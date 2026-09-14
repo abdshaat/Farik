@@ -20,9 +20,10 @@ Readiness confirmed by: pending
 - Staleness is a Vitest test in the `scripts` project, so `pnpm check` keeps its four parts (typecheck, lint, format check, tests) and the check runs where the file I/O is allowed. Rejected: a fifth `pnpm check` part, because `docs/standards/code.md` names four.
 - Generated files are excluded from Biome (`!**/generated` in `biome.json`) because their formatting is the generator's and they are never edited.
 - The domain type `TaskContract` is hand-written in `camelCase` with `readonly` properties; the mapping pair `contractFromWire` and `contractToWire` is the one mapping layer for this format in `core`, tested by a round trip. Optional fields are absent, never `undefined` (`exactOptionalPropertyTypes` is on). Non-empty arrays from the schema's `minItems: 1` are typed `readonly [Item, ...Item[]]` in the domain too, so the invariant survives the mapping.
-- Schema defaults (`max_sessions` 5, `max_iterations` 3, `iteration` 0, `expect.exit_code` 0, `new_tests_required` false) are applied by `contractFromWire`, and `contractToWire` writes them explicitly, so files on disk always carry them. Rejected: `ajv`'s `useDefaults`, because it mutates the input and ignores defaults inside `oneOf` branches.
+- Schema defaults (`max_sessions` 5, `max_iterations` 3, `iteration` 0, `locked` false, `expect.exit_code` 0, `new_tests_required` false) are applied by `contractFromWire`, and `contractToWire` writes them explicitly, so files on disk always carry them. Rejected: `ajv`'s `useDefaults`, because it mutates the input and ignores defaults inside `oneOf` branches.
 - `validateContract` validates with `ajv` (`Ajv2020`, `allErrors: true`, `strict: true`, `ajv-formats` for `date-time`) and then maps; it is the only exported entry point that produces a `TaskContract`. `contractFromWire` is exported from its module for its own unit test but not from the package barrel. Errors are `{ path, message }` with the JSON pointer of the offending value, `/` for the root.
 - `validateContract` checks the schema only. Definition of Ready rules (reviewer differs from assignee, budget within the sprint) are phase 1.
+- `references` entries carry `format: uri`, which `ajv-formats` checks; a contract written from an issue keeps the issue's link.
 - `TaskId` is the template literal type `` `FRK-${number}` ``. The two casts from `string` in `contractFromWire` are justified by the validator having checked the pattern, and each carries a `// reason:` comment.
 - Fixtures are builder functions in `packages/core/src/contract/fixtures/contract.ts`, per `docs/standards/code.md` ("Fixture"): `aContractWire(overrides)` for the minimal valid contract and `aFullContractWire()` for one with every optional field and every verification method.
 - Versions: `json-schema-to-typescript` 16.0.0 (root devDependency), `ajv` 8.20.0 and `ajv-formats` 3.0.1 (dependencies of `@farik/core`).
@@ -184,11 +185,11 @@ Produces: `GENERATED_SCHEMAS: readonly GeneratedSchema[]`, `generateTypes(entry,
   # generated packages/core/src/generated/task-contract.ts and packages/core/src/generated/task-contract.schema.ts
   sha256sum packages/core/src/generated/task-contract.ts packages/core/src/generated/task-contract.schema.ts
   # expected:
-  # a45f3a4f06074886ec38016f5bb423ac7a381a78ac1fe1822f0bc2b5713cbfff  packages/core/src/generated/task-contract.ts
-  # be1e72b35c30401249570b7cd8a7f868c5bd3a5cee75664697a63f758afdbf31  packages/core/src/generated/task-contract.schema.ts
+  # be64db566d6b07cf6150a8933915a6dd681892769d38a3f02b3cca8e86a32f5a  packages/core/src/generated/task-contract.ts
+  # 8db66bd639940563109a34ac1ac5342822e37a98726ddc37fa5821251c361f54  packages/core/src/generated/task-contract.schema.ts
   ```
 
-  The types file begins with the banner and exports `Role`, `FarikTaskContract` (with `in_scope: [string, ...string[]]` tuples for every `minItems: 1` array and a `verification` union of the five methods), and `ExitCriterion`. If the hashes differ, the schema on `main` or the generator version has changed since this plan was written; stop and update the plan.
+  The types file begins with the banner and exports `Role`, `FarikTaskContract` (with `in_scope: [string, ...string[]]` tuples for every `minItems: 1` array, `references?: string[]`, `locked?: boolean`, and a `verification` union of the five methods), and `ExitCriterion`. If the hashes differ, the schema on `main` or the generator version has changed since this plan was written; stop and update the plan.
 
 - [ ] Exclude generated files from Biome. In `biome.json`, change `files.includes` to:
 
@@ -332,12 +333,14 @@ Produces: every type in `contract.types.ts` (listed in the project plan, phase 0
     readonly exitCriteria: NonEmpty<ExitCriterion>;
     readonly constraints?: readonly string[];
     readonly dependencies?: readonly TaskId[];
+    readonly references?: readonly string[];
     readonly assigneeRole: Role;
     readonly reviewerRole: Role;
     readonly risk: Risk;
     readonly budget: Budget;
     readonly allowedPaths: NonEmpty<string>;
     readonly status: TaskStatus;
+    readonly locked: boolean;
     readonly sprint?: string;
     readonly assignee?: string;
     readonly reviewer?: string;
@@ -420,6 +423,8 @@ Produces: every type in `contract.types.ts` (listed in the project plan, phase 0
       ],
       constraints: ['Use the existing session store.'],
       dependencies: ['FRK-2'],
+      references: ['https://github.com/abdshaat/farik/issues/1'],
+      locked: true,
       budget: { max_cost_usd: 5, max_sessions: 5, max_iterations: 3 },
       sprint: 'S1',
       assignee: 'maya-chen',
@@ -448,12 +453,14 @@ Produces: every type in `contract.types.ts` (listed in the project plan, phase 0
       expect(contract.allowedPaths).toEqual(['src/login/**']);
       expect(contract.budget).toEqual({ maxCostUsd: 5, maxSessions: 5, maxIterations: 3 });
       expect(contract.iteration).toBe(0);
+      expect(contract.locked).toBe(false);
     });
 
     it('leaves optional fields absent rather than undefined', () => {
       const contract = contractFromWire(aContractWire());
       expect('sprint' in contract).toBe(false);
       expect('notes' in contract).toBe(false);
+      expect('references' in contract).toBe(false);
       expect('rationale' in contract.requirements[0]).toBe(false);
     });
 
@@ -599,6 +606,7 @@ Produces: every type in `contract.types.ts` (listed in the project plan, phase 0
       ...(wire.constraints !== undefined ? { constraints: wire.constraints } : {}),
       // reason: every dependency matches the same id pattern, checked by the validator.
       ...(wire.dependencies !== undefined ? { dependencies: wire.dependencies as TaskId[] } : {}),
+      ...(wire.references !== undefined ? { references: wire.references } : {}),
       assigneeRole: wire.assignee_role,
       reviewerRole: wire.reviewer_role,
       risk: wire.risk,
@@ -609,6 +617,7 @@ Produces: every type in `contract.types.ts` (listed in the project plan, phase 0
       },
       allowedPaths: wire.allowed_paths,
       status: wire.status,
+      locked: wire.locked ?? false,
       ...(wire.sprint !== undefined ? { sprint: wire.sprint } : {}),
       ...(wire.assignee !== undefined ? { assignee: wire.assignee } : {}),
       ...(wire.reviewer !== undefined ? { reviewer: wire.reviewer } : {}),
@@ -737,6 +746,13 @@ Produces: `type ValidationError = { readonly path: string; readonly message: str
       });
     });
 
+    it('refuses a reference that is not a uri', () => {
+      const result = validateContract(aContractWire({ references: ['not a uri'] }));
+      expect(result.ok).toBe(false);
+      if (result.ok) return;
+      expect(result.error).toEqual([{ path: '/references/0', message: 'must match format "uri"' }]);
+    });
+
     it('refuses an unknown top-level property', () => {
       const result = validateContract({ ...aContractWire(), owner: 'someone' });
       expect(result.ok).toBe(false);
@@ -756,6 +772,8 @@ Produces: `type ValidationError = { readonly path: string; readonly message: str
         'human',
       ]);
       expect(result.value.dependencies).toEqual(['FRK-2']);
+      expect(result.value.references).toEqual(['https://github.com/abdshaat/farik/issues/1']);
+      expect(result.value.locked).toBe(true);
       expect(result.value.notes).toEqual({
         completion: 'Done.',
         review: 'C1 passed: see output.',
@@ -815,7 +833,7 @@ Produces: `type ValidationError = { readonly path: string; readonly message: str
   pnpm --filter @farik/core test
   # expected:
   #  Test Files  4 passed (4)
-  #       Tests  23 passed (23)
+  #       Tests  24 passed (24)
   ```
 
 - [ ] Commit: `feat(core): validate contracts against the json schema`
@@ -851,6 +869,7 @@ Produces: `contractToWire(contract: TaskContract): TaskContractWire`
       const wire = contractToWire(validated.value);
       expect(wire.budget).toEqual({ max_cost_usd: 5, max_sessions: 5, max_iterations: 3 });
       expect(wire.iteration).toBe(0);
+      expect(wire.locked).toBe(false);
       expect(wire.exit_criteria[0].verification).toEqual({
         method: 'test',
         command: 'pnpm test login',
@@ -943,7 +962,10 @@ Produces: `contractToWire(contract: TaskContract): TaskContractWire`
     };
   }
 
-  function mapNonEmpty<In, Out>(list: readonly [In, ...In[]], fn: (item: In) => Out): [Out, ...Out[]] {
+  function mapNonEmpty<In, Out>(
+    list: readonly [In, ...In[]],
+    fn: (item: In) => Out,
+  ): [Out, ...Out[]] {
     const [head, ...tail] = list;
     return [fn(head), ...tail.map(fn)];
   }
@@ -959,6 +981,7 @@ Produces: `contractToWire(contract: TaskContract): TaskContractWire`
       exit_criteria: mapNonEmpty(contract.exitCriteria, criterionToWire),
       ...(contract.constraints !== undefined ? { constraints: [...contract.constraints] } : {}),
       ...(contract.dependencies !== undefined ? { dependencies: [...contract.dependencies] } : {}),
+      ...(contract.references !== undefined ? { references: [...contract.references] } : {}),
       assignee_role: contract.assigneeRole,
       reviewer_role: contract.reviewerRole,
       risk: contract.risk,
@@ -969,6 +992,7 @@ Produces: `contractToWire(contract: TaskContract): TaskContractWire`
       },
       allowed_paths: [...contract.allowedPaths],
       status: contract.status,
+      locked: contract.locked,
       ...(contract.sprint !== undefined ? { sprint: contract.sprint } : {}),
       ...(contract.assignee !== undefined ? { assignee: contract.assignee } : {}),
       ...(contract.reviewer !== undefined ? { reviewer: contract.reviewer } : {}),
@@ -981,15 +1005,13 @@ Produces: `contractToWire(contract: TaskContract): TaskContractWire`
   }
   ```
 
-  Then `pnpm format` (Biome wraps the `mapNonEmpty` signature and the `scope` line to the 100-column width).
-
 - [ ] Run the test and the package suite; confirm green:
 
   ```
   pnpm --filter @farik/core test
   # expected:
   #  Test Files  5 passed (5)
-  #       Tests  26 passed (26)
+  #       Tests  27 passed (27)
   ```
 
 - [ ] Commit: `feat(core): map contracts back to the snake_case wire shape`
@@ -1038,7 +1060,7 @@ Produces: the contract API from `@farik/core`
   pnpm check
   # expected:
   #  Test Files  8 passed (8)
-  #       Tests  42 passed (42)
+  #       Tests  43 passed (43)
   ```
 
 - [ ] Commit: `feat(core): export the contract api from the package barrel`
@@ -1050,8 +1072,8 @@ pnpm check
 # expected, in order: tsc for @farik/core and scripts with no diagnostics; biome lint "Checked N files"
 # with no fixes; check-todos silent; biome format "Checked N files"; vitest
 #  Test Files  8 passed (8)
-#       Tests  42 passed (42)
-# (27 in @farik/core, 15 in the scripts project), exit code 0.
+#       Tests  43 passed (43)
+# (28 in @farik/core, 15 in the scripts project), exit code 0.
 ```
 
 ```

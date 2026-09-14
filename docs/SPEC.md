@@ -1,6 +1,6 @@
 # Farik Specification
 
-Version 0.1 (draft for review). Owner: project founder. Status: not yet implemented; this document is the contract the first milestone is built against.
+Version 0.2 (draft for review). Owner: project founder. Status: not yet implemented; this document is the contract the first milestone is built against. Revision 0.2 (2026-09-14) adds sections 5.11 to 5.15, requirements F14 to F17, the `locked` and `references` contract fields, and the amendments marked "added in 0.2", all from the planning review recorded in `docs/plans/project-plan.md`.
 
 Farik is a desktop and web application that lets a person assemble a small team of AI agents, each with a named role, a face, its own tools, and its own skills, and put that team to work on a software product. The team runs a lightweight Scrum process: a product manager writes task contracts with explicit exit criteria, a scrum master keeps the board moving, and specialists do the work. A deterministic governor enforces the rules the agents cannot be trusted to enforce on themselves. The front end is a pixel-art office where the user can watch the team, open any agent's desk, and talk to them one-on-one or in the team channel.
 
@@ -10,7 +10,7 @@ The governance layer is the product. The pixel office is how people fall in love
 
 Goals for the initial launch:
 
-1. A user can create a team of three to seven agents, name them, pick avatars, and assign each one of five launch roles: Product Manager, Scrum Master, Architect, Software Developer, Marketing Specialist.
+1. A user can create a team of two to seven agents (the team builder suggests five), name them, pick avatars, and assign each one of five launch roles: Product Manager, Scrum Master, Architect, Software Developer, Marketing Specialist.
 2. A user can point the team at an existing git repository or start a new project from a one-paragraph brief.
 3. Work flows through a task lifecycle that the user can inspect at every step, where every task has a written contract with exit criteria before anyone starts on it, and where nobody accepts their own work.
 4. Every agent action is logged to an append-only event stream, and every expense (tokens, wall clock, tool calls) is attributable to a task and an agent.
@@ -38,7 +38,7 @@ A third persona, the enterprise platform team, is deliberately deferred. Their a
 
 ## 3. Core concepts
 
-**Team.** A named group of three to seven agents attached to exactly one project at a time. A team has a shared channel, a board, a budget, and a memory.
+**Team.** A named group of two to seven agents attached to exactly one project at a time. A team has a shared channel, a board, a budget, and a memory.
 
 **Agent.** A persistent identity: name, avatar, role, persona, model configuration, tool permissions, MCP servers, skills, and a private memory. An agent is not a running process. When work is assigned, the runtime starts a session for that agent, seeded with its identity and the task. Sessions end; the agent persists.
 
@@ -121,9 +121,9 @@ Transitions and who may trigger them:
 | draft | refining | Product Manager picks it up | none |
 | refining | ready | Governor, after PM submits contract | Definition of Ready (5.3) |
 | refining | escalated | Governor | contract fails DoR three times, or risk is `high` and human acceptance of the contract itself is required |
-| ready | assigned | Scrum Master, within WIP limits | assignee role matches contract, budget available in sprint |
+| ready | assigned | Scrum Master, within WIP limits | assignee role matches contract, budget available in sprint, every dependency accepted and integrated (5.14; added in 0.2) |
 | assigned | in_progress | assignee starts session | none |
-| in_progress | verifying | assignee declares done | all exit criteria have a recorded result from the assignee's own run |
+| in_progress | verifying | assignee declares done | all exit criteria have a recorded result from the assignee's own run, and the task branch has at least one commit and a clean worktree (added in 0.2) |
 | in_progress | blocked | assignee | a written blocker with what is needed |
 | blocked | in_progress | Scrum Master or human | blocker resolved |
 | blocked | escalated | Governor | blocked longer than the configured limit (default: one sprint) |
@@ -134,7 +134,7 @@ Transitions and who may trigger them:
 | any | escalated | Governor | budget exhausted, permission denied on a required action, or a `stop` from the user |
 | escalated | any | human only | none |
 
-The governor is the only actor allowed to write the `status` field for transitions marked as its own. Agents request transitions through a tool; the governor evaluates and either applies them or refuses with a reason that goes back to the agent and into the log.
+The governor is the only actor allowed to write the `status` field for transitions marked as its own. Agents request transitions through a tool; the governor evaluates and either applies them or refuses with a reason that goes back to the agent and into the log. A contract is frozen once its task leaves `refining` (5.11).
 
 ### 5.3 Definition of Ready
 
@@ -148,11 +148,12 @@ Structural (mechanical):
 - The reviewer role differs from the assignee role.
 - Risk level is set.
 - Scope lists at least one `out_of_scope` item. (An empty exclusion list is a reliable predictor of scope creep, so we require the PM to think about it.)
+- Every listed dependency exists and is at least `ready` (added in 0.2; moved here from the judgment list because it is mechanical).
+- The contract satisfies the team rules (5.12): the required verification methods are present, `allowed_paths` fall within the ceiling, and the budget is within the team maximum (added in 0.2).
 
 Judgment (Scrum Master, recorded as a review event):
 - The task is small enough to finish within its budget. If not, it goes back to the PM to be split.
 - The criteria would actually detect the failure the intent worries about, not just that something ran.
-- Dependencies on other tasks are listed and are themselves at least `ready`.
 
 ### 5.4 Definition of Done
 
@@ -174,6 +175,7 @@ Four budgets, all enforced by the governor, all configurable per team with role-
 |---|---|---|
 | Per session (tokens) | 400k input, 40k output | session ends, task to `blocked` with a note; next session resumes from the note |
 | Per task (dollars) | set in contract, PM proposes | task to `escalated` |
+| Per task (sessions) | `max_sessions` in the contract, default 5 (added in 0.2) | task to `escalated` |
 | Per sprint (dollars) | set at planning | no new assignments; in-progress tasks may finish |
 | Per day, team-wide (dollars) | set by user at setup | everything pauses; user is notified |
 
@@ -197,6 +199,8 @@ Permissions are capability tiers attached to a role, overridable per agent by th
 
 The user's setup screen asks about `execute` and `git_remote` explicitly because those are the two that can hurt.
 
+Protected paths (added in 0.2). A team rule (5.12) lists globs that no tool may read or write whatever the tier, so that secrets kept in the repository never enter a session. The default list is `.env`, `.env.*`, `**/*.pem`, `**/*.key`, and `.farik/local/**`.
+
 MCP tools inherit a tier from their server configuration. When the user connects an MCP server to an agent, Farik lists the server's tools and asks the user to tag each one as read-only or side-effecting. Untagged tools default to `external_effect`.
 
 ### 5.7 Escalation
@@ -204,6 +208,8 @@ MCP tools inherit a tier from their server configuration. When the user connects
 An escalation is a task state and a message to the user. It carries: the task, the reason (budget, iterations, blocker age, permission, risk gate, explicit request), what the agent tried, and the options the agent proposes. The user resolves it from the board or from the channel. Nothing else on the board waits for an escalation unless it depends on that task.
 
 The Scrum Master is responsible for making sure escalations do not pile up silently: it posts a digest in the channel at the start of each sprint and pings the user through the app's notification channel if an escalation is older than a configurable age.
+
+Questions (added in 0.2). An agent that needs an answer from the human before it can continue, a Product Manager refining a contract most often, asks it through the `farik_ask_human` tool. The session ends, the task keeps its status and is shown as waiting on the human, the question appears on the board and in the channel, and the human's answer starts the next session with the answer in its prompt. A question is not an escalation: nothing has gone wrong, and the answer is context, not a state decision. Escalations that carry a message from the human work the same way: the next session for that task starts with the message.
 
 ### 5.8 Memory
 
@@ -233,6 +239,45 @@ The hard rule again: nothing said in the channel creates work. An agent that wan
 ### 5.10 What the harness does not solve
 
 Two honest gaps. First, verification quality is only as good as the exit criteria the PM writes. A vague criterion passed by a sloppy reviewer is still a pass. The Scrum Master's judgment check and the human review of `high` risk contracts are the mitigations; they are not proofs. Second, the governor can prevent forbidden actions but cannot detect a semantically wrong change that stays within its allowed paths and passes its tests. Farik makes that kind of error cheap to find (small tasks, diffs per task, a reviewer who reads them) rather than impossible.
+
+### 5.11 Contract ownership (added in 0.2)
+
+Every contract has an owner. A contract the Product Manager wrote is owned by the team until the human locks it. A contract with `locked: true` is owned by the human: agents may record criterion results and write their notes on it, and the governor refuses every other change with the reason `contract_locked`. Locking and unlocking are human commands, recorded as `contract.locked` and `contract.unlocked` events. This is how a user writes a contract themselves, or with the Product Manager's help (5.13), and has the team execute exactly that contract.
+
+Independently of ownership, a contract is frozen once its task leaves `refining`: from `ready` onward, only `status`, `assignee`, `reviewer`, `iteration`, and `notes` change, and only through governed transitions and the note tools. An agent that wants a frozen contract changed asks the human (5.7). A human who edits a frozen contract moves the task back to `refining`, and the log says so.
+
+### 5.12 Team rules (added in 0.2)
+
+Team rules are constraints the human writes once, in `.farik/team.yaml` under `rules`, that the governor applies to every contract and every tool call. Agents read them in every session and cannot change them.
+
+| Rule | Type | Enforced where |
+|---|---|---|
+| `protected_paths` | globs | every file tool call, read or write, is refused inside them (5.6) |
+| `allowed_paths_ceiling` | globs | Definition of Ready refuses a contract whose `allowed_paths` reach outside them |
+| `required_criteria` | verification methods | Definition of Ready refuses a contract that has no criterion of each listed method |
+| `require_new_tests` | boolean | Definition of Ready refuses a contract whose `test` criteria do not set `new_tests_required` |
+| `max_task_budget_usd` | number | Definition of Ready refuses a contract whose budget exceeds it |
+| `forbidden_commands` | regular expressions | `farik_exec` refuses a command that matches one |
+
+Defaults: `protected_paths` as in 5.6, everything else empty or off. Rules never loosen a permission tier; they only narrow what a granted tier allows.
+
+### 5.13 Contract authoring and the criterion library (added in 0.2)
+
+A contract can be written three ways, and all three end in the same Definition of Ready check. The human writes it alone, in the editor or as a YAML file. The Product Manager writes it from a brief, an issue link, or the backlog, as in 6.1. Or the two write it together: the Product Manager drafts, the human edits, the Definition of Ready results update as they type, and the human locks the result (5.11). The command line offers the same through `farik contract new`, which runs a Product Manager drafting session over a brief or a link and prints the contract with its readiness results.
+
+The criterion library, `.farik/team/criteria.yaml`, holds named, reusable exit criteria: the project's own check and test commands found by the project scan, and any the human adds. When authoring, a criterion is referenced by name and expanded into the contract, so that contracts across a project verify the same way and the Product Manager is not asked to reinvent "the tests pass" every time.
+
+### 5.14 Integration of accepted work (added in 0.2)
+
+Each task works on its own branch, `farik/FRK-<n>`, in its own git worktree under `.farik/local/worktrees/FRK-<n>`, so that tasks running in parallel never share a working tree. The container for a task mounts that worktree.
+
+What happens to the branch after `accepted` is the team's `integration` policy: `manual` (the default: the human merges, and the board shows the task as awaiting integration until the branch is merged), `local_merge` (the governor merges the task branch into the integration branch with a merge commit, under `git_local`; a conflict escalates the task with reason `integration`), or `pull_request` (the branch is pushed and a pull request opened, which needs `git_remote`). The integration branch is the repository's default branch unless the team configures another.
+
+A task is assigned only when every dependency it lists is accepted and integrated, and its branch starts from the integration branch at that moment. Worktrees and containers are removed when a task is accepted or cancelled; branches are kept.
+
+### 5.15 Recovery (added in 0.2)
+
+Farik can stop at any moment: the laptop closes, the process is killed. On startup it reconciles the event log with itself and with the files (8.4): every session that has a `session.started` event without a `session.ended` one is ended with reason `interrupted`; every task that was `in_progress` stays `in_progress` and its next session starts from the last commit on its branch and the last note; worktrees and containers that belong to accepted or cancelled tasks are removed. Nothing is lost that was committed or logged, and nothing is repeated that was recorded as done.
 
 ## 6. Launch roles
 
@@ -292,9 +337,9 @@ Default tools: read, network, write_workspace scoped to its paths.
 
 Numbered so the milestone plan and tests can refer to them.
 
-**F1 Team builder.** Create, edit, pause, retire agents. Assign roles. Set names, avatars (from a shipped pixel set or an uploaded 32x32 image), and persona lines. Enforce three to seven members. Show and edit per-agent permissions, MCP servers, skills, and model settings.
+**F1 Team builder.** Create, edit, pause, retire agents. Assign roles. Set names, avatars (from a shipped pixel set or an uploaded 32x32 image), and persona lines. Enforce two to seven members. Show and edit per-agent permissions, MCP servers, skills, and model settings. Pausing an agent aborts its running session at the next tool call and moves its task to `blocked` with a note that says why (added in 0.2).
 
-**F2 Projects.** Open an existing git repository or create a new one. Produce and store the project scan. Initialize `.farik/`. Detect the project's test and build commands and offer them as verification presets.
+**F2 Projects.** Open an existing git repository or create a new one. Produce and store the project scan. Initialize `.farik/`. Detect the project's test and build commands and add them to the criterion library (F16).
 
 **F3 Board.** Kanban view of the task lifecycle. Filter by agent, sprint, risk. Open a task to see its contract, events, diff, notes, and cost. Create a task by hand (it enters as `draft`).
 
@@ -312,11 +357,19 @@ Numbered so the milestone plan and tests can refer to them.
 
 **F10 Pixel office.** A single scene: desks, agents, a meeting table for ceremonies, a door for the user. Agents move between desk, table, and a whiteboard based on state. Clicking an agent opens its panel. The scene is decorative and informative, never the only way to do anything; every action is also reachable from the board.
 
-**F11 Audit.** Event log viewer with filters. Export as JSON lines. Cost report per task, agent, sprint.
+**F11 Audit.** Event log viewer with filters. Export as JSON lines. Cost report per task, agent, sprint. Replay an exported log into a fresh set of projections, for debugging and for demonstrations (added in 0.2).
 
 **F12 Notifications.** Desktop notifications for escalations and sprint boundaries. Configurable quiet hours.
 
 **F13 Premium hooks.** License check, hosted-run toggle, and cloud sync are stubs in the open-source build. They must be present so the premium build is the same codebase with features enabled, not a fork.
+
+**F14 Contract authoring assistant (added in 0.2).** Write a contract alone, with the Product Manager, or from a brief or issue link, with Definition of Ready results shown live, criteria from the library, and a lock that makes the contract human-owned (5.11, 5.13). Questions from agents are shown and answered in the same place (5.7).
+
+**F15 Team rules (added in 0.2).** Edit the rules in 5.12 from the team editor and the command line; every refusal they cause names the rule.
+
+**F16 Criterion library (added in 0.2).** List, add, edit, and remove named criteria in `.farik/team/criteria.yaml`; seed it from the project scan; reference criteria by name when authoring.
+
+**F17 Harness metrics (added in 0.2).** Compute from the log, per project and per sprint: first-pass acceptance rate, human interventions per accepted task, cost per accepted task split by session purpose (refine, implement, verify, ceremony, conversation), the share of exit criteria verified by command or test rather than by review or human, and active weeks. Shown on the command line and in the app; these are the five numbers `docs/PRODUCT_ANALYSIS.md` says to track from Milestone 0.
 
 ## 8. Architecture
 
@@ -330,7 +383,7 @@ apps/
   web/            same React UI served for the hosted tier
 packages/
   core/           schemas, task state machine, governor, cost model  (no I/O)
-  store/          SQLite event log and projections; file adapters for .farik/
+  store/          SQLite event log and projections; file adapters for .farik/; the git adapter
   runtime/        agent session adapters; sandbox management
   roles/          shipped role definitions and skills
   ui/             pixel component library, scene renderer
@@ -343,27 +396,27 @@ packages/
 
 The first runtime adapter is built on the Claude Agent SDK. The choice is pragmatic rather than ideological: it ships the file, shell, and search tools a developer agent needs, it speaks MCP natively, it supports the Agent Skills folder format, it has subagents, and its hooks fire before and after every tool call, which is exactly where the governor needs to sit. Building a coding agent from scratch would cost the first two milestones and produce something worse.
 
-Concretely, one agent session is one `query()` call with: the agent's system prompt assembled from role, persona, memory, and contract; the tool set filtered by the agent's permission tiers; the agent's MCP servers; a `PreToolUse` hook that calls the governor and denies or allows; a `PostToolUse` hook that records the event and the running cost; and a stop condition on any budget.
+Concretely, one agent session is one `query()` call with: the agent's system prompt assembled from role, persona, memory, and contract; the tool set filtered by the agent's permission tiers; the agent's MCP servers; a `PreToolUse` hook that calls the governor and denies or allows; a `PostToolUse` hook that records the event and the running cost; and a stop condition on any budget. The SDK's shell tool is never enabled: commands run through the `farik_exec` tool (8.3), git commits and pushes through `farik_git` under the `git_local` and `git_remote` tiers, and the SDK's web tools are enabled only under `network` (ADR 0004; added in 0.2).
 
 Model defaults are set per role in `role.yaml`. The shipped defaults use Claude Opus 5 for the Product Manager, Architect, and Developer with adaptive thinking and effort at `high`, and Claude Sonnet 5 for the Scrum Master, channel chatter, and the Marketing Specialist's drafting. Effort is the first knob a cost-conscious user should turn; the setup screen exposes it as a single "thinking depth" slider per role.
 
-The `runtime` package defines an adapter interface (`startSession`, `resume`, `abort`, `events()`) so that a second provider can be added. There is no second provider in the first release, and the interface is not promised stable until there is. Two providers' worth of prompt tuning is a real cost that this project should not pay until someone needs it.
+The `runtime` package defines an adapter interface (`startSession`, `resume`, `abort`, with `events()` on the session handle) so that a second provider can be added. There is no second provider in the first release, and the interface is not promised stable until there is. Two providers' worth of prompt tuning is a real cost that this project should not pay until someone needs it.
 
 ### 8.3 Sandbox
 
-Agents with `execute` run commands inside a container per task, with the project directory mounted and network disabled unless the role has `network`. Docker is the first backend because it is what target users already have. The container is discarded when the task is accepted or cancelled. Git operations happen on a task branch inside the container; the governor's diff check for `allowed_paths` runs against that branch before acceptance.
+Agents with `execute` run commands inside a container per task, with the task's git worktree (5.14) mounted at `/workspace` and network disabled unless the role has `network`. Docker is the first backend because it is what target users already have. The container is discarded when the task is accepted or cancelled. Git operations happen on a task branch inside the container; the governor's diff check for `allowed_paths` runs against that branch before acceptance.
 
 Users who will not run Docker can opt into a no-sandbox mode with a loud warning. The governor still enforces paths and permissions, but process isolation is gone.
 
 ### 8.4 Storage
 
-SQLite via libsql for the event log and the projections the UI reads (board, costs, channel). Files under `.farik/` for anything the user should be able to read, diff, and edit: contracts, decisions, memories, role overrides. The event log is the source of truth for what happened; the files are the source of truth for what the team knows. On startup, Farik reconciles the two and reports any drift rather than silently picking one.
+SQLite via libsql for the event log and the projections the UI reads (board, costs, channel). Files under `.farik/` for anything the user should be able to read, diff, and edit: contracts, decisions, memories, role overrides. The event log is the source of truth for what happened; the files are the source of truth for what the team knows. On startup, Farik reconciles the two and reports any drift rather than silently picking one, and recovers interrupted sessions (5.15).
 
 Hosted tier: Postgres for the event log, object storage for project snapshots, the same file layout inside the cloud workspace.
 
 ### 8.5 Event protocol
 
-A single event type with a discriminated `kind`, stamped with time, team, project, task, agent, session, and a monotonically increasing sequence. Kinds are named `<entity>.<past_tense_verb>` (see `docs/standards/code.md`) and include `task.transitioned`, `tool.called`, `tool.returned`, `tool.denied`, `message.posted`, `cost.recorded`, `budget.exhausted`, `escalation.raised`, `escalation.resolved`, `session.started`, `session.ended`, `review.recorded`, `human.accepted`. The UI subscribes to the stream; nothing in the UI polls.
+A single event type with a discriminated `kind`, stamped with time, team, project, task, agent, session, and a monotonically increasing sequence. Kinds are named `<entity>.<past_tense_verb>` (see `docs/standards/code.md`) and include `task.transitioned`, `tool.called`, `tool.returned`, `tool.denied`, `message.posted`, `cost.recorded`, `budget.exhausted`, `escalation.raised`, `escalation.resolved`, `session.started`, `session.ended`, `review.recorded`, `human.accepted`, and, added in 0.2, `question.asked`, `question.answered`, `contract.locked`, `contract.unlocked`, `task.integrated`, `memory.written`. The UI subscribes to the stream; nothing in the UI polls.
 
 ### 8.6 Security
 
@@ -413,4 +466,4 @@ Recorded here so they are decided on purpose.
 
 ## 13. Glossary
 
-Contract: the document that makes a task ready. Exit criterion: a check that must pass for a task to be accepted. Governor: the deterministic enforcement layer. Ceremony: a structured team conversation (planning, standup, review, retro). Tier: a permission capability. ADR: architecture decision record. MCP: Model Context Protocol, the open standard for connecting tools to models. Skill: a folder of instructions an agent can load, following the Agent Skills format.
+Contract: the document that makes a task ready. Locked contract: a contract the human owns and agents cannot change (5.11). Team rule: a constraint the human sets once and the governor applies to every contract and tool call (5.12). Criterion library: named, reusable exit criteria (5.13). Worktree: a task's own checkout of the repository (5.14). Exit criterion: a check that must pass for a task to be accepted. Governor: the deterministic enforcement layer. Ceremony: a structured team conversation (planning, standup, review, retro). Tier: a permission capability. ADR: architecture decision record. MCP: Model Context Protocol, the open standard for connecting tools to models. Skill: a folder of instructions an agent can load, following the Agent Skills format.
