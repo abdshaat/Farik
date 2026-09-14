@@ -1,0 +1,234 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://farik.dev/schemas/task-contract.schema.json",
+  "title": "Farik Task Contract",
+  "description": "The document that makes a task ready. Written by the Product Manager, checked by the governor (structural rules) and the Scrum Master (judgment rules) before any work starts. See docs/SPEC.md section 5.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "id",
+    "title",
+    "intent",
+    "scope",
+    "requirements",
+    "exit_criteria",
+    "assignee_role",
+    "reviewer_role",
+    "risk",
+    "budget",
+    "allowed_paths",
+    "status"
+  ],
+  "properties": {
+    "id": {
+      "type": "string",
+      "pattern": "^FRK-[0-9]{1,6}$",
+      "description": "Stable identifier. Assigned by the store, never edited."
+    },
+    "title": { "type": "string", "minLength": 3, "maxLength": 120 },
+    "intent": {
+      "type": "string",
+      "minLength": 20,
+      "description": "The user-facing reason this task exists. If the task were done perfectly, what would be true for a user that is not true today?"
+    },
+    "scope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["in_scope", "out_of_scope"],
+      "properties": {
+        "in_scope": { "type": "array", "minItems": 1, "items": { "type": "string" } },
+        "out_of_scope": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string" },
+          "description": "At least one exclusion is required. An empty exclusion list means the author has not thought about where the task stops."
+        }
+      }
+    },
+    "requirements": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "text"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^R[0-9]+$" },
+          "text": { "type": "string", "minLength": 10 },
+          "rationale": { "type": "string" }
+        }
+      }
+    },
+    "exit_criteria": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/exitCriterion" }
+    },
+    "constraints": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Architectural or product constraints the assignee must respect. Typically contributed by the Architect."
+    },
+    "dependencies": {
+      "type": "array",
+      "items": { "type": "string", "pattern": "^FRK-[0-9]{1,6}$" },
+      "description": "Tasks that must be at least `ready` before this one can be assigned."
+    },
+    "assignee_role": { "$ref": "#/$defs/role" },
+    "reviewer_role": {
+      "$ref": "#/$defs/role",
+      "description": "Must differ from assignee_role. Enforced by the governor."
+    },
+    "risk": {
+      "type": "string",
+      "enum": ["low", "medium", "high"],
+      "description": "high requires human acceptance of the contract before work starts and of the result before the task is accepted."
+    },
+    "budget": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["max_cost_usd"],
+      "properties": {
+        "max_cost_usd": { "type": "number", "exclusiveMinimum": 0 },
+        "max_sessions": { "type": "integer", "minimum": 1, "default": 5 },
+        "max_iterations": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 3,
+          "description": "How many times the task may be rejected and returned to in_progress before it escalates."
+        }
+      }
+    },
+    "allowed_paths": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "type": "string" },
+      "description": "Glob patterns relative to the project root. The governor refuses acceptance if the task's diff touches anything outside them."
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "draft",
+        "refining",
+        "ready",
+        "assigned",
+        "in_progress",
+        "blocked",
+        "verifying",
+        "rejected",
+        "accepted",
+        "escalated",
+        "cancelled"
+      ],
+      "description": "Written only by the governor for governed transitions. See the transition table in docs/SPEC.md section 5.2."
+    },
+    "sprint": { "type": "string" },
+    "assignee": { "type": "string", "description": "Agent name once assigned." },
+    "reviewer": { "type": "string", "description": "Agent name once assigned." },
+    "iteration": { "type": "integer", "minimum": 0, "default": 0 },
+    "notes": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "completion": {
+          "type": "string",
+          "description": "Written by the assignee before declaring done: what changed, what was not done, what to look at first."
+        },
+        "review": {
+          "type": "string",
+          "description": "Written by the reviewer: each criterion mapped to the evidence that it passed or failed."
+        },
+        "escalation": { "type": "string" }
+      }
+    },
+    "created_by": { "type": "string" },
+    "created_at": { "type": "string", "format": "date-time" },
+    "updated_at": { "type": "string", "format": "date-time" }
+  },
+  "$defs": {
+    "role": {
+      "type": "string",
+      "enum": ["product_manager", "scrum_master", "architect", "software_developer", "marketing_specialist", "human"]
+    },
+    "exitCriterion": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "text", "verification"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^C[0-9]+$" },
+        "text": { "type": "string", "minLength": 10 },
+        "satisfies": {
+          "type": "array",
+          "items": { "type": "string", "pattern": "^R[0-9]+$" },
+          "description": "Requirement ids this criterion provides evidence for."
+        },
+        "verification": {
+          "type": "object",
+          "required": ["method"],
+          "oneOf": [
+            {
+              "additionalProperties": false,
+              "required": ["method", "command", "expect"],
+              "properties": {
+                "method": { "const": "command" },
+                "command": { "type": "string", "description": "Run inside the sandbox from the project root." },
+                "expect": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "exit_code": { "type": "integer", "default": 0 },
+                    "stdout_contains": { "type": "string" },
+                    "stdout_not_contains": { "type": "string" }
+                  }
+                }
+              }
+            },
+            {
+              "additionalProperties": false,
+              "required": ["method", "command"],
+              "properties": {
+                "method": { "const": "test" },
+                "command": { "type": "string", "description": "A test command. Passes on exit code 0." },
+                "new_tests_required": {
+                  "type": "boolean",
+                  "default": false,
+                  "description": "If true, the reviewer checks that the diff adds at least one test and that it fails on the base branch."
+                }
+              }
+            },
+            {
+              "additionalProperties": false,
+              "required": ["method", "path"],
+              "properties": {
+                "method": { "const": "artifact" },
+                "path": { "type": "string", "description": "A file that must exist after the task, relative to the project root." },
+                "must_contain": { "type": "array", "items": { "type": "string" } }
+              }
+            },
+            {
+              "additionalProperties": false,
+              "required": ["method", "rubric"],
+              "properties": {
+                "method": { "const": "review" },
+                "rubric": {
+                  "type": "array",
+                  "minItems": 1,
+                  "items": { "type": "string" },
+                  "description": "Yes/no questions the reviewer answers with a cited reason each. Used where no command can decide."
+                }
+              }
+            },
+            {
+              "additionalProperties": false,
+              "required": ["method", "question"],
+              "properties": {
+                "method": { "const": "human" },
+                "question": { "type": "string", "description": "What the human is asked to confirm. Satisfied only by a human.accepted event." }
+              }
+            }
+          ]
+        }
+      }
+    }
+  }
+}
