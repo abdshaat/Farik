@@ -5,8 +5,7 @@ Farik is an operating system for small teams of AI agents with a governance harn
 ## Standards (mandatory)
 
 - Workflow: `docs/standards/workflow.md`. Brainstorm, plan, execute under TDD, verify, review, finish. In that order.
-- Naming: `docs/standards/naming.md`. Branches, commits, files, identifiers, wire formats, events.
-- Code style and tooling: `docs/standards/code-style.md`.
+- Code: `docs/standards/code.md`. Naming (branches, commits, files, identifiers, wire formats, events), style, and the toolchain.
 - Decisions: `docs/decisions/`. Read the existing ADRs before proposing a change that touches architecture, tooling, or process. Add one when you make such a change.
 
 If the superpowers plugin is installed, its skills implement this workflow; use them. If it is not, follow the workflow document by hand. Either way the rules below hold.
@@ -23,6 +22,7 @@ If the superpowers plugin is installed, its skills implement this workflow; use 
 8. When behavior changes, `docs/SPEC.md` changes in the same pull request.
 9. Never skip, disable, or quarantine a failing test to get green.
 10. Do not accept your own work. A pull request is reviewed by someone, or by a fresh session, that did not write it.
+11. When the work you were asked to do is complete and pushed, open a pull request to `main` without waiting to be asked. Its description explains what changed and why it was necessary, and follows `.github/pull_request_template.md`. Never leave a pushed branch without a pull request.
 
 ## Commands
 

@@ -19,7 +19,7 @@ Package manager: pnpm for workspace support and disk efficiency.
 
 ## Decision
 
-pnpm workspaces, TypeScript strict, Biome for lint and format, Vitest for tests, lefthook for hooks, Changesets for versioning, GitHub Actions for CI, with one `pnpm check` command as the definition of mergeable. Details in `docs/standards/code-style.md`.
+pnpm workspaces, TypeScript strict, Biome for lint and format, Vitest for tests, lefthook for hooks, Changesets for versioning, GitHub Actions for CI, with one `pnpm check` command as the definition of mergeable. Details in `docs/standards/code.md`.
 
 ## Consequences
 

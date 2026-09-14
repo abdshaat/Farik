@@ -31,5 +31,5 @@ ADRs added or changed, or "none".
 - [ ] New behavior has tests that were watched to fail first
 - [ ] No files changed outside the plan's file map, or the plan was updated and the reason is above
 - [ ] `docs/SPEC.md` updated if behavior changed
-- [ ] Commit messages and branch follow `docs/standards/naming.md`
+- [ ] Commit messages and branch follow `docs/standards/code.md`
 - [ ] I have not approved my own pull request

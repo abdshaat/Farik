@@ -3,9 +3,8 @@
 Thank you for considering it. Farik holds itself to the same discipline it imposes on the agent teams it runs, so the process is stricter than most open-source projects of its size. The standards are short; please read them before your first change.
 
 1. [Workflow](docs/standards/workflow.md): how a change moves from idea to `main`. Brainstorm, plan, test-driven execution, verification with evidence, review, finish.
-2. [Naming](docs/standards/naming.md): one convention per kind of thing.
-3. [Code style and tooling](docs/standards/code-style.md): the toolchain and the rules tools cannot enforce.
-4. [Decisions](docs/decisions/): architecture decision records. Read them before proposing a change to architecture, tooling, or process.
+2. [Code](docs/standards/code.md): naming, style, and the toolchain.
+3. [Decisions](docs/decisions/): architecture decision records. Read them before proposing a change to architecture, tooling, or process.
 
 ## If you use Claude Code
 

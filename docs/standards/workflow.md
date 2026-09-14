@@ -9,7 +9,7 @@ The process is the one enforced by the [superpowers](https://github.com/obra/sup
 Every non-trivial change goes through these phases in order. "Non-trivial" means anything that adds or changes behavior. A typo fix or a one-line doc correction skips to phase 5.
 
 ```
-1. brainstorm  →  2. plan  →  3. execute (TDD, one task at a time)  →  4. verify  →  5. review  →  6. finish
+1. brainstorm  →  2. plan  →  3. execute (TDD, one task at a time)  →  4. verify  →  5. pull request and review  →  6. finish
 ```
 
 Skipping a phase is allowed only when the person who owns the change says so in the pull request, in writing, with a reason.
@@ -34,7 +34,7 @@ Map the file structure before writing tasks so that boundaries are clear and two
 
 ### 3. Execute
 
-Work on a branch named per `naming.md`, ideally in its own git worktree so that a clean test baseline can be confirmed before the first change. Confirm that baseline: run the full check and record that it passed before touching anything.
+Work on a branch named per `code.md`, ideally in its own git worktree so that a clean test baseline can be confirmed before the first change. Confirm that baseline: run the full check and record that it passed before touching anything.
 
 Then one task at a time, in plan order, each under test-driven development:
 
@@ -44,7 +44,7 @@ GREEN. Write the simplest code that makes the test pass. No extra features, no r
 
 REFACTOR. With everything green, remove duplication, improve names, extract helpers. Do not add behavior. Keep the suite green.
 
-Commit after each task with a message per `naming.md`. Tick the task's checkboxes in the plan as part of the same commit.
+Commit after each task with a message per `code.md`. Tick the task's checkboxes in the plan as part of the same commit.
 
 Code written before its test is deleted. Not kept as reference, not adapted, not consulted. The one exception is explicit permission from the change owner, recorded in the plan.
 
@@ -64,11 +64,13 @@ Phrases that are not allowed in a completion claim: "should work", "probably pas
 
 The full check is `pnpm check` once the monorepo exists (it runs typecheck, lint, format check, and tests). Until then there is no check command, and the verification section of a pull request says so explicitly.
 
-### 5. Review
+### 5. Pull request and review
 
 Self-review first, against the plan, before requesting anyone else's time. Read the diff as a hostile reviewer would: what would make CI reject this, what did the plan ask for that is missing, what is here that the plan did not ask for.
 
-Then open a pull request using the template. The request includes the plan link, the spec reference, the verification evidence, and any ADRs.
+Then open a pull request to `main` using the template. This is not optional and it is not deferred: the moment a unit of work is complete and pushed, its pull request exists. A pushed branch with no pull request is unfinished work that nobody can see. The request explains what changed and, above all, why it was necessary: what problem or spec requirement it serves and what would be wrong without it. It also carries the plan link, the spec reference, the verification evidence, and any ADRs.
+
+One plan is normally one pull request. A large plan may be split into several, each self-contained and each mergeable on its own; the plan says where the splits are. A pull request never contains work from two plans.
 
 Reviewers report findings by severity: critical (blocks merge: correctness, security, a rule in this document broken), important (must be addressed or explicitly deferred with a reason), and minor (author's call). A critical finding is never resolved by a comment; it is resolved by a commit.
 
@@ -76,7 +78,7 @@ Receiving review: address each finding or reply with a reason; never resolve a t
 
 ### 6. Finish
 
-When the pull request is green and approved: confirm the full check once more on the final commit, squash-merge into `main`, delete the branch. The squash commit message follows `naming.md` and links the plan.
+When the pull request is green and approved: confirm the full check once more on the final commit, squash-merge into `main`, delete the branch. The squash commit message follows `code.md` and links the plan.
 
 If the work is abandoned, say so on the pull request and close it. Do not leave branches open without a note.
 

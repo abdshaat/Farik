@@ -363,7 +363,7 @@ Hosted tier: Postgres for the event log, object storage for project snapshots, t
 
 ### 8.5 Event protocol
 
-A single event type with a discriminated `kind`, stamped with time, team, project, task, agent, session, and a monotonically increasing sequence. Kinds are named `<entity>.<past_tense_verb>` (see `docs/standards/naming.md`) and include `task.transitioned`, `tool.called`, `tool.returned`, `tool.denied`, `message.posted`, `cost.recorded`, `budget.exhausted`, `escalation.raised`, `escalation.resolved`, `session.started`, `session.ended`, `review.recorded`, `human.accepted`. The UI subscribes to the stream; nothing in the UI polls.
+A single event type with a discriminated `kind`, stamped with time, team, project, task, agent, session, and a monotonically increasing sequence. Kinds are named `<entity>.<past_tense_verb>` (see `docs/standards/code.md`) and include `task.transitioned`, `tool.called`, `tool.returned`, `tool.denied`, `message.posted`, `cost.recorded`, `budget.exhausted`, `escalation.raised`, `escalation.resolved`, `session.started`, `session.ended`, `review.recorded`, `human.accepted`. The UI subscribes to the stream; nothing in the UI polls.
 
 ### 8.6 Security
 

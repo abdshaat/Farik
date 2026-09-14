@@ -15,6 +15,6 @@ Status: specification stage. Nothing runs yet. Project standards are in place; s
 ## Standards
 
 - [Contributing](CONTRIBUTING.md): the entry point.
-- [Workflow](docs/standards/workflow.md), [naming](docs/standards/naming.md), [code style and tooling](docs/standards/code-style.md).
+- [Workflow](docs/standards/workflow.md), [code: naming, style, and tooling](docs/standards/code.md).
 - [Decisions](docs/decisions/): architecture decision records, starting with why this workflow was adopted.
 - [Plans](docs/plans/): one plan per change, written before the code.
