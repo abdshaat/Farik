@@ -14,7 +14,7 @@ If the superpowers plugin is installed, its skills implement this workflow; use 
 
 1. No production code before a failing test. Watch the test fail for the right reason. Code written before its test gets deleted, not adapted.
 2. No completion claim without fresh evidence. Run the check, read the output, paste it. "Should work" is not a status.
-3. Plans live in `docs/plans/YYYY-MM-DD-<feature>.md` and are written before execution, from the template in that directory. Tick checkboxes as you go, in the same commits.
+3. Planning is two-level: `docs/plans/project-plan.md` holds phases and steps; each step has its own plan at `docs/plans/phase-<n>-<name>/step-<nn>-<name>.md`, written from `docs/plans/step-template.md` before execution. A plan is ready only when every decision is made, nothing is ambiguous, and it has no forward dependencies. Tick checkboxes as you go, in the same commits.
 4. Commits follow Conventional Commits with a package scope. One task, one commit.
 5. `packages/core` does no I/O. Ever.
 6. Wire and file formats use `snake_case`; TypeScript uses `camelCase`; one mapping layer per package at the edge.

@@ -37,7 +37,8 @@ One convention per kind of thing, decided once, and a toolchain chosen so that s
 
 | Thing | Convention | Example |
 |---|---|---|
-| Plan | `docs/plans/YYYY-MM-DD-<feature-kebab>.md` | `docs/plans/2026-09-21-governor-state-machine.md` |
+| Project plan | `docs/plans/project-plan.md` | |
+| Step plan | `docs/plans/phase-<n>-<name-kebab>/step-<nn>-<name-kebab>.md`; phase numbers from 0, step numbers two-digit from 01 | `docs/plans/phase-1-harness/step-03-transition-table.md` |
 | Architecture decision record | `docs/decisions/NNNN-<title-kebab>.md`, four-digit, never reused | `docs/decisions/0001-adopt-superpowers-workflow.md` |
 | Standard | `docs/standards/<topic>.md`, lower-case | `docs/standards/code.md` |
 | Top-level project documents | `UPPER_CASE.md` at the level they describe | `README.md`, `CONTRIBUTING.md`, `docs/SPEC.md` |

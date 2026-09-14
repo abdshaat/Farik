@@ -1,6 +1,6 @@
 ## Plan
 
-Link to `docs/plans/YYYY-MM-DD-<feature>.md`, or the reason this change has no plan (typo, one-line doc fix).
+Link to the step plan under `docs/plans/phase-<n>-<name>/`, or the reason this change has no plan (typo, one-line doc fix).
 
 ## Spec reference
 

@@ -22,15 +22,21 @@ Output: a short design, two to twenty lines, that becomes the header of the plan
 
 ### 2. Plan
 
-Write the plan to `docs/plans/YYYY-MM-DD-<feature>.md` using `docs/plans/0000-template.md`. The plan is written for a skilled developer who knows nothing about this codebase or the problem domain.
+Planning has two levels, and both are written before any product code.
 
-The plan header carries: goal, spec reference (section and F-number), architecture notes, tech stack for this change, and global constraints.
+The project plan, `docs/plans/project-plan.md`, divides the whole project into phases and each phase into steps. A phase is a body of work that ends in something a person can use or verify (a command-line harness, a running desktop shell). A step is one pull request's worth of work inside a phase. The project plan lists every phase and step in order, one line each, with the decisions each phase depends on and whether each decision is made. A step is not started until every decision its phase depends on is recorded as made, in the project plan or in an ADR.
 
-Then tasks. A task is the smallest unit that carries its own test cycle and deserves a fresh reviewer's look. Each task lists the exact files it creates, modifies, and tests; the interfaces it consumes from earlier tasks and produces for later ones; the actual code, not "add validation here"; the exact commands to run with expected output; and a checkbox per step. Steps inside a task are two to five minutes each: write the failing test, watch it fail, write the minimal code, watch it pass, commit.
+The step plan, one file per step at `docs/plans/phase-<n>-<name>/step-<nn>-<name>.md`, is written from `docs/plans/step-template.md` for a skilled developer who knows nothing about this codebase or the problem domain. Its header carries the goal, the spec reference (section and F-number), the decisions it rests on, the steps it depends on, the architecture notes, and the global constraints. Then tasks.
 
-Repeat code across tasks rather than referencing an earlier task. Define every type and signature inside the plan.
+A task is the smallest unit that carries its own test cycle and deserves a fresh reviewer's look. Each task lists the exact files it creates, modifies, and tests; the interfaces it consumes from earlier tasks and produces for later ones; the actual code, not "add validation here"; the exact commands to run with expected output; and a checkbox per step. Steps inside a task are two to five minutes each: write the failing test, watch it fail, write the minimal code, watch it pass, commit. Repeat code across tasks rather than referencing an earlier task. Define every type and signature inside the plan. Map the file structure before writing tasks so that two tasks never fight over one file.
 
-Map the file structure before writing tasks so that boundaries are clear and two tasks never fight over one file.
+Three rules decide whether a plan is ready to execute. A reviewer checks all three before the first task starts, and a plan that fails any of them goes back to brainstorming.
+
+Every decision is made. Features, enhancements, names, data shapes, library choices, error behavior: all decided and written down in the plan's Decisions section or in an ADR it links. A decision that affects more than one step is an ADR. The Open questions section of a ready plan says "none".
+
+No ambiguity. Every file path is exact. Every code block is the code that will be written. Every command has its expected output. Words like "appropriate", "as needed", "and so on", "TBD", and "similar to" fail review, as does any task whose steps a second reader could carry out differently from the first.
+
+No forward dependencies. A step depends only on steps that are already merged to `main`. A task depends only on earlier tasks in the same plan. Nothing in a plan stubs, mocks, or leaves a placeholder for work that a later step will do; if a later step needs an interface, the later step adds it. Phases are ordered so that this holds across the whole project plan, and a step whose plan cannot be written without a forward reference means the phase is in the wrong order.
 
 ### 3. Execute
 
