@@ -1,6 +1,6 @@
-## Plan
+## Phase and plans
 
-Link to the step plan under `docs/plans/phase-<n>-<name>/`, or the reason this change has no plan (typo, one-line doc fix).
+The phase this pull request delivers and links to every step plan under `docs/plans/phase-<n>-<name>/`, or the reason this change is outside a phase and has no plan (typo, one-line doc fix).
 
 ## Spec reference
 
@@ -27,7 +27,8 @@ ADRs added or changed, or "none".
 
 ## Checklist
 
-- [ ] Every task in the plan is ticked and has a commit
+- [ ] Every task in every step plan of the phase is ticked and has a commit
+- [ ] Each step was reviewed against its plan when it landed, and the review is recorded in this thread
 - [ ] New behavior has tests that were watched to fail first
 - [ ] No files changed outside the plan's file map, or the plan was updated and the reason is above
 - [ ] `docs/SPEC.md` updated if behavior changed

@@ -24,7 +24,7 @@ Output: a short design, two to twenty lines, that becomes the header of the plan
 
 Planning has two levels, and both are written before any product code.
 
-The project plan, `docs/plans/project-plan.md`, divides the whole project into phases and each phase into steps. A phase is a body of work that ends in something a person can use or verify (a command-line harness, a running desktop shell). A step is one pull request's worth of work inside a phase. The project plan lists every phase and step in order, one line each, with the decisions each phase depends on and whether each decision is made. A step is not started until every decision its phase depends on is recorded as made, in the project plan or in an ADR.
+The project plan, `docs/plans/project-plan.md`, divides the whole project into phases and each phase into steps. A phase is a body of work that ends in something a person can use or verify (a command-line harness, a running desktop shell). A step is a self-contained unit of work inside a phase, executed from its own plan and landed as a group of commits on the phase branch. A phase is one pull request. The project plan lists every phase and step in order, one line each, with the decisions each phase depends on and whether each decision is made. A step is not started until every decision its phase depends on is recorded as made, in the project plan or in an ADR.
 
 The step plan, one file per step at `docs/plans/phase-<n>-<name>/step-<nn>-<name>.md`, is written from `docs/plans/step-template.md` for a skilled developer who knows nothing about this codebase or the problem domain. Its header carries the goal, the spec reference (section and F-number), the decisions it rests on, the steps it depends on, the architecture notes, and the global constraints. Then tasks.
 
@@ -36,11 +36,11 @@ Every decision is made. Features, enhancements, names, data shapes, library choi
 
 No ambiguity. Every file path is exact. Every code block is the code that will be written. Every command has its expected output. Words like "appropriate", "as needed", "and so on", "TBD", and "similar to" fail review, as does any task whose steps a second reader could carry out differently from the first.
 
-No forward dependencies. A step depends only on steps that are already merged to `main`. A task depends only on earlier tasks in the same plan. Nothing in a plan stubs, mocks, or leaves a placeholder for work that a later step will do; if a later step needs an interface, the later step adds it. Phases are ordered so that this holds across the whole project plan, and a step whose plan cannot be written without a forward reference means the phase is in the wrong order.
+No forward dependencies. A step depends only on phases already merged to `main` and on earlier steps already committed on the same phase branch. A task depends only on earlier tasks in the same plan. Nothing in a plan stubs, mocks, or leaves a placeholder for work that a later step will do; if a later step needs an interface, the later step adds it. Phases are ordered so that this holds across the whole project plan, and a step whose plan cannot be written without a forward reference means the phase is in the wrong order.
 
 ### 3. Execute
 
-Work on a branch named per `code.md`, ideally in its own git worktree so that a clean test baseline can be confirmed before the first change. Confirm that baseline: run the full check and record that it passed before touching anything.
+Work on the phase branch, `phase/<n>-<name>`, created from `main` when the phase's first step starts and kept until the phase merges. Use a git worktree for it so that a clean test baseline can be confirmed before the first change. Confirm that baseline at the start of every step: run the full check and record that it passed before touching anything.
 
 Then one task at a time, in plan order, each under test-driven development:
 
@@ -74,9 +74,9 @@ The full check is `pnpm check` once the monorepo exists (it runs typecheck, lint
 
 Self-review first, against the plan, before requesting anyone else's time. Read the diff as a hostile reviewer would: what would make CI reject this, what did the plan ask for that is missing, what is here that the plan did not ask for.
 
-Then open a pull request to `main` using the template. This is not optional and it is not deferred: the moment a unit of work is complete and pushed, its pull request exists. A pushed branch with no pull request is unfinished work that nobody can see. The request explains what changed and, above all, why it was necessary: what problem or spec requirement it serves and what would be wrong without it. It also carries the plan link, the spec reference, the verification evidence, and any ADRs.
+Then open the phase's pull request to `main` using the template. One phase is one pull request, opened as a draft when the phase's first step is pushed and marked ready for review when the last step's verification passes. This is not optional and it is not deferred: a pushed phase branch with no pull request is unfinished work that nobody can see. The request explains what changed and, above all, why it was necessary: what problem or spec requirement the phase serves and what would be wrong without it. It also carries links to every step plan in the phase, the spec references, the verification evidence from the final commit, and any ADRs.
 
-One plan is normally one pull request. A large plan may be split into several, each self-contained and each mergeable on its own; the plan says where the splits are. A pull request never contains work from two plans.
+A pull request never contains work from two phases. Each step inside a phase is still reviewed as it lands: the reviewer reads the step's commits against its plan on the phase branch and records the review in the pull request thread, so that the final review of the whole phase is a confirmation rather than a first reading.
 
 Reviewers report findings by severity: critical (blocks merge: correctness, security, a rule in this document broken), important (must be addressed or explicitly deferred with a reason), and minor (author's call). A critical finding is never resolved by a comment; it is resolved by a commit.
 
@@ -84,7 +84,7 @@ Receiving review: address each finding or reply with a reason; never resolve a t
 
 ### 6. Finish
 
-When the pull request is green and approved: confirm the full check once more on the final commit, squash-merge into `main`, delete the branch. The squash commit message follows `code.md` and links the plan.
+When the phase's pull request is green and approved: confirm the full check once more on the final commit, merge into `main` with a merge commit so that every task commit survives in history, delete the phase branch. The merge commit message follows `code.md` and links the project plan.
 
 If the work is abandoned, say so on the pull request and close it. Do not leave branches open without a note.
 

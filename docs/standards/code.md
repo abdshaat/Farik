@@ -25,12 +25,14 @@ One convention per kind of thing, decided once, and a toolchain chosen so that s
 | Thing | Convention | Example |
 |---|---|---|
 | Default branch | `main` | |
-| Working branch | `<type>/<short-kebab-description>`; type from the commit types below | `feat/governor-transition-table`, `fix/budget-rounding`, `docs/naming-standard` |
+| Phase branch | `phase/<n>-<name-kebab>`; one per phase, created from `main`, merged back once | `phase/0-foundation`, `phase/1-harness` |
+| Other working branch | `<type>/<short-kebab-description>` for work outside a phase (a standalone fix on `main`, a docs change); type from the commit types below | `fix/budget-rounding`, `docs/naming-standard` |
 | Harness-assigned branch | left as assigned (e.g. `claude/...`); the pull request title carries the type | |
 | Commit message | Conventional Commits: `<type>(<scope>): <imperative subject>`, subject lower-case, no trailing period, under 72 characters; body explains why, not what | `feat(core): add definition-of-ready structural checks` |
 | Commit type | one of `feat`, `fix`, `refactor`, `test`, `docs`, `chore`, `build`, `ci`, `perf` | |
 | Commit scope | a package name without the `@farik/` prefix, or `docs`, `repo`, `roles`, `skills` | `core`, `store`, `runtime`, `ui`, `desktop`, `web`, `protocol` |
-| Pull request title | same format as a commit subject; becomes the squash commit | |
+| Pull request title | for a phase: `phase <n>: <name>`; otherwise the same format as a commit subject | `phase 0: foundation` |
+| Merge commit | phases merge with a merge commit, never squash, so task commits survive | |
 | Tag | `v<semver>` | `v0.1.0` |
 
 ### Documents

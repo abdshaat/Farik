@@ -11,12 +11,14 @@ The alternative is to keep single-level plans and rely on review to catch both p
 
 ## Decision
 
-Planning is two-level. The project plan divides the project into phases and phases into steps; each step is one pull request and has its own plan. A plan is ready to execute only when every decision it rests on is written down, nothing in it is ambiguous, and it depends on nothing that is not already merged. These three rules are checked by a reviewer before the first task starts. Details in `docs/standards/workflow.md` phase 2.
+Planning is two-level. The project plan divides the project into phases and phases into steps. Each phase is one branch and one pull request; each step has its own plan and lands as commits on the phase branch. A plan is ready to execute only when every decision it rests on is written down, nothing in it is ambiguous, and it depends on nothing that is not already merged or already committed earlier on the same phase branch. These three rules are checked by a reviewer before the first task starts. Details in `docs/standards/workflow.md` phase 2.
 
 ## Consequences
 
 Planning takes longer and happens earlier. Decisions that would otherwise be made in the moment are made up front, some of them before the information that would make them easy is available. When such a decision turns out wrong, the fix is an ADR and a change to the project plan, not a quiet workaround.
 
 Phases must be ordered so that no step needs anything from a later phase. This constrains the order of the project plan; in particular, the desktop shell cannot be built before the protocol it displays, and the runtime cannot be built before the governor it calls.
+
+A phase's pull request can be large. The per-step reviews recorded on it as steps land are what keep the final review tractable, and merging with a merge commit rather than a squash keeps the task-level history that those reviews refer to.
 
 The project plan is a living document with a single owner. It is edited through pull requests like everything else, and each edit says which decision changed and why.

@@ -22,7 +22,7 @@ If the superpowers plugin is installed, its skills implement this workflow; use 
 8. When behavior changes, `docs/SPEC.md` changes in the same pull request.
 9. Never skip, disable, or quarantine a failing test to get green.
 10. Do not accept your own work. A pull request is reviewed by someone, or by a fresh session, that did not write it.
-11. When the work you were asked to do is complete and pushed, open a pull request to `main` without waiting to be asked. Its description explains what changed and why it was necessary, and follows `.github/pull_request_template.md`. Never leave a pushed branch without a pull request.
+11. One phase is one branch (`phase/<n>-<name>`) and one pull request to `main`. Open it as a draft when the phase's first step is pushed, without waiting to be asked; mark it ready when the last step's verification passes. Its description explains what changed and why it was necessary, and follows `.github/pull_request_template.md`. Never leave a pushed branch without a pull request. Work outside a phase (a standalone fix, a docs change) gets its own branch and pull request the same way.
 
 ## Commands
 

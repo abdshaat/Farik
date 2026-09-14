@@ -1,9 +1,9 @@
 # Phase <n>, step <nn>: <name>
 
 Status: draft | ready | in progress | done | abandoned
-Branch: `<type>/p<n>-s<nn>-<name-kebab>`
+Branch: `phase/<n>-<name-kebab>` (the phase branch; steps do not get their own)
 Spec: `docs/SPEC.md` section <n>, F<n>
-Depends on: none | phase <n> step <nn> (merged in #<pr>), ...
+Depends on: none | phase <n> (merged in #<pr>) | step <nn> of this phase (committed as <sha>), ...
 
 A plan is `ready` only when a reviewer other than the author has confirmed the three rules in `docs/standards/workflow.md` phase 2: every decision made, no ambiguity, no forward dependencies. Record who confirmed and when here.
 
@@ -43,7 +43,7 @@ packages/core/src/governor/transition-table.test.ts creates: one test per row, o
 
 ## Tasks
 
-Each task is the smallest unit with its own test cycle. Steps inside a task are two to five minutes. Write the actual code; do not write "add validation". Repeat code rather than referencing earlier tasks. Define every type and signature here. A task consumes only what earlier tasks in this plan produce or what is already on `main`.
+Each task is the smallest unit with its own test cycle. Steps inside a task are two to five minutes. Write the actual code; do not write "add validation". Repeat code rather than referencing earlier tasks. Define every type and signature here. A task consumes only what earlier tasks in this plan produce, what earlier steps committed on the phase branch, or what is already on `main`.
 
 ### Task 1: <name>
 
