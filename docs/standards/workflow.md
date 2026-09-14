@@ -1,18 +1,20 @@
 # Workflow
 
-How a change gets into Farik, from idea to merged commit. This applies to humans and to AI agents alike, and it applies to Farik's own code exactly as strictly as Farik's harness applies to the projects it manages. If a rule here would be embarrassing to apply to our users' teams, it does not belong here either.
+How a change gets into the Farik repository, from idea to merged commit. This document governs how Farik is built. It is not the product's harness; that lives in `docs/SPEC.md` section 5 and governs the agent teams Farik runs for its users. The two are kept deliberately similar in spirit, and if a rule here would be embarrassing to apply to our users' teams it does not belong here either, but they are separate documents about separate things.
+
+The process applies to humans and to AI agents alike.
 
 The process is the one enforced by the [superpowers](https://github.com/obra/superpowers) plugin for Claude Code, adopted as-is with Farik-specific paths and a few additions. Contributors using Claude Code should install the plugin; its skills trigger automatically. Contributors working by hand follow the same steps manually. ADR 0001 records the adoption.
 
 ## The sequence
 
-Every non-trivial change goes through these phases in order. "Non-trivial" means anything that adds or changes behavior. A typo fix or a one-line doc correction skips to phase 5.
+Every non-trivial change goes through these six stages in order. (Stages of the workflow, not to be confused with phases of the project plan, which are bodies of product work; see stage 2.) "Non-trivial" means anything that adds or changes behavior. A typo fix or a one-line doc correction skips to stage 5.
 
 ```
 1. brainstorm  →  2. plan  →  3. execute (TDD, one task at a time)  →  4. verify  →  5. pull request and review  →  6. finish
 ```
 
-Skipping a phase is allowed only when the person who owns the change says so in the pull request, in writing, with a reason.
+Skipping a stage is allowed only when the person who owns the change says so in the pull request, in writing, with a reason.
 
 ### 1. Brainstorm
 
@@ -102,8 +104,8 @@ Mirrors section 5.4 of the spec on purpose.
 
 ## Debugging
 
-When something is broken, resist the urge to try fixes. Follow the four phases from the plugin's systematic-debugging skill: reproduce reliably, then trace to the root cause with evidence, then fix the cause rather than the symptom, then add the test that would have caught it. A fix without a reproducing test is a guess.
+When something is broken, resist the urge to try fixes. Follow the four steps of the plugin's systematic-debugging skill: reproduce reliably, then trace to the root cause with evidence, then fix the cause rather than the symptom, then add the test that would have caught it. A fix without a reproducing test is a guess.
 
 ## What this workflow costs
 
-It is slower per change than editing and hoping. That is the point, and it is also a real cost. Expect the first few changes to feel heavy while templates and habits settle. If a phase consistently produces nothing of value for a class of change, propose removing it for that class through an ADR rather than skipping it quietly.
+It is slower per change than editing and hoping. That is the point, and it is also a real cost. Expect the first few changes to feel heavy while templates and habits settle. If a stage consistently produces nothing of value for a class of change, propose removing it for that class through an ADR rather than skipping it quietly.

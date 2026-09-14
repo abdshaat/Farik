@@ -11,7 +11,7 @@ The alternative is to keep single-level plans and rely on review to catch both p
 
 ## Decision
 
-Planning is two-level. The project plan divides the project into phases and phases into steps. Each phase is one branch and one pull request; each step has its own plan and lands as commits on the phase branch. A plan is ready to execute only when every decision it rests on is written down, nothing in it is ambiguous, and it depends on nothing that is not already merged or already committed earlier on the same phase branch. These three rules are checked by a reviewer before the first task starts. Details in `docs/standards/workflow.md` phase 2.
+Planning is two-level. The project plan divides the project into phases and phases into steps. Each phase is one branch and one pull request; each step has its own plan and lands as commits on the phase branch. A plan is ready to execute only when every decision it rests on is written down, nothing in it is ambiguous, and it depends on nothing that is not already merged or already committed earlier on the same phase branch. These three rules are checked by a reviewer before the first task starts. Details in `docs/standards/workflow.md` stage 2 (Plan).
 
 ## Consequences
 

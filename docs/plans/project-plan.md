@@ -4,7 +4,7 @@ Status: draft. Phase 0 is fully decided and its step plans may be written. Later
 Owner: project founder.
 Last decision change: 2026-09-14, initial draft.
 
-This document divides the project into phases and each phase into steps. A phase ends in something a person can use or verify. A phase is one pull request from the branch `phase/<n>-<name>`. A step has its own plan at `docs/plans/phase-<n>-<name>/step-<nn>-<name>.md` and lands as a group of commits on the phase branch. Steps run in the order listed; a step depends only on steps above it in the same phase and on phases already merged. The rules are in `docs/standards/workflow.md` phase 2 and ADR 0003.
+This document divides the project into phases and each phase into steps. A phase ends in something a person can use or verify. A phase is one pull request from the branch `phase/<n>-<name>`. A step has its own plan at `docs/plans/phase-<n>-<name>/step-<nn>-<name>.md` and lands as a group of commits on the phase branch. Steps run in the order listed; a step depends only on steps above it in the same phase and on phases already merged. The rules are in `docs/standards/workflow.md` stage 2 (Plan) and ADR 0003.
 
 Phases 0 through 2 together deliver Milestone 0 from `docs/SPEC.md` section 11. Phases 3 and 4 deliver Milestone 1. Phase 5 delivers Milestone 2 and the open-source launch. Phase 6 is Milestone 3.
 
