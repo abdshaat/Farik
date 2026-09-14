@@ -12,7 +12,7 @@ Install the [superpowers](https://github.com/obra/superpowers) plugin; its skill
 
 ## If you work by hand
 
-Follow `docs/standards/workflow.md` step by step. The project plan is `docs/plans/project-plan.md` and the step plan template is `docs/plans/step-template.md` and the ADR template in `docs/decisions/0000-template.md`. The pull request template asks for the evidence the workflow requires; a pull request without it will be sent back.
+Follow `docs/standards/workflow.md` step by step. The project plan is `docs/plans/project-plan.md`, the step plan template is `docs/plans/step-template.md`, and the ADR template is `docs/decisions/0000-template.md`. The pull request template asks for the evidence the workflow requires; a pull request without it will be sent back.
 
 ## Reporting a bug
 
