@@ -43,7 +43,7 @@ packages/core/src/governor/transition-table.test.ts creates: one test per row, o
 
 ## Tasks
 
-Each task is the smallest unit with its own test cycle. Steps inside a task are two to five minutes. Write the actual code; do not write "add validation". Repeat code rather than referencing earlier tasks. Define every type and signature here. A task consumes only what earlier tasks in this plan produce, what earlier steps committed on the phase branch, or what is already on `main`.
+Each task is the smallest unit with its own test cycle. Its checklist items take two to five minutes each. Write the actual code; do not write "add validation". Repeat code rather than referencing earlier tasks. Define every type and signature here. A task consumes only what earlier tasks in this plan produce, what earlier steps committed on the phase branch, or what is already on `main`.
 
 ### Task 1: <name>
 

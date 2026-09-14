@@ -4,6 +4,21 @@ How a change gets into the Farik repository, from idea to merged commit. This do
 
 The process applies to humans and to AI agents alike.
 
+## Vocabulary
+
+Each of these words has exactly one meaning in this repository. Documents that need another meaning use another word.
+
+| Word | Means | Defined in |
+|---|---|---|
+| Stage | One of the six parts of this workflow: brainstorm, plan, execute, verify, pull request and review, finish | this document |
+| Phase | A body of product work in the project plan that ends in something usable; one branch, one pull request | `docs/plans/project-plan.md`, ADR 0003 |
+| Step | A unit of work inside a phase with its own plan file; lands as commits on the phase branch | `docs/plans/project-plan.md`, `docs/plans/step-template.md` |
+| Task | A unit inside a step plan with its own test cycle and its own commit | `docs/plans/step-template.md` |
+| Checklist item | One two-to-five-minute action inside a task: write the failing test, watch it fail, and so on | `docs/plans/step-template.md` |
+| Gate | A rule a reviewer or the check command applies before something moves on (readiness of a plan, Definition of Done of a change) | this document |
+
+The product has its own vocabulary (task contract, sprint, ceremony, governor, tier) in `docs/SPEC.md` section 13. "Task" there means a contracted unit of work for an agent team and is unrelated to a plan task here; the two never appear in the same document except the project plan, which says which it means.
+
 The process is the one enforced by the [superpowers](https://github.com/obra/superpowers) plugin for Claude Code, adopted as-is with Farik-specific paths and a few additions. Contributors using Claude Code should install the plugin; its skills trigger automatically. Contributors working by hand follow the same steps manually. ADR 0001 records the adoption.
 
 ## The sequence
@@ -30,13 +45,13 @@ The project plan, `docs/plans/project-plan.md`, divides the whole project into p
 
 The step plan, one file per step at `docs/plans/phase-<n>-<name>/step-<nn>-<name>.md`, is written from `docs/plans/step-template.md` for a skilled developer who knows nothing about this codebase or the problem domain. Its header carries the goal, the spec reference (section and F-number), the decisions it rests on, the steps it depends on, the architecture notes, and the global constraints. Then tasks.
 
-A task is the smallest unit that carries its own test cycle and deserves a fresh reviewer's look. Each task lists the exact files it creates, modifies, and tests; the interfaces it consumes from earlier tasks and produces for later ones; the actual code, not "add validation here"; the exact commands to run with expected output; and a checkbox per step. Steps inside a task are two to five minutes each: write the failing test, watch it fail, write the minimal code, watch it pass, commit. Repeat code across tasks rather than referencing an earlier task. Define every type and signature inside the plan. Map the file structure before writing tasks so that two tasks never fight over one file.
+A task is the smallest unit that carries its own test cycle and deserves a fresh reviewer's look. Each task lists the exact files it creates, modifies, and tests; the interfaces it consumes from earlier tasks and produces for later ones; the actual code, not "add validation here"; the exact commands to run with expected output; and a checkbox per checklist item. Checklist items take two to five minutes each: write the failing test, watch it fail, write the minimal code, watch it pass, commit. Repeat code across tasks rather than referencing an earlier task. Define every type and signature inside the plan. Map the file structure before writing tasks so that two tasks never fight over one file.
 
 Three rules decide whether a plan is ready to execute. A reviewer checks all three before the first task starts, and a plan that fails any of them goes back to brainstorming.
 
 Every decision is made. Features, enhancements, names, data shapes, library choices, error behavior: all decided and written down in the plan's Decisions section or in an ADR it links. A decision that affects more than one step is an ADR. The Open questions section of a ready plan says "none".
 
-No ambiguity. Every file path is exact. Every code block is the code that will be written. Every command has its expected output. Words like "appropriate", "as needed", "and so on", "TBD", and "similar to" fail review, as does any task whose steps a second reader could carry out differently from the first.
+No ambiguity. Every file path is exact. Every code block is the code that will be written. Every command has its expected output. Words like "appropriate", "as needed", "and so on", "TBD", and "similar to" fail review, as does any task whose checklist items a second reader could carry out differently from the first.
 
 No forward dependencies. A step depends only on phases already merged to `main` and on earlier steps already committed on the same phase branch. A task depends only on earlier tasks in the same plan. Nothing in a plan stubs, mocks, or leaves a placeholder for work that a later step will do; if a later step needs an interface, the later step adds it. Phases are ordered so that this holds across the whole project plan, and a step whose plan cannot be written without a forward reference means the phase is in the wrong order.
 
