@@ -80,7 +80,7 @@ The user opens the app in the morning. The board shows what moved overnight. The
 
 ### 4.3 Asking an agent a question
 
-Clicking on an agent opens a one-on-one. This conversation is outside the task system: the agent answers using its memory and read access to the project but cannot change anything. If the conversation produces something actionable, the agent offers to turn it into an epic, which routes to the Product Manager for a contract like anything else (5.16).
+Clicking on an agent opens a one-on-one. This conversation is outside the task system: the agent answers using its memory and read access to the project but cannot change anything. If the conversation produces something actionable, the agent offers to file it as a request, which is triaged and contracted like anything else (5.16).
 
 ### 4.4 Changing the team
 
@@ -238,7 +238,7 @@ Agents post to the channel in a conversational register. The persona line and a 
 
 Ambient and reaction messages use a cheaper model than task work. The runtime keeps a compact rolling summary of the channel so an agent joining a conversation has context without replaying the whole log.
 
-The hard rule again: nothing said in the channel creates work. An agent that wants something done files a task. The tool for filing a task is available in the channel session precisely so that the conversational path leads into the governed path rather than around it.
+The hard rule again: nothing said in the channel creates work. An agent that wants something done files a request, which is triaged and contracted like a request from the user (5.16). The tool for filing a request is available in the channel session precisely so that the conversational path leads into the governed path rather than around it.
 
 ### 5.10 What the harness does not solve
 
@@ -267,7 +267,7 @@ Defaults: `protected_paths` as in 5.6, everything else empty or off. Rules never
 
 ### 5.13 Contract authoring and the criterion library (added in 0.2)
 
-A contract can be written three ways, and all three end in the same Definition of Ready check. The human writes it alone, in the editor or as a YAML file. The Product Manager writes it from a brief, an issue link, or the backlog, as in 6.1. Or the two write it together: the Product Manager drafts, the human edits, the Definition of Ready results update as they type, and the human locks the result (5.11). The command line offers the same through `farik contract new`, which runs a Product Manager drafting session over a brief or a link and prints the contract with its readiness results.
+A contract can be written three ways, and all three end in the same Definition of Ready check. The human writes it alone, in the editor or as a YAML file, and then the human's own triage sets whether it is an epic or a single task (5.16). The Product Manager writes it from a brief, an issue link, or the backlog, as in 6.1. Or the two write it together: the Product Manager drafts, the human edits, the Definition of Ready results update as they type, and the human locks the result (5.11). The command line offers the same through `farik contract new`, which runs a Product Manager drafting session over a brief or a link and prints the contract with its readiness results.
 
 The criterion library, `.farik/team/criteria.yaml`, holds named, reusable exit criteria: the project's own check and test commands found by the project scan, and any the human adds. When authoring, a criterion is referenced by name and expanded into the contract, so that contracts across a project verify the same way and the Product Manager is not asked to reinvent "the tests pass" every time.
 
@@ -285,7 +285,7 @@ Farik can stop at any moment: the laptop closes, the process is killed. On start
 
 ### 5.16 Epics: from a request to sub-contracts (added in 0.3)
 
-Every prompt from the user that asks for work is translated into a contract before anything else happens. The first thing that happens to it is triage: the Scrum Master, or the Product Manager when the team has no active Scrum Master, decides whether the request is large or small and records the decision with a reason (`request.triaged`). A large request becomes an epic (`kind: epic`). A small request becomes a single standalone task (`kind: task`, no `parent`), written by the Product Manager like any task, with its questions to the user asked first and the user's approval required only by the team's policy (`human_accepts_contracts`, or `high` risk); it then goes through the ordinary lifecycle without a breakdown. The governor refuses `draft → refining` until the triage is recorded, and the user may overrule it (`farik triage <id> large|small`, or the board) before the Product Manager starts. Triage runs on the cheaper model and produces one event, so a small request costs one short session on top of its own.
+Every prompt from the user that asks for work is translated into a contract before anything else happens, and so is every request an agent files from the channel or a one-on-one. The first thing that happens to a request is triage: the Scrum Master, or the Product Manager when the team has no active Scrum Master, decides whether the request is large or small and records the decision with a reason (`request.triaged`). A large request becomes an epic (`kind: epic`). A small request becomes a single standalone task (`kind: task`, no `parent`), written by the Product Manager like any task, with its questions to the user asked first and the user's approval required only by the team's policy (`human_accepts_contracts`, or `high` risk); it then goes through the ordinary lifecycle without a breakdown. The governor refuses `draft → refining` until the triage is recorded, and the user may overrule it (`farik triage <id> large|small`, or the board) before the Product Manager starts. Triage runs on the cheaper model and produces one event, so a small request costs one short session on top of its own.
 
 An epic goes through the same lifecycle as a task with four differences.
 
