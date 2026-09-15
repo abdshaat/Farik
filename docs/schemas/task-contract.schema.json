@@ -120,7 +120,7 @@
     },
     "reviewer_role": {
       "$ref": "#/$defs/role",
-      "description": "Must differ from assignee_role. Enforced by the governor."
+      "description": "The role that reviews the work. May equal assignee_role when the team has two agents of that role (a Software Developer may review another Developer's work); the governor ensures the reviewer agent is never the assignee."
     },
     "risk": {
       "type": "string",

@@ -92,7 +92,7 @@ This section is the heart of the specification. Everything else could be rebuilt
 
 Contracts before work. No agent starts a task that lacks a contract passing the Definition of Ready. This applies to tasks the user creates by hand too.
 
-Nobody grades their own homework. The reviewer on a contract is never the assignee. For the developer's code, the reviewer is the Architect; if the team has none, another Developer; if there is neither, no contract for a Developer can pass the Definition of Ready, and the Product Manager asks the human to add a reviewer agent, an Architect or a second Developer (decided 2026-09-15). The human does not stand in as reviewer: the harness verifies agents' work with agents. For the Architect's designs, the reviewer is the Product Manager. The Product Manager's contracts are reviewed by the Scrum Master for completeness and, above a risk threshold, by the human.
+Nobody grades their own homework. The reviewer on a contract is never the assignee. For the developer's code, the reviewer is the Architect; if the team has none, another Developer, since a Software Developer may review another Developer's work but never its own; if there is neither, no contract for a Developer can pass the Definition of Ready, and the Product Manager asks the human to add a reviewer agent, an Architect or a second Developer (decided 2026-09-15). The human does not stand in as reviewer: the harness verifies agents' work with agents. For the Architect's designs, the reviewer is the Product Manager. The Product Manager's contracts are reviewed by the Scrum Master for completeness and, above a risk threshold, by the human.
 
 Governance is code, not prompts. The prompts tell agents what good behavior looks like. The governor makes bad behavior impossible or expensive. A system prompt that says "never push to main" is a suggestion; a governor that returns a permission error is a rule.
 
@@ -146,11 +146,11 @@ Structural (mechanical):
 - At least one exit criterion exists, and every criterion has a `verification` with a `method` that is one of `command`, `test`, `artifact`, `review`, `human`.
 - Every `command` and `test` criterion has the command to run and what a passing result looks like.
 - Budget is set and does not exceed the remaining sprint budget.
-- The reviewer role differs from the assignee role.
+- The reviewer will not be the assignee. When the reviewer role differs from the assignee role, the team has at least one active agent of the reviewer role; when they are the same role (two Developers reviewing each other), the team has at least two active agents of it. The governor picks a reviewer agent other than the assignee at assignment (decided 2026-09-15).
 - Risk level is set.
 - Scope lists at least one `out_of_scope` item. (An empty exclusion list is a reliable predictor of scope creep, so we require the PM to think about it.)
 - Every listed dependency exists and is at least `ready` (added in 0.2; moved here from the judgment list because it is mechanical).
-- The reviewer role names an active agent other than the assignee (added in 0.3). When no such agent exists, the readiness result says which role to add.
+- When no agent can review, the readiness result says which role to add (added in 0.3).
 - The contract satisfies the team rules (5.12): the required verification methods are present, `allowed_paths` fall within the ceiling, and the budget is within the team maximum (added in 0.2).
 
 Judgment (Scrum Master, recorded as a review event):

@@ -489,8 +489,8 @@ Produces: `cargo xtask generate [--check]`; `xtask::generate::{GeneratedSchema, 
   # generated crates/core/src/generated/task_contract.schema.json
   sha256sum crates/core/src/generated/task_contract.rs crates/core/src/generated/task_contract.schema.json
   # expected:
-  # aba57e5b896faf7ca5261ee4b35d058aa41d3f52bc16252bf25d29970441a180  crates/core/src/generated/task_contract.rs
-  # bac64c5d003bda86d3e18fa915c7538a11dde499f54a381c45cf226c215923a9  crates/core/src/generated/task_contract.schema.json
+  # 11d3d9c51b672fa17290ffec656ccf822108c8b2a307e1ec835217d073c0769b  crates/core/src/generated/task_contract.rs
+  # fefb64f7ebc7004e8a2fbbbdc333173e077b6dbf3c1f6b68396fd2dd05989258  crates/core/src/generated/task_contract.schema.json
   wc -l crates/core/src/generated/task_contract.rs
   # expected: 863
   head -3 crates/core/src/generated/task_contract.rs
