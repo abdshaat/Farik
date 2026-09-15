@@ -10,7 +10,7 @@ The governance layer is the product. The pixel office is how people fall in love
 
 Goals for the initial launch:
 
-1. A user can create a team of two to seven agents (the team builder suggests five), name them, pick avatars, and assign each one of five launch roles: Product Manager, Scrum Master, Architect, Software Developer, Marketing Specialist.
+1. A user can create a team of two to seven agents (at least one Product Manager and one Software Developer; the team builder suggests five), name them, pick avatars, and assign each one of five launch roles: Product Manager, Scrum Master, Architect, Software Developer, Marketing Specialist.
 2. A user can point the team at an existing git repository or start a new project from a one-paragraph brief.
 3. Work flows through a task lifecycle that the user can inspect at every step, where every task has a written contract with exit criteria before anyone starts on it, and where nobody accepts their own work.
 4. Every agent action is logged to an append-only event stream, and every expense (tokens, wall clock, tool calls) is attributable to a task and an agent.
@@ -50,7 +50,7 @@ A third persona, the enterprise platform team, is deliberately deferred. Their a
 
 **Contract.** A structured document attached to a task: intent, scope, requirements, exit criteria with a verification method for each, constraints, budget, and a named reviewer who is not the assignee. The schema is in `docs/schemas/task-contract.schema.json`.
 
-**Sprint.** A time-boxed batch of tasks with a budget. Default length is one day of agent time, configurable. Sprints exist so that the team stops and looks up periodically rather than grinding an unbounded backlog.
+**Sprint.** A batch of tasks with a budget. A sprint ends when every task in it is accepted or cancelled; its budget caps what may be assigned inside it (decided 2026-09-15; there is no time box). Sprints exist so that the team stops and looks up periodically rather than grinding an unbounded backlog.
 
 **Governor.** Deterministic code, not an agent, that sits between every agent and every tool. It checks permissions, budgets, iteration limits, and path allowlists, and it is the only component that can move a task between certain states. Agents propose; the governor disposes.
 
@@ -92,7 +92,7 @@ This section is the heart of the specification. Everything else could be rebuilt
 
 Contracts before work. No agent starts a task that lacks a contract passing the Definition of Ready. This applies to tasks the user creates by hand too.
 
-Nobody grades their own homework. The reviewer on a contract is never the assignee. For the developer's code, the reviewer is the Architect by default. For the Architect's designs, the reviewer is the Product Manager. The Product Manager's contracts are reviewed by the Scrum Master for completeness and, above a risk threshold, by the human.
+Nobody grades their own homework. The reviewer on a contract is never the assignee. For the developer's code, the reviewer is the Architect; if the team has none, another Developer; if there is neither, the human, and the Product Manager suggests adding an Architect or a second Developer (decided 2026-09-15). For the Architect's designs, the reviewer is the Product Manager. The Product Manager's contracts are reviewed by the Scrum Master for completeness and, above a risk threshold, by the human.
 
 Governance is code, not prompts. The prompts tell agents what good behavior looks like. The governor makes bad behavior impossible or expensive. A system prompt that says "never push to main" is a suggestion; a governor that returns a permission error is a rule.
 
@@ -121,17 +121,18 @@ Transitions and who may trigger them:
 | draft | refining | Product Manager picks it up | none |
 | refining | ready | Governor, after PM submits contract | Definition of Ready (5.3) |
 | refining | escalated | Governor | contract fails DoR three times, or risk is `high` and human acceptance of the contract itself is required |
-| ready | assigned | Scrum Master, within WIP limits | assignee role matches contract, budget available in sprint, every dependency accepted and integrated (5.14; added in 0.2) |
+| ready | assigned | Scrum Master, or the Product Manager when the team has no active Scrum Master, within WIP limits | assignee role matches contract, budget available in sprint, every dependency accepted and integrated (5.14; added in 0.2) |
 | assigned | in_progress | assignee starts session | none |
 | in_progress | verifying | assignee declares done | all exit criteria have a recorded result from the assignee's own run, and the task branch has at least one commit and a clean worktree (added in 0.2) |
 | in_progress | blocked | assignee | a written blocker with what is needed |
 | blocked | in_progress | Scrum Master or human | blocker resolved |
-| blocked | escalated | Governor | blocked longer than the configured limit (default: one sprint) |
+| blocked | escalated | Governor | blocked longer than the configured limit (default: 24 hours) |
 | verifying | accepted | reviewer, then Product Manager | Definition of Done (5.4). Human acceptance required when risk is `high` |
 | verifying | rejected | reviewer | written reasons mapped to failed criteria |
 | rejected | in_progress | Governor | iteration count below limit (default 3) |
 | rejected | escalated | Governor | iteration limit reached |
 | any | escalated | Governor | budget exhausted, permission denied on a required action, or a `stop` from the user |
+| any | cancelled | human only | none (added in 0.2) |
 | escalated | any | human only | none |
 
 The governor is the only actor allowed to write the `status` field for transitions marked as its own. Agents request transitions through a tool; the governor evaluates and either applies them or refuses with a reason that goes back to the agent and into the log. A contract is frozen once its task leaves `refining` (5.11).
@@ -179,7 +180,7 @@ Four budgets, all enforced by the governor, all configurable per team with role-
 | Per sprint (dollars) | set at planning | no new assignments; in-progress tasks may finish |
 | Per day, team-wide (dollars) | set by user at setup | everything pauses; user is notified |
 
-Plus non-monetary limits: a session wall clock (default 30 minutes), a tool-call count per session (default 200), and the rejection iteration limit (default 3).
+Plus non-monetary limits: a session wall clock (default 30 minutes), a tool-call count per session (default 200), and the rejection iteration limit (default 3). Per-role defaults: the Scrum Master's session budget is 200k input and 20k output tokens; every other role uses the team default. The shipped sprint budget is 15 dollars and the daily budget 20 dollars; a task's `max_cost_usd` is capped at 5 dollars by the default team rule unless the human raises it (decided 2026-09-15).
 
 Costs are computed from the usage fields returned by the model API and from the model's published price table, which Farik ships as a versioned file the user can override.
 
@@ -230,7 +231,7 @@ Agents post to the channel in a conversational register. The persona line and a 
 - State transitions on tasks the agent owns or reviews (assigned, done, blocked, rejected with the one-line reason).
 - Mentions from other agents or the user.
 - Planning, standup, review, and retro ceremonies, which are structured conversations that run in the channel.
-- A configurable "ambient" allowance: a small number of unprompted messages per sprint per agent, so the team feels alive without becoming expensive. Default is three.
+- A configurable "ambient" allowance: a small number of unprompted messages per sprint per agent, so the team feels alive without becoming expensive. Default is one, and reactions are one or two sentences (decided 2026-09-15: keep the register minimal).
 
 Ambient and reaction messages use a cheaper model than task work. The runtime keeps a compact rolling summary of the channel so an agent joining a conversation has context without replaying the whole log.
 
@@ -337,7 +338,7 @@ Default tools: read, network, write_workspace scoped to its paths.
 
 Numbered so the milestone plan and tests can refer to them.
 
-**F1 Team builder.** Create, edit, pause, retire agents. Assign roles. Set names, avatars (from a shipped pixel set or an uploaded 32x32 image), and persona lines. Enforce two to seven members. Show and edit per-agent permissions, MCP servers, skills, and model settings. Pausing an agent aborts its running session at the next tool call and moves its task to `blocked` with a note that says why (added in 0.2).
+**F1 Team builder.** Create, edit, pause, retire agents. Assign roles. Set names, avatars (from a shipped pixel set or an uploaded 32x32 image), and persona lines. Enforce two to seven members with at least one Product Manager and one Software Developer. Show and edit per-agent permissions, MCP servers, skills, and model settings. Pausing an agent aborts its running session at the next tool call and moves its task to `blocked` with a note that says why (added in 0.2).
 
 **F2 Projects.** Open an existing git repository or create a new one. Produce and store the project scan. Initialize `.farik/`. Detect the project's test and build commands and add them to the criterion library (F16).
 
@@ -410,7 +411,7 @@ Users who will not run Docker can opt into a no-sandbox mode with a loud warning
 
 ### 8.4 Storage
 
-SQLite via libsql for the event log and the projections the UI reads (board, costs, channel). Files under `.farik/` for anything the user should be able to read, diff, and edit: contracts, decisions, memories, role overrides. The event log is the source of truth for what happened; the files are the source of truth for what the team knows. On startup, Farik reconciles the two and reports any drift rather than silently picking one, and recovers interrupted sessions (5.15).
+SQLite via libsql for the event log and the projections the UI reads (board, costs, channel). Files under `.farik/` for anything the user should be able to read, diff, and edit: contracts, decisions, memories, role overrides. The event log is the source of truth for what happened; the files are the source of truth for what the team knows. The log is machine-local, under `.farik/local/`, and is never committed; the files are what travels with the repository (decided 2026-09-15). On startup, Farik reconciles the two and reports any drift rather than silently picking one, and recovers interrupted sessions (5.15).
 
 Hosted tier: Postgres for the event log, object storage for project snapshots, the same file layout inside the cloud workspace.
 
@@ -445,7 +446,7 @@ Nothing that makes the agents safer or more controllable is ever premium.
 
 ## 11. Milestones
 
-Milestone 0, the harness. Four to five weeks. `core`, `store`, `runtime` with one adapter, a command-line interface, and two roles: Product Manager and Developer. Exit criterion: on a public open-source repository of the maintainers' choosing, the PM writes contracts for three real issues, the Developer implements them, the PM verifies, and a human reviews the diffs and the event log and agrees each task was done as contracted. No UI. This milestone exists to find out whether the governance loop works before anyone draws a pixel.
+Milestone 0, the harness. Four to five weeks. `core`, `store`, `runtime` with one adapter, a command-line interface, and two roles: Product Manager and Developer. Exit criterion: on Farik's own repository (private until the open-source launch; decided 2026-09-15), the PM writes contracts for three real issues, the Developer implements them, the reviewer verifies (with a two-agent team, the human, per 5.1), and a human reviews the diffs and the event log and agrees each task was done as contracted. No UI. This milestone exists to find out whether the governance loop works before anyone draws a pixel.
 
 Milestone 1, the team. Five to six weeks. All five roles, the channel, ceremonies, the desktop shell with the board, and a first version of the office scene. Exit criterion: a new user with no help can go from an empty office to an accepted task on their own repository inside thirty minutes, measured with five test users.
 
@@ -457,11 +458,11 @@ Milestone 3, premium. Hosted execution on the same event protocol, license and b
 
 Recorded here so they are decided on purpose.
 
-1. Should the Product Manager's contracts require human acceptance for every task in the first week of a project, then relax? A "training wheels" period would catch bad criteria early at the cost of more interruptions.
-2. Sprint length. One day of agent time is a guess. It may be that hours are right for solo builders and days for teams.
-3. Whether the office scene should show cost visually (an agent's desk lamp dimming as its budget runs down, say). Cute and informative, or gimmicky and distracting.
-4. Whether to ship the no-sandbox mode at all. It will be the most-used mode on Windows if it exists.
-5. How much of the channel's "human" register is worth its tokens. The plan is to instrument it and let the retention data decide.
+1. Resolved 2026-09-15: human acceptance of contracts is a team policy, `human_accepts_contracts`, with values `high_risk` (the default) and `all`. A "training wheels" period is the user switching it to `all` for a while.
+2. Resolved 2026-09-15: a sprint has no length; it ends when its tasks are done (section 3).
+3. Resolved 2026-09-15: the board and task detail show cost; the scene does not.
+4. Resolved 2026-09-15: no-sandbox mode ships, with a warning on every run and in the setup screen.
+5. Resolved 2026-09-15: the register is kept minimal (5.9), and the channel is instrumented so the choice can be revisited with data.
 6. A second model provider. Not before someone asks, but the adapter interface is there.
 
 ## 13. Glossary

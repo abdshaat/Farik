@@ -21,7 +21,7 @@ Agent sessions run on the host through the Claude Agent SDK. The built-in Bash t
 
 ## Consequences
 
-The governor stays in one process with the event log, which keeps the hot-path evaluation local and the audit trail complete. No-sandbox mode becomes a one-line configuration difference rather than a second architecture, which makes the decision to ship it a product decision rather than an engineering one.
+The governor stays in one process with the event log, which keeps the hot-path evaluation local and the audit trail complete. No-sandbox mode becomes a one-line configuration difference rather than a second architecture, which makes the decision to ship it a product decision rather than an engineering one. The founder decided on 2026-09-15 that it ships, with a warning on every run and in the setup screen.
 
 Farik owns the shell tool: output limits, timeouts, working directory, and environment are Farik's responsibility, and a coding agent that expects the SDK's Bash tool has to be told, in its role prompt, that `farik_exec` is its shell. Prompt tuning for the developer role has to account for this.
 
