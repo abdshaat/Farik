@@ -72,7 +72,7 @@ They then build the team. The default suggestion is five agents, one per launch 
 
 The user is shown the default permissions for each role and asked to confirm three things explicitly: whether agents may run commands, whether they may push to git, and the daily budget in dollars. Nothing runs until these are set.
 
-The office populates. Agents walk to their desks. The Product Manager posts in the channel a first reading of the project and asks the user two or three questions. Answering them starts the first planning session.
+The office populates. Agents walk to their desks. The Product Manager posts in the channel a first reading of the project and asks the user two or three questions. The user's first request, typed in reply, is filed, triaged, and contracted (5.16).
 
 ### 4.2 The working loop
 
@@ -94,7 +94,7 @@ This section is the heart of the specification. Everything else could be rebuilt
 
 Contracts before work. No agent starts a task that lacks a contract passing the Definition of Ready. This applies to tasks the user creates by hand too. Every request from the user is triaged and becomes an epic contract or a single task contract first; tasks otherwise exist only as the breakdown of an approved epic (5.16).
 
-Nobody grades their own homework. The reviewer on a contract is never the assignee. For the developer's code, the reviewer is the Architect; if the team has none, another Developer, since a Software Developer may review another Developer's work but never its own; if there is neither, no contract for a Developer can pass the Definition of Ready, and the Product Manager asks the human to add a reviewer agent, an Architect or a second Developer (decided 2026-09-15). The human does not stand in as reviewer: the harness verifies agents' work with agents. For the Architect's designs, the reviewer is the Product Manager. The Product Manager's contracts are reviewed by the Scrum Master for completeness and, above a risk threshold, by the human.
+Nobody grades their own homework. The reviewer on a contract is never the assignee. For the developer's code, the reviewer is the Architect; if the team has none, another Developer, since a Software Developer may review another Developer's work but never its own; if there is neither, no contract for a Developer can pass the Definition of Ready, and the Product Manager asks the human to add a reviewer agent, an Architect or a second Developer (decided 2026-09-15). The human does not stand in as reviewer: the harness verifies agents' work with agents. For the Architect's designs, the reviewer is the Product Manager. The Product Manager's contracts are checked by the Scrum Master for completeness (the judgment part of the Definition of Ready) and, above a risk threshold or for every epic, approved by the human. An epic's reviewer, the one who runs its exit criteria at the end, is the Product Manager when the Scrum Master broke it down and the human when the Product Manager did (5.16); it is the one place the human is a reviewer, and it costs nothing extra because the human accepts every epic anyway.
 
 Governance is code, not prompts. The prompts tell agents what good behavior looks like. The governor makes bad behavior impossible or expensive. A system prompt that says "never push to main" is a suggestion; a governor that returns a permission error is a rule.
 
@@ -122,10 +122,10 @@ Transitions and who may trigger them:
 |---|---|---|---|
 | draft | refining | Product Manager picks it up | the request has been triaged (5.16; added in 0.3) |
 | refining | ready | Governor, after PM submits contract | Definition of Ready (5.3) |
-| refining | escalated | Governor | contract fails DoR three times, or risk is `high` and human acceptance of the contract itself is required |
+| refining | escalated | Governor | contract fails DoR three times, or human acceptance of the contract itself is required: risk is `high`, the policy says so, or the contract is an epic (5.16). An epic waiting for approval sits here with reason `approval` |
 | ready | assigned | Scrum Master, or the Product Manager when the team has no active Scrum Master, within WIP limits | assignee role matches contract, budget available in sprint, every dependency accepted and integrated (5.14; added in 0.2) |
 | assigned | in_progress | assignee starts session | none |
-| in_progress | verifying | assignee declares done | all exit criteria have a recorded result from the assignee's own run, and the task branch has at least one commit and a clean worktree (added in 0.2) |
+| in_progress | verifying | assignee declares done | all exit criteria have a recorded result from the assignee's own run, and the task branch has at least one commit and a clean worktree (added in 0.2); for an epic, every task under it is accepted or cancelled and at least one is accepted (5.16) |
 | in_progress | blocked | assignee | a written blocker with what is needed |
 | blocked | in_progress | Scrum Master or human | blocker resolved |
 | blocked | escalated | Governor | blocked longer than the configured limit (default: 24 hours) |
@@ -167,7 +167,7 @@ A task is accepted when:
 2. No file outside the contract's `allowed_paths` was changed. The governor computes this from the git diff and refuses acceptance otherwise.
 3. The assignee wrote a completion note: what changed, what was not done, and anything the reviewer should look at first.
 4. The reviewer wrote a review note that maps each criterion to evidence (a command output, a file path, a test name).
-5. For tasks with risk `high`, the human has accepted.
+5. For tasks with risk `high`, and for every epic, the human has accepted.
 
 Verification runs in a fresh session for the reviewer. The reviewer does not receive the assignee's transcript, only the contract, the diff, the completion note, and the tools to run the criteria. This is deliberate: a reviewer that reads "I ran the tests and they passed" is measurably worse than one that runs the tests.
 
@@ -209,7 +209,7 @@ MCP tools inherit a tier from their server configuration. When the user connects
 
 ### 5.7 Escalation
 
-An escalation is a task state and a message to the user. It carries: the task, the reason (budget, iterations, blocker age, permission, risk gate, explicit request), what the agent tried, and the options the agent proposes. The user resolves it from the board or from the channel. Nothing else on the board waits for an escalation unless it depends on that task.
+An escalation is a task state and a message to the user. It carries: the task, the reason (budget, sessions, iterations, blocker age, permission, risk gate, approval of an epic, integration, explicit request), what the agent tried, and the options the agent proposes. The user resolves it from the board or from the channel. Nothing else on the board waits for an escalation unless it depends on that task.
 
 The Scrum Master is responsible for making sure escalations do not pile up silently: it posts a digest in the channel at the start of each sprint and pings the user through the app's notification channel if an escalation is older than a configurable age.
 
@@ -267,7 +267,7 @@ Defaults: `protected_paths` as in 5.6, everything else empty or off. Rules never
 
 ### 5.13 Contract authoring and the criterion library (added in 0.2)
 
-A contract can be written three ways, and all three end in the same Definition of Ready check. The human writes it alone, in the editor or as a YAML file, and then the human's own triage sets whether it is an epic or a single task (5.16). The Product Manager writes it from a brief, an issue link, or the backlog, as in 6.1. Or the two write it together: the Product Manager drafts, the human edits, the Definition of Ready results update as they type, and the human locks the result (5.11). The command line offers the same through `farik contract new`, which runs a Product Manager drafting session over a brief or a link and prints the contract with its readiness results.
+A contract can be written three ways, and all three end in the same Definition of Ready check. The human writes it alone, in the editor or as a YAML file, and then the human's own triage sets whether it is an epic or a single task (5.16). The Product Manager writes it from a brief, an issue link, or the backlog, as in 6.1. Or the two write it together: the Product Manager drafts, the human edits, the Definition of Ready results update as they type, and the human locks the result (5.11). The command line offers the same through `farik contract new`, which files the request, runs its triage (or takes the user's), then runs a Product Manager drafting session over a brief or a link, answering its questions at the terminal, and prints the contract with its readiness results.
 
 The criterion library, `.farik/team/criteria.yaml`, holds named, reusable exit criteria: the project's own check and test commands found by the project scan, and any the human adds. When authoring, a criterion is referenced by name and expanded into the contract, so that contracts across a project verify the same way and the Product Manager is not asked to reinvent "the tests pass" every time.
 
@@ -290,11 +290,11 @@ Every prompt from the user that asks for work is translated into a contract befo
 An epic goes through the same lifecycle as a task with four differences.
 
 1. The Product Manager writes it, and must ask the user every question it needs first. In an epic's `refining` sessions the Product Manager asks through the question mechanism (5.7) before it writes the contract, and it may not write or change product documents (the spec, requirements, or the product roadmap under `.farik/product/`) until the epic is approved: the `farik_write_product_doc` tool is refused for an epic that is not yet `ready`. When the Product Manager believes it has no questions, it says so in the contract's intent, and the user's approval is the check that it was right.
-2. The user reads and approves it. Every epic requires human acceptance of the contract before it leaves `refining`, whatever its risk; the user may approve, or send it back with a message that starts the next refining session. Nothing is broken down before this approval.
+2. The user reads and approves it. Every epic requires human acceptance of the contract before it leaves `refining`, whatever its risk: once the contract passes the structural checks, the governor moves the epic to `escalated` with reason `approval` and the board shows it as awaiting approval; the user approves, which moves it to `ready`, or sends it back to `refining` with a message that starts the next refining session. Nothing is broken down before this approval.
 3. Its assignee breaks it down. An approved epic is assigned to the Scrum Master, or to the Product Manager when the team has no active Scrum Master, and that assignee's work is to write the epic's tasks (`kind: task`, `parent` set), each with clear deliverables and exit criteria, and to assign them to the appropriate agents (5.2). A task's `allowed_paths` fall within its epic's, its budget within the epic's remaining budget, and its parent must be `in_progress`; the Definition of Ready checks all three. A task under an epic may be created only by its epic's assignee or by the human; a standalone task comes only from triage.
-4. It is done when its tasks are. An epic moves to `verifying` when every task under it is `accepted` or `cancelled` and at least one is accepted; its own exit criteria are then run by its reviewer (the Product Manager), and its acceptance requires the user, like its approval did.
+4. It is done when its tasks are. An epic moves to `verifying` when every task under it is `accepted` or `cancelled` and at least one is accepted; its own exit criteria are then run by its reviewer, the Product Manager when the Scrum Master broke it down and the human when the Product Manager did, since a reviewer is never the assignee (5.1); and its acceptance requires the user, like its approval did.
 
-A user who wants to write the epic themselves does so in the editor or as a file, locks it (5.11), and approves it; the breakdown still happens by the assignee. When the triage sized a request as small and the Product Manager finds while refining that it is not, it asks the Scrum Master (or, without one, decides itself) to re-triage it as large; the standalone task becomes the epic and its refining starts over.
+A user who wants to write the epic themselves does so in the editor or as a file, locks it (5.11), and approves it; the breakdown still happens by the assignee. When the triage sized a request as small and the Product Manager finds while refining that it is not, it re-triages the request itself as large (`farik_triage_request` accepts this one change from the Product Manager of a `refining` standalone task); the standalone task becomes the epic and its refining starts over. The user may overrule any triage until refining starts.
 
 The product roadmap, `.farik/product/roadmap.md`, and the product documents under `.farik/product/` are written by the Product Manager only through `farik_write_product_doc`, only for approved epics, and every write is a `product_doc.written` event, so that the user can see what changed in the roadmap and why.
 
@@ -306,7 +306,7 @@ Each role ships as a directory under `roles/<role>/` with `role.yaml` (mandate, 
 
 Mandate: own the backlog, translate every request from the user into a contract, an epic or a standalone task as the triage sized it, after asking the user its questions (5.16), accept work against contracts, keep the product pointed at a user need. The PM is the source of exit criteria and the last non-human gate. When the team has no Scrum Master, the PM also triages requests, breaks approved epics into tasks, and assigns them.
 
-Produces: epic contracts, the questions it asks the user, product decisions, the product roadmap and requirements under `.farik/product/` (only for approved epics), release scope.
+Produces: epic contracts and standalone task contracts, the questions it asks the user, product decisions, the product roadmap and requirements under `.farik/product/` (only for approved epics), release scope.
 
 Cannot: write application code, write product documents for an epic the user has not approved, run the test suite as a reviewer of its own contracts, accept a task without a reviewer's verification event.
 
@@ -316,11 +316,11 @@ Default tools: read, network (for competitor and docs research), the task and de
 
 Mandate: keep work flowing and keep the human informed. Triages every request from the user as large or small (5.16). Breaks approved epics into tasks with clear deliverables and exit criteria and assigns them to the appropriate agents. Runs planning, standup, review, and retro. Enforces WIP limits (default: one in-progress task per agent). Checks Definition of Ready judgment criteria. Owns escalation hygiene.
 
-Produces: task contracts under epics, sprint plans, standup summaries, retro notes, escalation digests.
+Produces: triage decisions, task contracts under epics, sprint plans, standup summaries, retro notes, escalation digests.
 
-Cannot: change requirements or contracts, write code, accept work.
+Cannot: change an epic's requirements or contract, change a frozen contract, write code, accept work.
 
-Default tools: read, the board tools. Runs on a mid-tier model; its work is coordination, not deep reasoning.
+Default tools: read, the board tools, the triage tool, and the contract tools for the tasks of an epic it is breaking down. Runs on a mid-tier model; its work is coordination, not deep reasoning.
 
 ### 6.3 Architect
 
@@ -370,7 +370,7 @@ Numbered so the milestone plan and tests can refer to them.
 
 **F7 Channel.** Team chat with agent posts, user posts, mentions, ceremony threads, and a link from any message to the task or event it refers to.
 
-**F8 One-on-one.** Direct conversation with an agent, read-only with respect to the project, with an offer to file a task.
+**F8 One-on-one.** Direct conversation with an agent, read-only with respect to the project, with an offer to file a request (5.16).
 
 **F9 MCP and skills.** Per-agent configuration of MCP servers (stdio and remote), tool tagging by tier, credential storage in the OS keychain. Per-agent, per-role, and team-wide skill folders.
 
@@ -382,7 +382,7 @@ Numbered so the milestone plan and tests can refer to them.
 
 **F13 Premium hooks.** License check, hosted-run toggle, and cloud sync are stubs in the open-source build. They must be present so the premium build is the same codebase with features enabled, not a fork.
 
-**F14 Contract authoring assistant (added in 0.2).** Write an epic contract alone, with the Product Manager, or from a brief or issue link, with the Product Manager's questions answered first, Definition of Ready results shown live, criteria from the library, a lock that makes the contract human-owned (5.11, 5.13), and the approval that lets it be broken down (5.16). Questions from agents are shown and answered in the same place (5.7).
+**F14 Contract authoring assistant (added in 0.2).** Write an epic or a standalone task contract alone, with the Product Manager, or from a brief or issue link, with the Product Manager's questions answered first, Definition of Ready results shown live, criteria from the library, a lock that makes the contract human-owned (5.11, 5.13), and the approval that lets it be broken down (5.16). Questions from agents are shown and answered in the same place (5.7).
 
 **F15 Team rules (added in 0.2).** Edit the rules in 5.12 from the team editor and the command line; every refusal they cause names the rule.
 

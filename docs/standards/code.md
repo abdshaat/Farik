@@ -78,7 +78,8 @@ The backend (every crate under `crates/`) is Rust. The front end (`packages/ui`,
 | Function, method, variable, field, module | `snake_case` | `evaluate_transition` |
 | Constant and static | `UPPER_SNAKE_CASE` | `DEFAULT_ITERATION_LIMIT`, `TRANSITION_TABLE` |
 | Boolean | reads as a question: `is_`, `has_`, `can_`, `should_` | `is_ready`, `has_reviewer` |
-| Function that may fail | returns `Result<T, E>` with a named error enum (`thiserror`) per crate; never panics across a crate boundary | `fn evaluate(...) -> Result<Transition, GovernorError>` |
+| Function that may fail | returns `Result<T, E>` with a named error enum (`thiserror`) per crate; never panics across a crate boundary; `xtask` and binaries may use `anyhow` and `String` reasons | `fn open(...) -> Result<EventLog, StoreError>` |
+| Governor outcome | a refusal or a failure that is a normal outcome, not an error, is a value named `<Subject>Refusal` or `<Subject>Failure` in the `Err` position of a `Result`, or a `Vec` of them | `fn evaluate_transition(...) -> Result<TransitionDecision, TransitionRefusal>` |
 | Wire enums | `#[serde(rename_all = "snake_case")]` so that variants match the wire values | `InProgress` serialises as `in_progress` |
 | Error type | `<Subject>Error` enum, one variant per reason, `#[error]` message in plain words | `StoreError::Io { path, source }` |
 | Lifetime and generic parameter | descriptive `PascalCase` for generics, short for lifetimes | `Result<Value, Failure>`, `'a` |
@@ -132,8 +133,10 @@ Anything that leaves a process or is written to disk uses `snake_case` keys. Rus
 
 | Thing | Convention | Example |
 |---|---|---|
-| Test description | `describe` names the unit; `it` states the behavior in plain words starting with a verb | `it('refuses a transition to ready when no exit criteria exist')` |
-| Fixture | `fixtures/<subject>.ts` exporting builder functions, not raw objects | `fixtures/contract.ts` exporting `aReadyContract()` |
+| Test name (Rust) | a `snake_case` sentence starting with a verb that states the behavior | `fn refuses_a_transition_to_ready_when_no_exit_criteria_exist()` |
+| Test description (TypeScript) | `describe` names the unit; `it` states the behavior in plain words starting with a verb | `it('refuses a transition to ready when no exit criteria exist')` |
+| Fixture (Rust) | `<module>/fixtures.rs` exporting builder functions, not raw values | `contract/fixtures.rs` exporting `a_contract_wire()` |
+| Fixture (TypeScript) | `fixtures/<subject>.ts` exporting builder functions, not raw objects | `fixtures/contract.ts` exporting `aReadyContract()` |
 | Snapshot | avoided; assert on specific fields | |
 
 ## Rules the tools cannot enforce
