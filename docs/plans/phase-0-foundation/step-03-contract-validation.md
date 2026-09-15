@@ -2,7 +2,7 @@
 
 Status: draft
 Branch: `phase/0-foundation` (the phase branch; steps do not get their own)
-Spec: `docs/SPEC.md` section 3 (Contract), section 5.3 (the structural checks build on these types in phase 1), section 5.11 (`locked`), section 5.13 (`references`), F4 (validation against the JSON schema); `docs/standards/code.md`, "Schema validation" and "Wire and file formats"
+Spec: `docs/SPEC.md` section 3 (Contract), section 5.3 (the structural checks build on these types in phase 1), section 5.11 (`locked`), section 5.13 (`references`), section 5.16 (`kind`, `parent`), F4 (validation against the JSON schema); `docs/standards/code.md`, "Schema validation" and "Wire and file formats"
 Depends on: step 01 of this phase (not yet committed), step 02 of this phase (not yet committed); record the shas here when they land
 
 A plan is `ready` only when a reviewer other than the author has confirmed the three rules in `docs/standards/workflow.md` stage 2 (Plan): every decision made, no ambiguity, no forward dependencies. Record who confirmed and when here.
@@ -16,7 +16,7 @@ Readiness confirmed by: pending
 ## Decisions
 
 - Validation uses the `jsonschema` crate (0.56.0, default features off so it resolves nothing over the network or the file system) with format assertion on, so `date-time` and `uri` are checked; the schema is embedded with `include_str!` from the copy step 02 generated, and the validator is built once in a `LazyLock`. Errors are `{ path, message }` with the JSON pointer of the offending value, `/` for the root, and the crate's own message. Rejected: validating by deserialising alone, because `serde` reports one error and stops, and its messages name Rust types rather than schema rules.
-- After the schema passes, the value is deserialised into the generated `FarikTaskContract`, aliased `TaskContract`; the schema's defaults (`max_sessions` 5, `max_iterations` 3, `iteration` 0, `locked` false, `expect.exit_code` 0, `new_tests_required` false) are applied by the generated `#[serde(default)]` attributes. A deserialisation failure after a schema pass is reported as one error at `/`; it means the generator and the validator disagree, which the tests are meant to catch.
+- After the schema passes, the value is deserialised into the generated `FarikTaskContract`, aliased `TaskContract`; the schema's defaults (`max_sessions` 5, `max_iterations` 3, `iteration` 0, `locked` false, `kind` `task`, `expect.exit_code` 0, `new_tests_required` false) are applied by the generated `#[serde(default)]` attributes. A deserialisation failure after a schema pass is reported as one error at `/`; it means the generator and the validator disagree, which the tests are meant to catch.
 - The generated `ExitCriterionVerification` is an untagged enum whose variants are named by position (`Variant0` for `command` and so forth). `farik-core` keeps one hand-written `Verification` enum with named variants and `impl From<&VerificationWire>`; it is the one mapping at this crate's edge (`docs/standards/code.md`, "Wire and file formats"). Rejected: changing the schema to coax named variants out of the generator, because branch titles and `enum` discriminators were tried and do not change the output.
 - Serialising a `TaskContract` writes the defaults explicitly and omits empty optional lists (`satisfies`, `constraints`, `dependencies`, `references`), which the round-trip test pins down.
 - `validate_contract` checks the schema only. Definition of Ready rules are phase 1.
@@ -187,6 +187,8 @@ Produces: `contract::{TaskContract, ExitCriterion, Budget, Notes, Requirement, R
           { "id": "C5", "text": "The founder has tried the login flow.",
             "verification": { "method": "human", "question": "Did you sign in successfully?" } }
       ]);
+      contract["kind"] = json!("task");
+      contract["parent"] = json!("FRK-3");
       contract["constraints"] = json!(["Use the existing session store."]);
       contract["dependencies"] = json!(["FRK-2"]);
       contract["references"] = json!(["https://github.com/abdshaat/farik/issues/1"]);
@@ -337,6 +339,8 @@ Produces: `contract::{TaskContract, ExitCriterion, Budget, Notes, Requirement, R
           assert_eq!(contract.budget.max_iterations.get(), 3);
           assert_eq!(contract.iteration, 0);
           assert!(!contract.locked);
+          assert_eq!(contract.kind.to_string(), "task");
+          assert!(contract.parent.is_none());
           assert_eq!(
               Verification::from(&contract.exit_criteria[0].verification),
               Verification::Test {
@@ -423,6 +427,10 @@ Produces: `contract::{TaskContract, ExitCriterion, Budget, Notes, Requirement, R
               vec!["https://github.com/abdshaat/farik/issues/1"]
           );
           assert!(contract.locked);
+          assert_eq!(
+              serde_json::to_value(&contract.parent).unwrap(),
+              json!("FRK-3")
+          );
           assert_eq!(
               contract
                   .notes
@@ -651,6 +659,8 @@ Produces: `contract::{TaskContract, ExitCriterion, Budget, Notes, Requirement, R
           assert_eq!(contract.budget.max_iterations.get(), 3);
           assert_eq!(contract.iteration, 0);
           assert!(!contract.locked);
+          assert_eq!(contract.kind.to_string(), "task");
+          assert!(contract.parent.is_none());
           assert_eq!(
               Verification::from(&contract.exit_criteria[0].verification),
               Verification::Test {
@@ -737,6 +747,10 @@ Produces: `contract::{TaskContract, ExitCriterion, Budget, Notes, Requirement, R
               vec!["https://github.com/abdshaat/farik/issues/1"]
           );
           assert!(contract.locked);
+          assert_eq!(
+              serde_json::to_value(&contract.parent).unwrap(),
+              json!("FRK-3")
+          );
           assert_eq!(
               contract
                   .notes

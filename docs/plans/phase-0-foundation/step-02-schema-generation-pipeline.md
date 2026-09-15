@@ -489,10 +489,10 @@ Produces: `cargo xtask generate [--check]`; `xtask::generate::{GeneratedSchema, 
   # generated crates/core/src/generated/task_contract.schema.json
   sha256sum crates/core/src/generated/task_contract.rs crates/core/src/generated/task_contract.schema.json
   # expected:
-  # 11d3d9c51b672fa17290ffec656ccf822108c8b2a307e1ec835217d073c0769b  crates/core/src/generated/task_contract.rs
-  # fefb64f7ebc7004e8a2fbbbdc333173e077b6dbf3c1f6b68396fd2dd05989258  crates/core/src/generated/task_contract.schema.json
+  # abe29b426486ece35cc3a74ed4f0dff16775a814d11e199e93ff11115e84e20b  crates/core/src/generated/task_contract.rs
+  # ef3e651b66318db253633bb8686c7238bdd8626c0728478e3a2b54bd6d7221ff  crates/core/src/generated/task_contract.schema.json
   wc -l crates/core/src/generated/task_contract.rs
-  # expected: 863
+  # expected: 980
   head -3 crates/core/src/generated/task_contract.rs
   # expected:
   # // Generated from docs/schemas/task-contract.schema.json by `cargo xtask generate`. Do not edit.
