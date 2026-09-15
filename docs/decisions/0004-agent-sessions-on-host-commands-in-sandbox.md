@@ -1,7 +1,7 @@
 # 0004. Agent sessions run on the host; only commands run in the sandbox
 
 Date: 2026-09-14
-Status: proposed
+Status: accepted (2026-09-15, the founder; mechanism amended by ADR 0005)
 
 ## Context
 
