@@ -46,9 +46,9 @@ A third persona, the enterprise platform team, is deliberately deferred. Their a
 
 **Project.** A git repository plus a `.farik/` directory inside it that holds the backlog, contracts, decisions, and memories as plain files. Everything the team knows about the project lives in the repository, so it can be diffed, reviewed, and version controlled like any other code.
 
-**Task.** The unit of work. A task is not ready until it has a contract. Every task belongs to an epic.
+**Task.** The unit of work. A task is not ready until it has a contract. A task belongs to an epic, or stands alone when it came from a small request.
 
-**Epic.** The translation of one request from the user into a contract, written by the Product Manager after asking the user its questions and approved by the user before anyone breaks it into tasks (5.16; added in 0.3).
+**Epic.** The translation of one large request from the user into a contract, written by the Product Manager after asking the user its questions and approved by the user before anyone breaks it into tasks. A small request becomes a single task instead; the Scrum Master or the Product Manager decides which (5.16; added in 0.3).
 
 **Contract.** A structured document attached to an epic or a task: intent, scope, requirements, exit criteria with a verification method for each, constraints, budget, and a named reviewer who is not the assignee. The schema is in `docs/schemas/task-contract.schema.json`; the `kind` field says which of the two it is.
 
@@ -92,7 +92,7 @@ This section is the heart of the specification. Everything else could be rebuilt
 
 ### 5.1 Principles
 
-Contracts before work. No agent starts a task that lacks a contract passing the Definition of Ready. This applies to tasks the user creates by hand too. Every request from the user becomes an epic contract first, and tasks exist only as the breakdown of an approved epic (5.16).
+Contracts before work. No agent starts a task that lacks a contract passing the Definition of Ready. This applies to tasks the user creates by hand too. Every request from the user is triaged and becomes an epic contract or a single task contract first; tasks otherwise exist only as the breakdown of an approved epic (5.16).
 
 Nobody grades their own homework. The reviewer on a contract is never the assignee. For the developer's code, the reviewer is the Architect; if the team has none, another Developer, since a Software Developer may review another Developer's work but never its own; if there is neither, no contract for a Developer can pass the Definition of Ready, and the Product Manager asks the human to add a reviewer agent, an Architect or a second Developer (decided 2026-09-15). The human does not stand in as reviewer: the harness verifies agents' work with agents. For the Architect's designs, the reviewer is the Product Manager. The Product Manager's contracts are reviewed by the Scrum Master for completeness and, above a risk threshold, by the human.
 
@@ -120,7 +120,7 @@ Transitions and who may trigger them:
 
 | From | To | Triggered by | Gate |
 |---|---|---|---|
-| draft | refining | Product Manager picks it up | none |
+| draft | refining | Product Manager picks it up | the request has been triaged (5.16; added in 0.3) |
 | refining | ready | Governor, after PM submits contract | Definition of Ready (5.3) |
 | refining | escalated | Governor | contract fails DoR three times, or risk is `high` and human acceptance of the contract itself is required |
 | ready | assigned | Scrum Master, or the Product Manager when the team has no active Scrum Master, within WIP limits | assignee role matches contract, budget available in sprint, every dependency accepted and integrated (5.14; added in 0.2) |
@@ -285,14 +285,16 @@ Farik can stop at any moment: the laptop closes, the process is killed. On start
 
 ### 5.16 Epics: from a request to sub-contracts (added in 0.3)
 
-Every prompt from the user that asks for work is translated into a contract before anything else happens. That contract is an epic (`kind: epic`), and it goes through the same lifecycle as a task with four differences.
+Every prompt from the user that asks for work is translated into a contract before anything else happens. The first thing that happens to it is triage: the Scrum Master, or the Product Manager when the team has no active Scrum Master, decides whether the request is large or small and records the decision with a reason (`request.triaged`). A large request becomes an epic (`kind: epic`). A small request becomes a single standalone task (`kind: task`, no `parent`), written by the Product Manager like any task, with its questions to the user asked first and the user's approval required only by the team's policy (`human_accepts_contracts`, or `high` risk); it then goes through the ordinary lifecycle without a breakdown. The governor refuses `draft → refining` until the triage is recorded, and the user may overrule it (`farik triage <id> large|small`, or the board) before the Product Manager starts. Triage runs on the cheaper model and produces one event, so a small request costs one short session on top of its own.
+
+An epic goes through the same lifecycle as a task with four differences.
 
 1. The Product Manager writes it, and must ask the user every question it needs first. In an epic's `refining` sessions the Product Manager asks through the question mechanism (5.7) before it writes the contract, and it may not write or change product documents (the spec, requirements, or the product roadmap under `.farik/product/`) until the epic is approved: the `farik_write_product_doc` tool is refused for an epic that is not yet `ready`. When the Product Manager believes it has no questions, it says so in the contract's intent, and the user's approval is the check that it was right.
 2. The user reads and approves it. Every epic requires human acceptance of the contract before it leaves `refining`, whatever its risk; the user may approve, or send it back with a message that starts the next refining session. Nothing is broken down before this approval.
-3. Its assignee breaks it down. An approved epic is assigned to the Scrum Master, or to the Product Manager when the team has no active Scrum Master, and that assignee's work is to write the epic's tasks (`kind: task`, `parent` set), each with clear deliverables and exit criteria, and to assign them to the appropriate agents (5.2). A task's `allowed_paths` fall within its epic's, its budget within the epic's remaining budget, and its parent must be `in_progress`; the Definition of Ready checks all three. A task may be created only by its epic's assignee or by the human.
+3. Its assignee breaks it down. An approved epic is assigned to the Scrum Master, or to the Product Manager when the team has no active Scrum Master, and that assignee's work is to write the epic's tasks (`kind: task`, `parent` set), each with clear deliverables and exit criteria, and to assign them to the appropriate agents (5.2). A task's `allowed_paths` fall within its epic's, its budget within the epic's remaining budget, and its parent must be `in_progress`; the Definition of Ready checks all three. A task under an epic may be created only by its epic's assignee or by the human; a standalone task comes only from triage.
 4. It is done when its tasks are. An epic moves to `verifying` when every task under it is `accepted` or `cancelled` and at least one is accepted; its own exit criteria are then run by its reviewer (the Product Manager), and its acceptance requires the user, like its approval did.
 
-An epic with one task is a normal outcome: a small request still gets its approval and its breakdown, which costs one contract and one question. A user who wants to write the epic themselves does so in the editor or as a file, locks it (5.11), and approves it; the breakdown still happens by the assignee.
+A user who wants to write the epic themselves does so in the editor or as a file, locks it (5.11), and approves it; the breakdown still happens by the assignee. When the triage sized a request as small and the Product Manager finds while refining that it is not, it asks the Scrum Master (or, without one, decides itself) to re-triage it as large; the standalone task becomes the epic and its refining starts over.
 
 The product roadmap, `.farik/product/roadmap.md`, and the product documents under `.farik/product/` are written by the Product Manager only through `farik_write_product_doc`, only for approved epics, and every write is a `product_doc.written` event, so that the user can see what changed in the roadmap and why.
 
@@ -302,7 +304,7 @@ Each role ships as a directory under `roles/<role>/` with `role.yaml` (mandate, 
 
 ### 6.1 Product Manager
 
-Mandate: own the backlog, translate every request from the user into an epic contract after asking the user its questions (5.16), accept work against contracts, keep the product pointed at a user need. The PM is the source of exit criteria and the last non-human gate. When the team has no Scrum Master, the PM also breaks approved epics into tasks and assigns them.
+Mandate: own the backlog, translate every request from the user into a contract, an epic or a standalone task as the triage sized it, after asking the user its questions (5.16), accept work against contracts, keep the product pointed at a user need. The PM is the source of exit criteria and the last non-human gate. When the team has no Scrum Master, the PM also triages requests, breaks approved epics into tasks, and assigns them.
 
 Produces: epic contracts, the questions it asks the user, product decisions, the product roadmap and requirements under `.farik/product/` (only for approved epics), release scope.
 
@@ -312,7 +314,7 @@ Default tools: read, network (for competitor and docs research), the task and de
 
 ### 6.2 Scrum Master
 
-Mandate: keep work flowing and keep the human informed. Breaks approved epics into tasks with clear deliverables and exit criteria and assigns them to the appropriate agents (5.16). Runs planning, standup, review, and retro. Enforces WIP limits (default: one in-progress task per agent). Checks Definition of Ready judgment criteria. Owns escalation hygiene.
+Mandate: keep work flowing and keep the human informed. Triages every request from the user as large or small (5.16). Breaks approved epics into tasks with clear deliverables and exit criteria and assigns them to the appropriate agents. Runs planning, standup, review, and retro. Enforces WIP limits (default: one in-progress task per agent). Checks Definition of Ready judgment criteria. Owns escalation hygiene.
 
 Produces: task contracts under epics, sprint plans, standup summaries, retro notes, escalation digests.
 
@@ -358,7 +360,7 @@ Numbered so the milestone plan and tests can refer to them.
 
 **F2 Projects.** Open an existing git repository or create a new one. Produce and store the project scan. Initialize `.farik/`. Detect the project's test and build commands and add them to the criterion library (F16).
 
-**F3 Board.** Kanban view of the task lifecycle, with tasks grouped under their epics. Filter by agent, sprint, risk, epic. Open a task to see its contract, events, diff, notes, and cost. Create an epic by hand (it enters as `draft`; added in 0.3: what the user creates is an epic, and tasks come from its breakdown).
+**F3 Board.** Kanban view of the task lifecycle, with tasks grouped under their epics and standalone tasks on their own. Filter by agent, sprint, risk, epic. Open a task to see its contract, events, diff, notes, and cost. Create a request by hand (it enters as `draft` and is triaged; added in 0.3) and overrule a triage.
 
 **F4 Contracts.** Editor for the contract schema with validation against the JSON schema. PM authoring flow. Definition of Ready results displayed inline.
 
@@ -436,7 +438,7 @@ Hosted tier: Postgres for the event log, object storage for project snapshots, t
 
 ### 8.5 Event protocol
 
-A single event type with a discriminated `kind`, stamped with time, team, project, task, agent, session, and a monotonically increasing sequence. Kinds are named `<entity>.<past_tense_verb>` (see `docs/standards/code.md`) and include `task.transitioned`, `tool.called`, `tool.returned`, `tool.denied`, `message.posted`, `cost.recorded`, `budget.exhausted`, `escalation.raised`, `escalation.resolved`, `session.started`, `session.ended`, `review.recorded`, `human.accepted`, and, added in 0.2, `question.asked`, `question.answered`, `contract.locked`, `contract.unlocked`, `task.integrated`, `memory.written`, and, added in 0.3, `product_doc.written`. The UI subscribes to the stream; nothing in the UI polls.
+A single event type with a discriminated `kind`, stamped with time, team, project, task, agent, session, and a monotonically increasing sequence. Kinds are named `<entity>.<past_tense_verb>` (see `docs/standards/code.md`) and include `task.transitioned`, `tool.called`, `tool.returned`, `tool.denied`, `message.posted`, `cost.recorded`, `budget.exhausted`, `escalation.raised`, `escalation.resolved`, `session.started`, `session.ended`, `review.recorded`, `human.accepted`, and, added in 0.2, `question.asked`, `question.answered`, `contract.locked`, `contract.unlocked`, `task.integrated`, `memory.written`, and, added in 0.3, `product_doc.written`, `request.triaged`. The UI subscribes to the stream; nothing in the UI polls.
 
 ### 8.6 Security
 

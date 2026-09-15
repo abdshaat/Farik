@@ -37,12 +37,12 @@
         "task"
       ],
       "default": "task",
-      "description": "epic: one request from the user, approved by the user before it is broken down. task: one deliverable of an epic. See docs/SPEC.md section 5.16."
+      "description": "epic: a large request from the user, approved by the user before it is broken down. task: one deliverable of an epic, or a small request the triage (docs/SPEC.md section 5.16) sized as a single task. Set by the triage before refining starts."
     },
     "parent": {
       "type": "string",
       "pattern": "^FRK-[0-9]{1,6}$",
-      "description": "The epic this task belongs to. Required for a task, absent for an epic; enforced by the governor."
+      "description": "The epic this task belongs to. Absent for an epic and for a standalone task that came from a small request; required for a task created by an epic's breakdown. Enforced by the governor."
     },
     "intent": {
       "type": "string",
