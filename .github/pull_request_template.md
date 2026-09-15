@@ -15,7 +15,7 @@ Two to six sentences. Why, more than what; the diff shows what.
 The exact command(s) run on the final commit and their output. Not a summary of the output.
 
 ```
-pnpm check
+cargo xtask check
 <paste output>
 ```
 

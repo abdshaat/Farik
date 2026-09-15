@@ -15,9 +15,11 @@ Git needs its own tool because two permission tiers, `git_local` and `git_remote
 
 The cost of the second option is that the agent's shell is a Farik tool rather than the SDK's own Bash tool, so command output streaming and timeouts are Farik's to implement, and the sandbox boundary protects the project from commands but not from the host-side file tools, which the governor's path check protects instead.
 
+Amended 2026-09-15 by ADR 0005: the sessions are Claude Code child processes rather than SDK calls, and the `PreToolUse` and `PostToolUse` hooks are `farik hook` commands that call the daemon, which runs the governor. Everything below about what runs where still holds.
+
 ## Decision
 
-Agent sessions run on the host through the Claude Agent SDK. The built-in Bash tool is disallowed in every session; the built-in WebFetch and WebSearch tools are allowed only under the `network` tier. Command execution is a Farik tool backed by an `Executor` interface with a Docker implementation and a host implementation, and the same interface is what no-sandbox mode switches. Git commits and pushes are a Farik tool on the host, tiered `git_local` and `git_remote`. Credentials, for the model API and for git remotes alike, never enter a container.
+Agent sessions run on the host through the Claude Code program, driven by the Rust runtime. The built-in Bash tool is disallowed in every session; the built-in WebFetch and WebSearch tools are allowed only under the `network` tier. Command execution is a Farik tool backed by an `Executor` interface with a Docker implementation and a host implementation, and the same interface is what no-sandbox mode switches. Git commits and pushes are a Farik tool on the host, tiered `git_local` and `git_remote`. Credentials, for the model API and for git remotes alike, never enter a container.
 
 ## Consequences
 

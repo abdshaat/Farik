@@ -1,6 +1,6 @@
 # Farik Specification
 
-Version 0.2 (draft for review). Owner: project founder. Status: not yet implemented; this document is the contract the first milestone is built against. Revision 0.2 (2026-09-14) adds sections 5.11 to 5.15, requirements F14 to F17, the `locked` and `references` contract fields, and the amendments marked "added in 0.2", all from the planning review recorded in `docs/plans/project-plan.md`.
+Version 0.2 (draft for review). Owner: project founder. Status: not yet implemented; this document is the contract the first milestone is built against. Revision 0.2 (2026-09-14) adds sections 5.11 to 5.15, requirements F14 to F17, the `locked` and `references` contract fields, and the amendments marked "added in 0.2", all from the planning review recorded in `docs/plans/project-plan.md`. Revision 0.3 (2026-09-15) records the founder's decisions of that day and the move of the backend to Rust (section 8, ADR 0005).
 
 Farik is a desktop and web application that lets a person assemble a small team of AI agents, each with a named role, a face, its own tools, and its own skills, and put that team to work on a software product. The team runs a lightweight Scrum process: a product manager writes task contracts with explicit exit criteria, a scrum master keeps the board moving, and specialists do the work. A deterministic governor enforces the rules the agents cannot be trusted to enforce on themselves. The front end is a pixel-art office where the user can watch the team, open any agent's desk, and talk to them one-on-one or in the team channel.
 
@@ -92,7 +92,7 @@ This section is the heart of the specification. Everything else could be rebuilt
 
 Contracts before work. No agent starts a task that lacks a contract passing the Definition of Ready. This applies to tasks the user creates by hand too.
 
-Nobody grades their own homework. The reviewer on a contract is never the assignee. For the developer's code, the reviewer is the Architect; if the team has none, another Developer; if there is neither, the human, and the Product Manager suggests adding an Architect or a second Developer (decided 2026-09-15). For the Architect's designs, the reviewer is the Product Manager. The Product Manager's contracts are reviewed by the Scrum Master for completeness and, above a risk threshold, by the human.
+Nobody grades their own homework. The reviewer on a contract is never the assignee. For the developer's code, the reviewer is the Architect; if the team has none, another Developer; if there is neither, no contract for a Developer can pass the Definition of Ready, and the Product Manager asks the human to add a reviewer agent, an Architect or a second Developer (decided 2026-09-15). The human does not stand in as reviewer: the harness verifies agents' work with agents. For the Architect's designs, the reviewer is the Product Manager. The Product Manager's contracts are reviewed by the Scrum Master for completeness and, above a risk threshold, by the human.
 
 Governance is code, not prompts. The prompts tell agents what good behavior looks like. The governor makes bad behavior impossible or expensive. A system prompt that says "never push to main" is a suggestion; a governor that returns a permission error is a rule.
 
@@ -150,6 +150,7 @@ Structural (mechanical):
 - Risk level is set.
 - Scope lists at least one `out_of_scope` item. (An empty exclusion list is a reliable predictor of scope creep, so we require the PM to think about it.)
 - Every listed dependency exists and is at least `ready` (added in 0.2; moved here from the judgment list because it is mechanical).
+- The reviewer role names an active agent other than the assignee (added in 0.3). When no such agent exists, the readiness result says which role to add.
 - The contract satisfies the team rules (5.12): the required verification methods are present, `allowed_paths` fall within the ceiling, and the budget is within the team maximum (added in 0.2).
 
 Judgment (Scrum Master, recorded as a review event):
@@ -376,32 +377,35 @@ Numbered so the milestone plan and tests can refer to them.
 
 ### 8.1 Shape
 
-A TypeScript monorepo managed with pnpm. Local-first: the orchestrator and governor run on the user's machine, agents execute in a sandbox on that machine, and the project stays where it is. The hosted premium tier moves execution to the cloud; the local shell talks to it over the same event protocol.
+A Rust backend and a TypeScript front end in one repository (decided 2026-09-15; ADR 0005). Local-first: the orchestrator and governor run on the user's machine, agents execute in a sandbox on that machine, and the project stays where it is. The hosted premium tier moves execution to the cloud; the local shell talks to it over the same event protocol.
 
 ```
-apps/
-  desktop/        Tauri shell + React UI (pixel office, board, channel)
-  web/            same React UI served for the hosted tier
-packages/
-  core/           schemas, task state machine, governor, cost model  (no I/O)
-  store/          SQLite event log and projections; file adapters for .farik/; the git adapter
-  runtime/        agent session adapters; sandbox management
-  roles/          shipped role definitions and skills
+crates/                       Rust, one Cargo workspace
+  core/           farik-core:     schemas, task state machine, governor, cost model  (no I/O)
+  protocol/       farik-protocol: event, command, and RPC types shared by daemon and front end
+  store/          farik-store:    SQLite event log and projections; file adapters for .farik/; the git adapter
+  runtime/        farik-runtime:  Claude Code sessions, sandbox, Farik tools, orchestrator, the daemon service
+  roles/          farik-roles:    shipped role definitions and skills, and their loader
+  cli/            farik:          the binary: command line, `farik serve`, `farik hook`
+xtask/                        the repository's own commands (check, generate, hooks)
+packages/                     TypeScript
   ui/             pixel component library, scene renderer
-  protocol/       event and command types shared by shell and runtime
+apps/
+  desktop/        Tauri shell (links the daemon in-process) + React UI (pixel office, board, channel)
+  web/            same React UI served for the hosted tier
 ```
 
-`core` has no I/O and is where every rule in section 5 lives. It is tested exhaustively, in isolation. This is the piece that must be right and is the piece most worth reading for anyone evaluating the project.
+`farik-core` has no I/O and is where every rule in section 5 lives. It is tested exhaustively, in isolation. This is the piece that must be right and is the piece most worth reading for anyone evaluating the project.
 
 ### 8.2 Agent runtime
 
-The first runtime adapter is built on the Claude Agent SDK. The choice is pragmatic rather than ideological: it ships the file, shell, and search tools a developer agent needs, it speaks MCP natively, it supports the Agent Skills folder format, it has subagents, and its hooks fire before and after every tool call, which is exactly where the governor needs to sit. Building a coding agent from scratch would cost the first two milestones and produce something worse.
+The first runtime adapter drives the Claude Code program (the engine underneath the Claude Agent SDK) as a child process in its non-interactive mode (ADR 0005). The choice is pragmatic rather than ideological: it ships the file and search tools a developer agent needs, it speaks MCP natively, it supports the Agent Skills folder format, it has subagents, and its hooks fire before and after every tool call, which is exactly where the governor needs to sit. Building a coding agent from scratch would cost the first two milestones and produce something worse.
 
-Concretely, one agent session is one `query()` call with: the agent's system prompt assembled from role, persona, memory, and contract; the tool set filtered by the agent's permission tiers; the agent's MCP servers; a `PreToolUse` hook that calls the governor and denies or allows; a `PostToolUse` hook that records the event and the running cost; and a stop condition on any budget. The SDK's shell tool is never enabled: commands run through the `farik_exec` tool (8.3), git commits and pushes through `farik_git` under the `git_local` and `git_remote` tiers, and the SDK's web tools are enabled only under `network` (ADR 0004; added in 0.2).
+Concretely, one agent session is one `claude -p` process with `--output-format stream-json` and `--input-format stream-json`, given: the agent's system prompt assembled from role, persona, memory, and contract (`--append-system-prompt-file`); the tool set filtered by the agent's permission tiers (`--disallowedTools`); the agent's MCP servers and Farik's own tool server (`--mcp-config`, `--strict-mcp-config`); a `PreToolUse` hook command, `farik hook pre-tool-use`, that asks the daemon, which runs the governor and answers allow or deny with a reason; a `PostToolUse` hook that records the event and the running cost; a permission-prompt tool that denies anything the hook did not decide; a turn limit; and a stop on any budget. The program's shell tool is never enabled: commands run through the `farik_exec` tool (8.3), git commits and pushes through `farik_git` under the `git_local` and `git_remote` tiers, and the program's web tools are enabled only under `network` (ADR 0004; added in 0.2). The runtime pins the oldest Claude Code version it was tested against and refuses to start on an older one.
 
 Model defaults are set per role in `role.yaml`. The shipped defaults use Claude Opus 5 for the Product Manager, Architect, and Developer with adaptive thinking and effort at `high`, and Claude Sonnet 5 for the Scrum Master, channel chatter, and the Marketing Specialist's drafting. Effort is the first knob a cost-conscious user should turn; the setup screen exposes it as a single "thinking depth" slider per role.
 
-The `runtime` package defines an adapter interface (`startSession`, `resume`, `abort`, with `events()` on the session handle) so that a second provider can be added. There is no second provider in the first release, and the interface is not promised stable until there is. Two providers' worth of prompt tuning is a real cost that this project should not pay until someone needs it.
+The `runtime` crate defines an adapter trait (`start_session`, `resume`, `abort`, with an event stream on the session handle) so that a second provider can be added. There is no second provider in the first release, and the trait is not promised stable until there is. Two providers' worth of prompt tuning is a real cost that this project should not pay until someone needs it.
 
 ### 8.3 Sandbox
 
@@ -411,7 +415,7 @@ Users who will not run Docker can opt into a no-sandbox mode with a loud warning
 
 ### 8.4 Storage
 
-SQLite via libsql for the event log and the projections the UI reads (board, costs, channel). Files under `.farik/` for anything the user should be able to read, diff, and edit: contracts, decisions, memories, role overrides. The event log is the source of truth for what happened; the files are the source of truth for what the team knows. The log is machine-local, under `.farik/local/`, and is never committed; the files are what travels with the repository (decided 2026-09-15). On startup, Farik reconciles the two and reports any drift rather than silently picking one, and recovers interrupted sessions (5.15).
+SQLite through `rusqlite` with the bundled engine for the event log and the projections the UI reads (board, costs, channel). Files under `.farik/` for anything the user should be able to read, diff, and edit: contracts, decisions, memories, role overrides. The event log is the source of truth for what happened; the files are the source of truth for what the team knows. The log is machine-local, under `.farik/local/`, and is never committed; the files are what travels with the repository (decided 2026-09-15). On startup, Farik reconciles the two and reports any drift rather than silently picking one, and recovers interrupted sessions (5.15).
 
 Hosted tier: Postgres for the event log, object storage for project snapshots, the same file layout inside the cloud workspace.
 
@@ -446,7 +450,7 @@ Nothing that makes the agents safer or more controllable is ever premium.
 
 ## 11. Milestones
 
-Milestone 0, the harness. Four to five weeks. `core`, `store`, `runtime` with one adapter, a command-line interface, and two roles: Product Manager and Developer. Exit criterion: on Farik's own repository (private until the open-source launch; decided 2026-09-15), the PM writes contracts for three real issues, the Developer implements them, the reviewer verifies (with a two-agent team, the human, per 5.1), and a human reviews the diffs and the event log and agrees each task was done as contracted. No UI. This milestone exists to find out whether the governance loop works before anyone draws a pixel.
+Milestone 0, the harness. Four to five weeks. `core`, `store`, `runtime` with one adapter, a command-line interface, and two roles: Product Manager and Developer, the latter instantiated twice so that one Developer reviews the other (5.1). Exit criterion: on Farik's own repository (private until the open-source launch; decided 2026-09-15), the PM writes contracts for three real issues, one Developer implements them, the other verifies, the PM accepts, and a human reviews the diffs and the event log and agrees each task was done as contracted. No UI. This milestone exists to find out whether the governance loop works before anyone draws a pixel.
 
 Milestone 1, the team. Five to six weeks. All five roles, the channel, ceremonies, the desktop shell with the board, and a first version of the office scene. Exit criterion: a new user with no help can go from an empty office to an accepted task on their own repository inside thirty minutes, measured with five test users.
 

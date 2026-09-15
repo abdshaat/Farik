@@ -1,0 +1,827 @@
+# Phase 0, step 03: Contract validation
+
+Status: draft
+Branch: `phase/0-foundation` (the phase branch; steps do not get their own)
+Spec: `docs/SPEC.md` section 3 (Contract), section 5.3 (the structural checks build on these types in phase 1), section 5.11 (`locked`), section 5.13 (`references`), F4 (validation against the JSON schema); `docs/standards/code.md`, "Schema validation" and "Wire and file formats"
+Depends on: step 01 of this phase (not yet committed), step 02 of this phase (not yet committed); record the shas here when they land
+
+A plan is `ready` only when a reviewer other than the author has confirmed the three rules in `docs/standards/workflow.md` stage 2 (Plan): every decision made, no ambiguity, no forward dependencies. Record who confirmed and when here.
+
+Readiness confirmed by: pending
+
+## Goal
+
+`farik-core` can take any JSON value, say exactly why it is not a contract, or hand back a typed `TaskContract` with the schema's defaults filled in, and every crate's tests can build one from a fixture. When this step is done, phase 1 can write the governor against `TaskContract` and a `Verification` enum with named variants, and phase 2 can read and write contract files knowing the schema was checked first.
+
+## Decisions
+
+- Validation uses the `jsonschema` crate (0.56.0, default features off so it resolves nothing over the network or the file system) with format assertion on, so `date-time` and `uri` are checked; the schema is embedded with `include_str!` from the copy step 02 generated, and the validator is built once in a `LazyLock`. Errors are `{ path, message }` with the JSON pointer of the offending value, `/` for the root, and the crate's own message. Rejected: validating by deserialising alone, because `serde` reports one error and stops, and its messages name Rust types rather than schema rules.
+- After the schema passes, the value is deserialised into the generated `FarikTaskContract`, aliased `TaskContract`; the schema's defaults (`max_sessions` 5, `max_iterations` 3, `iteration` 0, `locked` false, `expect.exit_code` 0, `new_tests_required` false) are applied by the generated `#[serde(default)]` attributes. A deserialisation failure after a schema pass is reported as one error at `/`; it means the generator and the validator disagree, which the tests are meant to catch.
+- The generated `ExitCriterionVerification` is an untagged enum whose variants are named by position (`Variant0` for `command` and so forth). `farik-core` keeps one hand-written `Verification` enum with named variants and `impl From<&VerificationWire>`; it is the one mapping at this crate's edge (`docs/standards/code.md`, "Wire and file formats"). Rejected: changing the schema to coax named variants out of the generator, because branch titles and `enum` discriminators were tried and do not change the output.
+- Serialising a `TaskContract` writes the defaults explicitly and omits empty optional lists (`satisfies`, `constraints`, `dependencies`, `references`), which the round-trip test pins down.
+- `validate_contract` checks the schema only. Definition of Ready rules are phase 1.
+- Fixtures are builder functions returning `serde_json::Value`, `pub` in `contract::fixtures` so that every crate's tests can use them: `a_contract_wire()` for the minimal valid contract and `a_full_contract_wire()` for one with every optional field and every verification method.
+
+## Design
+
+`crates/core/src/contract.rs` holds the aliases, `Verification` and its conversion, `ValidationError`, the `LazyLock` validator, `validate_contract`, and the tests; `contract/fixtures.rs` holds the two builders. `lib.rs` declares the module.
+
+Out of scope: YAML reading and writing (phase 2), any semantic check beyond the schema (phase 1), schemas other than the task contract.
+
+## Architecture notes
+
+Touches `crates/core` (new module, one new dependency) and the workspace `Cargo.toml`. Consumes `generated::task_contract` from step 02.
+
+## Global constraints
+
+- `farik-core` does no I/O; `include_str!` is compile-time; `cargo xtask core-io` passes.
+- No `unwrap` or `expect` outside tests and the `LazyLock` initialiser, whose `expect` messages say why the embedded schema cannot fail.
+- Commits follow `docs/standards/code.md`; this plan's checkboxes are ticked in the same commits.
+
+## File map
+
+```
+Cargo.toml                                    modifies: adds jsonschema to the workspace table
+crates/core/Cargo.toml                        modifies: adds jsonschema
+crates/core/src/lib.rs                        modifies: declares the contract module
+crates/core/src/contract.rs                   creates: aliases, Verification, ValidationError, validate_contract, tests
+crates/core/src/contract/fixtures.rs          creates: a_contract_wire, a_full_contract_wire
+docs/plans/phase-0-foundation/step-03-contract-validation.md   modifies: checkboxes ticked per task
+```
+
+## Tasks
+
+### Task 1: Fixtures, the validator, and the named verification enum
+
+Files: created `crates/core/src/contract.rs`, `crates/core/src/contract/fixtures.rs`; modified `Cargo.toml`, `crates/core/Cargo.toml`, `crates/core/src/lib.rs`
+
+Consumes: `generated::task_contract::*` from step 02
+Produces: `contract::{TaskContract, ExitCriterion, Budget, Notes, Requirement, Risk, TaskStatus, TaskId, Role, VerificationWire}`; `contract::Verification` with `From<&VerificationWire>` and `method()`; `contract::ValidationError`; `contract::validate_contract(input: &Value) -> Result<TaskContract, Vec<ValidationError>>`; `contract::fixtures::{a_contract_wire, a_full_contract_wire}`
+
+- [ ] Add the dependency. Make the workspace `Cargo.toml` exactly:
+
+  ```toml
+  [workspace]
+  resolver = "3"
+  members = ["crates/*", "xtask"]
+
+  [workspace.package]
+  version = "0.0.0"
+  edition = "2024"
+  license = "Apache-2.0"
+  repository = "https://github.com/abdshaat/Farik"
+  rust-version = "1.98.1"
+
+  [workspace.dependencies]
+  anyhow = "=1.0.104"
+  chrono = { version = "=0.4.45", features = ["serde"] }
+  jsonschema = { version = "=0.56.0", default-features = false }
+  prettyplease = "=0.3.0"
+  regress = "=0.12.0"
+  schemars = "=0.8.22"
+  serde = { version = "=1.0.229", features = ["derive"] }
+  serde_json = "=1.0.151"
+  syn = { version = "=3.0.5", features = ["full"] }
+  typify = "=0.8.0"
+
+  [workspace.lints.rust]
+  unsafe_code = "forbid"
+  missing_docs = "warn"
+
+  [workspace.lints.clippy]
+  all = { level = "warn", priority = -1 }
+  pedantic = { level = "warn", priority = -1 }
+  ```
+
+  and `crates/core/Cargo.toml`:
+
+  ```toml
+  [package]
+  name = "farik-core"
+  description = "Schemas, task state machine, governor, and cost model. Performs no I/O."
+  version.workspace = true
+  edition.workspace = true
+  license.workspace = true
+  repository.workspace = true
+  rust-version.workspace = true
+
+  [dependencies]
+  chrono.workspace = true
+  jsonschema.workspace = true
+  regress.workspace = true
+  serde.workspace = true
+  serde_json.workspace = true
+
+  [lints]
+  workspace = true
+  ```
+
+- [ ] Declare the module in `crates/core/src/lib.rs`:
+
+  ```rust
+  //! Farik's harness: schemas, the task state machine, the governor, and the cost model.
+  //! This crate performs no I/O.
+
+  /// The task contract and its validator.
+  pub mod contract;
+  /// Types generated from `docs/schemas/`.
+  pub mod generated;
+
+  /// The crate's package name, as published.
+  pub const CORE_CRATE_NAME: &str = "farik-core";
+
+  #[cfg(test)]
+  mod tests {
+      use super::CORE_CRATE_NAME;
+
+      #[test]
+      fn exposes_its_crate_name() {
+          assert_eq!(CORE_CRATE_NAME, "farik-core");
+      }
+  }
+  ```
+
+- [ ] Write the fixtures, `crates/core/src/contract/fixtures.rs`:
+
+  ```rust
+  use serde_json::{Value, json};
+
+  /// A schema-valid wire contract in `draft`, with every required field and no optional ones.
+  #[must_use]
+  pub fn a_contract_wire() -> Value {
+      json!({
+          "id": "FRK-1",
+          "title": "Add a login page",
+          "intent": "A user can sign in with an email and password so that their work is private.",
+          "scope": { "in_scope": ["login form"], "out_of_scope": ["password reset"] },
+          "requirements": [{ "id": "R1", "text": "The login form has email and password fields." }],
+          "exit_criteria": [{
+              "id": "C1",
+              "text": "Unit tests for the login form pass.",
+              "satisfies": ["R1"],
+              "verification": { "method": "test", "command": "pnpm test login" }
+          }],
+          "assignee_role": "software_developer",
+          "reviewer_role": "architect",
+          "risk": "low",
+          "budget": { "max_cost_usd": 5 },
+          "allowed_paths": ["src/login/**"],
+          "status": "draft"
+      })
+  }
+
+  /// A wire contract with every optional field present and every default written explicitly.
+  #[must_use]
+  pub fn a_full_contract_wire() -> Value {
+      let mut contract = a_contract_wire();
+      contract["requirements"] = json!([{ "id": "R1", "text": "The login form has email and password fields.", "rationale": "Baseline." }]);
+      contract["exit_criteria"] = json!([
+          { "id": "C1", "text": "The check command exits zero and prints the summary.", "satisfies": ["R1"],
+            "verification": { "method": "command", "command": "pnpm check", "expect": { "exit_code": 0, "stdout_contains": "passed", "stdout_not_contains": "failed" } } },
+          { "id": "C2", "text": "A new test exists and fails on the base branch.",
+            "verification": { "method": "test", "command": "pnpm test login", "new_tests_required": true } },
+          { "id": "C3", "text": "The release notes mention the login page.",
+            "verification": { "method": "artifact", "path": "CHANGELOG.md", "must_contain": ["login"] } },
+          { "id": "C4", "text": "The form follows the design system.",
+            "verification": { "method": "review", "rubric": ["Does the form use the shared Button?"] } },
+          { "id": "C5", "text": "The founder has tried the login flow.",
+            "verification": { "method": "human", "question": "Did you sign in successfully?" } }
+      ]);
+      contract["constraints"] = json!(["Use the existing session store."]);
+      contract["dependencies"] = json!(["FRK-2"]);
+      contract["references"] = json!(["https://github.com/abdshaat/farik/issues/1"]);
+      contract["budget"] = json!({ "max_cost_usd": 5.0, "max_sessions": 5, "max_iterations": 3 });
+      contract["locked"] = json!(true);
+      contract["sprint"] = json!("S1");
+      contract["assignee"] = json!("maya-chen");
+      contract["reviewer"] = json!("omar-reyes");
+      contract["iteration"] = json!(0);
+      contract["notes"] =
+          json!({ "completion": "Done.", "review": "C1 passed: see output.", "escalation": "None." });
+      contract["created_by"] = json!("maya-chen");
+      contract["created_at"] = json!("2026-09-14T10:00:00Z");
+      contract["updated_at"] = json!("2026-09-14T11:00:00Z");
+      contract
+  }
+  ```
+
+- [ ] Write the failing tests. `crates/core/src/contract.rs` holds, for now, the module doc, the re-exports, the `Verification` enum with its conversion, the `fixtures` declaration, and the tests, but not the validator:
+
+  ```rust
+  //! The task contract: `docs/schemas/task-contract.schema.json` as Rust types, and the validator
+  //! that turns an untrusted JSON value into one.
+
+  use std::sync::LazyLock;
+
+  use jsonschema::Validator;
+  use serde_json::Value;
+
+  pub use crate::generated::task_contract::{
+      ExitCriterion, ExitCriterionVerification as VerificationWire,
+      FarikTaskContract as TaskContract, FarikTaskContractBudget as Budget,
+      FarikTaskContractId as TaskId, FarikTaskContractNotes as Notes,
+      FarikTaskContractRequirementsItem as Requirement, FarikTaskContractRisk as Risk,
+      FarikTaskContractStatus as TaskStatus, Role,
+  };
+
+  /// A criterion's verification method with named variants. The generated wire enum names its
+  /// variants by position; this is the one mapping `farik-core` keeps at its edge.
+  #[derive(Debug, Clone, PartialEq, Eq)]
+  pub enum Verification {
+      /// Run a command; pass on the expected exit code and output.
+      Command {
+          /// Run inside the sandbox from the project root.
+          command: String,
+          /// The exit code that counts as a pass; the schema's default is 0.
+          exit_code: i64,
+          /// Text the standard output must contain.
+          stdout_contains: Option<String>,
+          /// Text the standard output must not contain.
+          stdout_not_contains: Option<String>,
+      },
+      /// Run a test command; pass on exit code 0.
+      Test {
+          /// The test command.
+          command: String,
+          /// Whether the reviewer must also see a new test that fails on the base branch.
+          new_tests_required: bool,
+      },
+      /// A file must exist after the task.
+      Artifact {
+          /// The path, relative to the project root.
+          path: String,
+          /// Strings the file must contain.
+          must_contain: Vec<String>,
+      },
+      /// Yes or no questions the reviewer answers with a cited reason each.
+      Review {
+          /// The questions.
+          rubric: Vec<String>,
+      },
+      /// Satisfied only by a `human.accepted` event.
+      Human {
+          /// What the human is asked to confirm.
+          question: String,
+      },
+  }
+
+  impl From<&VerificationWire> for Verification {
+      fn from(wire: &VerificationWire) -> Self {
+          match wire {
+              VerificationWire::Variant0 {
+                  command, expect, ..
+              } => Self::Command {
+                  command: command.clone(),
+                  exit_code: expect.exit_code,
+                  stdout_contains: expect.stdout_contains.clone(),
+                  stdout_not_contains: expect.stdout_not_contains.clone(),
+              },
+              VerificationWire::Variant1 {
+                  command,
+                  new_tests_required,
+                  ..
+              } => Self::Test {
+                  command: command.clone(),
+                  new_tests_required: *new_tests_required,
+              },
+              VerificationWire::Variant2 {
+                  must_contain, path, ..
+              } => Self::Artifact {
+                  path: path.clone(),
+                  must_contain: must_contain.clone(),
+              },
+              VerificationWire::Variant3 { rubric, .. } => Self::Review {
+                  rubric: rubric.clone(),
+              },
+              VerificationWire::Variant4 { question, .. } => Self::Human {
+                  question: question.clone(),
+              },
+          }
+      }
+  }
+
+  impl Verification {
+      /// The wire name of the method: `command`, `test`, `artifact`, `review`, or `human`.
+      #[must_use]
+      pub fn method(&self) -> &'static str {
+          match self {
+              Self::Command { .. } => "command",
+              Self::Test { .. } => "test",
+              Self::Artifact { .. } => "artifact",
+              Self::Review { .. } => "review",
+              Self::Human { .. } => "human",
+          }
+      }
+  }
+
+  /// Builders for test contracts, usable by every crate's tests.
+  pub mod fixtures;
+
+  #[cfg(test)]
+  mod tests {
+      use serde_json::json;
+
+      use super::fixtures::{a_contract_wire, a_full_contract_wire};
+      use super::{ValidationError, Verification, validate_contract};
+
+      fn refusal(input: &serde_json::Value) -> Vec<ValidationError> {
+          validate_contract(input).expect_err("expected a refusal")
+      }
+
+      #[test]
+      fn accepts_a_schema_valid_contract_and_applies_the_defaults() {
+          let contract = validate_contract(&a_contract_wire()).expect("valid");
+          assert_eq!(contract.id.to_string(), "FRK-1");
+          assert_eq!(contract.scope.out_of_scope, vec!["password reset"]);
+          assert_eq!(contract.budget.max_sessions.get(), 5);
+          assert_eq!(contract.budget.max_iterations.get(), 3);
+          assert_eq!(contract.iteration, 0);
+          assert!(!contract.locked);
+          assert_eq!(
+              Verification::from(&contract.exit_criteria[0].verification),
+              Verification::Test {
+                  command: "pnpm test login".to_string(),
+                  new_tests_required: false
+              }
+          );
+      }
+
+      #[test]
+      fn refuses_a_value_that_is_not_an_object() {
+          let errors = refusal(&json!("not a contract"));
+          assert_eq!(errors.len(), 1);
+          assert_eq!(errors[0].path, "/");
+      }
+
+      #[test]
+      fn refuses_a_task_id_that_does_not_match_the_pattern() {
+          let mut input = a_contract_wire();
+          input["id"] = json!("TASK-1");
+          let errors = refusal(&input);
+          assert_eq!(errors.len(), 1);
+          assert_eq!(errors[0].path, "/id");
+      }
+
+      #[test]
+      fn refuses_an_empty_out_of_scope_list() {
+          let mut input = a_contract_wire();
+          input["scope"]["out_of_scope"] = json!([]);
+          let errors = refusal(&input);
+          assert_eq!(errors.len(), 1);
+          assert_eq!(errors[0].path, "/scope/out_of_scope");
+      }
+
+      #[test]
+      fn refuses_a_command_criterion_without_an_expect_block() {
+          let mut input = a_contract_wire();
+          input["exit_criteria"][0]["verification"] =
+              json!({"method": "command", "command": "pnpm check"});
+          let errors = refusal(&input);
+          assert_eq!(errors.len(), 1);
+          assert_eq!(errors[0].path, "/exit_criteria/0/verification");
+      }
+
+      #[test]
+      fn refuses_an_unknown_top_level_property() {
+          let mut input = a_contract_wire();
+          input["owner"] = json!("someone");
+          let errors = refusal(&input);
+          assert_eq!(errors.len(), 1);
+          assert_eq!(errors[0].path, "/");
+      }
+
+      #[test]
+      fn refuses_a_reference_that_is_not_a_uri() {
+          let mut input = a_contract_wire();
+          input["references"] = json!(["not a uri"]);
+          let errors = refusal(&input);
+          assert_eq!(errors.len(), 1);
+          assert_eq!(errors[0].path, "/references/0");
+      }
+
+      #[test]
+      fn accepts_every_verification_method_and_every_optional_field() {
+          let contract = validate_contract(&a_full_contract_wire()).expect("valid");
+          let methods: Vec<&str> = contract
+              .exit_criteria
+              .iter()
+              .map(|criterion| Verification::from(&criterion.verification).method())
+              .collect();
+          assert_eq!(methods, ["command", "test", "artifact", "review", "human"]);
+          assert_eq!(
+              Verification::from(&contract.exit_criteria[0].verification),
+              Verification::Command {
+                  command: "pnpm check".to_string(),
+                  exit_code: 0,
+                  stdout_contains: Some("passed".to_string()),
+                  stdout_not_contains: Some("failed".to_string())
+              }
+          );
+          assert_eq!(contract.dependencies.len(), 1);
+          assert_eq!(
+              contract.references,
+              vec!["https://github.com/abdshaat/farik/issues/1"]
+          );
+          assert!(contract.locked);
+          assert_eq!(
+              contract
+                  .notes
+                  .as_ref()
+                  .and_then(|notes| notes.review.clone())
+                  .as_deref(),
+              Some("C1 passed: see output.")
+          );
+      }
+
+      #[test]
+      fn serializes_back_to_the_wire_shape_with_defaults_written_explicitly() {
+          let contract = validate_contract(&a_contract_wire()).expect("valid");
+          let wire = serde_json::to_value(&contract).expect("serializes");
+          assert_eq!(
+              wire["budget"],
+              json!({"max_cost_usd": 5.0, "max_sessions": 5, "max_iterations": 3})
+          );
+          assert_eq!(wire["iteration"], json!(0));
+          assert_eq!(wire["locked"], json!(false));
+          assert!(validate_contract(&wire).is_ok());
+      }
+
+      #[test]
+      fn round_trips_a_contract_that_has_every_field() {
+          let input = a_full_contract_wire();
+          let contract = validate_contract(&input).expect("valid");
+          let wire = serde_json::to_value(&contract).expect("serializes");
+          assert_eq!(wire, input);
+      }
+  }
+  ```
+
+- [ ] Run the tests and confirm they fail because the validator does not exist:
+
+  ```
+  cargo test --package farik-core
+  # expected, among the output:
+  # error[E0432]: unresolved imports `super::ValidationError`, `super::validate_contract`
+  # error: could not compile `farik-core` (lib test) due to 1 previous error; 3 warnings emitted
+  ```
+
+- [ ] Write the validator. `crates/core/src/contract.rs` in full:
+
+  ```rust
+  //! The task contract: `docs/schemas/task-contract.schema.json` as Rust types, and the validator
+  //! that turns an untrusted JSON value into one.
+
+  use std::sync::LazyLock;
+
+  use jsonschema::Validator;
+  use serde_json::Value;
+
+  pub use crate::generated::task_contract::{
+      ExitCriterion, ExitCriterionVerification as VerificationWire,
+      FarikTaskContract as TaskContract, FarikTaskContractBudget as Budget,
+      FarikTaskContractId as TaskId, FarikTaskContractNotes as Notes,
+      FarikTaskContractRequirementsItem as Requirement, FarikTaskContractRisk as Risk,
+      FarikTaskContractStatus as TaskStatus, Role,
+  };
+
+  /// A criterion's verification method with named variants. The generated wire enum names its
+  /// variants by position; this is the one mapping `farik-core` keeps at its edge.
+  #[derive(Debug, Clone, PartialEq, Eq)]
+  pub enum Verification {
+      /// Run a command; pass on the expected exit code and output.
+      Command {
+          /// Run inside the sandbox from the project root.
+          command: String,
+          /// The exit code that counts as a pass; the schema's default is 0.
+          exit_code: i64,
+          /// Text the standard output must contain.
+          stdout_contains: Option<String>,
+          /// Text the standard output must not contain.
+          stdout_not_contains: Option<String>,
+      },
+      /// Run a test command; pass on exit code 0.
+      Test {
+          /// The test command.
+          command: String,
+          /// Whether the reviewer must also see a new test that fails on the base branch.
+          new_tests_required: bool,
+      },
+      /// A file must exist after the task.
+      Artifact {
+          /// The path, relative to the project root.
+          path: String,
+          /// Strings the file must contain.
+          must_contain: Vec<String>,
+      },
+      /// Yes or no questions the reviewer answers with a cited reason each.
+      Review {
+          /// The questions.
+          rubric: Vec<String>,
+      },
+      /// Satisfied only by a `human.accepted` event.
+      Human {
+          /// What the human is asked to confirm.
+          question: String,
+      },
+  }
+
+  impl From<&VerificationWire> for Verification {
+      fn from(wire: &VerificationWire) -> Self {
+          match wire {
+              VerificationWire::Variant0 {
+                  command, expect, ..
+              } => Self::Command {
+                  command: command.clone(),
+                  exit_code: expect.exit_code,
+                  stdout_contains: expect.stdout_contains.clone(),
+                  stdout_not_contains: expect.stdout_not_contains.clone(),
+              },
+              VerificationWire::Variant1 {
+                  command,
+                  new_tests_required,
+                  ..
+              } => Self::Test {
+                  command: command.clone(),
+                  new_tests_required: *new_tests_required,
+              },
+              VerificationWire::Variant2 {
+                  must_contain, path, ..
+              } => Self::Artifact {
+                  path: path.clone(),
+                  must_contain: must_contain.clone(),
+              },
+              VerificationWire::Variant3 { rubric, .. } => Self::Review {
+                  rubric: rubric.clone(),
+              },
+              VerificationWire::Variant4 { question, .. } => Self::Human {
+                  question: question.clone(),
+              },
+          }
+      }
+  }
+
+  impl Verification {
+      /// The wire name of the method: `command`, `test`, `artifact`, `review`, or `human`.
+      #[must_use]
+      pub fn method(&self) -> &'static str {
+          match self {
+              Self::Command { .. } => "command",
+              Self::Test { .. } => "test",
+              Self::Artifact { .. } => "artifact",
+              Self::Review { .. } => "review",
+              Self::Human { .. } => "human",
+          }
+      }
+  }
+
+  /// Builders for test contracts, usable by every crate's tests.
+  pub mod fixtures;
+
+  const SCHEMA_JSON: &str = include_str!("generated/task_contract.schema.json");
+
+  /// One way in which a value failed the contract schema.
+  #[derive(Debug, Clone, PartialEq, Eq)]
+  pub struct ValidationError {
+      /// JSON pointer into the input; `/` for the root.
+      pub path: String,
+      /// The schema's own message.
+      pub message: String,
+  }
+
+  static VALIDATOR: LazyLock<Validator> = LazyLock::new(|| {
+      let schema: Value =
+          serde_json::from_str(SCHEMA_JSON).expect("the embedded contract schema is valid JSON");
+      jsonschema::options()
+          .should_validate_formats(true)
+          .build(&schema)
+          .expect("the embedded contract schema compiles")
+  });
+
+  /// Checks a value against `docs/schemas/task-contract.schema.json` and, when it conforms, returns
+  /// the typed contract with the schema's defaults applied. Refuses anything the schema refuses,
+  /// with one error per violation. Does not check Definition of Ready rules.
+  ///
+  /// # Errors
+  ///
+  /// Every schema violation, in document order.
+  pub fn validate_contract(input: &Value) -> Result<TaskContract, Vec<ValidationError>> {
+      let errors: Vec<ValidationError> = VALIDATOR
+          .iter_errors(input)
+          .map(|error| ValidationError {
+              path: pointer(&error.instance_path().to_string()),
+              message: error.to_string(),
+          })
+          .collect();
+      if !errors.is_empty() {
+          return Err(errors);
+      }
+      serde_json::from_value::<TaskContract>(input.clone()).map_err(|error| {
+          vec![ValidationError {
+              path: "/".to_string(),
+              message: error.to_string(),
+          }]
+      })
+  }
+
+  fn pointer(path: &str) -> String {
+      if path.is_empty() {
+          "/".to_string()
+      } else {
+          path.to_string()
+      }
+  }
+
+  #[cfg(test)]
+  mod tests {
+      use serde_json::json;
+
+      use super::fixtures::{a_contract_wire, a_full_contract_wire};
+      use super::{ValidationError, Verification, validate_contract};
+
+      fn refusal(input: &serde_json::Value) -> Vec<ValidationError> {
+          validate_contract(input).expect_err("expected a refusal")
+      }
+
+      #[test]
+      fn accepts_a_schema_valid_contract_and_applies_the_defaults() {
+          let contract = validate_contract(&a_contract_wire()).expect("valid");
+          assert_eq!(contract.id.to_string(), "FRK-1");
+          assert_eq!(contract.scope.out_of_scope, vec!["password reset"]);
+          assert_eq!(contract.budget.max_sessions.get(), 5);
+          assert_eq!(contract.budget.max_iterations.get(), 3);
+          assert_eq!(contract.iteration, 0);
+          assert!(!contract.locked);
+          assert_eq!(
+              Verification::from(&contract.exit_criteria[0].verification),
+              Verification::Test {
+                  command: "pnpm test login".to_string(),
+                  new_tests_required: false
+              }
+          );
+      }
+
+      #[test]
+      fn refuses_a_value_that_is_not_an_object() {
+          let errors = refusal(&json!("not a contract"));
+          assert_eq!(errors.len(), 1);
+          assert_eq!(errors[0].path, "/");
+      }
+
+      #[test]
+      fn refuses_a_task_id_that_does_not_match_the_pattern() {
+          let mut input = a_contract_wire();
+          input["id"] = json!("TASK-1");
+          let errors = refusal(&input);
+          assert_eq!(errors.len(), 1);
+          assert_eq!(errors[0].path, "/id");
+      }
+
+      #[test]
+      fn refuses_an_empty_out_of_scope_list() {
+          let mut input = a_contract_wire();
+          input["scope"]["out_of_scope"] = json!([]);
+          let errors = refusal(&input);
+          assert_eq!(errors.len(), 1);
+          assert_eq!(errors[0].path, "/scope/out_of_scope");
+      }
+
+      #[test]
+      fn refuses_a_command_criterion_without_an_expect_block() {
+          let mut input = a_contract_wire();
+          input["exit_criteria"][0]["verification"] =
+              json!({"method": "command", "command": "pnpm check"});
+          let errors = refusal(&input);
+          assert_eq!(errors.len(), 1);
+          assert_eq!(errors[0].path, "/exit_criteria/0/verification");
+      }
+
+      #[test]
+      fn refuses_an_unknown_top_level_property() {
+          let mut input = a_contract_wire();
+          input["owner"] = json!("someone");
+          let errors = refusal(&input);
+          assert_eq!(errors.len(), 1);
+          assert_eq!(errors[0].path, "/");
+      }
+
+      #[test]
+      fn refuses_a_reference_that_is_not_a_uri() {
+          let mut input = a_contract_wire();
+          input["references"] = json!(["not a uri"]);
+          let errors = refusal(&input);
+          assert_eq!(errors.len(), 1);
+          assert_eq!(errors[0].path, "/references/0");
+      }
+
+      #[test]
+      fn accepts_every_verification_method_and_every_optional_field() {
+          let contract = validate_contract(&a_full_contract_wire()).expect("valid");
+          let methods: Vec<&str> = contract
+              .exit_criteria
+              .iter()
+              .map(|criterion| Verification::from(&criterion.verification).method())
+              .collect();
+          assert_eq!(methods, ["command", "test", "artifact", "review", "human"]);
+          assert_eq!(
+              Verification::from(&contract.exit_criteria[0].verification),
+              Verification::Command {
+                  command: "pnpm check".to_string(),
+                  exit_code: 0,
+                  stdout_contains: Some("passed".to_string()),
+                  stdout_not_contains: Some("failed".to_string())
+              }
+          );
+          assert_eq!(contract.dependencies.len(), 1);
+          assert_eq!(
+              contract.references,
+              vec!["https://github.com/abdshaat/farik/issues/1"]
+          );
+          assert!(contract.locked);
+          assert_eq!(
+              contract
+                  .notes
+                  .as_ref()
+                  .and_then(|notes| notes.review.clone())
+                  .as_deref(),
+              Some("C1 passed: see output.")
+          );
+      }
+
+      #[test]
+      fn serializes_back_to_the_wire_shape_with_defaults_written_explicitly() {
+          let contract = validate_contract(&a_contract_wire()).expect("valid");
+          let wire = serde_json::to_value(&contract).expect("serializes");
+          assert_eq!(
+              wire["budget"],
+              json!({"max_cost_usd": 5.0, "max_sessions": 5, "max_iterations": 3})
+          );
+          assert_eq!(wire["iteration"], json!(0));
+          assert_eq!(wire["locked"], json!(false));
+          assert!(validate_contract(&wire).is_ok());
+      }
+
+      #[test]
+      fn round_trips_a_contract_that_has_every_field() {
+          let input = a_full_contract_wire();
+          let contract = validate_contract(&input).expect("valid");
+          let wire = serde_json::to_value(&contract).expect("serializes");
+          assert_eq!(wire, input);
+      }
+  }
+  ```
+
+- [ ] Run the tests; confirm green, with these ten contract tests and the smoke test:
+
+  ```
+  cargo test --package farik-core
+  # expected, among the output:
+  # test contract::tests::accepts_a_schema_valid_contract_and_applies_the_defaults ... ok
+  # test contract::tests::accepts_every_verification_method_and_every_optional_field ... ok
+  # test contract::tests::refuses_a_command_criterion_without_an_expect_block ... ok
+  # test contract::tests::refuses_a_reference_that_is_not_a_uri ... ok
+  # test contract::tests::refuses_a_task_id_that_does_not_match_the_pattern ... ok
+  # test contract::tests::refuses_a_value_that_is_not_an_object ... ok
+  # test contract::tests::refuses_an_empty_out_of_scope_list ... ok
+  # test contract::tests::refuses_an_unknown_top_level_property ... ok
+  # test contract::tests::round_trips_a_contract_that_has_every_field ... ok
+  # test contract::tests::serializes_back_to_the_wire_shape_with_defaults_written_explicitly ... ok
+  # test tests::exposes_its_crate_name ... ok
+  # test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
+  ```
+
+  For the record, the messages the validator reports, which the tests check by path rather than by text: a non-object is `"not a contract" is not of type "object"`; a bad id is `"TASK-1" does not match "^FRK-[0-9]{1,6}$"`; an empty list is `[] has less than 1 item`; an unknown property is `Additional properties are not allowed ('owner' was unexpected)`; a bad reference is `"not a uri" is not a "uri"`; a `command` criterion without `expect` is `{"command":"pnpm check","method":"command"} is not valid under any of the schemas listed in the 'oneOf' keyword`.
+
+- [ ] Run the full check; confirm green:
+
+  ```
+  cargo fmt --all
+  cargo xtask check
+  # expected, among the output:
+  # test result: ok. 11 passed; ...   (farik-core)
+  # test result: ok. 13 passed; ...   (xtask)
+  # xtask check: ok
+  # exit code 0
+  ```
+
+- [ ] Commit: `feat(core): validate contracts against the json schema`
+
+## Verification
+
+```
+cargo xtask check
+# expected: exit code 0 ending with "xtask check: ok"; 11 tests in farik-core, 13 in xtask.
+```
+
+```
+cargo xtask core-io
+# expected: no output, exit code 0 (the validator embeds the schema at compile time and reads nothing at run time).
+```
+
+```
+git log --oneline -1
+# expected: feat(core): validate contracts against the json schema
+```
+
+## Open questions
+
+none

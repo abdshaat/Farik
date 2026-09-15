@@ -16,8 +16,8 @@ If the superpowers plugin is installed, its skills implement this workflow; use 
 2. No completion claim without fresh evidence. Run the check, read the output, paste it. "Should work" is not a status.
 3. Planning is two-level: `docs/plans/project-plan.md` holds phases and steps; each step has its own plan at `docs/plans/phase-<n>-<name>/step-<nn>-<name>.md`, written from `docs/plans/step-template.md` before execution. A plan is ready only when every decision is made, nothing is ambiguous, and it has no forward dependencies. Tick checkboxes as you go, in the same commits.
 4. Commits follow Conventional Commits with a package scope. One task, one commit.
-5. `packages/core` does no I/O. Ever.
-6. Wire and file formats use `snake_case`; TypeScript uses `camelCase`; one mapping layer per package at the edge.
+5. `crates/core` (`farik-core`) does no I/O. Ever. `cargo xtask core-io` checks it.
+6. Wire and file formats use `snake_case`; Rust fields match them; TypeScript uses `camelCase`; one mapping layer per crate or package at the edge.
 7. Event kinds are `<entity>.<past_tense_verb>`.
 8. When behavior changes, `docs/SPEC.md` changes in the same pull request.
 9. Never skip, disable, or quarantine a failing test to get green.
@@ -26,8 +26,8 @@ If the superpowers plugin is installed, its skills implement this workflow; use 
 
 ## Commands
 
-`pnpm check` is the full check (typecheck, lint, format, tests) once the monorepo is scaffolded. Until the scaffold exists there is no check command; say so in any verification section rather than implying one ran.
+`cargo xtask check` is the full check (format, clippy, tests, generated-file freshness, bare-TODO check, the core no-I/O check; plus the front end's `pnpm check` once it exists) once the workspace is scaffolded. Until the scaffold exists there is no check command; say so in any verification section rather than implying one ran.
 
 ## Current state
 
-Specification stage. The first code change is the monorepo scaffold, and it goes through the full workflow like everything else: plan first, in `docs/plans/`.
+Specification stage. The backend is Rust and the front end is TypeScript (ADR 0005). The first code change is the Cargo workspace scaffold, and it goes through the full workflow like everything else: plan first, in `docs/plans/`.
