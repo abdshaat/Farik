@@ -1,13 +1,13 @@
 # Phase 1, step 02: Definition of Ready and team rules
 
-Status: draft
+Status: ready
 Branch: `claude/phase-0-implementation-izm38y` (the harness-assigned phase branch, left as assigned per `docs/standards/code.md`; steps do not get their own)
 Spec: `docs/SPEC.md` section 5.3 (Definition of Ready), 5.12 (team rules), 5.16 (an epic's tasks: parent, paths, budget), 5.6 (the default protected paths), F5
 Depends on: phase 0 (merged in #4); step 01 of this phase (committed as f9f0e67, 0e50df1, 3cc8bc3)
 
 A plan is `ready` only when a reviewer other than the author has confirmed the three rules in `docs/standards/workflow.md` stage 2 (Plan): every decision made, no ambiguity, no forward dependencies. Record who confirmed and when here.
 
-Readiness confirmed by: pending
+Readiness confirmed by: a fresh Claude Code review session, 2026-09-16, before execution (first pass NOT READY on two undecided cases, the human as reviewer and the budget cap on epics, decided in 96e70da; second pass READY under all three rules at 96e70da; recorded on pull request #5)
 
 ## Goal
 
