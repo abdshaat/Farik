@@ -128,7 +128,7 @@ Transitions and who may trigger them:
 | in_progress | verifying | assignee declares done | all exit criteria have a recorded result from the assignee's own run, and the task branch has at least one commit and a clean worktree (added in 0.2); for an epic, every task under it is accepted or cancelled and at least one is accepted (5.16) |
 | in_progress | blocked | assignee | a written blocker with what is needed |
 | blocked | in_progress | Scrum Master or human | blocker resolved |
-| blocked | escalated | Governor | blocked longer than the configured limit (default: 24 hours) |
+| blocked | escalated | Governor | blocked for the configured limit or longer (default: 24 hours) |
 | verifying | accepted | reviewer, then Product Manager | Definition of Done (5.4). Human acceptance required when risk is `high` |
 | verifying | rejected | reviewer | written reasons mapped to failed criteria |
 | rejected | in_progress | Governor | iteration count below limit (default 3) |
@@ -211,7 +211,7 @@ MCP tools inherit a tier from their server configuration. When the user connects
 
 ### 5.7 Escalation
 
-An escalation is a task state and a message to the user. It carries: the task, the reason (budget, sessions, iterations, blocker age, permission, risk gate, approval of an epic, integration, explicit request), what the agent tried, and the options the agent proposes. The user resolves it from the board or from the channel. Nothing else on the board waits for an escalation unless it depends on that task.
+An escalation is a task state and a message to the user. It carries: the task, the reason, what the agent tried, and the options the agent proposes. There are ten reasons, written on the wire as `budget`, `sessions`, `iterations`, `blocker_age`, `permission`, `risk_gate`, `approval` (an epic waiting for the user's approval of its contract, 5.16), `readiness_failures` (a contract that failed the Definition of Ready three times, 5.2), `integration` (5.14), and `explicit_request`. The user resolves it from the board or from the channel. Nothing else on the board waits for an escalation unless it depends on that task.
 
 The Scrum Master is responsible for making sure escalations do not pile up silently: it posts a digest in the channel at the start of each sprint and pings the user through the app's notification channel if an escalation is older than a configurable age.
 

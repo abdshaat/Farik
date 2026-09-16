@@ -1,6 +1,6 @@
 # Phase 1, step 06: Iteration and escalation rules
 
-Status: ready
+Status: done
 Branch: `claude/phase-0-implementation-izm38y` (the harness-assigned phase branch, left as assigned per `docs/standards/code.md`; steps do not get their own)
 Spec: `docs/SPEC.md` section 5.2 (`rejected → in_progress` below the iteration limit and `rejected → escalated` at it; `refining → escalated` after three failed readiness checks; `blocked → escalated` at or past the blocked limit, default 24 hours), section 5.7 (what an escalation carries and its ten reasons; this step writes the tenth into its list), section 5.16 (what the `approval` reason waits for), F5
 Depends on: phase 0 (merged in #4); step 05 of this phase (committed as 5ad2c21, c4cf30b, and its review fix f3ecea4)
@@ -62,7 +62,7 @@ Files: created `crates/core/src/governor/escalation.rs`; modified `crates/core/s
 Consumes: `contract::TaskId` from `main`
 Produces: `governor::escalation::{EscalationReason, Escalation, DEFAULT_ITERATION_LIMIT, READINESS_ATTEMPT_LIMIT, DEFAULT_BLOCKED_LIMIT, RejectionOutcome, evaluate_rejection, ReadinessOutcome, evaluate_readiness_attempts, BlockedAge, evaluate_blocked_age}`
 
-- [ ] Confirm the baseline on the branch head:
+- [x] Confirm the baseline on the branch head:
 
   ```
   cargo xtask check
@@ -72,7 +72,7 @@ Produces: `governor::escalation::{EscalationReason, Escalation, DEFAULT_ITERATIO
   # xtask check: ok
   ```
 
-- [ ] Declare the module. `crates/core/src/governor.rs` in full:
+- [x] Declare the module. `crates/core/src/governor.rs` in full:
 
   ```rust
   //! The governor: every rule of `docs/SPEC.md` section 5 as pure functions over values passed
@@ -94,7 +94,7 @@ Produces: `governor::escalation::{EscalationReason, Escalation, DEFAULT_ITERATIO
   /// The transition table of `docs/SPEC.md` section 5.2 as data, with lookups.
   pub mod transition_table;
   ```
-- [ ] Write the failing tests. `crates/core/src/governor/escalation.rs` holds only this:
+- [x] Write the failing tests. `crates/core/src/governor/escalation.rs` holds only this:
 
   ```rust
   #[cfg(test)]
@@ -233,7 +233,7 @@ Produces: `governor::escalation::{EscalationReason, Escalation, DEFAULT_ITERATIO
       }
   }
   ```
-- [ ] Run them and confirm they fail because the items are missing:
+- [x] Run them and confirm they fail because the items are missing:
 
   ```
   cargo test --package farik-core governor::escalation
@@ -242,7 +242,7 @@ Produces: `governor::escalation::{EscalationReason, Escalation, DEFAULT_ITERATIO
   # error: could not compile `farik-core` (lib test) due to 1 previous error
   ```
 
-- [ ] Write the implementation above the tests. `crates/core/src/governor/escalation.rs` in full:
+- [x] Write the implementation above the tests. `crates/core/src/governor/escalation.rs` in full:
 
   ```rust
   //! Iteration and escalation rules (`docs/SPEC.md` sections 5.2 and 5.7): how many rejections a
@@ -512,7 +512,7 @@ Produces: `governor::escalation::{EscalationReason, Escalation, DEFAULT_ITERATIO
       }
   }
   ```
-- [ ] Name the ten reasons in the spec. In `docs/SPEC.md` section 5.7, replace
+- [x] Name the ten reasons in the spec. In `docs/SPEC.md` section 5.7, replace
 
   ```
   An escalation is a task state and a message to the user. It carries: the task, the reason (budget, sessions, iterations, blocker age, permission, risk gate, approval of an epic, integration, explicit request), what the agent tried, and the options the agent proposes.
@@ -526,7 +526,7 @@ Produces: `governor::escalation::{EscalationReason, Escalation, DEFAULT_ITERATIO
 
   The rest of the paragraph is unchanged.
 
-- [ ] Put the blocked-age boundary in the spec and the gate's doc. In `docs/SPEC.md` section 5.2, replace
+- [x] Put the blocked-age boundary in the spec and the gate's doc. In `docs/SPEC.md` section 5.2, replace
 
   ```
   | blocked | escalated | Governor | blocked longer than the configured limit (default: 24 hours) |
@@ -552,7 +552,7 @@ Produces: `governor::escalation::{EscalationReason, Escalation, DEFAULT_ITERATIO
 
   Both before-texts occur exactly once. Neither changes behavior: `evaluate_blocked_age` is written to `>=` and the test above pins the instant the limit is reached.
 
-- [ ] Format, run the tests and the full check; confirm green:
+- [x] Format, run the tests and the full check; confirm green:
 
   ```
   cargo fmt --all
@@ -566,7 +566,7 @@ Produces: `governor::escalation::{EscalationReason, Escalation, DEFAULT_ITERATIO
   # xtask check: ok
   ```
 
-- [ ] Commit: `feat(core): decide rejections, readiness attempts, and blocked age`
+- [x] Commit: `feat(core): decide rejections, readiness attempts, and blocked age`
 
 ## Verification
 
