@@ -64,7 +64,7 @@ Produces: `governor::escalation::{EscalationReason, Escalation, DEFAULT_ITERATIO
   ```
   cargo xtask check
   # expected, among the output, then exit code 0:
-  # test result: ok. 110 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in ...   (farik-core)
+  # test result: ok. 114 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in ...   (farik-core)
   # test result: ok. 23 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in ...   (xtask)
   # xtask check: ok
   ```
@@ -509,10 +509,10 @@ Produces: `governor::escalation::{EscalationReason, Escalation, DEFAULT_ITERATIO
   cargo fmt --all
   cargo test --package farik-core governor::escalation
   # expected, among the output:
-  # test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 110 filtered out; finished in ...
+  # test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 114 filtered out; finished in ...
   cargo xtask check
   # expected, among the output, then exit code 0:
-  # test result: ok. 117 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in ...   (farik-core)
+  # test result: ok. 121 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in ...   (farik-core)
   # test result: ok. 23 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in ...   (xtask)
   # xtask check: ok
   ```
@@ -524,7 +524,7 @@ Produces: `governor::escalation::{EscalationReason, Escalation, DEFAULT_ITERATIO
 ```
 cargo xtask check
 # expected, among the output, then exit code 0:
-# test result: ok. 117 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in ...   (farik-core)
+# test result: ok. 121 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in ...   (farik-core)
 # test result: ok. 23 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in ...   (xtask)
 # xtask check: ok
 ```

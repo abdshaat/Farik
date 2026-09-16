@@ -28,13 +28,19 @@ static VALIDATOR: LazyLock<Validator> = LazyLock::new(|| {
         )
 });
 
+/// The one table format this program reads.
+const KNOWN_VERSION: u64 = 1;
+
 /// Checks a value against `docs/schemas/prices.schema.json` and, when it conforms, returns the
-/// typed table. Refuses anything the schema refuses, with one error per violation.
+/// typed table. Refuses anything the schema refuses, with one error per violation, and refuses a
+/// table whose `version` this program does not know, because a later format read as this one
+/// would price a session by guesswork.
 ///
 /// # Errors
 ///
-/// Every schema violation, in the schema's order rather than the input's key order; or, when the
-/// schema passes but the typed table cannot be built, one error at the root.
+/// Every schema violation, in the schema's order rather than the input's key order; one error at
+/// `/version` for a format this program does not know; or, when the schema passes but the typed
+/// table cannot be built, one error at the root.
 pub fn validate_price_table(input: &Value) -> Result<PriceTable, Vec<ValidationError>> {
     let errors: Vec<ValidationError> = VALIDATOR
         .iter_errors(input)
@@ -46,14 +52,24 @@ pub fn validate_price_table(input: &Value) -> Result<PriceTable, Vec<ValidationE
     if !errors.is_empty() {
         return Err(errors);
     }
-    serde_json::from_value::<PriceTable>(input.clone()).map_err(|error| {
+    let table = serde_json::from_value::<PriceTable>(input.clone()).map_err(|error| {
         vec![ValidationError {
             path: "/".to_string(),
             message: format!(
                 "the schema passed but the typed price table could not be built: {error}"
             ),
         }]
-    })
+    })?;
+    if table.version.get() != KNOWN_VERSION {
+        return Err(vec![ValidationError {
+            path: "/version".to_string(),
+            message: format!(
+                "the table is written in format version {}, and this program reads version {KNOWN_VERSION}",
+                table.version
+            ),
+        }]);
+    }
+    Ok(table)
 }
 
 fn pointer(path: &str) -> String {
@@ -134,21 +150,67 @@ mod tests {
     }
 
     #[test]
-    fn ships_a_table_that_matches_its_schema_and_names_the_current_models() {
+    fn ships_a_table_that_matches_its_schema_and_prices_every_model_a_team_can_call() {
         let table = validate_price_table(&shipped()).expect("valid");
-        for model in [
-            "claude-fable-5-1",
-            "claude-opus-5",
-            "claude-sonnet-5",
-            "claude-haiku-4-5",
-        ] {
-            assert!(table.prices.contains_key(model), "{model}");
-        }
         assert_eq!(table.version.get(), 1);
-        assert_eq!(PRICE_TABLE.prices.len(), table.prices.len());
         assert_eq!(
             table.source_url,
             "https://platform.claude.com/docs/en/about-claude/pricing"
+        );
+        assert_eq!(table.prices.len(), 12);
+        let spot = [
+            ("claude-fable-5-1", 10.0, 50.0, 12.5, 0.25),
+            ("claude-fable-5", 10.0, 50.0, 12.5, 1.0),
+            ("claude-opus-5", 5.0, 25.0, 6.25, 0.5),
+            ("claude-opus-4-8", 5.0, 25.0, 6.25, 0.5),
+            ("claude-opus-4-7", 5.0, 25.0, 6.25, 0.5),
+            ("claude-opus-4-6", 5.0, 25.0, 6.25, 0.5),
+            ("claude-opus-4-5", 5.0, 25.0, 6.25, 0.5),
+            ("claude-sonnet-5", 2.0, 10.0, 2.5, 0.2),
+            ("claude-sonnet-4-6", 3.0, 15.0, 3.75, 0.3),
+            ("claude-sonnet-4-5", 3.0, 15.0, 3.75, 0.3),
+            ("claude-haiku-4-5", 1.0, 5.0, 1.25, 0.1),
+            ("claude-haiku-4-5-20251001", 1.0, 5.0, 1.25, 0.1),
+        ];
+        for (model, input, output, cache_write, cache_read) in spot {
+            let price = PRICE_TABLE.prices.get(model).expect(model);
+            assert!(close(price.input_usd_per_mtok, input), "{model}");
+            assert!(close(price.output_usd_per_mtok, output), "{model}");
+            assert!(
+                close(price.cache_write_usd_per_mtok, cache_write),
+                "{model}"
+            );
+            assert!(close(price.cache_read_usd_per_mtok, cache_read), "{model}");
+        }
+    }
+
+    #[test]
+    fn refuses_a_table_written_in_a_format_this_program_does_not_know() {
+        let mut input = shipped();
+        input["version"] = json!(2);
+        let errors = validate_price_table(&input).expect_err("refused");
+        assert_eq!(errors.len(), 1);
+        assert_eq!(errors[0].path, "/version");
+        assert!(
+            errors[0].message.contains("version 1"),
+            "{}",
+            errors[0].message
+        );
+    }
+
+    #[test]
+    fn reports_a_typed_failure_after_a_schema_pass_at_the_root() {
+        let mut input = shipped();
+        input["version"] = json!(1.0);
+        let errors = validate_price_table(&input).expect_err("refused");
+        assert_eq!(errors.len(), 1);
+        assert_eq!(errors[0].path, "/");
+        assert!(
+            errors[0]
+                .message
+                .starts_with("the schema passed but the typed price table could not be built"),
+            "{}",
+            errors[0].message
         );
     }
 

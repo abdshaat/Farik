@@ -23,10 +23,13 @@ All in `docs/plans/project-plan.md`, phase 1 and the every-phase list, restated 
 - The `pricing` and `budget` modules are top-level modules of `farik-core`, as the project plan's step 05 entry names them (`pricing::` and `budget::`), not children of `governor`. `Usage` lives in `pricing`, because cost is computed from it; `budget` imports it for the ledger.
 - Cost is each token count times its price per million; the `u64` count becomes an `f64` under an `allow(clippy::cast_precision_loss)` with its reason (a count is far below 2^53). The token cost of the provider's own worked example (50k input and 15k output on Claude Opus 5 is 0.625 dollars) is a test, as is the cached variant of it.
 - `validate_price_table` mirrors `validate_contract` (schema first, one error per violation with its JSON pointer, then the typed table) without the contract's zero-fraction integer normalisation: the only integer is `version`, written by people as `1`. Rejected: sharing the contract's private normaliser, because widening phase 0's module is not this step's business.
-- A budget is exhausted when what was spent reaches its limit, so that a session ends at its last token rather than one past it and a task with `max_sessions` sessions gets no more; a dollar spend that is not a number counts as exhausted, because a figure that cannot be compared is no licence to keep spending, and a limit of nothing is exhausted before anything is spent, which a valid contract cannot ask for (`max_cost_usd` is above zero in the schema). The scopes are checked in the order of `BudgetScope`, session before task before sprint before day, and the first exhausted one is reported with its consequence from spec 5.5: session tokens, wall clock, and tool calls end the session and block the task; task dollars and task sessions escalate the task; the sprint stops new assignments; the day pauses the team. Only the first is reported, and the mildest consequence therefore hides the severest, so `check_budgets` says in its documentation that the caller checks again once it has acted. Rejected: returning every exhausted scope, because the runtime acts on one consequence at a time and re-checks anyway.
+- A budget is exhausted when what was spent reaches its limit, so that a session ends at its last token rather than one past it and a task with `max_sessions` sessions gets no more; a dollar spend that is not a number counts as exhausted, because a figure that cannot be compared is no licence to keep spending, and a limit of nothing is exhausted before anything is spent, which a valid contract cannot ask for (`max_cost_usd` is above zero in the schema). `check_budgets` returns every exhausted scope, in the order of `BudgetScope`, each with its consequence from spec 5.5: session tokens, wall clock, and tool calls end the session and block the task; task dollars and task sessions escalate the task; the sprint stops new assignments; the day pauses the team. Rejected: returning only the first, which the project plan's entry asked for and this plan's revision changes: no consequence subsumes another, a sprint that stops new assignments does not end a session that is already running, and the shipped sprint budget is smaller than the shipped daily one, so the first-only reading meant the team could never pause however far past its day it spent.
 - Session tokens are exhausted when either the input or the output count reaches its limit. Rejected: summing them, because the spec gives two numbers.
 - Defaults (project plan D3): 400k input and 40k output tokens, 30 minutes, 200 tool calls, with the Scrum Master at 200k and 20k; the shipped sprint budget 15 dollars and daily budget 20 dollars as `DEFAULT_SPRINT_BUDGET_USD` and `DEFAULT_DAY_BUDGET_USD`, two public constants the project plan's step 05 entry gains in this plan's commit. The `human` role gets the team default, a literal reading of spec 5.5, and no session is ever run for it. `std::time::Duration` is allowed in `farik-core`; only `SystemTime` is not. Durations use `Duration::from_mins`, which clippy asks for.
-- `add_usage` adds tokens and cost and leaves the wall clock and the tool-call count as they are, because the runtime keeps those itself; it returns a new ledger rather than mutating, like every function in the crate.
+- `add_usage` adds tokens and cost and leaves the wall clock and the tool-call count as they are, because the runtime keeps those itself; it returns a new ledger rather than mutating, like every function in the crate, and its token counts saturate rather than wrap, so that a ledger never reads as an empty session.
+- `validate_price_table` refuses a `version` this program does not know, at `/version`, because a later format read as this one would price a session by guesswork; the schema keeps `minimum: 1` so that a future format is a code change rather than a schema change.
+- The table pairs an alias with a dated snapshot for Claude Haiku 4.5 only, because from the 4.6 generation on the provider's dateless id is itself the pinned snapshot and there is no second spelling; Haiku 4.5 predates that convention, so both of its ids are priced.
+- Revised after the step review (pull request #5): every exhausted budget is reported rather than the first, the ledger saturates, an unknown format version is refused, the shipped table is pinned model by model, and the typed-build fallback has a test.
 - Tests use short aliases (`B`, `C`) rather than glob imports; a test helper returns the value it builds rather than an `Option`, because `clippy::unnecessary_wraps` refuses the latter; every code block below is the file after `cargo fmt --all`, and the generated module is what `cargo xtask generate` writes.
 
 ## Design
@@ -55,10 +58,10 @@ crates/core/src/generated/mod.rs                    modifies: declares prices
 crates/core/src/generated/prices.rs                 creates (generated): FarikPriceTable, ModelPrice
 crates/core/src/generated/prices.schema.json        creates (generated): the schema copy
 crates/core/src/lib.rs                              modifies: declares budget and pricing
-crates/core/src/pricing.rs                          creates: PriceTable and ModelPrice aliases, validate_price_table, Usage, PricingError, compute_cost_usd, seven tests
+crates/core/src/pricing.rs                          creates: PriceTable and ModelPrice aliases, validate_price_table, Usage, PricingError, compute_cost_usd, nine tests
 crates/core/src/pricing/prices.rs                   creates: PRICES_JSON, PRICE_TABLE
-crates/core/src/budget.rs                           creates: SessionLimits, the defaults, default_session_limits, SessionLedger, add_usage, BudgetScope, BudgetState, BudgetConsequence, Exhausted, check_budgets, thirteen tests
-docs/plans/project-plan.md                          modifies: phase 1 step 05 interface gains the two budget constants, names the modules, and names the generated type (in the plan's own commits)
+crates/core/src/budget.rs                           creates: SessionLimits, the defaults, default_session_limits, SessionLedger, add_usage, BudgetScope, BudgetState, BudgetConsequence, Exhausted, check_budgets, fifteen tests
+docs/plans/project-plan.md                          modifies: phase 1 step 05 interface gains the two budget constants, names the modules, names the generated type, and returns every exhausted budget (in the plan's own commits)
 docs/plans/phase-1-harness/step-05-budgets-and-cost.md   modifies: checkboxes ticked per task
 ```
 
@@ -354,21 +357,67 @@ Produces: `pricing::{PriceTable, ModelPrice, ValidationError, validate_price_tab
       }
 
       #[test]
-      fn ships_a_table_that_matches_its_schema_and_names_the_current_models() {
+      fn ships_a_table_that_matches_its_schema_and_prices_every_model_a_team_can_call() {
           let table = validate_price_table(&shipped()).expect("valid");
-          for model in [
-              "claude-fable-5-1",
-              "claude-opus-5",
-              "claude-sonnet-5",
-              "claude-haiku-4-5",
-          ] {
-              assert!(table.prices.contains_key(model), "{model}");
-          }
           assert_eq!(table.version.get(), 1);
-          assert_eq!(PRICE_TABLE.prices.len(), table.prices.len());
           assert_eq!(
               table.source_url,
               "https://platform.claude.com/docs/en/about-claude/pricing"
+          );
+          assert_eq!(table.prices.len(), 12);
+          let spot = [
+              ("claude-fable-5-1", 10.0, 50.0, 12.5, 0.25),
+              ("claude-fable-5", 10.0, 50.0, 12.5, 1.0),
+              ("claude-opus-5", 5.0, 25.0, 6.25, 0.5),
+              ("claude-opus-4-8", 5.0, 25.0, 6.25, 0.5),
+              ("claude-opus-4-7", 5.0, 25.0, 6.25, 0.5),
+              ("claude-opus-4-6", 5.0, 25.0, 6.25, 0.5),
+              ("claude-opus-4-5", 5.0, 25.0, 6.25, 0.5),
+              ("claude-sonnet-5", 2.0, 10.0, 2.5, 0.2),
+              ("claude-sonnet-4-6", 3.0, 15.0, 3.75, 0.3),
+              ("claude-sonnet-4-5", 3.0, 15.0, 3.75, 0.3),
+              ("claude-haiku-4-5", 1.0, 5.0, 1.25, 0.1),
+              ("claude-haiku-4-5-20251001", 1.0, 5.0, 1.25, 0.1),
+          ];
+          for (model, input, output, cache_write, cache_read) in spot {
+              let price = PRICE_TABLE.prices.get(model).expect(model);
+              assert!(close(price.input_usd_per_mtok, input), "{model}");
+              assert!(close(price.output_usd_per_mtok, output), "{model}");
+              assert!(
+                  close(price.cache_write_usd_per_mtok, cache_write),
+                  "{model}"
+              );
+              assert!(close(price.cache_read_usd_per_mtok, cache_read), "{model}");
+          }
+      }
+
+      #[test]
+      fn refuses_a_table_written_in_a_format_this_program_does_not_know() {
+          let mut input = shipped();
+          input["version"] = json!(2);
+          let errors = validate_price_table(&input).expect_err("refused");
+          assert_eq!(errors.len(), 1);
+          assert_eq!(errors[0].path, "/version");
+          assert!(
+              errors[0].message.contains("version 1"),
+              "{}",
+              errors[0].message
+          );
+      }
+
+      #[test]
+      fn reports_a_typed_failure_after_a_schema_pass_at_the_root() {
+          let mut input = shipped();
+          input["version"] = json!(1.0);
+          let errors = validate_price_table(&input).expect_err("refused");
+          assert_eq!(errors.len(), 1);
+          assert_eq!(errors[0].path, "/");
+          assert!(
+              errors[0]
+                  .message
+                  .starts_with("the schema passed but the typed price table could not be built"),
+              "{}",
+              errors[0].message
           );
       }
 
@@ -534,7 +583,7 @@ Produces: `pricing::{PriceTable, ModelPrice, ValidationError, validate_price_tab
 
       #[test]
       fn finds_nothing_exhausted_while_every_budget_has_room() {
-          assert_eq!(check_budgets(&a_state()), None);
+          assert_eq!(check_budgets(&a_state()), []);
       }
 
       #[test]
@@ -543,16 +592,19 @@ Produces: `pricing::{PriceTable, ModelPrice, ValidationError, validate_price_tab
           state.session.usage.input_tokens = 400_000;
           assert_eq!(
               check_budgets(&state),
-              Some(exhausted(B::SessionTokens, C::EndSessionAndBlockTask))
+              [exhausted(B::SessionTokens, C::EndSessionAndBlockTask)]
           );
+          let mut state = a_state();
+          state.session.usage.input_tokens = 399_999;
+          assert_eq!(check_budgets(&state), []);
           let mut state = a_state();
           state.session.usage.output_tokens = 40_000;
           assert_eq!(
               check_budgets(&state),
-              Some(exhausted(B::SessionTokens, C::EndSessionAndBlockTask))
+              [exhausted(B::SessionTokens, C::EndSessionAndBlockTask)]
           );
           state.session.usage.output_tokens = 39_999;
-          assert_eq!(check_budgets(&state), None);
+          assert_eq!(check_budgets(&state), []);
       }
 
       #[test]
@@ -561,7 +613,7 @@ Produces: `pricing::{PriceTable, ModelPrice, ValidationError, validate_price_tab
           state.session.wall_clock = Duration::from_mins(30);
           assert_eq!(
               check_budgets(&state),
-              Some(exhausted(B::SessionWallClock, C::EndSessionAndBlockTask))
+              [exhausted(B::SessionWallClock, C::EndSessionAndBlockTask)]
           );
       }
 
@@ -571,7 +623,7 @@ Produces: `pricing::{PriceTable, ModelPrice, ValidationError, validate_price_tab
           state.session.tool_calls = 200;
           assert_eq!(
               check_budgets(&state),
-              Some(exhausted(B::SessionToolCalls, C::EndSessionAndBlockTask))
+              [exhausted(B::SessionToolCalls, C::EndSessionAndBlockTask)]
           );
       }
 
@@ -581,7 +633,7 @@ Produces: `pricing::{PriceTable, ModelPrice, ValidationError, validate_price_tab
           state.task_spent_usd = 5.0;
           assert_eq!(
               check_budgets(&state),
-              Some(exhausted(B::TaskUsd, C::EscalateTask))
+              [exhausted(B::TaskUsd, C::EscalateTask)]
           );
       }
 
@@ -591,7 +643,7 @@ Produces: `pricing::{PriceTable, ModelPrice, ValidationError, validate_price_tab
           state.task_sessions = 5;
           assert_eq!(
               check_budgets(&state),
-              Some(exhausted(B::TaskSessions, C::EscalateTask))
+              [exhausted(B::TaskSessions, C::EscalateTask)]
           );
       }
 
@@ -601,7 +653,7 @@ Produces: `pricing::{PriceTable, ModelPrice, ValidationError, validate_price_tab
           state.sprint_spent_usd = 15.0;
           assert_eq!(
               check_budgets(&state),
-              Some(exhausted(B::SprintUsd, C::StopNewAssignments))
+              [exhausted(B::SprintUsd, C::StopNewAssignments)]
           );
       }
 
@@ -609,10 +661,7 @@ Produces: `pricing::{PriceTable, ModelPrice, ValidationError, validate_price_tab
       fn pauses_the_team_when_the_day_runs_out() {
           let mut state = a_state();
           state.day_spent_usd = 20.0;
-          assert_eq!(
-              check_budgets(&state),
-              Some(exhausted(B::DayUsd, C::PauseTeam))
-          );
+          assert_eq!(check_budgets(&state), [exhausted(B::DayUsd, C::PauseTeam)]);
       }
 
       #[test]
@@ -621,14 +670,11 @@ Produces: `pricing::{PriceTable, ModelPrice, ValidationError, validate_price_tab
           state.task_spent_usd = f64::NAN;
           assert_eq!(
               check_budgets(&state),
-              Some(exhausted(B::TaskUsd, C::EscalateTask))
+              [exhausted(B::TaskUsd, C::EscalateTask)]
           );
           let mut state = a_state();
           state.day_spent_usd = f64::INFINITY;
-          assert_eq!(
-              check_budgets(&state),
-              Some(exhausted(B::DayUsd, C::PauseTeam))
-          );
+          assert_eq!(check_budgets(&state), [exhausted(B::DayUsd, C::PauseTeam)]);
       }
 
       #[test]
@@ -638,24 +684,60 @@ Produces: `pricing::{PriceTable, ModelPrice, ValidationError, validate_price_tab
           state.task_max_usd = 0.0;
           assert_eq!(
               check_budgets(&state),
-              Some(exhausted(B::TaskUsd, C::EscalateTask))
+              [exhausted(B::TaskUsd, C::EscalateTask)]
           );
       }
 
       #[test]
-      fn reports_the_session_before_the_task_and_the_task_before_the_team() {
+      fn reports_every_exhausted_budget_in_scope_order() {
           let mut state = a_state();
-          state.day_spent_usd = 20.0;
-          state.task_spent_usd = 5.0;
-          assert_eq!(
-              check_budgets(&state),
-              Some(exhausted(B::TaskUsd, C::EscalateTask))
-          );
           state.session.tool_calls = 200;
+          state.task_spent_usd = 5.0;
+          state.sprint_spent_usd = 15.0;
+          state.day_spent_usd = 20.0;
           assert_eq!(
               check_budgets(&state),
-              Some(exhausted(B::SessionToolCalls, C::EndSessionAndBlockTask))
+              [
+                  exhausted(B::SessionToolCalls, C::EndSessionAndBlockTask),
+                  exhausted(B::TaskUsd, C::EscalateTask),
+                  exhausted(B::SprintUsd, C::StopNewAssignments),
+                  exhausted(B::DayUsd, C::PauseTeam),
+              ]
           );
+      }
+
+      #[test]
+      fn pauses_the_team_even_though_the_sprint_ran_out_first() {
+          let mut state = a_state();
+          state.sprint_spent_usd = 15.0;
+          state.day_spent_usd = 100.0;
+          assert_eq!(
+              check_budgets(&state),
+              [
+                  exhausted(B::SprintUsd, C::StopNewAssignments),
+                  exhausted(B::DayUsd, C::PauseTeam),
+              ]
+          );
+      }
+
+      #[test]
+      fn keeps_a_ledger_that_cannot_wrap_around() {
+          let ledger = SessionLedger {
+              usage: Usage {
+                  input_tokens: u64::MAX,
+                  output_tokens: u64::MAX,
+                  cache_read_tokens: u64::MAX,
+                  cache_write_tokens: u64::MAX,
+              },
+              ..SessionLedger::default()
+          };
+          let more = Usage {
+              input_tokens: 1,
+              output_tokens: 1,
+              cache_read_tokens: 1,
+              cache_write_tokens: 1,
+          };
+          assert_eq!(add_usage(&ledger, &more, 0.0).usage, ledger.usage);
       }
   }
   ```
@@ -707,13 +789,19 @@ Produces: `pricing::{PriceTable, ModelPrice, ValidationError, validate_price_tab
           )
   });
 
+  /// The one table format this program reads.
+  const KNOWN_VERSION: u64 = 1;
+
   /// Checks a value against `docs/schemas/prices.schema.json` and, when it conforms, returns the
-  /// typed table. Refuses anything the schema refuses, with one error per violation.
+  /// typed table. Refuses anything the schema refuses, with one error per violation, and refuses a
+  /// table whose `version` this program does not know, because a later format read as this one
+  /// would price a session by guesswork.
   ///
   /// # Errors
   ///
-  /// Every schema violation, in the schema's order rather than the input's key order; or, when the
-  /// schema passes but the typed table cannot be built, one error at the root.
+  /// Every schema violation, in the schema's order rather than the input's key order; one error at
+  /// `/version` for a format this program does not know; or, when the schema passes but the typed
+  /// table cannot be built, one error at the root.
   pub fn validate_price_table(input: &Value) -> Result<PriceTable, Vec<ValidationError>> {
       let errors: Vec<ValidationError> = VALIDATOR
           .iter_errors(input)
@@ -725,14 +813,24 @@ Produces: `pricing::{PriceTable, ModelPrice, ValidationError, validate_price_tab
       if !errors.is_empty() {
           return Err(errors);
       }
-      serde_json::from_value::<PriceTable>(input.clone()).map_err(|error| {
+      let table = serde_json::from_value::<PriceTable>(input.clone()).map_err(|error| {
           vec![ValidationError {
               path: "/".to_string(),
               message: format!(
                   "the schema passed but the typed price table could not be built: {error}"
               ),
           }]
-      })
+      })?;
+      if table.version.get() != KNOWN_VERSION {
+          return Err(vec![ValidationError {
+              path: "/version".to_string(),
+              message: format!(
+                  "the table is written in format version {}, and this program reads version {KNOWN_VERSION}",
+                  table.version
+              ),
+          }]);
+      }
+      Ok(table)
   }
 
   fn pointer(path: &str) -> String {
@@ -813,21 +911,67 @@ Produces: `pricing::{PriceTable, ModelPrice, ValidationError, validate_price_tab
       }
 
       #[test]
-      fn ships_a_table_that_matches_its_schema_and_names_the_current_models() {
+      fn ships_a_table_that_matches_its_schema_and_prices_every_model_a_team_can_call() {
           let table = validate_price_table(&shipped()).expect("valid");
-          for model in [
-              "claude-fable-5-1",
-              "claude-opus-5",
-              "claude-sonnet-5",
-              "claude-haiku-4-5",
-          ] {
-              assert!(table.prices.contains_key(model), "{model}");
-          }
           assert_eq!(table.version.get(), 1);
-          assert_eq!(PRICE_TABLE.prices.len(), table.prices.len());
           assert_eq!(
               table.source_url,
               "https://platform.claude.com/docs/en/about-claude/pricing"
+          );
+          assert_eq!(table.prices.len(), 12);
+          let spot = [
+              ("claude-fable-5-1", 10.0, 50.0, 12.5, 0.25),
+              ("claude-fable-5", 10.0, 50.0, 12.5, 1.0),
+              ("claude-opus-5", 5.0, 25.0, 6.25, 0.5),
+              ("claude-opus-4-8", 5.0, 25.0, 6.25, 0.5),
+              ("claude-opus-4-7", 5.0, 25.0, 6.25, 0.5),
+              ("claude-opus-4-6", 5.0, 25.0, 6.25, 0.5),
+              ("claude-opus-4-5", 5.0, 25.0, 6.25, 0.5),
+              ("claude-sonnet-5", 2.0, 10.0, 2.5, 0.2),
+              ("claude-sonnet-4-6", 3.0, 15.0, 3.75, 0.3),
+              ("claude-sonnet-4-5", 3.0, 15.0, 3.75, 0.3),
+              ("claude-haiku-4-5", 1.0, 5.0, 1.25, 0.1),
+              ("claude-haiku-4-5-20251001", 1.0, 5.0, 1.25, 0.1),
+          ];
+          for (model, input, output, cache_write, cache_read) in spot {
+              let price = PRICE_TABLE.prices.get(model).expect(model);
+              assert!(close(price.input_usd_per_mtok, input), "{model}");
+              assert!(close(price.output_usd_per_mtok, output), "{model}");
+              assert!(
+                  close(price.cache_write_usd_per_mtok, cache_write),
+                  "{model}"
+              );
+              assert!(close(price.cache_read_usd_per_mtok, cache_read), "{model}");
+          }
+      }
+
+      #[test]
+      fn refuses_a_table_written_in_a_format_this_program_does_not_know() {
+          let mut input = shipped();
+          input["version"] = json!(2);
+          let errors = validate_price_table(&input).expect_err("refused");
+          assert_eq!(errors.len(), 1);
+          assert_eq!(errors[0].path, "/version");
+          assert!(
+              errors[0].message.contains("version 1"),
+              "{}",
+              errors[0].message
+          );
+      }
+
+      #[test]
+      fn reports_a_typed_failure_after_a_schema_pass_at_the_root() {
+          let mut input = shipped();
+          input["version"] = json!(1.0);
+          let errors = validate_price_table(&input).expect_err("refused");
+          assert_eq!(errors.len(), 1);
+          assert_eq!(errors[0].path, "/");
+          assert!(
+              errors[0]
+                  .message
+                  .starts_with("the schema passed but the typed price table could not be built"),
+              "{}",
+              errors[0].message
           );
       }
 
@@ -1061,15 +1205,25 @@ Produces: `pricing::{PriceTable, ModelPrice, ValidationError, validate_price_tab
   }
 
   /// The ledger after one more model call: tokens and cost added, wall clock and tool calls
-  /// unchanged, because the runtime keeps those itself.
+  /// unchanged, because the runtime keeps those itself. Token counts saturate rather than wrap,
+  /// so that a ledger never reads as an empty session.
   #[must_use]
   pub fn add_usage(ledger: &SessionLedger, usage: &Usage, cost_usd: f64) -> SessionLedger {
       SessionLedger {
           usage: Usage {
-              input_tokens: ledger.usage.input_tokens + usage.input_tokens,
-              output_tokens: ledger.usage.output_tokens + usage.output_tokens,
-              cache_read_tokens: ledger.usage.cache_read_tokens + usage.cache_read_tokens,
-              cache_write_tokens: ledger.usage.cache_write_tokens + usage.cache_write_tokens,
+              input_tokens: ledger.usage.input_tokens.saturating_add(usage.input_tokens),
+              output_tokens: ledger
+                  .usage
+                  .output_tokens
+                  .saturating_add(usage.output_tokens),
+              cache_read_tokens: ledger
+                  .usage
+                  .cache_read_tokens
+                  .saturating_add(usage.cache_read_tokens),
+              cache_write_tokens: ledger
+                  .usage
+                  .cache_write_tokens
+                  .saturating_add(usage.cache_write_tokens),
           },
           wall_clock: ledger.wall_clock,
           tool_calls: ledger.tool_calls,
@@ -1144,15 +1298,16 @@ Produces: `pricing::{PriceTable, ModelPrice, ValidationError, validate_price_tab
       pub consequence: BudgetConsequence,
   }
 
-  /// The first exhausted budget, in the order of `BudgetScope`, or `None` while every budget has
-  /// room. A budget is exhausted when what was spent reaches its limit, so that a session ends at
-  /// its last token rather than one past it and a task with `max_sessions` sessions gets no more,
-  /// and a spend that is not a number counts as exhausted, because a broken figure is no licence to
-  /// keep spending. Only the first exhausted budget is reported, and its consequence is the mildest
-  /// of those that apply, so the caller checks again once it has acted: a session whose tool calls
-  /// ran out may also have exhausted the day, which the next check reports.
+  /// Every exhausted budget, in the order of `BudgetScope`, and the empty list while every budget
+  /// has room. A budget is exhausted when what was spent reaches its limit, so that a session ends
+  /// at its last token rather than one past it and a task with `max_sessions` sessions gets no
+  /// more, and a spend that is not a number counts as exhausted, because a broken figure is no
+  /// licence to keep spending. Every one is reported, because the consequences act on different
+  /// things and none subsumes another: a sprint that stops new assignments does not end the
+  /// session that is already running, and the shipped sprint budget is smaller than the shipped
+  /// daily one, so reporting only the first would mean the team never pauses.
   #[must_use]
-  pub fn check_budgets(state: &BudgetState) -> Option<Exhausted> {
+  pub fn check_budgets(state: &BudgetState) -> Vec<Exhausted> {
       let session = &state.session;
       let limits = &state.session_limits;
       let checks = [
@@ -1195,8 +1350,9 @@ Produces: `pricing::{PriceTable, ModelPrice, ValidationError, validate_price_tab
       ];
       checks
           .into_iter()
-          .find(|(_, _, exhausted)| *exhausted)
+          .filter(|(_, _, exhausted)| *exhausted)
           .map(|(scope, consequence, _)| Exhausted { scope, consequence })
+          .collect()
   }
 
   /// Whether a spend has reached its limit. A spend that is not a number has, because a figure
@@ -1301,7 +1457,7 @@ Produces: `pricing::{PriceTable, ModelPrice, ValidationError, validate_price_tab
 
       #[test]
       fn finds_nothing_exhausted_while_every_budget_has_room() {
-          assert_eq!(check_budgets(&a_state()), None);
+          assert_eq!(check_budgets(&a_state()), []);
       }
 
       #[test]
@@ -1310,16 +1466,19 @@ Produces: `pricing::{PriceTable, ModelPrice, ValidationError, validate_price_tab
           state.session.usage.input_tokens = 400_000;
           assert_eq!(
               check_budgets(&state),
-              Some(exhausted(B::SessionTokens, C::EndSessionAndBlockTask))
+              [exhausted(B::SessionTokens, C::EndSessionAndBlockTask)]
           );
+          let mut state = a_state();
+          state.session.usage.input_tokens = 399_999;
+          assert_eq!(check_budgets(&state), []);
           let mut state = a_state();
           state.session.usage.output_tokens = 40_000;
           assert_eq!(
               check_budgets(&state),
-              Some(exhausted(B::SessionTokens, C::EndSessionAndBlockTask))
+              [exhausted(B::SessionTokens, C::EndSessionAndBlockTask)]
           );
           state.session.usage.output_tokens = 39_999;
-          assert_eq!(check_budgets(&state), None);
+          assert_eq!(check_budgets(&state), []);
       }
 
       #[test]
@@ -1328,7 +1487,7 @@ Produces: `pricing::{PriceTable, ModelPrice, ValidationError, validate_price_tab
           state.session.wall_clock = Duration::from_mins(30);
           assert_eq!(
               check_budgets(&state),
-              Some(exhausted(B::SessionWallClock, C::EndSessionAndBlockTask))
+              [exhausted(B::SessionWallClock, C::EndSessionAndBlockTask)]
           );
       }
 
@@ -1338,7 +1497,7 @@ Produces: `pricing::{PriceTable, ModelPrice, ValidationError, validate_price_tab
           state.session.tool_calls = 200;
           assert_eq!(
               check_budgets(&state),
-              Some(exhausted(B::SessionToolCalls, C::EndSessionAndBlockTask))
+              [exhausted(B::SessionToolCalls, C::EndSessionAndBlockTask)]
           );
       }
 
@@ -1348,7 +1507,7 @@ Produces: `pricing::{PriceTable, ModelPrice, ValidationError, validate_price_tab
           state.task_spent_usd = 5.0;
           assert_eq!(
               check_budgets(&state),
-              Some(exhausted(B::TaskUsd, C::EscalateTask))
+              [exhausted(B::TaskUsd, C::EscalateTask)]
           );
       }
 
@@ -1358,7 +1517,7 @@ Produces: `pricing::{PriceTable, ModelPrice, ValidationError, validate_price_tab
           state.task_sessions = 5;
           assert_eq!(
               check_budgets(&state),
-              Some(exhausted(B::TaskSessions, C::EscalateTask))
+              [exhausted(B::TaskSessions, C::EscalateTask)]
           );
       }
 
@@ -1368,7 +1527,7 @@ Produces: `pricing::{PriceTable, ModelPrice, ValidationError, validate_price_tab
           state.sprint_spent_usd = 15.0;
           assert_eq!(
               check_budgets(&state),
-              Some(exhausted(B::SprintUsd, C::StopNewAssignments))
+              [exhausted(B::SprintUsd, C::StopNewAssignments)]
           );
       }
 
@@ -1376,10 +1535,7 @@ Produces: `pricing::{PriceTable, ModelPrice, ValidationError, validate_price_tab
       fn pauses_the_team_when_the_day_runs_out() {
           let mut state = a_state();
           state.day_spent_usd = 20.0;
-          assert_eq!(
-              check_budgets(&state),
-              Some(exhausted(B::DayUsd, C::PauseTeam))
-          );
+          assert_eq!(check_budgets(&state), [exhausted(B::DayUsd, C::PauseTeam)]);
       }
 
       #[test]
@@ -1388,14 +1544,11 @@ Produces: `pricing::{PriceTable, ModelPrice, ValidationError, validate_price_tab
           state.task_spent_usd = f64::NAN;
           assert_eq!(
               check_budgets(&state),
-              Some(exhausted(B::TaskUsd, C::EscalateTask))
+              [exhausted(B::TaskUsd, C::EscalateTask)]
           );
           let mut state = a_state();
           state.day_spent_usd = f64::INFINITY;
-          assert_eq!(
-              check_budgets(&state),
-              Some(exhausted(B::DayUsd, C::PauseTeam))
-          );
+          assert_eq!(check_budgets(&state), [exhausted(B::DayUsd, C::PauseTeam)]);
       }
 
       #[test]
@@ -1405,24 +1558,60 @@ Produces: `pricing::{PriceTable, ModelPrice, ValidationError, validate_price_tab
           state.task_max_usd = 0.0;
           assert_eq!(
               check_budgets(&state),
-              Some(exhausted(B::TaskUsd, C::EscalateTask))
+              [exhausted(B::TaskUsd, C::EscalateTask)]
           );
       }
 
       #[test]
-      fn reports_the_session_before_the_task_and_the_task_before_the_team() {
+      fn reports_every_exhausted_budget_in_scope_order() {
           let mut state = a_state();
-          state.day_spent_usd = 20.0;
-          state.task_spent_usd = 5.0;
-          assert_eq!(
-              check_budgets(&state),
-              Some(exhausted(B::TaskUsd, C::EscalateTask))
-          );
           state.session.tool_calls = 200;
+          state.task_spent_usd = 5.0;
+          state.sprint_spent_usd = 15.0;
+          state.day_spent_usd = 20.0;
           assert_eq!(
               check_budgets(&state),
-              Some(exhausted(B::SessionToolCalls, C::EndSessionAndBlockTask))
+              [
+                  exhausted(B::SessionToolCalls, C::EndSessionAndBlockTask),
+                  exhausted(B::TaskUsd, C::EscalateTask),
+                  exhausted(B::SprintUsd, C::StopNewAssignments),
+                  exhausted(B::DayUsd, C::PauseTeam),
+              ]
           );
+      }
+
+      #[test]
+      fn pauses_the_team_even_though_the_sprint_ran_out_first() {
+          let mut state = a_state();
+          state.sprint_spent_usd = 15.0;
+          state.day_spent_usd = 100.0;
+          assert_eq!(
+              check_budgets(&state),
+              [
+                  exhausted(B::SprintUsd, C::StopNewAssignments),
+                  exhausted(B::DayUsd, C::PauseTeam),
+              ]
+          );
+      }
+
+      #[test]
+      fn keeps_a_ledger_that_cannot_wrap_around() {
+          let ledger = SessionLedger {
+              usage: Usage {
+                  input_tokens: u64::MAX,
+                  output_tokens: u64::MAX,
+                  cache_read_tokens: u64::MAX,
+                  cache_write_tokens: u64::MAX,
+              },
+              ..SessionLedger::default()
+          };
+          let more = Usage {
+              input_tokens: 1,
+              output_tokens: 1,
+              cache_read_tokens: 1,
+              cache_write_tokens: 1,
+          };
+          assert_eq!(add_usage(&ledger, &more, 0.0).usage, ledger.usage);
       }
   }
   ```
@@ -1432,13 +1621,13 @@ Produces: `pricing::{PriceTable, ModelPrice, ValidationError, validate_price_tab
   cargo fmt --all
   cargo test --package farik-core pricing::
   # expected, among the output:
-  # test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 103 filtered out; finished in ...
+  # test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 105 filtered out; finished in ...
   cargo test --package farik-core budget::
   # expected, among the output:
-  # test result: ok. 13 passed; 0 failed; 0 ignored; 0 measured; 97 filtered out; finished in ...
+  # test result: ok. 15 passed; 0 failed; 0 ignored; 0 measured; 99 filtered out; finished in ...
   cargo xtask check
   # expected, among the output, then exit code 0:
-  # test result: ok. 110 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in ...   (farik-core)
+  # test result: ok. 114 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in ...   (farik-core)
   # test result: ok. 23 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in ...   (xtask)
   # xtask check: ok
   ```
@@ -1450,7 +1639,7 @@ Produces: `pricing::{PriceTable, ModelPrice, ValidationError, validate_price_tab
 ```
 cargo xtask check
 # expected, among the output, then exit code 0:
-# test result: ok. 110 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in ...   (farik-core)
+# test result: ok. 114 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in ...   (farik-core)
 # test result: ok. 23 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in ...   (xtask)
 # xtask check: ok
 ```

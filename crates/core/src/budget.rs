@@ -63,15 +63,25 @@ pub struct SessionLedger {
 }
 
 /// The ledger after one more model call: tokens and cost added, wall clock and tool calls
-/// unchanged, because the runtime keeps those itself.
+/// unchanged, because the runtime keeps those itself. Token counts saturate rather than wrap,
+/// so that a ledger never reads as an empty session.
 #[must_use]
 pub fn add_usage(ledger: &SessionLedger, usage: &Usage, cost_usd: f64) -> SessionLedger {
     SessionLedger {
         usage: Usage {
-            input_tokens: ledger.usage.input_tokens + usage.input_tokens,
-            output_tokens: ledger.usage.output_tokens + usage.output_tokens,
-            cache_read_tokens: ledger.usage.cache_read_tokens + usage.cache_read_tokens,
-            cache_write_tokens: ledger.usage.cache_write_tokens + usage.cache_write_tokens,
+            input_tokens: ledger.usage.input_tokens.saturating_add(usage.input_tokens),
+            output_tokens: ledger
+                .usage
+                .output_tokens
+                .saturating_add(usage.output_tokens),
+            cache_read_tokens: ledger
+                .usage
+                .cache_read_tokens
+                .saturating_add(usage.cache_read_tokens),
+            cache_write_tokens: ledger
+                .usage
+                .cache_write_tokens
+                .saturating_add(usage.cache_write_tokens),
         },
         wall_clock: ledger.wall_clock,
         tool_calls: ledger.tool_calls,
@@ -146,15 +156,16 @@ pub struct Exhausted {
     pub consequence: BudgetConsequence,
 }
 
-/// The first exhausted budget, in the order of `BudgetScope`, or `None` while every budget has
-/// room. A budget is exhausted when what was spent reaches its limit, so that a session ends at
-/// its last token rather than one past it and a task with `max_sessions` sessions gets no more,
-/// and a spend that is not a number counts as exhausted, because a broken figure is no licence to
-/// keep spending. Only the first exhausted budget is reported, and its consequence is the mildest
-/// of those that apply, so the caller checks again once it has acted: a session whose tool calls
-/// ran out may also have exhausted the day, which the next check reports.
+/// Every exhausted budget, in the order of `BudgetScope`, and the empty list while every budget
+/// has room. A budget is exhausted when what was spent reaches its limit, so that a session ends
+/// at its last token rather than one past it and a task with `max_sessions` sessions gets no
+/// more, and a spend that is not a number counts as exhausted, because a broken figure is no
+/// licence to keep spending. Every one is reported, because the consequences act on different
+/// things and none subsumes another: a sprint that stops new assignments does not end the
+/// session that is already running, and the shipped sprint budget is smaller than the shipped
+/// daily one, so reporting only the first would mean the team never pauses.
 #[must_use]
-pub fn check_budgets(state: &BudgetState) -> Option<Exhausted> {
+pub fn check_budgets(state: &BudgetState) -> Vec<Exhausted> {
     let session = &state.session;
     let limits = &state.session_limits;
     let checks = [
@@ -197,8 +208,9 @@ pub fn check_budgets(state: &BudgetState) -> Option<Exhausted> {
     ];
     checks
         .into_iter()
-        .find(|(_, _, exhausted)| *exhausted)
+        .filter(|(_, _, exhausted)| *exhausted)
         .map(|(scope, consequence, _)| Exhausted { scope, consequence })
+        .collect()
 }
 
 /// Whether a spend has reached its limit. A spend that is not a number has, because a figure
@@ -303,7 +315,7 @@ mod tests {
 
     #[test]
     fn finds_nothing_exhausted_while_every_budget_has_room() {
-        assert_eq!(check_budgets(&a_state()), None);
+        assert_eq!(check_budgets(&a_state()), []);
     }
 
     #[test]
@@ -312,16 +324,19 @@ mod tests {
         state.session.usage.input_tokens = 400_000;
         assert_eq!(
             check_budgets(&state),
-            Some(exhausted(B::SessionTokens, C::EndSessionAndBlockTask))
+            [exhausted(B::SessionTokens, C::EndSessionAndBlockTask)]
         );
+        let mut state = a_state();
+        state.session.usage.input_tokens = 399_999;
+        assert_eq!(check_budgets(&state), []);
         let mut state = a_state();
         state.session.usage.output_tokens = 40_000;
         assert_eq!(
             check_budgets(&state),
-            Some(exhausted(B::SessionTokens, C::EndSessionAndBlockTask))
+            [exhausted(B::SessionTokens, C::EndSessionAndBlockTask)]
         );
         state.session.usage.output_tokens = 39_999;
-        assert_eq!(check_budgets(&state), None);
+        assert_eq!(check_budgets(&state), []);
     }
 
     #[test]
@@ -330,7 +345,7 @@ mod tests {
         state.session.wall_clock = Duration::from_mins(30);
         assert_eq!(
             check_budgets(&state),
-            Some(exhausted(B::SessionWallClock, C::EndSessionAndBlockTask))
+            [exhausted(B::SessionWallClock, C::EndSessionAndBlockTask)]
         );
     }
 
@@ -340,7 +355,7 @@ mod tests {
         state.session.tool_calls = 200;
         assert_eq!(
             check_budgets(&state),
-            Some(exhausted(B::SessionToolCalls, C::EndSessionAndBlockTask))
+            [exhausted(B::SessionToolCalls, C::EndSessionAndBlockTask)]
         );
     }
 
@@ -350,7 +365,7 @@ mod tests {
         state.task_spent_usd = 5.0;
         assert_eq!(
             check_budgets(&state),
-            Some(exhausted(B::TaskUsd, C::EscalateTask))
+            [exhausted(B::TaskUsd, C::EscalateTask)]
         );
     }
 
@@ -360,7 +375,7 @@ mod tests {
         state.task_sessions = 5;
         assert_eq!(
             check_budgets(&state),
-            Some(exhausted(B::TaskSessions, C::EscalateTask))
+            [exhausted(B::TaskSessions, C::EscalateTask)]
         );
     }
 
@@ -370,7 +385,7 @@ mod tests {
         state.sprint_spent_usd = 15.0;
         assert_eq!(
             check_budgets(&state),
-            Some(exhausted(B::SprintUsd, C::StopNewAssignments))
+            [exhausted(B::SprintUsd, C::StopNewAssignments)]
         );
     }
 
@@ -378,10 +393,7 @@ mod tests {
     fn pauses_the_team_when_the_day_runs_out() {
         let mut state = a_state();
         state.day_spent_usd = 20.0;
-        assert_eq!(
-            check_budgets(&state),
-            Some(exhausted(B::DayUsd, C::PauseTeam))
-        );
+        assert_eq!(check_budgets(&state), [exhausted(B::DayUsd, C::PauseTeam)]);
     }
 
     #[test]
@@ -390,14 +402,11 @@ mod tests {
         state.task_spent_usd = f64::NAN;
         assert_eq!(
             check_budgets(&state),
-            Some(exhausted(B::TaskUsd, C::EscalateTask))
+            [exhausted(B::TaskUsd, C::EscalateTask)]
         );
         let mut state = a_state();
         state.day_spent_usd = f64::INFINITY;
-        assert_eq!(
-            check_budgets(&state),
-            Some(exhausted(B::DayUsd, C::PauseTeam))
-        );
+        assert_eq!(check_budgets(&state), [exhausted(B::DayUsd, C::PauseTeam)]);
     }
 
     #[test]
@@ -407,23 +416,59 @@ mod tests {
         state.task_max_usd = 0.0;
         assert_eq!(
             check_budgets(&state),
-            Some(exhausted(B::TaskUsd, C::EscalateTask))
+            [exhausted(B::TaskUsd, C::EscalateTask)]
         );
     }
 
     #[test]
-    fn reports_the_session_before_the_task_and_the_task_before_the_team() {
+    fn reports_every_exhausted_budget_in_scope_order() {
         let mut state = a_state();
-        state.day_spent_usd = 20.0;
-        state.task_spent_usd = 5.0;
-        assert_eq!(
-            check_budgets(&state),
-            Some(exhausted(B::TaskUsd, C::EscalateTask))
-        );
         state.session.tool_calls = 200;
+        state.task_spent_usd = 5.0;
+        state.sprint_spent_usd = 15.0;
+        state.day_spent_usd = 20.0;
         assert_eq!(
             check_budgets(&state),
-            Some(exhausted(B::SessionToolCalls, C::EndSessionAndBlockTask))
+            [
+                exhausted(B::SessionToolCalls, C::EndSessionAndBlockTask),
+                exhausted(B::TaskUsd, C::EscalateTask),
+                exhausted(B::SprintUsd, C::StopNewAssignments),
+                exhausted(B::DayUsd, C::PauseTeam),
+            ]
         );
+    }
+
+    #[test]
+    fn pauses_the_team_even_though_the_sprint_ran_out_first() {
+        let mut state = a_state();
+        state.sprint_spent_usd = 15.0;
+        state.day_spent_usd = 100.0;
+        assert_eq!(
+            check_budgets(&state),
+            [
+                exhausted(B::SprintUsd, C::StopNewAssignments),
+                exhausted(B::DayUsd, C::PauseTeam),
+            ]
+        );
+    }
+
+    #[test]
+    fn keeps_a_ledger_that_cannot_wrap_around() {
+        let ledger = SessionLedger {
+            usage: Usage {
+                input_tokens: u64::MAX,
+                output_tokens: u64::MAX,
+                cache_read_tokens: u64::MAX,
+                cache_write_tokens: u64::MAX,
+            },
+            ..SessionLedger::default()
+        };
+        let more = Usage {
+            input_tokens: 1,
+            output_tokens: 1,
+            cache_read_tokens: 1,
+            cache_write_tokens: 1,
+        };
+        assert_eq!(add_usage(&ledger, &more, 0.0).usage, ledger.usage);
     }
 }
