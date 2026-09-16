@@ -1,13 +1,13 @@
 # Phase 1, step 04: Permission tiers
 
-Status: draft
+Status: ready
 Branch: `claude/phase-0-implementation-izm38y` (the harness-assigned phase branch, left as assigned per `docs/standards/code.md`; steps do not get their own)
 Spec: `docs/SPEC.md` section 5.6 (permission tiers, their defaults per role, protected paths on every tool call, per-call human approval of external effects), 5.12 (`forbidden_commands`), ADR 0004 (`farik_exec` refuses git; git is a Farik tool with its own tiers), F5
 Depends on: phase 0 (merged in #4); step 02 of this phase (committed as 21fe00a, 87a3561, 4a1ac90: `TeamRules`); step 03 of this phase (committed as 220b576, 3355d35: the path checks)
 
 A plan is `ready` only when a reviewer other than the author has confirmed the three rules in `docs/standards/workflow.md` stage 2 (Plan): every decision made, no ambiguity, no forward dependencies. Record who confirmed and when here.
 
-Readiness confirmed by: pending
+Readiness confirmed by: a fresh Claude Code review session, 2026-09-16, before execution (first pass READY with four author-level items, taken in 44ea492; second pass READY under all three rules at 44ea492; recorded on pull request #5)
 
 ## Goal
 
