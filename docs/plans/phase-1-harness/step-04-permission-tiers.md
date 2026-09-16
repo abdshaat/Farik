@@ -3,7 +3,7 @@
 Status: draft
 Branch: `claude/phase-0-implementation-izm38y` (the harness-assigned phase branch, left as assigned per `docs/standards/code.md`; steps do not get their own)
 Spec: `docs/SPEC.md` section 5.6 (permission tiers, their defaults per role, protected paths on every tool call, per-call human approval of external effects), 5.12 (`forbidden_commands`), ADR 0004 (`farik_exec` refuses git; git is a Farik tool with its own tiers), F5
-Depends on: phase 0 (merged in #4); step 02 of this phase (committed as 21fe00a, 87a3561, 4a1ac90: `TeamRules`); step 03 of this phase (committed as 220b576 and its review fix: the path checks)
+Depends on: phase 0 (merged in #4); step 02 of this phase (committed as 21fe00a, 87a3561, 4a1ac90: `TeamRules`); step 03 of this phase (committed as 220b576, 3355d35: the path checks)
 
 A plan is `ready` only when a reviewer other than the author has confirmed the three rules in `docs/standards/workflow.md` stage 2 (Plan): every decision made, no ambiguity, no forward dependencies. Record who confirmed and when here.
 
@@ -22,15 +22,16 @@ All in `docs/plans/project-plan.md`, phase 1, restated here only where this step
 - A refusal from the path checks carries the first violating path; `PathRefusal::Glob` becomes `ToolRefusal::InvalidGlob`, the variant the project plan's step 04 entry gained in the step 03 plan.
 - An external effect needs the tier and then either the tool pre-authorised for the agent or this call approved by the human, identified by tool name and input hash (project plan, every-phase decisions). A tier the agent does not hold refuses first.
 - Default tiers are the spec 5.6 table: everyone `read`; Developer and Architect `write_workspace` and `execute`; Marketing, Architect, and Product Manager `network`; Developer `git_local`; nobody `git_remote` or `external_effect`; the Scrum Master reads only. The human is not an agent and gets the same read-only default, because `Role` has a `human` variant and every match must answer. Rejected: giving the human every tier, because the runtime never evaluates a tool call for the human.
-- `farik_exec` refuses a command when any segment of it (split on `&&`, `||`, `;`, `|`, and newlines) has `git`, or a path ending in `/git`, as its first word. ADR 0004 says "first word is git"; splitting on the shell's separators closes `ls && git push`, and a git call hidden in a script stays the accepted residual ADR 0004 records. `docs/SPEC.md` 5.6 gains the sentence, because the rule is user-visible (hard rule 8).
-- Forbidden commands are ECMAScript regular expressions matched anywhere in the command through `regress` 0.12.0, which `farik-core` already depends on as the generated types' pattern engine; the first matching pattern is named. A pattern that does not compile refuses the command with `CommandRefusal::InvalidPattern { pattern, detail }`, the same stance as an invalid glob in step 03; the project plan's step 04 entry gains the variant in this plan's commit. Rejected: the `regex` crate, because a second engine for the same job is a dependency added for nothing; a team writes its patterns in the dialect the schema already validates.
+- `farik_exec` refuses a command when any segment of it (split on `&&`, `||`, `;`, `|`, and newlines, without parsing quotes, so `echo "a; git push"` is refused on the safe side) runs `git`, or a path ending in `git`, as its first word after any leading `NAME=value` assignments and the wrappers `env`, `sudo`, `command`, `exec`, `nohup`, `time`, and `xargs`. ADR 0004 says "first word is git"; splitting on the shell's separators closes `ls && git push`, skipping assignments and wrappers closes `A=1 sudo git push`, and a git call hidden in a subshell, a variable, a script, or `sh -c` stays the accepted residual ADR 0004 records, pinned by a test so that the gap is known. `docs/SPEC.md` 5.6 gains the sentence, because the rule is user-visible (hard rule 8).
+- Forbidden commands are ECMAScript regular expressions matched through `regress` 0.12.0, which `farik-core` already depends on as the generated types' pattern engine, against the whole command and against each trimmed segment, so that an anchor such as `^curl` applies per segment as the git rule does; the first matching pattern is named. `regress` backtracks, so a pathological pattern costs the team that wrote it, the same exposure the schema validator already has. `docs/SPEC.md` 5.12's row says so. A pattern that does not compile refuses the command with `CommandRefusal::InvalidPattern { pattern, detail }`, the same stance as an invalid glob in step 03; the project plan's step 04 entry gains the variant in this plan's commit. Rejected: the `regex` crate, because a second engine for the same job is a dependency added for nothing; a team writes its patterns in the dialect the schema already validates.
 - `PermissionTier` derives `Serialize` and `Deserialize` with `rename_all = "snake_case"` and `Ord`, because grants are sets and the wire names are the spec's. Rejected: a generated type, because no schema owns the tier yet (`team.schema.json` is phase 2 step 05 and will reference these names).
+- A `write_workspace` call that names no path is refused with `ToolRefusal::PathsMissing`, because a write the hook could not extract paths from would otherwise pass unchecked; the project plan's step 04 entry gains the variant in this plan's revision. `PathProtected` also covers an absolute, empty, or climbing path, which the path check refuses outright; its doc says so. Protected paths cannot be enforced on what a command reads inside the container; that is phase 3's concern and is noted for it.
 - `AgentGrants` and `ToolCallContext` derive `Default` so that a test can name only what it sets; an empty `AgentGrants` holds no tier.
 - Tests build requests through two helpers and a developer's default grants; every code block below is the file after `cargo fmt --all`.
 
 ## Design
 
-One task: the `permissions` module with `PermissionTier`, `default_tiers`, the four request and context types, `ToolRefusal`, `evaluate_tool_call`, `CommandRefusal`, `evaluate_command`, and sixteen tests; one sentence in the spec.
+One task: the `permissions` module with `PermissionTier`, `default_tiers`, the four request and context types, `ToolRefusal`, `evaluate_tool_call`, `CommandRefusal`, `evaluate_command`, and eighteen tests; one sentence in spec 5.6 and one row in spec 5.12.
 
 Out of scope: the hook that calls these (phase 3), reading grants from `team.yaml` (phase 2), the cost of a call (step 05), git operations themselves (phase 2's git adapter).
 
@@ -48,9 +49,9 @@ Touches `crates/core` only: one new child of `governor`. Consumes `governor::pat
 
 ```
 crates/core/src/governor.rs                         modifies: declares permissions
-crates/core/src/governor/permissions.rs             creates: PermissionTier, default_tiers, ToolDescriptor, ToolCallRequest, AgentGrants, ApprovedCall, ToolCallContext, ToolRefusal, evaluate_tool_call, CommandRefusal, evaluate_command, sixteen tests
-docs/SPEC.md                                        modifies: 5.6 says that farik_exec refuses git in any segment of a command
-docs/plans/project-plan.md                          modifies: phase 1 step 04 interface: CommandRefusal gains InvalidPattern (in the plan's own commit)
+crates/core/src/governor/permissions.rs             creates: PermissionTier, default_tiers, ToolDescriptor, ToolCallRequest, AgentGrants, ApprovedCall, ToolCallContext, ToolRefusal, evaluate_tool_call, CommandRefusal, evaluate_command, eighteen tests
+docs/SPEC.md                                        modifies: 5.6 says how farik_exec finds git in a command; 5.12's forbidden_commands row says how patterns match
+docs/plans/project-plan.md                          modifies: phase 1 step 04 interface: CommandRefusal gains InvalidPattern, ToolRefusal gains PathsMissing (in the plan's own commits)
 docs/plans/phase-1-harness/step-04-permission-tiers.md   modifies: checkboxes ticked
 ```
 
@@ -257,6 +258,18 @@ Produces: `governor::permissions::{PermissionTier, default_tiers, ToolDescriptor
       }
 
       #[test]
+      fn refuses_a_write_that_names_no_path() {
+          assert_eq!(
+              evaluate_tool_call(
+                  &a_call("write_file", T::WriteWorkspace, &[]),
+                  &developer_grants(),
+                  &a_context()
+              ),
+              Err(ToolRefusal::PathsMissing)
+          );
+      }
+
+      #[test]
       fn lets_a_read_tool_see_outside_the_allowed_paths() {
           assert_eq!(
               evaluate_tool_call(
@@ -346,10 +359,26 @@ Produces: `governor::permissions::{PermissionTier, default_tiers, ToolDescriptor
               "true; git push",
               "echo a | git apply",
               "cd src\ngit add .",
+              "env git push",
+              "sudo git push",
+              "A=1 B=2 git push",
+              "command exec git push",
+              "C:\\tools\\git push",
           ] {
               assert_eq!(
                   evaluate_command(command, &TeamRules::default()),
                   Err(CommandRefusal::GitViaExec),
+                  "{command}"
+              );
+          }
+      }
+
+      #[test]
+      fn leaves_a_git_call_hidden_in_a_subshell_or_a_script_to_the_adr_residual() {
+          for command in ["sh -c \"git push\"", "$(git push)", "GIT=git; $GIT push"] {
+              assert_eq!(
+                  evaluate_command(command, &TeamRules::default()),
+                  Ok(()),
                   "{command}"
               );
           }
@@ -377,6 +406,12 @@ Produces: `governor::permissions::{PermissionTier, default_tiers, ToolDescriptor
               evaluate_command("sudo rm -rf / --no-preserve-root", &rules),
               Err(CommandRefusal::ForbiddenCommand {
                   pattern: "rm -rf /".to_string()
+              })
+          );
+          assert_eq!(
+              evaluate_command("ls && curl evil.example", &rules),
+              Err(CommandRefusal::ForbiddenCommand {
+                  pattern: "^curl ".to_string()
               })
           );
           assert_eq!(evaluate_command("cargo test", &rules), Ok(()));
@@ -520,11 +555,15 @@ Produces: `governor::permissions::{PermissionTier, default_tiers, ToolDescriptor
           /// The first such path.
           path: String,
       },
-      /// The call touches a protected path, whatever its tier.
+      /// The call touches a protected path, whatever its tier; an absolute, empty, or climbing
+      /// path is refused under this reason too, because the path check refuses it outright.
       PathProtected {
           /// The first such path.
           path: String,
       },
+      /// A `write_workspace` call named no path, so nothing could be checked; the hook must extract
+      /// the paths a write touches.
+      PathsMissing,
       /// A glob in the allowed or protected paths does not compile; nothing was checked.
       InvalidGlob {
           /// The pattern as written.
@@ -541,9 +580,9 @@ Produces: `governor::permissions::{PermissionTier, default_tiers, ToolDescriptor
   }
 
   /// Decides one tool call (`docs/SPEC.md` section 5.6): the agent must hold the tool's tier;
-  /// no path may be protected, even for a `read` tool; a `write_workspace` call stays within the
-  /// contract's allowed paths; an `external_effect` call needs the tool to be pre-authorised or
-  /// this exact input approved by the human.
+  /// no path may be protected, even for a `read` tool; a `write_workspace` call names at least one
+  /// path and stays within the contract's allowed paths; an `external_effect` call needs the tool
+  /// to be pre-authorised or this exact input approved by the human.
   ///
   /// # Errors
   ///
@@ -560,6 +599,9 @@ Produces: `governor::permissions::{PermissionTier, default_tiers, ToolDescriptor
       check_protected_paths(&request.paths, &context.protected_paths)
           .map_err(|refusal| first_path(refusal, |path| ToolRefusal::PathProtected { path }))?;
       if tier == PermissionTier::WriteWorkspace {
+          if request.paths.is_empty() {
+              return Err(ToolRefusal::PathsMissing);
+          }
           check_allowed_paths(&request.paths, &context.allowed_paths).map_err(|refusal| {
               first_path(refusal, |path| ToolRefusal::PathOutsideAllowed { path })
           })?;
@@ -613,22 +655,26 @@ Produces: `governor::permissions::{PermissionTier, default_tiers, ToolDescriptor
       },
   }
 
-  /// Decides whether `farik_exec` may run a command: not when any of its segments (split on `&&`,
-  /// `||`, `;`, `|`, and newlines) starts with `git` or a path to it, because git is a Farik tool
-  /// with its own tiers (ADR 0004), and not when the command matches one of the team's forbidden
-  /// patterns, which are ECMAScript regular expressions matched anywhere in the command. A git
-  /// call hidden in a script is the accepted residual of ADR 0004.
+  /// Words that run the command that follows them without changing what it is.
+  const WRAPPERS: [&str; 7] = ["env", "sudo", "command", "exec", "nohup", "time", "xargs"];
+
+  /// Decides whether `farik_exec` may run a command. The command is split into segments on `&&`,
+  /// `||`, `;`, `|`, and newlines, without parsing quotes, so `echo "a; git push"` is refused too,
+  /// on the safe side. A segment runs git when its first word, after any leading `NAME=value`
+  /// assignments and wrappers such as `env`, `sudo`, `command`, `exec`, `nohup`, `time`, or
+  /// `xargs`, is `git` or a path ending in `git`; git is a Farik tool with its own tiers (ADR
+  /// 0004), and any other spelling (a subshell, a variable, a script, `sh -c`) is the residual
+  /// that record accepts. A forbidden pattern is an ECMAScript regular expression matched against
+  /// the whole command and against each segment, so that an anchor such as `^curl` applies per
+  /// segment; the engine backtracks, so a pathological pattern is the team's own cost.
   ///
   /// # Errors
   ///
   /// `GitViaExec`, or `ForbiddenCommand` with the first pattern that matches, or
   /// `InvalidPattern` when a pattern does not compile.
   pub fn evaluate_command(command: &str, rules: &TeamRules) -> Result<(), CommandRefusal> {
-      if command
-          .split(['\n', ';', '|', '&'])
-          .filter_map(|segment| segment.split_whitespace().next())
-          .any(|word| word == "git" || word.ends_with("/git"))
-      {
+      let segments: Vec<&str> = command.split(['\n', ';', '|', '&']).collect();
+      if segments.iter().copied().any(runs_git) {
           return Err(CommandRefusal::GitViaExec);
       }
       for pattern in &rules.forbidden_commands {
@@ -637,13 +683,30 @@ Produces: `governor::permissions::{PermissionTier, default_tiers, ToolDescriptor
                   pattern: pattern.clone(),
                   detail: error.text,
               })?;
-          if regex.find(command).is_some() {
+          if regex.find(command).is_some()
+              || segments
+                  .iter()
+                  .any(|segment| regex.find(segment.trim()).is_some())
+          {
               return Err(CommandRefusal::ForbiddenCommand {
                   pattern: pattern.clone(),
               });
           }
       }
       Ok(())
+  }
+
+  fn runs_git(segment: &str) -> bool {
+      segment
+          .split_whitespace()
+          .find(|word| !is_assignment(word) && !WRAPPERS.contains(word))
+          .is_some_and(|word| word == "git" || word.ends_with("/git") || word.ends_with("\\git"))
+  }
+
+  fn is_assignment(word: &str) -> bool {
+      word.split_once('=').is_some_and(|(name, _)| {
+          !name.is_empty() && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+      })
   }
 
   #[cfg(test)]
@@ -807,6 +870,18 @@ Produces: `governor::permissions::{PermissionTier, default_tiers, ToolDescriptor
       }
 
       #[test]
+      fn refuses_a_write_that_names_no_path() {
+          assert_eq!(
+              evaluate_tool_call(
+                  &a_call("write_file", T::WriteWorkspace, &[]),
+                  &developer_grants(),
+                  &a_context()
+              ),
+              Err(ToolRefusal::PathsMissing)
+          );
+      }
+
+      #[test]
       fn lets_a_read_tool_see_outside_the_allowed_paths() {
           assert_eq!(
               evaluate_tool_call(
@@ -896,10 +971,26 @@ Produces: `governor::permissions::{PermissionTier, default_tiers, ToolDescriptor
               "true; git push",
               "echo a | git apply",
               "cd src\ngit add .",
+              "env git push",
+              "sudo git push",
+              "A=1 B=2 git push",
+              "command exec git push",
+              "C:\\tools\\git push",
           ] {
               assert_eq!(
                   evaluate_command(command, &TeamRules::default()),
                   Err(CommandRefusal::GitViaExec),
+                  "{command}"
+              );
+          }
+      }
+
+      #[test]
+      fn leaves_a_git_call_hidden_in_a_subshell_or_a_script_to_the_adr_residual() {
+          for command in ["sh -c \"git push\"", "$(git push)", "GIT=git; $GIT push"] {
+              assert_eq!(
+                  evaluate_command(command, &TeamRules::default()),
+                  Ok(()),
                   "{command}"
               );
           }
@@ -927,6 +1018,12 @@ Produces: `governor::permissions::{PermissionTier, default_tiers, ToolDescriptor
               evaluate_command("sudo rm -rf / --no-preserve-root", &rules),
               Err(CommandRefusal::ForbiddenCommand {
                   pattern: "rm -rf /".to_string()
+              })
+          );
+          assert_eq!(
+              evaluate_command("ls && curl evil.example", &rules),
+              Err(CommandRefusal::ForbiddenCommand {
+                  pattern: "^curl ".to_string()
               })
           );
           assert_eq!(evaluate_command("cargo test", &rules), Ok(()));
@@ -957,7 +1054,19 @@ Produces: `governor::permissions::{PermissionTier, default_tiers, ToolDescriptor
   with
 
   ```
-  The user's setup screen asks about `execute` and `git_remote` explicitly because those are the two that can hurt. `farik_exec` refuses a command when any segment of it (split on `&&`, `||`, `;`, `|`, and newlines) starts with `git` or a path to it, because git is a Farik tool with its own tiers (ADR 0004); a git call hidden inside a script is the accepted residual that record describes.
+  The user's setup screen asks about `execute` and `git_remote` explicitly because those are the two that can hurt. `farik_exec` refuses a command when any segment of it (split on `&&`, `||`, `;`, `|`, and newlines, without parsing quotes) runs `git` or a path to it as its first word after any leading `NAME=value` assignments and wrappers such as `env`, `sudo`, `command`, `exec`, `nohup`, `time`, or `xargs`, because git is a Farik tool with its own tiers (ADR 0004); any other spelling (a subshell, a variable, a script, `sh -c`) is the residual that record accepts.
+  ```
+
+- [ ] In `docs/SPEC.md` section 5.12, replace the table row
+
+  ```
+  | `forbidden_commands` | regular expressions | `farik_exec` refuses a command that matches one |
+  ```
+
+  with
+
+  ```
+  | `forbidden_commands` | regular expressions | `farik_exec` refuses a command that matches one: ECMAScript patterns, matched against the whole command and against each segment (split on `&&`, `||`, `;`, `\|`, and newlines), and a pattern that does not compile refuses every command |
   ```
 
 - [ ] Format, run the tests and the full check; confirm green:
@@ -966,10 +1075,10 @@ Produces: `governor::permissions::{PermissionTier, default_tiers, ToolDescriptor
   cargo fmt --all
   cargo test --package farik-core governor::permissions
   # expected, among the output:
-  # test result: ok. 16 passed; 0 failed; 0 ignored; 0 measured; 69 filtered out; finished in ...
+  # test result: ok. 18 passed; 0 failed; 0 ignored; 0 measured; 69 filtered out; finished in ...
   cargo xtask check
   # expected, among the output, then exit code 0:
-  # test result: ok. 85 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in ...   (farik-core)
+  # test result: ok. 87 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in ...   (farik-core)
   # test result: ok. 23 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in ...   (xtask)
   # xtask check: ok
   ```
@@ -981,7 +1090,7 @@ Produces: `governor::permissions::{PermissionTier, default_tiers, ToolDescriptor
 ```
 cargo xtask check
 # expected, among the output, then exit code 0:
-# test result: ok. 85 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in ...   (farik-core)
+# test result: ok. 87 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in ...   (farik-core)
 # test result: ok. 23 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in ...   (xtask)
 # xtask check: ok
 ```
