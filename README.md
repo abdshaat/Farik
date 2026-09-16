@@ -4,7 +4,18 @@ An open-source operating system for small teams of AI agents, with a pixel-art o
 
 You assemble three to seven agents, give each a name, an avatar, and a role (Product Manager, Scrum Master, Architect, Software Developer, Marketing Specialist), and point them at a repository. The Product Manager writes contracts with explicit exit criteria before any work starts. A deterministic governor enforces budgets, permissions, and the rule that nobody accepts their own work. You can watch the team in the office, talk to any agent, or read along in the team channel.
 
-Status: specification stage. Nothing runs yet. Project standards are in place; see [CONTRIBUTING.md](CONTRIBUTING.md) before making a change.
+Status: phase 0 (foundation) in progress; nothing runs yet. Project standards are in place; see [CONTRIBUTING.md](CONTRIBUTING.md) before making a change.
+
+## Getting started
+
+Install `rustup`; it reads `rust-toolchain.toml` and installs Rust 1.98.1 with `rustfmt` and `clippy` on first use. Then:
+
+```
+cargo xtask install-hooks
+cargo xtask check
+```
+
+`cargo xtask check` runs the format check, clippy, the tests, the generated-file freshness check, the bare-TODO check, and the core no-I/O check, and is what the `check` workflow runs on every pull request. `cargo fmt --all` rewrites files to the house style.
 
 ## Documents
 

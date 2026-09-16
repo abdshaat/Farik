@@ -1,13 +1,13 @@
 # Phase 0, step 01: Workspace scaffold
 
-Status: draft
-Branch: `phase/0-foundation` (the phase branch; steps do not get their own)
+Status: done
+Branch: `claude/phase-0-implementation-izm38y` (the harness-assigned phase branch, left as assigned per `docs/standards/code.md`; steps do not get their own)
 Spec: `docs/SPEC.md` section 8.1 (a Rust backend in one Cargo workspace; `farik-core` has no I/O), section 9 (Apache 2.0); ADR 0005 (toolchain); `docs/standards/code.md`, "Toolchain"
 Depends on: none
 
 A plan is `ready` only when a reviewer other than the author has confirmed the three rules in `docs/standards/workflow.md` stage 2 (Plan): every decision made, no ambiguity, no forward dependencies. Record who confirmed and when here.
 
-Readiness confirmed by: pending
+Readiness confirmed by: a fresh Claude Code review session, 2026-09-16; the confirmation came after execution had begun, which pull request #4 records.
 
 ## Goal
 
@@ -78,7 +78,7 @@ Files: created `LICENSE`, `rust-toolchain.toml`, `Cargo.toml`, `Cargo.lock`, `.c
 Consumes: nothing
 Produces: `cargo xtask check`, `cargo xtask pre-commit`, `cargo xtask commit-msg <file>`, `cargo xtask todos`, `cargo xtask core-io`, `cargo xtask install-hooks`; `xtask::commit_message::check_commit_message(message: &str) -> Result<(), String>`; `xtask::todos::find_bare_todos(files: &[(String, String)]) -> Vec<String>`; `farik_core::CORE_CRATE_NAME: &str`; installed git hooks
 
-- [ ] Confirm the starting point, on a clean checkout of `phase/0-foundation` created from `main`:
+- [x] Confirm the starting point, on a clean checkout of the phase branch created from `main`:
 
   ```
   cargo xtask check
@@ -86,7 +86,7 @@ Produces: `cargo xtask check`, `cargo xtask pre-commit`, `cargo xtask commit-msg
   # error: could not find `Cargo.toml` in `.../Farik` or any parent directory
   ```
 
-- [ ] Fetch the license, pin the toolchain, and ignore build output:
+- [x] Fetch the license, pin the toolchain, and ignore build output:
 
   ```
   curl -sSL https://www.apache.org/licenses/LICENSE-2.0.txt -o LICENSE
@@ -104,7 +104,7 @@ Produces: `cargo xtask check`, `cargo xtask pre-commit`, `cargo xtask commit-msg
   profile = "minimal"
   ```
 
-- [ ] Write `Cargo.toml`:
+- [x] Write `Cargo.toml`:
 
   ```toml
   [workspace]
@@ -144,7 +144,7 @@ Produces: `cargo xtask check`, `cargo xtask pre-commit`, `cargo xtask commit-msg
   style_edition = "2024"
   ```
 
-- [ ] Write the `xtask` crate manifest and library root. `xtask/Cargo.toml`:
+- [x] Write the `xtask` crate manifest and library root. `xtask/Cargo.toml`:
 
   ```toml
   [package]
@@ -172,7 +172,7 @@ Produces: `cargo xtask check`, `cargo xtask pre-commit`, `cargo xtask commit-msg
   pub mod todos;
   ```
 
-- [ ] Write the failing tests for the commit message rule. `xtask/src/commit_message.rs` holds only this for now:
+- [x] Write the failing tests for the commit message rule. `xtask/src/commit_message.rs` holds only this for now:
 
   ```rust
   #[cfg(test)]
@@ -302,7 +302,7 @@ Produces: `cargo xtask check`, `cargo xtask pre-commit`, `cargo xtask commit-msg
 
   with an empty `xtask/src/main.rs` containing `fn main() {}` so the crate builds.
 
-- [ ] Run the tests and confirm they fail because the functions do not exist:
+- [x] Run the tests and confirm they fail because the functions do not exist:
 
   ```
   cargo test --package xtask
@@ -312,7 +312,7 @@ Produces: `cargo xtask check`, `cargo xtask pre-commit`, `cargo xtask commit-msg
   # error: could not compile `xtask` (lib test) due to 2 previous errors
   ```
 
-- [ ] Write the implementations above the tests. `xtask/src/commit_message.rs` in full:
+- [x] Write the implementations above the tests. `xtask/src/commit_message.rs` in full:
 
   ```rust
   const TYPES: [&str; 9] = [
@@ -555,7 +555,7 @@ Produces: `cargo xtask check`, `cargo xtask pre-commit`, `cargo xtask commit-msg
   }
   ```
 
-- [ ] Run the tests; confirm green:
+- [x] Run the tests; confirm green:
 
   ```
   cargo test --package xtask
@@ -563,7 +563,7 @@ Produces: `cargo xtask check`, `cargo xtask pre-commit`, `cargo xtask commit-msg
   # test result: ok. 13 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
   ```
 
-- [ ] Write the commands. `xtask/src/main.rs` in full:
+- [x] Write the commands. `xtask/src/main.rs` in full:
 
   ```rust
   //! `cargo xtask <command>`: the repository's own commands.
@@ -744,7 +744,7 @@ Produces: `cargo xtask check`, `cargo xtask pre-commit`, `cargo xtask commit-msg
   }
   ```
 
-- [ ] Write the `farik-core` manifest and its failing smoke test. `crates/core/Cargo.toml`:
+- [x] Write the `farik-core` manifest and its failing smoke test. `crates/core/Cargo.toml`:
 
   ```toml
   [package]
@@ -779,7 +779,7 @@ Produces: `cargo xtask check`, `cargo xtask pre-commit`, `cargo xtask commit-msg
   }
   ```
 
-- [ ] Run it and confirm it fails because the constant is missing:
+- [x] Run it and confirm it fails because the constant is missing:
 
   ```
   cargo test --package farik-core
@@ -787,7 +787,7 @@ Produces: `cargo xtask check`, `cargo xtask pre-commit`, `cargo xtask commit-msg
   # error[E0432]: unresolved import `super::CORE_CRATE_NAME`
   ```
 
-- [ ] Make `crates/core/src/lib.rs` exactly:
+- [x] Make `crates/core/src/lib.rs` exactly:
 
   ```rust
   //! Farik's harness: schemas, the task state machine, the governor, and the cost model.
@@ -807,7 +807,7 @@ Produces: `cargo xtask check`, `cargo xtask pre-commit`, `cargo xtask commit-msg
   }
   ```
 
-- [ ] Format, then run the full check; confirm green:
+- [x] Format, then run the full check; confirm green:
 
   ```
   cargo fmt --all
@@ -819,7 +819,7 @@ Produces: `cargo xtask check`, `cargo xtask pre-commit`, `cargo xtask commit-msg
   # exit code 0
   ```
 
-- [ ] Prove the core no-I/O check, then remove the probe:
+- [x] Prove the core no-I/O check, then remove the probe:
 
   ```
   printf '//! probe\n/// x\npub fn probe() -> std::io::Result<String> { std::fs::read_to_string("x") }\n' > crates/core/src/probe.rs
@@ -831,7 +831,7 @@ Produces: `cargo xtask check`, `cargo xtask pre-commit`, `cargo xtask commit-msg
   git rm -f crates/core/src/probe.rs
   ```
 
-- [ ] Install the hooks and prove them. Stage everything, then:
+- [x] Install the hooks and prove them. Stage everything, then:
 
   ```
   cargo xtask install-hooks
@@ -853,7 +853,7 @@ Files: created `.github/workflows/check.yml`
 Consumes: `cargo xtask check` from Task 1
 Produces: the `check` workflow on pull requests and on pushes to `main`
 
-- [ ] Write `.github/workflows/check.yml`:
+- [x] Write `.github/workflows/check.yml`:
 
   ```yaml
   name: check
@@ -874,16 +874,16 @@ Produces: the `check` workflow on pull requests and on pushes to `main`
         - run: cargo xtask check
   ```
 
-- [ ] Confirm the lockfile is complete and the check is reproducible from a clean build, which is what CI does:
+- [x] Confirm the lockfile is complete and the check is reproducible from a clean build, which is what CI does:
 
   ```
   cargo clean && cargo xtask check
   # expected: ends with "xtask check: ok", exit code 0; git status shows Cargo.lock unchanged
   ```
 
-- [ ] Commit: `ci(repo): run cargo xtask check on pull requests and main`
+- [x] Commit: `ci(repo): run cargo xtask check on pull requests and main`
 
-- [ ] Push the phase branch and open the phase's draft pull request (`docs/standards/workflow.md` stage 5), then confirm on the pull request that the `check` job ran and passed on this commit. Paste the job's summary lines into the pull request's verification section. If the job fails, the failure is this step's to fix before Task 3.
+- [x] Push the phase branch and open the phase's draft pull request (`docs/standards/workflow.md` stage 5), then confirm on the pull request that the `check` job ran and passed on this commit. Paste the job's summary lines into the pull request's verification section. If the job fails, the failure is this step's to fix before Task 3.
 
 ### Task 3: Documentation
 
@@ -892,7 +892,7 @@ Files: modified `README.md`, `CLAUDE.md`
 Consumes: nothing
 Produces: contributor instructions that match the repository
 
-- [ ] In `README.md`, replace the line beginning `Status: specification stage.` with:
+- [x] In `README.md`, replace the line beginning `Status: specification stage.` with:
 
   ```markdown
   Status: phase 0 (foundation) in progress; nothing runs yet. Project standards are in place; see [CONTRIBUTING.md](CONTRIBUTING.md) before making a change.
@@ -911,15 +911,15 @@ Produces: contributor instructions that match the repository
 
   (The inner fenced block uses three backticks in the file; it is shown indented here only to nest it.)
 
-- [ ] In `CLAUDE.md`, replace the `## Current state` paragraph with:
+- [x] In `CLAUDE.md`, replace the `## Current state` paragraph with:
 
   ```markdown
-  Phase 0 (foundation) is in progress on `phase/0-foundation`. The Cargo workspace exists; `farik-core` has no behavior yet. The next steps are the schema generation pipeline and contract validation, per `docs/plans/project-plan.md`.
+  Phase 0 (foundation) is in progress on `claude/phase-0-implementation-izm38y` (the harness-assigned phase branch). The Cargo workspace exists; `farik-core` has no behavior yet. The next steps are the schema generation pipeline and contract validation, per `docs/plans/project-plan.md`.
   ```
 
-- [ ] Run the full check once more; confirm green (Markdown is not checked, so the output is the same as Task 1's).
+- [x] Run the full check once more; confirm green (Markdown is not checked, so the output is the same as Task 1's).
 
-- [ ] Commit: `docs(repo): describe the toolchain and the check command`
+- [x] Commit: `docs(repo): describe the toolchain and the check command`
 
 ## Verification
 
@@ -938,7 +938,7 @@ git log --oneline -3
 # build(repo): add the cargo workspace, xtask, and commit hooks
 ```
 
-The `check` workflow run on the pushed head of `phase/0-foundation` is green; its link and summary are in the pull request.
+The `check` workflow run on the pushed head of the phase branch is green; its link and summary are in the pull request.
 
 ```
 sha256sum LICENSE
