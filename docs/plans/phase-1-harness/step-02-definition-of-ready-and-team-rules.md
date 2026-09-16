@@ -1,6 +1,6 @@
 # Phase 1, step 02: Definition of Ready and team rules
 
-Status: in progress
+Status: done
 Branch: `claude/phase-0-implementation-izm38y` (the harness-assigned phase branch, left as assigned per `docs/standards/code.md`; steps do not get their own)
 Spec: `docs/SPEC.md` section 5.3 (Definition of Ready), 5.12 (team rules), 5.16 (an epic's tasks: parent, paths, budget), 5.6 (the default protected paths), F5
 Depends on: phase 0 (merged in #4); step 01 of this phase (committed as f9f0e67, 0e50df1, 3cc8bc3)
@@ -251,7 +251,7 @@ Files: created `crates/core/src/governor/readiness.rs`, `crates/core/src/governo
 Consumes: `governor::team_rules::TeamRules` from Task 1; `contract::{Role, TaskContract, TaskStatus, Verification, VerificationWire, validate_contract}`, `contract::fixtures::a_contract_wire`, and `generated::task_contract::FarikTaskContractKind` from `main`
 Produces: `governor::readiness::{ReadinessRule, JudgmentReview, ParentState, ReadinessContext, ReadinessFailure, evaluate_readiness}`; `governor::readiness::fixtures::{a_contract, a_ready_context}`
 
-- [ ] Declare the module. `crates/core/src/governor.rs` in full:
+- [x] Declare the module. `crates/core/src/governor.rs` in full:
 
   ```rust
   //! The governor: every rule of `docs/SPEC.md` section 5 as pure functions over values passed
@@ -267,7 +267,7 @@ Produces: `governor::readiness::{ReadinessRule, JudgmentReview, ParentState, Rea
   /// The transition table of `docs/SPEC.md` section 5.2 as data, with lookups.
   pub mod transition_table;
   ```
-- [ ] Write the fixtures. `crates/core/src/governor/readiness/fixtures.rs` in full:
+- [x] Write the fixtures. `crates/core/src/governor/readiness/fixtures.rs` in full:
 
   ```rust
   use std::collections::BTreeMap;
@@ -314,7 +314,7 @@ Produces: `governor::readiness::{ReadinessRule, JudgmentReview, ParentState, Rea
       }
   }
   ```
-- [ ] Write the failing tests. `crates/core/src/governor/readiness.rs` holds the module doc, the imports, the fixtures declaration, the rule enum, the context and failure types, and the tests, but not `evaluate_readiness` or the checks:
+- [x] Write the failing tests. `crates/core/src/governor/readiness.rs` holds the module doc, the imports, the fixtures declaration, the rule enum, the context and failure types, and the tests, but not `evaluate_readiness` or the checks:
 
   ```rust
   //! The Definition of Ready (`docs/SPEC.md` section 5.3), the team rules it applies (5.12), and
@@ -772,7 +772,7 @@ Produces: `governor::readiness::{ReadinessRule, JudgmentReview, ParentState, Rea
       }
   }
   ```
-- [ ] Run them and confirm they fail because the function is missing (the three unused-import warnings are the imports the checks will use):
+- [x] Run them and confirm they fail because the function is missing (the three unused-import warnings are the imports the checks will use):
 
   ```
   cargo test --package farik-core governor::readiness
@@ -784,7 +784,7 @@ Produces: `governor::readiness::{ReadinessRule, JudgmentReview, ParentState, Rea
   # error: could not compile `farik-core` (lib test) due to 1 previous error; 3 warnings emitted
   ```
 
-- [ ] Write the checks and `evaluate_readiness` between the types and the tests. `crates/core/src/governor/readiness.rs` in full:
+- [x] Write the checks and `evaluate_readiness` between the types and the tests. `crates/core/src/governor/readiness.rs` in full:
 
   ```rust
   //! The Definition of Ready (`docs/SPEC.md` section 5.3), the team rules it applies (5.12), and
@@ -1728,7 +1728,7 @@ Produces: `governor::readiness::{ReadinessRule, JudgmentReview, ParentState, Rea
       }
   }
   ```
-- [ ] Format, run the tests and the full check; confirm green:
+- [x] Format, run the tests and the full check; confirm green:
 
   ```
   cargo fmt --all
@@ -1742,7 +1742,7 @@ Produces: `governor::readiness::{ReadinessRule, JudgmentReview, ParentState, Rea
   # xtask check: ok
   ```
 
-- [ ] Commit: `feat(core): evaluate the definition of ready`
+- [x] Commit: `feat(core): evaluate the definition of ready`
 
 ## Verification
 
