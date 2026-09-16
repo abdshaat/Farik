@@ -1,6 +1,6 @@
 # Phase 1, step 01: Task status and transition table
 
-Status: in progress
+Status: done
 Branch: `claude/phase-0-implementation-izm38y` (the harness-assigned phase branch, left as assigned per `docs/standards/code.md`; steps do not get their own)
 Spec: `docs/SPEC.md` section 5.2 (the task lifecycle and its transition table), F5 (the governor as a library with a test for every transition)
 Depends on: phase 0 (merged in #4)
@@ -241,7 +241,7 @@ Files: created `crates/core/src/governor/transition_table.rs`; modified `crates/
 Consumes: `governor::task_status::{TASK_STATUSES, is_terminal}` from Task 1; `contract::TaskStatus` from `main`
 Produces: `governor::transition_table::{TransitionActor, GateId, Status, TransitionRow, TRANSITION_TABLE, find_transitions, transitions_from}`
 
-- [ ] Declare the module. `crates/core/src/governor.rs` in full:
+- [x] Declare the module. `crates/core/src/governor.rs` in full:
 
   ```rust
   //! The governor: every rule of `docs/SPEC.md` section 5 as pure functions over values passed
@@ -253,7 +253,7 @@ Produces: `governor::transition_table::{TransitionActor, GateId, Status, Transit
   pub mod transition_table;
   ```
 
-- [ ] Write the failing tests. `crates/core/src/governor/transition_table.rs` holds only this:
+- [x] Write the failing tests. `crates/core/src/governor/transition_table.rs` holds only this:
 
   ```rust
   #[cfg(test)]
@@ -476,7 +476,7 @@ Produces: `governor::transition_table::{TransitionActor, GateId, Status, Transit
   }
   ```
 
-- [ ] Run it and confirm it fails because the items are missing:
+- [x] Run it and confirm it fails because the items are missing:
 
   ```
   cargo test --package farik-core governor::transition_table
@@ -486,7 +486,7 @@ Produces: `governor::transition_table::{TransitionActor, GateId, Status, Transit
   # error[E0432]: unresolved imports `super::Status`, `super::TRANSITION_TABLE`, `super::TransitionRow`, `super::find_transitions`, `super::transitions_from`
   ```
 
-- [ ] Write the implementation above the tests. `crates/core/src/governor/transition_table.rs` in full:
+- [x] Write the implementation above the tests. `crates/core/src/governor/transition_table.rs` in full:
 
   ```rust
   use super::task_status::is_terminal;
@@ -927,7 +927,7 @@ Produces: `governor::transition_table::{TransitionActor, GateId, Status, Transit
   ```
 
 
-- [ ] Format, run the tests and the full check; confirm green:
+- [x] Format, run the tests and the full check; confirm green:
 
   ```
   cargo fmt --all
@@ -941,7 +941,7 @@ Produces: `governor::transition_table::{TransitionActor, GateId, Status, Transit
   # xtask check: ok
   ```
 
-- [ ] Commit: `feat(core): add the transition table of spec 5.2 as data`
+- [x] Commit: `feat(core): add the transition table of spec 5.2 as data`
 
 ## Verification
 

@@ -3,3 +3,5 @@
 
 /// The lifecycle's statuses and which of them are terminal.
 pub mod task_status;
+/// The transition table of `docs/SPEC.md` section 5.2 as data, with lookups.
+pub mod transition_table;
