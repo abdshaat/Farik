@@ -22,7 +22,14 @@ fn run(args: &[String]) -> anyhow::Result<()> {
     let root = workspace_root()?;
     match args.first().map(String::as_str) {
         Some("check") => check(&root),
-        Some("generate") => generate(&root, args.get(1).is_some_and(|flag| flag == "--check")),
+        Some("generate") => generate(
+            &root,
+            match args.get(1).map(String::as_str) {
+                None => false,
+                Some("--check") => true,
+                Some(flag) => bail!("unknown flag {flag}; usage: cargo xtask generate [--check]"),
+            },
+        ),
         Some("pre-commit") => pre_commit(&root),
         Some("commit-msg") => commit_msg(
             args.get(1)
@@ -142,7 +149,7 @@ fn generate(root: &Path, check_only: bool) -> anyhow::Result<()> {
         let types = xtask::generate::generate_types(entry, &schema_json)?;
         let outputs = [(entry.types, types), (entry.schema_copy, schema_json)];
         for (path, wanted) in outputs {
-            let current = fs::read_to_string(root.join(path)).unwrap_or_default();
+            let current = read_if_present(&root.join(path))?;
             if check_only {
                 if current != wanted {
                     bail!(
@@ -157,6 +164,14 @@ fn generate(root: &Path, check_only: bool) -> anyhow::Result<()> {
         }
     }
     Ok(())
+}
+
+fn read_if_present(path: &Path) -> anyhow::Result<String> {
+    match fs::read_to_string(path) {
+        Ok(text) => Ok(text),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(String::new()),
+        Err(error) => Err(error).with_context(|| format!("reading {}", path.display())),
+    }
 }
 
 fn install_hooks(root: &Path) -> anyhow::Result<()> {
