@@ -1,6 +1,6 @@
 # Phase 1, step 03: Allowed and protected paths
 
-Status: ready
+Status: done
 Branch: `claude/phase-0-implementation-izm38y` (the harness-assigned phase branch, left as assigned per `docs/standards/code.md`; steps do not get their own)
 Spec: `docs/SPEC.md` section 5.4 item 2 (no file outside `allowed_paths` may change), 5.6 (protected paths: no tool may read or write them, whatever its tier; this step adds the sentence that pins how globs match), 5.12 (`protected_paths` is a team rule), F5
 Depends on: phase 0 (merged in #4); step 01 of this phase (committed as f9f0e67, 0e50df1, 3cc8bc3); step 02 of this phase (committed as 21fe00a, 87a3561, 4a1ac90)
@@ -67,7 +67,7 @@ Files: created `crates/core/src/governor/paths.rs`; modified `Cargo.toml`, `Carg
 Consumes: nothing
 Produces: `governor::paths::{PathViolation, GlobError, PathRefusal, check_allowed_paths, check_protected_paths}`
 
-- [ ] Confirm the baseline on the branch head:
+- [x] Confirm the baseline on the branch head:
 
   ```
   cargo xtask check
@@ -77,7 +77,7 @@ Produces: `governor::paths::{PathViolation, GlobError, PathRefusal, check_allowe
   # xtask check: ok
   ```
 
-- [ ] Add the dependency. `Cargo.toml` in full:
+- [x] Add the dependency. `Cargo.toml` in full:
 
   ```toml
   [workspace]
@@ -135,7 +135,7 @@ Produces: `governor::paths::{PathViolation, GlobError, PathRefusal, check_allowe
   [lints]
   workspace = true
   ```
-- [ ] Declare the module. `crates/core/src/governor.rs` in full:
+- [x] Declare the module. `crates/core/src/governor.rs` in full:
 
   ```rust
   //! The governor: every rule of `docs/SPEC.md` section 5 as pure functions over values passed
@@ -153,7 +153,7 @@ Produces: `governor::paths::{PathViolation, GlobError, PathRefusal, check_allowe
   /// The transition table of `docs/SPEC.md` section 5.2 as data, with lookups.
   pub mod transition_table;
   ```
-- [ ] Write the failing tests. `crates/core/src/governor/paths.rs` holds only this:
+- [x] Write the failing tests. `crates/core/src/governor/paths.rs` holds only this:
 
   ```rust
   #[cfg(test)]
@@ -296,7 +296,7 @@ Produces: `governor::paths::{PathViolation, GlobError, PathRefusal, check_allowe
       }
   }
   ```
-- [ ] Run them and confirm they fail because the items are missing:
+- [x] Run them and confirm they fail because the items are missing:
 
   ```
   cargo test --package farik-core governor::paths
@@ -305,7 +305,7 @@ Produces: `governor::paths::{PathViolation, GlobError, PathRefusal, check_allowe
   # error: could not compile `farik-core` (lib test) due to 1 previous error
   ```
 
-- [ ] Write the implementation above the tests. `crates/core/src/governor/paths.rs` in full:
+- [x] Write the implementation above the tests. `crates/core/src/governor/paths.rs` in full:
 
   ```rust
   //! Allowed and protected paths (`docs/SPEC.md` sections 5.4 item 2, 5.6, and 5.12): which files a
@@ -560,7 +560,7 @@ Produces: `governor::paths::{PathViolation, GlobError, PathRefusal, check_allowe
       }
   }
   ```
-- [ ] In `docs/SPEC.md` section 5.6, replace the sentence
+- [x] In `docs/SPEC.md` section 5.6, replace the sentence
 
   ```
   The default list is `.env`, `.env.*`, `**/*.pem`, `**/*.key`, and `.farik/local/**`.
@@ -572,7 +572,7 @@ Produces: `governor::paths::{PathViolation, GlobError, PathRefusal, check_allowe
   The default list is `.env`, `.env.*`, `**/*.pem`, `**/*.key`, and `.farik/local/**`. Protected and allowed globs match the whole path relative to the project root: `*` stays within one directory, `**` crosses directories, a bare name such as `.env` names the root file only and `**/.env` names it anywhere, a path with a `..` segment is always refused, and a glob that does not compile refuses the check rather than matching nothing.
   ```
 
-- [ ] Format, run the tests and the full check; confirm green, and that the lockfile pins `globset` 0.4.20:
+- [x] Format, run the tests and the full check; confirm green, and that the lockfile pins `globset` 0.4.20:
 
   ```
   cargo fmt --all
@@ -590,7 +590,7 @@ Produces: `governor::paths::{PathViolation, GlobError, PathRefusal, check_allowe
   # version = "0.4.20"
   ```
 
-- [ ] Commit: `feat(core): check changed paths against allowed and protected globs`
+- [x] Commit: `feat(core): check changed paths against allowed and protected globs`
 
 ## Verification
 
