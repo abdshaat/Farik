@@ -76,7 +76,7 @@ Produces: `generated::prices::{FarikPriceTable, ModelPrice}`; the schema copy fo
   ```
   cargo xtask check
   # expected, among the output, then exit code 0:
-  # test result: ok. 87 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in ...   (farik-core)
+  # test result: ok. 90 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in ...   (farik-core)
   # test result: ok. 23 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in ...   (xtask)
   # xtask check: ok
   ```
@@ -280,7 +280,7 @@ Produces: `generated::prices::{FarikPriceTable, ModelPrice}`; the schema copy fo
   cargo fmt --all
   cargo xtask check
   # expected, among the output, then exit code 0:
-  # test result: ok. 87 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in ...   (farik-core)
+  # test result: ok. 90 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in ...   (farik-core)
   # test result: ok. 23 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in ...   (xtask)
   # xtask check: ok
   ```
@@ -1355,13 +1355,13 @@ Produces: `pricing::{PriceTable, ModelPrice, ValidationError, validate_price_tab
   cargo fmt --all
   cargo test --package farik-core pricing::
   # expected, among the output:
-  # test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 98 filtered out; finished in ...
+  # test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 101 filtered out; finished in ...
   cargo test --package farik-core budget::
   # expected, among the output:
-  # test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 94 filtered out; finished in ...
+  # test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 97 filtered out; finished in ...
   cargo xtask check
   # expected, among the output, then exit code 0:
-  # test result: ok. 105 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in ...   (farik-core)
+  # test result: ok. 108 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in ...   (farik-core)
   # test result: ok. 23 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in ...   (xtask)
   # xtask check: ok
   ```
@@ -1373,7 +1373,7 @@ Produces: `pricing::{PriceTable, ModelPrice, ValidationError, validate_price_tab
 ```
 cargo xtask check
 # expected, among the output, then exit code 0:
-# test result: ok. 105 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in ...   (farik-core)
+# test result: ok. 108 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in ...   (farik-core)
 # test result: ok. 23 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in ...   (xtask)
 # xtask check: ok
 ```
