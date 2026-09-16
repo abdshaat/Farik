@@ -6,8 +6,8 @@ const SUBJECT_LIMIT: usize = 72;
 /// Checks the first non-comment line of a commit message against the Conventional Commits shape.
 ///
 /// Accepts `<type>(<scope>): <subject>` with one of the nine types, a kebab-case scope, a
-/// lower-case first character, no trailing period, and at most 72 characters; merge and revert
-/// commits pass as they are.
+/// subject of at least two characters starting with a lower-case letter or a digit, no trailing
+/// period, and at most 72 characters; merge and revert commits pass as they are.
 ///
 /// # Errors
 ///
@@ -118,5 +118,21 @@ mod tests {
     #[test]
     fn rejects_a_subject_that_starts_with_an_upper_case_letter() {
         assert!(check_commit_message("feat(core): Add result type").is_err());
+    }
+
+    #[test]
+    fn rejects_a_type_that_is_not_one_of_the_nine() {
+        assert!(check_commit_message("wip(core): add result type").is_err());
+    }
+
+    #[test]
+    fn rejects_a_scope_that_is_not_kebab_case() {
+        assert!(check_commit_message("feat(Core): add result type").is_err());
+        assert!(check_commit_message("feat(core_io): add result type").is_err());
+    }
+
+    #[test]
+    fn rejects_a_subject_without_a_scope() {
+        assert!(check_commit_message("feat: add result type").is_err());
     }
 }
