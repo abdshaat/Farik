@@ -1,6 +1,9 @@
 //! The governor: every rule of `docs/SPEC.md` section 5 as pure functions over values passed
 //! in. It never reads the world and never mutates; the runtime applies what it decides.
 
+/// The Definition of Done of `docs/SPEC.md` section 5.4 as one function over a contract and
+/// the evidence gathered for it.
+pub mod done;
 /// Iteration and escalation rules (`docs/SPEC.md` sections 5.2 and 5.7).
 pub mod escalation;
 /// Allowed and protected paths (`docs/SPEC.md` sections 5.4, 5.6, 5.12).

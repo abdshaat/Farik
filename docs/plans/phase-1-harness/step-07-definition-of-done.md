@@ -1,6 +1,6 @@
 # Phase 1, step 07: Definition of Done
 
-Status: ready
+Status: done
 Branch: `claude/phase-0-implementation-izm38y` (the harness-assigned phase branch, left as assigned per `docs/standards/code.md`; steps do not get their own)
 Spec: `docs/SPEC.md` section 5.4 (the five conditions for acceptance, and the reviewer's fresh session), section 5.16 item 4 (an epic needs the human), section 5.3 (the `human` verification method), section 4 (what a contract is, which task 1 makes exact), F5
 Depends on: phase 0 (merged in #4) for `contract::{TaskContract, Verification, VerificationWire, validate_contract}` and the generated types; step 02 of this phase for `governor::readiness::fixtures::a_contract`, which every one of task 2's tests builds on (committed as 21fe00a, 87a3561, 4a1ac90); step 03 for `check_allowed_paths` (220b576, 3355d35); step 06 (33202e7 and its review fix abfb7d8)
@@ -354,7 +354,7 @@ Files: created `crates/core/src/governor/done.rs`; modified `crates/core/src/gov
 Consumes: `contract::{TaskContract, Verification}` and, in the tests, `contract::VerificationWire` and `governor::readiness::fixtures::a_contract`; `generated::task_contract::{FarikTaskContractKind, FarikTaskContractRisk}`; `governor::paths::{GlobError, PathRefusal, check_allowed_paths}`
 Produces: `governor::done::{RunBy, CriterionResult, DoneEvidence, DoneRule, DoneFailure, requires_human_acceptance, evaluate_done}`
 
-- [ ] Declare the module. `crates/core/src/governor.rs` in full:
+- [x] Declare the module. `crates/core/src/governor.rs` in full:
 
   ```rust
   //! The governor: every rule of `docs/SPEC.md` section 5 as pure functions over values passed
@@ -380,7 +380,7 @@ Produces: `governor::done::{RunBy, CriterionResult, DoneEvidence, DoneRule, Done
   pub mod transition_table;
   ```
 
-- [ ] Write the failing tests. `crates/core/src/governor/done.rs` holds only this:
+- [x] Write the failing tests. `crates/core/src/governor/done.rs` holds only this:
 
   ```rust
   #[cfg(test)]
@@ -701,7 +701,7 @@ Produces: `governor::done::{RunBy, CriterionResult, DoneEvidence, DoneRule, Done
   }
   ```
 
-- [ ] Run them and confirm they fail because the items are missing:
+- [x] Run them and confirm they fail because the items are missing:
 
   ```
   cargo test --package farik-core governor::done
@@ -710,7 +710,7 @@ Produces: `governor::done::{RunBy, CriterionResult, DoneEvidence, DoneRule, Done
   # error: could not compile `farik-core` (lib test) due to 1 previous error
   ```
 
-- [ ] Write the implementation above the tests. `crates/core/src/governor/done.rs` in full:
+- [x] Write the implementation above the tests. `crates/core/src/governor/done.rs` in full:
 
   ```rust
   //! The Definition of Done (`docs/SPEC.md` section 5.4): what a reviewer must have run, what the
@@ -1329,7 +1329,7 @@ Produces: `governor::done::{RunBy, CriterionResult, DoneEvidence, DoneRule, Done
   }
   ```
 
-- [ ] Format, run the tests and the full check; confirm green:
+- [x] Format, run the tests and the full check; confirm green:
 
   ```
   cargo fmt --all
@@ -1343,7 +1343,7 @@ Produces: `governor::done::{RunBy, CriterionResult, DoneEvidence, DoneRule, Done
   # xtask check: ok
   ```
 
-- [ ] Commit: `feat(core): decide whether a task meets the definition of done`
+- [x] Commit: `feat(core): decide whether a task meets the definition of done`
 
 ## Verification
 
