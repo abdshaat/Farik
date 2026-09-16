@@ -2,7 +2,7 @@
 
 Status: draft
 Branch: `claude/phase-0-implementation-izm38y` (the harness-assigned phase branch, left as assigned per `docs/standards/code.md`; steps do not get their own)
-Spec: `docs/SPEC.md` section 5.2 (`rejected → in_progress` below the iteration limit and `rejected → escalated` at it; `refining → escalated` after three failed readiness checks; `blocked → escalated` past the blocked limit, default 24 hours), section 5.7 (what an escalation carries and its reasons), section 5.16 (the `approval` reason), F5
+Spec: `docs/SPEC.md` section 5.2 (`rejected → in_progress` below the iteration limit and `rejected → escalated` at it; `refining → escalated` after three failed readiness checks; `blocked → escalated` past the blocked limit, default 24 hours), section 5.7 (what an escalation carries and its ten reasons; this step writes the tenth into its list), section 5.16 (what the `approval` reason waits for), F5
 Depends on: phase 0 (merged in #4); step 05 of this phase (committed as 5ad2c21, c4cf30b)
 
 A plan is `ready` only when a reviewer other than the author has confirmed the three rules in `docs/standards/workflow.md` stage 2 (Plan): every decision made, no ambiguity, no forward dependencies. Record who confirmed and when here.
@@ -11,7 +11,7 @@ Readiness confirmed by: pending
 
 ## Goal
 
-`farik-core` can decide the three counting rules of the lifecycle that are not budgets: whether a rejected task goes back to `in_progress` or escalates, whether a contract that failed the Definition of Ready is refined again or its task escalates, and whether a blocked task has waited too long; and it has the record an escalation carries to the user, with the spec's ten reasons as wire names. Step 08's gates and step 09's transition evaluation call these three functions behind `IterationBelowLimit`, `IterationLimitReached`, `ReadinessExhausted`, and `BlockedAge`; phase 2's events carry the reason.
+`farik-core` can decide the three counting rules of the lifecycle that are not budgets: whether a rejected task goes back to `in_progress` or escalates, whether a contract that failed the Definition of Ready is refined again or its task escalates, and whether a blocked task has waited too long; and it has the record an escalation carries to the user, with the spec's ten reasons as wire names. Step 09's transition evaluation calls these three functions behind the gates `IterationBelowLimit`, `IterationLimitReached`, `ReadinessExhausted`, and `BlockedAge`, which are gates of step 01's table rather than step 08's predicates; phase 2's events carry the reason.
 
 ## Decisions
 
@@ -20,7 +20,7 @@ All in `docs/plans/project-plan.md`, phase 1, restated here only where this step
 - `iteration` is how many times the task has already been returned to `in_progress` after a rejection, the contract's `iteration` field; `max_iterations` is how many times that may happen (the schema's own words: "how many times the task may be rejected and returned to in_progress before it escalates"). A rejection returns the task while `iteration < max_iterations` and escalates once the limit is reached, so with the default of 3 the first three rejections return and the fourth escalates; step 09's `IncrementIteration` effect counts each return. Rejected: counting the rejection itself before comparing, because then the third rejection of a task allowed three returns would escalate.
 - A failed readiness check is counted with the failure that just happened included: the first two failures retry, the third escalates (spec 5.2, "fails DoR three times"); the limit is the constant `READINESS_ATTEMPT_LIMIT` = 3, because the spec gives one number and no contract field carries it.
 - A blocked task escalates when its age reaches the limit (`>=`), consistent with step 05's budgets; `DEFAULT_BLOCKED_LIMIT` is 24 hours; the limit is a parameter because the spec says it is configurable. Time is injected: the function takes `blocked_at` and `now` (project plan, every-phase decisions), and a `now` before `blocked_at`, a clock that went backwards, counts as within the limit rather than as an error, because the next tick will tell. `std::time::Duration` is the limit's type, as in step 05; `chrono::DateTime<Utc>` is the timestamp's, as in the generated contract.
-- `EscalationReason` has the spec 5.7 list plus `approval` (spec 5.16), serialised in `snake_case` (`blocker_age`, `risk_gate`, `readiness_failures`, `explicit_request`), so that phase 2's `task.escalated` event carries the same words the spec uses. Rejected: a generated type, because the event schema that will carry it is phase 2 step 01's.
+- `EscalationReason` has spec 5.7's list, which already names the approval of an epic (5.16 says what that approval waits for), plus `readiness_failures`, which 5.7 does not name: spec 5.2 escalates a contract that failed the Definition of Ready three times, and 5.7's prose listed nine reasons without that one. This step writes the tenth into 5.7 in the wire spelling, so that the spec's list and this enum are the same ten (hard rule 8). Serialised in `snake_case` (`blocker_age`, `risk_gate`, `readiness_failures`, `explicit_request`), so that phase 2's `task.escalated` event carries the same words the spec uses. Rejected: a generated type, because the event schema that will carry it is phase 2 step 01's.
 - `Escalation` is a plain record (`task_id`, `reason`, `tried`, `options`); the runtime fills `tried` and `options` from the agent's escalation call, and this step only defines the shape.
 - `DEFAULT_ITERATION_LIMIT` = 3 is a public constant, the schema's default for `max_iterations`, so that tests and later steps name the number once; the project plan's step 06 entry gains the three constants in this plan's commit.
 - Tests import the items by name rather than a glob; every code block below is the file after `cargo fmt --all`.
@@ -46,6 +46,7 @@ Touches `crates/core` only: one new child of `governor`. Consumes `contract::Tas
 ```
 crates/core/src/governor.rs                         modifies: declares escalation
 crates/core/src/governor/escalation.rs              creates: EscalationReason, Escalation, the three constants, the three outcome enums and functions, seven tests
+docs/SPEC.md                                        modifies: section 5.7 names the ten reasons in their wire spelling
 docs/plans/project-plan.md                          modifies: phase 1 step 06 interface gains the three constants (in the plan's own commit)
 docs/plans/phase-1-harness/step-06-iteration-and-escalation-rules.md   modifies: checkboxes ticked
 ```
@@ -137,6 +138,7 @@ Produces: `governor::escalation::{EscalationReason, Escalation, DEFAULT_ITERATIO
 
       #[test]
       fn retries_readiness_twice_and_escalates_on_the_third_failure() {
+          assert_eq!(evaluate_readiness_attempts(0), ReadinessOutcome::Retry);
           assert_eq!(evaluate_readiness_attempts(1), ReadinessOutcome::Retry);
           assert_eq!(evaluate_readiness_attempts(2), ReadinessOutcome::Retry);
           assert_eq!(
@@ -269,7 +271,7 @@ Produces: `governor::escalation::{EscalationReason, Escalation, DEFAULT_ITERATIO
       RiskGate,
       /// An epic awaits the user's approval of its contract (spec 5.16).
       Approval,
-      /// The contract failed the Definition of Ready too many times.
+      /// The contract failed the Definition of Ready three times (spec 5.2).
       ReadinessFailures,
       /// Integrating the accepted work failed (spec 5.14).
       Integration,
@@ -413,6 +415,7 @@ Produces: `governor::escalation::{EscalationReason, Escalation, DEFAULT_ITERATIO
 
       #[test]
       fn retries_readiness_twice_and_escalates_on_the_third_failure() {
+          assert_eq!(evaluate_readiness_attempts(0), ReadinessOutcome::Retry);
           assert_eq!(evaluate_readiness_attempts(1), ReadinessOutcome::Retry);
           assert_eq!(evaluate_readiness_attempts(2), ReadinessOutcome::Retry);
           assert_eq!(
@@ -503,6 +506,20 @@ Produces: `governor::escalation::{EscalationReason, Escalation, DEFAULT_ITERATIO
       }
   }
   ```
+- [ ] Name the ten reasons in the spec. In `docs/SPEC.md` section 5.7, replace
+
+  ```
+  An escalation is a task state and a message to the user. It carries: the task, the reason (budget, sessions, iterations, blocker age, permission, risk gate, approval of an epic, integration, explicit request), what the agent tried, and the options the agent proposes.
+  ```
+
+  with
+
+  ```
+  An escalation is a task state and a message to the user. It carries: the task, the reason, what the agent tried, and the options the agent proposes. There are ten reasons, written on the wire as `budget`, `sessions`, `iterations`, `blocker_age`, `permission`, `risk_gate`, `approval` (an epic waiting for the user's approval of its contract, 5.16), `readiness_failures` (a contract that failed the Definition of Ready three times, 5.2), `integration` (5.14), and `explicit_request`.
+  ```
+
+  The rest of the paragraph is unchanged.
+
 - [ ] Format, run the tests and the full check; confirm green:
 
   ```
