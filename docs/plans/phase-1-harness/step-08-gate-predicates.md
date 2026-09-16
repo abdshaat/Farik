@@ -1,13 +1,13 @@
 # Phase 1, step 08: Gate predicates
 
-Status: draft
+Status: ready
 Branch: `claude/phase-0-implementation-izm38y` (the harness-assigned phase branch, left as assigned per `docs/standards/code.md`; steps do not get their own)
 Spec: `docs/SPEC.md` section 5.1 (a reviewer is never the assignee, and nobody grades their own homework), section 5.3 (the verification methods, and what a `review` criterion is, which this step writes down), section 5.2 (the gates of the transition table, who writes `status`, and the two terminal statuses), section 5.5 (a figure that cannot be compared), section 5.11 (a locked contract and a frozen one), section 5.14 (a dependency is accepted and integrated), section 5.16 (an epic's assignee, its reviewer, its tasks, its product documents), section 6.2 (the work-in-progress limit the Scrum Master enforces), F5
 Depends on: phase 0 (merged in #4); step 01 of this phase for `TransitionActor` and the gates the table names (f9f0e67, 0e50df1, 3cc8bc3); step 02 for `readiness::fixtures::a_contract` (21fe00a, 87a3561, 4a1ac90); step 06 for the escalation rules the Decisions cite (33202e7, abfb7d8); step 07 for `CriterionResult` and `RunBy` (a0cdecd, 090e015, cc27028)
 
 A plan is `ready` only when a reviewer other than the author has confirmed the three rules in `docs/standards/workflow.md` stage 2 (Plan): every decision made, no ambiguity, no forward dependencies. Record who confirmed and when here.
 
-Readiness confirmed by: pending
+Readiness confirmed by: a fresh Claude Code session that did not write this plan, the seventh readiness review, 2026-09-16, at `ce03daf`: READY under all three rules of `docs/standards/workflow.md` stage 2, with nine findings, all taken in this commit. Six earlier passes refused the plan; what each found is in Decisions.
 
 ## Goal
 
@@ -49,8 +49,10 @@ All in `docs/plans/project-plan.md`, phase 1, restated here only where this step
 - The human may write anything; a human write of a frozen contract that touches a field outside `FIELDS_AFTER_FREEZE` returns `ReturnsToRefining`, and one that touches only those fields is an ordinary allowed write, because the status and the assignee change on every transition.
 - A budget that cannot be compared does not fit, as a spend that is not a number counts as exhausted in `budget` (spec 5.5). `fits_within` is that rule read the other way round and the two agree on the direction; they are not shared, because one asks whether there is room and the other whether there is none.
 - A work-in-progress limit of zero refuses every assignment, which is how a team pauses an agent without retiring it; nothing here treats zero as unset, and the refusal says so in its own words rather than counting to zero.
+- An epic's `reviewer_role` field is not what decides its reviewer, and the Definition of Ready does not yet say so: `readiness::reviewer_available` special-cases only `Role::Human` for an epic, so an epic declaring `reviewer_role: architect` with an active Architect passes the Definition of Ready, gets the human's approval, reaches `ready`, and is then refused here, which now costs a human edit of a frozen contract and a second approval. This gate follows 5.1 and 5.16 item 4 and is right; the loose rule is step 02's, and `default_reviewer_role` and `REVIEWER_ROLE_FOR` only arrive in phase 3 step 07. Recorded rather than fixed here, because tightening the Definition of Ready is step 02's file and this step does not touch it: whoever tightens it knows where to look. Found by the seventh readiness review.
 - The `Triaged` gate needs no function: it is one boolean the runtime records (`request.triaged`, 5.16), and step 09 takes it as `TransitionContext::triaged`.
-- Revised six times on 2026-09-16, after six readiness reviews refused it. The sixth found no rule the gate answers wrongly, having walked the field partition against the schema, probed nineteen edge cases and killed 74 of 81 mutants. Its blocking finding was the fifth's defect in another clause of the same project-plan line: the entry said the reviewer must hold the contract's reviewer role, which is false of an epic, whose reviewer the gate derives (the Product Manager when the team has an active Scrum Master and the human when it has not), so a step 09 author building an epic's assignment from that line would meet a refusal the record does not predict. A tenth replacement records it. The five surviving mutants were all one promise: the Decisions say every gate reports every reason at once, and only `check_assignment` had a test for it, so four gates could have returned the first reason and stayed green; two more were the trimmed-id promise on the two ids the earlier passes' tests did not cover. Six assertions close all seven. The pass also found that the work-in-progress count reinterprets spec 6.2 rather than changing it, which hard rule 8 does not allow, so 5.2's gate cell now says what the limit counts and 6.2's default says "unfinished" — and, with it, the epic's assignee and reviewer that the cell never carried; that the amended 5.11 sentence claimed `contract_locked` for fields refused by their owner instead; and, in the messages, "a architect", now "role architect" as `readiness.rs` already words it.
+- Revised seven times on 2026-09-16. The seventh readiness review confirmed the plan **ready** under all three rules: it re-executed every block (no drift, every count exact, both compiler outputs verbatim), re-introduced the sixth pass's seven mutants and named the test that kills each, compiled a probe module calling all nine gates from the shapes the project plan records, and ran 78 mutants of its own. Its findings, all taken here, are test-completeness against promises this plan makes rather than rules the gate gets wrong: the every-reason-at-once promise was still unpinned for `check_criteria_recorded` and `check_child_creation`, which could each have reported their first reason and stayed green (the sixth pass's list named five gates; there were six); the trimmed-id promise was untested for the actor's own agent id, so an epic's assignee named with a stray space would have been refused by its own epic; `is_written`'s trim was untested for what a blocker needs and for a rejection's reasons, both of which took an empty string where the description took a space; an `artifact` criterion was not pinned as the assignee's to run, so the exemption could have been widened past the two 5.3 gives away; and `distinct` in the duplicate-dependency message was untested, because no test reported one dependency three times. Two more: hard rule 8 for `check_blocker_resolved`, whose written resolution 5.2's `blocked -> in_progress` cell never asked for, now an eighteenth replacement; and `Kind` named in the project plan without its generated spelling recorded anywhere. All six code fixes fold into existing tests, so the counts are unchanged, and each mutant was re-introduced and is now killed by a named test. The pass also recorded the epic `reviewer_role` trap the Definition of Ready leaves open, which is the bullet above.
+- Revised six times on 2026-09-16, after six readiness reviews refused it. The sixth found no rule the gate answers wrongly, having walked the field partition against the schema, probed nineteen edge cases and killed 74 of 81 mutants. Its blocking finding was the fifth's defect in another clause of the same project-plan line: the entry said the reviewer must hold the contract's reviewer role, which is false of an epic, whose reviewer the gate derives (the Product Manager when the team has an active Scrum Master and the human when it has not), so a step 09 author building an epic's assignment from that line would meet a refusal the record does not predict. A tenth replacement records it. The five surviving mutants were all one promise: the Decisions say every gate reports every reason at once, and only `check_assignment` had a test for it, so four gates could have returned the first reason and stayed green; two more were the trimmed-id promise on the two ids the earlier passes' tests did not cover. Six assertions close those seven mutants; the seventh pass found the promise itself still unpinned for two gates, which is its finding 1. The pass also found that the work-in-progress count reinterprets spec 6.2 rather than changing it, which hard rule 8 does not allow, so 5.2's gate cell now says what the limit counts and 6.2's default says "unfinished" — and, with it, the epic's assignee and reviewer that the cell never carried; that the amended 5.11 sentence claimed `contract_locked` for fields refused by their owner instead; and, in the messages, "a architect", now "role architect" as `readiness.rs` already words it.
 - Revised five times on 2026-09-16, after five readiness reviews refused it. The fifth confirmed the fourth rework's substance and found no new hole in the gate; what it left was a cleanup list, one line of it load-bearing for step 09: the project plan's record of `check_contract_write` still had the four-argument signature, which is the interface step 09's plan is written from, so a thirteenth exact-text replacement now carries the `kind`. The rest: the doc comment on the gate was the third pass's text and contradicted the function in five ways, `FIELDS_AFTER_FREEZE` was documented as four fields where it holds six, an inner return in the governor's arm did nothing, a child the runtime did not name was printed as an empty id, three steps of the refusal order were untested, and the counts of the reasons, the constants and the lifecycle fields were each one or two out of date. Its test findings are in: the epic rule is about the Scrum Master rather than about epics being unwritable, every field of the schema is now asserted to have exactly one owner, and the zero limit, the governor against an epic's assignee and the unnamed child are pinned.
 - Revised four times on 2026-09-16, after four readiness reviews refused it. The fourth found the allow-list was a default-allow: the content class was whatever was left over, so an unrecognised name was writable content, and two fields the schema assigns elsewhere, `kind` and `parent`, had fallen into it. It also found the Scrum Master able to rewrite an epic's contract while it was still being written, the window the freeze does not cover, and `sprint` frozen at `ready` although planning works from the ready backlog. All six sets are written out now, the content class among them, and the gate takes the contract's kind. The same pass found the product-document gate refusing an epic escalated after its approval, a bullet contradicting the code about the human and the lock, the `review` exemption citing a spec sentence that does not exist, and six mutants alive. All taken.
 - Revised three times on 2026-09-16, after three readiness reviews refused it. The third named the pattern the first two had each hit once: the write gate was reasoned one axis at a time, and a deny-list over a twenty-six-field wire format opens a new hole along every axis nobody has looked at yet. It found that any agent could set `locked` and hand the contract to the human for good, and that an assignee could widen its own allowed paths or drop its own risk from `high` before the freeze. The gate now answers from an allow-list per field. The same pass found the product-document gate still admitting `escalated`, so an approval that survived a return to `refining` reopened the hole the second pass had closed, and found the human able to write `status` at every status, past every gate. It also found a `review` criterion asked of the assignee although 5.3 gives it to the reviewer, the freeze untested at `ready` where 5.11 draws it, both trimmed-id comparisons untested although a bullet promised them, and a `Consumes` list naming an import the code does not have. All taken.
@@ -79,7 +81,7 @@ Touches `crates/core` only: one new child of `governor`. Consumes `contract::{Ro
 ```
 crates/core/src/governor.rs                         modifies: declares gates
 crates/core/src/governor/gates.rs                   creates: GateResult, the nine checks and their values, the seven field constants, fifty-one tests
-docs/SPEC.md                                        modifies: section 5.2's criteria-recorded gate names the criteria the assignee cannot run and its assignment gate names an epic's assignee and reviewer and what the work-in-progress limit counts; section 5.3 says what a review criterion is; section 5.11 adds the sprint to the frozen list and says a lock does not stop the lifecycle; section 5.16 item 1 refuses a product document by the approval of the contract the epic has now rather than by the status; section 6.2's default limit is one unfinished task
+docs/SPEC.md                                        modifies: section 5.2's criteria-recorded gate names the criteria the assignee cannot run, its assignment gate names an epic's assignee and reviewer and what the work-in-progress limit counts, and its blocked-to-in-progress gate asks for a written resolution; section 5.3 says what a review criterion is; section 5.11 adds the sprint to the frozen list and says a lock does not stop the lifecycle; section 5.16 item 1 refuses a product document by the approval of the contract the epic has now rather than by the status; section 6.2's default limit is one unfinished task
 docs/plans/project-plan.md                          modifies: phase 1 step 08's interface records the changes this plan makes to it
 docs/plans/phase-1-harness/step-08-gate-predicates.md   modifies: checkboxes ticked
 ```
@@ -334,6 +336,17 @@ Produces: `governor::gates::{GateResult, AssignmentRequester, DependencyState, A
               agent_id: Some("sm-1".to_string()),
           };
           assert_eq!(check_child_creation(&parent, &padded), Ok(()));
+          // And the other way round: the actor the runtime named with a stray space is the same
+          // agent, or an epic's own assignee could be refused by it.
+          let named = ParentEpic {
+              status: TaskStatus::InProgress,
+              assignee_id: "sm-1".to_string(),
+          };
+          let padded_actor = ContractWriteActor {
+              kind: TransitionActor::Assignee,
+              agent_id: Some(" sm-1 ".to_string()),
+          };
+          assert_eq!(check_child_creation(&named, &padded_actor), Ok(()));
       }
 
       #[test]
@@ -462,9 +475,10 @@ Produces: `governor::gates::{GateResult, AssignmentRequester, DependencyState, A
       }
 
       #[test]
-      fn refuses_two_reports_about_one_dependency() {
+      fn refuses_more_than_one_report_about_one_dependency() {
           // A dependency has one state; two reports mean the runtime is confused, and taking the
-          // first would make the answer depend on the order they arrived in.
+          // first would make the answer depend on the order they arrived in. However many reports
+          // arrive, the dependency is named once: three would otherwise read as three problems.
           let contract = a_depending_contract();
           let mut input = an_assignment();
           input.dependencies = vec![
@@ -479,6 +493,15 @@ Produces: `governor::gates::{GateResult, AssignmentRequester, DependencyState, A
                   integrated: false,
               },
           ];
+          assert_eq!(
+              reasons(check_assignment(&contract, &input)),
+              ["the runtime reported FRK-2 twice, and a dependency has one state"]
+          );
+          input.dependencies.push(DependencyState {
+              task_id: " FRK-2 ".to_string(),
+              status: TaskStatus::Blocked,
+              integrated: false,
+          });
           assert_eq!(
               reasons(check_assignment(&contract, &input)),
               ["the runtime reported FRK-2 twice, and a dependency has one state"]
@@ -617,6 +640,16 @@ Produces: `governor::gates::{GateResult, AssignmentRequester, DependencyState, A
               reasons(check_criteria_recorded(&runnable, &[], &work)),
               ["the assignee recorded no run with evidence for criterion C1"]
           );
+          let mut produced = a_contract();
+          produced.exit_criteria[0].verification = VerificationWire::Variant2 {
+              method: json!("artifact"),
+              must_contain: Vec::new(),
+              path: "docs/marketing/release-notes.md".to_string(),
+          };
+          assert_eq!(
+              reasons(check_criteria_recorded(&produced, &[], &work)),
+              ["the assignee recorded no run with evidence for criterion C1"]
+          );
       }
 
       #[test]
@@ -643,6 +676,22 @@ Produces: `governor::gates::{GateResult, AssignmentRequester, DependencyState, A
                   }
               )),
               ["the worktree has changes that are not committed"]
+          );
+          // All three rules failing at once report all three, in the order they are written.
+          assert_eq!(
+              reasons(check_criteria_recorded(
+                  &a_contract(),
+                  &[],
+                  &WorkState {
+                      commits: 0,
+                      worktree_clean: false
+                  }
+              )),
+              [
+                  "the assignee recorded no run with evidence for criterion C1",
+                  "the task branch has no commit on it",
+                  "the worktree has changes that are not committed"
+              ]
           );
       }
 
@@ -885,6 +934,14 @@ Produces: `governor::gates::{GateResult, AssignmentRequester, DependencyState, A
               reasons(check_child_creation(&not_started, &assignee)),
               ["the epic is ready and its tasks are written while it is in progress"]
           );
+          // Both rules failing at once report both, in the order they are written.
+          assert_eq!(
+              reasons(check_child_creation(&not_started, &other)),
+              [
+                  "a task under an epic is written by the epic's assignee, sm-1, or by the human",
+                  "the epic is ready and its tasks are written while it is in progress"
+              ]
+          );
       }
 
       #[test]
@@ -900,7 +957,7 @@ Produces: `governor::gates::{GateResult, AssignmentRequester, DependencyState, A
           );
           let blank = Blocker {
               description: " ".to_string(),
-              needed: String::new(),
+              needed: "\n".to_string(),
           };
           assert_eq!(
               reasons(check_blocker_written(Some(&blank))),
@@ -959,7 +1016,7 @@ Produces: `governor::gates::{GateResult, AssignmentRequester, DependencyState, A
           );
           let unknown = Rejection {
               failed_criterion_ids: vec!["C9".to_string()],
-              reasons: String::new(),
+              reasons: " ".to_string(),
           };
           assert_eq!(
               reasons(check_rejection_reasons(&a_contract(), Some(&unknown))),
@@ -2860,6 +2917,17 @@ Produces: `governor::gates::{GateResult, AssignmentRequester, DependencyState, A
               agent_id: Some("sm-1".to_string()),
           };
           assert_eq!(check_child_creation(&parent, &padded), Ok(()));
+          // And the other way round: the actor the runtime named with a stray space is the same
+          // agent, or an epic's own assignee could be refused by it.
+          let named = ParentEpic {
+              status: TaskStatus::InProgress,
+              assignee_id: "sm-1".to_string(),
+          };
+          let padded_actor = ContractWriteActor {
+              kind: TransitionActor::Assignee,
+              agent_id: Some(" sm-1 ".to_string()),
+          };
+          assert_eq!(check_child_creation(&named, &padded_actor), Ok(()));
       }
 
       #[test]
@@ -2988,9 +3056,10 @@ Produces: `governor::gates::{GateResult, AssignmentRequester, DependencyState, A
       }
 
       #[test]
-      fn refuses_two_reports_about_one_dependency() {
+      fn refuses_more_than_one_report_about_one_dependency() {
           // A dependency has one state; two reports mean the runtime is confused, and taking the
-          // first would make the answer depend on the order they arrived in.
+          // first would make the answer depend on the order they arrived in. However many reports
+          // arrive, the dependency is named once: three would otherwise read as three problems.
           let contract = a_depending_contract();
           let mut input = an_assignment();
           input.dependencies = vec![
@@ -3005,6 +3074,15 @@ Produces: `governor::gates::{GateResult, AssignmentRequester, DependencyState, A
                   integrated: false,
               },
           ];
+          assert_eq!(
+              reasons(check_assignment(&contract, &input)),
+              ["the runtime reported FRK-2 twice, and a dependency has one state"]
+          );
+          input.dependencies.push(DependencyState {
+              task_id: " FRK-2 ".to_string(),
+              status: TaskStatus::Blocked,
+              integrated: false,
+          });
           assert_eq!(
               reasons(check_assignment(&contract, &input)),
               ["the runtime reported FRK-2 twice, and a dependency has one state"]
@@ -3143,6 +3221,16 @@ Produces: `governor::gates::{GateResult, AssignmentRequester, DependencyState, A
               reasons(check_criteria_recorded(&runnable, &[], &work)),
               ["the assignee recorded no run with evidence for criterion C1"]
           );
+          let mut produced = a_contract();
+          produced.exit_criteria[0].verification = VerificationWire::Variant2 {
+              method: json!("artifact"),
+              must_contain: Vec::new(),
+              path: "docs/marketing/release-notes.md".to_string(),
+          };
+          assert_eq!(
+              reasons(check_criteria_recorded(&produced, &[], &work)),
+              ["the assignee recorded no run with evidence for criterion C1"]
+          );
       }
 
       #[test]
@@ -3169,6 +3257,22 @@ Produces: `governor::gates::{GateResult, AssignmentRequester, DependencyState, A
                   }
               )),
               ["the worktree has changes that are not committed"]
+          );
+          // All three rules failing at once report all three, in the order they are written.
+          assert_eq!(
+              reasons(check_criteria_recorded(
+                  &a_contract(),
+                  &[],
+                  &WorkState {
+                      commits: 0,
+                      worktree_clean: false
+                  }
+              )),
+              [
+                  "the assignee recorded no run with evidence for criterion C1",
+                  "the task branch has no commit on it",
+                  "the worktree has changes that are not committed"
+              ]
           );
       }
 
@@ -3411,6 +3515,14 @@ Produces: `governor::gates::{GateResult, AssignmentRequester, DependencyState, A
               reasons(check_child_creation(&not_started, &assignee)),
               ["the epic is ready and its tasks are written while it is in progress"]
           );
+          // Both rules failing at once report both, in the order they are written.
+          assert_eq!(
+              reasons(check_child_creation(&not_started, &other)),
+              [
+                  "a task under an epic is written by the epic's assignee, sm-1, or by the human",
+                  "the epic is ready and its tasks are written while it is in progress"
+              ]
+          );
       }
 
       #[test]
@@ -3426,7 +3538,7 @@ Produces: `governor::gates::{GateResult, AssignmentRequester, DependencyState, A
           );
           let blank = Blocker {
               description: " ".to_string(),
-              needed: String::new(),
+              needed: "\n".to_string(),
           };
           assert_eq!(
               reasons(check_blocker_written(Some(&blank))),
@@ -3485,7 +3597,7 @@ Produces: `governor::gates::{GateResult, AssignmentRequester, DependencyState, A
           );
           let unknown = Rejection {
               failed_criterion_ids: vec!["C9".to_string()],
-              reasons: String::new(),
+              reasons: " ".to_string(),
           };
           assert_eq!(
               reasons(check_rejection_reasons(&a_contract(), Some(&unknown))),
@@ -4414,7 +4526,19 @@ Produces: `governor::gates::{GateResult, AssignmentRequester, DependencyState, A
   with
 
   ```
-  A contract with `locked: true` is owned by the human: agents may record criterion results and write their notes on it, and the governor refuses every other change by an agent, with the reason `contract_locked` when the change is to the contract's content and the reason for the field's owner when the field is one that agent never writes anyway. A lock holds the contract's content for the human; it does not stop the lifecycle, so the governor still writes `status`, `assignee`, `reviewer`, `iteration`, and `sprint` when it applies a transition, or a locked task could never leave `refining`. Locking and unlocking are not content changes: a human who locks a contract from `ready` onward does not send its task back to `refining`, or writing an epic by hand and locking it would undo the approval it was just given (5.16).
+  A contract with `locked: true` is owned by the human: agents may record criterion results and write their notes on it, and the governor refuses every other change by an agent, with the reason `contract_locked` when the change is to the contract's content and the reason for the field's owner when the field is one that agent never writes anyway. A lock holds the contract's content for the human; it does not stop the lifecycle, so the governor still writes `status`, `assignee`, `reviewer`, `iteration`, and `sprint` when it applies a transition, or a locked task could never leave `refining`. Neither locking nor unlocking is a content change: a human who locks a contract from `ready` onward does not send its task back to `refining`, or writing an epic by hand and locking it would undo the approval it was just given (5.16).
+  ```
+
+- [ ] Say in the spec that a resolution is written. In `docs/SPEC.md` section 5.2's transition table, replace
+
+  ```
+  | blocked | in_progress | Scrum Master or human | blocker resolved |
+  ```
+
+  with
+
+  ```
+  | blocked | in_progress | Scrum Master or human | blocker resolved, with a written resolution, so that the next session knows what changed (added in 0.3) |
   ```
 
 - [ ] Say in the spec what the assignment gate checks. In `docs/SPEC.md` section 5.2's transition table, replace
@@ -4534,7 +4658,7 @@ Produces: `governor::gates::{GateResult, AssignmentRequester, DependencyState, A
   with
 
   ```
-  (the contract's `kind` comes first, added 2026-09-16 by the step 08 plan because the Scrum Master writes a task's content but never an epic's and the freeze cannot draw that line; the notes are always writable, and criterion results are events rather than contract fields; the five lifecycle fields are the governor's at every status; the human changes anything on a contract that is not finished, and a human change to a frozen one returns `ReturnsToRefining`; a task that is accepted or cancelled takes no write but a note)
+  (the contract's `kind` comes first, the generated `generated::task_contract::FarikTaskContractKind` that this crate aliases as `Kind`, added 2026-09-16 by the step 08 plan because the Scrum Master writes a task's content but never an epic's and the freeze cannot draw that line; the notes are always writable, and criterion results are events rather than contract fields; the five lifecycle fields are the governor's at every status; the human changes anything on a contract that is not finished, and a human change to a frozen one returns `ReturnsToRefining`; a task that is accepted or cancelled takes no write but a note)
   ```
 
   replace
@@ -4570,7 +4694,7 @@ Produces: `governor::gates::{GateResult, AssignmentRequester, DependencyState, A
   with
 
   ```
-  `enum ContractWriteRefusal { ContractLocked, ContractFrozen { fields: Vec<String> }, TaskTerminal { status: TaskStatus }, StoresFields { fields: Vec<String> }, CreationFields { fields: Vec<String> }, LifecycleFields { fields: Vec<String> }, HumansFields { fields: Vec<String> }, ContentFields { fields: Vec<String> }, UnknownFields { fields: Vec<String> } }`; `FIELDS_AFTER_FREEZE: [&str; 6]`, `FIELDS_THE_GOVERNOR_WRITES: [&str; 5]`, `FIELDS_ONLY_THE_HUMAN_WRITES: [&str; 1]`, `FIELDS_THE_STORE_OWNS: [&str; 4]`, `FIELDS_FIXED_AT_CREATION: [&str; 2]`, `FIELDS_OF_THE_CONTENT: [&str; 13]` and `FIELDS_ALWAYS_WRITABLE: [&str; 1]` (added 2026-09-16 by the step 08 plan and its five readiness reviews: the gate answers from an allow-list per field rather than a list of the forbidden, because a deny-list over a wire format grew a hole each time a reviewer looked along a new axis, and the content class is written out so a field added to the schema is refused until somebody says who writes it; the five lifecycle fields are the governor's whoever asks, `locked` is the human's, the identifier and the stamps are the store's, `kind` and `parent` are fixed at creation, the Scrum Master writes a task's content but never an epic's, a locked contract may still be moved by the governor, locking is not a content write, a terminal task takes no write but a note, and the reasons are reported most structural first)
+  `enum ContractWriteRefusal { ContractLocked, ContractFrozen { fields: Vec<String> }, TaskTerminal { status: TaskStatus }, StoresFields { fields: Vec<String> }, CreationFields { fields: Vec<String> }, LifecycleFields { fields: Vec<String> }, HumansFields { fields: Vec<String> }, ContentFields { fields: Vec<String> }, UnknownFields { fields: Vec<String> } }`; `FIELDS_AFTER_FREEZE: [&str; 6]`, `FIELDS_THE_GOVERNOR_WRITES: [&str; 5]`, `FIELDS_ONLY_THE_HUMAN_WRITES: [&str; 1]`, `FIELDS_THE_STORE_OWNS: [&str; 4]`, `FIELDS_FIXED_AT_CREATION: [&str; 2]`, `FIELDS_OF_THE_CONTENT: [&str; 13]` and `FIELDS_ALWAYS_WRITABLE: [&str; 1]` (added 2026-09-16 by the step 08 plan and its readiness reviews: the gate answers from an allow-list per field rather than a list of the forbidden, because a deny-list over a wire format grew a hole each time a reviewer looked along a new axis, and the content class is written out so a field added to the schema is refused until somebody says who writes it; the five lifecycle fields are the governor's whoever asks, `locked` is the human's, the identifier and the stamps are the store's, `kind` and `parent` are fixed at creation, the Scrum Master writes a task's content but never an epic's, a locked contract may still be moved by the governor, locking is not a content write, a terminal task takes no write but a note, and the reasons are reported most structural first)
   ```
 
 - [ ] Format, run the tests and the full check; confirm green:
