@@ -1,6 +1,6 @@
 # Phase 1, step 02: Definition of Ready and team rules
 
-Status: ready
+Status: in progress
 Branch: `claude/phase-0-implementation-izm38y` (the harness-assigned phase branch, left as assigned per `docs/standards/code.md`; steps do not get their own)
 Spec: `docs/SPEC.md` section 5.3 (Definition of Ready), 5.12 (team rules), 5.16 (an epic's tasks: parent, paths, budget), 5.6 (the default protected paths), F5
 Depends on: phase 0 (merged in #4); step 01 of this phase (committed as f9f0e67, 0e50df1, 3cc8bc3)
@@ -68,7 +68,7 @@ Files: created `crates/core/src/governor/team_rules.rs`; modified `crates/core/s
 Consumes: nothing
 Produces: `governor::team_rules::{TeamRules, DEFAULT_PROTECTED_PATHS, DEFAULT_MAX_TASK_BUDGET_USD, DEFAULT_TEAM_RULES}`
 
-- [ ] Confirm the baseline on the branch head:
+- [x] Confirm the baseline on the branch head:
 
   ```
   cargo xtask check
@@ -78,7 +78,7 @@ Produces: `governor::team_rules::{TeamRules, DEFAULT_PROTECTED_PATHS, DEFAULT_MA
   # xtask check: ok
   ```
 
-- [ ] Declare the module. `crates/core/src/governor.rs` in full:
+- [x] Declare the module. `crates/core/src/governor.rs` in full:
 
   ```rust
   //! The governor: every rule of `docs/SPEC.md` section 5 as pure functions over values passed
@@ -91,7 +91,7 @@ Produces: `governor::team_rules::{TeamRules, DEFAULT_PROTECTED_PATHS, DEFAULT_MA
   /// The transition table of `docs/SPEC.md` section 5.2 as data, with lookups.
   pub mod transition_table;
   ```
-- [ ] Write the failing tests. `crates/core/src/governor/team_rules.rs` holds only this:
+- [x] Write the failing tests. `crates/core/src/governor/team_rules.rs` holds only this:
 
   ```rust
   #[cfg(test)]
@@ -119,7 +119,7 @@ Produces: `governor::team_rules::{TeamRules, DEFAULT_PROTECTED_PATHS, DEFAULT_MA
       }
   }
   ```
-- [ ] Run them and confirm they fail because the items are missing:
+- [x] Run them and confirm they fail because the items are missing:
 
   ```
   cargo test --package farik-core governor::team_rules
@@ -128,7 +128,7 @@ Produces: `governor::team_rules::{TeamRules, DEFAULT_PROTECTED_PATHS, DEFAULT_MA
   # error: could not compile `farik-core` (lib test) due to 1 previous error
   ```
 
-- [ ] Write the implementation above the tests. `crates/core/src/governor/team_rules.rs` in full:
+- [x] Write the implementation above the tests. `crates/core/src/governor/team_rules.rs` in full:
 
   ```rust
   use std::sync::LazyLock;
@@ -204,7 +204,7 @@ Produces: `governor::team_rules::{TeamRules, DEFAULT_PROTECTED_PATHS, DEFAULT_MA
       }
   }
   ```
-- [ ] In `docs/SPEC.md` section 5.12, replace the table row
+- [x] In `docs/SPEC.md` section 5.12, replace the table row
 
   ```
   | `max_task_budget_usd` | number | Definition of Ready refuses a contract whose budget exceeds it |
@@ -228,7 +228,7 @@ Produces: `governor::team_rules::{TeamRules, DEFAULT_PROTECTED_PATHS, DEFAULT_MA
   Defaults: `protected_paths` as in 5.6, `max_task_budget_usd` 5 dollars (the human raises it in `team.yaml`), everything else empty or off.
   ```
 
-- [ ] Format, run the tests and the full check; confirm green:
+- [x] Format, run the tests and the full check; confirm green:
 
   ```
   cargo fmt --all
@@ -242,7 +242,7 @@ Produces: `governor::team_rules::{TeamRules, DEFAULT_PROTECTED_PATHS, DEFAULT_MA
   # xtask check: ok
   ```
 
-- [ ] Commit: `feat(core): add team rules with the spec's defaults`
+- [x] Commit: `feat(core): add team rules with the spec's defaults`
 
 ### Task 2: The Definition of Ready
 

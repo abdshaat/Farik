@@ -3,5 +3,7 @@
 
 /// The lifecycle's statuses and which of them are terminal.
 pub mod task_status;
+/// Team rules of `docs/SPEC.md` section 5.12 and their defaults.
+pub mod team_rules;
 /// The transition table of `docs/SPEC.md` section 5.2 as data, with lookups.
 pub mod transition_table;

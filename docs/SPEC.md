@@ -260,10 +260,10 @@ Team rules are constraints the human writes once, in `.farik/team.yaml` under `r
 | `allowed_paths_ceiling` | globs | Definition of Ready refuses a contract whose `allowed_paths` reach outside them |
 | `required_criteria` | verification methods | Definition of Ready refuses a contract that has no criterion of each listed method |
 | `require_new_tests` | boolean | Definition of Ready refuses a contract whose `test` criteria do not set `new_tests_required` |
-| `max_task_budget_usd` | number | Definition of Ready refuses a contract whose budget exceeds it |
+| `max_task_budget_usd` | number | Definition of Ready refuses a task whose budget exceeds it; an epic is bounded by the sprint budget instead |
 | `forbidden_commands` | regular expressions | `farik_exec` refuses a command that matches one |
 
-Defaults: `protected_paths` as in 5.6, everything else empty or off. Rules never loosen a permission tier; they only narrow what a granted tier allows.
+Defaults: `protected_paths` as in 5.6, `max_task_budget_usd` 5 dollars (the human raises it in `team.yaml`), everything else empty or off. Rules never loosen a permission tier; they only narrow what a granted tier allows.
 
 ### 5.13 Contract authoring and the criterion library (added in 0.2)
 
