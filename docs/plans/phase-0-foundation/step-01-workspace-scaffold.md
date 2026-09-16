@@ -853,7 +853,7 @@ Files: created `.github/workflows/check.yml`
 Consumes: `cargo xtask check` from Task 1
 Produces: the `check` workflow on pull requests and on pushes to `main`
 
-- [ ] Write `.github/workflows/check.yml`:
+- [x] Write `.github/workflows/check.yml`:
 
   ```yaml
   name: check
@@ -874,14 +874,14 @@ Produces: the `check` workflow on pull requests and on pushes to `main`
         - run: cargo xtask check
   ```
 
-- [ ] Confirm the lockfile is complete and the check is reproducible from a clean build, which is what CI does:
+- [x] Confirm the lockfile is complete and the check is reproducible from a clean build, which is what CI does:
 
   ```
   cargo clean && cargo xtask check
   # expected: ends with "xtask check: ok", exit code 0; git status shows Cargo.lock unchanged
   ```
 
-- [ ] Commit: `ci(repo): run cargo xtask check on pull requests and main`
+- [x] Commit: `ci(repo): run cargo xtask check on pull requests and main`
 
 - [ ] Push the phase branch and open the phase's draft pull request (`docs/standards/workflow.md` stage 5), then confirm on the pull request that the `check` job ran and passed on this commit. Paste the job's summary lines into the pull request's verification section. If the job fails, the failure is this step's to fix before Task 3.
 
