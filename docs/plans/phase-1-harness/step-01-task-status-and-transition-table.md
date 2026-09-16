@@ -1,13 +1,13 @@
 # Phase 1, step 01: Task status and transition table
 
-Status: ready
+Status: in progress
 Branch: `claude/phase-0-implementation-izm38y` (the harness-assigned phase branch, left as assigned per `docs/standards/code.md`; steps do not get their own)
 Spec: `docs/SPEC.md` section 5.2 (the task lifecycle and its transition table), F5 (the governor as a library with a test for every transition)
 Depends on: phase 0 (merged in #4)
 
 A plan is `ready` only when a reviewer other than the author has confirmed the three rules in `docs/standards/workflow.md` stage 2 (Plan): every decision made, no ambiguity, no forward dependencies. Record who confirmed and when here.
 
-Readiness confirmed by: a fresh Claude Code review session, 2026-09-16, before execution (first pass NOT READY on two clippy lints in the planned tests, fixed in 2e2a4aa or later; second pass READY under all three rules; recorded on pull request #5)
+Readiness confirmed by: a fresh Claude Code review session, 2026-09-16, before execution (first pass NOT READY on two clippy lints in the planned tests, fixed in 535ddfe; second pass READY under all three rules; recorded on pull request #5)
 
 ## Goal
 
@@ -60,7 +60,7 @@ Files: created `crates/core/src/governor.rs`, `crates/core/src/governor/task_sta
 Consumes: `farik_core::contract::TaskStatus` from `main`
 Produces: `governor::task_status::TASK_STATUSES: [TaskStatus; 11]`; `governor::task_status::is_terminal(status: TaskStatus) -> bool`
 
-- [ ] Confirm the baseline on the branch head:
+- [x] Confirm the baseline on the branch head:
 
   ```
   cargo xtask check
@@ -70,7 +70,7 @@ Produces: `governor::task_status::TASK_STATUSES: [TaskStatus; 11]`; `governor::t
   # xtask check: ok
   ```
 
-- [ ] Declare the module. `crates/core/src/lib.rs` in full:
+- [x] Declare the module. `crates/core/src/lib.rs` in full:
 
   ```rust
   //! Farik's harness: schemas, the task state machine, the governor, and the cost model.
@@ -107,7 +107,7 @@ Produces: `governor::task_status::TASK_STATUSES: [TaskStatus; 11]`; `governor::t
   pub mod task_status;
   ```
 
-- [ ] Write the failing tests. `crates/core/src/governor/task_status.rs` holds only this:
+- [x] Write the failing tests. `crates/core/src/governor/task_status.rs` holds only this:
 
   ```rust
   #[cfg(test)]
@@ -147,7 +147,7 @@ Produces: `governor::task_status::TASK_STATUSES: [TaskStatus; 11]`; `governor::t
   }
   ```
 
-- [ ] Run it and confirm it fails because the items are missing:
+- [x] Run it and confirm it fails because the items are missing:
 
   ```
   cargo test --package farik-core governor::task_status
@@ -155,7 +155,7 @@ Produces: `governor::task_status::TASK_STATUSES: [TaskStatus; 11]`; `governor::t
   # error[E0432]: unresolved imports `super::TASK_STATUSES`, `super::is_terminal`
   ```
 
-- [ ] Write the implementation above the tests. `crates/core/src/governor/task_status.rs` in full:
+- [x] Write the implementation above the tests. `crates/core/src/governor/task_status.rs` in full:
 
   ```rust
   use crate::contract::TaskStatus;
@@ -218,7 +218,7 @@ Produces: `governor::task_status::TASK_STATUSES: [TaskStatus; 11]`; `governor::t
   }
   ```
 
-- [ ] Format, run the tests and the full check; confirm green:
+- [x] Format, run the tests and the full check; confirm green:
 
   ```
   cargo fmt --all
@@ -232,7 +232,7 @@ Produces: `governor::task_status::TASK_STATUSES: [TaskStatus; 11]`; `governor::t
   # xtask check: ok
   ```
 
-- [ ] Commit: `feat(core): list the task statuses and the terminal ones`
+- [x] Commit: `feat(core): list the task statuses and the terminal ones`
 
 ### Task 2: The transition table and its lookups
 

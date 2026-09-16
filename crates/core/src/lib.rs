@@ -5,6 +5,8 @@
 pub mod contract;
 /// Types generated from `docs/schemas/`.
 pub mod generated;
+/// The governor: every rule of `docs/SPEC.md` section 5 as pure functions.
+pub mod governor;
 
 /// The crate's package name, as published.
 pub const CORE_CRATE_NAME: &str = "farik-core";
