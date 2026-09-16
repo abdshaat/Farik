@@ -30,4 +30,4 @@ If the superpowers plugin is installed, its skills implement this workflow; use 
 
 ## Current state
 
-Phase 0 (foundation) is in progress on `claude/phase-0-implementation-izm38y` (the harness-assigned phase branch). The Cargo workspace exists; `farik-core` has no behavior yet. The next steps are the schema generation pipeline and contract validation, per `docs/plans/project-plan.md`.
+Phase 0 (foundation) is done and merged (pull request #4): the Cargo workspace, `cargo xtask check`, the contract types generated from the schema, and `validate_contract` exist. Phase 1 (harness core) is in progress on `claude/phase-0-implementation-izm38y` (the harness-assigned branch, reused for phase 1 because a session may not push to another branch without permission); its step plans are written one at a time under `docs/plans/phase-1-harness/` from `docs/plans/project-plan.md`.
