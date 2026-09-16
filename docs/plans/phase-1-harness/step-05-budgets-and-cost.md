@@ -1,6 +1,6 @@
 # Phase 1, step 05: Budgets and cost
 
-Status: in progress
+Status: done
 Branch: `claude/phase-0-implementation-izm38y` (the harness-assigned phase branch, left as assigned per `docs/standards/code.md`; steps do not get their own)
 Spec: `docs/SPEC.md` section 5.5 (the four budgets and the non-monetary limits, their defaults, and what exhaustion does; costs from the model's usage and a shipped, overridable price table), section 10 (a first day under twenty dollars at list prices), F5
 Depends on: phase 0 (merged in #4); step 04 of this phase (committed as ab8d0fb, 4e3cb52)
@@ -294,7 +294,7 @@ Files: created `crates/core/src/pricing.rs`, `crates/core/src/pricing/prices.rs`
 Consumes: `generated::prices::{FarikPriceTable, ModelPrice}` from Task 1; `contract::{Role, ValidationError}` from `main`
 Produces: `pricing::{PriceTable, ModelPrice, ValidationError, validate_price_table, Usage, PricingError, compute_cost_usd}`; `pricing::prices::{PRICES_JSON, PRICE_TABLE}`; `budget::{SessionLimits, DEFAULT_SESSION_LIMITS, DEFAULT_SPRINT_BUDGET_USD, DEFAULT_DAY_BUDGET_USD, default_session_limits, SessionLedger, add_usage, BudgetScope, BudgetState, BudgetConsequence, Exhausted, check_budgets}`
 
-- [ ] Declare the modules. `crates/core/src/lib.rs` in full:
+- [x] Declare the modules. `crates/core/src/lib.rs` in full:
 
   ```rust
   //! Farik's harness: schemas, the task state machine, the governor, and the cost model.
@@ -324,7 +324,7 @@ Produces: `pricing::{PriceTable, ModelPrice, ValidationError, validate_price_tab
       }
   }
   ```
-- [ ] Write the failing tests, both modules, before any of the code they test. `crates/core/src/pricing.rs` holds the module doc, the imports, the re-exports, and the tests, but neither the `prices` declaration nor the validator, `Usage`, or the cost function:
+- [x] Write the failing tests, both modules, before any of the code they test. `crates/core/src/pricing.rs` holds the module doc, the imports, the re-exports, and the tests, but neither the `prices` declaration nor the validator, `Usage`, or the cost function:
 
   ```rust
   //! The cost of model usage (`docs/SPEC.md` section 5.5): the price table's types and validator,
@@ -659,7 +659,7 @@ Produces: `pricing::{PriceTable, ModelPrice, ValidationError, validate_price_tab
       }
   }
   ```
-- [ ] Run them and confirm they fail because nothing they test exists yet (the three warnings are the imports the validator will use):
+- [x] Run them and confirm they fail because nothing they test exists yet (the three warnings are the imports the validator will use):
 
   ```
   cargo test --package farik-core
@@ -674,7 +674,7 @@ Produces: `pricing::{PriceTable, ModelPrice, ValidationError, validate_price_tab
   # error: could not compile `farik-core` (lib test) due to 4 previous errors; 3 warnings emitted
   ```
 
-- [ ] Write the validator, `Usage`, and the cost function between the re-exports and the tests, and declare the shipped table. `crates/core/src/pricing.rs` in full:
+- [x] Write the validator, `Usage`, and the cost function between the re-exports and the tests, and declare the shipped table. `crates/core/src/pricing.rs` in full:
 
   ```rust
   //! The cost of model usage (`docs/SPEC.md` section 5.5): the price table's types and validator,
@@ -894,7 +894,7 @@ Produces: `pricing::{PriceTable, ModelPrice, ValidationError, validate_price_tab
       }
   }
   ```
-- [ ] Write the shipped table. `crates/core/src/pricing/prices.rs` in full:
+- [x] Write the shipped table. `crates/core/src/pricing/prices.rs` in full:
 
   ```rust
   //! The price table Farik ships (`docs/SPEC.md` section 5.5), copied from the provider's published
@@ -993,7 +993,7 @@ Produces: `pricing::{PriceTable, ModelPrice, ValidationError, validate_price_tab
           .expect("the shipped price table matches its schema: pricing::tests validates it")
   });
   ```
-- [ ] Write the budgets above their tests. `crates/core/src/budget.rs` in full:
+- [x] Write the budgets above their tests. `crates/core/src/budget.rs` in full:
 
   ```rust
   //! Budgets and limits (`docs/SPEC.md` section 5.5): the session limits per role, the session
@@ -1426,7 +1426,7 @@ Produces: `pricing::{PriceTable, ModelPrice, ValidationError, validate_price_tab
       }
   }
   ```
-- [ ] Format, run the tests and the full check; confirm green:
+- [x] Format, run the tests and the full check; confirm green:
 
   ```
   cargo fmt --all
@@ -1443,7 +1443,7 @@ Produces: `pricing::{PriceTable, ModelPrice, ValidationError, validate_price_tab
   # xtask check: ok
   ```
 
-- [ ] Commit: `feat(core): compute cost from the price table and check the budgets`
+- [x] Commit: `feat(core): compute cost from the price table and check the budgets`
 
 ## Verification
 
