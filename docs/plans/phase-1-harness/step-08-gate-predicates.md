@@ -95,7 +95,7 @@ Files: created `crates/core/src/governor/gates.rs`; modified `crates/core/src/go
 Consumes: `std::cmp::Ordering`; `contract::{Role, TaskContract, TaskStatus, wire_method}`; `generated::task_contract::FarikTaskContractKind`; `governor::done::{CriterionResult, RunBy}`; `governor::transition_table::TransitionActor`; `text::{distinct, listed}`; and in the tests `serde_json::json`, `contract::VerificationWire`, `generated::task_contract::ExitCriterionVerificationVariant0Expect`, `governor::readiness::fixtures::a_contract` and `governor::task_status::TASK_STATUSES`
 Produces: `governor::gates::{GateResult, AssignmentRequester, DependencyState, AssignmentInput, check_assignment, WorkState, check_criteria_recorded, ChildState, check_children_done, check_product_doc_write, ContractWriteActor, ParentEpic, check_child_creation, Blocker, check_blocker_written, check_blocker_resolved, Rejection, check_rejection_reasons, ContractWriteOutcome, ContractWriteRefusal, FIELDS_AFTER_FREEZE, FIELDS_THE_GOVERNOR_WRITES, FIELDS_ONLY_THE_HUMAN_WRITES, FIELDS_THE_STORE_OWNS, FIELDS_FIXED_AT_CREATION, FIELDS_OF_THE_CONTENT, FIELDS_ALWAYS_WRITABLE, check_contract_write}`
 
-- [ ] Confirm the baseline on the branch head:
+- [x] Confirm the baseline on the branch head:
 
   ```
   cargo xtask check
@@ -105,7 +105,7 @@ Produces: `governor::gates::{GateResult, AssignmentRequester, DependencyState, A
   # xtask check: ok
   ```
 
-- [ ] Declare the module. `crates/core/src/governor.rs` in full:
+- [x] Declare the module. `crates/core/src/governor.rs` in full:
 
   ```rust
   //! The governor: every rule of `docs/SPEC.md` section 5 as pure functions over values passed
@@ -134,7 +134,7 @@ Produces: `governor::gates::{GateResult, AssignmentRequester, DependencyState, A
   pub mod transition_table;
   ```
 
-- [ ] Write the failing tests. `crates/core/src/governor/gates.rs` holds only this:
+- [x] Write the failing tests. `crates/core/src/governor/gates.rs` holds only this:
 
   ```rust
   #[cfg(test)]
@@ -1900,7 +1900,7 @@ Produces: `governor::gates::{GateResult, AssignmentRequester, DependencyState, A
   }
   ```
 
-- [ ] Run them and confirm they fail because the items are missing:
+- [x] Run them and confirm they fail because the items are missing:
 
   ```
   cargo test --package farik-core governor::gates
@@ -1910,7 +1910,7 @@ Produces: `governor::gates::{GateResult, AssignmentRequester, DependencyState, A
   # error: could not compile `farik-core` (lib test) due to 2 previous errors
   ```
 
-- [ ] Write the implementation above the tests. `crates/core/src/governor/gates.rs` in full:
+- [x] Write the implementation above the tests. `crates/core/src/governor/gates.rs` in full:
 
   ```rust
   //! The gate predicates of `docs/SPEC.md` section 5.2's transition table, with the contract-write
@@ -4481,7 +4481,7 @@ Produces: `governor::gates::{GateResult, AssignmentRequester, DependencyState, A
   }
   ```
 
-- [ ] Say the exemption in the spec. In `docs/SPEC.md` section 5.2's transition table, replace
+- [x] Say the exemption in the spec. In `docs/SPEC.md` section 5.2's transition table, replace
 
   ```
   | in_progress | verifying | assignee declares done | all exit criteria have a recorded result from the assignee's own run, and the task branch has at least one commit and a clean worktree (added in 0.2); for an epic, every task under it is accepted or cancelled and at least one is accepted (5.16) |
@@ -4493,7 +4493,7 @@ Produces: `governor::gates::{GateResult, AssignmentRequester, DependencyState, A
   | in_progress | verifying | assignee declares done | every exit criterion the assignee can run has a recorded result with evidence from its own run, a `human` criterion being the human's to answer and a `review` one the reviewer's, both checked at acceptance instead (5.3, 5.4), and the task branch has at least one commit and a clean worktree (added in 0.2); for an epic, every task under it is accepted or cancelled and at least one is accepted (5.16) |
   ```
 
-- [ ] Say in the spec what a `review` criterion is. In `docs/SPEC.md` section 5.3, replace
+- [x] Say in the spec what a `review` criterion is. In `docs/SPEC.md` section 5.3, replace
 
   ```
   - At least one exit criterion exists, and every criterion has a `verification` with a `method` that is one of `command`, `test`, `artifact`, `review`, `human`.
@@ -4505,7 +4505,7 @@ Produces: `governor::gates::{GateResult, AssignmentRequester, DependencyState, A
   - At least one exit criterion exists, and every criterion has a `verification` with a `method` that is one of `command`, `test`, `artifact`, `review`, `human`. A `review` criterion is a rubric the reviewer answers and a `human` one a question only the user answers; neither is the assignee's to run, because nobody grades their own homework (5.1), so the gate on `in_progress -> verifying` does not ask the assignee for them and the Definition of Done asks the reviewer instead (added in 0.3).
   ```
 
-- [ ] Put the sprint in the spec's frozen list. In `docs/SPEC.md` section 5.11, replace
+- [x] Put the sprint in the spec's frozen list. In `docs/SPEC.md` section 5.11, replace
 
   ```
   from `ready` onward, only `status`, `assignee`, `reviewer`, `iteration`, and `notes` change
@@ -4517,7 +4517,7 @@ Produces: `governor::gates::{GateResult, AssignmentRequester, DependencyState, A
   from `ready` onward, only `status`, `assignee`, `reviewer`, `iteration`, `sprint`, and `notes` change, the sprint because a task is put into one at planning and planning works from the ready backlog
   ```
 
-- [ ] Say in the spec who a lock stops. In `docs/SPEC.md` section 5.11, replace
+- [x] Say in the spec who a lock stops. In `docs/SPEC.md` section 5.11, replace
 
   ```
   A contract with `locked: true` is owned by the human: agents may record criterion results and write their notes on it, and the governor refuses every other change with the reason `contract_locked`.
@@ -4529,7 +4529,7 @@ Produces: `governor::gates::{GateResult, AssignmentRequester, DependencyState, A
   A contract with `locked: true` is owned by the human: agents may record criterion results and write their notes on it, and the governor refuses every other change by an agent, with the reason `contract_locked` when the change is to the contract's content and the reason for the field's owner when the field is one that agent never writes anyway. A lock holds the contract's content for the human; it does not stop the lifecycle, so the governor still writes `status`, `assignee`, `reviewer`, `iteration`, and `sprint` when it applies a transition, or a locked task could never leave `refining`. Neither locking nor unlocking is a content change: a human who locks a contract from `ready` onward does not send its task back to `refining`, or writing an epic by hand and locking it would undo the approval it was just given (5.16).
   ```
 
-- [ ] Say in the spec that a resolution is written. In `docs/SPEC.md` section 5.2's transition table, replace
+- [x] Say in the spec that a resolution is written. In `docs/SPEC.md` section 5.2's transition table, replace
 
   ```
   | blocked | in_progress | Scrum Master or human | blocker resolved |
@@ -4541,7 +4541,7 @@ Produces: `governor::gates::{GateResult, AssignmentRequester, DependencyState, A
   | blocked | in_progress | Scrum Master or human | blocker resolved, with a written resolution, so that the next session knows what changed (added in 0.3) |
   ```
 
-- [ ] Say in the spec what the assignment gate checks. In `docs/SPEC.md` section 5.2's transition table, replace
+- [x] Say in the spec what the assignment gate checks. In `docs/SPEC.md` section 5.2's transition table, replace
 
   ```
   assignee role matches contract, budget available in sprint, every dependency accepted and integrated (5.14; added in 0.2)
@@ -4553,7 +4553,7 @@ Produces: `governor::gates::{GateResult, AssignmentRequester, DependencyState, A
   assignee role matches the contract, an epic's assignee being the Scrum Master, or the Product Manager when the team has no active one (5.16 item 3); the reviewer holds the contract's reviewer role, an epic's reviewer being the Product Manager when the Scrum Master broke it down and the human when the Product Manager did (5.1, 5.16 item 4), and is never the assignee; the assignee is below the team's work-in-progress limit, which counts every task it holds and has not finished, assigned, in progress, or blocked, because nothing gates `assigned -> in_progress` and counting only the started ones would let an agent be handed any number of tasks (added in 0.3); budget available in sprint; every dependency accepted and integrated (5.14; added in 0.2)
   ```
 
-- [ ] Say in the spec what the limit counts. In `docs/SPEC.md` section 6.2, replace
+- [x] Say in the spec what the limit counts. In `docs/SPEC.md` section 6.2, replace
 
   ```
   Enforces WIP limits (default: one in-progress task per agent)
@@ -4565,7 +4565,7 @@ Produces: `governor::gates::{GateResult, AssignmentRequester, DependencyState, A
   Enforces WIP limits (default: one unfinished task per agent, counted as 5.2 says: assigned, in progress, or blocked)
   ```
 
-- [ ] Say in the spec what the product-document gate reads. In `docs/SPEC.md` section 5.16 item 1, replace
+- [x] Say in the spec what the product-document gate reads. In `docs/SPEC.md` section 5.16 item 1, replace
 
   ```
   the `farik_write_product_doc` tool is refused for an epic that is not yet `ready`
@@ -4577,7 +4577,7 @@ Produces: `governor::gates::{GateResult, AssignmentRequester, DependencyState, A
   the `farik_write_product_doc` tool is refused until the user has approved the contract the epic has now, and for a `cancelled` epic, whose documents would describe a decision the team abandoned (added in 0.3). The governor asks the approval rather than the status, because an epic waiting for approval, one that failed the Definition of Ready three times, and one whose risk needs the human all sit in `escalated`; a return to `refining` ends the approval and item 2 asks for it again, and an epic escalated after its approval, for a budget or a permission, keeps the documents it was approved for
   ```
 
-- [ ] Record the interface changes in `docs/plans/project-plan.md`, phase 1 step 08. Each before-text is a substring of a longer line and occurs exactly once. Replace
+- [x] Record the interface changes in `docs/plans/project-plan.md`, phase 1 step 08. Each before-text is a substring of a longer line and occurs exactly once. Replace
 
   ```
   `struct DependencyState { task_id: TaskId, status: TaskStatus, integrated: bool }`
@@ -4697,7 +4697,7 @@ Produces: `governor::gates::{GateResult, AssignmentRequester, DependencyState, A
   `enum ContractWriteRefusal { ContractLocked, ContractFrozen { fields: Vec<String> }, TaskTerminal { status: TaskStatus }, StoresFields { fields: Vec<String> }, CreationFields { fields: Vec<String> }, LifecycleFields { fields: Vec<String> }, HumansFields { fields: Vec<String> }, ContentFields { fields: Vec<String> }, UnknownFields { fields: Vec<String> } }`; `FIELDS_AFTER_FREEZE: [&str; 6]`, `FIELDS_THE_GOVERNOR_WRITES: [&str; 5]`, `FIELDS_ONLY_THE_HUMAN_WRITES: [&str; 1]`, `FIELDS_THE_STORE_OWNS: [&str; 4]`, `FIELDS_FIXED_AT_CREATION: [&str; 2]`, `FIELDS_OF_THE_CONTENT: [&str; 13]` and `FIELDS_ALWAYS_WRITABLE: [&str; 1]` (added 2026-09-16 by the step 08 plan and its readiness reviews: the gate answers from an allow-list per field rather than a list of the forbidden, because a deny-list over a wire format grew a hole each time a reviewer looked along a new axis, and the content class is written out so a field added to the schema is refused until somebody says who writes it; the five lifecycle fields are the governor's whoever asks, `locked` is the human's, the identifier and the stamps are the store's, `kind` and `parent` are fixed at creation, the Scrum Master writes a task's content but never an epic's, a locked contract may still be moved by the governor, locking is not a content write, a terminal task takes no write but a note, and the reasons are reported most structural first)
   ```
 
-- [ ] Format, run the tests and the full check; confirm green:
+- [x] Format, run the tests and the full check; confirm green:
 
   ```
   cargo fmt --all
@@ -4711,7 +4711,7 @@ Produces: `governor::gates::{GateResult, AssignmentRequester, DependencyState, A
   # xtask check: ok
   ```
 
-- [ ] Commit: `feat(core): check the gates of the transition table`
+- [x] Commit: `feat(core): check the gates of the transition table`
 
 ## Verification
 

@@ -6,6 +6,9 @@
 pub mod done;
 /// Iteration and escalation rules (`docs/SPEC.md` sections 5.2 and 5.7).
 pub mod escalation;
+/// The gate predicates of `docs/SPEC.md` section 5.2's table, with the contract-write rules of
+/// 5.11 and the epic rules of 5.16.
+pub mod gates;
 /// Allowed and protected paths (`docs/SPEC.md` sections 5.4, 5.6, 5.12).
 pub mod paths;
 /// Permission tiers and the tool-call and command checks (`docs/SPEC.md` section 5.6, ADR 0004).
