@@ -1,13 +1,13 @@
 # Phase 1, step 03: Allowed and protected paths
 
-Status: draft
+Status: ready
 Branch: `claude/phase-0-implementation-izm38y` (the harness-assigned phase branch, left as assigned per `docs/standards/code.md`; steps do not get their own)
 Spec: `docs/SPEC.md` section 5.4 item 2 (no file outside `allowed_paths` may change), 5.6 (protected paths: no tool may read or write them, whatever its tier; this step adds the sentence that pins how globs match), 5.12 (`protected_paths` is a team rule), F5
 Depends on: phase 0 (merged in #4); step 01 of this phase (committed as f9f0e67, 0e50df1, 3cc8bc3); step 02 of this phase (committed as 21fe00a, 87a3561, 4a1ac90)
 
 A plan is `ready` only when a reviewer other than the author has confirmed the three rules in `docs/standards/workflow.md` stage 2 (Plan): every decision made, no ambiguity, no forward dependencies. Record who confirmed and when here.
 
-Readiness confirmed by: pending
+Readiness confirmed by: a fresh Claude Code review session, 2026-09-16, before execution (first pass READY with three author-level items, taken in cce4e48; second pass READY under all three rules at cce4e48; recorded on pull request #5)
 
 ## Goal
 
