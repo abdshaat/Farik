@@ -50,7 +50,7 @@ A third persona, the enterprise platform team, is deliberately deferred. Their a
 
 **Epic.** The translation of one large request from the user into a contract, written by the Product Manager after asking the user its questions and approved by the user before anyone breaks it into tasks. A small request becomes a single task instead; the Scrum Master or the Product Manager decides which (5.16; added in 0.3).
 
-**Contract.** A structured document attached to an epic or a task: intent, scope, requirements, exit criteria with a verification method for each, constraints, budget, and a named reviewer who is not the assignee. The schema is in `docs/schemas/task-contract.schema.json`; the `kind` field says which of the two it is.
+**Contract.** A structured document attached to an epic or a task: intent, scope, requirements, exit criteria with a verification method for each, constraints, budget, and a named reviewer who is not the assignee. The schema is in `docs/schemas/task-contract.schema.json`; the `kind` field says which of the two it is. Every exit criterion's `id` names one criterion: a recorded result, a note, and an event all refer to a criterion by its id, so a contract that gives one id to two criteria is refused when it is read, which JSON Schema cannot express and the validator therefore does (added in 0.3).
 
 **Sprint.** A batch of tasks with a budget. A sprint ends when every task in it is accepted or cancelled; its budget caps what may be assigned inside it (decided 2026-09-15; there is no time box). Sprints exist so that the team stops and looks up periodically rather than grinding an unbounded backlog.
 

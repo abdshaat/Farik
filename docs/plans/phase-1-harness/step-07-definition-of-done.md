@@ -79,7 +79,7 @@ Files: modified `crates/core/src/contract.rs`, `docs/SPEC.md`, `docs/plans/proje
 Consumes: `contract::{TaskContract, ValidationError, validate_contract}` from phase 0
 Produces: no new public item; `validate_contract` refuses one more shape
 
-- [ ] Confirm the baseline on the branch head:
+- [x] Confirm the baseline on the branch head:
 
   ```
   cargo xtask check
@@ -89,7 +89,7 @@ Produces: no new public item; `validate_contract` refuses one more shape
   # xtask check: ok
   ```
 
-- [ ] Write the failing tests. In `crates/core/src/contract.rs`, insert before `    #[test]\n    fn accepts_a_schema_valid_contract_and_applies_the_defaults() {`:
+- [x] Write the failing tests. In `crates/core/src/contract.rs`, insert before `    #[test]\n    fn accepts_a_schema_valid_contract_and_applies_the_defaults() {`:
 
   ```rust
       #[test]
@@ -154,7 +154,7 @@ Produces: no new public item; `validate_contract` refuses one more shape
 
   ```
 
-- [ ] Run them and confirm they fail because `validate_contract` accepts a repeated id. Each panics at `expected a refusal` with the accepted contract printed:
+- [x] Run them and confirm they fail because `validate_contract` accepts a repeated id. Each panics at `expected a refusal` with the accepted contract printed:
 
   ```
   cargo test --package farik-core contract
@@ -165,7 +165,7 @@ Produces: no new public item; `validate_contract` refuses one more shape
   # test result: FAILED. 17 passed; 2 failed; 0 ignored; 0 measured; 106 filtered out; finished in 0.09s
   ```
 
-- [ ] Refuse it. In `crates/core/src/contract.rs`, replace
+- [x] Refuse it. In `crates/core/src/contract.rs`, replace
 
   ```rust
   use std::sync::LazyLock;
@@ -259,7 +259,7 @@ Produces: no new public item; `validate_contract` refuses one more shape
   }
   ```
 
-- [ ] Say it in the spec. In `docs/SPEC.md` section 4, replace
+- [x] Say it in the spec. In `docs/SPEC.md` section 4, replace
 
   ```
   **Contract.** A structured document attached to an epic or a task: intent, scope, requirements, exit criteria with a verification method for each, constraints, budget, and a named reviewer who is not the assignee. The schema is in `docs/schemas/task-contract.schema.json`; the `kind` field says which of the two it is.
@@ -271,7 +271,7 @@ Produces: no new public item; `validate_contract` refuses one more shape
   **Contract.** A structured document attached to an epic or a task: intent, scope, requirements, exit criteria with a verification method for each, constraints, budget, and a named reviewer who is not the assignee. The schema is in `docs/schemas/task-contract.schema.json`; the `kind` field says which of the two it is. Every exit criterion's `id` names one criterion: a recorded result, a note, and an event all refer to a criterion by its id, so a contract that gives one id to two criteria is refused when it is read, which JSON Schema cannot express and the validator therefore does (added in 0.3).
   ```
 
-- [ ] Bring the project plan in line. Each of these before-texts is a substring of a longer line rather than a whole line, and each occurs exactly once. In `docs/plans/project-plan.md`, replace
+- [x] Bring the project plan in line. Each of these before-texts is a substring of a longer line rather than a whole line, and each occurs exactly once. In `docs/plans/project-plan.md`, replace
 
   ```
   `contract::validate_contract(input: &serde_json::Value) -> Result<TaskContract, Vec<ValidationError>>`
@@ -331,7 +331,7 @@ Produces: no new public item; `validate_contract` refuses one more shape
   answering spec 5.4 item 5 and 5.16 item 4 only, so that step 07's `HumanAccepted` rule and phase 3's orchestrator agree; step 09's `ContractRequiresHuman` gate is the human's approval of the contract before work starts, which `human_accepts_contracts` widens, and step 09 takes it from its context field instead
   ```
 
-- [ ] Format, run the tests and the full check; confirm green:
+- [x] Format, run the tests and the full check; confirm green:
 
   ```
   cargo fmt --all
@@ -345,7 +345,7 @@ Produces: no new public item; `validate_contract` refuses one more shape
   # xtask check: ok
   ```
 
-- [ ] Commit: `fix(core): refuse a contract that gives one id to two criteria`
+- [x] Commit: `fix(core): refuse a contract that gives one id to two criteria`
 
 ### Task 2: The Definition of Done
 
