@@ -1,9 +1,9 @@
 # Phase 0, step 03: Contract validation
 
-Status: draft
-Branch: `phase/0-foundation` (the phase branch; steps do not get their own)
+Status: in progress
+Branch: `claude/phase-0-implementation-izm38y` (the harness-assigned phase branch, left as assigned per `docs/standards/code.md`; steps do not get their own)
 Spec: `docs/SPEC.md` section 3 (Contract), section 5.3 (the structural checks build on these types in phase 1), section 5.11 (`locked`), section 5.13 (`references`), section 5.16 (`kind`, `parent`), F4 (validation against the JSON schema); `docs/standards/code.md`, "Schema validation" and "Wire and file formats"
-Depends on: step 01 of this phase (not yet committed), step 02 of this phase (not yet committed); record the shas here when they land
+Depends on: step 01 of this phase (committed as 61e3a28, f1163b8, c6f4c9c), step 02 of this phase (committed as c5e8ab9)
 
 A plan is `ready` only when a reviewer other than the author has confirmed the three rules in `docs/standards/workflow.md` stage 2 (Plan): every decision made, no ambiguity, no forward dependencies. Record who confirmed and when here.
 
@@ -58,7 +58,7 @@ Files: created `crates/core/src/contract.rs`, `crates/core/src/contract/fixtures
 Consumes: `generated::task_contract::*` from step 02
 Produces: `contract::{TaskContract, ExitCriterion, Budget, Notes, Requirement, Risk, TaskStatus, TaskId, Role, VerificationWire}`; `contract::Verification` with `From<&VerificationWire>` and `method()`; `contract::ValidationError`; `contract::validate_contract(input: &Value) -> Result<TaskContract, Vec<ValidationError>>`; `contract::fixtures::{a_contract_wire, a_full_contract_wire}`
 
-- [ ] Add the dependency. Make the workspace `Cargo.toml` exactly:
+- [x] Add the dependency. Make the workspace `Cargo.toml` exactly:
 
   ```toml
   [workspace]
@@ -116,7 +116,7 @@ Produces: `contract::{TaskContract, ExitCriterion, Budget, Notes, Requirement, R
   workspace = true
   ```
 
-- [ ] Declare the module in `crates/core/src/lib.rs`:
+- [x] Declare the module in `crates/core/src/lib.rs`:
 
   ```rust
   //! Farik's harness: schemas, the task state machine, the governor, and the cost model.
@@ -141,7 +141,7 @@ Produces: `contract::{TaskContract, ExitCriterion, Budget, Notes, Requirement, R
   }
   ```
 
-- [ ] Write the fixtures, `crates/core/src/contract/fixtures.rs`:
+- [x] Write the fixtures, `crates/core/src/contract/fixtures.rs`:
 
   ```rust
   use serde_json::{Value, json};
@@ -207,7 +207,7 @@ Produces: `contract::{TaskContract, ExitCriterion, Budget, Notes, Requirement, R
   }
   ```
 
-- [ ] Write the failing tests. `crates/core/src/contract.rs` holds, for now, the module doc, the re-exports, the `Verification` enum with its conversion, the `fixtures` declaration, and the tests, but not the validator:
+- [x] Write the failing tests. `crates/core/src/contract.rs` holds, for now, the module doc, the re-exports, the `Verification` enum with its conversion, the `fixtures` declaration, and the tests, but not the validator:
 
   ```rust
   //! The task contract: `docs/schemas/task-contract.schema.json` as Rust types, and the validator
@@ -464,7 +464,7 @@ Produces: `contract::{TaskContract, ExitCriterion, Budget, Notes, Requirement, R
   }
   ```
 
-- [ ] Run the tests and confirm they fail because the validator does not exist:
+- [x] Run the tests and confirm they fail because the validator does not exist:
 
   ```
   cargo test --package farik-core
@@ -473,7 +473,7 @@ Produces: `contract::{TaskContract, ExitCriterion, Budget, Notes, Requirement, R
   # error: could not compile `farik-core` (lib test) due to 1 previous error; 3 warnings emitted
   ```
 
-- [ ] Write the validator. `crates/core/src/contract.rs` in full:
+- [x] Write the validator. `crates/core/src/contract.rs` in full:
 
   ```rust
   //! The task contract: `docs/schemas/task-contract.schema.json` as Rust types, and the validator
@@ -784,7 +784,7 @@ Produces: `contract::{TaskContract, ExitCriterion, Budget, Notes, Requirement, R
   }
   ```
 
-- [ ] Run the tests; confirm green, with these ten contract tests and the smoke test:
+- [x] Run the tests; confirm green, with these ten contract tests and the smoke test:
 
   ```
   cargo test --package farik-core
@@ -805,7 +805,7 @@ Produces: `contract::{TaskContract, ExitCriterion, Budget, Notes, Requirement, R
 
   For the record, the messages the validator reports, which the tests check by path rather than by text: a non-object is `"not a contract" is not of type "object"`; a bad id is `"TASK-1" does not match "^FRK-[0-9]{1,6}$"`; an empty list is `[] has less than 1 item`; an unknown property is `Additional properties are not allowed ('owner' was unexpected)`; a bad reference is `"not a uri" is not a "uri"`; a `command` criterion without `expect` is `{"command":"pnpm check","method":"command"} is not valid under any of the schemas listed in the 'oneOf' keyword`.
 
-- [ ] Run the full check; confirm green:
+- [x] Run the full check; confirm green:
 
   ```
   cargo fmt --all
@@ -817,7 +817,7 @@ Produces: `contract::{TaskContract, ExitCriterion, Budget, Notes, Requirement, R
   # exit code 0
   ```
 
-- [ ] Commit: `feat(core): validate contracts against the json schema`
+- [x] Commit: `feat(core): validate contracts against the json schema`
 
 ## Verification
 

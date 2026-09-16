@@ -1,6 +1,8 @@
 //! Farik's harness: schemas, the task state machine, the governor, and the cost model.
 //! This crate performs no I/O.
 
+/// The task contract and its validator.
+pub mod contract;
 /// Types generated from `docs/schemas/`.
 pub mod generated;
 
