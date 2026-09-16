@@ -20,5 +20,8 @@ pub mod readiness;
 pub mod task_status;
 /// Team rules of `docs/SPEC.md` section 5.12 and their defaults.
 pub mod team_rules;
+/// Transition evaluation: the table, the actors, and every gate as one decision
+/// (`docs/SPEC.md` section 5.2).
+pub mod transition;
 /// The transition table of `docs/SPEC.md` section 5.2 as data, with lookups.
 pub mod transition_table;

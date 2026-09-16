@@ -1,6 +1,6 @@
 # Phase 1, step 09: Transition evaluation
 
-Status: ready
+Status: done
 Branch: `claude/phase-0-implementation-izm38y` (the harness-assigned phase branch, left as assigned per `docs/standards/code.md`; steps do not get their own)
 Spec: `docs/SPEC.md` section 5.2 (the transition table, its gates, and who triggers each move), section 5.1 (a row that belongs to the assignee or the reviewer is that agent's), section 5.3 (the Definition of Ready), section 5.4 (the Definition of Done), section 5.5 (the budgets the governor escalates on), section 5.7 (the ten escalation reasons), section 5.11 (a contract the human must accept), section 5.12 (`human_accepts_contracts`), section 5.16 (triage, an epic's tasks, an epic's approval), F5 (the governor as a library with a test for every transition)
 Depends on: phase 0 (merged in #4); step 01 of this phase for the table, `GateId`, `TransitionActor` and the two lookups (f9f0e67, 0e50df1, 3cc8bc3); step 02 for `evaluate_readiness`, `ReadinessContext` and the fixtures (21fe00a, 87a3561, 4a1ac90); step 05 for `check_budgets` and `BudgetState` (5ad2c21, c4cf30b, f3ecea4, 04ba838); step 06 for the three counting rules and `EscalationReason` (33202e7, abfb7d8); step 07 for `evaluate_done`, `DoneEvidence` and `requires_human_acceptance` (a0cdecd, 090e015, cc27028); step 08 for the nine gate predicates and their values (fa02450, 2594121)
@@ -83,7 +83,7 @@ Files: created `crates/core/src/governor/transition.rs`; modified `crates/core/s
 Consumes: `std::time::Duration`; `chrono::{DateTime, Utc}`; `budget::{BudgetConsequence, BudgetScope, BudgetState, check_budgets}`; `contract::{TaskContract, TaskId, TaskStatus}`; `generated::task_contract::FarikTaskContractKind`; `governor::done::{CriterionResult, DoneEvidence, evaluate_done, requires_human_acceptance}`; `governor::escalation::{BlockedAge, EscalationReason, READINESS_ATTEMPT_LIMIT, ReadinessOutcome, RejectionOutcome, evaluate_blocked_age, evaluate_readiness_attempts, evaluate_rejection}`; `governor::gates::{AssignmentInput, AssignmentRequester, Blocker, ChildState, GateResult, Rejection, WorkState, check_assignment, check_blocker_resolved, check_blocker_written, check_children_done, check_criteria_recorded, check_rejection_reasons}`; `governor::readiness::{ReadinessContext, evaluate_readiness}`; `governor::transition_table::{GateId, TransitionActor, TransitionRow, find_transitions}`; and in the tests `chrono::TimeZone`, `budget::{DEFAULT_DAY_BUDGET_USD, DEFAULT_SESSION_LIMITS, DEFAULT_SPRINT_BUDGET_USD, SessionLedger}`, `contract::Role`, the generated `Risk`, `governor::done::RunBy`, `governor::escalation::{DEFAULT_BLOCKED_LIMIT, evaluate_rejection}`, `governor::readiness::fixtures::{a_contract, a_ready_context}` and `governor::transition_table::{Status, TRANSITION_TABLE}`
 Produces: `governor::transition::{TransitionRequest, ContractAcceptance, TransitionContext, TransitionEffect, TransitionDecision, GateFailure, TransitionRefusal, evaluate_transition}`
 
-- [ ] Confirm the baseline on the branch head:
+- [x] Confirm the baseline on the branch head:
 
   ```
   cargo xtask check
@@ -93,7 +93,7 @@ Produces: `governor::transition::{TransitionRequest, ContractAcceptance, Transit
   # xtask check: ok
   ```
 
-- [ ] Declare the module. `crates/core/src/governor.rs` in full:
+- [x] Declare the module. `crates/core/src/governor.rs` in full:
 
   ```rust
   //! The governor: every rule of `docs/SPEC.md` section 5 as pure functions over values passed
@@ -125,7 +125,7 @@ Produces: `governor::transition::{TransitionRequest, ContractAcceptance, Transit
   pub mod transition_table;
   ```
 
-- [ ] Write the failing tests. `crates/core/src/governor/transition.rs` holds only this:
+- [x] Write the failing tests. `crates/core/src/governor/transition.rs` holds only this:
 
   ```rust
   #[cfg(test)]
@@ -1274,7 +1274,7 @@ Produces: `governor::transition::{TransitionRequest, ContractAcceptance, Transit
   }
   ```
 
-- [ ] Run them and confirm they fail because the items are missing:
+- [x] Run them and confirm they fail because the items are missing:
 
   ```
   cargo test --package farik-core governor::transition
@@ -1283,7 +1283,7 @@ Produces: `governor::transition::{TransitionRequest, ContractAcceptance, Transit
   # error: could not compile `farik-core` (lib test) due to 1 previous error
   ```
 
-- [ ] Write the implementation above the tests. `crates/core/src/governor/transition.rs` in full:
+- [x] Write the implementation above the tests. `crates/core/src/governor/transition.rs` in full:
 
   ```rust
   //! Transition evaluation (`docs/SPEC.md` section 5.2, F5): the one question the runtime asks
@@ -3026,7 +3026,7 @@ Produces: `governor::transition::{TransitionRequest, ContractAcceptance, Transit
   }
   ```
 
-- [ ] Stop the spec claiming the user's stop for the governor. In `docs/SPEC.md` section 5.2's transition table, replace
+- [x] Stop the spec claiming the user's stop for the governor. In `docs/SPEC.md` section 5.2's transition table, replace
 
   ```
   | any | escalated | Governor | budget exhausted, permission denied on a required action, or a `stop` from the user |
@@ -3038,7 +3038,7 @@ Produces: `governor::transition::{TransitionRequest, ContractAcceptance, Transit
   | any | escalated | Governor | a budget whose consequence is escalation is exhausted — the task's dollars or its sessions (5.5) — or a permission was denied on a required action; a `stop` from the user takes the human's row below, which needs no gate, because the governor is not what hears the user (added in 0.3) |
   ```
 
-- [ ] Say in the spec that readying a contract waits for the human. In `docs/SPEC.md` section 5.2's transition table, replace
+- [x] Say in the spec that readying a contract waits for the human. In `docs/SPEC.md` section 5.2's transition table, replace
 
   ```
   | refining | ready | Governor, after PM submits contract | Definition of Ready (5.3) |
@@ -3050,7 +3050,7 @@ Produces: `governor::transition::{TransitionRequest, ContractAcceptance, Transit
   | refining | ready | Governor, after PM submits contract | Definition of Ready (5.3), and the human's acceptance of the contract where it is required: an epic always, a `high` risk, or the team's policy (5.16 item 2, 5.12; added in 0.3) |
   ```
 
-- [ ] Say in the spec how the table is read when more than one row carries a move. In `docs/SPEC.md` section 5.2, where the before-text is a substring of a longer line and occurs exactly once, replace
+- [x] Say in the spec how the table is read when more than one row carries a move. In `docs/SPEC.md` section 5.2, where the before-text is a substring of a longer line and occurs exactly once, replace
 
   ```
   The governor judges an assignment on what the runtime tells it,
@@ -3064,7 +3064,7 @@ Produces: `governor::transition::{TransitionRequest, ContractAcceptance, Transit
   The governor judges an assignment on what the runtime tells it,
   ```
 
-- [ ] Record the interface changes in `docs/plans/project-plan.md`, phase 1 step 09. Each before-text is a substring of a longer line and occurs exactly once. Replace
+- [x] Record the interface changes in `docs/plans/project-plan.md`, phase 1 step 09. Each before-text is a substring of a longer line and occurs exactly once. Replace
 
   ```
   contract_requires_human_acceptance: bool, contract_human_accepted: bool
@@ -3112,7 +3112,7 @@ Produces: `governor::transition::{TransitionRequest, ContractAcceptance, Transit
   `enum TransitionRefusal { NoSuchTransition { from: TaskStatus, to: TaskStatus }, ActorNotAllowed { actor: TransitionActor, allowed: Vec<TransitionActor> }, NotTheNamedAgent { actor: TransitionActor, named: Option<String>, asked: Option<String> }, GateFailed { failures: Vec<GateFailure> } }` with `struct GateFailure { gate: GateId, details: Vec<String> }` (changed 2026-09-16 by the step 09 plan: a move can be carried by more than one row, so a refusal that named one gate would report the first row's for a move three gates refused; and a row that belongs to the assignee or the reviewer is open only to the agent the contract names, which is the refusal `agent_id` exists for)
   ```
 
-- [ ] Format, run the tests and the full check; confirm green:
+- [x] Format, run the tests and the full check; confirm green:
 
   ```
   cargo fmt --all
@@ -3126,7 +3126,7 @@ Produces: `governor::transition::{TransitionRequest, ContractAcceptance, Transit
   # xtask check: ok
   ```
 
-- [ ] Commit: `feat(core): decide every transition of the lifecycle`
+- [x] Commit: `feat(core): decide every transition of the lifecycle`
 
 ## Verification
 
