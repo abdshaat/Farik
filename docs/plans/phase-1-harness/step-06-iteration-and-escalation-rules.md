@@ -1,13 +1,13 @@
 # Phase 1, step 06: Iteration and escalation rules
 
-Status: draft
+Status: ready
 Branch: `claude/phase-0-implementation-izm38y` (the harness-assigned phase branch, left as assigned per `docs/standards/code.md`; steps do not get their own)
-Spec: `docs/SPEC.md` section 5.2 (`rejected → in_progress` below the iteration limit and `rejected → escalated` at it; `refining → escalated` after three failed readiness checks; `blocked → escalated` past the blocked limit, default 24 hours), section 5.7 (what an escalation carries and its ten reasons; this step writes the tenth into its list), section 5.16 (what the `approval` reason waits for), F5
-Depends on: phase 0 (merged in #4); step 05 of this phase (committed as 5ad2c21, c4cf30b)
+Spec: `docs/SPEC.md` section 5.2 (`rejected → in_progress` below the iteration limit and `rejected → escalated` at it; `refining → escalated` after three failed readiness checks; `blocked → escalated` at or past the blocked limit, default 24 hours), section 5.7 (what an escalation carries and its ten reasons; this step writes the tenth into its list), section 5.16 (what the `approval` reason waits for), F5
+Depends on: phase 0 (merged in #4); step 05 of this phase (committed as 5ad2c21, c4cf30b, and its review fix f3ecea4)
 
 A plan is `ready` only when a reviewer other than the author has confirmed the three rules in `docs/standards/workflow.md` stage 2 (Plan): every decision made, no ambiguity, no forward dependencies. Record who confirmed and when here.
 
-Readiness confirmed by: pending
+Readiness confirmed by: a fresh Claude Code session that did not write this plan, 2026-09-16. Second pass at `cdb388c`: READY under all three rules of `docs/standards/workflow.md` stage 2. It executed the whole plan in a scratch copy rather than taking the evidence on trust: the baseline, the red output byte-identical to rustc's two lines, `cargo fmt --all --check` clean on the blocks as written, 7 tests green with 114 filtered out, 121 and 23 in the workspace, clippy pedantic with `-D warnings` clean, `cargo xtask core-io` clean, `git status` showing only the file map's files, and the spec replacement's before-text occurring exactly once. Two important items it raised with the verdict are taken in this commit: the blocked-age boundary is written into spec 5.2 rather than left contradicting it, and the event kind is `escalation.raised`, which spec 8.5 lists, rather than an invented `task.escalated`. Its two minors are taken too: `Depends on` names step 05's review fix, and the zero-attempt assertion says in a comment why a count nothing produces is still pinned.
 
 ## Goal
 
@@ -19,10 +19,11 @@ All in `docs/plans/project-plan.md`, phase 1, restated here only where this step
 
 - `iteration` is how many times the task has already been returned to `in_progress` after a rejection, the contract's `iteration` field; `max_iterations` is how many times that may happen (the schema's own words: "how many times the task may be rejected and returned to in_progress before it escalates"). A rejection returns the task while `iteration < max_iterations` and escalates once the limit is reached, so with the default of 3 the first three rejections return and the fourth escalates; step 09's `IncrementIteration` effect counts each return. Rejected: counting the rejection itself before comparing, because then the third rejection of a task allowed three returns would escalate.
 - A failed readiness check is counted with the failure that just happened included: the first two failures retry, the third escalates (spec 5.2, "fails DoR three times"); the limit is the constant `READINESS_ATTEMPT_LIMIT` = 3, because the spec gives one number and no contract field carries it.
-- A blocked task escalates when its age reaches the limit (`>=`), consistent with step 05's budgets; `DEFAULT_BLOCKED_LIMIT` is 24 hours; the limit is a parameter because the spec says it is configurable. Time is injected: the function takes `blocked_at` and `now` (project plan, every-phase decisions), and a `now` before `blocked_at`, a clock that went backwards, counts as within the limit rather than as an error, because the next tick will tell. `std::time::Duration` is the limit's type, as in step 05; `chrono::DateTime<Utc>` is the timestamp's, as in the generated contract.
-- `EscalationReason` has spec 5.7's list, which already names the approval of an epic (5.16 says what that approval waits for), plus `readiness_failures`, which 5.7 does not name: spec 5.2 escalates a contract that failed the Definition of Ready three times, and 5.7's prose listed nine reasons without that one. This step writes the tenth into 5.7 in the wire spelling, so that the spec's list and this enum are the same ten (hard rule 8). Serialised in `snake_case` (`blocker_age`, `risk_gate`, `readiness_failures`, `explicit_request`), so that phase 2's `task.escalated` event carries the same words the spec uses. Rejected: a generated type, because the event schema that will carry it is phase 2 step 01's.
+- A blocked task escalates when its age reaches the limit (`>=`), consistent with step 05's budgets, where spec 5.5 already says a budget is exhausted when its spend reaches its limit. Spec 5.2's row said "blocked longer than the configured limit", which excludes the instant the limit is reached, and step 01's `GateId::BlockedAge` doc repeated it; both are rewritten to "for the configured limit or longer" in this step's commit, so that the spec and the test pin the same instant (hard rule 8). Rejected: `>` to match the old wording, because a limit that fires at exactly 24 hours is the one a user can predict, and because the harness would then have two boundary conventions. `DEFAULT_BLOCKED_LIMIT` is 24 hours; the limit is a parameter because the spec says it is configurable. Time is injected: the function takes `blocked_at` and `now` (project plan, every-phase decisions), and a `now` before `blocked_at`, a clock that went backwards, counts as within the limit rather than as an error, because the next tick will tell. `std::time::Duration` is the limit's type, as in step 05; `chrono::DateTime<Utc>` is the timestamp's, as in the generated contract.
+- `EscalationReason` has spec 5.7's list, which already names the approval of an epic (5.16 says what that approval waits for), plus `readiness_failures`, which 5.7 does not name: spec 5.2 escalates a contract that failed the Definition of Ready three times, and 5.7's prose listed nine reasons without that one. This step writes the tenth into 5.7 in the wire spelling, so that the spec's list and this enum are the same ten (hard rule 8). Serialised in `snake_case` (`blocker_age`, `risk_gate`, `readiness_failures`, `explicit_request`), so that phase 2's `escalation.raised` event, the kind spec 8.5 lists and the project plan's phase 2 step 10 adds, carries the same words the spec uses. Rejected: a generated type, because the event schema that will carry it is phase 2 step 01's.
 - `Escalation` is a plain record (`task_id`, `reason`, `tried`, `options`); the runtime fills `tried` and `options` from the agent's escalation call, and this step only defines the shape.
 - `DEFAULT_ITERATION_LIMIT` = 3 is a public constant, the schema's default for `max_iterations`, so that tests and later steps name the number once; the project plan's step 06 entry gains the three constants in this plan's commit.
+- The counts are `u32`, as step 05's `task_max_sessions` is, while the generated contract carries `iteration: u64` and `max_iterations: NonZeroU64`; step 09 converts with `u32::try_from` rather than `as`, which clippy pedantic refuses, and its plan budgets for the conversion.
 - Tests import the items by name rather than a glob; every code block below is the file after `cargo fmt --all`.
 
 ## Design
@@ -45,8 +46,9 @@ Touches `crates/core` only: one new child of `governor`. Consumes `contract::Tas
 
 ```
 crates/core/src/governor.rs                         modifies: declares escalation
+crates/core/src/governor/transition_table.rs        modifies: the BlockedAge gate's doc says "for the configured limit or longer"
 crates/core/src/governor/escalation.rs              creates: EscalationReason, Escalation, the three constants, the three outcome enums and functions, seven tests
-docs/SPEC.md                                        modifies: section 5.7 names the ten reasons in their wire spelling
+docs/SPEC.md                                        modifies: section 5.7 names the ten reasons in their wire spelling; section 5.2's blocked row says "for the configured limit or longer"
 docs/plans/project-plan.md                          modifies: phase 1 step 06 interface gains the three constants (in the plan's own commit)
 docs/plans/phase-1-harness/step-06-iteration-and-escalation-rules.md   modifies: checkboxes ticked
 ```
@@ -138,6 +140,8 @@ Produces: `governor::escalation::{EscalationReason, Escalation, DEFAULT_ITERATIO
 
       #[test]
       fn retries_readiness_twice_and_escalates_on_the_third_failure() {
+          // The count includes the failure that has just happened, so the runtime never passes
+          // zero; zero retries all the same rather than escalating on a count nothing produces.
           assert_eq!(evaluate_readiness_attempts(0), ReadinessOutcome::Retry);
           assert_eq!(evaluate_readiness_attempts(1), ReadinessOutcome::Retry);
           assert_eq!(evaluate_readiness_attempts(2), ReadinessOutcome::Retry);
@@ -415,6 +419,8 @@ Produces: `governor::escalation::{EscalationReason, Escalation, DEFAULT_ITERATIO
 
       #[test]
       fn retries_readiness_twice_and_escalates_on_the_third_failure() {
+          // The count includes the failure that has just happened, so the runtime never passes
+          // zero; zero retries all the same rather than escalating on a count nothing produces.
           assert_eq!(evaluate_readiness_attempts(0), ReadinessOutcome::Retry);
           assert_eq!(evaluate_readiness_attempts(1), ReadinessOutcome::Retry);
           assert_eq!(evaluate_readiness_attempts(2), ReadinessOutcome::Retry);
@@ -519,6 +525,32 @@ Produces: `governor::escalation::{EscalationReason, Escalation, DEFAULT_ITERATIO
   ```
 
   The rest of the paragraph is unchanged.
+
+- [ ] Put the blocked-age boundary in the spec and the gate's doc. In `docs/SPEC.md` section 5.2, replace
+
+  ```
+  | blocked | escalated | Governor | blocked longer than the configured limit (default: 24 hours) |
+  ```
+
+  with
+
+  ```
+  | blocked | escalated | Governor | blocked for the configured limit or longer (default: 24 hours) |
+  ```
+
+  and in `crates/core/src/governor/transition_table.rs`, replace
+
+  ```
+      /// Blocked longer than the configured limit.
+  ```
+
+  with
+
+  ```
+      /// Blocked for the configured limit or longer.
+  ```
+
+  Both before-texts occur exactly once. Neither changes behavior: `evaluate_blocked_age` is written to `>=` and the test above pins the instant the limit is reached.
 
 - [ ] Format, run the tests and the full check; confirm green:
 
