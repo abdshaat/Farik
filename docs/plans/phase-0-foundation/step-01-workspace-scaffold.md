@@ -883,7 +883,7 @@ Produces: the `check` workflow on pull requests and on pushes to `main`
 
 - [x] Commit: `ci(repo): run cargo xtask check on pull requests and main`
 
-- [ ] Push the phase branch and open the phase's draft pull request (`docs/standards/workflow.md` stage 5), then confirm on the pull request that the `check` job ran and passed on this commit. Paste the job's summary lines into the pull request's verification section. If the job fails, the failure is this step's to fix before Task 3.
+- [x] Push the phase branch and open the phase's draft pull request (`docs/standards/workflow.md` stage 5), then confirm on the pull request that the `check` job ran and passed on this commit. Paste the job's summary lines into the pull request's verification section. If the job fails, the failure is this step's to fix before Task 3.
 
 ### Task 3: Documentation
 
@@ -892,7 +892,7 @@ Files: modified `README.md`, `CLAUDE.md`
 Consumes: nothing
 Produces: contributor instructions that match the repository
 
-- [ ] In `README.md`, replace the line beginning `Status: specification stage.` with:
+- [x] In `README.md`, replace the line beginning `Status: specification stage.` with:
 
   ```markdown
   Status: phase 0 (foundation) in progress; nothing runs yet. Project standards are in place; see [CONTRIBUTING.md](CONTRIBUTING.md) before making a change.
@@ -911,15 +911,15 @@ Produces: contributor instructions that match the repository
 
   (The inner fenced block uses three backticks in the file; it is shown indented here only to nest it.)
 
-- [ ] In `CLAUDE.md`, replace the `## Current state` paragraph with:
+- [x] In `CLAUDE.md`, replace the `## Current state` paragraph with:
 
   ```markdown
   Phase 0 (foundation) is in progress on `phase/0-foundation`. The Cargo workspace exists; `farik-core` has no behavior yet. The next steps are the schema generation pipeline and contract validation, per `docs/plans/project-plan.md`.
   ```
 
-- [ ] Run the full check once more; confirm green (Markdown is not checked, so the output is the same as Task 1's).
+- [x] Run the full check once more; confirm green (Markdown is not checked, so the output is the same as Task 1's).
 
-- [ ] Commit: `docs(repo): describe the toolchain and the check command`
+- [x] Commit: `docs(repo): describe the toolchain and the check command`
 
 ## Verification
 

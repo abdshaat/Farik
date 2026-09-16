@@ -30,4 +30,4 @@ If the superpowers plugin is installed, its skills implement this workflow; use 
 
 ## Current state
 
-Specification stage. The backend is Rust and the front end is TypeScript (ADR 0005). The first code change is the Cargo workspace scaffold, and it goes through the full workflow like everything else: plan first, in `docs/plans/`.
+Phase 0 (foundation) is in progress on `claude/phase-0-implementation-izm38y` (the harness-assigned phase branch). The Cargo workspace exists; `farik-core` has no behavior yet. The next steps are the schema generation pipeline and contract validation, per `docs/plans/project-plan.md`.
