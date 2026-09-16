@@ -1,13 +1,13 @@
 # Phase 1, step 09: Transition evaluation
 
-Status: draft
+Status: ready
 Branch: `claude/phase-0-implementation-izm38y` (the harness-assigned phase branch, left as assigned per `docs/standards/code.md`; steps do not get their own)
 Spec: `docs/SPEC.md` section 5.2 (the transition table, its gates, and who triggers each move), section 5.1 (a row that belongs to the assignee or the reviewer is that agent's), section 5.3 (the Definition of Ready), section 5.4 (the Definition of Done), section 5.5 (the budgets the governor escalates on), section 5.7 (the ten escalation reasons), section 5.11 (a contract the human must accept), section 5.12 (`human_accepts_contracts`), section 5.16 (triage, an epic's tasks, an epic's approval), F5 (the governor as a library with a test for every transition)
 Depends on: phase 0 (merged in #4); step 01 of this phase for the table, `GateId`, `TransitionActor` and the two lookups (f9f0e67, 0e50df1, 3cc8bc3); step 02 for `evaluate_readiness`, `ReadinessContext` and the fixtures (21fe00a, 87a3561, 4a1ac90); step 05 for `check_budgets` and `BudgetState` (5ad2c21, c4cf30b, f3ecea4, 04ba838); step 06 for the three counting rules and `EscalationReason` (33202e7, abfb7d8); step 07 for `evaluate_done`, `DoneEvidence` and `requires_human_acceptance` (a0cdecd, 090e015, cc27028); step 08 for the nine gate predicates and their values (fa02450, 2594121)
 
 A plan is `ready` only when a reviewer other than the author has confirmed the three rules in `docs/standards/workflow.md` stage 2 (Plan): every decision made, no ambiguity, no forward dependencies. Record who confirmed and when here.
 
-Readiness confirmed by: pending
+Readiness confirmed by: a fresh Claude Code session that did not write this plan, the third readiness review, 2026-09-16, at `9656279`: READY under all three rules of `docs/standards/workflow.md` stage 2, with two should-fix findings and two optional ones, all taken in this commit. Two earlier passes refused the plan; what each found is in Decisions.
 
 ## Goal
 
@@ -31,7 +31,7 @@ All in `docs/plans/project-plan.md`, phase 1, restated here only where this step
 - `TransitionContext` carries the values rather than a trait the runtime implements, because `farik-core` does no I/O and a trait would let the world in through the back door. It is not `PartialEq`: the generated `TaskContract` is not, and a context is a bundle of inputs rather than a value to compare.
 - A contract waiting for the human does not leave `refining` for `ready`. Spec 5.16 item 2 gives every epic the human's acceptance "before it leaves `refining`, whatever its risk", and 5.2 says the same for a high risk and for the team's policy; this is the only function the runtime asks, so a rule it does not hold is not held, and an epic would otherwise reach `ready` and then `assigned` with no approval ever asked for. The `DefinitionOfReady` gate therefore refuses first while the contract waits, and the Definition of Ready is the whole gate once the human has answered.
 - The `ReadinessExhausted` gate asks whether the contract fails the Definition of Ready **now**, as well as how often it has failed. Without that the two `refining -> escalated` rows overlap, and the counter's row comes first: an epic that failed three times, was sent back by the human with a message, and has since been fixed would escalate with reason `readiness_failures` where 5.16 item 2 says `approval`. The board would show it as having failed readiness, the human would resolve it by moving it rather than approving it, and the approval `check_product_doc_write` reads would never be recorded. Asking the contract makes the two rows exclusive, so the answer no longer depends on table order or on when the runtime resets its counter — which is also why the counter may be a running total, and its doc comment says so. A contract nobody has to accept, that now passes, is not escalated at all: it is ready.
-- The `ContractRequiresHuman` gate also asks whether the contract passes the Definition of Ready, because 5.16 item 2 asks the human "once the contract passes the structural checks". Without it an epic goes to the user on its first readiness failure, losing the three refining attempts 5.2 gives it, and the human's gate-free `escalated -> any` row then carries a contract that never passed the Definition of Ready into `ready`, which 5.1's "contracts before work" forbids. The whole Definition of Ready is the reading, because that is the function step 02 provides; the details name the rule and then the readiness failures themselves. Together the fork is: below three failures nothing opens and the Product Manager refines again; at three, the readiness row; ready and waiting, the approval row; ready and accepted, `ready`.
+- The `ContractRequiresHuman` gate also asks whether the contract passes the Definition of Ready, because 5.16 item 2 asks the human "once the contract passes the structural checks". It asks that **before** it asks whether the human has already answered, or a contract the human accepted that does not pass would be refused with "so it goes to ready" while the readying gate refuses that very move — and the flow 5.16 names, a user writing an epic themselves and locking and approving it (5.11), reaches exactly that state. Without it an epic goes to the user on its first readiness failure, losing the three refining attempts 5.2 gives it, and the human's gate-free `escalated -> any` row then carries a contract that never passed the Definition of Ready into `ready`, which 5.1's "contracts before work" forbids. The whole Definition of Ready is the reading, because that is the function step 02 provides; the details name the rule and then the readiness failures themselves. Together the fork is: below three failures nothing opens and the Product Manager refines again; at three, the readiness row; ready and waiting, the approval row; ready and accepted, `ready`.
 - The governor's own `any -> escalated` row opens only on a budget whose consequence is escalation. Spec 5.5 gives every budget its own consequence and only the task's dollars and the task's sessions say "task to `escalated`": the session's budgets end the session and block the task, the sprint's stops new assignments, and the day's pauses the team. Escalating one task because the team's day is spent would be the wrong answer to the wrong question, and step 05 already attaches the consequence to every exhausted scope. A task out of both dollars and sessions reads as the dollars, which come first in `BudgetScope` and are the harder limit.
 - Who asked for an assignment comes from the request's actor, and the `requested_by` of the input is overwritten with it. The two are the same fact spelled twice, and a runtime that filled the input with `scrum_master` while asking as the Product Manager would open the Product Manager's row in a team that has an active Scrum Master. Only those two rows carry an assignment (5.2), so no other actor reaches the conversion. Added by this plan after its readiness review.
 - The two halves of "is this contract waiting for the human?" travel together as `ContractAcceptance { required_by_policy, given }`, and the gate passes when the team's policy requires it **or** the contract's own risk or kind does (`done::requires_human_acceptance`), and the human has not answered. Either half is enough, so the two cannot disagree in the direction that would carry a task past the human. `TeamRules` does not yet carry `human_accepts_contracts` (5.12), which is why the policy half is passed in. Changed from the project plan's two bools, which were also one bool too many for clippy's pedantic limit on a struct.
@@ -43,6 +43,7 @@ All in `docs/plans/project-plan.md`, phase 1, restated here only where this step
 - What is left of the sprint appears three times in the context — in `budget`, in `readiness`, and in `assignment` — because each of those answers its own question in its own shape. The doc comment says the runtime derives all three from one figure, or the Definition of Ready at `refining -> ready` and the assignment gate at `ready -> assigned` could disagree about the same sprint.
 - `escalation_reason`'s `GovernorEscalation` arm ends in `unwrap_or(EscalationReason::Budget)`, which is unreachable by construction: the row is taken only when the gate opened, and the gate opens only when that same function answered `Some`. It stays because the function must be total, and the alternative — carrying the reason out of the gate and into the decision — would make every other gate return a value it does not have. A mutant of that fallback survives the suite, which is what unreachable means.
 - `EscalationReason::Integration` (5.14) is unreachable after this step, because no row of the table carries it: integration happens after `accepted`, which is terminal. Recorded rather than solved here, so that phase 3 meets it in the plan rather than in the code.
+- Revised three times on 2026-09-16. The third readiness review confirmed the plan **ready** under all three rules: it re-executed every block with no drift, walked all eighty states of the refining fork and found exactly one row open in each, replayed the seven replacements, compiled a phase-3 caller from the project-plan entry alone, and killed fifty-nine of sixty-three mutants. Its findings, taken here, are two orders and a sentence: the acceptance gate answered "the human has already accepted this contract, so it goes to ready" for a contract that does not pass the Definition of Ready, which the readying gate refuses, so the structural checks are asked first; the spec's new paragraph stated the approval row's present-tense condition and not the readiness row's mirror of it, which is the asymmetry that produced the second pass's blocking bug; and three orders the suite left free — the two inside these gates and the readying gate's own — are now pinned by assertions, each confirmed by re-introducing the mutant. Its two remaining survivors are the unreachable fallback and one semantically equivalent rewrite.
 - Revised twice on 2026-09-16. The second readiness review confirmed the first rework, reproduced every number, and found one blocking hole in it: the `ReadinessExhausted` row asked only its counter while its sibling asked the contract, so the two rows overlapped and the counter's row, being first, took a fixed contract to the user as a readiness failure instead of as an approval. Its bullet is above. The pass also found that nothing pinned the budget being read before the permission, and that the `Consumes` list had `BudgetConsequence` missing and `AssignmentRequester` in the wrong half; both taken. Sixty-eight of the seventy mutants it aimed at the reworked code were already killed.
 - Revised once on 2026-09-16, after a readiness review refused the plan with four blocking findings. Three were rules the spec states and this function did not hold: a contract waiting for the human could be readied, the approval row opened before the contract was ready, and the governor escalated a task for a budget whose consequence 5.5 gives to somebody else. The fourth was the iteration count, which reversed step 06's landed decision and the schema's own wording without an ADR. The review's should-fix list closed six mutants: three gate arms were pinned only through their missing-value branch, the far end of the saturating conversion was untested, a blank assignee on the contract was untested, and the two budget tests exhausted the day's dollars, which now proves the opposite of what they were written for. Executing the review's own test of the assignment gate then found one more hole: the request's actor and the input's `requested_by` could disagree, which the bullet above closes.
 - Tests import the items by name rather than a glob; every code block below is the file after `cargo fmt --all`.
@@ -468,8 +469,19 @@ Produces: `governor::transition::{TransitionRequest, ContractAcceptance, Transit
           context.acceptance.required_by_policy = true;
           assert_eq!(
               one_gate(&ready, &context),
+              (GateId::DefinitionOfReady, vec![waiting.clone()])
+          );
+          // The human is answered before the Definition of Ready, and only that is reported: it is
+          // the one thing that has to happen next, and the escalation path reports the failures.
+          context.contract.intent = " "
+              .repeat(24)
+              .parse()
+              .expect("twenty-four spaces pass the schema");
+          assert_eq!(
+              one_gate(&ready, &context),
               (GateId::DefinitionOfReady, vec![waiting])
           );
+          context.contract = a_context().contract;
           // Once the human has accepted, the Definition of Ready is the whole gate again.
           context.acceptance.given = true;
           assert_eq!(effects(&ready, &context), []);
@@ -590,6 +602,16 @@ Produces: `governor::transition::{TransitionRequest, ContractAcceptance, Transit
                       .to_string()
               ]
           );
+          // The contract is answered before the counter, so a fixed contract reads the same whatever
+          // the runtime counted.
+          context.readiness_failed_attempts = 1;
+          assert_eq!(
+              gates(&ask(TaskStatus::Escalated, A::Governor, None), &context)[0].details,
+              vec![
+                  "the contract passes the Definition of Ready, so it goes to ready rather than escalating on its failures"
+                      .to_string()
+              ]
+          );
           assert_eq!(
               effects(&ask(TaskStatus::Ready, A::Governor, None), &context),
               []
@@ -630,6 +652,26 @@ Produces: `governor::transition::{TransitionRequest, ContractAcceptance, Transit
               vec![
                   "the human has already accepted this contract, so it goes to ready rather than escalating"
                       .to_string()
+              ]
+          );
+          // A contract the human has accepted that does not pass the Definition of Ready must not be
+          // told it goes to `ready`, because the readying gate refuses that very move: the flow 5.16
+          // names, a user writing an epic themselves and locking and approving it, reaches this state.
+          context.acceptance.given = true;
+          let mut unready = a_context();
+          unready.status = TaskStatus::Refining;
+          unready.contract.kind = Kind::Epic;
+          unready.acceptance.given = true;
+          unready.contract.intent = " "
+              .repeat(24)
+              .parse()
+              .expect("twenty-four spaces pass the schema");
+          assert_eq!(
+              gates(&request, &unready)[1].details,
+              vec![
+                  "the human is asked once the contract passes the structural checks (5.16 item 2), and this one does not yet"
+                      .to_string(),
+                  "the intent is blank; state the user-facing reason for the task".to_string()
               ]
           );
           // And one that needs nobody's acceptance says that instead.
@@ -1644,16 +1686,13 @@ Produces: `governor::transition::{TransitionRequest, ContractAcceptance, Transit
                   .to_string(),
           ]);
       }
-      if context.acceptance.given {
-          return Err(vec![
-              "the human has already accepted this contract, so it goes to ready rather than escalating"
-                  .to_string(),
-          ]);
-      }
       // 5.16 item 2 asks the human once the contract passes the structural checks. A contract sent to
       // the user on its first readiness failure would lose the three refining attempts 5.2 gives it,
       // and the human's gate-free `escalated -> any` row would then carry a contract that never
-      // passed the Definition of Ready into `ready`.
+      // passed the Definition of Ready into `ready`. This is asked before the acceptance, because a
+      // contract the human has accepted that does not pass would otherwise be told it goes to `ready`,
+      // which the readying gate refuses: the user writing an epic themselves and locking and
+      // approving it (5.11, 5.16) reaches exactly that state.
       if let Some(failures) = readiness_failures(context) {
           let mut details = vec![
               "the human is asked once the contract passes the structural checks (5.16 item 2), and this one does not yet"
@@ -1661,6 +1700,12 @@ Produces: `governor::transition::{TransitionRequest, ContractAcceptance, Transit
           ];
           details.extend(failures);
           return Err(details);
+      }
+      if context.acceptance.given {
+          return Err(vec![
+              "the human has already accepted this contract, so it goes to ready rather than escalating"
+                  .to_string(),
+          ]);
       }
       Ok(())
   }
@@ -1700,7 +1745,9 @@ Produces: `governor::transition::{TransitionRequest, ContractAcceptance, Transit
   }
 
   /// The Definition of Ready's own messages when the contract fails it, in its own order, and `None`
-  /// when it passes.
+  /// when it passes. A `refining -> escalated` request evaluates this twice when the readiness row
+  /// shuts and the acceptance row is tried next; it is a pure function of the same values both times,
+  /// so the two answers cannot differ, and the cost is nineteen re-run checks and no I/O.
   fn readiness_failures(context: &TransitionContext) -> Option<Vec<String>> {
       evaluate_readiness(&context.contract, &context.readiness)
           .err()
@@ -2174,8 +2221,19 @@ Produces: `governor::transition::{TransitionRequest, ContractAcceptance, Transit
           context.acceptance.required_by_policy = true;
           assert_eq!(
               one_gate(&ready, &context),
+              (GateId::DefinitionOfReady, vec![waiting.clone()])
+          );
+          // The human is answered before the Definition of Ready, and only that is reported: it is
+          // the one thing that has to happen next, and the escalation path reports the failures.
+          context.contract.intent = " "
+              .repeat(24)
+              .parse()
+              .expect("twenty-four spaces pass the schema");
+          assert_eq!(
+              one_gate(&ready, &context),
               (GateId::DefinitionOfReady, vec![waiting])
           );
+          context.contract = a_context().contract;
           // Once the human has accepted, the Definition of Ready is the whole gate again.
           context.acceptance.given = true;
           assert_eq!(effects(&ready, &context), []);
@@ -2296,6 +2354,16 @@ Produces: `governor::transition::{TransitionRequest, ContractAcceptance, Transit
                       .to_string()
               ]
           );
+          // The contract is answered before the counter, so a fixed contract reads the same whatever
+          // the runtime counted.
+          context.readiness_failed_attempts = 1;
+          assert_eq!(
+              gates(&ask(TaskStatus::Escalated, A::Governor, None), &context)[0].details,
+              vec![
+                  "the contract passes the Definition of Ready, so it goes to ready rather than escalating on its failures"
+                      .to_string()
+              ]
+          );
           assert_eq!(
               effects(&ask(TaskStatus::Ready, A::Governor, None), &context),
               []
@@ -2336,6 +2404,26 @@ Produces: `governor::transition::{TransitionRequest, ContractAcceptance, Transit
               vec![
                   "the human has already accepted this contract, so it goes to ready rather than escalating"
                       .to_string()
+              ]
+          );
+          // A contract the human has accepted that does not pass the Definition of Ready must not be
+          // told it goes to `ready`, because the readying gate refuses that very move: the flow 5.16
+          // names, a user writing an epic themselves and locking and approving it, reaches this state.
+          context.acceptance.given = true;
+          let mut unready = a_context();
+          unready.status = TaskStatus::Refining;
+          unready.contract.kind = Kind::Epic;
+          unready.acceptance.given = true;
+          unready.contract.intent = " "
+              .repeat(24)
+              .parse()
+              .expect("twenty-four spaces pass the schema");
+          assert_eq!(
+              gates(&request, &unready)[1].details,
+              vec![
+                  "the human is asked once the contract passes the structural checks (5.16 item 2), and this one does not yet"
+                      .to_string(),
+                  "the intent is blank; state the user-facing reason for the task".to_string()
               ]
           );
           // And one that needs nobody's acceptance says that instead.
@@ -2971,7 +3059,7 @@ Produces: `governor::transition::{TransitionRequest, ContractAcceptance, Transit
   with
 
   ```
-  More than one row can carry one move: three send a `refining` contract to `escalated`, and a blocked or rejected task has its own row and the governor's. The rows are taken in the order they appear here and the first whose gate opens is the one recorded, so the more specific reason is the one the user reads; when none opens, the refusal says what every gate it tried was waiting for. A row whose actor is the assignee or the reviewer is open only to the agent the contract names in that field, so one Developer cannot declare another's task done (5.1), and who asked for an assignment is the actor of the request rather than anything the runtime repeats back. A move to `escalated` raises an escalation whose reason is the row's: the readiness failures, an epic's approval or a task's risk gate, the blocker's age, the iteration limit, the exhausted budget (the task's sessions being their own reason), the denied permission, or the user's own request on the human's row (5.7). The approval row opens only once the contract passes the structural checks (5.16 item 2), so a contract that fails them is refined again rather than sent to the user. `iteration` counts returns: it goes up by one as the task goes from `rejected` back to `in_progress`, which is what `max_iterations` bounds, and every move into `in_progress` clears the blocker and its time, including the one the human makes from `escalated`, because a task that escalated out of `blocked` kept its blocker and a stale one would age again. A block the runtime recorded no time for cannot be aged, so the governor refuses to escalate it and says so, as it does for any value it was not given (added in 0.3).
+  More than one row can carry one move: three send a `refining` contract to `escalated`, and a blocked or rejected task has its own row and the governor's. The rows are taken in the order they appear here and the first whose gate opens is the one recorded, so the more specific reason is the one the user reads; when none opens, the refusal says what every gate it tried was waiting for. A row whose actor is the assignee or the reviewer is open only to the agent the contract names in that field, so one Developer cannot declare another's task done (5.1), and who asked for an assignment is the actor of the request rather than anything the runtime repeats back. A move to `escalated` raises an escalation whose reason is the row's: the readiness failures, an epic's approval or a task's risk gate, the blocker's age, the iteration limit, the exhausted budget (the task's sessions being their own reason), the denied permission, or the user's own request on the human's row (5.7). The approval row opens only once the contract passes the structural checks (5.16 item 2), so a contract that fails them is refined again rather than sent to the user, and the readiness row is the mirror of it: a contract that now passes is not escalated on its earlier failures, however many the runtime counted, so the two rows never both open and a contract that has been fixed reaches the user as an approval rather than as a failure. `iteration` counts returns: it goes up by one as the task goes from `rejected` back to `in_progress`, which is what `max_iterations` bounds, and every move into `in_progress` clears the blocker and its time, including the one the human makes from `escalated`, because a task that escalated out of `blocked` kept its blocker and a stale one would age again. A block the runtime recorded no time for cannot be aged, so the governor refuses to escalate it and says so, as it does for any value it was not given (added in 0.3).
 
   The governor judges an assignment on what the runtime tells it,
   ```
