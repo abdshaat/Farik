@@ -3,7 +3,7 @@
 Status: draft
 Branch: `claude/phase-0-implementation-izm38y` (the harness-assigned phase branch, left as assigned per `docs/standards/code.md`; steps do not get their own)
 Spec: `docs/SPEC.md` section 5.6 (permission tiers, their defaults per role, protected paths on every tool call, per-call human approval of external effects), 5.12 (`forbidden_commands`), ADR 0004 (`farik_exec` refuses git; git is a Farik tool with its own tiers), F5
-Depends on: phase 0 (merged in #4); step 02 of this phase (committed as 21fe00a, 87a3561, 4a1ac90: `TeamRules`); step 03 of this phase (committed as 220b576: the path checks)
+Depends on: phase 0 (merged in #4); step 02 of this phase (committed as 21fe00a, 87a3561, 4a1ac90: `TeamRules`); step 03 of this phase (committed as 220b576 and its review fix: the path checks)
 
 A plan is `ready` only when a reviewer other than the author has confirmed the three rules in `docs/standards/workflow.md` stage 2 (Plan): every decision made, no ambiguity, no forward dependencies. Record who confirmed and when here.
 
@@ -68,7 +68,7 @@ Produces: `governor::permissions::{PermissionTier, default_tiers, ToolDescriptor
   ```
   cargo xtask check
   # expected, among the output, then exit code 0:
-  # test result: ok. 66 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in ...   (farik-core)
+  # test result: ok. 69 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in ...   (farik-core)
   # test result: ok. 23 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in ...   (xtask)
   # xtask check: ok
   ```
@@ -966,10 +966,10 @@ Produces: `governor::permissions::{PermissionTier, default_tiers, ToolDescriptor
   cargo fmt --all
   cargo test --package farik-core governor::permissions
   # expected, among the output:
-  # test result: ok. 16 passed; 0 failed; 0 ignored; 0 measured; 66 filtered out; finished in ...
+  # test result: ok. 16 passed; 0 failed; 0 ignored; 0 measured; 69 filtered out; finished in ...
   cargo xtask check
   # expected, among the output, then exit code 0:
-  # test result: ok. 82 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in ...   (farik-core)
+  # test result: ok. 85 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in ...   (farik-core)
   # test result: ok. 23 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in ...   (xtask)
   # xtask check: ok
   ```
@@ -981,7 +981,7 @@ Produces: `governor::permissions::{PermissionTier, default_tiers, ToolDescriptor
 ```
 cargo xtask check
 # expected, among the output, then exit code 0:
-# test result: ok. 82 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in ...   (farik-core)
+# test result: ok. 85 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in ...   (farik-core)
 # test result: ok. 23 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in ...   (xtask)
 # xtask check: ok
 ```

@@ -32,9 +32,11 @@ pub enum PathRefusal {
 }
 
 /// Refuses every changed path that matches none of the allowed globs (spec 5.4 item 2). With
-/// no allowed glob, every change is refused. Paths are relative to the project root with forward
-/// slashes, compared as given; `*` stays within one directory and `**` crosses directories. A
-/// path with a `..` segment is always refused, so that no path climbs out of what a glob names.
+/// no allowed glob, every change is refused. Paths are relative to the project root; before
+/// matching, backslashes become `/` and `.` segments are dropped, so that `./src/x` and
+/// `src\x` are `src/x`. `*` stays within one directory and `**` crosses directories. An
+/// absolute path, an empty path, or a path with a `..` segment is always refused, so that no
+/// path climbs out of what a glob names.
 ///
 /// # Errors
 ///
@@ -44,18 +46,21 @@ pub fn check_allowed_paths(
     changed: &[String],
     allowed_globs: &[String],
 ) -> Result<(), PathRefusal> {
-    let allowed = compile(allowed_globs)?;
+    let allowed = compile(allowed_globs, false)?;
     refuse(
         changed
             .iter()
-            .filter(|path| climbs(path) || !allowed.is_match(path)),
+            .filter(|path| normalise(path).is_none_or(|path| !allowed.is_match(path))),
     )
 }
 
 /// Refuses every path that matches a protected glob (spec 5.6 and 5.12), whatever the tool's
-/// tier. A bare name such as `.env` names the file at the project root only; `**/.env` names it
-/// anywhere. A path with a `..` segment is always refused, so that no path reaches a protected
-/// file by climbing.
+/// tier. Paths are normalised as in `check_allowed_paths`, protected globs match without regard
+/// to letter case (a case-insensitive file system would open `.ENV` as `.env`), and a directory
+/// that a glob such as `.farik/local/**` names is protected like its children. A bare name such
+/// as `.env` names the file at the project root only; `**/.env` names it anywhere. An absolute
+/// path, an empty path, or a path with a `..` segment is always refused, so that no path reaches
+/// a protected file by climbing.
 ///
 /// # Errors
 ///
@@ -65,23 +70,34 @@ pub fn check_protected_paths(
     paths: &[String],
     protected_globs: &[String],
 ) -> Result<(), PathRefusal> {
-    let protected = compile(protected_globs)?;
-    refuse(
-        paths
-            .iter()
-            .filter(|path| climbs(path) || protected.is_match(path)),
-    )
+    let protected = compile(protected_globs, true)?;
+    refuse(paths.iter().filter(|path| {
+        normalise(path)
+            .is_none_or(|path| protected.is_match(&path) || protected.is_match(format!("{path}/x")))
+    }))
 }
 
-fn climbs(path: &str) -> bool {
-    path.split('/').any(|segment| segment == "..")
+/// The path with backslashes as `/` and `.` segments dropped, or `None` when it is empty,
+/// absolute (a leading separator or a drive letter), or has a `..` segment.
+fn normalise(path: &str) -> Option<String> {
+    let unified = path.replace('\\', "/");
+    let is_absolute = unified.starts_with('/') || unified.chars().nth(1) == Some(':');
+    let segments: Vec<&str> = unified
+        .split('/')
+        .filter(|segment| !segment.is_empty() && *segment != ".")
+        .collect();
+    if is_absolute || segments.is_empty() || segments.contains(&"..") {
+        return None;
+    }
+    Some(segments.join("/"))
 }
 
-fn compile(globs: &[String]) -> Result<GlobSet, PathRefusal> {
+fn compile(globs: &[String], case_insensitive: bool) -> Result<GlobSet, PathRefusal> {
     let mut builder = GlobSetBuilder::new();
     for pattern in globs {
         let glob = GlobBuilder::new(pattern)
             .literal_separator(true)
+            .case_insensitive(case_insensitive)
             .build()
             .map_err(|error| {
                 PathRefusal::Glob(GlobError::Invalid {
@@ -91,6 +107,8 @@ fn compile(globs: &[String]) -> Result<GlobSet, PathRefusal> {
             })?;
         builder.add(glob);
     }
+    // Reachable only through the regex engine's size limit, which no hand-written rule meets;
+    // the error carries no pattern, so the report names none.
     builder.build().map_err(|error| {
         PathRefusal::Glob(GlobError::Invalid {
             pattern: error.glob().unwrap_or_default().to_string(),
@@ -246,6 +264,59 @@ mod tests {
         };
         assert_eq!(pattern, "src/[rs");
         assert!(!detail.is_empty(), "{detail}");
-        assert!(check_protected_paths(&strings(&["src/lib.rs"]), &strings(&["src/[rs"])).is_err());
+        assert!(matches!(
+            check_protected_paths(&strings(&["src/lib.rs"]), &strings(&["src/[rs"])),
+            Err(PathRefusal::Glob(_))
+        ));
+    }
+
+    #[test]
+    fn treats_spellings_of_the_same_path_alike() {
+        assert_eq!(
+            check_protected_paths(
+                &strings(&["./.env", ".ENV", "src\\..\\.env", "config/./.env.local"]),
+                &strings(&[".env", "**/.env.*"])
+            ),
+            Err(violations(&[
+                "./.env",
+                ".ENV",
+                "src\\..\\.env",
+                "config/./.env.local"
+            ]))
+        );
+        assert_eq!(
+            check_allowed_paths(
+                &strings(&["./src/login/form.rs", "src\\login\\form.rs"]),
+                &strings(&["src/login/**"])
+            ),
+            Ok(())
+        );
+    }
+
+    #[test]
+    fn refuses_an_absolute_or_empty_path_in_both_checks() {
+        for path in ["/repo/.env", "C:\\repo\\.env", ""] {
+            assert_eq!(
+                check_allowed_paths(&strings(&[path]), &strings(&["**"])),
+                Err(violations(&[path])),
+                "{path:?}"
+            );
+            assert_eq!(
+                check_protected_paths(&strings(&[path]), &[]),
+                Err(violations(&[path])),
+                "{path:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn protects_a_directory_named_by_a_glob_over_its_children() {
+        assert_eq!(
+            check_protected_paths(
+                &strings(&[".farik/local", ".farik/local/", ".farik"]),
+                &strings(&[".farik/local/**"])
+            ),
+            Err(violations(&[".farik/local", ".farik/local/"]))
+        );
     }
 }
