@@ -19,7 +19,7 @@ fn main() -> ExitCode {
 }
 
 fn run(args: &[String]) -> anyhow::Result<()> {
-    let root = workspace_root();
+    let root = workspace_root()?;
     match args.first().map(String::as_str) {
         Some("check") => check(&root),
         Some("generate") => generate(&root, args.get(1).is_some_and(|flag| flag == "--check")),
@@ -32,16 +32,16 @@ fn run(args: &[String]) -> anyhow::Result<()> {
         Some("core-io") => core_io(&root),
         Some("install-hooks") => install_hooks(&root),
         _ => bail!(
-            "usage: cargo xtask <check|pre-commit|commit-msg <file>|todos|core-io|install-hooks>"
+            "usage: cargo xtask <check|generate [--check]|pre-commit|commit-msg <file>|todos|core-io|install-hooks>"
         ),
     }
 }
 
-fn workspace_root() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+fn workspace_root() -> anyhow::Result<PathBuf> {
+    Ok(PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .parent()
-        .expect("xtask lives one level below the workspace root")
-        .to_path_buf()
+        .context("xtask lives one level below the workspace root")?
+        .to_path_buf())
 }
 
 fn cargo(root: &Path, args: &[&str]) -> anyhow::Result<()> {
@@ -160,8 +160,8 @@ fn generate(root: &Path, check_only: bool) -> anyhow::Result<()> {
 }
 
 fn install_hooks(root: &Path) -> anyhow::Result<()> {
-    let hooks = root.join(".git").join("hooks");
-    fs::create_dir_all(&hooks)?;
+    let hooks = root.join(hooks_dir(root)?);
+    fs::create_dir_all(&hooks).with_context(|| format!("creating {}", hooks.display()))?;
     write_hook(
         &hooks.join("pre-commit"),
         "#!/bin/sh\nexec cargo xtask pre-commit\n",
@@ -174,12 +174,25 @@ fn install_hooks(root: &Path) -> anyhow::Result<()> {
     Ok(())
 }
 
+fn hooks_dir(root: &Path) -> anyhow::Result<PathBuf> {
+    let output = Command::new("git")
+        .args(["rev-parse", "--git-path", "hooks"])
+        .current_dir(root)
+        .output()
+        .context("running git rev-parse --git-path hooks")?;
+    if !output.status.success() {
+        bail!("git rev-parse --git-path hooks failed");
+    }
+    Ok(PathBuf::from(String::from_utf8(output.stdout)?.trim_end()))
+}
+
 fn write_hook(path: &Path, body: &str) -> anyhow::Result<()> {
     fs::write(path, body).with_context(|| format!("writing {}", path.display()))?;
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        fs::set_permissions(path, fs::Permissions::from_mode(0o755))?;
+        fs::set_permissions(path, fs::Permissions::from_mode(0o755))
+            .with_context(|| format!("making {} executable", path.display()))?;
     }
     Ok(())
 }
