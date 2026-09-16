@@ -3,7 +3,7 @@
 Status: draft
 Branch: `claude/phase-0-implementation-izm38y` (the harness-assigned phase branch, left as assigned per `docs/standards/code.md`; steps do not get their own)
 Spec: `docs/SPEC.md` section 5.5 (the four budgets and the non-monetary limits, their defaults, and what exhaustion does; costs from the model's usage and a shipped, overridable price table), section 10 (a first day under twenty dollars at list prices), F5
-Depends on: phase 0 (merged in #4); step 04 of this phase (its plan at 44ea492; the sha of its commit is recorded here when it lands, and this step starts after it)
+Depends on: phase 0 (merged in #4); step 04 of this phase (committed as ab8d0fb)
 
 A plan is `ready` only when a reviewer other than the author has confirmed the three rules in `docs/standards/workflow.md` stage 2 (Plan): every decision made, no ambiguity, no forward dependencies. Record who confirmed and when here.
 
