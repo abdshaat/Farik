@@ -30,6 +30,7 @@ All in `docs/plans/project-plan.md`, phase 1, restated here only where this step
 - `ResetBlocker` fires on every move into `in_progress`, not only out of `blocked`. A task at work carries no blocker, so clearing one costs the runtime nothing; and a task that escalated out of `blocked` kept its blocker — which is what the user is shown — so the human moving it from `escalated` to `in_progress` must clear it, or a stale blocker would age again and escalate a task nobody is blocked on.
 - `TransitionContext` carries the values rather than a trait the runtime implements, because `farik-core` does no I/O and a trait would let the world in through the back door. It is not `PartialEq`: the generated `TaskContract` is not, and a context is a bundle of inputs rather than a value to compare.
 - A contract waiting for the human does not leave `refining` for `ready`. Spec 5.16 item 2 gives every epic the human's acceptance "before it leaves `refining`, whatever its risk", and 5.2 says the same for a high risk and for the team's policy; this is the only function the runtime asks, so a rule it does not hold is not held, and an epic would otherwise reach `ready` and then `assigned` with no approval ever asked for. The `DefinitionOfReady` gate therefore refuses first while the contract waits, and the Definition of Ready is the whole gate once the human has answered.
+- The `ReadinessExhausted` gate asks whether the contract fails the Definition of Ready **now**, as well as how often it has failed. Without that the two `refining -> escalated` rows overlap, and the counter's row comes first: an epic that failed three times, was sent back by the human with a message, and has since been fixed would escalate with reason `readiness_failures` where 5.16 item 2 says `approval`. The board would show it as having failed readiness, the human would resolve it by moving it rather than approving it, and the approval `check_product_doc_write` reads would never be recorded. Asking the contract makes the two rows exclusive, so the answer no longer depends on table order or on when the runtime resets its counter — which is also why the counter may be a running total, and its doc comment says so. A contract nobody has to accept, that now passes, is not escalated at all: it is ready.
 - The `ContractRequiresHuman` gate also asks whether the contract passes the Definition of Ready, because 5.16 item 2 asks the human "once the contract passes the structural checks". Without it an epic goes to the user on its first readiness failure, losing the three refining attempts 5.2 gives it, and the human's gate-free `escalated -> any` row then carries a contract that never passed the Definition of Ready into `ready`, which 5.1's "contracts before work" forbids. The whole Definition of Ready is the reading, because that is the function step 02 provides; the details name the rule and then the readiness failures themselves. Together the fork is: below three failures nothing opens and the Product Manager refines again; at three, the readiness row; ready and waiting, the approval row; ready and accepted, `ready`.
 - The governor's own `any -> escalated` row opens only on a budget whose consequence is escalation. Spec 5.5 gives every budget its own consequence and only the task's dollars and the task's sessions say "task to `escalated`": the session's budgets end the session and block the task, the sprint's stops new assignments, and the day's pauses the team. Escalating one task because the team's day is spent would be the wrong answer to the wrong question, and step 05 already attaches the consequence to every exhausted scope. A task out of both dollars and sessions reads as the dollars, which come first in `BudgetScope` and are the harder limit.
 - Who asked for an assignment comes from the request's actor, and the `requested_by` of the input is overwritten with it. The two are the same fact spelled twice, and a runtime that filled the input with `scrum_master` while asking as the Product Manager would open the Product Manager's row in a team that has an active Scrum Master. Only those two rows carry an assignment (5.2), so no other actor reaches the conversion. Added by this plan after its readiness review.
@@ -40,13 +41,15 @@ All in `docs/plans/project-plan.md`, phase 1, restated here only where this step
 - The details of a gate that wraps a longer answer are that answer's own messages, in its own order: the Definition of Ready's failures, the Definition of Done's failures, and each gate predicate's reasons. Nothing is reworded here, so an agent reads the same sentence wherever it meets the rule.
 - The blocked limit is a field of the context rather than a constant read here, because it is a team setting; `escalation::DEFAULT_BLOCKED_LIMIT` is what a runtime with no setting passes. The message says the limit in seconds, which is what the value carries.
 - What is left of the sprint appears three times in the context — in `budget`, in `readiness`, and in `assignment` — because each of those answers its own question in its own shape. The doc comment says the runtime derives all three from one figure, or the Definition of Ready at `refining -> ready` and the assignment gate at `ready -> assigned` could disagree about the same sprint.
+- `escalation_reason`'s `GovernorEscalation` arm ends in `unwrap_or(EscalationReason::Budget)`, which is unreachable by construction: the row is taken only when the gate opened, and the gate opens only when that same function answered `Some`. It stays because the function must be total, and the alternative — carrying the reason out of the gate and into the decision — would make every other gate return a value it does not have. A mutant of that fallback survives the suite, which is what unreachable means.
 - `EscalationReason::Integration` (5.14) is unreachable after this step, because no row of the table carries it: integration happens after `accepted`, which is terminal. Recorded rather than solved here, so that phase 3 meets it in the plan rather than in the code.
+- Revised twice on 2026-09-16. The second readiness review confirmed the first rework, reproduced every number, and found one blocking hole in it: the `ReadinessExhausted` row asked only its counter while its sibling asked the contract, so the two rows overlapped and the counter's row, being first, took a fixed contract to the user as a readiness failure instead of as an approval. Its bullet is above. The pass also found that nothing pinned the budget being read before the permission, and that the `Consumes` list had `BudgetConsequence` missing and `AssignmentRequester` in the wrong half; both taken. Sixty-eight of the seventy mutants it aimed at the reworked code were already killed.
 - Revised once on 2026-09-16, after a readiness review refused the plan with four blocking findings. Three were rules the spec states and this function did not hold: a contract waiting for the human could be readied, the approval row opened before the contract was ready, and the governor escalated a task for a budget whose consequence 5.5 gives to somebody else. The fourth was the iteration count, which reversed step 06's landed decision and the schema's own wording without an ADR. The review's should-fix list closed six mutants: three gate arms were pinned only through their missing-value branch, the far end of the saturating conversion was untested, a blank assignee on the contract was untested, and the two budget tests exhausted the day's dollars, which now proves the opposite of what they were written for. Executing the review's own test of the assignment gate then found one more hole: the request's actor and the input's `requested_by` could disagree, which the bullet above closes.
 - Tests import the items by name rather than a glob; every code block below is the file after `cargo fmt --all`.
 
 ## Design
 
-One task: the `governor::transition` module with `evaluate_transition`, the request, the context, the decision, the effects, the refusals, and twenty-four tests. Twenty-three of them are one gate, one refusal, or one effect each; the twenty-fourth walks `TRANSITION_TABLE` and opens every one of its twenty rows with the state that belongs to it, which is what spec F5 asks for and what makes a row added to 5.2 fail until somebody says what opens it.
+One task: the `governor::transition` module with `evaluate_transition`, the request, the context, the decision, the effects, the refusals, and twenty-five tests. Most of them are one gate, one refusal, or one effect each; three read the table itself — one opens every one of its twenty rows with the state that belongs to it, which is what spec F5 asks for, one checks that only the five gates with a reason of their own reach `escalated`, and one pins which row is taken when two could open. Between them a row added to 5.2 fails the suite until somebody says what opens it and what it records.
 
 Out of scope: applying the decision, which is phase 3's runtime; the escalation record itself (`Escalation` from step 06), which the runtime fills from the reason this returns; the integration escalation of 5.14, which has no row in the table; and anything that reads a clock, a file, or the log.
 
@@ -64,7 +67,7 @@ Touches `crates/core` only: one new child of `governor`. Consumes `budget::{Budg
 
 ```
 crates/core/src/governor.rs                          modifies: declares transition
-crates/core/src/governor/transition.rs               creates: evaluate_transition, the request, the context, the decision, the effects, the refusals, twenty-four tests
+crates/core/src/governor/transition.rs               creates: evaluate_transition, the request, the context, the decision, the effects, the refusals, twenty-five tests
 docs/SPEC.md                                         modifies: section 5.2's `refining -> ready` row names the human's acceptance, its governor row stops claiming the user's stop and says which budgets escalate a task, and one paragraph says how several rows carrying one move are ordered, whose an assignee's or a reviewer's row is, what each escalation's reason is, what a return to work records, and what a block with no recorded time does
 docs/plans/project-plan.md                           modifies: phase 1 step 09's interface records the changes this plan makes to it
 docs/plans/phase-1-harness/step-09-transition-evaluation.md   modifies: checkboxes ticked
@@ -76,7 +79,7 @@ docs/plans/phase-1-harness/step-09-transition-evaluation.md   modifies: checkbox
 
 Files: created `crates/core/src/governor/transition.rs`; modified `crates/core/src/governor.rs`
 
-Consumes: `std::time::Duration`; `chrono::{DateTime, Utc}`; `budget::{BudgetScope, BudgetState, check_budgets}`; `contract::{TaskContract, TaskId, TaskStatus}`; `generated::task_contract::FarikTaskContractKind`; `governor::done::{CriterionResult, DoneEvidence, evaluate_done, requires_human_acceptance}`; `governor::escalation::{BlockedAge, EscalationReason, READINESS_ATTEMPT_LIMIT, ReadinessOutcome, RejectionOutcome, evaluate_blocked_age, evaluate_readiness_attempts, evaluate_rejection}`; `governor::gates::{AssignmentInput, Blocker, ChildState, GateResult, Rejection, WorkState, check_assignment, check_blocker_resolved, check_blocker_written, check_children_done, check_criteria_recorded, check_rejection_reasons}`; `governor::readiness::{ReadinessContext, evaluate_readiness}`; `governor::transition_table::{GateId, TransitionActor, TransitionRow, find_transitions}`; and in the tests `chrono::TimeZone`, `budget::{DEFAULT_DAY_BUDGET_USD, DEFAULT_SESSION_LIMITS, DEFAULT_SPRINT_BUDGET_USD, SessionLedger}`, `contract::Role`, the generated `Risk`, `governor::done::RunBy`, `governor::escalation::{DEFAULT_BLOCKED_LIMIT, evaluate_rejection}`, `governor::gates::AssignmentRequester`, `governor::readiness::fixtures::{a_contract, a_ready_context}` and `governor::transition_table::{Status, TRANSITION_TABLE}`
+Consumes: `std::time::Duration`; `chrono::{DateTime, Utc}`; `budget::{BudgetConsequence, BudgetScope, BudgetState, check_budgets}`; `contract::{TaskContract, TaskId, TaskStatus}`; `generated::task_contract::FarikTaskContractKind`; `governor::done::{CriterionResult, DoneEvidence, evaluate_done, requires_human_acceptance}`; `governor::escalation::{BlockedAge, EscalationReason, READINESS_ATTEMPT_LIMIT, ReadinessOutcome, RejectionOutcome, evaluate_blocked_age, evaluate_readiness_attempts, evaluate_rejection}`; `governor::gates::{AssignmentInput, AssignmentRequester, Blocker, ChildState, GateResult, Rejection, WorkState, check_assignment, check_blocker_resolved, check_blocker_written, check_children_done, check_criteria_recorded, check_rejection_reasons}`; `governor::readiness::{ReadinessContext, evaluate_readiness}`; `governor::transition_table::{GateId, TransitionActor, TransitionRow, find_transitions}`; and in the tests `chrono::TimeZone`, `budget::{DEFAULT_DAY_BUDGET_USD, DEFAULT_SESSION_LIMITS, DEFAULT_SPRINT_BUDGET_USD, SessionLedger}`, `contract::Role`, the generated `Risk`, `governor::done::RunBy`, `governor::escalation::{DEFAULT_BLOCKED_LIMIT, evaluate_rejection}`, `governor::readiness::fixtures::{a_contract, a_ready_context}` and `governor::transition_table::{Status, TRANSITION_TABLE}`
 Produces: `governor::transition::{TransitionRequest, ContractAcceptance, TransitionContext, TransitionEffect, TransitionDecision, GateFailure, TransitionRefusal, evaluate_transition}`
 
 - [ ] Confirm the baseline on the branch head:
@@ -512,6 +515,11 @@ Produces: `governor::transition::{TransitionRequest, ContractAcceptance, Transit
           let mut context = a_context();
           context.status = TaskStatus::Refining;
           context.readiness_failed_attempts = 3;
+          // The row is about a contract that fails the Definition of Ready, so this one does.
+          context.contract.intent = " "
+              .repeat(24)
+              .parse()
+              .expect("twenty-four spaces pass the schema");
           let request = ask(TaskStatus::Escalated, A::Governor, None);
           assert_eq!(
               effects(&request, &context),
@@ -538,6 +546,53 @@ Produces: `governor::transition::{TransitionRequest, ContractAcceptance, Transit
                   "the contract has failed the Definition of Ready 2 times, and it is refined again until 3"
                       .to_string()
               ]
+          );
+      }
+
+      #[test]
+      fn asks_the_human_about_a_contract_that_now_passes_however_often_it_failed_before() {
+          // The two rows into `escalated` from `refining` must not overlap: a contract that failed
+          // the Definition of Ready three times, was sent back by the human, and now passes is
+          // waiting for the approval 5.16 item 2 asks for, not for its readiness failures again. The
+          // board would otherwise show it as having failed readiness, the human would resolve it by
+          // moving it rather than approving it, and the approval `check_product_doc_write` needs
+          // would never be recorded.
+          let mut context = a_context();
+          context.status = TaskStatus::Refining;
+          context.contract.kind = Kind::Epic;
+          context.readiness_failed_attempts = 3;
+          let decision = decide(&ask(TaskStatus::Escalated, A::Governor, None), &context)
+              .expect("the move is allowed");
+          assert_eq!(decision.row.gate, GateId::ContractRequiresHuman);
+          assert_eq!(
+              decision.effects,
+              [TransitionEffect::RaiseEscalation(Why::Approval)]
+          );
+          // And a contract nobody has to accept, that now passes, is not escalated at all: it is
+          // ready, whatever the counter says.
+          context.contract.kind = Kind::Task;
+          let failures = gates(&ask(TaskStatus::Escalated, A::Governor, None), &context);
+          assert_eq!(
+              failures
+                  .iter()
+                  .map(|failure| failure.gate)
+                  .collect::<Vec<GateId>>(),
+              [
+                  GateId::ReadinessExhausted,
+                  GateId::ContractRequiresHuman,
+                  GateId::GovernorEscalation
+              ]
+          );
+          assert_eq!(
+              failures[0].details,
+              vec![
+                  "the contract passes the Definition of Ready, so it goes to ready rather than escalating on its failures"
+                      .to_string()
+              ]
+          );
+          assert_eq!(
+              effects(&ask(TaskStatus::Ready, A::Governor, None), &context),
+              []
           );
       }
 
@@ -939,9 +994,15 @@ Produces: `governor::transition::{TransitionRequest, ContractAcceptance, Transit
               effects(&request, &context),
               [TransitionEffect::RaiseEscalation(Why::Budget)]
           );
+          // A budget is read before a permission, so a task that has run out of money and been
+          // denied something reads as the money.
+          context.permission_denied = true;
+          assert_eq!(
+              effects(&request, &context),
+              [TransitionEffect::RaiseEscalation(Why::Budget)]
+          );
           // And a permission denied on a required action, with every budget in hand.
           context.budget = a_budget();
-          context.permission_denied = true;
           assert_eq!(
               effects(&request, &context),
               [TransitionEffect::RaiseEscalation(Why::Permission)]
@@ -1030,6 +1091,10 @@ Produces: `governor::transition::{TransitionRequest, ContractAcceptance, Transit
               case(1, S::Refining, S::Ready, A::Governor, no_change),
               case(2, S::Refining, S::Escalated, A::Governor, |context| {
                   context.readiness_failed_attempts = 3;
+                  context.contract.intent = " "
+                      .repeat(24)
+                      .parse()
+                      .expect("twenty-four spaces pass the schema");
               }),
               case(3, S::Refining, S::Escalated, A::Governor, |context| {
                   context.readiness_failed_attempts = 0;
@@ -1128,6 +1193,10 @@ Produces: `governor::transition::{TransitionRequest, ContractAcceptance, Transit
           let mut context = a_context();
           context.status = TaskStatus::Refining;
           context.readiness_failed_attempts = 3;
+          context.contract.intent = " "
+              .repeat(24)
+              .parse()
+              .expect("twenty-four spaces pass the schema");
           context.budget.task_spent_usd = context.budget.task_max_usd;
           let decision = decide(&ask(TaskStatus::Escalated, A::Governor, None), &context)
               .expect("the move is allowed");
@@ -1250,7 +1319,10 @@ Produces: `governor::transition::{TransitionRequest, ContractAcceptance, Transit
       /// What the Definition of Ready needs.
       pub readiness: ReadinessContext,
       /// How many times the contract has failed the Definition of Ready, counting the failure that
-      /// has just happened, so that the third failure escalates (`docs/SPEC.md` section 5.2).
+      /// has just happened, so that the third failure escalates (`docs/SPEC.md` section 5.2). The
+      /// runtime may keep it as a running total: the gate that reads it also asks whether the
+      /// contract fails the Definition of Ready now, so a counter nobody reset cannot escalate a
+      /// contract that has since been fixed.
       pub readiness_failed_attempts: u32,
       /// Whether this contract is waiting for the human, and whether the human has answered.
       pub acceptance: ContractAcceptance,
@@ -1478,16 +1550,7 @@ Produces: `governor::transition::{TransitionRequest, ContractAcceptance, Transit
               }
               readiness_failures(context).map_or(Ok(()), Err)
           }
-          GateId::ReadinessExhausted => open_or(
-              evaluate_readiness_attempts(context.readiness_failed_attempts)
-                  == ReadinessOutcome::Escalate,
-              || {
-                  format!(
-                      "the contract has failed the Definition of Ready {} times, and it is refined again until {READINESS_ATTEMPT_LIMIT}",
-                      context.readiness_failed_attempts
-                  )
-              },
-          ),
+          GateId::ReadinessExhausted => readiness_exhausted(context),
           GateId::ContractRequiresHuman => human_must_accept_the_contract(context),
           GateId::Assignment => match &context.assignment {
               Some(assignment) => {
@@ -1600,6 +1663,31 @@ Produces: `governor::transition::{TransitionRequest, ContractAcceptance, Transit
           return Err(details);
       }
       Ok(())
+  }
+
+  /// The `ReadinessExhausted` gate of `refining -> escalated`: the contract fails the Definition of
+  /// Ready now, and it has failed it the limit's worth of times. Asking the contract as well as the
+  /// counter is what keeps this row and the approval row apart, whatever the runtime's counter does:
+  /// a contract that failed three times, was sent back by the human and now passes is waiting for the
+  /// approval 5.16 item 2 asks for, not for its failures again, and one nobody has to accept is
+  /// simply ready.
+  fn readiness_exhausted(context: &TransitionContext) -> GateResult {
+      if readiness_failures(context).is_none() {
+          return Err(vec![
+              "the contract passes the Definition of Ready, so it goes to ready rather than escalating on its failures"
+                  .to_string(),
+          ]);
+      }
+      open_or(
+          evaluate_readiness_attempts(context.readiness_failed_attempts)
+              == ReadinessOutcome::Escalate,
+          || {
+              format!(
+                  "the contract has failed the Definition of Ready {} times, and it is refined again until {READINESS_ATTEMPT_LIMIT}",
+                  context.readiness_failed_attempts
+              )
+          },
+      )
   }
 
   /// Whether this contract is waiting for the human's acceptance: the team's policy asks for it, or
@@ -2133,6 +2221,11 @@ Produces: `governor::transition::{TransitionRequest, ContractAcceptance, Transit
           let mut context = a_context();
           context.status = TaskStatus::Refining;
           context.readiness_failed_attempts = 3;
+          // The row is about a contract that fails the Definition of Ready, so this one does.
+          context.contract.intent = " "
+              .repeat(24)
+              .parse()
+              .expect("twenty-four spaces pass the schema");
           let request = ask(TaskStatus::Escalated, A::Governor, None);
           assert_eq!(
               effects(&request, &context),
@@ -2159,6 +2252,53 @@ Produces: `governor::transition::{TransitionRequest, ContractAcceptance, Transit
                   "the contract has failed the Definition of Ready 2 times, and it is refined again until 3"
                       .to_string()
               ]
+          );
+      }
+
+      #[test]
+      fn asks_the_human_about_a_contract_that_now_passes_however_often_it_failed_before() {
+          // The two rows into `escalated` from `refining` must not overlap: a contract that failed
+          // the Definition of Ready three times, was sent back by the human, and now passes is
+          // waiting for the approval 5.16 item 2 asks for, not for its readiness failures again. The
+          // board would otherwise show it as having failed readiness, the human would resolve it by
+          // moving it rather than approving it, and the approval `check_product_doc_write` needs
+          // would never be recorded.
+          let mut context = a_context();
+          context.status = TaskStatus::Refining;
+          context.contract.kind = Kind::Epic;
+          context.readiness_failed_attempts = 3;
+          let decision = decide(&ask(TaskStatus::Escalated, A::Governor, None), &context)
+              .expect("the move is allowed");
+          assert_eq!(decision.row.gate, GateId::ContractRequiresHuman);
+          assert_eq!(
+              decision.effects,
+              [TransitionEffect::RaiseEscalation(Why::Approval)]
+          );
+          // And a contract nobody has to accept, that now passes, is not escalated at all: it is
+          // ready, whatever the counter says.
+          context.contract.kind = Kind::Task;
+          let failures = gates(&ask(TaskStatus::Escalated, A::Governor, None), &context);
+          assert_eq!(
+              failures
+                  .iter()
+                  .map(|failure| failure.gate)
+                  .collect::<Vec<GateId>>(),
+              [
+                  GateId::ReadinessExhausted,
+                  GateId::ContractRequiresHuman,
+                  GateId::GovernorEscalation
+              ]
+          );
+          assert_eq!(
+              failures[0].details,
+              vec![
+                  "the contract passes the Definition of Ready, so it goes to ready rather than escalating on its failures"
+                      .to_string()
+              ]
+          );
+          assert_eq!(
+              effects(&ask(TaskStatus::Ready, A::Governor, None), &context),
+              []
           );
       }
 
@@ -2560,9 +2700,15 @@ Produces: `governor::transition::{TransitionRequest, ContractAcceptance, Transit
               effects(&request, &context),
               [TransitionEffect::RaiseEscalation(Why::Budget)]
           );
+          // A budget is read before a permission, so a task that has run out of money and been
+          // denied something reads as the money.
+          context.permission_denied = true;
+          assert_eq!(
+              effects(&request, &context),
+              [TransitionEffect::RaiseEscalation(Why::Budget)]
+          );
           // And a permission denied on a required action, with every budget in hand.
           context.budget = a_budget();
-          context.permission_denied = true;
           assert_eq!(
               effects(&request, &context),
               [TransitionEffect::RaiseEscalation(Why::Permission)]
@@ -2651,6 +2797,10 @@ Produces: `governor::transition::{TransitionRequest, ContractAcceptance, Transit
               case(1, S::Refining, S::Ready, A::Governor, no_change),
               case(2, S::Refining, S::Escalated, A::Governor, |context| {
                   context.readiness_failed_attempts = 3;
+                  context.contract.intent = " "
+                      .repeat(24)
+                      .parse()
+                      .expect("twenty-four spaces pass the schema");
               }),
               case(3, S::Refining, S::Escalated, A::Governor, |context| {
                   context.readiness_failed_attempts = 0;
@@ -2749,6 +2899,10 @@ Produces: `governor::transition::{TransitionRequest, ContractAcceptance, Transit
           let mut context = a_context();
           context.status = TaskStatus::Refining;
           context.readiness_failed_attempts = 3;
+          context.contract.intent = " "
+              .repeat(24)
+              .parse()
+              .expect("twenty-four spaces pass the schema");
           context.budget.task_spent_usd = context.budget.task_max_usd;
           let decision = decide(&ask(TaskStatus::Escalated, A::Governor, None), &context)
               .expect("the move is allowed");
@@ -2808,7 +2962,7 @@ Produces: `governor::transition::{TransitionRequest, ContractAcceptance, Transit
   | refining | ready | Governor, after PM submits contract | Definition of Ready (5.3), and the human's acceptance of the contract where it is required: an epic always, a `high` risk, or the team's policy (5.16 item 2, 5.12; added in 0.3) |
   ```
 
-- [ ] Say in the spec how the table is read when more than one row carries a move. In `docs/SPEC.md` section 5.2, replace
+- [ ] Say in the spec how the table is read when more than one row carries a move. In `docs/SPEC.md` section 5.2, where the before-text is a substring of a longer line and occurs exactly once, replace
 
   ```
   The governor judges an assignment on what the runtime tells it,
@@ -2876,10 +3030,10 @@ Produces: `governor::transition::{TransitionRequest, ContractAcceptance, Transit
   cargo fmt --all
   cargo test --package farik-core governor::transition::tests
   # expected, among the output:
-  # test result: ok. 24 passed; 0 failed; 0 ignored; 0 measured; 198 filtered out; finished in ...
+  # test result: ok. 25 passed; 0 failed; 0 ignored; 0 measured; 198 filtered out; finished in ...
   cargo xtask check
   # expected, among the output, then exit code 0:
-  # test result: ok. 222 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in ...   (farik-core)
+  # test result: ok. 223 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in ...   (farik-core)
   # test result: ok. 23 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in ...   (xtask)
   # xtask check: ok
   ```
@@ -2891,7 +3045,7 @@ Produces: `governor::transition::{TransitionRequest, ContractAcceptance, Transit
 ```
 cargo xtask check
 # expected, among the output, then exit code 0:
-# test result: ok. 222 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in ...   (farik-core)
+# test result: ok. 223 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in ...   (farik-core)
 # test result: ok. 23 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in ...   (xtask)
 # xtask check: ok
 ```
