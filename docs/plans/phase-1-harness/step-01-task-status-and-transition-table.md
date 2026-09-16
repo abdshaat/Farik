@@ -1,13 +1,13 @@
 # Phase 1, step 01: Task status and transition table
 
-Status: draft
+Status: ready
 Branch: `claude/phase-0-implementation-izm38y` (the harness-assigned phase branch, left as assigned per `docs/standards/code.md`; steps do not get their own)
 Spec: `docs/SPEC.md` section 5.2 (the task lifecycle and its transition table), F5 (the governor as a library with a test for every transition)
 Depends on: phase 0 (merged in #4)
 
 A plan is `ready` only when a reviewer other than the author has confirmed the three rules in `docs/standards/workflow.md` stage 2 (Plan): every decision made, no ambiguity, no forward dependencies. Record who confirmed and when here.
 
-Readiness confirmed by: pending
+Readiness confirmed by: a fresh Claude Code review session, 2026-09-16, before execution (first pass NOT READY on two clippy lints in the planned tests, fixed in 2e2a4aa or later; second pass READY under all three rules; recorded on pull request #5)
 
 ## Goal
 
