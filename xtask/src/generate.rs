@@ -63,3 +63,32 @@ fn rustfmt(source: &str) -> anyhow::Result<String> {
     }
     Ok(String::from_utf8(output.stdout)?)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{GENERATED_SCHEMAS, generate_types};
+
+    #[test]
+    fn rejects_a_schema_that_is_not_json_and_names_it() {
+        let error = generate_types(&GENERATED_SCHEMAS[0], "{ not json").expect_err("rejected");
+        assert!(
+            format!("{error:#}").starts_with("parsing docs/schemas/task-contract.schema.json"),
+            "{error:#}"
+        );
+    }
+
+    #[test]
+    fn generates_a_formatted_module_with_the_header_and_the_type() {
+        let schema =
+            r#"{"title": "Thing", "type": "object", "properties": {"name": {"type": "string"}}}"#;
+        let module = generate_types(&GENERATED_SCHEMAS[0], schema).expect("generated");
+        assert!(module.starts_with(
+            "// Generated from docs/schemas/task-contract.schema.json by `cargo xtask generate`. Do not edit.\n#![allow(clippy::all, clippy::pedantic, missing_docs)]\n\n"
+        ));
+        assert!(module.contains("pub struct Thing {"), "{module}");
+        assert!(
+            module.contains("pub name: ::std::option::Option<::std::string::String>,"),
+            "{module}"
+        );
+    }
+}
