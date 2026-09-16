@@ -3,7 +3,7 @@
 Status: draft
 Branch: `claude/phase-0-implementation-izm38y` (the harness-assigned phase branch, left as assigned per `docs/standards/code.md`; steps do not get their own)
 Spec: `docs/SPEC.md` section 5.1 (a reviewer is never the assignee), section 5.2 (the gates of the transition table, who writes `status`, and the two terminal statuses), section 5.5 (a figure that cannot be compared), section 5.11 (a locked contract and a frozen one), section 5.14 (a dependency is accepted and integrated), section 5.16 (an epic's assignee, its reviewer, its tasks, its product documents), F5
-Depends on: phase 0 (merged in #4); step 01 of this phase for `TransitionActor` and the gates the table names (f9f0e67, 0e50df1, 3cc8bc3); step 02 for `readiness::fixtures::a_contract` (21fe00a, 87a3561, 4a1ac90); step 07 for `CriterionResult` and `RunBy` (a0cdecd, 090e015)
+Depends on: phase 0 (merged in #4); step 01 of this phase for `TransitionActor` and the gates the table names (f9f0e67, 0e50df1, 3cc8bc3); step 02 for `readiness::fixtures::a_contract` (21fe00a, 87a3561, 4a1ac90); step 06 for the escalation rules the Decisions cite (33202e7, abfb7d8); step 07 for `CriterionResult` and `RunBy` (a0cdecd, 090e015, cc27028)
 
 A plan is `ready` only when a reviewer other than the author has confirmed the three rules in `docs/standards/workflow.md` stage 2 (Plan): every decision made, no ambiguity, no forward dependencies. Record who confirmed and when here.
 
@@ -22,29 +22,34 @@ All in `docs/plans/project-plan.md`, phase 1, restated here only where this step
 - `check_assignment` is the widest of the gates, and the only one that reads the contract against a proposed pair of agents. Its rules, in order: the Product Manager may ask only when the team has no active Scrum Master (5.2); the assignee's role is the contract's, except for an epic, which goes to the Scrum Master, or to the Product Manager when there is no active one (5.16 item 3); the reviewer's role is the contract's, except for an epic, whose reviewer is derived from the same flag, the Product Manager when the Scrum Master broke it down and the human when the Product Manager did (5.1, 5.16 item 4, project plan D7); the reviewer is not the assignee (5.1); the assignee is below the limit on the unfinished tasks it holds; the task's budget fits what is left of the sprint's; and every dependency the contract lists is accepted and integrated (5.14).
 - The work-in-progress limit counts every task the agent holds and has not finished, assigned, in progress, or blocked, not only the ones it has started. This gate stands on `ready -> assigned` and `assigned -> in_progress` has no gate at all, so counting only the started ones would let an agent be handed any number of tasks and start none. Spec 6.2's "one in-progress task per agent" is the default value, not the set to count.
 - A dependency the runtime reported nothing about refuses the assignment rather than passing, because an unknown dependency is not an accepted one. A dependency named twice is one dependency and is reported once; a task that names itself is refused, because nothing can satisfy it.
+- An agent id is compared once trimmed, so that a stray space does not make an agent its own reviewer or hide an epic's assignee, and an assignment the runtime named no agent for is refused rather than passing every rule with two blanks. A rejection that names a criterion with no id says so instead of printing an empty name.
 - `DependencyState` and `ChildState` name their task with a `String`, not the typed `TaskId`, because step 02's `ReadinessContext::dependency_statuses` already keys by `String` and the contract's own `dependencies` are strings on the wire; two spellings of the same thing in one module would be worse than one loose one. Changed from the project plan's `TaskId` by this plan.
 - `check_criteria_recorded` asks for a recorded result from the assignee's own run with evidence, not for a passing one. Spec 5.2 asks for "a recorded result", and the reviewer's independent run is what decides: demanding a pass here would reward an agent that records one it did not get. A `human` criterion is exempt, because the assignee cannot run one; the human answers it and the Definition of Done checks that (step 07).
 - Evidence must not be blank, the same floor step 07 holds the reviewer to: a recorded result with nothing in it is not a run.
 - `check_children_done` is the `CriteriaRecorded` gate of an epic (5.16 item 4): every task accepted or cancelled, and at least one accepted. An epic with no tasks at all fails the second rule, which is right: there is nothing to verify.
-- `check_product_doc_write` takes the escalation reason as well as the status, because an epic awaiting the user's approval sits in `escalated` (5.16 item 2) and so does one escalated for any other cause after approval. Spec 5.2 says the waiting one carries reason `approval`, which step 06 already models, so the reason is what tells them apart rather than a blanket refusal of the status. A cancelled epic is refused with a reason of its own: its documents would describe a product decision the team abandoned. Changed from the project plan's "epic `Ready` or beyond", which admitted both.
+- `check_product_doc_write` takes the user's approval as its own input rather than reading it from the status, because the status cannot answer it and neither can the escalation reason. Spec 5.2's `refining -> escalated` row names three causes: an epic waiting for approval, a contract that failed the Definition of Ready three times, and one whose risk needs the human. All three sit in `escalated` and none of the last two was ever approved, so keying on reason `approval` alone would have written a product document for an epic the user never read. Approval is the human command that moves an epic to `ready`, which the runtime observes. A cancelled epic is refused with a reason of its own, and so is one still in `draft` or `refining`, whose contract is still being written. Changed from the project plan's "epic `Ready` or beyond", which admitted an unapproved epic in `escalated`.
 - `check_child_creation` takes a `ParentEpic` of its own rather than step 02's `ParentState`, because that one carries the paths and the budget the Definition of Ready needs and not the assignee this question turns on; a caller would have to invent two fields it does not use. Added by this plan; the project plan's entry named `ParentState` and a separate assignee argument.
 - It also checks that the epic is `in_progress`, which the Definition of Ready checks as well. The overlap is deliberate: readiness runs when the task is written, this runs when it is created, and 5.16 item 3 states both.
 - `check_child_creation` recognises the epic's assignee by its agent id, whatever actor kind the caller names it with, because `TransitionActor` can describe one agent as `Assignee`, `ScrumMaster` or `ProductManager` depending on what the caller is describing, and the question here is which agent this is rather than what it is. An epic whose assignee the runtime did not name matches nobody and the message says so.
 - `check_contract_write` returns `Result<ContractWriteOutcome, ContractWriteRefusal>` rather than a `GateResult`, because its answers are not two: allowed, allowed but the task goes back to `refining`, or refused, and the refusal has three named reasons. `FIELDS_AFTER_FREEZE` and `FIELDS_ALWAYS_WRITABLE` are public constants, so that phase 2's command handling and phase 5's editor name the same fields once. Added by this plan.
-- `FIELDS_AFTER_FREEZE` is the set of fields that still **change** after the freeze, not the set an agent may **write**. Spec 5.11 says they change "only through governed transitions and the note tools", and 5.2 says the governor is the only actor allowed to write `status` for its own transitions, so the governor writes them and every other agent writes only the notes. Writing them as an agent set would have let an assignee move its own task.
+- `FIELDS_AFTER_FREEZE` is the set of fields that still **change** after the freeze, not a set anyone may **write**. Spec 5.11 says they change "only through governed transitions and the note tools" and 5.2 says agents request transitions and the governor applies them, so `FIELDS_THE_GOVERNOR_WRITES` is a constant of its own and no agent writes those four at any status, frozen or not. The freeze alone would not have been enough: a contract is unfrozen exactly while it is in `draft` and `refining`, which is when the Product Manager holds it, so an agent could have written `status: ready` and skipped the Definition of Ready, or `status: accepted` and skipped everything.
+- The governor writes those four fields and the notes and nothing else. A contract's content is the Product Manager's and the human's, and the governor applies transitions rather than deciding what a task is, so `ContentFields` says that rather than calling a draft contract frozen.
 - A lock keeps a contract's content for the human; it does not stop the lifecycle. The governor may therefore write `FIELDS_AFTER_FREEZE` on a locked contract, or a locked task could never leave `refining` and every lock would be a deadlock.
-- A task that is `accepted` or `cancelled` takes no write but a note, the human's included. Spec 5.2 says nothing leaves those two, and the human's write of a frozen contract is defined by sending the task back to `refining`, which a terminal task has no way to do; `TaskTerminal` says so rather than pretending otherwise.
+- The human writes anything on a contract that is not finished, and a human write of a frozen contract beyond `FIELDS_AFTER_FREEZE` sends the task back to `refining`. A task that is `accepted` or `cancelled` takes no write but a note, the human's included. Spec 5.2 says nothing leaves those two, and the human's write of a frozen contract is defined by sending the task back to `refining`, which a terminal task has no way to do; `TaskTerminal` says so rather than pretending otherwise.
+- More than one reason can hold at once, so they are reported most structural first: finished, then a field that is the governor's, then the lock, then the freeze. Each earlier one holds whatever the later ones say, and a caller that fixes the reason it is given makes progress rather than meeting the same refusal under another name. A test pins the order.
 - A write that names no field at all is allowed for everyone: the runtime asks before it writes, and a question about nothing is not a change.
 - A locked or frozen contract leaves only its notes open to an agent. Criterion results are events rather than contract fields, so nothing here covers them, and 5.11's "agents may record criterion results" is about the log.
 - The human may write anything; a human write of a frozen contract that touches a field outside `FIELDS_AFTER_FREEZE` returns `ReturnsToRefining`, and one that touches only those fields is an ordinary allowed write, because the status and the assignee change on every transition.
 - A budget that cannot be compared does not fit, as a spend that is not a number counts as exhausted in `budget` (spec 5.5). `fits_within` is that rule read the other way round and the two agree on the direction; they are not shared, because one asks whether there is room and the other whether there is none.
+- A work-in-progress limit of zero refuses every assignment, which is how a team pauses an agent without retiring it; nothing here treats zero as unset.
 - The `Triaged` gate needs no function: it is one boolean the runtime records (`request.triaged`, 5.16), and step 09 takes it as `TransitionContext::triaged`.
+- Revised twice on 2026-09-16, after two readiness reviews refused it. The second found that the first fix had closed the frozen half of the hole and left the unfrozen one open: any agent could still write `status` on a `draft` or `refining` contract, which is exactly when the Product Manager holds it, so `status` and its three siblings are now the governor's at every status. It also found the product-document gate writing a document for an epic that failed the Definition of Ready three times, because that epic sits in `escalated` too and only the reason `approval` was being refused; the approval is now its own input. Two bullets still outran the code and one named a constant that does not exist, the governor called a draft contract frozen, and the refusal order when two reasons held was an accident of branch order. All taken.
 - Revised 2026-09-16 after a readiness review refused the plan with three critical findings, all in `check_contract_write`: it sent a terminal task back to `refining`, it let any agent write `status` on a frozen contract, and it deadlocked a locked contract against the governor. The review also found the epic reviewer rule of project plan D7 enforced nowhere, the work-in-progress count evadable, the product-document refusal defending a limitation the signature had chosen, three Decisions bullets claiming more than the code did, and a project-plan edit written as prose where every other edit in this repository is exact text. All taken.
 - Tests import the items by name rather than a glob; every code block below is the file after `cargo fmt --all`.
 
 ## Design
 
-One task: the `governor::gates` module with `GateResult`, the nine checks, the values they take, the two field constants, and thirty-one tests.
+One task: the `governor::gates` module with `GateResult`, the nine checks, the values they take, the three field constants, and thirty-five tests. It is the largest task in the phase; it is one task because its nine answers are one question, which of the lifecycle's doors this actor may open, and splitting them would give a reviewer three views of the same table.
 
 Out of scope: the table, the actor check, and the four counting gates, which are step 09's to compose from step 01's and step 06's work; the Definition of Ready and the Definition of Done, which are gates of their own from steps 02 and 07; and everything the runtime must observe to fill these values, which is phase 3's.
 
@@ -62,7 +67,7 @@ Touches `crates/core` only: one new child of `governor`. Consumes `contract::{Ro
 
 ```
 crates/core/src/governor.rs                         modifies: declares gates
-crates/core/src/governor/gates.rs                   creates: GateResult, the nine checks and their values, the two field constants, thirty-one tests
+crates/core/src/governor/gates.rs                   creates: GateResult, the nine checks and their values, the three field constants, thirty-five tests
 docs/SPEC.md                                        modifies: section 5.2's criteria-recorded gate says a `human` criterion is not the assignee's to run
 docs/plans/project-plan.md                          modifies: phase 1 step 08's interface records the changes this plan makes to it
 docs/plans/phase-1-harness/step-08-gate-predicates.md   modifies: checkboxes ticked
@@ -75,7 +80,7 @@ docs/plans/phase-1-harness/step-08-gate-predicates.md   modifies: checkboxes tic
 Files: created `crates/core/src/governor/gates.rs`; modified `crates/core/src/governor.rs`
 
 Consumes: `contract::{Role, TaskContract, TaskStatus, Verification}`, `generated::task_contract::FarikTaskContractKind`, `governor::done::{CriterionResult, RunBy}`, `governor::transition_table::TransitionActor`, and in the tests `contract::VerificationWire` and `governor::readiness::fixtures::a_contract`
-Produces: `governor::gates::{GateResult, AssignmentRequester, DependencyState, AssignmentInput, check_assignment, WorkState, check_criteria_recorded, ChildState, check_children_done, check_product_doc_write, ContractWriteActor, ParentEpic, check_child_creation, Blocker, check_blocker_written, check_blocker_resolved, Rejection, check_rejection_reasons, ContractWriteOutcome, ContractWriteRefusal, FIELDS_AFTER_FREEZE, FIELDS_WHEN_LOCKED, check_contract_write}`
+Produces: `governor::gates::{GateResult, AssignmentRequester, DependencyState, AssignmentInput, check_assignment, WorkState, check_criteria_recorded, ChildState, check_children_done, check_product_doc_write, ContractWriteActor, ParentEpic, check_child_creation, Blocker, check_blocker_written, check_blocker_resolved, Rejection, check_rejection_reasons, ContractWriteOutcome, ContractWriteRefusal, FIELDS_AFTER_FREEZE, FIELDS_THE_GOVERNOR_WRITES, FIELDS_ALWAYS_WRITABLE, check_contract_write}`
 
 - [ ] Confirm the baseline on the branch head:
 
@@ -133,7 +138,6 @@ Produces: `governor::gates::{GateResult, AssignmentRequester, DependencyState, A
       use crate::contract::{Role, TaskContract, TaskStatus, VerificationWire};
       use crate::generated::task_contract::FarikTaskContractKind as Kind;
       use crate::governor::done::{CriterionResult, RunBy};
-      use crate::governor::escalation::EscalationReason;
       use crate::governor::readiness::fixtures::a_contract;
       use crate::governor::transition_table::TransitionActor;
 
@@ -246,6 +250,22 @@ Produces: `governor::gates::{GateResult, AssignmentRequester, DependencyState, A
               reasons(check_assignment(&epic, &input)),
               ["the reviewer is a architect and this contract is reviewed by a human"]
           );
+      }
+
+      #[test]
+      fn refuses_an_assignment_the_runtime_did_not_name_two_agents_for() {
+          for (assignee, reviewer) in [("", "arch-1"), ("dev-1", " "), ("", "")] {
+              let mut input = an_assignment();
+              input.assignee_id = assignee.to_string();
+              input.reviewer_id = reviewer.to_string();
+              assert!(
+                  reasons(check_assignment(&a_contract(), &input)).contains(
+                      &"the runtime named no agent for the assignee or the reviewer, and a task is assigned to one of each"
+                          .to_string()
+                  ),
+                  "{assignee} {reviewer}"
+              );
+          }
       }
 
       #[test]
@@ -485,34 +505,27 @@ Produces: `governor::gates::{GateResult, AssignmentRequester, DependencyState, A
       #[test]
       fn writes_a_product_document_only_for_the_product_manager_and_an_approved_epic() {
           assert_eq!(
-              check_product_doc_write(TaskStatus::Ready, None, Role::ProductManager),
+              check_product_doc_write(TaskStatus::Ready, true, Role::ProductManager),
               Ok(())
           );
           assert_eq!(
-              check_product_doc_write(TaskStatus::InProgress, None, Role::ProductManager),
+              check_product_doc_write(TaskStatus::InProgress, true, Role::ProductManager),
               Ok(())
           );
           assert_eq!(
               reasons(check_product_doc_write(
                   TaskStatus::Ready,
-                  None,
+                  true,
                   Role::SoftwareDeveloper
               )),
               [
                   "a software_developer may not write a product document; the Product Manager owns them"
               ]
           );
-          for status in [TaskStatus::Draft, TaskStatus::Refining] {
-              assert_eq!(
-                  reasons(check_product_doc_write(status, None, Role::ProductManager)),
-                  ["the user has not approved this epic yet, and a product document waits for that"],
-                  "{status}"
-              );
-          }
           assert_eq!(
               reasons(check_product_doc_write(
                   TaskStatus::Cancelled,
-                  None,
+                  true,
                   Role::ProductManager
               )),
               [
@@ -522,25 +535,35 @@ Produces: `governor::gates::{GateResult, AssignmentRequester, DependencyState, A
       }
 
       #[test]
-      fn tells_an_epic_waiting_for_approval_from_one_escalated_after_it() {
-          // Both sit in `escalated`; spec 5.2 says the one waiting carries reason `approval`, which
-          // is the only thing that tells them apart.
-          assert_eq!(
-              reasons(check_product_doc_write(
-                  TaskStatus::Escalated,
-                  Some(EscalationReason::Approval),
-                  Role::ProductManager
-              )),
-              ["the user has not approved this epic yet, and a product document waits for that"]
-          );
-          for reason in [
-              Some(EscalationReason::Budget),
-              Some(EscalationReason::BlockerAge),
-              None,
+      fn waits_for_the_approval_itself_and_not_for_a_status_that_resembles_it() {
+          // An epic waiting for approval sits in `escalated`, and so does one that failed the
+          // Definition of Ready three times and one whose risk needs the human: none of the three
+          // was approved, and the status cannot tell them apart. The approval is its own fact.
+          for status in [
+              TaskStatus::Draft,
+              TaskStatus::Refining,
+              TaskStatus::Escalated,
+              TaskStatus::Ready,
+              TaskStatus::InProgress,
           ] {
+              assert!(
+                  reasons(check_product_doc_write(status, false, Role::ProductManager)).contains(
+                      &"the user has not approved this epic yet, and a product document waits for that"
+                          .to_string()
+                  ),
+                  "{status}"
+              );
+          }
+          assert_eq!(
+              check_product_doc_write(TaskStatus::Escalated, true, Role::ProductManager),
+              Ok(())
+          );
+          // An approved epic still has nothing to write from while its contract is being refined.
+          for status in [TaskStatus::Draft, TaskStatus::Refining] {
               assert_eq!(
-                  check_product_doc_write(TaskStatus::Escalated, reason, Role::ProductManager),
-                  Ok(())
+                  reasons(check_product_doc_write(status, true, Role::ProductManager)).len(),
+                  1,
+                  "{status}"
               );
           }
       }
@@ -568,6 +591,20 @@ Produces: `governor::gates::{GateResult, AssignmentRequester, DependencyState, A
           assert_eq!(
               reasons(check_child_creation(&parent, &other)),
               ["a task under an epic is written by the epic's assignee, sm-1, or by the human"]
+          );
+          let unnamed = ParentEpic {
+              status: TaskStatus::InProgress,
+              assignee_id: String::new(),
+          };
+          let nobody = ContractWriteActor {
+              kind: TransitionActor::Assignee,
+              agent_id: Some(String::new()),
+          };
+          assert_eq!(
+              reasons(check_child_creation(&unnamed, &nobody)),
+              [
+                  "a task under an epic is written by the epic's assignee, which the runtime did not name, or by the human"
+              ]
           );
           let not_started = ParentEpic {
               status: TaskStatus::Ready,
@@ -641,6 +678,14 @@ Produces: `governor::gates::{GateResult, AssignmentRequester, DependencyState, A
               reasons(check_rejection_reasons(&a_contract(), Some(&empty))),
               ["the rejection names no failed criterion"]
           );
+          let unnamed = Rejection {
+              failed_criterion_ids: vec![" ".to_string()],
+              reasons: "The form accepts an empty password.".to_string(),
+          };
+          assert_eq!(
+              reasons(check_rejection_reasons(&a_contract(), Some(&unnamed))),
+              ["the rejection names a criterion with no id"]
+          );
           let unknown = Rejection {
               failed_criterion_ids: vec!["C9".to_string()],
               reasons: String::new(),
@@ -660,14 +705,104 @@ Produces: `governor::gates::{GateResult, AssignmentRequester, DependencyState, A
               kind: TransitionActor::ProductManager,
               agent_id: Some("pm-1".to_string()),
           };
+          for status in [TaskStatus::Draft, TaskStatus::Refining] {
+              assert_eq!(
+                  check_contract_write(
+                      status,
+                      false,
+                      &agent,
+                      &["intent".to_string(), "exit_criteria".to_string()]
+                  ),
+                  Ok(ContractWriteOutcome::Allowed),
+                  "{status}"
+              );
+          }
+      }
+
+      #[test]
+      fn never_lets_an_agent_move_a_task_by_writing_its_status() {
+          // An agent asks for a transition and the governor applies it. An agent that could write
+          // `status` itself would set `ready` without the Definition of Ready, or `accepted`
+          // without anything at all, and the contract is not frozen while it is being written.
+          for kind in [
+              TransitionActor::ProductManager,
+              TransitionActor::ScrumMaster,
+              TransitionActor::Assignee,
+              TransitionActor::Reviewer,
+          ] {
+              let actor = ContractWriteActor {
+                  kind,
+                  agent_id: Some("agent-1".to_string()),
+              };
+              assert_eq!(
+                  check_contract_write(
+                      TaskStatus::Refining,
+                      false,
+                      &actor,
+                      &["intent".to_string(), "status".to_string()]
+                  ),
+                  Err(ContractWriteRefusal::LifecycleFields {
+                      fields: vec!["status".to_string()]
+                  })
+              );
+          }
+      }
+
+      #[test]
+      fn keeps_a_contracts_content_out_of_the_governors_hands() {
+          // The governor applies transitions; it does not decide what a task is. Saying so with a
+          // reason of its own keeps the log honest: a draft contract is not frozen.
+          let governor = ContractWriteActor {
+              kind: TransitionActor::Governor,
+              agent_id: None,
+          };
+          for status in [TaskStatus::Draft, TaskStatus::Refining, TaskStatus::Ready] {
+              assert_eq!(
+                  check_contract_write(status, false, &governor, &["intent".to_string()]),
+                  Err(ContractWriteRefusal::ContentFields {
+                      fields: vec!["intent".to_string()]
+                  }),
+                  "{status}"
+              );
+          }
+      }
+
+      #[test]
+      fn reports_the_most_structural_refusal_when_more_than_one_holds() {
+          // Each earlier reason holds whatever the later ones say, so the order is decided rather
+          // than left to the order of the branches.
+          let agent = ContractWriteActor {
+              kind: TransitionActor::Assignee,
+              agent_id: Some("dev-1".to_string()),
+          };
+          // finished beats everything
           assert_eq!(
               check_contract_write(
-                  TaskStatus::Refining,
-                  false,
+                  TaskStatus::Accepted,
+                  true,
                   &agent,
-                  &["intent".to_string(), "exit_criteria".to_string()]
+                  &["status".to_string(), "scope".to_string()]
               ),
-              Ok(ContractWriteOutcome::Allowed)
+              Err(ContractWriteRefusal::TaskTerminal {
+                  status: TaskStatus::Accepted
+              })
+          );
+          // the governor's fields beat the lock and the freeze
+          assert_eq!(
+              check_contract_write(
+                  TaskStatus::Ready,
+                  true,
+                  &agent,
+                  &["status".to_string(), "scope".to_string()]
+              ),
+              Err(ContractWriteRefusal::LifecycleFields {
+                  fields: vec!["status".to_string()]
+              })
+          );
+          // the lock beats the freeze
+          assert_eq!(
+              check_contract_write(TaskStatus::Ready, true, &agent, &["scope".to_string()]),
+              Err(ContractWriteRefusal::ContractLocked)
           );
       }
 
@@ -707,13 +842,20 @@ Produces: `governor::gates::{GateResult, AssignmentRequester, DependencyState, A
               );
           }
           for field in ["status", "assignee", "reviewer", "iteration"] {
-              assert_eq!(
-                  check_contract_write(TaskStatus::Ready, false, &agent, &[field.to_string()]),
-                  Err(ContractWriteRefusal::ContractFrozen {
-                      fields: vec![field.to_string()]
-                  }),
-                  "{field}"
-              );
+              for status in [
+                  TaskStatus::Draft,
+                  TaskStatus::Refining,
+                  TaskStatus::Ready,
+                  TaskStatus::InProgress,
+              ] {
+                  assert_eq!(
+                      check_contract_write(status, false, &agent, &[field.to_string()]),
+                      Err(ContractWriteRefusal::LifecycleFields {
+                          fields: vec![field.to_string()]
+                      }),
+                      "{field} at {status}"
+                  );
+              }
           }
           assert_eq!(
               check_contract_write(TaskStatus::Ready, false, &agent, &["notes".to_string()]),
@@ -748,15 +890,21 @@ Produces: `governor::gates::{GateResult, AssignmentRequester, DependencyState, A
               check_contract_write(TaskStatus::Ready, true, &governor, &["status".to_string()]),
               Ok(ContractWriteOutcome::Allowed)
           );
-          assert_eq!(
-              check_contract_write(
-                  TaskStatus::Refining,
-                  true,
-                  &governor,
-                  &["intent".to_string()]
-              ),
-              Err(ContractWriteRefusal::ContractLocked)
-          );
+          // A lock is not what stops the governor writing a contract's content; nothing it does
+          // ever writes content, so the reason is the same whether or not the contract is locked.
+          for locked in [true, false] {
+              assert_eq!(
+                  check_contract_write(
+                      TaskStatus::Refining,
+                      locked,
+                      &governor,
+                      &["intent".to_string()]
+                  ),
+                  Err(ContractWriteRefusal::ContentFields {
+                      fields: vec!["intent".to_string()]
+                  })
+              );
+          }
       }
 
       #[test]
@@ -854,7 +1002,6 @@ Produces: `governor::gates::{GateResult, AssignmentRequester, DependencyState, A
   use crate::contract::{Role, TaskContract, TaskStatus, wire_method};
   use crate::generated::task_contract::FarikTaskContractKind as Kind;
   use crate::governor::done::{CriterionResult, RunBy};
-  use crate::governor::escalation::EscalationReason;
   use crate::governor::transition_table::TransitionActor;
   use crate::text::listed;
 
@@ -974,10 +1121,15 @@ Produces: `governor::gates::{GateResult, AssignmentRequester, DependencyState, A
               input.reviewer_role
           ));
       }
-      if input.reviewer_id == input.assignee_id {
+      if input.assignee_id.trim().is_empty() || input.reviewer_id.trim().is_empty() {
+          reasons.push(
+              "the runtime named no agent for the assignee or the reviewer, and a task is assigned to one of each"
+                  .to_string(),
+          );
+      } else if input.reviewer_id.trim() == input.assignee_id.trim() {
           reasons.push(format!(
               "{} cannot review its own work; name another agent as reviewer",
-              input.assignee_id
+              input.assignee_id.trim()
           ));
       }
       if input.assignee_open_tasks >= input.wip_limit {
@@ -1125,18 +1277,21 @@ Produces: `governor::gates::{GateResult, AssignmentRequester, DependencyState, A
   }
 
   /// Whether the Product Manager may write a product document for this epic (`docs/SPEC.md`
-  /// section 5.16 items 1 and 5): the writer is the Product Manager, and the user has approved the
-  /// epic. An epic waiting for that approval sits in `escalated` with reason `approval` (5.2), so
-  /// the reason is what tells it from an epic escalated after approval; `escalated` with any other
-  /// reason, or with none recorded, is past the bar. A cancelled epic is refused: its documents
-  /// would describe a product decision the team abandoned.
+  /// section 5.16 items 1 and 5): the writer is the Product Manager, the user has approved the
+  /// epic, and the epic is not cancelled.
+  ///
+  /// The approval is passed in rather than read from the status, because the status cannot answer
+  /// it. An epic waiting for approval sits in `escalated` (5.16 item 2), and so does one that
+  /// failed the Definition of Ready three times and one whose risk needs the human, neither of
+  /// which was ever approved (5.2's `refining -> escalated` row names all three). The runtime knows
+  /// which: approval is the human command that moves the epic to `ready`.
   ///
   /// # Errors
   ///
   /// Every rule the write fails.
   pub fn check_product_doc_write(
       epic_status: TaskStatus,
-      escalation_reason: Option<EscalationReason>,
+      user_approved: bool,
       actor_role: Role,
   ) -> GateResult {
       let mut reasons = Vec::new();
@@ -1145,13 +1300,16 @@ Produces: `governor::gates::{GateResult, AssignmentRequester, DependencyState, A
               "a {actor_role} may not write a product document; the Product Manager owns them"
           ));
       }
-      let awaiting_approval = epic_status == TaskStatus::Escalated
-          && escalation_reason == Some(EscalationReason::Approval);
-      if awaiting_approval || matches!(epic_status, TaskStatus::Draft | TaskStatus::Refining) {
+      if !user_approved {
           reasons.push(
               "the user has not approved this epic yet, and a product document waits for that"
                   .to_string(),
           );
+      }
+      if matches!(epic_status, TaskStatus::Draft | TaskStatus::Refining) {
+          reasons.push(format!(
+              "the epic is {epic_status}, and a product document is written from a contract the user has read"
+          ));
       }
       if epic_status == TaskStatus::Cancelled {
           reasons.push(
@@ -1189,15 +1347,16 @@ Produces: `governor::gates::{GateResult, AssignmentRequester, DependencyState, A
   /// Every rule the creation fails.
   pub fn check_child_creation(parent: &ParentEpic, actor: &ContractWriteActor) -> GateResult {
       let mut reasons = Vec::new();
-      let is_the_assignee = !parent.assignee_id.trim().is_empty()
-          && actor.agent_id.as_deref() == Some(parent.assignee_id.as_str());
+      let named = parent.assignee_id.trim();
+      let is_the_assignee =
+          !named.is_empty() && actor.agent_id.as_deref().map(str::trim) == Some(named);
       if actor.kind != TransitionActor::Human && !is_the_assignee {
           reasons.push(format!(
               "a task under an epic is written by the epic's assignee, {}, or by the human",
-              if parent.assignee_id.trim().is_empty() {
+              if named.is_empty() {
                   "which the runtime did not name"
               } else {
-                  parent.assignee_id.as_str()
+                  named
               }
           ));
       }
@@ -1287,9 +1446,17 @@ Produces: `governor::gates::{GateResult, AssignmentRequester, DependencyState, A
       if rejection.failed_criterion_ids.is_empty() {
           reasons.push("the rejection names no failed criterion".to_string());
       }
+      if rejection
+          .failed_criterion_ids
+          .iter()
+          .any(|id| id.trim().is_empty())
+      {
+          reasons.push("the rejection names a criterion with no id".to_string());
+      }
       let unknown: Vec<String> = rejection
           .failed_criterion_ids
           .iter()
+          .filter(|id| !id.trim().is_empty())
           .filter(|id| {
               !contract
                   .exit_criteria
@@ -1336,10 +1503,28 @@ Produces: `governor::gates::{GateResult, AssignmentRequester, DependencyState, A
           /// Which of the two it is.
           status: TaskStatus,
       },
+      /// An agent asked to write fields that change only through a governed transition. It requests
+      /// the transition instead, and the governor writes them (`docs/SPEC.md` section 5.2).
+      LifecycleFields {
+          /// The fields it may not write.
+          fields: Vec<String>,
+      },
+      /// The governor asked to write a contract's content, which the Product Manager and the human
+      /// write. The governor applies transitions; it does not decide what a task is.
+      ContentFields {
+          /// The fields it may not write.
+          fields: Vec<String>,
+      },
   }
 
-  /// The fields an agent may still change once a contract is frozen (`docs/SPEC.md` section 5.11).
+  /// The fields that still change once a contract is frozen (`docs/SPEC.md` section 5.11): the
+  /// four the governor writes when it applies a transition, and the notes.
   pub const FIELDS_AFTER_FREEZE: [&str; 5] = ["status", "assignee", "reviewer", "iteration", "notes"];
+
+  /// The fields only the governor writes, at every status (`docs/SPEC.md` sections 5.2 and 5.11).
+  /// An agent asks for a transition and the governor applies it; an agent that could write `status`
+  /// itself would be able to skip every gate, including the Definition of Ready.
+  pub const FIELDS_THE_GOVERNOR_WRITES: [&str; 4] = ["status", "assignee", "reviewer", "iteration"];
 
   /// The fields the note tools write, which stay open whatever the contract's status: its notes,
   /// and nothing else. Criterion results are events rather than contract fields, so nothing here
@@ -1348,19 +1533,30 @@ Produces: `governor::gates::{GateResult, AssignmentRequester, DependencyState, A
 
   /// Whether a write to a contract is allowed (`docs/SPEC.md` sections 5.2 and 5.11).
   ///
-  /// A task that is `accepted` or `cancelled` is finished: only the note tools still write to it.
-  /// A contract is frozen once its task leaves `refining`, and from `ready` onward the fields of
-  /// `FIELDS_AFTER_FREEZE` change only through a governed transition, so the governor writes them
-  /// and an agent writes only the notes. A locked contract belongs to the human, and an agent
-  /// writes only its notes whatever its status. The human may change anything, and a human change
-  /// to a frozen contract sends the task back to `refining`, which is why a terminal task is
-  /// refused even for the human: nothing may leave `accepted` or `cancelled`.
+  /// A task that is `accepted` or `cancelled` is finished: only the note tools still write to it,
+  /// the human included, because a human write of a frozen contract is defined by sending the task
+  /// back to `refining` and nothing leaves those two statuses.
+  ///
+  /// `FIELDS_THE_GOVERNOR_WRITES` are never an agent's, at any status: an agent asks for a
+  /// transition and the governor applies it, so an agent that could write `status` itself would
+  /// skip every gate. A locked contract belongs to the human, so an agent writes only its notes. A
+  /// contract is frozen once its task leaves `refining`, so from `ready` onward an agent writes
+  /// only its notes there too. The governor writes those four fields and the notes and nothing
+  /// else, because it applies transitions rather than deciding what a task is. The human writes
+  /// anything on a contract that is not finished, and a human write of a frozen contract beyond
+  /// `FIELDS_AFTER_FREEZE` sends the task back to `refining`.
+  ///
+  /// Refusals are reported in that order, most structural first, because each holds whatever the
+  /// later ones say: a finished task takes no write however the contract is owned, and a field
+  /// that is the governor's is the governor's whether or not the contract is locked.
   ///
   /// # Errors
   ///
-  /// `TaskTerminal` when anything but the notes of a finished task is written, `ContractLocked`
-  /// when an agent writes anything but the notes of a locked contract, or `ContractFrozen` naming
-  /// the fields an agent may not write once the contract is frozen.
+  /// `TaskTerminal` when anything but the notes of a finished task is written; `LifecycleFields`
+  /// when an agent writes what only the governor writes; `ContentFields` when the governor writes a
+  /// contract's content; `ContractLocked` when an agent writes anything but the notes of a locked
+  /// contract; or `ContractFrozen` naming the fields an agent may not write once the contract is
+  /// frozen.
   pub fn check_contract_write(
       status: TaskStatus,
       locked: bool,
@@ -1376,39 +1572,40 @@ Produces: `governor::gates::{GateResult, AssignmentRequester, DependencyState, A
       }
       let frozen = !matches!(status, TaskStatus::Draft | TaskStatus::Refining);
       let beyond_freeze = beyond(changed_fields, &FIELDS_AFTER_FREEZE);
-      match actor.kind {
-          TransitionActor::Human => {
-              if frozen && !beyond_freeze.is_empty() {
-                  Ok(ContractWriteOutcome::ReturnsToRefining)
-              } else {
-                  Ok(ContractWriteOutcome::Allowed)
-              }
+      if actor.kind == TransitionActor::Human {
+          if frozen && !beyond_freeze.is_empty() {
+              return Ok(ContractWriteOutcome::ReturnsToRefining);
           }
-          TransitionActor::Governor => {
-              if beyond_freeze.is_empty() {
-                  Ok(ContractWriteOutcome::Allowed)
-              } else if locked {
-                  Err(ContractWriteRefusal::ContractLocked)
-              } else {
-                  Err(ContractWriteRefusal::ContractFrozen {
-                      fields: beyond_freeze,
-                  })
-              }
-          }
-          _ => {
-              if beyond_notes.is_empty() {
-                  Ok(ContractWriteOutcome::Allowed)
-              } else if locked {
-                  Err(ContractWriteRefusal::ContractLocked)
-              } else if frozen {
-                  Err(ContractWriteRefusal::ContractFrozen {
-                      fields: beyond_notes,
-                  })
-              } else {
-                  Ok(ContractWriteOutcome::Allowed)
-              }
-          }
+          return Ok(ContractWriteOutcome::Allowed);
       }
+      if actor.kind == TransitionActor::Governor {
+          if beyond_freeze.is_empty() {
+              return Ok(ContractWriteOutcome::Allowed);
+          }
+          return Err(ContractWriteRefusal::ContentFields {
+              fields: beyond_freeze,
+          });
+      }
+      let lifecycle = changed_fields
+          .iter()
+          .filter(|field| FIELDS_THE_GOVERNOR_WRITES.contains(&field.as_str()))
+          .cloned()
+          .collect::<Vec<String>>();
+      if !lifecycle.is_empty() {
+          return Err(ContractWriteRefusal::LifecycleFields { fields: lifecycle });
+      }
+      if beyond_notes.is_empty() {
+          return Ok(ContractWriteOutcome::Allowed);
+      }
+      if locked {
+          return Err(ContractWriteRefusal::ContractLocked);
+      }
+      if frozen {
+          return Err(ContractWriteRefusal::ContractFrozen {
+              fields: beyond_notes,
+          });
+      }
+      Ok(ContractWriteOutcome::Allowed)
   }
 
   /// The changed fields that are not in the given set, in the order they were given.
@@ -1434,7 +1631,6 @@ Produces: `governor::gates::{GateResult, AssignmentRequester, DependencyState, A
       use crate::contract::{Role, TaskContract, TaskStatus, VerificationWire};
       use crate::generated::task_contract::FarikTaskContractKind as Kind;
       use crate::governor::done::{CriterionResult, RunBy};
-      use crate::governor::escalation::EscalationReason;
       use crate::governor::readiness::fixtures::a_contract;
       use crate::governor::transition_table::TransitionActor;
 
@@ -1547,6 +1743,22 @@ Produces: `governor::gates::{GateResult, AssignmentRequester, DependencyState, A
               reasons(check_assignment(&epic, &input)),
               ["the reviewer is a architect and this contract is reviewed by a human"]
           );
+      }
+
+      #[test]
+      fn refuses_an_assignment_the_runtime_did_not_name_two_agents_for() {
+          for (assignee, reviewer) in [("", "arch-1"), ("dev-1", " "), ("", "")] {
+              let mut input = an_assignment();
+              input.assignee_id = assignee.to_string();
+              input.reviewer_id = reviewer.to_string();
+              assert!(
+                  reasons(check_assignment(&a_contract(), &input)).contains(
+                      &"the runtime named no agent for the assignee or the reviewer, and a task is assigned to one of each"
+                          .to_string()
+                  ),
+                  "{assignee} {reviewer}"
+              );
+          }
       }
 
       #[test]
@@ -1786,34 +1998,27 @@ Produces: `governor::gates::{GateResult, AssignmentRequester, DependencyState, A
       #[test]
       fn writes_a_product_document_only_for_the_product_manager_and_an_approved_epic() {
           assert_eq!(
-              check_product_doc_write(TaskStatus::Ready, None, Role::ProductManager),
+              check_product_doc_write(TaskStatus::Ready, true, Role::ProductManager),
               Ok(())
           );
           assert_eq!(
-              check_product_doc_write(TaskStatus::InProgress, None, Role::ProductManager),
+              check_product_doc_write(TaskStatus::InProgress, true, Role::ProductManager),
               Ok(())
           );
           assert_eq!(
               reasons(check_product_doc_write(
                   TaskStatus::Ready,
-                  None,
+                  true,
                   Role::SoftwareDeveloper
               )),
               [
                   "a software_developer may not write a product document; the Product Manager owns them"
               ]
           );
-          for status in [TaskStatus::Draft, TaskStatus::Refining] {
-              assert_eq!(
-                  reasons(check_product_doc_write(status, None, Role::ProductManager)),
-                  ["the user has not approved this epic yet, and a product document waits for that"],
-                  "{status}"
-              );
-          }
           assert_eq!(
               reasons(check_product_doc_write(
                   TaskStatus::Cancelled,
-                  None,
+                  true,
                   Role::ProductManager
               )),
               [
@@ -1823,25 +2028,35 @@ Produces: `governor::gates::{GateResult, AssignmentRequester, DependencyState, A
       }
 
       #[test]
-      fn tells_an_epic_waiting_for_approval_from_one_escalated_after_it() {
-          // Both sit in `escalated`; spec 5.2 says the one waiting carries reason `approval`, which
-          // is the only thing that tells them apart.
-          assert_eq!(
-              reasons(check_product_doc_write(
-                  TaskStatus::Escalated,
-                  Some(EscalationReason::Approval),
-                  Role::ProductManager
-              )),
-              ["the user has not approved this epic yet, and a product document waits for that"]
-          );
-          for reason in [
-              Some(EscalationReason::Budget),
-              Some(EscalationReason::BlockerAge),
-              None,
+      fn waits_for_the_approval_itself_and_not_for_a_status_that_resembles_it() {
+          // An epic waiting for approval sits in `escalated`, and so does one that failed the
+          // Definition of Ready three times and one whose risk needs the human: none of the three
+          // was approved, and the status cannot tell them apart. The approval is its own fact.
+          for status in [
+              TaskStatus::Draft,
+              TaskStatus::Refining,
+              TaskStatus::Escalated,
+              TaskStatus::Ready,
+              TaskStatus::InProgress,
           ] {
+              assert!(
+                  reasons(check_product_doc_write(status, false, Role::ProductManager)).contains(
+                      &"the user has not approved this epic yet, and a product document waits for that"
+                          .to_string()
+                  ),
+                  "{status}"
+              );
+          }
+          assert_eq!(
+              check_product_doc_write(TaskStatus::Escalated, true, Role::ProductManager),
+              Ok(())
+          );
+          // An approved epic still has nothing to write from while its contract is being refined.
+          for status in [TaskStatus::Draft, TaskStatus::Refining] {
               assert_eq!(
-                  check_product_doc_write(TaskStatus::Escalated, reason, Role::ProductManager),
-                  Ok(())
+                  reasons(check_product_doc_write(status, true, Role::ProductManager)).len(),
+                  1,
+                  "{status}"
               );
           }
       }
@@ -1869,6 +2084,20 @@ Produces: `governor::gates::{GateResult, AssignmentRequester, DependencyState, A
           assert_eq!(
               reasons(check_child_creation(&parent, &other)),
               ["a task under an epic is written by the epic's assignee, sm-1, or by the human"]
+          );
+          let unnamed = ParentEpic {
+              status: TaskStatus::InProgress,
+              assignee_id: String::new(),
+          };
+          let nobody = ContractWriteActor {
+              kind: TransitionActor::Assignee,
+              agent_id: Some(String::new()),
+          };
+          assert_eq!(
+              reasons(check_child_creation(&unnamed, &nobody)),
+              [
+                  "a task under an epic is written by the epic's assignee, which the runtime did not name, or by the human"
+              ]
           );
           let not_started = ParentEpic {
               status: TaskStatus::Ready,
@@ -1942,6 +2171,14 @@ Produces: `governor::gates::{GateResult, AssignmentRequester, DependencyState, A
               reasons(check_rejection_reasons(&a_contract(), Some(&empty))),
               ["the rejection names no failed criterion"]
           );
+          let unnamed = Rejection {
+              failed_criterion_ids: vec![" ".to_string()],
+              reasons: "The form accepts an empty password.".to_string(),
+          };
+          assert_eq!(
+              reasons(check_rejection_reasons(&a_contract(), Some(&unnamed))),
+              ["the rejection names a criterion with no id"]
+          );
           let unknown = Rejection {
               failed_criterion_ids: vec!["C9".to_string()],
               reasons: String::new(),
@@ -1961,14 +2198,104 @@ Produces: `governor::gates::{GateResult, AssignmentRequester, DependencyState, A
               kind: TransitionActor::ProductManager,
               agent_id: Some("pm-1".to_string()),
           };
+          for status in [TaskStatus::Draft, TaskStatus::Refining] {
+              assert_eq!(
+                  check_contract_write(
+                      status,
+                      false,
+                      &agent,
+                      &["intent".to_string(), "exit_criteria".to_string()]
+                  ),
+                  Ok(ContractWriteOutcome::Allowed),
+                  "{status}"
+              );
+          }
+      }
+
+      #[test]
+      fn never_lets_an_agent_move_a_task_by_writing_its_status() {
+          // An agent asks for a transition and the governor applies it. An agent that could write
+          // `status` itself would set `ready` without the Definition of Ready, or `accepted`
+          // without anything at all, and the contract is not frozen while it is being written.
+          for kind in [
+              TransitionActor::ProductManager,
+              TransitionActor::ScrumMaster,
+              TransitionActor::Assignee,
+              TransitionActor::Reviewer,
+          ] {
+              let actor = ContractWriteActor {
+                  kind,
+                  agent_id: Some("agent-1".to_string()),
+              };
+              assert_eq!(
+                  check_contract_write(
+                      TaskStatus::Refining,
+                      false,
+                      &actor,
+                      &["intent".to_string(), "status".to_string()]
+                  ),
+                  Err(ContractWriteRefusal::LifecycleFields {
+                      fields: vec!["status".to_string()]
+                  })
+              );
+          }
+      }
+
+      #[test]
+      fn keeps_a_contracts_content_out_of_the_governors_hands() {
+          // The governor applies transitions; it does not decide what a task is. Saying so with a
+          // reason of its own keeps the log honest: a draft contract is not frozen.
+          let governor = ContractWriteActor {
+              kind: TransitionActor::Governor,
+              agent_id: None,
+          };
+          for status in [TaskStatus::Draft, TaskStatus::Refining, TaskStatus::Ready] {
+              assert_eq!(
+                  check_contract_write(status, false, &governor, &["intent".to_string()]),
+                  Err(ContractWriteRefusal::ContentFields {
+                      fields: vec!["intent".to_string()]
+                  }),
+                  "{status}"
+              );
+          }
+      }
+
+      #[test]
+      fn reports_the_most_structural_refusal_when_more_than_one_holds() {
+          // Each earlier reason holds whatever the later ones say, so the order is decided rather
+          // than left to the order of the branches.
+          let agent = ContractWriteActor {
+              kind: TransitionActor::Assignee,
+              agent_id: Some("dev-1".to_string()),
+          };
+          // finished beats everything
           assert_eq!(
               check_contract_write(
-                  TaskStatus::Refining,
-                  false,
+                  TaskStatus::Accepted,
+                  true,
                   &agent,
-                  &["intent".to_string(), "exit_criteria".to_string()]
+                  &["status".to_string(), "scope".to_string()]
               ),
-              Ok(ContractWriteOutcome::Allowed)
+              Err(ContractWriteRefusal::TaskTerminal {
+                  status: TaskStatus::Accepted
+              })
+          );
+          // the governor's fields beat the lock and the freeze
+          assert_eq!(
+              check_contract_write(
+                  TaskStatus::Ready,
+                  true,
+                  &agent,
+                  &["status".to_string(), "scope".to_string()]
+              ),
+              Err(ContractWriteRefusal::LifecycleFields {
+                  fields: vec!["status".to_string()]
+              })
+          );
+          // the lock beats the freeze
+          assert_eq!(
+              check_contract_write(TaskStatus::Ready, true, &agent, &["scope".to_string()]),
+              Err(ContractWriteRefusal::ContractLocked)
           );
       }
 
@@ -2008,13 +2335,20 @@ Produces: `governor::gates::{GateResult, AssignmentRequester, DependencyState, A
               );
           }
           for field in ["status", "assignee", "reviewer", "iteration"] {
-              assert_eq!(
-                  check_contract_write(TaskStatus::Ready, false, &agent, &[field.to_string()]),
-                  Err(ContractWriteRefusal::ContractFrozen {
-                      fields: vec![field.to_string()]
-                  }),
-                  "{field}"
-              );
+              for status in [
+                  TaskStatus::Draft,
+                  TaskStatus::Refining,
+                  TaskStatus::Ready,
+                  TaskStatus::InProgress,
+              ] {
+                  assert_eq!(
+                      check_contract_write(status, false, &agent, &[field.to_string()]),
+                      Err(ContractWriteRefusal::LifecycleFields {
+                          fields: vec![field.to_string()]
+                      }),
+                      "{field} at {status}"
+                  );
+              }
           }
           assert_eq!(
               check_contract_write(TaskStatus::Ready, false, &agent, &["notes".to_string()]),
@@ -2049,15 +2383,21 @@ Produces: `governor::gates::{GateResult, AssignmentRequester, DependencyState, A
               check_contract_write(TaskStatus::Ready, true, &governor, &["status".to_string()]),
               Ok(ContractWriteOutcome::Allowed)
           );
-          assert_eq!(
-              check_contract_write(
-                  TaskStatus::Refining,
-                  true,
-                  &governor,
-                  &["intent".to_string()]
-              ),
-              Err(ContractWriteRefusal::ContractLocked)
-          );
+          // A lock is not what stops the governor writing a contract's content; nothing it does
+          // ever writes content, so the reason is the same whether or not the contract is locked.
+          for locked in [true, false] {
+              assert_eq!(
+                  check_contract_write(
+                      TaskStatus::Refining,
+                      locked,
+                      &governor,
+                      &["intent".to_string()]
+                  ),
+                  Err(ContractWriteRefusal::ContentFields {
+                      fields: vec!["intent".to_string()]
+                  })
+              );
+          }
       }
 
       #[test]
@@ -2144,6 +2484,18 @@ Produces: `governor::gates::{GateResult, AssignmentRequester, DependencyState, A
   | in_progress | verifying | assignee declares done | every exit criterion the assignee can run has a recorded result with evidence from its own run, a `human` criterion being the human's to answer and checked at acceptance instead (5.4), and the task branch has at least one commit and a clean worktree (added in 0.2); for an epic, every task under it is accepted or cancelled and at least one is accepted (5.16) |
   ```
 
+- [ ] Say in the spec who a lock stops. In `docs/SPEC.md` section 5.11, replace
+
+  ```
+  A contract with `locked: true` is owned by the human: agents may record criterion results and write their notes on it, and the governor refuses every other change with the reason `contract_locked`.
+  ```
+
+  with
+
+  ```
+  A contract with `locked: true` is owned by the human: agents may record criterion results and write their notes on it, and the governor refuses every other change by an agent with the reason `contract_locked`. A lock holds the contract's content for the human; it does not stop the lifecycle, so the governor still writes `status`, `assignee`, `reviewer`, and `iteration` when it applies a transition, or a locked task could never leave `refining`.
+  ```
+
 - [ ] Record the interface changes in `docs/plans/project-plan.md`, phase 1 step 08. Each before-text is a substring of a longer line and occurs exactly once. Replace
 
   ```
@@ -2189,7 +2541,7 @@ Produces: `governor::gates::{GateResult, AssignmentRequester, DependencyState, A
   with
 
   ```
-  `fn check_product_doc_write(epic_status: TaskStatus, escalation_reason: Option<EscalationReason>, actor_role: Role) -> GateResult` (Product Manager only, and the user's approval given: an epic waiting for it sits in `escalated` with reason `approval`, so the reason is what tells it from one escalated afterwards; a cancelled epic is refused)
+  `fn check_product_doc_write(epic_status: TaskStatus, user_approved: bool, actor_role: Role) -> GateResult` (Product Manager only, and the user's approval passed in rather than read from the status: an epic waiting for approval, one that failed the Definition of Ready three times, and one whose risk needs the human all sit in `escalated`, and only the first is about approval; a cancelled epic and one still being written are refused too)
   ```
 
   replace
@@ -2204,6 +2556,18 @@ Produces: `governor::gates::{GateResult, AssignmentRequester, DependencyState, A
   `fn check_child_creation(parent: &ParentEpic, actor: &ContractWriteActor) -> GateResult` with `struct ParentEpic { status: TaskStatus, assignee_id: String }` (changed 2026-09-16 by the step 08 plan: step 02's `ParentState` carries the paths and budget the Definition of Ready needs and not the assignee this question turns on; the assignee is recognised by its agent id whatever actor kind names it)
   ```
 
+  replace
+
+  ```
+  (notes and criterion results are always allowed; a human may change anything, and a human change to a frozen contract returns `ReturnsToRefining`)
+  ```
+
+  with
+
+  ```
+  (the notes are always writable, and criterion results are events rather than contract fields; the four lifecycle fields are the governor's at every status; the human changes anything on a contract that is not finished, and a human change to a frozen one returns `ReturnsToRefining`; a task that is accepted or cancelled takes no write but a note)
+  ```
+
   and replace
 
   ```
@@ -2213,7 +2577,7 @@ Produces: `governor::gates::{GateResult, AssignmentRequester, DependencyState, A
   with
 
   ```
-  `enum ContractWriteRefusal { ContractLocked, ContractFrozen { fields: Vec<String> }, TaskTerminal { status: TaskStatus } }`; `FIELDS_AFTER_FREEZE: [&str; 5]` and `FIELDS_ALWAYS_WRITABLE: [&str; 1]` (added 2026-09-16 by the step 08 plan and its readiness review: the fields that still change after the freeze are the governor's to write and an agent writes only the notes, a locked contract may still be moved by the governor, and a terminal task takes no write but a note)
+  `enum ContractWriteRefusal { ContractLocked, ContractFrozen { fields: Vec<String> }, TaskTerminal { status: TaskStatus }, LifecycleFields { fields: Vec<String> }, ContentFields { fields: Vec<String> } }`; `FIELDS_AFTER_FREEZE: [&str; 5]`, `FIELDS_THE_GOVERNOR_WRITES: [&str; 4]` and `FIELDS_ALWAYS_WRITABLE: [&str; 1]` (added 2026-09-16 by the step 08 plan and its two readiness reviews: the four lifecycle fields are the governor's at every status and no agent writes them, a contract's content is never the governor's, a locked contract may still be moved by the governor, a terminal task takes no write but a note, and the reasons are reported most structural first)
   ```
 
 - [ ] Format, run the tests and the full check; confirm green:
@@ -2222,10 +2586,10 @@ Produces: `governor::gates::{GateResult, AssignmentRequester, DependencyState, A
   cargo fmt --all
   cargo test --package farik-core governor::gates
   # expected, among the output:
-  # test result: ok. 31 passed; 0 failed; 0 ignored; 0 measured; 144 filtered out; finished in ...
+  # test result: ok. 35 passed; 0 failed; 0 ignored; 0 measured; 144 filtered out; finished in ...
   cargo xtask check
   # expected, among the output, then exit code 0:
-  # test result: ok. 175 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in ...   (farik-core)
+  # test result: ok. 179 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in ...   (farik-core)
   # test result: ok. 23 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in ...   (xtask)
   # xtask check: ok
   ```
@@ -2237,7 +2601,7 @@ Produces: `governor::gates::{GateResult, AssignmentRequester, DependencyState, A
 ```
 cargo xtask check
 # expected, among the output, then exit code 0:
-# test result: ok. 175 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in ...   (farik-core)
+# test result: ok. 179 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in ...   (farik-core)
 # test result: ok. 23 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in ...   (xtask)
 # xtask check: ok
 ```
