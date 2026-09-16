@@ -1,6 +1,6 @@
 # Phase 0, step 03: Contract validation
 
-Status: in progress
+Status: done
 Branch: `claude/phase-0-implementation-izm38y` (the harness-assigned phase branch, left as assigned per `docs/standards/code.md`; steps do not get their own)
 Spec: `docs/SPEC.md` section 3 (Contract), section 5.3 (the structural checks build on these types in phase 1), section 5.11 (`locked`), section 5.13 (`references`), section 5.16 (`kind`, `parent`), F4 (validation against the JSON schema); `docs/standards/code.md`, "Schema validation" and "Wire and file formats"
 Depends on: step 01 of this phase (committed as 61e3a28, f1163b8, c6f4c9c), step 02 of this phase (committed as c5e8ab9)

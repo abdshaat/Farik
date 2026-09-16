@@ -1,6 +1,6 @@
 # Phase 0, step 01: Workspace scaffold
 
-Status: in progress
+Status: done
 Branch: `claude/phase-0-implementation-izm38y` (the harness-assigned phase branch, left as assigned per `docs/standards/code.md`; steps do not get their own)
 Spec: `docs/SPEC.md` section 8.1 (a Rust backend in one Cargo workspace; `farik-core` has no I/O), section 9 (Apache 2.0); ADR 0005 (toolchain); `docs/standards/code.md`, "Toolchain"
 Depends on: none

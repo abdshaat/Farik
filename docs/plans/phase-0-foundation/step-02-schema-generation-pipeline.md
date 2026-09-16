@@ -1,6 +1,6 @@
 # Phase 0, step 02: Schema generation pipeline
 
-Status: in progress
+Status: done
 Branch: `claude/phase-0-implementation-izm38y` (the harness-assigned phase branch, left as assigned per `docs/standards/code.md`; steps do not get their own)
 Spec: `docs/SPEC.md` section 3 (Contract), F4 (validation against the JSON schema); `docs/standards/code.md`, "Schema validation"; ADR 0005
 Depends on: step 01 of this phase (committed as 61e3a28, f1163b8, c6f4c9c)
