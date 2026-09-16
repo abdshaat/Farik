@@ -51,6 +51,9 @@ All in `docs/plans/project-plan.md`, phase 1, restated here only where this step
 - A work-in-progress limit of zero refuses every assignment, which is how a team pauses an agent without retiring it; nothing here treats zero as unset, and the refusal says so in its own words rather than counting to zero.
 - An epic's `reviewer_role` field is not what decides its reviewer, and the Definition of Ready does not yet say so: `readiness::reviewer_available` special-cases only `Role::Human` for an epic, so an epic declaring `reviewer_role: architect` with an active Architect passes the Definition of Ready, gets the human's approval, reaches `ready`, and is then refused here, which now costs a human edit of a frozen contract and a second approval. This gate follows 5.1 and 5.16 item 4 and is right; the loose rule is step 02's, and `default_reviewer_role` and `REVIEWER_ROLE_FOR` only arrive in phase 3 step 07. Recorded rather than fixed here, because tightening the Definition of Ready is step 02's file and this step does not touch it: whoever tightens it knows where to look. Found by the seventh readiness review.
 - The `Triaged` gate needs no function: it is one boolean the runtime records (`request.triaged`, 5.16), and step 09 takes it as `TransitionContext::triaged`.
+- Reviewed after it landed by a fresh session that did not write it (`fa02450`). No critical finding: stage A was clean on every check, and the reviewer could not get a gate to contradict the spec on a case the schema can produce. What it found were four seams where this module meets the ones around it, a hard rule 8 shortfall, and three surviving mutants. All taken. The work-in-progress count, as this step defined it and as 5.2 and 6.2 had just been amended to say, could be walked through `rejected`: an agent at a limit of one whose only task is rejected counted zero, took a second, and the governor then returned the first to `in_progress`. The count is every task the agent holds that is not accepted or cancelled, in the doc comment and in both spec sentences. Step 07's Definition of Done compared a recorded criterion id untrimmed where this gate trims it, so a padded id opened `in_progress -> verifying` and then blocked acceptance for good; `done.rs` trims in all three of its comparisons now. `check_children_done` accepted two reports about one task where the assignment gate refuses two about one dependency, so an epic could verify on a report contradicting itself. The Definition of Ready compares a budget with `>`, which a figure that cannot be compared passes, where `budget` and this gate both count it as exhausted; `readiness.rs` now reads spec 5.5 the same way at all three of its ceilings. Also taken: an epic the human reviews needed a reviewer agent id and the refusal for a missing one named both agents at once, so the two are separate reasons now and the human is not asked for an id; the duplicate-report rule reached reports about tasks the contract never named; `listed` called one value a plural when the value contained a comma, which a caller's criterion id can; the write gate re-implemented `is_terminal`; and three mutants survived, two of them promises the Decisions make and one an equivalent rewrite, each now pinned by an assertion. The reviewer also recorded two edges it did not ask this step to close, which the two bullets below now carry.
+- The epic trap the Definition of Ready leaves open is in the assignee role as well as the reviewer role: `readiness::reviewer_available` special-cases only `Role::Human`, and nothing checks an epic's `assignee_role` at all, so an epic declaring either of them freely passes the Definition of Ready, costs the human an approval (5.16 item 2), and is then refused at assignment. Whoever tightens one tightens both, in step 02's file, and phase 3 step 07's `default_reviewer_role` is where the fields stop being free. Recorded by the step 08 review.
+- The gate cannot keep the Scrum Master to the tasks of the epic it is breaking down: it is shown the contract's `kind` and not its `parent`, so it allows a Scrum Master to write any unfrozen task's content, including a standalone task from triage, which 5.16 gives to the Product Manager and 6.2 keeps out of the Scrum Master's tools. Closing it belongs to whoever grants the tool (phase 3), not here. Recorded by the step 08 review.
 - Revised seven times on 2026-09-16. The seventh readiness review confirmed the plan **ready** under all three rules: it re-executed every block (no drift, every count exact, both compiler outputs verbatim), re-introduced the sixth pass's seven mutants and named the test that kills each, compiled a probe module calling all nine gates from the shapes the project plan records, and ran 78 mutants of its own. Its findings, all taken here, are test-completeness against promises this plan makes rather than rules the gate gets wrong: the every-reason-at-once promise was still unpinned for `check_criteria_recorded` and `check_child_creation`, which could each have reported their first reason and stayed green (the sixth pass's list named five gates; there were six); the trimmed-id promise was untested for the actor's own agent id, so an epic's assignee named with a stray space would have been refused by its own epic; `is_written`'s trim was untested for what a blocker needs and for a rejection's reasons, both of which took an empty string where the description took a space; an `artifact` criterion was not pinned as the assignee's to run, so the exemption could have been widened past the two 5.3 gives away; and `distinct` in the duplicate-dependency message was untested, because no test reported one dependency three times. Two more: hard rule 8 for `check_blocker_resolved`, whose written resolution 5.2's `blocked -> in_progress` cell never asked for, now an eighteenth replacement; and `Kind` named in the project plan without its generated spelling recorded anywhere. All six code fixes fold into existing tests, so the counts are unchanged, and each mutant was re-introduced and is now killed by a named test. The pass also recorded the epic `reviewer_role` trap the Definition of Ready leaves open, which is the bullet above.
 - Revised six times on 2026-09-16, after six readiness reviews refused it. The sixth found no rule the gate answers wrongly, having walked the field partition against the schema, probed nineteen edge cases and killed 74 of 81 mutants. Its blocking finding was the fifth's defect in another clause of the same project-plan line: the entry said the reviewer must hold the contract's reviewer role, which is false of an epic, whose reviewer the gate derives (the Product Manager when the team has an active Scrum Master and the human when it has not), so a step 09 author building an epic's assignment from that line would meet a refusal the record does not predict. A tenth replacement records it. The five surviving mutants were all one promise: the Decisions say every gate reports every reason at once, and only `check_assignment` had a test for it, so four gates could have returned the first reason and stayed green; two more were the trimmed-id promise on the two ids the earlier passes' tests did not cover. Six assertions close those seven mutants; the seventh pass found the promise itself still unpinned for two gates, which is its finding 1. The pass also found that the work-in-progress count reinterprets spec 6.2 rather than changing it, which hard rule 8 does not allow, so 5.2's gate cell now says what the limit counts and 6.2's default says "unfinished" — and, with it, the epic's assignee and reviewer that the cell never carried; that the amended 5.11 sentence claimed `contract_locked` for fields refused by their owner instead; and, in the messages, "a architect", now "role architect" as `readiness.rs` already words it.
 - Revised five times on 2026-09-16, after five readiness reviews refused it. The fifth confirmed the fourth rework's substance and found no new hole in the gate; what it left was a cleanup list, one line of it load-bearing for step 09: the project plan's record of `check_contract_write` still had the four-argument signature, which is the interface step 09's plan is written from, so a thirteenth exact-text replacement now carries the `kind`. The rest: the doc comment on the gate was the third pass's text and contradicted the function in five ways, `FIELDS_AFTER_FREEZE` was documented as four fields where it holds six, an inner return in the governor's arm did nothing, a child the runtime did not name was printed as an empty id, three steps of the refusal order were untested, and the counts of the reasons, the constants and the lifecycle fields were each one or two out of date. Its test findings are in: the epic rule is about the Scrum Master rather than about epics being unwritable, every field of the schema is now asserted to have exactly one owner, and the zero limit, the governor against an epic's assignee and the unnamed child are pinned.
@@ -62,7 +65,7 @@ All in `docs/plans/project-plan.md`, phase 1, restated here only where this step
 
 ## Design
 
-One task: the `governor::gates` module with `GateResult`, the nine checks, the values they take, the seven field constants, and fifty-one tests. It is the largest task in the phase; it is one task because its nine answers are one question, which of the lifecycle's doors this actor may open, and splitting them would give a reviewer several partial views of the same table.
+One task: the `governor::gates` module with `GateResult`, the nine checks, the values they take, the seven field constants, and fifty-two tests, the last of them added by the step review. It is the largest task in the phase; it is one task because its nine answers are one question, which of the lifecycle's doors this actor may open, and splitting them would give a reviewer several partial views of the same table.
 
 Out of scope: the table, the actor check, and the four counting gates, which are step 09's to compose from step 01's and step 06's work; the Definition of Ready and the Definition of Done, which are gates of their own from steps 02 and 07; and everything the runtime must observe to fill these values, which is phase 3's.
 
@@ -80,9 +83,12 @@ Touches `crates/core` only: one new child of `governor`. Consumes `contract::{Ro
 
 ```
 crates/core/src/governor.rs                         modifies: declares gates
-crates/core/src/governor/gates.rs                   creates: GateResult, the nine checks and their values, the seven field constants, fifty-one tests
+crates/core/src/governor/gates.rs                   creates: GateResult, the nine checks and their values, the seven field constants, fifty-two tests
 docs/SPEC.md                                        modifies: section 5.2's criteria-recorded gate names the criteria the assignee cannot run, its assignment gate names an epic's assignee and reviewer and what the work-in-progress limit counts, and its blocked-to-in-progress gate asks for a written resolution; section 5.3 says what a review criterion is; section 5.11 adds the sprint to the frozen list and says a lock does not stop the lifecycle; section 5.16 item 1 refuses a product document by the approval of the contract the epic has now rather than by the status; section 6.2's default limit is one unfinished task
 docs/plans/project-plan.md                          modifies: phase 1 step 08's interface records the changes this plan makes to it
+crates/core/src/governor/done.rs                    modifies (step review fix): trims a recorded criterion id, as this step's gate does
+crates/core/src/governor/readiness.rs               modifies (step review fix): a budget that cannot be compared exceeds every ceiling, as spec 5.5 says
+crates/core/src/text.rs                             modifies (step review fix): `listed` decides the plural by how many values there are
 docs/plans/phase-1-harness/step-08-gate-predicates.md   modifies: checkboxes ticked
 ```
 
@@ -274,6 +280,29 @@ Produces: `governor::gates::{GateResult, AssignmentRequester, DependencyState, A
       }
 
       #[test]
+      fn asks_for_no_reviewer_agent_when_the_human_reviews_the_epic() {
+          // An epic broken down by the Product Manager is reviewed by the human (5.16 item 4), and
+          // the human is not an agent: there is no id for the runtime to pass and nothing for the
+          // reviewer to be the assignee of.
+          let mut epic = a_contract();
+          epic.kind = Kind::Epic;
+          let mut input = an_assignment();
+          input.requested_by = AssignmentRequester::ProductManager;
+          input.has_active_scrum_master = false;
+          input.assignee_id = "pm-1".to_string();
+          input.assignee_role = Role::ProductManager;
+          input.reviewer_id = String::new();
+          input.reviewer_role = Role::Human;
+          assert_eq!(check_assignment(&epic, &input), Ok(()));
+          // The assignee is still named, and a task whose reviewer is an agent still needs its id.
+          input.assignee_id = "  ".to_string();
+          assert_eq!(
+              reasons(check_assignment(&epic, &input)),
+              ["the runtime named no agent for the assignee, and a task is assigned to one"]
+          );
+      }
+
+      #[test]
       fn lets_the_scrum_master_assign_only_when_the_team_has_one() {
           // Spec 5.2's row gives the trigger to the Scrum Master, or to the Product Manager when
           // the team has no active Scrum Master. There is no row for a Scrum Master without one.
@@ -287,15 +316,29 @@ Produces: `governor::gates::{GateResult, AssignmentRequester, DependencyState, A
 
       #[test]
       fn refuses_an_assignment_the_runtime_did_not_name_two_agents_for() {
-          for (assignee, reviewer) in [("", "arch-1"), ("dev-1", " "), ("", "")] {
+          // Each blank is its own reason, so that a caller with one of the two missing is not told
+          // to look at both.
+          let missing_assignee =
+              "the runtime named no agent for the assignee, and a task is assigned to one"
+                  .to_string();
+          let missing_reviewer =
+              "the runtime named no agent for the reviewer, and a task is reviewed by one"
+                  .to_string();
+          for (assignee, reviewer, expected) in [
+              ("", "arch-1", vec![missing_assignee.clone()]),
+              ("dev-1", " ", vec![missing_reviewer.clone()]),
+              (
+                  "",
+                  "",
+                  vec![missing_assignee.clone(), missing_reviewer.clone()],
+              ),
+          ] {
               let mut input = an_assignment();
               input.assignee_id = assignee.to_string();
               input.reviewer_id = reviewer.to_string();
-              assert!(
-                  reasons(check_assignment(&a_contract(), &input)).contains(
-                      &"the runtime named no agent for the assignee or the reviewer, and a task is assigned to one of each"
-                          .to_string()
-                  ),
+              assert_eq!(
+                  reasons(check_assignment(&a_contract(), &input)),
+                  expected,
                   "{assignee} {reviewer}"
               );
           }
@@ -506,6 +549,22 @@ Produces: `governor::gates::{GateResult, AssignmentRequester, DependencyState, A
               reasons(check_assignment(&contract, &input)),
               ["the runtime reported FRK-2 twice, and a dependency has one state"]
           );
+          // Only the dependencies this contract names are its business: two reports about a task it
+          // does not depend on say nothing about whether it may be assigned.
+          let mut unrelated = an_assignment();
+          unrelated.dependencies = vec![
+              DependencyState {
+                  task_id: "FRK-99".to_string(),
+                  status: TaskStatus::Accepted,
+                  integrated: true,
+              },
+              DependencyState {
+                  task_id: "FRK-99".to_string(),
+                  status: TaskStatus::Draft,
+                  integrated: false,
+              },
+          ];
+          assert_eq!(check_assignment(&a_contract(), &unrelated), Ok(()));
       }
 
       #[test]
@@ -532,7 +591,20 @@ Produces: `governor::gates::{GateResult, AssignmentRequester, DependencyState, A
           input.reviewer_id = "dev-1".to_string();
           input.assignee_open_tasks = 9;
           input.remaining_sprint_budget_usd = 0.0;
-          assert_eq!(reasons(check_assignment(&a_contract(), &input)).len(), 5);
+          let contract = a_depending_contract();
+          // The whole list, in the order the rules are written: counting the reasons would leave
+          // the order free, and an agent reads them in the order it is given them.
+          assert_eq!(
+              reasons(check_assignment(&contract, &input)),
+              [
+                  "the Product Manager assigns only when the team has no active Scrum Master",
+                  "the assignee has role marketing_specialist and this contract is assigned to role software_developer",
+                  "dev-1 cannot review its own work; name another agent as reviewer",
+                  "dev-1 already holds 9 unfinished tasks and the limit is 2",
+                  "the budget of 5 USD does not fit the 0 USD left in the sprint",
+                  "the runtime reported nothing about FRK-2, which this task depends on"
+              ]
+          );
       }
 
       #[test]
@@ -638,6 +710,17 @@ Produces: `governor::gates::{GateResult, AssignmentRequester, DependencyState, A
           };
           assert_eq!(
               reasons(check_criteria_recorded(&runnable, &[], &work)),
+              ["the assignee recorded no run with evidence for criterion C1"]
+          );
+          // A verification whose `method` is not a string names no method, so it is not one of the
+          // two the assignee is excused: an unreadable criterion stays its to run.
+          let mut unreadable = a_contract();
+          unreadable.exit_criteria[0].verification = VerificationWire::Variant3 {
+              method: json!(7),
+              rubric: vec!["Does the form say why a password was refused?".to_string()],
+          };
+          assert_eq!(
+              reasons(check_criteria_recorded(&unreadable, &[], &work)),
               ["the assignee recorded no run with evidence for criterion C1"]
           );
           let mut produced = a_contract();
@@ -749,6 +832,22 @@ Produces: `governor::gates::{GateResult, AssignmentRequester, DependencyState, A
               ["no task under this epic was accepted, so there is nothing to verify"]
           );
           assert_eq!(reasons(check_children_done(&[])).len(), 1);
+          // Two reports about one task mean the runtime is confused, as they do for a dependency:
+          // an epic must not verify on a report that contradicts itself.
+          let twice = [
+              ChildState {
+                  task_id: "FRK-2".to_string(),
+                  status: TaskStatus::Accepted,
+              },
+              ChildState {
+                  task_id: " FRK-2 ".to_string(),
+                  status: TaskStatus::Cancelled,
+              },
+          ];
+          assert_eq!(
+              reasons(check_children_done(&twice)),
+              ["the runtime reported FRK-2 twice, and a task under this epic has one state"]
+          );
           let unnamed = [ChildState {
               task_id: "  ".to_string(),
               status: TaskStatus::Draft,
@@ -1032,6 +1131,16 @@ Produces: `governor::gates::{GateResult, AssignmentRequester, DependencyState, A
           assert_eq!(
               reasons(check_rejection_reasons(&a_contract(), Some(&two_unknown))),
               ["this contract has no criteria C8, C9"]
+          );
+          // One id that happens to contain a comma is still one id: the plural is decided by how
+          // many values there are, not by what is inside them.
+          let comma = Rejection {
+              failed_criterion_ids: vec!["C8, C9".to_string()],
+              reasons: "The form accepts an empty password.".to_string(),
+          };
+          assert_eq!(
+              reasons(check_rejection_reasons(&a_contract(), Some(&comma))),
+              ["this contract has no criterion C8, C9"]
           );
       }
 
@@ -1532,6 +1641,19 @@ Produces: `governor::gates::{GateResult, AssignmentRequester, DependencyState, A
                   status: TaskStatus::Accepted
               })
           );
+          // a finished task beats the store's fields
+          assert_eq!(
+              check_contract_write(
+                  Kind::Task,
+                  TaskStatus::Accepted,
+                  false,
+                  &agent,
+                  &["id".to_string()]
+              ),
+              Err(ContractWriteRefusal::TaskTerminal {
+                  status: TaskStatus::Accepted
+              })
+          );
           // a name nobody knows beats a finished task
           assert_eq!(
               check_contract_write(
@@ -1923,6 +2045,7 @@ Produces: `governor::gates::{GateResult, AssignmentRequester, DependencyState, A
   use crate::contract::{Role, TaskContract, TaskStatus, wire_method};
   use crate::generated::task_contract::FarikTaskContractKind as Kind;
   use crate::governor::done::{CriterionResult, RunBy};
+  use crate::governor::task_status::is_terminal;
   use crate::governor::transition_table::TransitionActor;
   use crate::text::{distinct, listed};
 
@@ -1986,9 +2109,12 @@ Produces: `governor::gates::{GateResult, AssignmentRequester, DependencyState, A
       pub reviewer_id: String,
       /// The proposed reviewer's role.
       pub reviewer_role: Role,
-      /// How many tasks the proposed assignee already holds and has not finished: assigned, in
-      /// progress, or blocked. Counting only the started ones would let an agent be assigned any
-      /// number of tasks and start none, because `assigned -> in_progress` has no gate.
+      /// How many tasks the proposed assignee already holds and has not finished: every task of its
+      /// that is neither `accepted` nor `cancelled`. Counting only the started ones would let an
+      /// agent be assigned any number of tasks and start none, because `assigned -> in_progress` has
+      /// no gate; counting only the assigned, in-progress and blocked ones would let the limit be
+      /// walked through `verifying` and `rejected`, and `rejected -> in_progress` hands a task
+      /// straight back to the same agent.
       pub assignee_open_tasks: u32,
       /// The team's limit on work in progress per agent.
       pub wip_limit: u32,
@@ -2046,16 +2172,26 @@ Produces: `governor::gates::{GateResult, AssignmentRequester, DependencyState, A
               input.reviewer_role
           ));
       }
-      if input.assignee_id.trim().is_empty() || input.reviewer_id.trim().is_empty() {
+      if input.assignee_id.trim().is_empty() {
           reasons.push(
-              "the runtime named no agent for the assignee or the reviewer, and a task is assigned to one of each"
+              "the runtime named no agent for the assignee, and a task is assigned to one"
                   .to_string(),
           );
-      } else if input.reviewer_id.trim() == input.assignee_id.trim() {
-          reasons.push(format!(
-              "{} cannot review its own work; name another agent as reviewer",
-              input.assignee_id.trim()
-          ));
+      }
+      // An epic the Product Manager broke down is reviewed by the human (5.16 item 4), and the human
+      // is not an agent: there is no id to name, and nothing for the reviewer to be the assignee of.
+      if expected_reviewer != Role::Human {
+          if input.reviewer_id.trim().is_empty() {
+              reasons.push(
+                  "the runtime named no agent for the reviewer, and a task is reviewed by one"
+                      .to_string(),
+              );
+          } else if input.reviewer_id.trim() == input.assignee_id.trim() {
+              reasons.push(format!(
+                  "{} cannot review its own work; name another agent as reviewer",
+                  input.assignee_id.trim()
+              ));
+          }
       }
       if input.assignee_open_tasks >= input.wip_limit {
           reasons.push(if input.wip_limit == 0 {
@@ -2096,10 +2232,16 @@ Produces: `governor::gates::{GateResult, AssignmentRequester, DependencyState, A
       let mut reported: Vec<&str> = Vec::new();
       let mut twice: Vec<String> = Vec::new();
       for state in &input.dependencies {
-          if reported.contains(&state.task_id.trim()) {
-              twice.push(state.task_id.trim().to_string());
+          let id = state.task_id.trim();
+          // Only the dependencies this contract names are its business: what the runtime says about
+          // anything else decides nothing here, contradictory or not.
+          if !named.iter().any(|dependency| dependency == id) {
+              continue;
+          }
+          if reported.contains(&id) {
+              twice.push(id.to_string());
           } else {
-              reported.push(state.task_id.trim());
+              reported.push(id);
           }
       }
       if !twice.is_empty() {
@@ -2208,10 +2350,29 @@ Produces: `governor::gates::{GateResult, AssignmentRequester, DependencyState, A
   ///
   /// Every rule the epic fails, each naming the tasks that are not done.
   pub fn check_children_done(children: &[ChildState]) -> GateResult {
+      let mut reported: Vec<&str> = Vec::new();
+      let mut twice: Vec<String> = Vec::new();
+      for child in children {
+          let named = child.task_id.trim();
+          if named.is_empty() {
+              continue;
+          }
+          if reported.contains(&named) {
+              twice.push(named.to_string());
+          } else {
+              reported.push(named);
+          }
+      }
+      if !twice.is_empty() {
+          return Err(vec![format!(
+              "the runtime reported {} twice, and a task under this epic has one state",
+              distinct(&twice)
+          )]);
+      }
       let mut reasons = Vec::new();
       let unfinished: Vec<String> = children
           .iter()
-          .filter(|child| !matches!(child.status, TaskStatus::Accepted | TaskStatus::Cancelled))
+          .filter(|child| !is_terminal(child.status))
           .map(|child| {
               let named = child.task_id.trim();
               if named.is_empty() {
@@ -2578,6 +2739,10 @@ Produces: `governor::gates::{GateResult, AssignmentRequester, DependencyState, A
   /// is what the contract is, an epic or a task, and `status` is the task's status now, before
   /// whatever the write is part of.
   ///
+  /// This gate is about changing a contract that exists. Creating one is `check_child_creation`'s
+  /// question: a create names `kind` and `parent`, which are fixed at creation and which this gate
+  /// refuses, so a caller that routed a create through here would make every creation impossible.
+  ///
   /// Every one of the schema's fields is written into one of six sets, and a name in none of them is
   /// refused rather than guessed at, so that a field added to the schema tomorrow waits until
   /// somebody says who writes it:
@@ -2639,7 +2804,7 @@ Produces: `governor::gates::{GateResult, AssignmentRequester, DependencyState, A
           return Err(ContractWriteRefusal::UnknownFields { fields: unknown });
       }
       let beyond_notes = beyond(changed_fields, &FIELDS_ALWAYS_WRITABLE);
-      if matches!(status, TaskStatus::Accepted | TaskStatus::Cancelled) {
+      if is_terminal(status) {
           if beyond_notes.is_empty() {
               return Ok(ContractWriteOutcome::Allowed);
           }
@@ -2855,6 +3020,29 @@ Produces: `governor::gates::{GateResult, AssignmentRequester, DependencyState, A
       }
 
       #[test]
+      fn asks_for_no_reviewer_agent_when_the_human_reviews_the_epic() {
+          // An epic broken down by the Product Manager is reviewed by the human (5.16 item 4), and
+          // the human is not an agent: there is no id for the runtime to pass and nothing for the
+          // reviewer to be the assignee of.
+          let mut epic = a_contract();
+          epic.kind = Kind::Epic;
+          let mut input = an_assignment();
+          input.requested_by = AssignmentRequester::ProductManager;
+          input.has_active_scrum_master = false;
+          input.assignee_id = "pm-1".to_string();
+          input.assignee_role = Role::ProductManager;
+          input.reviewer_id = String::new();
+          input.reviewer_role = Role::Human;
+          assert_eq!(check_assignment(&epic, &input), Ok(()));
+          // The assignee is still named, and a task whose reviewer is an agent still needs its id.
+          input.assignee_id = "  ".to_string();
+          assert_eq!(
+              reasons(check_assignment(&epic, &input)),
+              ["the runtime named no agent for the assignee, and a task is assigned to one"]
+          );
+      }
+
+      #[test]
       fn lets_the_scrum_master_assign_only_when_the_team_has_one() {
           // Spec 5.2's row gives the trigger to the Scrum Master, or to the Product Manager when
           // the team has no active Scrum Master. There is no row for a Scrum Master without one.
@@ -2868,15 +3056,29 @@ Produces: `governor::gates::{GateResult, AssignmentRequester, DependencyState, A
 
       #[test]
       fn refuses_an_assignment_the_runtime_did_not_name_two_agents_for() {
-          for (assignee, reviewer) in [("", "arch-1"), ("dev-1", " "), ("", "")] {
+          // Each blank is its own reason, so that a caller with one of the two missing is not told
+          // to look at both.
+          let missing_assignee =
+              "the runtime named no agent for the assignee, and a task is assigned to one"
+                  .to_string();
+          let missing_reviewer =
+              "the runtime named no agent for the reviewer, and a task is reviewed by one"
+                  .to_string();
+          for (assignee, reviewer, expected) in [
+              ("", "arch-1", vec![missing_assignee.clone()]),
+              ("dev-1", " ", vec![missing_reviewer.clone()]),
+              (
+                  "",
+                  "",
+                  vec![missing_assignee.clone(), missing_reviewer.clone()],
+              ),
+          ] {
               let mut input = an_assignment();
               input.assignee_id = assignee.to_string();
               input.reviewer_id = reviewer.to_string();
-              assert!(
-                  reasons(check_assignment(&a_contract(), &input)).contains(
-                      &"the runtime named no agent for the assignee or the reviewer, and a task is assigned to one of each"
-                          .to_string()
-                  ),
+              assert_eq!(
+                  reasons(check_assignment(&a_contract(), &input)),
+                  expected,
                   "{assignee} {reviewer}"
               );
           }
@@ -3087,6 +3289,22 @@ Produces: `governor::gates::{GateResult, AssignmentRequester, DependencyState, A
               reasons(check_assignment(&contract, &input)),
               ["the runtime reported FRK-2 twice, and a dependency has one state"]
           );
+          // Only the dependencies this contract names are its business: two reports about a task it
+          // does not depend on say nothing about whether it may be assigned.
+          let mut unrelated = an_assignment();
+          unrelated.dependencies = vec![
+              DependencyState {
+                  task_id: "FRK-99".to_string(),
+                  status: TaskStatus::Accepted,
+                  integrated: true,
+              },
+              DependencyState {
+                  task_id: "FRK-99".to_string(),
+                  status: TaskStatus::Draft,
+                  integrated: false,
+              },
+          ];
+          assert_eq!(check_assignment(&a_contract(), &unrelated), Ok(()));
       }
 
       #[test]
@@ -3113,7 +3331,20 @@ Produces: `governor::gates::{GateResult, AssignmentRequester, DependencyState, A
           input.reviewer_id = "dev-1".to_string();
           input.assignee_open_tasks = 9;
           input.remaining_sprint_budget_usd = 0.0;
-          assert_eq!(reasons(check_assignment(&a_contract(), &input)).len(), 5);
+          let contract = a_depending_contract();
+          // The whole list, in the order the rules are written: counting the reasons would leave
+          // the order free, and an agent reads them in the order it is given them.
+          assert_eq!(
+              reasons(check_assignment(&contract, &input)),
+              [
+                  "the Product Manager assigns only when the team has no active Scrum Master",
+                  "the assignee has role marketing_specialist and this contract is assigned to role software_developer",
+                  "dev-1 cannot review its own work; name another agent as reviewer",
+                  "dev-1 already holds 9 unfinished tasks and the limit is 2",
+                  "the budget of 5 USD does not fit the 0 USD left in the sprint",
+                  "the runtime reported nothing about FRK-2, which this task depends on"
+              ]
+          );
       }
 
       #[test]
@@ -3219,6 +3450,17 @@ Produces: `governor::gates::{GateResult, AssignmentRequester, DependencyState, A
           };
           assert_eq!(
               reasons(check_criteria_recorded(&runnable, &[], &work)),
+              ["the assignee recorded no run with evidence for criterion C1"]
+          );
+          // A verification whose `method` is not a string names no method, so it is not one of the
+          // two the assignee is excused: an unreadable criterion stays its to run.
+          let mut unreadable = a_contract();
+          unreadable.exit_criteria[0].verification = VerificationWire::Variant3 {
+              method: json!(7),
+              rubric: vec!["Does the form say why a password was refused?".to_string()],
+          };
+          assert_eq!(
+              reasons(check_criteria_recorded(&unreadable, &[], &work)),
               ["the assignee recorded no run with evidence for criterion C1"]
           );
           let mut produced = a_contract();
@@ -3330,6 +3572,22 @@ Produces: `governor::gates::{GateResult, AssignmentRequester, DependencyState, A
               ["no task under this epic was accepted, so there is nothing to verify"]
           );
           assert_eq!(reasons(check_children_done(&[])).len(), 1);
+          // Two reports about one task mean the runtime is confused, as they do for a dependency:
+          // an epic must not verify on a report that contradicts itself.
+          let twice = [
+              ChildState {
+                  task_id: "FRK-2".to_string(),
+                  status: TaskStatus::Accepted,
+              },
+              ChildState {
+                  task_id: " FRK-2 ".to_string(),
+                  status: TaskStatus::Cancelled,
+              },
+          ];
+          assert_eq!(
+              reasons(check_children_done(&twice)),
+              ["the runtime reported FRK-2 twice, and a task under this epic has one state"]
+          );
           let unnamed = [ChildState {
               task_id: "  ".to_string(),
               status: TaskStatus::Draft,
@@ -3613,6 +3871,16 @@ Produces: `governor::gates::{GateResult, AssignmentRequester, DependencyState, A
           assert_eq!(
               reasons(check_rejection_reasons(&a_contract(), Some(&two_unknown))),
               ["this contract has no criteria C8, C9"]
+          );
+          // One id that happens to contain a comma is still one id: the plural is decided by how
+          // many values there are, not by what is inside them.
+          let comma = Rejection {
+              failed_criterion_ids: vec!["C8, C9".to_string()],
+              reasons: "The form accepts an empty password.".to_string(),
+          };
+          assert_eq!(
+              reasons(check_rejection_reasons(&a_contract(), Some(&comma))),
+              ["this contract has no criterion C8, C9"]
           );
       }
 
@@ -4108,6 +4376,19 @@ Produces: `governor::gates::{GateResult, AssignmentRequester, DependencyState, A
                   true,
                   &agent,
                   &["status".to_string(), "scope".to_string()]
+              ),
+              Err(ContractWriteRefusal::TaskTerminal {
+                  status: TaskStatus::Accepted
+              })
+          );
+          // a finished task beats the store's fields
+          assert_eq!(
+              check_contract_write(
+                  Kind::Task,
+                  TaskStatus::Accepted,
+                  false,
+                  &agent,
+                  &["id".to_string()]
               ),
               Err(ContractWriteRefusal::TaskTerminal {
                   status: TaskStatus::Accepted
@@ -4703,10 +4984,10 @@ Produces: `governor::gates::{GateResult, AssignmentRequester, DependencyState, A
   cargo fmt --all
   cargo test --package farik-core governor::gates
   # expected, among the output:
-  # test result: ok. 51 passed; 0 failed; 0 ignored; 0 measured; 144 filtered out; finished in ...
+  # test result: ok. 52 passed; 0 failed; 0 ignored; 0 measured; 146 filtered out; finished in ...   (after the step review fixes; 51 and 144 when the step landed)
   cargo xtask check
   # expected, among the output, then exit code 0:
-  # test result: ok. 195 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in ...   (farik-core)
+  # test result: ok. 198 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in ...   (farik-core; 195 when the step landed, before the review fixes)
   # test result: ok. 23 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in ...   (xtask)
   # xtask check: ok
   ```
@@ -4718,7 +4999,7 @@ Produces: `governor::gates::{GateResult, AssignmentRequester, DependencyState, A
 ```
 cargo xtask check
 # expected, among the output, then exit code 0:
-# test result: ok. 195 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in ...   (farik-core)
+# test result: ok. 198 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in ...   (farik-core; 195 when the step landed, before the review fixes)
 # test result: ok. 23 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in ...   (xtask)
 # xtask check: ok
 ```

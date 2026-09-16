@@ -138,10 +138,9 @@ fn reviewer_result<'a>(
     evidence: &'a DoneEvidence,
     criterion_id: &str,
 ) -> Option<&'a CriterionResult> {
-    evidence
-        .results
-        .iter()
-        .find(|result| result.criterion_id == criterion_id && result.run_by == RunBy::Reviewer)
+    evidence.results.iter().find(|result| {
+        result.criterion_id.trim() == criterion_id && result.run_by == RunBy::Reviewer
+    })
 }
 
 fn criterion_run_by_reviewer(
@@ -176,7 +175,9 @@ fn criterion_passed(contract: &TaskContract, evidence: &DoneEvidence) -> Option<
         .map(|criterion| criterion.id.to_string())
         .filter(|id| {
             evidence.results.iter().any(|result| {
-                &result.criterion_id == id && result.run_by != RunBy::Assignee && !result.passed
+                result.criterion_id.trim() == id
+                    && result.run_by != RunBy::Assignee
+                    && !result.passed
             })
         })
         .collect();
@@ -200,7 +201,7 @@ fn human_criterion_accepted(
         .map(|criterion| criterion.id.to_string())
         .filter(|id| {
             !evidence.results.iter().any(|result| {
-                &result.criterion_id == id && result.passed && result.run_by == RunBy::Human
+                result.criterion_id.trim() == id && result.passed && result.run_by == RunBy::Human
             })
         })
         .collect();
@@ -320,6 +321,33 @@ mod tests {
             review_note: Some("C1: cargo test, 11 passed.".to_string()),
             human_accepted: false,
         }
+    }
+
+    #[test]
+    fn reads_a_recorded_criterion_id_the_same_however_it_is_padded() {
+        // Step 08's `check_criteria_recorded` trims a recorded result's criterion id, so this must
+        // too: a padded id would otherwise open `in_progress -> verifying` and then block
+        // acceptance for good, with nothing to do about it but edit a frozen contract.
+        let mut evidence = an_evidence();
+        evidence.results = vec![a_result(" C1 ", RunBy::Reviewer)];
+        assert_eq!(evaluate_done(&a_contract(), &evidence), Ok(()));
+        // A padded id on a failed run is still that criterion failing.
+        let mut failed = a_result(" C1 ", RunBy::Reviewer);
+        failed.passed = false;
+        evidence.results = vec![failed];
+        assert_eq!(
+            failed_rules(&a_contract(), &evidence),
+            vec![R::CriterionPassed]
+        );
+        // And a padded id on the human's acceptance is still that criterion answered.
+        let mut contract = a_contract();
+        contract.exit_criteria[0].verification = VerificationWire::Variant4 {
+            method: serde_json::json!("human"),
+            question: "Did you sign in successfully?".to_string(),
+        };
+        let mut asked = an_evidence();
+        asked.results = vec![a_result(" C1 ", RunBy::Human)];
+        assert_eq!(evaluate_done(&contract, &asked), Ok(()));
     }
 
     fn failed_rules(contract: &TaskContract, evidence: &DoneEvidence) -> Vec<R> {

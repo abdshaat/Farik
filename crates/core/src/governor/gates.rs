@@ -8,6 +8,7 @@ use std::cmp::Ordering;
 use crate::contract::{Role, TaskContract, TaskStatus, wire_method};
 use crate::generated::task_contract::FarikTaskContractKind as Kind;
 use crate::governor::done::{CriterionResult, RunBy};
+use crate::governor::task_status::is_terminal;
 use crate::governor::transition_table::TransitionActor;
 use crate::text::{distinct, listed};
 
@@ -71,9 +72,12 @@ pub struct AssignmentInput {
     pub reviewer_id: String,
     /// The proposed reviewer's role.
     pub reviewer_role: Role,
-    /// How many tasks the proposed assignee already holds and has not finished: assigned, in
-    /// progress, or blocked. Counting only the started ones would let an agent be assigned any
-    /// number of tasks and start none, because `assigned -> in_progress` has no gate.
+    /// How many tasks the proposed assignee already holds and has not finished: every task of its
+    /// that is neither `accepted` nor `cancelled`. Counting only the started ones would let an
+    /// agent be assigned any number of tasks and start none, because `assigned -> in_progress` has
+    /// no gate; counting only the assigned, in-progress and blocked ones would let the limit be
+    /// walked through `verifying` and `rejected`, and `rejected -> in_progress` hands a task
+    /// straight back to the same agent.
     pub assignee_open_tasks: u32,
     /// The team's limit on work in progress per agent.
     pub wip_limit: u32,
@@ -131,16 +135,26 @@ pub fn check_assignment(contract: &TaskContract, input: &AssignmentInput) -> Gat
             input.reviewer_role
         ));
     }
-    if input.assignee_id.trim().is_empty() || input.reviewer_id.trim().is_empty() {
+    if input.assignee_id.trim().is_empty() {
         reasons.push(
-            "the runtime named no agent for the assignee or the reviewer, and a task is assigned to one of each"
+            "the runtime named no agent for the assignee, and a task is assigned to one"
                 .to_string(),
         );
-    } else if input.reviewer_id.trim() == input.assignee_id.trim() {
-        reasons.push(format!(
-            "{} cannot review its own work; name another agent as reviewer",
-            input.assignee_id.trim()
-        ));
+    }
+    // An epic the Product Manager broke down is reviewed by the human (5.16 item 4), and the human
+    // is not an agent: there is no id to name, and nothing for the reviewer to be the assignee of.
+    if expected_reviewer != Role::Human {
+        if input.reviewer_id.trim().is_empty() {
+            reasons.push(
+                "the runtime named no agent for the reviewer, and a task is reviewed by one"
+                    .to_string(),
+            );
+        } else if input.reviewer_id.trim() == input.assignee_id.trim() {
+            reasons.push(format!(
+                "{} cannot review its own work; name another agent as reviewer",
+                input.assignee_id.trim()
+            ));
+        }
     }
     if input.assignee_open_tasks >= input.wip_limit {
         reasons.push(if input.wip_limit == 0 {
@@ -181,10 +195,16 @@ fn unready_dependencies(contract: &TaskContract, input: &AssignmentInput) -> Vec
     let mut reported: Vec<&str> = Vec::new();
     let mut twice: Vec<String> = Vec::new();
     for state in &input.dependencies {
-        if reported.contains(&state.task_id.trim()) {
-            twice.push(state.task_id.trim().to_string());
+        let id = state.task_id.trim();
+        // Only the dependencies this contract names are its business: what the runtime says about
+        // anything else decides nothing here, contradictory or not.
+        if !named.iter().any(|dependency| dependency == id) {
+            continue;
+        }
+        if reported.contains(&id) {
+            twice.push(id.to_string());
         } else {
-            reported.push(state.task_id.trim());
+            reported.push(id);
         }
     }
     if !twice.is_empty() {
@@ -293,10 +313,29 @@ pub struct ChildState {
 ///
 /// Every rule the epic fails, each naming the tasks that are not done.
 pub fn check_children_done(children: &[ChildState]) -> GateResult {
+    let mut reported: Vec<&str> = Vec::new();
+    let mut twice: Vec<String> = Vec::new();
+    for child in children {
+        let named = child.task_id.trim();
+        if named.is_empty() {
+            continue;
+        }
+        if reported.contains(&named) {
+            twice.push(named.to_string());
+        } else {
+            reported.push(named);
+        }
+    }
+    if !twice.is_empty() {
+        return Err(vec![format!(
+            "the runtime reported {} twice, and a task under this epic has one state",
+            distinct(&twice)
+        )]);
+    }
     let mut reasons = Vec::new();
     let unfinished: Vec<String> = children
         .iter()
-        .filter(|child| !matches!(child.status, TaskStatus::Accepted | TaskStatus::Cancelled))
+        .filter(|child| !is_terminal(child.status))
         .map(|child| {
             let named = child.task_id.trim();
             if named.is_empty() {
@@ -663,6 +702,10 @@ pub const FIELDS_ALWAYS_WRITABLE: [&str; 1] = ["notes"];
 /// is what the contract is, an epic or a task, and `status` is the task's status now, before
 /// whatever the write is part of.
 ///
+/// This gate is about changing a contract that exists. Creating one is `check_child_creation`'s
+/// question: a create names `kind` and `parent`, which are fixed at creation and which this gate
+/// refuses, so a caller that routed a create through here would make every creation impossible.
+///
 /// Every one of the schema's fields is written into one of six sets, and a name in none of them is
 /// refused rather than guessed at, so that a field added to the schema tomorrow waits until
 /// somebody says who writes it:
@@ -724,7 +767,7 @@ pub fn check_contract_write(
         return Err(ContractWriteRefusal::UnknownFields { fields: unknown });
     }
     let beyond_notes = beyond(changed_fields, &FIELDS_ALWAYS_WRITABLE);
-    if matches!(status, TaskStatus::Accepted | TaskStatus::Cancelled) {
+    if is_terminal(status) {
         if beyond_notes.is_empty() {
             return Ok(ContractWriteOutcome::Allowed);
         }
@@ -940,6 +983,29 @@ mod tests {
     }
 
     #[test]
+    fn asks_for_no_reviewer_agent_when_the_human_reviews_the_epic() {
+        // An epic broken down by the Product Manager is reviewed by the human (5.16 item 4), and
+        // the human is not an agent: there is no id for the runtime to pass and nothing for the
+        // reviewer to be the assignee of.
+        let mut epic = a_contract();
+        epic.kind = Kind::Epic;
+        let mut input = an_assignment();
+        input.requested_by = AssignmentRequester::ProductManager;
+        input.has_active_scrum_master = false;
+        input.assignee_id = "pm-1".to_string();
+        input.assignee_role = Role::ProductManager;
+        input.reviewer_id = String::new();
+        input.reviewer_role = Role::Human;
+        assert_eq!(check_assignment(&epic, &input), Ok(()));
+        // The assignee is still named, and a task whose reviewer is an agent still needs its id.
+        input.assignee_id = "  ".to_string();
+        assert_eq!(
+            reasons(check_assignment(&epic, &input)),
+            ["the runtime named no agent for the assignee, and a task is assigned to one"]
+        );
+    }
+
+    #[test]
     fn lets_the_scrum_master_assign_only_when_the_team_has_one() {
         // Spec 5.2's row gives the trigger to the Scrum Master, or to the Product Manager when
         // the team has no active Scrum Master. There is no row for a Scrum Master without one.
@@ -953,15 +1019,29 @@ mod tests {
 
     #[test]
     fn refuses_an_assignment_the_runtime_did_not_name_two_agents_for() {
-        for (assignee, reviewer) in [("", "arch-1"), ("dev-1", " "), ("", "")] {
+        // Each blank is its own reason, so that a caller with one of the two missing is not told
+        // to look at both.
+        let missing_assignee =
+            "the runtime named no agent for the assignee, and a task is assigned to one"
+                .to_string();
+        let missing_reviewer =
+            "the runtime named no agent for the reviewer, and a task is reviewed by one"
+                .to_string();
+        for (assignee, reviewer, expected) in [
+            ("", "arch-1", vec![missing_assignee.clone()]),
+            ("dev-1", " ", vec![missing_reviewer.clone()]),
+            (
+                "",
+                "",
+                vec![missing_assignee.clone(), missing_reviewer.clone()],
+            ),
+        ] {
             let mut input = an_assignment();
             input.assignee_id = assignee.to_string();
             input.reviewer_id = reviewer.to_string();
-            assert!(
-                reasons(check_assignment(&a_contract(), &input)).contains(
-                    &"the runtime named no agent for the assignee or the reviewer, and a task is assigned to one of each"
-                        .to_string()
-                ),
+            assert_eq!(
+                reasons(check_assignment(&a_contract(), &input)),
+                expected,
                 "{assignee} {reviewer}"
             );
         }
@@ -1172,6 +1252,22 @@ mod tests {
             reasons(check_assignment(&contract, &input)),
             ["the runtime reported FRK-2 twice, and a dependency has one state"]
         );
+        // Only the dependencies this contract names are its business: two reports about a task it
+        // does not depend on say nothing about whether it may be assigned.
+        let mut unrelated = an_assignment();
+        unrelated.dependencies = vec![
+            DependencyState {
+                task_id: "FRK-99".to_string(),
+                status: TaskStatus::Accepted,
+                integrated: true,
+            },
+            DependencyState {
+                task_id: "FRK-99".to_string(),
+                status: TaskStatus::Draft,
+                integrated: false,
+            },
+        ];
+        assert_eq!(check_assignment(&a_contract(), &unrelated), Ok(()));
     }
 
     #[test]
@@ -1198,7 +1294,20 @@ mod tests {
         input.reviewer_id = "dev-1".to_string();
         input.assignee_open_tasks = 9;
         input.remaining_sprint_budget_usd = 0.0;
-        assert_eq!(reasons(check_assignment(&a_contract(), &input)).len(), 5);
+        let contract = a_depending_contract();
+        // The whole list, in the order the rules are written: counting the reasons would leave
+        // the order free, and an agent reads them in the order it is given them.
+        assert_eq!(
+            reasons(check_assignment(&contract, &input)),
+            [
+                "the Product Manager assigns only when the team has no active Scrum Master",
+                "the assignee has role marketing_specialist and this contract is assigned to role software_developer",
+                "dev-1 cannot review its own work; name another agent as reviewer",
+                "dev-1 already holds 9 unfinished tasks and the limit is 2",
+                "the budget of 5 USD does not fit the 0 USD left in the sprint",
+                "the runtime reported nothing about FRK-2, which this task depends on"
+            ]
+        );
     }
 
     #[test]
@@ -1304,6 +1413,17 @@ mod tests {
         };
         assert_eq!(
             reasons(check_criteria_recorded(&runnable, &[], &work)),
+            ["the assignee recorded no run with evidence for criterion C1"]
+        );
+        // A verification whose `method` is not a string names no method, so it is not one of the
+        // two the assignee is excused: an unreadable criterion stays its to run.
+        let mut unreadable = a_contract();
+        unreadable.exit_criteria[0].verification = VerificationWire::Variant3 {
+            method: json!(7),
+            rubric: vec!["Does the form say why a password was refused?".to_string()],
+        };
+        assert_eq!(
+            reasons(check_criteria_recorded(&unreadable, &[], &work)),
             ["the assignee recorded no run with evidence for criterion C1"]
         );
         let mut produced = a_contract();
@@ -1415,6 +1535,22 @@ mod tests {
             ["no task under this epic was accepted, so there is nothing to verify"]
         );
         assert_eq!(reasons(check_children_done(&[])).len(), 1);
+        // Two reports about one task mean the runtime is confused, as they do for a dependency:
+        // an epic must not verify on a report that contradicts itself.
+        let twice = [
+            ChildState {
+                task_id: "FRK-2".to_string(),
+                status: TaskStatus::Accepted,
+            },
+            ChildState {
+                task_id: " FRK-2 ".to_string(),
+                status: TaskStatus::Cancelled,
+            },
+        ];
+        assert_eq!(
+            reasons(check_children_done(&twice)),
+            ["the runtime reported FRK-2 twice, and a task under this epic has one state"]
+        );
         let unnamed = [ChildState {
             task_id: "  ".to_string(),
             status: TaskStatus::Draft,
@@ -1698,6 +1834,16 @@ mod tests {
         assert_eq!(
             reasons(check_rejection_reasons(&a_contract(), Some(&two_unknown))),
             ["this contract has no criteria C8, C9"]
+        );
+        // One id that happens to contain a comma is still one id: the plural is decided by how
+        // many values there are, not by what is inside them.
+        let comma = Rejection {
+            failed_criterion_ids: vec!["C8, C9".to_string()],
+            reasons: "The form accepts an empty password.".to_string(),
+        };
+        assert_eq!(
+            reasons(check_rejection_reasons(&a_contract(), Some(&comma))),
+            ["this contract has no criterion C8, C9"]
         );
     }
 
@@ -2193,6 +2339,19 @@ mod tests {
                 true,
                 &agent,
                 &["status".to_string(), "scope".to_string()]
+            ),
+            Err(ContractWriteRefusal::TaskTerminal {
+                status: TaskStatus::Accepted
+            })
+        );
+        // a finished task beats the store's fields
+        assert_eq!(
+            check_contract_write(
+                Kind::Task,
+                TaskStatus::Accepted,
+                false,
+                &agent,
+                &["id".to_string()]
             ),
             Err(ContractWriteRefusal::TaskTerminal {
                 status: TaskStatus::Accepted

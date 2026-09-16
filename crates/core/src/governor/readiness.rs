@@ -1,6 +1,7 @@
 //! The Definition of Ready (`docs/SPEC.md` section 5.3), the team rules it applies (5.12), and
 //! the parent rules of an epic's tasks (5.16), as one function over a contract and a context.
 
+use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet};
 
 use super::team_rules::TeamRules;
@@ -246,11 +247,25 @@ fn command_criteria_complete(
     ))
 }
 
+/// Whether a budget is above a ceiling. A figure that cannot be compared is, because spec 5.5
+/// counts a spend that is not a number as exhausted, and `budget` and the assignment gate both
+/// read it that way: a contract that passed here with such a budget would be refused at
+/// assignment instead, after the human had already approved it.
+fn exceeds(cost: f64, ceiling: f64) -> bool {
+    !matches!(
+        cost.partial_cmp(&ceiling),
+        Some(Ordering::Less | Ordering::Equal)
+    )
+}
+
 fn budget_within_sprint(
     contract: &TaskContract,
     context: &ReadinessContext,
 ) -> Option<ReadinessFailure> {
-    if contract.budget.max_cost_usd > context.remaining_sprint_budget_usd {
+    if exceeds(
+        contract.budget.max_cost_usd,
+        context.remaining_sprint_budget_usd,
+    ) {
         return Some(failure(
             ReadinessRule::BudgetWithinSprint,
             format!(
@@ -478,7 +493,7 @@ fn budget_within_team_max(
 ) -> Option<ReadinessFailure> {
     if contract.kind == Kind::Task
         && let Some(max) = context.rules.max_task_budget_usd
-        && contract.budget.max_cost_usd > max
+        && exceeds(contract.budget.max_cost_usd, max)
     {
         return Some(failure(
             ReadinessRule::BudgetWithinTeamMax,
@@ -555,7 +570,7 @@ fn budget_within_parent(
     let Some(parent) = &context.parent else {
         return None;
     };
-    if contract.budget.max_cost_usd > parent.remaining_budget_usd {
+    if exceeds(contract.budget.max_cost_usd, parent.remaining_budget_usd) {
         return Some(failure(
             ReadinessRule::BudgetWithinParent,
             format!(
@@ -733,6 +748,27 @@ mod tests {
         assert_eq!(
             failed_rules(&a_contract(), &context),
             [R::BudgetWithinSprint]
+        );
+    }
+
+    #[test]
+    fn refuses_a_budget_that_cannot_be_compared_at_every_ceiling() {
+        // Spec 5.5: a figure that cannot be compared counts as exhausted, which `budget` and step
+        // 08's assignment gate both read that way. A contract that was ready with such a budget
+        // would be refused at assignment instead, after the human had already approved it.
+        let (mut contract, mut context) = a_task_under(ParentState {
+            allowed_paths: a_contract().allowed_paths.clone(),
+            ..an_in_progress_parent()
+        });
+        contract.budget.max_cost_usd = f64::NAN;
+        context.rules.max_task_budget_usd = Some(5.0);
+        assert_eq!(
+            failed_rules(&contract, &context),
+            [
+                R::BudgetWithinSprint,
+                R::BudgetWithinTeamMax,
+                R::BudgetWithinParent
+            ]
         );
     }
 
