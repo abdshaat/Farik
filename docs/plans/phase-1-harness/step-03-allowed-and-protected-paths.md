@@ -2,8 +2,8 @@
 
 Status: draft
 Branch: `claude/phase-0-implementation-izm38y` (the harness-assigned phase branch, left as assigned per `docs/standards/code.md`; steps do not get their own)
-Spec: `docs/SPEC.md` section 5.4 item 2 (no file outside `allowed_paths` may change), 5.6 (protected paths: no tool may read or write them, whatever its tier), 5.12 (`protected_paths` is a team rule), F5
-Depends on: phase 0 (merged in #4); step 01 of this phase (committed as f9f0e67, 0e50df1, 3cc8bc3); step 02 of this phase (committed as 21fe00a, 87a3561, and its review fixes)
+Spec: `docs/SPEC.md` section 5.4 item 2 (no file outside `allowed_paths` may change), 5.6 (protected paths: no tool may read or write them, whatever its tier; this step adds the sentence that pins how globs match), 5.12 (`protected_paths` is a team rule), F5
+Depends on: phase 0 (merged in #4); step 01 of this phase (committed as f9f0e67, 0e50df1, 3cc8bc3); step 02 of this phase (committed as 21fe00a, 87a3561, 4a1ac90)
 
 A plan is `ready` only when a reviewer other than the author has confirmed the three rules in `docs/standards/workflow.md` stage 2 (Plan): every decision made, no ambiguity, no forward dependencies. Record who confirmed and when here.
 
@@ -20,19 +20,23 @@ All in `docs/plans/project-plan.md`, phase 1, restated here only where this step
 - Globs are matched by `globset` 0.4.20 with its `log` feature off (the crate's default features pull in `log`, which `farik-core` has no use for), licensed MIT or Unlicense. Rejected: a hand-written matcher, because glob edge cases are where safety bugs live (project plan).
 - `*` and `?` stay within one path segment (`literal_separator(true)`), so `src/*.rs` does not admit `src/login/form.rs`; `**` crosses directories. Rejected: `globset`'s default, where `*` crosses `/`, because the spec's examples (`src/login/**`) read as shell globs and a rule that admits more than it reads is a safety bug.
 - Paths are relative to the project root with forward slashes and are compared as given; a bare protected name such as `.env` names the file at the project root only, and `**/.env` names it anywhere. This matches the spec's default list, which pairs `.env` with `**/*.pem`. Rejected: normalising `./` prefixes or backslashes here, because the runtime that reads a diff or a tool call owns the paths it produces.
+- A path with a `..` segment is refused by both checks whatever the globs, because these two functions are the safety boundary of spec 5.6 and `src/../.env` must not pass as `src/**` or slip past `.env`; step 02 refuses the same segment in its ceiling rule. Rejected: leaving it to the runtime, because a check that can be climbed out of is not a check.
+- The glob dialect is user-visible, so `docs/SPEC.md` 5.6 gains one sentence saying how globs match (hard rule 8): `*` within one directory, `**` across, a bare name at the root only, and an invalid glob refusing the check.
 - A glob that does not compile is a refusal of its own, `PathRefusal::Glob(GlobError::Invalid { pattern, detail })`, and nothing is checked; the alternative, treating it as matching nothing, would silently admit every change under `check_allowed_paths` or protect nothing under `check_protected_paths`. The project plan's step 03 entry returned `Vec<PathViolation>` in the error position and named `GlobError` without a place to return it; it is changed in this plan's commit to `Result<(), PathRefusal>` with `enum PathRefusal { Violations(Vec<PathViolation>), Glob(GlobError) }`, per its "Changing this plan" section. Steps 04 and 07 map `Violations` to their own refusals.
 - Violations are reported in the order the paths were given, one per path, so that a message can list them as the diff does. With no allowed glob every change is a violation; with no changed path the check passes.
+- `GlobSetBuilder::build` can fail after every single glob compiled only by exceeding the regex engine's size limit, which no hand-written rule reaches; that error is mapped like the others rather than unwrapped, because `expect` is not allowed outside tests, and it has no test because no input reaches it.
+- The project plan's step 04 entry gains `ToolRefusal::InvalidGlob { pattern, detail }` in this plan's revision commit, so that step 04 has somewhere to put `PathRefusal::Glob`; step 07's `DoneFailure` carries it in its message.
 - Tests state behavior and build their inputs through two helpers; every code block below is the file after `cargo fmt --all`.
 
 ## Design
 
-One task: the `paths` module with `PathViolation`, `GlobError`, `PathRefusal`, `check_allowed_paths`, `check_protected_paths`, a private compiler from globs to a `GlobSet`, and nine tests; the `globset` dependency pinned in the workspace and added to `farik-core`.
+One task: the `paths` module with `PathViolation`, `GlobError`, `PathRefusal`, `check_allowed_paths`, `check_protected_paths`, a private compiler from globs to a `GlobSet`, and ten tests; the `globset` dependency pinned in the workspace and added to `farik-core`; one sentence in the spec.
 
 Out of scope: reading the diff (phase 2), the tool-call check that calls these (step 04), the Definition of Done rule that calls the first (step 07), containment of one glob in another (step 02's ceiling rule, by literal prefix).
 
 ## Architecture notes
 
-Touches `crates/core` (one new child of `governor`, one new dependency) and the workspace `Cargo.toml` and `Cargo.lock`. Consumes nothing from steps 01 and 02. `globset` performs no I/O; `cargo xtask core-io` scans `farik-core`'s sources, which mention none of its forbidden tokens.
+Touches `crates/core` (one new child of `governor`, one new dependency), the workspace `Cargo.toml` and `Cargo.lock`, and `docs/SPEC.md` 5.6. Consumes nothing from steps 01 and 02. `globset` performs no I/O; `cargo xtask core-io` scans `farik-core`'s sources, which mention none of its forbidden tokens.
 
 ## Global constraints
 
@@ -48,8 +52,9 @@ Cargo.toml                                    modifies: pins globset in the work
 Cargo.lock                                    modifies (generated by cargo): pins globset and its dependencies
 crates/core/Cargo.toml                        modifies: adds globset
 crates/core/src/governor.rs                   modifies: declares paths
-crates/core/src/governor/paths.rs             creates: PathViolation, GlobError, PathRefusal, check_allowed_paths, check_protected_paths, nine tests
-docs/plans/project-plan.md                    modifies: phase 1 step 03 interface returns PathRefusal (in the plan's own commit)
+crates/core/src/governor/paths.rs             creates: PathViolation, GlobError, PathRefusal, check_allowed_paths, check_protected_paths, ten tests
+docs/SPEC.md                                  modifies: 5.6 says how protected and allowed globs match
+docs/plans/project-plan.md                    modifies: phase 1 step 03 interface returns PathRefusal, and step 04's ToolRefusal gains InvalidGlob (in the plan's own commits)
 docs/plans/phase-1-harness/step-03-allowed-and-protected-paths.md   modifies: checkboxes ticked
 ```
 
@@ -57,7 +62,7 @@ docs/plans/phase-1-harness/step-03-allowed-and-protected-paths.md   modifies: ch
 
 ### Task 1: The two path checks
 
-Files: created `crates/core/src/governor/paths.rs`; modified `Cargo.toml`, `Cargo.lock`, `crates/core/Cargo.toml`, `crates/core/src/governor.rs`
+Files: created `crates/core/src/governor/paths.rs`; modified `Cargo.toml`, `Cargo.lock`, `crates/core/Cargo.toml`, `crates/core/src/governor.rs`, `docs/SPEC.md`
 
 Consumes: nothing
 Produces: `governor::paths::{PathViolation, GlobError, PathRefusal, check_allowed_paths, check_protected_paths}`
@@ -267,6 +272,18 @@ Produces: `governor::paths::{PathViolation, GlobError, PathRefusal, check_allowe
       }
 
       #[test]
+      fn refuses_a_path_with_a_parent_segment_whatever_the_globs() {
+          assert_eq!(
+              check_allowed_paths(&strings(&["src/../.env"]), &strings(&["**"])),
+              Err(violations(&["src/../.env"]))
+          );
+          assert_eq!(
+              check_protected_paths(&strings(&["src/../.env"]), &[]),
+              Err(violations(&["src/../.env"]))
+          );
+      }
+
+      #[test]
       fn refuses_a_glob_that_does_not_compile_and_names_it() {
           let Err(PathRefusal::Glob(GlobError::Invalid { pattern, detail })) =
               check_allowed_paths(&strings(&["src/lib.rs"]), &strings(&["src/[rs"]))
@@ -326,7 +343,8 @@ Produces: `governor::paths::{PathViolation, GlobError, PathRefusal, check_allowe
 
   /// Refuses every changed path that matches none of the allowed globs (spec 5.4 item 2). With
   /// no allowed glob, every change is refused. Paths are relative to the project root with forward
-  /// slashes, compared as given; `*` stays within one directory and `**` crosses directories.
+  /// slashes, compared as given; `*` stays within one directory and `**` crosses directories. A
+  /// path with a `..` segment is always refused, so that no path climbs out of what a glob names.
   ///
   /// # Errors
   ///
@@ -337,12 +355,17 @@ Produces: `governor::paths::{PathViolation, GlobError, PathRefusal, check_allowe
       allowed_globs: &[String],
   ) -> Result<(), PathRefusal> {
       let allowed = compile(allowed_globs)?;
-      refuse(changed.iter().filter(|path| !allowed.is_match(path)))
+      refuse(
+          changed
+              .iter()
+              .filter(|path| climbs(path) || !allowed.is_match(path)),
+      )
   }
 
   /// Refuses every path that matches a protected glob (spec 5.6 and 5.12), whatever the tool's
   /// tier. A bare name such as `.env` names the file at the project root only; `**/.env` names it
-  /// anywhere.
+  /// anywhere. A path with a `..` segment is always refused, so that no path reaches a protected
+  /// file by climbing.
   ///
   /// # Errors
   ///
@@ -353,7 +376,15 @@ Produces: `governor::paths::{PathViolation, GlobError, PathRefusal, check_allowe
       protected_globs: &[String],
   ) -> Result<(), PathRefusal> {
       let protected = compile(protected_globs)?;
-      refuse(paths.iter().filter(|path| protected.is_match(path)))
+      refuse(
+          paths
+              .iter()
+              .filter(|path| climbs(path) || protected.is_match(path)),
+      )
+  }
+
+  fn climbs(path: &str) -> bool {
+      path.split('/').any(|segment| segment == "..")
   }
 
   fn compile(globs: &[String]) -> Result<GlobSet, PathRefusal> {
@@ -505,6 +536,18 @@ Produces: `governor::paths::{PathViolation, GlobError, PathRefusal, check_allowe
       }
 
       #[test]
+      fn refuses_a_path_with_a_parent_segment_whatever_the_globs() {
+          assert_eq!(
+              check_allowed_paths(&strings(&["src/../.env"]), &strings(&["**"])),
+              Err(violations(&["src/../.env"]))
+          );
+          assert_eq!(
+              check_protected_paths(&strings(&["src/../.env"]), &[]),
+              Err(violations(&["src/../.env"]))
+          );
+      }
+
+      #[test]
       fn refuses_a_glob_that_does_not_compile_and_names_it() {
           let Err(PathRefusal::Glob(GlobError::Invalid { pattern, detail })) =
               check_allowed_paths(&strings(&["src/lib.rs"]), &strings(&["src/[rs"]))
@@ -517,16 +560,28 @@ Produces: `governor::paths::{PathViolation, GlobError, PathRefusal, check_allowe
       }
   }
   ```
+- [ ] In `docs/SPEC.md` section 5.6, replace the sentence
+
+  ```
+  The default list is `.env`, `.env.*`, `**/*.pem`, `**/*.key`, and `.farik/local/**`.
+  ```
+
+  with
+
+  ```
+  The default list is `.env`, `.env.*`, `**/*.pem`, `**/*.key`, and `.farik/local/**`. Protected and allowed globs match the whole path relative to the project root: `*` stays within one directory, `**` crosses directories, a bare name such as `.env` names the root file only and `**/.env` names it anywhere, a path with a `..` segment is always refused, and a glob that does not compile refuses the check rather than matching nothing.
+  ```
+
 - [ ] Format, run the tests and the full check; confirm green, and that the lockfile pins `globset` 0.4.20:
 
   ```
   cargo fmt --all
   cargo test --package farik-core governor::paths
   # expected, among the output:
-  # test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 56 filtered out; finished in ...
+  # test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 56 filtered out; finished in ...
   cargo xtask check
   # expected, among the output, then exit code 0:
-  # test result: ok. 65 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in ...   (farik-core)
+  # test result: ok. 66 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in ...   (farik-core)
   # test result: ok. 23 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in ...   (xtask)
   # xtask check: ok
   grep -A1 '^name = "globset"$' Cargo.lock
@@ -542,7 +597,7 @@ Produces: `governor::paths::{PathViolation, GlobError, PathRefusal, check_allowe
 ```
 cargo xtask check
 # expected, among the output, then exit code 0:
-# test result: ok. 65 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in ...   (farik-core)
+# test result: ok. 66 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in ...   (farik-core)
 # test result: ok. 23 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in ...   (xtask)
 # xtask check: ok
 ```
