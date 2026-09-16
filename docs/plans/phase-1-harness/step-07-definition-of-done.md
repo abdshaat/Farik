@@ -1,13 +1,13 @@
 # Phase 1, step 07: Definition of Done
 
-Status: draft
+Status: ready
 Branch: `claude/phase-0-implementation-izm38y` (the harness-assigned phase branch, left as assigned per `docs/standards/code.md`; steps do not get their own)
 Spec: `docs/SPEC.md` section 5.4 (the five conditions for acceptance, and the reviewer's fresh session), section 5.16 item 4 (an epic needs the human), section 5.3 (the `human` verification method), section 4 (what a contract is, which task 1 makes exact), F5
-Depends on: phase 0 (merged in #4); step 02 of this phase for `contract::Verification` (committed as 21fe00a, 87a3561, 4a1ac90); step 03 for `check_allowed_paths` (220b576, 3355d35); step 06 (33202e7 and its review fix abfb7d8)
+Depends on: phase 0 (merged in #4) for `contract::{TaskContract, Verification, VerificationWire, validate_contract}` and the generated types; step 02 of this phase for `governor::readiness::fixtures::a_contract`, which every one of task 2's tests builds on (committed as 21fe00a, 87a3561, 4a1ac90); step 03 for `check_allowed_paths` (220b576, 3355d35); step 06 (33202e7 and its review fix abfb7d8)
 
 A plan is `ready` only when a reviewer other than the author has confirmed the three rules in `docs/standards/workflow.md` stage 2 (Plan): every decision made, no ambiguity, no forward dependencies. Record who confirmed and when here.
 
-Readiness confirmed by: pending
+Readiness confirmed by: a fresh Claude Code session that did not write this plan, 2026-09-16. Fourth pass at `e0cb984`: READY under all three rules of `docs/standards/workflow.md` stage 2, after three passes that refused it. It executed both tasks in a scratch copy rather than taking the evidence on trust: the baseline, both red states verbatim, `cargo fmt --all --check` clean immediately after pasting each block, clippy pedantic with `-D warnings`, `cargo xtask core-io`, every quoted count to the digit, both commit subjects through `cargo xtask commit-msg`, and byte identity of the blocks. It ran 32 mutations and killed 31. It also attacked the result: through any contract `validate_contract` produced it could not get a task accepted with a criterion nobody ran, with a change outside its allowed paths, or without the human where spec 5.4 item 5 or 5.16 item 4 requires one. The one survivor is taken in this commit: the message a Product Manager reads most often, the diff that reaches outside the allowed paths, was pinned only by its prefix while the bullet above claimed all seven messages were asserted, so it now has an exact assertion and the bullet says which branches it covers. Four smaller items are taken too: the first Decisions bullet no longer says `validate_contract` runs on every read from the wire, which is a convention rather than a type-level guarantee, and task 1 now writes that convention into the two phase 2 entries that could bypass it; the duplicate-id note is attributed to the third review, which moved the rule, rather than the second, which put it in the wrong place; the header and Consumes list name phase 0 for `Verification` and step 02 for the fixture every test builds on; the three project-plan anchors are marked as substrings of longer lines; and a Decisions bullet says which reviewer result decides when two name one criterion.
 
 ## Goal
 
@@ -19,7 +19,7 @@ First, though, the step makes the first of those rules decidable at all. A recor
 
 All in `docs/plans/project-plan.md`, phase 1, restated here only where this step needs the exact value.
 
-- Exit criterion ids must name one criterion each, and the rule belongs in `validate_contract` rather than in the Definition of Ready. Uniqueness inside an array is a well-formedness property of the document, the same kind as `^C[0-9]+$` and `minItems: 1`, and the project plan's step 02 entry already set the precedent: there is no `RiskSet` readiness rule "because the schema requires `risk` and `validate_contract` refuses a contract without one". JSON Schema 2020-12 cannot express uniqueness by property, but the validator has a stage after the schema where it can. Rejected: a `CriteriaIdsUnique` readiness rule, because the Definition of Ready runs once, on `refining -> ready`, and its verdict is never stored: step 01's committed table has two gate-free human rows (`any -> escalated` and `escalated -> any`), so a human can move a task from `draft` to `verifying` without it, and phase 2's recovery and `farik doctor --adopt` rebuild contracts with no readiness run at all. `validate_contract` runs on every read from the wire.
+- Exit criterion ids must name one criterion each, and the rule belongs in `validate_contract` rather than in the Definition of Ready. Uniqueness inside an array is a well-formedness property of the document, the same kind as `^C[0-9]+$` and `minItems: 1`, and the project plan's step 02 entry already set the precedent: there is no `RiskSet` readiness rule "because the schema requires `risk` and `validate_contract` refuses a contract without one". JSON Schema 2020-12 cannot express uniqueness by property, but the validator has a stage after the schema where it can. Rejected: a `CriteriaIdsUnique` readiness rule, because the Definition of Ready runs once, on `refining -> ready`, and its verdict is never stored: step 01's committed table has two gate-free human rows (`any -> escalated` and `escalated -> any`), so a human can move a task from `draft` to `verifying` without it, and phase 2's recovery and `farik doctor --adopt` rebuild contracts with no readiness run at all. `validate_contract` is the crate's only path from a wire value to a `TaskContract` today, and `crates/core/src/generated/mod.rs` states the convention that every wire value passes it. That is a convention, not a type-level guarantee: `TaskContract` is a re-export of a generated type that derives `Deserialize`, so a caller can bypass it. Task 1 therefore also writes the convention into the project plan's phase 2 entries, where the two places that could bypass it are declared.
 - Every repeated id is named once, in the order the criteria appear, because reporting the first of several hides the rest, as step 05's budgets taught. The message says why the rule exists, so that a Product Manager reading a refusal knows what to change.
 - The refusal is one error at `/exit_criteria` rather than one per repeated criterion, because the fault is the set of ids, not any one of them.
 - `evaluate_done` returns `Result<(), Vec<DoneFailure>>` and reports every rule the task fails, in the order of `DoneRule`, as step 02's `evaluate_readiness` does. Each check returns `Option<DoneFailure>` and `evaluate_done` collects with `filter_map`, the shape `evaluate_readiness` already has, so the two halves of the governor read the same way. Rejected: stopping at the first failure.
@@ -28,12 +28,13 @@ All in `docs/plans/project-plan.md`, phase 1, restated here only where this step
 - A reviewer's result counts only with non-blank evidence, because spec 5.4 item 4 requires the review note to map each criterion to evidence, and a recorded result with nothing in it is the "I ran the tests and they passed" the section warns about. Whitespace is not evidence, with the same floor the notes have: `trim` follows Unicode White_Space, so a non-breaking or ideographic space is refused and a zero-width one is not.
 - A `human` result needs no evidence while a reviewer's does, because the acceptance event is the evidence: spec 5.4 item 1 asks for an explicit human acceptance, not for the human to write up a command's output. A test pins it.
 - `DoneEvidence.results` holds what this verification round recorded: the reviewer's own runs and the human's acceptances. The assignee's earlier run is step 08's `check_criteria_recorded` gate, which takes it as its own parameter, so a criterion the assignee failed and the reviewer passed is accepted: the independent run is the point of spec 5.4 item 1. The type cannot stop a runtime from putting an assignee's result here, so every check ignores one rather than trusting the field to be clean. Changed 2026-09-16 by this plan from the project plan's `reviewer_results`, whose name said less than the field holds.
+- When more than one reviewer result names the same criterion, the first decides, so a blank result followed by a good one refuses and a good one followed by a blank one accepts. Both are the safe direction for a list that should hold one result per criterion, and the runtime is what keeps it to one; neither is asserted.
 - A result whose `criterion_id` names no criterion of the contract decides nothing, including when it failed: the contract's criteria are the list, and anything else is noise the runtime recorded. The criteria that are in the contract still have to be run and to pass, which the other rules enforce. A test pins it.
 - `CriterionPassed` reads every result that is not the assignee's, rather than only the reviewer's, so that a `human` criterion recorded as failed also refuses; and it ignores the assignee's, so that its earlier failure does not outvote the reviewer's own run. Both directions have a test, because a check restricted to the reviewer alone passed the whole suite when this plan was first reviewed.
 - The diff is checked with step 03's `check_allowed_paths`, so that one set of glob semantics decides what a path means everywhere in the harness, and a contract whose `allowed_paths` do not compile refuses acceptance rather than accepting everything. A task that changed nothing passes: spec 5.4 item 2 forbids changes outside the allowed paths and says nothing about changes being required, and step 08's `CriteriaRecorded` gate is where a commit is demanded.
 - An empty `allowed_paths` makes every changed path a violation, and its message says so rather than ending in a dangling list. Like the assignee's results, it is unreachable through `validate_contract` (`minItems: 1`) and reachable by hand, so it is checked rather than assumed, with a test.
 - `requires_human_acceptance` answers one question and says so in its doc: must the human accept the finished result before the task is accepted? Spec 5.4 item 5 and 5.16 item 4 give the answer, risk `high` or kind `epic`, and no team policy touches it. Its consumers are this step's `HumanAccepted` rule and phase 3's orchestrator; it is public so that they agree. It is deliberately **not** the answer to step 09's `ContractRequiresHuman` gate, which is the human's approval of the contract *before* work starts: project plan D8 widens that one to every task under `human_accepts_contracts: all`, and step 09 takes it as the context field `contract_requires_human_acceptance` rather than calling this function. The schema's `risk` description names the two moments separately, and conflating them would either silence the policy or make high-risk acceptance policy-dependent.
-- A note counts as written only when it is not blank, and both notes are `Option<String>` rather than `String`, so that "the runtime has none" and "the agent wrote nothing" are the same refusal with one message. Every one of the seven messages is asserted by a test, because four of them were free to say anything when this plan was reviewed a third time.
+- A note counts as written only when it is not blank, and both notes are `Option<String>` rather than `String`, so that "the runtime has none" and "the agent wrote nothing" are the same refusal with one message. Every one of the seven messages is asserted exactly by a test, and so is each of the three branches `PathsWithinAllowed` can take, because four messages were free to say anything when this plan was reviewed a third time and the most-read of the three branches still was at the fourth.
 - A contract with no exit criteria at all passes the three rules that iterate them vacuously. That is unreachable rather than decided: the schema sets `minItems: 1` on `exit_criteria`, `validate_contract` refuses a contract without one, and step 02's `CriteriaPresent` rule refuses it again before the task is ever assigned.
 - Revised three times on 2026-09-16, after three readiness reviews, each of which found the previous fix narrower than it read. The first found a `human` criterion's exemption handed to a `test` criterion by an id lookup. The second found results still matched by id, so a `test` and a `command` criterion sharing `C1` were accepted on one run, and put the rule in the Definition of Ready. The third showed that the Definition of Ready is not a boundary a task must cross: two gate-free human rows in step 01's table go around it, and phase 2 rebuilds contracts without it. The rule now lives in `validate_contract`, and the claim in this plan is the one the code can keep.
 - Tests import the items by name rather than a glob; every code block below is the file after `cargo fmt --all`.
@@ -270,7 +271,7 @@ Produces: no new public item; `validate_contract` refuses one more shape
   **Contract.** A structured document attached to an epic or a task: intent, scope, requirements, exit criteria with a verification method for each, constraints, budget, and a named reviewer who is not the assignee. The schema is in `docs/schemas/task-contract.schema.json`; the `kind` field says which of the two it is. Every exit criterion's `id` names one criterion: a recorded result, a note, and an event all refer to a criterion by its id, so a contract that gives one id to two criteria is refused when it is read, which JSON Schema cannot express and the validator therefore does (added in 0.3).
   ```
 
-- [ ] Bring the project plan in line. In `docs/plans/project-plan.md`, replace
+- [ ] Bring the project plan in line. Each of these before-texts is a substring of a longer line rather than a whole line, and each occurs exactly once. In `docs/plans/project-plan.md`, replace
 
   ```
   `contract::validate_contract(input: &serde_json::Value) -> Result<TaskContract, Vec<ValidationError>>`
@@ -285,13 +286,37 @@ Produces: no new public item; `validate_contract` refuses one more shape
   replace
 
   ```
-  the Definition of Ready refuses it (`CriteriaIdsUnique`, step 07 task 2)
+  was answered by step 07's second readiness review, not by this step: the Definition of Ready refuses it (`CriteriaIdsUnique`, step 07 task 2)
   ```
 
   with
 
   ```
-  `validate_contract` refuses it (step 07 task 1), not the Definition of Ready, which a human moving a task out of `escalated` and phase 2's recovery both go around
+  was answered by step 07's third readiness review, not by this step: `validate_contract` refuses it (step 07 task 1), not the Definition of Ready, which a human moving a task out of `escalated` and phase 2's recovery both go around
+  ```
+
+  replace
+
+  ```
+  `TaskCreate { contract: TaskContract }`
+  ```
+
+  with
+
+  ```
+  `TaskCreate { contract: TaskContract }` (the daemon builds it with `validate_contract`, never by deserialising a wire value directly, because the repeated-criterion-id rule of phase 1 step 07 lives there)
+  ```
+
+  replace
+
+  ```
+  read_contract(&self, id)
+  ```
+
+  with
+
+  ```
+  read_contract(&self, id) (through `validate_contract`, so that a contract read back from a file is held to the same rules as one that arrived on the wire)
   ```
 
   and replace
@@ -326,7 +351,7 @@ Produces: no new public item; `validate_contract` refuses one more shape
 
 Files: created `crates/core/src/governor/done.rs`; modified `crates/core/src/governor.rs`
 
-Consumes: `contract::{TaskContract, Verification}`, `generated::task_contract::{FarikTaskContractKind, FarikTaskContractRisk}`, `governor::paths::{GlobError, PathRefusal, check_allowed_paths}`
+Consumes: `contract::{TaskContract, Verification}` and, in the tests, `contract::VerificationWire` and `governor::readiness::fixtures::a_contract`; `generated::task_contract::{FarikTaskContractKind, FarikTaskContractRisk}`; `governor::paths::{GlobError, PathRefusal, check_allowed_paths}`
 Produces: `governor::done::{RunBy, CriterionResult, DoneEvidence, DoneRule, DoneFailure, requires_human_acceptance, evaluate_done}`
 
 - [ ] Declare the module. `crates/core/src/governor.rs` in full:
@@ -576,9 +601,9 @@ Produces: `governor::done::{RunBy, CriterionResult, DoneEvidence, DoneRule, Done
               failed_rules(&a_contract(), &evidence),
               [R::PathsWithinAllowed]
           );
-          assert!(
-              message_of(&a_contract(), &evidence, R::PathsWithinAllowed)
-                  .starts_with("the diff changes src/billing/invoice.rs outside")
+          assert_eq!(
+              message_of(&a_contract(), &evidence, R::PathsWithinAllowed),
+              "the diff changes src/billing/invoice.rs outside the contract's allowed paths src/login/**"
           );
       }
 
@@ -1204,9 +1229,9 @@ Produces: `governor::done::{RunBy, CriterionResult, DoneEvidence, DoneRule, Done
               failed_rules(&a_contract(), &evidence),
               [R::PathsWithinAllowed]
           );
-          assert!(
-              message_of(&a_contract(), &evidence, R::PathsWithinAllowed)
-                  .starts_with("the diff changes src/billing/invoice.rs outside")
+          assert_eq!(
+              message_of(&a_contract(), &evidence, R::PathsWithinAllowed),
+              "the diff changes src/billing/invoice.rs outside the contract's allowed paths src/login/**"
           );
       }
 
