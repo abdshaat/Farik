@@ -1,6 +1,6 @@
 # Phase 1, step 08: Gate predicates
 
-Status: ready
+Status: done
 Branch: `claude/phase-0-implementation-izm38y` (the harness-assigned phase branch, left as assigned per `docs/standards/code.md`; steps do not get their own)
 Spec: `docs/SPEC.md` section 5.1 (a reviewer is never the assignee, and nobody grades their own homework), section 5.3 (the verification methods, and what a `review` criterion is, which this step writes down), section 5.2 (the gates of the transition table, who writes `status`, and the two terminal statuses), section 5.5 (a figure that cannot be compared), section 5.11 (a locked contract and a frozen one), section 5.14 (a dependency is accepted and integrated), section 5.16 (an epic's assignee, its reviewer, its tasks, its product documents), section 6.2 (the work-in-progress limit the Scrum Master enforces), F5
 Depends on: phase 0 (merged in #4); step 01 of this phase for `TransitionActor` and the gates the table names (f9f0e67, 0e50df1, 3cc8bc3); step 02 for `readiness::fixtures::a_contract` (21fe00a, 87a3561, 4a1ac90); step 06 for the escalation rules the Decisions cite (33202e7, abfb7d8); step 07 for `CriterionResult` and `RunBy` (a0cdecd, 090e015, cc27028)
