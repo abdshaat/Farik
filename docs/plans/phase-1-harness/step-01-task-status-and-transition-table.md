@@ -24,6 +24,7 @@ All in `docs/plans/project-plan.md`, phase 1, restated here only where this step
 - `TASK_STATUSES` lists the statuses in the order of the schema's `status` enum, and a test checks that the two agree, so that a schema change is caught here.
 - Test names state behavior (`docs/standards/code.md`); tests use qualified enum paths through short aliases (`S`, `A`, `G`) rather than glob imports, because `clippy::enum_glob_use` is on; a `Line` type alias keeps the spec-line table under `clippy::type_complexity`, and `is_specific` takes its `Copy` row by value for `clippy::trivially_copy_pass_by_ref`.
 - Every code block below is the file after `cargo fmt --all`, so that the committed file and the plan are the same bytes.
+- Revised after the step review (pull request #5): `transitions_from` leaves out an `any` row whose target is the status itself, so that `escalated` is not listed as leaving to `escalated`; the reachability test walks the specific rows plus `any → cancelled`, so that the `any` rows alone cannot satisfy it; a test pins that an unlisted pair is refused; and `docs/SPEC.md` 5.2 says that `accepted` and `cancelled` are terminal.
 
 ## Design
 
@@ -47,7 +48,8 @@ Touches `crates/core` only: a new `governor` module with two children. Consumes 
 crates/core/src/lib.rs                                 modifies: declares the governor module
 crates/core/src/governor.rs                            creates: the governor module root, declares task_status and transition_table
 crates/core/src/governor/task_status.rs                creates: TASK_STATUSES, is_terminal, two tests
-crates/core/src/governor/transition_table.rs           creates: TransitionActor, GateId, Status, TransitionRow, TRANSITION_TABLE, find_transitions, transitions_from, ten tests
+crates/core/src/governor/transition_table.rs           creates: TransitionActor, GateId, Status, TransitionRow, TRANSITION_TABLE, find_transitions, transitions_from, twelve tests
+docs/SPEC.md                                           modifies: section 5.2 says which statuses are terminal (added after the step review)
 docs/plans/phase-1-harness/step-01-task-status-and-transition-table.md   modifies: checkboxes ticked per task
 ```
 
@@ -455,19 +457,39 @@ Produces: `governor::transition_table::{TransitionActor, GateId, Status, Transit
       }
 
       #[test]
-      fn reaches_every_status_from_draft() {
+      fn does_not_list_a_move_to_the_same_status_as_leaving_it() {
+          let rows = transitions_from(S::Escalated);
+          assert!(rows.iter().all(|row| row.to != Status::Is(S::Escalated)));
+          assert_eq!(
+              actors_and_gates(&rows),
+              [(A::Human, G::None), (A::Human, G::None)]
+          );
+      }
+
+      #[test]
+      fn refuses_a_pair_the_spec_does_not_list() {
+          assert!(find_transitions(S::Draft, S::Ready).is_empty());
+          assert!(find_transitions(S::Ready, S::InProgress).is_empty());
+          assert!(find_transitions(S::Verifying, S::Draft).is_empty());
+      }
+
+      #[test]
+      fn reaches_every_status_from_draft_through_the_specific_rows() {
           let mut seen = BTreeSet::from([S::Draft]);
           let mut queue = vec![S::Draft];
           while let Some(status) = queue.pop() {
-              for row in transitions_from(status) {
-                  let targets: Vec<S> = match row.to {
-                      Status::Any => TASK_STATUSES.to_vec(),
-                      Status::Is(target) => vec![target],
+              for row in TRANSITION_TABLE
+                  .iter()
+                  .filter(|row| row.from.matches(status))
+              {
+                  let Status::Is(target) = row.to else {
+                      continue;
                   };
-                  for target in targets {
-                      if seen.insert(target) {
-                          queue.push(target);
-                      }
+                  if row.from == Status::Any && target != S::Cancelled {
+                      continue;
+                  }
+                  if seen.insert(target) {
+                      queue.push(target);
                   }
               }
           }
@@ -694,7 +716,8 @@ Produces: `governor::transition_table::{TransitionActor, GateId, Status, Transit
           .collect()
   }
 
-  /// The rows that leave `from`, in table order. Empty when `from` is terminal.
+  /// The rows that leave `from`, in table order. Empty when `from` is terminal; an `any` row
+  /// whose target is `from` itself is not a way out, so it is left out.
   #[must_use]
   pub fn transitions_from(from: TaskStatus) -> Vec<&'static TransitionRow> {
       if is_terminal(from) {
@@ -702,7 +725,7 @@ Produces: `governor::transition_table::{TransitionActor, GateId, Status, Transit
       }
       TRANSITION_TABLE
           .iter()
-          .filter(|row| row.from.matches(from))
+          .filter(|row| row.from.matches(from) && row.to != Status::Is(from))
           .collect()
   }
 
@@ -905,19 +928,39 @@ Produces: `governor::transition_table::{TransitionActor, GateId, Status, Transit
       }
 
       #[test]
-      fn reaches_every_status_from_draft() {
+      fn does_not_list_a_move_to_the_same_status_as_leaving_it() {
+          let rows = transitions_from(S::Escalated);
+          assert!(rows.iter().all(|row| row.to != Status::Is(S::Escalated)));
+          assert_eq!(
+              actors_and_gates(&rows),
+              [(A::Human, G::None), (A::Human, G::None)]
+          );
+      }
+
+      #[test]
+      fn refuses_a_pair_the_spec_does_not_list() {
+          assert!(find_transitions(S::Draft, S::Ready).is_empty());
+          assert!(find_transitions(S::Ready, S::InProgress).is_empty());
+          assert!(find_transitions(S::Verifying, S::Draft).is_empty());
+      }
+
+      #[test]
+      fn reaches_every_status_from_draft_through_the_specific_rows() {
           let mut seen = BTreeSet::from([S::Draft]);
           let mut queue = vec![S::Draft];
           while let Some(status) = queue.pop() {
-              for row in transitions_from(status) {
-                  let targets: Vec<S> = match row.to {
-                      Status::Any => TASK_STATUSES.to_vec(),
-                      Status::Is(target) => vec![target],
+              for row in TRANSITION_TABLE
+                  .iter()
+                  .filter(|row| row.from.matches(status))
+              {
+                  let Status::Is(target) = row.to else {
+                      continue;
                   };
-                  for target in targets {
-                      if seen.insert(target) {
-                          queue.push(target);
-                      }
+                  if row.from == Status::Any && target != S::Cancelled {
+                      continue;
+                  }
+                  if seen.insert(target) {
+                      queue.push(target);
                   }
               }
           }
@@ -933,10 +976,10 @@ Produces: `governor::transition_table::{TransitionActor, GateId, Status, Transit
   cargo fmt --all
   cargo test --package farik-core governor::transition_table
   # expected, among the output:
-  # test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 15 filtered out; finished in ...
+  # test result: ok. 12 passed; 0 failed; 0 ignored; 0 measured; 15 filtered out; finished in ...
   cargo xtask check
   # expected, among the output, then exit code 0:
-  # test result: ok. 25 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in ...   (farik-core)
+  # test result: ok. 27 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in ...   (farik-core)
   # test result: ok. 23 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in ...   (xtask)
   # xtask check: ok
   ```
@@ -948,7 +991,7 @@ Produces: `governor::transition_table::{TransitionActor, GateId, Status, Transit
 ```
 cargo xtask check
 # expected, among the output, then exit code 0:
-# test result: ok. 25 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in ...   (farik-core)
+# test result: ok. 27 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in ...   (farik-core)
 # test result: ok. 23 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in ...   (xtask)
 # xtask check: ok
 ```

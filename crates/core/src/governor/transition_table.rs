@@ -203,7 +203,8 @@ pub fn find_transitions(from: TaskStatus, to: TaskStatus) -> Vec<&'static Transi
         .collect()
 }
 
-/// The rows that leave `from`, in table order. Empty when `from` is terminal.
+/// The rows that leave `from`, in table order. Empty when `from` is terminal; an `any` row
+/// whose target is `from` itself is not a way out, so it is left out.
 #[must_use]
 pub fn transitions_from(from: TaskStatus) -> Vec<&'static TransitionRow> {
     if is_terminal(from) {
@@ -211,7 +212,7 @@ pub fn transitions_from(from: TaskStatus) -> Vec<&'static TransitionRow> {
     }
     TRANSITION_TABLE
         .iter()
-        .filter(|row| row.from.matches(from))
+        .filter(|row| row.from.matches(from) && row.to != Status::Is(from))
         .collect()
 }
 
@@ -414,19 +415,39 @@ mod tests {
     }
 
     #[test]
-    fn reaches_every_status_from_draft() {
+    fn does_not_list_a_move_to_the_same_status_as_leaving_it() {
+        let rows = transitions_from(S::Escalated);
+        assert!(rows.iter().all(|row| row.to != Status::Is(S::Escalated)));
+        assert_eq!(
+            actors_and_gates(&rows),
+            [(A::Human, G::None), (A::Human, G::None)]
+        );
+    }
+
+    #[test]
+    fn refuses_a_pair_the_spec_does_not_list() {
+        assert!(find_transitions(S::Draft, S::Ready).is_empty());
+        assert!(find_transitions(S::Ready, S::InProgress).is_empty());
+        assert!(find_transitions(S::Verifying, S::Draft).is_empty());
+    }
+
+    #[test]
+    fn reaches_every_status_from_draft_through_the_specific_rows() {
         let mut seen = BTreeSet::from([S::Draft]);
         let mut queue = vec![S::Draft];
         while let Some(status) = queue.pop() {
-            for row in transitions_from(status) {
-                let targets: Vec<S> = match row.to {
-                    Status::Any => TASK_STATUSES.to_vec(),
-                    Status::Is(target) => vec![target],
+            for row in TRANSITION_TABLE
+                .iter()
+                .filter(|row| row.from.matches(status))
+            {
+                let Status::Is(target) = row.to else {
+                    continue;
                 };
-                for target in targets {
-                    if seen.insert(target) {
-                        queue.push(target);
-                    }
+                if row.from == Status::Any && target != S::Cancelled {
+                    continue;
+                }
+                if seen.insert(target) {
+                    queue.push(target);
                 }
             }
         }
