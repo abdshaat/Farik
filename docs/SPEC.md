@@ -173,7 +173,7 @@ Verification runs in a fresh session for the reviewer. The reviewer does not rec
 
 ### 5.5 Budgets and limits
 
-Four budgets, all enforced by the governor, all configurable per team with role-based defaults:
+Five budgets, all enforced by the governor, all configurable per team with role-based defaults:
 
 | Budget | Default | On exhaustion |
 |---|---|---|
@@ -184,6 +184,8 @@ Four budgets, all enforced by the governor, all configurable per team with role-
 | Per day, team-wide (dollars) | set by user at setup | everything pauses; user is notified |
 
 Plus non-monetary limits: a session wall clock (default 30 minutes), a tool-call count per session (default 200), and the rejection iteration limit (default 3). Per-role defaults: the Scrum Master's session budget is 200k input and 20k output tokens; every other role uses the team default. The shipped sprint budget is 15 dollars and the daily budget 20 dollars; a task's `max_cost_usd` is capped at 5 dollars by the default team rule unless the human raises it (decided 2026-09-15).
+
+More than one budget can be exhausted at the same moment, and every consequence applies. The governor reports all of them rather than the first, because none of these consequences subsumes another: stopping new assignments does not end a session that is already running, so a sprint that has run out must never hide a day that has. A budget is exhausted when what was spent reaches its limit, and a spend that is not a number counts as exhausted.
 
 Costs are computed from the usage fields returned by the model API and from the model's published price table, which Farik ships as a versioned file the user can override.
 
