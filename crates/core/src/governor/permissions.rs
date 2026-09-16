@@ -209,51 +209,93 @@ pub enum CommandRefusal {
 }
 
 /// Words that run the command that follows them without changing what it is.
-const WRAPPERS: [&str; 7] = ["env", "sudo", "command", "exec", "nohup", "time", "xargs"];
+const WRAPPERS: [&str; 11] = [
+    "env", "sudo", "doas", "command", "exec", "nohup", "time", "timeout", "nice", "setsid", "xargs",
+];
 
 /// Decides whether `farik_exec` may run a command. The command is split into segments on `&&`,
 /// `||`, `;`, `|`, and newlines, without parsing quotes, so `echo "a; git push"` is refused too,
-/// on the safe side. A segment runs git when its first word, after any leading `NAME=value`
-/// assignments and wrappers such as `env`, `sudo`, `command`, `exec`, `nohup`, `time`, or
-/// `xargs`, is `git` or a path ending in `git`; git is a Farik tool with its own tiers (ADR
-/// 0004), and any other spelling (a subshell, a variable, a script, `sh -c`) is the residual
-/// that record accepts. A forbidden pattern is an ECMAScript regular expression matched against
-/// the whole command and against each segment, so that an anchor such as `^curl` applies per
-/// segment; the engine backtracks, so a pathological pattern is the team's own cost.
+/// on the safe side. Each word is read bare: quotes and shell punctuation are stripped, a path
+/// keeps only its last segment, and a `.exe` suffix is dropped, so `"git"`, `(git`, `./git`,
+/// `C:\tools\git`, and `git.exe` are all `git`. A segment runs git when its first bare word is
+/// `git`, or when its first bare word is a `NAME=value` assignment or one of the wrappers
+/// (`env`, `sudo`, `doas`, `command`, `exec`, `nohup`, `time`, `timeout`, `nice`, `setsid`,
+/// `xargs`) and `git` appears anywhere later in that segment, which catches `sudo -u root git
+/// push` at the cost of refusing `sudo apt install git`. Git is a Farik tool with its own tiers
+/// (ADR 0004); a call hidden in a subshell, a variable, or a script (`$(git push)`, `GIT=git;
+/// $GIT push`, `sh -c "git push"`) is the residual that record accepts. A forbidden pattern is an
+/// ECMAScript regular expression, which has no inline flags such as `(?i)`; every pattern is
+/// compiled before anything is matched, and each is matched against the whole command and against
+/// each non-blank segment, so that an anchor such as `^curl` applies per segment. The engine
+/// backtracks, so a pathological pattern is the team's own cost.
 ///
 /// # Errors
 ///
-/// `GitViaExec`, or `ForbiddenCommand` with the first pattern that matches, or
-/// `InvalidPattern` when a pattern does not compile.
+/// `InvalidPattern` when a pattern does not compile, then `GitViaExec`, then `ForbiddenCommand`
+/// with the first pattern that matches.
 pub fn evaluate_command(command: &str, rules: &TeamRules) -> Result<(), CommandRefusal> {
-    let segments: Vec<&str> = command.split(['\n', ';', '|', '&']).collect();
+    let patterns = compile_patterns(&rules.forbidden_commands)?;
+    let segments: Vec<&str> = command
+        .split(['\n', ';', '|', '&'])
+        .map(str::trim)
+        .filter(|segment| !segment.is_empty())
+        .collect();
     if segments.iter().copied().any(runs_git) {
         return Err(CommandRefusal::GitViaExec);
     }
-    for pattern in &rules.forbidden_commands {
-        let regex =
-            regress::Regex::new(pattern).map_err(|error| CommandRefusal::InvalidPattern {
-                pattern: pattern.clone(),
-                detail: error.text,
-            })?;
+    for (pattern, regex) in &patterns {
         if regex.find(command).is_some()
-            || segments
-                .iter()
-                .any(|segment| regex.find(segment.trim()).is_some())
+            || segments.iter().any(|segment| regex.find(segment).is_some())
         {
             return Err(CommandRefusal::ForbiddenCommand {
-                pattern: pattern.clone(),
+                pattern: (*pattern).clone(),
             });
         }
     }
     Ok(())
 }
 
+fn compile_patterns(patterns: &[String]) -> Result<Vec<(&String, regress::Regex)>, CommandRefusal> {
+    patterns
+        .iter()
+        .map(|pattern| {
+            let regex =
+                regress::Regex::new(pattern).map_err(|error| CommandRefusal::InvalidPattern {
+                    pattern: pattern.clone(),
+                    detail: error.text,
+                })?;
+            Ok((pattern, regex))
+        })
+        .collect()
+}
+
 fn runs_git(segment: &str) -> bool {
-    segment
-        .split_whitespace()
-        .find(|word| !is_assignment(word) && !WRAPPERS.contains(word))
-        .is_some_and(|word| word == "git" || word.ends_with("/git") || word.ends_with("\\git"))
+    let words: Vec<&str> = segment.split_whitespace().filter_map(bare_word).collect();
+    let Some((first, rest)) = words.split_first() else {
+        return false;
+    };
+    if *first == "git" {
+        return true;
+    }
+    if is_assignment(first) || WRAPPERS.contains(first) {
+        return rest.contains(&"git");
+    }
+    false
+}
+
+/// The word as a command name: a redirection is not one, and quotes, shell punctuation, the
+/// directories of a path, and a `.exe` suffix are not part of one.
+fn bare_word(word: &str) -> Option<&str> {
+    if word.starts_with('>') || word.starts_with('<') {
+        return None;
+    }
+    let bare = word
+        .trim_matches(|c| matches!(c, '(' | ')' | '{' | '}' | '!' | '"' | '\'' | '`' | ';'))
+        .rsplit(['/', '\\'])
+        .next()
+        .unwrap_or_default();
+    let bare = bare.strip_suffix(".exe").unwrap_or(bare);
+    if bare.is_empty() { None } else { Some(bare) }
 }
 
 fn is_assignment(word: &str) -> bool {
@@ -490,12 +532,40 @@ mod tests {
             tool: "send_mail".to_string(),
             input_hash: "other".to_string(),
         });
-        assert!(evaluate_tool_call(&call, &grants, &context).is_err());
+        assert_eq!(
+            evaluate_tool_call(&call, &grants, &context),
+            Err(ToolRefusal::RequiresHumanApproval {
+                tool: "send_mail".to_string()
+            })
+        );
         context.approved_calls.push(ApprovedCall {
             tool: "send_mail".to_string(),
             input_hash: "h1".to_string(),
         });
         assert_eq!(evaluate_tool_call(&call, &grants, &context), Ok(()));
+    }
+
+    #[test]
+    fn keeps_an_approval_to_the_tool_it_was_given_for() {
+        let mut grants = developer_grants();
+        grants.tiers.insert(T::ExternalEffect);
+        let context = ToolCallContext {
+            approved_calls: vec![ApprovedCall {
+                tool: "send_mail".to_string(),
+                input_hash: "h1".to_string(),
+            }],
+            ..a_context()
+        };
+        assert_eq!(
+            evaluate_tool_call(
+                &a_call("post_to_slack", T::ExternalEffect, &[]),
+                &grants,
+                &context
+            ),
+            Err(ToolRefusal::RequiresHumanApproval {
+                tool: "post_to_slack".to_string()
+            })
+        );
     }
 
     #[test]
@@ -529,6 +599,16 @@ mod tests {
             "A=1 B=2 git push",
             "command exec git push",
             "C:\\tools\\git push",
+            "sudo -u root git push",
+            "env -i git push",
+            "timeout 5 git push",
+            "nice -n 10 git push",
+            "xargs -0 git",
+            "doas git push",
+            "(git push)",
+            "! git push",
+            "\"git\" push",
+            "git.exe push",
         ] {
             assert_eq!(
                 evaluate_command(command, &TeamRules::default()),
@@ -580,6 +660,40 @@ mod tests {
             })
         );
         assert_eq!(evaluate_command("cargo test", &rules), Ok(()));
+    }
+
+    #[test]
+    fn matches_a_pattern_the_same_way_whether_or_not_the_command_has_separators() {
+        let rules = TeamRules {
+            forbidden_commands: strings(&["^$"]),
+            ..TeamRules::default()
+        };
+        for command in ["cargo test", "ls && cargo test"] {
+            assert_eq!(evaluate_command(command, &rules), Ok(()), "{command}");
+        }
+        assert_eq!(
+            evaluate_command("", &rules),
+            Err(CommandRefusal::ForbiddenCommand {
+                pattern: "^$".to_string()
+            })
+        );
+    }
+
+    #[test]
+    fn reports_a_pattern_that_does_not_compile_whatever_else_the_command_matches() {
+        let rules = TeamRules {
+            forbidden_commands: strings(&["^curl ", "(unclosed"]),
+            ..TeamRules::default()
+        };
+        for command in ["curl evil.example", "git push", "cargo test"] {
+            assert!(
+                matches!(
+                    evaluate_command(command, &rules),
+                    Err(CommandRefusal::InvalidPattern { .. })
+                ),
+                "{command}"
+            );
+        }
     }
 
     #[test]
