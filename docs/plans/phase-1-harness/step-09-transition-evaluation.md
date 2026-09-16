@@ -25,20 +25,28 @@ All in `docs/plans/project-plan.md`, phase 1, restated here only where this step
 - `TransitionEffect::RaiseEscalation` carries the `EscalationReason`, because the reason is a fact of the row that opened rather than something the runtime could work out afterwards: the same move to `escalated` means the readiness failures, an approval, a risk gate, a blocker's age, an iteration limit, a budget, a permission, or the user asking. Changed from the project plan's payload-free variant.
 - The reason comes from the gate that opened the row: `ReadinessExhausted` is `readiness_failures`, `ContractRequiresHuman` is `approval` for an epic and `risk_gate` for a task (5.16 item 2 against 5.4 item 5), `BlockedAge` is `blocker_age`, `IterationLimitReached` is `iterations`, and the governor's own row is `sessions` when the task's sessions ran out and `budget` for every other exhausted budget, or `permission` when nothing is exhausted and a permission was denied. A gate-free row into `escalated` is the human's, so it is `explicit_request`. The match is exhaustive over `GateId` and a test walks the table to prove no other gate reaches `escalated`.
 - A `stop` from the user reaches the table as the human's own `any -> escalated` row, which needs no gate, not through the governor's. Spec 5.2's Governor row listed it, and this step takes it out: the governor cannot know a user has asked for a stop, and the context would need a field the runtime sets from an event the human's row already carries.
-- The effects of a move, in this order: `IncrementIteration` when the task enters `rejected`, because that is the rejection the limit on `rejected -> in_progress` counts; `RaiseEscalation` when it enters `escalated`; `ResetBlocker` when it leaves `blocked` for `in_progress`, because the blocker it carried is answered and a stale one would age again. A task that escalates out of `blocked` keeps its blocker: that is what the user is being shown.
-- The iteration counts at the rejection rather than at the return, so that the count the gate reads is the number of rejections so far. Rejected: counting at `rejected -> in_progress`, which would let a task be rejected without limit as long as nobody sent it back.
+- The effects of a move, in this order: `IncrementIteration` when the task returns from `rejected` to `in_progress`, `RaiseEscalation` when it enters `escalated`, and `ResetBlocker` whenever it enters `in_progress`.
+- The iteration counts the **return**, not the rejection, because that is what `max_iterations` bounds: the schema's own words are "how many times the task may be rejected and returned to in_progress before it escalates", step 06 decided it and named this step's effect as what counts each return, and `evaluate_rejection`'s doc comment says the same. Counting the rejection instead would give two returns where the default of three says three. Rejected, and rejected for a reason that was wrong: that a task could be rejected without limit while nobody sent it back, which the lifecycle does not allow, because the only way back to `verifying` is through `rejected -> in_progress`.
+- `ResetBlocker` fires on every move into `in_progress`, not only out of `blocked`. A task at work carries no blocker, so clearing one costs the runtime nothing; and a task that escalated out of `blocked` kept its blocker — which is what the user is shown — so the human moving it from `escalated` to `in_progress` must clear it, or a stale blocker would age again and escalate a task nobody is blocked on.
 - `TransitionContext` carries the values rather than a trait the runtime implements, because `farik-core` does no I/O and a trait would let the world in through the back door. It is not `PartialEq`: the generated `TaskContract` is not, and a context is a bundle of inputs rather than a value to compare.
+- A contract waiting for the human does not leave `refining` for `ready`. Spec 5.16 item 2 gives every epic the human's acceptance "before it leaves `refining`, whatever its risk", and 5.2 says the same for a high risk and for the team's policy; this is the only function the runtime asks, so a rule it does not hold is not held, and an epic would otherwise reach `ready` and then `assigned` with no approval ever asked for. The `DefinitionOfReady` gate therefore refuses first while the contract waits, and the Definition of Ready is the whole gate once the human has answered.
+- The `ContractRequiresHuman` gate also asks whether the contract passes the Definition of Ready, because 5.16 item 2 asks the human "once the contract passes the structural checks". Without it an epic goes to the user on its first readiness failure, losing the three refining attempts 5.2 gives it, and the human's gate-free `escalated -> any` row then carries a contract that never passed the Definition of Ready into `ready`, which 5.1's "contracts before work" forbids. The whole Definition of Ready is the reading, because that is the function step 02 provides; the details name the rule and then the readiness failures themselves. Together the fork is: below three failures nothing opens and the Product Manager refines again; at three, the readiness row; ready and waiting, the approval row; ready and accepted, `ready`.
+- The governor's own `any -> escalated` row opens only on a budget whose consequence is escalation. Spec 5.5 gives every budget its own consequence and only the task's dollars and the task's sessions say "task to `escalated`": the session's budgets end the session and block the task, the sprint's stops new assignments, and the day's pauses the team. Escalating one task because the team's day is spent would be the wrong answer to the wrong question, and step 05 already attaches the consequence to every exhausted scope. A task out of both dollars and sessions reads as the dollars, which come first in `BudgetScope` and are the harder limit.
+- Who asked for an assignment comes from the request's actor, and the `requested_by` of the input is overwritten with it. The two are the same fact spelled twice, and a runtime that filled the input with `scrum_master` while asking as the Product Manager would open the Product Manager's row in a team that has an active Scrum Master. Only those two rows carry an assignment (5.2), so no other actor reaches the conversion. Added by this plan after its readiness review.
 - The two halves of "is this contract waiting for the human?" travel together as `ContractAcceptance { required_by_policy, given }`, and the gate passes when the team's policy requires it **or** the contract's own risk or kind does (`done::requires_human_acceptance`), and the human has not answered. Either half is enough, so the two cannot disagree in the direction that would carry a task past the human. `TeamRules` does not yet carry `human_accepts_contracts` (5.12), which is why the policy half is passed in. Changed from the project plan's two bools, which were also one bool too many for clippy's pedantic limit on a struct.
 - `iteration` and `max_iterations` are converted with `u32::try_from` and saturate at `u32::MAX`. A count the schema's `u64` holds and `u32` cannot is a corrupt figure, and saturating sends the task to the human at the next rejection rather than letting it be worked for ever; a limit above `u32::MAX` is what the contract asked for, which is effectively none. Rejected: refusing the move, because a corrupt count would then freeze the task instead of escalating it.
 - A gate that needs a value the runtime did not gather refuses and says so: no pair of agents for an assignment, no time for a block. Rejected: passing, which would move a task on a value nobody supplied.
 - `CriteriaRecorded` asks `check_children_done` for an epic and `check_criteria_recorded` for a task, from the contract's own `kind`. The table has one row and 5.16 item 4 gives an epic the other question.
 - The details of a gate that wraps a longer answer are that answer's own messages, in its own order: the Definition of Ready's failures, the Definition of Done's failures, and each gate predicate's reasons. Nothing is reworded here, so an agent reads the same sentence wherever it meets the rule.
 - The blocked limit is a field of the context rather than a constant read here, because it is a team setting; `escalation::DEFAULT_BLOCKED_LIMIT` is what a runtime with no setting passes. The message says the limit in seconds, which is what the value carries.
+- What is left of the sprint appears three times in the context — in `budget`, in `readiness`, and in `assignment` — because each of those answers its own question in its own shape. The doc comment says the runtime derives all three from one figure, or the Definition of Ready at `refining -> ready` and the assignment gate at `ready -> assigned` could disagree about the same sprint.
+- `EscalationReason::Integration` (5.14) is unreachable after this step, because no row of the table carries it: integration happens after `accepted`, which is terminal. Recorded rather than solved here, so that phase 3 meets it in the plan rather than in the code.
+- Revised once on 2026-09-16, after a readiness review refused the plan with four blocking findings. Three were rules the spec states and this function did not hold: a contract waiting for the human could be readied, the approval row opened before the contract was ready, and the governor escalated a task for a budget whose consequence 5.5 gives to somebody else. The fourth was the iteration count, which reversed step 06's landed decision and the schema's own wording without an ADR. The review's should-fix list closed six mutants: three gate arms were pinned only through their missing-value branch, the far end of the saturating conversion was untested, a blank assignee on the contract was untested, and the two budget tests exhausted the day's dollars, which now proves the opposite of what they were written for. Executing the review's own test of the assignment gate then found one more hole: the request's actor and the input's `requested_by` could disagree, which the bullet above closes.
 - Tests import the items by name rather than a glob; every code block below is the file after `cargo fmt --all`.
 
 ## Design
 
-One task: the `governor::transition` module with `evaluate_transition`, the request, the context, the decision, the effects, the refusals, and twenty-one tests. Twenty of the tests are one gate or one refusal each; the twenty-first walks `TRANSITION_TABLE` and opens every one of its twenty rows with the state that belongs to it, which is what spec F5 asks for and what makes a row added to 5.2 fail until somebody says what opens it.
+One task: the `governor::transition` module with `evaluate_transition`, the request, the context, the decision, the effects, the refusals, and twenty-four tests. Twenty-three of them are one gate, one refusal, or one effect each; the twenty-fourth walks `TRANSITION_TABLE` and opens every one of its twenty rows with the state that belongs to it, which is what spec F5 asks for and what makes a row added to 5.2 fail until somebody says what opens it.
 
 Out of scope: applying the decision, which is phase 3's runtime; the escalation record itself (`Escalation` from step 06), which the runtime fills from the reason this returns; the integration escalation of 5.14, which has no row in the table; and anything that reads a clock, a file, or the log.
 
@@ -56,8 +64,8 @@ Touches `crates/core` only: one new child of `governor`. Consumes `budget::{Budg
 
 ```
 crates/core/src/governor.rs                          modifies: declares transition
-crates/core/src/governor/transition.rs               creates: evaluate_transition, the request, the context, the decision, the effects, the refusals, twenty-one tests
-docs/SPEC.md                                         modifies: section 5.2's governor row stops claiming the user's stop, and one paragraph says how several rows carrying one move are ordered, whose an assignee's or a reviewer's row is, what each escalation's reason is, and what a rejection and a return from blocked record
+crates/core/src/governor/transition.rs               creates: evaluate_transition, the request, the context, the decision, the effects, the refusals, twenty-four tests
+docs/SPEC.md                                         modifies: section 5.2's `refining -> ready` row names the human's acceptance, its governor row stops claiming the user's stop and says which budgets escalate a task, and one paragraph says how several rows carrying one move are ordered, whose an assignee's or a reviewer's row is, what each escalation's reason is, what a return to work records, and what a block with no recorded time does
 docs/plans/project-plan.md                           modifies: phase 1 step 09's interface records the changes this plan makes to it
 docs/plans/phase-1-harness/step-09-transition-evaluation.md   modifies: checkboxes ticked
 ```
@@ -344,18 +352,21 @@ Produces: `governor::transition::{TransitionRequest, ContractAcceptance, Transit
               )
               .is_ok()
           );
-          // An unassigned task has no assignee to ask for it, however the request is spelled.
-          context.contract.assignee = None;
-          for asked in [None, Some("dev-1"), Some("  ")] {
-              assert_eq!(
-                  decide(&ask(TaskStatus::Verifying, A::Assignee, asked), &context),
-                  Err(TransitionRefusal::NotTheNamedAgent {
-                      actor: A::Assignee,
-                      named: None,
-                      asked: asked.map(str::to_string)
-                  }),
-                  "{asked:?}"
-              );
+          // An unassigned task has no assignee to ask for it, however the request is spelled, and a
+          // contract whose assignee is a blank names nobody either.
+          for named in [None, Some("  ")] {
+              context.contract.assignee = named.map(str::to_string);
+              for asked in [None, Some("dev-1"), Some("  ")] {
+                  assert_eq!(
+                      decide(&ask(TaskStatus::Verifying, A::Assignee, asked), &context),
+                      Err(TransitionRefusal::NotTheNamedAgent {
+                          actor: A::Assignee,
+                          named: named.map(str::to_string),
+                          asked: asked.map(str::to_string)
+                      }),
+                      "{named:?} {asked:?}"
+                  );
+              }
           }
       }
 
@@ -424,6 +435,75 @@ Produces: `governor::transition::{TransitionRequest, ContractAcceptance, Transit
           assert_eq!(
               details,
               vec!["the intent is blank; state the user-facing reason for the task".to_string()]
+          );
+      }
+
+      #[test]
+      fn keeps_a_contract_the_human_has_not_accepted_out_of_ready() {
+          // Spec 5.16 item 2: every epic requires the human's acceptance of its contract before it
+          // leaves `refining`, whatever its risk, and 5.2 says the same for a high risk and for the
+          // team's policy. This is the only function the runtime asks, so a rule it does not hold is
+          // not held: the epic would reach `ready`, then `assigned`, with no approval ever asked for.
+          let mut context = a_context();
+          context.status = TaskStatus::Refining;
+          let ready = ask(TaskStatus::Ready, A::Governor, None);
+          let waiting =
+              "this contract needs the human's acceptance before it leaves refining (5.16 item 2), and the human has not given it"
+                  .to_string();
+          context.contract.kind = Kind::Epic;
+          assert_eq!(
+              one_gate(&ready, &context),
+              (GateId::DefinitionOfReady, vec![waiting.clone()])
+          );
+          context.contract.kind = Kind::Task;
+          context.contract.risk = Risk::High;
+          assert_eq!(
+              one_gate(&ready, &context),
+              (GateId::DefinitionOfReady, vec![waiting.clone()])
+          );
+          context.contract.risk = Risk::Medium;
+          context.acceptance.required_by_policy = true;
+          assert_eq!(
+              one_gate(&ready, &context),
+              (GateId::DefinitionOfReady, vec![waiting])
+          );
+          // Once the human has accepted, the Definition of Ready is the whole gate again.
+          context.acceptance.given = true;
+          assert_eq!(effects(&ready, &context), []);
+      }
+
+      #[test]
+      fn asks_the_human_only_once_the_contract_passes_the_structural_checks() {
+          // Spec 5.16 item 2: "once the contract passes the structural checks, the governor moves the
+          // epic to `escalated` with reason `approval`". An epic sent to the user on its first
+          // readiness failure would lose the three refining attempts 5.2 gives it, and the human's
+          // gate-free `escalated -> any` row would then carry a contract that never passed the
+          // Definition of Ready into `ready`.
+          let mut context = a_context();
+          context.status = TaskStatus::Refining;
+          context.contract.kind = Kind::Epic;
+          context.readiness_failed_attempts = 1;
+          context.contract.intent = " "
+              .repeat(24)
+              .parse()
+              .expect("twenty-four spaces pass the schema");
+          let request = ask(TaskStatus::Escalated, A::Governor, None);
+          let failures = gates(&request, &context);
+          assert_eq!(failures[1].gate, GateId::ContractRequiresHuman);
+          assert_eq!(
+              failures[1].details,
+              vec![
+                  "the human is asked once the contract passes the structural checks (5.16 item 2), and this one does not yet"
+                      .to_string(),
+                  "the intent is blank; state the user-facing reason for the task".to_string()
+              ]
+          );
+          // The same epic, written properly, goes to the user.
+          context.contract = a_context().contract;
+          context.contract.kind = Kind::Epic;
+          assert_eq!(
+              effects(&request, &context),
+              [TransitionEffect::RaiseEscalation(Why::Approval)]
           );
       }
 
@@ -515,8 +595,41 @@ Produces: `governor::transition::{TransitionRequest, ContractAcceptance, Transit
           context.status = TaskStatus::Ready;
           let request = ask(TaskStatus::Assigned, A::ScrumMaster, Some("sm-1"));
           assert_eq!(effects(&request, &context), []);
-          // The gate's details are the assignment gate's own, and a runtime that named no pair of
-          // agents is told so rather than refused for a rule it could not have met.
+          // The gate's details are the assignment gate's own: a limit of zero is that gate's answer
+          // and this module does not reword it.
+          context
+              .assignment
+              .as_mut()
+              .expect("the fixture assigns")
+              .wip_limit = 0;
+          assert_eq!(
+              one_gate(&request, &context),
+              (
+                  GateId::Assignment,
+                  vec!["dev-1 takes no work: its limit is zero".to_string()]
+              )
+          );
+          // And the Product Manager asks only when the team has no active Scrum Master, which is the
+          // same gate refusing on its own row rather than a row missing. Who asked comes from the
+          // request's actor, not from the input's `requested_by`, or the fixture's Scrum Master would
+          // open the Product Manager's row.
+          let mut by_the_pm = a_context();
+          by_the_pm.status = TaskStatus::Ready;
+          assert_eq!(
+              one_gate(
+                  &ask(TaskStatus::Assigned, A::ProductManager, Some("pm-1")),
+                  &by_the_pm
+              ),
+              (
+                  GateId::Assignment,
+                  vec![
+                      "the Product Manager assigns only when the team has no active Scrum Master"
+                          .to_string()
+                  ]
+              )
+          );
+          // A runtime that named no pair of agents is told so rather than refused for a rule it could
+          // not have met.
           context.assignment = None;
           assert_eq!(
               one_gate(&request, &context),
@@ -561,6 +674,16 @@ Produces: `governor::transition::{TransitionRequest, ContractAcceptance, Transit
           let mut context = a_context();
           let block = ask(TaskStatus::Blocked, A::Assignee, Some("dev-1"));
           assert_eq!(effects(&block, &context), []);
+          // A blocker that says nothing about what is needed is the gate's answer, not a missing
+          // value, and the details are the gate's own.
+          context.blocker.as_mut().expect("the fixture blocks").needed = " ".to_string();
+          assert_eq!(
+              one_gate(&block, &context),
+              (
+                  GateId::BlockerWritten,
+                  vec!["the blocker does not say what is needed to clear it".to_string()]
+              )
+          );
           context.blocker = None;
           assert_eq!(one_gate(&block, &context).0, GateId::BlockerWritten);
           // Leaving `blocked` for work clears the blocker, whoever asked.
@@ -614,9 +737,9 @@ Produces: `governor::transition::{TransitionRequest, ContractAcceptance, Transit
                       .to_string()
               ]
           );
-          // With the age row shut and a budget exhausted, the governor's own row carries the move,
-          // and the reason follows the row that opened rather than the one that did not.
-          context.budget.day_spent_usd = context.budget.day_max_usd;
+          // With the age row shut and the task's own budget exhausted, the governor's own row carries
+          // the move, and the reason follows the row that opened rather than the one that did not.
+          context.budget.task_spent_usd = context.budget.task_max_usd;
           assert_eq!(
               effects(&request, &context),
               [TransitionEffect::RaiseEscalation(Why::Budget)]
@@ -642,14 +765,14 @@ Produces: `governor::transition::{TransitionRequest, ContractAcceptance, Transit
       }
 
       #[test]
-      fn rejects_work_with_written_reasons_and_counts_the_iteration() {
+      fn rejects_work_only_with_written_reasons_and_leaves_the_count_to_the_return() {
           let mut context = a_context();
           context.status = TaskStatus::Verifying;
           let request = ask(TaskStatus::Rejected, A::Reviewer, Some("arch-1"));
-          assert_eq!(
-              effects(&request, &context),
-              [TransitionEffect::IncrementIteration]
-          );
+          // The contract's `iteration` is how many times the task has already been returned to
+          // `in_progress` after a rejection, which is what `max_iterations` bounds (the schema's own
+          // words, and step 06's decision), so the rejection itself records nothing.
+          assert_eq!(effects(&request, &context), []);
           context.rejection = None;
           assert_eq!(
               one_gate(&request, &context),
@@ -661,6 +784,39 @@ Produces: `governor::transition::{TransitionRequest, ContractAcceptance, Transit
                   ]
               )
           );
+          // A rejection the contract cannot make sense of is the gate's own answer, unreworded.
+          context.rejection = Some(Rejection {
+              failed_criterion_ids: vec!["C9".to_string()],
+              reasons: "The form accepts an empty password.".to_string(),
+          });
+          assert_eq!(
+              one_gate(&request, &context),
+              (
+                  GateId::RejectionReasons,
+                  vec!["this contract has no criterion C9".to_string()]
+              )
+          );
+      }
+
+      #[test]
+      fn counts_the_iteration_when_the_task_returns_to_work_and_clears_its_blocker() {
+          let mut context = a_context();
+          context.status = TaskStatus::Rejected;
+          // The return is what the count is of, and a task going back to work carries no blocker.
+          assert_eq!(
+              effects(&ask(TaskStatus::InProgress, A::Governor, None), &context),
+              [
+                  TransitionEffect::IncrementIteration,
+                  TransitionEffect::ResetBlocker
+              ]
+          );
+          // A task the human takes out of `escalated` into work leaves its blocker behind too: one
+          // that escalated out of `blocked` kept it, and a stale blocker would age again.
+          context.status = TaskStatus::Escalated;
+          assert_eq!(
+              effects(&ask(TaskStatus::InProgress, A::Human, None), &context),
+              [TransitionEffect::ResetBlocker]
+          );
       }
 
       #[test]
@@ -669,9 +825,16 @@ Produces: `governor::transition::{TransitionRequest, ContractAcceptance, Transit
           context.status = TaskStatus::Rejected;
           let again = ask(TaskStatus::InProgress, A::Governor, None);
           let escalate = ask(TaskStatus::Escalated, A::Governor, None);
-          // The contract's default limit is three; the iteration counts the rejections so far.
+          // The contract's default limit is three; the iteration counts the returns so far, and the
+          // return this decides is the one it counts.
           context.contract.iteration = 2;
-          assert_eq!(effects(&again, &context), []);
+          assert_eq!(
+              effects(&again, &context),
+              [
+                  TransitionEffect::IncrementIteration,
+                  TransitionEffect::ResetBlocker
+              ]
+          );
           assert_eq!(
               gates(&escalate, &context)[0].details,
               vec![
@@ -701,34 +864,82 @@ Produces: `governor::transition::{TransitionRequest, ContractAcceptance, Transit
               effects(&escalate, &context),
               [TransitionEffect::RaiseEscalation(Why::Iterations)]
           );
+          // A limit that large is what the contract asked for: effectively none, so the task is
+          // worked again however many times it has been returned.
+          context.contract.budget.max_iterations = (u64::from(u32::MAX) + 1)
+              .try_into()
+              .expect("a limit above u32::MAX is still non-zero");
+          context.contract.iteration = 5;
+          assert_eq!(
+              effects(&again, &context),
+              [
+                  TransitionEffect::IncrementIteration,
+                  TransitionEffect::ResetBlocker
+              ]
+          );
       }
 
       #[test]
-      fn escalates_on_an_exhausted_budget_or_a_denied_permission() {
+      fn escalates_only_on_a_budget_whose_consequence_is_escalation() {
           let mut context = a_context();
           let request = ask(TaskStatus::Escalated, A::Governor, None);
+          let nothing_to_escalate =
+              "no budget whose consequence is escalation is exhausted and no permission was denied, so the governor has nothing to escalate"
+                  .to_string();
           assert_eq!(
               one_gate(&request, &context),
               (
                   GateId::GovernorEscalation,
-                  vec![
-                      "no budget is exhausted and no permission was denied, so the governor has nothing to escalate"
-                          .to_string()
-                  ]
+                  vec![nothing_to_escalate.clone()]
               )
           );
-          // The task's sessions are their own reason (5.7); every other budget is `budget`.
-          context.budget.task_sessions = context.budget.task_max_sessions;
-          assert_eq!(
-              effects(&request, &context),
-              [TransitionEffect::RaiseEscalation(Why::Sessions)]
-          );
+          // Spec 5.5 gives every budget its own consequence, and only the task's carry escalation:
+          // the session's end the session and block the task, the sprint's stops new assignments,
+          // and the day's pauses the team. Escalating one task for any of those would be the wrong
+          // answer to the wrong question.
+          for elsewhere in [
+              |budget: &mut BudgetState| {
+                  budget.session.usage.input_tokens = budget.session_limits.max_input_tokens;
+              },
+              |budget: &mut BudgetState| {
+                  budget.session.wall_clock = budget.session_limits.max_wall_clock;
+              },
+              |budget: &mut BudgetState| {
+                  budget.session.tool_calls = budget.session_limits.max_tool_calls;
+              },
+              |budget: &mut BudgetState| budget.sprint_spent_usd = budget.sprint_max_usd,
+              |budget: &mut BudgetState| budget.day_spent_usd = budget.day_max_usd,
+          ] {
+              context.budget = a_budget();
+              elsewhere(&mut context.budget);
+              assert_eq!(
+                  one_gate(&request, &context),
+                  (
+                      GateId::GovernorEscalation,
+                      vec![nothing_to_escalate.clone()]
+                  )
+              );
+          }
+          // The task's dollars are `budget` and its sessions are `sessions` (5.7).
           context.budget = a_budget();
           context.budget.task_spent_usd = context.budget.task_max_usd;
           assert_eq!(
               effects(&request, &context),
               [TransitionEffect::RaiseEscalation(Why::Budget)]
           );
+          context.budget = a_budget();
+          context.budget.task_sessions = context.budget.task_max_sessions;
+          assert_eq!(
+              effects(&request, &context),
+              [TransitionEffect::RaiseEscalation(Why::Sessions)]
+          );
+          // Both at once: the dollars are the harder limit and the reason the user reads.
+          context.budget.task_spent_usd = context.budget.task_max_usd;
+          assert_eq!(
+              effects(&request, &context),
+              [TransitionEffect::RaiseEscalation(Why::Budget)]
+          );
+          // And a permission denied on a required action, with every budget in hand.
           context.budget = a_budget();
           context.permission_denied = true;
           assert_eq!(
@@ -758,10 +969,23 @@ Produces: `governor::transition::{TransitionRequest, ContractAcceptance, Transit
           ] {
               assert!(decide(&ask(to, A::Human, None), &context).is_ok(), "{to}");
           }
-          // An agent cannot: the row is the human's.
+          // An agent cannot: the row is the human's, and the actor is answered before the agent id,
+          // so a reviewer asking with the wrong id is told the row is not its actor's at all.
+          for (actor, agent_id) in [(A::Assignee, "dev-1"), (A::Reviewer, "dev-2")] {
+              assert_eq!(
+                  decide(&ask(TaskStatus::Ready, actor, Some(agent_id)), &context),
+                  Err(TransitionRefusal::ActorNotAllowed {
+                      actor,
+                      allowed: vec![A::Human]
+                  }),
+                  "{actor:?}"
+              );
+          }
+          // Cancelling is the human's too, and the two rows that carry `escalated -> cancelled` name
+          // the same actor, which is named once.
           assert_eq!(
               decide(
-                  &ask(TaskStatus::Ready, A::Assignee, Some("dev-1")),
+                  &ask(TaskStatus::Cancelled, A::Assignee, Some("dev-1")),
                   &context
               ),
               Err(TransitionRefusal::ActorNotAllowed {
@@ -904,7 +1128,7 @@ Produces: `governor::transition::{TransitionRequest, ContractAcceptance, Transit
           let mut context = a_context();
           context.status = TaskStatus::Refining;
           context.readiness_failed_attempts = 3;
-          context.budget.day_spent_usd = context.budget.day_max_usd;
+          context.budget.task_spent_usd = context.budget.task_max_usd;
           let decision = decide(&ask(TaskStatus::Escalated, A::Governor, None), &context)
               .expect("the move is allowed");
           assert_eq!(decision.row.gate, GateId::ReadinessExhausted);
@@ -926,7 +1150,9 @@ Produces: `governor::transition::{TransitionRequest, ContractAcceptance, Transit
           )
           .expect("the move is allowed");
           assert_eq!(decision.row.gate, GateId::None);
-          assert_eq!(decision.effects, []);
+          // Every move into `in_progress` clears the blocker: a task at work has none, and the
+          // runtime clearing nothing costs nothing.
+          assert_eq!(decision.effects, [TransitionEffect::ResetBlocker]);
           // And the rejection outcome of step 06 is what the iteration gates read, not a count of
           // their own: at the default limit a fresh task is worked rather than escalated.
           assert_eq!(
@@ -962,7 +1188,7 @@ Produces: `governor::transition::{TransitionRequest, ContractAcceptance, Transit
 
   use chrono::{DateTime, Utc};
 
-  use crate::budget::{BudgetScope, BudgetState, check_budgets};
+  use crate::budget::{BudgetConsequence, BudgetScope, BudgetState, check_budgets};
   use crate::contract::{TaskContract, TaskId, TaskStatus};
   use crate::generated::task_contract::FarikTaskContractKind as Kind;
   use crate::governor::done::{
@@ -973,9 +1199,9 @@ Produces: `governor::transition::{TransitionRequest, ContractAcceptance, Transit
       evaluate_blocked_age, evaluate_readiness_attempts, evaluate_rejection,
   };
   use crate::governor::gates::{
-      AssignmentInput, Blocker, ChildState, GateResult, Rejection, WorkState, check_assignment,
-      check_blocker_resolved, check_blocker_written, check_children_done, check_criteria_recorded,
-      check_rejection_reasons,
+      AssignmentInput, AssignmentRequester, Blocker, ChildState, GateResult, Rejection, WorkState,
+      check_assignment, check_blocker_resolved, check_blocker_written, check_children_done,
+      check_criteria_recorded, check_rejection_reasons,
   };
   use crate::governor::readiness::{ReadinessContext, evaluate_readiness};
   use crate::governor::transition_table::{GateId, TransitionActor, TransitionRow, find_transitions};
@@ -1049,7 +1275,10 @@ Produces: `governor::transition::{TransitionRequest, ContractAcceptance, Transit
       pub done: DoneEvidence,
       /// What the reviewer wrote when it rejected the work.
       pub rejection: Option<Rejection>,
-      /// Every budget's spend and limit.
+      /// Every budget's spend and limit. What is left of the sprint appears three times in this
+      /// context — here, in `readiness`, and in `assignment` — because each of those answers its own
+      /// question; the runtime derives all three from one figure, or the Definition of Ready and the
+      /// assignment gate could disagree about the same sprint.
       pub budget: BudgetState,
       /// Whether a permission was denied on an action the task requires.
       pub permission_denied: bool,
@@ -1058,7 +1287,8 @@ Produces: `governor::transition::{TransitionRequest, ContractAcceptance, Transit
   /// What the runtime must record along with the move.
   #[derive(Debug, Clone, Copy, PartialEq, Eq)]
   pub enum TransitionEffect {
-      /// The contract's `iteration` goes up by one: the task has been rejected once more.
+      /// The contract's `iteration` goes up by one: the task has been returned to `in_progress`
+      /// after a rejection once more, which is what `max_iterations` bounds.
       IncrementIteration,
       /// An escalation is raised, for this reason (`docs/SPEC.md` section 5.7).
       RaiseEscalation(EscalationReason),
@@ -1169,7 +1399,7 @@ Produces: `governor::transition::{TransitionRequest, ContractAcceptance, Transit
       }
       let mut failures = Vec::new();
       for row in mine {
-          match check_gate(row.gate, context) {
+          match check_gate(row.gate, request.actor, context) {
               Ok(()) => {
                   return Ok(TransitionDecision {
                       from: context.status,
@@ -1232,20 +1462,22 @@ Produces: `governor::transition::{TransitionRequest, ContractAcceptance, Transit
   }
 
   /// Whether one gate opens, and everything it says when it does not.
-  fn check_gate(gate: GateId, context: &TransitionContext) -> GateResult {
+  fn check_gate(gate: GateId, actor: TransitionActor, context: &TransitionContext) -> GateResult {
       match gate {
           GateId::None => Ok(()),
           GateId::Triaged => open_or(context.triaged, || {
               "the request has no recorded triage decision, and refining starts from one (5.16)"
                   .to_string()
           }),
-          GateId::DefinitionOfReady => evaluate_readiness(&context.contract, &context.readiness)
-              .map_err(|failures| {
-                  failures
-                      .iter()
-                      .map(|failure| failure.message.clone())
-                      .collect()
-              }),
+          GateId::DefinitionOfReady => {
+              if waits_for_the_human(context) {
+                  return Err(vec![
+                      "this contract needs the human's acceptance before it leaves refining (5.16 item 2), and the human has not given it"
+                          .to_string(),
+                  ]);
+              }
+              readiness_failures(context).map_or(Ok(()), Err)
+          }
           GateId::ReadinessExhausted => open_or(
               evaluate_readiness_attempts(context.readiness_failed_attempts)
                   == ReadinessOutcome::Escalate,
@@ -1258,7 +1490,11 @@ Produces: `governor::transition::{TransitionRequest, ContractAcceptance, Transit
           ),
           GateId::ContractRequiresHuman => human_must_accept_the_contract(context),
           GateId::Assignment => match &context.assignment {
-              Some(assignment) => check_assignment(&context.contract, assignment),
+              Some(assignment) => {
+                  let mut asked = assignment.clone();
+                  asked.requested_by = requester(actor);
+                  check_assignment(&context.contract, &asked)
+              }
               None => Err(vec![
                   "the runtime named no pair of agents for this assignment".to_string(),
               ]),
@@ -1306,10 +1542,25 @@ Produces: `governor::transition::{TransitionRequest, ContractAcceptance, Transit
           ),
           GateId::GovernorEscalation => {
               open_or(governor_escalation_reason(context).is_some(), || {
-                  "no budget is exhausted and no permission was denied, so the governor has nothing to escalate"
+                  "no budget whose consequence is escalation is exhausted and no permission was denied, so the governor has nothing to escalate"
                       .to_string()
               })
           }
+      }
+  }
+
+  /// Who asked for an assignment, from the actor of the row rather than from the input: the request
+  /// says who is asking and the two must not be able to disagree, or a team with an active Scrum
+  /// Master could have the Product Manager's row opened by an input that says the Scrum Master asked.
+  /// Only those two rows carry an assignment (5.2), so no other actor reaches this.
+  fn requester(actor: TransitionActor) -> AssignmentRequester {
+      match actor {
+          TransitionActor::ProductManager => AssignmentRequester::ProductManager,
+          TransitionActor::ScrumMaster
+          | TransitionActor::Assignee
+          | TransitionActor::Reviewer
+          | TransitionActor::Governor
+          | TransitionActor::Human => AssignmentRequester::ScrumMaster,
       }
   }
 
@@ -1336,7 +1587,41 @@ Produces: `governor::transition::{TransitionRequest, ContractAcceptance, Transit
                   .to_string(),
           ]);
       }
+      // 5.16 item 2 asks the human once the contract passes the structural checks. A contract sent to
+      // the user on its first readiness failure would lose the three refining attempts 5.2 gives it,
+      // and the human's gate-free `escalated -> any` row would then carry a contract that never
+      // passed the Definition of Ready into `ready`.
+      if let Some(failures) = readiness_failures(context) {
+          let mut details = vec![
+              "the human is asked once the contract passes the structural checks (5.16 item 2), and this one does not yet"
+                  .to_string(),
+          ];
+          details.extend(failures);
+          return Err(details);
+      }
       Ok(())
+  }
+
+  /// Whether this contract is waiting for the human's acceptance: the team's policy asks for it, or
+  /// the contract's own risk or kind does (`done::requires_human_acceptance`), and the human has not
+  /// answered. Either half is enough, so the two cannot disagree in the direction that would carry a
+  /// task past the human.
+  fn waits_for_the_human(context: &TransitionContext) -> bool {
+      (context.acceptance.required_by_policy || requires_human_acceptance(&context.contract))
+          && !context.acceptance.given
+  }
+
+  /// The Definition of Ready's own messages when the contract fails it, in its own order, and `None`
+  /// when it passes.
+  fn readiness_failures(context: &TransitionContext) -> Option<Vec<String>> {
+      evaluate_readiness(&context.contract, &context.readiness)
+          .err()
+          .map(|failures| {
+              failures
+                  .iter()
+                  .map(|failure| failure.message.clone())
+                  .collect()
+          })
   }
 
   /// The `BlockedAge` gate of `blocked -> escalated`. A task the runtime stamped no block time for
@@ -1381,11 +1666,22 @@ Produces: `governor::transition::{TransitionRequest, ContractAcceptance, Transit
   /// sessions are their own reason (5.7); every other exhausted budget is `budget`. A user's `stop`
   /// reaches the table as the human's own row instead, which needs no gate.
   fn governor_escalation_reason(context: &TransitionContext) -> Option<EscalationReason> {
-      if let Some(first) = check_budgets(&context.budget).first() {
-          return Some(if first.scope == BudgetScope::TaskSessions {
-              EscalationReason::Sessions
-          } else {
-              EscalationReason::Budget
+      for exhausted in check_budgets(&context.budget) {
+          if exhausted.consequence != BudgetConsequence::EscalateTask {
+              continue;
+          }
+          return Some(match exhausted.scope {
+              BudgetScope::TaskSessions => EscalationReason::Sessions,
+              // The task's dollars are the only other scope 5.5 gives `EscalateTask`, and they come
+              // first in `BudgetScope`, so a task out of both reads as the dollars, the harder limit.
+              // A scope that grew that consequence would escalate on dollars until somebody chose its
+              // reason here.
+              BudgetScope::TaskUsd
+              | BudgetScope::SessionTokens
+              | BudgetScope::SessionWallClock
+              | BudgetScope::SessionToolCalls
+              | BudgetScope::SprintUsd
+              | BudgetScope::DayUsd => EscalationReason::Budget,
           });
       }
       if context.permission_denied {
@@ -1394,12 +1690,15 @@ Produces: `governor::transition::{TransitionRequest, ContractAcceptance, Transit
       None
   }
 
-  /// What the runtime records with the move: the rejection that has just happened counts, a move to
-  /// `escalated` carries the reason the gate that opened it names, and a task leaving `blocked` for
-  /// work leaves its blocker behind.
+  /// What the runtime records with the move: a task returning to work after a rejection counts that
+  /// return, which is what `max_iterations` bounds (step 06, and the schema's own words); a move to
+  /// `escalated` carries the reason the gate that opened it names; and a task entering `in_progress`
+  /// leaves its blocker behind, whatever status it came from, because a task at work has none and a
+  /// stale one would age again — a task that escalates out of `blocked` keeps its blocker, which is
+  /// what the user is shown.
   fn effects(gate: GateId, to: TaskStatus, context: &TransitionContext) -> Vec<TransitionEffect> {
       let mut effects = Vec::new();
-      if to == TaskStatus::Rejected {
+      if context.status == TaskStatus::Rejected && to == TaskStatus::InProgress {
           effects.push(TransitionEffect::IncrementIteration);
       }
       if to == TaskStatus::Escalated {
@@ -1407,7 +1706,7 @@ Produces: `governor::transition::{TransitionRequest, ContractAcceptance, Transit
               gate, context,
           )));
       }
-      if context.status == TaskStatus::Blocked && to == TaskStatus::InProgress {
+      if to == TaskStatus::InProgress {
           effects.push(TransitionEffect::ResetBlocker);
       }
       effects
@@ -1674,18 +1973,21 @@ Produces: `governor::transition::{TransitionRequest, ContractAcceptance, Transit
               )
               .is_ok()
           );
-          // An unassigned task has no assignee to ask for it, however the request is spelled.
-          context.contract.assignee = None;
-          for asked in [None, Some("dev-1"), Some("  ")] {
-              assert_eq!(
-                  decide(&ask(TaskStatus::Verifying, A::Assignee, asked), &context),
-                  Err(TransitionRefusal::NotTheNamedAgent {
-                      actor: A::Assignee,
-                      named: None,
-                      asked: asked.map(str::to_string)
-                  }),
-                  "{asked:?}"
-              );
+          // An unassigned task has no assignee to ask for it, however the request is spelled, and a
+          // contract whose assignee is a blank names nobody either.
+          for named in [None, Some("  ")] {
+              context.contract.assignee = named.map(str::to_string);
+              for asked in [None, Some("dev-1"), Some("  ")] {
+                  assert_eq!(
+                      decide(&ask(TaskStatus::Verifying, A::Assignee, asked), &context),
+                      Err(TransitionRefusal::NotTheNamedAgent {
+                          actor: A::Assignee,
+                          named: named.map(str::to_string),
+                          asked: asked.map(str::to_string)
+                      }),
+                      "{named:?} {asked:?}"
+                  );
+              }
           }
       }
 
@@ -1754,6 +2056,75 @@ Produces: `governor::transition::{TransitionRequest, ContractAcceptance, Transit
           assert_eq!(
               details,
               vec!["the intent is blank; state the user-facing reason for the task".to_string()]
+          );
+      }
+
+      #[test]
+      fn keeps_a_contract_the_human_has_not_accepted_out_of_ready() {
+          // Spec 5.16 item 2: every epic requires the human's acceptance of its contract before it
+          // leaves `refining`, whatever its risk, and 5.2 says the same for a high risk and for the
+          // team's policy. This is the only function the runtime asks, so a rule it does not hold is
+          // not held: the epic would reach `ready`, then `assigned`, with no approval ever asked for.
+          let mut context = a_context();
+          context.status = TaskStatus::Refining;
+          let ready = ask(TaskStatus::Ready, A::Governor, None);
+          let waiting =
+              "this contract needs the human's acceptance before it leaves refining (5.16 item 2), and the human has not given it"
+                  .to_string();
+          context.contract.kind = Kind::Epic;
+          assert_eq!(
+              one_gate(&ready, &context),
+              (GateId::DefinitionOfReady, vec![waiting.clone()])
+          );
+          context.contract.kind = Kind::Task;
+          context.contract.risk = Risk::High;
+          assert_eq!(
+              one_gate(&ready, &context),
+              (GateId::DefinitionOfReady, vec![waiting.clone()])
+          );
+          context.contract.risk = Risk::Medium;
+          context.acceptance.required_by_policy = true;
+          assert_eq!(
+              one_gate(&ready, &context),
+              (GateId::DefinitionOfReady, vec![waiting])
+          );
+          // Once the human has accepted, the Definition of Ready is the whole gate again.
+          context.acceptance.given = true;
+          assert_eq!(effects(&ready, &context), []);
+      }
+
+      #[test]
+      fn asks_the_human_only_once_the_contract_passes_the_structural_checks() {
+          // Spec 5.16 item 2: "once the contract passes the structural checks, the governor moves the
+          // epic to `escalated` with reason `approval`". An epic sent to the user on its first
+          // readiness failure would lose the three refining attempts 5.2 gives it, and the human's
+          // gate-free `escalated -> any` row would then carry a contract that never passed the
+          // Definition of Ready into `ready`.
+          let mut context = a_context();
+          context.status = TaskStatus::Refining;
+          context.contract.kind = Kind::Epic;
+          context.readiness_failed_attempts = 1;
+          context.contract.intent = " "
+              .repeat(24)
+              .parse()
+              .expect("twenty-four spaces pass the schema");
+          let request = ask(TaskStatus::Escalated, A::Governor, None);
+          let failures = gates(&request, &context);
+          assert_eq!(failures[1].gate, GateId::ContractRequiresHuman);
+          assert_eq!(
+              failures[1].details,
+              vec![
+                  "the human is asked once the contract passes the structural checks (5.16 item 2), and this one does not yet"
+                      .to_string(),
+                  "the intent is blank; state the user-facing reason for the task".to_string()
+              ]
+          );
+          // The same epic, written properly, goes to the user.
+          context.contract = a_context().contract;
+          context.contract.kind = Kind::Epic;
+          assert_eq!(
+              effects(&request, &context),
+              [TransitionEffect::RaiseEscalation(Why::Approval)]
           );
       }
 
@@ -1845,8 +2216,41 @@ Produces: `governor::transition::{TransitionRequest, ContractAcceptance, Transit
           context.status = TaskStatus::Ready;
           let request = ask(TaskStatus::Assigned, A::ScrumMaster, Some("sm-1"));
           assert_eq!(effects(&request, &context), []);
-          // The gate's details are the assignment gate's own, and a runtime that named no pair of
-          // agents is told so rather than refused for a rule it could not have met.
+          // The gate's details are the assignment gate's own: a limit of zero is that gate's answer
+          // and this module does not reword it.
+          context
+              .assignment
+              .as_mut()
+              .expect("the fixture assigns")
+              .wip_limit = 0;
+          assert_eq!(
+              one_gate(&request, &context),
+              (
+                  GateId::Assignment,
+                  vec!["dev-1 takes no work: its limit is zero".to_string()]
+              )
+          );
+          // And the Product Manager asks only when the team has no active Scrum Master, which is the
+          // same gate refusing on its own row rather than a row missing. Who asked comes from the
+          // request's actor, not from the input's `requested_by`, or the fixture's Scrum Master would
+          // open the Product Manager's row.
+          let mut by_the_pm = a_context();
+          by_the_pm.status = TaskStatus::Ready;
+          assert_eq!(
+              one_gate(
+                  &ask(TaskStatus::Assigned, A::ProductManager, Some("pm-1")),
+                  &by_the_pm
+              ),
+              (
+                  GateId::Assignment,
+                  vec![
+                      "the Product Manager assigns only when the team has no active Scrum Master"
+                          .to_string()
+                  ]
+              )
+          );
+          // A runtime that named no pair of agents is told so rather than refused for a rule it could
+          // not have met.
           context.assignment = None;
           assert_eq!(
               one_gate(&request, &context),
@@ -1891,6 +2295,16 @@ Produces: `governor::transition::{TransitionRequest, ContractAcceptance, Transit
           let mut context = a_context();
           let block = ask(TaskStatus::Blocked, A::Assignee, Some("dev-1"));
           assert_eq!(effects(&block, &context), []);
+          // A blocker that says nothing about what is needed is the gate's answer, not a missing
+          // value, and the details are the gate's own.
+          context.blocker.as_mut().expect("the fixture blocks").needed = " ".to_string();
+          assert_eq!(
+              one_gate(&block, &context),
+              (
+                  GateId::BlockerWritten,
+                  vec!["the blocker does not say what is needed to clear it".to_string()]
+              )
+          );
           context.blocker = None;
           assert_eq!(one_gate(&block, &context).0, GateId::BlockerWritten);
           // Leaving `blocked` for work clears the blocker, whoever asked.
@@ -1944,9 +2358,9 @@ Produces: `governor::transition::{TransitionRequest, ContractAcceptance, Transit
                       .to_string()
               ]
           );
-          // With the age row shut and a budget exhausted, the governor's own row carries the move,
-          // and the reason follows the row that opened rather than the one that did not.
-          context.budget.day_spent_usd = context.budget.day_max_usd;
+          // With the age row shut and the task's own budget exhausted, the governor's own row carries
+          // the move, and the reason follows the row that opened rather than the one that did not.
+          context.budget.task_spent_usd = context.budget.task_max_usd;
           assert_eq!(
               effects(&request, &context),
               [TransitionEffect::RaiseEscalation(Why::Budget)]
@@ -1972,14 +2386,14 @@ Produces: `governor::transition::{TransitionRequest, ContractAcceptance, Transit
       }
 
       #[test]
-      fn rejects_work_with_written_reasons_and_counts_the_iteration() {
+      fn rejects_work_only_with_written_reasons_and_leaves_the_count_to_the_return() {
           let mut context = a_context();
           context.status = TaskStatus::Verifying;
           let request = ask(TaskStatus::Rejected, A::Reviewer, Some("arch-1"));
-          assert_eq!(
-              effects(&request, &context),
-              [TransitionEffect::IncrementIteration]
-          );
+          // The contract's `iteration` is how many times the task has already been returned to
+          // `in_progress` after a rejection, which is what `max_iterations` bounds (the schema's own
+          // words, and step 06's decision), so the rejection itself records nothing.
+          assert_eq!(effects(&request, &context), []);
           context.rejection = None;
           assert_eq!(
               one_gate(&request, &context),
@@ -1991,6 +2405,39 @@ Produces: `governor::transition::{TransitionRequest, ContractAcceptance, Transit
                   ]
               )
           );
+          // A rejection the contract cannot make sense of is the gate's own answer, unreworded.
+          context.rejection = Some(Rejection {
+              failed_criterion_ids: vec!["C9".to_string()],
+              reasons: "The form accepts an empty password.".to_string(),
+          });
+          assert_eq!(
+              one_gate(&request, &context),
+              (
+                  GateId::RejectionReasons,
+                  vec!["this contract has no criterion C9".to_string()]
+              )
+          );
+      }
+
+      #[test]
+      fn counts_the_iteration_when_the_task_returns_to_work_and_clears_its_blocker() {
+          let mut context = a_context();
+          context.status = TaskStatus::Rejected;
+          // The return is what the count is of, and a task going back to work carries no blocker.
+          assert_eq!(
+              effects(&ask(TaskStatus::InProgress, A::Governor, None), &context),
+              [
+                  TransitionEffect::IncrementIteration,
+                  TransitionEffect::ResetBlocker
+              ]
+          );
+          // A task the human takes out of `escalated` into work leaves its blocker behind too: one
+          // that escalated out of `blocked` kept it, and a stale blocker would age again.
+          context.status = TaskStatus::Escalated;
+          assert_eq!(
+              effects(&ask(TaskStatus::InProgress, A::Human, None), &context),
+              [TransitionEffect::ResetBlocker]
+          );
       }
 
       #[test]
@@ -1999,9 +2446,16 @@ Produces: `governor::transition::{TransitionRequest, ContractAcceptance, Transit
           context.status = TaskStatus::Rejected;
           let again = ask(TaskStatus::InProgress, A::Governor, None);
           let escalate = ask(TaskStatus::Escalated, A::Governor, None);
-          // The contract's default limit is three; the iteration counts the rejections so far.
+          // The contract's default limit is three; the iteration counts the returns so far, and the
+          // return this decides is the one it counts.
           context.contract.iteration = 2;
-          assert_eq!(effects(&again, &context), []);
+          assert_eq!(
+              effects(&again, &context),
+              [
+                  TransitionEffect::IncrementIteration,
+                  TransitionEffect::ResetBlocker
+              ]
+          );
           assert_eq!(
               gates(&escalate, &context)[0].details,
               vec![
@@ -2031,34 +2485,82 @@ Produces: `governor::transition::{TransitionRequest, ContractAcceptance, Transit
               effects(&escalate, &context),
               [TransitionEffect::RaiseEscalation(Why::Iterations)]
           );
+          // A limit that large is what the contract asked for: effectively none, so the task is
+          // worked again however many times it has been returned.
+          context.contract.budget.max_iterations = (u64::from(u32::MAX) + 1)
+              .try_into()
+              .expect("a limit above u32::MAX is still non-zero");
+          context.contract.iteration = 5;
+          assert_eq!(
+              effects(&again, &context),
+              [
+                  TransitionEffect::IncrementIteration,
+                  TransitionEffect::ResetBlocker
+              ]
+          );
       }
 
       #[test]
-      fn escalates_on_an_exhausted_budget_or_a_denied_permission() {
+      fn escalates_only_on_a_budget_whose_consequence_is_escalation() {
           let mut context = a_context();
           let request = ask(TaskStatus::Escalated, A::Governor, None);
+          let nothing_to_escalate =
+              "no budget whose consequence is escalation is exhausted and no permission was denied, so the governor has nothing to escalate"
+                  .to_string();
           assert_eq!(
               one_gate(&request, &context),
               (
                   GateId::GovernorEscalation,
-                  vec![
-                      "no budget is exhausted and no permission was denied, so the governor has nothing to escalate"
-                          .to_string()
-                  ]
+                  vec![nothing_to_escalate.clone()]
               )
           );
-          // The task's sessions are their own reason (5.7); every other budget is `budget`.
-          context.budget.task_sessions = context.budget.task_max_sessions;
-          assert_eq!(
-              effects(&request, &context),
-              [TransitionEffect::RaiseEscalation(Why::Sessions)]
-          );
+          // Spec 5.5 gives every budget its own consequence, and only the task's carry escalation:
+          // the session's end the session and block the task, the sprint's stops new assignments,
+          // and the day's pauses the team. Escalating one task for any of those would be the wrong
+          // answer to the wrong question.
+          for elsewhere in [
+              |budget: &mut BudgetState| {
+                  budget.session.usage.input_tokens = budget.session_limits.max_input_tokens;
+              },
+              |budget: &mut BudgetState| {
+                  budget.session.wall_clock = budget.session_limits.max_wall_clock;
+              },
+              |budget: &mut BudgetState| {
+                  budget.session.tool_calls = budget.session_limits.max_tool_calls;
+              },
+              |budget: &mut BudgetState| budget.sprint_spent_usd = budget.sprint_max_usd,
+              |budget: &mut BudgetState| budget.day_spent_usd = budget.day_max_usd,
+          ] {
+              context.budget = a_budget();
+              elsewhere(&mut context.budget);
+              assert_eq!(
+                  one_gate(&request, &context),
+                  (
+                      GateId::GovernorEscalation,
+                      vec![nothing_to_escalate.clone()]
+                  )
+              );
+          }
+          // The task's dollars are `budget` and its sessions are `sessions` (5.7).
           context.budget = a_budget();
           context.budget.task_spent_usd = context.budget.task_max_usd;
           assert_eq!(
               effects(&request, &context),
               [TransitionEffect::RaiseEscalation(Why::Budget)]
           );
+          context.budget = a_budget();
+          context.budget.task_sessions = context.budget.task_max_sessions;
+          assert_eq!(
+              effects(&request, &context),
+              [TransitionEffect::RaiseEscalation(Why::Sessions)]
+          );
+          // Both at once: the dollars are the harder limit and the reason the user reads.
+          context.budget.task_spent_usd = context.budget.task_max_usd;
+          assert_eq!(
+              effects(&request, &context),
+              [TransitionEffect::RaiseEscalation(Why::Budget)]
+          );
+          // And a permission denied on a required action, with every budget in hand.
           context.budget = a_budget();
           context.permission_denied = true;
           assert_eq!(
@@ -2088,10 +2590,23 @@ Produces: `governor::transition::{TransitionRequest, ContractAcceptance, Transit
           ] {
               assert!(decide(&ask(to, A::Human, None), &context).is_ok(), "{to}");
           }
-          // An agent cannot: the row is the human's.
+          // An agent cannot: the row is the human's, and the actor is answered before the agent id,
+          // so a reviewer asking with the wrong id is told the row is not its actor's at all.
+          for (actor, agent_id) in [(A::Assignee, "dev-1"), (A::Reviewer, "dev-2")] {
+              assert_eq!(
+                  decide(&ask(TaskStatus::Ready, actor, Some(agent_id)), &context),
+                  Err(TransitionRefusal::ActorNotAllowed {
+                      actor,
+                      allowed: vec![A::Human]
+                  }),
+                  "{actor:?}"
+              );
+          }
+          // Cancelling is the human's too, and the two rows that carry `escalated -> cancelled` name
+          // the same actor, which is named once.
           assert_eq!(
               decide(
-                  &ask(TaskStatus::Ready, A::Assignee, Some("dev-1")),
+                  &ask(TaskStatus::Cancelled, A::Assignee, Some("dev-1")),
                   &context
               ),
               Err(TransitionRefusal::ActorNotAllowed {
@@ -2234,7 +2749,7 @@ Produces: `governor::transition::{TransitionRequest, ContractAcceptance, Transit
           let mut context = a_context();
           context.status = TaskStatus::Refining;
           context.readiness_failed_attempts = 3;
-          context.budget.day_spent_usd = context.budget.day_max_usd;
+          context.budget.task_spent_usd = context.budget.task_max_usd;
           let decision = decide(&ask(TaskStatus::Escalated, A::Governor, None), &context)
               .expect("the move is allowed");
           assert_eq!(decision.row.gate, GateId::ReadinessExhausted);
@@ -2256,7 +2771,9 @@ Produces: `governor::transition::{TransitionRequest, ContractAcceptance, Transit
           )
           .expect("the move is allowed");
           assert_eq!(decision.row.gate, GateId::None);
-          assert_eq!(decision.effects, []);
+          // Every move into `in_progress` clears the blocker: a task at work has none, and the
+          // runtime clearing nothing costs nothing.
+          assert_eq!(decision.effects, [TransitionEffect::ResetBlocker]);
           // And the rejection outcome of step 06 is what the iteration gates read, not a count of
           // their own: at the default limit a fresh task is worked rather than escalated.
           assert_eq!(
@@ -2276,7 +2793,19 @@ Produces: `governor::transition::{TransitionRequest, ContractAcceptance, Transit
   with
 
   ```
-  | any | escalated | Governor | budget exhausted, or permission denied on a required action; a `stop` from the user takes the human's row below, which needs no gate, because the governor is not what hears the user (added in 0.3) |
+  | any | escalated | Governor | a budget whose consequence is escalation is exhausted — the task's dollars or its sessions (5.5) — or a permission was denied on a required action; a `stop` from the user takes the human's row below, which needs no gate, because the governor is not what hears the user (added in 0.3) |
+  ```
+
+- [ ] Say in the spec that readying a contract waits for the human. In `docs/SPEC.md` section 5.2's transition table, replace
+
+  ```
+  | refining | ready | Governor, after PM submits contract | Definition of Ready (5.3) |
+  ```
+
+  with
+
+  ```
+  | refining | ready | Governor, after PM submits contract | Definition of Ready (5.3), and the human's acceptance of the contract where it is required: an epic always, a `high` risk, or the team's policy (5.16 item 2, 5.12; added in 0.3) |
   ```
 
 - [ ] Say in the spec how the table is read when more than one row carries a move. In `docs/SPEC.md` section 5.2, replace
@@ -2288,7 +2817,7 @@ Produces: `governor::transition::{TransitionRequest, ContractAcceptance, Transit
   with
 
   ```
-  More than one row can carry one move: three send a `refining` contract to `escalated`, and a blocked or rejected task has its own row and the governor's. The rows are taken in the order they appear here and the first whose gate opens is the one recorded, so the more specific reason is the one the user reads; when none opens, the refusal says what every gate it tried was waiting for. A row whose actor is the assignee or the reviewer is open only to the agent the contract names in that field, so one Developer cannot declare another's task done (5.1). A move to `escalated` raises an escalation whose reason is the row's: the readiness failures, an epic's approval or a task's risk gate, the blocker's age, the iteration limit, the exhausted budget (the task's sessions being their own reason), the denied permission, or the user's own request on the human's row (5.7). A rejection counts: `iteration` goes up by one as the task enters `rejected`, which is what the limit on `rejected -> in_progress` is measured against, and a task that leaves `blocked` for `in_progress` leaves its blocker and its block time behind, while one that escalates out of `blocked` keeps both, because that is what the user is shown (added in 0.3).
+  More than one row can carry one move: three send a `refining` contract to `escalated`, and a blocked or rejected task has its own row and the governor's. The rows are taken in the order they appear here and the first whose gate opens is the one recorded, so the more specific reason is the one the user reads; when none opens, the refusal says what every gate it tried was waiting for. A row whose actor is the assignee or the reviewer is open only to the agent the contract names in that field, so one Developer cannot declare another's task done (5.1), and who asked for an assignment is the actor of the request rather than anything the runtime repeats back. A move to `escalated` raises an escalation whose reason is the row's: the readiness failures, an epic's approval or a task's risk gate, the blocker's age, the iteration limit, the exhausted budget (the task's sessions being their own reason), the denied permission, or the user's own request on the human's row (5.7). The approval row opens only once the contract passes the structural checks (5.16 item 2), so a contract that fails them is refined again rather than sent to the user. `iteration` counts returns: it goes up by one as the task goes from `rejected` back to `in_progress`, which is what `max_iterations` bounds, and every move into `in_progress` clears the blocker and its time, including the one the human makes from `escalated`, because a task that escalated out of `blocked` kept its blocker and a stale one would age again. A block the runtime recorded no time for cannot be aged, so the governor refuses to escalate it and says so, as it does for any value it was not given (added in 0.3).
 
   The governor judges an assignment on what the runtime tells it,
   ```
@@ -2347,10 +2876,10 @@ Produces: `governor::transition::{TransitionRequest, ContractAcceptance, Transit
   cargo fmt --all
   cargo test --package farik-core governor::transition::tests
   # expected, among the output:
-  # test result: ok. 21 passed; 0 failed; 0 ignored; 0 measured; 198 filtered out; finished in ...
+  # test result: ok. 24 passed; 0 failed; 0 ignored; 0 measured; 198 filtered out; finished in ...
   cargo xtask check
   # expected, among the output, then exit code 0:
-  # test result: ok. 219 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in ...   (farik-core)
+  # test result: ok. 222 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in ...   (farik-core)
   # test result: ok. 23 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in ...   (xtask)
   # xtask check: ok
   ```
@@ -2362,7 +2891,7 @@ Produces: `governor::transition::{TransitionRequest, ContractAcceptance, Transit
 ```
 cargo xtask check
 # expected, among the output, then exit code 0:
-# test result: ok. 219 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in ...   (farik-core)
+# test result: ok. 222 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in ...   (farik-core)
 # test result: ok. 23 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in ...   (xtask)
 # xtask check: ok
 ```
