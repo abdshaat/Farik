@@ -3,7 +3,7 @@
 Status: draft
 Branch: `claude/phase-0-implementation-izm38y` (the harness-assigned phase branch, left as assigned per `docs/standards/code.md`; steps do not get their own)
 Spec: `docs/SPEC.md` section 5.2 (`rejected → in_progress` below the iteration limit and `rejected → escalated` at it; `refining → escalated` after three failed readiness checks; `blocked → escalated` past the blocked limit, default 24 hours), section 5.7 (what an escalation carries and its reasons), section 5.16 (the `approval` reason), F5
-Depends on: phase 0 (merged in #4); step 05 of this phase (its plan at f78d9cf and 2e829ab; the sha of its commits is recorded here when it lands, and this step starts after it)
+Depends on: phase 0 (merged in #4); step 05 of this phase (committed as 5ad2c21, c4cf30b)
 
 A plan is `ready` only when a reviewer other than the author has confirmed the three rules in `docs/standards/workflow.md` stage 2 (Plan): every decision made, no ambiguity, no forward dependencies. Record who confirmed and when here.
 
@@ -64,7 +64,7 @@ Produces: `governor::escalation::{EscalationReason, Escalation, DEFAULT_ITERATIO
   ```
   cargo xtask check
   # expected, among the output, then exit code 0:
-  # test result: ok. 108 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in ...   (farik-core)
+  # test result: ok. 110 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in ...   (farik-core)
   # test result: ok. 23 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in ...   (xtask)
   # xtask check: ok
   ```
@@ -509,10 +509,10 @@ Produces: `governor::escalation::{EscalationReason, Escalation, DEFAULT_ITERATIO
   cargo fmt --all
   cargo test --package farik-core governor::escalation
   # expected, among the output:
-  # test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 108 filtered out; finished in ...
+  # test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 110 filtered out; finished in ...
   cargo xtask check
   # expected, among the output, then exit code 0:
-  # test result: ok. 115 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in ...   (farik-core)
+  # test result: ok. 117 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in ...   (farik-core)
   # test result: ok. 23 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in ...   (xtask)
   # xtask check: ok
   ```
@@ -524,7 +524,7 @@ Produces: `governor::escalation::{EscalationReason, Escalation, DEFAULT_ITERATIO
 ```
 cargo xtask check
 # expected, among the output, then exit code 0:
-# test result: ok. 115 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in ...   (farik-core)
+# test result: ok. 117 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in ...   (farik-core)
 # test result: ok. 23 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in ...   (xtask)
 # xtask check: ok
 ```
