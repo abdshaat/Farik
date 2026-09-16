@@ -4,8 +4,11 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use super::team_rules::TeamRules;
-use crate::contract::{Role, TaskContract, TaskStatus, Verification, VerificationWire};
+use crate::contract::{
+    Role, TaskContract, TaskStatus, Verification, VerificationWire, wire_method,
+};
 use crate::generated::task_contract::FarikTaskContractKind as Kind;
+use crate::text::listed;
 
 /// Builders for readiness contexts and typed contracts, usable by every crate's tests.
 pub mod fixtures;
@@ -176,16 +179,6 @@ fn criterion_ids<'a>(
         .collect()
 }
 
-fn wire_method(wire: &VerificationWire) -> Option<&str> {
-    match wire {
-        VerificationWire::Variant0 { method, .. }
-        | VerificationWire::Variant1 { method, .. }
-        | VerificationWire::Variant2 { method, .. }
-        | VerificationWire::Variant3 { method, .. }
-        | VerificationWire::Variant4 { method, .. } => method.as_str(),
-    }
-}
-
 fn intent_present(contract: &TaskContract, _: &ReadinessContext) -> Option<ReadinessFailure> {
     if contract.intent.trim().is_empty() {
         return Some(failure(
@@ -245,7 +238,11 @@ fn command_criteria_complete(
     }
     Some(failure(
         ReadinessRule::CommandCriteriaComplete,
-        format!("criteria {} have a blank command", bad.join(", ")),
+        format!(
+            "{} {} a blank command",
+            listed("criterion", "criteria", &bad),
+            if bad.len() == 1 { "has" } else { "have" }
+        ),
     ))
 }
 

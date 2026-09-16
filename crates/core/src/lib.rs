@@ -11,6 +11,8 @@ pub mod generated;
 pub mod governor;
 /// The price table and the cost of model usage.
 pub mod pricing;
+/// Small shared pieces of English used in refusal messages.
+mod text;
 
 /// The crate's package name, as published.
 pub const CORE_CRATE_NAME: &str = "farik-core";

@@ -2,10 +2,11 @@
 //! diff may touch, what was written down, and when the human must accept, as one function over a
 //! contract and the evidence gathered for it.
 
-use crate::contract::{TaskContract, Verification};
+use crate::contract::{ExitCriterion, TaskContract, wire_method};
 use crate::generated::task_contract::FarikTaskContractKind as Kind;
 use crate::generated::task_contract::FarikTaskContractRisk as Risk;
 use crate::governor::paths::{GlobError, PathRefusal, check_allowed_paths};
+use crate::text::{distinct, listed};
 
 /// Who ran a criterion.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -127,16 +128,12 @@ fn failure(rule: DoneRule, message: String) -> DoneFailure {
     DoneFailure { rule, message }
 }
 
-/// "criterion C1" or "criteria C1, C2", so that a message reads as English either way.
-fn listed(ids: &[String]) -> String {
-    if ids.len() == 1 {
-        format!("criterion {}", ids[0])
-    } else {
-        format!("criteria {}", ids.join(", "))
-    }
+/// The result the reviewer recorded for a criterion, if any.
+/// Whether only the human can answer this criterion (`docs/SPEC.md` section 5.4 item 1).
+fn is_answered_by_the_human(criterion: &ExitCriterion) -> bool {
+    wire_method(&criterion.verification) == Some("human")
 }
 
-/// The result the reviewer recorded for a criterion, if any.
 fn reviewer_result<'a>(
     evidence: &'a DoneEvidence,
     criterion_id: &str,
@@ -154,12 +151,7 @@ fn criterion_run_by_reviewer(
     let missing: Vec<String> = contract
         .exit_criteria
         .iter()
-        .filter(|criterion| {
-            !matches!(
-                Verification::from(&criterion.verification),
-                Verification::Human { .. }
-            )
-        })
+        .filter(|criterion| !is_answered_by_the_human(criterion))
         .map(|criterion| criterion.id.to_string())
         .filter(|id| {
             reviewer_result(evidence, id).is_none_or(|result| result.evidence.trim().is_empty())
@@ -172,7 +164,7 @@ fn criterion_run_by_reviewer(
         DoneRule::CriterionRunByReviewer,
         format!(
             "the reviewer's own run recorded no evidence for {}",
-            listed(&missing)
+            listed("criterion", "criteria", &missing)
         ),
     ))
 }
@@ -193,7 +185,7 @@ fn criterion_passed(contract: &TaskContract, evidence: &DoneEvidence) -> Option<
     }
     Some(failure(
         DoneRule::CriterionPassed,
-        format!("{} did not pass", listed(&failed)),
+        format!("{} did not pass", listed("criterion", "criteria", &failed)),
     ))
 }
 
@@ -204,12 +196,7 @@ fn human_criterion_accepted(
     let missing: Vec<String> = contract
         .exit_criteria
         .iter()
-        .filter(|criterion| {
-            matches!(
-                Verification::from(&criterion.verification),
-                Verification::Human { .. }
-            )
-        })
+        .filter(|criterion| is_answered_by_the_human(criterion))
         .map(|criterion| criterion.id.to_string())
         .filter(|id| {
             !evidence.results.iter().any(|result| {
@@ -224,7 +211,7 @@ fn human_criterion_accepted(
         DoneRule::HumanCriterionAccepted,
         format!(
             "the human has not answered {}, and only the human can",
-            listed(&missing)
+            listed("criterion", "criteria", &missing)
         ),
     ))
 }
@@ -233,11 +220,12 @@ fn paths_within_allowed(contract: &TaskContract, evidence: &DoneEvidence) -> Opt
     match check_allowed_paths(&evidence.changed_paths, &contract.allowed_paths) {
         Ok(()) => None,
         Err(PathRefusal::Violations(violations)) => {
-            let changed = violations
-                .iter()
-                .map(|violation| violation.path.clone())
-                .collect::<Vec<String>>()
-                .join(", ");
+            let changed = distinct(
+                &violations
+                    .iter()
+                    .map(|violation| violation.path.clone())
+                    .collect::<Vec<String>>(),
+            );
             Some(failure(
                 DoneRule::PathsWithinAllowed,
                 if contract.allowed_paths.is_empty() {
@@ -245,7 +233,7 @@ fn paths_within_allowed(contract: &TaskContract, evidence: &DoneEvidence) -> Opt
                 } else {
                     format!(
                         "the diff changes {changed} outside the contract's allowed paths {}",
-                        contract.allowed_paths.join(", ")
+                        distinct(&contract.allowed_paths)
                     )
                 },
             ))
@@ -304,10 +292,16 @@ mod tests {
         CriterionResult, DoneEvidence, DoneRule as R, RunBy, evaluate_done,
         requires_human_acceptance,
     };
-    use crate::contract::{TaskContract, VerificationWire};
+    use crate::contract::{ExitCriterion, TaskContract, VerificationWire};
     use crate::generated::task_contract::FarikTaskContractKind as Kind;
     use crate::generated::task_contract::FarikTaskContractRisk as Risk;
     use crate::governor::readiness::fixtures::a_contract;
+
+    fn named_criterion(from: &ExitCriterion, id: &str) -> ExitCriterion {
+        let mut criterion = from.clone();
+        criterion.id = id.parse().expect("a criterion id");
+        criterion
+    }
 
     fn a_result(criterion_id: &str, run_by: RunBy) -> CriterionResult {
         CriterionResult {
@@ -593,22 +587,80 @@ mod tests {
 
     #[test]
     fn reports_every_failure_in_rule_order() {
+        // All seven at once, so that the order is one assertion rather than a chain of pairs, and
+        // every list is plural, so that the singular and the plural wording are both pinned.
         let mut contract = a_contract();
         contract.risk = Risk::High;
+        let ran = contract.exit_criteria[0].clone();
+        let mut asked = ran.clone();
+        asked.verification = VerificationWire::Variant4 {
+            method: json!("human"),
+            question: "Did you sign in successfully?".to_string(),
+        };
+        contract.exit_criteria = vec![
+            named_criterion(&ran, "C1"),
+            named_criterion(&ran, "C2"),
+            named_criterion(&asked, "C3"),
+            named_criterion(&asked, "C4"),
+        ];
+        let blank_and_failed = |id: &str| CriterionResult {
+            criterion_id: id.to_string(),
+            passed: false,
+            evidence: "  ".to_string(),
+            run_by: RunBy::Reviewer,
+        };
         let mut evidence = an_evidence();
-        evidence.results = Vec::new();
-        evidence.changed_paths = vec!["README.md".to_string()];
+        evidence.results = vec![blank_and_failed("C1"), blank_and_failed("C2")];
+        evidence.changed_paths = vec!["README.md".to_string(), "Cargo.toml".to_string()];
         evidence.completion_note = None;
         evidence.review_note = None;
         assert_eq!(
             failed_rules(&contract, &evidence),
             [
                 R::CriterionRunByReviewer,
+                R::CriterionPassed,
+                R::HumanCriterionAccepted,
                 R::PathsWithinAllowed,
                 R::CompletionNotePresent,
                 R::ReviewNotePresent,
                 R::HumanAccepted
             ]
+        );
+        assert_eq!(
+            message_of(&contract, &evidence, R::CriterionRunByReviewer),
+            "the reviewer's own run recorded no evidence for criteria C1, C2"
+        );
+        assert_eq!(
+            message_of(&contract, &evidence, R::CriterionPassed),
+            "criteria C1, C2 did not pass"
+        );
+        assert_eq!(
+            message_of(&contract, &evidence, R::HumanCriterionAccepted),
+            "the human has not answered criteria C3, C4, and only the human can"
+        );
+        assert_eq!(
+            message_of(&contract, &evidence, R::PathsWithinAllowed),
+            "the diff changes README.md, Cargo.toml outside the contract's allowed paths src/login/**"
+        );
+    }
+
+    #[test]
+    fn names_a_repeated_path_or_criterion_once_in_a_message() {
+        // A contract built by hand can repeat an id, and a diff can list one path twice; a message
+        // that repeats itself reads as two problems where there is one.
+        let mut contract = a_contract();
+        let one = contract.exit_criteria[0].clone();
+        contract.exit_criteria = vec![named_criterion(&one, "C1"), named_criterion(&one, "C1")];
+        let mut evidence = an_evidence();
+        evidence.results = Vec::new();
+        evidence.changed_paths = vec!["README.md".to_string(), "README.md".to_string()];
+        assert_eq!(
+            message_of(&contract, &evidence, R::CriterionRunByReviewer),
+            "the reviewer's own run recorded no evidence for criterion C1"
+        );
+        assert_eq!(
+            message_of(&contract, &evidence, R::PathsWithinAllowed),
+            "the diff changes README.md outside the contract's allowed paths src/login/**"
         );
     }
 }

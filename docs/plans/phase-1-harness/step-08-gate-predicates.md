@@ -74,7 +74,7 @@ Produces: `governor::gates::{GateResult, AssignmentRequester, DependencyState, A
   ```
   cargo xtask check
   # expected, among the output, then exit code 0:
-  # test result: ok. 141 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in ...   (farik-core)
+  # test result: ok. 144 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in ...   (farik-core)
   # test result: ok. 23 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in ...   (xtask)
   # xtask check: ok
   ```
@@ -1693,10 +1693,10 @@ Produces: `governor::gates::{GateResult, AssignmentRequester, DependencyState, A
   cargo fmt --all
   cargo test --package farik-core governor::gates
   # expected, among the output:
-  # test result: ok. 24 passed; 0 failed; 0 ignored; 0 measured; 141 filtered out; finished in ...
+  # test result: ok. 24 passed; 0 failed; 0 ignored; 0 measured; 144 filtered out; finished in ...
   cargo xtask check
   # expected, among the output, then exit code 0:
-  # test result: ok. 165 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in ...   (farik-core)
+  # test result: ok. 168 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in ...   (farik-core)
   # test result: ok. 23 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in ...   (xtask)
   # xtask check: ok
   ```
@@ -1708,7 +1708,7 @@ Produces: `governor::gates::{GateResult, AssignmentRequester, DependencyState, A
 ```
 cargo xtask check
 # expected, among the output, then exit code 0:
-# test result: ok. 165 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in ...   (farik-core)
+# test result: ok. 168 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in ...   (farik-core)
 # test result: ok. 23 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in ...   (xtask)
 # xtask check: ok
 ```

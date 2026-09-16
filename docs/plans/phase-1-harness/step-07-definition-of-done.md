@@ -37,6 +37,7 @@ All in `docs/plans/project-plan.md`, phase 1, restated here only where this step
 - A note counts as written only when it is not blank, and both notes are `Option<String>` rather than `String`, so that "the runtime has none" and "the agent wrote nothing" are the same refusal with one message. Every one of the seven messages is asserted exactly by a test, and so is each of the three branches `PathsWithinAllowed` can take, because four messages were free to say anything when this plan was reviewed a third time and the most-read of the three branches still was at the fourth.
 - A contract with no exit criteria at all passes the three rules that iterate them vacuously. That is unreachable rather than decided: the schema sets `minItems: 1` on `exit_criteria`, `validate_contract` refuses a contract without one, and step 02's `CriteriaPresent` rule refuses it again before the task is ever assigned.
 - Revised three times on 2026-09-16, after three readiness reviews, each of which found the previous fix narrower than it read. The first found a `human` criterion's exemption handed to a `test` criterion by an id lookup. The second found results still matched by id, so a `test` and a `command` criterion sharing `C1` were accepted on one run, and put the rule in the Definition of Ready. The third showed that the Definition of Ready is not a boundary a task must cross: two gate-free human rows in step 01's table go around it, and phase 2 rebuilds contracts without it. The rule now lives in `validate_contract`, and the claim in this plan is the one the code can keep.
+- Revised again after the step review of `a0cdecd` and `090e015`, which found no way to accept a task wrongly but three things worth fixing: the order of two rules was not pinned by any test although the doc promised it, repeated requirement ids were the same hole as repeated criterion ids and nothing refused them, and spec 5.4 did not carry the evidence rule the code enforces. The blocks above are the files after that fix, so the plan and the code are again the same bytes; the file map marks what the fix added.
 - Tests import the items by name rather than a glob; every code block below is the file after `cargo fmt --all`.
 
 ## Design
@@ -60,8 +61,14 @@ Touches `crates/core` only: `contract.rs` gains one rule, and `governor` gains o
 ## File map
 
 ```
-crates/core/src/contract.rs                         modifies: validate_contract refuses repeated criterion ids, with three tests (task 1)
-docs/SPEC.md                                        modifies: section 4's Contract definition says exit criterion ids name one criterion each (task 1)
+crates/core/src/contract.rs                         modifies: validate_contract refuses repeated criterion and requirement ids, and shares wire_method, with five tests (task 1)
+crates/core/src/text.rs                             creates: the shared pieces of English a refusal message is built from (task 1, step review fix)
+crates/core/src/lib.rs                              modifies: declares text (task 1, step review fix)
+crates/core/src/governor/readiness.rs               modifies: uses the shared wire_method and listed (task 1, step review fix)
+docs/schemas/task-contract.schema.json              modifies: every array bounded at a hundred, the two id patterns tightened (task 1, step review fix)
+crates/core/src/generated/task_contract.rs          regenerates from the schema (task 1, step review fix)
+crates/core/src/generated/task_contract.schema.json regenerates from the schema (task 1, step review fix)
+docs/SPEC.md                                        modifies: section 4's Contract definition says exit criterion and requirement ids each name one thing and that no array holds more than a hundred; section 5.4 item 1 says a reviewer's result counts only with evidence (task 1, the second added by the step review)
 docs/plans/project-plan.md                          modifies: phase 0 step 03's validate_contract entry records the refusal; phase 1's duplicate-id note points at the validator; step 07's entry stops claiming requires_human_acceptance answers ContractRequiresHuman (task 1)
 crates/core/src/governor.rs                         modifies: declares done (task 2)
 crates/core/src/governor/done.rs                    creates: RunBy, CriterionResult, DoneEvidence, DoneRule, DoneFailure, requires_human_acceptance, evaluate_done, sixteen tests (task 2)
@@ -113,6 +120,448 @@ Produces: no new public item; `validate_contract` refuses one more shape
       }
 
       #[test]
+      fn refuses_requirements_that_share_an_id() {
+          // An exit criterion names the requirements it satisfies by their ids, so two requirements
+          // with one id are the same hole as two criteria with one id.
+          let mut input = a_contract_wire();
+          let twin = input["requirements"][0].clone();
+          input["requirements"] = json!([twin.clone(), twin]);
+          let errors = refusal(&input);
+          assert_eq!(errors.len(), 1);
+          assert_eq!(errors[0].path, "/requirements");
+          assert_eq!(
+              errors[0].message,
+              "the id R1 names more than one requirement; give each requirement its own, because an \
+               exit criterion names the requirements it satisfies by their ids and cannot tell two \
+               apart"
+          );
+      }
+
+      #[test]
+      fn reports_a_repeated_criterion_id_and_a_repeated_requirement_id_together() {
+          let mut input = a_contract_wire();
+          let criterion = input["exit_criteria"][0].clone();
+          input["exit_criteria"] = json!([criterion.clone(), criterion]);
+          let requirement = input["requirements"][0].clone();
+          input["requirements"] = json!([requirement.clone(), requirement]);
+          let errors = refusal(&input);
+          assert_eq!(
+              errors
+                  .iter()
+                  .map(|error| error.path.as_str())
+                  .collect::<Vec<&str>>(),
+              ["/exit_criteria", "/requirements"]
+          );
+      }
+
+      #[test]
+      fn names_every_repeated_id_once_however_far_apart_they_are() {
+          let mut input = a_contract_wire();
+          let first = input["exit_criteria"][0].clone();
+          let named = |id: &str| {
+              let mut criterion = first.clone();
+              criterion["id"] = json!(id);
+              criterion
+          };
+          // C1 and C3 each name two criteria, never adjacent, and C1 names three.
+          input["exit_criteria"] = json!([
+              named("C1"),
+              named("C2"),
+              named("C3"),
+              named("C1"),
+              named("C3"),
+              named("C1"),
+          ]);
+          let errors = refusal(&input);
+          assert_eq!(errors.len(), 1);
+          assert!(
+              errors[0]
+                  .message
+                  .starts_with("the ids C1, C3 name more than one"),
+              "{}",
+              errors[0].message
+          );
+      }
+
+      #[test]
+      fn accepts_exit_criteria_whose_ids_are_all_distinct() {
+          let mut input = a_contract_wire();
+          let first = input["exit_criteria"][0].clone();
+          let mut second = first.clone();
+          second["id"] = json!("C2");
+          input["exit_criteria"] = json!([first, second]);
+          let contract = validate_contract(&input).expect("valid");
+          assert_eq!(contract.exit_criteria.len(), 2);
+      }
+  ```
+
+- [x] Run them and confirm they fail because `validate_contract` accepts a repeated id. Each panics at `expected a refusal` with the accepted contract printed:
+
+  ```
+  cargo test --package farik-core contract
+  # expected, among the output:
+  # failures:
+  #     contract::tests::names_every_repeated_id_once_however_far_apart_they_are
+  #     contract::tests::refuses_exit_criteria_that_share_an_id
+  #     contract::tests::refuses_requirements_that_share_an_id
+  #     contract::tests::reports_a_repeated_criterion_id_and_a_repeated_requirement_id_together
+  # test result: FAILED. 17 passed; 4 failed; 0 ignored; 0 measured; 106 filtered out; finished in 0.11s
+  ```
+
+- [x] Bound the arrays and refuse the repeats. `docs/schemas/task-contract.schema.json` gains `"maxItems": 100` on every array and tightens the two id patterns to `^C[1-9][0-9]*$` and `^R[1-9][0-9]*$`, so that an id is written one way and a refusal naming what is wrong stays readable; then `cargo xtask generate` rewrites `crates/core/src/generated/task_contract.rs` and its schema copy. `crates/core/src/text.rs` is new, `crates/core/src/lib.rs` declares it, `crates/core/src/governor/readiness.rs` uses the shared `wire_method` and `listed`, and `crates/core/src/contract.rs` in full:
+
+  ```rust
+  //! The task contract: `docs/schemas/task-contract.schema.json` as Rust types, and the validator
+  //! that turns an untrusted JSON value into one.
+
+  use std::collections::BTreeSet;
+  use std::sync::LazyLock;
+
+  use jsonschema::Validator;
+  use serde_json::Value;
+
+  use crate::text::listed;
+
+  pub use crate::generated::task_contract::{
+      ExitCriterion, ExitCriterionVerification as VerificationWire,
+      FarikTaskContract as TaskContract, FarikTaskContractBudget as Budget,
+      FarikTaskContractId as TaskId, FarikTaskContractNotes as Notes,
+      FarikTaskContractRequirementsItem as Requirement, FarikTaskContractRisk as Risk,
+      FarikTaskContractStatus as TaskStatus, Role,
+  };
+
+  /// A criterion's verification method with named variants. The generated wire enum names its
+  /// variants by position; this is the one mapping `farik-core` keeps at its edge.
+  #[derive(Debug, Clone, PartialEq, Eq)]
+  pub enum Verification {
+      /// Run a command; pass on the expected exit code and output.
+      Command {
+          /// Run inside the sandbox from the project root.
+          command: String,
+          /// The exit code that counts as a pass; the schema's default is 0.
+          exit_code: i64,
+          /// Text the standard output must contain.
+          stdout_contains: Option<String>,
+          /// Text the standard output must not contain.
+          stdout_not_contains: Option<String>,
+      },
+      /// Run a test command; pass on exit code 0.
+      Test {
+          /// The test command.
+          command: String,
+          /// Whether the reviewer must also see a new test that fails on the base branch.
+          new_tests_required: bool,
+      },
+      /// A file must exist after the task.
+      Artifact {
+          /// The path, relative to the project root.
+          path: String,
+          /// Strings the file must contain.
+          must_contain: Vec<String>,
+      },
+      /// Yes or no questions the reviewer answers with a cited reason each.
+      Review {
+          /// The questions.
+          rubric: Vec<String>,
+      },
+      /// Satisfied only by a `human.accepted` event.
+      Human {
+          /// What the human is asked to confirm.
+          question: String,
+      },
+  }
+
+  impl From<&VerificationWire> for Verification {
+      fn from(wire: &VerificationWire) -> Self {
+          match wire {
+              VerificationWire::Variant0 {
+                  command, expect, ..
+              } => Self::Command {
+                  command: command.clone(),
+                  exit_code: expect.exit_code,
+                  stdout_contains: expect.stdout_contains.clone(),
+                  stdout_not_contains: expect.stdout_not_contains.clone(),
+              },
+              VerificationWire::Variant1 {
+                  command,
+                  new_tests_required,
+                  ..
+              } => Self::Test {
+                  command: command.clone(),
+                  new_tests_required: *new_tests_required,
+              },
+              VerificationWire::Variant2 {
+                  must_contain, path, ..
+              } => Self::Artifact {
+                  path: path.clone(),
+                  must_contain: must_contain.clone(),
+              },
+              VerificationWire::Variant3 { rubric, .. } => Self::Review {
+                  rubric: rubric.clone(),
+              },
+              VerificationWire::Variant4 { question, .. } => Self::Human {
+                  question: question.clone(),
+              },
+          }
+      }
+  }
+
+  impl Verification {
+      /// The wire name of the method: `command`, `test`, `artifact`, `review`, or `human`.
+      #[must_use]
+      pub fn method(&self) -> &'static str {
+          match self {
+              Self::Command { .. } => "command",
+              Self::Test { .. } => "test",
+              Self::Artifact { .. } => "artifact",
+              Self::Review { .. } => "review",
+              Self::Human { .. } => "human",
+          }
+      }
+  }
+
+  /// Builders for test contracts, usable by every crate's tests.
+  pub mod fixtures;
+
+  const SCHEMA_JSON: &str = include_str!("generated/task_contract.schema.json");
+
+  /// One way in which a value failed the contract schema.
+  #[derive(Debug, Clone, PartialEq, Eq)]
+  pub struct ValidationError {
+      /// JSON pointer into the input; `/` for the root.
+      pub path: String,
+      /// The schema's own message.
+      pub message: String,
+  }
+
+  static VALIDATOR: LazyLock<Validator> = LazyLock::new(|| {
+      let schema: Value = serde_json::from_str(SCHEMA_JSON).expect(
+          "the embedded contract schema is valid JSON: it is a copy of docs/schemas/ written by \
+           cargo xtask generate and checked for freshness by cargo xtask check",
+      );
+      jsonschema::options()
+          .should_validate_formats(true)
+          .build(&schema)
+          .expect(
+              "the embedded contract schema compiles: it is JSON Schema 2020-12 with no external \
+               references, and the generator already parsed it",
+          )
+  });
+
+  /// Checks a value against `docs/schemas/task-contract.schema.json` and, when it conforms, returns
+  /// the typed contract with the schema's defaults applied. Refuses anything the schema refuses,
+  /// with one error per violation. Does not check Definition of Ready rules.
+  ///
+  /// An integer written with a zero fraction (`0.0`) counts as an integer, as it does for the
+  /// schema. Timestamps are normalised to UTC with at most nine fractional digits, so a contract
+  /// written back is not always byte-identical to the one read.
+  ///
+  /// # Errors
+  ///
+  /// Every schema violation, in the schema's order rather than the input's key order; one error at
+  /// the root when the schema passes but the typed contract cannot be built; or one error at
+  /// `/exit_criteria` or `/requirements` when two of them share an `id`.
+  pub fn validate_contract(input: &Value) -> Result<TaskContract, Vec<ValidationError>> {
+      let errors: Vec<ValidationError> = VALIDATOR
+          .iter_errors(input)
+          .map(|error| ValidationError {
+              path: pointer(&error.instance_path().to_string()),
+              message: error.to_string(),
+          })
+          .collect();
+      if !errors.is_empty() {
+          return Err(errors);
+      }
+      let contract = serde_json::from_value::<TaskContract>(with_integers_normalised(input))
+          .map_err(|error| {
+              vec![ValidationError {
+                  path: "/".to_string(),
+                  message: format!(
+                      "the schema passed but the typed contract could not be built: {error}"
+                  ),
+              }]
+          })?;
+      let mut errors = Vec::new();
+      let criteria = repeated_ids(
+          contract
+              .exit_criteria
+              .iter()
+              .map(|criterion| criterion.id.as_str()),
+      );
+      if !criteria.is_empty() {
+          errors.push(ValidationError {
+              path: "/exit_criteria".to_string(),
+              message: format!(
+                  "{} more than one exit criterion; give each criterion its own, because a \
+                   recorded result, a note, and an event all name a criterion by its id and cannot \
+                   tell two apart",
+                  named(&criteria)
+              ),
+          });
+      }
+      let requirements = repeated_ids(
+          contract
+              .requirements
+              .iter()
+              .map(|requirement| requirement.id.as_str()),
+      );
+      if !requirements.is_empty() {
+          errors.push(ValidationError {
+              path: "/requirements".to_string(),
+              message: format!(
+                  "{} more than one requirement; give each requirement its own, because an exit \
+                   criterion names the requirements it satisfies by their ids and cannot tell two \
+                   apart",
+                  named(&requirements)
+              ),
+          });
+      }
+      if !errors.is_empty() {
+          return Err(errors);
+      }
+      Ok(contract)
+  }
+
+  /// Every id that names more than one of the things it was given, in the order they appear and
+  /// without repeats. JSON Schema 2020-12 cannot say that a property is unique across an array, so
+  /// the rule lives here, where every contract read from the wire passes.
+  fn repeated_ids<'a>(ids: impl Iterator<Item = &'a str>) -> Vec<String> {
+      let mut seen: BTreeSet<&str> = BTreeSet::new();
+      let mut reported: BTreeSet<&str> = BTreeSet::new();
+      let mut repeated: Vec<String> = Vec::new();
+      for id in ids {
+          if !seen.insert(id) && reported.insert(id) {
+              repeated.push(id.to_string());
+          }
+      }
+      repeated
+  }
+
+  /// "the id C1 names" or "the ids C1, C2 name", so that a message reads as English either way.
+  fn named(ids: &[String]) -> String {
+      let verb = if ids.len() == 1 { "names" } else { "name" };
+      format!("{} {verb}", listed("the id", "the ids", ids))
+  }
+
+  /// The `method` a verification names, read straight from the wire value, or `None` when the
+  /// value carries no string there. `Verification::from` answers the same question but clones the
+  /// command, the rubric, and `must_contain` to do it, which a check that only asks "is this one
+  /// the human answers?" does not need.
+  #[must_use]
+  pub fn wire_method(verification: &VerificationWire) -> Option<&str> {
+      match verification {
+          VerificationWire::Variant0 { method, .. }
+          | VerificationWire::Variant1 { method, .. }
+          | VerificationWire::Variant2 { method, .. }
+          | VerificationWire::Variant3 { method, .. }
+          | VerificationWire::Variant4 { method, .. } => method.as_str(),
+      }
+  }
+
+  /// JSON Schema counts a number with a zero fraction as an integer and serde does not; such
+  /// numbers are rewritten as integers, where they fit in an `i64`, so that the two agree.
+  fn with_integers_normalised(value: &Value) -> Value {
+      match value {
+          Value::Number(number) => {
+              Value::Number(as_integer(number).unwrap_or_else(|| number.clone()))
+          }
+          Value::Array(items) => Value::Array(items.iter().map(with_integers_normalised).collect()),
+          Value::Object(fields) => Value::Object(
+              fields
+                  .iter()
+                  .map(|(key, field)| (key.clone(), with_integers_normalised(field)))
+                  .collect(),
+          ),
+          other => other.clone(),
+      }
+  }
+
+  fn as_integer(number: &serde_json::Number) -> Option<serde_json::Number> {
+      let float = number.as_f64().filter(|_| number.is_f64())?;
+      if !float.is_finite() || float.fract() != 0.0 {
+          return None;
+      }
+      format!("{float:.0}")
+          .parse::<i64>()
+          .ok()
+          .map(serde_json::Number::from)
+  }
+
+  fn pointer(path: &str) -> String {
+      if path.is_empty() {
+          "/".to_string()
+      } else {
+          path.to_string()
+      }
+  }
+
+  #[cfg(test)]
+  mod tests {
+      use serde_json::json;
+
+      use super::fixtures::{a_contract_wire, a_full_contract_wire};
+      use super::{ValidationError, Verification, validate_contract};
+
+      fn refusal(input: &serde_json::Value) -> Vec<ValidationError> {
+          validate_contract(input).expect_err("expected a refusal")
+      }
+
+      #[test]
+      fn refuses_exit_criteria_that_share_an_id() {
+          // A recorded result, a note, and an event all name a criterion by its id, so two criteria
+          // with one id are indistinguishable downstream: one run would be credited to both, and a
+          // task could be accepted with a criterion nobody ran. JSON Schema 2020-12 cannot say a
+          // property is unique across an array, so the rule lives here rather than in the schema.
+          let mut input = a_contract_wire();
+          let twin = input["exit_criteria"][0].clone();
+          input["exit_criteria"] = json!([twin.clone(), twin]);
+          let errors = refusal(&input);
+          assert_eq!(errors.len(), 1);
+          assert_eq!(errors[0].path, "/exit_criteria");
+          assert_eq!(
+              errors[0].message,
+              "the id C1 names more than one exit criterion; give each criterion its own, because a \
+               recorded result, a note, and an event all name a criterion by its id and cannot tell \
+               two apart"
+          );
+      }
+
+      #[test]
+      fn refuses_requirements_that_share_an_id() {
+          // An exit criterion names the requirements it satisfies by their ids, so two requirements
+          // with one id are the same hole as two criteria with one id.
+          let mut input = a_contract_wire();
+          let twin = input["requirements"][0].clone();
+          input["requirements"] = json!([twin.clone(), twin]);
+          let errors = refusal(&input);
+          assert_eq!(errors.len(), 1);
+          assert_eq!(errors[0].path, "/requirements");
+          assert_eq!(
+              errors[0].message,
+              "the id R1 names more than one requirement; give each requirement its own, because an \
+               exit criterion names the requirements it satisfies by their ids and cannot tell two \
+               apart"
+          );
+      }
+
+      #[test]
+      fn reports_a_repeated_criterion_id_and_a_repeated_requirement_id_together() {
+          let mut input = a_contract_wire();
+          let criterion = input["exit_criteria"][0].clone();
+          input["exit_criteria"] = json!([criterion.clone(), criterion]);
+          let requirement = input["requirements"][0].clone();
+          input["requirements"] = json!([requirement.clone(), requirement]);
+          let errors = refusal(&input);
+          assert_eq!(
+              errors
+                  .iter()
+                  .map(|error| error.path.as_str())
+                  .collect::<Vec<&str>>(),
+              ["/exit_criteria", "/requirements"]
+          );
+      }
+
+      #[test]
       fn names_every_repeated_id_once_however_far_apart_they_are() {
           let mut input = a_contract_wire();
           let first = input["exit_criteria"][0].clone();
@@ -152,184 +601,172 @@ Produces: no new public item; `validate_contract` refuses one more shape
           assert_eq!(contract.exit_criteria.len(), 2);
       }
 
-  ```
-
-- [x] Run them and confirm they fail because `validate_contract` accepts a repeated id. Each panics at `expected a refusal` with the accepted contract printed:
-
-  ```
-  cargo test --package farik-core contract
-  # expected, among the output:
-  # failures:
-  #     contract::tests::names_every_repeated_id_once_however_far_apart_they_are
-  #     contract::tests::refuses_exit_criteria_that_share_an_id
-  # test result: FAILED. 17 passed; 2 failed; 0 ignored; 0 measured; 106 filtered out; finished in 0.09s
-  ```
-
-- [x] Refuse it. In `crates/core/src/contract.rs`, replace
-
-  ```rust
-  use std::sync::LazyLock;
-  ```
-
-  with
-
-  ```rust
-  use std::collections::BTreeSet;
-  use std::sync::LazyLock;
-  ```
-
-  replace
-
-  ```rust
-  /// Every schema violation, in the schema's order rather than the input's key order; or, when the
-  /// schema passes but the typed contract cannot be built, one error at the root.
-  ```
-
-  with
-
-  ```rust
-  /// Every schema violation, in the schema's order rather than the input's key order; one error at
-  /// the root when the schema passes but the typed contract cannot be built; or one error at
-  /// `/exit_criteria` when two criteria share an `id`.
-  ```
-
-  and replace
-
-  ```rust
-      serde_json::from_value::<TaskContract>(with_integers_normalised(input)).map_err(|error| {
-          vec![ValidationError {
-              path: "/".to_string(),
-              message: format!(
-                  "the schema passed but the typed contract could not be built: {error}"
-              ),
-          }]
-      })
-  }
-  ```
-
-  with
-
-  ```rust
-      let contract = serde_json::from_value::<TaskContract>(with_integers_normalised(input))
-          .map_err(|error| {
-              vec![ValidationError {
-                  path: "/".to_string(),
-                  message: format!(
-                      "the schema passed but the typed contract could not be built: {error}"
-                  ),
-              }]
-          })?;
-      let repeated = repeated_criterion_ids(&contract);
-      if !repeated.is_empty() {
-          return Err(vec![ValidationError {
-              path: "/exit_criteria".to_string(),
-              message: format!(
-                  "{} more than one exit criterion; give each criterion its own, because a \
-                   recorded result, a note, and an event all name a criterion by its id and cannot \
-                   tell two apart",
-                  named(&repeated)
-              ),
-          }]);
+      #[test]
+      fn accepts_a_schema_valid_contract_and_applies_the_defaults() {
+          let contract = validate_contract(&a_contract_wire()).expect("valid");
+          assert_eq!(contract.id.to_string(), "FRK-1");
+          assert_eq!(contract.scope.out_of_scope, vec!["password reset"]);
+          assert_eq!(contract.budget.max_sessions.get(), 5);
+          assert_eq!(contract.budget.max_iterations.get(), 3);
+          assert_eq!(contract.iteration, 0);
+          assert!(!contract.locked);
+          assert_eq!(contract.kind.to_string(), "task");
+          assert!(contract.parent.is_none());
+          assert_eq!(
+              Verification::from(&contract.exit_criteria[0].verification),
+              Verification::Test {
+                  command: "pnpm test login".to_string(),
+                  new_tests_required: false
+              }
+          );
       }
-      Ok(contract)
-  }
 
-  /// Every `id` that names more than one exit criterion, in the schema's order and without
-  /// repeats. JSON Schema 2020-12 cannot say that a property is unique across an array, so the
-  /// rule lives here, where every contract read from the wire passes.
-  fn repeated_criterion_ids(contract: &TaskContract) -> Vec<String> {
-      let mut seen: BTreeSet<&str> = BTreeSet::new();
-      let mut repeated: Vec<String> = Vec::new();
-      for criterion in &contract.exit_criteria {
-          let id = criterion.id.as_str();
-          if !seen.insert(id) && !repeated.iter().any(|already| already == id) {
-              repeated.push(id.to_string());
-          }
+      #[test]
+      fn refuses_a_value_that_is_not_an_object() {
+          let errors = refusal(&json!("not a contract"));
+          assert_eq!(errors.len(), 1);
+          assert_eq!(errors[0].path, "/");
       }
-      repeated
-  }
 
-  /// "the id C1 names" or "the ids C1, C2 name", so that a message reads as English either way.
-  fn named(ids: &[String]) -> String {
-      if ids.len() == 1 {
-          format!("the id {} names", ids[0])
-      } else {
-          format!("the ids {} name", ids.join(", "))
+      #[test]
+      fn refuses_a_task_id_that_does_not_match_the_pattern() {
+          let mut input = a_contract_wire();
+          input["id"] = json!("TASK-1");
+          let errors = refusal(&input);
+          assert_eq!(errors.len(), 1);
+          assert_eq!(errors[0].path, "/id");
+      }
+
+      #[test]
+      fn refuses_an_empty_out_of_scope_list() {
+          let mut input = a_contract_wire();
+          input["scope"]["out_of_scope"] = json!([]);
+          let errors = refusal(&input);
+          assert_eq!(errors.len(), 1);
+          assert_eq!(errors[0].path, "/scope/out_of_scope");
+      }
+
+      #[test]
+      fn refuses_a_command_criterion_without_an_expect_block() {
+          let mut input = a_contract_wire();
+          input["exit_criteria"][0]["verification"] =
+              json!({"method": "command", "command": "pnpm check"});
+          let errors = refusal(&input);
+          assert_eq!(errors.len(), 1);
+          assert_eq!(errors[0].path, "/exit_criteria/0/verification");
+      }
+
+      #[test]
+      fn refuses_an_unknown_top_level_property() {
+          let mut input = a_contract_wire();
+          input["owner"] = json!("someone");
+          let errors = refusal(&input);
+          assert_eq!(errors.len(), 1);
+          assert_eq!(errors[0].path, "/");
+      }
+
+      #[test]
+      fn refuses_a_reference_that_is_not_a_uri() {
+          let mut input = a_contract_wire();
+          input["references"] = json!(["not a uri"]);
+          let errors = refusal(&input);
+          assert_eq!(errors.len(), 1);
+          assert_eq!(errors[0].path, "/references/0");
+      }
+
+      #[test]
+      fn accepts_every_verification_method_and_every_optional_field() {
+          let contract = validate_contract(&a_full_contract_wire()).expect("valid");
+          let methods: Vec<&str> = contract
+              .exit_criteria
+              .iter()
+              .map(|criterion| Verification::from(&criterion.verification).method())
+              .collect();
+          assert_eq!(methods, ["command", "test", "artifact", "review", "human"]);
+          assert_eq!(
+              Verification::from(&contract.exit_criteria[0].verification),
+              Verification::Command {
+                  command: "pnpm check".to_string(),
+                  exit_code: 0,
+                  stdout_contains: Some("passed".to_string()),
+                  stdout_not_contains: Some("failed".to_string())
+              }
+          );
+          assert_eq!(contract.dependencies.len(), 1);
+          assert_eq!(
+              contract.references,
+              vec!["https://github.com/abdshaat/farik/issues/1"]
+          );
+          assert!(contract.locked);
+          assert_eq!(
+              serde_json::to_value(&contract.parent).unwrap(),
+              json!("FRK-3")
+          );
+          assert_eq!(
+              contract
+                  .notes
+                  .as_ref()
+                  .and_then(|notes| notes.review.clone())
+                  .as_deref(),
+              Some("C1 passed: see output.")
+          );
+      }
+
+      #[test]
+      fn serializes_back_to_the_wire_shape_with_defaults_written_explicitly() {
+          let contract = validate_contract(&a_contract_wire()).expect("valid");
+          let wire = serde_json::to_value(&contract).expect("serializes");
+          assert_eq!(
+              wire["budget"],
+              json!({"max_cost_usd": 5.0, "max_sessions": 5, "max_iterations": 3})
+          );
+          assert_eq!(wire["iteration"], json!(0));
+          assert_eq!(wire["locked"], json!(false));
+          assert!(validate_contract(&wire).is_ok());
+      }
+
+      #[test]
+      fn accepts_an_integer_written_with_a_zero_fraction() {
+          let mut input = a_full_contract_wire();
+          input["iteration"] = json!(0.0);
+          input["exit_criteria"][0]["verification"]["expect"]["exit_code"] = json!(0.0);
+          let contract = validate_contract(&input).expect("valid");
+          assert_eq!(contract.iteration, 0);
+          assert_eq!(
+              Verification::from(&contract.exit_criteria[0].verification).method(),
+              "command"
+          );
+      }
+
+      #[test]
+      fn reports_a_typed_failure_after_a_schema_pass_at_the_root() {
+          let mut input = a_contract_wire();
+          input["iteration"] = json!(2e19);
+          let errors = refusal(&input);
+          assert_eq!(errors.len(), 1);
+          assert_eq!(errors[0].path, "/");
+          assert!(
+              errors[0]
+                  .message
+                  .starts_with("the schema passed but the typed contract could not be built"),
+              "{}",
+              errors[0].message
+          );
+      }
+
+      #[test]
+      fn round_trips_a_contract_that_has_every_field() {
+          let input = a_full_contract_wire();
+          let contract = validate_contract(&input).expect("valid");
+          let wire = serde_json::to_value(&contract).expect("serializes");
+          assert_eq!(wire, input);
       }
   }
   ```
 
-- [x] Say it in the spec. In `docs/SPEC.md` section 4, replace
+- [x] Say it in the spec. `docs/SPEC.md` section 4's Contract definition says every exit criterion's and every requirement's `id` names one of them, and that no array in a contract holds more than a hundred entries; section 5.4 item 1 says a reviewer's recorded result counts only with evidence and that a `human` criterion's acceptance needs none.
 
-  ```
-  **Contract.** A structured document attached to an epic or a task: intent, scope, requirements, exit criteria with a verification method for each, constraints, budget, and a named reviewer who is not the assignee. The schema is in `docs/schemas/task-contract.schema.json`; the `kind` field says which of the two it is.
-  ```
-
-  with
-
-  ```
-  **Contract.** A structured document attached to an epic or a task: intent, scope, requirements, exit criteria with a verification method for each, constraints, budget, and a named reviewer who is not the assignee. The schema is in `docs/schemas/task-contract.schema.json`; the `kind` field says which of the two it is. Every exit criterion's `id` names one criterion: a recorded result, a note, and an event all refer to a criterion by its id, so a contract that gives one id to two criteria is refused when it is read, which JSON Schema cannot express and the validator therefore does (added in 0.3).
-  ```
-
-- [x] Bring the project plan in line. Each of these before-texts is a substring of a longer line rather than a whole line, and each occurs exactly once. In `docs/plans/project-plan.md`, replace
-
-  ```
-  `contract::validate_contract(input: &serde_json::Value) -> Result<TaskContract, Vec<ValidationError>>`
-  ```
-
-  with
-
-  ```
-  `contract::validate_contract(input: &serde_json::Value) -> Result<TaskContract, Vec<ValidationError>>` (refuses repeated exit criterion ids as well as schema violations, added 2026-09-16 by the phase 1 step 07 plan)
-  ```
-
-  replace
-
-  ```
-  was answered by step 07's second readiness review, not by this step: the Definition of Ready refuses it (`CriteriaIdsUnique`, step 07 task 2)
-  ```
-
-  with
-
-  ```
-  was answered by step 07's third readiness review, not by this step: `validate_contract` refuses it (step 07 task 1), not the Definition of Ready, which a human moving a task out of `escalated` and phase 2's recovery both go around
-  ```
-
-  replace
-
-  ```
-  `TaskCreate { contract: TaskContract }`
-  ```
-
-  with
-
-  ```
-  `TaskCreate { contract: TaskContract }` (the daemon builds it with `validate_contract`, never by deserialising a wire value directly, because the repeated-criterion-id rule of phase 1 step 07 lives there)
-  ```
-
-  replace
-
-  ```
-  read_contract(&self, id)
-  ```
-
-  with
-
-  ```
-  read_contract(&self, id) (through `validate_contract`, so that a contract read back from a file is held to the same rules as one that arrived on the wire)
-  ```
-
-  and replace
-
-  ```
-  so that step 09's `ContractRequiresHuman` gate and the Definition of Done ask the same question once
-  ```
-
-  with
-
-  ```
-  answering spec 5.4 item 5 and 5.16 item 4 only, so that step 07's `HumanAccepted` rule and phase 3's orchestrator agree; step 09's `ContractRequiresHuman` gate is the human's approval of the contract before work starts, which `human_accepts_contracts` widens, and step 09 takes it from its context field instead
-  ```
+- [x] Bring the project plan in line: `validate_contract`'s entry records both refusals and the bound, the duplicate-id note points at the validator, `Command::TaskCreate` and `read_contract` go through it, `requires_human_acceptance` answers only 5.4 item 5 and 5.16 item 4, `RunBy` carries the note that phase 2 adds its wire derives, and a bullet records what was deliberately not decided: an exit criterion's `satisfies` may still name a requirement the contract does not have.
 
 - [x] Format, run the tests and the full check; confirm green:
 
@@ -337,14 +774,13 @@ Produces: no new public item; `validate_contract` refuses one more shape
   cargo fmt --all
   cargo test --package farik-core contract
   # expected, among the output:
-  # test result: ok. 19 passed; 0 failed; 0 ignored; 0 measured; 106 filtered out; finished in ...
+  # test result: ok. 21 passed; 0 failed; 0 ignored; 0 measured; 106 filtered out; finished in ...
   cargo xtask check
   # expected, among the output, then exit code 0:
-  # test result: ok. 125 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in ...   (farik-core)
+  # test result: ok. 127 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in ...   (farik-core)
   # test result: ok. 23 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in ...   (xtask)
   # xtask check: ok
   ```
-
 - [x] Commit: `fix(core): refuse a contract that gives one id to two criteria`
 
 ### Task 2: The Definition of Done
@@ -391,10 +827,16 @@ Produces: `governor::done::{RunBy, CriterionResult, DoneEvidence, DoneRule, Done
           CriterionResult, DoneEvidence, DoneRule as R, RunBy, evaluate_done,
           requires_human_acceptance,
       };
-      use crate::contract::{TaskContract, VerificationWire};
+      use crate::contract::{ExitCriterion, TaskContract, VerificationWire};
       use crate::generated::task_contract::FarikTaskContractKind as Kind;
       use crate::generated::task_contract::FarikTaskContractRisk as Risk;
       use crate::governor::readiness::fixtures::a_contract;
+
+      fn named_criterion(from: &ExitCriterion, id: &str) -> ExitCriterion {
+          let mut criterion = from.clone();
+          criterion.id = id.parse().expect("a criterion id");
+          criterion
+      }
 
       fn a_result(criterion_id: &str, run_by: RunBy) -> CriterionResult {
           CriterionResult {
@@ -680,22 +1122,80 @@ Produces: `governor::done::{RunBy, CriterionResult, DoneEvidence, DoneRule, Done
 
       #[test]
       fn reports_every_failure_in_rule_order() {
+          // All seven at once, so that the order is one assertion rather than a chain of pairs, and
+          // every list is plural, so that the singular and the plural wording are both pinned.
           let mut contract = a_contract();
           contract.risk = Risk::High;
+          let ran = contract.exit_criteria[0].clone();
+          let mut asked = ran.clone();
+          asked.verification = VerificationWire::Variant4 {
+              method: json!("human"),
+              question: "Did you sign in successfully?".to_string(),
+          };
+          contract.exit_criteria = vec![
+              named_criterion(&ran, "C1"),
+              named_criterion(&ran, "C2"),
+              named_criterion(&asked, "C3"),
+              named_criterion(&asked, "C4"),
+          ];
+          let blank_and_failed = |id: &str| CriterionResult {
+              criterion_id: id.to_string(),
+              passed: false,
+              evidence: "  ".to_string(),
+              run_by: RunBy::Reviewer,
+          };
           let mut evidence = an_evidence();
-          evidence.results = Vec::new();
-          evidence.changed_paths = vec!["README.md".to_string()];
+          evidence.results = vec![blank_and_failed("C1"), blank_and_failed("C2")];
+          evidence.changed_paths = vec!["README.md".to_string(), "Cargo.toml".to_string()];
           evidence.completion_note = None;
           evidence.review_note = None;
           assert_eq!(
               failed_rules(&contract, &evidence),
               [
                   R::CriterionRunByReviewer,
+                  R::CriterionPassed,
+                  R::HumanCriterionAccepted,
                   R::PathsWithinAllowed,
                   R::CompletionNotePresent,
                   R::ReviewNotePresent,
                   R::HumanAccepted
               ]
+          );
+          assert_eq!(
+              message_of(&contract, &evidence, R::CriterionRunByReviewer),
+              "the reviewer's own run recorded no evidence for criteria C1, C2"
+          );
+          assert_eq!(
+              message_of(&contract, &evidence, R::CriterionPassed),
+              "criteria C1, C2 did not pass"
+          );
+          assert_eq!(
+              message_of(&contract, &evidence, R::HumanCriterionAccepted),
+              "the human has not answered criteria C3, C4, and only the human can"
+          );
+          assert_eq!(
+              message_of(&contract, &evidence, R::PathsWithinAllowed),
+              "the diff changes README.md, Cargo.toml outside the contract's allowed paths src/login/**"
+          );
+      }
+
+      #[test]
+      fn names_a_repeated_path_or_criterion_once_in_a_message() {
+          // A contract built by hand can repeat an id, and a diff can list one path twice; a message
+          // that repeats itself reads as two problems where there is one.
+          let mut contract = a_contract();
+          let one = contract.exit_criteria[0].clone();
+          contract.exit_criteria = vec![named_criterion(&one, "C1"), named_criterion(&one, "C1")];
+          let mut evidence = an_evidence();
+          evidence.results = Vec::new();
+          evidence.changed_paths = vec!["README.md".to_string(), "README.md".to_string()];
+          assert_eq!(
+              message_of(&contract, &evidence, R::CriterionRunByReviewer),
+              "the reviewer's own run recorded no evidence for criterion C1"
+          );
+          assert_eq!(
+              message_of(&contract, &evidence, R::PathsWithinAllowed),
+              "the diff changes README.md outside the contract's allowed paths src/login/**"
           );
       }
   }
@@ -717,10 +1217,11 @@ Produces: `governor::done::{RunBy, CriterionResult, DoneEvidence, DoneRule, Done
   //! diff may touch, what was written down, and when the human must accept, as one function over a
   //! contract and the evidence gathered for it.
 
-  use crate::contract::{TaskContract, Verification};
+  use crate::contract::{ExitCriterion, TaskContract, wire_method};
   use crate::generated::task_contract::FarikTaskContractKind as Kind;
   use crate::generated::task_contract::FarikTaskContractRisk as Risk;
   use crate::governor::paths::{GlobError, PathRefusal, check_allowed_paths};
+  use crate::text::{distinct, listed};
 
   /// Who ran a criterion.
   #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -842,16 +1343,12 @@ Produces: `governor::done::{RunBy, CriterionResult, DoneEvidence, DoneRule, Done
       DoneFailure { rule, message }
   }
 
-  /// "criterion C1" or "criteria C1, C2", so that a message reads as English either way.
-  fn listed(ids: &[String]) -> String {
-      if ids.len() == 1 {
-          format!("criterion {}", ids[0])
-      } else {
-          format!("criteria {}", ids.join(", "))
-      }
+  /// The result the reviewer recorded for a criterion, if any.
+  /// Whether only the human can answer this criterion (`docs/SPEC.md` section 5.4 item 1).
+  fn is_answered_by_the_human(criterion: &ExitCriterion) -> bool {
+      wire_method(&criterion.verification) == Some("human")
   }
 
-  /// The result the reviewer recorded for a criterion, if any.
   fn reviewer_result<'a>(
       evidence: &'a DoneEvidence,
       criterion_id: &str,
@@ -869,12 +1366,7 @@ Produces: `governor::done::{RunBy, CriterionResult, DoneEvidence, DoneRule, Done
       let missing: Vec<String> = contract
           .exit_criteria
           .iter()
-          .filter(|criterion| {
-              !matches!(
-                  Verification::from(&criterion.verification),
-                  Verification::Human { .. }
-              )
-          })
+          .filter(|criterion| !is_answered_by_the_human(criterion))
           .map(|criterion| criterion.id.to_string())
           .filter(|id| {
               reviewer_result(evidence, id).is_none_or(|result| result.evidence.trim().is_empty())
@@ -887,7 +1379,7 @@ Produces: `governor::done::{RunBy, CriterionResult, DoneEvidence, DoneRule, Done
           DoneRule::CriterionRunByReviewer,
           format!(
               "the reviewer's own run recorded no evidence for {}",
-              listed(&missing)
+              listed("criterion", "criteria", &missing)
           ),
       ))
   }
@@ -908,7 +1400,7 @@ Produces: `governor::done::{RunBy, CriterionResult, DoneEvidence, DoneRule, Done
       }
       Some(failure(
           DoneRule::CriterionPassed,
-          format!("{} did not pass", listed(&failed)),
+          format!("{} did not pass", listed("criterion", "criteria", &failed)),
       ))
   }
 
@@ -919,12 +1411,7 @@ Produces: `governor::done::{RunBy, CriterionResult, DoneEvidence, DoneRule, Done
       let missing: Vec<String> = contract
           .exit_criteria
           .iter()
-          .filter(|criterion| {
-              matches!(
-                  Verification::from(&criterion.verification),
-                  Verification::Human { .. }
-              )
-          })
+          .filter(|criterion| is_answered_by_the_human(criterion))
           .map(|criterion| criterion.id.to_string())
           .filter(|id| {
               !evidence.results.iter().any(|result| {
@@ -939,7 +1426,7 @@ Produces: `governor::done::{RunBy, CriterionResult, DoneEvidence, DoneRule, Done
           DoneRule::HumanCriterionAccepted,
           format!(
               "the human has not answered {}, and only the human can",
-              listed(&missing)
+              listed("criterion", "criteria", &missing)
           ),
       ))
   }
@@ -948,11 +1435,12 @@ Produces: `governor::done::{RunBy, CriterionResult, DoneEvidence, DoneRule, Done
       match check_allowed_paths(&evidence.changed_paths, &contract.allowed_paths) {
           Ok(()) => None,
           Err(PathRefusal::Violations(violations)) => {
-              let changed = violations
-                  .iter()
-                  .map(|violation| violation.path.clone())
-                  .collect::<Vec<String>>()
-                  .join(", ");
+              let changed = distinct(
+                  &violations
+                      .iter()
+                      .map(|violation| violation.path.clone())
+                      .collect::<Vec<String>>(),
+              );
               Some(failure(
                   DoneRule::PathsWithinAllowed,
                   if contract.allowed_paths.is_empty() {
@@ -960,7 +1448,7 @@ Produces: `governor::done::{RunBy, CriterionResult, DoneEvidence, DoneRule, Done
                   } else {
                       format!(
                           "the diff changes {changed} outside the contract's allowed paths {}",
-                          contract.allowed_paths.join(", ")
+                          distinct(&contract.allowed_paths)
                       )
                   },
               ))
@@ -1019,10 +1507,16 @@ Produces: `governor::done::{RunBy, CriterionResult, DoneEvidence, DoneRule, Done
           CriterionResult, DoneEvidence, DoneRule as R, RunBy, evaluate_done,
           requires_human_acceptance,
       };
-      use crate::contract::{TaskContract, VerificationWire};
+      use crate::contract::{ExitCriterion, TaskContract, VerificationWire};
       use crate::generated::task_contract::FarikTaskContractKind as Kind;
       use crate::generated::task_contract::FarikTaskContractRisk as Risk;
       use crate::governor::readiness::fixtures::a_contract;
+
+      fn named_criterion(from: &ExitCriterion, id: &str) -> ExitCriterion {
+          let mut criterion = from.clone();
+          criterion.id = id.parse().expect("a criterion id");
+          criterion
+      }
 
       fn a_result(criterion_id: &str, run_by: RunBy) -> CriterionResult {
           CriterionResult {
@@ -1308,22 +1802,80 @@ Produces: `governor::done::{RunBy, CriterionResult, DoneEvidence, DoneRule, Done
 
       #[test]
       fn reports_every_failure_in_rule_order() {
+          // All seven at once, so that the order is one assertion rather than a chain of pairs, and
+          // every list is plural, so that the singular and the plural wording are both pinned.
           let mut contract = a_contract();
           contract.risk = Risk::High;
+          let ran = contract.exit_criteria[0].clone();
+          let mut asked = ran.clone();
+          asked.verification = VerificationWire::Variant4 {
+              method: json!("human"),
+              question: "Did you sign in successfully?".to_string(),
+          };
+          contract.exit_criteria = vec![
+              named_criterion(&ran, "C1"),
+              named_criterion(&ran, "C2"),
+              named_criterion(&asked, "C3"),
+              named_criterion(&asked, "C4"),
+          ];
+          let blank_and_failed = |id: &str| CriterionResult {
+              criterion_id: id.to_string(),
+              passed: false,
+              evidence: "  ".to_string(),
+              run_by: RunBy::Reviewer,
+          };
           let mut evidence = an_evidence();
-          evidence.results = Vec::new();
-          evidence.changed_paths = vec!["README.md".to_string()];
+          evidence.results = vec![blank_and_failed("C1"), blank_and_failed("C2")];
+          evidence.changed_paths = vec!["README.md".to_string(), "Cargo.toml".to_string()];
           evidence.completion_note = None;
           evidence.review_note = None;
           assert_eq!(
               failed_rules(&contract, &evidence),
               [
                   R::CriterionRunByReviewer,
+                  R::CriterionPassed,
+                  R::HumanCriterionAccepted,
                   R::PathsWithinAllowed,
                   R::CompletionNotePresent,
                   R::ReviewNotePresent,
                   R::HumanAccepted
               ]
+          );
+          assert_eq!(
+              message_of(&contract, &evidence, R::CriterionRunByReviewer),
+              "the reviewer's own run recorded no evidence for criteria C1, C2"
+          );
+          assert_eq!(
+              message_of(&contract, &evidence, R::CriterionPassed),
+              "criteria C1, C2 did not pass"
+          );
+          assert_eq!(
+              message_of(&contract, &evidence, R::HumanCriterionAccepted),
+              "the human has not answered criteria C3, C4, and only the human can"
+          );
+          assert_eq!(
+              message_of(&contract, &evidence, R::PathsWithinAllowed),
+              "the diff changes README.md, Cargo.toml outside the contract's allowed paths src/login/**"
+          );
+      }
+
+      #[test]
+      fn names_a_repeated_path_or_criterion_once_in_a_message() {
+          // A contract built by hand can repeat an id, and a diff can list one path twice; a message
+          // that repeats itself reads as two problems where there is one.
+          let mut contract = a_contract();
+          let one = contract.exit_criteria[0].clone();
+          contract.exit_criteria = vec![named_criterion(&one, "C1"), named_criterion(&one, "C1")];
+          let mut evidence = an_evidence();
+          evidence.results = Vec::new();
+          evidence.changed_paths = vec!["README.md".to_string(), "README.md".to_string()];
+          assert_eq!(
+              message_of(&contract, &evidence, R::CriterionRunByReviewer),
+              "the reviewer's own run recorded no evidence for criterion C1"
+          );
+          assert_eq!(
+              message_of(&contract, &evidence, R::PathsWithinAllowed),
+              "the diff changes README.md outside the contract's allowed paths src/login/**"
           );
       }
   }
@@ -1335,10 +1887,10 @@ Produces: `governor::done::{RunBy, CriterionResult, DoneEvidence, DoneRule, Done
   cargo fmt --all
   cargo test --package farik-core governor::done
   # expected, among the output:
-  # test result: ok. 16 passed; 0 failed; 0 ignored; 0 measured; 125 filtered out; finished in ...
+  # test result: ok. 17 passed; 0 failed; 0 ignored; 0 measured; 127 filtered out; finished in ...
   cargo xtask check
   # expected, among the output, then exit code 0:
-  # test result: ok. 141 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in ...   (farik-core)
+  # test result: ok. 144 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in ...   (farik-core)
   # test result: ok. 23 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in ...   (xtask)
   # xtask check: ok
   ```
@@ -1350,7 +1902,7 @@ Produces: `governor::done::{RunBy, CriterionResult, DoneEvidence, DoneRule, Done
 ```
 cargo xtask check
 # expected, among the output, then exit code 0:
-# test result: ok. 141 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in ...   (farik-core)
+# test result: ok. 144 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in ...   (farik-core)
 # test result: ok. 23 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in ...   (xtask)
 # xtask check: ok
 ```

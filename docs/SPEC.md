@@ -1,6 +1,6 @@
 # Farik Specification
 
-Version 0.2 (draft for review). Owner: project founder. Status: not yet implemented; this document is the contract the first milestone is built against. Revision 0.2 (2026-09-14) adds sections 5.11 to 5.15, requirements F14 to F17, the `locked` and `references` contract fields, and the amendments marked "added in 0.2", all from the planning review recorded in `docs/plans/project-plan.md`. Revision 0.3 (2026-09-15) records the founder's decisions of that day and the move of the backend to Rust (section 8, ADR 0005).
+Version 0.2 (draft for review). Owner: project founder. Status: not yet implemented; this document is the contract the first milestone is built against. Revision 0.3 also carries the rules the phase 1 reviews pinned down as the harness was built, each marked where it appears. Revision 0.2 (2026-09-14) adds sections 5.11 to 5.15, requirements F14 to F17, the `locked` and `references` contract fields, and the amendments marked "added in 0.2", all from the planning review recorded in `docs/plans/project-plan.md`. Revision 0.3 (2026-09-15) records the founder's decisions of that day and the move of the backend to Rust (section 8, ADR 0005).
 
 Farik is a desktop and web application that lets a person assemble a small team of AI agents, each with a named role, a face, its own tools, and its own skills, and put that team to work on a software product. The team runs a lightweight Scrum process: a product manager writes task contracts with explicit exit criteria, a scrum master keeps the board moving, and specialists do the work. A deterministic governor enforces the rules the agents cannot be trusted to enforce on themselves. The front end is a pixel-art office where the user can watch the team, open any agent's desk, and talk to them one-on-one or in the team channel.
 
@@ -50,7 +50,7 @@ A third persona, the enterprise platform team, is deliberately deferred. Their a
 
 **Epic.** The translation of one large request from the user into a contract, written by the Product Manager after asking the user its questions and approved by the user before anyone breaks it into tasks. A small request becomes a single task instead; the Scrum Master or the Product Manager decides which (5.16; added in 0.3).
 
-**Contract.** A structured document attached to an epic or a task: intent, scope, requirements, exit criteria with a verification method for each, constraints, budget, and a named reviewer who is not the assignee. The schema is in `docs/schemas/task-contract.schema.json`; the `kind` field says which of the two it is. Every exit criterion's `id` names one criterion: a recorded result, a note, and an event all refer to a criterion by its id, so a contract that gives one id to two criteria is refused when it is read, which JSON Schema cannot express and the validator therefore does (added in 0.3).
+**Contract.** A structured document attached to an epic or a task: intent, scope, requirements, exit criteria with a verification method for each, constraints, budget, and a named reviewer who is not the assignee. The schema is in `docs/schemas/task-contract.schema.json`; the `kind` field says which of the two it is. Every exit criterion's `id` names one criterion, and every requirement's `id` names one requirement: a recorded result, a note, and an event all refer to a criterion by its id, and a criterion names the requirements it satisfies by theirs, so a contract that gives one id to two of either is refused when it is read, which JSON Schema cannot express and the validator therefore does. No array in a contract holds more than a hundred entries, so that a refusal naming what is wrong stays readable and an untrusted contract cannot make the governor walk a list without end (added in 0.3).
 
 **Sprint.** A batch of tasks with a budget. A sprint ends when every task in it is accepted or cancelled; its budget caps what may be assigned inside it (decided 2026-09-15; there is no time box). Sprints exist so that the team stops and looks up periodically rather than grinding an unbounded backlog.
 
@@ -163,7 +163,7 @@ Judgment (Scrum Master, recorded as a review event):
 
 A task is accepted when:
 
-1. Every exit criterion has been run by the reviewer, independently of the assignee's run, and passed. `human` criteria are satisfied only by an explicit human acceptance event.
+1. Every exit criterion has been run by the reviewer, independently of the assignee's run, and passed. A recorded result from the reviewer counts only when it carries evidence: a result with nothing in it is the "I ran the tests and they passed" this section exists to refuse. `human` criteria are satisfied only by an explicit human acceptance event, which needs no evidence of its own because the acceptance is the evidence.
 2. No file outside the contract's `allowed_paths` was changed. The governor computes this from the git diff and refuses acceptance otherwise.
 3. The assignee wrote a completion note: what changed, what was not done, and anything the reviewer should look at first.
 4. The reviewer wrote a review note that maps each criterion to evidence (a command output, a file path, a test name).
