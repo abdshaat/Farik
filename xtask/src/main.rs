@@ -7,16 +7,6 @@ use std::process::{Command, ExitCode};
 
 use anyhow::{Context, bail};
 
-const CORE_FORBIDDEN: [&str; 7] = [
-    "std::fs",
-    "std::net",
-    "std::process",
-    "std::env",
-    "std::time::SystemTime",
-    "tokio",
-    "rand",
-];
-
 fn main() -> ExitCode {
     let args: Vec<String> = env::args().skip(1).collect();
     match run(&args) {
@@ -135,14 +125,7 @@ fn todos(root: &Path) -> anyhow::Result<()> {
 
 fn core_io(root: &Path) -> anyhow::Result<()> {
     let files = tracked_files(root, &["crates/core/src/*.rs", "crates/core/src/**/*.rs"])?;
-    let mut findings = Vec::new();
-    for (path, text) in &files {
-        for (index, line) in text.lines().enumerate() {
-            if let Some(token) = CORE_FORBIDDEN.iter().find(|token| line.contains(*token)) {
-                findings.push(format!("{path}:{}: uses {token}", index + 1));
-            }
-        }
-    }
+    let findings = xtask::core_io::find_core_io(&files);
     if findings.is_empty() {
         return Ok(());
     }
