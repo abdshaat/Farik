@@ -20,7 +20,7 @@ pub enum EscalationReason {
     Sessions,
     /// The rejection iteration limit was reached.
     Iterations,
-    /// The task stayed blocked longer than the limit.
+    /// The task stayed blocked for the limit or longer.
     BlockerAge,
     /// A permission was denied on a required action.
     Permission,
@@ -112,7 +112,13 @@ pub enum BlockedAge {
 }
 
 /// Decides whether a task blocked at `blocked_at` has, at `now`, been blocked for `limit` or
-/// longer. A `now` before `blocked_at` (a clock that went backwards) counts as within the limit.
+/// longer. A `now` before `blocked_at` counts as within the limit: the pair cannot be aged, and
+/// escalating on it would send every blocked task to the user the moment a clock steps backwards.
+///
+/// The cost is that a `blocked_at` stamped in the future keeps a task from ever escalating, because
+/// unlike a `now` that is behind, a persisted `blocked_at` tells the same lie on every tick. Not
+/// persisting one is the runtime's job (phase 3): it stamps `blocked_at` when the task blocks and
+/// re-stamps it if its clock is corrected backwards afterwards.
 #[must_use]
 pub fn evaluate_blocked_age(
     blocked_at: DateTime<Utc>,
@@ -148,6 +154,14 @@ mod tests {
 
     #[test]
     fn returns_a_rejected_task_while_its_iterations_are_below_the_limit() {
+        // The schema's default for max_iterations and spec 5.2's "default 3": pinned as a literal,
+        // because every other use here is relative to the constant and would follow it if it drifted.
+        assert_eq!(DEFAULT_ITERATION_LIMIT, 3);
+        assert_eq!(
+            evaluate_rejection(2, 3),
+            RejectionOutcome::ReturnToInProgress
+        );
+        assert_eq!(evaluate_rejection(3, 3), RejectionOutcome::Escalate);
         for iteration in 0..DEFAULT_ITERATION_LIMIT {
             assert_eq!(
                 evaluate_rejection(iteration, DEFAULT_ITERATION_LIMIT),
@@ -226,24 +240,65 @@ mod tests {
     }
 
     #[test]
+    fn cannot_age_a_task_whose_block_time_has_not_arrived() {
+        // A blocked_at a year ahead of now: really blocked for a month, but the clock cannot say
+        // so, and the rule keeps waiting rather than escalating every blocked task at once. The
+        // runtime is what must not persist this; the doc comment on the function says so.
+        assert_eq!(
+            evaluate_blocked_age(
+                at("2027-08-16T10:00:00Z"),
+                at("2026-09-16T10:00:00Z"),
+                DEFAULT_BLOCKED_LIMIT
+            ),
+            BlockedAge::WithinLimit
+        );
+    }
+
+    #[test]
     fn names_the_reasons_of_the_spec_on_the_wire() {
+        // Exhaustive on purpose: an eleventh reason cannot be added to the enum without failing
+        // to compile here, so the governance vocabulary cannot grow without the spec growing too.
+        fn wire_name(reason: EscalationReason) -> &'static str {
+            match reason {
+                EscalationReason::Budget => "budget",
+                EscalationReason::Sessions => "sessions",
+                EscalationReason::Iterations => "iterations",
+                EscalationReason::BlockerAge => "blocker_age",
+                EscalationReason::Permission => "permission",
+                EscalationReason::RiskGate => "risk_gate",
+                EscalationReason::Approval => "approval",
+                EscalationReason::ReadinessFailures => "readiness_failures",
+                EscalationReason::Integration => "integration",
+                EscalationReason::ExplicitRequest => "explicit_request",
+            }
+        }
         let reasons = [
-            (EscalationReason::Budget, "budget"),
-            (EscalationReason::Sessions, "sessions"),
-            (EscalationReason::Iterations, "iterations"),
-            (EscalationReason::BlockerAge, "blocker_age"),
-            (EscalationReason::Permission, "permission"),
-            (EscalationReason::RiskGate, "risk_gate"),
-            (EscalationReason::Approval, "approval"),
-            (EscalationReason::ReadinessFailures, "readiness_failures"),
-            (EscalationReason::Integration, "integration"),
-            (EscalationReason::ExplicitRequest, "explicit_request"),
+            EscalationReason::Budget,
+            EscalationReason::Sessions,
+            EscalationReason::Iterations,
+            EscalationReason::BlockerAge,
+            EscalationReason::Permission,
+            EscalationReason::RiskGate,
+            EscalationReason::Approval,
+            EscalationReason::ReadinessFailures,
+            EscalationReason::Integration,
+            EscalationReason::ExplicitRequest,
         ];
-        for (reason, wire) in reasons {
+        assert_eq!(reasons.len(), 10, "spec 5.7 names ten reasons");
+        for reason in reasons {
+            let wire = wire_name(reason);
             assert_eq!(serde_json::to_value(reason).unwrap(), json!(wire));
             assert_eq!(
                 serde_json::from_value::<EscalationReason>(json!(wire)).unwrap(),
                 reason
+            );
+        }
+        // A reason this program does not know is refused rather than absorbed, so that the
+        // governance vocabulary cannot widen behind a catch-all variant.
+        for unknown in ["Budget", "blockerAge", "readiness_failure", ""] {
+            assert!(
+                serde_json::from_value::<EscalationReason>(json!(unknown)).is_err(),
+                "{unknown}"
             );
         }
     }

@@ -3,7 +3,7 @@
 Status: draft
 Branch: `claude/phase-0-implementation-izm38y` (the harness-assigned phase branch, left as assigned per `docs/standards/code.md`; steps do not get their own)
 Spec: `docs/SPEC.md` section 5.4 (the five conditions for acceptance, and the reviewer's fresh session), section 5.16 item 4 (an epic needs the human), section 5.3 (the `human` verification method), F5
-Depends on: phase 0 (merged in #4); step 02 of this phase for `contract::Verification` (committed as 21fe00a, 87a3561, 4a1ac90); step 03 for `check_allowed_paths` (220b576, 3355d35); step 06 (33202e7)
+Depends on: phase 0 (merged in #4); step 02 of this phase for `contract::Verification` (committed as 21fe00a, 87a3561, 4a1ac90); step 03 for `check_allowed_paths` (220b576, 3355d35); step 06 (33202e7 and its review fix)
 
 A plan is `ready` only when a reviewer other than the author has confirmed the three rules in `docs/standards/workflow.md` stage 2 (Plan): every decision made, no ambiguity, no forward dependencies. Record who confirmed and when here.
 
@@ -66,7 +66,7 @@ Produces: `governor::done::{RunBy, CriterionResult, DoneEvidence, DoneRule, Done
   ```
   cargo xtask check
   # expected, among the output, then exit code 0:
-  # test result: ok. 121 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in ...   (farik-core)
+  # test result: ok. 122 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in ...   (farik-core)
   # test result: ok. 23 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in ...   (xtask)
   # xtask check: ok
   ```
@@ -803,10 +803,10 @@ Produces: `governor::done::{RunBy, CriterionResult, DoneEvidence, DoneRule, Done
   cargo fmt --all
   cargo test --package farik-core governor::done
   # expected, among the output:
-  # test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 121 filtered out; finished in ...
+  # test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 122 filtered out; finished in ...
   cargo xtask check
   # expected, among the output, then exit code 0:
-  # test result: ok. 132 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in ...   (farik-core)
+  # test result: ok. 133 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in ...   (farik-core)
   # test result: ok. 23 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in ...   (xtask)
   # xtask check: ok
   ```
@@ -818,7 +818,7 @@ Produces: `governor::done::{RunBy, CriterionResult, DoneEvidence, DoneRule, Done
 ```
 cargo xtask check
 # expected, among the output, then exit code 0:
-# test result: ok. 132 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in ...   (farik-core)
+# test result: ok. 133 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in ...   (farik-core)
 # test result: ok. 23 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in ...   (xtask)
 # xtask check: ok
 ```

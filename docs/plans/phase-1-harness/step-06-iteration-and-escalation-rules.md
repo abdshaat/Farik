@@ -24,11 +24,12 @@ All in `docs/plans/project-plan.md`, phase 1, restated here only where this step
 - `Escalation` is a plain record (`task_id`, `reason`, `tried`, `options`); the runtime fills `tried` and `options` from the agent's escalation call, and this step only defines the shape.
 - `DEFAULT_ITERATION_LIMIT` = 3 is a public constant, the schema's default for `max_iterations`, so that tests and later steps name the number once; the project plan's step 06 entry gains the three constants in this plan's commit.
 - The counts are `u32`, as step 05's `task_max_sessions` is, while the generated contract carries `iteration: u64` and `max_iterations: NonZeroU64`; step 09 converts with `u32::try_from` rather than `as`, which clippy pedantic refuses, and its plan budgets for the conversion.
+- Revised 2026-09-16 after the step review (`33202e7`), which found four mutations the suite did not catch and one case the rule absorbs: the iteration limit's value is pinned as a literal, the wire names are checked through an exhaustive match so an eleventh reason cannot compile without one, an unknown reason is pinned as refused, and a `blocked_at` the clock cannot age has its own test and its own sentence in spec 5.2 saying the runtime must never persist one. The `BlockerAge` doc no longer says "longer than the limit", the wording this step removed everywhere else.
 - Tests import the items by name rather than a glob; every code block below is the file after `cargo fmt --all`.
 
 ## Design
 
-One task: the `governor::escalation` module with `EscalationReason`, `Escalation`, the three constants, `RejectionOutcome` and `evaluate_rejection`, `ReadinessOutcome` and `evaluate_readiness_attempts`, `BlockedAge` and `evaluate_blocked_age`, and seven tests.
+One task: the `governor::escalation` module with `EscalationReason`, `Escalation`, the three constants, `RejectionOutcome` and `evaluate_rejection`, `ReadinessOutcome` and `evaluate_readiness_attempts`, `BlockedAge` and `evaluate_blocked_age`, and eight tests.
 
 Out of scope: the gates that call these (step 08), the transition rows they serve (step 09), the events that carry an escalation (phase 2), the Scrum Master's digest and the notification age (phase 3 and 4).
 
@@ -47,7 +48,7 @@ Touches `crates/core` only: one new child of `governor`. Consumes `contract::Tas
 ```
 crates/core/src/governor.rs                         modifies: declares escalation
 crates/core/src/governor/transition_table.rs        modifies: the BlockedAge gate's doc says "for the configured limit or longer"
-crates/core/src/governor/escalation.rs              creates: EscalationReason, Escalation, the three constants, the three outcome enums and functions, seven tests
+crates/core/src/governor/escalation.rs              creates: EscalationReason, Escalation, the three constants, the three outcome enums and functions, eight tests
 docs/SPEC.md                                        modifies: section 5.7 names the ten reasons in their wire spelling; section 5.2's blocked row says "for the configured limit or longer"
 docs/plans/project-plan.md                          modifies: phase 1 step 06 interface gains the three constants (in the plan's own commit)
 docs/plans/phase-1-harness/step-06-iteration-and-escalation-rules.md   modifies: checkboxes ticked
@@ -116,6 +117,14 @@ Produces: `governor::escalation::{EscalationReason, Escalation, DEFAULT_ITERATIO
 
       #[test]
       fn returns_a_rejected_task_while_its_iterations_are_below_the_limit() {
+          // The schema's default for max_iterations and spec 5.2's "default 3": pinned as a literal,
+          // because every other use here is relative to the constant and would follow it if it drifted.
+          assert_eq!(DEFAULT_ITERATION_LIMIT, 3);
+          assert_eq!(
+              evaluate_rejection(2, 3),
+              RejectionOutcome::ReturnToInProgress
+          );
+          assert_eq!(evaluate_rejection(3, 3), RejectionOutcome::Escalate);
           for iteration in 0..DEFAULT_ITERATION_LIMIT {
               assert_eq!(
                   evaluate_rejection(iteration, DEFAULT_ITERATION_LIMIT),
@@ -194,24 +203,65 @@ Produces: `governor::escalation::{EscalationReason, Escalation, DEFAULT_ITERATIO
       }
 
       #[test]
+      fn cannot_age_a_task_whose_block_time_has_not_arrived() {
+          // A blocked_at a year ahead of now: really blocked for a month, but the clock cannot say
+          // so, and the rule keeps waiting rather than escalating every blocked task at once. The
+          // runtime is what must not persist this; the doc comment on the function says so.
+          assert_eq!(
+              evaluate_blocked_age(
+                  at("2027-08-16T10:00:00Z"),
+                  at("2026-09-16T10:00:00Z"),
+                  DEFAULT_BLOCKED_LIMIT
+              ),
+              BlockedAge::WithinLimit
+          );
+      }
+
+      #[test]
       fn names_the_reasons_of_the_spec_on_the_wire() {
+          // Exhaustive on purpose: an eleventh reason cannot be added to the enum without failing
+          // to compile here, so the governance vocabulary cannot grow without the spec growing too.
+          fn wire_name(reason: EscalationReason) -> &'static str {
+              match reason {
+                  EscalationReason::Budget => "budget",
+                  EscalationReason::Sessions => "sessions",
+                  EscalationReason::Iterations => "iterations",
+                  EscalationReason::BlockerAge => "blocker_age",
+                  EscalationReason::Permission => "permission",
+                  EscalationReason::RiskGate => "risk_gate",
+                  EscalationReason::Approval => "approval",
+                  EscalationReason::ReadinessFailures => "readiness_failures",
+                  EscalationReason::Integration => "integration",
+                  EscalationReason::ExplicitRequest => "explicit_request",
+              }
+          }
           let reasons = [
-              (EscalationReason::Budget, "budget"),
-              (EscalationReason::Sessions, "sessions"),
-              (EscalationReason::Iterations, "iterations"),
-              (EscalationReason::BlockerAge, "blocker_age"),
-              (EscalationReason::Permission, "permission"),
-              (EscalationReason::RiskGate, "risk_gate"),
-              (EscalationReason::Approval, "approval"),
-              (EscalationReason::ReadinessFailures, "readiness_failures"),
-              (EscalationReason::Integration, "integration"),
-              (EscalationReason::ExplicitRequest, "explicit_request"),
+              EscalationReason::Budget,
+              EscalationReason::Sessions,
+              EscalationReason::Iterations,
+              EscalationReason::BlockerAge,
+              EscalationReason::Permission,
+              EscalationReason::RiskGate,
+              EscalationReason::Approval,
+              EscalationReason::ReadinessFailures,
+              EscalationReason::Integration,
+              EscalationReason::ExplicitRequest,
           ];
-          for (reason, wire) in reasons {
+          assert_eq!(reasons.len(), 10, "spec 5.7 names ten reasons");
+          for reason in reasons {
+              let wire = wire_name(reason);
               assert_eq!(serde_json::to_value(reason).unwrap(), json!(wire));
               assert_eq!(
                   serde_json::from_value::<EscalationReason>(json!(wire)).unwrap(),
                   reason
+              );
+          }
+          // A reason this program does not know is refused rather than absorbed, so that the
+          // governance vocabulary cannot widen behind a catch-all variant.
+          for unknown in ["Budget", "blockerAge", "readiness_failure", ""] {
+              assert!(
+                  serde_json::from_value::<EscalationReason>(json!(unknown)).is_err(),
+                  "{unknown}"
               );
           }
       }
@@ -267,7 +317,7 @@ Produces: `governor::escalation::{EscalationReason, Escalation, DEFAULT_ITERATIO
       Sessions,
       /// The rejection iteration limit was reached.
       Iterations,
-      /// The task stayed blocked longer than the limit.
+      /// The task stayed blocked for the limit or longer.
       BlockerAge,
       /// A permission was denied on a required action.
       Permission,
@@ -359,7 +409,13 @@ Produces: `governor::escalation::{EscalationReason, Escalation, DEFAULT_ITERATIO
   }
 
   /// Decides whether a task blocked at `blocked_at` has, at `now`, been blocked for `limit` or
-  /// longer. A `now` before `blocked_at` (a clock that went backwards) counts as within the limit.
+  /// longer. A `now` before `blocked_at` counts as within the limit: the pair cannot be aged, and
+  /// escalating on it would send every blocked task to the user the moment a clock steps backwards.
+  ///
+  /// The cost is that a `blocked_at` stamped in the future keeps a task from ever escalating, because
+  /// unlike a `now` that is behind, a persisted `blocked_at` tells the same lie on every tick. Not
+  /// persisting one is the runtime's job (phase 3): it stamps `blocked_at` when the task blocks and
+  /// re-stamps it if its clock is corrected backwards afterwards.
   #[must_use]
   pub fn evaluate_blocked_age(
       blocked_at: DateTime<Utc>,
@@ -395,6 +451,14 @@ Produces: `governor::escalation::{EscalationReason, Escalation, DEFAULT_ITERATIO
 
       #[test]
       fn returns_a_rejected_task_while_its_iterations_are_below_the_limit() {
+          // The schema's default for max_iterations and spec 5.2's "default 3": pinned as a literal,
+          // because every other use here is relative to the constant and would follow it if it drifted.
+          assert_eq!(DEFAULT_ITERATION_LIMIT, 3);
+          assert_eq!(
+              evaluate_rejection(2, 3),
+              RejectionOutcome::ReturnToInProgress
+          );
+          assert_eq!(evaluate_rejection(3, 3), RejectionOutcome::Escalate);
           for iteration in 0..DEFAULT_ITERATION_LIMIT {
               assert_eq!(
                   evaluate_rejection(iteration, DEFAULT_ITERATION_LIMIT),
@@ -473,24 +537,65 @@ Produces: `governor::escalation::{EscalationReason, Escalation, DEFAULT_ITERATIO
       }
 
       #[test]
+      fn cannot_age_a_task_whose_block_time_has_not_arrived() {
+          // A blocked_at a year ahead of now: really blocked for a month, but the clock cannot say
+          // so, and the rule keeps waiting rather than escalating every blocked task at once. The
+          // runtime is what must not persist this; the doc comment on the function says so.
+          assert_eq!(
+              evaluate_blocked_age(
+                  at("2027-08-16T10:00:00Z"),
+                  at("2026-09-16T10:00:00Z"),
+                  DEFAULT_BLOCKED_LIMIT
+              ),
+              BlockedAge::WithinLimit
+          );
+      }
+
+      #[test]
       fn names_the_reasons_of_the_spec_on_the_wire() {
+          // Exhaustive on purpose: an eleventh reason cannot be added to the enum without failing
+          // to compile here, so the governance vocabulary cannot grow without the spec growing too.
+          fn wire_name(reason: EscalationReason) -> &'static str {
+              match reason {
+                  EscalationReason::Budget => "budget",
+                  EscalationReason::Sessions => "sessions",
+                  EscalationReason::Iterations => "iterations",
+                  EscalationReason::BlockerAge => "blocker_age",
+                  EscalationReason::Permission => "permission",
+                  EscalationReason::RiskGate => "risk_gate",
+                  EscalationReason::Approval => "approval",
+                  EscalationReason::ReadinessFailures => "readiness_failures",
+                  EscalationReason::Integration => "integration",
+                  EscalationReason::ExplicitRequest => "explicit_request",
+              }
+          }
           let reasons = [
-              (EscalationReason::Budget, "budget"),
-              (EscalationReason::Sessions, "sessions"),
-              (EscalationReason::Iterations, "iterations"),
-              (EscalationReason::BlockerAge, "blocker_age"),
-              (EscalationReason::Permission, "permission"),
-              (EscalationReason::RiskGate, "risk_gate"),
-              (EscalationReason::Approval, "approval"),
-              (EscalationReason::ReadinessFailures, "readiness_failures"),
-              (EscalationReason::Integration, "integration"),
-              (EscalationReason::ExplicitRequest, "explicit_request"),
+              EscalationReason::Budget,
+              EscalationReason::Sessions,
+              EscalationReason::Iterations,
+              EscalationReason::BlockerAge,
+              EscalationReason::Permission,
+              EscalationReason::RiskGate,
+              EscalationReason::Approval,
+              EscalationReason::ReadinessFailures,
+              EscalationReason::Integration,
+              EscalationReason::ExplicitRequest,
           ];
-          for (reason, wire) in reasons {
+          assert_eq!(reasons.len(), 10, "spec 5.7 names ten reasons");
+          for reason in reasons {
+              let wire = wire_name(reason);
               assert_eq!(serde_json::to_value(reason).unwrap(), json!(wire));
               assert_eq!(
                   serde_json::from_value::<EscalationReason>(json!(wire)).unwrap(),
                   reason
+              );
+          }
+          // A reason this program does not know is refused rather than absorbed, so that the
+          // governance vocabulary cannot widen behind a catch-all variant.
+          for unknown in ["Budget", "blockerAge", "readiness_failure", ""] {
+              assert!(
+                  serde_json::from_value::<EscalationReason>(json!(unknown)).is_err(),
+                  "{unknown}"
               );
           }
       }
@@ -558,10 +663,10 @@ Produces: `governor::escalation::{EscalationReason, Escalation, DEFAULT_ITERATIO
   cargo fmt --all
   cargo test --package farik-core governor::escalation
   # expected, among the output:
-  # test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 114 filtered out; finished in ...
+  # test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 114 filtered out; finished in ...
   cargo xtask check
   # expected, among the output, then exit code 0:
-  # test result: ok. 121 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in ...   (farik-core)
+  # test result: ok. 122 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in ...   (farik-core)
   # test result: ok. 23 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in ...   (xtask)
   # xtask check: ok
   ```
@@ -573,7 +678,7 @@ Produces: `governor::escalation::{EscalationReason, Escalation, DEFAULT_ITERATIO
 ```
 cargo xtask check
 # expected, among the output, then exit code 0:
-# test result: ok. 121 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in ...   (farik-core)
+# test result: ok. 122 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in ...   (farik-core)
 # test result: ok. 23 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in ...   (xtask)
 # xtask check: ok
 ```

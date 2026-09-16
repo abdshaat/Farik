@@ -137,7 +137,7 @@ Transitions and who may trigger them:
 | any | cancelled | human only | none (added in 0.2) |
 | escalated | any | human only | none |
 
-`accepted` and `cancelled` are terminal: no transition leaves them, `any` in the table excludes them, and `any` never means staying in the same status. The governor is the only actor allowed to write the `status` field for transitions marked as its own. Agents request transitions through a tool; the governor evaluates and either applies them or refuses with a reason that goes back to the agent and into the log. A contract is frozen once its task leaves `refining` (5.11).
+`accepted` and `cancelled` are terminal: no transition leaves them, `any` in the table excludes them, and `any` never means staying in the same status. The governor is the only actor allowed to write the `status` field for transitions marked as its own. Agents request transitions through a tool; the governor evaluates and either applies them or refuses with a reason that goes back to the agent and into the log. A contract is frozen once its task leaves `refining` (5.11). The blocked-age rule measures from the moment the runtime stamped, so the runtime must never persist a block time later than the present and must re-stamp it if its clock is corrected backwards: the governor cannot age a task whose block time has not arrived, and it keeps waiting rather than escalating every blocked task the instant a clock steps back.
 
 ### 5.3 Definition of Ready
 

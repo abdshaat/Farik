@@ -555,7 +555,7 @@ Produces: `governor::transition_table::{TransitionActor, GateId, Status, Transit
       BlockerWritten,
       /// The blocker is resolved.
       BlockerResolved,
-      /// Blocked longer than the configured limit.
+      /// Blocked for the configured limit or longer.
       BlockedAge,
       /// The Definition of Done (spec 5.4).
       DefinitionOfDone,
