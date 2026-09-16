@@ -14,11 +14,18 @@ pub struct GeneratedSchema {
 }
 
 /// Every schema that has generated code.
-pub const GENERATED_SCHEMAS: [GeneratedSchema; 1] = [GeneratedSchema {
-    schema: "docs/schemas/task-contract.schema.json",
-    types: "crates/core/src/generated/task_contract.rs",
-    schema_copy: "crates/core/src/generated/task_contract.schema.json",
-}];
+pub const GENERATED_SCHEMAS: [GeneratedSchema; 2] = [
+    GeneratedSchema {
+        schema: "docs/schemas/task-contract.schema.json",
+        types: "crates/core/src/generated/task_contract.rs",
+        schema_copy: "crates/core/src/generated/task_contract.schema.json",
+    },
+    GeneratedSchema {
+        schema: "docs/schemas/prices.schema.json",
+        types: "crates/core/src/generated/prices.rs",
+        schema_copy: "crates/core/src/generated/prices.schema.json",
+    },
+];
 
 /// Generates the Rust module for one schema's JSON text, formatted by `rustfmt`.
 ///

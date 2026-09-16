@@ -1,6 +1,6 @@
 # Phase 1, step 05: Budgets and cost
 
-Status: ready
+Status: in progress
 Branch: `claude/phase-0-implementation-izm38y` (the harness-assigned phase branch, left as assigned per `docs/standards/code.md`; steps do not get their own)
 Spec: `docs/SPEC.md` section 5.5 (the four budgets and the non-monetary limits, their defaults, and what exhaustion does; costs from the model's usage and a shipped, overridable price table), section 10 (a first day under twenty dollars at list prices), F5
 Depends on: phase 0 (merged in #4); step 04 of this phase (committed as ab8d0fb, 4e3cb52)
@@ -71,7 +71,7 @@ Files: created `docs/schemas/prices.schema.json`, `crates/core/src/generated/pri
 Consumes: `xtask::generate::{GeneratedSchema, GENERATED_SCHEMAS}` and the `generate` command from phase 0 step 02
 Produces: `generated::prices::{FarikPriceTable, ModelPrice}`; the schema copy for `include_str!`
 
-- [ ] Confirm the baseline on the branch head:
+- [x] Confirm the baseline on the branch head:
 
   ```
   cargo xtask check
@@ -81,7 +81,7 @@ Produces: `generated::prices::{FarikPriceTable, ModelPrice}`; the schema copy fo
   # xtask check: ok
   ```
 
-- [ ] Write the schema. `docs/schemas/prices.schema.json` in full:
+- [x] Write the schema. `docs/schemas/prices.schema.json` in full:
 
   ```json
   {
@@ -130,7 +130,7 @@ Produces: `generated::prices::{FarikPriceTable, ModelPrice}`; the schema copy fo
     }
   }
   ```
-- [ ] Register it and declare the module before it exists, so that the check fails for the right reason. `xtask/src/generate.rs` in full:
+- [x] Register it and declare the module before it exists, so that the check fails for the right reason. `xtask/src/generate.rs` in full:
 
   ```rust
   use std::io::Write;
@@ -247,7 +247,7 @@ Produces: `generated::prices::{FarikPriceTable, ModelPrice}`; the schema copy fo
   pub mod prices;
   pub mod task_contract;
   ```
-- [ ] Confirm the crate fails to build because the generated module is missing, and the freshness check says so:
+- [x] Confirm the crate fails to build because the generated module is missing, and the freshness check says so:
 
   ```
   cargo check --package farik-core
@@ -259,7 +259,7 @@ Produces: `generated::prices::{FarikPriceTable, ModelPrice}`; the schema copy fo
   # xtask: crates/core/src/generated/prices.rs is out of date with docs/schemas/prices.schema.json; run cargo xtask generate
   ```
 
-- [ ] Generate, and confirm the hashes:
+- [x] Generate, and confirm the hashes:
 
   ```
   cargo xtask generate
@@ -274,7 +274,7 @@ Produces: `generated::prices::{FarikPriceTable, ModelPrice}`; the schema copy fo
 
   The module exports `FarikPriceTable { prices: HashMap<String, ModelPrice>, retrieved_at: NaiveDate, source_url: String, version: NonZeroU64 }` and `ModelPrice` with the four `f64` prices. If the hashes differ, a pinned crate version has changed since this plan was written; stop and update the plan.
 
-- [ ] Run the full check; confirm green (no new test yet):
+- [x] Run the full check; confirm green (no new test yet):
 
   ```
   cargo fmt --all
@@ -285,7 +285,7 @@ Produces: `generated::prices::{FarikPriceTable, ModelPrice}`; the schema copy fo
   # xtask check: ok
   ```
 
-- [ ] Commit: `build(core): generate the price table types from the json schema`
+- [x] Commit: `build(core): generate the price table types from the json schema`
 
 ### Task 2: Cost and budgets
 
