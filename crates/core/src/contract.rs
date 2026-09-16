@@ -119,21 +119,31 @@ pub struct ValidationError {
 }
 
 static VALIDATOR: LazyLock<Validator> = LazyLock::new(|| {
-    let schema: Value =
-        serde_json::from_str(SCHEMA_JSON).expect("the embedded contract schema is valid JSON");
+    let schema: Value = serde_json::from_str(SCHEMA_JSON).expect(
+        "the embedded contract schema is valid JSON: it is a copy of docs/schemas/ written by \
+         cargo xtask generate and checked for freshness by cargo xtask check",
+    );
     jsonschema::options()
         .should_validate_formats(true)
         .build(&schema)
-        .expect("the embedded contract schema compiles")
+        .expect(
+            "the embedded contract schema compiles: it is JSON Schema 2020-12 with no external \
+             references, and the generator already parsed it",
+        )
 });
 
 /// Checks a value against `docs/schemas/task-contract.schema.json` and, when it conforms, returns
 /// the typed contract with the schema's defaults applied. Refuses anything the schema refuses,
 /// with one error per violation. Does not check Definition of Ready rules.
 ///
+/// An integer written with a zero fraction (`0.0`) counts as an integer, as it does for the
+/// schema. Timestamps are normalised to UTC with at most nine fractional digits, so a contract
+/// written back is not always byte-identical to the one read.
+///
 /// # Errors
 ///
-/// Every schema violation, in document order.
+/// Every schema violation, in the schema's order rather than the input's key order; or, when the
+/// schema passes but the typed contract cannot be built, one error at the root.
 pub fn validate_contract(input: &Value) -> Result<TaskContract, Vec<ValidationError>> {
     let errors: Vec<ValidationError> = VALIDATOR
         .iter_errors(input)
@@ -145,12 +155,43 @@ pub fn validate_contract(input: &Value) -> Result<TaskContract, Vec<ValidationEr
     if !errors.is_empty() {
         return Err(errors);
     }
-    serde_json::from_value::<TaskContract>(input.clone()).map_err(|error| {
+    serde_json::from_value::<TaskContract>(with_integers_normalised(input)).map_err(|error| {
         vec![ValidationError {
             path: "/".to_string(),
-            message: error.to_string(),
+            message: format!(
+                "the schema passed but the typed contract could not be built: {error}"
+            ),
         }]
     })
+}
+
+/// JSON Schema counts a number with a zero fraction as an integer and serde does not; such
+/// numbers are rewritten as integers, where they fit in an `i64`, so that the two agree.
+fn with_integers_normalised(value: &Value) -> Value {
+    match value {
+        Value::Number(number) => {
+            Value::Number(as_integer(number).unwrap_or_else(|| number.clone()))
+        }
+        Value::Array(items) => Value::Array(items.iter().map(with_integers_normalised).collect()),
+        Value::Object(fields) => Value::Object(
+            fields
+                .iter()
+                .map(|(key, field)| (key.clone(), with_integers_normalised(field)))
+                .collect(),
+        ),
+        other => other.clone(),
+    }
+}
+
+fn as_integer(number: &serde_json::Number) -> Option<serde_json::Number> {
+    let float = number.as_f64().filter(|_| number.is_f64())?;
+    if !float.is_finite() || float.fract() != 0.0 {
+        return None;
+    }
+    format!("{float:.0}")
+        .parse::<i64>()
+        .ok()
+        .map(serde_json::Number::from)
 }
 
 fn pointer(path: &str) -> String {
@@ -294,6 +335,35 @@ mod tests {
         assert_eq!(wire["iteration"], json!(0));
         assert_eq!(wire["locked"], json!(false));
         assert!(validate_contract(&wire).is_ok());
+    }
+
+    #[test]
+    fn accepts_an_integer_written_with_a_zero_fraction() {
+        let mut input = a_full_contract_wire();
+        input["iteration"] = json!(0.0);
+        input["exit_criteria"][0]["verification"]["expect"]["exit_code"] = json!(0.0);
+        let contract = validate_contract(&input).expect("valid");
+        assert_eq!(contract.iteration, 0);
+        assert_eq!(
+            Verification::from(&contract.exit_criteria[0].verification).method(),
+            "command"
+        );
+    }
+
+    #[test]
+    fn reports_a_typed_failure_after_a_schema_pass_at_the_root() {
+        let mut input = a_contract_wire();
+        input["iteration"] = json!(2e19);
+        let errors = refusal(&input);
+        assert_eq!(errors.len(), 1);
+        assert_eq!(errors[0].path, "/");
+        assert!(
+            errors[0]
+                .message
+                .starts_with("the schema passed but the typed contract could not be built"),
+            "{}",
+            errors[0].message
+        );
     }
 
     #[test]
