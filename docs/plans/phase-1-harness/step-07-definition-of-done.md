@@ -18,20 +18,24 @@ Readiness confirmed by: pending
 All in `docs/plans/project-plan.md`, phase 1, restated here only where this step needs the exact value.
 
 - `evaluate_done` returns `Result<(), Vec<DoneFailure>>` and reports every rule the task fails, in the order of `DoneRule`, as step 02's `evaluate_readiness` does: a reviewer told one thing at a time sends the task back once per round, and step 05's budgets taught that reporting the first of several independent failures hides the rest. Rejected: stopping at the first failure.
+- Every check reads the criterion it holds and never looks a verification back up by id, because nothing forbids two criteria sharing one id: the schema's `id` pattern has no uniqueness constraint, no readiness rule checks it, and a Product Manager writing two `C1`s is an ordinary slip. Looked up by id, the first match decides, so a `human` criterion listed first would hand its exemption to a `test` criterion nobody ran and the contract would be accepted. A test with two `C1` criteria pins it.
 - A criterion whose verification method is `human` is exempt from `CriterionRunByReviewer` and judged by `HumanCriterionAccepted` instead, because spec 5.4 item 1 says such criteria "are satisfied only by an explicit human acceptance event": a reviewer cannot run them at all, so requiring its run would make every contract with a `human` criterion permanently unacceptable. It needs a result that passed with `run_by: Human`.
 - A reviewer's result counts only with non-blank evidence, because spec 5.4 item 4 requires the review note to map each criterion to evidence, and a recorded result with nothing in it is the "I ran the tests and they passed" the section warns about. Whitespace is not evidence.
-- `DoneEvidence.results` holds what this verification round recorded: the reviewer's own runs and the human's acceptances. The assignee's earlier run is step 08's `check_criteria_recorded` gate, not this one's evidence, so a criterion that the assignee failed and the reviewer passed is accepted, which is the point of an independent run. Changed 2026-09-16 by this plan from the project plan's `reviewer_results`, whose name said less than the field holds.
-- `CriterionPassed` reads every result in the round rather than only the reviewer's, so that a `human` criterion recorded as failed also refuses.
+- `DoneEvidence.results` holds what this verification round recorded: the reviewer's own runs and the human's acceptances. The assignee's earlier run is step 08's `check_criteria_recorded` gate, which takes it as its own parameter, so a criterion the assignee failed and the reviewer passed is accepted: the independent run is the point of spec 5.4 item 1. The type cannot stop a runtime from putting an assignee's result here, so every check ignores one rather than trusting the field to be clean. Changed 2026-09-16 by this plan from the project plan's `reviewer_results`, whose name said less than the field holds.
+- `CriterionPassed` reads every result that is not the assignee's, rather than only the reviewer's, so that a `human` criterion recorded as failed also refuses; and it ignores the assignee's, so that its earlier failure does not outvote the reviewer's own run. Both directions have a test, because a check restricted to the reviewer alone passed the whole suite when the plan was first reviewed.
 - The diff is checked with step 03's `check_allowed_paths`, so that one set of glob semantics decides what a path means everywhere in the harness, and a contract whose `allowed_paths` do not compile refuses acceptance rather than accepting everything. A task that changed nothing passes: spec 5.4 item 2 forbids changes outside the allowed paths and says nothing about changes being required, and step 08's `CriteriaRecorded` gate is where a commit is demanded.
-- `requires_human_acceptance` is public, because step 09's `ContractRequiresHuman` gate and phase 3's orchestrator ask the same question, and spec 5.4 item 5 and 5.16 item 4 give one answer: risk `high`, or kind `epic`. The team policy `human_accepts_contracts: all` of resolved question 1 is about the contract at `refining`, not about acceptance, and is phase 3's.
-- A note counts as written only when it is not blank, and both notes are `Option<String>` rather than `String`, so that "the runtime has none" and "the agent wrote nothing" are the same refusal with one message.
+- `requires_human_acceptance` answers one question and says so in its doc: must the human accept the finished result before the task is accepted? Spec 5.4 item 5 and 5.16 item 4 give the answer, risk `high` or kind `epic`, and no team policy touches it. Its consumers are this step's `HumanAccepted` rule and phase 3's orchestrator; it is public so that they agree. It is deliberately **not** the answer to step 09's `ContractRequiresHuman` gate, which is the human's approval of the contract *before* work starts: project plan D8 widens that one to every task under `human_accepts_contracts: all`, and step 09 takes it as the context field `contract_requires_human_acceptance` rather than calling this function. The schema's `risk` description names the two moments separately, and conflating them would either silence the policy or make high-risk acceptance policy-dependent.
+- A note counts as written only when it is not blank, and both notes are `Option<String>` rather than `String`, so that "the runtime has none" and "the agent wrote nothing" are the same refusal with one message. `trim` is a floor, not a judgment of quality: it follows Unicode White_Space, so it catches a non-breaking or ideographic space but not a zero-width one, and the substance spec 5.4 item 4 asks for is carried by each result's evidence rather than by the note's length.
+- A contract with no exit criteria at all passes the two criterion rules vacuously. That is unreachable rather than decided: the schema sets `minItems: 1` on `exit_criteria`, `validate_contract` refuses a contract without one, and step 02's `CriteriaPresent` rule refuses it again before the task is ever assigned.
+- A `human` result needs no evidence while a reviewer's does, because the acceptance event is the evidence: spec 5.4 item 1 asks for an explicit human acceptance, not for the human to write up a command's output.
+- Revised 2026-09-16 after the readiness review found the `human`-exemption lookup accepting a criterion nobody ran when two criteria share an id (critical), the stated decision about the assignee's failure contradicted by the code, the invalid-glob refusal and the assignee rule both survivable as mutations, and the `requires_human_acceptance` rationale conflating the contract's approval with the result's acceptance. All taken; the glob refusal now reads in plain English and a contract that allows no path at all no longer ends its message in a dangling list.
 - Tests import the items by name rather than a glob; every code block below is the file after `cargo fmt --all`.
 
 ## Design
 
-One task: the `governor::done` module with `RunBy`, `CriterionResult`, `DoneEvidence`, `DoneRule`, `DoneFailure`, `requires_human_acceptance`, `evaluate_done` and its seven private checks, and eleven tests.
+One task: the `governor::done` module with `RunBy`, `CriterionResult`, `DoneEvidence`, `DoneRule`, `DoneFailure`, `requires_human_acceptance`, `evaluate_done` and its seven private checks, and fourteen tests.
 
-Out of scope: the gate that calls it and the assignee's own recorded run (step 08), the transition row it serves (step 09), the events that record an acceptance (phase 2), and who is allowed to be the reviewer, which step 02's `ReviewerAvailable` and step 08's `check_assignment` already decide.
+Out of scope: the gate that calls it and the assignee's own recorded run (step 08), the transition row it serves (step 09), the events that record an acceptance (phase 2), and who is allowed to be the reviewer, which step 02's `ReviewerAvailable` and step 08's `check_assignment` already decide. Also out of scope, and worth naming because this step trusts them: nothing here ties `RunBy::Human` to a `human.accepted` event, which is phase 2's, or the `Reviewer` label to the fresh session spec 5.4's closing paragraph requires, which is phase 3's. `CriterionResult` is what the runtime recorded, and phase 1 takes it at its word.
 
 ## Architecture notes
 
@@ -47,7 +51,7 @@ Touches `crates/core` only: one new child of `governor`. Consumes `contract::{Ta
 
 ```
 crates/core/src/governor.rs                         modifies: declares done
-crates/core/src/governor/done.rs                    creates: RunBy, CriterionResult, DoneEvidence, DoneRule, DoneFailure, requires_human_acceptance, evaluate_done, eleven tests
+crates/core/src/governor/done.rs                    creates: RunBy, CriterionResult, DoneEvidence, DoneRule, DoneFailure, requires_human_acceptance, evaluate_done, fourteen tests
 docs/plans/project-plan.md                          modifies: phase 1 step 07 interface gains requires_human_acceptance and renames the evidence field (in the plan's own commit)
 docs/plans/phase-1-harness/step-07-definition-of-done.md   modifies: checkboxes ticked
 ```
@@ -191,6 +195,50 @@ Produces: `governor::done::{RunBy, CriterionResult, DoneEvidence, DoneRule, Done
       }
 
       #[test]
+      fn accepts_what_the_reviewer_passed_although_the_assignee_had_failed_it() {
+          // The independent run is the point: the assignee's earlier failure is step 08's gate, and
+          // a reviewer that ran the criterion itself and watched it pass is what 5.4 item 1 asks.
+          let mut evidence = an_evidence();
+          let mut failed = a_result("C1", RunBy::Assignee);
+          failed.passed = false;
+          evidence.results.push(failed);
+          assert_eq!(evaluate_done(&a_contract(), &evidence), Ok(()));
+      }
+
+      #[test]
+      fn refuses_a_criterion_whose_id_is_shared_with_a_human_one() {
+          // Two criteria called C1, the human one first. Reading a verification back up by id would
+          // hand the human exemption to the second and accept a criterion nobody ran.
+          let mut contract = a_contract();
+          let mut human = contract.exit_criteria[0].clone();
+          human.verification = VerificationWire::Variant4 {
+              method: json!("human"),
+              question: "Did you sign in successfully?".to_string(),
+          };
+          contract.exit_criteria.insert(0, human);
+          let mut evidence = an_evidence();
+          evidence.results = vec![a_result("C1", RunBy::Human)];
+          assert_eq!(
+              failed_rules(&contract, &evidence),
+              [R::CriterionRunByReviewer]
+          );
+      }
+
+      #[test]
+      fn refuses_allowed_paths_that_do_not_compile() {
+          let mut contract = a_contract();
+          contract.allowed_paths = vec!["src/[".to_string()];
+          assert_eq!(
+              failed_rules(&contract, &an_evidence()),
+              [R::PathsWithinAllowed]
+          );
+          assert_eq!(
+              message_of(&contract, &an_evidence(), R::PathsWithinAllowed),
+              "the contract's allowed path src/[ is not a valid glob: unclosed character class; missing ']'"
+          );
+      }
+
+      #[test]
       fn lets_only_the_human_satisfy_a_human_criterion() {
           let mut contract = a_contract();
           contract.exit_criteria[0].verification = VerificationWire::Variant4 {
@@ -205,6 +253,15 @@ Produces: `governor::done::{RunBy, CriterionResult, DoneEvidence, DoneRule, Done
           );
           evidence.results = vec![a_result("C1", RunBy::Human)];
           assert_eq!(evaluate_done(&contract, &evidence), Ok(()));
+          // A human answer recorded as a failure refuses too, which is why the passed check reads
+          // every result that is not the assignee's rather than only the reviewer's.
+          let mut refused = a_result("C1", RunBy::Human);
+          refused.passed = false;
+          evidence.results = vec![refused];
+          assert_eq!(
+              failed_rules(&contract, &evidence),
+              [R::CriterionPassed, R::HumanCriterionAccepted]
+          );
       }
 
       #[test]
@@ -320,7 +377,7 @@ Produces: `governor::done::{RunBy, CriterionResult, DoneEvidence, DoneRule, Done
   use crate::contract::{TaskContract, Verification};
   use crate::generated::task_contract::FarikTaskContractKind as Kind;
   use crate::generated::task_contract::FarikTaskContractRisk as Risk;
-  use crate::governor::paths::{PathRefusal, check_allowed_paths};
+  use crate::governor::paths::{GlobError, PathRefusal, check_allowed_paths};
 
   /// Who ran a criterion.
   #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -390,8 +447,13 @@ Produces: `governor::done::{RunBy, CriterionResult, DoneEvidence, DoneRule, Done
       pub message: String,
   }
 
-  /// Whether the contract needs the human's acceptance: `high` risk, or an epic (`docs/SPEC.md`
-  /// sections 5.4 item 5 and 5.16).
+  /// Whether the human must accept the finished result before the task is accepted: the contract's
+  /// risk is `high`, or it is an epic (`docs/SPEC.md` section 5.4 item 5 and section 5.16 item 4).
+  /// No team policy touches this.
+  ///
+  /// This is not the human's approval of the contract before work starts, which spec 5.2's
+  /// `refining -> escalated` gate asks and the team policy `human_accepts_contracts` widens to every
+  /// task; step 09 takes that answer from its context rather than from here.
   #[must_use]
   pub fn requires_human_acceptance(contract: &TaskContract) -> bool {
       contract.risk == Risk::High || contract.kind == Kind::Epic
@@ -456,13 +518,15 @@ Produces: `governor::done::{RunBy, CriterionResult, DoneEvidence, DoneRule, Done
       let missing: Vec<String> = contract
           .exit_criteria
           .iter()
+          .filter(|criterion| {
+              !matches!(
+                  Verification::from(&criterion.verification),
+                  Verification::Human { .. }
+              )
+          })
           .map(|criterion| criterion.id.to_string())
           .filter(|id| {
-              !matches!(
-                  verification_of(contract, id),
-                  Some(Verification::Human { .. })
-              ) && reviewer_result(evidence, id)
-                  .is_none_or(|result| result.evidence.trim().is_empty())
+              reviewer_result(evidence, id).is_none_or(|result| result.evidence.trim().is_empty())
           })
           .collect();
       if missing.is_empty() {
@@ -477,24 +541,15 @@ Produces: `governor::done::{RunBy, CriterionResult, DoneEvidence, DoneRule, Done
       )
   }
 
-  fn verification_of(contract: &TaskContract, criterion_id: &str) -> Option<Verification> {
-      contract
-          .exit_criteria
-          .iter()
-          .find(|criterion| criterion.id.as_str() == criterion_id)
-          .map(|criterion| Verification::from(&criterion.verification))
-  }
-
   fn criterion_passed(contract: &TaskContract, evidence: &DoneEvidence) -> Vec<DoneFailure> {
       let failed: Vec<String> = contract
           .exit_criteria
           .iter()
           .map(|criterion| criterion.id.to_string())
           .filter(|id| {
-              evidence
-                  .results
-                  .iter()
-                  .any(|result| &result.criterion_id == id && !result.passed)
+              evidence.results.iter().any(|result| {
+                  &result.criterion_id == id && result.run_by != RunBy::Assignee && !result.passed
+              })
           })
           .collect();
       if failed.is_empty() {
@@ -538,21 +593,27 @@ Produces: `governor::done::{RunBy, CriterionResult, DoneEvidence, DoneRule, Done
   fn paths_within_allowed(contract: &TaskContract, evidence: &DoneEvidence) -> Vec<DoneFailure> {
       match check_allowed_paths(&evidence.changed_paths, &contract.allowed_paths) {
           Ok(()) => Vec::new(),
-          Err(PathRefusal::Violations(violations)) => one(
+          Err(PathRefusal::Violations(violations)) => {
+              let changed = violations
+                  .iter()
+                  .map(|violation| violation.path.clone())
+                  .collect::<Vec<String>>()
+                  .join(", ");
+              one(
+                  DoneRule::PathsWithinAllowed,
+                  if contract.allowed_paths.is_empty() {
+                      format!("the diff changes {changed}, and the contract allows no path at all")
+                  } else {
+                      format!(
+                          "the diff changes {changed} outside the contract's allowed paths {}",
+                          contract.allowed_paths.join(", ")
+                      )
+                  },
+              )
+          }
+          Err(PathRefusal::Glob(GlobError::Invalid { pattern, detail })) => one(
               DoneRule::PathsWithinAllowed,
-              format!(
-                  "the diff changes {} outside the contract's allowed paths {}",
-                  violations
-                      .iter()
-                      .map(|violation| violation.path.clone())
-                      .collect::<Vec<String>>()
-                      .join(", "),
-                  contract.allowed_paths.join(", ")
-              ),
-          ),
-          Err(PathRefusal::Glob(error)) => one(
-              DoneRule::PathsWithinAllowed,
-              format!("the contract's allowed paths cannot be read: {error:?}"),
+              format!("the contract's allowed path {pattern} is not a valid glob: {detail}"),
           ),
       }
   }
@@ -687,6 +748,50 @@ Produces: `governor::done::{RunBy, CriterionResult, DoneEvidence, DoneRule, Done
       }
 
       #[test]
+      fn accepts_what_the_reviewer_passed_although_the_assignee_had_failed_it() {
+          // The independent run is the point: the assignee's earlier failure is step 08's gate, and
+          // a reviewer that ran the criterion itself and watched it pass is what 5.4 item 1 asks.
+          let mut evidence = an_evidence();
+          let mut failed = a_result("C1", RunBy::Assignee);
+          failed.passed = false;
+          evidence.results.push(failed);
+          assert_eq!(evaluate_done(&a_contract(), &evidence), Ok(()));
+      }
+
+      #[test]
+      fn refuses_a_criterion_whose_id_is_shared_with_a_human_one() {
+          // Two criteria called C1, the human one first. Reading a verification back up by id would
+          // hand the human exemption to the second and accept a criterion nobody ran.
+          let mut contract = a_contract();
+          let mut human = contract.exit_criteria[0].clone();
+          human.verification = VerificationWire::Variant4 {
+              method: json!("human"),
+              question: "Did you sign in successfully?".to_string(),
+          };
+          contract.exit_criteria.insert(0, human);
+          let mut evidence = an_evidence();
+          evidence.results = vec![a_result("C1", RunBy::Human)];
+          assert_eq!(
+              failed_rules(&contract, &evidence),
+              [R::CriterionRunByReviewer]
+          );
+      }
+
+      #[test]
+      fn refuses_allowed_paths_that_do_not_compile() {
+          let mut contract = a_contract();
+          contract.allowed_paths = vec!["src/[".to_string()];
+          assert_eq!(
+              failed_rules(&contract, &an_evidence()),
+              [R::PathsWithinAllowed]
+          );
+          assert_eq!(
+              message_of(&contract, &an_evidence(), R::PathsWithinAllowed),
+              "the contract's allowed path src/[ is not a valid glob: unclosed character class; missing ']'"
+          );
+      }
+
+      #[test]
       fn lets_only_the_human_satisfy_a_human_criterion() {
           let mut contract = a_contract();
           contract.exit_criteria[0].verification = VerificationWire::Variant4 {
@@ -701,6 +806,15 @@ Produces: `governor::done::{RunBy, CriterionResult, DoneEvidence, DoneRule, Done
           );
           evidence.results = vec![a_result("C1", RunBy::Human)];
           assert_eq!(evaluate_done(&contract, &evidence), Ok(()));
+          // A human answer recorded as a failure refuses too, which is why the passed check reads
+          // every result that is not the assignee's rather than only the reviewer's.
+          let mut refused = a_result("C1", RunBy::Human);
+          refused.passed = false;
+          evidence.results = vec![refused];
+          assert_eq!(
+              failed_rules(&contract, &evidence),
+              [R::CriterionPassed, R::HumanCriterionAccepted]
+          );
       }
 
       #[test]
@@ -803,10 +917,10 @@ Produces: `governor::done::{RunBy, CriterionResult, DoneEvidence, DoneRule, Done
   cargo fmt --all
   cargo test --package farik-core governor::done
   # expected, among the output:
-  # test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 122 filtered out; finished in ...
+  # test result: ok. 14 passed; 0 failed; 0 ignored; 0 measured; 122 filtered out; finished in ...
   cargo xtask check
   # expected, among the output, then exit code 0:
-  # test result: ok. 133 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in ...   (farik-core)
+  # test result: ok. 136 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in ...   (farik-core)
   # test result: ok. 23 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in ...   (xtask)
   # xtask check: ok
   ```
@@ -818,7 +932,7 @@ Produces: `governor::done::{RunBy, CriterionResult, DoneEvidence, DoneRule, Done
 ```
 cargo xtask check
 # expected, among the output, then exit code 0:
-# test result: ok. 133 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in ...   (farik-core)
+# test result: ok. 136 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in ...   (farik-core)
 # test result: ok. 23 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in ...   (xtask)
 # xtask check: ok
 ```
