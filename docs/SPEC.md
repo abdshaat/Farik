@@ -201,7 +201,7 @@ Permissions are capability tiers attached to a role, overridable per agent by th
 | `git_remote` | push, open pull requests | nobody by default; user grants explicitly |
 | `external_effect` | anything that changes state outside the sandbox: posting to services, sending mail, deploying | nobody by default; each use requires human approval unless pre-authorized per MCP tool |
 
-The user's setup screen asks about `execute` and `git_remote` explicitly because those are the two that can hurt.
+The user's setup screen asks about `execute` and `git_remote` explicitly because those are the two that can hurt. `farik_exec` refuses a command when any segment of it (split on `&&`, `||`, `;`, `|`, and newlines, without parsing quotes) runs `git` or a path to it as its first word after any leading `NAME=value` assignments and wrappers such as `env`, `sudo`, `command`, `exec`, `nohup`, `time`, or `xargs`, because git is a Farik tool with its own tiers (ADR 0004); any other spelling (a subshell, a variable, a script, `sh -c`) is the residual that record accepts.
 
 Protected paths (added in 0.2). A team rule (5.12) lists globs that no tool may read or write whatever the tier, so that secrets kept in the repository never enter a session. The default list is `.env`, `.env.*`, `**/*.pem`, `**/*.key`, and `.farik/local/**`. Protected and allowed globs match the whole path relative to the project root, after backslashes become `/` and `.` segments are dropped: `*` stays within one directory, `**` crosses directories, a bare name such as `.env` names the root file only and `**/.env` names it anywhere, protected globs match without regard to letter case and protect a directory they name along with its children, an absolute path, an empty path, or a path with a `..` segment is always refused, and a glob that does not compile refuses the check rather than matching nothing.
 
@@ -261,7 +261,7 @@ Team rules are constraints the human writes once, in `.farik/team.yaml` under `r
 | `required_criteria` | verification methods | Definition of Ready refuses a contract that has no criterion of each listed method |
 | `require_new_tests` | boolean | Definition of Ready refuses a contract whose `test` criteria do not set `new_tests_required` |
 | `max_task_budget_usd` | number | Definition of Ready refuses a task whose budget exceeds it; an epic is bounded by the sprint budget instead |
-| `forbidden_commands` | regular expressions | `farik_exec` refuses a command that matches one |
+| `forbidden_commands` | regular expressions | `farik_exec` refuses a command that matches one: ECMAScript patterns, matched against the whole command and against each segment (split on `&&`, `||`, `;`, `\|`, and newlines), and a pattern that does not compile refuses every command |
 
 Defaults: `protected_paths` as in 5.6, `max_task_budget_usd` 5 dollars (the human raises it in `team.yaml`), everything else empty or off. Rules never loosen a permission tier; they only narrow what a granted tier allows.
 

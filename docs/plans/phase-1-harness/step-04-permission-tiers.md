@@ -1,6 +1,6 @@
 # Phase 1, step 04: Permission tiers
 
-Status: ready
+Status: done
 Branch: `claude/phase-0-implementation-izm38y` (the harness-assigned phase branch, left as assigned per `docs/standards/code.md`; steps do not get their own)
 Spec: `docs/SPEC.md` section 5.6 (permission tiers, their defaults per role, protected paths on every tool call, per-call human approval of external effects), 5.12 (`forbidden_commands`), ADR 0004 (`farik_exec` refuses git; git is a Farik tool with its own tiers), F5
 Depends on: phase 0 (merged in #4); step 02 of this phase (committed as 21fe00a, 87a3561, 4a1ac90: `TeamRules`); step 03 of this phase (committed as 220b576, 3355d35: the path checks)
@@ -64,7 +64,7 @@ Files: created `crates/core/src/governor/permissions.rs`; modified `crates/core/
 Consumes: `governor::paths::{check_allowed_paths, check_protected_paths, PathRefusal, GlobError}` from step 03; `governor::team_rules::TeamRules` from step 02; `contract::Role` from `main`
 Produces: `governor::permissions::{PermissionTier, default_tiers, ToolDescriptor, ToolCallRequest, AgentGrants, ApprovedCall, ToolCallContext, ToolRefusal, evaluate_tool_call, CommandRefusal, evaluate_command}`
 
-- [ ] Confirm the baseline on the branch head:
+- [x] Confirm the baseline on the branch head:
 
   ```
   cargo xtask check
@@ -74,7 +74,7 @@ Produces: `governor::permissions::{PermissionTier, default_tiers, ToolDescriptor
   # xtask check: ok
   ```
 
-- [ ] Declare the module. `crates/core/src/governor.rs` in full:
+- [x] Declare the module. `crates/core/src/governor.rs` in full:
 
   ```rust
   //! The governor: every rule of `docs/SPEC.md` section 5 as pure functions over values passed
@@ -94,7 +94,7 @@ Produces: `governor::permissions::{PermissionTier, default_tiers, ToolDescriptor
   /// The transition table of `docs/SPEC.md` section 5.2 as data, with lookups.
   pub mod transition_table;
   ```
-- [ ] Write the failing tests. `crates/core/src/governor/permissions.rs` holds only this:
+- [x] Write the failing tests. `crates/core/src/governor/permissions.rs` holds only this:
 
   ```rust
   #[cfg(test)]
@@ -433,7 +433,7 @@ Produces: `governor::permissions::{PermissionTier, default_tiers, ToolDescriptor
       }
   }
   ```
-- [ ] Run them and confirm they fail because the items are missing:
+- [x] Run them and confirm they fail because the items are missing:
 
   ```
   cargo test --package farik-core governor::permissions
@@ -442,7 +442,7 @@ Produces: `governor::permissions::{PermissionTier, default_tiers, ToolDescriptor
   # error: could not compile `farik-core` (lib test) due to 1 previous error
   ```
 
-- [ ] Write the implementation above the tests. `crates/core/src/governor/permissions.rs` in full:
+- [x] Write the implementation above the tests. `crates/core/src/governor/permissions.rs` in full:
 
   ```rust
   //! Permission tiers (`docs/SPEC.md` section 5.6): what a tool call may do given the agent's
@@ -1045,7 +1045,7 @@ Produces: `governor::permissions::{PermissionTier, default_tiers, ToolDescriptor
       }
   }
   ```
-- [ ] In `docs/SPEC.md` section 5.6, replace the sentence
+- [x] In `docs/SPEC.md` section 5.6, replace the sentence
 
   ```
   The user's setup screen asks about `execute` and `git_remote` explicitly because those are the two that can hurt.
@@ -1057,7 +1057,7 @@ Produces: `governor::permissions::{PermissionTier, default_tiers, ToolDescriptor
   The user's setup screen asks about `execute` and `git_remote` explicitly because those are the two that can hurt. `farik_exec` refuses a command when any segment of it (split on `&&`, `||`, `;`, `|`, and newlines, without parsing quotes) runs `git` or a path to it as its first word after any leading `NAME=value` assignments and wrappers such as `env`, `sudo`, `command`, `exec`, `nohup`, `time`, or `xargs`, because git is a Farik tool with its own tiers (ADR 0004); any other spelling (a subshell, a variable, a script, `sh -c`) is the residual that record accepts.
   ```
 
-- [ ] In `docs/SPEC.md` section 5.12, replace the table row
+- [x] In `docs/SPEC.md` section 5.12, replace the table row
 
   ```
   | `forbidden_commands` | regular expressions | `farik_exec` refuses a command that matches one |
@@ -1069,7 +1069,7 @@ Produces: `governor::permissions::{PermissionTier, default_tiers, ToolDescriptor
   | `forbidden_commands` | regular expressions | `farik_exec` refuses a command that matches one: ECMAScript patterns, matched against the whole command and against each segment (split on `&&`, `||`, `;`, `\|`, and newlines), and a pattern that does not compile refuses every command |
   ```
 
-- [ ] Format, run the tests and the full check; confirm green:
+- [x] Format, run the tests and the full check; confirm green:
 
   ```
   cargo fmt --all
@@ -1083,7 +1083,7 @@ Produces: `governor::permissions::{PermissionTier, default_tiers, ToolDescriptor
   # xtask check: ok
   ```
 
-- [ ] Commit: `feat(core): evaluate tool calls and commands against permission tiers`
+- [x] Commit: `feat(core): evaluate tool calls and commands against permission tiers`
 
 ## Verification
 
