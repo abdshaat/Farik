@@ -14,6 +14,7 @@ use chrono::{DateTime, Utc};
 use crate::budget::{BudgetConsequence, BudgetScope, BudgetState, check_budgets};
 use crate::contract::{TaskContract, TaskId, TaskStatus};
 use crate::generated::task_contract::FarikTaskContractKind as Kind;
+use crate::generated::task_contract::FarikTaskContractRisk as Risk;
 use crate::governor::done::{
     CriterionResult, DoneEvidence, evaluate_done, requires_human_acceptance,
 };
@@ -49,7 +50,8 @@ pub struct TransitionRequest {
 pub struct ContractAcceptance {
     /// Whether the team's policy requires the human to accept this contract, over and above the
     /// risk and the kind that `done::requires_human_acceptance` answers
-    /// (`human_accepts_contracts`, `docs/SPEC.md` section 5.12).
+    /// (`human_accepts_contracts`, a team policy rather than one of 5.12's rules: `docs/SPEC.md`
+    /// section 5.16 and its resolved question 1, with the values `high_risk` and `all`).
     pub required_by_policy: bool,
     /// Whether the human has accepted the contract the task has now. An edit of a frozen contract
     /// sends the task back to `refining` (5.11), and the acceptance it had does not carry over.
@@ -61,8 +63,6 @@ pub struct ContractAcceptance {
 /// compare.
 #[derive(Debug, Clone)]
 pub struct TransitionContext {
-    /// The task's status now, before the move.
-    pub status: TaskStatus,
     /// Its contract as it stands.
     pub contract: TaskContract,
     /// Whether the request behind this task has a recorded triage decision (`docs/SPEC.md`
@@ -120,6 +120,10 @@ pub enum TransitionEffect {
     RaiseEscalation(EscalationReason),
     /// The blocker and its time are cleared: the task is moving again.
     ResetBlocker,
+    /// The time the block is aged from is stamped. Without it the `blocked -> escalated` row can
+    /// never open, because a block the runtime recorded no time for cannot be aged, so the stamp is
+    /// part of the decision rather than something to be remembered.
+    StampBlockedAt,
 }
 
 /// The move the governor will apply.
@@ -147,6 +151,16 @@ pub struct GateFailure {
 /// Why a move is refused.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TransitionRefusal {
+    /// The request names one task and the contract another, so the runtime has paired them wrongly
+    /// and nothing here can say what either task may do. The status a move leaves comes from the
+    /// contract, which is the one place it is written (`docs/SPEC.md` section 5.11), so a request
+    /// decided from somebody else's contract would record a row that was never open for either.
+    WrongTask {
+        /// The task the request names.
+        asked: TaskId,
+        /// The task the contract is for.
+        contract: TaskId,
+    },
     /// No row of the table moves a task from this status to that one. `transitions_from` says
     /// what this status can reach, for a caller that wants to tell the agent what to ask instead.
     NoSuchTransition {
@@ -194,10 +208,16 @@ pub fn evaluate_transition(
     request: &TransitionRequest,
     context: &TransitionContext,
 ) -> Result<TransitionDecision, TransitionRefusal> {
-    let rows = find_transitions(context.status, request.to);
+    if request.task_id != context.contract.id {
+        return Err(TransitionRefusal::WrongTask {
+            asked: request.task_id.clone(),
+            contract: context.contract.id.clone(),
+        });
+    }
+    let rows = find_transitions(context.contract.status, request.to);
     if rows.is_empty() {
         return Err(TransitionRefusal::NoSuchTransition {
-            from: context.status,
+            from: context.contract.status,
             to: request.to,
         });
     }
@@ -228,7 +248,7 @@ pub fn evaluate_transition(
         match check_gate(row.gate, request.actor, context) {
             Ok(()) => {
                 return Ok(TransitionDecision {
-                    from: context.status,
+                    from: context.contract.status,
                     to: request.to,
                     row,
                     effects: effects(row.gate, request.to, context),
@@ -296,13 +316,24 @@ fn check_gate(gate: GateId, actor: TransitionActor, context: &TransitionContext)
                 .to_string()
         }),
         GateId::DefinitionOfReady => {
+            let mut details = Vec::new();
             if waits_for_the_human(context) {
-                return Err(vec![
+                details.push(
                     "this contract needs the human's acceptance before it leaves refining (5.16 item 2), and the human has not given it"
                         .to_string(),
-                ]);
+                );
             }
-            readiness_failures(context).map_or(Ok(()), Err)
+            // The acceptance first, because it is the last thing to happen, and the failures with
+            // it: a contract that does not pass the structural checks cannot be put to the human
+            // yet (5.16 item 2), so reporting only the acceptance would tell an epic to wait for
+            // something nobody can ask for, and the escalation row would say the opposite about the
+            // same contract.
+            details.extend(readiness_failures(context).unwrap_or_default());
+            if details.is_empty() {
+                Ok(())
+            } else {
+                Err(details)
+            }
         }
         GateId::ReadinessExhausted => readiness_exhausted(context),
         GateId::ContractRequiresHuman => human_must_accept_the_contract(context),
@@ -545,7 +576,7 @@ fn governor_escalation_reason(context: &TransitionContext) -> Option<EscalationR
 /// what the user is shown.
 fn effects(gate: GateId, to: TaskStatus, context: &TransitionContext) -> Vec<TransitionEffect> {
     let mut effects = Vec::new();
-    if context.status == TaskStatus::Rejected && to == TaskStatus::InProgress {
+    if context.contract.status == TaskStatus::Rejected && to == TaskStatus::InProgress {
         effects.push(TransitionEffect::IncrementIteration);
     }
     if to == TaskStatus::Escalated {
@@ -555,6 +586,9 @@ fn effects(gate: GateId, to: TaskStatus, context: &TransitionContext) -> Vec<Tra
     }
     if to == TaskStatus::InProgress {
         effects.push(TransitionEffect::ResetBlocker);
+    }
+    if to == TaskStatus::Blocked {
+        effects.push(TransitionEffect::StampBlockedAt);
     }
     effects
 }
@@ -568,10 +602,13 @@ fn escalation_reason(gate: GateId, context: &TransitionContext) -> EscalationRea
     match gate {
         GateId::ReadinessExhausted => EscalationReason::ReadinessFailures,
         GateId::ContractRequiresHuman => {
-            if context.contract.kind == Kind::Epic {
-                EscalationReason::Approval
-            } else {
+            // The contract's own `high` risk is the risk gate (5.4 item 5); an epic (5.16 item 2)
+            // and a contract the team's policy sends to the human are the user's approval. Calling
+            // the policy a risk gate would tell the user a low-risk task has one.
+            if context.contract.risk == Risk::High {
                 EscalationReason::RiskGate
+            } else {
+                EscalationReason::Approval
             }
         }
         GateId::BlockedAge => EscalationReason::BlockerAge,
@@ -671,10 +708,10 @@ mod tests {
     /// about.
     fn a_context() -> TransitionContext {
         let mut contract = a_contract();
+        contract.status = TaskStatus::InProgress;
         contract.assignee = Some("dev-1".to_string());
         contract.reviewer = Some("arch-1".to_string());
         TransitionContext {
-            status: TaskStatus::InProgress,
             contract,
             triaged: true,
             children: Vec::new(),
@@ -748,6 +785,24 @@ mod tests {
     }
 
     #[test]
+    fn refuses_a_request_paired_with_another_tasks_contract() {
+        // The status the move leaves comes from the contract, which is the one place it is written
+        // (5.11), so a request decided from somebody else's contract would record a row that was
+        // never open for either task. The governor refuses what cannot be true rather than guessing
+        // which of the two the runtime meant.
+        let context = a_context();
+        let mut elsewhere = ask(TaskStatus::Verifying, A::Assignee, Some("dev-1"));
+        elsewhere.task_id = "FRK-999".parse().expect("a task id");
+        assert_eq!(
+            decide(&elsewhere, &context),
+            Err(TransitionRefusal::WrongTask {
+                asked: "FRK-999".parse().expect("a task id"),
+                contract: context.contract.id.clone()
+            })
+        );
+    }
+
+    #[test]
     fn refuses_a_move_the_table_has_no_row_for() {
         let mut context = a_context();
         assert_eq!(
@@ -761,7 +816,7 @@ mod tests {
             })
         );
         // Nothing leaves a terminal status, and no row means staying put.
-        context.status = TaskStatus::Accepted;
+        context.contract.status = TaskStatus::Accepted;
         assert_eq!(
             decide(&ask(TaskStatus::InProgress, A::Human, None), &context),
             Err(TransitionRefusal::NoSuchTransition {
@@ -769,7 +824,7 @@ mod tests {
                 to: TaskStatus::InProgress
             })
         );
-        context.status = TaskStatus::InProgress;
+        context.contract.status = TaskStatus::InProgress;
         assert_eq!(
             decide(
                 &ask(TaskStatus::InProgress, A::Assignee, Some("dev-1")),
@@ -785,7 +840,7 @@ mod tests {
     #[test]
     fn refuses_an_actor_no_row_names_and_says_who_may_ask() {
         let mut context = a_context();
-        context.status = TaskStatus::Ready;
+        context.contract.status = TaskStatus::Ready;
         assert_eq!(
             decide(
                 &ask(TaskStatus::Assigned, A::Assignee, Some("dev-1")),
@@ -842,7 +897,7 @@ mod tests {
     fn opens_the_reviewers_row_only_to_the_reviewer_the_contract_names() {
         let context = a_context();
         let mut verifying = a_context();
-        verifying.status = TaskStatus::Verifying;
+        verifying.contract.status = TaskStatus::Verifying;
         assert_eq!(
             decide(
                 &ask(TaskStatus::Rejected, A::Reviewer, Some("dev-1")),
@@ -864,14 +919,14 @@ mod tests {
         // The Scrum Master, the Product Manager, the governor and the human hold no place on the
         // contract, so their rows ask nothing about an agent id.
         let mut blocked = context;
-        blocked.status = TaskStatus::Blocked;
+        blocked.contract.status = TaskStatus::Blocked;
         assert!(decide(&ask(TaskStatus::InProgress, A::ScrumMaster, None), &blocked).is_ok());
     }
 
     #[test]
     fn refines_a_draft_request_only_once_it_is_triaged() {
         let mut context = a_context();
-        context.status = TaskStatus::Draft;
+        context.contract.status = TaskStatus::Draft;
         let request = ask(TaskStatus::Refining, A::ProductManager, Some("pm-1"));
         assert_eq!(effects(&request, &context), []);
         context.triaged = false;
@@ -890,7 +945,7 @@ mod tests {
     #[test]
     fn readies_a_contract_that_passes_the_definition_of_ready() {
         let mut context = a_context();
-        context.status = TaskStatus::Refining;
+        context.contract.status = TaskStatus::Refining;
         let request = ask(TaskStatus::Ready, A::Governor, None);
         assert_eq!(effects(&request, &context), []);
         // The gate's details are the Definition of Ready's own messages, in its own order.
@@ -913,7 +968,7 @@ mod tests {
         // team's policy. This is the only function the runtime asks, so a rule it does not hold is
         // not held: the epic would reach `ready`, then `assigned`, with no approval ever asked for.
         let mut context = a_context();
-        context.status = TaskStatus::Refining;
+        context.contract.status = TaskStatus::Refining;
         let ready = ask(TaskStatus::Ready, A::Governor, None);
         let waiting =
             "this contract needs the human's acceptance before it leaves refining (5.16 item 2), and the human has not given it"
@@ -935,17 +990,28 @@ mod tests {
             one_gate(&ready, &context),
             (GateId::DefinitionOfReady, vec![waiting.clone()])
         );
-        // The human is answered before the Definition of Ready, and only that is reported: it is
-        // the one thing that has to happen next, and the escalation path reports the failures.
+        // The acceptance comes first because it is the last thing to happen, but the failures are
+        // reported with it: a contract that does not pass the structural checks cannot be put to
+        // the human yet (5.16 item 2), so reporting only the acceptance would tell an epic to wait
+        // for something nobody can ask for, and the escalation row would say the opposite about the
+        // same contract.
         context.contract.intent = " "
             .repeat(24)
             .parse()
             .expect("twenty-four spaces pass the schema");
         assert_eq!(
             one_gate(&ready, &context),
-            (GateId::DefinitionOfReady, vec![waiting])
+            (
+                GateId::DefinitionOfReady,
+                vec![
+                    waiting,
+                    "the intent is blank; state the user-facing reason for the task".to_string()
+                ]
+            )
         );
+        // The fixture's contract is `in_progress`, and this test is about a `refining` one.
         context.contract = a_context().contract;
+        context.contract.status = TaskStatus::Refining;
         // Once the human has accepted, the Definition of Ready is the whole gate again.
         context.acceptance.given = true;
         assert_eq!(effects(&ready, &context), []);
@@ -959,7 +1025,7 @@ mod tests {
         // gate-free `escalated -> any` row would then carry a contract that never passed the
         // Definition of Ready into `ready`.
         let mut context = a_context();
-        context.status = TaskStatus::Refining;
+        context.contract.status = TaskStatus::Refining;
         context.contract.kind = Kind::Epic;
         context.readiness_failed_attempts = 1;
         context.contract.intent = " "
@@ -978,7 +1044,9 @@ mod tests {
             ]
         );
         // The same epic, written properly, goes to the user.
+        // The fixture's contract is `in_progress`, and this test is about a `refining` one.
         context.contract = a_context().contract;
+        context.contract.status = TaskStatus::Refining;
         context.contract.kind = Kind::Epic;
         assert_eq!(
             effects(&request, &context),
@@ -989,7 +1057,7 @@ mod tests {
     #[test]
     fn escalates_a_contract_that_has_failed_the_definition_of_ready_three_times() {
         let mut context = a_context();
-        context.status = TaskStatus::Refining;
+        context.contract.status = TaskStatus::Refining;
         context.readiness_failed_attempts = 3;
         // The row is about a contract that fails the Definition of Ready, so this one does.
         context.contract.intent = " "
@@ -1034,7 +1102,7 @@ mod tests {
         // moving it rather than approving it, and the approval `check_product_doc_write` needs
         // would never be recorded.
         let mut context = a_context();
-        context.status = TaskStatus::Refining;
+        context.contract.status = TaskStatus::Refining;
         context.contract.kind = Kind::Epic;
         context.readiness_failed_attempts = 3;
         let decision = decide(&ask(TaskStatus::Escalated, A::Governor, None), &context)
@@ -1085,7 +1153,7 @@ mod tests {
     #[test]
     fn escalates_a_contract_that_waits_for_the_human_and_names_why() {
         let mut context = a_context();
-        context.status = TaskStatus::Refining;
+        context.contract.status = TaskStatus::Refining;
         context.readiness_failed_attempts = 0;
         let request = ask(TaskStatus::Escalated, A::Governor, None);
         // An epic waits for the user's approval (5.16 item 2); a high-risk task waits on the risk
@@ -1101,12 +1169,14 @@ mod tests {
             effects(&request, &context),
             [TransitionEffect::RaiseEscalation(Why::RiskGate)]
         );
-        // The team's policy is the other half of the question, and either half is enough.
+        // The team's policy is the other half of the question, and either half is enough. A
+        // contract the policy sends to the human has no risk gate, so it is the user's approval:
+        // 5.7's `risk_gate` is the contract's own `high` risk and nothing else.
         context.contract.risk = Risk::Medium;
         context.acceptance.required_by_policy = true;
         assert_eq!(
             effects(&request, &context),
-            [TransitionEffect::RaiseEscalation(Why::RiskGate)]
+            [TransitionEffect::RaiseEscalation(Why::Approval)]
         );
         // A contract the human has already accepted goes to `ready`, not to the human again.
         context.acceptance.given = true;
@@ -1123,7 +1193,7 @@ mod tests {
         // names, a user writing an epic themselves and locking and approving it, reaches this state.
         context.acceptance.given = true;
         let mut unready = a_context();
-        unready.status = TaskStatus::Refining;
+        unready.contract.status = TaskStatus::Refining;
         unready.contract.kind = Kind::Epic;
         unready.acceptance.given = true;
         unready.contract.intent = " "
@@ -1153,7 +1223,7 @@ mod tests {
     #[test]
     fn assigns_a_task_through_the_assignment_gate() {
         let mut context = a_context();
-        context.status = TaskStatus::Ready;
+        context.contract.status = TaskStatus::Ready;
         let request = ask(TaskStatus::Assigned, A::ScrumMaster, Some("sm-1"));
         assert_eq!(effects(&request, &context), []);
         // The gate's details are the assignment gate's own: a limit of zero is that gate's answer
@@ -1175,7 +1245,7 @@ mod tests {
         // request's actor, not from the input's `requested_by`, or the fixture's Scrum Master would
         // open the Product Manager's row.
         let mut by_the_pm = a_context();
-        by_the_pm.status = TaskStatus::Ready;
+        by_the_pm.contract.status = TaskStatus::Ready;
         assert_eq!(
             one_gate(
                 &ask(TaskStatus::Assigned, A::ProductManager, Some("pm-1")),
@@ -1234,7 +1304,12 @@ mod tests {
     fn blocks_a_task_with_a_written_blocker_and_clears_it_with_a_resolution() {
         let mut context = a_context();
         let block = ask(TaskStatus::Blocked, A::Assignee, Some("dev-1"));
-        assert_eq!(effects(&block, &context), []);
+        // Something has to record the time the block is aged from, or `blocked -> escalated` can
+        // never open and a forgotten stamp would quietly retire the rule.
+        assert_eq!(
+            effects(&block, &context),
+            [TransitionEffect::StampBlockedAt]
+        );
         // A blocker that says nothing about what is needed is the gate's answer, not a missing
         // value, and the details are the gate's own.
         context.blocker.as_mut().expect("the fixture blocks").needed = " ".to_string();
@@ -1249,7 +1324,7 @@ mod tests {
         assert_eq!(one_gate(&block, &context).0, GateId::BlockerWritten);
         // Leaving `blocked` for work clears the blocker, whoever asked.
         let mut blocked = a_context();
-        blocked.status = TaskStatus::Blocked;
+        blocked.contract.status = TaskStatus::Blocked;
         for actor in [A::ScrumMaster, A::Human] {
             assert_eq!(
                 effects(&ask(TaskStatus::InProgress, actor, None), &blocked),
@@ -1267,7 +1342,7 @@ mod tests {
     #[test]
     fn escalates_a_task_blocked_for_the_limit_or_longer() {
         let mut context = a_context();
-        context.status = TaskStatus::Blocked;
+        context.contract.status = TaskStatus::Blocked;
         context.blocked_limit = Duration::from_secs(3600);
         let request = ask(TaskStatus::Escalated, A::Governor, None);
         assert_eq!(
@@ -1310,7 +1385,7 @@ mod tests {
     #[test]
     fn accepts_a_task_on_the_definition_of_done() {
         let mut context = a_context();
-        context.status = TaskStatus::Verifying;
+        context.contract.status = TaskStatus::Verifying;
         let request = ask(TaskStatus::Accepted, A::ProductManager, Some("pm-1"));
         assert_eq!(effects(&request, &context), []);
         context.done.review_note = None;
@@ -1328,7 +1403,7 @@ mod tests {
     #[test]
     fn rejects_work_only_with_written_reasons_and_leaves_the_count_to_the_return() {
         let mut context = a_context();
-        context.status = TaskStatus::Verifying;
+        context.contract.status = TaskStatus::Verifying;
         let request = ask(TaskStatus::Rejected, A::Reviewer, Some("arch-1"));
         // The contract's `iteration` is how many times the task has already been returned to
         // `in_progress` after a rejection, which is what `max_iterations` bounds (the schema's own
@@ -1362,7 +1437,7 @@ mod tests {
     #[test]
     fn counts_the_iteration_when_the_task_returns_to_work_and_clears_its_blocker() {
         let mut context = a_context();
-        context.status = TaskStatus::Rejected;
+        context.contract.status = TaskStatus::Rejected;
         // The return is what the count is of, and a task going back to work carries no blocker.
         assert_eq!(
             effects(&ask(TaskStatus::InProgress, A::Governor, None), &context),
@@ -1373,7 +1448,7 @@ mod tests {
         );
         // A task the human takes out of `escalated` into work leaves its blocker behind too: one
         // that escalated out of `blocked` kept it, and a stale blocker would age again.
-        context.status = TaskStatus::Escalated;
+        context.contract.status = TaskStatus::Escalated;
         assert_eq!(
             effects(&ask(TaskStatus::InProgress, A::Human, None), &context),
             [TransitionEffect::ResetBlocker]
@@ -1383,7 +1458,7 @@ mod tests {
     #[test]
     fn works_a_rejected_task_again_until_the_iteration_limit() {
         let mut context = a_context();
-        context.status = TaskStatus::Rejected;
+        context.contract.status = TaskStatus::Rejected;
         let again = ask(TaskStatus::InProgress, A::Governor, None);
         let escalate = ask(TaskStatus::Escalated, A::Governor, None);
         // The contract's default limit is three; the iteration counts the returns so far, and the
@@ -1527,7 +1602,7 @@ mod tests {
             []
         );
         // From `escalated` the human may put the task anywhere the lifecycle has room for.
-        context.status = TaskStatus::Escalated;
+        context.contract.status = TaskStatus::Escalated;
         for to in [
             TaskStatus::Refining,
             TaskStatus::Ready,
@@ -1644,7 +1719,7 @@ mod tests {
         let mut covered: Vec<usize> = Vec::new();
         for case in every_row() {
             let mut context = a_context();
-            context.status = case.from;
+            context.contract.status = case.from;
             (case.prepare)(&mut context);
             let agent_id = match case.actor {
                 A::Assignee => Some("dev-1"),
@@ -1666,6 +1741,47 @@ mod tests {
             (0..TRANSITION_TABLE.len()).collect::<Vec<usize>>(),
             "every row of the table has a case"
         );
+    }
+
+    #[test]
+    fn refuses_every_row_of_the_table_to_an_actor_it_does_not_name() {
+        // `docs/standards/code.md`: every transition has a test that exercises it and one that
+        // exercises its refusal. Each row is asked by an actor no row of that move names, and the
+        // two rows the contract names an agent for are also asked by the wrong agent.
+        for case in every_row() {
+            let mut context = a_context();
+            context.contract.status = case.from;
+            (case.prepare)(&mut context);
+            let stranger = match case.actor {
+                A::Assignee | A::Reviewer => A::ScrumMaster,
+                A::ScrumMaster | A::ProductManager | A::Governor | A::Human => A::Reviewer,
+            };
+            match decide(&ask(case.to, stranger, Some("arch-1")), &context) {
+                Err(TransitionRefusal::ActorNotAllowed { actor, allowed }) => {
+                    assert_eq!(actor, stranger, "row {}", case.row);
+                    assert!(
+                        !allowed.contains(&stranger) && allowed.contains(&case.actor),
+                        "row {}: allowed {allowed:?}",
+                        case.row
+                    );
+                }
+                other => panic!(
+                    "row {}: expected the actor to be refused, got {other:?}",
+                    case.row
+                ),
+            }
+            // The assignee's and the reviewer's rows are also shut to another agent.
+            if matches!(case.actor, A::Assignee | A::Reviewer) {
+                assert!(
+                    matches!(
+                        decide(&ask(case.to, case.actor, Some("dev-9")), &context),
+                        Err(TransitionRefusal::NotTheNamedAgent { .. })
+                    ),
+                    "row {}",
+                    case.row
+                );
+            }
+        }
     }
 
     #[test]
@@ -1697,7 +1813,7 @@ mod tests {
         // budget exhausted could escalate for either reason. The table's order decides, so that
         // the more specific reason is the one the user reads.
         let mut context = a_context();
-        context.status = TaskStatus::Refining;
+        context.contract.status = TaskStatus::Refining;
         context.readiness_failed_attempts = 3;
         context.contract.intent = " "
             .repeat(24)
@@ -1718,7 +1834,7 @@ mod tests {
     #[test]
     fn starts_a_session_on_an_assigned_task_with_no_gate_at_all() {
         let mut context = a_context();
-        context.status = TaskStatus::Assigned;
+        context.contract.status = TaskStatus::Assigned;
         let decision = decide(
             &ask(TaskStatus::InProgress, A::Assignee, Some("dev-1")),
             &context,

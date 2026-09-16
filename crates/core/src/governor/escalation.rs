@@ -26,7 +26,9 @@ pub enum EscalationReason {
     Permission,
     /// The contract's risk requires the human's acceptance.
     RiskGate,
-    /// An epic awaits the user's approval of its contract (spec 5.16).
+    /// A contract awaits the user's approval: every epic (spec 5.16 item 2), and any contract the
+    /// team's policy `human_accepts_contracts` sends to the human. The contract's own `high` risk
+    /// is `RiskGate` instead.
     Approval,
     /// The contract failed the Definition of Ready three times (spec 5.2).
     ReadinessFailures,
