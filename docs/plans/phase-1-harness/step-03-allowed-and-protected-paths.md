@@ -3,7 +3,7 @@
 Status: draft
 Branch: `claude/phase-0-implementation-izm38y` (the harness-assigned phase branch, left as assigned per `docs/standards/code.md`; steps do not get their own)
 Spec: `docs/SPEC.md` section 5.4 item 2 (no file outside `allowed_paths` may change), 5.6 (protected paths: no tool may read or write them, whatever its tier), 5.12 (`protected_paths` is a team rule), F5
-Depends on: phase 0 (merged in #4); step 01 of this phase (committed as f9f0e67, 0e50df1, 3cc8bc3); step 02 of this phase (committed as 21fe00a, 87a3561)
+Depends on: phase 0 (merged in #4); step 01 of this phase (committed as f9f0e67, 0e50df1, 3cc8bc3); step 02 of this phase (committed as 21fe00a, 87a3561, and its review fixes)
 
 A plan is `ready` only when a reviewer other than the author has confirmed the three rules in `docs/standards/workflow.md` stage 2 (Plan): every decision made, no ambiguity, no forward dependencies. Record who confirmed and when here.
 
@@ -67,7 +67,7 @@ Produces: `governor::paths::{PathViolation, GlobError, PathRefusal, check_allowe
   ```
   cargo xtask check
   # expected, among the output, then exit code 0:
-  # test result: ok. 54 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in ...   (farik-core)
+  # test result: ok. 56 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in ...   (farik-core)
   # test result: ok. 23 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in ...   (xtask)
   # xtask check: ok
   ```
@@ -523,10 +523,10 @@ Produces: `governor::paths::{PathViolation, GlobError, PathRefusal, check_allowe
   cargo fmt --all
   cargo test --package farik-core governor::paths
   # expected, among the output:
-  # test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 54 filtered out; finished in ...
+  # test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 56 filtered out; finished in ...
   cargo xtask check
   # expected, among the output, then exit code 0:
-  # test result: ok. 63 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in ...   (farik-core)
+  # test result: ok. 65 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in ...   (farik-core)
   # test result: ok. 23 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in ...   (xtask)
   # xtask check: ok
   grep -A1 '^name = "globset"$' Cargo.lock
@@ -542,7 +542,7 @@ Produces: `governor::paths::{PathViolation, GlobError, PathRefusal, check_allowe
 ```
 cargo xtask check
 # expected, among the output, then exit code 0:
-# test result: ok. 63 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in ...   (farik-core)
+# test result: ok. 65 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in ...   (farik-core)
 # test result: ok. 23 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in ...   (xtask)
 # xtask check: ok
 ```

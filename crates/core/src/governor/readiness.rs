@@ -23,8 +23,8 @@ pub enum ReadinessRule {
     CommandCriteriaComplete,
     /// The budget does not exceed the remaining sprint budget.
     BudgetWithinSprint,
-    /// Someone other than the assignee can review: the human always can; otherwise one active
-    /// agent of the reviewer role, or two when it is the assignee's role.
+    /// Someone other than the assignee can review: the human, for an epic only; otherwise one
+    /// active agent of the reviewer role, or two when it is the assignee's role.
     ReviewerAvailable,
     /// Scope names at least one `out_of_scope` item that is not blank.
     OutOfScopePresent,
@@ -210,19 +210,24 @@ fn criteria_methods_valid(
     contract: &TaskContract,
     _: &ReadinessContext,
 ) -> Option<ReadinessFailure> {
-    let bad = criterion_ids(contract, |verification, wire| {
-        wire_method(wire) != Some(verification.method())
-    });
+    let bad: Vec<String> = contract
+        .exit_criteria
+        .iter()
+        .filter_map(|criterion| {
+            let implied = Verification::from(&criterion.verification).method();
+            let named = wire_method(&criterion.verification).unwrap_or("nothing");
+            (named != implied).then(|| {
+                format!(
+                    "criterion {} names the method {named} but has the fields of {implied}",
+                    criterion.id.as_str()
+                )
+            })
+        })
+        .collect();
     if bad.is_empty() {
         return None;
     }
-    Some(failure(
-        ReadinessRule::CriteriaMethodsValid,
-        format!(
-            "criteria {} name a verification method that does not match their fields",
-            bad.join(", ")
-        ),
-    ))
+    Some(failure(ReadinessRule::CriteriaMethodsValid, bad.join("; ")))
 }
 
 fn command_criteria_complete(
@@ -265,7 +270,14 @@ fn reviewer_available(
     context: &ReadinessContext,
 ) -> Option<ReadinessFailure> {
     if contract.reviewer_role == Role::Human {
-        return None;
+        if contract.kind == Kind::Epic {
+            return None;
+        }
+        return Some(failure(
+            ReadinessRule::ReviewerAvailable,
+            "the human reviews only epics; name an agent role as the reviewer of a task"
+                .to_string(),
+        ));
     }
     let needed = if contract.reviewer_role == contract.assignee_role {
         2
@@ -406,21 +418,28 @@ fn split_glob(pattern: &str) -> (&str, &str) {
     pattern.split_at(end)
 }
 
-/// Whether a path glob stays under one of the ceiling globs. A ceiling that is a directory
-/// (`src`, `src/`, `src/**`, or `**`) admits every path whose literal prefix is that directory
-/// or below it: `src/login/**` is within `src/**`, `src2/**` is not, and `**` admits everything.
-/// Any other ceiling (`docs/**/*.md`, `src/*.rs`) admits only a path written exactly like it, so
-/// that a file filter is never widened. Paths are compared as written: `./src/**` is not
-/// `src/**`.
+/// Whether a path glob stays under one of the ceiling globs. `**` admits everything. A ceiling
+/// that is a directory (`src`, `src/`, `src/**`) admits every path whose literal prefix is that
+/// directory or below it: `src/login/**` is within `src/**`, `src2/**` is not. Any other ceiling
+/// (`docs/**/*.md`, `src/*.rs`, an empty entry, `/`) admits only a path written exactly like it,
+/// so that a file filter is never widened and a stray entry never opens the ceiling. A path
+/// with a `..` segment is never within a directory. Paths are compared as written: `./src/**`
+/// is not `src/**`.
 fn is_within_any(path: &str, ceilings: &[String]) -> bool {
     ceilings.iter().any(|ceiling| {
+        if ceiling == "**" {
+            return true;
+        }
         let (prefix, rest) = split_glob(ceiling);
-        if !matches!(rest, "" | "**") {
+        let directory = prefix.trim_end_matches('/');
+        if !matches!(rest, "" | "**") || directory.is_empty() {
             return path == ceiling;
         }
-        let directory = prefix.trim_end_matches('/');
         let path = split_glob(path).0.trim_end_matches('/');
-        directory.is_empty() || path == directory || path.starts_with(&format!("{directory}/"))
+        if path.split('/').any(|segment| segment == "..") {
+            return false;
+        }
+        path == directory || path.starts_with(&format!("{directory}/"))
     })
 }
 
@@ -449,8 +468,9 @@ fn allowed_paths_within_ceiling(
     Some(failure(
         ReadinessRule::AllowedPathsWithinCeiling,
         format!(
-            "allowed paths {} reach outside the team's ceiling",
-            outside.join(", ")
+            "allowed paths {} reach outside the team's ceiling {}",
+            outside.join(", "),
+            context.rules.allowed_paths_ceiling.join(", ")
         ),
     ))
 }
@@ -523,8 +543,9 @@ fn paths_within_parent(
     Some(failure(
         ReadinessRule::PathsWithinParent,
         format!(
-            "allowed paths {} reach outside the parent's allowed paths",
-            outside.join(", ")
+            "allowed paths {} reach outside the parent's allowed paths {}",
+            outside.join(", "),
+            parent.allowed_paths.join(", ")
         ),
     ))
 }
@@ -688,6 +709,10 @@ mod tests {
             failed_rules(&contract, &a_ready_context()),
             [R::CriteriaMethodsValid]
         );
+        assert_eq!(
+            message_of(&contract, &a_ready_context(), R::CriteriaMethodsValid),
+            "criterion C1 names the method review but has the fields of human"
+        );
     }
 
     #[test]
@@ -729,15 +754,23 @@ mod tests {
     }
 
     #[test]
-    fn accepts_the_human_as_reviewer_without_counting_agents() {
-        let mut contract = a_contract();
-        contract.reviewer_role = Role::Human;
+    fn lets_the_human_review_an_epic_but_not_a_task() {
+        let mut epic = a_contract();
+        epic.kind = Kind::Epic;
+        epic.reviewer_role = Role::Human;
         let mut context = a_ready_context();
         context.active_agents_by_role.clear();
-        context
-            .active_agents_by_role
-            .insert(Role::SoftwareDeveloper, 1);
-        assert_eq!(evaluate_readiness(&contract, &context), Ok(()));
+        assert_eq!(evaluate_readiness(&epic, &context), Ok(()));
+        let mut task = a_contract();
+        task.reviewer_role = Role::Human;
+        assert_eq!(
+            failed_rules(&task, &a_ready_context()),
+            [R::ReviewerAvailable]
+        );
+        assert!(
+            message_of(&task, &a_ready_context(), R::ReviewerAvailable)
+                .starts_with("the human reviews only epics")
+        );
     }
 
     #[test]
@@ -808,8 +841,42 @@ mod tests {
         );
         context.rules.allowed_paths_ceiling = vec!["src/**".to_string()];
         assert_eq!(evaluate_readiness(&a_contract(), &context), Ok(()));
+        context.rules.allowed_paths_ceiling = vec!["src2/**".to_string()];
+        assert_eq!(
+            failed_rules(&a_contract(), &context),
+            [R::AllowedPathsWithinCeiling]
+        );
+        assert!(
+            message_of(&a_contract(), &context, R::AllowedPathsWithinCeiling)
+                .ends_with("reach outside the team's ceiling src2/**")
+        );
         context.rules.allowed_paths_ceiling = vec!["src2/**".to_string(), "**".to_string()];
         assert_eq!(evaluate_readiness(&a_contract(), &context), Ok(()));
+    }
+
+    #[test]
+    fn treats_an_empty_ceiling_entry_as_exact_rather_than_open() {
+        for entry in ["", "/"] {
+            let mut context = a_ready_context();
+            context.rules.allowed_paths_ceiling = vec![entry.to_string()];
+            assert_eq!(
+                failed_rules(&a_contract(), &context),
+                [R::AllowedPathsWithinCeiling],
+                "{entry:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn refuses_an_allowed_path_that_climbs_out_with_a_parent_segment() {
+        let mut contract = a_contract();
+        contract.allowed_paths = vec!["src/../.env".to_string()];
+        let mut context = a_ready_context();
+        context.rules.allowed_paths_ceiling = vec!["src/**".to_string()];
+        assert_eq!(
+            failed_rules(&contract, &context),
+            [R::AllowedPathsWithinCeiling]
+        );
     }
 
     #[test]
@@ -842,7 +909,6 @@ mod tests {
     fn does_not_cap_an_epic_at_the_team_maximum_for_a_task() {
         let mut epic = a_contract();
         epic.kind = Kind::Epic;
-        epic.reviewer_role = Role::Human;
         epic.budget.max_cost_usd = 40.0;
         assert_eq!(evaluate_readiness(&epic, &a_ready_context()), Ok(()));
     }
@@ -888,19 +954,18 @@ mod tests {
     #[test]
     fn requires_the_judgment_review_only_when_the_team_has_a_scrum_master() {
         let mut context = a_ready_context();
-        context.requires_judgment_review = true;
-        assert_eq!(failed_rules(&a_contract(), &context), [R::JudgmentRecorded]);
-        context.judgment_review = Some(a_review(true, true));
-        assert_eq!(evaluate_readiness(&a_contract(), &context), Ok(()));
-        context.requires_judgment_review = false;
         context.judgment_review = None;
+        assert_eq!(failed_rules(&a_contract(), &context), [R::JudgmentRecorded]);
+        context.requires_judgment_review = false;
+        context.active_agents_by_role.remove(&Role::ScrumMaster);
+        assert_eq!(evaluate_readiness(&a_contract(), &context), Ok(()));
+        context.judgment_review = Some(a_review(false, false));
         assert_eq!(evaluate_readiness(&a_contract(), &context), Ok(()));
     }
 
     #[test]
     fn refuses_a_judgment_that_the_task_does_not_fit_its_budget() {
         let mut context = a_ready_context();
-        context.requires_judgment_review = true;
         context.judgment_review = Some(a_review(false, true));
         assert_eq!(
             failed_rules(&a_contract(), &context),
@@ -911,7 +976,6 @@ mod tests {
     #[test]
     fn refuses_a_judgment_that_the_criteria_would_not_detect_the_failure() {
         let mut context = a_ready_context();
-        context.requires_judgment_review = true;
         context.judgment_review = Some(a_review(true, false));
         assert_eq!(
             failed_rules(&a_contract(), &context),
@@ -924,7 +988,7 @@ mod tests {
         let mut contract = a_contract();
         contract.exit_criteria.clear();
         let mut context = a_ready_context();
-        context.requires_judgment_review = true;
+        context.judgment_review = None;
         context.remaining_sprint_budget_usd = 1.0;
         context.rules.required_criteria = vec!["human".to_string()];
         assert_eq!(

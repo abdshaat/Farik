@@ -21,15 +21,17 @@ All in `docs/plans/project-plan.md`, phase 1, restated here only where this step
 - Rules the schema guarantees on the wire are still checked on the typed value where it can differ: the intent and `out_of_scope` items must have words (the schema counts whitespace), `exit_criteria` can be empty on a contract built in Rust, a `command` or `test` criterion's command must not be blank, and a criterion's `method` value must name the shape its fields have (the generated types carry `method` as a plain value, so an inconsistent one can be built in Rust).
 - One check function per rule, all with the signature `fn(&TaskContract, &ReadinessContext) -> Option<ReadinessFailure>`, listed in a `const` array in enum order; `evaluate_readiness` runs them all and reports every failure, so that the Product Manager fixes a contract in one pass. Rejected: stopping at the first failure.
 - `DependenciesReady`: a dependency counts as at least `ready` when its status is `ready`, `assigned`, `in_progress`, `blocked`, `verifying`, `rejected`, or `accepted`; one missing from the context does not exist. Rejected: counting `escalated` and `cancelled`, because neither is on the way to `accepted`.
-- `ReviewerAvailable` passes when the reviewer role is `human`, because the human is the reviewer of an epic the Product Manager broke down (spec 5.1, 5.16 item 4) and is always available; otherwise it counts agents of the reviewer role: one when it differs from the assignee role, two when it is the same (spec 5.3, decided 2026-09-15), and the message ends with `add an agent with role <role>`. Rejected: having the runtime report the human as an active agent, because the human is not an agent.
-- Paths within a ceiling or a parent are judged by literal prefix. A glob is split at its first `*`, `?`, `[`, or `{`; an entry whose rest is empty or `**` is a directory ceiling (`src`, `src/`, `src/**`, `**`) and admits every path whose own literal prefix is that directory or below it: `src/login/**` is within `src/**`, `src2/**` is not, `**` admits everything. Any other entry (`docs/**/*.md`, `src/*.rs`) admits only a path written exactly like it, so that a file filter is never widened into its directory. Paths are compared as written: `./src/**` is not `src/**`. Rejected: glob containment through `globset`, because deciding whether one glob contains another is not what the crate offers, and step 03 matches concrete paths, not patterns.
+- `ReviewerAvailable` passes when the reviewer role is `human` and the contract is an epic, because the human is the reviewer of an epic the Product Manager broke down (spec 5.1, 5.16 item 4) and is always available, and refuses a task whose reviewer is the human, because the harness verifies agents' work with agents (spec 5.1); otherwise it counts agents of the reviewer role: one when it differs from the assignee role, two when it is the same (spec 5.3, decided 2026-09-15), and the message ends with `add an agent with role <role>`. Rejected: having the runtime report the human as an active agent, because the human is not an agent.
+- Paths within a ceiling or a parent are judged by literal prefix. A glob is split at its first `*`, `?`, `[`, or `{`; an entry whose rest is empty or `**` is a directory ceiling (`src`, `src/`, `src/**`, `**`) and admits every path whose own literal prefix is that directory or below it: `src/login/**` is within `src/**`, `src2/**` is not, `**` admits everything. Any other entry (`docs/**/*.md`, `src/*.rs`, an empty entry, `/`) admits only a path written exactly like it, so that a file filter is never widened into its directory and a stray empty entry never opens the ceiling. A path with a `..` segment is never within a directory. Paths are compared as written: `./src/**` is not `src/**`. Rejected: glob containment through `globset`, because deciding whether one glob contains another is not what the crate offers, and step 03 matches concrete paths, not patterns.
 - Team rules defaults: `protected_paths` as in spec 5.6, `max_task_budget_usd` 5 dollars (project plan D3), everything else empty or off. `docs/SPEC.md` 5.12 says "everything else empty or off"; it is updated in this step to name the budget cap, because behavior and spec change together (hard rule 8). `DEFAULT_TEAM_RULES` is a `LazyLock` because the value owns strings.
 - The team cap is a cap on a task (D3 says "a task's `max_cost_usd`"): `BudgetWithinTeamMax` skips an epic, whose budget is bounded by the sprint budget through `BudgetWithinSprint` and whose tasks each fit under the cap and within the epic's remaining budget. Rejected: capping epics too, because under the default rules no epic could then exceed five dollars in total. The 5.12 table row and the defaults sentence say so.
 - `TeamRules` is a plain value with `Default`; the file format that fills it is `team.schema.json` in phase 2 step 05, which adds its own conversion.
 - The judgment rules apply only when the context says the team has an active Scrum Master (`requires_judgment_review`); without one the structural checks alone gate (project plan D2), and a review recorded anyway is ignored.
-- Fixtures: `governor::readiness::fixtures::a_contract()` returns the phase 0 wire fixture typed, built once in a `LazyLock` whose `expect` says why it cannot fail (the wire fixture is pinned schema-valid by `contract::tests`); `a_ready_context()` is a context in which it is ready. Both are `pub` so later steps' tests use them.
-- Tests use qualified enum paths through short aliases (`R`, `Kind`) rather than glob imports; check functions return `Option` through a `failure` constructor wrapped at the call site, because `clippy::unnecessary_wraps` refuses a helper that always returns `Some`.
+- Fixtures: `governor::readiness::fixtures::a_contract()` returns the phase 0 wire fixture typed, built once in a `LazyLock` whose `expect` says why it cannot fail (the wire fixture is pinned schema-valid by `contract::tests`); `a_ready_context()` is a context in which it is ready, with an active Scrum Master and its positive judgment review recorded, so that the context is one the runtime can produce (D2 ties the review requirement to an active Scrum Master). Both are `pub` so later steps' tests use them.
+- Failure messages name what to change to: the ceiling entries, the parent's paths, and for a mismatched criterion both the method named and the one its fields imply. A `TaskContract` enters the system only through `validate_contract`, which refuses a budget that is not positive, so the budget rules assume a finite positive budget.
 - Every code block below is the file after `cargo fmt --all`, so that the committed file and the plan are the same bytes.
+- Revised after the step review (pull request #5): the human may review an epic but not a task; an empty or `/` ceiling entry and a path with a `..` segment no longer open a directory ceiling; the boundary of a directory ceiling has a test; the fixture carries a recorded review; messages name the ceiling, the parent's paths, and the mismatched method.
+- Tests use qualified enum paths through short aliases (`R`, `Kind`) rather than glob imports; check functions return `Option` through a `failure` constructor wrapped at the call site, because `clippy::unnecessary_wraps` refuses a helper that always returns `Some`.
 
 ## Design
 
@@ -52,7 +54,7 @@ Touches `crates/core` only: two new children of `governor` and a fixtures module
 ```
 crates/core/src/governor.rs                          modifies: declares team_rules (task 1) and readiness (task 2)
 crates/core/src/governor/team_rules.rs               creates: TeamRules, Default, DEFAULT_PROTECTED_PATHS, DEFAULT_MAX_TASK_BUDGET_USD, DEFAULT_TEAM_RULES, two tests
-crates/core/src/governor/readiness.rs                creates: ReadinessRule, JudgmentReview, ParentState, ReadinessContext, ReadinessFailure, evaluate_readiness, the nineteen checks, twenty-five tests
+crates/core/src/governor/readiness.rs                creates: ReadinessRule, JudgmentReview, ParentState, ReadinessContext, ReadinessFailure, evaluate_readiness, the nineteen checks, twenty-seven tests
 crates/core/src/governor/readiness/fixtures.rs       creates: a_contract, a_ready_context
 docs/SPEC.md                                         modifies: 5.12 says the budget cap is on a task and names its default
 docs/plans/project-plan.md                           modifies: phase 1 step 02 interface drops RiskSet, with the reason, and lists the two default constants (in the plan's own commits)
@@ -273,7 +275,7 @@ Produces: `governor::readiness::{ReadinessRule, JudgmentReview, ParentState, Rea
   use std::collections::BTreeMap;
   use std::sync::LazyLock;
 
-  use super::ReadinessContext;
+  use super::{JudgmentReview, ReadinessContext};
   use crate::contract::fixtures::a_contract_wire;
   use crate::contract::{Role, TaskContract, validate_contract};
   use crate::governor::team_rules::TeamRules;
@@ -291,8 +293,8 @@ Produces: `governor::readiness::{ReadinessRule, JudgmentReview, ParentState, Rea
   }
 
   /// A context in which `a_contract()` is ready: a sprint with a hundred dollars left, one active
-  /// agent of every launch role, the default team rules, no parent, and no judgment review
-  /// required.
+  /// agent of every launch role, the default team rules, no parent, and, because the team has a
+  /// Scrum Master, its judgment review recorded with both answers yes.
   #[must_use]
   pub fn a_ready_context() -> ReadinessContext {
       ReadinessContext {
@@ -309,8 +311,12 @@ Produces: `governor::readiness::{ReadinessRule, JudgmentReview, ParentState, Rea
           .collect(),
           parent: None,
           rules: TeamRules::default(),
-          requires_judgment_review: false,
-          judgment_review: None,
+          requires_judgment_review: true,
+          judgment_review: Some(JudgmentReview {
+              fits_budget: true,
+              criteria_detect_failure: true,
+              reason: "Two files, one form; the test runs the form.".to_string(),
+          }),
       }
   }
   ```
@@ -342,8 +348,8 @@ Produces: `governor::readiness::{ReadinessRule, JudgmentReview, ParentState, Rea
       CommandCriteriaComplete,
       /// The budget does not exceed the remaining sprint budget.
       BudgetWithinSprint,
-      /// Someone other than the assignee can review: the human always can; otherwise one active
-      /// agent of the reviewer role, or two when it is the assignee's role.
+      /// Someone other than the assignee can review: the human, for an epic only; otherwise one
+      /// active agent of the reviewer role, or two when it is the assignee's role.
       ReviewerAvailable,
       /// Scope names at least one `out_of_scope` item that is not blank.
       OutOfScopePresent,
@@ -521,6 +527,10 @@ Produces: `governor::readiness::{ReadinessRule, JudgmentReview, ParentState, Rea
               failed_rules(&contract, &a_ready_context()),
               [R::CriteriaMethodsValid]
           );
+          assert_eq!(
+              message_of(&contract, &a_ready_context(), R::CriteriaMethodsValid),
+              "criterion C1 names the method review but has the fields of human"
+          );
       }
 
       #[test]
@@ -562,15 +572,23 @@ Produces: `governor::readiness::{ReadinessRule, JudgmentReview, ParentState, Rea
       }
 
       #[test]
-      fn accepts_the_human_as_reviewer_without_counting_agents() {
-          let mut contract = a_contract();
-          contract.reviewer_role = Role::Human;
+      fn lets_the_human_review_an_epic_but_not_a_task() {
+          let mut epic = a_contract();
+          epic.kind = Kind::Epic;
+          epic.reviewer_role = Role::Human;
           let mut context = a_ready_context();
           context.active_agents_by_role.clear();
-          context
-              .active_agents_by_role
-              .insert(Role::SoftwareDeveloper, 1);
-          assert_eq!(evaluate_readiness(&contract, &context), Ok(()));
+          assert_eq!(evaluate_readiness(&epic, &context), Ok(()));
+          let mut task = a_contract();
+          task.reviewer_role = Role::Human;
+          assert_eq!(
+              failed_rules(&task, &a_ready_context()),
+              [R::ReviewerAvailable]
+          );
+          assert!(
+              message_of(&task, &a_ready_context(), R::ReviewerAvailable)
+                  .starts_with("the human reviews only epics")
+          );
       }
 
       #[test]
@@ -641,8 +659,42 @@ Produces: `governor::readiness::{ReadinessRule, JudgmentReview, ParentState, Rea
           );
           context.rules.allowed_paths_ceiling = vec!["src/**".to_string()];
           assert_eq!(evaluate_readiness(&a_contract(), &context), Ok(()));
+          context.rules.allowed_paths_ceiling = vec!["src2/**".to_string()];
+          assert_eq!(
+              failed_rules(&a_contract(), &context),
+              [R::AllowedPathsWithinCeiling]
+          );
+          assert!(
+              message_of(&a_contract(), &context, R::AllowedPathsWithinCeiling)
+                  .ends_with("reach outside the team's ceiling src2/**")
+          );
           context.rules.allowed_paths_ceiling = vec!["src2/**".to_string(), "**".to_string()];
           assert_eq!(evaluate_readiness(&a_contract(), &context), Ok(()));
+      }
+
+      #[test]
+      fn treats_an_empty_ceiling_entry_as_exact_rather_than_open() {
+          for entry in ["", "/"] {
+              let mut context = a_ready_context();
+              context.rules.allowed_paths_ceiling = vec![entry.to_string()];
+              assert_eq!(
+                  failed_rules(&a_contract(), &context),
+                  [R::AllowedPathsWithinCeiling],
+                  "{entry:?}"
+              );
+          }
+      }
+
+      #[test]
+      fn refuses_an_allowed_path_that_climbs_out_with_a_parent_segment() {
+          let mut contract = a_contract();
+          contract.allowed_paths = vec!["src/../.env".to_string()];
+          let mut context = a_ready_context();
+          context.rules.allowed_paths_ceiling = vec!["src/**".to_string()];
+          assert_eq!(
+              failed_rules(&contract, &context),
+              [R::AllowedPathsWithinCeiling]
+          );
       }
 
       #[test]
@@ -675,7 +727,6 @@ Produces: `governor::readiness::{ReadinessRule, JudgmentReview, ParentState, Rea
       fn does_not_cap_an_epic_at_the_team_maximum_for_a_task() {
           let mut epic = a_contract();
           epic.kind = Kind::Epic;
-          epic.reviewer_role = Role::Human;
           epic.budget.max_cost_usd = 40.0;
           assert_eq!(evaluate_readiness(&epic, &a_ready_context()), Ok(()));
       }
@@ -721,19 +772,18 @@ Produces: `governor::readiness::{ReadinessRule, JudgmentReview, ParentState, Rea
       #[test]
       fn requires_the_judgment_review_only_when_the_team_has_a_scrum_master() {
           let mut context = a_ready_context();
-          context.requires_judgment_review = true;
-          assert_eq!(failed_rules(&a_contract(), &context), [R::JudgmentRecorded]);
-          context.judgment_review = Some(a_review(true, true));
-          assert_eq!(evaluate_readiness(&a_contract(), &context), Ok(()));
-          context.requires_judgment_review = false;
           context.judgment_review = None;
+          assert_eq!(failed_rules(&a_contract(), &context), [R::JudgmentRecorded]);
+          context.requires_judgment_review = false;
+          context.active_agents_by_role.remove(&Role::ScrumMaster);
+          assert_eq!(evaluate_readiness(&a_contract(), &context), Ok(()));
+          context.judgment_review = Some(a_review(false, false));
           assert_eq!(evaluate_readiness(&a_contract(), &context), Ok(()));
       }
 
       #[test]
       fn refuses_a_judgment_that_the_task_does_not_fit_its_budget() {
           let mut context = a_ready_context();
-          context.requires_judgment_review = true;
           context.judgment_review = Some(a_review(false, true));
           assert_eq!(
               failed_rules(&a_contract(), &context),
@@ -744,7 +794,6 @@ Produces: `governor::readiness::{ReadinessRule, JudgmentReview, ParentState, Rea
       #[test]
       fn refuses_a_judgment_that_the_criteria_would_not_detect_the_failure() {
           let mut context = a_ready_context();
-          context.requires_judgment_review = true;
           context.judgment_review = Some(a_review(true, false));
           assert_eq!(
               failed_rules(&a_contract(), &context),
@@ -757,7 +806,7 @@ Produces: `governor::readiness::{ReadinessRule, JudgmentReview, ParentState, Rea
           let mut contract = a_contract();
           contract.exit_criteria.clear();
           let mut context = a_ready_context();
-          context.requires_judgment_review = true;
+          context.judgment_review = None;
           context.remaining_sprint_budget_usd = 1.0;
           context.rules.required_criteria = vec!["human".to_string()];
           assert_eq!(
@@ -812,8 +861,8 @@ Produces: `governor::readiness::{ReadinessRule, JudgmentReview, ParentState, Rea
       CommandCriteriaComplete,
       /// The budget does not exceed the remaining sprint budget.
       BudgetWithinSprint,
-      /// Someone other than the assignee can review: the human always can; otherwise one active
-      /// agent of the reviewer role, or two when it is the assignee's role.
+      /// Someone other than the assignee can review: the human, for an epic only; otherwise one
+      /// active agent of the reviewer role, or two when it is the assignee's role.
       ReviewerAvailable,
       /// Scope names at least one `out_of_scope` item that is not blank.
       OutOfScopePresent,
@@ -999,19 +1048,24 @@ Produces: `governor::readiness::{ReadinessRule, JudgmentReview, ParentState, Rea
       contract: &TaskContract,
       _: &ReadinessContext,
   ) -> Option<ReadinessFailure> {
-      let bad = criterion_ids(contract, |verification, wire| {
-          wire_method(wire) != Some(verification.method())
-      });
+      let bad: Vec<String> = contract
+          .exit_criteria
+          .iter()
+          .filter_map(|criterion| {
+              let implied = Verification::from(&criterion.verification).method();
+              let named = wire_method(&criterion.verification).unwrap_or("nothing");
+              (named != implied).then(|| {
+                  format!(
+                      "criterion {} names the method {named} but has the fields of {implied}",
+                      criterion.id.as_str()
+                  )
+              })
+          })
+          .collect();
       if bad.is_empty() {
           return None;
       }
-      Some(failure(
-          ReadinessRule::CriteriaMethodsValid,
-          format!(
-              "criteria {} name a verification method that does not match their fields",
-              bad.join(", ")
-          ),
-      ))
+      Some(failure(ReadinessRule::CriteriaMethodsValid, bad.join("; ")))
   }
 
   fn command_criteria_complete(
@@ -1054,7 +1108,14 @@ Produces: `governor::readiness::{ReadinessRule, JudgmentReview, ParentState, Rea
       context: &ReadinessContext,
   ) -> Option<ReadinessFailure> {
       if contract.reviewer_role == Role::Human {
-          return None;
+          if contract.kind == Kind::Epic {
+              return None;
+          }
+          return Some(failure(
+              ReadinessRule::ReviewerAvailable,
+              "the human reviews only epics; name an agent role as the reviewer of a task"
+                  .to_string(),
+          ));
       }
       let needed = if contract.reviewer_role == contract.assignee_role {
           2
@@ -1195,21 +1256,28 @@ Produces: `governor::readiness::{ReadinessRule, JudgmentReview, ParentState, Rea
       pattern.split_at(end)
   }
 
-  /// Whether a path glob stays under one of the ceiling globs. A ceiling that is a directory
-  /// (`src`, `src/`, `src/**`, or `**`) admits every path whose literal prefix is that directory
-  /// or below it: `src/login/**` is within `src/**`, `src2/**` is not, and `**` admits everything.
-  /// Any other ceiling (`docs/**/*.md`, `src/*.rs`) admits only a path written exactly like it, so
-  /// that a file filter is never widened. Paths are compared as written: `./src/**` is not
-  /// `src/**`.
+  /// Whether a path glob stays under one of the ceiling globs. `**` admits everything. A ceiling
+  /// that is a directory (`src`, `src/`, `src/**`) admits every path whose literal prefix is that
+  /// directory or below it: `src/login/**` is within `src/**`, `src2/**` is not. Any other ceiling
+  /// (`docs/**/*.md`, `src/*.rs`, an empty entry, `/`) admits only a path written exactly like it,
+  /// so that a file filter is never widened and a stray entry never opens the ceiling. A path
+  /// with a `..` segment is never within a directory. Paths are compared as written: `./src/**`
+  /// is not `src/**`.
   fn is_within_any(path: &str, ceilings: &[String]) -> bool {
       ceilings.iter().any(|ceiling| {
+          if ceiling == "**" {
+              return true;
+          }
           let (prefix, rest) = split_glob(ceiling);
-          if !matches!(rest, "" | "**") {
+          let directory = prefix.trim_end_matches('/');
+          if !matches!(rest, "" | "**") || directory.is_empty() {
               return path == ceiling;
           }
-          let directory = prefix.trim_end_matches('/');
           let path = split_glob(path).0.trim_end_matches('/');
-          directory.is_empty() || path == directory || path.starts_with(&format!("{directory}/"))
+          if path.split('/').any(|segment| segment == "..") {
+              return false;
+          }
+          path == directory || path.starts_with(&format!("{directory}/"))
       })
   }
 
@@ -1238,8 +1306,9 @@ Produces: `governor::readiness::{ReadinessRule, JudgmentReview, ParentState, Rea
       Some(failure(
           ReadinessRule::AllowedPathsWithinCeiling,
           format!(
-              "allowed paths {} reach outside the team's ceiling",
-              outside.join(", ")
+              "allowed paths {} reach outside the team's ceiling {}",
+              outside.join(", "),
+              context.rules.allowed_paths_ceiling.join(", ")
           ),
       ))
   }
@@ -1312,8 +1381,9 @@ Produces: `governor::readiness::{ReadinessRule, JudgmentReview, ParentState, Rea
       Some(failure(
           ReadinessRule::PathsWithinParent,
           format!(
-              "allowed paths {} reach outside the parent's allowed paths",
-              outside.join(", ")
+              "allowed paths {} reach outside the parent's allowed paths {}",
+              outside.join(", "),
+              parent.allowed_paths.join(", ")
           ),
       ))
   }
@@ -1477,6 +1547,10 @@ Produces: `governor::readiness::{ReadinessRule, JudgmentReview, ParentState, Rea
               failed_rules(&contract, &a_ready_context()),
               [R::CriteriaMethodsValid]
           );
+          assert_eq!(
+              message_of(&contract, &a_ready_context(), R::CriteriaMethodsValid),
+              "criterion C1 names the method review but has the fields of human"
+          );
       }
 
       #[test]
@@ -1518,15 +1592,23 @@ Produces: `governor::readiness::{ReadinessRule, JudgmentReview, ParentState, Rea
       }
 
       #[test]
-      fn accepts_the_human_as_reviewer_without_counting_agents() {
-          let mut contract = a_contract();
-          contract.reviewer_role = Role::Human;
+      fn lets_the_human_review_an_epic_but_not_a_task() {
+          let mut epic = a_contract();
+          epic.kind = Kind::Epic;
+          epic.reviewer_role = Role::Human;
           let mut context = a_ready_context();
           context.active_agents_by_role.clear();
-          context
-              .active_agents_by_role
-              .insert(Role::SoftwareDeveloper, 1);
-          assert_eq!(evaluate_readiness(&contract, &context), Ok(()));
+          assert_eq!(evaluate_readiness(&epic, &context), Ok(()));
+          let mut task = a_contract();
+          task.reviewer_role = Role::Human;
+          assert_eq!(
+              failed_rules(&task, &a_ready_context()),
+              [R::ReviewerAvailable]
+          );
+          assert!(
+              message_of(&task, &a_ready_context(), R::ReviewerAvailable)
+                  .starts_with("the human reviews only epics")
+          );
       }
 
       #[test]
@@ -1597,8 +1679,42 @@ Produces: `governor::readiness::{ReadinessRule, JudgmentReview, ParentState, Rea
           );
           context.rules.allowed_paths_ceiling = vec!["src/**".to_string()];
           assert_eq!(evaluate_readiness(&a_contract(), &context), Ok(()));
+          context.rules.allowed_paths_ceiling = vec!["src2/**".to_string()];
+          assert_eq!(
+              failed_rules(&a_contract(), &context),
+              [R::AllowedPathsWithinCeiling]
+          );
+          assert!(
+              message_of(&a_contract(), &context, R::AllowedPathsWithinCeiling)
+                  .ends_with("reach outside the team's ceiling src2/**")
+          );
           context.rules.allowed_paths_ceiling = vec!["src2/**".to_string(), "**".to_string()];
           assert_eq!(evaluate_readiness(&a_contract(), &context), Ok(()));
+      }
+
+      #[test]
+      fn treats_an_empty_ceiling_entry_as_exact_rather_than_open() {
+          for entry in ["", "/"] {
+              let mut context = a_ready_context();
+              context.rules.allowed_paths_ceiling = vec![entry.to_string()];
+              assert_eq!(
+                  failed_rules(&a_contract(), &context),
+                  [R::AllowedPathsWithinCeiling],
+                  "{entry:?}"
+              );
+          }
+      }
+
+      #[test]
+      fn refuses_an_allowed_path_that_climbs_out_with_a_parent_segment() {
+          let mut contract = a_contract();
+          contract.allowed_paths = vec!["src/../.env".to_string()];
+          let mut context = a_ready_context();
+          context.rules.allowed_paths_ceiling = vec!["src/**".to_string()];
+          assert_eq!(
+              failed_rules(&contract, &context),
+              [R::AllowedPathsWithinCeiling]
+          );
       }
 
       #[test]
@@ -1631,7 +1747,6 @@ Produces: `governor::readiness::{ReadinessRule, JudgmentReview, ParentState, Rea
       fn does_not_cap_an_epic_at_the_team_maximum_for_a_task() {
           let mut epic = a_contract();
           epic.kind = Kind::Epic;
-          epic.reviewer_role = Role::Human;
           epic.budget.max_cost_usd = 40.0;
           assert_eq!(evaluate_readiness(&epic, &a_ready_context()), Ok(()));
       }
@@ -1677,19 +1792,18 @@ Produces: `governor::readiness::{ReadinessRule, JudgmentReview, ParentState, Rea
       #[test]
       fn requires_the_judgment_review_only_when_the_team_has_a_scrum_master() {
           let mut context = a_ready_context();
-          context.requires_judgment_review = true;
-          assert_eq!(failed_rules(&a_contract(), &context), [R::JudgmentRecorded]);
-          context.judgment_review = Some(a_review(true, true));
-          assert_eq!(evaluate_readiness(&a_contract(), &context), Ok(()));
-          context.requires_judgment_review = false;
           context.judgment_review = None;
+          assert_eq!(failed_rules(&a_contract(), &context), [R::JudgmentRecorded]);
+          context.requires_judgment_review = false;
+          context.active_agents_by_role.remove(&Role::ScrumMaster);
+          assert_eq!(evaluate_readiness(&a_contract(), &context), Ok(()));
+          context.judgment_review = Some(a_review(false, false));
           assert_eq!(evaluate_readiness(&a_contract(), &context), Ok(()));
       }
 
       #[test]
       fn refuses_a_judgment_that_the_task_does_not_fit_its_budget() {
           let mut context = a_ready_context();
-          context.requires_judgment_review = true;
           context.judgment_review = Some(a_review(false, true));
           assert_eq!(
               failed_rules(&a_contract(), &context),
@@ -1700,7 +1814,6 @@ Produces: `governor::readiness::{ReadinessRule, JudgmentReview, ParentState, Rea
       #[test]
       fn refuses_a_judgment_that_the_criteria_would_not_detect_the_failure() {
           let mut context = a_ready_context();
-          context.requires_judgment_review = true;
           context.judgment_review = Some(a_review(true, false));
           assert_eq!(
               failed_rules(&a_contract(), &context),
@@ -1713,7 +1826,7 @@ Produces: `governor::readiness::{ReadinessRule, JudgmentReview, ParentState, Rea
           let mut contract = a_contract();
           contract.exit_criteria.clear();
           let mut context = a_ready_context();
-          context.requires_judgment_review = true;
+          context.judgment_review = None;
           context.remaining_sprint_budget_usd = 1.0;
           context.rules.required_criteria = vec!["human".to_string()];
           assert_eq!(
@@ -1734,10 +1847,10 @@ Produces: `governor::readiness::{ReadinessRule, JudgmentReview, ParentState, Rea
   cargo fmt --all
   cargo test --package farik-core governor::readiness
   # expected, among the output:
-  # test result: ok. 25 passed; 0 failed; 0 ignored; 0 measured; 29 filtered out; finished in ...
+  # test result: ok. 27 passed; 0 failed; 0 ignored; 0 measured; 29 filtered out; finished in ...
   cargo xtask check
   # expected, among the output, then exit code 0:
-  # test result: ok. 54 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in ...   (farik-core)
+  # test result: ok. 56 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in ...   (farik-core)
   # test result: ok. 23 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in ...   (xtask)
   # xtask check: ok
   ```
@@ -1749,7 +1862,7 @@ Produces: `governor::readiness::{ReadinessRule, JudgmentReview, ParentState, Rea
 ```
 cargo xtask check
 # expected, among the output, then exit code 0:
-# test result: ok. 54 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in ...   (farik-core)
+# test result: ok. 56 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in ...   (farik-core)
 # test result: ok. 23 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in ...   (xtask)
 # xtask check: ok
 ```
