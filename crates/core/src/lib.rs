@@ -1,6 +1,9 @@
 //! Farik's harness: schemas, the task state machine, the governor, and the cost model.
 //! This crate performs no I/O.
 
+/// Types generated from `docs/schemas/`.
+pub mod generated;
+
 /// The crate's package name, as published.
 pub const CORE_CRATE_NAME: &str = "farik-core";
 

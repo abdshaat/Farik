@@ -1,9 +1,9 @@
 # Phase 0, step 02: Schema generation pipeline
 
-Status: draft
-Branch: `phase/0-foundation` (the phase branch; steps do not get their own)
+Status: in progress
+Branch: `claude/phase-0-implementation-izm38y` (the harness-assigned phase branch, left as assigned per `docs/standards/code.md`; steps do not get their own)
 Spec: `docs/SPEC.md` section 3 (Contract), F4 (validation against the JSON schema); `docs/standards/code.md`, "Schema validation"; ADR 0005
-Depends on: step 01 of this phase (not yet committed; record the sha here when it lands)
+Depends on: step 01 of this phase (committed as 61e3a28, f1163b8, c6f4c9c)
 
 A plan is `ready` only when a reviewer other than the author has confirmed the three rules in `docs/standards/workflow.md` stage 2 (Plan): every decision made, no ambiguity, no forward dependencies. Record who confirmed and when here.
 
@@ -64,7 +64,7 @@ Files: created `xtask/src/generate.rs`, `crates/core/src/generated/mod.rs`, `cra
 Consumes: `docs/schemas/task-contract.schema.json` on `main`; the `xtask` commands from step 01
 Produces: `cargo xtask generate [--check]`; `xtask::generate::{GeneratedSchema, GENERATED_SCHEMAS, generate_types}`; `farik_core::generated::task_contract::*`
 
-- [ ] Add the dependencies. Make the workspace `Cargo.toml` exactly:
+- [x] Add the dependencies. Make the workspace `Cargo.toml` exactly:
 
   ```toml
   [workspace]
@@ -142,7 +142,7 @@ Produces: `cargo xtask generate [--check]`; `xtask::generate::{GeneratedSchema, 
   workspace = true
   ```
 
-- [ ] Declare the modules before they exist, so that the check fails for the right reason. `crates/core/src/generated/mod.rs`:
+- [x] Declare the modules before they exist, so that the check fails for the right reason. `crates/core/src/generated/mod.rs`:
 
   ```rust
   //! Rust types generated from the JSON Schemas in `docs/schemas/`. Regenerate with `cargo xtask generate`.
@@ -173,7 +173,7 @@ Produces: `cargo xtask generate [--check]`; `xtask::generate::{GeneratedSchema, 
   }
   ```
 
-- [ ] Confirm the crate fails to build because the generated module is missing:
+- [x] Confirm the crate fails to build because the generated module is missing:
 
   ```
   cargo check --package farik-core
@@ -182,7 +182,7 @@ Produces: `cargo xtask generate [--check]`; `xtask::generate::{GeneratedSchema, 
   # error: could not compile `farik-core` (lib) due to 1 previous error
   ```
 
-- [ ] Write the generator. `xtask/src/lib.rs`:
+- [x] Write the generator. `xtask/src/lib.rs`:
 
   ```rust
   //! Repository tasks: the check command, hooks, and code generation. Run with `cargo xtask`.
@@ -472,7 +472,7 @@ Produces: `cargo xtask generate [--check]`; `xtask::generate::{GeneratedSchema, 
   }
   ```
 
-- [ ] Run the freshness check and confirm it fails because the generated files do not exist:
+- [x] Run the freshness check and confirm it fails because the generated files do not exist:
 
   ```
   cargo xtask generate --check
@@ -480,7 +480,7 @@ Produces: `cargo xtask generate [--check]`; `xtask::generate::{GeneratedSchema, 
   # xtask: crates/core/src/generated/task_contract.rs is out of date with docs/schemas/task-contract.schema.json; run cargo xtask generate
   ```
 
-- [ ] Generate:
+- [x] Generate:
 
   ```
   cargo xtask generate
@@ -502,7 +502,7 @@ Produces: `cargo xtask generate [--check]`; `xtask::generate::{GeneratedSchema, 
 
   The module exports `Role`, `ExitCriterion`, `ExitCriterionVerification` (five positional variants), `FarikTaskContract`, and a newtype for every `pattern` and length constraint (`FarikTaskContractId`, `ExitCriterionId`, and so forth). If the hashes differ, the schema on `main` or a pinned crate version has changed since this plan was written; stop and update the plan.
 
-- [ ] Run the full check; confirm green:
+- [x] Run the full check; confirm green:
 
   ```
   cargo fmt --all
@@ -514,7 +514,7 @@ Produces: `cargo xtask generate [--check]`; `xtask::generate::{GeneratedSchema, 
   # exit code 0
   ```
 
-- [ ] Commit: `build(repo): generate contract types from the json schema`
+- [x] Commit: `build(repo): generate contract types from the json schema`
 
 ## Verification
 

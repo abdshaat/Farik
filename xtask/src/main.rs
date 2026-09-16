@@ -32,6 +32,7 @@ fn run(args: &[String]) -> anyhow::Result<()> {
     let root = workspace_root();
     match args.first().map(String::as_str) {
         Some("check") => check(&root),
+        Some("generate") => generate(&root, args.get(1).is_some_and(|flag| flag == "--check")),
         Some("pre-commit") => pre_commit(&root),
         Some("commit-msg") => commit_msg(
             args.get(1)
@@ -79,6 +80,7 @@ fn check(root: &Path) -> anyhow::Result<()> {
         ],
     )?;
     cargo(root, &["test", "--workspace"])?;
+    generate(root, true)?;
     todos(root)?;
     core_io(root)?;
     println!("xtask check: ok");
@@ -148,6 +150,30 @@ fn core_io(root: &Path) -> anyhow::Result<()> {
         "farik-core performs no I/O (hard rule 5):\n{}",
         findings.join("\n")
     );
+}
+
+fn generate(root: &Path, check_only: bool) -> anyhow::Result<()> {
+    for entry in &xtask::generate::GENERATED_SCHEMAS {
+        let schema_json = fs::read_to_string(root.join(entry.schema))
+            .with_context(|| format!("reading {}", entry.schema))?;
+        let types = xtask::generate::generate_types(entry, &schema_json)?;
+        let outputs = [(entry.types, types), (entry.schema_copy, schema_json)];
+        for (path, wanted) in outputs {
+            let current = fs::read_to_string(root.join(path)).unwrap_or_default();
+            if check_only {
+                if current != wanted {
+                    bail!(
+                        "{path} is out of date with {}; run cargo xtask generate",
+                        entry.schema
+                    );
+                }
+            } else if current != wanted {
+                fs::write(root.join(path), &wanted).with_context(|| format!("writing {path}"))?;
+                println!("generated {path}");
+            }
+        }
+    }
+    Ok(())
 }
 
 fn install_hooks(root: &Path) -> anyhow::Result<()> {
