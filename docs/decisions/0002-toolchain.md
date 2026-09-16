@@ -1,7 +1,7 @@
 # 0002. TypeScript monorepo toolchain
 
 Date: 2026-09-14
-Status: accepted
+Status: superseded by 0005 for the backend; still in force for the front end
 
 ## Context
 

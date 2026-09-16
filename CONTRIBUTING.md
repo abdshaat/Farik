@@ -14,6 +14,10 @@ Install the [superpowers](https://github.com/obra/superpowers) plugin; its skill
 
 Follow `docs/standards/workflow.md` step by step. The project plan is `docs/plans/project-plan.md`, the step plan template is `docs/plans/step-template.md`, and the ADR template is `docs/decisions/0000-template.md`. The pull request template asks for the evidence the workflow requires; a pull request without it will be sent back.
 
+## Toolchains
+
+The backend is Rust: install the toolchain pinned in `rust-toolchain.toml` with `rustup` and run `cargo xtask check`. The front end (from phase 5 of the project plan) is TypeScript and adds pnpm. ADR 0005 records the split.
+
 ## Reporting a bug
 
 Open an issue with a reproduction. A failing test is the best reproduction. If you can, follow the debugging section of the workflow document and include what you found about the root cause.

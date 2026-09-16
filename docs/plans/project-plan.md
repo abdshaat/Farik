@@ -1,170 +1,452 @@
 # Farik project plan
 
-Status: draft. Phase 0 is fully decided and its step plans may be written. Later phases carry open decisions, listed under each phase, that must be closed before that phase's first step plan is written.
+Status: draft, revision 5. The backend is Rust (ADR 0005); every interface in this plan is a Rust signature except the front end's. The contract architecture is the one in `docs/SPEC.md` 5.16: a request is triaged into an epic or a standalone task, an epic is approved by the user and broken down into tasks. Phase 0 is fully decided and its step plans are written under `docs/plans/phase-0-foundation/`. Every product decision the plan raised (D1 to D20) was closed by the founder on 2026-09-15 and folded into the phase it governs; the closed decisions table at the end records each answer and where it lives.
 Owner: project founder.
-Last decision change: 2026-09-14, initial draft.
+Last decision change: 2026-09-15, revision 5: the contract architecture (request, triage, epic, task) is stated once in the every-phase list and threaded through every phase; human triage moves to phase 2, where the store can record it; requests filed by agents go through triage like the user's; D7 is recorded as clarified (a Developer may review another Developer's work, never its own); ADR 0004 accepted by the founder.
 
 This document divides the project into phases and each phase into steps. Vocabulary is as defined in `docs/standards/workflow.md`; where a step name below says "task" it means the product's task contract from `docs/SPEC.md`, not a plan task. A phase ends in something a person can use or verify. A phase is one pull request from the branch `phase/<n>-<name>`. A step has its own plan at `docs/plans/phase-<n>-<name>/step-<nn>-<name>.md` and lands as a group of commits on the phase branch. Steps run in the order listed; a step depends only on steps above it in the same phase and on phases already merged. The rules are in `docs/standards/workflow.md` stage 2 (Plan) and ADR 0003.
 
-Phases 0 through 2 together deliver Milestone 0 from `docs/SPEC.md` section 11. Phases 3 and 4 deliver Milestone 1. Phase 5 delivers Milestone 2 and the open-source launch. Phase 6 is Milestone 3.
+Phases 0 through 3 together deliver Milestone 0 from `docs/SPEC.md` section 11. Phases 4 and 5 deliver Milestone 1. Phase 6 delivers Milestone 2 and the open-source launch. Phase 7 is Milestone 3.
+
+## How to read a phase
+
+Each phase has four parts. "Ends with" is the thing a person can use or verify when the phase merges. "Decisions" lists what the phase rests on, each made and recorded. "Steps" is the ordered table, one line per step, with the spec references it serves. "Interfaces this phase adds" lists, per step, the public items the step produces, so that the no-forward-dependency rule can be checked by reading: a step may consume only items listed under an earlier step or an earlier phase. Signatures are Rust, abbreviated (`Result<T, E>` names the crate's error enum; `&` borrows and lifetimes are left to the step plan); the step plan is where they become exact code. Where a later step changes what an earlier interface is passed, the later step adds the field; the earlier step never leaves a placeholder for it.
 
 ## Decisions that apply to every phase
 
 Made, with the record:
 
 - Workflow and pull request rules: ADR 0001, `docs/standards/workflow.md`.
-- Toolchain: ADR 0002. pnpm workspaces, TypeScript strict, Biome, Vitest, lefthook, Changesets, GitHub Actions, `pnpm check`.
+- Backend in Rust, front end in TypeScript, the Claude Code program as the agent engine, `cargo xtask check` as the check command: ADR 0005, `docs/standards/code.md`. ADR 0002 still governs the front end's tools.
 - Planning structure: ADR 0003.
 - Naming and wire format rules: `docs/standards/code.md`.
-- `packages/core` performs no I/O: `docs/standards/code.md`, hard rule 5 in `CLAUDE.md`.
-- Licensing: Apache 2.0 for everything outside `ee/`: `docs/SPEC.md` section 9.
-- Package layout: `docs/SPEC.md` section 8.1.
-- Model provider for the first release: Claude via the Claude Agent SDK, one adapter, interface not promised stable: `docs/SPEC.md` section 8.2.
+- `farik-core` performs no I/O: `docs/standards/code.md`, hard rule 5 in `CLAUDE.md`. Enforced mechanically from Phase 0 by `cargo xtask core-io`.
+- Licensing: Apache 2.0 for everything outside `ee/`: `docs/SPEC.md` section 9. The `LICENSE` file is added by Phase 0 step 01.
+- Crate and package layout: `docs/SPEC.md` section 8.1. A crate is created by the first step that needs it, so that no empty crate sits unused. The table below says which step creates each one.
+- Execution model: agent sessions run on the host as Claude Code child processes; the program's shell tool is disallowed, its web tools are allowed only under `network`; command execution is a Farik tool backed by an `Executor` with a Docker implementation and a host implementation; git operations that need credentials or a tier are Farik tools on the host; governor decisions reach the program through `farik hook` commands that call the daemon: ADR 0004 (accepted 2026-09-15; mechanism amended by ADR 0005). No-sandbox mode ships (D1): the host implementation is chosen per machine in `.farik/local/settings.yaml`, and every `farik run` and the setup screen warn when it is on.
+- Versions are exact. Every dependency in every `Cargo.toml` and `package.json` is pinned to one version (`=` in Cargo), never a range, and an upgrade is its own `chore` commit. The lockfiles are committed. The Rust toolchain is pinned in `rust-toolchain.toml`.
+- Schemas own their types. Every format that leaves a process or is written to disk has a JSON Schema (2020-12) in `docs/schemas/`. `cargo xtask generate` turns each schema into a Rust module through `typify`, formatted by `rustfmt`, plus a verbatim copy of the schema for the crate to embed with `include_str!`, both committed under `crates/<owner>/src/generated/`, and `cargo xtask check` fails if a committed file is stale. The owner is the crate at whose edge the format is read or written. Rust fields are `snake_case` like the wire, so the generated types are the domain types; where a generated shape is awkward (an untagged enum with positional variants), the crate keeps one hand-written type and one `From` conversion at its edge. Validation uses the `jsonschema` crate with format assertion on, before deserialising with `serde`. The front end generates TypeScript types from the same schemas with `json-schema-to-typescript` and keeps one `camelCase` mapping layer at the daemon client.
+
+| Schema | Owner | First generated in |
+|---|---|---|
+| `task-contract.schema.json` | `farik-core` | phase 0 step 02 |
+| `prices.schema.json` | `farik-core` | phase 1 step 05 |
+| `event.schema.json`, `command.schema.json` | `farik-protocol` | phase 2 step 01 |
+| `team.schema.json` (agents, budgets, policy, rules), `criteria.schema.json` | `farik-store` | phase 2 step 05 |
+| `role.schema.json` | `farik-roles` | phase 3 step 07 |
+| `rpc.schema.json` | `farik-protocol`, and `@farik/protocol-client` | phase 5 step 01 |
+
+| Crate or package | Directory | Created in |
+|---|---|---|
+| `xtask` | `xtask` | phase 0 step 01 |
+| `farik-core` | `crates/core` | phase 0 step 01 |
+| `farik-protocol` | `crates/protocol` | phase 2 step 01 |
+| `farik-store` | `crates/store` | phase 2 step 02 |
+| `farik` (binary) | `crates/cli` | phase 2 step 06 |
+| `farik-runtime` | `crates/runtime` | phase 3 step 01 |
+| `farik-roles` | `crates/roles` | phase 3 step 07 |
+| `@farik/protocol-client` | `packages/protocol-client` | phase 5 step 01 |
+| `@farik/ui` | `packages/ui` | phase 5 step 02 |
+| `@farik/desktop` | `apps/desktop` | phase 5 step 03 |
+| `@farik/web` | `apps/web` | phase 7, not planned |
+
+- The contract architecture (spec 5.16), which every phase serves:
+  1. A request is anything that asks the team for work: a prompt from the user (`farik contract new`, `farik task create`, the editor, the channel), or a request an agent files (`farik_create_task` without a parent, `farik_propose_task` from a one-on-one). It is a `draft` contract whose `kind` is not yet decided.
+  2. Triage decides its size. The Scrum Master, or the Product Manager when the team has no active Scrum Master, records `request.triaged` with `large` or `small` and a reason; the human may triage or overrule (`farik triage`, the board). The `Triaged` gate keeps an untriaged request in `draft`.
+  3. A large request is an epic (`kind: epic`). The Product Manager asks the user its questions before writing it, may not write product documents until it is approved, and the user approves it (`human.accept`, subject `contract`) or sends it back. The approved epic is assigned to the Scrum Master, or the Product Manager without one, whose work is the breakdown: tasks (`kind: task`, `parent` set) with deliverables and exit criteria, assigned through `farik_assign_task`. An epic waiting for approval sits in `escalated` with reason `Approval`. The epic is done when its tasks are; its reviewer is the Product Manager when the Scrum Master broke it down and the human when the Product Manager did, so that a reviewer is never the assignee; and the user accepts it.
+  4. A small request is a standalone task (`kind: task`, no parent) that goes through the ordinary lifecycle, with the user's approval only where policy or risk requires it.
+  5. Every contract, epic or task, passes the Definition of Ready before work starts, is verified by a reviewer who is never its assignee, and is accepted by the Product Manager against its exit criteria.
+- Event kinds and commands grow with the code. The step that first emits an event kind, or first handles a command, adds it to the schema. The list in `docs/SPEC.md` section 8.5 is the checklist, and phase 6 step 08 confirms every kind in it exists.
+- Tests are split in three. Unit tests live in `#[cfg(test)] mod tests` in the module they test and run by `cargo xtask check`. Integration tests (`crates/<name>/tests/<subject>.rs`) need Docker, a git binary, or the file system in ways a unit test must not, run by `cargo xtask check --integration`, and run in CI as a second job of the same `check` workflow from the step that adds the first one (phase 2 step 04). Live tests (`crates/<name>/tests/live_<subject>.rs`) talk to the Claude Code program and the model, cost money, are run by hand with `FARIK_LIVE_TESTS=1`, and never run in CI.
+- Every function that crosses a crate boundary and can fail returns `Result<T, E>` with the crate's error enum, including the asynchronous ones (`docs/standards/code.md`, "Errors are values"). A non-zero exit code from a command is a value, not a failure.
+- Time, randomness, and identifiers are injected. Nothing in `core`, `protocol`, `store`, or `runtime` reads the clock or generates an identifier on its own; a `Clock` trait (`fn now(&self) -> DateTime<Utc>`) and an `IdSource` trait (`fn session_id(&self) -> String`) are passed in. Task ids are `FRK-<n>` from a counter in the store; session ids are UUID v4 through `IdSource`; event `recorded_at` fields are ISO 8601 UTC from the clock.
+- Only the phase branch's pull request accepts work; a step's review is recorded on that pull request as the step lands.
 
 ## Phase 0: Foundation
 
-Ends with: an empty monorepo where `pnpm check` runs typecheck, lint, format check, and tests in CI, and where the task contract schema produces TypeScript types.
+Ends with: a Cargo workspace where `cargo xtask check` runs the format check, clippy, the tests, the generated-file freshness check, the bare-TODO check, and the core no-I/O check, locally and in CI, and where the task contract schema produces Rust types and a validator.
 
-Decisions for this phase, all made here:
+Decisions for this phase, all made here (the step plans carry the exact files):
 
-- Node version: the current LTS line at the time the scaffold step executes, pinned in `.nvmrc` and `engines`. The step plan names the exact version.
-- Module system: ECMAScript modules only, `"type": "module"` in every package.
-- Packages created in this phase: `@farik/core` only. Other packages are created by the first step that needs them, so that no empty package sits unused.
-- Schema to types: JSON Schema stays the source of truth; TypeScript types are generated with `json-schema-to-typescript` into `packages/core/src/generated/` and committed; validation at the wire boundary uses `ajv` with the 2020-12 dialect. Rejected: Zod as source of truth, because the schema is a published artifact that other tools will read.
-- `Result` type: a hand-written discriminated union in `packages/core/src/result.ts` (`{ ok: true, value } | { ok: false, error }`) with `ok()`, `err()`, `map()`, `andThen()`. Rejected: a third-party result library, because the surface needed is small and the type is on every package boundary.
-- Continuous integration: one GitHub Actions workflow named `check`, on pull requests and pushes to `main`, Ubuntu runner, `pnpm install --frozen-lockfile` then `pnpm check`.
-- Commit hook scope: lefthook pre-commit runs Biome on staged files only; commit-msg validates the Conventional Commits format with a regular expression in a small script, no commitlint dependency.
+- Rust 1.98.1 (stable) in `rust-toolchain.toml` with `rustfmt` and `clippy`; edition 2024; workspace lints `unsafe_code = "forbid"`, `missing_docs = "warn"`, `clippy::all` and `clippy::pedantic` at `warn`, and clippy run with `-D warnings` so that every warning fails. Rejected: nightly, because nothing needs it.
+- Crate versions: `anyhow` 1.0.104 (binaries and xtask only), `typify` 0.8.0, `schemars` 0.8.22 (typify's schema parser), `syn` 3.0.5, `prettyplease` 0.3.0, `serde` 1.0.229, `serde_json` 1.0.151, `chrono` 0.4.45, `regress` 0.12.0 (typify's pattern engine), `jsonschema` 0.56.0 with default features off (no network or file resolution). Each was installed together and `cargo xtask check` run green on 2026-09-15 with Rust 1.98.1.
+- The `xtask` crate owns the repository's commands: `check`, `generate [--check]`, `pre-commit`, `commit-msg <file>`, `todos`, `core-io`, `install-hooks`; `.cargo/config.toml` aliases `cargo xtask`. Rejected: shell scripts and a Node toolchain, because the backend has none.
+- Commit hooks are two shell one-liners that `cargo xtask install-hooks` writes into `.git/hooks`: `pre-commit` runs the format check and the bare-TODO check; `commit-msg` runs the Conventional Commits check. Rejected: a hook manager, because two lines need none.
+- The commit-msg check accepts `<type>(<scope>): <subject>` with the nine types from `docs/standards/code.md`, a kebab-case scope, a lower-case first character, no trailing period, and at most 72 characters, and it accepts `Merge ...` and `Revert ...` subjects; it does not check the scope against a list.
+- The bare-TODO check scans tracked `.rs`, `.ts`, `.tsx`, `.css`, and `.toml` files for `TODO` or `FIXME` not followed by `(FRK-<n>)`, `(#<n>)`, or `(<http link>)`, skipping `xtask/src/`, whose sources describe the rule.
+- Generated Rust is formatted by piping the generator's output through `rustfmt`, so that `cargo fmt --check` accepts it; the generated module carries `#![allow(clippy::all, clippy::pedantic, missing_docs)]`.
+- `farik-core` embeds the schema copy with `include_str!` and builds its validator once in a `LazyLock`; the generated `FarikTaskContract` is aliased to `TaskContract`, and the one hand-written domain type is `Verification`, an enum with named variants converted from the generated positional enum.
+- `LICENSE` is the verbatim Apache License 2.0 text (sha256 `cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30`).
+- Continuous integration: one GitHub Actions workflow named `check` on pull requests and pushes to `main`, Ubuntu runner, `dtolnay/rust-toolchain` with the pinned version, `Swatinem/rust-cache`, then `cargo xtask check`.
 
 Steps:
 
-| Step | Name | Delivers |
-|---|---|---|
-| 01 | Monorepo scaffold | Root workspace, tooling config, `pnpm check`, CI workflow, `@farik/core` with one passing smoke test |
-| 02 | Result type | `packages/core/src/result.ts` with tests |
-| 03 | Contract schema types | Generated types from `docs/schemas/task-contract.schema.json`, an `ajv` validator behind a `validateContract(input: unknown): Result<TaskContract, ValidationError[]>` function, tests against valid and invalid fixtures |
+| Step | Name | Spec | Delivers |
+|---|---|---|---|
+| 01 | Workspace scaffold | 8.1, 9, ADR 0005 | Cargo workspace, pinned toolchain, `xtask` with `check`, `pre-commit`, `commit-msg`, `todos`, `core-io`, `install-hooks`, `farik-core` with one passing test, `LICENSE`, CI workflow, documentation |
+| 02 | Schema generation pipeline | 3 (Contract), F4 | `cargo xtask generate` through `typify`, the generated `task_contract` module and schema copy in `farik-core`, the freshness check inside `cargo xtask check` |
+| 03 | Contract validation | 3 (Contract), F4 | `validate_contract` with the `jsonschema` crate, `Verification` with named variants, fixtures, tests against valid and invalid inputs |
+
+Interfaces this phase adds:
+
+- Step 01 (`xtask`): `commit_message::check_commit_message(message: &str) -> Result<(), String>`; `todos::find_bare_todos(files: &[(String, String)]) -> Vec<String>`; the commands listed above. (`farik-core`): `CORE_CRATE_NAME: &str`.
+- Step 02 (`xtask`): `generate::GeneratedSchema { schema, types, schema_copy }`, `generate::GENERATED_SCHEMAS`, `generate::generate_types(entry, schema_json) -> anyhow::Result<String>`. (`farik-core`): `generated::task_contract::{FarikTaskContract, ExitCriterion, ExitCriterionVerification, FarikTaskContractBudget, FarikTaskContractId, FarikTaskContractNotes, FarikTaskContractRequirementsItem, FarikTaskContractRisk, FarikTaskContractScope, FarikTaskContractStatus, Role}` and the constrained newtypes for every `pattern` and length.
+- Step 03 (`farik-core`): `contract::{TaskContract, ExitCriterion, Budget, Notes, Requirement, Risk, TaskStatus, TaskId, Role}` (aliases of the generated types), `contract::VerificationWire` (the generated enum), `contract::Verification` (named variants `Command { command, exit_code, stdout_contains, stdout_not_contains }`, `Test { command, new_tests_required }`, `Artifact { path, must_contain }`, `Review { rubric }`, `Human { question }`) with `impl From<&VerificationWire>` and `fn method(&self) -> &'static str`; `contract::ValidationError { path: String, message: String }`; `contract::validate_contract(input: &serde_json::Value) -> Result<TaskContract, Vec<ValidationError>>`; `contract::fixtures::{a_contract_wire, a_full_contract_wire}() -> serde_json::Value`.
 
 ## Phase 1: Harness core
 
-Ends with: `@farik/core` implements every rule in `docs/SPEC.md` section 5 as pure functions with a test for every transition and every refusal.
+Ends with: `farik-core` implements every rule in `docs/SPEC.md` section 5 as pure functions, with a test for every row of the transition table, one for every refusal, one for every Definition of Ready and Definition of Done rule, and one for every budget.
 
 Decisions for this phase:
 
-- Made: the transition table is data (an array of rows), not code branches, so that the test suite can iterate it and the documentation can be generated from it.
-- Made: the governor is a set of pure functions taking `(state, request, context)` and returning `Result<Decision, Refusal>`; it never mutates.
-- Made: cost is computed from a price table file shipped in `packages/core/src/pricing/prices.json`, versioned, user-overridable at the store layer.
-- Made: the diff check for `allowed_paths` operates on a list of changed paths passed in, never on git itself.
-- Open: whether the Definition of Ready judgment checks (spec 5.3, Scrum Master) are represented in `core` as a recorded review with a fixed rubric, or only as an event the runtime produces. Decide before step 02.
-- Open: exact default budget numbers per role (spec 5.5 gives team-level defaults only). Decide before step 05.
+- Made: the transition table is data (a `const` slice of rows), not code branches, so that the test suite can iterate it and the documentation can be generated from it. A row is `{ from, to, actor, gate }`; `from` and `to` are `Status::Any` or a `TaskStatus`; `actor` is who may request the transition: `ProductManager`, `ScrumMaster`, `Assignee`, `Reviewer`, `Governor` (only the orchestrator, from observed facts), or `Human`.
+- Made: the governor is a set of pure functions taking `(request, context)` and returning `Result<Decision, Refusal>`; it never mutates. Every gate in the table is its own function, built before the function that composes them, so that no step stubs a gate for a later step.
+- Made: `verifying → accepted` is requested by the Product Manager with the reviewer's independent criterion results in the context. `any → escalated` on a user `stop` is requested by `Human` with gate `None`; on budget or permission it is requested by `Governor`.
+- Made: the transition table has 20 rows: the spec's lines, with `blocked → in_progress`, `any → escalated`, and `ready → assigned` each split by actor, `refining → escalated` split by trigger (`ReadinessExhausted`, `ContractRequiresHuman`), and `any → cancelled` for `Human` (D4). `ready → assigned` for `ProductManager` passes its `Assignment` gate only when the team has no active Scrum Master (D6).
+- Made: the Definition of Ready judgment checks are a fixed rubric (`JudgmentReview`: fits budget, criteria detect the failure the intent worries about, each with a written reason) recorded as a `review.recorded` event by the runtime. When the team has an active Scrum Master the rubric must be recorded and all yes for `refining → ready` (D2); without one, the structural checks alone gate; `core` learns which from `requires_judgment_review` in the context. The dependencies-ready check and the reviewer-available check (spec 5.3, D7) are mechanical: `core` receives the statuses of the listed dependencies and the count of active agents per role. The reviewer rule is about agents, not roles: a reviewer role equal to the assignee role is allowed when the team has two active agents of it, and the assignment gate refuses a reviewer who is the assignee.
+- Made: epics (spec 5.16) share the contract schema and the transition table; `kind` and `parent` distinguish them. The first transition, `draft → refining`, carries the gate `Triaged`: the request has a `request.triaged` decision by the Scrum Master, the Product Manager (without a Scrum Master), or the human, which sets `kind`. Five gates read `kind`: `ContractRequiresHuman` is always on for an epic, and the escalation it raises carries reason `Approval`; `DefinitionOfDone` requires the human's acceptance for every epic (`HumanAccepted`); `Assignment` of an epic accepts only the Scrum Master role, or the Product Manager role when the team has no active Scrum Master, as assignee; `CriteriaRecorded` for an epic means every child is `accepted` or `cancelled` with at least one accepted; and the readiness rules `ParentInProgress`, `PathsWithinParent`, and `BudgetWithinParent` apply to tasks with a parent; a standalone task (small request) has none, and an epic must have none. Product documents are written through one governed tool whose gate is `check_product_doc_write`: allowed only for an epic that is `ready` or beyond.
+- Made: team rules (spec 5.12) are a `TeamRules` value in `core`, passed in the readiness context and the tool-call context; `core` ships `DEFAULT_TEAM_RULES` with the default protected paths. Contract ownership and freezing (spec 5.11) are one gate predicate, `check_contract_write`. Assignment requires every dependency accepted and integrated (spec 5.14, D20).
+- Made: cost is computed from a price table shipped as the Rust module `crates/core/src/pricing/prices.rs`, whose shape is `docs/schemas/prices.schema.json` with `version`, `source_url`, `retrieved_at`, and `prices` keyed by model id; a test validates the shipped table against the schema. The user overrides it with `.farik/prices.json`, read and validated by the store. The numbers are copied from the provider's published table on the day step 05 executes and pasted into the step plan.
+- Made (D3): default budgets. Session tokens 400k in and 40k out for every role except the Scrum Master at 200k and 20k; wall clock 30 minutes; 200 tool calls per session; a task's `max_cost_usd` is capped at 5 dollars by the default team rule unless the human raises it; sprint 15 dollars; day 20 dollars.
+- Made: the path checks use `globset` 0.4.20. Rejected: a hand-written matcher, because glob edge cases are where safety bugs live.
+- Made: human approval of an `external_effect` tool call is per call, identified by the tool name and a hash of its input; the governor allows it only when that pair is in the context's approved list.
 
 Steps:
 
-| Step | Name | Delivers |
-|---|---|---|
-| 01 | Task status and transition table | `TaskStatus` union, the table from spec 5.2 as data, tests that every row is reachable and every non-row is refused |
-| 02 | Definition of Ready | Structural checks from spec 5.3 as a function over a contract, one test per rule |
-| 03 | Transition evaluation | `evaluateTransition` combining actor role, gate, and table; refusals carry a reason |
-| 04 | Permission tiers | Tier union, role defaults from spec 5.6, `evaluateToolCall` over a tool descriptor and an agent's grants |
-| 05 | Budgets and cost | Budget types from spec 5.5, `recordUsage`, `checkBudget`, price table and cost computation |
-| 06 | Allowed paths check | `checkAllowedPaths(changedPaths, allowedGlobs)` |
-| 07 | Iteration and escalation rules | Rejection counting, blocked-age rule, budget exhaustion to `escalated`, from spec 5.2 and 5.7 |
-| 08 | Definition of Done | Acceptance evaluation from spec 5.4 over verification results, path check, notes, and risk |
+| Step | Name | Spec | Delivers |
+|---|---|---|---|
+| 01 | Task status and transition table | 5.2 | `TaskStatus` helpers, the table from spec 5.2 as 20 data rows, lookup functions, tests that the table has exactly those rows and that every status is reachable |
+| 02 | Definition of Ready and team rules | 5.3, 5.12, 5.16 | `TeamRules` and its defaults; structural checks, rule checks, the reviewer-available check, the parent checks for tasks, and the judgment rubric as one function over a contract and a context, one test per rule |
+| 03 | Allowed and protected paths | 5.4 item 2, 5.6, 5.12 | `check_allowed_paths` and `check_protected_paths` |
+| 04 | Permission tiers | 5.6, 5.12 | Tier enum, role defaults, `evaluate_tool_call` over a tool descriptor, an agent's grants, the task's allowed paths, and the protected paths; `evaluate_command` against forbidden commands |
+| 05 | Budgets and cost | 5.5, 10 | Session limits, usage ledger, the price table and its schema, `compute_cost_usd`, `check_budgets` with the consequence per budget, including the per-task session count |
+| 06 | Iteration and escalation rules | 5.2, 5.7 | Rejection counting, readiness attempt counting, blocked-age rule, the `Escalation` record |
+| 07 | Definition of Done | 5.4 | `evaluate_done` over reviewer results, changed paths, notes, risk, and human acceptance, one test per rule |
+| 08 | Gate predicates | 5.2, 5.11, 5.14, 5.16 | Assignment (with dependency integration, the no-Scrum-Master rule, and the epic assignee rule), criteria recorded (with work committed; for an epic, children done), blocker written, blocker resolved, rejection reasons, contract write (locked and frozen), product document write, child creation, each returning `GateResult` |
+| 09 | Transition evaluation | 5.2, F5 | `evaluate_transition` composing the table, the actor check, and every gate; a test per row that it applies and one that it refuses; a test that a non-row is refused |
 
-## Phase 2: Store, runtime, and the command line
+Interfaces this phase adds (all in `farik-core`, all pure; `governor::` module unless noted):
 
-Ends with: Milestone 0. On a public repository, a Product Manager agent writes contracts for three real issues, a Developer agent implements them, the PM verifies, and a human reviewing the diffs and the event log agrees each task was done as contracted. No graphical interface.
+- Step 01: `TASK_STATUSES: [TaskStatus; 11]`; `enum TransitionActor { ProductManager, ScrumMaster, Assignee, Reviewer, Governor, Human }`; `enum GateId { None, Triaged, DefinitionOfReady, ReadinessExhausted, ContractRequiresHuman, Assignment, CriteriaRecorded, BlockerWritten, BlockerResolved, BlockedAge, DefinitionOfDone, RejectionReasons, IterationBelowLimit, IterationLimitReached, GovernorEscalation }`; `enum Status { Any, Is(TaskStatus) }`; `struct TransitionRow { from: Status, to: Status, actor: TransitionActor, gate: GateId }`; `TRANSITION_TABLE: [TransitionRow; 20]`; `fn find_transitions(from: TaskStatus, to: TaskStatus) -> Vec<&'static TransitionRow>`; `fn transitions_from(status: TaskStatus) -> Vec<&'static TransitionRow>`; `fn is_terminal(status: TaskStatus) -> bool`.
+- Step 02: `struct TeamRules { protected_paths: Vec<String>, allowed_paths_ceiling: Vec<String>, required_criteria: Vec<String>, require_new_tests: bool, max_task_budget_usd: Option<f64>, forbidden_commands: Vec<String> }` with `Default` = the spec's defaults, and `DEFAULT_TEAM_RULES`; `enum ReadinessRule { IntentPresent, CriteriaPresent, CriteriaMethodsValid, CommandCriteriaComplete, BudgetWithinSprint, ReviewerAvailable, RiskSet, OutOfScopePresent, DependenciesReady, RequiredCriteriaPresent, NewTestsRequiredByRule, AllowedPathsWithinCeiling, BudgetWithinTeamMax, NoParentForEpic, ParentInProgress, PathsWithinParent, BudgetWithinParent, JudgmentRecorded, JudgmentFitsBudget, JudgmentCriteriaDetectFailure }` (the three `Parent*` rules apply when `parent` is set; `NoParentForEpic` refuses an epic with one); `struct JudgmentReview { fits_budget: bool, criteria_detect_failure: bool, reason: String }`; `struct ParentState { status: TaskStatus, allowed_paths: Vec<String>, remaining_budget_usd: f64 }`; `struct ReadinessContext { remaining_sprint_budget_usd: f64, dependency_statuses: BTreeMap<String, TaskStatus>, active_agents_by_role: BTreeMap<Role, u32>, parent: Option<ParentState>, rules: TeamRules, requires_judgment_review: bool, judgment_review: Option<JudgmentReview> }`; `struct ReadinessFailure { rule: ReadinessRule, message: String }`; `fn evaluate_readiness(contract: &TaskContract, context: &ReadinessContext) -> Result<(), Vec<ReadinessFailure>>` (`ReviewerAvailable` passes with one active agent of the reviewer role when it differs from the assignee role and with two when it is the same role; its failure message names the role to add).
+- Step 03: `struct PathViolation { path: String }`; `fn check_allowed_paths(changed: &[String], allowed_globs: &[String]) -> Result<(), Vec<PathViolation>>`; `fn check_protected_paths(paths: &[String], protected_globs: &[String]) -> Result<(), Vec<PathViolation>>`; `enum GlobError { Invalid { pattern, detail } }` returned when a glob does not compile.
+- Step 04: `enum PermissionTier { Read, WriteWorkspace, Execute, Network, GitLocal, GitRemote, ExternalEffect }` (`snake_case` on the wire); `fn default_tiers(role: Role) -> &'static [PermissionTier]`; `struct ToolDescriptor { name: String, tier: PermissionTier }`; `struct ToolCallRequest { tool: ToolDescriptor, paths: Vec<String>, input_hash: String }`; `struct AgentGrants { tiers: BTreeSet<PermissionTier>, preauthorized_external_tools: BTreeSet<String> }`; `struct ApprovedCall { tool: String, input_hash: String }`; `struct ToolCallContext { allowed_paths: Vec<String>, protected_paths: Vec<String>, approved_calls: Vec<ApprovedCall> }`; `enum ToolRefusal { TierNotGranted { tier }, PathOutsideAllowed { path }, PathProtected { path }, RequiresHumanApproval { tool } }`; `fn evaluate_tool_call(request: &ToolCallRequest, grants: &AgentGrants, context: &ToolCallContext) -> Result<(), ToolRefusal>` (protected paths are checked for `Read` tools too); `enum CommandRefusal { ForbiddenCommand { pattern }, GitViaExec }`; `fn evaluate_command(command: &str, rules: &TeamRules) -> Result<(), CommandRefusal>`.
+- Step 05 (`pricing::` and `budget::`): `struct SessionLimits { max_input_tokens: u64, max_output_tokens: u64, max_wall_clock: Duration, max_tool_calls: u32 }`; `DEFAULT_SESSION_LIMITS`; `fn default_session_limits(role: Role) -> SessionLimits` (the D3 numbers); `struct Usage { input_tokens: u64, output_tokens: u64, cache_read_tokens: u64, cache_write_tokens: u64 }`; `struct SessionLedger { usage: Usage, wall_clock: Duration, tool_calls: u32, cost_usd: f64 }`; `fn add_usage(ledger: &SessionLedger, usage: &Usage, cost_usd: f64) -> SessionLedger`; `generated::prices::PriceTable` and `contract`-style aliases `PriceTable`, `ModelPrice`; `fn validate_price_table(input: &Value) -> Result<PriceTable, Vec<ValidationError>>`; `PRICE_TABLE: LazyLock<PriceTable>`; `enum PricingError { UnknownModel { model_id } }`; `fn compute_cost_usd(usage: &Usage, model_id: &str, prices: &PriceTable) -> Result<f64, PricingError>`; `enum BudgetScope { SessionTokens, SessionWallClock, SessionToolCalls, TaskUsd, TaskSessions, SprintUsd, DayUsd }`; `struct BudgetState { session: SessionLedger, session_limits: SessionLimits, task_spent_usd: f64, task_max_usd: f64, task_sessions: u32, task_max_sessions: u32, sprint_spent_usd: f64, sprint_max_usd: f64, day_spent_usd: f64, day_max_usd: f64 }`; `enum BudgetConsequence { EndSessionAndBlockTask, EscalateTask, StopNewAssignments, PauseTeam }`; `struct Exhausted { scope: BudgetScope, consequence: BudgetConsequence }`; `fn check_budgets(state: &BudgetState) -> Option<Exhausted>` (scopes in the order listed; `TaskSessions` escalates).
+- Step 06: `enum EscalationReason { Budget, Sessions, Iterations, BlockerAge, Permission, RiskGate, Approval, ReadinessFailures, Integration, ExplicitRequest }`; `struct Escalation { task_id: TaskId, reason: EscalationReason, tried: String, options: Vec<String> }`; `enum RejectionOutcome { ReturnToInProgress, Escalate }`; `fn evaluate_rejection(iteration: u32, max_iterations: u32) -> RejectionOutcome`; `enum ReadinessOutcome { Retry, Escalate }`; `fn evaluate_readiness_attempts(failed_attempts: u32) -> ReadinessOutcome` (limit 3); `enum BlockedAge { WithinLimit, Exceeded }`; `fn evaluate_blocked_age(blocked_at: DateTime<Utc>, now: DateTime<Utc>, limit: Duration) -> BlockedAge`.
+- Step 07: `enum RunBy { Assignee, Reviewer, Human }`; `struct CriterionResult { criterion_id: String, passed: bool, evidence: String, run_by: RunBy }`; `struct DoneEvidence { reviewer_results: Vec<CriterionResult>, changed_paths: Vec<String>, completion_note: Option<String>, review_note: Option<String>, human_accepted: bool }`; `enum DoneRule { CriterionRunByReviewer, CriterionPassed, HumanCriterionAccepted, PathsWithinAllowed, CompletionNotePresent, ReviewNotePresent, HumanAccepted }`; (`HumanAccepted` applies when the contract's risk is `high` or its kind is `epic`); `struct DoneFailure { rule: DoneRule, message: String }`; `fn evaluate_done(contract: &TaskContract, evidence: &DoneEvidence) -> Result<(), Vec<DoneFailure>>`.
+- Step 08: `type GateResult = Result<(), Vec<String>>`; `struct DependencyState { task_id: TaskId, status: TaskStatus, integrated: bool }`; `enum AssignmentRequester { ScrumMaster, ProductManager }`; `struct AssignmentInput { requested_by: AssignmentRequester, has_active_scrum_master: bool, assignee_id: String, assignee_role: Role, reviewer_id: String, reviewer_role: Role, assignee_in_progress_count: u32, wip_limit: u32, remaining_sprint_budget_usd: f64, dependencies: Vec<DependencyState> }`; `fn check_assignment(contract: &TaskContract, input: &AssignmentInput) -> GateResult` (a Product Manager's request passes only when `has_active_scrum_master` is false; the reviewer must hold the contract's reviewer role and must not be the assignee; for an epic the assignee role must be `ScrumMaster`, or `ProductManager` when `has_active_scrum_master` is false); `struct WorkState { commits: u32, worktree_clean: bool }`; `fn check_criteria_recorded(contract: &TaskContract, assignee_results: &[CriterionResult], work: &WorkState) -> GateResult`; `struct ChildState { task_id: TaskId, status: TaskStatus }`; `fn check_children_done(children: &[ChildState]) -> GateResult` (the `CriteriaRecorded` gate of an epic: every child `Accepted` or `Cancelled`, at least one accepted); `fn check_product_doc_write(epic_status: TaskStatus, actor_role: Role) -> GateResult` (Product Manager only, epic `Ready` or beyond); `fn check_child_creation(parent: &ParentState, parent_assignee_id: &str, actor: &ContractWriteActor) -> GateResult` (the epic's assignee or a human, parent `InProgress`); `struct Blocker { description: String, needed: String }`; `fn check_blocker_written(blocker: Option<&Blocker>) -> GateResult`; `fn check_blocker_resolved(resolution: Option<&str>) -> GateResult`; `struct Rejection { failed_criterion_ids: Vec<String>, reasons: String }`; `fn check_rejection_reasons(contract: &TaskContract, rejection: Option<&Rejection>) -> GateResult`; `struct ContractWriteActor { kind: TransitionActor, agent_id: Option<String> }`; `enum ContractWriteOutcome { Allowed, ReturnsToRefining }`; `enum ContractWriteRefusal { ContractLocked, ContractFrozen { fields: Vec<String> } }`; `fn check_contract_write(status: TaskStatus, locked: bool, actor: &ContractWriteActor, changed_fields: &[String]) -> Result<ContractWriteOutcome, ContractWriteRefusal>` (notes and criterion results are always allowed; a human may change anything, and a human change to a frozen contract returns `ReturnsToRefining`).
+- Step 09: `struct TransitionRequest { task_id: TaskId, to: TaskStatus, actor: TransitionActor, agent_id: Option<String> }`; `struct TransitionContext { status: TaskStatus, contract: TaskContract, triaged: bool, children: Vec<ChildState>, readiness: ReadinessContext, readiness_failed_attempts: u32, contract_requires_human_acceptance: bool, contract_human_accepted: bool, assignment: Option<AssignmentInput>, assignee_results: Vec<CriterionResult>, work: WorkState, blocker: Option<Blocker>, blocker_resolution: Option<String>, blocked_at: Option<DateTime<Utc>>, now: DateTime<Utc>, blocked_limit: Duration, done: DoneEvidence, rejection: Option<Rejection>, budget: BudgetState, permission_denied: bool }`; `enum TransitionEffect { IncrementIteration, RaiseEscalation, ResetBlocker }`; `struct TransitionDecision { from: TaskStatus, to: TaskStatus, row: &'static TransitionRow, effects: Vec<TransitionEffect> }`; `enum TransitionRefusal { NoSuchTransition, ActorNotAllowed, GateFailed { gate: GateId, details: Vec<String> } }`; `fn evaluate_transition(request: &TransitionRequest, context: &TransitionContext) -> Result<TransitionDecision, TransitionRefusal>`.
+
+## Phase 2: Protocol, store, and the first command line
+
+Ends with: on any git repository, `farik init` creates `.farik/` and the event log, `farik task create` files a draft task from a YAML contract, `farik board` and `farik log` show it from projections and from the log, and `farik doctor` reports drift between the files and the log. No agents run yet.
 
 Decisions for this phase:
 
-- Made: SQLite through libsql for the event log and projections (spec 8.4).
-- Made: `.farik/` file layout as in spec 5.8 and 8.4; contracts as YAML, one file per task, named by task id.
-- Made: sandbox is Docker, one container per task, project mounted, network off unless the role has `network` (spec 8.3).
-- Made: the runtime adapter is the Claude Agent SDK; governor decisions run in `PreToolUse` hooks; usage is recorded in `PostToolUse` hooks (spec 8.2).
-- Made: command-line binary is `farik`, in `apps/cli`.
-- Open: whether a no-sandbox mode ships (spec section 12, question 4). Decide before step 07.
-- Open: the exact prompt structure for the two roles and how memory is spliced in. Decide before step 08, with an ADR because it affects every later role.
-- Open: which public repository is used for the Milestone 0 exit test. Decide before step 10.
+- Made: SQLite through `rusqlite` 0.40.2 with the `bundled` feature for the event log and projections (spec 8.4). One database file, `.farik/local/farik.db`, holding the `events` table and the projection tables. Migrations are SQL strings embedded in `crates/store/src/migrations/`, applied on open, recorded in `schema_migrations`.
+- Made (D5): the event log lives under `.farik/local/` and is not committed; the files under `.farik/` are. Reconciliation on startup compares the two and reports every difference as a `drift.detected` event and a `farik doctor` line; `farik doctor --adopt` imports file-only contracts into the log. Nothing is picked silently.
+- Made: `.farik/` layout, fixed here for every later phase:
+
+  ```
+  .farik/
+    team.yaml                  team, agents, grants, budgets, policy, rules   schema: team.schema.json
+    project.md                 the project scan
+    contracts/FRK-<n>.yaml     one contract per task, snake_case
+    agents/<agent_id>/memory.md
+    team/retro.md
+    team/criteria.yaml         the criterion library                          schema: criteria.schema.json
+    product/roadmap.md         the product roadmap, written only through farik_write_product_doc (phase 3)
+    product/spec.md, product/requirements/   product documents, same rule
+    decisions/                 (written from phase 4 step 05)
+    sprints/S<n>.yaml          (written from phase 4 step 02)
+    local/                     gitignored on init
+      farik.db                 event log and projections
+      settings.yaml            machine-specific: sandbox mode
+      daemon.json              (written from phase 3 step 05)
+      worktrees/FRK-<n>/       one git worktree per task (phase 3)
+  ```
+
+  `.farik/prices.json`, when present, overrides the shipped price table (spec 5.5) and is validated against `prices.schema.json` on read.
+
+- Made: YAML through `serde_saphyr` 1.2.0 (maintained; `serde_yaml` is deprecated). Contracts are written with the schema's key order and two-space indentation so that diffs are stable.
+- Made: the git adapter lives in `farik-store` under `src/git/` (spec 8.1). Each task gets its own worktree under `.farik/local/worktrees/FRK-<n>` on the branch `farik/FRK-<n>` (spec 5.14); the adapter creates and removes them. Git is driven through the `git` binary with `std::process::Command`, never a reimplementation. Changed paths include added, modified, deleted, and both sides of renamed files.
+- Made: the command line is the `farik` binary in `crates/cli`, built with `clap` 4.6.7 (derive). Output is plain text tables; `--json` prints the same data as JSON for scripts.
+- Made (D18): the team model. An agent has `id` (kebab-case slug of the display name, unique in the team), `display_name`, `role`, `persona`, `avatar`, `status` (`active`, `paused`, `retired`), `model` (`id`, `effort`), `grants`, `preauthorized_external_tools`, and later `mcp_servers` and `skills`. A team has `name`, `agents`, `budgets` (`daily_usd`, `session` limits), `policy` (`human_accepts_contracts`, `wip_limit_per_agent`, `blocked_limit_hours`, `max_iterations`, `integration` with `manual`, `local_merge`, or `pull_request`, and `integration_branch`), and `rules` (spec 5.12). The schema enforces two to seven agents with at least one active Product Manager and one active Software Developer.
+- Made: `farik-protocol` holds the event envelope, the event kinds, the commands, and later the RPC types; it depends on `farik-core` and on nothing else.
 
 Steps:
 
-| Step | Name | Delivers |
-|---|---|---|
-| 01 | Protocol package | `@farik/protocol`: event envelope, event kinds from spec 8.5, command types |
-| 02 | Event log | `@farik/store`: append-only log in SQLite, read by sequence, filter by task and agent |
-| 03 | Projections | Board, cost per task and agent, channel summary, rebuilt from the log |
-| 04 | Project files | `.farik/` adapters for contracts, decisions, memory; reconciliation with the log on startup |
-| 05 | Runtime adapter interface | `@farik/runtime`: `startSession`, `resume`, `abort`, `events()`, and a recorded-response fake |
-| 06 | Claude Agent SDK adapter | The real adapter with governor hooks and usage recording |
-| 07 | Sandbox | Docker container lifecycle per task |
-| 08 | Product Manager and Developer roles | `roles/product_manager/`, `roles/software_developer/`, prompts, default tools |
-| 09 | Command line | `farik init`, `farik plan`, `farik run`, `farik board`, `farik log` |
-| 10 | Milestone 0 exit | The exit test from spec section 11, recorded with the event log and a written human review |
+| Step | Name | Spec | Delivers |
+|---|---|---|---|
+| 01 | Protocol crate | 8.5 | `event.schema.json` and `command.schema.json`, `farik-protocol` with generated types, `FarikEvent`, the kinds this phase emits, `Command`, `Clock` and `IdSource` traits |
+| 02 | Event log | 5.1, 8.4 | `farik-store`: append-only log in SQLite, read by sequence, filter by task, agent, and kind, subscribe |
+| 03 | Projections | 8.4, 10 | Board and cost projections rebuilt from the log and updated per event, with a cursor |
+| 04 | Git adapter | 5.14, 8.3, F2 | Repository queries, branches, worktrees, changed paths, diff, clean check, commit count, merge; the first integration test and the CI job for `cargo xtask check --integration` |
+| 05 | Team, rules, criteria, and project files | 3, 5.8, 5.12, 5.13, 8.4, 8.6, F2, F15, F16 | `team.schema.json` with rules, `criteria.schema.json`, `.farik/` initialization, contract, memory, criteria, prices, and scan file adapters, the project scan seeding the library, reconciliation |
+| 06 | Command line | F2, F3, F11, F15, F16, 5.11, 5.16 | `crates/cli`: `farik init`, `farik task create` (files a `draft` request from a YAML contract), `farik triage` (the human's triage or overrule), `farik task show`, `farik board`, `farik log`, `farik doctor`, `farik contract lock`, `farik contract unlock`, `farik rules show`, `farik criteria list` |
 
-## Phase 3: The team
+Interfaces this phase adds:
 
-Ends with: all five roles, the channel, ceremonies, sprints, and memory, still driven from the command line.
+- Step 01 (`farik-protocol`): `enum EventKind` (this phase: `TaskCreated`, `RequestTriaged`, `ContractWritten`, `ContractLocked`, `ContractUnlocked`, `DriftDetected`, `ProjectScanned`, `TeamUpdated`, `CriteriaUpdated`; `snake_case` dotted names on the wire: `task.created`, `contract.written`, and the rest); `struct EventEnvelope { seq: u64, recorded_at: DateTime<Utc>, team_id: String, project_id: String, task_id: Option<TaskId>, agent_id: Option<String>, session_id: Option<String> }`; `struct FarikEvent { envelope: EventEnvelope, body: EventBody }` where `enum EventBody` has one variant per kind with its payload struct; `struct NewEvent` (an event without `seq`); `fn new_event(kind..., recorded_at, ids...) -> NewEvent`; `fn event_from_value(value: &Value) -> Result<FarikEvent, Vec<ValidationError>>`; `fn event_to_value(event: &FarikEvent) -> Value`; `enum Command` (this phase: `TaskCreate { contract: TaskContract }`, `RequestTriage { task_id, size: Large | Small, reason }`); `trait Clock { fn now(&self) -> DateTime<Utc>; }`; `trait IdSource { fn session_id(&self) -> String; }`; `struct FixedClock`, `struct SequentialIds` for tests.
+- Step 02 (`farik-store`): `enum StoreError { Io { detail }, Sqlite { detail }, InvalidEvent { detail } }`; `fn open_event_log(path: &Path) -> Result<EventLog, StoreError>` (`:memory:` for tests); `impl EventLog { fn append(&self, event: NewEvent) -> Result<FarikEvent, StoreError>; fn read(&self, query: &EventQuery) -> Result<Vec<FarikEvent>, StoreError>; fn subscribe(&self) -> Receiver<FarikEvent>; fn next_task_id(&self) -> Result<TaskId, StoreError> }` backed by a `task_counters` table; `struct EventQuery { after_seq: Option<u64>, task_id: Option<TaskId>, agent_id: Option<String>, kinds: Vec<EventKind>, limit: Option<usize> }`.
+- Step 03: `struct TaskProjection { task_id, kind, parent, status, title, assignee_id, reviewer_id, risk, sprint_id, iteration, triaged: bool, locked: bool, updated_seq }` (later steps add the fields their events feed: `cost_usd` in 3.09; `waiting_on_human`, `awaiting_approval`, `awaiting_integration` in 3.10); `enum CostScope { Task, Agent, Session, Sprint, Day }`; `struct CostProjection { scope, key, usd, input_tokens, output_tokens }`; `fn open_projections(log: &EventLog) -> Result<Projections, StoreError>`; `impl Projections { fn rebuild(&self) -> Result<(), StoreError>; fn apply(&self, event: &FarikEvent) -> Result<(), StoreError>; fn board(&self) -> Result<Vec<TaskProjection>, StoreError>; fn task(&self, id: &TaskId) -> Result<Option<TaskProjection>, StoreError>; fn costs(&self, scope: CostScope) -> Result<Vec<CostProjection>, StoreError>; fn cursor(&self) -> Result<u64, StoreError> }`.
+- Step 04 (`farik-store::git`): `enum GitError { NotARepository, CommandFailed { command, stderr } }`; `struct Git { root: PathBuf }`; `impl Git { fn open(root) -> Git; fn is_repository(&self) -> bool; fn head_summary(&self) -> Result<Option<HeadSummary>, GitError>; fn default_branch(&self) -> Result<String, GitError>; fn current_branch(&self) -> Result<String, GitError>; fn create_branch(&self, name, from) -> Result<(), GitError>; fn create_worktree(&self, path, branch, from) -> Result<(), GitError>; fn remove_worktree(&self, path) -> Result<(), GitError>; fn is_clean(&self, path) -> Result<bool, GitError>; fn commit_count(&self, base, head) -> Result<u32, GitError>; fn changed_paths(&self, base, head) -> Result<Vec<String>, GitError>; fn diff(&self, base, head) -> Result<String, GitError>; fn merge(&self, into, from, message) -> Result<MergeOutcome, GitError> }`; `struct HeadSummary { sha, committed_at, subject }`; `enum MergeOutcome { Merged { sha }, Conflicts(Vec<String>) }`. Phase 3 step 03 adds `commit` and `push`.
+- Step 05: `generated::team::*`, `Team`, `Agent`, `TeamPolicy`, `TeamBudgets` (aliases), `fn validate_team(input: &Value) -> Result<Team, Vec<ValidationError>>`, `impl Team { fn rules(&self) -> TeamRules; fn active_agents(&self) -> impl Iterator<Item = &Agent>; fn has_active(&self, role: Role) -> bool }`; `generated::criteria::*`, `CriterionTemplate`, `CriteriaLibrary`, `fn validate_criteria`, `enum CriteriaError { UnknownCriterion { name } }`, `fn expand_criteria(refs: &[(String, String)], library: &CriteriaLibrary) -> Result<Vec<ExitCriterion>, CriteriaError>`; `enum FilesError { NotFound { path }, Invalid { path, detail }, Io { path, detail } }`; `struct ProjectFiles { root: PathBuf }`; `impl ProjectFiles { fn init(&self, team: &Team) -> Result<(), FilesError>; fn read_team / write_team; fn read_contract(&self, id) / write_contract(&self, contract) / list_contracts; fn read_memory(&self, agent_id) / write_memory; fn read_project_scan / write_project_scan; fn read_prices(&self) -> Result<Option<PriceTable>, FilesError>; fn read_criteria / write_criteria; fn read_product_doc(&self, path) / write_product_doc(&self, path, text) (paths under `product/` only); fn read_settings / write_settings }`; `struct LocalSettings { sandbox: Sandbox }` with `enum Sandbox { Docker, None }`; `struct ProjectScan { read_back: String, detected_criteria: Vec<CriterionTemplate> }`; `fn scan_project(root: &Path, git: &Git) -> Result<ProjectScan, ScanError>`; `enum Drift { ContractWithoutEvents, EventsWithoutContract, StatusMismatch }` with `task_id` and `detail`; `fn reconcile(files: &ProjectFiles, log: &EventLog) -> Result<Vec<Drift>, ReconcileError>`.
+- Step 06 (`farik`): the commands above; `fn run_cli(args: &[String], io: &mut CliIo) -> i32` with `struct CliIo { stdout: Box<dyn Write>, stderr: Box<dyn Write>, cwd: PathBuf, clock: Box<dyn Clock> }` so that the command line is tested without spawning a process.
+
+## Phase 3: Runtime and Milestone 0
+
+Ends with: Milestone 0. On Farik's own repository, with a team of a Product Manager and two Developers, three requests from the human go through the whole contract architecture: the Product Manager triages them (two large, one small); the small one becomes a standalone task; for each large one the Product Manager asks its questions, writes the epic, and the human approves it (one epic is co-written and locked by the human); the Product Manager breaks each epic into tasks and assigns them; one Developer implements each task in its own worktree, the other Developer verifies it, the Product Manager accepts it; each epic is accepted by the Product Manager and then by the human; the harness metrics are printed; and a human reviewing the diffs and the event log agrees each task was done as contracted. Command line only.
 
 Decisions for this phase:
 
-- Made: ambient message allowance is three per agent per sprint (spec 5.9).
-- Made: channel and ambient messages use Claude Sonnet 5; task work uses the role's configured model (spec 8.2).
-- Open: default sprint length (spec section 12, question 2). Decide before step 05.
-- Open: how much of the channel's conversational register to keep; instrument first (spec section 12, question 5). This does not block any step; it sets what step 02 measures.
+- Made: the runtime drives the Claude Code program as a child process (ADR 0005): `claude -p --output-format stream-json --input-format stream-json --verbose --model <id> --append-system-prompt-file <path> --disallowedTools <list> --mcp-config <json> --strict-mcp-config --permission-prompt-tool mcp__farik__permission --max-turns <n> --settings <json with hooks>`, with `ANTHROPIC_API_KEY` in the child's environment only. The runtime pins the oldest Claude Code version it was tested against (2.1.272 on 2026-09-15) and refuses to start on an older one. Every `stream-json` line is parsed into a `SessionEvent`; the `result` line carries usage.
+- Made: the daemon exists from this phase. `farik run` starts the runtime service in-process: an `axum` 0.8.9 HTTP server on `127.0.0.1` with a random port and a token written to `.farik/local/daemon.json`, serving the hook endpoint, the Farik MCP server (streamable HTTP, `rmcp` 3.3.0), and, from phase 5, the front end's WebSocket. Hook commands are `farik hook pre-tool-use` and `farik hook post-tool-use`: they read Claude Code's hook JSON on stdin, post it to the daemon with the token, and print the daemon's decision JSON for Claude Code to enforce. The permission-prompt tool denies anything the hook did not decide.
+- Made: sandbox is Docker, one container per task, the task's worktree mounted at `/workspace`, network off unless the role has `network` (spec 8.3). The image is built from `crates/runtime/sandbox/Dockerfile` (Node 24, git, pnpm, npm, python3, and the Rust toolchain, since Farik's own repository is the Milestone 0 target) and tagged `farik/sandbox:<crate version>`. Containers are named `farik-<project_id>-<task_id>` and discarded on `accepted` or `cancelled`.
+- Made: `farik_exec` refuses a command whose first word is `git`; the container never holds git credentials (ADR 0004). Farik tool inputs are described with JSON Schema through `rmcp`'s `schemars` derive, and the resulting schema is the tool's contract; no Farik tool input has a file in `docs/schemas/` because it never leaves the process.
+- Made (D6): assignment is an agent's decision through `farik_assign_task`. The Scrum Master assigns; in a team without an active Scrum Master, the Product Manager does, in a `plan` session the orchestrator starts when `ready` tasks exist and nobody is assigning. The orchestrator never assigns on its own.
+- Made (D7): the reviewer of a task is an active agent whose role is the contract's `reviewer_role` and who is not the assignee. For a Developer's work the preference is the Architect, then another Developer: a Software Developer may review another Developer's work, never its own. When the team has neither, no Developer contract passes the Definition of Ready (`ReviewerAvailable`), and the Product Manager, told so by the readiness result, asks the human through `farik_ask_human` to add a reviewer agent. Milestone 0 therefore runs with two Developers. `REVIEWER_ROLE_FOR` and `default_reviewer_role` live in step 07 and the assigning agent's prompt uses them: `farik_assign_task` names the reviewer as well as the assignee, and the `Assignment` gate refuses a reviewer who is the assignee or whose role is not the contract's. An epic's reviewer is the Product Manager when the Scrum Master is its assignee and the human when the Product Manager is (spec 5.16).
+- Made: the reviewer's session is fresh and receives the contract, the diff, the completion note, and the criterion tools, never the assignee's transcript (spec 5.4).
+- Made: the prompt structure is fixed sections in fixed order: role mandate and forbidden list from `system.md`, the untrusted-content notice (spec 8.6), the agent's persona line, the project scan, the agent's memory, the team rules, the criterion library, the contract (when there is one), the tool list with tiers, the human's message (an answer or an escalation message, when there is one), and the closing instruction for the session's purpose. ADR 0006 records it when step 08 starts, because it affects every later role.
+- Made (D8): `human_accepts_contracts` is a team policy with values `high_risk` (spec 5.2) and `all`; the shipped default is `high_risk`. It governs tasks; every epic requires the human's approval regardless (spec 5.16).
+- Made: triage (spec 5.16) is the orchestrator's first move on an untriaged `draft`, whoever filed it. It starts a `triage` session on the cheaper model for the Scrum Master, or the Product Manager without one, whose only tool is `farik_triage_request { size: large | small, reason }`, which sets `kind` and emits `request.triaged`. The human's `farik triage` (phase 2) records the same event and wins when it comes first. `farik_triage_request` accepts the Scrum Master on any `draft`, the Product Manager on a `draft` when the team has no active Scrum Master, and the Product Manager of a `refining` standalone task for the one change `small` to `large`, which turns the task into an epic and restarts refining. The human may overrule until refining starts.
+- Made: the epic flow (spec 5.16) is the orchestrator's. A large request is a `draft` epic. The Product Manager's `refine` session for an epic is told to ask first; its `farik_write_contract` is refused for an epic while a question is unanswered, and `farik_write_product_doc` is refused until the epic is `ready`. When the structural checks pass, the governor moves the epic to `escalated` with reason `Approval`; the human approves with `human.accept` (subject `contract`), which moves it to `ready`, or sends it back to `refining` with the message of `escalation.resolve`. The approved epic is assigned to the Scrum Master, or the Product Manager without one, whose `plan` session creates the tasks with `farik_create_task` (`parent` set) and assigns them with `farik_assign_task`. The epic reaches `verifying` when its children are done, its criteria are run by the Product Manager, and its acceptance needs the human again. Product documents live under `.farik/product/` (`roadmap.md`, `spec.md`, `requirements/`), written only through the tool, each write a `product_doc.written` event.
+- Made: every task runs in its own worktree (spec 5.14); the orchestrator creates it at assignment from the integration branch, mounts it in the container, and removes it on `accepted` or `cancelled`. Integration follows the team policy; the default is `manual`, the human merges (D19). A `local_merge` conflict escalates with reason `Integration`.
+- Made: recovery (spec 5.15) runs at the start of every `farik run`: interrupted sessions are ended, worktrees and containers of finished tasks removed, and `in_progress` tasks resume from their last commit and note.
+- Made: questions (spec 5.7) are `question.asked` and `question.answered` events; a task with an unanswered question is skipped by the orchestrator's tick. Pausing an agent (`agent.update` with `status: paused`) aborts its session at the next hook and blocks its task with the note "agent paused by the user".
+- Made: session purpose (`triage`, `refine`, `plan`, `implement`, `verify`, `ceremony`, `conversation`) is stamped on `session.started` and on every `cost.recorded` event.
+- Made: until phase 4 adds sprints, `budget_state` sets `sprint_max_usd` to `f64::INFINITY` and `sprint_spent_usd` to 0, so the `SprintUsd` scope never fires and daily exhaustion fires as `DayUsd` with `PauseTeam`; the readiness context's `remaining_sprint_budget_usd` is the remaining daily budget. Phase 4 step 02 replaces both.
+- Made (D1): no-sandbox mode ships; `farik run` prints a warning on every start when `sandbox: none`.
+- Made (D9): the Milestone 0 exit test runs on Farik's own repository, which stays private until the phase 6 launch; the three issues are three of Farik's own.
 
 Steps:
 
-| Step | Name | Delivers |
-|---|---|---|
-| 01 | Remaining roles | `scrum_master`, `architect`, `marketing_specialist` |
-| 02 | Channel | Message model, posting triggers from spec 5.9, rolling summary, rate limits |
-| 03 | Ceremonies | Planning, standup, review, retro as structured channel conversations |
-| 04 | Memory | Agent notebooks with size cap, team retro file, decisions directory, project scan refresh |
-| 05 | Sprints | Sprint model, sprint budget, WIP limits, escalation digest |
+| Step | Name | Spec | Delivers |
+|---|---|---|---|
+| 01 | Runtime adapter and recorded transcripts | 8.2, F6 | `farik-runtime`: the `RuntimeAdapter` trait, `SessionSpec`, `SessionEvent`, the `stream-json` parser, and a recorded adapter that replays transcript fixtures |
+| 02 | Executor and sandbox | 8.3 | `Executor` trait, `HostExecutor`, `DockerExecutor` with container lifecycle per task, integration tests |
+| 03 | Farik tools | 5.1, 5.2, 5.6, 5.7, 5.9, 5.11, 5.12, 5.13, 5.16 | The Farik MCP tool set with tiers and handlers: triage request, read task, read board, read rules, read criteria, write contract (through the contract-write gate and, for epics, the unanswered-question check), request transition, assign task, record criterion result, write note, create task (a child through the child-creation gate, or a new request for triage), declare blocked, ask human, write product doc (through its gate), exec (through `evaluate_command`), git; `Git` widened with `commit` and `push` |
+| 04 | Criterion runner | 5.4, 5.13, F16 | Runs `command`, `test`, and `artifact` criteria through an executor, including the base-branch run for `new_tests_required`; `review` and `human` criteria produce the questions to answer |
+| 05 | Daemon service and hooks | 8.2, 8.6 | The `axum` service: token, hook endpoint calling the governor, the MCP server mount, the permission-prompt tool; `farik hook pre-tool-use` and `farik hook post-tool-use`; `daemon.json` |
+| 06 | Claude Code adapter | 8.2, 8.6 | The real adapter: process spawn with the flags above, version check, built-in tools filtered by tier (Bash never, web tools under `network`), usage recording, wall-clock abort; a live test and the `code.md` row for live tests |
+| 07 | Role crate and the two launch roles | 5.1, 6, 6.1, 6.4 | `role.schema.json`, `farik-roles` loader with the roles embedded, `product_manager` and `software_developer` with `role.yaml`, `system.md`, and one skill each; the reviewer preference table |
+| 08 | Prompt assembly | 5.8, 5.12, 5.13, 8.2, 8.6 | `assemble_system_prompt` with the fixed section order; ADR 0006 |
+| 09 | Cost recording | 5.5, F6 | `cost.recorded` and `budget.exhausted` events from session usage, the budgets kept in projections, the price override |
+| 10 | Orchestrator | 5.2, 5.4, 5.5, 5.7, 5.11, 5.14, 5.15, 5.16, F1, F6 | The loop that moves epics and tasks through the lifecycle with worktrees, sessions, governor decisions, triage, the epic flow (questions, approval, breakdown, children done), reviewer resolution, integration, recovery, agent pausing, escalations, and human commands; tested end to end with the recorded adapter, one request to an accepted epic |
+| 11 | Command line, second part | 5.13, 5.16, F6, F11, F14 | `farik run`, `farik plan`, `farik contract new` (a request through triage and refining, with the questions answered at the terminal), `farik approve`, `farik answer`, `farik integrate`, `farik stop`, `farik resolve`, `farik accept`, `farik cancel`, `farik task show` with events, diff, cost, and children |
+| 12 | Harness metrics | F17 | The five metrics as projections from the log, `farik metrics`, one test per metric on a recorded log |
+| 13 | Milestone 0 exit | 11 | The exit test on Farik's repository, recorded with the event log export, the metrics, and the written human review in `docs/milestones/m0-exit.md` |
 
-## Phase 4: Desktop
+Interfaces this phase adds:
 
-Ends with: a desktop application where a new user goes from an empty office to an accepted task on their own repository inside thirty minutes.
+- Step 01 (`farik-runtime`): `enum Effort { Low, Medium, High }`; `enum McpTransport { Http { url: String }, Stdio { command: String, args: Vec<String> } }`; `struct McpServerConfig { name: String, transport: McpTransport, headers: BTreeMap<String, String> }` (this phase: only Farik's own server; phase 6 step 01 widens it); `struct SessionSpec { session_id: String, agent_id: String, task_id: Option<TaskId>, purpose: SessionPurpose, system_prompt: String, model: String, effort: Effort, farik_tools: Vec<String>, disallowed_builtin_tools: Vec<String>, mcp_servers: Vec<McpServerConfig>, cwd: PathBuf, limits: SessionLimits, initial_prompt: String }`; `enum SessionPurpose { Triage, Refine, Plan, Implement, Verify, Ceremony, Conversation }`; `enum SessionEvent { ToolCalled { tool, input }, ToolReturned { tool, output }, ToolDenied { tool, reason }, UsageReported(Usage), TextProduced(String), Ended { reason: EndReason, detail } }`; `enum EndReason { Completed, Aborted, Limit, Error }`; `trait SessionHandle { fn session_id(&self) -> &str; fn events(&mut self) -> &mut Receiver<SessionEvent>; fn send(&self, text: &str) -> Result<(), RuntimeError>; fn abort(&self) -> Result<(), RuntimeError> }`; `enum RuntimeError { Spawn { detail }, Protocol { detail }, VersionTooOld { found, required }, Aborted, Limit }`; `trait RuntimeAdapter { fn start_session(&self, spec: SessionSpec) -> Result<Box<dyn SessionHandle>, RuntimeError>; fn resume(&self, session_id: &str, prompt: &str) -> Result<Box<dyn SessionHandle>, RuntimeError> }`; `fn parse_stream_json_line(line: &str) -> Result<Option<SessionEvent>, RuntimeError>`; `struct RecordedAdapter` built from `crates/runtime/tests/fixtures/transcripts/*.jsonl`.
+- Step 02: `struct ExecResult { exit_code: i32, stdout: String, stderr: String, timed_out: bool }`; `enum ExecError { SpawnFailed { detail }, ContainerGone }`; `trait Executor { fn run(&self, command: &str, cwd: &Path, timeout: Duration, env: &BTreeMap<String, String>) -> Result<ExecResult, ExecError> }`; `struct HostExecutor`; `enum SandboxError { DockerUnavailable, ImageMissing { image }, ContainerFailed { detail } }`; `trait Sandbox: Executor { fn discard(self: Box<Self>) -> Result<(), SandboxError> }`; `struct DockerSandbox` with `fn create(project_id, task_id, worktree, network, image) -> Result<DockerSandbox, SandboxError>` and `impl Sandbox`; `struct HostSandbox` (no-sandbox mode: a `HostExecutor` whose `discard` is a no-op); `trait SandboxFactory { fn create(&self, project_id: &str, task_id: &TaskId, worktree: &Path, network: bool) -> Result<Box<dyn Sandbox>, SandboxError> }` with `DockerSandboxFactory` and `HostSandboxFactory`; `SANDBOX_IMAGE: &str`.
+- Step 03: `enum ToolError { InvalidInput { detail }, Refused { reason }, Failed { detail } }`; `struct ToolContext { agent_id, role, task_id, log: Arc<EventLog>, files: Arc<ProjectFiles>, projections: Arc<Projections>, executor: Option<Arc<dyn Executor>>, transitions: Arc<dyn TransitionRequester>, clock: Arc<dyn Clock> }`; `trait TransitionRequester { fn request(&self, request: TransitionRequest) -> Result<TransitionDecision, TransitionRefusal> }`; `struct FarikTools` (an `rmcp` server) with the tools `farik_triage_request` (input `{ size: large | small, reason }`; sets `kind`; emits `request.triaged`; the actors named in the phase decision), `farik_read_task`, `farik_read_board`, `farik_read_rules`, `farik_read_criteria`, `farik_write_contract` (runs `check_contract_write` first; accepts criterion references by name and expands them from the library), `farik_request_transition`, `farik_assign_task` (input `{ task_id, assignee_id, reviewer_id }`; requests `ready → assigned` as the caller's role), `farik_record_criterion_result`, `farik_write_note`, `farik_create_task` (with `parent`: a child of an epic, through `check_child_creation`; without: a new `draft` request that goes to triage), `farik_declare_blocked`, `farik_ask_human` (emits `question.asked` and ends the session), `farik_write_product_doc` (input `{ path, content }` under `.farik/product/`; runs `check_product_doc_write`; emits `product_doc.written`), `farik_exec` (tier `Execute`; runs `evaluate_command`; output capped at 64 KiB with a truncation note), `farik_git` (`status`, `diff`, `commit` under `GitLocal`; `push` under `GitRemote`); `fn tool_descriptors() -> Vec<ToolDescriptor>`; `Git` gains `fn commit(&self, worktree, message, paths) -> Result<String, GitError>` and `fn push(&self, remote, branch) -> Result<(), GitError>`; event kinds added: `task.transitioned`, `transition.refused`, `criterion.recorded`, `note.written`, `question.asked`, `product_doc.written`, `contract.evaluated` (payload `{ gate: definition_of_ready | definition_of_done, passed, failures }`).
+- Step 04: `enum CriterionOutcome { Result(CriterionResult), NeedsReview { rubric: Vec<String> }, NeedsHuman { question: String } }`; `fn run_criterion(criterion: &ExitCriterion, executor: &dyn Executor, cwd: &Path, clock: &dyn Clock) -> Result<CriterionOutcome, ExecError>`; `fn run_criteria(contract: &TaskContract, ...) -> Result<Vec<CriterionOutcome>, ExecError>`; `struct NewTestsCheck { adds_tests: bool, fails_on_base: bool }`; `fn check_new_tests(command: &str, git: &Git, base: &str, head: &str, executor: &dyn Executor) -> Result<NewTestsCheck, CriterionError>` (creates a temporary worktree at `base`, runs the test command there, removes it).
+- Step 05: `struct DaemonConfig { port: Option<u16>, token: String }`; `struct DaemonInfo { port: u16, token: String }` (the `daemon.json` shape); `struct DaemonState { log: Arc<EventLog>, projections: Arc<Projections>, files: Arc<ProjectFiles>, team: RwLock<Team>, sessions: RwLock<BTreeMap<String, SessionState>>, tools: Arc<FarikTools>, clock: Arc<dyn Clock> }` with `struct SessionState { agent_id, task_id, grants: AgentGrants, allowed_paths, approved_calls: Vec<ApprovedCall> }`; `enum DaemonError { Bind { detail }, Io { detail } }`; `async fn serve(config: DaemonConfig, state: Arc<DaemonState>) -> Result<DaemonInfo, DaemonError>`; `struct HookRequest` and `struct HookDecision { permission_decision: allow | deny, reason: String }` (Claude Code's hook JSON shapes); `fn decide_pre_tool_use(request: &HookRequest, state: &DaemonState) -> HookDecision` (calls `evaluate_tool_call`, `evaluate_command`, and the approved-call list); `fn record_post_tool_use(...)`; `farik hook pre-tool-use` and `farik hook post-tool-use` in the binary.
+- Step 06: `struct ClaudeAdapter { api_key: SecretString, claude_path: PathBuf, clock: Arc<dyn Clock> }` with `impl RuntimeAdapter`; `MIN_CLAUDE_VERSION: &str = "2.1.272"`; `fn builtin_tool_tier(tool: &str) -> Option<PermissionTier>` (Read, Glob, Grep are `Read`; Edit, Write, MultiEdit are `WriteWorkspace`; WebFetch and WebSearch are `Network`; Bash and every other built-in are never allowed and go on `--disallowedTools`); event kinds added: `session.started`, `session.ended`, `tool.called`, `tool.returned`, `tool.denied`.
+- Step 07 (`farik-roles`): `struct Skill { name: String, dir: PathBuf }`; `struct RoleDefinition { id: Role, mandate, produces: Vec<String>, forbidden: Vec<String>, default_tiers: Vec<PermissionTier>, model: String, effort: Effort, session_limits: SessionLimits, system_prompt: String, skills: Vec<Skill> }`; `trait RoleSource { fn load(&self, role: Role) -> Result<RoleDefinition, RoleError> }` with `EmbeddedRoles` implementing it; `enum RoleError { NotFound { role_id }, Invalid { role_id, detail } }`; `fn load_role(role: Role) -> Result<RoleDefinition, RoleError>` (definitions embedded with `include_str!`; a user override under `.farik/roles/<role_id>/` is read by the store and merged by the runtime); `REVIEWER_ROLE_FOR: &[(Role, &[Role])]` (a Developer's task to Architect, then another Developer; an Architect's to Product Manager; a Marketing Specialist's to Product Manager; an epic to Product Manager when its assignee is the Scrum Master, to `human` when its assignee is the Product Manager); `fn default_reviewer_role(team: &Team, contract_kind: Kind, assignee: &Agent) -> Option<Role>` (the first preferred role with an active agent other than the assignee; `human` always counts as available).
+- Step 08: `struct PromptInput<'a> { role: &'a RoleDefinition, agent: &'a Agent, project_scan: Option<&'a str>, memory: &'a str, rules: &'a TeamRules, criteria: &'a CriteriaLibrary, contract: Option<&'a TaskContract>, tools: &'a [ToolDescriptor], purpose: SessionPurpose, human_message: Option<&'a str> }`; `fn assemble_system_prompt(input: &PromptInput) -> String`; `PROMPT_SECTIONS: [&str; 11]`.
+- Step 09: `TaskProjection` gains `cost_usd`; `fn record_session_cost(log, projections, session_id, agent_id, task_id, purpose, model_id, usage, prices, clock) -> Result<f64, StoreError>`; `fn budget_state(projections, team, task_id, session) -> Result<BudgetState, StoreError>`; `fn effective_prices(files: &ProjectFiles) -> Result<PriceTable, FilesError>`; event kinds added: `cost.recorded`, `budget.exhausted`.
+- Step 10: `enum CommandError { Invalid { detail }, Refused { reason }, NotFound { what } }`; `enum OrchestratorError { Store(StoreError), Files(FilesError), Git(GitError), Runtime(RuntimeError), Sandbox(SandboxError), Role(RoleError) }`; `struct Orchestrator` built from `OrchestratorDeps { log, projections, files, git, adapter: Arc<dyn RuntimeAdapter>, sandboxes: Arc<dyn SandboxFactory>, roles: Arc<dyn RoleSource>, prices, clock, ids }`; `impl Orchestrator { async fn tick(&self) -> Result<TickReport, OrchestratorError>; async fn run_until_idle(&self) -> Result<(), OrchestratorError>; fn stop(&self); async fn handle(&self, command: Command) -> Result<(), CommandError>; fn recover(&self) -> Result<RecoveryReport, OrchestratorError>; fn integrate(&self, task_id) -> Result<IntegrationOutcome, OrchestratorError> }`; `TaskProjection` gains `waiting_on_human`, `awaiting_approval`, `awaiting_integration`, fed by `question.asked`, `escalation.raised` with reason `approval`, and `task.transitioned` to `accepted` under the `manual` policy; `struct TickReport { sessions_started, transitions, escalations, idle }`; `struct RecoveryReport { sessions_interrupted, worktrees_removed, tasks_resumed }`; `enum IntegrationOutcome { Merged { sha }, AwaitingHuman }`; commands added: `TaskTransition { task_id, to, reason }` (human, from `escalated`), `HumanAccept { task_id, subject: Contract | Result }`, `EscalationResolve { task_id, message }`, `QuestionAnswer { question_id, answer }`, `ContractLock`, `ContractUnlock`, `TaskIntegrate`, `AgentUpdate`, `SessionStop`, `RunStop`; event kinds added: `escalation.raised`, `escalation.resolved`, `question.answered`, `task.integrated`, `human.accepted`, `review.recorded`, `agent.updated`.
+- Step 11: the commands above in `farik`; `farik contract new --brief <text> | --from <url>` files a `draft` request, runs the triage session and prints its size and reason (`--size large|small` skips it with the human's own triage), then runs the Product Manager's `refine` session, printing each question and reading the answer from the terminal until the contract is written, then prints the contract and its readiness result; `--lock` locks it; `farik approve <epic>` is `human.accept` with subject `contract`; `farik answer <question-id> <text>`; `farik integrate <task>`; `farik cancel <task> <reason>`; `farik task show --diff`.
+- Step 12: `struct HarnessMetrics { first_pass_acceptance_rate: Option<f64>, interventions_per_accepted_task: Option<f64>, cost_per_accepted_task_usd: Option<CostSplit>, mechanically_verified_criteria_share: Option<f64>, active_weeks: u32 }`; `struct CostSplit { total: f64, by_purpose: BTreeMap<SessionPurpose, f64> }`; `Projections` gains `fn metrics(&self, sprint_id: Option<&str>) -> Result<HarnessMetrics, StoreError>`; `farik metrics [--sprint <id>] [--json]`.
+- Step 13: no code interfaces; `docs/milestones/m0-exit.md`, `docs/milestones/m0-exit.events.jsonl`, and the metrics output.
+
+## Phase 4: The team
+
+Ends with: from the command line, a team of five runs a full sprint on Farik's repository: requests triaged by the Scrum Master, epics written by the Product Manager and approved by the human, broken down and assigned by the Scrum Master in planning, implemented, reviewed by the Architect, accepted by the Product Manager, a standup summary at each boundary, a review and a retro at the end, with memory and decisions written to `.farik/`.
 
 Decisions for this phase:
 
-- Made: Tauri shell with React (spec 8.1).
-- Open: renderer for the office scene. Candidates are PixiJS and Phaser. Decide before step 05 with an ADR.
-- Open: the pixel design system (palette, tile size, font). Decide before step 01 with an ADR.
-- Open: whether the scene shows cost visually (spec section 12, question 3). Decide before step 05.
+- Made (D11): the conversational register is kept minimal. The ambient allowance is one message per agent per sprint (spec 5.9); reactions are posted only for transitions on the agent's own tasks and for mentions; the style guide asks for one or two sentences. Step 03 still counts reaction, ambient, and ceremony messages and their cost.
+- Made: channel and ambient messages use Claude Sonnet 5; task work uses the role's configured model (spec 8.2). One-shot completions go through the Claude Code program too (`claude -p --output-format json`), so there is one engine.
+- Made: the channel is stored as `message.posted` events only; the rolling summary is derived, written to `.farik/local/channel-summary.md`, and rebuilt from the log when missing, capped at 2,000 tokens.
+- Made (D10): a sprint ends when every task in it is accepted or cancelled. There is no time box. When the sprint budget is spent, no new assignments are made and the Scrum Master raises it in the channel and in the escalation digest; the human ends the sprint or raises the budget. The blocked-age limit is `blocked_limit_hours`, default 24.
+- Made: a sprint is `.farik/sprints/S<n>.yaml` with `id`, `started_at`, `ended_at`, `budget_usd`, `task_ids`, `status`; from this step on `budget_state` fills the sprint fields from the open sprint and the readiness context's `remaining_sprint_budget_usd` is the sprint's remainder.
+- Made: channel sessions carry `farik_create_task` (without a parent: it files a request that goes to triage) and `farik_post_message`, nothing else that changes a task (spec 5.9).
+- Made: the memory size cap is measured as `ceil(characters / 4)` tokens against the 8k default; the agent is told the count and the cap and asked to prune above 80 percent. Memory is written only through `farik_write_memory`, which emits `memory.written` with the full text.
+- Made: decisions under `.farik/decisions/` are written through `farik_write_decision`, available to the Architect and the Product Manager, numbered `NNNN-<slug>.md`, immutable once written.
 
 Steps:
 
-| Step | Name | Delivers |
-|---|---|---|
-| 01 | Pixel component library | `@farik/ui`: buttons, panels, lists, dialogs in the design system |
-| 02 | Desktop shell | `apps/desktop`: Tauri app subscribing to the event stream from a local runtime |
-| 03 | Board | Kanban of the lifecycle, task detail with contract, events, diff, cost |
-| 04 | Channel and one-on-one | Team chat view and per-agent direct conversation |
-| 05 | Office scene | Desks, meeting table, whiteboard, door; agent movement by state; click to open an agent |
-| 06 | First-run flow | Project pick, project scan read-back, team builder, permission and budget confirmation |
+| Step | Name | Spec | Delivers |
+|---|---|---|---|
+| 01 | Remaining roles | 6.2, 6.3, 6.5, 5.1 | `scrum_master`, `architect`, `marketing_specialist` with prompts and skills; Scrum Master assignment sessions; Definition of Ready judgment sessions for the Scrum Master |
+| 02 | Sprints | 3, 5.5, 6.2 | Sprint model and files, sprint budget in the assignment gate, WIP limits per agent, `farik sprint start`, `farik sprint end`, `farik sprint show` |
+| 03 | Channel | 5.7, 5.9, F7 | Message model, posting triggers on transitions, questions, and mentions, ambient allowance, rolling summary, `farik channel`, `farik say` |
+| 04 | Ceremonies and escalation hygiene | 5.7, 5.9, 6.2 | Planning, standup, review, retro as structured channel conversations run by the Scrum Master; escalation digest at sprint start; `escalation.aged` events |
+| 05 | Memory | 5.8 | Notebook cap and prune instruction, `farik_write_memory`, `team/retro.md` appended by the Scrum Master, `farik_write_decision`, project scan refresh when the tree changes |
+| 06 | Milestone 1 team exit | 11 | A recorded sprint on Farik's repository with five roles, in `docs/milestones/m1-team-exit.md` |
 
-## Phase 5: Ecosystem and launch
+Interfaces this phase adds:
 
-Ends with: the public open-source release.
+- Step 01: the three role directories; the orchestrator starts filling `requires_judgment_review` with true when an active Scrum Master exists (D2); a `farik_record_judgment` tool for the Scrum Master; Scrum Master `triage` and `plan` sessions take over triage, epic breakdown, and assignment from the Product Manager when one is active (spec 5.16).
+- Step 02: `struct Sprint { id, started_at, ended_at: Option, budget_usd, task_ids, status: Open | Closed }`; `ProjectFiles` gains `read_sprint`, `write_sprint`, `list_sprints`; `Projections` gains `fn sprint(&self, id)`; commands added: `SprintStart`, `SprintEnd`; event kinds added: `sprint.started`, `sprint.ended`; the orchestrator starts filling `AssignmentInput` from the sprint's board and budget.
+- Step 03: `enum AuthorId { Agent(String), User }`; `struct MessageRefs { task_id: Option<TaskId>, event_seq: Option<u64> }`; `struct Message { author_id: AuthorId, text, mentions: Vec<String>, refs: MessageRefs, kind: Reaction | Ambient | Ceremony | User }` as the payload of `message.posted`; `struct PostingTrigger { agent_id: String, prompt: String }`; `fn posting_triggers(event: &FarikEvent, team: &Team) -> Vec<PostingTrigger>`; `fn ambient_allowance(projections, sprint_id, agent_id) -> Result<u32, StoreError>`; `struct Completion { text: String, usage: Usage }`; `RuntimeAdapter` gains `fn complete(&self, model: &str, prompt: &str, max_tokens: u32) -> Result<Completion, RuntimeError>` for cheap one-shot calls; `fn summarize_channel(messages: &[Message], previous: Option<&str>, adapter: &dyn RuntimeAdapter) -> Result<String, RuntimeError>`; command added: `MessagePost`; tools added to channel sessions: `farik_post_message`, `farik_create_task`.
+- Step 04: `enum CeremonyKind { Planning, Standup, Review, Retro }`; `Orchestrator` gains `async fn run_ceremony(&self, kind, sprint_id) -> Result<Vec<Message>, OrchestratorError>`; `fn escalation_digest(projections, clock) -> Result<String, StoreError>`; event kind added: `escalation.aged`; `TeamPolicy` gains `escalation_age_hours`.
+- Step 05: `struct MemoryBudget { tokens: u32, cap: u32, over_budget: bool }`; `fn memory_budget(text: &str, cap_tokens: u32) -> MemoryBudget`; `farik_write_memory`, `farik_write_decision`, and `farik_append_retro` tools; `fn should_refresh_scan(git: &Git, last_scan_sha: &str) -> Result<bool, GitError>`; event kinds added: `memory.written`, `decision.written`.
+
+## Phase 5: Desktop
+
+Ends with: a desktop application where a new user goes from an empty office to an accepted task on their own repository inside thirty minutes, measured with five test users.
 
 Decisions for this phase:
 
-- Open: desktop notification mechanism per platform. Decide before step 04.
-- Open: launch recording script and repository (per `docs/PRODUCT_ANALYSIS.md`, go to market). Decide before step 05.
+- Made: Tauri 2 shell (`@tauri-apps/cli` 2.11.4) with React 19 (spec 8.1), Vite for the front end. The Tauri app's Rust side depends on `farik-runtime` and runs the daemon in-process (D12): there is no sidecar and no second process. `farik serve` on the command line runs the same daemon for a browser or a second client.
+- Made: the front end's toolchain is ADR 0002's (pnpm, TypeScript, Biome, Vitest), added by step 01 with a root `package.json`, and `cargo xtask check` runs `pnpm check` from then on. `@farik/protocol-client` is the front end's typed client, generated from `rpc.schema.json`, `event.schema.json`, and `command.schema.json` with `json-schema-to-typescript`, and it is the front end's one `camelCase` mapping layer.
+- Made: the wire between the daemon and the front end is JSON-RPC 2.0 over a WebSocket on the daemon's port: `subscribe` streams events from a sequence, `command` sends a `Command`, `query` reads projections. `apps/web` in phase 7 speaks the same protocol to a remote daemon.
+- Made: contract validation and Definition of Ready results shown in the editor come from the daemon (`contract.validate` command), never from the webview.
+- Made: every action in the office is also reachable from the board (F10); the scene can be disabled in settings and the board is the default view when it is.
+- Made (D13): the design system is provisional. Step 02's plan picks a 16 px tile, 32x32 avatars, one fixed 32-colour palette, and one bitmap font, records them in an ADR marked provisional, and the founder refines the look in phase 6 step 07.
+- Made (D14): the office scene renderer is PixiJS 8.20.1.
+- Made (D15): cost is shown on the board and in task detail, never in the scene.
 
 Steps:
 
-| Step | Name | Delivers |
+| Step | Name | Spec | Delivers |
+|---|---|---|---|
+| 01 | Front-end toolchain and RPC transport | 8.1, 8.5, F6 | Root `package.json` and pnpm workspace, `cargo xtask check` running `pnpm check`, `rpc.schema.json`, the WebSocket JSON-RPC route on the daemon with subscribe, command, and query, `@farik/protocol-client` |
+| 02 | Pixel component library | F10, 10 | `@farik/ui`: buttons, panels, lists, dialogs, form fields, tables in the provisional design system; strings externalized; the provisional ADR |
+| 03 | Desktop shell | 8.1 | `apps/desktop`: Tauri app running the daemon in-process, connected, showing connection state and a raw event ticker; settings for scene on or off |
+| 04 | Board | F3, 5.14, 5.16 | Kanban of the lifecycle with tasks grouped under their epics, filters by agent, sprint, risk, and epic; waiting-on-triage, waiting-on-human, awaiting-approval, and awaiting-integration markers; triage or overrule a triage; task detail with contract history, events, diff, notes, cost by purpose, and children; file a request by hand; integrate |
+| 05 | Contract authoring and human gates | F4, F14, 5.2, 5.4, 5.7, 5.11, 5.13, 5.16 | Schema-driven editor with validation and Definition of Ready results inline; the Product Manager's questions answered in the editor before it drafts; criteria from the library; lock and unlock; approve an epic or send it back with a message; accept a `high` risk contract; resolve an escalation; human acceptance of a result; the product roadmap view with its change history |
+| 06 | Channel view | F7 | Team chat with agent and user posts, mentions, ceremony threads, links to tasks and events |
+| 07 | Team builder and editor | F1, F15, F16, 4.4 | Create, edit, pause, retire, replace agents; roles, names, avatars from the shipped set or a 32x32 upload, persona lines, permissions, model and effort; two to seven enforced with the required roles; team rules and the criterion library editors; integration policy |
+| 08 | Office scene | F10, 10 | Desks, meeting table, whiteboard, door; agent movement by state; click to open an agent; 60 frames per second on the reference laptop; disable switch |
+| 09 | First-run flow | 4.1, F2, 5.16 | Existing or new project, scan read-back, team builder, explicit confirmation of `execute`, `git_remote`, and the daily budget; the office populates, the Product Manager's first reading and questions appear, and the user's first request is filed and triaged |
+| 10 | Milestone 1 exit | 11 | The thirty-minute test with five users, protocol and results in `docs/milestones/m1-exit.md` |
+
+Interfaces this phase adds:
+
+- Step 01 (`farik-protocol`): `generated::rpc::*` with `RpcRequest`, `RpcResponse`, `RpcNotification`; `enum QueryName { Board, Task, Costs, Channel, Team, Sprint, Events, Metrics }` with the params and results per query; (`farik-runtime`): the WebSocket route on the daemon; (`@farik/protocol-client`): `createDaemonClient(url: string, token: string): DaemonClient` with `subscribe(afterSeq, listener): () => void`, `command(command): Promise<Result<void, DaemonError>>`, `query<Name>(name, params): Promise<Result<QueryResult[Name], DaemonError>>`, `close()`; command added: `ContractValidate`.
+- Step 02 (`@farik/ui`): React components `Button`, `Panel`, `List`, `Dialog`, `TextField`, `Select`, `Table`, `Badge`, `Tabs`; `theme.css` tokens; `t(key)` string lookup over `strings/en.json`.
+- Step 03 (`@farik/desktop`): the Tauri shell with `src-tauri` depending on `farik-runtime`; `useDaemon()` hook exposing the client and connection state.
+- Steps 04 to 09: React views `Board`, `TaskDetail`, `ContractEditor` (with the `ContractAssistant` conversation), `QuestionPanel`, `EscalationPanel`, `Channel`, `TeamBuilder`, `RulesEditor`, `CriteriaEditor`, `AgentPanel`, `OfficeScene`, `FirstRun`; command added: `TeamUpdate`.
+
+## Phase 6: Ecosystem and launch
+
+Ends with: the public open-source release, `v0.1.0`, with per-agent MCP servers and skills, one-on-one conversations, the audit viewer, notifications, and the premium hooks present as stubs.
+
+Decisions for this phase:
+
+- Made: MCP servers are configured per agent in `team.yaml` (`mcp_servers: [{ name, transport: stdio | http, command | url, args, env_keys, tool_tiers }]`); credentials are named by key, stored in the OS keychain through the `keyring` crate (version pinned in the step plan), read by the daemon at connection time, and passed to the server process environment (spec 8.6). Tool listing uses `rmcp` as a client; untagged tools are `external_effect` (spec 5.6). Approval of an `external_effect` call is `tool.approve` from the board or `farik tool approve <approval-id>`.
+- Made: skills live at three levels, the role's embedded `skills/`, `.farik/skills/`, and `.farik/agents/<agent_id>/skills/`, loaded into a session through Claude Code's skills directories in that order.
+- Made: one-on-one conversations are sessions with `Read` tier only, no task, and one Farik tool, `farik_propose_task`, which files a `draft` request that goes to triage like any other (F8, spec 4.3, 5.16).
+- Made: premium hooks (F13) are traits with open-source implementations: `LicenseCheck` returning `Tier::OpenSource`, `HostedRunToggle` unavailable with the reason "not available in this build", `SyncProvider` with a no-op implementation. No `ee/` directory exists in this release.
+- Made (D16): notifications go through Tauri's notification plugin on all three platforms, driven by the daemon's events.
+- Made (D13): the founder's design refinement pass is its own step before launch.
+- Made (D17): there is no launch recording. The launch artifact is the README, the changelog, and the release itself; the go-to-market paragraph of `docs/PRODUCT_ANALYSIS.md` that called for a recording is superseded.
+- Made: the release pipeline is a second GitHub Actions workflow, `release`, that builds the desktop app for macOS, Windows, and Linux on a tag, builds the `farik` binary for the same targets, publishes `farik-core` and `farik-protocol` to crates.io, and attaches binaries to the GitHub release; the changelog is `git-cliff` 2.14.1 output. The repository is made public in this step.
+
+Steps:
+
+| Step | Name | Spec | Delivers |
+|---|---|---|---|
+| 01 | MCP per agent | F9, 3, 5.6, 8.6 | Server configuration (stdio and remote), tool listing, tier tagging, keychain credentials, loading into sessions; per-call human approval of `external_effect` tools from the board and from `farik tool approve` |
+| 02 | Skills per agent | F9, 3 | Skill folders at agent, role, and team level; loading into sessions; agent panel listing |
+| 03 | One-on-one | F8, 4.3, 5.8 | Read-only direct conversation with an agent, memory history with revert and decisions view in the agent panel, offer to file a task |
+| 04 | Audit viewer | F11, F17 | Event log view with filters, JSON Lines export and replay, cost reports per task, agent, and sprint, the harness metrics panel |
+| 05 | Notifications | F12, 5.7 | Desktop notifications for `escalation.raised`, `escalation.aged`, `question.asked`, `sprint.started`, `sprint.ended`; quiet hours |
+| 06 | Premium hooks | F13, 9 | `LicenseCheck`, `HostedRunToggle`, `SyncProvider` stubs wired into settings |
+| 07 | Design refinement | F10, 10 | The founder's pass over the palette, font, avatars, and scene; the provisional ADR superseded by an accepted one |
+| 08 | Launch | 11, product analysis | README rewrite, event kind checklist against spec 8.5, changelog, release workflow, tag `v0.1.0`; the repository made public |
+
+Interfaces this phase adds:
+
+- Step 01: `McpServerConfig` gains `env_keys: Vec<String>` and `tool_tiers: BTreeMap<String, PermissionTier>` and appears in `Team` (`Agent` gains `mcp_servers`); `enum McpError { Unreachable, Protocol { detail }, CredentialsMissing { key } }`; `async fn list_mcp_tools(config: &McpServerConfig, credentials: &dyn CredentialSource) -> Result<Vec<McpToolInfo>, McpError>`; `trait CredentialSource { fn get(&self, key) -> Result<Option<String>, CredentialError>; fn set(&self, key, value) -> Result<(), CredentialError> }`; `struct KeychainCredentials`; `SessionSpec` gains `mcp_servers`; command added: `ToolApprove { approval_id, approved }`; event kinds added: `approval.requested`, `approval.granted`, `approval.denied`; the daemon keeps the session's approved calls from these events and the agent retries the identical call after approval.
+- Step 02: `Agent` gains `skills`; `fn resolve_skill_dirs(agent: &Agent, role: &RoleDefinition, root: &Path) -> Vec<PathBuf>`; `SessionSpec` gains `skill_dirs`.
+- Step 03: `Orchestrator` gains `async fn start_conversation(&self, agent_id, first_message) -> Result<ConversationId, CommandError>`; `farik_propose_task` tool; command added: `ConversationSend { conversation_id, text }`; event kinds added: `conversation.started`, `conversation.ended`.
+- Step 04: `fn export_events(log: &EventLog, query: &EventQuery, sink: &mut dyn Write) -> Result<u64, StoreError>`; `fn replay_events(source: &mut dyn BufRead, into: &EventLog) -> Result<u64, StoreError>` and `farik replay <file>`; `fn cost_report(projections, scope) -> Result<Vec<CostProjection>, StoreError>`; views `AuditLog`, `CostReport`, `Metrics`.
+- Step 05: `trait Notifier { fn notify(&self, title, body, task_id) -> Result<(), NotifyError> }`; `TeamPolicy` gains `quiet_hours`; `fn should_notify(event: &FarikEvent, policy: &TeamPolicy, clock: &dyn Clock) -> bool`.
+- Step 06: `trait LicenseCheck { fn check(&self) -> Tier }`; `enum Tier { OpenSource, Premium }`; `trait HostedRunToggle { fn availability(&self) -> Availability }`; `trait SyncProvider { fn push(&self) -> Result<(), SyncError>; fn pull(&self) -> Result<(), SyncError> }`; the open-source implementations of each.
+- Step 07: no code interfaces; the asset files under `packages/ui/assets/` and the ADR.
+- Step 08: no code interfaces; `CHANGELOG.md`, `.github/workflows/release.yml`, `cliff.toml`, the tag.
+
+## Phase 7: Premium
+
+Not yet planned. Its steps are written after the Phase 6 retrospective, because what the open-source launch teaches decides what hosted execution must do first. `docs/SPEC.md` section 9 lists the candidate features in priority order. The premium hooks from phase 6 step 06 are the seams it fills, and `apps/web` speaks the phase 5 RPC protocol to a hosted daemon.
+
+## Coverage
+
+Every functional requirement in `docs/SPEC.md` section 7 and every rule in section 5, with the steps that deliver it. A requirement that spans phases lists the step where it becomes usable first.
+
+| Spec | Delivered by |
+|---|---|
+| 5.2 lifecycle and table | 1.01, 1.09; applied by 3.10 |
+| 5.3 Definition of Ready | 1.02; judgment sessions in 4.01 |
+| 5.4 Definition of Done | 1.03, 1.07; reviewer sessions in 3.10 |
+| 5.5 budgets | 1.05, 3.09; sprint budget in 4.02 |
+| 5.6 permissions | 1.04, 3.05, 3.06; MCP tagging in 6.01 |
+| 5.7 escalation and questions | 1.06, 3.03, 3.10; digest and age in 4.04; notifications in 6.05 |
+| 5.8 memory | 2.05 (files), 3.08 (in prompts), 4.05 (cap, retro, decisions, refresh) |
+| 5.9 channel | 4.03, 4.04; view in 5.06 |
+| 5.11 contract ownership | 0.03 (fields), 1.08 (gate), 2.06 (lock, unlock), 3.03 (enforced on writes), 5.05 (editor) |
+| 5.12 team rules | 1.02, 1.03, 1.04, 2.05, 3.03, 3.08; editor in 5.07 |
+| 5.13 authoring and criterion library | 2.05, 2.06, 3.04, 3.11, 5.05, 5.07 |
+| 5.14 integration and worktrees | 1.08 (assignment), 2.04, 3.10, 3.11, 5.04 |
+| 5.15 recovery | 3.10 |
+| 5.16 requests, triage, epics, and tasks | 0.03 (fields), 1.01 (`Triaged` gate), 1.02, 1.08, 2.01, 2.03, 2.05, 2.06 (human triage), 3.03, 3.10, 3.11, 4.01, 4.03, 5.04, 5.05, 5.09, 6.03 |
+| F1 team builder | 2.05 (model), 5.07, 5.09 |
+| F2 projects | 2.04, 2.05, 2.06; presets in 3.04; first run in 5.09 |
+| F3 board | 2.06 (text), 5.04 |
+| F4 contracts | 0.03 (validation), 5.05 (editor) |
+| F5 governor | phase 1 |
+| F6 runtime | 3.01, 3.05, 3.06, 3.09, 3.10; stream in 5.01 |
+| F7 channel | 4.03, 5.06 |
+| F8 one-on-one | 6.03 |
+| F9 MCP and skills | 6.01, 6.02 |
+| F10 pixel office | 5.08, 6.07 |
+| F11 audit | 2.06 (`farik log`), 6.04 |
+| F12 notifications | 6.05 |
+| F13 premium hooks | 6.06 |
+| F14 contract authoring assistant | 3.11 (command line), 5.05 |
+| F15 team rules | 2.05, 2.06, 5.07 |
+| F16 criterion library | 2.05, 2.06, 3.04, 5.07 |
+| F17 harness metrics | 3.12, 6.04 |
+| 8.1 layout | 0.01 and the crate table above |
+| 8.2 runtime | 3.05, 3.06, ADR 0004, ADR 0005 |
+| 8.3 sandbox | 3.02 |
+| 8.4 storage | 2.02, 2.03, 2.05 |
+| 8.5 event protocol | 2.01 and every step that adds a kind; checked in 6.08 |
+| 8.6 security | 3.05, 3.06 (disallowed tools, untrusted notice), 6.01 (keychain) |
+| 10 non-functional | 1.04 (measured, not gated), 2.03 (projections), 5.08 (frame rate), 5.02 (strings) |
+
+## Spec changes this plan implies
+
+Each is made in the step named, in the same pull request as the code, per hard rule 8.
+
+- 8.5: the added event kinds (each step that adds one).
+- 8.2: the prompt section order once ADR 0006 is written (phase 3 step 08).
+- Already made in spec 0.3 by this plan's pull request: section 8 for the Rust backend and the Claude Code child process, 5.1 and 5.3 for the reviewer rule (D7), 5.16 with the `kind` and `parent` fields and the `Triaged` gate for the contract architecture, and the founder's other decisions (D3, D4, D5, D6, D9, D10, D11, D15, D18) in sections 1, 3, 5.2, 5.5, 5.9, 8.4, 11, 12, and F1.
+
+## Closed decisions
+
+Every decision the plan raised, the founder's answer of 2026-09-15, and where it is now recorded. The ids stay in use so that references in the phase lists and in pull requests keep resolving.
+
+| Id | Decision | Recorded in |
 |---|---|---|
-| 01 | MCP per agent | Server configuration (stdio and remote), tool listing, tier tagging, keychain credentials |
-| 02 | Skills per agent | Skill folders at agent, role, and team level; loading into sessions |
-| 03 | Audit viewer | Event log view with filters, JSON Lines export, cost reports |
-| 04 | Notifications | Escalation and sprint boundary notifications, quiet hours |
-| 05 | Launch | README, recording, changelog, release tag |
-
-## Phase 6: Premium
-
-Not yet planned. Its steps are written after the Phase 5 retrospective, because what the open-source launch teaches decides what hosted execution must do first. The spec's section 9 lists the candidate features in priority order.
+| D1 | No-sandbox mode ships, with a warning on every run and in setup. | every-phase list; phase 3; spec 8.3 |
+| D2 | With an active Scrum Master, the judgment rubric gates `refining → ready`. | phase 1; phase 4 step 01 |
+| D3 | The proposed budget table is approved. | phase 1; spec 5.5 |
+| D4 | A human may cancel a task from any state. | phase 1 (`any → cancelled` row); spec 5.2 |
+| D5 | The event log is machine-local, never committed. | phase 2; spec 8.4 |
+| D6 | Without a Scrum Master, the Product Manager assigns. | phase 1 (second `ready → assigned` row); phase 3; spec 5.2 |
+| D7 | A Developer's reviewer is the Architect, else another Developer: a Software Developer may review another Developer's work but never its own; with neither, the contract fails readiness and the Product Manager asks the human to add a reviewer agent. | phase 1 step 02 (`ReviewerAvailable`), step 08 (`check_assignment`); phase 3 step 07 and step 10; spec 5.1, 5.3, and 11; the schema's `reviewer_role` description |
+| D8 | `human_accepts_contracts` defaults to `high_risk`. | phase 3; spec 12 |
+| D9 | The Milestone 0 exit runs on Farik's own repository, private until launch. | phase 3 step 13; spec 11 |
+| D10 | A sprint ends when all its tasks are accepted or cancelled. | phase 4; spec 3 and 5.2 |
+| D11 | The conversational register is minimal: one ambient message per agent per sprint. | phase 4; spec 5.9 and 12 |
+| D12 | The backend, and so the daemon, is Rust; the desktop app runs it in-process. | ADR 0005; every-phase list; phase 3 step 05; phase 5 |
+| D13 | The design system is provisional at phase 5 step 02 and refined by the founder at phase 6 step 07. | phase 5; phase 6 |
+| D14 | The office scene uses PixiJS 8.20.1. | phase 5 step 08 |
+| D15 | Cost is shown on the board, not in the scene. | phase 5; spec 12 |
+| D16 | Notifications use Tauri's notification plugin on all platforms. | phase 6 step 05 |
+| D17 | No launch recording. | phase 6 step 08 |
+| D18 | Teams have two to seven agents, at least one Product Manager and one Software Developer. | phase 2 step 05; spec 1 and F1 |
+| D19 | The default integration policy is `manual`: the human merges. | phase 3; spec 5.14 |
+| D20 | A dependency must be accepted and integrated before the dependent task is assigned. | phase 1 step 08; spec 5.14 |
 
 ## Changing this plan
 
-Edits go through a pull request that says which decision changed and why. Reordering steps within a phase is a normal edit. Reordering phases, or adding a dependency from an earlier phase on a later one, requires an ADR because it means the no-forward-dependencies rule was about to be broken.
+Edits go through a pull request that says which decision changed and why. Reordering steps within a phase is a normal edit. Reordering phases, or adding a dependency from an earlier phase on a later one, requires an ADR because it means the no-forward-dependencies rule was about to be broken. Reopening a closed decision is an edit to the phase's decision list and to its row in the closed decisions table, with the reason.
