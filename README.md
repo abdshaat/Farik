@@ -15,7 +15,7 @@ cargo xtask install-hooks
 cargo xtask check
 ```
 
-`cargo xtask check` runs the format check, clippy, the tests, the bare-TODO check, and the core no-I/O check, and is what the `check` workflow runs on every pull request. `cargo fmt --all` rewrites files to the house style.
+`cargo xtask check` runs the format check, clippy, the tests, the generated-file freshness check, the bare-TODO check, and the core no-I/O check, and is what the `check` workflow runs on every pull request. `cargo fmt --all` rewrites files to the house style.
 
 ## Documents
 

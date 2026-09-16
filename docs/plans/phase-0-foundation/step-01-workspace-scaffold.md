@@ -7,7 +7,7 @@ Depends on: none
 
 A plan is `ready` only when a reviewer other than the author has confirmed the three rules in `docs/standards/workflow.md` stage 2 (Plan): every decision made, no ambiguity, no forward dependencies. Record who confirmed and when here.
 
-Readiness confirmed by: pending
+Readiness confirmed by: a fresh Claude Code review session, 2026-09-16; the confirmation came after execution had begun, which pull request #4 records.
 
 ## Goal
 
@@ -78,7 +78,7 @@ Files: created `LICENSE`, `rust-toolchain.toml`, `Cargo.toml`, `Cargo.lock`, `.c
 Consumes: nothing
 Produces: `cargo xtask check`, `cargo xtask pre-commit`, `cargo xtask commit-msg <file>`, `cargo xtask todos`, `cargo xtask core-io`, `cargo xtask install-hooks`; `xtask::commit_message::check_commit_message(message: &str) -> Result<(), String>`; `xtask::todos::find_bare_todos(files: &[(String, String)]) -> Vec<String>`; `farik_core::CORE_CRATE_NAME: &str`; installed git hooks
 
-- [x] Confirm the starting point, on a clean checkout of `phase/0-foundation` created from `main`:
+- [x] Confirm the starting point, on a clean checkout of the phase branch created from `main`:
 
   ```
   cargo xtask check
@@ -914,7 +914,7 @@ Produces: contributor instructions that match the repository
 - [x] In `CLAUDE.md`, replace the `## Current state` paragraph with:
 
   ```markdown
-  Phase 0 (foundation) is in progress on `phase/0-foundation`. The Cargo workspace exists; `farik-core` has no behavior yet. The next steps are the schema generation pipeline and contract validation, per `docs/plans/project-plan.md`.
+  Phase 0 (foundation) is in progress on `claude/phase-0-implementation-izm38y` (the harness-assigned phase branch). The Cargo workspace exists; `farik-core` has no behavior yet. The next steps are the schema generation pipeline and contract validation, per `docs/plans/project-plan.md`.
   ```
 
 - [x] Run the full check once more; confirm green (Markdown is not checked, so the output is the same as Task 1's).
@@ -938,7 +938,7 @@ git log --oneline -3
 # build(repo): add the cargo workspace, xtask, and commit hooks
 ```
 
-The `check` workflow run on the pushed head of `phase/0-foundation` is green; its link and summary are in the pull request.
+The `check` workflow run on the pushed head of the phase branch is green; its link and summary are in the pull request.
 
 ```
 sha256sum LICENSE
