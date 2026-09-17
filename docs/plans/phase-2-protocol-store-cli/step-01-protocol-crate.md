@@ -30,6 +30,7 @@ Farik's log has a shape. When this step is done, `docs/schemas/event.schema.json
 - `Command::TaskCreate` boxes its contract. A `TaskContract` is an order of magnitude larger than the other command's arguments and an enum is as large as its largest variant, so `clippy::large_enum_variant`, which `cargo xtask check` runs with `-D warnings`, refuses the unboxed form. This makes the field `Box<TaskContract>` where `docs/plans/project-plan.md` writes `TaskCreate { contract: TaskContract }`; the project plan's signatures are abbreviated by its own statement, and this is the step plan making one exact.
 - `EventError` carries no `Display` and no `std::error::Error`. `docs/standards/code.md` names `thiserror` for a crate's error enum, and the workspace pins no such dependency: `farik-core`'s seven error and refusal enums are plain enums the caller matches on, and one crate deviating would be the odd one out. The step that folds this into `StoreError` decides whether the workspace takes the dependency.
 - All nine of this phase's event kinds land in this step, though this step emits none of them. The every-phase decision says the step that first emits a kind adds it to the schema; the same project plan's step 01 interface list names all nine here, because the schema is one file and the crate that owns it is built once. Steps 02, 03, 05, and 06 are what emit them.
+- `pointer` and `read_body` are written once in `event.rs` and once in `command.rs` rather than shared. `farik-core` already keeps one `pointer` in `contract.rs` and an identical one in `pricing.rs`, so this is the house's answer for a seven-line helper at two schema boundaries, and a module holding two of them would be a namespace for functions, which `docs/standards/code.md` rules out. The two `read_body`s differ in their message anyway: one names an event kind, the other a command.
 - The command schema gets a reader and no writer. Nothing in this phase puts a command on a wire: the command line builds a `Command` in process. A writer would have no caller and no test that means anything.
 - `task_create`'s `contract` is typed `object` and nothing more. One schema never references another, and the contract's rules — the repeated criterion and requirement ids among them — live in `farik_core::contract::validate_contract`, which the reader calls, so a contract that arrives inside a command is held to exactly the rules a contract that arrives alone is.
 - `Clock` and `IdSource` are traits with no supertraits, as `docs/plans/project-plan.md` states them. `FixedClock` and `SequentialIds` ship in the crate rather than behind `#[cfg(test)]`, so that every other crate's tests can use them, as `contract::fixtures` does.
@@ -82,7 +83,7 @@ crates/protocol/src/event/fixtures.rs                  creates: builders for tes
 crates/protocol/src/command.rs                         creates: Command and its reader
 crates/protocol/src/clock.rs                           creates: Clock, IdSource, FixedClock, SequentialIds
 docs/SPEC.md                                           modifies: section 8.5 names every kind this phase adds
-docs/plans/project-plan.md                             modifies: the status line and phase 2's step 01 state
+docs/plans/project-plan.md                             modifies: the status line, and the every-phase note on the generator's derives
 CLAUDE.md                                              modifies: the current-state paragraph
 README.md                                              modifies: the status line
 docs/plans/phase-2-protocol-store-cli/step-01-protocol-crate.md   modifies: checkboxes ticked per task
@@ -97,22 +98,22 @@ Files: modified `xtask/src/generate.rs`, `crates/core/src/generated/task_contrac
 Consumes: `xtask::generate::{GENERATED_SCHEMAS, generate_types}` on `main`
 Produces: every generated type derives `PartialEq`
 
-- [ ] Write the failing test. Append this to the `tests` module at the bottom of `xtask/src/generate.rs`, above `generates_a_formatted_module_with_the_header_and_the_type`. The probe schema's one property is `required` on purpose: an object whose every property is optional also gets `Default` in its derive list, and the assertion would then never hold.
+- [ ] Write the failing test. Insert it in the `tests` module of `xtask/src/generate.rs`, immediately above `generates_a_formatted_module_with_the_header_and_the_type`. The probe schema's one property is `required` on purpose: an object whose every property is optional also gets `Default` in its derive list, and the assertion would then never hold.
 
   ```rust
-  #[test]
-  fn derives_partial_eq_so_that_a_generated_value_can_be_compared_to_an_expected_one() {
-      // Without it, a test that builds an event can only assert on its wire form, which is the
-      // thing the writer is supposed to be checked against.
-      let schema = r#"{"title": "Thing", "type": "object", "required": ["name"], "properties": {"name": {"type": "string"}}}"#;
-      let module = generate_types(&GENERATED_SCHEMAS[0], schema).expect("generated");
-      assert!(
-          module.contains(
-              "#[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]"
-          ),
-          "{module}"
-      );
-  }
+      #[test]
+      fn derives_partial_eq_so_that_a_generated_value_can_be_compared_to_an_expected_one() {
+          // Without it, a test that builds an event can only assert on its wire form, which is the
+          // thing the writer is supposed to be checked against.
+          let schema = r#"{"title": "Thing", "type": "object", "required": ["name"], "properties": {"name": {"type": "string"}}}"#;
+          let module = generate_types(&GENERATED_SCHEMAS[0], schema).expect("generated");
+          assert!(
+              module.contains(
+                  "#[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]"
+              ),
+              "{module}"
+          );
+      }
   ```
 
 - [ ] Run it and confirm it fails because the derive is missing:
@@ -233,8 +234,8 @@ Produces: the crate `farik-protocol`; `farik_protocol::generated::event::{EventK
 
   ```
   cargo test -p farik-protocol
-  # expected: FAIL to compile, error[E0433]: failed to resolve: could not find `generated` in the
-  #           crate root
+  # expected: FAIL to compile, error[E0433]: cannot find `generated` in `crate`, labelled
+  #           "could not find `generated` in the crate root"
   ```
 
 - [ ] Write the schema. Create `docs/schemas/event.schema.json`:
@@ -494,7 +495,7 @@ Files: modified `docs/SPEC.md`
 Consumes: the kind list from Task 2
 Produces: section 8.5 lists the nine kinds of this phase
 
-This task changes documentation and has no test cycle; the check that matters is that the list in the spec and the list in the schema agree, which the command below and the reader of the pull request confirm.
+This task changes documentation and has no test cycle; the check that matters is that the list in the spec and the list in the schema agree, which the command below and the reader of the pull request confirm. The replacement prose is quoted below as a blockquote; the `> ` marker is this plan's, not part of the text to write.
 
 - [ ] In `docs/SPEC.md` section 8.5, replace the sentence that begins "Kinds are named" with:
 
@@ -834,9 +835,11 @@ Produces: `farik_protocol::event::{EventEnvelope, EventBody, FarikEvent, EventKi
 
   ```
   cargo test -p farik-protocol
-  # expected: FAIL to compile, error[E0432]: unresolved imports `super::EVERY_KIND`,
-  #           `super::EventBody`, `super::EventKind`, `super::ValidationError`,
-  #           `super::event_from_value`
+  # expected: FAIL to compile, two errors, both because the module has nothing in it yet:
+  #           error[E0432]: unresolved import `crate::event::EventKind` at
+  #           crates/protocol/src/event/fixtures.rs:5, "no `EventKind` in `event`", and
+  #           error[E0432]: unresolved imports `super::EVERY_KIND`, `super::EventBody`,
+  #           `super::EventKind`, `super::ValidationError`, `super::event_from_value`
   ```
 
 - [ ] Write the minimal implementation. Insert into `crates/protocol/src/event.rs`, between the module doc and `pub mod fixtures;`:
@@ -1085,7 +1088,7 @@ Produces: `farik_protocol::event::{EventEnvelope, EventBody, FarikEvent, EventKi
   # expected: all passing, eleven tests in event::tests
   ```
 
-- [ ] Tie the two lists of kinds together so that neither can gain a kind without the other. Append one line to `names_every_event_kind_as_an_entity_and_a_past_tense_verb` in `crates/protocol/src/lib.rs`:
+- [ ] Tie the two lists of kinds together so that neither can gain a kind without the other. Add one line to `names_every_event_kind_as_an_entity_and_a_past_tense_verb` in `crates/protocol/src/lib.rs`, as the function's last statement, after the `for` loop:
 
   ```rust
   assert_eq!(KINDS.map(|(_, kind)| kind), crate::event::EVERY_KIND);
@@ -2048,11 +2051,17 @@ Files: modified `docs/plans/project-plan.md`, `CLAUDE.md`, `README.md`, `docs/pl
 Consumes: nothing
 Produces: a project plan, a `README.md`, and a `CLAUDE.md` that describe the repository as it now is
 
-This task changes documentation and has no test cycle.
+This task changes documentation and has no test cycle. As in Task 3, the `> ` marker on each block below is this plan's and is not part of the text to write.
 
 - [ ] In `docs/plans/project-plan.md`, in the status paragraph, replace the sentences about phase 1 and phase 2 with:
 
   > Phase 1 is done and merged (pull request #5, 2026-09-16): all nine of its step plans under `docs/plans/phase-1-harness/` are executed and reviewed; three rules of section 5 that need a decision in the spec rather than a function in `core` are named at the end of that phase's section. Phase 2 is fully decided and under way; its step plans are written one at a time under `docs/plans/phase-2-protocol-store-cli/` as each step starts.
+
+- [ ] In `docs/plans/project-plan.md`, in "Decisions that apply to every phase", append to the "Schemas own their types" bullet:
+
+  > Generated types derive `PartialEq` (`TypeSpaceSettings::with_derive`), so that a test can compare a generated value to an expected one; this holds for every schema the workspace adds, not only the ones that have it today.
+
+  The derive is turned on for the whole generator by phase 2 step 01, so a later step that adds a schema inherits it and should not have to rediscover why.
 
 - [ ] In `CLAUDE.md`, replace the "Current state" section's paragraphs with:
 
