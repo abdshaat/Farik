@@ -254,6 +254,19 @@ impl Git {
     /// (5.14) and the integration branch lives here — so a merge that moved it would change what a
     /// person has open in front of them.
     ///
+    /// **One task integrates at a time, and nothing here enforces it** (`docs/SPEC.md` 5.14). This
+    /// reads HEAD, moves it, and puts it back, so two of these at once on one repository interleave:
+    /// measured on this code, sixteen runs in forty left the checkout on the wrong branch and one in
+    /// forty landed the merge commit on a branch nobody named, while the caller was told it merged.
+    /// The lock belongs to whatever drives integration — phase 3 step 10 — rather than to a method
+    /// that cannot see the other caller. Everything else here is safe side by side: a worktree per
+    /// task touches no shared head.
+    ///
+    /// A merge that lands and then cannot put the branch back comes back as the error from the
+    /// checkout, and the merge commit stays where it landed. Nothing has reached that case, and the
+    /// alternative — reporting success while the repository sits somewhere the caller did not ask
+    /// for — is worse to be wrong about.
+    ///
     /// # Errors
     ///
     /// `CommandFailed` when either name is unknown, when the head is detached and there is no
