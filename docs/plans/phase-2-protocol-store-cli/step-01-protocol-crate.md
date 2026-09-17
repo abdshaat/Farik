@@ -1,6 +1,6 @@
 # Phase 2, step 01: Protocol crate
 
-Status: ready
+Status: done
 Branch: `claude/phase-0-implementation-izm38y` (the harness-assigned phase branch, left as assigned per `docs/standards/code.md`; a session may not push to another branch without permission, so phase 2 reuses it as phase 1 did; steps do not get their own)
 Spec: `docs/SPEC.md` section 8.5 (event protocol), 8.4 (storage), 5.11 (contract ownership), 5.13 (the criterion library), 5.16 (triage); `docs/standards/code.md`, "Wire and file formats" and "Schema validation"
 Depends on: phase 0 (merged in #4), phase 1 (merged in #5)
@@ -2053,17 +2053,17 @@ Produces: a project plan, a `README.md`, and a `CLAUDE.md` that describe the rep
 
 This task changes documentation and has no test cycle. As in Task 3, the `> ` marker on each block below is this plan's and is not part of the text to write.
 
-- [ ] In `docs/plans/project-plan.md`, in the status paragraph, replace the sentences about phase 1 and phase 2 with:
+- [x] In `docs/plans/project-plan.md`, in the status paragraph, replace the sentences about phase 1 and phase 2 with:
 
   > Phase 1 is done and merged (pull request #5, 2026-09-16): all nine of its step plans under `docs/plans/phase-1-harness/` are executed and reviewed; three rules of section 5 that need a decision in the spec rather than a function in `core` are named at the end of that phase's section. Phase 2 is fully decided and under way; its step plans are written one at a time under `docs/plans/phase-2-protocol-store-cli/` as each step starts.
 
-- [ ] In `docs/plans/project-plan.md`, in "Decisions that apply to every phase", append to the "Schemas own their types" bullet:
+- [x] In `docs/plans/project-plan.md`, in "Decisions that apply to every phase", append to the "Schemas own their types" bullet:
 
   > Generated types derive `PartialEq` (`TypeSpaceSettings::with_derive`), so that a test can compare a generated value to an expected one; this holds for every schema the workspace adds, not only the ones that have it today.
 
   Note, not text to write: the derive is turned on for the whole generator by phase 2 step 01, so a later step that adds a schema inherits it rather than rediscovering why it is there.
 
-- [ ] In `CLAUDE.md`, replace the "Current state" section's paragraphs with:
+- [x] In `CLAUDE.md`, replace the "Current state" section's paragraphs with:
 
   > Phase 0 (foundation) is done and merged (pull request #4): the Cargo workspace, `cargo xtask check`, the contract types generated from the schema, and `validate_contract` exist.
   >
@@ -2071,15 +2071,15 @@ This task changes documentation and has no test cycle. As in Task 3, the `> ` ma
   >
   > Phase 2 (protocol, store, and the first command line) is in progress on `claude/phase-0-implementation-izm38y` (the harness-assigned branch, reused because a session may not push to another branch without permission), in pull request #6. Its step plans live under `docs/plans/phase-2-protocol-store-cli/` and are written one at a time from `docs/plans/project-plan.md`.
 
-- [ ] In `README.md`, replace the status line with:
+- [x] In `README.md`, replace the status line with:
 
   > Status: phase 0 (foundation) and phase 1 (harness core) merged; phase 2 (protocol, store, and the first command line) in progress. Nothing runs for a user yet. Project standards are in place; see [CONTRIBUTING.md](CONTRIBUTING.md) before making a change.
 
-- [ ] Confirm the phase's draft pull request exists, is titled `phase 2: protocol, store, and the first command line`, follows `.github/pull_request_template.md`, and links this step plan. Open it if it does not; hard rule 11 of `CLAUDE.md` gives a pushed phase branch no other option. It is pull request #6, opened when this plan was pushed.
+- [x] Confirm the phase's draft pull request exists, is titled `phase 2: protocol, store, and the first command line`, follows `.github/pull_request_template.md`, and links this step plan. Open it if it does not; hard rule 11 of `CLAUDE.md` gives a pushed phase branch no other option. It is pull request #6, opened when this plan was pushed.
 
-- [ ] Set this plan's `Status:` to `done` and confirm every checkbox above is ticked.
+- [x] Set this plan's `Status:` to `done` and confirm every checkbox above is ticked.
 
-- [ ] Commit: `docs(docs): record phase 2 step 01 as done`
+- [x] Commit: `docs(docs): record phase 2 step 01 as done`
 
 ## Verification
 
