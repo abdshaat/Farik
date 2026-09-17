@@ -1,6 +1,6 @@
 # Phase 2, step 05: Team, rules, and the criterion library
 
-Status: ready
+Status: done
 Branch: `claude/phase-0-implementation-izm38y` (the harness-assigned phase branch, left as assigned per `docs/standards/code.md`; a session may not push to another branch without permission, so phase 2 reuses it as phase 1 did; steps do not get their own)
 Spec: `docs/SPEC.md` section 3 (team, agent, role), 5.6 (permission tiers and protected paths), 5.12 (team rules), 5.13 (the criterion library), 5.14 (the integration policy), 5.16 (who accepts a contract); F1, F15, F16; decision D18 in `docs/plans/project-plan.md`
 Depends on: phase 0 (merged in #4), phase 1 (merged in #5), steps 01 to 04 of this phase (last commit `fc70cd6`)
@@ -2870,23 +2870,23 @@ Produces: a project plan that describes the two validators as they are
 
 This task changes documentation and has no test cycle. The `> ` marker on each block below is this plan's and is not part of the text to write.
 
-- [ ] In `docs/plans/project-plan.md`, replace the phase 2 line beginning `- Step 05: \`generated::team::*\`` — everything up to and including the sentence that ends `only where the step boundary falls.` — with:
+- [x] In `docs/plans/project-plan.md`, replace the phase 2 line beginning `- Step 05: \`generated::team::*\`` — everything up to and including the sentence that ends `only where the step boundary falls.` — with:
 
   > - Step 05 (`farik-core::team` and `farik-core::criteria`): `generated::team::*`; `Team`, `Agent`, `TeamPolicy`, `TeamBudgets` (aliases of the generated `FarikTeam`, `Agent`, `Policy`, `Budgets`); `fn validate_team(input: &Value) -> Result<Team, Vec<ValidationError>>`; `impl Team { fn rules(&self) -> TeamRules; fn active_agents(&self) -> impl Iterator<Item = &Agent>; fn has_active(&self, role: Role) -> bool }`; `impl Agent { fn tiers(&self) -> Vec<PermissionTier> }` — the role's defaults, widened by the agent's `grants` and narrowed by its `revokes`, with taking away winning over granting (added 2026-09-17 by the step 05 plan: 5.6 says a role's tiers are overridable per agent, and `grants` alone could only widen, so there was no way to say that this Developer does not run commands); `impl From<team::Role> for contract::Role` and `impl From<team::PermissionTier> for governor::PermissionTier`, the crate's one mapping layer at its edge. **Three rules are `validate_team`'s rather than the schema's** (2026-09-17, by the step 05 plan): D18 asked the schema to enforce an active Product Manager and an active Software Developer, and every way of writing that `contains` in `typify` 0.8.0 fails: one on the array is `unhandled array validation` and generates nothing, two as branches of an `allOf` generate an uninhabited `pub enum FarikTeamAgents {}` that makes the team unbuildable, and the same two at the root panic the generator. `dependentSchemas` does work, and was refused because its refusal dumps the whole agents array without naming a role, and `validate_team` returns on schema errors before its own rules run, so it would replace the readable message rather than back it up. So the schema says two to seven agents and the validator says unique ids, an active Product Manager and an active Software Developer, reporting every one that fails rather than the first. `Team::rules` keeps the protected paths `farik-core` ships whatever the team writes and adds the team's to them, because 5.12 says a rule only narrows. `generated::criteria::*`; `CriterionTemplate`, `CriteriaLibrary`; `fn validate_criteria` (a name names one criterion, which the schema cannot say either); `enum CriteriaError { UnknownCriterion { name }, Refused { name, detail } }` (the second added 2026-09-17 by the step 05 plan: the id in a reference is the caller's text and a contract's ids are `C1`, `C2`, so expanding `("C0", …)` has to answer something); `fn expand_criteria(refs: &[(String, String)], library: &CriteriaLibrary) -> Result<Vec<ExitCriterion>, CriteriaError>`, where each reference is the id the criterion will carry and the name it has in the library, in that order, and an expanded criterion arrives with an empty `satisfies` because the library has not heard of a contract's requirements. `criteria.schema.json` carries a copy of the contract schema's `verification` and a test holds the two copies identical, because a `$ref` across files would need an external-reference resolver in both `typify` and `jsonschema`. **Split from the old step 05 on 2026-09-17**, which held the file adapters as well: they are `farik-store`'s, because `farik-core` does no I/O (hard rule 5), and one plan for both halves would have been twice the size of any step so far. Nothing about what is built changed, only where the step boundary falls.
 
-- [ ] In `docs/plans/project-plan.md`, on the D18 line, after `The schema enforces two to seven agents with at least one active Product Manager and one active Software Developer.`, add:
+- [x] In `docs/plans/project-plan.md`, on the D18 line, after `The schema enforces two to seven agents with at least one active Product Manager and one active Software Developer.`, add:
 
   > (Corrected 2026-09-17 by the step 05 plan: the schema enforces the count, and `validate_team` enforces the two roles and the unique ids, because no arrangement of `contains` in `typify` 0.8.0 both generates usable types and refuses in words a person can read.)
 
-- [ ] In `docs/plans/project-plan.md`, on the D18 line, after the sentence just added, add:
+- [x] In `docs/plans/project-plan.md`, on the D18 line, after the sentence just added, add:
 
   > An agent also has `revokes`, added 2026-09-17 by the step 05 plan, because spec 5.6 makes a role's tiers overridable per agent and `grants` alone could only widen them.
 
-- [ ] Nothing in `docs/SPEC.md` changes. 5.6 already says a role's tiers are overridable per agent, which `revokes` is what makes true; 5.2 already says a work-in-progress limit of zero pauses an agent, which the schema now lets a person write. This step adds no rule and no event kind.
+- [x] Nothing in `docs/SPEC.md` changes. 5.6 already says a role's tiers are overridable per agent, which `revokes` is what makes true; 5.2 already says a work-in-progress limit of zero pauses an agent, which the schema now lets a person write. This step adds no rule and no event kind.
 
-- [ ] Set this plan's `Status:` to `done` and confirm every checkbox above is ticked, each in the commit of the task it belongs to.
+- [x] Set this plan's `Status:` to `done` and confirm every checkbox above is ticked, each in the commit of the task it belongs to.
 
-- [ ] Commit: `docs(docs): record what step 05 changed about the team`
+- [x] Commit: `docs(docs): record what step 05 changed about the team`
 
 ## Verification
 
