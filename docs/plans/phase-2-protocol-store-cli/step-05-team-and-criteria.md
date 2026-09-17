@@ -17,17 +17,26 @@ It adds no I/O. `farik-core` performs none, ever (hard rule 5), so reading and w
 
 ## Decisions
 
-- **Three of the team's rules are `validate_team`'s rather than the schema's.** D18 says "the schema enforces two to seven agents with at least one active Product Manager and one active Software Developer". The count it does. The other two it cannot: they want `contains` on the agents array, and `typify` answers an array with a `contains` by generating an empty enum — `pub enum FarikTeamAgents {}` — which makes the whole team unbuildable. Moving the `contains` to a root-level `allOf` makes the generator panic outright. So the schema says two to seven, and `validate_team` says the rest: ids are unique, an active Product Manager is there, an active Software Developer is there. This is the same shape as step 01's decision that the schema does not pair `kind` with `body` and the reader does. Task 6 records it.
+- **Three of the team's rules are `validate_team`'s rather than the schema's.** D18 says "the schema enforces two to seven agents with at least one active Product Manager and one active Software Developer". The count it does. The other two want `contains` on the agents array, and every way of writing that fails differently, all four measured on `typify` 0.8.0 with this schema:
+  - one `contains` on the array: `cargo xtask generate` exits 1 with `invalid schema for FarikTeam_agents: unhandled array validation`, and nothing is generated;
+  - two, as two branches of an `allOf` on the array, which is the natural way to say "one of each": generation *succeeds* and writes `pub enum FarikTeamAgents {}`, an uninhabited type, so `FarikTeam` cannot be built at all and nothing announces it;
+  - the same two moved to a root-level `allOf`: the generator panics — `typify-impl-0.8.0/src/type_entry.rs:290: called Option::unwrap() on a None value`;
+  - `dependentSchemas` at the root: generation succeeds, `typify` ignores the keyword, the types are unchanged, and the copied schema keeps it, so `jsonschema` does enforce the rule.
+  That last one works, and is still the wrong call. Its refusal is `None of [{"display_name":"ada",…},{…}] are valid under the given schema` — the whole agents array dumped, with the words "Product Manager" nowhere in it — and because `validate_team` returns on schema errors before it reaches its own rules, putting the rule in the schema would *replace* the readable refusal rather than back it up. So the schema says two to seven, and `validate_team` says the rest: ids are unique, an active Product Manager is there, an active Software Developer is there. This is the same shape as step 01's decision that the schema does not pair `kind` with `body` and the reader does. Task 6 records it.
 - **Every rule the schema cannot say is reported, not just the first.** A team file with a repeated id and no developer is two problems, and a person fixing one at a time is a person running the command twice.
 - **The criterion library carries a copy of the contract schema's `verification`, and a test holds the two copies to being identical.** A criterion in the library is an exit criterion without an id, so the two schemas have to agree about what a verification is. A `$ref` across files would need both `typify` and `jsonschema` to resolve an external reference, which is a dependency on a resolver that nothing else here needs; the copy needs only a test, and that test reads both embedded schemas and compares the sub-tree. If they ever drift, the mapping between the two generated types starts lying, and the test fails before it can.
 - **A reference to a criterion is the id it will carry and the name it has, in that order.** `("C1", "cargo-check")` reads as the criterion it produces. The library does not know a contract's requirements, so an expanded criterion arrives with an empty `satisfies`: which requirements it provides evidence for is a fact about one contract.
 - **`CriteriaError` gains a second variant, `Refused { name, detail }`**, beyond the `UnknownCriterion` the project plan records. The id in a reference is the caller's text, and a contract's ids are `C1`, `C2`, and so on; expanding `("C0", ...)` has to answer something, and a panic is not an answer. It also stands ready for the day the two schemas disagree. Task 6 records it.
 - **The protected paths `farik-core` ships are kept whatever the team writes, and the team's are added to them.** 5.12 says rules only narrow what a tier allows; a team that could delete `.env` from the list would be widening one. A path the team repeats is still one path.
 - **There is no way to write "no cap" for `max_task_budget_usd`.** A missing field and an explicit `null` are one value to serde, so a schema that offered both would be promising something the types cannot keep. Left out, it is the five dollars `farik-core` ships; a team that wants more writes a larger number.
+- **A role's tiers are the user's to widen *and* to narrow.** `docs/SPEC.md` 5.6 says a role's capability tiers are "overridable per agent by the user", and an override that could only widen would leave no way to say that this Developer does not run commands. So an agent has `revokes` beside `grants`, and `Agent::tiers()` answers what it actually holds: the role's defaults, plus what was granted, minus what was taken away. Taking away wins over granting, because a tier in both lists is a person's mistake and the narrower reading of a mistake is the safer one. Task 6 records the field and the method; the spec already says this, so it does not change.
+- **A work-in-progress limit of zero is a number a person may write.** 5.2 says a limit of zero refuses every assignment, which is how a team pauses an agent without retiring it, and `farik-core`'s assignment gate already answers "takes no work: its limit is zero". A schema with `minimum: 1` would have made that answer unreachable, which is what the first draft of this plan had.
 - **The team's roles are the contract's minus `human`, and its permission tiers are a second spelling of the governor's.** A contract may name the human as a reviewer; no agent is a human. Two `From` implementations are this crate's one mapping layer, at its edge, as `docs/standards/code.md` asks.
 - **Budgets hold `daily_usd` and the session limits, and no sprint budget.** D18 puts the sprint's budget on the sprint, which is phase 3's; a team file that carried one would be two sources of truth for the same number.
 - **The fixtures are `pub mod fixtures`, not `#[cfg(test)]`.** `docs/standards/code.md` says a crate's fixtures are public so that another crate's tests can use them, and step 06 writes a team file in a test on its way to reading one back.
 - **Four helpers in `contract.rs` become `pub(crate)`**: `pointer`, `with_integers_normalised`, `repeated_ids` and `named`. Three validators in one crate that disagreed about how to report a JSON pointer, or about whether `1.0` is an integer, would be three ways for the same file to be refused differently.
+- **`rules` is required although every property inside it is optional**, so a hand-written file carries one `rules: {}`. Kept required: `farik init` writes the file in step 06, and an empty `rules:` key is a line that shows a reader where rules go. The alternative — optional, defaulting inside `Team::rules` — hides the whole feature from anyone reading an example.
+- **`status` is required on every agent, with no default.** Making it optional would make the generated field an `Option<AgentStatus>` and put a `None` case into `active_agents`, `has_active` and everything after them, to save one word per agent in a file a command writes.
 - The generated `ModelEffort` is this step's; `farik-runtime`'s own `Effort` arrives in phase 3 step 01 and maps to it there. Nothing here depends on that crate.
 
 ## Design
@@ -75,6 +84,8 @@ docs/plans/phase-2-protocol-store-cli/step-05-team-and-criteria.md modifies: thi
 `Cargo.toml` and `Cargo.lock` do not change: this step adds no dependency.
 
 ## Tasks
+
+Blocks are separated by exactly one blank line. `rustfmt.toml` allows no more, and `cargo xtask check` runs the format check before it runs a test, so two blank lines at a seam fail a task before anything is tried.
 
 ### Task 1: The team file, read from the wire
 
@@ -143,7 +154,8 @@ Produces: `farik_core::team::{Team, validate_team}` and the generated team types
                   "avatar": "ada.png",
                   "status": "active",
                   "model": { "id": "claude-opus-5", "effort": "high" },
-                  "grants": ["read", "network"],
+                  "grants": ["execute"],
+                  "revokes": ["network"],
                   "preauthorized_external_tools": ["mcp__linear__create_issue"]
               },
               {
@@ -433,15 +445,6 @@ Produces: `farik_core::team::{Team, validate_team}` and the generated team types
           "model": {
             "$ref": "#/$defs/model"
           },
-          "grants": {
-            "type": "array",
-            "maxItems": 7,
-            "uniqueItems": true,
-            "items": {
-              "$ref": "#/$defs/permissionTier"
-            },
-            "description": "Permission tiers this agent holds beyond its role's defaults (spec 5.6). A grant widens; a rule never does."
-          },
           "preauthorized_external_tools": {
             "type": "array",
             "maxItems": 100,
@@ -450,6 +453,24 @@ Produces: `farik_core::team::{Team, validate_team}` and the generated team types
               "minLength": 1
             },
             "description": "External-effect tools this agent may use without asking the human each time (spec 5.6)."
+          },
+          "grants": {
+            "type": "array",
+            "maxItems": 7,
+            "uniqueItems": true,
+            "items": {
+              "$ref": "#/$defs/permissionTier"
+            },
+            "description": "Permission tiers this agent holds on top of its role's defaults (spec 5.6)."
+          },
+          "revokes": {
+            "type": "array",
+            "maxItems": 7,
+            "uniqueItems": true,
+            "items": {
+              "$ref": "#/$defs/permissionTier"
+            },
+            "description": "Permission tiers this agent does not hold, whatever its role's defaults say (spec 5.6: a role's tiers are the user's to override, which means taking one away as well as adding one). Taking away wins over granting."
           }
         }
       },
@@ -550,9 +571,9 @@ Produces: `farik_core::team::{Team, validate_team}` and the generated team types
           },
           "wip_limit_per_agent": {
             "type": "integer",
-            "minimum": 1,
+            "minimum": 0,
             "maximum": 100,
-            "description": "How many tasks one agent may hold that are neither accepted nor cancelled (spec 5.2)."
+            "description": "How many tasks one agent may hold that are neither accepted nor cancelled (spec 5.2). Zero refuses every assignment, which is how a team pauses an agent without retiring it."
           },
           "blocked_limit_hours": {
             "type": "integer",
@@ -773,9 +794,9 @@ Produces: `farik_core::team::{Team, validate_team}` and the generated team types
 Files: modified `crates/core/src/team.rs`, `docs/plans/phase-2-protocol-store-cli/step-05-team-and-criteria.md`
 
 Consumes: `Team`, `validate_team` from Task 1
-Produces: `Team::{active_agents, has_active}`, `From<RoleWire> for Role`, `From<PermissionTierWire> for PermissionTier`, and the three rules the schema cannot say
+Produces: `Team::{active_agents, has_active}`, `Agent::tiers`, `From<RoleWire> for Role`, `From<PermissionTierWire> for PermissionTier`, and the three rules the schema cannot say
 
-The two arrive together because the rules are written in terms of who is active: a team needs an active Product Manager, and "active" is a question about the agents' status that nothing could ask yet.
+They arrive together because the rules are written in terms of who is active: a team needs an active Product Manager, and "active" is a question about the agents' status that nothing could ask yet. `Agent::tiers` comes with them because it is the other half of the same mapping — the permission tiers a team file spells one way and the governor another.
 
 - [ ] Write the failing tests. Replace the whole tests module of `crates/core/src/team.rs` with:
 
@@ -945,6 +966,28 @@ The two arrive together because the rules are written in terms of who is active:
       }
 
       #[test]
+      fn reports_a_repeated_id_and_a_missing_role_together() {
+          // Two problems in one file are two refusals: a person fixing one at a time is a person
+          // running the command twice.
+          let mut wire = a_team_wire();
+          wire["agents"] = json!([
+              an_agent_wire("ada", "product_manager"),
+              an_agent_wire("ada", "architect"),
+          ]);
+          let messages: Vec<String> = refusals(&wire)
+              .into_iter()
+              .map(|(_, message)| message)
+              .collect();
+          assert_eq!(messages.len(), 2, "{messages:?}");
+          assert!(messages[0].contains("the id ada names"), "{}", messages[0]);
+          assert!(
+              messages[1].contains("software_developer"),
+              "{}",
+              messages[1]
+          );
+      }
+
+      #[test]
       fn a_paused_product_manager_is_not_an_active_one() {
           // A paused agent keeps the work it holds and is given nothing new, so a team whose only
           // Product Manager is paused cannot start anything.
@@ -982,6 +1025,84 @@ The two arrive together because the rules are written in terms of who is active:
           assert!(!team.has_active(Role::ScrumMaster), "retired");
           assert!(!team.has_active(Role::Human), "the human is not an agent");
           assert_eq!(team.agents[2].status, AgentStatus::Paused);
+      }
+
+      #[test]
+      fn a_work_in_progress_limit_of_zero_is_how_an_agent_is_paused() {
+          // 5.2: a limit of zero refuses every assignment, which is how a team pauses an agent
+          // without retiring it, and the governor already answers "takes no work: its limit is zero".
+          // A schema that would not let a person write the number would make that answer unreachable.
+          let mut wire = a_team_wire();
+          wire["policy"]["wip_limit_per_agent"] = json!(0);
+          assert_eq!(team(&wire).policy.wip_limit_per_agent, 0);
+      }
+
+      #[test]
+      fn refuses_a_number_outside_what_a_rule_allows() {
+          // Every bound here carries a spec number: 5.2's work-in-progress limit, 5.7's blocked age
+          // and iteration count, 5.5's daily budget, 5.12's task cap and its list of methods. A bound
+          // nothing tests is a bound the next person deletes to make something else compile.
+          for (pointer, value) in [
+              ("/policy/wip_limit_per_agent", json!(-1)),
+              ("/policy/wip_limit_per_agent", json!(101)),
+              ("/policy/blocked_limit_hours", json!(0)),
+              ("/policy/blocked_limit_hours", json!(721)),
+              ("/policy/max_iterations", json!(0)),
+              ("/policy/max_iterations", json!(101)),
+              ("/budgets/daily_usd", json!(0)),
+              ("/rules/max_task_budget_usd", json!(0)),
+              ("/rules/required_criteria", json!(["vibes"])),
+          ] {
+              let mut wire = a_full_team_wire();
+              *wire
+                  .pointer_mut(pointer)
+                  .expect("the full fixture has every field") = value.clone();
+              let paths = paths(&wire);
+              assert!(
+                  !paths.is_empty() && paths.iter().all(|path| path.starts_with(pointer)),
+                  "{pointer} = {value}: {paths:?}"
+              );
+          }
+      }
+
+      #[test]
+      fn a_role_s_tiers_are_the_user_s_to_widen_and_to_narrow() {
+          // 5.6: a role's tiers are overridable per agent. Ada is a Product Manager, whose defaults
+          // are read and network; she is granted execute and denied network.
+          let team = team(&a_full_team_wire());
+          assert_eq!(
+              team.agents[0].tiers(),
+              [PermissionTier::Read, PermissionTier::Execute]
+          );
+          assert_eq!(
+              team.agents[1].tiers(),
+              [
+                  PermissionTier::Read,
+                  PermissionTier::WriteWorkspace,
+                  PermissionTier::Execute,
+                  PermissionTier::GitLocal,
+              ],
+              "and an agent that overrides nothing holds what its role holds"
+          );
+      }
+
+      #[test]
+      fn taking_a_tier_away_wins_over_granting_it() {
+          // Both lists naming one tier is a person's mistake, and the narrower reading of a mistake
+          // is the safer one.
+          let mut wire = a_team_wire();
+          wire["agents"][1]["grants"] = json!(["git_remote", "read"]);
+          wire["agents"][1]["revokes"] = json!(["git_remote", "execute"]);
+          let team = team(&wire);
+          assert_eq!(
+              team.agents[1].tiers(),
+              [
+                  PermissionTier::Read,
+                  PermissionTier::WriteWorkspace,
+                  PermissionTier::GitLocal,
+              ],
+              "execute taken away, git_remote granted and taken away, read granted twice over"
+          );
       }
 
       #[test]
@@ -1042,9 +1163,11 @@ The two arrive together because the rules are written in terms of who is active:
   #   current scope
   # error[E0599]: no method named `has_active` found for struct `FarikTeam` in the current
   #   scope  (five times, once per call site)
+  # error[E0599]: no method named `tiers` found for struct `Agent` in the current scope
+  #   (three times)
   # error[E0631]: type mismatch in function arguments  (the `.map(Role::from)` that has no
   #   From to call yet)
-  # error: could not compile `farik-core` (lib test) due to 8 previous errors
+  # error: could not compile `farik-core` (lib test) due to 11 previous errors
   ```
 
 - [ ] Write the minimal implementation. In `crates/core/src/team.rs`, add to the imports, after the `crate::contract` line:
@@ -1164,6 +1287,45 @@ The two arrive together because the rules are written in terms of who is active:
   }
   ```
 
+- [ ] And after that, what an agent may do:
+
+  ```rust
+  impl Agent {
+      /// Every permission tier this agent holds: its role's defaults, widened by what it was granted
+      /// and narrowed by what was taken away.
+      ///
+      /// `docs/SPEC.md` section 5.6 says a role's tiers are the user's to override, and an override
+      /// that could only widen would leave no way to say that this Developer does not run commands.
+      /// Taking away wins over granting, because a tier in both lists is a person's mistake and the
+      /// narrower reading of a mistake is the safer one. The order is the role's own first, then what
+      /// a grant added, so that a list read back reads as the role plus the exceptions.
+      #[must_use]
+      pub fn tiers(&self) -> Vec<PermissionTier> {
+          let mut tiers = default_tiers(Role::from(self.role)).to_vec();
+          for granted in self
+              .grants
+              .iter()
+              .flatten()
+              .copied()
+              .map(PermissionTier::from)
+          {
+              if !tiers.contains(&granted) {
+                  tiers.push(granted);
+              }
+          }
+          let revoked: Vec<PermissionTier> = self
+              .revokes
+              .iter()
+              .flatten()
+              .copied()
+              .map(PermissionTier::from)
+              .collect();
+          tiers.retain(|tier| !revoked.contains(tier));
+          tiers
+      }
+  }
+  ```
+
 - [ ] And after that:
 
   ```rust
@@ -1203,7 +1365,7 @@ The two arrive together because the rules are written in terms of who is active:
   ```
   cargo xtask check --integration
   # expected: ends with `xtask check: ok`, with
-  #   test result: ok. 237 passed (farik-core)
+  #   test result: ok. 242 passed (farik-core)
   #   test result: ok. 15 passed (crates/store/tests/git.rs)
   #   test result: ok. 29 passed (xtask)
   ```
@@ -1386,6 +1548,28 @@ Produces: `Team::rules`
       }
 
       #[test]
+      fn reports_a_repeated_id_and_a_missing_role_together() {
+          // Two problems in one file are two refusals: a person fixing one at a time is a person
+          // running the command twice.
+          let mut wire = a_team_wire();
+          wire["agents"] = json!([
+              an_agent_wire("ada", "product_manager"),
+              an_agent_wire("ada", "architect"),
+          ]);
+          let messages: Vec<String> = refusals(&wire)
+              .into_iter()
+              .map(|(_, message)| message)
+              .collect();
+          assert_eq!(messages.len(), 2, "{messages:?}");
+          assert!(messages[0].contains("the id ada names"), "{}", messages[0]);
+          assert!(
+              messages[1].contains("software_developer"),
+              "{}",
+              messages[1]
+          );
+      }
+
+      #[test]
       fn a_paused_product_manager_is_not_an_active_one() {
           // A paused agent keeps the work it holds and is given nothing new, so a team whose only
           // Product Manager is paused cannot start anything.
@@ -1481,6 +1665,84 @@ Produces: `Team::rules`
           assert!(!team.has_active(Role::ScrumMaster), "retired");
           assert!(!team.has_active(Role::Human), "the human is not an agent");
           assert_eq!(team.agents[2].status, AgentStatus::Paused);
+      }
+
+      #[test]
+      fn a_work_in_progress_limit_of_zero_is_how_an_agent_is_paused() {
+          // 5.2: a limit of zero refuses every assignment, which is how a team pauses an agent
+          // without retiring it, and the governor already answers "takes no work: its limit is zero".
+          // A schema that would not let a person write the number would make that answer unreachable.
+          let mut wire = a_team_wire();
+          wire["policy"]["wip_limit_per_agent"] = json!(0);
+          assert_eq!(team(&wire).policy.wip_limit_per_agent, 0);
+      }
+
+      #[test]
+      fn refuses_a_number_outside_what_a_rule_allows() {
+          // Every bound here carries a spec number: 5.2's work-in-progress limit, 5.7's blocked age
+          // and iteration count, 5.5's daily budget, 5.12's task cap and its list of methods. A bound
+          // nothing tests is a bound the next person deletes to make something else compile.
+          for (pointer, value) in [
+              ("/policy/wip_limit_per_agent", json!(-1)),
+              ("/policy/wip_limit_per_agent", json!(101)),
+              ("/policy/blocked_limit_hours", json!(0)),
+              ("/policy/blocked_limit_hours", json!(721)),
+              ("/policy/max_iterations", json!(0)),
+              ("/policy/max_iterations", json!(101)),
+              ("/budgets/daily_usd", json!(0)),
+              ("/rules/max_task_budget_usd", json!(0)),
+              ("/rules/required_criteria", json!(["vibes"])),
+          ] {
+              let mut wire = a_full_team_wire();
+              *wire
+                  .pointer_mut(pointer)
+                  .expect("the full fixture has every field") = value.clone();
+              let paths = paths(&wire);
+              assert!(
+                  !paths.is_empty() && paths.iter().all(|path| path.starts_with(pointer)),
+                  "{pointer} = {value}: {paths:?}"
+              );
+          }
+      }
+
+      #[test]
+      fn a_role_s_tiers_are_the_user_s_to_widen_and_to_narrow() {
+          // 5.6: a role's tiers are overridable per agent. Ada is a Product Manager, whose defaults
+          // are read and network; she is granted execute and denied network.
+          let team = team(&a_full_team_wire());
+          assert_eq!(
+              team.agents[0].tiers(),
+              [PermissionTier::Read, PermissionTier::Execute]
+          );
+          assert_eq!(
+              team.agents[1].tiers(),
+              [
+                  PermissionTier::Read,
+                  PermissionTier::WriteWorkspace,
+                  PermissionTier::Execute,
+                  PermissionTier::GitLocal,
+              ],
+              "and an agent that overrides nothing holds what its role holds"
+          );
+      }
+
+      #[test]
+      fn taking_a_tier_away_wins_over_granting_it() {
+          // Both lists naming one tier is a person's mistake, and the narrower reading of a mistake
+          // is the safer one.
+          let mut wire = a_team_wire();
+          wire["agents"][1]["grants"] = json!(["git_remote", "read"]);
+          wire["agents"][1]["revokes"] = json!(["git_remote", "execute"]);
+          let team = team(&wire);
+          assert_eq!(
+              team.agents[1].tiers(),
+              [
+                  PermissionTier::Read,
+                  PermissionTier::WriteWorkspace,
+                  PermissionTier::GitLocal,
+              ],
+              "execute taken away, git_remote granted and taken away, read granted twice over"
+          );
       }
 
       #[test]
@@ -1605,7 +1867,7 @@ Produces: `Team::rules`
   ```
   cargo xtask check --integration
   # expected: ends with `xtask check: ok`, with
-  #   test result: ok. 240 passed (farik-core)
+  #   test result: ok. 245 passed (farik-core)
   #   test result: ok. 15 passed (crates/store/tests/git.rs)
   #   test result: ok. 29 passed (xtask)
   ```
@@ -1648,7 +1910,11 @@ Produces: `farik_core::criteria::{CriteriaLibrary, CriterionTemplate, validate_c
                   "verification": {
                       "method": "command",
                       "command": "cargo xtask check",
-                      "expect": { "exit_code": 0, "stdout_contains": "xtask check: ok" }
+                      "expect": {
+                          "exit_code": 2,
+                          "stdout_contains": "xtask check: ok",
+                          "stdout_not_contains": "warning"
+                      }
                   }
               },
               {
@@ -1684,6 +1950,14 @@ Produces: `farik_core::criteria::{CriteriaLibrary, CriterionTemplate, validate_c
                   "verification": {
                       "method": "human",
                       "question": "Does this do what you asked for?"
+                  }
+              },
+              {
+                  "name": "tests-pass",
+                  "text": "The tests pass, and this change need not add one.",
+                  "verification": {
+                      "method": "test",
+                      "command": "cargo test --workspace"
                   }
               }
           ]
@@ -1726,7 +2000,7 @@ Produces: `farik_core::criteria::{CriteriaLibrary, CriterionTemplate, validate_c
       #[test]
       fn reads_a_library_with_a_criterion_of_every_method() {
           let library = library(&a_criteria_library_wire());
-          assert_eq!(library.criteria.len(), 5);
+          assert_eq!(library.criteria.len(), 6);
           assert_eq!(library.criteria[0].name.as_str(), "cargo-check");
           assert_eq!(
               library.criteria[0].source,
@@ -2115,7 +2389,7 @@ Produces: `farik_core::criteria::{CriteriaLibrary, CriterionTemplate, validate_c
   ```
   cargo xtask check --integration
   # expected: ends with `xtask check: ok`, with
-  #   test result: ok. 246 passed (farik-core)
+  #   test result: ok. 251 passed (farik-core)
   #   test result: ok. 15 passed (crates/store/tests/git.rs)
   #   test result: ok. 29 passed (xtask)
   ```
@@ -2167,6 +2441,7 @@ Produces: `farik_core::criteria::{CriteriaError, expand_criteria}`
               "decision-recorded",
               "reviewed-for-clarity",
               "human-accepted",
+              "tests-pass",
           ]
           .iter()
           .enumerate()
@@ -2177,7 +2452,7 @@ Produces: `farik_core::criteria::{CriteriaError, expand_criteria}`
       #[test]
       fn reads_a_library_with_a_criterion_of_every_method() {
           let library = library(&a_criteria_library_wire());
-          assert_eq!(library.criteria.len(), 5);
+          assert_eq!(library.criteria.len(), 6);
           assert_eq!(library.criteria[0].name.as_str(), "cargo-check");
           assert_eq!(
               library.criteria[0].source,
@@ -2247,7 +2522,7 @@ Produces: `farik_core::criteria::{CriteriaError, expand_criteria}`
                   .iter()
                   .map(|criterion| criterion.id.to_string())
                   .collect::<Vec<_>>(),
-              ["C1", "C2", "C3", "C4", "C5"],
+              ["C1", "C2", "C3", "C4", "C5", "C6"],
               "in the order they were asked for, with the ids the caller named"
           );
           assert_eq!(
@@ -2263,9 +2538,9 @@ Produces: `farik_core::criteria::{CriteriaError, expand_criteria}`
               [
                   Verification::Command {
                       command: "cargo xtask check".to_string(),
-                      exit_code: 0,
+                      exit_code: 2,
                       stdout_contains: Some("xtask check: ok".to_string()),
-                      stdout_not_contains: None,
+                      stdout_not_contains: Some("warning".to_string()),
                   },
                   Verification::Test {
                       command: "cargo test --workspace".to_string(),
@@ -2281,8 +2556,12 @@ Produces: `farik_core::criteria::{CriteriaError, expand_criteria}`
                   Verification::Human {
                       question: "Does this do what you asked for?".to_string(),
                   },
+                  Verification::Test {
+                      command: "cargo test --workspace".to_string(),
+                      new_tests_required: false,
+                  },
               ],
-              "every method, through the mapping the copied schema needs"
+              "every method, and both sides of every field the mapping carries"
           );
       }
 
@@ -2310,7 +2589,7 @@ Produces: `farik_core::criteria::{CriteriaError, expand_criteria}`
                   .collect(),
           );
           let contract = validate_contract(&wire).expect("the contract holds");
-          assert_eq!(contract.exit_criteria.len(), 5);
+          assert_eq!(contract.exit_criteria.len(), 6);
       }
 
       #[test]
@@ -2378,9 +2657,15 @@ Produces: `farik_core::criteria::{CriteriaError, expand_criteria}`
                   .expect("the embedded contract schema is valid JSON");
           let library: Value =
               serde_json::from_str(SCHEMA_JSON).expect("the embedded criteria schema is valid JSON");
+          let copy = &library["$defs"]["criterionTemplate"]["properties"]["verification"];
+          assert!(
+              copy.is_object(),
+              "the criteria schema still keeps its verification where this test looks; two pointers \
+               that both went stale would compare null to null and hold nothing"
+          );
           assert_eq!(
-              library["$defs"]["criterionTemplate"]["properties"]["verification"],
-              contract["$defs"]["exitCriterion"]["properties"]["verification"],
+              copy,
+              &contract["$defs"]["exitCriterion"]["properties"]["verification"],
           );
       }
   }
@@ -2514,8 +2799,8 @@ Produces: `farik_core::criteria::{CriteriaError, expand_criteria}`
   /// A template's verification as a contract's.
   ///
   /// The two are the same shape because they are the same JSON: `criteria.schema.json` carries a copy
-  /// of the contract schema's `verification`, and a test holds the two copies to being identical byte
-  /// for byte. This is the mapping between the two Rust types that copy produces.
+  /// of the contract schema's `verification`, and a test holds the two copies to being the same
+  /// value. This is the mapping between the two Rust types that copy produces.
   fn verification_of(template: &TemplateVerification) -> ExitCriterionVerification {
       match template {
           TemplateVerification::Variant0 {
@@ -2568,7 +2853,7 @@ Produces: `farik_core::criteria::{CriteriaError, expand_criteria}`
   ```
   cargo xtask check --integration
   # expected: ends with `xtask check: ok`, with
-  #   test result: ok. 253 passed (farik-core)
+  #   test result: ok. 258 passed (farik-core)
   #   test result: ok. 15 passed (crates/store/tests/git.rs)
   #   test result: ok. 29 passed (xtask)
   ```
@@ -2586,11 +2871,17 @@ This task changes documentation and has no test cycle. The `> ` marker on each b
 
 - [ ] In `docs/plans/project-plan.md`, replace the phase 2 line beginning `- Step 05: \`generated::team::*\`` — everything up to and including the sentence that ends `only where the step boundary falls.` — with:
 
-  > - Step 05 (`farik-core::team` and `farik-core::criteria`): `generated::team::*`; `Team`, `Agent`, `TeamPolicy`, `TeamBudgets` (aliases of the generated `FarikTeam`, `Agent`, `Policy`, `Budgets`); `fn validate_team(input: &Value) -> Result<Team, Vec<ValidationError>>`; `impl Team { fn rules(&self) -> TeamRules; fn active_agents(&self) -> impl Iterator<Item = &Agent>; fn has_active(&self, role: Role) -> bool }`; `impl From<team::Role> for contract::Role` and `impl From<team::PermissionTier> for governor::PermissionTier`, the crate's one mapping layer at its edge. **Three rules are `validate_team`'s rather than the schema's** (2026-09-17, by the step 05 plan): D18 asked the schema to enforce an active Product Manager and an active Software Developer, and `typify` answers an array carrying a `contains` with an empty enum, which makes the whole team unbuildable; so the schema says two to seven agents and the validator says unique ids, an active Product Manager and an active Software Developer, reporting every one that fails rather than the first. `Team::rules` keeps the protected paths `farik-core` ships whatever the team writes and adds the team's to them, because 5.12 says a rule only narrows. `generated::criteria::*`; `CriterionTemplate`, `CriteriaLibrary`; `fn validate_criteria` (a name names one criterion, which the schema cannot say either); `enum CriteriaError { UnknownCriterion { name }, Refused { name, detail } }` (the second added 2026-09-17 by the step 05 plan: the id in a reference is the caller's text and a contract's ids are `C1`, `C2`, so expanding `("C0", …)` has to answer something); `fn expand_criteria(refs: &[(String, String)], library: &CriteriaLibrary) -> Result<Vec<ExitCriterion>, CriteriaError>`, where each reference is the id the criterion will carry and the name it has in the library, in that order, and an expanded criterion arrives with an empty `satisfies` because the library has not heard of a contract's requirements. `criteria.schema.json` carries a copy of the contract schema's `verification` and a test holds the two copies identical, because a `$ref` across files would need an external-reference resolver in both `typify` and `jsonschema`. **Split from the old step 05 on 2026-09-17**, which held the file adapters as well: they are `farik-store`'s, because `farik-core` does no I/O (hard rule 5), and one plan for both halves would have been twice the size of any step so far. Nothing about what is built changed, only where the step boundary falls.
+  > - Step 05 (`farik-core::team` and `farik-core::criteria`): `generated::team::*`; `Team`, `Agent`, `TeamPolicy`, `TeamBudgets` (aliases of the generated `FarikTeam`, `Agent`, `Policy`, `Budgets`); `fn validate_team(input: &Value) -> Result<Team, Vec<ValidationError>>`; `impl Team { fn rules(&self) -> TeamRules; fn active_agents(&self) -> impl Iterator<Item = &Agent>; fn has_active(&self, role: Role) -> bool }`; `impl Agent { fn tiers(&self) -> Vec<PermissionTier> }` — the role's defaults, widened by the agent's `grants` and narrowed by its `revokes`, with taking away winning over granting (added 2026-09-17 by the step 05 plan: 5.6 says a role's tiers are overridable per agent, and `grants` alone could only widen, so there was no way to say that this Developer does not run commands); `impl From<team::Role> for contract::Role` and `impl From<team::PermissionTier> for governor::PermissionTier`, the crate's one mapping layer at its edge. **Three rules are `validate_team`'s rather than the schema's** (2026-09-17, by the step 05 plan): D18 asked the schema to enforce an active Product Manager and an active Software Developer, and every way of writing that `contains` in `typify` 0.8.0 fails: one on the array is `unhandled array validation` and generates nothing, two as branches of an `allOf` generate an uninhabited `pub enum FarikTeamAgents {}` that makes the team unbuildable, and the same two at the root panic the generator. `dependentSchemas` does work, and was refused because its refusal dumps the whole agents array without naming a role, and `validate_team` returns on schema errors before its own rules run, so it would replace the readable message rather than back it up. So the schema says two to seven agents and the validator says unique ids, an active Product Manager and an active Software Developer, reporting every one that fails rather than the first. `Team::rules` keeps the protected paths `farik-core` ships whatever the team writes and adds the team's to them, because 5.12 says a rule only narrows. `generated::criteria::*`; `CriterionTemplate`, `CriteriaLibrary`; `fn validate_criteria` (a name names one criterion, which the schema cannot say either); `enum CriteriaError { UnknownCriterion { name }, Refused { name, detail } }` (the second added 2026-09-17 by the step 05 plan: the id in a reference is the caller's text and a contract's ids are `C1`, `C2`, so expanding `("C0", …)` has to answer something); `fn expand_criteria(refs: &[(String, String)], library: &CriteriaLibrary) -> Result<Vec<ExitCriterion>, CriteriaError>`, where each reference is the id the criterion will carry and the name it has in the library, in that order, and an expanded criterion arrives with an empty `satisfies` because the library has not heard of a contract's requirements. `criteria.schema.json` carries a copy of the contract schema's `verification` and a test holds the two copies identical, because a `$ref` across files would need an external-reference resolver in both `typify` and `jsonschema`. **Split from the old step 05 on 2026-09-17**, which held the file adapters as well: they are `farik-store`'s, because `farik-core` does no I/O (hard rule 5), and one plan for both halves would have been twice the size of any step so far. Nothing about what is built changed, only where the step boundary falls.
 
 - [ ] In `docs/plans/project-plan.md`, on the D18 line, after `The schema enforces two to seven agents with at least one active Product Manager and one active Software Developer.`, add:
 
-  > (Corrected 2026-09-17 by the step 05 plan: the schema enforces the count, and `validate_team` enforces the two roles and the unique ids, because `typify` cannot generate a usable type from an array that carries a `contains`.)
+  > (Corrected 2026-09-17 by the step 05 plan: the schema enforces the count, and `validate_team` enforces the two roles and the unique ids, because no arrangement of `contains` in `typify` 0.8.0 both generates usable types and refuses in words a person can read.)
+
+- [ ] In `docs/plans/project-plan.md`, on the D18 line, after the sentence just added, add:
+
+  > An agent also has `revokes`, added 2026-09-17 by the step 05 plan, because spec 5.6 makes a role's tiers overridable per agent and `grants` alone could only widen them.
+
+- [ ] Nothing in `docs/SPEC.md` changes. 5.6 already says a role's tiers are overridable per agent, which `revokes` is what makes true; 5.2 already says a work-in-progress limit of zero pauses an agent, which the schema now lets a person write. This step adds no rule and no event kind.
 
 - [ ] Set this plan's `Status:` to `done` and confirm every checkbox above is ticked, each in the commit of the task it belongs to.
 
@@ -2603,7 +2894,7 @@ This task changes documentation and has no test cycle. The `> ` marker on each b
   ```
   cargo xtask check --integration
   # expected: ends with `xtask check: ok`, with
-  #   test result: ok. 253 passed (farik-core, its eight modules)
+  #   test result: ok. 258 passed (farik-core: budget, contract, criteria, governor, pricing, team)
   #   test result: ok. 37 passed (farik-protocol)
   #   test result: ok. 44 passed (farik-store)
   #   test result: ok. 8 passed (crates/store/tests/event_log_file.rs)
