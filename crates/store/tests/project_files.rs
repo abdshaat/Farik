@@ -6,8 +6,8 @@
 use farik_core::contract::{TaskId, validate_contract};
 use farik_core::criteria::{fixtures::a_criteria_library_wire, validate_criteria};
 use farik_core::team::AgentId;
-use farik_store::files::FilesError;
 use farik_store::files::fixtures::{TempProject, a_team};
+use farik_store::files::{FilesError, LocalSettings, Sandbox};
 
 /// Holds a refusal to `docs/standards/code.md`: it is read by the person who edited the file, so it
 /// names the file, quotes the line, and says nothing about the API that would have accepted it.
@@ -530,4 +530,61 @@ fn reading_a_product_document_makes_nothing() {
         Err(FilesError::Invalid { .. })
     ));
     assert!(!project.root.join(".farik").exists(), "nor is a refusal");
+}
+
+#[test]
+fn reads_no_prices_when_a_project_does_not_override_them() {
+    let project = TempProject::new("prices");
+    let files = project.files();
+    files.init(&a_team()).expect("a project is made");
+    assert_eq!(
+        files.read_prices().expect("no override is not a refusal"),
+        None
+    );
+
+    let shipped = farik_core::pricing::prices::PRICES_JSON;
+    std::fs::write(project.root.join(".farik/prices.json"), shipped).expect("an override");
+    assert!(
+        files
+            .read_prices()
+            .expect("it reads back")
+            .is_some_and(|table| table.version.get() == 1)
+    );
+
+    std::fs::write(
+        project.root.join(".farik/prices.json"),
+        "{\"version\": 1}\n",
+    )
+    .expect("broken");
+    let Err(FilesError::Invalid { path, .. }) = files.read_prices() else {
+        panic!("half a price table is not one");
+    };
+    assert_eq!(path, ".farik/prices.json");
+}
+
+#[test]
+fn a_machine_that_was_never_asked_runs_the_sandbox_the_spec_asks_for() {
+    let project = TempProject::new("settings");
+    let files = project.files();
+    assert_eq!(
+        files.read_settings().expect("the defaults"),
+        LocalSettings {
+            sandbox: Sandbox::Docker,
+        }
+    );
+
+    files
+        .write_settings(&LocalSettings {
+            sandbox: Sandbox::None,
+        })
+        .expect("it is written");
+    assert_eq!(
+        files.read_settings().expect("it reads back").sandbox,
+        Sandbox::None
+    );
+    assert_eq!(
+        std::fs::read_to_string(project.root.join(".farik/local/settings.json")).expect("the file"),
+        "{\n  \"sandbox\": \"none\"\n}\n",
+        "snake_case on the wire, and a file a person can read"
+    );
 }

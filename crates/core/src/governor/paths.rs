@@ -212,7 +212,7 @@ mod tests {
                     ".env",
                     ".env.local",
                     "certs/server.pem",
-                    ".farik/local/settings.yaml"
+                    ".farik/local/settings.json"
                 ]),
                 &protected
             ),
@@ -220,7 +220,7 @@ mod tests {
                 ".env",
                 ".env.local",
                 "certs/server.pem",
-                ".farik/local/settings.yaml"
+                ".farik/local/settings.json"
             ]))
         );
     }

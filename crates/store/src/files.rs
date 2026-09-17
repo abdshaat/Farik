@@ -11,8 +11,9 @@ use std::path::{Path, PathBuf};
 use farik_core::contract::{TaskContract, TaskId, ValidationError, validate_contract};
 use farik_core::criteria::{CriteriaLibrary, validate_criteria};
 use farik_core::governor::paths::normalise;
+use farik_core::pricing::{PriceTable, validate_price_table};
 use farik_core::team::{AgentId, Team, validate_team};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 /// Wire fixtures and a temporary project, for tests in this crate and in others.
@@ -55,6 +56,32 @@ impl fmt::Display for FilesError {
 }
 
 impl std::error::Error for FilesError {}
+
+/// Where the sandbox runs (`docs/SPEC.md` section 8.3). Machine-local, because one person's laptop
+/// has Docker and another's does not, and that is not a fact about the project.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Sandbox {
+    /// One container per task, which is what the spec asks for.
+    Docker,
+    /// No sandbox: every task runs on the machine itself.
+    None,
+}
+
+/// What this machine knows that the repository does not.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+pub struct LocalSettings {
+    /// Where a task's session runs.
+    pub sandbox: Sandbox,
+}
+
+impl Default for LocalSettings {
+    fn default() -> Self {
+        Self {
+            sandbox: Sandbox::Docker,
+        }
+    }
+}
 
 /// The `.farik/` directory of one project, at the root of its git repository.
 pub struct ProjectFiles {
@@ -297,6 +324,54 @@ impl ProjectFiles {
     pub fn write_product_doc(&self, path: &str, text: &str) -> Result<(), FilesError> {
         self.write_text(&self.inside_product(path)?, text)
     }
+
+    /// The price table this project overrides the shipped one with, or nothing when it does not.
+    ///
+    /// # Errors
+    ///
+    /// `Invalid` when the file is there and is not a price table, `Io` when it cannot be read.
+    pub fn read_prices(&self) -> Result<Option<PriceTable>, FilesError> {
+        let text = match self.read_text(PRICES) {
+            Err(FilesError::NotFound { .. }) => return Ok(None),
+            other => other?,
+        };
+        let value: Value = serde_json::from_str(&text).map_err(|error| FilesError::Invalid {
+            path: Self::named(PRICES),
+            detail: error.to_string(),
+        })?;
+        validate_price_table(&value)
+            .map(Some)
+            .map_err(|errors| self.refused(PRICES, &errors))
+    }
+
+    /// What this machine knows, or the defaults when it has not been asked.
+    ///
+    /// # Errors
+    ///
+    /// `Invalid` when the file is there and is not settings, `Io` when it cannot be read.
+    pub fn read_settings(&self) -> Result<LocalSettings, FilesError> {
+        let text = match self.read_text(SETTINGS) {
+            Err(FilesError::NotFound { .. }) => return Ok(LocalSettings::default()),
+            other => other?,
+        };
+        serde_json::from_str(&text).map_err(|error| FilesError::Invalid {
+            path: Self::named(SETTINGS),
+            detail: error.to_string(),
+        })
+    }
+
+    /// Writes what this machine knows.
+    ///
+    /// # Errors
+    ///
+    /// `Io` when the file cannot be written.
+    pub fn write_settings(&self, settings: &LocalSettings) -> Result<(), FilesError> {
+        let text = serde_json::to_string_pretty(settings).map_err(|error| FilesError::Invalid {
+            path: Self::named(SETTINGS),
+            detail: error.to_string(),
+        })?;
+        self.write_text(SETTINGS, &format!("{text}\n"))
+    }
 }
 
 /// Where each file lives, relative to `.farik/`. One place, so that a reader of this module can see
@@ -304,6 +379,8 @@ impl ProjectFiles {
 const TEAM: &str = "team.yaml";
 const CRITERIA: &str = "team/criteria.yaml";
 const PROJECT_SCAN: &str = "project.md";
+const PRICES: &str = "prices.json";
+const SETTINGS: &str = "local/settings.json";
 
 /// How a file a person edits by hand is read.
 ///

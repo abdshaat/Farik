@@ -2385,7 +2385,7 @@ Files: modified `crates/store/src/files.rs`, `crates/store/tests/project_files.r
 Consumes: everything above
 Produces: `farik_store::files::{LocalSettings, Sandbox}` and `ProjectFiles::{read_prices, read_settings, write_settings}`
 
-- [ ] Write the failing tests. Replace `crates/store/tests/project_files.rs`, whole, with:
+- [x] Write the failing tests. Replace `crates/store/tests/project_files.rs`, whole, with:
 
   ```rust
   //! The files under `.farik/`, against a real directory.
@@ -2980,7 +2980,7 @@ Produces: `farik_store::files::{LocalSettings, Sandbox}` and `ProjectFiles::{rea
   }
   ```
 
-- [ ] Run them and confirm they fail because this machine has nothing to say yet:
+- [x] Run them and confirm they fail because this machine has nothing to say yet:
 
   ```
   cargo test -p farik-store --test project_files
@@ -2997,7 +2997,7 @@ Produces: `farik_store::files::{LocalSettings, Sandbox}` and `ProjectFiles::{rea
   # error: could not compile `farik-store` (test "project_files") due to 7 previous errors
   ```
 
-- [ ] Write the minimal implementation. In `crates/store/src/files.rs`, replace everything from the top of the file down to and including `pub mod fixtures;`, so that it reads, whole:
+- [x] Write the minimal implementation. In `crates/store/src/files.rs`, replace everything from the top of the file down to and including `pub mod fixtures;`, so that it reads, whole:
 
   ```rust
   //! The files under `.farik/` (`docs/SPEC.md` sections 3, 5.8, 5.12, 5.13 and 8.4).
@@ -3022,7 +3022,7 @@ Produces: `farik_store::files::{LocalSettings, Sandbox}` and `ProjectFiles::{rea
   pub mod fixtures;
   ```
 
-- [ ] Insert, between the error and `pub struct ProjectFiles`:
+- [x] Insert, between the error and `pub struct ProjectFiles`:
 
   ```rust
   /// Where the sandbox runs (`docs/SPEC.md` section 8.3). Machine-local, because one person's laptop
@@ -3052,7 +3052,7 @@ Produces: `farik_store::files::{LocalSettings, Sandbox}` and `ProjectFiles::{rea
   }
   ```
 
-- [ ] Insert into the first `impl ProjectFiles` block, after `write_product_doc`:
+- [x] Insert into the first `impl ProjectFiles` block, after `write_product_doc`:
 
   ```rust
       /// The price table this project overrides the shipped one with, or nothing when it does not.
@@ -3104,7 +3104,7 @@ Produces: `farik_store::files::{LocalSettings, Sandbox}` and `ProjectFiles::{rea
       }
   ```
 
-- [ ] And complete the layout, which becomes:
+- [x] And complete the layout, which becomes:
 
   ```rust
   /// Where each file lives, relative to `.farik/`. One place, so that a reader of this module can see
@@ -3116,9 +3116,9 @@ Produces: `farik_store::files::{LocalSettings, Sandbox}` and `ProjectFiles::{rea
   const SETTINGS: &str = "local/settings.json";
   ```
 
-- [ ] The settings file now has a name, and one test in `farik-core` used the old one to stand for a path under `.farik/local/`. In `crates/core/src/governor/paths.rs`, both occurrences sit inside a string literal already: change the text `settings.yaml` to `settings.json` in each, leaving the quotes as they are, so that both lines read `".farik/local/settings.json"`.
+- [x] The settings file now has a name, and one test in `farik-core` used the old one to stand for a path under `.farik/local/`. In `crates/core/src/governor/paths.rs`, both occurrences sit inside a string literal already: change the text `settings.yaml` to `settings.json` in each, leaving the quotes as they are, so that both lines read `".farik/local/settings.json"`.
 
-- [ ] Run the check and confirm green:
+- [x] Run the check and confirm green:
 
   ```
   cargo xtask check --integration
@@ -3127,7 +3127,7 @@ Produces: `farik_store::files::{LocalSettings, Sandbox}` and `ProjectFiles::{rea
   #   test result: ok. 25 passed (crates/store/tests/project_files.rs)
   ```
 
-- [ ] Commit: `feat(store): read a price override and the local settings`
+- [x] Commit: `feat(store): read a price override and the local settings`
 
 ### Task 5: The plans say what the step became
 
