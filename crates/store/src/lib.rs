@@ -9,4 +9,4 @@ pub mod event_log;
 pub mod migrations;
 
 pub use error::StoreError;
-pub use event_log::{EventLog, IN_MEMORY, open_event_log};
+pub use event_log::{EventLog, EventQuery, IN_MEMORY, open_event_log};

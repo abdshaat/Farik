@@ -502,7 +502,10 @@ pub fn event_to_value(event: &FarikEvent) -> Value {
     Value::Object(wire)
 }
 
-fn body_to_value(body: &EventBody) -> Value {
+/// One body as the canonical wire value its kind's schema describes. The store holds this rather
+/// than the whole event, because the envelope's fields are the log's own columns.
+#[must_use]
+pub fn body_to_value(body: &EventBody) -> Value {
     let mut wire = Map::new();
     match body {
         EventBody::TaskCreated(body) => {

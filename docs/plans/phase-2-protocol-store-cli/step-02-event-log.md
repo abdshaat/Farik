@@ -635,7 +635,7 @@ Files: modified `crates/protocol/src/event.rs`, `crates/store/src/event_log.rs`,
 Consumes: `open_event_log`, `EventLog`, `IN_MEMORY` from Task 1; `FarikEvent`, `NewEvent`, `EventEnvelope`, `EventKind`, `EVERY_KIND`, `event_from_value`, `fixtures::an_event_wire`, `body_to_value` from `crates/protocol/src/event.rs`; `TaskId` from `crates/core/src/contract.rs`
 Produces: `EventLog::append`, `EventLog::read`, `farik_store::EventQuery`, `farik_protocol::event::body_to_value` as public API
 
-- [ ] Write the failing tests. Replace the tests module's imports in `crates/store/src/event_log.rs` — the four lines from `use chrono::TimeZone;` to `use crate::migrations;`, blank line included — with:
+- [x] Write the failing tests. Replace the tests module's imports in `crates/store/src/event_log.rs` — the four lines from `use chrono::TimeZone;` to `use crate::migrations;`, blank line included — with:
 
   ```rust
       use chrono::TimeZone;
@@ -852,7 +852,7 @@ Produces: `EventLog::append`, `EventLog::read`, `farik_store::EventQuery`, `fari
       }
   ```
 
-- [ ] Grow `crates/store/tests/event_log_file.rs`. Replace its whole import section — the four lines from `use std::path::PathBuf;` to `use farik_store::open_event_log;`, the blank line between them included — with:
+- [x] Grow `crates/store/tests/event_log_file.rs`. Replace its whole import section — the four lines from `use std::path::PathBuf;` to `use farik_store::open_event_log;`, the blank line between them included — with:
 
   ```rust
   use std::path::PathBuf;
@@ -925,7 +925,7 @@ Produces: `EventLog::append`, `EventLog::read`, `farik_store::EventQuery`, `fari
   }
   ```
 
-- [ ] Run them and confirm they fail because appending and reading are missing:
+- [x] Run them and confirm they fail because appending and reading are missing:
 
   ```
   cargo test -p farik-store
@@ -938,7 +938,7 @@ Produces: `EventLog::append`, `EventLog::read`, `farik_store::EventQuery`, `fari
   # error[E0599]: no method named `read` found for struct `EventLog` in the current scope
   ```
 
-- [ ] Make the body writer public. In `crates/protocol/src/event.rs`, replace the line
+- [x] Make the body writer public. In `crates/protocol/src/event.rs`, replace the line
 
   ```rust
   fn body_to_value(body: &EventBody) -> Value {
@@ -953,7 +953,7 @@ Produces: `EventLog::append`, `EventLog::read`, `farik_store::EventQuery`, `fari
   pub fn body_to_value(body: &EventBody) -> Value {
   ```
 
-- [ ] Write the minimal implementation. In `crates/store/src/event_log.rs`, replace the import block — the eight lines from `use std::path::Path;` to `use crate::migrations;` — with:
+- [x] Write the minimal implementation. In `crates/store/src/event_log.rs`, replace the import block — the eight lines from `use std::path::Path;` to `use crate::migrations;` — with:
 
   ```rust
   use std::fmt::Write;
@@ -1220,13 +1220,13 @@ Produces: `EventLog::append`, `EventLog::read`, `farik_store::EventQuery`, `fari
   }
   ```
 
-- [ ] Add `EventQuery` to the re-export in `crates/store/src/lib.rs`, which becomes:
+- [x] Add `EventQuery` to the re-export in `crates/store/src/lib.rs`, which becomes:
 
   ```rust
   pub use event_log::{EventLog, EventQuery, IN_MEMORY, open_event_log};
   ```
 
-- [ ] Run the tests and confirm green:
+- [x] Run the tests and confirm green:
 
   ```
   cargo test -p farik-store
@@ -1236,7 +1236,7 @@ Produces: `EventLog::append`, `EventLog::read`, `farik_store::EventQuery`, `fari
   # expected: test result: ok. 37 passed, unchanged by making a function public
   ```
 
-- [ ] Run the format and lint checks:
+- [x] Run the format and lint checks:
 
   ```
   cargo fmt --all --check
@@ -1244,7 +1244,7 @@ Produces: `EventLog::append`, `EventLog::read`, `farik_store::EventQuery`, `fari
   # expected: both silent
   ```
 
-- [ ] Commit: `feat(store): append events and read the ones a query asks for`
+- [x] Commit: `feat(store): append events and read the ones a query asks for`
 
 ### Task 3: Every append reaches whoever is listening
 
