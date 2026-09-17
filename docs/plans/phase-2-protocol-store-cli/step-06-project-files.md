@@ -1,6 +1,6 @@
 # Phase 2, step 06: Project files
 
-Status: ready
+Status: done
 Branch: `claude/phase-0-implementation-izm38y` (the harness-assigned phase branch, left as assigned per `docs/standards/code.md`; a session may not push to another branch without permission, so phase 2 reuses it as phase 1 did; steps do not get their own)
 Spec: `docs/SPEC.md` section 3 (a project is a git repository plus `.farik/`), 5.6 (protected paths and where a product document may be written), 5.8 (the three memories), 5.12 and 5.13 (the team file and the criterion library), 5.14 (a task's worktree, which lives under `.farik/local/`), 8.4 (the files are the source of truth for what the team knows); F2
 Depends on: phase 0 (merged in #4), phase 1 (merged in #5), steps 01 to 05 of this phase (last code commit `14ea992`), and ADR 0007 for the YAML parser
@@ -3138,17 +3138,17 @@ Produces: a project plan that describes the file adapter as it is
 
 This task changes documentation and has no test cycle. The `> ` marker on the block below is this plan's and is not part of the text to write.
 
-- [ ] In `docs/plans/project-plan.md`, replace the phase 2 line beginning `- Step 06 (\`farik-store::files\`):` — everything up to and including `never sees a file.` — with:
+- [x] In `docs/plans/project-plan.md`, replace the phase 2 line beginning `- Step 06 (\`farik-store::files\`):` — everything up to and including `never sees a file.` — with:
 
   > - Step 06 (`farik-store::files`): `enum FilesError { NotFound { path }, Invalid { path, detail }, Io { path, detail } }`; `struct ProjectFiles { root: PathBuf }` with `open` and `root`; `impl ProjectFiles { fn init(&self, team: &Team) -> Result<(), FilesError>; fn read_team / write_team; fn read_criteria / write_criteria; fn read_contract(&self, id: &TaskId) (through `validate_contract`, and refused when the contract inside names another id) / write_contract / list_contracts (ordered by the number in the id; a file that is not a contract's is passed over); fn read_memory(&self, agent_id: &AgentId) (an agent that never wrote one has an empty notebook, not a missing file) / write_memory; fn read_project_scan / write_project_scan; fn read_product_doc(&self, path: &str) / write_product_doc (under `product/` only, through `farik-core`'s own path rule); fn read_prices(&self) -> Result<Option<PriceTable>, FilesError>; fn read_settings / write_settings }`; `struct LocalSettings { sandbox: Sandbox }` with `enum Sandbox { Docker, None }`, JSON under `.farik/local/` because nobody hand-edits it and it is never committed. Every schema-backed file is held, read and written, to the validator that owns it, so the round trip is a promise: what a writer accepts, the reader returns; `local/settings.json` is the one structured file with no schema, because nobody hand-edits it. A write goes to a file beside the one being written and is renamed over it, because a rename within a directory is the one file operation that is all or nothing. `init` makes the layout, never overwrites what is there, and writes `.farik/local/.gitignore` holding `*`. YAML is read and written by `serde-saphyr` (ADR 0007), which is this crate's one new dependency; `farik-core` gains none, because it does no I/O and never sees a file. Added 2026-09-17 by the step 06 plan: `farik-core` exports `AgentId`, and `governor::paths::normalise` is public, because a product document's path comes from a tool call and two answers to "does this path climb out" would be two definitions of a safe path. A product document's path is then resolved against the file system as well, because a directory under `product/` can be a symlink and a path through one has no `..` in it to catch; the resolution makes nothing, since `.farik/` existing is what makes a directory a project. A byte-order mark is stripped on the way in. YAML is read with `strict_booleans`, so an unquoted `no` stays a word, and a refusal is rendered with the parser's `UserMessageFormatter` and the file's own name, because the default text recommends the API call that would have accepted the file.
 
-- [ ] Set this plan's `Status:` to `done` and confirm every checkbox above is ticked, each in the commit of the task it belongs to.
+- [x] Set this plan's `Status:` to `done` and confirm every checkbox above is ticked, each in the commit of the task it belongs to.
 
-- [ ] Commit: `docs(docs): record what step 06 changed about the files`
+- [x] Commit: `docs(docs): record what step 06 changed about the files`
 
 ## Verification
 
-- [ ] The whole check, from the workspace root:
+- [x] The whole check, from the workspace root:
 
   ```
   cargo xtask check --integration
@@ -3162,14 +3162,14 @@ This task changes documentation and has no test cycle. The `> ` marker on the bl
   #   test result: ok. 29 passed (xtask)
   ```
 
-- [ ] `farik-core` still performs no I/O, which this step leans on rather than changes:
+- [x] `farik-core` still performs no I/O, which this step leans on rather than changes:
 
   ```
   cargo xtask core-io
   # expected: silent
   ```
 
-- [ ] The one new dependency is the one ADR 0007 chose, pinned:
+- [x] The one new dependency is the one ADR 0007 chose, pinned:
 
   ```
   grep saphyr Cargo.toml crates/store/Cargo.toml
@@ -3178,7 +3178,7 @@ This task changes documentation and has no test cycle. The `> ` marker on the bl
   # crates/store/Cargo.toml:serde-saphyr.workspace = true
   ```
 
-- [ ] Every commit subject is accepted:
+- [x] Every commit subject is accepted:
 
   ```
   for subject in \
