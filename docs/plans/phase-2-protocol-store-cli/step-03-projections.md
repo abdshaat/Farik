@@ -7,7 +7,21 @@ Depends on: phase 0 (merged in #4), phase 1 (merged in #5), steps 01 and 02 of t
 
 A plan is `ready` only when a reviewer other than the author has confirmed the three rules in `docs/standards/workflow.md` stage 2 (Plan): every decision made, no ambiguity, no forward dependencies. Record who confirmed and when here.
 
-Readiness confirmed by: <pending>
+Readiness confirmed by: <pending — refused once on 2026-09-17, twelve findings, all taken>
+
+The first reviewer rebuilt the step outside the working tree from this plan's own blocks and reached
+`xtask check: ok` with every count exact, but three of the plan's own commands did not produce the
+output it stated: Task 1's commit subject was 73 characters against a limit of 72, Task 2's
+`contract.rs` block was not what rustfmt packs, and Task 2 imported `TaskId` a task before any test
+names it, so its own `clippy -- -D warnings` step failed. Those are fixed, along with nine smaller
+findings.
+
+The twelfth was the one that mattered. Following the plan's instruction to watch Task 4's reopen test
+fail by mutation showed that it did not fail: opening catches up from the log, so the board is
+correct wherever it lives, and the test's assertions — made through `Projections` — could not tell a
+persisted board from one rebuilt on the spot. The test now asks another connection to the log's file
+what is in `task_projections` and `projection_cursor`, which is the property it was supposed to hold,
+and the mutation kills it (`left: 0`, `right: 1`).
 
 ## Goal
 
@@ -54,6 +68,7 @@ Out of scope: the cost projection and its scopes (phase 3 step 09); the assignee
 - No `unwrap` or `expect` outside tests. The lock is recovered from poisoning with `PoisonError::into_inner`, as `EventLog` does.
 - Every table is `STRICT`, and a boolean column carries a `CHECK`.
 - Nothing in the projection tables is a source of truth: every row is derivable from the log.
+- The log's connection is behind one lock, and `std::sync::Mutex` is not reentrant: nothing may hold that guard across a call that takes it again. `catch_up` is why this is written down — it reads the cursor, reads the log, and applies each event as three separate acquisitions rather than one.
 - No test is skipped, ignored, or quarantined.
 
 ## File map
@@ -132,7 +147,7 @@ Produces: `farik_store::{Projections, open_projections}`, `Projections::cursor`
   }
   ```
 
-- [ ] Declare the module and re-export it. In `crates/store/src/lib.rs`, replace the four lines from `/// The database's shape` to the `pub use event_log::` line with:
+- [ ] Declare the module and re-export it. In `crates/store/src/lib.rs`, replace the five lines from `/// The database's shape` to the `pub use event_log::` line, the blank line between them included, with:
 
   ```rust
   /// The database's shape, as SQL applied in order.
@@ -333,7 +348,7 @@ Produces: `farik_store::{Projections, open_projections}`, `Projections::cursor`
   # expected: both silent
   ```
 
-- [ ] Commit: `feat(store): open the projections of a log and say how far they have read`
+- [ ] Commit: `feat(store): open a log's projections and say how far they have read`
 
 ### Task 2: A filed request reaches the board
 
@@ -355,7 +370,7 @@ Produces: `farik_store::TaskProjection`, `Projections::{apply, board, task}`, `f
       use super::{Arc, EventLog, FarikEvent, Projections, TaskProjection, open_projections};
       use crate::error::StoreError;
       use crate::event_log::{IN_MEMORY, open_event_log};
-      use farik_core::contract::{Risk, TaskId, TaskKind, TaskStatus};
+      use farik_core::contract::{Risk, TaskKind, TaskStatus};
 
       fn at(hour: u32) -> DateTime<Utc> {
           Utc.with_ymd_and_hms(2026, 9, 17, hour, 0, 0)
@@ -550,17 +565,21 @@ Produces: `farik_store::TaskProjection`, `Projections::{apply, board, task}`, `f
   ```
   cargo test -p farik-store
   # expected: FAIL to compile,
+  # these three codes and no others, nine errors in all, each E0599 once per call site:
   # error[E0432]: unresolved imports `super::FarikEvent`, `super::TaskProjection`
+  # error[E0432]: unresolved import `farik_core::contract::TaskKind`
   # error[E0599]: no method named `apply` found for reference `&Projections` in the current scope
   # error[E0599]: no method named `board` found for struct `Projections` in the current scope
   # error[E0599]: no method named `task` found for struct `Projections` in the current scope
   ```
 
-- [ ] Give the contract's kind a name. In `crates/core/src/contract.rs`, replace
+- [ ] Give the contract's kind a name. In `crates/core/src/contract.rs`, replace the four lines of the `pub use` list from `FarikTaskContract as TaskContract` to `Role,`
 
   ```rust
       FarikTaskContract as TaskContract, FarikTaskContractBudget as Budget,
       FarikTaskContractId as TaskId, FarikTaskContractNotes as Notes,
+      FarikTaskContractRequirementsItem as Requirement, FarikTaskContractRisk as Risk,
+      FarikTaskContractStatus as TaskStatus, Role,
   ```
 
   with:
@@ -568,7 +587,8 @@ Produces: `farik_store::TaskProjection`, `Projections::{apply, board, task}`, `f
   ```rust
       FarikTaskContract as TaskContract, FarikTaskContractBudget as Budget,
       FarikTaskContractId as TaskId, FarikTaskContractKind as TaskKind,
-      FarikTaskContractNotes as Notes,
+      FarikTaskContractNotes as Notes, FarikTaskContractRequirementsItem as Requirement,
+      FarikTaskContractRisk as Risk, FarikTaskContractStatus as TaskStatus, Role,
   ```
 
 - [ ] Let the board read the task id prefix. In `crates/store/src/event_log.rs`, replace
@@ -1003,8 +1023,14 @@ Produces: the `request.triaged`, `contract.locked` and `contract.unlocked` arms 
   # ---- projections::tests::takes_the_kind_and_the_flag_from_the_triage stdout ----
   # assertion failed: task.triaged
   # ---- projections::tests::says_who_holds_a_contract_the_human_locked_and_gave_back stdout ----
-  # assertion failed: held(&projections)
+  # locked
   # test result: FAILED. 25 passed; 2 failed
+  ```
+
+- [ ] Add `TaskId` to the tests module's `farik_core::contract` import, which the test above is the first to name, so that it becomes:
+
+  ```rust
+  use farik_core::contract::{Risk, TaskId, TaskKind, TaskStatus};
   ```
 
 - [ ] Write the minimal implementation. In `crates/store/src/projections.rs`, add `RequestTriagedBodySize` to the `farik_protocol::event` import, which becomes:
@@ -1154,8 +1180,9 @@ Produces: the catch-up in `open_projections`, and an `apply` that takes one even
   ```rust
   #[test]
   fn keeps_the_board_and_its_place_in_the_log_across_a_reopen() {
-      // The projections are derived, but they are derived once: a command that opens the log should
-      // not replay ten thousand events to show a board, which is what `docs/SPEC.md` section 10 asks.
+      // The projections are derived, but they are derived once: `docs/SPEC.md` section 10 asks that a
+      // command opening a project not replay ten thousand events to show a board. That is only true if
+      // the board is in the log's own file, which is what another connection to that file can say.
       let directory = TempDir::new("board-across-a-reopen");
       {
           let log =
@@ -1167,15 +1194,30 @@ Produces: the catch-up in `open_projections`, and an `apply` that takes one even
               projections.apply(&appended).expect("projects");
           }
       }
+      let outside = rusqlite::Connection::open(directory.db()).expect("another connection");
+      let projected: i64 = outside
+          .query_row("SELECT count(*) FROM task_projections", [], |row| {
+              row.get(0)
+          })
+          .expect("the board reads");
+      assert_eq!(projected, 1, "the board is in the log's own file");
+      let cursor: i64 = outside
+          .query_row(
+              "SELECT seq FROM projection_cursor WHERE id = 1",
+              [],
+              |row| row.get(0),
+          )
+          .expect("the cursor reads");
+      assert_eq!(cursor, 2, "and so is how far it had read");
+      drop(outside);
+
+      // So a command that opens the project again has nothing to catch up on, and reads the board the
+      // events left rather than one it built itself.
       let log =
           std::sync::Arc::new(open_event_log(&directory.db(), at(10)).expect("the log reopens"));
       let projections =
           farik_store::open_projections(std::sync::Arc::clone(&log)).expect("projections reopen");
-      assert_eq!(
-          projections.cursor().expect("the cursor reads"),
-          2,
-          "both events were already applied, so there is nothing to catch up on"
-      );
+      assert_eq!(projections.cursor().expect("the cursor reads"), 2);
       let board = projections.board().expect("the board reads");
       assert_eq!(board.len(), 1, "both events are about the one contract");
       assert!(board[0].triaged, "and the triage is still recorded");
@@ -1196,11 +1238,9 @@ Produces: the catch-up in `open_projections`, and an `apply` that takes one even
   # test result: FAILED. 27 passed; 2 failed
   ```
 
-  The reopen test in `crates/store/tests/event_log_file.rs` passes already, and cannot be made to
-  fail by leaving a feature out: it holds a property of where the projections live rather than of
-  what they do. To watch it fail, give `Projections` a database of its own — `Connection::open_in_memory`
-  in place of `self.log.connection()` — and it reports a cursor of 0 and an empty board after the
-  reopen. Put the shared connection back before carrying on.
+  The reopen test in `crates/store/tests/event_log_file.rs` passes on arrival, and no missing
+  feature can make it fail: it holds a property of *where* the projections live rather than of
+  what they do. It is watched to fail after the green instead, by mutation — the step below.
 
 - [ ] Write the minimal implementation. In `crates/store/src/projections.rs`, add `EventQuery` to the `crate::event_log` import, which becomes:
 
@@ -1285,6 +1325,44 @@ Produces: the catch-up in `open_projections`, and an `apply` that takes one even
   cargo clippy --workspace --all-targets -- -D warnings
   # expected: silent
   ```
+
+- [ ] Confirm the reopen test is a pin rather than a passenger. Make these three edits, which give `Projections` a database of its own instead of the log's:
+
+  ```rust
+  // in the struct:
+  pub struct Projections {
+      log: Arc<EventLog>,
+      own: std::sync::Mutex<Connection>,
+  }
+
+  // in open_projections, in place of the line `let projections = Projections { log };`:
+      let mut own = Connection::open_in_memory()?;
+      crate::migrations::apply(&mut own, chrono::Utc::now())?;
+      let projections = Projections {
+          log,
+          own: std::sync::Mutex::new(own),
+      };
+
+  // in connection, in place of the line `self.log.connection()`:
+          self.own
+              .lock()
+              .unwrap_or_else(std::sync::PoisonError::into_inner)
+  ```
+
+  and run it:
+
+  ```
+  cargo test -p farik-store --test event_log_file keeps_the_board
+  # expected: FAIL
+  # assertion `left == right` failed: the board is in the log's own file
+  #   left: 0
+  #  right: 1
+  ```
+
+  The board is rebuilt from the log on open either way, so the cursor and the board the test
+  reads back through `Projections` cannot tell the two apart — only the query through another
+  connection to the file can. Undo all three edits before committing; nothing else depends on
+  them.
 
 - [ ] Commit: `feat(store): catch the projections up and take one event once`
 
@@ -1394,6 +1472,14 @@ Produces: `Projections::rebuild`
   #           test result: ok. 7 passed (event_log_file)
   ```
 
+- [ ] Run the format and lint checks:
+
+  ```
+  cargo fmt --all --check
+  cargo clippy --workspace --all-targets -- -D warnings
+  # expected: both silent
+  ```
+
 - [ ] Commit: `feat(store): build the board again from the log`
 
 ### Task 6: The plans say what the projections became
@@ -1407,15 +1493,23 @@ This task changes documentation and has no test cycle. The `> ` marker on each b
 
 - [ ] In `docs/plans/project-plan.md`, in the phase 2 section, replace the line beginning `- Step 03: \`struct TaskProjection\`` with:
 
-  > - Step 03 (`farik-store::projections`): `struct TaskProjection { task_id: TaskId, kind: TaskKind, parent: Option<TaskId>, title: String, status: TaskStatus, risk: Risk, triaged: bool, locked: bool, updated_seq: u64 }` — the fields an event of this phase carries (changed 2026-09-17 by the step 03 plan: `assignee_id`, `reviewer_id`, `sprint_id` and `iteration` arrive with `task.transitioned` in phase 3 step 03, which is the event that carries them, as `cost_usd` arrives in 3.09 and `waiting_on_human`, `awaiting_approval` and `awaiting_integration` in 3.10; a column nothing can write is a column no test can hold to anything); `fn open_projections(log: Arc<EventLog>) -> Result<Projections, StoreError>` (an `Arc` rather than a reference, changed 2026-09-17 by the step 03 plan, because `rebuild` and the catch-up on open both read the log and phase 3 holds the two side by side, which is also what lets `rebuild(&self)` keep this signature); `impl Projections { fn rebuild(&self) -> Result<(), StoreError>; fn apply(&self, event: &FarikEvent) -> Result<(), StoreError>; fn board(&self) -> Result<Vec<TaskProjection>, StoreError>; fn task(&self, id: &TaskId) -> Result<Option<TaskProjection>, StoreError>; fn cursor(&self) -> Result<u64, StoreError> }` (opening catches up from the cursor; `apply` ignores an event at or before it, and moves the row and the cursor in one transaction; `rebuild` resets and replays). `farik-core` gains the alias `TaskKind` for `FarikTaskContractKind`. The projections live in the log's database and share its connection and lock, because a log at `:memory:` cannot be reached by a second connection. `enum CostScope`, `struct CostProjection` and `Projections::costs` move to phase 3 step 09, where `cost.recorded` arrives: no event of this phase carries a cost and nothing reads one until phase 5 step 04.
+  > - Step 03 (`farik-store::projections`): `struct TaskProjection { task_id: TaskId, kind: TaskKind, parent: Option<TaskId>, title: String, status: TaskStatus, risk: Risk, triaged: bool, locked: bool, updated_seq: u64 }` — the fields an event of this phase carries (changed 2026-09-17 by the step 03 plan: `assignee_id`, `reviewer_id`, `sprint_id` and `iteration` arrive with `task.transitioned` in phase 3 step 03, which is the event that carries them, as `cost_usd` arrives in 3.09 and `waiting_on_human`, `awaiting_approval` and `awaiting_integration` in 3.10; a column nothing can write is a column no test can hold to anything); `fn open_projections(log: Arc<EventLog>) -> Result<Projections, StoreError>` (an `Arc` rather than a reference, changed 2026-09-17 by the step 03 plan, because `rebuild` and the catch-up on open both read the log and phase 3 holds the two side by side, which is also what lets `rebuild(&self)` keep this signature); `impl Projections { fn rebuild(&self) -> Result<(), StoreError>; fn apply(&self, event: &FarikEvent) -> Result<(), StoreError>; fn board(&self) -> Result<Vec<TaskProjection>, StoreError>; fn task(&self, id: &TaskId) -> Result<Option<TaskProjection>, StoreError>; fn cursor(&self) -> Result<u64, StoreError> }` (opening catches up from the cursor; `apply` ignores an event at or before it, and moves the row and the cursor in one transaction; `rebuild` resets and replays). `farik-core` gains the alias `TaskKind` for `FarikTaskContractKind`. The projections live in the log's database and share its connection and lock, because a log at `:memory:` cannot be reached by a second connection. `enum CostScope`, `struct CostProjection` and `Projections::costs` move to phase 3 step 09, where `cost.recorded` arrives: no event of this phase carries a cost, and the first thing that reads one is phase 3 step 09's own `budget_state`, which arrives beside it.
 
-- [ ] In `docs/plans/project-plan.md`, in the phase 3 step 03 line, append to the sentence that lists the fields later steps add:
+- [ ] In `docs/plans/project-plan.md`, append to the end of the phase 3 step 03 interface line — the line that begins `- Step 03:` and goes on to name `enum ToolError` — as a new sentence after its closing full stop:
 
   > `TaskProjection` also gains `assignee_id`, `reviewer_id`, `sprint_id` and `iteration` here, from `task.transitioned` (moved 2026-09-17 from phase 2 step 03, which had no event that carries them).
 
-- [ ] In `docs/plans/project-plan.md`, in the phase 3 step 09 line, append:
+- [ ] In `docs/plans/project-plan.md`, append to the end of the phase 3 step 09 interface line — the line that begins `- Step 09:` and goes on to say that `TaskProjection` gains `cost_usd` — as a new sentence after its closing full stop:
 
-  > and `enum CostScope { Task, Agent, Session, Sprint, Day }`, `struct CostProjection { scope, key, usd, input_tokens, output_tokens }` and `Projections::costs(&self, scope) -> Result<Vec<CostProjection>, StoreError>` (moved 2026-09-17 from phase 2 step 03, which had no event that feeds them).
+  > `enum CostScope { Task, Agent, Session, Sprint, Day }`, `struct CostProjection { scope, key, usd, input_tokens, output_tokens }` and `Projections::costs(&self, scope) -> Result<Vec<CostProjection>, StoreError>` arrive here too, with the event that feeds them (moved 2026-09-17 from phase 2 step 03, which had no such event).
+
+- [ ] In `docs/plans/project-plan.md`, in the phase 2 step table, replace the last cell of the step 03 row — `Board and cost projections rebuilt from the log and updated per event, with a cursor` — with:
+
+  > Board projections rebuilt from the log and updated per event, with a cursor; the cost projections move to phase 3 step 09, with the event that feeds them
+
+- [ ] In `docs/plans/project-plan.md`, in the phase 3 step table, append to the last cell of the step 09 row, after `the price override`:
+
+  > , and the cost projections moved here from phase 2 step 03
 
 - [ ] Set this plan's `Status:` to `done` and confirm every checkbox above is ticked, each in the commit of the task it belongs to.
 
@@ -1438,14 +1532,14 @@ This task changes documentation and has no test cycle. The `> ` marker on each b
 - [ ] Every commit subject is accepted:
 
   ```
-  for subject in \\
-    "feat(store): open the projections of a log and say how far they have read" \\
-    "feat(store): put a filed request on the board" \\
-    "feat(store): record a triage and a contract the human holds" \\
-    "feat(store): catch the projections up and take one event once" \\
-    "feat(store): build the board again from the log" \\
+  for subject in \
+    "feat(store): open a log's projections and say how far they have read" \
+    "feat(store): put a filed request on the board" \
+    "feat(store): record a triage and a contract the human holds" \
+    "feat(store): catch the projections up and take one event once" \
+    "feat(store): build the board again from the log" \
     "docs(docs): record what step 03 changed about the projections"; do
-    printf '%s\\n' "$subject" > /tmp/subject && cargo xtask commit-msg /tmp/subject
+    printf '%s\n' "$subject" > /tmp/subject && cargo xtask commit-msg /tmp/subject
   done
   # expected: silent, six times
   ```
