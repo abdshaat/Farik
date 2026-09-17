@@ -1,13 +1,13 @@
 # Phase 2, step 01: Protocol crate
 
-Status: draft
+Status: ready
 Branch: `claude/phase-0-implementation-izm38y` (the harness-assigned phase branch, left as assigned per `docs/standards/code.md`; a session may not push to another branch without permission, so phase 2 reuses it as phase 1 did; steps do not get their own)
 Spec: `docs/SPEC.md` section 8.5 (event protocol), 8.4 (storage), 5.11 (contract ownership), 5.13 (the criterion library), 5.16 (triage); `docs/standards/code.md`, "Wire and file formats" and "Schema validation"
 Depends on: phase 0 (merged in #4), phase 1 (merged in #5)
 
 A plan is `ready` only when a reviewer other than the author has confirmed the three rules in `docs/standards/workflow.md` stage 2 (Plan): every decision made, no ambiguity, no forward dependencies. Record who confirmed and when here.
 
-Readiness confirmed by: not yet
+Readiness confirmed by: a fresh Claude Code review session, 2026-09-17, on the fourth round. It rebuilt the step outside the working tree from the plan's own fenced blocks, applied verbatim in task order, and reproduced every expected output: each RED's compiler errors, each GREEN's test counts, `cargo fmt --all --check` clean after every task, all ten commit subjects accepted by `cargo xtask commit-msg`, the File map exact, and `cargo xtask check` ending in `xtask check: ok`. The three earlier rounds are recorded in the commits that took their findings.
 
 ## Goal
 
@@ -154,7 +154,7 @@ Produces: every generated type derives `PartialEq`
 Files: created `docs/schemas/event.schema.json`, `crates/protocol/Cargo.toml`, `crates/protocol/src/lib.rs`, `crates/protocol/src/generated/mod.rs`, `crates/protocol/src/generated/event.rs` (generated), `crates/protocol/src/generated/event.schema.json` (generated); modified `Cargo.toml`, `Cargo.lock`, `xtask/src/generate.rs`; tested by `crates/protocol/src/lib.rs`
 
 Consumes: `cargo xtask generate` from Task 1
-Produces: the crate `farik-protocol`; `farik_protocol::generated::event::{EventKind, ContractSummary, TaskCreatedBody, RequestTriagedBody, ContractWrittenBody, ContractLockedBody, ContractUnlockedBody, DriftDetectedBody, ProjectScannedBody, TeamUpdatedBody, CriteriaUpdatedBody, FarikEvent, EventBodyWire}`
+Produces: the crate `farik-protocol`; `farik_protocol::generated::event::{EventKind, ContractSummary, TaskCreatedBody, RequestTriagedBody, ContractWrittenBody, ContractLockedBody, ContractUnlockedBody, DriftDetectedBody, ProjectScannedBody, TeamUpdatedBody, CriteriaUpdatedBody, ContractSummaryKind, ContractSummaryParent, ContractSummaryRisk, ContractSummaryStatus, DriftDetectedBodyDrift, RequestTriagedBodySize, FarikEvent, EventBodyWire}`
 
 - [ ] Scaffold the crate so that there is something to run a test in. Add to the root `Cargo.toml`, in `[workspace.dependencies]`, between `chrono` and `globset`:
 
@@ -824,7 +824,7 @@ Produces: `farik_protocol::event::{EventEnvelope, EventBody, FarikEvent, EventKi
   }
   ```
 
-  Declare the module in `crates/protocol/src/lib.rs`, above `pub mod generated;`:
+  Declare the module in `crates/protocol/src/lib.rs`, above the `///` line that documents `pub mod generated;`:
 
   ```rust
   /// The event envelope, the event bodies, and the reader and writer of the wire form.
@@ -842,7 +842,7 @@ Produces: `farik_protocol::event::{EventEnvelope, EventBody, FarikEvent, EventKi
   #           `super::EventKind`, `super::ValidationError`, `super::event_from_value`
   ```
 
-- [ ] Write the minimal implementation. Insert into `crates/protocol/src/event.rs`, between the module doc and `pub mod fixtures;`:
+- [ ] Write the minimal implementation. Insert into `crates/protocol/src/event.rs`, between the `//!` module doc and the `///` line that documents `pub mod fixtures;`:
 
   ```rust
   use std::str::FromStr;
@@ -1592,7 +1592,7 @@ Produces: `farik_protocol::command::{Command, CommandName, RequestSize, command_
       },
   ```
 
-  Declare the module in `crates/protocol/src/generated/mod.rs`, above `pub mod event;`:
+  Declare the module in `crates/protocol/src/generated/mod.rs`, above `pub mod event;`, which carries no doc comment of its own:
 
   ```rust
   pub mod command;
@@ -1721,7 +1721,7 @@ Produces: `farik_protocol::command::{Command, CommandName, RequestSize, command_
   }
   ```
 
-  Declare the module in `crates/protocol/src/lib.rs`, above `pub mod event;`:
+  Declare the module in `crates/protocol/src/lib.rs`, above the `///` line that documents `pub mod event;`:
 
   ```rust
   /// The commands the daemon accepts.
@@ -1952,7 +1952,7 @@ Produces: `farik_protocol::clock::{Clock, IdSource, FixedClock, SequentialIds}`
   }
   ```
 
-  Declare the module in `crates/protocol/src/lib.rs`, above `pub mod command;`:
+  Declare the module in `crates/protocol/src/lib.rs`, above the `///` line that documents `pub mod command;`:
 
   ```rust
   /// Time and identifiers, injected rather than read from the machine.
