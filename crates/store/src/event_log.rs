@@ -18,6 +18,12 @@ use serde_json::{Map, Value};
 use crate::error::StoreError;
 use crate::migrations;
 
+/// The prefix every task id this store hands out carries, from the contract schema's pattern.
+const TASK_ID_PREFIX: &str = "FRK";
+
+/// The highest number `^FRK-[0-9]{1,6}$` can spell.
+const HIGHEST_TASK_NUMBER: u64 = 999_999;
+
 /// The path that opens a database in memory rather than on disk, for tests and for a dry run.
 pub const IN_MEMORY: &str = ":memory:";
 
@@ -169,6 +175,34 @@ impl EventLog {
         let (sender, receiver) = channel();
         self.subscribers_lock().push(sender);
         receiver
+    }
+
+    /// The next task id, with the counter moved on so that no two callers get the same one.
+    ///
+    /// # Errors
+    ///
+    /// `Sqlite` when the counter cannot be read or written; `TaskIdsExhausted` when the next number
+    /// no longer fits the contract schema's pattern; `InvalidEvent` never.
+    pub fn next_task_id(&self) -> Result<TaskId, StoreError> {
+        let mut connection = self.connection();
+        let transaction = connection.transaction()?;
+        let next: i64 = transaction.query_row(
+            "INSERT INTO task_counters (prefix, next) VALUES (?1, 1)
+             ON CONFLICT (prefix) DO UPDATE SET next = next + 1
+             RETURNING next",
+            (TASK_ID_PREFIX,),
+            |row| row.get(0),
+        )?;
+        transaction.commit()?;
+        let number = u64::try_from(next).map_err(|_| StoreError::Sqlite {
+            detail: "the task id counter is negative, which no increment can produce".to_string(),
+        })?;
+        if number > HIGHEST_TASK_NUMBER {
+            return Err(StoreError::TaskIdsExhausted { next: number });
+        }
+        format!("{TASK_ID_PREFIX}-{number}")
+            .parse()
+            .map_err(|_| StoreError::TaskIdsExhausted { next: number })
     }
 
     /// The migration versions this log has applied, in order.
@@ -633,5 +667,32 @@ mod tests {
         // A subscriber hears what happened after it subscribed, not before.
         let late = log.subscribe();
         assert_eq!(late.try_recv(), Err(TryRecvError::Empty));
+    }
+    #[test]
+    fn hands_out_one_task_id_per_call_and_never_the_same_one_twice() {
+        let log = a_log();
+        let ids: Vec<String> = (0..3)
+            .map(|_| log.next_task_id().expect("an id").to_string())
+            .collect();
+        assert_eq!(ids, ["FRK-1", "FRK-2", "FRK-3"]);
+    }
+
+    #[test]
+    fn refuses_a_task_id_the_contract_schema_cannot_spell() {
+        // The pattern is `^FRK-[0-9]{1,6}$`, so the counter has an end. Refusing is the only honest
+        // answer: the alternative is handing back something that is not a task id.
+        let log = a_log();
+        log.connection
+            .lock()
+            .expect("a fresh lock")
+            .execute(
+                "INSERT INTO task_counters (prefix, next) VALUES ('FRK', 999999)",
+                (),
+            )
+            .expect("the counter is set");
+        assert_eq!(
+            log.next_task_id().expect_err("the millionth id"),
+            StoreError::TaskIdsExhausted { next: 1_000_000 }
+        );
     }
 }

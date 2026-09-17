@@ -1406,7 +1406,7 @@ Files: modified `crates/store/src/event_log.rs`, `crates/store/tests/event_log_f
 Consumes: `EventLog`, `open_event_log` from Task 1; `StoreError::TaskIdsExhausted` from Task 1; `TaskId` from `crates/core/src/contract.rs`
 Produces: `EventLog::next_task_id`
 
-- [ ] Write the failing tests. Append to the tests module of `crates/store/src/event_log.rs`:
+- [x] Write the failing tests. Append to the tests module of `crates/store/src/event_log.rs`:
 
   ```rust
       #[test]
@@ -1438,7 +1438,7 @@ Produces: `EventLog::next_task_id`
       }
   ```
 
-- [ ] Add the last two lines to `keeps_every_event_and_its_place_across_a_reopen` in `crates/store/tests/event_log_file.rs`, after `assert_eq!(third.envelope.seq, 3);`:
+- [x] Add the last two lines to `keeps_every_event_and_its_place_across_a_reopen` in `crates/store/tests/event_log_file.rs`, after `assert_eq!(third.envelope.seq, 3);`:
 
   ```rust
       // And the ids the store hands out carry on too.
@@ -1483,7 +1483,7 @@ Produces: `EventLog::next_task_id`
   }
   ```
 
-- [ ] Run them and confirm they fail because no id is handed out:
+- [x] Run them and confirm they fail because no id is handed out:
 
   ```
   cargo test -p farik-store
@@ -1493,7 +1493,7 @@ Produces: `EventLog::next_task_id`
   #   --> crates/store/tests/event_log_file.rs
   ```
 
-- [ ] Write the minimal implementation. In `crates/store/src/event_log.rs`, insert before `pub const IN_MEMORY`:
+- [x] Write the minimal implementation. In `crates/store/src/event_log.rs`, insert before `pub const IN_MEMORY`:
 
   ```rust
   /// The prefix every task id this store hands out carries, from the contract schema's pattern.
@@ -1535,7 +1535,7 @@ Produces: `EventLog::next_task_id`
       }
   ```
 
-- [ ] Run the tests and confirm green:
+- [x] Run the tests and confirm green:
 
   ```
   cargo test -p farik-store
@@ -1543,14 +1543,14 @@ Produces: `EventLog::next_task_id`
   #           test result: ok. 3 passed (event_log_file)
   ```
 
-- [ ] Run the lint check:
+- [x] Run the lint check:
 
   ```
   cargo clippy -p farik-store --all-targets -- -D warnings
   # expected: silent
   ```
 
-- [ ] Commit: `feat(store): hand out one task id at a time`
+- [x] Commit: `feat(store): hand out one task id at a time`
 
 ### Task 5: An append that returned survives the power going out
 

@@ -92,4 +92,40 @@ fn keeps_every_event_and_its_place_across_a_reopen() {
         .append(&an_event(EventKind::TeamUpdated))
         .expect("appends");
     assert_eq!(third.envelope.seq, 3);
+    // And the ids the store hands out carry on too.
+    assert_eq!(reopened.next_task_id().expect("an id").to_string(), "FRK-1");
+}
+
+#[test]
+fn never_gives_two_logs_on_one_file_the_same_place_or_the_same_task_id() {
+    // Two commands can run at once, and `farik` is a separate process each time.
+    let directory = TempDir::new("two-logs");
+    let first = open_event_log(&directory.db(), at(9)).expect("the first log opens");
+    let second = open_event_log(&directory.db(), at(9)).expect("the second log opens");
+    let mut places = Vec::new();
+    for _ in 0..2 {
+        places.push(
+            first
+                .append(&an_event(EventKind::TaskCreated))
+                .expect("appends")
+                .envelope
+                .seq,
+        );
+        places.push(
+            second
+                .append(&an_event(EventKind::TeamUpdated))
+                .expect("appends")
+                .envelope
+                .seq,
+        );
+    }
+    assert_eq!(places, [1, 2, 3, 4]);
+    let ids = [
+        first.next_task_id().expect("an id").to_string(),
+        second.next_task_id().expect("an id").to_string(),
+        first.next_task_id().expect("an id").to_string(),
+    ];
+    assert_eq!(ids, ["FRK-1", "FRK-2", "FRK-3"]);
+    // Both connections see the whole log, whichever of them wrote each event.
+    assert_eq!(second.read(&EventQuery::default()).expect("reads").len(), 4);
 }
