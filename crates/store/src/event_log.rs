@@ -3,6 +3,7 @@
 
 use std::fmt::Write;
 use std::path::Path;
+use std::sync::mpsc::{Receiver, Sender, channel};
 use std::sync::{Mutex, MutexGuard, PoisonError};
 
 use chrono::{DateTime, SecondsFormat, Utc};
@@ -27,6 +28,7 @@ pub const IN_MEMORY: &str = ":memory:";
 /// thread's. `append` takes `&self` so that the log can be shared.
 pub struct EventLog {
     connection: Mutex<Connection>,
+    subscribers: Mutex<Vec<Sender<FarikEvent>>>,
 }
 
 /// Which events to read. Every field left empty means "no filter"; `Default` reads the whole log.
@@ -69,6 +71,7 @@ pub fn open_event_log(path: &Path, now: DateTime<Utc>) -> Result<EventLog, Store
     migrations::apply(&mut connection, now)?;
     Ok(EventLog {
         connection: Mutex::new(connection),
+        subscribers: Mutex::new(Vec::new()),
     })
 }
 
@@ -119,6 +122,7 @@ impl EventLog {
             },
             body: checked.body,
         };
+        self.announce(&appended);
         Ok(appended)
     }
 
@@ -155,6 +159,18 @@ impl EventLog {
         Ok(events)
     }
 
+    /// A channel that receives every event appended after this call. Each subscriber gets its own,
+    /// and one that stops listening is dropped at the next append rather than holding events for a
+    /// receiver nobody owns.
+    ///
+    /// An event reaches a subscriber only once it is committed: a subscriber that acted on an
+    /// append that then failed would have seen something that did not happen.
+    pub fn subscribe(&self) -> Receiver<FarikEvent> {
+        let (sender, receiver) = channel();
+        self.subscribers_lock().push(sender);
+        receiver
+    }
+
     /// The migration versions this log has applied, in order.
     ///
     /// # Errors
@@ -179,6 +195,17 @@ impl EventLog {
         self.connection
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
+    }
+
+    fn subscribers_lock(&self) -> MutexGuard<'_, Vec<Sender<FarikEvent>>> {
+        self.subscribers
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+    }
+
+    fn announce(&self, event: &FarikEvent) {
+        self.subscribers_lock()
+            .retain(|subscriber| subscriber.send(event.clone()).is_ok());
     }
 }
 
@@ -318,6 +345,8 @@ fn statement_of(query: &EventQuery) -> Option<(String, Vec<SqlValue>)> {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::mpsc::TryRecvError;
+
     use chrono::TimeZone;
     use farik_protocol::event::fixtures::an_event_wire;
     use farik_protocol::event::{EVERY_KIND, EventKind};
@@ -584,5 +613,25 @@ mod tests {
             matches!(&refusal, StoreError::InvalidEvent { detail } if detail.contains("event 1")),
             "{refusal:?}"
         );
+    }
+    #[test]
+    fn announces_every_append_to_every_subscriber_and_forgets_the_ones_that_left() {
+        let log = a_log();
+        let first = log.subscribe();
+        let second = log.subscribe();
+        let appended = log
+            .append(&an_event(EventKind::TaskCreated))
+            .expect("appends");
+        assert_eq!(first.recv().expect("the first hears"), appended);
+        assert_eq!(second.recv().expect("the second hears"), appended);
+        drop(second);
+        let next = log
+            .append(&an_event(EventKind::RequestTriaged))
+            .expect("appends");
+        assert_eq!(first.recv().expect("the first still hears"), next);
+        assert_eq!(log.subscribers_lock().len(), 1);
+        // A subscriber hears what happened after it subscribed, not before.
+        let late = log.subscribe();
+        assert_eq!(late.try_recv(), Err(TryRecvError::Empty));
     }
 }

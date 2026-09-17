@@ -1253,7 +1253,7 @@ Files: modified `crates/store/src/event_log.rs`, `docs/plans/phase-2-protocol-st
 Consumes: `EventLog::append` from Task 2
 Produces: `EventLog::subscribe`
 
-- [ ] Write the failing test. Add `use std::sync::mpsc::TryRecvError;` as the first line of the tests module in `crates/store/src/event_log.rs`, so its imports begin
+- [x] Write the failing test. Add `use std::sync::mpsc::TryRecvError;` as the first line of the tests module in `crates/store/src/event_log.rs`, so its imports begin
 
   ```rust
   #[cfg(test)]
@@ -1288,7 +1288,7 @@ Produces: `EventLog::subscribe`
       }
   ```
 
-- [ ] Run it and confirm it fails because nothing is announced:
+- [x] Run it and confirm it fails because nothing is announced:
 
   ```
   cargo test -p farik-store
@@ -1297,7 +1297,7 @@ Produces: `EventLog::subscribe`
   # error[E0599]: no method named `subscribers_lock` found for struct `EventLog` in the current scope
   ```
 
-- [ ] Write the minimal implementation. In `crates/store/src/event_log.rs`, replace
+- [x] Write the minimal implementation. In `crates/store/src/event_log.rs`, replace
 
   ```rust
   use std::sync::{Mutex, MutexGuard, PoisonError};
@@ -1382,7 +1382,7 @@ Produces: `EventLog::subscribe`
       }
   ```
 
-- [ ] Run the tests and confirm green:
+- [x] Run the tests and confirm green:
 
   ```
   cargo test -p farik-store
@@ -1390,14 +1390,14 @@ Produces: `EventLog::subscribe`
   #           test result: ok. 2 passed (event_log_file)
   ```
 
-- [ ] Run the lint check:
+- [x] Run the lint check:
 
   ```
   cargo clippy -p farik-store --all-targets -- -D warnings
   # expected: silent
   ```
 
-- [ ] Commit: `feat(store): announce every append to its subscribers`
+- [x] Commit: `feat(store): announce every append to its subscribers`
 
 ### Task 4: One task id at a time, across processes
 
