@@ -50,6 +50,19 @@ pub struct HeadSummary {
     pub subject: String,
 }
 
+/// What came of a merge.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum MergeOutcome {
+    /// It merged, leaving this commit.
+    Merged {
+        /// The merge commit's hash.
+        sha: String,
+    },
+    /// It did not merge, and these paths are why. The tree is left as it was: a conflicted
+    /// working tree nobody is watching is worse than a refusal (`docs/SPEC.md` 5.14).
+    Conflicts(Vec<String>),
+}
+
 /// One repository, at a path.
 ///
 /// Every method runs `git` as a child process. Farik does not reimplement git: a repository is the
@@ -228,6 +241,58 @@ impl Git {
         ])
     }
 
+    /// Merges `from` into `into` with a merge commit, or reports what conflicted.
+    ///
+    /// A conflict leaves nothing behind: the merge is undone before this returns, because the tree
+    /// it would leave is one nobody is watching and every later command would trip over it. The
+    /// task is escalated with reason `integration` instead (5.14).
+    ///
+    /// The repository is left on the branch it was found on, whether the merge took or not. `root`
+    /// is the user's own checkout rather than a task's worktree — worktrees are where tasks work
+    /// (5.14) and the integration branch lives here — so a merge that moved it would change what a
+    /// person has open in front of them.
+    ///
+    /// # Errors
+    ///
+    /// `CommandFailed` when either name is unknown, when the head is detached and there is no
+    /// branch to put back, or when the tree is not clean enough to switch branches.
+    pub fn merge(&self, into: &str, from: &str, message: &str) -> Result<MergeOutcome, GitError> {
+        self.require_repository()?;
+        let was_on = self.current_branch()?;
+        self.at_root(&["checkout", into])?;
+        let outcome = self.merge_what_is_checked_out(from, message);
+        if was_on == into {
+            return outcome;
+        }
+        let restored = self.at_root(&["checkout", &was_on]);
+        // The merge's own answer comes first. A branch that could not be put back is worth
+        // reporting, but not in place of the reason the merge itself refused.
+        outcome.and_then(|merged| restored.map(|_| merged))
+    }
+
+    /// The merge itself, with `into` already checked out.
+    fn merge_what_is_checked_out(
+        &self,
+        from: &str,
+        message: &str,
+    ) -> Result<MergeOutcome, GitError> {
+        match self.at_root(&["merge", "--no-ff", "-m", message, from]) {
+            Ok(_) => Ok(MergeOutcome::Merged {
+                sha: self.at_root(&["rev-parse", "HEAD"])?,
+            }),
+            Err(refusal) => {
+                let conflicted = self.at_root(&["diff", "--name-only", "--diff-filter=U", "-z"])?;
+                let conflicts = changed_paths_of(&conflicted);
+                if conflicts.is_empty() {
+                    // It refused for some other reason, and that reason is the answer.
+                    return Err(refusal);
+                }
+                self.at_root(&["merge", "--abort"])?;
+                Ok(MergeOutcome::Conflicts(conflicts))
+            }
+        }
+    }
+
     /// Refuses before running anything when there is no repository, so that every method says the
     /// same thing about it rather than each passing on whatever git happened to print.
     fn require_repository(&self) -> Result<(), GitError> {
@@ -309,10 +374,11 @@ fn changed_paths_of(listed: &str) -> Vec<String> {
 
 #[cfg(test)]
 mod tests {
-    use std::path::PathBuf;
+    use std::path::{Path, PathBuf};
 
     use super::{
-        GitError, HeadSummary, changed_paths_of, default_branch_of, head_summary_of, path_argument,
+        Git, GitError, HeadSummary, changed_paths_of, default_branch_of, head_summary_of,
+        path_argument,
     };
 
     /// What `git log --format=%H%x1f%cI%x1f%s` prints for one commit.
@@ -418,6 +484,49 @@ mod tests {
                 "git branch farik/FRK-1 main refused: fatal: a branch named 'farik/FRK-1' already \
                  exists",
             ]
+        );
+    }
+
+    #[test]
+    fn says_there_is_no_repository_before_it_runs_anything() {
+        // Every method asks first, so that a user is told the one thing that is wrong rather than
+        // whatever git prints about a directory it has never heard of.
+        let nowhere = Git::open(std::env::temp_dir().join("farik-not-a-repository-at-all"));
+        assert!(!nowhere.is_repository());
+        assert_eq!(nowhere.head_summary(), Err(GitError::NotARepository));
+        assert_eq!(nowhere.default_branch(), Err(GitError::NotARepository));
+        assert_eq!(nowhere.current_branch(), Err(GitError::NotARepository));
+        assert_eq!(
+            nowhere.create_branch("farik/FRK-1", "main"),
+            Err(GitError::NotARepository)
+        );
+        assert_eq!(
+            nowhere.create_worktree(Path::new("worktrees/FRK-1"), "farik/FRK-1", "main"),
+            Err(GitError::NotARepository)
+        );
+        assert_eq!(
+            nowhere.remove_worktree(Path::new("worktrees/FRK-1")),
+            Err(GitError::NotARepository)
+        );
+        assert_eq!(
+            nowhere.is_clean(Path::new(".")),
+            Err(GitError::NotARepository)
+        );
+        assert_eq!(
+            nowhere.commit_count("main", "farik/FRK-1"),
+            Err(GitError::NotARepository)
+        );
+        assert_eq!(
+            nowhere.changed_paths("main", "farik/FRK-1"),
+            Err(GitError::NotARepository)
+        );
+        assert_eq!(
+            nowhere.diff("main", "farik/FRK-1"),
+            Err(GitError::NotARepository)
+        );
+        assert_eq!(
+            nowhere.merge("main", "farik/FRK-1", "a message"),
+            Err(GitError::NotARepository)
         );
     }
 }

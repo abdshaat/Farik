@@ -8,7 +8,7 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use farik_store::{Git, GitError};
+use farik_store::{Git, GitError, MergeOutcome};
 
 /// A repository of its own, removed when the test ends however the test ends.
 struct TempRepo {
@@ -282,4 +282,128 @@ fn names_both_sides_of_a_file_that_moved() {
         .expect("the read works");
     changed.sort();
     assert_eq!(changed, ["README.md", "docs/README.md"]);
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn merges_a_finished_task_into_the_integration_branch() {
+    let repository = TempRepo::new("merge");
+    let git = repository.adapter();
+    repository.git(&["checkout", "-b", "farik/FRK-1"]);
+    repository.write("src/added.rs", "fn added() {}\n");
+    repository.commit("feat: add a thing");
+
+    // Called from the task's own branch, which is where a finished task leaves the repository. The
+    // merge goes to the integration branch and comes back: this checkout is the user's own, not a
+    // task's worktree, so what they have open is not the merge's to move.
+    let outcome = git
+        .merge("main", "farik/FRK-1", "integrate FRK-1")
+        .expect("the merge runs");
+    let MergeOutcome::Merged { sha } = outcome else {
+        panic!("it merged: {outcome:?}");
+    };
+    assert_eq!(sha, repository.git(&["rev-parse", "main"]));
+    assert_eq!(
+        git.current_branch().expect("the read works"),
+        "farik/FRK-1",
+        "and left the repository on the branch it found it on"
+    );
+    assert_eq!(
+        repository.git(&["log", "-1", "--format=%s", "main"]),
+        "integrate FRK-1",
+        "with a merge commit, so the task's commits survive"
+    );
+    assert_eq!(
+        repository.git(&["rev-list", "--count", "--merges", "main"]),
+        "1"
+    );
+    assert_eq!(
+        repository.git(&["show", "main:src/added.rs"]),
+        "fn added() {}",
+        "and the work is on the integration branch"
+    );
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn refuses_a_merge_that_failed_for_something_other_than_a_conflict() {
+    // Nothing conflicted, so there is nothing to report as a conflict: an empty list of conflicted
+    // paths would be a refusal wearing the shape of an answer, and the task would be integrated on
+    // paper without a single commit having moved.
+    let repository = TempRepo::new("merge-refused");
+    let git = repository.adapter();
+    let refusal = git.merge("main", "farik/FRK-404", "integrate FRK-404");
+    let Err(GitError::CommandFailed { command, stderr }) = refusal else {
+        panic!("it refused: {refusal:?}");
+    };
+    assert_eq!(
+        command, "merge --no-ff -m integrate FRK-404 farik/FRK-404",
+        "the merge's own refusal, not whatever an abort with nothing to abort says"
+    );
+    assert!(stderr.contains("farik/FRK-404"), "{stderr}");
+    assert_eq!(
+        git.current_branch().expect("the read works"),
+        "main",
+        "and the repository is where it was"
+    );
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn refuses_to_merge_from_a_detached_head_because_there_is_no_branch_to_put_back() {
+    // The repository is put back on the branch it was found on, and a detached head is not one.
+    // Refusing before anything has been run is better than merging and leaving a person somewhere
+    // they never were.
+    let repository = TempRepo::new("detached");
+    let git = repository.adapter();
+    repository.git(&["checkout", "--detach"]);
+    let answer = git.merge("main", "main", "integrate nothing at all");
+    assert!(
+        matches!(answer, Err(GitError::CommandFailed { .. })),
+        "{answer:?}"
+    );
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn names_what_conflicted_and_leaves_the_tree_as_it_was() {
+    // A conflict escalates the task with reason `integration` (5.14). What it must not do is leave
+    // a half-merged working tree behind for the next command to trip over.
+    let repository = TempRepo::new("conflict");
+    let git = repository.adapter();
+    repository.git(&["checkout", "-b", "farik/FRK-1"]);
+    repository.write("README.md", "the branch's line\n");
+    repository.commit("docs: the branch writes it");
+    repository.git(&["checkout", "main"]);
+    repository.write("README.md", "main's line\n");
+    repository.commit("docs: main writes it too");
+    let before = repository.git(&["rev-parse", "main"]);
+    repository.git(&["checkout", "farik/FRK-1"]);
+
+    let outcome = git
+        .merge("main", "farik/FRK-1", "integrate FRK-1")
+        .expect("the merge runs and reports");
+    assert_eq!(
+        outcome,
+        MergeOutcome::Conflicts(vec!["README.md".to_string()])
+    );
+    assert_eq!(
+        repository.git(&["rev-parse", "main"]),
+        before,
+        "nothing was committed"
+    );
+    assert_eq!(
+        git.current_branch().expect("the read works"),
+        "farik/FRK-1",
+        "and the repository is back on the branch it was on"
+    );
+    assert!(
+        git.is_clean(&repository.path).expect("the read works"),
+        "and nothing was left half-merged"
+    );
+    assert_eq!(
+        repository.git(&["show", "main:README.md"]),
+        "main's line",
+        "the integration branch's own work is untouched"
+    );
 }

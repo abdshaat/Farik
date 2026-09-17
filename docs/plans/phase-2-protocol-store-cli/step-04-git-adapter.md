@@ -1521,7 +1521,7 @@ Files: modified `crates/store/src/git.rs`, `crates/store/src/lib.rs`, `crates/st
 Consumes: everything above
 Produces: `farik_store::MergeOutcome`, `Git::merge`
 
-- [ ] Write the failing tests. Replace the whole tests module of `crates/store/src/git.rs` with:
+- [x] Write the failing tests. Replace the whole tests module of `crates/store/src/git.rs` with:
 
   ```rust
   #[cfg(test)]
@@ -1684,7 +1684,7 @@ Produces: `farik_store::MergeOutcome`, `Git::merge`
   }
   ```
 
-- [ ] The integration test names `MergeOutcome` now, so change the import in `crates/store/tests/git.rs` to:
+- [x] The integration test names `MergeOutcome` now, so change the import in `crates/store/tests/git.rs` to:
 
   ```rust
   use farik_store::{Git, GitError, MergeOutcome};
@@ -1818,7 +1818,7 @@ Produces: `farik_store::MergeOutcome`, `Git::merge`
   }
   ```
 
-- [ ] Run them and confirm they fail because nothing merges:
+- [x] Run them and confirm they fail because nothing merges:
 
   ```
   cargo test -p farik-store --lib
@@ -1836,7 +1836,7 @@ Produces: `farik_store::MergeOutcome`, `Git::merge`
   # error: could not compile `farik-store` (test "git") due to 5 previous errors
   ```
 
-- [ ] Write the minimal implementation. Insert into `crates/store/src/git.rs`, before the doc comment of `pub struct Git`:
+- [x] Write the minimal implementation. Insert into `crates/store/src/git.rs`, before the doc comment of `pub struct Git`:
 
   ```rust
   /// What came of a merge.
@@ -1909,13 +1909,13 @@ Produces: `farik_store::MergeOutcome`, `Git::merge`
       }
   ```
 
-- [ ] Add `MergeOutcome` to the re-export in `crates/store/src/lib.rs`, which becomes:
+- [x] Add `MergeOutcome` to the re-export in `crates/store/src/lib.rs`, which becomes:
 
   ```rust
   pub use git::{Git, GitError, HeadSummary, MergeOutcome};
   ```
 
-- [ ] Run the check and confirm green:
+- [x] Run the check and confirm green:
 
   ```
   cargo xtask check --integration
@@ -1926,7 +1926,7 @@ Produces: `farik_store::MergeOutcome`, `Git::merge`
   #   test result: ok. 27 passed (xtask)
   ```
 
-- [ ] Commit: `feat(store): merge a finished task or say what conflicted`
+- [x] Commit: `feat(store): merge a finished task or say what conflicted`
 
 ### Task 6: The plans say what the adapter became
 
