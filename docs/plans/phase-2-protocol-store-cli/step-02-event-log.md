@@ -1,13 +1,15 @@
 # Phase 2, step 02: The event log
 
-Status: draft
+Status: ready
 Branch: `claude/phase-0-implementation-izm38y` (the harness-assigned phase branch, left as assigned per `docs/standards/code.md`; a session may not push to another branch without permission, so phase 2 reuses it as phase 1 did; steps do not get their own)
 Spec: `docs/SPEC.md` section 5.1 (the log is the source of truth), 8.4 (storage), 8.5 (the event protocol); `docs/standards/code.md`, "Wire and file formats" and "Rust integration test"
 Depends on: phase 0 (merged in #4), phase 1 (merged in #5), step 01 of this phase (committed as 1f93550)
 
 A plan is `ready` only when a reviewer other than the author has confirmed the three rules in `docs/standards/workflow.md` stage 2 (Plan): every decision made, no ambiguity, no forward dependencies. Record who confirmed and when here.
 
-Readiness confirmed by: <pending>
+Readiness confirmed by: a fresh Claude Code review session, 2026-09-17, on the second round. It rebuilt the step outside the working tree from this plan's own fenced blocks, applied verbatim in task order, and reproduced every expected output with nothing guessed or filled in: each RED's error codes and missing items, each GREEN's counts (3/1, 9/2 with protocol at 37, 10/2, 12/3, 12/4), `cargo fmt --all --check` silent after every task, all six commit subjects accepted by `cargo xtask commit-msg` with scopes on the list in `docs/standards/code.md`, Task 6's three project-plan anchors each found exactly once, the changed-file set exactly the File map, and `cargo xtask check` ending in `xtask check: ok`.
+
+The first round refused it on ten findings, taken in `9b9229c`; the most serious was that Task 1 wrote the error enum, the migration SQL and the applier before its first test, so two of its three assertions were green by construction. The second round's six non-blocking findings — three Task 6 anchors that described a span more loosely than they quoted it, the missing reason for hand-writing `Display` rather than adding `thiserror`, a `Produces:` line short of `applied_migrations`, and the unstated multiplicity of Task 2's red — are taken in the commit that records this line.
 
 ## Goal
 
@@ -20,6 +22,7 @@ Farik has somewhere to keep what happened. `farik-store` opens a SQLite database
 - `append` re-validates through `event_from_value`: chose to check every event against `docs/schemas/event.schema.json` on the way in over trusting the caller, because `NewEvent`'s fields are public, so an event can reach the log without passing through `new_event`, and the log cannot be corrected afterwards. The placeholder sequence number zero never reaches a row; the insert assigns the real one.
 - `StoreError` gains `TaskIdsExhausted { next }`: chose a refusal of its own over `Sqlite` with a message because the contract schema's `^FRK-[0-9]{1,6}$` has an end, and a caller that wants to say so needs to match on it rather than read a string.
 - `farik_protocol::event::body_to_value` becomes public: chose to expose it over having the store write a body itself, because two hand-written writers of the same schema drift. No test is added in `farik-protocol` for the change: a child `mod tests` already sees a private parent item, so a test there cannot fail on visibility. What pins it is the store's use across the crate boundary, which the store's own red state shows.
+- `StoreError` writes its own `Display` and `std::error::Error` rather than deriving them with `thiserror`, which `docs/standards/code.md` names for a crate's error enum: chose the hand-written impls because `thiserror` is not in `[workspace.dependencies]` and the workspace pins every version by hand, so using it would add a dependency for four messages. This is the first error enum in the workspace to carry a `Display` at all (`EventError` and `PricingError` have none); adding the crate is a change for whichever step first needs it across several crates.
 - Every table is `STRICT`: chose the strict form over SQLite's default affinity rules because a column declared `TEXT` that accepts an integer lets a row mean something other than what it says, and the log is the source of truth.
 - Append-only is enforced by `BEFORE UPDATE` and `BEFORE DELETE` triggers that `RAISE(ABORT)`: chose the engine over this module's discipline because `farik doctor`, a repair script, and a person with the `sqlite3` shell all reach the same table.
 - Write-ahead logging and `synchronous = FULL` are set for a database on a file and not for one in memory: chose this over setting them always because a database in memory has no journal to set, and `PRAGMA journal_mode = WAL` on it is a silent no-op. Only the journal mode is asserted; `synchronous` is per connection and leaves no trace another connection can read.
@@ -85,7 +88,7 @@ docs/plans/phase-2-protocol-store-cli/step-02-event-log.md modifies: this plan, 
 Files: created `crates/store/Cargo.toml`, `crates/store/src/lib.rs`, `crates/store/src/error.rs`, `crates/store/src/migrations.rs`, `crates/store/src/migrations/0001_event_log.sql`, `crates/store/src/event_log.rs`, `crates/store/tests/event_log_file.rs`; modified `Cargo.toml`, `Cargo.lock` (by cargo), `docs/plans/phase-2-protocol-store-cli/step-02-event-log.md`; tested by `crates/store/src/event_log.rs` and `crates/store/tests/event_log_file.rs`
 
 Consumes: nothing from this plan
-Produces: `farik_store::{StoreError, EventLog, IN_MEMORY, open_event_log}`, `farik_store::migrations::known_versions`
+Produces: `farik_store::{StoreError, EventLog, IN_MEMORY, open_event_log}`, `EventLog::applied_migrations`, `farik_store::migrations::known_versions`
 
 The scaffolding below — the two manifests and three files holding nothing but their `//!` docs — is what a test needs in order to fail for the right reason rather than for a missing crate. No behaviour is written until after the red.
 
@@ -926,7 +929,8 @@ Produces: `EventLog::append`, `EventLog::read`, `farik_store::EventQuery`, `fari
 
   ```
   cargo test -p farik-store
-  # expected: FAIL to compile, twice:
+  # expected: FAIL to compile, twice. These codes and no others, each `E0599` once per call
+  # site (22 errors in the lib test, 6 in the integration test):
   # error[E0432]: unresolved imports `super::EventQuery`, `super::FarikEvent`, `super::NewEvent`,
   #   `super::body_to_value`, `super::event_from_value`
   # error[E0432]: unresolved import `farik_store::EventQuery`
@@ -1621,13 +1625,17 @@ This task changes documentation and has no test cycle. The `> ` marker on each b
 
   > - Step 02 (`farik-store`): `enum StoreError { Io { detail }, Sqlite { detail }, InvalidEvent { detail }, TaskIdsExhausted { next: u64 } }` (the last added 2026-09-17 by the step 02 plan: the contract schema's `^FRK-[0-9]{1,6}$` has an end, so the counter does too, and a caller that wants to say so needs to match on it rather than read a message); `IN_MEMORY: &str`, the path that opens a database in memory for tests and for a dry run; `fn open_event_log(path: &Path, now: DateTime<Utc>) -> Result<EventLog, StoreError>` (the clock is injected as a value, changed 2026-09-17 by the step 02 plan: `docs/standards/code.md` allows no ambient clock and the migration ledger stamps `applied_at`; a value rather than the `Clock` trait because a log is opened once per command and stamps one row); `impl EventLog { fn append(&self, event: &NewEvent) -> Result<FarikEvent, StoreError>; fn read(&self, query: &EventQuery) -> Result<Vec<FarikEvent>, StoreError>; fn subscribe(&self) -> Receiver<FarikEvent>; fn next_task_id(&self) -> Result<TaskId, StoreError>; fn applied_migrations(&self) -> Result<Vec<i64>, StoreError> }` backed by a `task_counters` table (`append` takes a reference, changed 2026-09-17 by the step 02 plan, because clippy's `needless_pass_by_value` refuses the value form, and it re-validates every event through `event_from_value` because `NewEvent`'s fields are public); `struct EventQuery { after_seq: Option<u64>, task_id: Option<TaskId>, agent_id: Option<String>, kinds: Vec<EventKind>, limit: Option<usize> }`, whose `Default` reads the whole log; `fn migrations::known_versions() -> Vec<i64>`. `farik_protocol::event::body_to_value` becomes public in this step, so that the store does not write a body of its own.
 
-- [ ] In `docs/plans/project-plan.md`, in "Decisions that apply to every phase", replace the second sentence of the "Tests are split in three" bullet — the one beginning `Integration tests (\`crates/<name>/tests/<subject>.rs\`)` and ending `(phase 2 step 04)` — with:
+- [ ] In `docs/plans/project-plan.md`, in "Decisions that apply to every phase", replace, in the "Tests are split in three" bullet, the sentence beginning `Integration tests (\`crates/<name>/tests/<subject>.rs\`)` and ending `(phase 2 step 04).`, its closing full stop included and the sentences around it left alone, with:
 
   > Integration tests (`crates/<name>/tests/<subject>.rs`) need Docker, a git binary, or the file system in ways a unit test must not. One that needs only a temporary directory runs in the default `cargo xtask check`; one that needs Docker or a git binary runs by `cargo xtask check --integration`, which runs in CI as a second job of the same `check` workflow from the step that adds the first test needing it (phase 2 step 04). Changed 2026-09-17 by the phase 2 step 02 plan: the first `tests/` file is the event log's, it needs a temporary directory and nothing else, and gating it would have left reopening, two processes on one file, and the journal mode out of every check until step 04.
 
-- [ ] In `docs/plans/project-plan.md`, in the phase 2 step table, replace the last cell of the step 04 row — `the first integration test and the CI job for \`cargo xtask check --integration\`` — with:
+- [ ] In `docs/plans/project-plan.md`, in the phase 2 step table, replace, in the step 04 row, the text `the first integration test and the CI job for \`cargo xtask check --integration\`` — the tail of its last cell, whose list of deliverables before the semicolon stays as it is — with:
 
   > the first integration test that needs a git binary, and the CI job for `cargo xtask check --integration`
+
+- [ ] In `docs/plans/project-plan.md`, in "Decisions that apply to every phase", replace, in the "Time, randomness, and identifiers are injected" bullet, the sentence beginning `Nothing in \`core\`, \`protocol\`, \`store\`, or \`runtime\`` and ending `are passed in.`, its closing full stop included, with:
+
+  > Nothing in `core`, `protocol`, `store`, or `runtime` reads the clock or generates an identifier on its own; a `Clock` trait (`fn now(&self) -> DateTime<Utc>`) and an `IdSource` trait (`fn session_id(&self) -> String`) are passed in, or, where a call samples the clock exactly once, the `DateTime<Utc>` itself — as `open_event_log(path, now)` takes it, recorded 2026-09-17 by the phase 2 step 02 plan.
 
 - [ ] Set this plan's `Status:` to `done` and confirm every checkbox above is ticked, each in the commit of the task it belongs to.
 
