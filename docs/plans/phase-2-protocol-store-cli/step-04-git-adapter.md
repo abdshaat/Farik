@@ -13,7 +13,7 @@ Readiness confirmed by: <pending>
 
 Farik can drive the repository it lives in. `Git` answers what is at the tip of a branch and which branch is the default, makes the branch and the worktree a task works in and takes the worktree away again, says what a branch changed and how many commits it took, and merges a finished task into the integration branch or says what conflicted without leaving a half-merged tree behind. Everything runs the `git` program as a child process: a repository is the user's own, and the only behaviour anyone can rely on is the program's.
 
-This step also gives the repository a way to run the tests that need a real repository to work in. Nine of the tests here do, so they are marked `#[ignore]` and run by `cargo xtask check --integration`, which is what CI runs.
+This step also gives the repository a way to run the tests that need a real repository to work in. Ten of the tests here do, so they are marked `#[ignore]` and run by `cargo xtask check --integration`, which is what CI runs.
 
 ## Decisions
 
@@ -21,14 +21,16 @@ This step also gives the repository a way to run the tests that need a real repo
 - The tests that need `git` are marked `#[ignore]`, not put behind a cargo feature and not skipped by an environment variable at run time: chose `#[ignore]` because the default check still *compiles* them, so `cargo fmt` and `clippy` hold them to the same standard and they cannot rot, and because `cargo test` prints them as ignored rather than passing silently. A feature would hide them from the default build; an environment variable would make a test that ran nothing look like a test that passed.
 - The gate is not about a machine without `git`, and nothing in this step claims it is. `cargo xtask check` has needed `git` since phase 0: `tracked_files` shells out to `git ls-files`, so the bare-TODO check and the no-I/O check both fail without it. What the gate is about is a test that needs a *repository* to work in — slow, and writing to the file system — and the flag is what says to run them.
 - `cargo xtask check --integration` adds `--include-ignored` to the test run and changes nothing else, so one command is the whole check rather than half of it.
-- **CI runs one job, not two.** The project plan records this step as adding "the CI job for `cargo xtask check --integration`", a second job in the `check` workflow. A second job would compile the workspace again to run a strict superset of what the first ran, because `--integration` only adds the ignored tests to the same `cargo test` invocation, and `ubuntu-latest` already has `git`. The workflow runs `cargo xtask check --integration` in the one job it has, and carries a comment saying that a second job starts paying for itself when a test needs Docker, which is phase 3 step 02. Task 6 records the change. What is lost, and the comment says so: nothing in CI runs `cargo xtask check` *without* the flag any more, so a break in the flagless path — a test wrongly marked `#[ignore]` and therefore run by nobody's default command, or the `Tests::WithoutTheOnesThatNeedAProgram` arm itself — would reach `main` unseen. It is the command every contributor runs, and after this step it is guarded only by them running it.
+- **CI runs one job, not two.** The project plan records this step as adding "the CI job for `cargo xtask check --integration`", a second job in the `check` workflow. A second job would compile the workspace again to run a strict superset of what the first ran, because `--integration` only adds the ignored tests to the same `cargo test` invocation, and `ubuntu-latest` already has `git`. The workflow runs `cargo xtask check --integration` in the one job it has, and carries a comment saying that a second job starts paying for itself when a test needs Docker, which is phase 3 step 02. Task 6 records the change. What is lost, and the workflow's own comment says so in the block task 1 writes: nothing in CI runs `cargo xtask check` *without* the flag any more, so a break in the flagless path — a test wrongly marked `#[ignore]` and therefore run by nobody's default command, or the `Tests::WithoutTheOnesThatNeedAProgram` arm itself — would reach `main` unseen. It is the command every contributor runs, and after this step it is guarded only by them running it. A second `cargo test --workspace` step in the same job was considered and refused: it would run the whole suite again to cover a difference of ten tests, and `xtask::check`'s three unit tests already pin all three arms of the parsing.
 - `GitError` gains a third variant, `NotInstalled { detail }`: the recorded interface has `NotARepository` and `CommandFailed { command, stderr }`, and neither says "the `git` program is not on this machine". Folding that into `CommandFailed` would report an empty `stderr` for a command that never ran. Task 6 records it.
 - Every method asks `require_repository` first and answers `NotARepository` itself, rather than passing on whatever git printed about a directory it has never heard of. `farik init` is what reports this to a user, and it should read the same whichever method noticed.
 - `changed_paths` passes `--no-renames`, so a move comes back as the old path and the new one: the governor is asked about each path a change touched (5.6), and a rename reported only by its new name would let work land at a path nobody allowed.
 - `changed_paths` and `diff` use the three-dot range `base...head` — what the branch did since it and `base` last agreed — while `commit_count` uses two dots, `base..head`, which is how many commits `head` has that `base` does not. A reviewer reading a task's work wants the first; a gate counting the task's commits wants the second.
+- **A test may not rest on anything a person's git configuration can reshape, and where one would, the adapter names the flag that settles it.** The test helper's own `run_git` is held away from the machine's configuration — `GIT_CONFIG_GLOBAL` and `GIT_CONFIG_SYSTEM` at `/dev/null`, `LC_ALL=C` — so a global `core.hooksPath` cannot run a contributor's hooks inside a fixture. That is the setup half only: `Git` spawns its own children and honours the user's configuration on purpose, which is the whole reason Farik shells out. So two flags are the adapter's, not the test's. `is_clean` passes `--untracked-files=normal`, because `status.showUntrackedFiles = no` would otherwise tell Farik that a worktree full of a session's output is clean — a governance answer, not a formatting one. `diff` passes `--src-prefix=a/ --dst-prefix=b/`, because `diff.noprefix = true` would otherwise hand a reviewer a patch nothing can apply. Each is pinned by a test that sets that very setting in the fixture's own configuration, where local beats global and nothing on the machine is touched. And git's refusals are matched by the `command` that was run and the name inside the message, never by the whole sentence, because the sentence is translated and the command is not.
+- `diff` also passes `--no-ext-diff`, and that one is defensive: no test reaches it. Setting `diff.external` in a fixture would make the test depend on a program on the machine to run the external differ with, which is the dependence the rest of this bullet is removing. It stays because a personal external differ is not a patch.
 - Every path git prints comes back through `-z`, so nothing is split on a newline: a path may hold one, and a path list that loses a file is worse than one that refuses.
 - **`merge` puts the repository back on the branch it found it on**, whether the merge took, conflicted, or refused. `self.root` is the user's own checkout, not a task's worktree — worktrees are where tasks work (5.14) and the integration branch lives here — so a merge that quietly moved what a person has open would be a surprise nobody asked for. The alternative considered was refusing unless `into` is already checked out, which only moves the checkout into every caller. A detached head refuses, because there is no branch to put back; `current_branch` is what says so, before anything has been run.
-- When the merge and the branch that is put back after it both fail, the merge's own refusal is what comes back: a branch that could not be restored is worth reporting, but not in place of the reason the merge failed.
+- When the merge and the branch that is put back after it both fail, the merge's own refusal is what comes back: a branch that could not be restored is worth reporting, but not in place of the reason the merge failed. This ordering is defensive and no test reaches it: `was_on` is a branch the main worktree has checked out, so nothing else can hold it, and a merge that succeeded leaves a tree clean enough to leave. Swapping the two does not fail anything, and a reader looking for the test that holds it should stop looking.
 - A conflicted merge is undone before `merge` returns: the tree it would otherwise leave is one nobody is watching, and every later command would trip over it. The task escalates with reason `integration` instead (5.14), and `MergeOutcome::Conflicts` is what says so.
 - `remove_worktree` passes `--force`, because a finished task's worktree holds whatever its session built — untracked output git would otherwise refuse to remove, and that nothing wants kept.
 - `default_branch` asks `origin/HEAD` and falls back to the branch `HEAD` is on: a repository with no remote records its default branch nowhere at all. `.farik/team.yaml` is where a team says otherwise, and the integration branch is its to set (5.14).
@@ -59,7 +61,7 @@ Out of scope: `commit` and `push`, which phase 3 step 03 adds with the tools tha
 - No `unwrap` or `expect` outside tests.
 - A path reaches git as a `&str` through `path_argument`, which refuses one that is not text rather than mangling it.
 - Every test that needs the `git` program carries `#[ignore = "needs the git program: cargo xtask check --integration"]`, spelled exactly so, so that `cargo test` prints the reason.
-- No test is skipped, ignored, or quarantined to get green: the nine ignored tests are gated on a program, and they run in CI on every pull request.
+- No test is skipped, ignored, or quarantined to get green: the ten ignored tests are gated on a program, and they run in CI on every pull request.
 
 ## File map
 
@@ -87,7 +89,7 @@ Files: created `crates/store/src/git.rs`, `crates/store/tests/git.rs`, `xtask/sr
 Consumes: nothing from this plan
 Produces: `farik_store::{Git, GitError}`, `Git::{open, is_repository}`, `xtask::check::{Tests, tests_requested}`, and `cargo xtask check --integration`
 
-The flag arrives with the first test that needs it. Without it the eight tests this step writes would be written and never run until the end, which is not a red-green cycle at all.
+The flag arrives with the first test that needs it. Without it the ten tests this step writes would be written and never run until the end, which is not a red-green cycle at all.
 
 - [ ] Write the failing tests. Create `crates/store/src/git.rs` with the module doc:
 
@@ -163,8 +165,8 @@ The flag arrives with the first test that needs it. Without it the eight tests t
           std::fs::create_dir_all(&path).expect("a directory under the temporary directory");
           let repository = Self { path };
           repository.git(&["init", "-b", "main"]);
-          // A test must not depend on the machine's git configuration, and signing would ask for a
-          // key nobody has here.
+          // An identity, because a machine that has none cannot commit at all, and no signing,
+          // because that would ask for a key nobody here has.
           repository.git(&["config", "user.name", "Farik Test"]);
           repository.git(&["config", "user.email", "test@farik.invalid"]);
           repository.git(&["config", "commit.gpgsign", "false"]);
@@ -202,10 +204,20 @@ The flag arrives with the first test that needs it. Without it the eight tests t
   }
 
   /// Runs git directly, for the setup a test needs before the adapter is the thing under test.
+  ///
+  /// The setup is held away from whatever the person running the tests has configured — a global
+  /// `core.hooksPath` would otherwise run their hooks inside the fixture. What this cannot do is
+  /// isolate the adapter: `Git` spawns its own children, and it honours the user's configuration on
+  /// purpose, which is the whole reason Farik shells out to git at all. So no assertion in this file
+  /// may rest on anything a setting can reshape — where one would, the adapter names the flag that
+  /// makes the answer its own rather than the configuration's.
   fn run_git(directory: &Path, arguments: &[&str]) -> String {
       let output = Command::new("git")
           .args(arguments)
           .current_dir(directory)
+          .env("GIT_CONFIG_GLOBAL", "/dev/null")
+          .env("GIT_CONFIG_SYSTEM", "/dev/null")
+          .env("LC_ALL", "C")
           .output()
           .expect("git runs");
       assert!(
@@ -542,6 +554,11 @@ The flag arrives with the first test that needs it. Without it the eight tests t
     # effect is to include the tests marked `#[ignore]` for needing it. A second job would compile the
     # workspace again to run a superset of what this one ran. When a test needs Docker (phase 3 step
     # 02), the separation starts paying for itself and this becomes two jobs.
+    #
+    # What that costs: nothing here runs `cargo xtask check` without the flag any more, so a break in
+    # the flagless path — a test wrongly marked `#[ignore]` and so run by nobody's default command, or
+    # the default arm itself — would reach `main` unseen. The command a contributor runs is what
+    # guards it.
     check:
       runs-on: ubuntu-latest
       steps:
@@ -1002,14 +1019,13 @@ Produces: `Git::{create_branch, create_worktree, remove_worktree, is_clean}`
       let git = repository.adapter();
       git.create_branch("farik/FRK-1", "main")
           .expect("the branch is made");
-      assert_eq!(
-          git.create_branch("farik/FRK-1", "main"),
-          Err(GitError::CommandFailed {
-              command: "branch farik/FRK-1 main".to_string(),
-              stderr: "fatal: a branch named 'farik/FRK-1' already exists".to_string(),
-          }),
-          "a name is taken once"
-      );
+      let taken = git.create_branch("farik/FRK-1", "main");
+      let Err(GitError::CommandFailed { command, stderr }) = taken else {
+          panic!("a name is taken once: {taken:?}");
+      };
+      assert_eq!(command, "branch farik/FRK-1 main");
+      // What git said, not how it said it: the sentence is translated, the branch name is not.
+      assert!(stderr.contains("farik/FRK-1"), "{stderr}");
 
       let worktree = repository.path.join(".farik/local/worktrees/FRK-2");
       git.create_worktree(&worktree, "farik/FRK-2", "main")
@@ -1025,6 +1041,14 @@ Produces: `Git::{create_branch, create_worktree, remove_worktree, is_clean}`
       assert!(
           !git.is_clean(&worktree).expect("the read works"),
           "an untracked file is not clean either"
+      );
+      // And a repository configured not to show untracked files does not get to tell Farik that a
+      // worktree full of a session's output is clean. Set here rather than globally because a test
+      // may not touch the machine's configuration; the adapter's own flag is what answers it.
+      repository.git(&["config", "status.showUntrackedFiles", "no"]);
+      assert!(
+          !git.is_clean(&worktree).expect("the read works"),
+          "whatever the repository is configured to show"
       );
       // Forced, because that untracked file is exactly what a finished task leaves behind.
       git.remove_worktree(&worktree).expect("it is taken away");
@@ -1053,8 +1077,9 @@ Produces: `Git::{create_branch, create_worktree, remove_worktree, is_clean}`
   # error[E0599]: no method named `create_worktree` found for struct `Git` in the current scope
   # error[E0599]: no method named `is_clean` found for struct `Git` in the current scope
   # error[E0599]: no method named `is_clean` found for struct `Git` in the current scope
+  # error[E0599]: no method named `is_clean` found for struct `Git` in the current scope
   # error[E0599]: no method named `remove_worktree` found for struct `Git` in the current scope
-  # error: could not compile `farik-store` (test "git") due to 6 previous errors
+  # error: could not compile `farik-store` (test "git") due to 7 previous errors
   ```
 
 - [ ] Write the minimal implementation. Insert into `impl Git`, before `require_repository`:
@@ -1114,12 +1139,16 @@ Produces: `Git::{create_branch, create_worktree, remove_worktree, is_clean}`
   ```rust
       /// Whether the tree at `path` has nothing uncommitted, untracked files included.
       ///
+      /// `--untracked-files=normal` is what makes that promise true rather than hopeful: a user with
+      /// `status.showUntrackedFiles = no` in their own configuration would otherwise be told a
+      /// worktree full of a session's output is clean.
+      ///
       /// # Errors
       ///
       /// `CommandFailed` when `path` is not a working tree of this repository.
       pub fn is_clean(&self, path: &Path) -> Result<bool, GitError> {
           self.require_repository()?;
-          Ok(run_git(path, &["status", "--porcelain"])?.is_empty())
+          Ok(run_git(path, &["status", "--porcelain", "--untracked-files=normal"])?.is_empty())
       }
   ```
 
@@ -1313,6 +1342,9 @@ Produces: `Git::{commit_count, changed_paths, diff}`
           .expect("the read works");
       changed.sort();
       assert_eq!(changed, ["README.md", "src/added.rs"]);
+      // git's own prefixes, whatever this repository is configured to use: a patch without them is
+      // one nothing can apply, and a reviewer is handed this patch to read (5.6).
+      repository.git(&["config", "diff.noprefix", "true"]);
       let patch = git.diff("main", "farik/FRK-1").expect("the read works");
       assert!(patch.contains("fn added()"), "the patch holds the change");
       assert!(patch.contains("--- a/README.md"), "and the removal");
@@ -1403,13 +1435,24 @@ Produces: `Git::{commit_count, changed_paths, diff}`
   ```rust
       /// What `head` changed since it and `base` last agreed, as a patch.
       ///
+      /// The flags are what make this git's own patch in git's own shape, whatever the user has
+      /// configured: `--no-ext-diff` because a personal external differ is not a patch, and the two
+      /// prefixes because `diff.noprefix` would otherwise hand a reviewer a patch nothing can apply.
+      ///
       /// # Errors
       ///
       /// `CommandFailed` when either name is unknown.
       pub fn diff(&self, base: &str, head: &str) -> Result<String, GitError> {
           self.require_repository()?;
           let range = format!("{base}...{head}");
-          self.at_root(&["diff", "--no-color", &range])
+          self.at_root(&[
+              "diff",
+              "--no-color",
+              "--no-ext-diff",
+              "--src-prefix=a/",
+              "--dst-prefix=b/",
+              &range,
+          ])
       }
   ```
 
@@ -1666,18 +1709,35 @@ Produces: `farik_store::MergeOutcome`, `Git::merge`
       // paper without a single commit having moved.
       let repository = TempRepo::new("merge-refused");
       let git = repository.adapter();
+      let refusal = git.merge("main", "farik/FRK-404", "integrate FRK-404");
+      let Err(GitError::CommandFailed { command, stderr }) = refusal else {
+          panic!("it refused: {refusal:?}");
+      };
       assert_eq!(
-          git.merge("main", "farik/FRK-404", "integrate FRK-404"),
-          Err(GitError::CommandFailed {
-              command: "merge --no-ff -m integrate FRK-404 farik/FRK-404".to_string(),
-              stderr: "merge: farik/FRK-404 - not something we can merge".to_string(),
-          }),
-          "git's own reason for refusing, not whatever an abort with nothing to abort says"
+          command, "merge --no-ff -m integrate FRK-404 farik/FRK-404",
+          "the merge's own refusal, not whatever an abort with nothing to abort says"
       );
+      assert!(stderr.contains("farik/FRK-404"), "{stderr}");
       assert_eq!(
           git.current_branch().expect("the read works"),
           "main",
           "and the repository is where it was"
+      );
+  }
+
+  #[test]
+  #[ignore = "needs the git program: cargo xtask check --integration"]
+  fn refuses_to_merge_from_a_detached_head_because_there_is_no_branch_to_put_back() {
+      // The repository is put back on the branch it was found on, and a detached head is not one.
+      // Refusing before anything has been run is better than merging and leaving a person somewhere
+      // they never were.
+      let repository = TempRepo::new("detached");
+      let git = repository.adapter();
+      repository.git(&["checkout", "--detach"]);
+      let answer = git.merge("main", "main", "integrate nothing at all");
+      assert!(
+          matches!(answer, Err(GitError::CommandFailed { .. })),
+          "{answer:?}"
       );
   }
 
@@ -1740,7 +1800,8 @@ Produces: `farik_store::MergeOutcome`, `Git::merge`
   # error[E0599]: no method named `merge` found for struct `Git` in the current scope
   # error[E0599]: no method named `merge` found for struct `Git` in the current scope
   # error[E0599]: no method named `merge` found for struct `Git` in the current scope
-  # error: could not compile `farik-store` (test "git") due to 4 previous errors
+  # error[E0599]: no method named `merge` found for struct `Git` in the current scope
+  # error: could not compile `farik-store` (test "git") due to 5 previous errors
   ```
 
 - [ ] Write the minimal implementation. Insert into `crates/store/src/git.rs`, before the doc comment of `pub struct Git`:
@@ -1829,7 +1890,7 @@ Produces: `farik_store::MergeOutcome`, `Git::merge`
   # expected: ends with `xtask check: ok`, with
   #   test result: ok. 44 passed (the store's modules)
   #   test result: ok. 8 passed (event_log_file)
-  #   test result: ok. 9 passed (git)
+  #   test result: ok. 10 passed (git)
   #   test result: ok. 27 passed (xtask)
   ```
 
@@ -1877,7 +1938,7 @@ This task changes documentation and has no test cycle. The `> ` marker on each b
   #   test result: ok. 37 passed (farik-protocol)
   #   test result: ok. 44 passed (farik-store, its five modules)
   #   test result: ok. 8 passed (crates/store/tests/event_log_file.rs)
-  #   test result: ok. 9 passed (crates/store/tests/git.rs)
+  #   test result: ok. 10 passed (crates/store/tests/git.rs)
   #   test result: ok. 27 passed (xtask)
   ```
 
@@ -1886,7 +1947,7 @@ This task changes documentation and has no test cycle. The `> ` marker on each b
   ```
   cargo xtask check
   # expected: ends with `xtask check: ok`, with crates/store/tests/git.rs reported as
-  #   test result: ok. 0 passed; 0 failed; 9 ignored
+  #   test result: ok. 0 passed; 0 failed; 10 ignored
   ```
 
 - [ ] Every commit subject is accepted:
