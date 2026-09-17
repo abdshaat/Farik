@@ -129,3 +129,19 @@ fn never_gives_two_logs_on_one_file_the_same_place_or_the_same_task_id() {
     // Both connections see the whole log, whichever of them wrote each event.
     assert_eq!(second.read(&EventQuery::default()).expect("reads").len(), 4);
 }
+
+#[test]
+fn writes_ahead_of_the_database_file() {
+    // Write-ahead logging is what makes `synchronous = FULL` affordable, and it is a property of
+    // the file, so another connection can read it back. `synchronous` itself is per connection and
+    // leaves no trace to assert on.
+    let directory = TempDir::new("writes-ahead");
+    let log = open_event_log(&directory.db(), at(9)).expect("the log opens");
+    log.append(&an_event(EventKind::TaskCreated))
+        .expect("appends");
+    let connection = rusqlite::Connection::open(directory.db()).expect("another connection");
+    let mode: String = connection
+        .query_row("PRAGMA journal_mode", [], |row| row.get(0))
+        .expect("the journal mode reads");
+    assert_eq!(mode.to_lowercase(), "wal");
+}

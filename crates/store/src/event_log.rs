@@ -73,6 +73,13 @@ pub fn open_event_log(path: &Path, now: DateTime<Utc>) -> Result<EventLog, Store
     }
     let mut connection = Connection::open(path)?;
     connection.busy_timeout(std::time::Duration::from_secs(5))?;
+    if !in_memory {
+        // The log is the source of truth for what happened, so an append that returned must
+        // survive the machine losing power: `FULL` is that promise, and write-ahead logging is what
+        // makes it affordable. A database in memory has no journal to set.
+        connection.pragma_update(None, "journal_mode", "WAL")?;
+        connection.pragma_update(None, "synchronous", "FULL")?;
+    }
     connection.pragma_update(None, "foreign_keys", "ON")?;
     migrations::apply(&mut connection, now)?;
     Ok(EventLog {

@@ -1559,7 +1559,7 @@ Files: modified `crates/store/src/event_log.rs`, `crates/store/tests/event_log_f
 Consumes: `open_event_log` from Task 1
 Produces: write-ahead logging and `synchronous = FULL` on a log that lives on a file
 
-- [ ] Write the failing test. Append to `crates/store/tests/event_log_file.rs` (`rusqlite` is already a dependency of the crate, and a crate's dependencies are available to its `tests/` targets, so nothing is added to the manifest):
+- [x] Write the failing test. Append to `crates/store/tests/event_log_file.rs` (`rusqlite` is already a dependency of the crate, and a crate's dependencies are available to its `tests/` targets, so nothing is added to the manifest):
 
   ```rust
   #[test]
@@ -1579,7 +1579,7 @@ Produces: write-ahead logging and `synchronous = FULL` on a log that lives on a 
   }
   ```
 
-- [ ] Run it and confirm it fails because the journal is SQLite's default:
+- [x] Run it and confirm it fails because the journal is SQLite's default:
 
   ```
   cargo test -p farik-store --test event_log_file
@@ -1590,7 +1590,7 @@ Produces: write-ahead logging and `synchronous = FULL` on a log that lives on a 
   #  right: "wal"
   ```
 
-- [ ] Write the minimal implementation. In `open_event_log` in `crates/store/src/event_log.rs`, insert before the `foreign_keys` pragma:
+- [x] Write the minimal implementation. In `open_event_log` in `crates/store/src/event_log.rs`, insert before the `foreign_keys` pragma:
 
   ```rust
       if !in_memory {
@@ -1602,7 +1602,7 @@ Produces: write-ahead logging and `synchronous = FULL` on a log that lives on a 
       }
   ```
 
-- [ ] Run the tests and confirm green:
+- [x] Run the tests and confirm green:
 
   ```
   cargo test -p farik-store
@@ -1610,7 +1610,7 @@ Produces: write-ahead logging and `synchronous = FULL` on a log that lives on a 
   #           test result: ok. 4 passed (event_log_file)
   ```
 
-- [ ] Commit: `feat(store): write ahead of the database file`
+- [x] Commit: `feat(store): write ahead of the database file`
 
 ### Task 6: The plans say what the store's interface became
 
