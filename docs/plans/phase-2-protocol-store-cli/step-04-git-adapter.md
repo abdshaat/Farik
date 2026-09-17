@@ -911,7 +911,7 @@ Files: modified `crates/store/src/git.rs`, `crates/store/tests/git.rs`, `docs/pl
 Consumes: `Git`, `require_repository`, `at_root` from Tasks 1 and 2
 Produces: `Git::{create_branch, create_worktree, remove_worktree, is_clean}`
 
-- [ ] Write the failing tests. Replace the whole tests module of `crates/store/src/git.rs` with:
+- [x] Write the failing tests. Replace the whole tests module of `crates/store/src/git.rs` with:
 
   ```rust
   #[cfg(test)]
@@ -1014,7 +1014,7 @@ Produces: `Git::{create_branch, create_worktree, remove_worktree, is_clean}`
   }
   ```
 
-- [ ] The integration test names `GitError` now, so change the import in `crates/store/tests/git.rs` to:
+- [x] The integration test names `GitError` now, so change the import in `crates/store/tests/git.rs` to:
 
   ```rust
   use farik_store::{Git, GitError};
@@ -1088,7 +1088,7 @@ Produces: `Git::{create_branch, create_worktree, remove_worktree, is_clean}`
   }
   ```
 
-- [ ] Run them and confirm they fail because no worktree can be made:
+- [x] Run them and confirm they fail because no worktree can be made:
 
   ```
   cargo test -p farik-store --lib
@@ -1109,7 +1109,7 @@ Produces: `Git::{create_branch, create_worktree, remove_worktree, is_clean}`
   # error: could not compile `farik-store` (test "git") due to 8 previous errors
   ```
 
-- [ ] Write the minimal implementation. Insert into `impl Git`, before `require_repository`:
+- [x] Write the minimal implementation. Insert into `impl Git`, before `require_repository`:
 
   ```rust
       /// Makes a branch at `from`, without checking it out.
@@ -1200,7 +1200,7 @@ Produces: `Git::{create_branch, create_worktree, remove_worktree, is_clean}`
   }
   ```
 
-- [ ] Run the check and confirm green:
+- [x] Run the check and confirm green:
 
   ```
   cargo xtask check --integration
@@ -1211,7 +1211,7 @@ Produces: `Git::{create_branch, create_worktree, remove_worktree, is_clean}`
   #   test result: ok. 27 passed (xtask)
   ```
 
-- [ ] Commit: `feat(store): make a branch and a worktree for a task`
+- [x] Commit: `feat(store): make a branch and a worktree for a task`
 
 ### Task 4: What a branch changed
 

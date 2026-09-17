@@ -8,7 +8,7 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use farik_store::Git;
+use farik_store::{Git, GitError};
 
 /// A repository of its own, removed when the test ends however the test ends.
 struct TempRepo {
@@ -155,4 +155,68 @@ fn answers_with_the_branch_it_is_on_when_there_is_no_remote_to_ask() {
     assert_eq!(git.default_branch().expect("the read works"), "main");
     repository.git(&["checkout", "-b", "farik/FRK-1"]);
     assert_eq!(git.current_branch().expect("the read works"), "farik/FRK-1");
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn makes_a_branch_and_a_worktree_for_a_task_and_takes_the_worktree_away_again() {
+    // One worktree per task is what keeps two tasks from sharing a working tree (5.14), and the
+    // branch outlives it: the work is on the branch, not in the directory.
+    let repository = TempRepo::new("worktree");
+    let git = repository.adapter();
+    git.create_branch("farik/FRK-1", "main")
+        .expect("the branch is made");
+    let taken = git.create_branch("farik/FRK-1", "main");
+    let Err(GitError::CommandFailed { command, stderr }) = taken else {
+        panic!("a name is taken once: {taken:?}");
+    };
+    assert_eq!(command, "branch farik/FRK-1 main");
+    // What git said, not how it said it: the sentence is translated, the branch name is not.
+    assert!(stderr.contains("farik/FRK-1"), "{stderr}");
+
+    let worktree = repository.path.join(".farik/local/worktrees/FRK-2");
+    git.create_worktree(&worktree, "farik/FRK-2", "main")
+        .expect("the worktree is made");
+    assert!(
+        worktree.join("README.md").is_file(),
+        "it has the work in it"
+    );
+    assert!(git.is_clean(&worktree).expect("the read works"));
+
+    std::fs::write(worktree.join("built-by-the-session.txt"), "output\n")
+        .expect("something the session built");
+    assert!(
+        !git.is_clean(&worktree).expect("the read works"),
+        "an untracked file is not clean either"
+    );
+    // Forced, because that untracked file is exactly what a finished task leaves behind.
+    git.remove_worktree(&worktree).expect("it is taken away");
+    assert!(!worktree.exists());
+    assert!(
+        repository
+            .git(&["branch", "--list", "farik/FRK-2"])
+            .contains("farik/FRK-2"),
+        "and the branch is kept"
+    );
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn calls_a_worktree_dirty_whatever_the_repository_is_configured_to_show() {
+    // A user with `status.showUntrackedFiles = no` does not get to tell Farik that a worktree full
+    // of a session's output is clean. Its own fixture, because a setting stays in force for
+    // everything after it: left in the test above, it would take the dirtiness out of the very
+    // worktree whose removal that test forces.
+    let repository = TempRepo::new("untracked-hidden");
+    let git = repository.adapter();
+    let worktree = repository.path.join(".farik/local/worktrees/FRK-3");
+    git.create_worktree(&worktree, "farik/FRK-3", "main")
+        .expect("the worktree is made");
+    std::fs::write(worktree.join("built-by-the-session.txt"), "output\n")
+        .expect("something the session built");
+    repository.git(&["config", "status.showUntrackedFiles", "no"]);
+    assert!(
+        !git.is_clean(&worktree).expect("the read works"),
+        "an untracked file is not clean whatever the repository is configured to show"
+    );
 }

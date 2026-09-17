@@ -118,6 +118,64 @@ impl Git {
         self.at_root(&["symbolic-ref", "--short", "HEAD"])
     }
 
+    /// Makes a branch at `from`, without checking it out.
+    ///
+    /// # Errors
+    ///
+    /// `CommandFailed` when the name is taken or `from` names nothing.
+    pub fn create_branch(&self, name: &str, from: &str) -> Result<(), GitError> {
+        self.require_repository()?;
+        self.at_root(&["branch", name, from])?;
+        Ok(())
+    }
+
+    /// Makes a worktree at `path` on a new branch `branch`, starting from `from`.
+    ///
+    /// One worktree per task is what keeps two tasks from sharing a working tree (5.14).
+    ///
+    /// # Errors
+    ///
+    /// `CommandFailed` when the path is taken, the branch exists, or `from` names nothing.
+    pub fn create_worktree(&self, path: &Path, branch: &str, from: &str) -> Result<(), GitError> {
+        self.require_repository()?;
+        let path = path_argument(path)?;
+        self.at_root(&["worktree", "add", "-b", branch, &path, from])?;
+        Ok(())
+    }
+
+    /// Removes the worktree at `path`, keeping its branch.
+    ///
+    /// Forced, because a task's worktree holds whatever its session built — untracked output that
+    /// git would otherwise refuse to remove, and that nothing wants kept once the task is done.
+    ///
+    /// # Errors
+    ///
+    /// `CommandFailed` when no worktree is registered at `path`.
+    pub fn remove_worktree(&self, path: &Path) -> Result<(), GitError> {
+        self.require_repository()?;
+        let path = path_argument(path)?;
+        self.at_root(&["worktree", "remove", "--force", &path])?;
+        Ok(())
+    }
+
+    /// Whether the tree at `path` has nothing uncommitted, untracked files included.
+    ///
+    /// `--untracked-files=normal` is what makes that promise true rather than hopeful: a user with
+    /// `status.showUntrackedFiles = no` in their own configuration would otherwise be told a
+    /// worktree full of a session's output is clean.
+    ///
+    /// A file git ignores is not untracked and does not make a worktree dirty, deliberately: an
+    /// ignore rule is how a person says a path is not content, and `.DS_Store` next to a task's
+    /// work is not the task's work. Farik counts what git counts.
+    ///
+    /// # Errors
+    ///
+    /// `CommandFailed` when `path` is not a working tree of this repository.
+    pub fn is_clean(&self, path: &Path) -> Result<bool, GitError> {
+        self.require_repository()?;
+        Ok(run_git(path, &["status", "--porcelain", "--untracked-files=normal"])?.is_empty())
+    }
+
     /// Refuses before running anything when there is no repository, so that every method says the
     /// same thing about it rather than each passing on whatever git happened to print.
     fn require_repository(&self) -> Result<(), GitError> {
@@ -175,9 +233,24 @@ fn default_branch_of(reference: &str) -> String {
         .map_or_else(|| reference.to_string(), |(_, branch)| branch.to_string())
 }
 
+/// A path as git takes it, refusing one that is not text.
+///
+/// Every path Farik hands git it built itself, from `.farik/local/worktrees/` and a task id, so
+/// this is about a repository somewhere a user's own path is not UTF-8.
+fn path_argument(path: &Path) -> Result<String, GitError> {
+    path.to_str()
+        .map(ToString::to_string)
+        .ok_or_else(|| GitError::CommandFailed {
+            command: "worktree".to_string(),
+            stderr: format!("the path {} is not text git can be given", path.display()),
+        })
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{GitError, HeadSummary, default_branch_of, head_summary_of};
+    use std::path::PathBuf;
+
+    use super::{GitError, HeadSummary, default_branch_of, head_summary_of, path_argument};
 
     /// What `git log --format=%H%x1f%cI%x1f%s` prints for one commit.
     fn a_log_line(subject: &str) -> String {
@@ -228,6 +301,21 @@ mod tests {
         // A branch whose own name holds a slash keeps the rest of it.
         assert_eq!(default_branch_of("origin/release/2.0"), "release/2.0");
         assert_eq!(default_branch_of("main"), "main", "no remote to take off");
+    }
+
+    #[test]
+    fn refuses_a_path_that_is_not_text_git_can_be_given() {
+        assert!(path_argument(&PathBuf::from("crates/store")).is_ok());
+        #[cfg(unix)]
+        {
+            use std::ffi::OsString;
+            use std::os::unix::ffi::OsStringExt;
+            let not_text = PathBuf::from(OsString::from_vec(vec![0xff, 0xfe]));
+            assert!(matches!(
+                path_argument(&not_text),
+                Err(GitError::CommandFailed { .. })
+            ));
+        }
     }
 
     #[test]
