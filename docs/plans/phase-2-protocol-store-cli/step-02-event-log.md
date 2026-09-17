@@ -15,7 +15,7 @@ Farik has somewhere to keep what happened. `farik-store` opens a SQLite database
 
 ## Decisions
 
-- `open_event_log(path: &Path, now: DateTime<Utc>)` takes the clock: chose the injected time over reading the clock inside `migrations::apply` because `docs/standards/code.md` ("Time, randomness, and identifiers are injected") allows no ambient clock outside the edge, and the migration ledger stamps `applied_at`. The project plan's recorded signature has no `now`; task 6 records the change.
+- `open_event_log(path: &Path, now: DateTime<Utc>)` takes the clock: chose the injected time over reading the clock inside `migrations::apply` because `docs/standards/code.md` ("Time, randomness, and identifiers are injected") allows no ambient clock outside the edge, and the migration ledger stamps `applied_at`. Chose a `DateTime<Utc>` value over the `Clock` trait step 01 built, although the project plan's every-phase decision names that trait as the mechanism: a log is opened once per command and stamps one row, so there is nothing to sample repeatedly, and the trait would make the store depend on something it calls exactly once. A caller that holds a `Clock` passes `clock.now()`. The project plan's recorded signature has no `now`; task 6 records the change.
 - `append(&self, event: &NewEvent)` takes a reference rather than the value the project plan records: chose the reference because `NewEvent` is not `Copy` and clippy's `needless_pass_by_value` (pedantic, denied) refuses the value form. Task 6 records the change.
 - `append` re-validates through `event_from_value`: chose to check every event against `docs/schemas/event.schema.json` on the way in over trusting the caller, because `NewEvent`'s fields are public, so an event can reach the log without passing through `new_event`, and the log cannot be corrected afterwards. The placeholder sequence number zero never reaches a row; the insert assigns the real one.
 - `StoreError` gains `TaskIdsExhausted { next }`: chose a refusal of its own over `Sqlite` with a message because the contract schema's `^FRK-[0-9]{1,6}$` has an end, and a caller that wants to say so needs to match on it rather than read a string.
@@ -29,6 +29,8 @@ Farik has somewhere to keep what happened. `farik-store` opens a SQLite database
 - A query with no filter reads the whole log, and a query whose `after_seq` no row can hold reads nothing rather than being refused: chose the empty answer because a reader resuming from the end of the log is the ordinary case.
 - Task ids come from a `task_counters` row, incremented and read in one statement (`INSERT ... ON CONFLICT DO UPDATE ... RETURNING next`) inside a transaction: chose the counter table over `max(seq)` or a scan of the contracts because the id has to be unique across processes, and two `farik` commands run at once.
 - The unit tests open `:memory:`; what only a database on a file can show lives in `crates/store/tests/event_log_file.rs`: chose the split over one file because `docs/standards/code.md` puts a test that needs the file system in `tests/`, and because the unit tests reach `log.connection` to write a row by hand, which no integration test can.
+- Two unit tests reach into private state, against `docs/standards/code.md`'s testing rules, and each is deliberate. `log.connection` is how a row that this crate would never write gets into the log, which is the whole subject of the two tests that use it. `log.subscribers_lock().len()` is how the subscribe test says that a departed subscriber is forgotten: sending on a closed channel already fails silently, so an `announce` that ignored the error instead of dropping the sender would pass every observable assertion while the list grew without bound for as long as the process lived.
+- `crates/store/tests/event_log_file.rs` is the workspace's first `tests/` file, and it runs in the default `cargo xtask check` rather than behind `--integration`: it needs a temporary directory and nothing else — no Docker, no git binary — and the project plan's every-phase testing decision gates the flag on the first test that needs one of those (phase 2 step 04). Gating this one would have left the only tests of reopening, of two processes on one file, and of the journal mode out of every check until step 04. Task 6 amends that decision and step 04's row so the plan stops promising what this step has done.
 - The integration test file has a hand-rolled `TempDir` that removes its directory on drop: chose eight lines over a `tempfile` dependency because the workspace pins every version by hand and this is the only place that needs one.
 - The integration file's module doc says what the file is for rather than listing the tests in it: chosen so that the doc is written once instead of being rewritten by each task that adds a test to it.
 
@@ -70,7 +72,9 @@ crates/store/src/migrations.rs                creates: the migration list, the a
 crates/store/src/migrations/0001_event_log.sql creates: the events table, its indexes, its append-only triggers, task_counters
 crates/store/src/event_log.rs                 creates: EventLog, EventQuery, open_event_log; tested by its own tests module
 crates/store/tests/event_log_file.rs          creates: what only a log on a file can show
-docs/plans/project-plan.md                    modifies: records what this step changed about the interface it had recorded
+crates/protocol/src/event.rs                  modifies: body_to_value becomes public
+Cargo.lock                                    modifies (generated by cargo): the new member and rusqlite
+docs/plans/project-plan.md                    modifies: records what this step changed about the interface it had recorded, and where the first tests/ file runs
 docs/plans/phase-2-protocol-store-cli/step-02-event-log.md modifies: this plan, ticked as it goes
 ```
 
@@ -78,10 +82,12 @@ docs/plans/phase-2-protocol-store-cli/step-02-event-log.md modifies: this plan, 
 
 ### Task 1: A log that opens, and a shape it brings up to date
 
-Files: created `crates/store/Cargo.toml`, `crates/store/src/lib.rs`, `crates/store/src/error.rs`, `crates/store/src/migrations.rs`, `crates/store/src/migrations/0001_event_log.sql`, `crates/store/src/event_log.rs`, `crates/store/tests/event_log_file.rs`; modified `Cargo.toml`; tested by `crates/store/src/event_log.rs` and `crates/store/tests/event_log_file.rs`
+Files: created `crates/store/Cargo.toml`, `crates/store/src/lib.rs`, `crates/store/src/error.rs`, `crates/store/src/migrations.rs`, `crates/store/src/migrations/0001_event_log.sql`, `crates/store/src/event_log.rs`, `crates/store/tests/event_log_file.rs`; modified `Cargo.toml`, `Cargo.lock` (by cargo), `docs/plans/phase-2-protocol-store-cli/step-02-event-log.md`; tested by `crates/store/src/event_log.rs` and `crates/store/tests/event_log_file.rs`
 
 Consumes: nothing from this plan
 Produces: `farik_store::{StoreError, EventLog, IN_MEMORY, open_event_log}`, `farik_store::migrations::known_versions`
+
+The scaffolding below — the two manifests and three files holding nothing but their `//!` docs — is what a test needs in order to fail for the right reason rather than for a missing crate. No behaviour is written until after the red.
 
 - [ ] Add to the `[workspace.dependencies]` table of `Cargo.toml`, keeping it alphabetical — `farik-protocol` after `farik-core`, `rusqlite` after `regress`:
 
@@ -115,7 +121,7 @@ Produces: `farik_store::{StoreError, EventLog, IN_MEMORY, open_event_log}`, `far
   workspace = true
   ```
 
-- [ ] Create `crates/store/src/lib.rs`:
+- [ ] Create `crates/store/src/lib.rs`, declaring the three modules and re-exporting nothing yet:
 
   ```rust
   //! Farik's memory: the append-only event log, the projections read from it, and the files under
@@ -127,214 +133,21 @@ Produces: `farik_store::{StoreError, EventLog, IN_MEMORY, open_event_log}`, `far
   pub mod event_log;
   /// The database's shape, as SQL applied in order.
   pub mod migrations;
-
-  pub use error::StoreError;
   ```
 
-- [ ] Create `crates/store/src/error.rs`:
+- [ ] Create `crates/store/src/error.rs` with one line, so that the module exists and holds nothing:
 
   ```rust
   //! What the store refuses, and why.
-
-  use std::fmt;
-
-  /// Why a store operation did not happen.
-  #[derive(Debug, Clone, PartialEq, Eq)]
-  pub enum StoreError {
-      /// The file system refused: the directory could not be made, the file could not be reached.
-      Io {
-          /// What failed, in the words the operating system used.
-          detail: String,
-      },
-      /// SQLite refused: a statement failed, the database is locked, a migration did not apply.
-      Sqlite {
-          /// What failed, in SQLite's own words.
-          detail: String,
-      },
-      /// A row of the log cannot be read back as an event. The log is append-only and every append
-      /// goes through the protocol crate's rules, so this means the file was changed by something
-      /// else, or was written by a version of Farik this one does not understand.
-      InvalidEvent {
-          /// Which row and what is wrong with it.
-          detail: String,
-      },
-      /// The task id counter has passed what the contract schema's pattern can spell
-      /// (`^FRK-[0-9]{1,6}$`), so the store has no id left to hand out. Refused rather than
-      /// returning something that is not a task id.
-      TaskIdsExhausted {
-          /// The number the counter reached.
-          next: u64,
-      },
-  }
-
-  impl fmt::Display for StoreError {
-      fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-          match self {
-              Self::Io { detail } => write!(formatter, "the file system refused: {detail}"),
-              Self::Sqlite { detail } => write!(formatter, "sqlite refused: {detail}"),
-              Self::InvalidEvent { detail } => {
-                  write!(
-                      formatter,
-                      "the log holds a row that is not an event: {detail}"
-                  )
-              }
-              Self::TaskIdsExhausted { next } => write!(
-                  formatter,
-                  "the task id counter reached {next}, which no longer fits FRK- and six digits"
-              ),
-          }
-      }
-  }
-
-  impl std::error::Error for StoreError {}
-
-  impl From<rusqlite::Error> for StoreError {
-      fn from(error: rusqlite::Error) -> Self {
-          Self::Sqlite {
-              detail: error.to_string(),
-          }
-      }
-  }
-
-  impl From<std::io::Error> for StoreError {
-      fn from(error: std::io::Error) -> Self {
-          Self::Io {
-              detail: error.to_string(),
-          }
-      }
-  }
   ```
 
-- [ ] Create `crates/store/src/migrations/0001_event_log.sql`:
-
-  ```sql
-  -- The event log and the counter that hands out task ids (docs/SPEC.md 5.1, 8.4).
-  --
-  -- Every table is STRICT: a column declared TEXT refuses an integer, so a row that does not mean
-  -- what it says cannot be written in the first place. The log is the source of truth for what
-  -- happened, and a log that accepts anything is not one. `schema_migrations` is not here: the
-  -- ledger of what has been applied belongs to the applier, which makes it before it reads it.
-
-  -- One row per event. The envelope's fields are columns, because they are what the log is queried
-  -- by; the body is the canonical JSON of docs/schemas/event.schema.json, because its shape belongs
-  -- to the kind rather than to the table. Nothing is stored twice: a read rebuilds the wire value
-  -- from the columns and the body and hands it to the protocol crate's reader, so a row that cannot
-  -- be read back is refused rather than half-built.
-  CREATE TABLE events (
-      seq         INTEGER PRIMARY KEY AUTOINCREMENT,
-      recorded_at TEXT NOT NULL,
-      team_id     TEXT NOT NULL,
-      project_id  TEXT NOT NULL,
-      task_id     TEXT,
-      agent_id    TEXT,
-      session_id  TEXT,
-      kind        TEXT NOT NULL,
-      body        TEXT NOT NULL
-  ) STRICT;
-
-  CREATE INDEX events_by_task ON events (task_id, seq) WHERE task_id IS NOT NULL;
-  CREATE INDEX events_by_agent ON events (agent_id, seq) WHERE agent_id IS NOT NULL;
-  CREATE INDEX events_by_kind ON events (kind, seq);
-
-  -- Append-only in the engine, not only in the code above it: `farik doctor`, a migration, a repair
-  -- script, and a person with the sqlite3 shell all go through these.
-  CREATE TRIGGER events_refuse_update
-  BEFORE UPDATE ON events
-  BEGIN
-      SELECT RAISE(ABORT, 'the event log is append-only: an event cannot be changed');
-  END;
-
-  CREATE TRIGGER events_refuse_delete
-  BEFORE DELETE ON events
-  BEGIN
-      SELECT RAISE(ABORT, 'the event log is append-only: an event cannot be deleted');
-  END;
-
-  -- The next number for each task id prefix. One row, `FRK`, until a second prefix exists.
-  CREATE TABLE task_counters (
-      prefix TEXT PRIMARY KEY,
-      next   INTEGER NOT NULL
-  ) STRICT;
-  ```
-
-- [ ] Create `crates/store/src/migrations.rs`:
+- [ ] Create `crates/store/src/migrations.rs` with one line, the same way:
 
   ```rust
   //! The database's shape, as SQL applied in order and recorded once applied.
-
-  use chrono::{DateTime, SecondsFormat, Utc};
-  use rusqlite::Connection;
-
-  use crate::error::StoreError;
-
-  /// One migration: its version and the SQL that applies it.
-  struct Migration {
-      version: i64,
-      sql: &'static str,
-  }
-
-  /// Every migration, in the order they apply. A migration is never edited once it has shipped; a
-  /// change to the shape is a new one, so that a database written by an older Farik reaches the same
-  /// shape as one made today.
-  const MIGRATIONS: [Migration; 1] = [Migration {
-      version: 1,
-      sql: include_str!("migrations/0001_event_log.sql"),
-  }];
-
-  /// Brings the database to the shape this version expects, and records what it applied. Applying to
-  /// a database that is already current does nothing, so opening a log twice is not an error.
-  ///
-  /// Each migration and its record go in one transaction: a migration that fails leaves the database
-  /// as it was rather than half-migrated, which is the state nothing knows how to repair.
-  ///
-  /// # Errors
-  ///
-  /// `Sqlite` when a migration or its record fails.
-  pub(crate) fn apply(connection: &mut Connection, now: DateTime<Utc>) -> Result<(), StoreError> {
-      connection.execute_batch(
-          "CREATE TABLE IF NOT EXISTS schema_migrations (
-              version    INTEGER PRIMARY KEY,
-              applied_at TEXT NOT NULL
-          ) STRICT;",
-      )?;
-      for migration in &MIGRATIONS {
-          if is_applied(connection, migration.version)? {
-              continue;
-          }
-          let transaction = connection.transaction()?;
-          transaction.execute_batch(migration.sql)?;
-          transaction.execute(
-              "INSERT OR REPLACE INTO schema_migrations (version, applied_at) VALUES (?1, ?2)",
-              (
-                  migration.version,
-                  now.to_rfc3339_opts(SecondsFormat::AutoSi, true),
-              ),
-          )?;
-          transaction.commit()?;
-      }
-      Ok(())
-  }
-
-  fn is_applied(connection: &Connection, version: i64) -> Result<bool, StoreError> {
-      let count: i64 = connection.query_row(
-          "SELECT count(*) FROM schema_migrations WHERE version = ?1",
-          (version,),
-          |row| row.get(0),
-      )?;
-      Ok(count > 0)
-  }
-
-  /// The versions this build knows about, in order. `open_event_log` has applied every one of them.
-  #[must_use]
-  pub fn known_versions() -> Vec<i64> {
-      MIGRATIONS
-          .iter()
-          .map(|migration| migration.version)
-          .collect()
-  }
   ```
 
-- [ ] Write the failing tests. Create `crates/store/src/event_log.rs` with the module doc and nothing else:
+- [ ] Write the failing tests. Create `crates/store/src/event_log.rs` with the module doc:
 
   ```rust
   //! The event log: every action the team takes, in the order it happened, never changed afterwards
@@ -475,17 +288,231 @@ Produces: `farik_store::{StoreError, EventLog, IN_MEMORY, open_event_log}`, `far
   }
   ```
 
-- [ ] Run them and confirm they fail because the log is missing:
+- [ ] Run them and confirm they fail because there is no log and no applier:
 
   ```
   cargo test -p farik-store
   # expected: FAIL to compile, twice:
   # error[E0432]: unresolved imports `super::DateTime`, `super::EventLog`, `super::IN_MEMORY`,
   #   `super::Path`, `super::Utc`, `super::open_event_log`
+  # error[E0425]: cannot find function `known_versions` in module `migrations`
+  # error[E0425]: cannot find function `apply` in module `migrations`
+  # error[E0425]: cannot find function `known_versions` in module `migrations`
+  # error: could not compile `farik-store` (lib test) due to 4 previous errors
   # error[E0432]: unresolved import `farik_store::open_event_log`
+  # error: could not compile `farik-store` (test "event_log_file") due to 1 previous error
   ```
 
-- [ ] Write the minimal implementation. Insert into `crates/store/src/event_log.rs`, between the module doc and the tests module:
+- [ ] Write the minimal implementation. Replace the one line of `crates/store/src/error.rs` with:
+
+  ```rust
+  //! What the store refuses, and why.
+
+  use std::fmt;
+
+  /// Why a store operation did not happen.
+  #[derive(Debug, Clone, PartialEq, Eq)]
+  pub enum StoreError {
+      /// The file system refused: the directory could not be made, the file could not be reached.
+      Io {
+          /// What failed, in the words the operating system used.
+          detail: String,
+      },
+      /// SQLite refused: a statement failed, the database is locked, a migration did not apply.
+      Sqlite {
+          /// What failed, in SQLite's own words.
+          detail: String,
+      },
+      /// A row of the log cannot be read back as an event. The log is append-only and every append
+      /// goes through the protocol crate's rules, so this means the file was changed by something
+      /// else, or was written by a version of Farik this one does not understand.
+      InvalidEvent {
+          /// Which row and what is wrong with it.
+          detail: String,
+      },
+      /// The task id counter has passed what the contract schema's pattern can spell
+      /// (`^FRK-[0-9]{1,6}$`), so the store has no id left to hand out. Refused rather than
+      /// returning something that is not a task id.
+      TaskIdsExhausted {
+          /// The number the counter reached.
+          next: u64,
+      },
+  }
+
+  impl fmt::Display for StoreError {
+      fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+          match self {
+              Self::Io { detail } => write!(formatter, "the file system refused: {detail}"),
+              Self::Sqlite { detail } => write!(formatter, "sqlite refused: {detail}"),
+              Self::InvalidEvent { detail } => {
+                  write!(
+                      formatter,
+                      "the log holds a row that is not an event: {detail}"
+                  )
+              }
+              Self::TaskIdsExhausted { next } => write!(
+                  formatter,
+                  "the task id counter reached {next}, which no longer fits FRK- and six digits"
+              ),
+          }
+      }
+  }
+
+  impl std::error::Error for StoreError {}
+
+  impl From<rusqlite::Error> for StoreError {
+      fn from(error: rusqlite::Error) -> Self {
+          Self::Sqlite {
+              detail: error.to_string(),
+          }
+      }
+  }
+
+  impl From<std::io::Error> for StoreError {
+      fn from(error: std::io::Error) -> Self {
+          Self::Io {
+              detail: error.to_string(),
+          }
+      }
+  }
+  ```
+
+- [ ] Create `crates/store/src/migrations/0001_event_log.sql`:
+
+  ```sql
+  -- The event log and the counter that hands out task ids (docs/SPEC.md 5.1, 8.4).
+  --
+  -- Every table is STRICT: a column declared TEXT refuses an integer, so a row that does not mean
+  -- what it says cannot be written in the first place. The log is the source of truth for what
+  -- happened, and a log that accepts anything is not one. `schema_migrations` is not here: the
+  -- ledger of what has been applied belongs to the applier, which makes it before it reads it.
+
+  -- One row per event. The envelope's fields are columns, because they are what the log is queried
+  -- by; the body is the canonical JSON of docs/schemas/event.schema.json, because its shape belongs
+  -- to the kind rather than to the table. Nothing is stored twice: a read rebuilds the wire value
+  -- from the columns and the body and hands it to the protocol crate's reader, so a row that cannot
+  -- be read back is refused rather than half-built.
+  CREATE TABLE events (
+      seq         INTEGER PRIMARY KEY AUTOINCREMENT,
+      recorded_at TEXT NOT NULL,
+      team_id     TEXT NOT NULL,
+      project_id  TEXT NOT NULL,
+      task_id     TEXT,
+      agent_id    TEXT,
+      session_id  TEXT,
+      kind        TEXT NOT NULL,
+      body        TEXT NOT NULL
+  ) STRICT;
+
+  CREATE INDEX events_by_task ON events (task_id, seq) WHERE task_id IS NOT NULL;
+  CREATE INDEX events_by_agent ON events (agent_id, seq) WHERE agent_id IS NOT NULL;
+  CREATE INDEX events_by_kind ON events (kind, seq);
+
+  -- Append-only in the engine, not only in the code above it: `farik doctor`, a migration, a repair
+  -- script, and a person with the sqlite3 shell all go through these.
+  CREATE TRIGGER events_refuse_update
+  BEFORE UPDATE ON events
+  BEGIN
+      SELECT RAISE(ABORT, 'the event log is append-only: an event cannot be changed');
+  END;
+
+  CREATE TRIGGER events_refuse_delete
+  BEFORE DELETE ON events
+  BEGIN
+      SELECT RAISE(ABORT, 'the event log is append-only: an event cannot be deleted');
+  END;
+
+  -- The next number for each task id prefix. One row, `FRK`, until a second prefix exists.
+  CREATE TABLE task_counters (
+      prefix TEXT PRIMARY KEY,
+      next   INTEGER NOT NULL
+  ) STRICT;
+  ```
+
+- [ ] Replace the one line of `crates/store/src/migrations.rs` with:
+
+  ```rust
+  //! The database's shape, as SQL applied in order and recorded once applied.
+
+  use chrono::{DateTime, SecondsFormat, Utc};
+  use rusqlite::Connection;
+
+  use crate::error::StoreError;
+
+  /// One migration: its version and the SQL that applies it.
+  struct Migration {
+      version: i64,
+      sql: &'static str,
+  }
+
+  /// Every migration, in the order they apply. A migration is never edited once it has shipped; a
+  /// change to the shape is a new one, so that a database written by an older Farik reaches the same
+  /// shape as one made today.
+  const MIGRATIONS: [Migration; 1] = [Migration {
+      version: 1,
+      sql: include_str!("migrations/0001_event_log.sql"),
+  }];
+
+  /// Brings the database to the shape this version expects, and records what it applied. Applying to
+  /// a database that is already current does nothing, so opening a log twice is not an error.
+  ///
+  /// Each migration and its record go in one transaction: a migration that fails leaves the database
+  /// as it was rather than half-migrated, which is the state nothing knows how to repair.
+  ///
+  /// # Errors
+  ///
+  /// `Sqlite` when a migration or its record fails.
+  pub(crate) fn apply(connection: &mut Connection, now: DateTime<Utc>) -> Result<(), StoreError> {
+      connection.execute_batch(
+          "CREATE TABLE IF NOT EXISTS schema_migrations (
+              version    INTEGER PRIMARY KEY,
+              applied_at TEXT NOT NULL
+          ) STRICT;",
+      )?;
+      for migration in &MIGRATIONS {
+          if is_applied(connection, migration.version)? {
+              continue;
+          }
+          let transaction = connection.transaction()?;
+          transaction.execute_batch(migration.sql)?;
+          transaction.execute(
+              "INSERT OR REPLACE INTO schema_migrations (version, applied_at) VALUES (?1, ?2)",
+              (
+                  migration.version,
+                  now.to_rfc3339_opts(SecondsFormat::AutoSi, true),
+              ),
+          )?;
+          transaction.commit()?;
+      }
+      Ok(())
+  }
+
+  fn is_applied(connection: &Connection, version: i64) -> Result<bool, StoreError> {
+      let count: i64 = connection.query_row(
+          "SELECT count(*) FROM schema_migrations WHERE version = ?1",
+          (version,),
+          |row| row.get(0),
+      )?;
+      Ok(count > 0)
+  }
+
+  /// The versions this build knows about, in order. `open_event_log` has applied every one of them.
+  #[must_use]
+  pub fn known_versions() -> Vec<i64> {
+      MIGRATIONS
+          .iter()
+          .map(|migration| migration.version)
+          .collect()
+  }
+  ```
+
+- [ ] Add the re-export of `StoreError` to `crates/store/src/lib.rs`, after the three `pub mod` lines and separated from them by a blank line:
+
+  ```rust
+  pub use error::StoreError;
+  ```
+
+- [ ] Insert into `crates/store/src/event_log.rs`, between the module doc and the tests module:
 
   ```rust
   use std::path::Path;
@@ -574,7 +601,7 @@ Produces: `farik_store::{StoreError, EventLog, IN_MEMORY, open_event_log}`, `far
   }
   ```
 
-- [ ] Add the re-export to `crates/store/src/lib.rs`, after `pub use error::StoreError;`:
+- [ ] Add the second re-export to `crates/store/src/lib.rs`, after `pub use error::StoreError;`:
 
   ```rust
   pub use event_log::{EventLog, IN_MEMORY, open_event_log};
@@ -600,7 +627,7 @@ Produces: `farik_store::{StoreError, EventLog, IN_MEMORY, open_event_log}`, `far
 
 ### Task 2: Appending an event, and reading the ones a query asks for
 
-Files: modified `crates/protocol/src/event.rs`, `crates/store/src/event_log.rs`, `crates/store/src/lib.rs`, `crates/store/tests/event_log_file.rs`; tested by `crates/store/src/event_log.rs` and `crates/store/tests/event_log_file.rs`
+Files: modified `crates/protocol/src/event.rs`, `crates/store/src/event_log.rs`, `crates/store/src/lib.rs`, `crates/store/tests/event_log_file.rs`, `docs/plans/phase-2-protocol-store-cli/step-02-event-log.md`; tested by `crates/store/src/event_log.rs` and `crates/store/tests/event_log_file.rs`
 
 Consumes: `open_event_log`, `EventLog`, `IN_MEMORY` from Task 1; `FarikEvent`, `NewEvent`, `EventEnvelope`, `EventKind`, `EVERY_KIND`, `event_from_value`, `fixtures::an_event_wire`, `body_to_value` from `crates/protocol/src/event.rs`; `TaskId` from `crates/core/src/contract.rs`
 Produces: `EventLog::append`, `EventLog::read`, `farik_store::EventQuery`, `farik_protocol::event::body_to_value` as public API
@@ -822,9 +849,11 @@ Produces: `EventLog::append`, `EventLog::read`, `farik_store::EventQuery`, `fari
       }
   ```
 
-- [ ] Grow `crates/store/tests/event_log_file.rs`. Replace its import lines with:
+- [ ] Grow `crates/store/tests/event_log_file.rs`. Replace its whole import section — the four lines from `use std::path::PathBuf;` to `use farik_store::open_event_log;`, the blank line between them included — with:
 
   ```rust
+  use std::path::PathBuf;
+
   use chrono::{DateTime, TimeZone, Utc};
   use farik_protocol::event::fixtures::an_event_wire;
   use farik_protocol::event::{EventKind, NewEvent, event_from_value};
@@ -1215,7 +1244,7 @@ Produces: `EventLog::append`, `EventLog::read`, `farik_store::EventQuery`, `fari
 
 ### Task 3: Every append reaches whoever is listening
 
-Files: modified `crates/store/src/event_log.rs`; tested by `crates/store/src/event_log.rs`
+Files: modified `crates/store/src/event_log.rs`, `docs/plans/phase-2-protocol-store-cli/step-02-event-log.md`; tested by `crates/store/src/event_log.rs`
 
 Consumes: `EventLog::append` from Task 2
 Produces: `EventLog::subscribe`
@@ -1368,7 +1397,7 @@ Produces: `EventLog::subscribe`
 
 ### Task 4: One task id at a time, across processes
 
-Files: modified `crates/store/src/event_log.rs`, `crates/store/tests/event_log_file.rs`; tested by both
+Files: modified `crates/store/src/event_log.rs`, `crates/store/tests/event_log_file.rs`, `docs/plans/phase-2-protocol-store-cli/step-02-event-log.md`; tested by both
 
 Consumes: `EventLog`, `open_event_log` from Task 1; `StoreError::TaskIdsExhausted` from Task 1; `TaskId` from `crates/core/src/contract.rs`
 Produces: `EventLog::next_task_id`
@@ -1521,19 +1550,12 @@ Produces: `EventLog::next_task_id`
 
 ### Task 5: An append that returned survives the power going out
 
-Files: modified `crates/store/Cargo.toml`, `crates/store/src/event_log.rs`, `crates/store/tests/event_log_file.rs`; tested by `crates/store/tests/event_log_file.rs`
+Files: modified `crates/store/src/event_log.rs`, `crates/store/tests/event_log_file.rs`, `docs/plans/phase-2-protocol-store-cli/step-02-event-log.md`; tested by `crates/store/tests/event_log_file.rs`
 
 Consumes: `open_event_log` from Task 1
 Produces: write-ahead logging and `synchronous = FULL` on a log that lives on a file
 
-- [ ] Write the failing test. Add to `crates/store/Cargo.toml`, after the `[dependencies]` table:
-
-  ```toml
-  [dev-dependencies]
-  rusqlite.workspace = true
-  ```
-
-  and append to `crates/store/tests/event_log_file.rs`:
+- [ ] Write the failing test. Append to `crates/store/tests/event_log_file.rs` (`rusqlite` is already a dependency of the crate, and a crate's dependencies are available to its `tests/` targets, so nothing is added to the manifest):
 
   ```rust
   #[test]
@@ -1591,13 +1613,25 @@ Produces: write-ahead logging and `synchronous = FULL` on a log that lives on a 
 Files: modified `docs/plans/project-plan.md`, `docs/plans/phase-2-protocol-store-cli/step-02-event-log.md`
 
 Consumes: everything above
-Produces: nothing in code
+Produces: a project plan that describes the store as it now is
 
-No test: this task changes prose only, and `cargo xtask check` is what holds it.
+This task changes documentation and has no test cycle. The `> ` marker on each block below is this plan's and is not part of the text to write.
 
-- [ ] In `docs/plans/project-plan.md`, replace the phase 2 `Step 02 (farik-store)` line with one that records what this step settled: `open_event_log(path: &Path, now: DateTime<Utc>)` (the clock is injected, changed 2026-09-17 by the step 02 plan, because `docs/standards/code.md` allows no ambient clock and the migration ledger stamps `applied_at`); `append(&self, event: &NewEvent)` (a reference, because clippy's `needless_pass_by_value` refuses the value form); `StoreError { Io, Sqlite, InvalidEvent, TaskIdsExhausted { next } }` (the last added because the contract schema's `^FRK-[0-9]{1,6}$` has an end); `IN_MEMORY`; `EventLog::applied_migrations`; `migrations::known_versions`; and the note that `farik-protocol`'s `body_to_value` is public so that the store does not write a body of its own.
-- [ ] Tick every checkbox above, set this plan's `Status:` to `done`, and fill in the Verification section with the output the commands actually produced.
-- [ ] Commit: `docs(plans): record what step 02 changed about the store`
+- [ ] In `docs/plans/project-plan.md`, in the phase 2 section, replace the line beginning `- Step 02 (\`farik-store\`):` with:
+
+  > - Step 02 (`farik-store`): `enum StoreError { Io { detail }, Sqlite { detail }, InvalidEvent { detail }, TaskIdsExhausted { next: u64 } }` (the last added 2026-09-17 by the step 02 plan: the contract schema's `^FRK-[0-9]{1,6}$` has an end, so the counter does too, and a caller that wants to say so needs to match on it rather than read a message); `IN_MEMORY: &str`, the path that opens a database in memory for tests and for a dry run; `fn open_event_log(path: &Path, now: DateTime<Utc>) -> Result<EventLog, StoreError>` (the clock is injected as a value, changed 2026-09-17 by the step 02 plan: `docs/standards/code.md` allows no ambient clock and the migration ledger stamps `applied_at`; a value rather than the `Clock` trait because a log is opened once per command and stamps one row); `impl EventLog { fn append(&self, event: &NewEvent) -> Result<FarikEvent, StoreError>; fn read(&self, query: &EventQuery) -> Result<Vec<FarikEvent>, StoreError>; fn subscribe(&self) -> Receiver<FarikEvent>; fn next_task_id(&self) -> Result<TaskId, StoreError>; fn applied_migrations(&self) -> Result<Vec<i64>, StoreError> }` backed by a `task_counters` table (`append` takes a reference, changed 2026-09-17 by the step 02 plan, because clippy's `needless_pass_by_value` refuses the value form, and it re-validates every event through `event_from_value` because `NewEvent`'s fields are public); `struct EventQuery { after_seq: Option<u64>, task_id: Option<TaskId>, agent_id: Option<String>, kinds: Vec<EventKind>, limit: Option<usize> }`, whose `Default` reads the whole log; `fn migrations::known_versions() -> Vec<i64>`. `farik_protocol::event::body_to_value` becomes public in this step, so that the store does not write a body of its own.
+
+- [ ] In `docs/plans/project-plan.md`, in "Decisions that apply to every phase", replace the second sentence of the "Tests are split in three" bullet — the one beginning `Integration tests (\`crates/<name>/tests/<subject>.rs\`)` and ending `(phase 2 step 04)` — with:
+
+  > Integration tests (`crates/<name>/tests/<subject>.rs`) need Docker, a git binary, or the file system in ways a unit test must not. One that needs only a temporary directory runs in the default `cargo xtask check`; one that needs Docker or a git binary runs by `cargo xtask check --integration`, which runs in CI as a second job of the same `check` workflow from the step that adds the first test needing it (phase 2 step 04). Changed 2026-09-17 by the phase 2 step 02 plan: the first `tests/` file is the event log's, it needs a temporary directory and nothing else, and gating it would have left reopening, two processes on one file, and the journal mode out of every check until step 04.
+
+- [ ] In `docs/plans/project-plan.md`, in the phase 2 step table, replace the last cell of the step 04 row — `the first integration test and the CI job for \`cargo xtask check --integration\`` — with:
+
+  > the first integration test that needs a git binary, and the CI job for `cargo xtask check --integration`
+
+- [ ] Set this plan's `Status:` to `done` and confirm every checkbox above is ticked, each in the commit of the task it belongs to.
+
+- [ ] Commit: `docs(docs): record what step 02 changed about the store`
 
 ## Verification
 
@@ -1622,7 +1656,7 @@ No test: this task changes prose only, and `cargo xtask check` is what holds it.
     "feat(store): announce every append to its subscribers" \
     "feat(store): hand out one task id at a time" \
     "feat(store): write ahead of the database file" \
-    "docs(plans): record what step 02 changed about the store"; do
+    "docs(docs): record what step 02 changed about the store"; do
     printf '%s\n' "$subject" > /tmp/subject && cargo xtask commit-msg /tmp/subject
   done
   # expected: silent, six times
