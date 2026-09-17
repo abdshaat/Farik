@@ -1659,6 +1659,8 @@ performance only, and nothing queries by status or parent until step 06.
   #   test result: ok. 30 passed (farik-store, the event_log and projections modules)
   #   test result: ok. 7 passed (crates/store/tests/event_log_file.rs)
   #   test result: ok. 24 passed (xtask)
+  # what it ended at once the landing review's findings were taken: 35 in the store's
+  # modules and 8 in its integration test, the other three unchanged
   ```
 
 - [x] Every commit subject is accepted:
