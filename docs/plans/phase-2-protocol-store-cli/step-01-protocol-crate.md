@@ -1108,7 +1108,7 @@ Files: modified `crates/protocol/src/event.rs`; tested by `crates/protocol/src/e
 Consumes: `event_from_value`, `EVERY_KIND`, the fixtures, from Task 5
 Produces: `farik_protocol::event::event_to_value`
 
-- [ ] Write the failing test. Append to the `tests` module of `crates/protocol/src/event.rs`:
+- [x] Write the failing test. Append to the `tests` module of `crates/protocol/src/event.rs`:
 
   ```rust
       #[test]
@@ -1147,14 +1147,14 @@ Produces: `farik_protocol::event::event_to_value`
       };
   ```
 
-- [ ] Run it and confirm it fails because the writer is missing:
+- [x] Run it and confirm it fails because the writer is missing:
 
   ```
   cargo test -p farik-protocol
   # expected: FAIL to compile, error[E0432]: unresolved import `super::event_to_value`
   ```
 
-- [ ] Write the minimal implementation. Change the two import lines at the top of `crates/protocol/src/event.rs` to
+- [x] Write the minimal implementation. Change the two import lines at the top of `crates/protocol/src/event.rs` to
 
   ```rust
   use chrono::{DateTime, SecondsFormat, Utc};
@@ -1314,14 +1314,14 @@ Produces: `farik_protocol::event::event_to_value`
   }
   ```
 
-- [ ] Run the test and the crate's suite; confirm green:
+- [x] Run the test and the crate's suite; confirm green:
 
   ```
   cargo test -p farik-protocol
   # expected: all passing, including writes_back_exactly_the_value_it_read_for_every_kind
   ```
 
-- [ ] Commit: `feat(protocol): write an event back to its wire form`
+- [x] Commit: `feat(protocol): write an event back to its wire form`
 
 ### Task 7: An event before it has a sequence number
 

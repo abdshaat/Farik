@@ -4,10 +4,10 @@
 use std::str::FromStr;
 use std::sync::LazyLock;
 
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, SecondsFormat, Utc};
 use jsonschema::Validator;
 use serde::de::DeserializeOwned;
-use serde_json::Value;
+use serde_json::{Map, Value};
 
 pub use farik_core::contract::{TaskId, ValidationError};
 
@@ -235,12 +235,158 @@ fn pointer(path: &str) -> String {
     }
 }
 
+/// One event as the wire value the log holds, the inverse of `event_from_value`.
+///
+/// The crate writes the wire form itself, field by field, rather than deriving it: `serde_json`
+/// answers with a `Result` whose error cannot happen for these types, and `docs/standards/code.md`
+/// allows no `unwrap` or `expect` here, so the alternative is an impossible error on every caller
+/// forever. The round-trip test is what keeps this honest.
+#[must_use]
+pub fn event_to_value(event: &FarikEvent) -> Value {
+    let mut wire = Map::new();
+    wire.insert("seq".to_string(), Value::from(event.envelope.seq));
+    wire.insert(
+        "recorded_at".to_string(),
+        Value::String(
+            event
+                .envelope
+                .recorded_at
+                .to_rfc3339_opts(SecondsFormat::AutoSi, true),
+        ),
+    );
+    wire.insert(
+        "team_id".to_string(),
+        Value::String(event.envelope.team_id.clone()),
+    );
+    wire.insert(
+        "project_id".to_string(),
+        Value::String(event.envelope.project_id.clone()),
+    );
+    if let Some(task_id) = &event.envelope.task_id {
+        wire.insert("task_id".to_string(), Value::String(task_id.to_string()));
+    }
+    if let Some(agent_id) = &event.envelope.agent_id {
+        wire.insert("agent_id".to_string(), Value::String(agent_id.clone()));
+    }
+    if let Some(session_id) = &event.envelope.session_id {
+        wire.insert("session_id".to_string(), Value::String(session_id.clone()));
+    }
+    wire.insert(
+        "kind".to_string(),
+        Value::String(event.body.kind().to_string()),
+    );
+    wire.insert("body".to_string(), body_to_value(&event.body));
+    Value::Object(wire)
+}
+
+fn body_to_value(body: &EventBody) -> Value {
+    let mut wire = Map::new();
+    match body {
+        EventBody::TaskCreated(body) => {
+            wire.insert("summary".to_string(), summary_to_value(&body.summary));
+            wire.insert(
+                "created_by".to_string(),
+                Value::String(body.created_by.clone()),
+            );
+        }
+        EventBody::RequestTriaged(body) => {
+            wire.insert("size".to_string(), Value::String(body.size.to_string()));
+            wire.insert("reason".to_string(), Value::String(body.reason.clone()));
+            wire.insert(
+                "triaged_by".to_string(),
+                Value::String(body.triaged_by.clone()),
+            );
+        }
+        EventBody::ContractWritten(body) => {
+            wire.insert("summary".to_string(), summary_to_value(&body.summary));
+            wire.insert(
+                "written_by".to_string(),
+                Value::String(body.written_by.clone()),
+            );
+        }
+        EventBody::ContractLocked(body) => {
+            wire.insert(
+                "locked_by".to_string(),
+                Value::String(body.locked_by.clone()),
+            );
+        }
+        EventBody::ContractUnlocked(body) => {
+            wire.insert(
+                "unlocked_by".to_string(),
+                Value::String(body.unlocked_by.clone()),
+            );
+        }
+        EventBody::DriftDetected(body) => {
+            wire.insert("drift".to_string(), Value::String(body.drift.to_string()));
+            wire.insert("detail".to_string(), Value::String(body.detail.clone()));
+        }
+        EventBody::ProjectScanned(body) => {
+            wire.insert(
+                "read_back".to_string(),
+                Value::String(body.read_back.clone()),
+            );
+            wire.insert(
+                "detected_criteria".to_string(),
+                strings(&body.detected_criteria),
+            );
+        }
+        EventBody::TeamUpdated(body) => {
+            wire.insert(
+                "team_name".to_string(),
+                Value::String(body.team_name.clone()),
+            );
+            wire.insert("agent_ids".to_string(), strings(&body.agent_ids));
+            wire.insert(
+                "updated_by".to_string(),
+                Value::String(body.updated_by.clone()),
+            );
+        }
+        EventBody::CriteriaUpdated(body) => {
+            wire.insert(
+                "criterion_names".to_string(),
+                strings(&body.criterion_names),
+            );
+            wire.insert(
+                "updated_by".to_string(),
+                Value::String(body.updated_by.clone()),
+            );
+        }
+    }
+    Value::Object(wire)
+}
+
+fn summary_to_value(summary: &ContractSummary) -> Value {
+    let mut wire = Map::new();
+    wire.insert("kind".to_string(), Value::String(summary.kind.to_string()));
+    if let Some(parent) = &summary.parent {
+        wire.insert("parent".to_string(), Value::String(parent.to_string()));
+    }
+    wire.insert("title".to_string(), Value::String(summary.title.clone()));
+    wire.insert(
+        "status".to_string(),
+        Value::String(summary.status.to_string()),
+    );
+    wire.insert("risk".to_string(), Value::String(summary.risk.to_string()));
+    Value::Object(wire)
+}
+
+fn strings(values: &[String]) -> Value {
+    Value::Array(
+        values
+            .iter()
+            .map(|value| Value::String(value.clone()))
+            .collect(),
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use serde_json::json;
 
     use super::fixtures::{a_body_wire, a_contract_summary_wire, a_full_event_wire, an_event_wire};
-    use super::{EVERY_KIND, EventBody, EventKind, ValidationError, event_from_value};
+    use super::{
+        EVERY_KIND, EventBody, EventKind, ValidationError, event_from_value, event_to_value,
+    };
 
     fn refusal(input: &serde_json::Value) -> Vec<ValidationError> {
         event_from_value(input).expect_err("expected a refusal")
@@ -384,5 +530,32 @@ mod tests {
             body.summary.parent.as_ref().map(|id| id.to_string()),
             Some("FRK-3".to_string())
         );
+    }
+
+    #[test]
+    fn writes_back_exactly_the_value_it_read_for_every_kind() {
+        // The writer is hand-written, so this is what holds it to the schema the reader checks.
+        for kind in EVERY_KIND {
+            let wire = a_full_event_wire(kind);
+            let event = event_from_value(&wire).expect("valid");
+            assert_eq!(event_to_value(&event), wire, "{kind}");
+        }
+    }
+
+    #[test]
+    fn writes_a_summary_and_its_parent() {
+        let mut input = an_event_wire(EventKind::ContractWritten);
+        input["body"]["summary"]["parent"] = json!("FRK-3");
+        let event = event_from_value(&input).expect("valid");
+        assert_eq!(event_to_value(&event), input);
+    }
+
+    #[test]
+    fn leaves_out_the_optional_fields_that_are_not_there() {
+        let event = event_from_value(&an_event_wire(EventKind::ContractLocked)).expect("valid");
+        let wire = event_to_value(&event);
+        for absent in ["task_id", "agent_id", "session_id"] {
+            assert!(wire.get(absent).is_none(), "{absent}");
+        }
     }
 }
