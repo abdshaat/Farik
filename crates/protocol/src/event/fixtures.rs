@@ -2,7 +2,7 @@
 
 use serde_json::{Value, json};
 
-use crate::event::EventKind;
+use crate::event::{EventKind, NewEvent, event_from_value};
 
 /// A schema-valid wire event of one kind, with that kind's body, and no optional envelope field
 /// beyond the `task_id` that a contract-scoped kind may not be recorded without.
@@ -20,6 +20,26 @@ pub fn an_event_wire(kind: EventKind) -> Value {
         event["task_id"] = json!("FRK-1");
     }
     event
+}
+
+/// A schema-valid event of one kind, ready to append: what `new_event` would have produced, built
+/// from `an_event_wire` so that a test of the store and a test of the protocol cannot drift apart.
+///
+/// # Panics
+///
+/// When `an_event_wire` stops being schema-valid, which is the fixture's own bug.
+#[must_use]
+pub fn a_new_event(kind: EventKind) -> NewEvent {
+    let event = event_from_value(&an_event_wire(kind)).expect("the fixture is schema-valid");
+    NewEvent {
+        recorded_at: event.envelope.recorded_at,
+        team_id: event.envelope.team_id,
+        project_id: event.envelope.project_id,
+        task_id: event.envelope.task_id,
+        agent_id: event.envelope.agent_id,
+        session_id: event.envelope.session_id,
+        body: event.body,
+    }
 }
 
 /// The same event with every optional envelope field present.

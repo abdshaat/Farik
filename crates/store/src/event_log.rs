@@ -10,7 +10,7 @@ use std::time::Duration;
 use chrono::{DateTime, SecondsFormat, Utc};
 use farik_core::contract::TaskId;
 use farik_protocol::event::{
-    EventEnvelope, EventKind, FarikEvent, NewEvent, body_to_value, event_from_value,
+    EventEnvelope, EventKind, FarikEvent, NewEvent, body_to_value, event_from_value, event_to_value,
 };
 use rusqlite::types::Value as SqlValue;
 use rusqlite::{Connection, params_from_iter};
@@ -49,7 +49,8 @@ pub struct EventQuery {
     pub after_seq: Option<u64>,
     /// Only events about this contract.
     pub task_id: Option<TaskId>,
-    /// Only events produced by this agent.
+    /// Only events produced by this agent, matched exactly. The log stores the id the wire rules
+    /// settled on, so an id with space around it matches nothing; `TaskId` cannot hold one.
     pub agent_id: Option<String>,
     /// Only these kinds; an empty list is every kind.
     pub kinds: Vec<EventKind>,
@@ -153,11 +154,7 @@ impl EventLog {
     ///
     /// `Sqlite` when the read fails; `InvalidEvent` when a row cannot be read back as an event.
     pub fn read(&self, query: &EventQuery) -> Result<Vec<FarikEvent>, StoreError> {
-        let Some((sql, parameters)) = statement_of(query) else {
-            // A sequence number no row can hold asks for nothing, which is an empty answer rather
-            // than an error: a reader resuming from the end of the log is the ordinary case.
-            return Ok(Vec::new());
-        };
+        let (sql, parameters) = statement_of(query);
         let connection = self.connection();
         let mut statement = connection.prepare(&sql)?;
         let rows = statement.query_map(params_from_iter(parameters), |row| {
@@ -259,33 +256,23 @@ impl EventLog {
 }
 
 /// The wire value of an event that has not been appended, with `seq` as given.
+///
+/// Written through the protocol crate's own writer rather than field by field, so that the envelope
+/// has one writer. A second one would drop a field added to the envelope later without anything
+/// noticing, because both sides of the round-trip test come from the same value.
 fn wire_of(event: &NewEvent, seq: u64) -> Value {
-    let mut wire = Map::new();
-    wire.insert("seq".to_string(), Value::from(seq));
-    wire.insert(
-        "recorded_at".to_string(),
-        Value::String(stamp(event.recorded_at)),
-    );
-    wire.insert("team_id".to_string(), Value::String(event.team_id.clone()));
-    wire.insert(
-        "project_id".to_string(),
-        Value::String(event.project_id.clone()),
-    );
-    if let Some(task_id) = &event.task_id {
-        wire.insert("task_id".to_string(), Value::String(task_id.to_string()));
-    }
-    if let Some(agent_id) = &event.agent_id {
-        wire.insert("agent_id".to_string(), Value::String(agent_id.clone()));
-    }
-    if let Some(session_id) = &event.session_id {
-        wire.insert("session_id".to_string(), Value::String(session_id.clone()));
-    }
-    wire.insert(
-        "kind".to_string(),
-        Value::String(event.body.kind().to_string()),
-    );
-    wire.insert("body".to_string(), body_to_value(&event.body));
-    Value::Object(wire)
+    event_to_value(&FarikEvent {
+        envelope: EventEnvelope {
+            seq,
+            recorded_at: event.recorded_at,
+            team_id: event.team_id.clone(),
+            project_id: event.project_id.clone(),
+            task_id: event.task_id.clone(),
+            agent_id: event.agent_id.clone(),
+            session_id: event.session_id.clone(),
+        },
+        body: event.body.clone(),
+    })
 }
 
 fn read_wire(wire: &Value) -> Result<FarikEvent, String> {
@@ -383,11 +370,11 @@ fn event_of_row(row: Row) -> Result<FarikEvent, StoreError> {
     })
 }
 
-/// The SQL and the parameters one query needs, or `None` when the query can match no row at all.
+/// The SQL and the parameters one query needs.
 ///
 /// Every value is a bound parameter; the only thing the query's contents change about the SQL is
 /// how many placeholders the `kind` list has.
-fn statement_of(query: &EventQuery) -> Option<(String, Vec<SqlValue>)> {
+fn statement_of(query: &EventQuery) -> (String, Vec<SqlValue>) {
     let mut sql = "SELECT seq, recorded_at, team_id, project_id, task_id, agent_id, session_id, \
                    kind, body FROM events"
         .to_string();
@@ -395,8 +382,9 @@ fn statement_of(query: &EventQuery) -> Option<(String, Vec<SqlValue>)> {
     let mut parameters: Vec<SqlValue> = Vec::new();
     if let Some(after_seq) = query.after_seq {
         // A sequence number no row can hold matches nothing, because `seq` is a signed integer in
-        // the engine and the log cannot reach past it.
-        let after_seq = i64::try_from(after_seq).ok()?;
+        // the engine and the log cannot reach past it. A reader resuming from the end of the log is
+        // the ordinary case, so that is an empty answer rather than a refusal.
+        let after_seq = i64::try_from(after_seq).unwrap_or(i64::MAX);
         conditions.push(format!("seq > ?{}", parameters.len() + 1));
         parameters.push(SqlValue::Integer(after_seq));
     }
@@ -429,20 +417,21 @@ fn statement_of(query: &EventQuery) -> Option<(String, Vec<SqlValue>)> {
         let _ = write!(sql, " LIMIT ?{}", parameters.len() + 1);
         parameters.push(SqlValue::Integer(i64::try_from(limit).unwrap_or(i64::MAX)));
     }
-    Some((sql, parameters))
+    (sql, parameters)
 }
 
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;
     use std::sync::mpsc::TryRecvError;
+    use std::time::Duration;
 
     use chrono::TimeZone;
-    use farik_protocol::event::fixtures::an_event_wire;
+    use farik_protocol::event::fixtures::{a_new_event as an_event, an_event_wire};
     use farik_protocol::event::{EVERY_KIND, EventKind};
 
     use super::{
-        DateTime, EventLog, EventQuery, FarikEvent, IN_MEMORY, NewEvent, Path, StoreError, Utc,
+        DateTime, EventLog, EventQuery, FarikEvent, IN_MEMORY, Path, Receiver, StoreError, Utc,
         body_to_value, event_from_value, open_event_log,
     };
     use crate::migrations;
@@ -455,21 +444,6 @@ mod tests {
 
     fn a_log() -> EventLog {
         open_event_log(Path::new(IN_MEMORY), at(9)).expect("a log in memory opens")
-    }
-
-    /// The fixture event of one kind, ready to append: what `new_event` would have produced, built
-    /// from the protocol crate's own wire fixture so that the two cannot drift.
-    fn an_event(kind: EventKind) -> NewEvent {
-        let event = event_from_value(&an_event_wire(kind)).expect("the fixture is schema-valid");
-        NewEvent {
-            recorded_at: event.envelope.recorded_at,
-            team_id: event.envelope.team_id,
-            project_id: event.envelope.project_id,
-            task_id: event.envelope.task_id,
-            agent_id: event.envelope.agent_id,
-            session_id: event.envelope.session_id,
-            body: event.body,
-        }
     }
 
     /// Enough threads and appends that an announcement made outside the log's own lock is handed
@@ -489,6 +463,13 @@ mod tests {
                 (next,),
             )
             .expect("the counter is set");
+    }
+
+    /// The next event a subscriber is handed, waiting only as long as an announcement could take.
+    fn heard(stream: &Receiver<FarikEvent>, who: &str) -> FarikEvent {
+        stream
+            .recv_timeout(Duration::from_secs(5))
+            .unwrap_or_else(|refusal| panic!("{who} hears the append: {refusal}"))
     }
 
     fn kinds_of(events: &[FarikEvent]) -> Vec<EventKind> {
@@ -669,6 +650,13 @@ mod tests {
             ..EventQuery::default()
         };
         assert_eq!(log.read(&past_the_end).expect("reads"), Vec::new());
+        // A limit no `i64` can hold asks for more rows than the log will ever hold, which is all of
+        // them rather than none of them.
+        let more_than_there_are = EventQuery {
+            limit: Some(usize::MAX),
+            ..EventQuery::default()
+        };
+        assert_eq!(log.read(&more_than_there_are).expect("reads").len(), 4);
     }
 
     #[test]
@@ -692,6 +680,29 @@ mod tests {
             ..EventQuery::default()
         };
         assert_eq!(log.read(&nobody).expect("reads"), Vec::new());
+    }
+
+    #[test]
+    fn stores_the_ids_the_wire_rules_settled_on_rather_than_the_ones_it_was_given() {
+        // The reader trims an id before it accepts one, and the columns are what a query filters on.
+        // A log that kept the padding would answer nothing to a query for the id it had just told
+        // its caller it stored.
+        let log = a_log();
+        let mut padded = an_event(EventKind::TeamUpdated);
+        padded.team_id = " farik ".to_string();
+        padded.agent_id = Some(" maya-chen ".to_string());
+        let appended = log.append(&padded).expect("appends");
+        assert_eq!(appended.envelope.team_id, "farik");
+        assert_eq!(appended.envelope.agent_id.as_deref(), Some("maya-chen"));
+        let by_agent = EventQuery {
+            agent_id: Some("maya-chen".to_string()),
+            ..EventQuery::default()
+        };
+        assert_eq!(
+            log.read(&by_agent).expect("reads"),
+            vec![appended],
+            "the row holds the trimmed id, so the query finds it"
+        );
     }
 
     #[test]
@@ -762,13 +773,15 @@ mod tests {
         let appended = log
             .append(&an_event(EventKind::TaskCreated))
             .expect("appends");
-        assert_eq!(first.recv().expect("the first hears"), appended);
-        assert_eq!(second.recv().expect("the second hears"), appended);
+        // Bounded, because an announcement that never comes should fail the test rather than hang
+        // the job: `cargo test` has no timeout of its own.
+        assert_eq!(heard(&first, "the first"), appended);
+        assert_eq!(heard(&second, "the second"), appended);
         drop(second);
         let next = log
             .append(&an_event(EventKind::RequestTriaged))
             .expect("appends");
-        assert_eq!(first.recv().expect("the first still hears"), next);
+        assert_eq!(heard(&first, "the first still"), next);
         assert_eq!(log.subscribers_lock().len(), 1);
         // A subscriber hears what happened after it subscribed, not before.
         let late = log.subscribe();

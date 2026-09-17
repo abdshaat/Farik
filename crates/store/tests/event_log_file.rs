@@ -7,8 +7,8 @@
 use std::path::PathBuf;
 
 use chrono::{DateTime, TimeZone, Utc};
-use farik_protocol::event::fixtures::an_event_wire;
-use farik_protocol::event::{EventKind, NewEvent, event_from_value};
+use farik_protocol::event::EventKind;
+use farik_protocol::event::fixtures::a_new_event as an_event;
 use farik_store::{EventQuery, open_event_log};
 
 /// A directory of its own, removed when the test ends however the test ends.
@@ -43,19 +43,6 @@ fn at(hour: u32) -> DateTime<Utc> {
     Utc.with_ymd_and_hms(2026, 9, 17, hour, 0, 0)
         .single()
         .expect("a real hour")
-}
-
-fn an_event(kind: EventKind) -> NewEvent {
-    let event = event_from_value(&an_event_wire(kind)).expect("the fixture is schema-valid");
-    NewEvent {
-        recorded_at: event.envelope.recorded_at,
-        team_id: event.envelope.team_id,
-        project_id: event.envelope.project_id,
-        task_id: event.envelope.task_id,
-        agent_id: event.envelope.agent_id,
-        session_id: event.envelope.session_id,
-        body: event.body,
-    }
 }
 
 #[test]
