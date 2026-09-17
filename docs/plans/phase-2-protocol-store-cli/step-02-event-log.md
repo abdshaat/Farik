@@ -1,6 +1,6 @@
 # Phase 2, step 02: The event log
 
-Status: ready
+Status: done
 Branch: `claude/phase-0-implementation-izm38y` (the harness-assigned phase branch, left as assigned per `docs/standards/code.md`; a session may not push to another branch without permission, so phase 2 reuses it as phase 1 did; steps do not get their own)
 Spec: `docs/SPEC.md` section 5.1 (the log is the source of truth), 8.4 (storage), 8.5 (the event protocol); `docs/standards/code.md`, "Wire and file formats" and "Rust integration test"
 Depends on: phase 0 (merged in #4), phase 1 (merged in #5), step 01 of this phase (committed as 1f93550)
@@ -1621,29 +1621,29 @@ Produces: a project plan that describes the store as it now is
 
 This task changes documentation and has no test cycle. The `> ` marker on each block below is this plan's and is not part of the text to write.
 
-- [ ] In `docs/plans/project-plan.md`, in the phase 2 section, replace the line beginning `- Step 02 (\`farik-store\`):` with:
+- [x] In `docs/plans/project-plan.md`, in the phase 2 section, replace the line beginning `- Step 02 (\`farik-store\`):` with:
 
   > - Step 02 (`farik-store`): `enum StoreError { Io { detail }, Sqlite { detail }, InvalidEvent { detail }, TaskIdsExhausted { next: u64 } }` (the last added 2026-09-17 by the step 02 plan: the contract schema's `^FRK-[0-9]{1,6}$` has an end, so the counter does too, and a caller that wants to say so needs to match on it rather than read a message); `IN_MEMORY: &str`, the path that opens a database in memory for tests and for a dry run; `fn open_event_log(path: &Path, now: DateTime<Utc>) -> Result<EventLog, StoreError>` (the clock is injected as a value, changed 2026-09-17 by the step 02 plan: `docs/standards/code.md` allows no ambient clock and the migration ledger stamps `applied_at`; a value rather than the `Clock` trait because a log is opened once per command and stamps one row); `impl EventLog { fn append(&self, event: &NewEvent) -> Result<FarikEvent, StoreError>; fn read(&self, query: &EventQuery) -> Result<Vec<FarikEvent>, StoreError>; fn subscribe(&self) -> Receiver<FarikEvent>; fn next_task_id(&self) -> Result<TaskId, StoreError>; fn applied_migrations(&self) -> Result<Vec<i64>, StoreError> }` backed by a `task_counters` table (`append` takes a reference, changed 2026-09-17 by the step 02 plan, because clippy's `needless_pass_by_value` refuses the value form, and it re-validates every event through `event_from_value` because `NewEvent`'s fields are public); `struct EventQuery { after_seq: Option<u64>, task_id: Option<TaskId>, agent_id: Option<String>, kinds: Vec<EventKind>, limit: Option<usize> }`, whose `Default` reads the whole log; `fn migrations::known_versions() -> Vec<i64>`. `farik_protocol::event::body_to_value` becomes public in this step, so that the store does not write a body of its own.
 
-- [ ] In `docs/plans/project-plan.md`, in "Decisions that apply to every phase", replace, in the "Tests are split in three" bullet, the sentence beginning `Integration tests (\`crates/<name>/tests/<subject>.rs\`)` and ending `(phase 2 step 04).`, its closing full stop included and the sentences around it left alone, with:
+- [x] In `docs/plans/project-plan.md`, in "Decisions that apply to every phase", replace, in the "Tests are split in three" bullet, the sentence beginning `Integration tests (\`crates/<name>/tests/<subject>.rs\`)` and ending `(phase 2 step 04).`, its closing full stop included and the sentences around it left alone, with:
 
   > Integration tests (`crates/<name>/tests/<subject>.rs`) need Docker, a git binary, or the file system in ways a unit test must not. One that needs only a temporary directory runs in the default `cargo xtask check`; one that needs Docker or a git binary runs by `cargo xtask check --integration`, which runs in CI as a second job of the same `check` workflow from the step that adds the first test needing it (phase 2 step 04). Changed 2026-09-17 by the phase 2 step 02 plan: the first `tests/` file is the event log's, it needs a temporary directory and nothing else, and gating it would have left reopening, two processes on one file, and the journal mode out of every check until step 04.
 
-- [ ] In `docs/plans/project-plan.md`, in the phase 2 step table, replace, in the step 04 row, the text `the first integration test and the CI job for \`cargo xtask check --integration\`` — the tail of its last cell, whose list of deliverables before the semicolon stays as it is — with:
+- [x] In `docs/plans/project-plan.md`, in the phase 2 step table, replace, in the step 04 row, the text `the first integration test and the CI job for \`cargo xtask check --integration\`` — the tail of its last cell, whose list of deliverables before the semicolon stays as it is — with:
 
   > the first integration test that needs a git binary, and the CI job for `cargo xtask check --integration`
 
-- [ ] In `docs/plans/project-plan.md`, in "Decisions that apply to every phase", replace, in the "Time, randomness, and identifiers are injected" bullet, the sentence beginning `Nothing in \`core\`, \`protocol\`, \`store\`, or \`runtime\`` and ending `are passed in.`, its closing full stop included, with:
+- [x] In `docs/plans/project-plan.md`, in "Decisions that apply to every phase", replace, in the "Time, randomness, and identifiers are injected" bullet, the sentence beginning `Nothing in \`core\`, \`protocol\`, \`store\`, or \`runtime\`` and ending `are passed in.`, its closing full stop included, with:
 
   > Nothing in `core`, `protocol`, `store`, or `runtime` reads the clock or generates an identifier on its own; a `Clock` trait (`fn now(&self) -> DateTime<Utc>`) and an `IdSource` trait (`fn session_id(&self) -> String`) are passed in, or, where a call samples the clock exactly once, the `DateTime<Utc>` itself — as `open_event_log(path, now)` takes it, recorded 2026-09-17 by the phase 2 step 02 plan.
 
-- [ ] Set this plan's `Status:` to `done` and confirm every checkbox above is ticked, each in the commit of the task it belongs to.
+- [x] Set this plan's `Status:` to `done` and confirm every checkbox above is ticked, each in the commit of the task it belongs to.
 
-- [ ] Commit: `docs(docs): record what step 02 changed about the store`
+- [x] Commit: `docs(docs): record what step 02 changed about the store`
 
 ## Verification
 
-- [ ] The whole check, from the workspace root:
+- [x] The whole check, from the workspace root:
 
   ```
   cargo xtask check
@@ -1655,7 +1655,7 @@ This task changes documentation and has no test cycle. The `> ` marker on each b
   #   test result: ok. 24 passed (xtask)
   ```
 
-- [ ] Every commit subject is accepted:
+- [x] Every commit subject is accepted:
 
   ```
   for subject in \
