@@ -95,7 +95,7 @@ Files: created `docs/schemas/team.schema.json`, `crates/core/src/team.rs`, `crat
 Consumes: nothing from this plan
 Produces: `farik_core::team::{Team, validate_team}` and the generated team types
 
-- [ ] Write the failing tests. Create `crates/core/src/team.rs` with the module doc and the fixtures declaration:
+- [x] Write the failing tests. Create `crates/core/src/team.rs` with the module doc and the fixtures declaration:
 
   ```rust
   //! The team (`docs/SPEC.md` sections 3, 5.12, 5.14 and 5.16): `docs/schemas/team.schema.json` as
@@ -106,7 +106,7 @@ Produces: `farik_core::team::{Team, validate_team}` and the generated team types
   pub mod fixtures;
   ```
 
-- [ ] Create `crates/core/src/team/fixtures.rs`:
+- [x] Create `crates/core/src/team/fixtures.rs`:
 
   ```rust
   use serde_json::{Value, json};
@@ -196,7 +196,7 @@ Produces: `farik_core::team::{Team, validate_team}` and the generated team types
   }
   ```
 
-- [ ] Append the tests module to `crates/core/src/team.rs`:
+- [x] Append the tests module to `crates/core/src/team.rs`:
 
   ```rust
   #[cfg(test)]
@@ -321,7 +321,7 @@ Produces: `farik_core::team::{Team, validate_team}` and the generated team types
   }
   ```
 
-- [ ] Declare the module in `crates/core/src/lib.rs`. The list is alphabetical, so this goes between `pricing` and `text` — insert before
+- [x] Declare the module in `crates/core/src/lib.rs`. The list is alphabetical, so this goes between `pricing` and `text` — insert before
 
   ```rust
   /// Small shared pieces of English used in refusal messages.
@@ -335,7 +335,7 @@ Produces: `farik_core::team::{Team, validate_team}` and the generated team types
   pub mod team;
   ```
 
-- [ ] Run them and confirm they fail because nothing of the team exists:
+- [x] Run them and confirm they fail because nothing of the team exists:
 
   ```
   cargo test -p farik-core --lib
@@ -345,7 +345,7 @@ Produces: `farik_core::team::{Team, validate_team}` and the generated team types
   # error: could not compile `farik-core` (lib test) due to 1 previous error
   ```
 
-- [ ] Write the schema. Create `docs/schemas/team.schema.json`:
+- [x] Write the schema. Create `docs/schemas/team.schema.json`:
 
   ```json
   {
@@ -667,7 +667,7 @@ Produces: `farik_core::team::{Team, validate_team}` and the generated team types
   }
   ```
 
-- [ ] Generate its types. In `xtask/src/generate.rs`, change the array's length to 5 and add the entry after the task contract's:
+- [x] Generate its types. In `xtask/src/generate.rs`, change the array's length to 5 and add the entry after the task contract's:
 
   ```rust
       GeneratedSchema {
@@ -685,13 +685,13 @@ Produces: `farik_core::team::{Team, validate_team}` and the generated team types
   #           generated crates/core/src/generated/team.schema.json
   ```
 
-- [ ] Declare the generated module in `crates/core/src/generated/mod.rs`, after `task_contract`:
+- [x] Declare the generated module in `crates/core/src/generated/mod.rs`, after `task_contract`:
 
   ```rust
   pub mod team;
   ```
 
-- [ ] Make the four validator helpers the crate's rather than the module's. In `crates/core/src/contract.rs`, put `pub(crate) ` in front of each of these four signatures, changing nothing else about them:
+- [x] Make the four validator helpers the crate's rather than the module's. In `crates/core/src/contract.rs`, put `pub(crate) ` in front of each of these four signatures, changing nothing else about them:
 
   ```rust
   fn repeated_ids<'a>(ids: impl Iterator<Item = &'a str>) -> Vec<String> {
@@ -700,7 +700,7 @@ Produces: `farik_core::team::{Team, validate_team}` and the generated team types
   fn pointer(path: &str) -> String {
   ```
 
-- [ ] Write the minimal implementation. In `crates/core/src/team.rs`, replace the module doc with the doc and its imports:
+- [x] Write the minimal implementation. In `crates/core/src/team.rs`, replace the module doc with the doc and its imports:
 
   ```rust
   //! The team (`docs/SPEC.md` sections 3, 5.12, 5.14 and 5.16): `docs/schemas/team.schema.json` as
@@ -776,7 +776,7 @@ Produces: `farik_core::team::{Team, validate_team}` and the generated team types
   }
   ```
 
-- [ ] Run the check and confirm green:
+- [x] Run the check and confirm green:
 
   ```
   cargo xtask check --integration
@@ -788,7 +788,7 @@ Produces: `farik_core::team::{Team, validate_team}` and the generated team types
   #   test result: ok. 29 passed (xtask)
   ```
 
-- [ ] Commit: `feat(core): read a team file and refuse one that is not`
+- [x] Commit: `feat(core): read a team file and refuse one that is not`
 
 ### Task 2: Who is active, and what a team cannot do without
 

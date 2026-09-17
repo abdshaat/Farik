@@ -6,3 +6,4 @@
 
 pub mod prices;
 pub mod task_contract;
+pub mod team;

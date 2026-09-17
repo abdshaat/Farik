@@ -215,7 +215,7 @@ pub fn validate_contract(input: &Value) -> Result<TaskContract, Vec<ValidationEr
 /// Every id that names more than one of the things it was given, in the order they appear and
 /// without repeats. JSON Schema 2020-12 cannot say that a property is unique across an array, so
 /// the rule lives here, where every contract read from the wire passes.
-fn repeated_ids<'a>(ids: impl Iterator<Item = &'a str>) -> Vec<String> {
+pub(crate) fn repeated_ids<'a>(ids: impl Iterator<Item = &'a str>) -> Vec<String> {
     let mut seen: BTreeSet<&str> = BTreeSet::new();
     let mut reported: BTreeSet<&str> = BTreeSet::new();
     let mut repeated: Vec<String> = Vec::new();
@@ -228,7 +228,7 @@ fn repeated_ids<'a>(ids: impl Iterator<Item = &'a str>) -> Vec<String> {
 }
 
 /// "the id C1 names" or "the ids C1, C2 name", so that a message reads as English either way.
-fn named(ids: &[String]) -> String {
+pub(crate) fn named(ids: &[String]) -> String {
     let verb = if ids.len() == 1 { "names" } else { "name" };
     format!("{} {verb}", listed("the id", "the ids", ids))
 }
@@ -250,7 +250,7 @@ pub fn wire_method(verification: &VerificationWire) -> Option<&str> {
 
 /// JSON Schema counts a number with a zero fraction as an integer and serde does not; such
 /// numbers are rewritten as integers, where they fit in an `i64`, so that the two agree.
-fn with_integers_normalised(value: &Value) -> Value {
+pub(crate) fn with_integers_normalised(value: &Value) -> Value {
     match value {
         Value::Number(number) => {
             Value::Number(as_integer(number).unwrap_or_else(|| number.clone()))
@@ -277,7 +277,7 @@ fn as_integer(number: &serde_json::Number) -> Option<serde_json::Number> {
         .map(serde_json::Number::from)
 }
 
-fn pointer(path: &str) -> String {
+pub(crate) fn pointer(path: &str) -> String {
     if path.is_empty() {
         "/".to_string()
     } else {
