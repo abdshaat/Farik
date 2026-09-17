@@ -1,6 +1,6 @@
 # Farik Specification
 
-Version 0.2 (draft for review). Owner: project founder. Status: not yet implemented; this document is the contract the first milestone is built against. Revision 0.3 also carries the rules the phase 1 reviews pinned down as the harness was built, each marked where it appears. Revision 0.2 (2026-09-14) adds sections 5.11 to 5.15, requirements F14 to F17, the `locked` and `references` contract fields, and the amendments marked "added in 0.2", all from the planning review recorded in `docs/plans/project-plan.md`. Revision 0.3 (2026-09-15) records the founder's decisions of that day and the move of the backend to Rust (section 8, ADR 0005). Revision 0.4 (2026-09-17) names in section 8.5 the six event kinds phase 2 emits that earlier revisions left unlisted, and records in 8.4 where task ids come from and where they stop. Revision 0.5 (2026-09-17) says in 5.14 what the repository's default branch is when there is no remote to record one, and that one task integrates at a time, both from the phase 2 step 04 reviews.
+Version 0.2 (draft for review). Owner: project founder. Status: not yet implemented; this document is the contract the first milestone is built against. Revision 0.3 also carries the rules the phase 1 reviews pinned down as the harness was built, each marked where it appears. Revision 0.2 (2026-09-14) adds sections 5.11 to 5.15, requirements F14 to F17, the `locked` and `references` contract fields, and the amendments marked "added in 0.2", all from the planning review recorded in `docs/plans/project-plan.md`. Revision 0.3 (2026-09-15) records the founder's decisions of that day and the move of the backend to Rust (section 8, ADR 0005). Revision 0.4 (2026-09-17) names in section 8.5 the six event kinds phase 2 emits that earlier revisions left unlisted, and records in 8.4 where task ids come from and where they stop. Revision 0.5 (2026-09-17) says in 5.14 what the repository's default branch is when there is no remote to record one, and that one task integrates at a time, both from the phase 2 step 04 reviews. Revision 0.6 (2026-09-17) names in 5.5 and 8.3 the two files phase 2 step 06 gave a place -- the price override and this machine's sandbox choice -- neither of which earlier revisions put anywhere.
 
 Farik is a desktop and web application that lets a person assemble a small team of AI agents, each with a named role, a face, its own tools, and its own skills, and put that team to work on a software product. The team runs a lightweight Scrum process: a product manager writes task contracts with explicit exit criteria, a scrum master keeps the board moving, and specialists do the work. A deterministic governor enforces the rules the agents cannot be trusted to enforce on themselves. The front end is a pixel-art office where the user can watch the team, open any agent's desk, and talk to them one-on-one or in the team channel.
 
@@ -191,7 +191,7 @@ Plus non-monetary limits: a session wall clock (default 30 minutes), a tool-call
 
 More than one budget can be exhausted at the same moment, and every consequence applies. The governor reports all of them rather than the first, because none of these consequences subsumes another: stopping new assignments does not end a session that is already running, so a sprint that has run out must never hide a day that has. A budget is exhausted when what was spent reaches its limit, and a spend that is not a number counts as exhausted.
 
-Costs are computed from the usage fields returned by the model API and from the model's published price table, which Farik ships as a versioned file the user can override.
+Costs are computed from the usage fields returned by the model API and from the model's published price table, which Farik ships as a versioned file the user can override at `.farik/prices.json` (added in 0.6). An override whose `version` this program does not read is refused rather than read as the version it knows, because a later format priced as this one would price a session by guesswork.
 
 ### 5.6 Permissions
 
@@ -438,7 +438,7 @@ The `runtime` crate defines an adapter trait (`start_session`, `resume`, `abort`
 
 Agents with `execute` run commands inside a container per task, with the task's git worktree (5.14) mounted at `/workspace` and network disabled unless the role has `network`. Docker is the first backend because it is what target users already have. The container is discarded when the task is accepted or cancelled. Git operations happen on a task branch inside the container; the governor's diff check for `allowed_paths` runs against that branch before acceptance.
 
-Users who will not run Docker can opt into a no-sandbox mode with a loud warning. The governor still enforces paths and permissions, but process isolation is gone.
+Users who will not run Docker can opt into a no-sandbox mode with a loud warning. The governor still enforces paths and permissions, but process isolation is gone. The choice is this machine's, not the project's, so it lives in `.farik/local/settings.json`, which is never committed (added in 0.6); a machine that has never been asked runs the sandbox.
 
 ### 8.4 Storage
 

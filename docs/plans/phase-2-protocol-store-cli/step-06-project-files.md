@@ -7,7 +7,7 @@ Depends on: phase 0 (merged in #4), phase 1 (merged in #5), steps 01 to 05 of th
 
 A plan is `ready` only when a reviewer other than the author has confirmed the three rules in `docs/standards/workflow.md` stage 2 (Plan): every decision made, nothing ambiguous, no forward dependencies. Record who confirmed and when here.
 
-Readiness confirmed by: a review session that did not write this plan, on 2026-09-17, against `5647f77`. It confirmed the three rules by rebuilding Tasks 1 to 4 from this plan alone in a fresh copy outside the working tree, with a target directory of its own: all eight predicted reds exact, including the count of each kind of error and each `N previous errors` total; every green exact at 11, 18, 23 and 25 `project_files` tests and 45, 46, 49 and 49 in `farik-store`; `cargo xtask check --integration` ending in `xtask check: ok` at all four; the Verification section run as written, the commit-subject loop included; and the changed-file set exactly the File map's ten. It probed the new work rather than reading it: eight paths through `resolved`, both halves of `said_to_a_person` reverted one at a time, `strict_booleans` turned off, and every boolean spelling a person might write into `team.yaml`.
+Readiness confirmed by: a review session that did not write this plan, on 2026-09-17, against `5647f77`. It confirmed the three rules by rebuilding Tasks 1 to 4 from this plan alone in a fresh copy outside the working tree, with a target directory of its own: all eight predicted reds exact, including the count of each kind of error and each `N previous errors` total; every green exact at 11, 18, 23 and 25 `project_files` tests and 45, 46, 49 and 49 in `farik-store`; `cargo xtask check --integration` ending in `xtask check: ok` at all four; the Verification section run as written, the commit-subject loop included; and the changed-file set exactly the File map's eleven rows. It probed the new work rather than reading it: eight paths through `resolved`, both halves of `said_to_a_person` reverted one at a time, `strict_booleans` turned off, and every boolean spelling a person might write into `team.yaml`.
 
 Two rounds refused it first. Round one found ten things, among them a symlink escape from the product boundary that the string rule could not see, a `serde_saphyr` choice made before the duplicate-key behaviour was measured, and refusals that dropped the `.farik/` prefix. Round two found fourteen, three of them defects in the code this plan produces: a refusal that named a path from the wrong root, a *read* that made `.farik/` and so would have made a project of any directory it was pointed at, and a refusal that told the person editing `team.yaml` to set an option on a Rust API. Round three's two remaining findings were prose, and both are applied above: this decision said two functions where there are three, and the one about the path boundary now records what it does not promise.
 
@@ -27,7 +27,7 @@ Two promises hold it together. **A file read back is held to exactly the rules t
 - **A product document's path is checked by `farik-core`'s own path rule**, which this step makes public. The path comes from a tool call, so it is a string an agent chose; 5.6 puts product documents under `product/` and nowhere else. Two answers to "does this path climb out" would be two definitions of a safe path, and the one already written is the one the governor uses.
 - **And then the file system is asked as well as the string.** A directory under `product/` can be a symlink pointing anywhere, and a path through one has no `..` in it for the string rule to catch. So `inside_product` resolves the path and `product/` itself, each as far as it exists, and the one has to be under the other. The string rule says what the text means; this says where it lands, and a boundary that only reads the text is not a boundary. A link at `product/` itself moves the boundary with it, and is meant to: that is a person's own choice about where their product documents live, and no path a tool call can choose.
 - **And nothing is made in the asking.** `canonicalize` refuses a path that is not there, and the first draft of this step made `product/` so that it would answer. But `.farik/` existing is what makes a directory a Farik project (spec 3), so a read that made it would make a project of whatever it was pointed at. `resolved` follows the links that do exist and puts the rest of the path back on the end, where there is no directory for a link to hide in.
-- **A byte-order mark is stripped on the way in.** It is what a Windows editor puts at the front of a file it saved, it is not content, and a parser that meets one says the file holds two documents — which is not a thing a person can act on.
+- **A byte-order mark is stripped on the way in.** It is what a Windows editor puts at the front of a file it saved, and it is not content. `serde-saphyr` tolerates one, so this matters for the two JSON files: `serde_json` refuses a mark at column 1 saying only that it expected a value, which is not a thing a person can act on.
 - **Every write goes through `write_text`, including `.gitignore`.** One way to write a file means one place where the beside-and-rename happens; a second way would be a file written the other way for no reason a reader could find.
 - **A contract lives in the file its own id names, and a file that disagrees is refused.** The file name and the id inside it are two claims about the same thing; a board that believed the file name would show a task that does not exist.
 - **An agent that has never written a notebook has an empty one, not a missing file.** Every session for an agent includes its notebook (5.8), and "there is no file" is not something to tell an agent about.
@@ -3196,3 +3196,78 @@ This task changes documentation and has no test cycle. The `> ` marker on the bl
 ## Open questions
 
 none
+
+## Review findings
+
+The landing review was a fresh session that did not write this step. It ran forty-five mutants, one
+per behaviour the code claims, the whole suite for each, reverting between; probed the product
+boundary with eight kinds of path; and measured two writers on one project. Thirty-six mutants died.
+Of the nine that lived, two it argued were equivalent and seven were gaps — one of them a defect the
+mutants did not cause but the probing found.
+
+The code changed in `3004cfe`. The task blocks above are what was executed and are left as they were;
+this section is what changed after them.
+
+- **Two writers on one project published a file holding both writes.** The file a write goes to
+  beside the one being written was named after the target, so every writer on one root wrote the
+  same one — in this process or another. The rename is all or nothing; what is in the file being
+  renamed is not. Two writers and one reader on `project.md`, 200 writes each, gave `(134, 740)`
+  against `(0, 0)`: 134 writes refused because the other writer had already renamed the shared file
+  away, and 740 reads that were neither write — a published file holding bytes from both, or an
+  empty one, read back through `read_project_scan`. This is the failure the beside-and-rename exists
+  to prevent, and it is reachable in Farik's own design: `farik` and the daemon are different
+  processes on one project (8.5) and tasks run at the same time (5.14). A lock inside one process
+  cannot see the other, so the name carries the process id and a counter. The same shared name also
+  destroyed a document a tool call had named `notes.md.writing` when `notes.md` was written; both
+  names are an agent's to choose.
+- **The product boundary failed open.** When `product/` could not be resolved, replacing the two
+  `?`s with `return Ok(relative)` left every test green: an agent-chosen path would have been treated
+  as inside `product/` because the boundary could not be computed. The code failed closed already and
+  now says which side could not be worked out, so the refusal for an unresolvable root no longer
+  reads as a missing document.
+- **Nothing pinned the boundary to a component-wise comparison.** Swapping `Path::starts_with` for a
+  textual prefix survived, and the reviewer showed it is a live escape: a sibling called
+  `product-secrets`, reached through a link inside `product/`, was written to. The existing link test
+  used `secret/`, which shares no prefix, so it could not see this.
+- **`list_contracts` listed a directory named like a contract.** A person's notes in
+  `contracts/FRK-9.yaml/` put a task on the board that cannot be read.
+- **The byte-order-mark test passed for the wrong reason.** `serde-saphyr` tolerates a mark, so
+  stripping it changes nothing for the YAML files; it matters for `prices.json` and
+  `local/settings.json`, which `serde_json` refuses at column 1 saying only that it expected a value.
+  No test gave either of those a mark, and the comment in the code — repeated in the Decisions above
+  — said the YAML parser was the one that could not cope. Both corrected.
+- **Two readers were indistinguishable from plain serde.** Reducing `read_contract` and
+  `read_prices` to `serde_json::from_value` survived, because the only broken files the tests wrote
+  were structurally broken, which serde refuses too. The promise is that a file read back is held to
+  exactly the rules it would be held to arriving on the wire, and the rules that are only the
+  schema's — a contract with no exit criteria, a table of a version this program does not read — were
+  held by nothing. One test each.
+- **`write_if_absent`'s promise was untested.** Removing its `exists` guard survived: `farik init` on
+  a project would silently discard whatever a person had added to `.farik/local/.gitignore`.
+
+Accepted as the reviewer argued, not taken:
+
+- **Two mutants of `resolved` are equivalent.** Dropping the components it puts back, or stopping one
+  short, cannot change what `inside_product` decides: a symlink leads somewhere only through a
+  component that exists, so both sides of the comparison are shortened by the same components. What
+  the push-back buys is the words of the refusal and the function's own contract for a caller that
+  does not exist yet. Recorded in its doc comment instead of tested.
+- **The window between the check and the write is accepted.** `inside_product` answers about the file
+  system as it was asked; nothing in this module makes a symlink, so no caller can move the ground
+  under itself, but another program could. What it costs is bounded by who can write inside `.farik/`
+  at all. Recorded in the doc comment.
+
+Also taken, from the same review's reading rather than its mutants:
+
+- `refused` and `as_wire` took a `self` they discarded, and `docs/standards/code.md` says a struct
+  with methods is not a namespace for functions. They are free functions now.
+- `docs/SPEC.md` named neither of the two files this step gave a place. 5.5 said the price table is
+  "a versioned file the user can override" and 8.3 that a person can opt into no-sandbox mode,
+  without saying where either lives. Revision 0.6 names `.farik/prices.json` and
+  `.farik/local/settings.json`, and records that an override of an unknown version is refused and
+  that a machine never asked runs the sandbox.
+
+Left as it is, with the reason: `read_settings` ignores a key it does not know. `local/settings.json`
+is the one structured file with no schema, so a typo'd key is reported nowhere — which is a thing for
+`farik doctor` to say when it reads the file, and is recorded on step 08's row of the project plan
+with the two items step 05's review left there.
