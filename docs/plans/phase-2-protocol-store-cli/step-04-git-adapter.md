@@ -2000,3 +2000,69 @@ This task changes documentation and has no test cycle. The `> ` marker on each b
 ## Open questions
 
 none
+
+## Review findings
+
+The landing review was a fresh session that did not write this step. It read the code against this
+plan and then against the world, ran thirty-four mutations and eight behavioural probes against real
+repositories, and tried the suite under a temporary directory whose name holds a space and
+non-ASCII characters. Its verdict was **not a clean review**: seven real holes, two of them serious.
+
+Taken, each with the mutant that now dies:
+
+- **The flag's effect was untested, which is the half that matters.** The parse lived in a tested
+  library and the argument it produced was built in `main.rs`, which has no tests: replacing
+  `--include-ignored` with anything else left the whole check green while the eleven integration
+  tests ran as ignored, and continuous integration is one job running that one command. Closed by
+  `xtask::check::test_arguments`, with two tests. Commit `f197b6e`.
+- **`run_git` ate the first byte of a path that begins with a space.** A file committed as
+  ` leading.txt` came back from `changed_paths` as `leading.txt`, and that path is what the
+  allowed-paths rule is asked about (5.6): a change checked against a rule it never matched.
+  `MergeOutcome::Conflicts` shares the same parser and had the same hole. Trimmed at the end only
+  now. Commit `a290e77`.
+- **`is_clean` broke its own doc comment twice.** Handed another repository's path it answered `Ok`
+  about that repository; handed a path that is not there — which is what a crashed session leaves —
+  it answered `NotInstalled`, rendering as "git could not be run", because the operating system
+  reports a missing working directory with the same not-found as a missing program. Every worktree
+  of one repository shares its common directory, so that is what is asked; `run_git` says plainly
+  when a directory is not there. `docs/standards/code.md` records the git 2.31 that
+  `--path-format` wants. Commit `d315802`.
+- **Six assertions that were missing rather than wrong**, each now failing against its mutant: a
+  task's branch and worktree start from the integration branch as it is at that moment (5.14) and
+  the fixtures had `main` checked out throughout; `default_branch` had no test with a remote at all;
+  `head_summary` promised strict ISO 8601 and only `starts_with("20")` was asked, and its fixture
+  had one commit so `log -1` could have been `log -2`; `diff` promised no colour and no test set
+  `color.ui`; and the unit test for a line that is not a commit left both fields empty at once, so
+  neither half of the guard was held to anything. Commit `151abc6`.
+
+Recorded rather than fixed here, because the fix is not this step's:
+
+- **Two merges at once on one repository interleave.** `merge` reads HEAD, moves it and puts it
+  back. Measured on the landed adapter: sixteen runs in forty left the checkout on the wrong branch,
+  and one in forty landed the merge commit on a branch nobody named while the caller was told it
+  merged. A lock inside `merge` cannot see the other caller, so `docs/SPEC.md` 5.14 now says one
+  task integrates at a time and the project plan puts the lock with phase 3 step 10, which is what
+  drives integration. Eight concurrent worktree and read calls were clean: it is integration alone.
+  Commit `4867c97`.
+- **A merge that lands and then cannot put the branch back is reported as the checkout's error**,
+  with the merge commit left where it landed. Nothing has reached that case. `merge`'s doc says so,
+  and says why the alternative — reporting success while the repository sits somewhere the caller
+  did not ask for — is worse to be wrong about.
+- **`.farik/local/` must be ignored by git** when step 05 makes `.farik/`: a task's worktree lives
+  under it, so without the ignore every repository Farik touches is dirty forever. Recorded on the
+  step 05 row of the project plan.
+
+Accepted as equivalent or immaterial, with the reviewer's reasons: `--no-ext-diff` (this plan
+already records it as defensive and untested, and pinning it would want an external differ on the
+machine); `commit_count`'s parse-failure branch (git prints a number); the ordering of a failed
+merge against a failed restore (recorded above); the `was_on == into` short circuit (removing it
+re-checks-out the same branch); `--git-dir` against `--show-toplevel` in `is_repository` (they
+differ only for a bare repository, which Farik cannot work in); and `--no-color` on the `log` that
+reads the tip, verified: `color.ui = always` does not paint a custom `%H%x1f%cI%x1f%s` format,
+though it does paint `git diff`, which is why that one is now pinned.
+
+Portability, from the review: the suite passes under a temporary directory named with a space and
+non-ASCII characters, because every path reaches git through argv and never a shell. The fixtures'
+isolation — `GIT_CONFIG_GLOBAL`, `core.hooksPath`, `core.excludesFile` and `core.attributesFile` at
+`/dev/null` — is POSIX-only, so on Windows a contributor's real configuration would be read; nothing
+in this repository targets Windows yet and no step plan has claimed otherwise.
