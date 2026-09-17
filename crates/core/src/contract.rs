@@ -110,7 +110,10 @@ impl Verification {
 /// Builders for test contracts, usable by every crate's tests.
 pub mod fixtures;
 
-const SCHEMA_JSON: &str = include_str!("generated/task_contract.schema.json");
+/// The contract schema this crate validates against, embedded at compile time. Public so that a
+/// crate whose own schema repeats one of the contract's vocabularies can test that it still
+/// matches, one schema never being allowed to reference another.
+pub const SCHEMA_JSON: &str = include_str!("generated/task_contract.schema.json");
 
 /// One way in which a value failed the contract schema.
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -523,7 +523,7 @@ Files: modified `crates/core/src/contract.rs`, `crates/protocol/src/lib.rs`; tes
 Consumes: `crates/protocol/src/generated/event.schema.json` from Task 2
 Produces: `farik_core::contract::SCHEMA_JSON`
 
-- [ ] Write the failing test. Append to the `tests` module of `crates/protocol/src/lib.rs`:
+- [x] Write the failing test. Append to the `tests` module of `crates/protocol/src/lib.rs`:
 
   ```rust
       #[test]
@@ -544,14 +544,14 @@ Produces: `farik_core::contract::SCHEMA_JSON`
       }
   ```
 
-- [ ] Run it and confirm it fails because the contract schema is not readable from outside its crate:
+- [x] Run it and confirm it fails because the contract schema is not readable from outside its crate:
 
   ```
   cargo test -p farik-protocol
   # expected: FAIL to compile, error[E0603]: constant `SCHEMA_JSON` is private
   ```
 
-- [ ] Write the minimal implementation. In `crates/core/src/contract.rs`, replace the line
+- [x] Write the minimal implementation. In `crates/core/src/contract.rs`, replace the line
 
   ```rust
   const SCHEMA_JSON: &str = include_str!("generated/task_contract.schema.json");
@@ -566,14 +566,14 @@ Produces: `farik_core::contract::SCHEMA_JSON`
   pub const SCHEMA_JSON: &str = include_str!("generated/task_contract.schema.json");
   ```
 
-- [ ] Run the test and both crates' suites; confirm green:
+- [x] Run the test and both crates' suites; confirm green:
 
   ```
   cargo test -p farik-protocol -p farik-core
   # expected: all passing, including keeps_the_summary_vocabularies_the_contract_schema_owns
   ```
 
-- [ ] Commit: `feat(core): expose the contract schema to another crate's tests`
+- [x] Commit: `feat(core): expose the contract schema to another crate's tests`
 
   The type is `feat(core)` rather than `test(protocol)` because the change that makes the test
   possible is a widening of `farik-core`'s public interface, which is the half of the diff a

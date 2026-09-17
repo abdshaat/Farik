@@ -28,4 +28,21 @@ mod tests {
             assert_eq!(wire.parse::<EventKind>().expect("a known kind"), kind);
         }
     }
+
+    #[test]
+    fn keeps_the_summary_vocabularies_the_contract_schema_owns() {
+        // One schema never references another, so the event schema repeats the contract's kind,
+        // status, and risk lists. This is what stops the copy from drifting from the original.
+        let event: serde_json::Value =
+            serde_json::from_str(include_str!("generated/event.schema.json"))
+                .expect("the embedded event schema is valid JSON");
+        let contract: serde_json::Value = serde_json::from_str(farik_core::contract::SCHEMA_JSON)
+            .expect("the embedded contract schema is valid JSON");
+        let summary = &event["$defs"]["contractSummary"]["properties"];
+        let fields = &contract["properties"];
+        assert_eq!(summary["kind"]["enum"], fields["kind"]["enum"]);
+        assert_eq!(summary["status"]["enum"], fields["status"]["enum"]);
+        assert_eq!(summary["risk"]["enum"], fields["risk"]["enum"]);
+        assert_eq!(summary["parent"]["pattern"], fields["parent"]["pattern"]);
+    }
 }
