@@ -48,9 +48,26 @@ pub enum CriteriaError {
         /// The name that was asked for.
         name: String,
     },
-    /// The library's criterion is not one a contract will take. Today only an id reaches this: the
-    /// caller names the id the criterion will carry, and a contract's ids are `C1`, `C2`, and so
-    /// on. It also stands ready for the day the two schemas disagree about what a criterion is.
+    /// The id the caller gave is not one a contract takes. A contract's ids are `C1`, `C2`, and so
+    /// on; nothing is wrong with the criterion, which is why this names the id first — the last
+    /// thing a person needs is to be sent to a library entry that is fine.
+    NotAnId {
+        /// The id that was given.
+        id: String,
+        /// The criterion it was given for, so that a caller can find the reference.
+        name: String,
+        /// What the contract's own shape refused, in its words.
+        detail: String,
+    },
+    /// One id was given to two criteria. A contract's criteria have one each, so this would be
+    /// refused later by `validate_contract`, a long way from the mistake that caused it.
+    RepeatedId {
+        /// The id that was given twice.
+        id: String,
+    },
+    /// The library's criterion is not one a contract will take for some other reason. Nothing
+    /// reaches this while the two schemas agree about what a criterion is, which a test holds them
+    /// to; it stands ready for the day they do not.
     Refused {
         /// The name of the criterion being expanded.
         name: String,
@@ -65,6 +82,14 @@ impl fmt::Display for CriteriaError {
             Self::UnknownCriterion { name } => {
                 write!(formatter, "the criterion library has no {name}")
             }
+            Self::NotAnId { id, name, detail } => write!(
+                formatter,
+                "{id}, the id given for {name}, is not one a contract takes: {detail}"
+            ),
+            Self::RepeatedId { id } => write!(
+                formatter,
+                "the id {id} was given to two criteria, and a contract's criteria have one each"
+            ),
             Self::Refused { name, detail } => {
                 write!(
                     formatter,
@@ -137,12 +162,16 @@ pub fn validate_criteria(input: &Value) -> Result<CriteriaLibrary, Vec<Validatio
 ///
 /// # Errors
 ///
-/// `UnknownCriterion` for the first name the library does not hold, or `Refused` when the id is not
+/// `RepeatedId` when one id was given twice, before anything else is looked at; then
+/// `UnknownCriterion` for the first name the library does not hold, or `NotAnId` when the id is not
 /// one a contract accepts.
 pub fn expand_criteria(
     refs: &[(String, String)],
     library: &CriteriaLibrary,
 ) -> Result<Vec<ExitCriterion>, CriteriaError> {
+    if let Some(id) = repeated_ids(refs.iter().map(|(id, _)| id.as_str())).first() {
+        return Err(CriteriaError::RepeatedId { id: id.clone() });
+    }
     refs.iter()
         .map(|(id, name)| {
             let template = library
@@ -152,9 +181,10 @@ pub fn expand_criteria(
                 .ok_or_else(|| CriteriaError::UnknownCriterion { name: name.clone() })?;
             Ok(ExitCriterion {
                 id: ExitCriterionId::try_from(id.as_str()).map_err(|error| {
-                    CriteriaError::Refused {
+                    CriteriaError::NotAnId {
+                        id: id.clone(),
                         name: name.clone(),
-                        detail: format!("{id} is not a criterion id a contract takes: {error}"),
+                        detail: error.to_string(),
                     }
                 })?,
                 satisfies: Vec::new(),
@@ -466,13 +496,34 @@ mod tests {
     fn refuses_an_id_a_contract_would_not_take() {
         let library = library(&a_criteria_library_wire());
         let refused = expand_criteria(&[("C0".to_string(), "cargo-check".to_string())], &library);
-        let Err(CriteriaError::Refused { name, detail }) = refused else {
+        let Err(refusal) = refused else {
             panic!("a contract's ids start at C1: {refused:?}");
         };
-        assert_eq!(name, "cargo-check");
-        assert!(
-            detail.starts_with("C0 is not a criterion id a contract takes"),
-            "{detail}"
+        // Read from the other side: nothing is wrong with cargo-check, and a person sent to the
+        // library to fix it would find nothing there to fix.
+        assert_eq!(
+            refusal.to_string(),
+            "C0, the id given for cargo-check, is not one a contract takes: doesn't match pattern \
+             \"^C[1-9][0-9]*$\""
+        );
+    }
+
+    #[test]
+    fn refuses_one_id_given_to_two_criteria() {
+        // A contract's criteria have one id each, so this would be refused later by
+        // validate_contract, naming a contract rather than the reference list that built it.
+        let library = library(&a_criteria_library_wire());
+        assert_eq!(
+            expand_criteria(
+                &[
+                    ("C1".to_string(), "cargo-check".to_string()),
+                    ("C1".to_string(), "unit-tests".to_string()),
+                ],
+                &library,
+            ),
+            Err(CriteriaError::RepeatedId {
+                id: "C1".to_string(),
+            })
         );
     }
 
@@ -482,9 +533,17 @@ mod tests {
             CriteriaError::UnknownCriterion {
                 name: "pnpm-check".to_string(),
             },
+            CriteriaError::NotAnId {
+                id: "C0".to_string(),
+                name: "cargo-check".to_string(),
+                detail: "it starts at C1".to_string(),
+            },
+            CriteriaError::RepeatedId {
+                id: "C1".to_string(),
+            },
             CriteriaError::Refused {
                 name: "cargo-check".to_string(),
-                detail: "C0 is not a criterion id a contract takes".to_string(),
+                detail: "its text is not one a contract takes".to_string(),
             },
         ]
         .iter()
@@ -494,8 +553,10 @@ mod tests {
             said,
             [
                 "the criterion library has no pnpm-check",
-                "the criterion cargo-check cannot go in a contract: C0 is not a criterion id a \
-                 contract takes",
+                "C0, the id given for cargo-check, is not one a contract takes: it starts at C1",
+                "the id C1 was given to two criteria, and a contract's criteria have one each",
+                "the criterion cargo-check cannot go in a contract: its text is not one a contract \
+                 takes",
             ]
         );
     }

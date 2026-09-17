@@ -50,18 +50,23 @@ const REQUIRED_ROLES: [(RoleWire, &str); 2] = [
 /// Checks a value against `docs/schemas/team.schema.json` and, when it conforms, returns the typed
 /// team.
 ///
-/// Three rules are this function's rather than the schema's, because `typify` cannot generate a
+/// Four rules are this function's rather than the schema's. Three of them are there because
+/// `typify` cannot generate a
 /// usable type from an array that carries a `contains` — it writes an empty enum for the array and
 /// the whole team becomes unbuildable. So the schema says two to seven agents and this says the
 /// rest: ids are unique, and an active Product Manager and an active Software Developer are there.
+/// The fourth is there because the schema has no way to say it either: an agent may not have `read`
+/// taken away, since everyone reads (5.6) and an agent that cannot read is one every tool call is
+/// refused for.
+///
 /// They are checked after the schema passes, on the typed value, and every one of them is reported
 /// rather than only the first.
 ///
 /// # Errors
 ///
 /// Every schema violation, each at its own JSON pointer; or, when the schema passes, one error per
-/// repeated agent id and one per missing required role; or, when the schema passes and the typed
-/// team cannot be built, one error at the root.
+/// repeated agent id, one per agent that revoked `read`, and one per missing required role; or,
+/// when the schema passes and the typed team cannot be built, one error at the root.
 pub fn validate_team(input: &Value) -> Result<Team, Vec<ValidationError>> {
     let errors: Vec<ValidationError> = VALIDATOR
         .iter_errors(input)
@@ -92,6 +97,24 @@ pub fn validate_team(input: &Value) -> Result<Team, Vec<ValidationError>> {
                 named(&repeated)
             ),
         });
+    }
+    for (index, agent) in team.agents.iter().enumerate() {
+        if agent
+            .revokes
+            .iter()
+            .flatten()
+            .any(|tier| *tier == PermissionTierWire::Read)
+        {
+            errors.push(ValidationError {
+                path: format!("/agents/{index}/revokes"),
+                message: format!(
+                    "{} cannot have read taken away: everyone reads (docs/SPEC.md section 5.6), \
+                     and an agent that cannot read is one every tool call is refused for. A team \
+                     pauses an agent instead.",
+                    agent.id.as_str()
+                ),
+            });
+        }
     }
     for (role, what) in REQUIRED_ROLES {
         if !team.has_active(Role::from(role)) {
@@ -659,6 +682,24 @@ mod tests {
                 PermissionTier::GitLocal,
             ],
             "execute taken away, git_remote granted and taken away, read granted twice over"
+        );
+    }
+
+    #[test]
+    fn refuses_an_agent_that_cannot_read() {
+        // 5.6: everyone reads. An agent with read taken away is one every tool call is refused
+        // for, in every session it is ever given, and the file that did it would look fine. Pause
+        // is how a team stops an agent.
+        let mut wire = a_team_wire();
+        wire["agents"][1]["revokes"] = json!(["execute", "read"]);
+        let refusals = refusals(&wire);
+        assert_eq!(refusals.len(), 1, "{refusals:?}");
+        assert_eq!(refusals[0].0, "/agents/1/revokes");
+        assert_eq!(
+            refusals[0].1,
+            "linus cannot have read taken away: everyone reads (docs/SPEC.md section 5.6), and an \
+             agent that cannot read is one every tool call is refused for. A team pauses an agent \
+             instead."
         );
     }
 
