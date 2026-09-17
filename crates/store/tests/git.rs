@@ -112,3 +112,47 @@ fn knows_a_repository_from_a_directory_that_is_not_one() {
     assert!(Git::open(plain).is_repository());
     assert!(!Git::open(std::env::temp_dir().join("farik-nowhere-at-all")).is_repository());
 }
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn reads_the_commit_at_the_tip_and_says_when_there_is_none() {
+    let empty = std::env::temp_dir().join(format!("farik-git-empty-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&empty);
+    std::fs::create_dir_all(&empty).expect("a directory");
+    run_git(&empty, &["init", "-b", "main"]);
+    assert_eq!(
+        Git::open(empty.clone())
+            .head_summary()
+            .expect("the read works"),
+        None,
+        "a repository farik init has just made has no commit"
+    );
+    let _ = std::fs::remove_dir_all(&empty);
+
+    let repository = TempRepo::new("head-summary");
+    let summary = repository
+        .adapter()
+        .head_summary()
+        .expect("the read works")
+        .expect("a repository with a commit has one");
+    assert_eq!(summary.sha, repository.git(&["rev-parse", "HEAD"]));
+    assert_eq!(summary.subject, "the first commit");
+    assert!(
+        summary.committed_at.starts_with("20"),
+        "an ISO 8601 date: {}",
+        summary.committed_at
+    );
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn answers_with_the_branch_it_is_on_when_there_is_no_remote_to_ask() {
+    // A repository with no remote records its default branch nowhere, so the branch HEAD is on is
+    // the only answer there is; the team file is where a team says otherwise (5.14).
+    let repository = TempRepo::new("default-branch");
+    let git = repository.adapter();
+    assert_eq!(git.current_branch().expect("the read works"), "main");
+    assert_eq!(git.default_branch().expect("the read works"), "main");
+    repository.git(&["checkout", "-b", "farik/FRK-1"]);
+    assert_eq!(git.current_branch().expect("the read works"), "farik/FRK-1");
+}

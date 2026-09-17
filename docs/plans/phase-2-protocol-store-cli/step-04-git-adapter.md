@@ -616,7 +616,7 @@ Files: modified `crates/store/src/git.rs`, `crates/store/src/lib.rs`, `crates/st
 Consumes: `Git`, `GitError`, `at_root`, `run_git` from Task 1
 Produces: `farik_store::HeadSummary`, `Git::{head_summary, default_branch, current_branch}`
 
-- [ ] Write the failing tests. Replace the whole tests module of `crates/store/src/git.rs` with:
+- [x] Write the failing tests. Replace the whole tests module of `crates/store/src/git.rs` with:
 
   ```rust
   #[cfg(test)]
@@ -702,7 +702,7 @@ Produces: `farik_store::HeadSummary`, `Git::{head_summary, default_branch, curre
   }
   ```
 
-- [ ] Append to `crates/store/tests/git.rs`, a blank line between each of these and the test above it:
+- [x] Append to `crates/store/tests/git.rs`, a blank line between each of these and the test above it:
 
   ```rust
   #[test]
@@ -750,7 +750,7 @@ Produces: `farik_store::HeadSummary`, `Git::{head_summary, default_branch, curre
   }
   ```
 
-- [ ] Run them and confirm they fail because nothing reads the tip. One command per target, as in task 1, so that what is printed is the same every time:
+- [x] Run them and confirm they fail because nothing reads the tip. One command per target, as in task 1, so that what is printed is the same every time:
 
   ```
   cargo test -p farik-store --lib
@@ -769,7 +769,7 @@ Produces: `farik_store::HeadSummary`, `Git::{head_summary, default_branch, curre
   # error: could not compile `farik-store` (test "git") due to 5 previous errors
   ```
 
-- [ ] Write the minimal implementation. Insert into `crates/store/src/git.rs`, before the doc comment of `pub struct Git` — above it, not between it and the struct:
+- [x] Write the minimal implementation. Insert into `crates/store/src/git.rs`, before the doc comment of `pub struct Git` — above it, not between it and the struct:
 
   ```rust
   /// What the tip of a branch is, as a board shows it.
@@ -885,13 +885,13 @@ Produces: `farik_store::HeadSummary`, `Git::{head_summary, default_branch, curre
   }
   ```
 
-- [ ] Add `HeadSummary` to the re-export in `crates/store/src/lib.rs`, which becomes:
+- [x] Add `HeadSummary` to the re-export in `crates/store/src/lib.rs`, which becomes:
 
   ```rust
   pub use git::{Git, GitError, HeadSummary};
   ```
 
-- [ ] Run the check and confirm green:
+- [x] Run the check and confirm green:
 
   ```
   cargo xtask check --integration
@@ -902,7 +902,7 @@ Produces: `farik_store::HeadSummary`, `Git::{head_summary, default_branch, curre
   #   test result: ok. 27 passed (xtask)
   ```
 
-- [ ] Commit: `feat(store): read the tip of a branch and which branch is which`
+- [x] Commit: `feat(store): read the tip of a branch and which branch is which`
 
 ### Task 3: A branch and a worktree for every task
 
