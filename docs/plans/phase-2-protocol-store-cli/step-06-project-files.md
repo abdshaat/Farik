@@ -1503,7 +1503,7 @@ Files: modified `crates/store/src/files.rs`, `crates/store/tests/project_files.r
 Consumes: everything above
 Produces: `ProjectFiles::{read_memory, write_memory, read_project_scan, write_project_scan, read_product_doc, write_product_doc}`, `farik_core::team::AgentId`, and `farik_core::governor::paths::normalise` made public
 
-- [ ] Write the failing tests. Replace `crates/store/tests/project_files.rs`, whole, with:
+- [x] Write the failing tests. Replace `crates/store/tests/project_files.rs`, whole, with:
 
   ```rust
   //! The files under `.farik/`, against a real directory.
@@ -2041,7 +2041,7 @@ Produces: `ProjectFiles::{read_memory, write_memory, read_project_scan, write_pr
   }
   ```
 
-- [ ] Replace the tests module of `crates/store/src/files.rs` with:
+- [x] Replace the tests module of `crates/store/src/files.rs` with:
 
   ```rust
   #[cfg(test)]
@@ -2140,7 +2140,7 @@ Produces: `ProjectFiles::{read_memory, write_memory, read_project_scan, write_pr
   }
   ```
 
-- [ ] Run them and confirm they fail because `farik-core` has the agent id type but does not export it, and neither path function exists yet:
+- [x] Run them and confirm they fail because `farik-core` has the agent id type but does not export it, and neither path function exists yet:
 
   ```
   cargo test -p farik-store --lib
@@ -2165,7 +2165,7 @@ Produces: `ProjectFiles::{read_memory, write_memory, read_project_scan, write_pr
   #   errors
   ```
 
-- [ ] Give the store the two things `farik-core` has and does not offer. In `crates/core/src/team.rs`, add `AgentId` to the generated re-export, which becomes:
+- [x] Give the store the two things `farik-core` has and does not offer. In `crates/core/src/team.rs`, add `AgentId` to the generated re-export, which becomes:
 
   ```rust
   pub use crate::generated::team::{
@@ -2176,7 +2176,7 @@ Produces: `ProjectFiles::{read_memory, write_memory, read_project_scan, write_pr
   };
   ```
 
-- [ ] In `crates/core/src/governor/paths.rs`, replace the doc comment and signature of `normalise` with:
+- [x] In `crates/core/src/governor/paths.rs`, replace the doc comment and signature of `normalise` with:
 
   ```rust
   /// The path with backslashes as `/` and `.` segments dropped, or `None` when it is empty,
@@ -2189,7 +2189,7 @@ Produces: `ProjectFiles::{read_memory, write_memory, read_project_scan, write_pr
   pub fn normalise(path: &str) -> Option<String> {
   ```
 
-- [ ] Write the minimal implementation. In `crates/store/src/files.rs`, add one import line after the `farik_core::criteria` one:
+- [x] Write the minimal implementation. In `crates/store/src/files.rs`, add one import line after the `farik_core::criteria` one:
 
   ```rust
   use farik_core::governor::paths::normalise;
@@ -2201,7 +2201,7 @@ Produces: `ProjectFiles::{read_memory, write_memory, read_project_scan, write_pr
   use farik_core::team::{AgentId, Team, validate_team};
   ```
 
-- [ ] Insert into the first `impl ProjectFiles` block, after `list_contracts`:
+- [x] Insert into the first `impl ProjectFiles` block, after `list_contracts`:
 
   ```rust
       /// An agent's own notebook, which is included in every session it runs (5.8).
@@ -2266,7 +2266,7 @@ Produces: `ProjectFiles::{read_memory, write_memory, read_project_scan, write_pr
       }
   ```
 
-- [ ] Add the scan's line to the layout, which becomes:
+- [x] Add the scan's line to the layout, which becomes:
 
   ```rust
   /// Where each file lives, relative to `.farik/`. One place, so that a reader of this module can see
@@ -2276,7 +2276,7 @@ Produces: `ProjectFiles::{read_memory, write_memory, read_project_scan, write_pr
   const PROJECT_SCAN: &str = "project.md";
   ```
 
-- [ ] And insert, after `contract_path`:
+- [x] And insert, after `contract_path`:
 
   ```rust
   /// The file an agent's notebook lives in. An agent id is a slug the team schema pinned, so this
@@ -2286,7 +2286,7 @@ Produces: `ProjectFiles::{read_memory, write_memory, read_project_scan, write_pr
   }
   ```
 
-- [ ] Then, after that:
+- [x] Then, after that:
 
   ```rust
   /// A product document's path, or a refusal when it climbs out of `product/`.
@@ -2305,7 +2305,7 @@ Produces: `ProjectFiles::{read_memory, write_memory, read_project_scan, write_pr
   }
   ```
 
-- [ ] Then, after that, the one helper that asks the file system rather than the string:
+- [x] Then, after that, the one helper that asks the file system rather than the string:
 
   ```rust
   /// The path with every part of it that exists resolved, and the rest as it was written.
@@ -2333,7 +2333,7 @@ Produces: `ProjectFiles::{read_memory, write_memory, read_project_scan, write_pr
   }
   ```
 
-- [ ] And in the second `impl ProjectFiles` block, insert between `write_if_absent` and `read_text` — the seam between the helpers that only read a path and the ones that touch the disk, which is what this one does:
+- [x] And in the second `impl ProjectFiles` block, insert between `write_if_absent` and `read_text` — the seam between the helpers that only read a path and the ones that touch the disk, which is what this one does:
 
   ```rust
       /// A product document's path, once the file system has been asked as well as the string.
@@ -2367,7 +2367,7 @@ Produces: `ProjectFiles::{read_memory, write_memory, read_project_scan, write_pr
       }
   ```
 
-- [ ] Run the check and confirm green:
+- [x] Run the check and confirm green:
 
   ```
   cargo xtask check --integration
@@ -2376,7 +2376,7 @@ Produces: `ProjectFiles::{read_memory, write_memory, read_project_scan, write_pr
   #   test result: ok. 23 passed (crates/store/tests/project_files.rs)
   ```
 
-- [ ] Commit: `feat(store): keep a product document under product and nowhere else`
+- [x] Commit: `feat(store): keep a product document under product and nowhere else`
 
 ### Task 4: What this machine knows
 

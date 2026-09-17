@@ -13,7 +13,7 @@ use crate::governor::team_rules::TeamRules;
 
 pub use crate::contract::{Role, ValidationError};
 pub use crate::generated::team::{
-    Agent, AgentStatus, Budgets as TeamBudgets, FarikTeam as Team, Model as AgentModel,
+    Agent, AgentId, AgentStatus, Budgets as TeamBudgets, FarikTeam as Team, Model as AgentModel,
     ModelEffort as Effort, PermissionTier as PermissionTierWire, Policy as TeamPolicy,
     PolicyHumanAcceptsContracts as HumanAcceptsContracts, PolicyIntegration as Integration,
     Role as RoleWire, Rules as RulesWire, SessionLimits as SessionLimitsWire,

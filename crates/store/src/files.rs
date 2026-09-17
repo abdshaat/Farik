@@ -10,7 +10,8 @@ use std::path::{Path, PathBuf};
 
 use farik_core::contract::{TaskContract, TaskId, ValidationError, validate_contract};
 use farik_core::criteria::{CriteriaLibrary, validate_criteria};
-use farik_core::team::{Team, validate_team};
+use farik_core::governor::paths::normalise;
+use farik_core::team::{AgentId, Team, validate_team};
 use serde::Serialize;
 use serde_json::Value;
 
@@ -235,12 +236,74 @@ impl ProjectFiles {
         ids.sort_by_key(|id| id.as_str().trim_start_matches("FRK-").parse::<u64>().ok());
         Ok(ids)
     }
+
+    /// An agent's own notebook, which is included in every session it runs (5.8).
+    ///
+    /// An agent that has never written one has an empty notebook rather than no notebook, because
+    /// every session includes it and a missing file is not a thing to tell an agent about.
+    ///
+    /// # Errors
+    ///
+    /// `Io` when the file is there and cannot be read.
+    pub fn read_memory(&self, agent_id: &AgentId) -> Result<String, FilesError> {
+        match self.read_text(&memory_path(agent_id)) {
+            Err(FilesError::NotFound { .. }) => Ok(String::new()),
+            other => other,
+        }
+    }
+
+    /// Writes an agent's notebook.
+    ///
+    /// # Errors
+    ///
+    /// `Io` when the directory cannot be made or the file cannot be written.
+    pub fn write_memory(&self, agent_id: &AgentId, text: &str) -> Result<(), FilesError> {
+        self.write_text(&memory_path(agent_id), text)
+    }
+
+    /// What the project scan read back about this repository (5.8).
+    ///
+    /// # Errors
+    ///
+    /// `NotFound` when the project has not been scanned, `Io` when the file cannot be read.
+    pub fn read_project_scan(&self) -> Result<String, FilesError> {
+        self.read_text(PROJECT_SCAN)
+    }
+
+    /// Writes what the project scan read back.
+    ///
+    /// # Errors
+    ///
+    /// `Io` when the file cannot be written.
+    pub fn write_project_scan(&self, text: &str) -> Result<(), FilesError> {
+        self.write_text(PROJECT_SCAN, text)
+    }
+
+    /// A product document, by its path under `product/`.
+    ///
+    /// # Errors
+    ///
+    /// `Invalid` when the path climbs out of `product/`, `NotFound` when there is no such document,
+    /// `Io` when it cannot be read.
+    pub fn read_product_doc(&self, path: &str) -> Result<String, FilesError> {
+        self.read_text(&self.inside_product(path)?)
+    }
+
+    /// Writes a product document.
+    ///
+    /// # Errors
+    ///
+    /// `Invalid` when the path climbs out of `product/`, `Io` when it cannot be written.
+    pub fn write_product_doc(&self, path: &str, text: &str) -> Result<(), FilesError> {
+        self.write_text(&self.inside_product(path)?, text)
+    }
 }
 
 /// Where each file lives, relative to `.farik/`. One place, so that a reader of this module can see
 /// the whole layout at once and a change to it is one line.
 const TEAM: &str = "team.yaml";
 const CRITERIA: &str = "team/criteria.yaml";
+const PROJECT_SCAN: &str = "project.md";
 
 /// How a file a person edits by hand is read.
 ///
@@ -257,6 +320,51 @@ fn yaml_options() -> serde_saphyr::Options {
 /// The file a contract lives in: the one its own id names.
 fn contract_path(id: &TaskId) -> String {
     format!("contracts/{}.yaml", id.as_str())
+}
+
+/// The file an agent's notebook lives in. An agent id is a slug the team schema pinned, so this
+/// path cannot climb anywhere.
+fn memory_path(agent_id: &AgentId) -> String {
+    format!("agents/{}/memory.md", agent_id.as_str())
+}
+
+/// A product document's path, or a refusal when it climbs out of `product/`.
+///
+/// The path comes from a tool call, so it is a string an agent chose. `farik-core`'s own path rule
+/// is what answers: empty, absolute, or holding a `..` segment is refused, and `.` segments and
+/// backslashes are dropped on the way. Everything else is somewhere under `product/`, which is the
+/// only place 5.6 lets a product document be written.
+fn product_path(path: &str) -> Result<String, FilesError> {
+    let normalised = normalise(path).ok_or_else(|| FilesError::Invalid {
+        path: ProjectFiles::named(&format!("product/{path}")),
+        detail: "a product document lives under product/, and this path climbs out of it"
+            .to_string(),
+    })?;
+    Ok(format!("product/{normalised}"))
+}
+
+/// The path with every part of it that exists resolved, and the rest as it was written.
+///
+/// `canonicalize` refuses a path that is not there, and most of these are not there yet. So the
+/// deepest part that does exist is resolved — which is what follows a symlink — and what is left is
+/// put back on the end, where there is no existing directory for a link to hide in.
+fn resolved(path: &Path) -> Result<PathBuf, std::io::Error> {
+    let mut left = Vec::new();
+    let mut existing = path.to_path_buf();
+    while !existing.exists() {
+        match (existing.file_name(), existing.parent()) {
+            (Some(name), Some(parent)) => {
+                left.push(name.to_os_string());
+                existing = parent.to_path_buf();
+            }
+            _ => break,
+        }
+    }
+    let mut answer = std::fs::canonicalize(&existing)?;
+    while let Some(name) = left.pop() {
+        answer.push(name);
+    }
+    Ok(answer)
 }
 
 impl ProjectFiles {
@@ -314,6 +422,36 @@ impl ProjectFiles {
             return Ok(());
         }
         self.write_text(relative, text)
+    }
+
+    /// A product document's path, once the file system has been asked as well as the string.
+    ///
+    /// `product_path` answers what the text says; this answers where it lands. A directory under
+    /// `product/` may be a symlink pointing anywhere, and following one would put a tool call's
+    /// chosen path outside `.farik/` entirely — the string rule alone cannot see that, because
+    /// there is no `..` in it. So the path and `product/` itself are each resolved as far as they
+    /// exist, and the one has to be under the other.
+    ///
+    /// Nothing is made here, not even the directory the answer is about. A read that conjured
+    /// `.farik/` would make a project of whatever directory it was pointed at.
+    fn inside_product(&self, path: &str) -> Result<String, FilesError> {
+        let relative = product_path(path)?;
+        let refuse = |detail: String| FilesError::Invalid {
+            path: Self::named(&relative),
+            detail,
+        };
+        let boundary =
+            resolved(&self.path_of("product")).map_err(|error| refuse(error.to_string()))?;
+        let landing =
+            resolved(&self.path_of(&relative)).map_err(|error| refuse(error.to_string()))?;
+        if landing.starts_with(&boundary) {
+            Ok(relative)
+        } else {
+            Err(refuse(format!(
+                "it leads out of product/, to {}, which a product document may not be",
+                landing.display()
+            )))
+        }
     }
 
     /// One file's text.
@@ -407,8 +545,9 @@ impl ProjectFiles {
 #[cfg(test)]
 mod tests {
     use farik_core::contract::TaskId;
+    use farik_core::team::AgentId;
 
-    use super::{FilesError, contract_path};
+    use super::{FilesError, contract_path, memory_path, product_path};
 
     #[test]
     fn says_what_it_could_not_use_and_why_in_plain_words() {
@@ -444,5 +583,56 @@ mod tests {
             contract_path(&TaskId::try_from("FRK-12").expect("an id")),
             "contracts/FRK-12.yaml"
         );
+    }
+
+    #[test]
+    fn names_the_file_a_notebook_lives_in() {
+        assert_eq!(
+            memory_path(&AgentId::try_from("ada").expect("an id")),
+            "agents/ada/memory.md"
+        );
+    }
+
+    #[test]
+    fn keeps_a_product_document_under_product() {
+        assert_eq!(
+            product_path("roadmap.md").expect("a path"),
+            "product/roadmap.md"
+        );
+        assert_eq!(
+            product_path("./areas/login.md").expect("a path"),
+            "product/areas/login.md",
+            "a . segment is dropped rather than refused"
+        );
+        assert_eq!(
+            product_path("areas\\login.md").expect("a path"),
+            "product/areas/login.md",
+            "and a backslash is a separator"
+        );
+    }
+
+    #[test]
+    fn refuses_a_product_path_that_climbs_out_of_product() {
+        // The path comes from a tool call, so it is a string an agent chose. 5.6 puts product
+        // documents under product/ and nowhere else, and one `..` would put this one in the
+        // repository's own source.
+        for path in [
+            "../team.yaml",
+            "../../etc/passwd",
+            "/etc/passwd",
+            "",
+            "a/../../b",
+        ] {
+            let refused = product_path(path);
+            let Err(FilesError::Invalid {
+                path: named,
+                detail,
+            }) = refused
+            else {
+                panic!("{path:?} climbs out: {refused:?}");
+            };
+            assert_eq!(named, format!(".farik/product/{path}"));
+            assert!(detail.contains("climbs out of it"), "{detail}");
+        }
     }
 }

@@ -79,7 +79,12 @@ pub fn check_protected_paths(
 
 /// The path with backslashes as `/` and `.` segments dropped, or `None` when it is empty,
 /// absolute (a leading separator or a drive letter), or has a `..` segment.
-fn normalise(path: &str) -> Option<String> {
+///
+/// Public because the same question is asked twice: here, of a path a change touched, and in
+/// `farik-store`'s file adapter, of a path a tool call wants to write under `.farik/product/`. Two
+/// answers to "does this path climb out" would be two definitions of a safe path.
+#[must_use]
+pub fn normalise(path: &str) -> Option<String> {
     let unified = path.replace('\\', "/");
     let is_absolute = unified.starts_with('/') || unified.chars().nth(1) == Some(':');
     let segments: Vec<&str> = unified

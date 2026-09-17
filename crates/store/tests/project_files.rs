@@ -5,6 +5,7 @@
 
 use farik_core::contract::{TaskId, validate_contract};
 use farik_core::criteria::{fixtures::a_criteria_library_wire, validate_criteria};
+use farik_core::team::AgentId;
 use farik_store::files::FilesError;
 use farik_store::files::fixtures::{TempProject, a_team};
 
@@ -409,4 +410,124 @@ fn a_project_with_nothing_in_it_has_no_contracts() {
             .expect("an empty list, not a refusal")
             .is_empty()
     );
+}
+
+#[test]
+fn an_agent_that_never_wrote_a_notebook_has_an_empty_one() {
+    // Every session for an agent includes its notebook (5.8). A missing file is not something to
+    // tell an agent about; it is an agent that has not written anything down yet.
+    let project = TempProject::new("memory");
+    let files = project.files();
+    let ada = AgentId::try_from("ada").expect("an id");
+    assert_eq!(files.read_memory(&ada).expect("an empty notebook"), "");
+
+    files
+        .write_memory(&ada, "The login form is in src/login.\n")
+        .expect("it is written");
+    assert_eq!(
+        files.read_memory(&ada).expect("it reads back"),
+        "The login form is in src/login.\n"
+    );
+}
+
+#[test]
+fn reads_back_the_project_scan_and_says_when_there_is_none() {
+    let project = TempProject::new("scan");
+    let files = project.files();
+    assert_eq!(
+        files.read_project_scan(),
+        Err(FilesError::NotFound {
+            path: ".farik/project.md".to_string(),
+        })
+    );
+    files
+        .write_project_scan("# Farik\n\nA Rust workspace.\n")
+        .expect("it is written");
+    assert!(
+        files
+            .read_project_scan()
+            .expect("it reads back")
+            .contains("A Rust workspace")
+    );
+}
+
+#[test]
+fn writes_a_product_document_and_refuses_one_that_climbs_out() {
+    let project = TempProject::new("product");
+    let files = project.files();
+    files
+        .write_product_doc("areas/login.md", "# Login\n")
+        .expect("it is written");
+    assert!(project.root.join(".farik/product/areas/login.md").is_file());
+    assert_eq!(
+        files
+            .read_product_doc("areas/login.md")
+            .expect("it reads back"),
+        "# Login\n"
+    );
+
+    let refused = files.write_product_doc("../team.yaml", "not here\n");
+    assert!(
+        matches!(refused, Err(FilesError::Invalid { .. })),
+        "{refused:?}"
+    );
+    assert!(
+        !project.root.join(".farik/team.yaml").exists(),
+        "and nothing was written where it pointed"
+    );
+}
+
+#[test]
+fn refuses_a_product_document_that_leaves_product_through_a_link() {
+    // The string rule cannot see this one: there is no `..` in `out/loot.md`. A directory under
+    // product/ may be a link pointing anywhere, and the path comes from a tool call.
+    let project = TempProject::new("product-link");
+    let files = project.files();
+    files
+        .write_product_doc("kept.md", "# Kept\n")
+        .expect("a document is written, which makes product/");
+
+    #[cfg(unix)]
+    {
+        let outside = project.root.join("secret");
+        std::fs::create_dir_all(&outside).expect("somewhere outside .farik/");
+        std::os::unix::fs::symlink(&outside, project.root.join(".farik/product/out"))
+            .expect("a link out of product/");
+
+        let refused = files.write_product_doc("out/loot.md", "taken\n");
+        let Err(FilesError::Invalid { path, detail }) = refused else {
+            panic!("it leads out of product/: {refused:?}");
+        };
+        assert_eq!(path, ".farik/product/out/loot.md");
+        assert!(detail.contains("leads out of product/"), "{detail}");
+        assert!(
+            !outside.join("loot.md").exists(),
+            "and nothing was written where it pointed"
+        );
+        assert!(
+            files.read_product_doc("out/loot.md").is_err(),
+            "and reading through it is refused too"
+        );
+    }
+}
+
+#[test]
+fn reading_a_product_document_makes_nothing() {
+    // `.farik/` existing is what makes a directory a Farik project (spec 3). A read that made it,
+    // to answer where a path lands, would make a project of whatever it was pointed at.
+    let project = TempProject::new("product-read-makes-nothing");
+    let files = project.files();
+    assert!(matches!(
+        files.read_product_doc("roadmap.md"),
+        Err(FilesError::NotFound { .. })
+    ));
+    assert!(
+        !project.root.join(".farik").exists(),
+        "a read is not an init"
+    );
+    assert!(matches!(
+        files.read_product_doc("../team.yaml"),
+        Err(FilesError::Invalid { .. })
+    ));
+    assert!(!project.root.join(".farik").exists(), "nor is a refusal");
 }
