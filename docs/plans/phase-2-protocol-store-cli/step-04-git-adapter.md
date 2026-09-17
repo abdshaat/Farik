@@ -1220,7 +1220,7 @@ Files: modified `crates/store/src/git.rs`, `crates/store/tests/git.rs`, `docs/pl
 Consumes: `Git`, `require_repository`, `at_root` from Tasks 1 and 2
 Produces: `Git::{commit_count, changed_paths, diff}`
 
-- [ ] Write the failing tests. Replace the whole tests module of `crates/store/src/git.rs` with:
+- [x] Write the failing tests. Replace the whole tests module of `crates/store/src/git.rs` with:
 
   ```rust
   #[cfg(test)]
@@ -1339,7 +1339,7 @@ Produces: `Git::{commit_count, changed_paths, diff}`
   }
   ```
 
-- [ ] Append to `crates/store/tests/git.rs`, a blank line between each of these and the test above it:
+- [x] Append to `crates/store/tests/git.rs`, a blank line between each of these and the test above it:
 
   ```rust
   #[test]
@@ -1406,7 +1406,7 @@ Produces: `Git::{commit_count, changed_paths, diff}`
   }
   ```
 
-- [ ] Run them and confirm they fail because nothing reads a range:
+- [x] Run them and confirm they fail because nothing reads a range:
 
   ```
   cargo test -p farik-store --lib
@@ -1424,7 +1424,7 @@ Produces: `Git::{commit_count, changed_paths, diff}`
   # error: could not compile `farik-store` (test "git") due to 5 previous errors
   ```
 
-- [ ] Write the minimal implementation. Insert into `impl Git`, before `require_repository`:
+- [x] Write the minimal implementation. Insert into `impl Git`, before `require_repository`:
 
   ```rust
       /// How many commits `head` has that `base` does not.
@@ -1501,7 +1501,7 @@ Produces: `Git::{commit_count, changed_paths, diff}`
   }
   ```
 
-- [ ] Run the check and confirm green:
+- [x] Run the check and confirm green:
 
   ```
   cargo xtask check --integration
@@ -1512,7 +1512,7 @@ Produces: `Git::{commit_count, changed_paths, diff}`
   #   test result: ok. 27 passed (xtask)
   ```
 
-- [ ] Commit: `feat(store): say what a branch changed and how much`
+- [x] Commit: `feat(store): say what a branch changed and how much`
 
 ### Task 5: Merging a finished task
 

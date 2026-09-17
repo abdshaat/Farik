@@ -220,3 +220,66 @@ fn calls_a_worktree_dirty_whatever_the_repository_is_configured_to_show() {
         "an untracked file is not clean whatever the repository is configured to show"
     );
 }
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn counts_the_commits_a_branch_added_and_names_every_path_it_touched() {
+    let repository = TempRepo::new("changed-paths");
+    let git = repository.adapter();
+    repository.git(&["checkout", "-b", "farik/FRK-1"]);
+    repository.write("src/added.rs", "fn added() {}\n");
+    repository.write("README.md", "the first line\nand a second\n");
+    repository.commit("feat: add a thing");
+    repository.git(&["rm", "--quiet", "README.md"]);
+    repository.commit("feat: and take one away");
+    // main moves on after the branch left it, as it does whenever another task lands first. What
+    // this branch changed is what it changed since the two last agreed, so none of main's own work
+    // belongs to it: counted from the tip instead, the governor would be handed
+    // src/only-on-main.rs as a path this task touched (5.6).
+    repository.git(&["checkout", "main"]);
+    repository.write("src/only-on-main.rs", "fn elsewhere() {}\n");
+    repository.commit("feat: something else entirely");
+    repository.git(&["checkout", "farik/FRK-1"]);
+
+    assert_eq!(git.commit_count("main", "farik/FRK-1"), Ok(2));
+    assert_eq!(
+        git.commit_count("farik/FRK-1", "main"),
+        Ok(1),
+        "the other way is main's own commit, not the branch's two"
+    );
+    let mut changed = git
+        .changed_paths("main", "farik/FRK-1")
+        .expect("the read works");
+    changed.sort();
+    assert_eq!(changed, ["README.md", "src/added.rs"]);
+    // git's own prefixes, whatever this repository is configured to use: a patch without them is
+    // one nothing can apply, and a reviewer is handed this patch to read (5.6).
+    repository.git(&["config", "diff.noprefix", "true"]);
+    let patch = git.diff("main", "farik/FRK-1").expect("the read works");
+    assert!(patch.contains("fn added()"), "the patch holds the change");
+    assert!(patch.contains("--- a/README.md"), "and the removal");
+    assert!(patch.contains("+++ b/src/added.rs"), "with both prefixes");
+    assert!(
+        !patch.contains("only-on-main"),
+        "and nothing main did after the branch left it: {patch}"
+    );
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn names_both_sides_of_a_file_that_moved() {
+    // The governor asks about each path a change touched (5.6), and a move touches two: a rename
+    // reported only by its new name would let work land at a path nobody allowed.
+    let repository = TempRepo::new("renames");
+    let git = repository.adapter();
+    repository.git(&["checkout", "-b", "farik/FRK-1"]);
+    std::fs::create_dir_all(repository.path.join("docs")).expect("the directory it moves into");
+    repository.git(&["mv", "README.md", "docs/README.md"]);
+    repository.commit("docs: move the readme");
+
+    let mut changed = git
+        .changed_paths("main", "farik/FRK-1")
+        .expect("the read works");
+    changed.sort();
+    assert_eq!(changed, ["README.md", "docs/README.md"]);
+}

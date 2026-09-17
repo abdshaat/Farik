@@ -176,6 +176,58 @@ impl Git {
         Ok(run_git(path, &["status", "--porcelain", "--untracked-files=normal"])?.is_empty())
     }
 
+    /// How many commits `head` has that `base` does not.
+    ///
+    /// # Errors
+    ///
+    /// `CommandFailed` when either name is unknown; `InvalidCount` never — git counts.
+    pub fn commit_count(&self, base: &str, head: &str) -> Result<u32, GitError> {
+        self.require_repository()?;
+        let range = format!("{base}..{head}");
+        let counted = self.at_root(&["rev-list", "--count", &range])?;
+        counted.parse().map_err(|_| GitError::CommandFailed {
+            command: format!("rev-list --count {range}"),
+            stderr: format!("answered {counted:?}, which is not a number of commits"),
+        })
+    }
+
+    /// Every path `head` changed since it and `base` last agreed.
+    ///
+    /// Renames are reported as both sides, a removal and an addition, because the governor's
+    /// allowed-paths rule is asked about each of them separately (`docs/SPEC.md` 5.6).
+    ///
+    /// # Errors
+    ///
+    /// `CommandFailed` when either name is unknown.
+    pub fn changed_paths(&self, base: &str, head: &str) -> Result<Vec<String>, GitError> {
+        self.require_repository()?;
+        let range = format!("{base}...{head}");
+        let listed = self.at_root(&["diff", "--no-renames", "--name-only", "-z", &range])?;
+        Ok(changed_paths_of(&listed))
+    }
+
+    /// What `head` changed since it and `base` last agreed, as a patch.
+    ///
+    /// The flags are what make this git's own patch in git's own shape, whatever the user has
+    /// configured: `--no-ext-diff` because a personal external differ is not a patch, and the two
+    /// prefixes because `diff.noprefix` would otherwise hand a reviewer a patch nothing can apply.
+    ///
+    /// # Errors
+    ///
+    /// `CommandFailed` when either name is unknown.
+    pub fn diff(&self, base: &str, head: &str) -> Result<String, GitError> {
+        self.require_repository()?;
+        let range = format!("{base}...{head}");
+        self.at_root(&[
+            "diff",
+            "--no-color",
+            "--no-ext-diff",
+            "--src-prefix=a/",
+            "--dst-prefix=b/",
+            &range,
+        ])
+    }
+
     /// Refuses before running anything when there is no repository, so that every method says the
     /// same thing about it rather than each passing on whatever git happened to print.
     fn require_repository(&self) -> Result<(), GitError> {
@@ -246,11 +298,22 @@ fn path_argument(path: &Path) -> Result<String, GitError> {
         })
 }
 
+/// git's `-z` output as paths. Nothing is split on a newline, because a path may hold one.
+fn changed_paths_of(listed: &str) -> Vec<String> {
+    listed
+        .split('\0')
+        .filter(|path| !path.is_empty())
+        .map(ToString::to_string)
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use std::path::PathBuf;
 
-    use super::{GitError, HeadSummary, default_branch_of, head_summary_of, path_argument};
+    use super::{
+        GitError, HeadSummary, changed_paths_of, default_branch_of, head_summary_of, path_argument,
+    };
 
     /// What `git log --format=%H%x1f%cI%x1f%s` prints for one commit.
     fn a_log_line(subject: &str) -> String {
@@ -301,6 +364,20 @@ mod tests {
         // A branch whose own name holds a slash keeps the rest of it.
         assert_eq!(default_branch_of("origin/release/2.0"), "release/2.0");
         assert_eq!(default_branch_of("main"), "main", "no remote to take off");
+    }
+
+    #[test]
+    fn reads_the_paths_git_separated_by_nothing() {
+        assert_eq!(
+            changed_paths_of("src/lib.rs\0docs/SPEC.md\0"),
+            ["src/lib.rs", "docs/SPEC.md"]
+        );
+        assert_eq!(changed_paths_of(""), Vec::<String>::new());
+        // A newline in a path is what `-z` is for: nothing here splits on one.
+        assert_eq!(
+            changed_paths_of("a file\nwith a newline\0other.rs\0"),
+            ["a file\nwith a newline", "other.rs"]
+        );
     }
 
     #[test]
