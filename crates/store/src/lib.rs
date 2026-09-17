@@ -5,6 +5,8 @@
 pub mod error;
 /// The event log.
 pub mod event_log;
+/// The files under `.farik/`.
+pub mod files;
 /// The repository Farik works in.
 pub mod git;
 /// The database's shape, as SQL applied in order.

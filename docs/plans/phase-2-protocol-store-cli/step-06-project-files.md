@@ -104,7 +104,7 @@ Files: created `crates/store/src/files.rs`, `crates/store/src/files/fixtures.rs`
 Consumes: nothing from this plan
 Produces: `farik_store::files::{FilesError, ProjectFiles}`, `ProjectFiles::{open, root, init, read_team, write_team}`, and the fixtures every later task's tests use
 
-- [ ] Add the dependency. Both lists are alphabetical, and a hyphen sorts before an underscore. In the workspace `Cargo.toml`, between the `serde` line and the `serde_json` line:
+- [x] Add the dependency. Both lists are alphabetical, and a hyphen sorts before an underscore. In the workspace `Cargo.toml`, between the `serde` line and the `serde_json` line:
 
   ```toml
   serde-saphyr = "=1.3.0"
@@ -118,7 +118,7 @@ Produces: `farik_store::files::{FilesError, ProjectFiles}`, `ProjectFiles::{open
   serde_json.workspace = true
   ```
 
-- [ ] Write the failing tests. Create `crates/store/src/files.rs` with the module doc and the fixtures declaration:
+- [x] Write the failing tests. Create `crates/store/src/files.rs` with the module doc and the fixtures declaration:
 
   ```rust
   //! The files under `.farik/` (`docs/SPEC.md` sections 3, 5.8, 5.12, 5.13 and 8.4).
@@ -132,7 +132,7 @@ Produces: `farik_store::files::{FilesError, ProjectFiles}`, `ProjectFiles::{open
   pub mod fixtures;
   ```
 
-- [ ] Create `crates/store/src/files/fixtures.rs`:
+- [x] Create `crates/store/src/files/fixtures.rs`:
 
   ```rust
   use std::path::PathBuf;
@@ -189,7 +189,7 @@ Produces: `farik_store::files::{FilesError, ProjectFiles}`, `ProjectFiles::{open
   }
   ```
 
-- [ ] Create `crates/store/tests/project_files.rs`:
+- [x] Create `crates/store/tests/project_files.rs`:
 
   ```rust
   //! The files under `.farik/`, against a real directory.
@@ -455,7 +455,7 @@ Produces: `farik_store::files::{FilesError, ProjectFiles}`, `ProjectFiles::{open
   }
   ```
 
-- [ ] Append the tests module to `crates/store/src/files.rs`:
+- [x] Append the tests module to `crates/store/src/files.rs`:
 
   ```rust
   #[cfg(test)]
@@ -492,14 +492,14 @@ Produces: `farik_store::files::{FilesError, ProjectFiles}`, `ProjectFiles::{open
   }
   ```
 
-- [ ] Declare the module in `crates/store/src/lib.rs`, after `event_log` and before `git`:
+- [x] Declare the module in `crates/store/src/lib.rs`, after `event_log` and before `git`:
 
   ```rust
   /// The files under `.farik/`.
   pub mod files;
   ```
 
-- [ ] Run them and confirm they fail because nothing of the files exists. One command per target: `cargo test -p farik-store` builds both at once and cancels whichever it had not finished when the other failed, so which errors a run prints is a race.
+- [x] Run them and confirm they fail because nothing of the files exists. One command per target: `cargo test -p farik-store` builds both at once and cancels whichever it had not finished when the other failed, so which errors a run prints is a race.
 
   ```
   cargo test -p farik-store --lib
@@ -517,7 +517,7 @@ Produces: `farik_store::files::{FilesError, ProjectFiles}`, `ProjectFiles::{open
   # error: could not compile `farik-store` (lib) due to 1 previous error
   ```
 
-- [ ] Write the minimal implementation. In `crates/store/src/files.rs`, put the imports between the module doc and `pub mod fixtures;`, so that the top of the file reads, whole:
+- [x] Write the minimal implementation. In `crates/store/src/files.rs`, put the imports between the module doc and `pub mod fixtures;`, so that the top of the file reads, whole:
 
   ```rust
   //! The files under `.farik/` (`docs/SPEC.md` sections 3, 5.8, 5.12, 5.13 and 8.4).
@@ -539,7 +539,7 @@ Produces: `farik_store::files::{FilesError, ProjectFiles}`, `ProjectFiles::{open
   pub mod fixtures;
   ```
 
-- [ ] Insert, between that and the tests module, the error:
+- [x] Insert, between that and the tests module, the error:
 
   ```rust
   /// Why a file could not be read or written.
@@ -581,7 +581,7 @@ Produces: `farik_store::files::{FilesError, ProjectFiles}`, `ProjectFiles::{open
   impl std::error::Error for FilesError {}
   ```
 
-- [ ] Then, after it, the project and what `init` makes:
+- [x] Then, after it, the project and what `init` makes:
 
   ```rust
   /// The `.farik/` directory of one project, at the root of its git repository.
@@ -644,7 +644,7 @@ Produces: `farik_store::files::{FilesError, ProjectFiles}`, `ProjectFiles::{open
       }
   ```
 
-- [ ] Then the team, and the brace that closes the block those three live in:
+- [x] Then the team, and the brace that closes the block those three live in:
 
   ```rust
       /// The team, held to the rules a team on the wire is held to.
@@ -671,7 +671,7 @@ Produces: `farik_store::files::{FilesError, ProjectFiles}`, `ProjectFiles::{open
   }
   ```
 
-- [ ] Then the layout, which grows a line per task:
+- [x] Then the layout, which grows a line per task:
 
   ```rust
   /// Where each file lives, relative to `.farik/`. One place, so that a reader of this module can see
@@ -679,7 +679,7 @@ Produces: `farik_store::files::{FilesError, ProjectFiles}`, `ProjectFiles::{open
   const TEAM: &str = "team.yaml";
   ```
 
-- [ ] Then how a file a person edits is read:
+- [x] Then how a file a person edits is read:
 
   ```rust
   /// How a file a person edits by hand is read.
@@ -695,7 +695,7 @@ Produces: `farik_store::files::{FilesError, ProjectFiles}`, `ProjectFiles::{open
   }
   ```
 
-- [ ] Then the paths, which is where the second `impl` block opens:
+- [x] Then the paths, which is where the second `impl` block opens:
 
   ```rust
   impl ProjectFiles {
@@ -756,7 +756,7 @@ Produces: `farik_store::files::{FilesError, ProjectFiles}`, `ProjectFiles::{open
       }
   ```
 
-- [ ] And last the reading and the writing, which closes it:
+- [x] And last the reading and the writing, which closes it:
 
   ```rust
       /// One file's text.
@@ -848,7 +848,7 @@ Produces: `farik_store::files::{FilesError, ProjectFiles}`, `ProjectFiles::{open
   }
   ```
 
-- [ ] Run the check and confirm green:
+- [x] Run the check and confirm green:
 
   ```
   cargo xtask check --integration
@@ -861,7 +861,7 @@ Produces: `farik_store::files::{FilesError, ProjectFiles}`, `ProjectFiles::{open
   ```
 
 
-- [ ] Commit: `feat(store): make the files a project starts with`
+- [x] Commit: `feat(store): make the files a project starts with`
 
 ### Task 2: The criterion library and the contracts
 
