@@ -18,17 +18,19 @@ Two promises hold it together. **A file read back is held to exactly the rules t
 ## Decisions
 
 - **YAML is read and written by `serde-saphyr`, and only as `serde_json::Value`.** ADR 0007 records why that crate rather than the three others measured: it is the only one that refuses a duplicate mapping key instead of silently taking the last value, and two `wip_limit_per_agent` lines in `team.yaml` would otherwise give a limit nobody chose, invisibly, because the duplicate is gone before Farik sees the value. It also stops an alias-expansion bomb at a node budget. Nothing here derives serde for a YAML shape — the text becomes a `Value`, the `Value` goes to the validator that owns that file, and only then is it typed. Replacing the crate would be a change to two functions.
+- **These files are read with `strict_booleans`, and the refusal with `UserMessageFormatter`.** Both are the crate's own settings, and both are about the file being one a person wrote. Without the first, YAML 1.1 turns an unquoted `no`, `y` or `off` into a boolean, so an agent whose id is `no` never reaches `validate_team` as a word. Without the second, the crate's default text tells whoever edited `team.yaml` to "set `DuplicateKeyPolicy` in Options", which is advice for whoever called the crate; `code.md` asks for plain words. The crate does not know the file's name and calls it `<input>`, so the name is put back.
 - **A write goes to a file beside the one being written and is renamed over it.** A rename within a directory is the one file operation that is all or nothing. A crash in the middle of `team.yaml` would otherwise leave the team unreadable, and the team is what every session is assembled from.
 - **`init` never takes anything away.** It makes the directories whether or not they hold anything yet, so that a person opening `.farik/` sees where things go, and it writes the team only when there is no team. A second `farik init` on a project that has one is a command with nothing to do.
 - **`.farik/local/.gitignore` holds `*`.** A task's worktree lives at `.farik/local/worktrees/FRK-<n>` (5.14) and the event log at `.farik/local/farik.db` (8.4). Without it every repository Farik touches is dirty for good and `Git::is_clean` on the root never answers true again — which the step 04 landing review found and recorded on this step's row of the project plan.
 - **A product document's path is checked by `farik-core`'s own path rule**, which this step makes public. The path comes from a tool call, so it is a string an agent chose; 5.6 puts product documents under `product/` and nowhere else. Two answers to "does this path climb out" would be two definitions of a safe path, and the one already written is the one the governor uses.
-- **And then the file system is asked as well as the string.** A directory under `product/` can be a symlink pointing anywhere, and a path through one has no `..` in it for the string rule to catch. So `inside_product` resolves the deepest part of the path that exists and refuses it unless it lands under `product/`. The string rule says what the text means; this says where it lands, and a boundary that only reads the text is not a boundary.
+- **And then the file system is asked as well as the string.** A directory under `product/` can be a symlink pointing anywhere, and a path through one has no `..` in it for the string rule to catch. So `inside_product` resolves the path and `product/` itself, each as far as it exists, and the one has to be under the other. The string rule says what the text means; this says where it lands, and a boundary that only reads the text is not a boundary.
+- **And nothing is made in the asking.** `canonicalize` refuses a path that is not there, and the first draft of this step made `product/` so that it would answer. But `.farik/` existing is what makes a directory a Farik project (spec 3), so a read that made it would make a project of whatever it was pointed at. `resolved` follows the links that do exist and puts the rest of the path back on the end, where there is no directory for a link to hide in.
 - **A byte-order mark is stripped on the way in.** It is what a Windows editor puts at the front of a file it saved, it is not content, and a parser that meets one says the file holds two documents — which is not a thing a person can act on.
 - **Every write goes through `write_text`, including `.gitignore`.** One way to write a file means one place where the beside-and-rename happens; a second way would be a file written the other way for no reason a reader could find.
 - **A contract lives in the file its own id names, and a file that disagrees is refused.** The file name and the id inside it are two claims about the same thing; a board that believed the file name would show a task that does not exist.
 - **An agent that has never written a notebook has an empty one, not a missing file.** Every session for an agent includes its notebook (5.8), and "there is no file" is not something to tell an agent about.
 - **A missing price override and a machine that was never asked about its sandbox are answers, not refusals.** `read_prices` gives `None` and the shipped table stands; `read_settings` gives the defaults. Both are ordinary states of a new project.
-- **`LocalSettings` is JSON under `.farik/local/`, not YAML beside the team.** Nobody hand-edits it, it is never committed, and it is a fact about one laptop rather than about the project. It is `local/settings.json`, which the project plan's layout and one test string in `farik-core` are corrected to in Task 4; they said `settings.yaml`, and nothing had written either yet.
+- **`LocalSettings` is JSON under `.farik/local/`, not YAML beside the team.** Nobody hand-edits it, it is never committed, and it is a fact about one laptop rather than about the project. It is `local/settings.json`, and one test string in `farik-core` that said `settings.yaml` is corrected to it in Task 4; nothing had written either.
 - **A file under `contracts/` that is not a contract's is not an error.** The directory is a person's to keep notes in; `list_contracts` passes over what it does not recognise, and orders what it does by the number in the id, so that the tenth task does not come before the ninth.
 - **The tests live in `crates/store/tests/project_files.rs` and run in the default check.** They need somewhere to write and nothing else, which is exactly what `event_log_file.rs` established in step 02; `--integration` is for what needs a program.
 - **`TempProject` is a public fixture**, not a test-only helper, because step 07's scan and step 08's command line both need a project to work in, and `docs/standards/code.md` says a crate's fixtures are public so another crate's tests can use them.
@@ -62,11 +64,11 @@ Out of scope: the project scan that writes `project.md` and the reconciliation o
 - Modified: `farik-store` gains `files`, a sibling of `event_log`, `projections` and `git`. It reads no database and runs no program.
 - Consumed: `farik-core`'s four validators, its `TaskId` and `AgentId`, and its path rule. `serde`, `serde_json` and `serde-saphyr`.
 - New dependency: `serde-saphyr`, pinned exactly as every other one is and sorted into the list where it belongs. `Cargo.toml` and `Cargo.lock` both change, which is the first time in this phase.
-- `farik-core` does no I/O and is not touched except to export a type and make one function public; `cargo xtask core-io` still passes.
+- `farik-core` does no I/O and is not touched except to export a type, make one function public, and rename a path in one of its own tests; `cargo xtask core-io` still passes.
 
 ## Global constraints
 
-- Every structured file goes through its own validator on the way in and on the way out.
+- Every schema-backed file — the team, the criterion library, a contract, the price override — goes through its own validator on the way in and on the way out. `local/settings.json` is the one structured file with no schema, because nobody hand-edits it and it is never committed.
 - Every file this module writes is written by `write_text`, which writes beside and renames; nothing calls `std::fs::write` on a path under `.farik/` directly.
 - Every path that came from a tool call is resolved against the file system before it is read or written, not only read as a string.
 - No `unwrap` or `expect` outside tests and fixtures.
@@ -196,10 +198,30 @@ Produces: `farik_store::files::{FilesError, ProjectFiles}`, `ProjectFiles::{open
   use farik_store::files::FilesError;
   use farik_store::files::fixtures::{TempProject, a_team};
 
+  /// Holds a refusal to `docs/standards/code.md`: it is read by the person who edited the file, so it
+  /// names the file, quotes the line, and says nothing about the API that would have accepted it.
+  fn said_to_a_person(detail: &str) {
+      assert!(
+          detail.contains(".farik/team.yaml"),
+          "names the file: {detail}"
+      );
+      for programmer in ["Options", "DuplicateKeyPolicy", "from_multiple", "<input>"] {
+          assert!(
+              !detail.contains(programmer),
+              "says {programmer} to a person editing a team file: {detail}"
+          );
+      }
+  }
+
   #[test]
   fn makes_the_layout_a_project_starts_with() {
       let project = TempProject::new("init");
       let files = project.files();
+      assert_eq!(
+          files.root(),
+          project.root,
+          "the project root is where it was opened"
+      );
       files.init(&a_team()).expect("a project is made");
 
       for directory in [
@@ -320,7 +342,8 @@ Produces: `farik_store::files::{FilesError, ProjectFiles}`, `ProjectFiles::{open
           panic!("one key, one value");
       };
       assert_eq!(path, ".farik/team.yaml");
-      assert!(detail.contains("duplicate"), "{detail}");
+      assert!(detail.contains("duplicate mapping key: name"), "{detail}");
+      said_to_a_person(&detail);
   }
 
   #[test]
@@ -340,14 +363,15 @@ Produces: `farik_store::files::{FilesError, ProjectFiles}`, `ProjectFiles::{open
           panic!("one file, one team");
       };
       assert_eq!(path, ".farik/team.yaml");
-      assert!(detail.contains("document"), "{detail}");
+      assert!(detail.contains("single YAML document"), "{detail}");
+      said_to_a_person(&detail);
   }
 
   #[test]
-  fn refuses_an_agent_id_yaml_reads_as_something_other_than_a_word() {
-      // ADR 0007's remaining sharp edge, held in place by a test: YAML 1.1 resolves an unquoted `no`
-      // to `false`, so an id written that way never reaches `validate_team` as a string. It has to
-      // come back as a refusal a person can act on rather than as an agent called `false`.
+  fn keeps_a_word_yaml_would_otherwise_have_an_opinion_about() {
+      // YAML 1.1 resolves an unquoted `no`, `y` or `off` to a boolean, so an agent whose id is `no`
+      // would reach `validate_team` as `false` and be refused for not being a string. ADR 0007 reads
+      // these files with that resolution off, so the person gets the agent they wrote.
       let project = TempProject::new("norway");
       let files = project.files();
       files.write_team(&a_team()).expect("written");
@@ -355,12 +379,9 @@ Produces: `farik_store::files::{FilesError, ProjectFiles}`, `ProjectFiles::{open
       let text = std::fs::read_to_string(&path).expect("the file");
       let first = a_team().agents[0].id.as_str().to_string();
       std::fs::write(&path, text.replace(&format!("id: {first}"), "id: no"))
-          .expect("a person writes an id that yaml has an opinion about");
-      let Err(FilesError::Invalid { path, detail }) = files.read_team() else {
-          panic!("an id is a word");
-      };
-      assert_eq!(path, ".farik/team.yaml");
-      assert!(detail.contains("/agents/0/id"), "{detail}");
+          .expect("a person writes an id yaml has an opinion about");
+      let team = files.read_team().expect("an id is a word, not a boolean");
+      assert_eq!(team.agents[0].id.as_str(), "no");
   }
 
   #[test]
@@ -476,15 +497,22 @@ Produces: `farik_store::files::{FilesError, ProjectFiles}`, `ProjectFiles::{open
   pub mod files;
   ```
 
-- [ ] Run them and confirm they fail because nothing of the files exists:
+- [ ] Run them and confirm they fail because nothing of the files exists. One command per target: `cargo test -p farik-store` builds both at once and cancels whichever it had not finished when the other failed, so which errors a run prints is a race.
 
   ```
-  cargo test -p farik-store
-  # expected: FAIL to compile. The fixtures name a type that is not there, so the crate
-  # does not build and nothing after it is tried:
+  cargo test -p farik-store --lib
+  # expected: FAIL to compile. The fixtures and the tests module each name something
+  # that is not there:
   # error[E0432]: unresolved import `super::ProjectFiles`
-  # error: could not compile `farik-store` (lib) due to 1 previous error; 6 warnings
-  #   emitted
+  # error[E0432]: unresolved import `super::FilesError`
+  # error: could not compile `farik-store` (lib test) due to 2 previous errors
+  ```
+
+  ```
+  cargo test -p farik-store --test project_files
+  # expected: FAIL to compile, because the crate itself does not build:
+  # error[E0432]: unresolved import `super::ProjectFiles`
+  # error: could not compile `farik-store` (lib) due to 1 previous error
   ```
 
 - [ ] Write the minimal implementation. In `crates/store/src/files.rs`, put the imports between the module doc and `pub mod fixtures;`, so that the top of the file reads, whole:
@@ -649,6 +677,22 @@ Produces: `farik_store::files::{FilesError, ProjectFiles}`, `ProjectFiles::{open
   const TEAM: &str = "team.yaml";
   ```
 
+- [ ] Then how a file a person edits is read:
+
+  ```rust
+  /// How a file a person edits by hand is read.
+  ///
+  /// `strict_booleans` is the one setting that matters for such a file: YAML 1.1 resolves an unquoted
+  /// `no`, `y` or `off` to a boolean, so a Norwegian country code or an agent id written that way
+  /// would reach the validator as `false` rather than as what the person typed. What Farik itself
+  /// writes is quoted either way.
+  fn yaml_options() -> serde_saphyr::Options {
+      let mut options = serde_saphyr::Options::default();
+      options.strict_booleans = true;
+      options
+  }
+  ```
+
 - [ ] Then the paths, which is where the second `impl` block opens:
 
   ```rust
@@ -761,11 +805,20 @@ Produces: `farik_store::files::{FilesError, ProjectFiles}`, `ProjectFiles::{open
       }
 
       /// One YAML file as an untrusted value, for a validator to hold to its rules.
+      ///
+      /// Read the way a file a person edits by hand should be. `UserMessageFormatter` is the crate's
+      /// own answer to the question, and its own default is explicitly not for a person to read: it
+      /// recommends the API call that would have accepted the file. And the name of the input is put
+      /// back, because the crate does not know it and calls it `<input>`.
       fn read_yaml(&self, relative: &str) -> Result<Value, FilesError> {
           let text = self.read_text(relative)?;
-          serde_saphyr::from_str(&text).map_err(|error| FilesError::Invalid {
-              path: Self::named(relative),
-              detail: error.to_string(),
+          serde_saphyr::from_str_with_options(&text, yaml_options()).map_err(|error| {
+              FilesError::Invalid {
+                  path: Self::named(relative),
+                  detail: error
+                      .render_with_formatter(&serde_saphyr::UserMessageFormatter)
+                      .replace("<input>", &Self::named(relative)),
+              }
           })
       }
 
@@ -828,6 +881,21 @@ Produces: `ProjectFiles::{read_criteria, write_criteria, read_contract, write_co
   use farik_store::files::FilesError;
   use farik_store::files::fixtures::{TempProject, a_team};
 
+  /// Holds a refusal to `docs/standards/code.md`: it is read by the person who edited the file, so it
+  /// names the file, quotes the line, and says nothing about the API that would have accepted it.
+  fn said_to_a_person(detail: &str) {
+      assert!(
+          detail.contains(".farik/team.yaml"),
+          "names the file: {detail}"
+      );
+      for programmer in ["Options", "DuplicateKeyPolicy", "from_multiple", "<input>"] {
+          assert!(
+              !detail.contains(programmer),
+              "says {programmer} to a person editing a team file: {detail}"
+          );
+      }
+  }
+
   /// The contract `farik-core`'s own fixture describes, with the id a test asks for.
   fn a_contract(id: &str) -> farik_core::contract::TaskContract {
       let mut wire = farik_core::contract::fixtures::a_contract_wire();
@@ -839,6 +907,11 @@ Produces: `ProjectFiles::{read_criteria, write_criteria, read_contract, write_co
   fn makes_the_layout_a_project_starts_with() {
       let project = TempProject::new("init");
       let files = project.files();
+      assert_eq!(
+          files.root(),
+          project.root,
+          "the project root is where it was opened"
+      );
       files.init(&a_team()).expect("a project is made");
 
       for directory in [
@@ -1007,7 +1080,8 @@ Produces: `ProjectFiles::{read_criteria, write_criteria, read_contract, write_co
           panic!("one key, one value");
       };
       assert_eq!(path, ".farik/team.yaml");
-      assert!(detail.contains("duplicate"), "{detail}");
+      assert!(detail.contains("duplicate mapping key: name"), "{detail}");
+      said_to_a_person(&detail);
   }
 
   #[test]
@@ -1027,14 +1101,15 @@ Produces: `ProjectFiles::{read_criteria, write_criteria, read_contract, write_co
           panic!("one file, one team");
       };
       assert_eq!(path, ".farik/team.yaml");
-      assert!(detail.contains("document"), "{detail}");
+      assert!(detail.contains("single YAML document"), "{detail}");
+      said_to_a_person(&detail);
   }
 
   #[test]
-  fn refuses_an_agent_id_yaml_reads_as_something_other_than_a_word() {
-      // ADR 0007's remaining sharp edge, held in place by a test: YAML 1.1 resolves an unquoted `no`
-      // to `false`, so an id written that way never reaches `validate_team` as a string. It has to
-      // come back as a refusal a person can act on rather than as an agent called `false`.
+  fn keeps_a_word_yaml_would_otherwise_have_an_opinion_about() {
+      // YAML 1.1 resolves an unquoted `no`, `y` or `off` to a boolean, so an agent whose id is `no`
+      // would reach `validate_team` as `false` and be refused for not being a string. ADR 0007 reads
+      // these files with that resolution off, so the person gets the agent they wrote.
       let project = TempProject::new("norway");
       let files = project.files();
       files.write_team(&a_team()).expect("written");
@@ -1042,12 +1117,9 @@ Produces: `ProjectFiles::{read_criteria, write_criteria, read_contract, write_co
       let text = std::fs::read_to_string(&path).expect("the file");
       let first = a_team().agents[0].id.as_str().to_string();
       std::fs::write(&path, text.replace(&format!("id: {first}"), "id: no"))
-          .expect("a person writes an id that yaml has an opinion about");
-      let Err(FilesError::Invalid { path, detail }) = files.read_team() else {
-          panic!("an id is a word");
-      };
-      assert_eq!(path, ".farik/team.yaml");
-      assert!(detail.contains("/agents/0/id"), "{detail}");
+          .expect("a person writes an id yaml has an opinion about");
+      let team = files.read_team().expect("an id is a word, not a boolean");
+      assert_eq!(team.agents[0].id.as_str(), "no");
   }
 
   #[test]
@@ -1260,13 +1332,26 @@ Produces: `ProjectFiles::{read_criteria, write_criteria, read_contract, write_co
   }
   ```
 
-- [ ] Run them and confirm they fail because nothing names a contract's file:
+- [ ] Run them and confirm they fail because nothing names a contract's file and nothing reads one:
 
   ```
-  cargo test -p farik-store
+  cargo test -p farik-store --lib
   # expected: FAIL to compile,
   # error[E0432]: unresolved import `super::contract_path`
   # error: could not compile `farik-store` (lib test) due to 1 previous error
+  ```
+
+  ```
+  cargo test -p farik-store --test project_files
+  # expected: FAIL to compile, one error per call site:
+  # error[E0599]: no method named `read_criteria` found for struct `ProjectFiles` in
+  #   the current scope  (twice)
+  # error[E0599]: no method named `write_criteria` ...  (three times)
+  # error[E0599]: no method named `read_contract` ...   (three times)
+  # error[E0599]: no method named `write_contract` ...  (five times)
+  # error[E0599]: no method named `list_contracts` ...  (twice)
+  # error: could not compile `farik-store` (test "project_files") due to 15 previous
+  #   errors
   ```
 
 - [ ] Write the minimal implementation. In `crates/store/src/files.rs`, replace the `farik_core::contract` import line with:
@@ -1430,6 +1515,21 @@ Produces: `ProjectFiles::{read_memory, write_memory, read_project_scan, write_pr
   use farik_store::files::FilesError;
   use farik_store::files::fixtures::{TempProject, a_team};
 
+  /// Holds a refusal to `docs/standards/code.md`: it is read by the person who edited the file, so it
+  /// names the file, quotes the line, and says nothing about the API that would have accepted it.
+  fn said_to_a_person(detail: &str) {
+      assert!(
+          detail.contains(".farik/team.yaml"),
+          "names the file: {detail}"
+      );
+      for programmer in ["Options", "DuplicateKeyPolicy", "from_multiple", "<input>"] {
+          assert!(
+              !detail.contains(programmer),
+              "says {programmer} to a person editing a team file: {detail}"
+          );
+      }
+  }
+
   /// The contract `farik-core`'s own fixture describes, with the id a test asks for.
   fn a_contract(id: &str) -> farik_core::contract::TaskContract {
       let mut wire = farik_core::contract::fixtures::a_contract_wire();
@@ -1441,6 +1541,11 @@ Produces: `ProjectFiles::{read_memory, write_memory, read_project_scan, write_pr
   fn makes_the_layout_a_project_starts_with() {
       let project = TempProject::new("init");
       let files = project.files();
+      assert_eq!(
+          files.root(),
+          project.root,
+          "the project root is where it was opened"
+      );
       files.init(&a_team()).expect("a project is made");
 
       for directory in [
@@ -1609,7 +1714,8 @@ Produces: `ProjectFiles::{read_memory, write_memory, read_project_scan, write_pr
           panic!("one key, one value");
       };
       assert_eq!(path, ".farik/team.yaml");
-      assert!(detail.contains("duplicate"), "{detail}");
+      assert!(detail.contains("duplicate mapping key: name"), "{detail}");
+      said_to_a_person(&detail);
   }
 
   #[test]
@@ -1629,14 +1735,15 @@ Produces: `ProjectFiles::{read_memory, write_memory, read_project_scan, write_pr
           panic!("one file, one team");
       };
       assert_eq!(path, ".farik/team.yaml");
-      assert!(detail.contains("document"), "{detail}");
+      assert!(detail.contains("single YAML document"), "{detail}");
+      said_to_a_person(&detail);
   }
 
   #[test]
-  fn refuses_an_agent_id_yaml_reads_as_something_other_than_a_word() {
-      // ADR 0007's remaining sharp edge, held in place by a test: YAML 1.1 resolves an unquoted `no`
-      // to `false`, so an id written that way never reaches `validate_team` as a string. It has to
-      // come back as a refusal a person can act on rather than as an agent called `false`.
+  fn keeps_a_word_yaml_would_otherwise_have_an_opinion_about() {
+      // YAML 1.1 resolves an unquoted `no`, `y` or `off` to a boolean, so an agent whose id is `no`
+      // would reach `validate_team` as `false` and be refused for not being a string. ADR 0007 reads
+      // these files with that resolution off, so the person gets the agent they wrote.
       let project = TempProject::new("norway");
       let files = project.files();
       files.write_team(&a_team()).expect("written");
@@ -1644,12 +1751,9 @@ Produces: `ProjectFiles::{read_memory, write_memory, read_project_scan, write_pr
       let text = std::fs::read_to_string(&path).expect("the file");
       let first = a_team().agents[0].id.as_str().to_string();
       std::fs::write(&path, text.replace(&format!("id: {first}"), "id: no"))
-          .expect("a person writes an id that yaml has an opinion about");
-      let Err(FilesError::Invalid { path, detail }) = files.read_team() else {
-          panic!("an id is a word");
-      };
-      assert_eq!(path, ".farik/team.yaml");
-      assert!(detail.contains("/agents/0/id"), "{detail}");
+          .expect("a person writes an id yaml has an opinion about");
+      let team = files.read_team().expect("an id is a word, not a boolean");
+      assert_eq!(team.agents[0].id.as_str(), "no");
   }
 
   #[test]
@@ -1888,14 +1992,14 @@ Produces: `ProjectFiles::{read_memory, write_memory, read_project_scan, write_pr
       files
           .write_product_doc("kept.md", "# Kept\n")
           .expect("a document is written, which makes product/");
-      let outside = project.root.join("secret");
-      std::fs::create_dir_all(&outside).expect("somewhere outside .farik/");
-      #[cfg(unix)]
-      std::os::unix::fs::symlink(&outside, project.root.join(".farik/product/out"))
-          .expect("a link out of product/");
 
       #[cfg(unix)]
       {
+          let outside = project.root.join("secret");
+          std::fs::create_dir_all(&outside).expect("somewhere outside .farik/");
+          std::os::unix::fs::symlink(&outside, project.root.join(".farik/product/out"))
+              .expect("a link out of product/");
+
           let refused = files.write_product_doc("out/loot.md", "taken\n");
           let Err(FilesError::Invalid { path, detail }) = refused else {
               panic!("it leads out of product/: {refused:?}");
@@ -1911,6 +2015,27 @@ Produces: `ProjectFiles::{read_memory, write_memory, read_project_scan, write_pr
               "and reading through it is refused too"
           );
       }
+  }
+
+  #[test]
+  fn reading_a_product_document_makes_nothing() {
+      // `.farik/` existing is what makes a directory a Farik project (spec 3). A read that made it,
+      // to answer where a path lands, would make a project of whatever it was pointed at.
+      let project = TempProject::new("product-read-makes-nothing");
+      let files = project.files();
+      assert!(matches!(
+          files.read_product_doc("roadmap.md"),
+          Err(FilesError::NotFound { .. })
+      ));
+      assert!(
+          !project.root.join(".farik").exists(),
+          "a read is not an init"
+      );
+      assert!(matches!(
+          files.read_product_doc("../team.yaml"),
+          Err(FilesError::Invalid { .. })
+      ));
+      assert!(!project.root.join(".farik").exists(), "nor is a refusal");
   }
   ```
 
@@ -2006,22 +2131,36 @@ Produces: `ProjectFiles::{read_memory, write_memory, read_project_scan, write_pr
               else {
                   panic!("{path:?} climbs out: {refused:?}");
               };
-              assert_eq!(named, format!("product/{path}"));
+              assert_eq!(named, format!(".farik/product/{path}"));
               assert!(detail.contains("climbs out of it"), "{detail}");
           }
       }
   }
   ```
 
-- [ ] Run them and confirm they fail because nothing names an agent, a notebook or a product document:
+- [ ] Run them and confirm they fail because `farik-core` has the agent id type but does not export it, and neither path function exists yet:
 
   ```
-  cargo test -p farik-store
-  # expected: FAIL to compile, two errors — `farik-core` has the agent id type but does
-  # not export it, and neither path function exists yet:
+  cargo test -p farik-store --lib
+  # expected: FAIL to compile,
   # error[E0432]: unresolved import `farik_core::team::AgentId`
   # error[E0432]: unresolved imports `super::memory_path`, `super::product_path`
   # error: could not compile `farik-store` (lib test) due to 2 previous errors
+  ```
+
+  ```
+  cargo test -p farik-store --test project_files
+  # expected: FAIL to compile, the same missing export and one error per call site:
+  # error[E0432]: unresolved import `farik_core::team::AgentId`
+  # error[E0599]: no method named `read_memory` found for struct `ProjectFiles` in the
+  #   current scope  (twice)
+  # error[E0599]: no method named `write_memory` ...        (once)
+  # error[E0599]: no method named `read_project_scan` ...   (twice)
+  # error[E0599]: no method named `write_project_scan` ...  (once)
+  # error[E0599]: no method named `read_product_doc` ...    (four times)
+  # error[E0599]: no method named `write_product_doc` ...   (four times)
+  # error: could not compile `farik-store` (test "project_files") due to 15 previous
+  #   errors
   ```
 
 - [ ] Give the store the two things `farik-core` has and does not offer. In `crates/core/src/team.rs`, add `AgentId` to the generated re-export, which becomes:
@@ -2156,11 +2295,39 @@ Produces: `ProjectFiles::{read_memory, write_memory, read_project_scan, write_pr
   /// only place 5.6 lets a product document be written.
   fn product_path(path: &str) -> Result<String, FilesError> {
       let normalised = normalise(path).ok_or_else(|| FilesError::Invalid {
-          path: format!("product/{path}"),
+          path: ProjectFiles::named(&format!("product/{path}")),
           detail: "a product document lives under product/, and this path climbs out of it"
               .to_string(),
       })?;
       Ok(format!("product/{normalised}"))
+  }
+  ```
+
+- [ ] Then, after that, the one helper that asks the file system rather than the string:
+
+  ```rust
+  /// The path with every part of it that exists resolved, and the rest as it was written.
+  ///
+  /// `canonicalize` refuses a path that is not there, and most of these are not there yet. So the
+  /// deepest part that does exist is resolved — which is what follows a symlink — and what is left is
+  /// put back on the end, where there is no existing directory for a link to hide in.
+  fn resolved(path: &Path) -> Result<PathBuf, std::io::Error> {
+      let mut left = Vec::new();
+      let mut existing = path.to_path_buf();
+      while !existing.exists() {
+          match (existing.file_name(), existing.parent()) {
+              (Some(name), Some(parent)) => {
+                  left.push(name.to_os_string());
+                  existing = parent.to_path_buf();
+              }
+              _ => break,
+          }
+      }
+      let mut answer = std::fs::canonicalize(&existing)?;
+      while let Some(name) = left.pop() {
+          answer.push(name);
+      }
+      Ok(answer)
   }
   ```
 
@@ -2172,27 +2339,22 @@ Produces: `ProjectFiles::{read_memory, write_memory, read_project_scan, write_pr
       /// `product_path` answers what the text says; this answers where it lands. A directory under
       /// `product/` may be a symlink pointing anywhere, and following one would put a tool call's
       /// chosen path outside `.farik/` entirely — the string rule alone cannot see that, because
-      /// there is no `..` in it. So the deepest part of the path that exists is resolved, and it has
-      /// to be under `product/` once it is.
+      /// there is no `..` in it. So the path and `product/` itself are each resolved as far as they
+      /// exist, and the one has to be under the other.
+      ///
+      /// Nothing is made here, not even the directory the answer is about. A read that conjured
+      /// `.farik/` would make a project of whatever directory it was pointed at.
       fn inside_product(&self, path: &str) -> Result<String, FilesError> {
           let relative = product_path(path)?;
-          let product = self.path_of("product");
-          self.make_directory(&product)?;
-          let mut existing = self.path_of(&relative);
-          while !existing.exists() {
-              match existing.parent() {
-                  Some(parent) => existing = parent.to_path_buf(),
-                  None => break,
-              }
-          }
           let refuse = |detail: String| FilesError::Invalid {
               path: Self::named(&relative),
               detail,
           };
-          let root = std::fs::canonicalize(&product).map_err(|error| refuse(error.to_string()))?;
+          let boundary =
+              resolved(&self.path_of("product")).map_err(|error| refuse(error.to_string()))?;
           let landing =
-              std::fs::canonicalize(&existing).map_err(|error| refuse(error.to_string()))?;
-          if landing.starts_with(&root) {
+              resolved(&self.path_of(&relative)).map_err(|error| refuse(error.to_string()))?;
+          if landing.starts_with(&boundary) {
               Ok(relative)
           } else {
               Err(refuse(format!(
@@ -2209,7 +2371,7 @@ Produces: `ProjectFiles::{read_memory, write_memory, read_project_scan, write_pr
   cargo xtask check --integration
   # expected: ends with `xtask check: ok`, with
   #   test result: ok. 49 passed (farik-store)
-  #   test result: ok. 22 passed (crates/store/tests/project_files.rs)
+  #   test result: ok. 23 passed (crates/store/tests/project_files.rs)
   ```
 
 - [ ] Commit: `feat(store): keep a product document under product and nowhere else`
@@ -2235,6 +2397,21 @@ Produces: `farik_store::files::{LocalSettings, Sandbox}` and `ProjectFiles::{rea
   use farik_store::files::fixtures::{TempProject, a_team};
   use farik_store::files::{FilesError, LocalSettings, Sandbox};
 
+  /// Holds a refusal to `docs/standards/code.md`: it is read by the person who edited the file, so it
+  /// names the file, quotes the line, and says nothing about the API that would have accepted it.
+  fn said_to_a_person(detail: &str) {
+      assert!(
+          detail.contains(".farik/team.yaml"),
+          "names the file: {detail}"
+      );
+      for programmer in ["Options", "DuplicateKeyPolicy", "from_multiple", "<input>"] {
+          assert!(
+              !detail.contains(programmer),
+              "says {programmer} to a person editing a team file: {detail}"
+          );
+      }
+  }
+
   /// The contract `farik-core`'s own fixture describes, with the id a test asks for.
   fn a_contract(id: &str) -> farik_core::contract::TaskContract {
       let mut wire = farik_core::contract::fixtures::a_contract_wire();
@@ -2246,6 +2423,11 @@ Produces: `farik_store::files::{LocalSettings, Sandbox}` and `ProjectFiles::{rea
   fn makes_the_layout_a_project_starts_with() {
       let project = TempProject::new("init");
       let files = project.files();
+      assert_eq!(
+          files.root(),
+          project.root,
+          "the project root is where it was opened"
+      );
       files.init(&a_team()).expect("a project is made");
 
       for directory in [
@@ -2414,7 +2596,8 @@ Produces: `farik_store::files::{LocalSettings, Sandbox}` and `ProjectFiles::{rea
           panic!("one key, one value");
       };
       assert_eq!(path, ".farik/team.yaml");
-      assert!(detail.contains("duplicate"), "{detail}");
+      assert!(detail.contains("duplicate mapping key: name"), "{detail}");
+      said_to_a_person(&detail);
   }
 
   #[test]
@@ -2434,14 +2617,15 @@ Produces: `farik_store::files::{LocalSettings, Sandbox}` and `ProjectFiles::{rea
           panic!("one file, one team");
       };
       assert_eq!(path, ".farik/team.yaml");
-      assert!(detail.contains("document"), "{detail}");
+      assert!(detail.contains("single YAML document"), "{detail}");
+      said_to_a_person(&detail);
   }
 
   #[test]
-  fn refuses_an_agent_id_yaml_reads_as_something_other_than_a_word() {
-      // ADR 0007's remaining sharp edge, held in place by a test: YAML 1.1 resolves an unquoted `no`
-      // to `false`, so an id written that way never reaches `validate_team` as a string. It has to
-      // come back as a refusal a person can act on rather than as an agent called `false`.
+  fn keeps_a_word_yaml_would_otherwise_have_an_opinion_about() {
+      // YAML 1.1 resolves an unquoted `no`, `y` or `off` to a boolean, so an agent whose id is `no`
+      // would reach `validate_team` as `false` and be refused for not being a string. ADR 0007 reads
+      // these files with that resolution off, so the person gets the agent they wrote.
       let project = TempProject::new("norway");
       let files = project.files();
       files.write_team(&a_team()).expect("written");
@@ -2449,12 +2633,9 @@ Produces: `farik_store::files::{LocalSettings, Sandbox}` and `ProjectFiles::{rea
       let text = std::fs::read_to_string(&path).expect("the file");
       let first = a_team().agents[0].id.as_str().to_string();
       std::fs::write(&path, text.replace(&format!("id: {first}"), "id: no"))
-          .expect("a person writes an id that yaml has an opinion about");
-      let Err(FilesError::Invalid { path, detail }) = files.read_team() else {
-          panic!("an id is a word");
-      };
-      assert_eq!(path, ".farik/team.yaml");
-      assert!(detail.contains("/agents/0/id"), "{detail}");
+          .expect("a person writes an id yaml has an opinion about");
+      let team = files.read_team().expect("an id is a word, not a boolean");
+      assert_eq!(team.agents[0].id.as_str(), "no");
   }
 
   #[test]
@@ -2693,14 +2874,14 @@ Produces: `farik_store::files::{LocalSettings, Sandbox}` and `ProjectFiles::{rea
       files
           .write_product_doc("kept.md", "# Kept\n")
           .expect("a document is written, which makes product/");
-      let outside = project.root.join("secret");
-      std::fs::create_dir_all(&outside).expect("somewhere outside .farik/");
-      #[cfg(unix)]
-      std::os::unix::fs::symlink(&outside, project.root.join(".farik/product/out"))
-          .expect("a link out of product/");
 
       #[cfg(unix)]
       {
+          let outside = project.root.join("secret");
+          std::fs::create_dir_all(&outside).expect("somewhere outside .farik/");
+          std::os::unix::fs::symlink(&outside, project.root.join(".farik/product/out"))
+              .expect("a link out of product/");
+
           let refused = files.write_product_doc("out/loot.md", "taken\n");
           let Err(FilesError::Invalid { path, detail }) = refused else {
               panic!("it leads out of product/: {refused:?}");
@@ -2716,6 +2897,27 @@ Produces: `farik_store::files::{LocalSettings, Sandbox}` and `ProjectFiles::{rea
               "and reading through it is refused too"
           );
       }
+  }
+
+  #[test]
+  fn reading_a_product_document_makes_nothing() {
+      // `.farik/` existing is what makes a directory a Farik project (spec 3). A read that made it,
+      // to answer where a path lands, would make a project of whatever it was pointed at.
+      let project = TempProject::new("product-read-makes-nothing");
+      let files = project.files();
+      assert!(matches!(
+          files.read_product_doc("roadmap.md"),
+          Err(FilesError::NotFound { .. })
+      ));
+      assert!(
+          !project.root.join(".farik").exists(),
+          "a read is not an init"
+      );
+      assert!(matches!(
+          files.read_product_doc("../team.yaml"),
+          Err(FilesError::Invalid { .. })
+      ));
+      assert!(!project.root.join(".farik").exists(), "nor is a refusal");
   }
 
   #[test]
@@ -2779,8 +2981,9 @@ Produces: `farik_store::files::{LocalSettings, Sandbox}` and `ProjectFiles::{rea
 - [ ] Run them and confirm they fail because this machine has nothing to say yet:
 
   ```
-  cargo test -p farik-store
-  # expected: FAIL to compile, with one error per call site and nothing else:
+  cargo test -p farik-store --test project_files
+  # expected: FAIL to compile, with one error per call site and nothing else. This task
+  # adds no unit test, so the lib's own tests still pass and are not run here:
   # error[E0432]: unresolved imports `farik_store::files::LocalSettings`,
   #   `farik_store::files::Sandbox`
   # error[E0599]: no method named `read_prices` found for struct `ProjectFiles` in the
@@ -2792,7 +2995,7 @@ Produces: `farik_store::files::{LocalSettings, Sandbox}` and `ProjectFiles::{rea
   # error: could not compile `farik-store` (test "project_files") due to 7 previous errors
   ```
 
-- [ ] Write the minimal implementation. In `crates/store/src/files.rs`, replace everything from the first `use` line down to `pub mod fixtures;` — the module doc above it does not change — with:
+- [ ] Write the minimal implementation. In `crates/store/src/files.rs`, replace everything from the top of the file down to and including `pub mod fixtures;`, so that it reads, whole:
 
   ```rust
   //! The files under `.farik/` (`docs/SPEC.md` sections 3, 5.8, 5.12, 5.13 and 8.4).
@@ -2911,11 +3114,7 @@ Produces: `farik_store::files::{LocalSettings, Sandbox}` and `ProjectFiles::{rea
   const SETTINGS: &str = "local/settings.json";
   ```
 
-- [ ] The settings file now has a name, and one test in `farik-core` used the old one to stand for a path under `.farik/local/`. In `crates/core/src/governor/paths.rs`, replace both occurrences of `.farik/local/settings.yaml` with:
-
-  ```rust
-  ".farik/local/settings.json"
-  ```
+- [ ] The settings file now has a name, and one test in `farik-core` used the old one to stand for a path under `.farik/local/`. In `crates/core/src/governor/paths.rs`, both occurrences sit inside a string literal already: change the text `settings.yaml` to `settings.json` in each, leaving the quotes as they are, so that both lines read `".farik/local/settings.json"`.
 
 - [ ] Run the check and confirm green:
 
@@ -2923,7 +3122,7 @@ Produces: `farik_store::files::{LocalSettings, Sandbox}` and `ProjectFiles::{rea
   cargo xtask check --integration
   # expected: ends with `xtask check: ok`, with
   #   test result: ok. 49 passed (farik-store)
-  #   test result: ok. 24 passed (crates/store/tests/project_files.rs)
+  #   test result: ok. 25 passed (crates/store/tests/project_files.rs)
   ```
 
 - [ ] Commit: `feat(store): read a price override and the local settings`
@@ -2939,7 +3138,7 @@ This task changes documentation and has no test cycle. The `> ` marker on the bl
 
 - [ ] In `docs/plans/project-plan.md`, replace the phase 2 line beginning `- Step 06 (\`farik-store::files\`):` — everything up to and including `never sees a file.` — with:
 
-  > - Step 06 (`farik-store::files`): `enum FilesError { NotFound { path }, Invalid { path, detail }, Io { path, detail } }`; `struct ProjectFiles { root: PathBuf }` with `open` and `root`; `impl ProjectFiles { fn init(&self, team: &Team) -> Result<(), FilesError>; fn read_team / write_team; fn read_criteria / write_criteria; fn read_contract(&self, id: &TaskId) (through `validate_contract`, and refused when the contract inside names another id) / write_contract / list_contracts (ordered by the number in the id; a file that is not a contract's is passed over); fn read_memory(&self, agent_id: &AgentId) (an agent that never wrote one has an empty notebook, not a missing file) / write_memory; fn read_project_scan / write_project_scan; fn read_product_doc(&self, path: &str) / write_product_doc (under `product/` only, through `farik-core`'s own path rule); fn read_prices(&self) -> Result<Option<PriceTable>, FilesError>; fn read_settings / write_settings }`; `struct LocalSettings { sandbox: Sandbox }` with `enum Sandbox { Docker, None }`, JSON under `.farik/local/` because nobody hand-edits it and it is never committed. Every structured file is held, read and written, to the validator that owns it, so the round trip is a promise: what a writer accepts, the reader returns. A write goes to a file beside the one being written and is renamed over it, because a rename within a directory is the one file operation that is all or nothing. `init` makes the layout, never overwrites what is there, and writes `.farik/local/.gitignore` holding `*`. YAML is read and written by `serde-saphyr` (ADR 0007), which is this crate's one new dependency; `farik-core` gains none, because it does no I/O and never sees a file. Added 2026-09-17 by the step 06 plan: `farik-core` exports `AgentId`, and `governor::paths::normalise` is public, because a product document's path comes from a tool call and two answers to "does this path climb out" would be two definitions of a safe path. A product document's path is then resolved against the file system as well, because a directory under `product/` can be a symlink and a path through one has no `..` in it to catch. A byte-order mark is stripped on the way in.
+  > - Step 06 (`farik-store::files`): `enum FilesError { NotFound { path }, Invalid { path, detail }, Io { path, detail } }`; `struct ProjectFiles { root: PathBuf }` with `open` and `root`; `impl ProjectFiles { fn init(&self, team: &Team) -> Result<(), FilesError>; fn read_team / write_team; fn read_criteria / write_criteria; fn read_contract(&self, id: &TaskId) (through `validate_contract`, and refused when the contract inside names another id) / write_contract / list_contracts (ordered by the number in the id; a file that is not a contract's is passed over); fn read_memory(&self, agent_id: &AgentId) (an agent that never wrote one has an empty notebook, not a missing file) / write_memory; fn read_project_scan / write_project_scan; fn read_product_doc(&self, path: &str) / write_product_doc (under `product/` only, through `farik-core`'s own path rule); fn read_prices(&self) -> Result<Option<PriceTable>, FilesError>; fn read_settings / write_settings }`; `struct LocalSettings { sandbox: Sandbox }` with `enum Sandbox { Docker, None }`, JSON under `.farik/local/` because nobody hand-edits it and it is never committed. Every schema-backed file is held, read and written, to the validator that owns it, so the round trip is a promise: what a writer accepts, the reader returns; `local/settings.json` is the one structured file with no schema, because nobody hand-edits it. A write goes to a file beside the one being written and is renamed over it, because a rename within a directory is the one file operation that is all or nothing. `init` makes the layout, never overwrites what is there, and writes `.farik/local/.gitignore` holding `*`. YAML is read and written by `serde-saphyr` (ADR 0007), which is this crate's one new dependency; `farik-core` gains none, because it does no I/O and never sees a file. Added 2026-09-17 by the step 06 plan: `farik-core` exports `AgentId`, and `governor::paths::normalise` is public, because a product document's path comes from a tool call and two answers to "does this path climb out" would be two definitions of a safe path. A product document's path is then resolved against the file system as well, because a directory under `product/` can be a symlink and a path through one has no `..` in it to catch; the resolution makes nothing, since `.farik/` existing is what makes a directory a project. A byte-order mark is stripped on the way in. YAML is read with `strict_booleans`, so an unquoted `no` stays a word, and a refusal is rendered with the parser's `UserMessageFormatter` and the file's own name, because the default text recommends the API call that would have accepted the file.
 
 - [ ] Set this plan's `Status:` to `done` and confirm every checkbox above is ticked, each in the commit of the task it belongs to.
 
@@ -2957,7 +3156,7 @@ This task changes documentation and has no test cycle. The `> ` marker on the bl
   #   test result: ok. 49 passed (farik-store)
   #   test result: ok. 8 passed (crates/store/tests/event_log_file.rs)
   #   test result: ok. 15 passed (crates/store/tests/git.rs)
-  #   test result: ok. 24 passed (crates/store/tests/project_files.rs)
+  #   test result: ok. 25 passed (crates/store/tests/project_files.rs)
   #   test result: ok. 29 passed (xtask)
   ```
 
@@ -2980,15 +3179,16 @@ This task changes documentation and has no test cycle. The `> ` marker on the bl
 - [ ] Every commit subject is accepted:
 
   ```
-  for subject in \\
-    "feat(store): make the files a project starts with" \\
-    "feat(store): read a contract back from the file its id names" \\
-    "feat(store): keep a product document under product and nowhere else" \\
-    "feat(store): read a price override and the local settings" \\
+  for subject in \
+    "feat(store): make the files a project starts with" \
+    "feat(store): read a contract back from the file its id names" \
+    "feat(store): keep a product document under product and nowhere else" \
+    "feat(store): read a price override and the local settings" \
     "docs(docs): record what step 06 changed about the files"; do
-    printf '%s\\n' "$subject" > /tmp/subject && cargo xtask commit-msg /tmp/subject
+    printf '%s\n' "$subject" > target/commit-subject
+    cargo xtask commit-msg target/commit-subject
   done
-  # expected: silent, five times
+  # expected: silent, five times. target/ is where cargo writes and git ignores it.
   ```
 
 ## Open questions
