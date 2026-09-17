@@ -4,17 +4,22 @@ use serde_json::{Value, json};
 
 use crate::event::EventKind;
 
-/// A schema-valid wire event of one kind, with that kind's body and no optional envelope field.
+/// A schema-valid wire event of one kind, with that kind's body, and no optional envelope field
+/// beyond the `task_id` that a contract-scoped kind may not be recorded without.
 #[must_use]
 pub fn an_event_wire(kind: EventKind) -> Value {
-    json!({
+    let mut event = json!({
         "seq": 1,
         "recorded_at": "2026-09-17T10:00:00Z",
         "team_id": "farik",
         "project_id": "farik",
         "kind": kind.to_string(),
         "body": a_body_wire(kind)
-    })
+    });
+    if crate::event::is_about_one_contract(kind) {
+        event["task_id"] = json!("FRK-1");
+    }
+    event
 }
 
 /// The same event with every optional envelope field present.

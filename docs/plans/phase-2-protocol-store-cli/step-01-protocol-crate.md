@@ -2081,6 +2081,59 @@ This task changes documentation and has no test cycle. As in Task 3, the `> ` ma
 
 - [x] Commit: `docs(docs): record phase 2 step 01 as done`
 
+## Review findings
+
+The step was reviewed on landing by a session that did not write it, against this plan and then as
+code. No critical finding. What follows is every finding and what was done, as
+`docs/standards/workflow.md` stage 5 requires: addressed, or deferred with a reason.
+
+Fixed, in `fix(protocol): close the doors the step 01 review found ajar`:
+
+- A schema failure anywhere inside a body collapsed to one opaque error at `/body`, with the whole
+  body echoed back, because the schema types `body` as a choice of nine shapes and can only say
+  that none matched. The reader knows the kind before it needs the body, so a `/body` failure is
+  now asked again of that kind's shape alone and reported where it actually is.
+- The drift test compared only `contract_summary.parent` against the contract schema, leaving the
+  envelope's and the command's copies of `^FRK-[0-9]{1,6}$` unchecked; those two are the ones
+  `TaskId::from_str` is handed. All three copies are compared now.
+- `task_id` was optional for every kind, so a `contract.locked` event could record that something
+  was locked by someone and never be attached to a contract again. The five kinds that are about
+  one contract are refused without it, at both doors, by `is_about_one_contract`.
+- `event_to_value`'s doc comment called it "the inverse of `event_from_value`", which is false: it
+  writes the canonical form, so a timestamp and an id come back normalised. The comment says so and
+  a test pins the three normalisations, so that step 02 does not assume the bytes it reads are the
+  bytes it wrote.
+- `refuses_a_body_that_belongs_to_another_kind` tried nine pairings where its name implies
+  seventy-two; it tries all seventy-two now.
+- `trims_every_id_and_forgets_an_optional_one_that_is_blank` and the reader's near-namesake were
+  one word apart; the `new_event` one now says `stamps`.
+- A blank `created_by`, `written_by`, `locked_by`, `unlocked_by`, `triaged_by` or `updated_by` was
+  accepted, though the section 5 governance rules rest on that attribution and an append-only log
+  cannot correct it. Both doors refuse one and trim the rest, which is the rule this plan already
+  stated for `team_id` and `project_id` applied where it was missing.
+- `seq` had no upper bound, so a number past `u64` passed the schema and failed the reader's typing
+  at the root; the schema carries the bound and refuses it at `/seq`.
+- The command schema said nothing about where the actor of a command comes from, which the step
+  that turns a command into an event has to know; its description now does.
+
+Deferred, with the reason:
+
+- `EventEnvelope`, `NewEvent` and `FarikEvent` have public fields, so a caller can build a
+  `FarikEvent` whose ids `new_event` would have refused, and `event_to_value` will write it.
+  Making the fields private would give this crate an interface no other crate in the workspace has,
+  for a rule that is only breakable by writing the struct out by hand. The real seam is where a
+  `FarikEvent` is first built from a `NewEvent` and a sequence number, which is step 02's `append`:
+  that step's plan carries this as a constraint, and no-forward-dependencies is why the constructor
+  is not added here.
+- A number with a zero fraction (`{"seq": 1.0}`) passes the schema and fails the reader's typing at
+  the root rather than at `/seq`. `farik-core` solved the same thing for contracts with a private
+  `with_integers_normalised`; making the two agree means moving that helper somewhere both crates
+  can reach, which is a change to `farik-core`'s interface and belongs in its own commit.
+- `event_from_value` and `command_from_value` each deserialise the whole wire value and then read
+  the body again by kind, so a `task_create`'s contract map is built twice. The first pass is also
+  the check that the schema passed but the typed value could not be built, which is a real error
+  path with its own test; the cost is one extra parse per read and the log is not a hot loop.
+
 ## Verification
 
 The full check, run fresh on the final commit:
@@ -2096,8 +2149,9 @@ The step's own behavior, run on its own:
 
 ```
 cargo test -p farik-protocol
-# expected: 29 tests passing -- 2 in lib, 17 in event::tests, 7 in command::tests, 3 in
-#           clock::tests -- and none filtered out or ignored
+# expected: 37 tests passing -- 2 in lib, 25 in event::tests, 7 in command::tests, 3 in
+#           clock::tests -- and none filtered out or ignored (29 when the step landed, before the
+#           review fixes)
 ```
 
 The generated files are the schemas':

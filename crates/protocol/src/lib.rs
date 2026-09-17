@@ -51,5 +51,16 @@ mod tests {
         assert_eq!(summary["status"]["enum"], fields["status"]["enum"]);
         assert_eq!(summary["risk"]["enum"], fields["risk"]["enum"]);
         assert_eq!(summary["parent"]["pattern"], fields["parent"]["pattern"]);
+        // Every copy of the task id's pattern, not only the summary's: the envelope's and the
+        // command's are what farik_core's TaskId::from_str is then handed.
+        let command: serde_json::Value =
+            serde_json::from_str(include_str!("generated/command.schema.json"))
+                .expect("the embedded command schema is valid JSON");
+        for copy in [
+            &event["properties"]["task_id"]["pattern"],
+            &command["$defs"]["requestTriageBody"]["properties"]["task_id"]["pattern"],
+        ] {
+            assert_eq!(copy, &fields["id"]["pattern"]);
+        }
     }
 }

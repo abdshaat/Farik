@@ -496,7 +496,7 @@ pub struct FarikEvent {
     pub project_id: ::std::string::String,
     ///When the event was recorded, from the injected clock. Never read from the machine's clock by the crate that builds the event.
     pub recorded_at: ::chrono::DateTime<::chrono::offset::Utc>,
-    ///The event's place in the log. Assigned by the store on append and never reused.
+    ///The event's place in the log. Assigned by the store on append and never reused. The upper bound is the store's counter's, so that a number past it is refused here, at its own path, rather than by the reader's typing at the root.
     pub seq: u64,
     ///The session the event was recorded in, when it was recorded in one.
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]

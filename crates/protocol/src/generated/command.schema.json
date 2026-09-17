@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://farik.dev/schemas/command.schema.json",
   "title": "Farik Command",
-  "description": "A request for the daemon to change something. Shaped like an event: command names what is asked and body carries that command's arguments. The pairing of the two is checked by the reader, farik_protocol::command::command_from_value.",
+  "description": "A request for the daemon to change something. Shaped like an event: command names what is asked and body carries that command's arguments. The pairing of the two is checked by the reader, farik_protocol::command::command_from_value. A command carries no actor: who asked is the session the command arrived on, and the step that turns a command into an event takes the actor from there rather than from the caller's word for it.",
   "type": "object",
   "additionalProperties": false,
   "required": ["command", "body"],

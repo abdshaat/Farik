@@ -39,6 +39,82 @@ static VALIDATOR: LazyLock<Validator> = LazyLock::new(|| {
         )
 });
 
+/// One validator per kind, each holding that kind's body schema alone. The event schema types
+/// `body` as a choice of nine shapes, so it can only say that a body matched none of them; these
+/// say what is wrong with the one shape the event's `kind` asked for.
+static BODY_VALIDATORS: LazyLock<Vec<Validator>> = LazyLock::new(|| {
+    let schema: Value = serde_json::from_str(SCHEMA_JSON).expect(
+        "the embedded event schema is valid JSON: the whole-event validator above parses the \
+         same text",
+    );
+    let defs = schema
+        .get("$defs")
+        .cloned()
+        .expect("the embedded event schema has $defs: every body shape is defined there");
+    EVERY_KIND
+        .iter()
+        .map(|kind| {
+            let body = serde_json::json!({
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "$ref": format!("#/$defs/{}", body_def_name(*kind)),
+                "$defs": defs,
+            });
+            jsonschema::options()
+                .should_validate_formats(true)
+                .build(&body)
+                .expect(
+                    "a body schema compiles: it is one $ref into the $defs of a schema the \
+                     generator already parsed",
+                )
+        })
+        .collect()
+});
+
+/// The name `docs/schemas/event.schema.json` gives one kind's body shape.
+fn body_def_name(kind: EventKind) -> &'static str {
+    match kind {
+        EventKind::TaskCreated => "taskCreatedBody",
+        EventKind::RequestTriaged => "requestTriagedBody",
+        EventKind::ContractWritten => "contractWrittenBody",
+        EventKind::ContractLocked => "contractLockedBody",
+        EventKind::ContractUnlocked => "contractUnlockedBody",
+        EventKind::DriftDetected => "driftDetectedBody",
+        EventKind::ProjectScanned => "projectScannedBody",
+        EventKind::TeamUpdated => "teamUpdatedBody",
+        EventKind::CriteriaUpdated => "criteriaUpdatedBody",
+    }
+}
+
+/// Whether an event of this kind is about one contract, and so may not be recorded without naming
+/// it. The log is append-only: an event saying that something was locked, by someone, with no id,
+/// can never afterwards be attached to the contract it was about.
+#[must_use]
+pub fn is_about_one_contract(kind: EventKind) -> bool {
+    matches!(
+        kind,
+        EventKind::TaskCreated
+            | EventKind::RequestTriaged
+            | EventKind::ContractWritten
+            | EventKind::ContractLocked
+            | EventKind::ContractUnlocked
+    )
+}
+
+/// The field naming who acted, for the kinds that name one, and nothing for `drift.detected` and
+/// `project.scanned`, which record what Farik itself found.
+fn attribution(body: &mut EventBody) -> Option<(&'static str, &mut String)> {
+    match body {
+        EventBody::TaskCreated(body) => Some(("created_by", &mut body.created_by)),
+        EventBody::RequestTriaged(body) => Some(("triaged_by", &mut body.triaged_by)),
+        EventBody::ContractWritten(body) => Some(("written_by", &mut body.written_by)),
+        EventBody::ContractLocked(body) => Some(("locked_by", &mut body.locked_by)),
+        EventBody::ContractUnlocked(body) => Some(("unlocked_by", &mut body.unlocked_by)),
+        EventBody::TeamUpdated(body) => Some(("updated_by", &mut body.updated_by)),
+        EventBody::CriteriaUpdated(body) => Some(("updated_by", &mut body.updated_by)),
+        EventBody::DriftDetected(_) | EventBody::ProjectScanned(_) => None,
+    }
+}
+
 /// Every kind the log holds in this phase, in the order `docs/schemas/event.schema.json` lists
 /// them. The step that adds a kind adds it here.
 pub const EVERY_KIND: [EventKind; 9] = [
@@ -163,8 +239,13 @@ pub struct NewEvent {
 pub enum EventError {
     /// An id that must name something was blank once trimmed.
     BlankId {
-        /// The field: `team_id` or `project_id`.
+        /// The field: `team_id`, `project_id`, or the body's own field naming who acted.
         field: String,
+    },
+    /// An event about one contract was stamped without naming it.
+    NoContractNamed {
+        /// The kind that is about one contract.
+        kind: EventKind,
     },
 }
 
@@ -174,7 +255,9 @@ pub enum EventError {
 ///
 /// # Errors
 ///
-/// `BlankId` when `team_id` or `project_id` is blank once trimmed; `team_id` is reported first.
+/// `BlankId` when `team_id`, `project_id`, or the body's own field naming who acted is blank once
+/// trimmed, in that order; `NoContractNamed` when the body's kind is about one contract
+/// (`is_about_one_contract`) and `ids` names none.
 pub fn new_event(
     body: EventBody,
     recorded_at: DateTime<Utc>,
@@ -182,6 +265,13 @@ pub fn new_event(
 ) -> Result<NewEvent, EventError> {
     let team_id = named(&ids.team_id, "team_id")?;
     let project_id = named(&ids.project_id, "project_id")?;
+    let mut body = body;
+    if let Some((field, actor)) = attribution(&mut body) {
+        *actor = named(actor, field)?;
+    }
+    if is_about_one_contract(body.kind()) && ids.task_id.is_none() {
+        return Err(EventError::NoContractNamed { kind: body.kind() });
+    }
     Ok(NewEvent {
         recorded_at,
         team_id,
@@ -215,13 +305,7 @@ fn named(value: &str, field: &str) -> Result<String, EventError> {
 /// blank id; one at `/task_id` for an id the contract's pattern refuses; or one error at the root
 /// when the schema passes but the typed event cannot be built.
 pub fn event_from_value(input: &Value) -> Result<FarikEvent, Vec<ValidationError>> {
-    let errors: Vec<ValidationError> = VALIDATOR
-        .iter_errors(input)
-        .map(|error| ValidationError {
-            path: pointer(&error.instance_path().to_string()),
-            message: error.to_string(),
-        })
-        .collect();
+    let errors = schema_errors(input);
     if !errors.is_empty() {
         return Err(errors);
     }
@@ -232,8 +316,64 @@ pub fn event_from_value(input: &Value) -> Result<FarikEvent, Vec<ValidationError
         }]
     })?;
     let envelope = envelope_from_wire(&wire)?;
-    let body = body_from_value(wire.kind, &input["body"])?;
+    if is_about_one_contract(wire.kind) && envelope.task_id.is_none() {
+        return Err(vec![ValidationError {
+            path: "/task_id".to_string(),
+            message: format!(
+                "a {} event is about one contract and names none, and an append-only log cannot \
+                 attach it to one afterwards",
+                wire.kind
+            ),
+        }]);
+    }
+    let mut body = body_from_value(wire.kind, &input["body"])?;
+    if let Some((field, actor)) = attribution(&mut body) {
+        let named = actor.trim();
+        if named.is_empty() {
+            return Err(vec![ValidationError {
+                path: format!("/body/{field}"),
+                message: "is blank, and an event the log cannot attribute to whoever acted is not \
+                          correctable once it is appended"
+                    .to_string(),
+            }]);
+        }
+        *actor = named.to_string();
+    }
     Ok(FarikEvent { envelope, body })
+}
+
+/// The schema's own failures. A failure inside `body` is reported by the schema once, at `/body`,
+/// because `body` there is a choice of nine shapes and the schema can only say that none matched.
+/// The event's `kind` says which one it was meant to be, so such a failure is asked again of that
+/// shape alone and reported where it actually is.
+fn schema_errors(input: &Value) -> Vec<ValidationError> {
+    let mut errors: Vec<ValidationError> = Vec::new();
+    for error in VALIDATOR.iter_errors(input) {
+        let path = pointer(&error.instance_path().to_string());
+        match (path.as_str(), body_errors(input)) {
+            ("/body", Some(inside)) => errors.extend(inside),
+            _ => errors.push(ValidationError {
+                path,
+                message: error.to_string(),
+            }),
+        }
+    }
+    errors
+}
+
+/// What the body gets wrong when held to its own kind's shape, at paths under `/body`. `None` when
+/// the kind is not one this crate knows, or when that shape accepts the body after all.
+fn body_errors(input: &Value) -> Option<Vec<ValidationError>> {
+    let kind: EventKind = input.get("kind")?.as_str()?.parse().ok()?;
+    let index = EVERY_KIND.iter().position(|known| *known == kind)?;
+    let errors: Vec<ValidationError> = BODY_VALIDATORS[index]
+        .iter_errors(input.get("body")?)
+        .map(|error| ValidationError {
+            path: format!("/body{}", error.instance_path()),
+            message: error.to_string(),
+        })
+        .collect();
+    (!errors.is_empty()).then_some(errors)
 }
 
 fn envelope_from_wire(wire: &EventWire) -> Result<EventEnvelope, Vec<ValidationError>> {
@@ -316,7 +456,9 @@ fn pointer(path: &str) -> String {
     }
 }
 
-/// One event as the wire value the log holds, the inverse of `event_from_value`.
+/// One event as the canonical wire value the log holds. `event_from_value` accepts it back, but
+/// it is not byte-for-byte what that function was given: a timestamp is written in UTC in one
+/// spelling whatever spelling it arrived in, and every id is written trimmed.
 ///
 /// The crate writes the wire form itself, field by field, rather than deriving it: `serde_json`
 /// answers with a `Result` whose error cannot happen for these types, and `docs/standards/code.md`
@@ -481,7 +623,11 @@ mod tests {
             assert_eq!(event.body.kind(), kind);
             assert_eq!(event.envelope.seq, 1);
             assert_eq!(event.envelope.team_id, "farik");
-            assert!(event.envelope.task_id.is_none());
+            assert_eq!(
+                event.envelope.task_id.is_some(),
+                super::is_about_one_contract(kind),
+                "{kind}"
+            );
         }
     }
 
@@ -514,23 +660,23 @@ mod tests {
         // contract.locked event could carry a task.created body into the log and every reader
         // after it would have to guess which one to believe.
         for kind in EVERY_KIND {
-            let other = if kind == EventKind::TaskCreated {
-                EventKind::ContractLocked
-            } else {
-                EventKind::TaskCreated
-            };
-            let mut input = an_event_wire(kind);
-            input["body"] = a_body_wire(other);
-            let errors = refusal(&input);
-            assert_eq!(errors.len(), 1, "{kind}");
-            assert_eq!(errors[0].path, "/body", "{kind}");
-            assert!(
-                errors[0]
-                    .message
-                    .starts_with(&format!("a {kind} event does not carry this body")),
-                "{}",
-                errors[0].message
-            );
+            for other in EVERY_KIND {
+                if other == kind {
+                    continue;
+                }
+                let mut input = an_event_wire(kind);
+                input["body"] = a_body_wire(other);
+                let errors = refusal(&input);
+                assert_eq!(errors.len(), 1, "{kind} carrying {other}");
+                assert_eq!(errors[0].path, "/body", "{kind} carrying {other}");
+                assert!(
+                    errors[0]
+                        .message
+                        .starts_with(&format!("a {kind} event does not carry this body")),
+                    "{}",
+                    errors[0].message
+                );
+            }
         }
     }
 
@@ -634,7 +780,8 @@ mod tests {
 
     #[test]
     fn leaves_out_the_optional_fields_that_are_not_there() {
-        let event = event_from_value(&an_event_wire(EventKind::ContractLocked)).expect("valid");
+        // A kind that is not about one contract, since one that is may not leave out `task_id`.
+        let event = event_from_value(&an_event_wire(EventKind::ProjectScanned)).expect("valid");
         let wire = event_to_value(&event);
         for absent in ["task_id", "agent_id", "session_id"] {
             assert!(wire.get(absent).is_none(), "{absent}");
@@ -651,13 +798,14 @@ mod tests {
         }
     }
 
+    /// A body of a kind that is about no one contract, so that `some_ids` naming none is enough.
     fn a_body() -> EventBody {
-        let event = event_from_value(&an_event_wire(EventKind::ContractLocked)).expect("valid");
+        let event = event_from_value(&an_event_wire(EventKind::ProjectScanned)).expect("valid");
         event.body
     }
 
     fn at() -> chrono::DateTime<chrono::Utc> {
-        let event = event_from_value(&an_event_wire(EventKind::ContractLocked)).expect("valid");
+        let event = event_from_value(&an_event_wire(EventKind::ProjectScanned)).expect("valid");
         event.envelope.recorded_at
     }
 
@@ -667,12 +815,12 @@ mod tests {
         assert_eq!(new.team_id, "farik");
         assert_eq!(new.project_id, "farik");
         assert_eq!(new.recorded_at, at());
-        assert_eq!(new.body.kind(), EventKind::ContractLocked);
+        assert_eq!(new.body.kind(), EventKind::ProjectScanned);
         assert!(new.task_id.is_none());
     }
 
     #[test]
-    fn trims_every_id_and_forgets_an_optional_one_that_is_blank() {
+    fn stamps_every_id_trimmed_and_forgets_an_optional_one_that_is_blank() {
         let ids = EventIds {
             team_id: "  farik  ".to_string(),
             project_id: "  farik  ".to_string(),
@@ -715,5 +863,147 @@ mod tests {
                 }
             );
         }
+    }
+
+    #[test]
+    fn reports_a_malformed_field_inside_a_body_at_its_own_path() {
+        // The schema types `body` as a choice of nine shapes, so it reports a failure anywhere
+        // inside one at `/body`, with the whole body echoed back. The kind says which shape the
+        // body was meant to be, so the reader checks it again against that one alone.
+        let mut input = an_event_wire(EventKind::ProjectScanned);
+        input["body"]["detected_criteria"] = json!([1, 2]);
+        let errors = refusal(&input);
+        assert_eq!(errors.len(), 2);
+        assert_eq!(
+            errors
+                .iter()
+                .map(|error| error.path.as_str())
+                .collect::<Vec<&str>>(),
+            ["/body/detected_criteria/0", "/body/detected_criteria/1"]
+        );
+    }
+
+    #[test]
+    fn reports_an_unknown_field_inside_a_summary_at_its_own_path() {
+        let mut input = an_event_wire(EventKind::TaskCreated);
+        input["body"]["summary"]["assignee"] = json!("maya-chen");
+        let errors = refusal(&input);
+        assert_eq!(errors.len(), 1);
+        assert_eq!(errors[0].path, "/body/summary");
+    }
+
+    #[test]
+    fn refuses_a_contract_event_that_names_no_contract() {
+        // task.created, request.triaged and the three contract events are each about one
+        // contract, and the log is append-only: an event recording that something was locked by
+        // someone, with no id, can never be attached to the contract it was about.
+        for kind in EVERY_KIND {
+            let mut input = an_event_wire(kind);
+            let removed = input
+                .as_object_mut()
+                .expect("an event is an object")
+                .remove("task_id");
+            if !super::is_about_one_contract(kind) {
+                assert!(removed.is_none(), "{kind}");
+                continue;
+            }
+            let errors = refusal(&input);
+            assert_eq!(errors.len(), 1, "{kind}");
+            assert_eq!(errors[0].path, "/task_id", "{kind}");
+            assert!(
+                errors[0]
+                    .message
+                    .starts_with(&format!("a {kind} event is about one contract")),
+                "{}",
+                errors[0].message
+            );
+        }
+    }
+
+    #[test]
+    fn refuses_an_event_whose_actor_is_blank() {
+        // Every kind that names who acted is refused without one. The governance rules of
+        // docs/SPEC.md section 5 rest on that attribution, and the log cannot correct it later.
+        for (kind, field) in [
+            (EventKind::TaskCreated, "created_by"),
+            (EventKind::RequestTriaged, "triaged_by"),
+            (EventKind::ContractWritten, "written_by"),
+            (EventKind::ContractLocked, "locked_by"),
+            (EventKind::ContractUnlocked, "unlocked_by"),
+            (EventKind::TeamUpdated, "updated_by"),
+            (EventKind::CriteriaUpdated, "updated_by"),
+        ] {
+            let mut input = an_event_wire(kind);
+            input["body"][field] = json!("   ");
+            let errors = refusal(&input);
+            assert_eq!(errors.len(), 1, "{kind}");
+            assert_eq!(errors[0].path, format!("/body/{field}"), "{kind}");
+        }
+    }
+
+    #[test]
+    fn trims_the_actor_it_reads() {
+        let mut input = an_event_wire(EventKind::ContractLocked);
+        input["body"]["locked_by"] = json!("  human  ");
+        let event = event_from_value(&input).expect("valid");
+        let EventBody::ContractLocked(body) = event.body else {
+            panic!("a contract.locked event carries a contract.locked body");
+        };
+        assert_eq!(body.locked_by, "human");
+    }
+
+    #[test]
+    fn writes_the_canonical_form_of_a_timestamp_it_read() {
+        // event_to_value writes the canonical wire form, not the bytes it was given: the log
+        // holds one spelling of a moment, so step 02 must not assume the value it reads back is
+        // byte-identical to the one it passed in.
+        for (given, canonical) in [
+            ("2026-09-17T12:00:00+02:00", "2026-09-17T10:00:00Z"),
+            ("2026-09-17T10:00:00.000Z", "2026-09-17T10:00:00Z"),
+            ("2026-09-17t10:00:00z", "2026-09-17T10:00:00Z"),
+            ("2026-09-17T10:00:00.500Z", "2026-09-17T10:00:00.500Z"),
+        ] {
+            let mut input = an_event_wire(EventKind::ProjectScanned);
+            input["recorded_at"] = json!(given);
+            let event = event_from_value(&input).expect("valid");
+            assert_eq!(
+                event_to_value(&event)["recorded_at"],
+                json!(canonical),
+                "{given}"
+            );
+        }
+    }
+
+    #[test]
+    fn refuses_to_stamp_a_contract_event_that_names_no_contract() {
+        let body = event_from_value(&an_event_wire(EventKind::ContractLocked))
+            .expect("valid")
+            .body;
+        let error = new_event(body, at(), some_ids()).expect_err("expected a refusal");
+        assert_eq!(
+            error,
+            EventError::NoContractNamed {
+                kind: EventKind::ContractLocked
+            }
+        );
+    }
+
+    #[test]
+    fn refuses_to_stamp_an_event_whose_actor_is_blank() {
+        let mut input = an_event_wire(EventKind::TeamUpdated);
+        input["body"]["updated_by"] = json!("human");
+        let body = event_from_value(&input).expect("valid").body;
+        let EventBody::TeamUpdated(mut updated) = body else {
+            panic!("a team.updated event carries a team.updated body");
+        };
+        updated.updated_by = "   ".to_string();
+        let error = new_event(EventBody::TeamUpdated(updated), at(), some_ids())
+            .expect_err("expected a refusal");
+        assert_eq!(
+            error,
+            EventError::BlankId {
+                field: "updated_by".to_string()
+            }
+        );
     }
 }

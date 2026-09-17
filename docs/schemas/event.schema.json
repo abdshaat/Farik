@@ -17,7 +17,8 @@
     "seq": {
       "type": "integer",
       "minimum": 0,
-      "description": "The event's place in the log. Assigned by the store on append and never reused."
+      "maximum": 18446744073709551615,
+      "description": "The event's place in the log. Assigned by the store on append and never reused. The upper bound is the store's counter's, so that a number past it is refused here, at its own path, rather than by the reader's typing at the root."
     },
     "recorded_at": {
       "type": "string",

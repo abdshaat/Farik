@@ -69,7 +69,7 @@ impl ::std::convert::TryFrom<::std::string::String> for CommandName {
         value.parse()
     }
 }
-///A request for the daemon to change something. Shaped like an event: command names what is asked and body carries that command's arguments. The pairing of the two is checked by the reader, farik_protocol::command::command_from_value.
+///A request for the daemon to change something. Shaped like an event: command names what is asked and body carries that command's arguments. The pairing of the two is checked by the reader, farik_protocol::command::command_from_value. A command carries no actor: who asked is the session the command arrived on, and the step that turns a command into an event takes the actor from there rather than from the caller's word for it.
 #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct FarikCommand {
