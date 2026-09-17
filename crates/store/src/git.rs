@@ -459,7 +459,17 @@ mod tests {
         for not_a_line in ["", "a1b2c3", "a1b2c3\u{1f}2026-09-17T10:00:00+00:00"] {
             assert_eq!(head_summary_of(not_a_line), None, "{not_a_line:?}");
         }
-        assert_eq!(head_summary_of("\u{1f}\u{1f}a subject"), None, "no sha");
+        // One empty field each, so that both halves of the guard are held to something.
+        assert_eq!(
+            head_summary_of("\u{1f}2026-09-17T10:00:00+00:00\u{1f}a subject"),
+            None,
+            "no sha"
+        );
+        assert_eq!(
+            head_summary_of("a1b2c3\u{1f}\u{1f}a subject"),
+            None,
+            "no time"
+        );
     }
 
     #[test]

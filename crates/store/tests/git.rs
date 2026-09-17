@@ -130,16 +130,25 @@ fn reads_the_commit_at_the_tip_and_says_when_there_is_none() {
     let _ = std::fs::remove_dir_all(&empty);
 
     let repository = TempRepo::new("head-summary");
+    // Two commits, so that the tip is the tip rather than the only thing there is.
+    repository.write("second.txt", "and a second\n");
+    repository.commit("the second commit");
     let summary = repository
         .adapter()
         .head_summary()
         .expect("the read works")
         .expect("a repository with a commit has one");
     assert_eq!(summary.sha, repository.git(&["rev-parse", "HEAD"]));
-    assert_eq!(summary.subject, "the first commit");
+    assert_eq!(summary.subject, "the second commit");
+    // Strict ISO 8601, which is what a board and a log can order and a person can read. The
+    // ordinary format git prints is neither: it separates the date from the time with a space.
+    assert_eq!(
+        summary.committed_at,
+        repository.git(&["log", "-1", "--format=%cI"])
+    );
     assert!(
-        summary.committed_at.starts_with("20"),
-        "an ISO 8601 date: {}",
+        summary.committed_at.contains('T'),
+        "{}",
         summary.committed_at
     );
 }
@@ -159,13 +168,78 @@ fn answers_with_the_branch_it_is_on_when_there_is_no_remote_to_ask() {
 
 #[test]
 #[ignore = "needs the git program: cargo xtask check --integration"]
+fn reads_the_default_branch_from_the_remote_that_records_it() {
+    // A repository with a remote records its default branch, and that is the integration branch
+    // (5.14) — not whatever a session happens to have checked out at the time.
+    let origin = TempRepo::new("default-origin");
+    origin.git(&["branch", "-m", "trunk"]);
+    let clone = std::env::temp_dir().join(format!(
+        "farik-git-clone-{}-{:?}",
+        std::process::id(),
+        std::thread::current().id()
+    ));
+    let _ = std::fs::remove_dir_all(&clone);
+    run_git(
+        &std::env::temp_dir(),
+        &[
+            "clone",
+            "--quiet",
+            origin.path.to_str().expect("a path that is text"),
+            clone.to_str().expect("a path that is text"),
+        ],
+    );
+    let git = Git::open(clone.clone());
+    run_git(&clone, &["checkout", "-b", "farik/FRK-1"]);
+    assert_eq!(git.current_branch().expect("the read works"), "farik/FRK-1");
+    assert_eq!(
+        git.default_branch().expect("the read works"),
+        "trunk",
+        "what the remote records, not what is checked out"
+    );
+    let _ = std::fs::remove_dir_all(&clone);
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn hands_back_a_patch_with_no_colour_in_it() {
+    // Whatever the repository is configured to show. A patch is read by a reviewer and by whatever
+    // reads a reviewer's answer; escape codes are neither.
+    let repository = TempRepo::new("colour");
+    let git = repository.adapter();
+    repository.git(&["checkout", "-b", "farik/FRK-1"]);
+    repository.write("src/added.rs", "fn added() {}\n");
+    repository.commit("feat: add a thing");
+    repository.git(&["config", "color.ui", "always"]);
+
+    let patch = git.diff("main", "farik/FRK-1").expect("the read works");
+    assert!(patch.contains("fn added()"), "the patch holds the change");
+    assert!(
+        !patch.contains('\u{1b}'),
+        "and nothing a terminal would paint: {patch:?}"
+    );
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
 fn makes_a_branch_and_a_worktree_for_a_task_and_takes_the_worktree_away_again() {
     // One worktree per task is what keeps two tasks from sharing a working tree (5.14), and the
     // branch outlives it: the work is on the branch, not in the directory.
     let repository = TempRepo::new("worktree");
     let git = repository.adapter();
+    // From `main`, whatever this repository has checked out: a task's branch starts from the
+    // integration branch as it is at that moment (5.14), and starting it somewhere else is not an
+    // error anyone would see.
+    repository.git(&["checkout", "-b", "elsewhere"]);
+    repository.write("only-on-elsewhere.txt", "not where a task starts\n");
+    repository.commit("docs: somewhere else entirely");
+
     git.create_branch("farik/FRK-1", "main")
         .expect("the branch is made");
+    assert_eq!(
+        repository.git(&["rev-parse", "farik/FRK-1"]),
+        repository.git(&["rev-parse", "main"]),
+        "the branch starts where it was told to"
+    );
     let taken = git.create_branch("farik/FRK-1", "main");
     let Err(GitError::CommandFailed { command, stderr }) = taken else {
         panic!("a name is taken once: {taken:?}");
@@ -180,6 +254,10 @@ fn makes_a_branch_and_a_worktree_for_a_task_and_takes_the_worktree_away_again() 
     assert!(
         worktree.join("README.md").is_file(),
         "it has the work in it"
+    );
+    assert!(
+        !worktree.join("only-on-elsewhere.txt").exists(),
+        "and the worktree starts from main too, not from what was checked out"
     );
     assert!(git.is_clean(&worktree).expect("the read works"));
 
