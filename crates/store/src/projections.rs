@@ -11,7 +11,7 @@ use farik_protocol::event::{
 use rusqlite::{Connection, Transaction};
 
 use crate::error::StoreError;
-use crate::event_log::{EventLog, TASK_ID_PREFIX};
+use crate::event_log::{EventLog, EventQuery, TASK_ID_PREFIX};
 
 /// What a board shows about one contract, as the log left it.
 ///
@@ -49,20 +49,29 @@ pub struct Projections {
     log: Arc<EventLog>,
 }
 
-/// Opens the projections of `log`.
+/// Opens the projections of `log` and brings them up to date with it.
+///
+/// Catching up on open is what makes the pair self-healing: an `apply` that never ran, because the
+/// process stopped between the append and the projection, is applied here instead. The cursor is
+/// what remembers how far the projections had read.
 ///
 /// # Errors
 ///
-/// `Sqlite` when a projection table cannot be read.
+/// `Sqlite` when a projection table cannot be read or written; `InvalidEvent` when the log holds a
+/// row that is not an event.
 pub fn open_projections(log: Arc<EventLog>) -> Result<Projections, StoreError> {
-    Ok(Projections { log })
+    let projections = Projections { log };
+    projections.catch_up()?;
+    Ok(projections)
 }
 
 impl Projections {
     /// Applies one event, and moves the cursor to it.
     ///
-    /// The row and the cursor move in one transaction, so the cursor never claims work that was not
-    /// done.
+    /// An event at or before the cursor is ignored rather than applied twice: a caller that both
+    /// subscribes and catches up on open would otherwise take the same append in twice, and
+    /// `updated_seq` would go backwards. The row and the cursor move in one transaction, so the
+    /// cursor never claims work that was not done.
     ///
     /// # Errors
     ///
@@ -70,6 +79,9 @@ impl Projections {
     pub fn apply(&self, event: &FarikEvent) -> Result<(), StoreError> {
         let mut connection = self.connection();
         let transaction = connection.transaction()?;
+        if event.envelope.seq <= read_cursor(&transaction)? {
+            return Ok(());
+        }
         apply_to(&transaction, event)?;
         write_cursor(&transaction, event.envelope.seq)?;
         transaction.commit()?;
@@ -118,6 +130,19 @@ impl Projections {
     pub fn cursor(&self) -> Result<u64, StoreError> {
         let connection = self.connection();
         read_cursor(&connection)
+    }
+
+    /// Applies every event the log has that the cursor has not reached.
+    fn catch_up(&self) -> Result<(), StoreError> {
+        let after_seq = self.cursor()?;
+        let behind = self.log.read(&EventQuery {
+            after_seq: Some(after_seq),
+            ..EventQuery::default()
+        })?;
+        for event in &behind {
+            self.apply(event)?;
+        }
+        Ok(())
     }
 
     /// The log's own connection: the projections live in the same database, and share its lock so
@@ -627,5 +652,48 @@ mod tests {
         );
         assert_eq!(projections.board().expect("the board reads"), Vec::new());
         assert_eq!(projections.cursor().expect("the cursor reads"), 1);
+    }
+    #[test]
+    fn catches_up_with_everything_the_log_holds_when_it_is_opened() {
+        // The projections are derived, so a process that appended and stopped before projecting has
+        // left work behind rather than damage. Opening is where it is done.
+        let log = a_log();
+        for id in ["FRK-1", "FRK-2"] {
+            log.append(&about(EventKind::TaskCreated, id))
+                .expect("appends");
+        }
+        let projections = open_projections(Arc::clone(&log)).expect("the projections open");
+        assert_eq!(
+            ids_of(&projections.board().expect("the board reads")),
+            ["FRK-1", "FRK-2"]
+        );
+        assert_eq!(projections.cursor().expect("the cursor reads"), 2);
+        // And opening again reads nothing twice.
+        let again = open_projections(Arc::clone(&log)).expect("the projections open again");
+        assert_eq!(again.cursor().expect("the cursor reads"), 2);
+        assert_eq!(again.board().expect("the board reads").len(), 2);
+    }
+
+    #[test]
+    fn applies_one_event_once_however_often_it_is_handed_over() {
+        // A caller that both subscribes and catches up on open hands the same append over twice.
+        let (log, projections) = a_board();
+        let filed = record(&log, &projections, &about(EventKind::TaskCreated, "FRK-1"));
+        let rewritten = record(
+            &log,
+            &projections,
+            &written("FRK-1", "Add a logout page", "refining", "low", None),
+        );
+        projections.apply(&filed).expect("the first one again");
+        let task = projections
+            .task(&"FRK-1".parse().expect("a task id"))
+            .expect("the read works")
+            .expect("on the board");
+        assert_eq!(
+            task.title, "Add a logout page",
+            "the later event still stands"
+        );
+        assert_eq!(task.updated_seq, rewritten.envelope.seq);
+        assert_eq!(projections.cursor().expect("the cursor reads"), 2);
     }
 }

@@ -218,3 +218,48 @@ fn hands_two_processes_on_one_file_a_different_id_every_time() {
         "each id was handed out exactly once, in one unbroken run"
     );
 }
+
+#[test]
+fn keeps_the_board_and_its_place_in_the_log_across_a_reopen() {
+    // The projections are derived, but they are derived once: `docs/SPEC.md` section 10 asks that a
+    // command opening a project not replay ten thousand events to show a board. That is only true if
+    // the board is in the log's own file, which is what another connection to that file can say.
+    let directory = TempDir::new("board-across-a-reopen");
+    {
+        let log =
+            std::sync::Arc::new(open_event_log(&directory.db(), at(9)).expect("the log opens"));
+        let projections =
+            farik_store::open_projections(std::sync::Arc::clone(&log)).expect("projections open");
+        for kind in [EventKind::TaskCreated, EventKind::RequestTriaged] {
+            let appended = log.append(&an_event(kind)).expect("appends");
+            projections.apply(&appended).expect("projects");
+        }
+    }
+    let outside = rusqlite::Connection::open(directory.db()).expect("another connection");
+    let projected: i64 = outside
+        .query_row("SELECT count(*) FROM task_projections", [], |row| {
+            row.get(0)
+        })
+        .expect("the board reads");
+    assert_eq!(projected, 1, "the board is in the log's own file");
+    let cursor: i64 = outside
+        .query_row(
+            "SELECT seq FROM projection_cursor WHERE id = 1",
+            [],
+            |row| row.get(0),
+        )
+        .expect("the cursor reads");
+    assert_eq!(cursor, 2, "and so is how far it had read");
+    drop(outside);
+
+    // So a command that opens the project again has nothing to catch up on, and reads the board the
+    // events left rather than one it built itself.
+    let log =
+        std::sync::Arc::new(open_event_log(&directory.db(), at(10)).expect("the log reopens"));
+    let projections =
+        farik_store::open_projections(std::sync::Arc::clone(&log)).expect("projections reopen");
+    assert_eq!(projections.cursor().expect("the cursor reads"), 2);
+    let board = projections.board().expect("the board reads");
+    assert_eq!(board.len(), 1, "both events are about the one contract");
+    assert!(board[0].triaged, "and the triage is still recorded");
+}

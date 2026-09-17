@@ -1164,7 +1164,7 @@ Files: modified `crates/store/src/projections.rs`, `crates/store/tests/event_log
 Consumes: `Projections::{apply, board, cursor}` from Tasks 1 to 3; `EventQuery` from step 02
 Produces: the catch-up in `open_projections`, and an `apply` that takes one event once
 
-- [ ] Write the failing tests. Append these two to the tests module of `crates/store/src/projections.rs`, a blank line between each and the test above it:
+- [x] Write the failing tests. Append these two to the tests module of `crates/store/src/projections.rs`, a blank line between each and the test above it:
 
   ```rust
       #[test]
@@ -1212,7 +1212,7 @@ Produces: the catch-up in `open_projections`, and an `apply` that takes one even
       }
   ```
 
-- [ ] Append to `crates/store/tests/event_log_file.rs`:
+- [x] Append to `crates/store/tests/event_log_file.rs`:
 
   ```rust
   #[test]
@@ -1261,7 +1261,7 @@ Produces: the catch-up in `open_projections`, and an `apply` that takes one even
   }
   ```
 
-- [ ] Run them and confirm the first two fail because opening reads nothing and an event is taken twice:
+- [x] Run them and confirm the first two fail because opening reads nothing and an event is taken twice:
 
   ```
   cargo test -p farik-store --lib
@@ -1279,7 +1279,7 @@ Produces: the catch-up in `open_projections`, and an `apply` that takes one even
   feature can make it fail: it holds a property of *where* the projections live rather than of
   what they do. It is watched to fail after the green instead, by mutation — the step below.
 
-- [ ] Write the minimal implementation. In `crates/store/src/projections.rs`, add `EventQuery` to the `crate::event_log` import, which becomes:
+- [x] Write the minimal implementation. In `crates/store/src/projections.rs`, add `EventQuery` to the `crate::event_log` import, which becomes:
 
   ```rust
   use crate::event_log::{EventLog, EventQuery, TASK_ID_PREFIX};
@@ -1348,7 +1348,7 @@ Produces: the catch-up in `open_projections`, and an `apply` that takes one even
       }
   ```
 
-- [ ] Run the tests and confirm green:
+- [x] Run the tests and confirm green:
 
   ```
   cargo test -p farik-store
@@ -1356,7 +1356,7 @@ Produces: the catch-up in `open_projections`, and an `apply` that takes one even
   #           test result: ok. 7 passed (event_log_file)
   ```
 
-- [ ] Run the format and lint checks:
+- [x] Run the format and lint checks:
 
   ```
   cargo fmt --all --check
@@ -1364,7 +1364,7 @@ Produces: the catch-up in `open_projections`, and an `apply` that takes one even
   # expected: both silent
   ```
 
-- [ ] Confirm the reopen test is a pin rather than a passenger. Make these three edits, which give `Projections` a database of its own instead of the log's:
+- [x] Confirm the reopen test is a pin rather than a passenger. Make these three edits, which give `Projections` a database of its own instead of the log's:
 
   ```rust
   // in the struct:
@@ -1404,7 +1404,7 @@ Produces: the catch-up in `open_projections`, and an `apply` that takes one even
   and reads through `Projections`; the command above is scoped to the one test on purpose.)
   Undo all three edits before committing; nothing else depends on them.
 
-- [ ] Commit: `feat(store): catch the projections up and take one event once`
+- [x] Commit: `feat(store): catch the projections up and take one event once`
 
 ### Task 5: Building the board again from the log
 
