@@ -4,7 +4,7 @@ An open-source operating system for small teams of AI agents, with a pixel-art o
 
 You assemble three to seven agents, give each a name, an avatar, and a role (Product Manager, Scrum Master, Architect, Software Developer, Marketing Specialist), and point them at a repository. The Product Manager writes contracts with explicit exit criteria before any work starts. A deterministic governor enforces budgets, permissions, and the rule that nobody accepts their own work. You can watch the team in the office, talk to any agent, or read along in the team channel.
 
-Status: phase 0 (foundation) merged; phase 1 (harness core) in progress. Nothing runs for a user yet. Project standards are in place; see [CONTRIBUTING.md](CONTRIBUTING.md) before making a change.
+Status: phase 0 (foundation) merged; phase 1 (harness core) complete and awaiting review in pull request #5. Nothing runs for a user yet. Project standards are in place; see [CONTRIBUTING.md](CONTRIBUTING.md) before making a change.
 
 ## Getting started
 
