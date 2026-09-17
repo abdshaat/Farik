@@ -480,6 +480,7 @@ mod tests {
             .expect("the count reads");
         assert_eq!(rows, 1);
     }
+
     #[test]
     fn appends_events_in_order_and_hands_back_the_place_each_was_given() {
         let log = a_log();
@@ -655,6 +656,7 @@ mod tests {
             "{refusal:?}"
         );
     }
+
     #[test]
     fn announces_every_append_to_every_subscriber_and_forgets_the_ones_that_left() {
         let log = a_log();
@@ -675,6 +677,7 @@ mod tests {
         let late = log.subscribe();
         assert_eq!(late.try_recv(), Err(TryRecvError::Empty));
     }
+
     #[test]
     fn hands_out_one_task_id_per_call_and_never_the_same_one_twice() {
         let log = a_log();
