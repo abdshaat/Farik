@@ -14,7 +14,7 @@ pub struct GeneratedSchema {
 }
 
 /// Every schema that has generated code.
-pub const GENERATED_SCHEMAS: [GeneratedSchema; 2] = [
+pub const GENERATED_SCHEMAS: [GeneratedSchema; 3] = [
     GeneratedSchema {
         schema: "docs/schemas/task-contract.schema.json",
         types: "crates/core/src/generated/task_contract.rs",
@@ -24,6 +24,11 @@ pub const GENERATED_SCHEMAS: [GeneratedSchema; 2] = [
         schema: "docs/schemas/prices.schema.json",
         types: "crates/core/src/generated/prices.rs",
         schema_copy: "crates/core/src/generated/prices.schema.json",
+    },
+    GeneratedSchema {
+        schema: "docs/schemas/event.schema.json",
+        types: "crates/protocol/src/generated/event.rs",
+        schema_copy: "crates/protocol/src/generated/event.schema.json",
     },
 ];
 

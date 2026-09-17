@@ -156,7 +156,7 @@ Files: created `docs/schemas/event.schema.json`, `crates/protocol/Cargo.toml`, `
 Consumes: `cargo xtask generate` from Task 1
 Produces: the crate `farik-protocol`; `farik_protocol::generated::event::{EventKind, ContractSummary, TaskCreatedBody, RequestTriagedBody, ContractWrittenBody, ContractLockedBody, ContractUnlockedBody, DriftDetectedBody, ProjectScannedBody, TeamUpdatedBody, CriteriaUpdatedBody, ContractSummaryKind, ContractSummaryParent, ContractSummaryRisk, ContractSummaryStatus, DriftDetectedBodyDrift, RequestTriagedBodySize, FarikEvent, EventBodyWire}`
 
-- [ ] Scaffold the crate so that there is something to run a test in. Add to the root `Cargo.toml`, in `[workspace.dependencies]`, between `chrono` and `globset`:
+- [x] Scaffold the crate so that there is something to run a test in. Add to the root `Cargo.toml`, in `[workspace.dependencies]`, between `chrono` and `globset`:
 
   ```toml
   farik-core = { path = "crates/core" }
@@ -200,7 +200,7 @@ Produces: the crate `farik-protocol`; `farik_protocol::generated::event::{EventK
   # expected: Compiling farik-protocol v0.0.0 ... Finished
   ```
 
-- [ ] Write the failing test. Append to `crates/protocol/src/lib.rs`:
+- [x] Write the failing test. Append to `crates/protocol/src/lib.rs`:
 
   ```rust
   #[cfg(test)]
@@ -230,7 +230,7 @@ Produces: the crate `farik-protocol`; `farik_protocol::generated::event::{EventK
   }
   ```
 
-- [ ] Run it and confirm it fails because the module is missing:
+- [x] Run it and confirm it fails because the module is missing:
 
   ```
   cargo test -p farik-protocol
@@ -238,7 +238,7 @@ Produces: the crate `farik-protocol`; `farik_protocol::generated::event::{EventK
   #           "could not find `generated` in the crate root"
   ```
 
-- [ ] Write the schema. Create `docs/schemas/event.schema.json`:
+- [x] Write the schema. Create `docs/schemas/event.schema.json`:
 
   ```json
   {
@@ -441,7 +441,7 @@ Produces: the crate `farik-protocol`; `farik_protocol::generated::event::{EventK
   }
   ```
 
-- [ ] Wire the schema into the generator. In `xtask/src/generate.rs`, change the array's length to 3 and append the entry:
+- [x] Wire the schema into the generator. In `xtask/src/generate.rs`, change the array's length to 3 and append the entry:
 
   ```rust
       GeneratedSchema {
@@ -479,14 +479,14 @@ Produces: the crate `farik-protocol`; `farik_protocol::generated::event::{EventK
   #           generated crates/protocol/src/generated/event.schema.json
   ```
 
-- [ ] Run the test; confirm green:
+- [x] Run the test; confirm green:
 
   ```
   cargo test -p farik-protocol
   # expected: test tests::names_every_event_kind_as_an_entity_and_a_past_tense_verb ... ok
   ```
 
-- [ ] Commit: `feat(protocol): generate the event types from the event schema`
+- [x] Commit: `feat(protocol): generate the event types from the event schema`
 
 ### Task 3: The spec names every kind this phase emits
 
