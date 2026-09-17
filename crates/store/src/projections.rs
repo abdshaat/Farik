@@ -8,7 +8,7 @@ use farik_protocol::event::{
     ContractSummary, ContractSummaryKind, ContractSummaryRisk, ContractSummaryStatus, EventBody,
     FarikEvent, RequestTriagedBodySize,
 };
-use rusqlite::{Connection, Transaction};
+use rusqlite::{Connection, Transaction, TransactionBehavior};
 
 use crate::error::StoreError;
 use crate::event_log::{EventLog, EventQuery, TASK_ID_PREFIX};
@@ -80,27 +80,47 @@ impl Projections {
     pub fn rebuild(&self) -> Result<(), StoreError> {
         {
             let mut connection = self.connection();
-            let transaction = connection.transaction()?;
+            // `Immediate` as in `apply`: this one writes before it reads, so it is safe either way
+            // today, and taking the lock up front keeps it safe if a read is ever added above.
+            let transaction =
+                connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
             transaction.execute("DELETE FROM task_projections", ())?;
             write_cursor(&transaction, 0)?;
             transaction.commit()?;
         }
-        self.catch_up()
+        self.catch_up()?;
+        Ok(())
     }
 
     /// Applies one event, and moves the cursor to it.
     ///
-    /// An event at or before the cursor is ignored rather than applied twice: a caller that both
-    /// subscribes and catches up on open would otherwise take the same append in twice, and
-    /// `updated_seq` would go backwards. The row and the cursor move in one transaction, so the
-    /// cursor never claims work that was not done.
+    /// Takes the event in whatever order it arrives. An event at or before the cursor is ignored
+    /// rather than applied twice, so a caller that both subscribes and catches up on open does not
+    /// take one append in twice. An event *past* the next one is a gap — two processes each
+    /// appending and projecting can hand this one event 3 before event 2 — and the events in
+    /// between are read from the log rather than stepped over: a cursor that moved past an event
+    /// nothing applied would leave the board short of the log for good, with nothing to notice.
     ///
     /// # Errors
     ///
-    /// `Sqlite` when the write fails.
+    /// `Sqlite` when the write fails; `InvalidEvent` when the log holds a row that is not an event,
+    /// which only a gap can reach.
     pub fn apply(&self, event: &FarikEvent) -> Result<(), StoreError> {
+        if event.envelope.seq > self.cursor()?.saturating_add(1) {
+            self.catch_up()?;
+            return Ok(());
+        }
+        self.apply_in_order(event)
+    }
+
+    /// Applies one event that is the next one, or one already applied.
+    fn apply_in_order(&self, event: &FarikEvent) -> Result<(), StoreError> {
         let mut connection = self.connection();
-        let transaction = connection.transaction()?;
+        // `Immediate`, for the reason `migrations::apply` gives at length: this transaction reads
+        // the cursor before it writes, and a transaction that takes its read lock first cannot wait
+        // for the write lock it turns out to need — SQLite refuses it at once rather than after
+        // `busy_timeout`. Two `farik` commands projecting what they appended is the ordinary case.
+        let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
         if event.envelope.seq <= read_cursor(&transaction)? {
             return Ok(());
         }
@@ -154,17 +174,20 @@ impl Projections {
         read_cursor(&connection)
     }
 
-    /// Applies every event the log has that the cursor has not reached.
-    fn catch_up(&self) -> Result<(), StoreError> {
+    /// Applies every event the log has that the cursor has not reached, and says how many that
+    /// was. Zero is the ordinary answer, and the one `docs/SPEC.md` section 10 asks for: a board
+    /// that is already current costs nothing to open.
+    fn catch_up(&self) -> Result<usize, StoreError> {
         let after_seq = self.cursor()?;
         let behind = self.log.read(&EventQuery {
             after_seq: Some(after_seq),
             ..EventQuery::default()
         })?;
         for event in &behind {
-            self.apply(event)?;
+            // In order, and through the door that does not look for a gap: this is what fills one.
+            self.apply_in_order(event)?;
         }
-        Ok(())
+        Ok(behind.len())
     }
 
     /// The log's own connection: the projections live in the same database, and share its lock so
@@ -719,6 +742,47 @@ mod tests {
         );
         assert_eq!(task.updated_seq, rewritten.envelope.seq);
         assert_eq!(projections.cursor().expect("the cursor reads"), 2);
+    }
+
+    #[test]
+    fn reads_what_it_was_handed_out_of_order_rather_than_stepping_over_it() {
+        // Two processes each append and project what they appended, so the projections can be
+        // handed event 3 before event 2. A cursor that moved to 3 would leave the board short of
+        // the log for good, with nothing to notice — so the events in between are read from the
+        // log, which is the one place they certainly are.
+        let (log, projections) = a_board();
+        let events: Vec<FarikEvent> = ["FRK-1", "FRK-2", "FRK-3"]
+            .iter()
+            .map(|id| {
+                log.append(&about(EventKind::TaskCreated, id))
+                    .expect("appends")
+            })
+            .collect();
+        projections.apply(&events[0]).expect("projects the first");
+        projections.apply(&events[2]).expect("projects the third");
+        assert_eq!(
+            ids_of(&projections.board().expect("the board reads")),
+            ["FRK-1", "FRK-2", "FRK-3"],
+            "the second was read from the log rather than stepped over"
+        );
+        assert_eq!(projections.cursor().expect("the cursor reads"), 3);
+        // And the one that arrives late changes nothing, because it is already in.
+        projections.apply(&events[1]).expect("projects the second");
+        assert_eq!(projections.board().expect("the board reads").len(), 3);
+        assert_eq!(projections.cursor().expect("the cursor reads"), 3);
+    }
+
+    #[test]
+    fn reads_nothing_when_the_board_is_already_current() {
+        // What `docs/SPEC.md` section 10 asks of this step: opening a project whose board is up to
+        // date costs nothing, rather than replaying every event to arrive at the board it has.
+        let (log, projections) = a_board();
+        record(&log, &projections, &about(EventKind::TaskCreated, "FRK-1"));
+        assert_eq!(
+            projections.catch_up().expect("catching up reads the log"),
+            0,
+            "nothing to catch up on"
+        );
     }
 
     #[test]

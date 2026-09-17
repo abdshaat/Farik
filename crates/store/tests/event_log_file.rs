@@ -263,3 +263,75 @@ fn keeps_the_board_and_its_place_in_the_log_across_a_reopen() {
     assert_eq!(board.len(), 1, "both events are about the one contract");
     assert!(board[0].triaged, "and the triage is still recorded");
 }
+
+/// How many `farik` commands the projection race below runs at once, and how much each does.
+const PROJECTING_PROCESSES: u32 = 4;
+const EVENTS_PER_PROCESS: u32 = 150;
+
+#[test]
+fn projects_every_event_when_several_processes_append_and_project_at_once() {
+    // Two farik commands run at once, each appending to the log and projecting what it appended.
+    // Neither the append nor the projection may be refused, and the board has to end up holding
+    // every contract the log holds — a board that quietly lags its log is worse than one that
+    // refuses, because nothing downstream can tell.
+    let directory = TempDir::new("projected-at-once");
+    let ready = std::sync::Barrier::new(PROJECTING_PROCESSES as usize);
+    let refusals: Vec<String> = std::thread::scope(|scope| {
+        let processes: Vec<_> = (0..PROJECTING_PROCESSES)
+            .map(|process| {
+                let ready = &ready;
+                let directory = &directory;
+                scope.spawn(move || {
+                    let log = std::sync::Arc::new(
+                        open_event_log(&directory.db(), at(9)).expect("the log opens"),
+                    );
+                    let projections = farik_store::open_projections(std::sync::Arc::clone(&log))
+                        .expect("the projections open");
+                    ready.wait();
+                    let mut refused = Vec::new();
+                    for event in 0..EVENTS_PER_PROCESS {
+                        let mut filed = an_event(EventKind::TaskCreated);
+                        filed.task_id = Some(
+                            format!("FRK-{}", process * EVENTS_PER_PROCESS + event + 1)
+                                .parse()
+                                .expect("a task id"),
+                        );
+                        match log.append(&filed) {
+                            Err(refusal) => refused.push(format!("append: {refusal}")),
+                            Ok(appended) => {
+                                if let Err(refusal) = projections.apply(&appended) {
+                                    refused.push(format!("apply: {refusal}"));
+                                }
+                            }
+                        }
+                    }
+                    refused
+                })
+            })
+            .collect();
+        processes
+            .into_iter()
+            .flat_map(|process| process.join().expect("the process finishes"))
+            .collect()
+    });
+    assert_eq!(refusals, Vec::<String>::new(), "nothing was refused");
+
+    let log =
+        std::sync::Arc::new(open_event_log(&directory.db(), at(10)).expect("the log reopens"));
+    let projections =
+        farik_store::open_projections(std::sync::Arc::clone(&log)).expect("projections reopen");
+    let appended = log
+        .read(&farik_store::EventQuery::default())
+        .expect("the log reads")
+        .len();
+    let projected = projections.board().expect("the board reads").len();
+    assert_eq!(
+        appended,
+        (PROJECTING_PROCESSES * EVENTS_PER_PROCESS) as usize,
+        "every event was appended"
+    );
+    assert_eq!(
+        projected, appended,
+        "and every one of them reached the board"
+    );
+}
