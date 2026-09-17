@@ -1,7 +1,7 @@
 //! The database's shape, as SQL applied in order and recorded once applied.
 
 use chrono::{DateTime, SecondsFormat, Utc};
-use rusqlite::Connection;
+use rusqlite::{Connection, TransactionBehavior};
 
 use crate::error::StoreError;
 
@@ -20,10 +20,12 @@ const MIGRATIONS: [Migration; 1] = [Migration {
 }];
 
 /// Brings the database to the shape this version expects, and records what it applied. Applying to
-/// a database that is already current does nothing, so opening a log twice is not an error.
+/// a database that is already current does nothing, so opening a log twice is not an error, and
+/// neither is opening it from several processes at the same moment.
 ///
-/// Each migration and its record go in one transaction: a migration that fails leaves the database
-/// as it was rather than half-migrated, which is the state nothing knows how to repair.
+/// Each migration, the ledger it is read from, and the record of it go in one transaction that
+/// takes the write lock before it reads: a migration that fails leaves the database as it was
+/// rather than half-migrated, which is the state nothing knows how to repair.
 ///
 /// # Errors
 ///
@@ -36,13 +38,22 @@ pub(crate) fn apply(connection: &mut Connection, now: DateTime<Utc>) -> Result<(
         ) STRICT;",
     )?;
     for migration in &MIGRATIONS {
-        if is_applied(connection, migration.version)? {
+        // `Immediate` takes the write lock before the ledger is read rather than after. A
+        // transaction that reads first and then finds it needs to write cannot wait for the lock,
+        // because another reader may be waiting to write the same rows, so SQLite refuses it at
+        // once instead of after `busy_timeout` — and two processes that both read "not applied"
+        // both run the migration, and the loser is told the tables already exist. Several `farik`
+        // commands starting on a fresh repository at the same moment is the ordinary case.
+        let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        if is_applied(&transaction, migration.version)? {
             continue;
         }
-        let transaction = connection.transaction()?;
         transaction.execute_batch(migration.sql)?;
+        // A plain insert, not `INSERT OR REPLACE`: the write lock is held, so the row cannot
+        // already be there, and a ledger that disagrees with the tables should fail loudly rather
+        // than have its `applied_at` quietly rewritten.
         transaction.execute(
-            "INSERT OR REPLACE INTO schema_migrations (version, applied_at) VALUES (?1, ?2)",
+            "INSERT INTO schema_migrations (version, applied_at) VALUES (?1, ?2)",
             (
                 migration.version,
                 now.to_rfc3339_opts(SecondsFormat::AutoSi, true),

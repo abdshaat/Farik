@@ -5,6 +5,7 @@ use std::fmt::Write;
 use std::path::Path;
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::sync::{Mutex, MutexGuard, PoisonError};
+use std::time::Duration;
 
 use chrono::{DateTime, SecondsFormat, Utc};
 use farik_core::contract::TaskId;
@@ -23,6 +24,13 @@ const TASK_ID_PREFIX: &str = "FRK";
 
 /// The highest number `^FRK-[0-9]{1,6}$` can spell.
 const HIGHEST_TASK_NUMBER: u64 = 999_999;
+
+/// How many times a connection tries to put the file in write-ahead logging mode before it gives
+/// up, and how long it waits between tries. `busy_timeout` does not cover this one lock, so this is
+/// the same waiting done by hand: a second at the outside, and nothing at all once the file is in
+/// the mode.
+const JOURNAL_MODE_TRIES: u32 = 50;
+const JOURNAL_MODE_WAIT: Duration = Duration::from_millis(20);
 
 /// The path that opens a database in memory rather than on disk, for tests and for a dry run.
 pub const IN_MEMORY: &str = ":memory:";
@@ -72,12 +80,12 @@ pub fn open_event_log(path: &Path, now: DateTime<Utc>) -> Result<EventLog, Store
         std::fs::create_dir_all(directory)?;
     }
     let mut connection = Connection::open(path)?;
-    connection.busy_timeout(std::time::Duration::from_secs(5))?;
+    connection.busy_timeout(Duration::from_secs(5))?;
     if !in_memory {
         // The log is the source of truth for what happened, so an append that returned must
         // survive the machine losing power: `FULL` is that promise, and write-ahead logging is what
         // makes it affordable. A database in memory has no journal to set.
-        connection.pragma_update(None, "journal_mode", "WAL")?;
+        write_ahead(&connection)?;
         connection.pragma_update(None, "synchronous", "FULL")?;
     }
     connection.pragma_update(None, "foreign_keys", "ON")?;
@@ -291,6 +299,46 @@ fn read_wire(wire: &Value) -> Result<FarikEvent, String> {
             .collect::<Vec<String>>()
             .join("; ")
     })
+}
+
+/// Puts the file in write-ahead logging mode, waiting for whichever connection is doing it.
+///
+/// Changing the journal mode takes an exclusive lock on the file, and SQLite refuses that at once
+/// rather than waiting for `busy_timeout`, which every other statement here honours. So several
+/// `farik` commands opening one fresh log at the same moment cannot all perform the switch, and the
+/// ones that lose have to wait by hand. What the log needs is the mode the file is in, not which
+/// connection put it there: a connection that finds the file already in it is done.
+///
+/// A file that is already in the mode needs no lock at all, so this waits only on the first open of
+/// a new log, and only when something else is opening it at the same moment.
+fn write_ahead(connection: &Connection) -> Result<(), StoreError> {
+    let mut refused = None;
+    for attempt in 0..JOURNAL_MODE_TRIES {
+        if journal_is_write_ahead(connection) {
+            return Ok(());
+        }
+        match connection.pragma_update(None, "journal_mode", "WAL") {
+            Ok(()) => return Ok(()),
+            Err(refusal) => refused = Some(refusal),
+        }
+        if attempt + 1 < JOURNAL_MODE_TRIES {
+            std::thread::sleep(JOURNAL_MODE_WAIT);
+        }
+    }
+    Err(refused.map_or_else(
+        || StoreError::Sqlite {
+            detail: "the journal mode could not be read or set".to_string(),
+        },
+        StoreError::from,
+    ))
+}
+
+/// Whether the file is in write-ahead logging mode. A read that is itself refused answers `false`,
+/// because the answer is then not yet known and the caller is about to wait and ask again.
+fn journal_is_write_ahead(connection: &Connection) -> bool {
+    connection
+        .query_row("PRAGMA journal_mode", [], |row| row.get::<_, String>(0))
+        .is_ok_and(|mode| mode.eq_ignore_ascii_case("wal"))
 }
 
 fn stamp(at: DateTime<Utc>) -> String {

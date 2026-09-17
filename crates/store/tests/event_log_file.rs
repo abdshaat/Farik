@@ -97,7 +97,7 @@ fn keeps_every_event_and_its_place_across_a_reopen() {
 }
 
 #[test]
-fn never_gives_two_logs_on_one_file_the_same_place_or_the_same_task_id() {
+fn keeps_two_logs_on_one_file_from_sharing_a_place_or_an_id() {
     // Two commands can run at once, and `farik` is a separate process each time.
     let directory = TempDir::new("two-logs");
     let first = open_event_log(&directory.db(), at(9)).expect("the first log opens");
@@ -144,4 +144,86 @@ fn writes_ahead_of_the_database_file() {
         .query_row("PRAGMA journal_mode", [], |row| row.get(0))
         .expect("the journal mode reads");
     assert_eq!(mode.to_lowercase(), "wal");
+}
+
+/// How many `farik` commands the two tests below start at once.
+const PROCESSES: u32 = 16;
+
+/// Enough ids per process that a counter which read the number it had not yet written hands the
+/// same one out twice, and few enough that the test is over in well under a second.
+const IDS_PER_PROCESS: u32 = 125;
+
+/// How many fresh files the opening race is run against. One run catches a migration applied twice
+/// most of the time; several make it near certain, and each costs a tenth of a second.
+const OPENING_ATTEMPTS: u32 = 5;
+
+#[test]
+fn opens_one_log_from_several_processes_at_once() {
+    // Opening applies whatever migrations the file is missing, and several farik commands can start
+    // on a fresh repository at the same moment. Each has to end up with a log it can use, rather
+    // than one of them meeting another half way through the migration: the loser of that race sees
+    // either "table events already exists" or "database is locked", because a transaction that
+    // takes its read lock first cannot wait for the write lock it turns out to need.
+    for attempt in 0..OPENING_ATTEMPTS {
+        let directory = TempDir::new(&format!("opened-at-once-{attempt}"));
+        let ready = std::sync::Barrier::new(PROCESSES as usize);
+        std::thread::scope(|scope| {
+            for _ in 0..PROCESSES {
+                scope.spawn(|| {
+                    ready.wait();
+                    let log = open_event_log(&directory.db(), at(9))
+                        .unwrap_or_else(|refusal| panic!("the log opens: {refusal}"));
+                    assert_eq!(
+                        log.applied_migrations().expect("the ledger reads"),
+                        farik_store::migrations::known_versions()
+                    );
+                });
+            }
+        });
+    }
+}
+
+#[test]
+fn hands_two_processes_on_one_file_a_different_id_every_time() {
+    // Two farik commands run at once, each its own process with its own connection. The counter's
+    // read is its write statement, so neither can be handed a number the other has taken; reading
+    // the number before writing it is the classic lost update, and two agents would start on one
+    // contract.
+    let directory = TempDir::new("two-logs-at-once");
+    let logs: Vec<_> = (0..PROCESSES)
+        .map(|_| open_event_log(&directory.db(), at(9)).expect("the log opens"))
+        .collect();
+    let ready = std::sync::Barrier::new(PROCESSES as usize);
+    let taken: Vec<String> = std::thread::scope(|scope| {
+        let processes: Vec<_> = logs
+            .iter()
+            .map(|log| {
+                scope.spawn(|| {
+                    ready.wait();
+                    (0..IDS_PER_PROCESS)
+                        .map(|_| log.next_task_id().expect("an id").to_string())
+                        .collect::<Vec<String>>()
+                })
+            })
+            .collect();
+        processes
+            .into_iter()
+            .flat_map(|process| process.join().expect("the process finishes"))
+            .collect()
+    });
+    let mut numbers: Vec<u64> = taken
+        .iter()
+        .map(|id| {
+            id.strip_prefix("FRK-")
+                .expect("every id carries the prefix")
+                .parse()
+                .expect("and a number")
+        })
+        .collect();
+    numbers.sort_unstable();
+    let every_number: Vec<u64> = (1..=u64::from(PROCESSES * IDS_PER_PROCESS)).collect();
+    assert_eq!(
+        numbers, every_number,
+        "each id was handed out exactly once, in one unbroken run"
+    );
 }
