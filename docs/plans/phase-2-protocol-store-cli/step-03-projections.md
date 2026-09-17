@@ -1,6 +1,6 @@
 # Phase 2, step 03: Projections
 
-Status: ready
+Status: done
 Branch: `claude/phase-0-implementation-izm38y` (the harness-assigned phase branch, left as assigned per `docs/standards/code.md`; a session may not push to another branch without permission, so phase 2 reuses it as phase 1 did; steps do not get their own)
 Spec: `docs/SPEC.md` section 8.4 (storage), 10 (the UI stays responsive with ten thousand events), 5.1 (every action is an event), 5.2 (the lifecycle the board shows), 5.11 (a locked contract), 5.16 (triage)
 Depends on: phase 0 (merged in #4), phase 1 (merged in #5), steps 01 and 02 of this phase (committed as 1f93550 and 50b264e)
@@ -1531,33 +1531,33 @@ Produces: a project plan that describes the projections as they now are
 
 This task changes documentation and has no test cycle. The `> ` marker on each block below is this plan's and is not part of the text to write.
 
-- [ ] In `docs/plans/project-plan.md`, in the phase 2 section, replace the line beginning `- Step 03: \`struct TaskProjection\`` with:
+- [x] In `docs/plans/project-plan.md`, in the phase 2 section, replace the line beginning `- Step 03: \`struct TaskProjection\`` with:
 
   > - Step 03 (`farik-store::projections`): `struct TaskProjection { task_id: TaskId, kind: TaskKind, parent: Option<TaskId>, title: String, status: TaskStatus, risk: Risk, triaged: bool, locked: bool, updated_seq: u64 }` — the fields an event of this phase carries (changed 2026-09-17 by the step 03 plan: `assignee_id`, `reviewer_id`, `sprint_id` and `iteration` arrive with `task.transitioned` in phase 3 step 03, which is the event that carries them, as `cost_usd` arrives in 3.09 and `waiting_on_human`, `awaiting_approval` and `awaiting_integration` in 3.10; a column nothing can write is a column no test can hold to anything); `fn open_projections(log: Arc<EventLog>) -> Result<Projections, StoreError>` (an `Arc` rather than a reference, changed 2026-09-17 by the step 03 plan, because `rebuild` and the catch-up on open both read the log and phase 3 holds the two side by side, which is also what lets `rebuild(&self)` keep this signature); `impl Projections { fn rebuild(&self) -> Result<(), StoreError>; fn apply(&self, event: &FarikEvent) -> Result<(), StoreError>; fn board(&self) -> Result<Vec<TaskProjection>, StoreError>; fn task(&self, id: &TaskId) -> Result<Option<TaskProjection>, StoreError>; fn cursor(&self) -> Result<u64, StoreError> }` (opening catches up from the cursor; `apply` ignores an event at or before it, and moves the row and the cursor in one transaction; `rebuild` resets and replays). `farik-core` gains the alias `TaskKind` for `FarikTaskContractKind`. The projections live in the log's database and share its connection and lock, because a log at `:memory:` cannot be reached by a second connection. `enum CostScope`, `struct CostProjection` and `Projections::costs` move to phase 3 step 09, where `cost.recorded` arrives: no event of this phase carries a cost, the first thing that reads one is phase 3 step 09's own `budget_state`, which arrives beside the event, and no view until phase 5 step 04.
 
-- [ ] In `docs/plans/project-plan.md`, append to the end of the phase 3 step 03 interface line — the line that begins `- Step 03:` and goes on to name `enum ToolError` — as a new sentence after its closing full stop:
+- [x] In `docs/plans/project-plan.md`, append to the end of the phase 3 step 03 interface line — the line that begins `- Step 03:` and goes on to name `enum ToolError` — as a new sentence after its closing full stop:
 
   > `TaskProjection` also gains `assignee_id`, `reviewer_id`, `sprint_id` and `iteration` here, from `task.transitioned` (moved 2026-09-17 from phase 2 step 03, which had no event that carries them).
 
-- [ ] In `docs/plans/project-plan.md`, append to the end of the phase 3 step 09 interface line — the line that begins `- Step 09:` and goes on to say that `TaskProjection` gains `cost_usd` — as a new sentence after its closing full stop:
+- [x] In `docs/plans/project-plan.md`, append to the end of the phase 3 step 09 interface line — the line that begins `- Step 09:` and goes on to say that `TaskProjection` gains `cost_usd` — as a new sentence after its closing full stop:
 
   > `enum CostScope { Task, Agent, Session, Sprint, Day }`, `struct CostProjection { scope, key, usd, input_tokens, output_tokens }` and `Projections::costs(&self, scope) -> Result<Vec<CostProjection>, StoreError>` arrive here too, with the event that feeds them (moved 2026-09-17 from phase 2 step 03, which had no such event).
 
-- [ ] In `docs/plans/project-plan.md`, in the phase 2 step table, replace the last cell of the step 03 row — `Board and cost projections rebuilt from the log and updated per event, with a cursor` — with:
+- [x] In `docs/plans/project-plan.md`, in the phase 2 step table, replace the last cell of the step 03 row — `Board and cost projections rebuilt from the log and updated per event, with a cursor` — with:
 
   > Board projections rebuilt from the log and updated per event, with a cursor; the cost projections move to phase 3 step 09, with the event that feeds them
 
-- [ ] In `docs/plans/project-plan.md`, in the phase 3 step table, append to the last cell of the step 09 row, after `the price override`:
+- [x] In `docs/plans/project-plan.md`, in the phase 3 step table, append to the last cell of the step 09 row, after `the price override`:
 
   > , and the cost projections moved here from phase 2 step 03
 
-- [ ] Set this plan's `Status:` to `done` and confirm every checkbox above is ticked, each in the commit of the task it belongs to.
+- [x] Set this plan's `Status:` to `done` and confirm every checkbox above is ticked, each in the commit of the task it belongs to.
 
-- [ ] Commit: `docs(docs): record what step 03 changed about the projections`
+- [x] Commit: `docs(docs): record what step 03 changed about the projections`
 
 ## Verification
 
-- [ ] The whole check, from the workspace root:
+- [x] The whole check, from the workspace root:
 
   ```
   cargo xtask check
@@ -1569,7 +1569,7 @@ This task changes documentation and has no test cycle. The `> ` marker on each b
   #   test result: ok. 24 passed (xtask)
   ```
 
-- [ ] Every commit subject is accepted:
+- [x] Every commit subject is accepted:
 
   ```
   for subject in \
