@@ -13,10 +13,12 @@ rust-version = "1.98.1"
 anyhow = "=1.0.104"
 chrono = { version = "=0.4.45", features = ["serde"] }
 farik-core = { path = "crates/core" }
+farik-protocol = { path = "crates/protocol" }
 globset = { version = "=0.4.20", default-features = false }
 jsonschema = { version = "=0.56.0", default-features = false }
 prettyplease = "=0.3.0"
 regress = "=0.12.0"
+rusqlite = { version = "=0.40.2", features = ["bundled"] }
 schemars = "=0.8.22"
 serde = { version = "=1.0.229", features = ["derive"] }
 serde_json = "=1.0.151"

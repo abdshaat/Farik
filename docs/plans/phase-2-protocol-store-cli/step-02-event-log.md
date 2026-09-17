@@ -92,7 +92,7 @@ Produces: `farik_store::{StoreError, EventLog, IN_MEMORY, open_event_log}`, `Eve
 
 The scaffolding below — the two manifests and three files holding nothing but their `//!` docs — is what a test needs in order to fail for the right reason rather than for a missing crate. No behaviour is written until after the red.
 
-- [ ] Add to the `[workspace.dependencies]` table of `Cargo.toml`, keeping it alphabetical — `farik-protocol` after `farik-core`, `rusqlite` after `regress`:
+- [x] Add to the `[workspace.dependencies]` table of `Cargo.toml`, keeping it alphabetical — `farik-protocol` after `farik-core`, `rusqlite` after `regress`:
 
   ```toml
   farik-protocol = { path = "crates/protocol" }
@@ -102,7 +102,7 @@ The scaffolding below — the two manifests and three files holding nothing but 
   rusqlite = { version = "=0.40.2", features = ["bundled"] }
   ```
 
-- [ ] Create `crates/store/Cargo.toml`:
+- [x] Create `crates/store/Cargo.toml`:
 
   ```toml
   [package]
@@ -124,7 +124,7 @@ The scaffolding below — the two manifests and three files holding nothing but 
   workspace = true
   ```
 
-- [ ] Create `crates/store/src/lib.rs`, declaring the three modules and re-exporting nothing yet:
+- [x] Create `crates/store/src/lib.rs`, declaring the three modules and re-exporting nothing yet:
 
   ```rust
   //! Farik's memory: the append-only event log, the projections read from it, and the files under
@@ -138,19 +138,19 @@ The scaffolding below — the two manifests and three files holding nothing but 
   pub mod migrations;
   ```
 
-- [ ] Create `crates/store/src/error.rs` with one line, so that the module exists and holds nothing:
+- [x] Create `crates/store/src/error.rs` with one line, so that the module exists and holds nothing:
 
   ```rust
   //! What the store refuses, and why.
   ```
 
-- [ ] Create `crates/store/src/migrations.rs` with one line, the same way:
+- [x] Create `crates/store/src/migrations.rs` with one line, the same way:
 
   ```rust
   //! The database's shape, as SQL applied in order and recorded once applied.
   ```
 
-- [ ] Write the failing tests. Create `crates/store/src/event_log.rs` with the module doc:
+- [x] Write the failing tests. Create `crates/store/src/event_log.rs` with the module doc:
 
   ```rust
   //! The event log: every action the team takes, in the order it happened, never changed afterwards
@@ -233,7 +233,7 @@ The scaffolding below — the two manifests and three files holding nothing but 
   }
   ```
 
-- [ ] Create `crates/store/tests/event_log_file.rs`:
+- [x] Create `crates/store/tests/event_log_file.rs`:
 
   ```rust
   //! What only a log on the file system can show: the directory being made, the sequence surviving a
@@ -291,7 +291,7 @@ The scaffolding below — the two manifests and three files holding nothing but 
   }
   ```
 
-- [ ] Run them and confirm they fail because there is no log and no applier:
+- [x] Run them and confirm they fail because there is no log and no applier:
 
   ```
   cargo test -p farik-store
@@ -306,7 +306,7 @@ The scaffolding below — the two manifests and three files holding nothing but 
   # error: could not compile `farik-store` (test "event_log_file") due to 1 previous error
   ```
 
-- [ ] Write the minimal implementation. Replace the one line of `crates/store/src/error.rs` with:
+- [x] Write the minimal implementation. Replace the one line of `crates/store/src/error.rs` with:
 
   ```rust
   //! What the store refuses, and why.
@@ -380,7 +380,7 @@ The scaffolding below — the two manifests and three files holding nothing but 
   }
   ```
 
-- [ ] Create `crates/store/src/migrations/0001_event_log.sql`:
+- [x] Create `crates/store/src/migrations/0001_event_log.sql`:
 
   ```sql
   -- The event log and the counter that hands out task ids (docs/SPEC.md 5.1, 8.4).
@@ -432,7 +432,7 @@ The scaffolding below — the two manifests and three files holding nothing but 
   ) STRICT;
   ```
 
-- [ ] Replace the one line of `crates/store/src/migrations.rs` with:
+- [x] Replace the one line of `crates/store/src/migrations.rs` with:
 
   ```rust
   //! The database's shape, as SQL applied in order and recorded once applied.
@@ -509,13 +509,13 @@ The scaffolding below — the two manifests and three files holding nothing but 
   }
   ```
 
-- [ ] Add the re-export of `StoreError` to `crates/store/src/lib.rs`, after the three `pub mod` lines and separated from them by a blank line:
+- [x] Add the re-export of `StoreError` to `crates/store/src/lib.rs`, after the three `pub mod` lines and separated from them by a blank line:
 
   ```rust
   pub use error::StoreError;
   ```
 
-- [ ] Insert into `crates/store/src/event_log.rs`, between the module doc and the tests module:
+- [x] Insert into `crates/store/src/event_log.rs`, between the module doc and the tests module:
 
   ```rust
   use std::path::Path;
@@ -604,13 +604,13 @@ The scaffolding below — the two manifests and three files holding nothing but 
   }
   ```
 
-- [ ] Add the second re-export to `crates/store/src/lib.rs`, after `pub use error::StoreError;`:
+- [x] Add the second re-export to `crates/store/src/lib.rs`, after `pub use error::StoreError;`:
 
   ```rust
   pub use event_log::{EventLog, IN_MEMORY, open_event_log};
   ```
 
-- [ ] Run the tests and confirm green:
+- [x] Run the tests and confirm green:
 
   ```
   cargo test -p farik-store
@@ -618,7 +618,7 @@ The scaffolding below — the two manifests and three files holding nothing but 
   #           test result: ok. 1 passed (event_log_file)
   ```
 
-- [ ] Run the format and lint checks:
+- [x] Run the format and lint checks:
 
   ```
   cargo fmt --all --check
@@ -626,7 +626,7 @@ The scaffolding below — the two manifests and three files holding nothing but 
   # expected: both silent
   ```
 
-- [ ] Commit: `feat(store): open an event log and bring its shape up to date`
+- [x] Commit: `feat(store): open an event log and bring its shape up to date`
 
 ### Task 2: Appending an event, and reading the ones a query asks for
 

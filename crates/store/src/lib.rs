@@ -1,0 +1,12 @@
+//! Farik's memory: the append-only event log, the projections read from it, and the files under
+//! `.farik/` (`docs/SPEC.md` sections 5.1 and 8.4).
+
+/// What the store refuses, and why.
+pub mod error;
+/// The event log.
+pub mod event_log;
+/// The database's shape, as SQL applied in order.
+pub mod migrations;
+
+pub use error::StoreError;
+pub use event_log::{EventLog, IN_MEMORY, open_event_log};
