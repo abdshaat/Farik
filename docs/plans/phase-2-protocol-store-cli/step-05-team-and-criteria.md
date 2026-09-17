@@ -1,13 +1,13 @@
 # Phase 2, step 05: Team, rules, and the criterion library
 
-Status: draft
+Status: ready
 Branch: `claude/phase-0-implementation-izm38y` (the harness-assigned phase branch, left as assigned per `docs/standards/code.md`; a session may not push to another branch without permission, so phase 2 reuses it as phase 1 did; steps do not get their own)
 Spec: `docs/SPEC.md` section 3 (team, agent, role), 5.6 (permission tiers and protected paths), 5.12 (team rules), 5.13 (the criterion library), 5.14 (the integration policy), 5.16 (who accepts a contract); F1, F15, F16; decision D18 in `docs/plans/project-plan.md`
 Depends on: phase 0 (merged in #4), phase 1 (merged in #5), steps 01 to 04 of this phase (last commit `fc70cd6`)
 
 A plan is `ready` only when a reviewer other than the author has confirmed the three rules in `docs/standards/workflow.md` stage 2 (Plan): every decision made, nothing ambiguous, no forward dependencies. Record who confirmed and when here.
 
-Readiness confirmed by: <pending>
+Readiness confirmed by: a review session that did not write this plan, on 2026-09-17, against `38f0d27` and the one-word correction it made itself. It confirmed the three rules by rebuilding the whole step from this plan alone in a fresh copy outside the working tree, with a target directory of its own: every predicted red exact including the count of errors, every green exact at 231, 242, 245, 251 and 258, `cargo xtask check --integration` ending in `xtask check: ok` at all five, and the changed-file set exactly the File map's fifteen. The first round refused on four findings — a schema that forbade the work-in-progress limit of zero that 5.2 calls a pause, an agent whose tiers could only be widened while 5.6 calls them overridable, a reason for a decision that was one of four things the generator does rather than the only one, and five surviving mutants. The second refused on one: `Agent::tiers` calls `default_tiers` and Task 2's import did not name it, so that task could not reach its own green. The reviewer applied the one-word fix, reached 242, and confirmed the rest; it is applied below.
 
 ## Goal
 
@@ -21,7 +21,8 @@ It adds no I/O. `farik-core` performs none, ever (hard rule 5), so reading and w
   - one `contains` on the array: `cargo xtask generate` exits 1 with `invalid schema for FarikTeam_agents: unhandled array validation`, and nothing is generated;
   - two, as two branches of an `allOf` on the array, which is the natural way to say "one of each": generation *succeeds* and writes `pub enum FarikTeamAgents {}`, an uninhabited type, so `FarikTeam` cannot be built at all and nothing announces it;
   - the same two moved to a root-level `allOf`: the generator panics — `typify-impl-0.8.0/src/type_entry.rs:290: called Option::unwrap() on a None value`;
-  - `dependentSchemas` at the root: generation succeeds, `typify` ignores the keyword, the types are unchanged, and the copied schema keeps it, so `jsonschema` does enforce the rule.
+  - `dependentSchemas` at the root: generation succeeds, `typify` ignores the keyword, the types come out byte-identical — the generator rewrites only the schema copy — and the copy keeps the keyword, so `jsonschema` does enforce the rule.
+
   That last one works, and is still the wrong call. Its refusal is `None of [{"display_name":"ada",…},{…}] are valid under the given schema` — the whole agents array dumped, with the words "Product Manager" nowhere in it — and because `validate_team` returns on schema errors before it reaches its own rules, putting the rule in the schema would *replace* the readable refusal rather than back it up. So the schema says two to seven, and `validate_team` says the rest: ids are unique, an active Product Manager is there, an active Software Developer is there. This is the same shape as step 01's decision that the schema does not pair `kind` with `body` and the reader does. Task 6 records it.
 - **Every rule the schema cannot say is reported, not just the first.** A team file with a repeated id and no developer is two problems, and a person fixing one at a time is a person running the command twice.
 - **The criterion library carries a copy of the contract schema's `verification`, and a test holds the two copies to being identical.** A criterion in the library is an exit criterion without an id, so the two schemas have to agree about what a verification is. A `$ref` across files would need both `typify` and `jsonschema` to resolve an external reference, which is a dependency on a resolver that nothing else here needs; the copy needs only a test, and that test reads both embedded schemas and compares the sub-tree. If they ever drift, the mapping between the two generated types starts lying, and the test fails before it can.
@@ -1170,10 +1171,10 @@ They arrive together because the rules are written in terms of who is active: a 
   # error: could not compile `farik-core` (lib test) due to 11 previous errors
   ```
 
-- [ ] Write the minimal implementation. In `crates/core/src/team.rs`, add to the imports, after the `crate::contract` line:
+- [ ] Write the minimal implementation. In `crates/core/src/team.rs`, add to the imports, after the `crate::contract` line — both names on one line, which is what rustfmt leaves alone:
 
   ```rust
-  use crate::governor::permissions::PermissionTier;
+  use crate::governor::permissions::{PermissionTier, default_tiers};
   ```
 
   and change the `crate::contract` line itself to:
