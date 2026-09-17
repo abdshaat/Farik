@@ -497,15 +497,15 @@ Produces: section 8.5 lists the nine kinds of this phase
 
 This task changes documentation and has no test cycle; the check that matters is that the list in the spec and the list in the schema agree, which the command below and the reader of the pull request confirm. The replacement prose is quoted below as a blockquote; the `> ` marker is this plan's, not part of the text to write.
 
-- [ ] In `docs/SPEC.md` section 8.5, replace the sentence that begins "Kinds are named" with:
+- [x] In `docs/SPEC.md` section 8.5, replace the sentence that begins "Kinds are named" with:
 
   > Kinds are named `<entity>.<past_tense_verb>` (see `docs/standards/code.md`) and include `task.transitioned`, `tool.called`, `tool.returned`, `tool.denied`, `message.posted`, `cost.recorded`, `budget.exhausted`, `escalation.raised`, `escalation.resolved`, `session.started`, `session.ended`, `review.recorded`, `human.accepted`, and, added in 0.2, `question.asked`, `question.answered`, `contract.locked`, `contract.unlocked`, `task.integrated`, `memory.written`, and, added in 0.3, `product_doc.written`, `request.triaged`, and, added in 0.4, `task.created`, `contract.written`, `drift.detected`, `project.scanned`, `team.updated`, `criteria.updated`.
 
-- [ ] At the end of the version paragraph at the top of `docs/SPEC.md`, append:
+- [x] At the end of the version paragraph at the top of `docs/SPEC.md`, append:
 
   > Revision 0.4 (2026-09-17) names in section 8.5 the six event kinds phase 2 emits that earlier revisions left unlisted.
 
-- [ ] Confirm the two lists agree:
+- [x] Confirm the two lists agree:
 
   ```
   grep -o '"[a-z_]*\.[a-z_]*"' docs/schemas/event.schema.json | sort -u
@@ -514,7 +514,7 @@ This task changes documentation and has no test cycle; the check that matters is
   #           "task.created" "team.updated" -- each of which appears in the sentence above
   ```
 
-- [ ] Commit: `docs(docs): name every event kind phase 2 emits in section 8.5`
+- [x] Commit: `docs(docs): name every event kind phase 2 emits in section 8.5`
 
 ### Task 4: The contract vocabulary is not duplicated silently
 
