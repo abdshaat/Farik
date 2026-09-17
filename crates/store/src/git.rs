@@ -183,9 +183,11 @@ impl Git {
     ///
     /// # Errors
     ///
-    /// `CommandFailed` when `path` is not a working tree of this repository.
+    /// `CommandFailed` when `path` is not a working tree of this repository, including when it is
+    /// not there at all.
     pub fn is_clean(&self, path: &Path) -> Result<bool, GitError> {
         self.require_repository()?;
+        self.require_worktree_of_this_repository(path)?;
         Ok(run_git(path, &["status", "--porcelain", "--untracked-files=normal"])?.is_empty())
     }
 
@@ -293,6 +295,29 @@ impl Git {
         }
     }
 
+    /// Refuses a path that is not a working tree of this repository: another repository's own tree,
+    /// or a directory that is not one at all.
+    ///
+    /// Every worktree of one repository shares its common directory and no two repositories share
+    /// theirs, so that is what "of this repository" means. Asked because `is_clean` is the only
+    /// method that takes a path rather than working at the root, and a task's worktree is a path
+    /// the runtime hands in (5.14) — an answer about somebody else's repository would be a task
+    /// passed or failed on a tree nobody looked at.
+    fn require_worktree_of_this_repository(&self, path: &Path) -> Result<(), GitError> {
+        let mine = self.at_root(&COMMON_DIRECTORY)?;
+        let theirs = run_git(path, &COMMON_DIRECTORY)?;
+        if mine == theirs {
+            return Ok(());
+        }
+        Err(GitError::CommandFailed {
+            command: COMMON_DIRECTORY.join(" "),
+            stderr: format!(
+                "{} is not a working tree of this repository",
+                path.display()
+            ),
+        })
+    }
+
     /// Refuses before running anything when there is no repository, so that every method says the
     /// same thing about it rather than each passing on whatever git happened to print.
     fn require_repository(&self) -> Result<(), GitError> {
@@ -309,6 +334,12 @@ impl Git {
     }
 }
 
+/// What every worktree of one repository shares and no two repositories do. `--path-format` makes
+/// the answer absolute, so a main worktree's `.git` and a linked worktree's path to the same
+/// directory are the same string; it wants git 2.31 or newer, which `docs/standards/code.md`
+/// records.
+const COMMON_DIRECTORY: [&str; 3] = ["rev-parse", "--path-format=absolute", "--git-common-dir"];
+
 /// Runs git in `directory` and hands back what it said on standard output, with the newline git
 /// ends it with taken off.
 ///
@@ -316,6 +347,15 @@ impl Git {
 /// back to the rule that asks about each path a change touched (5.6): a path a byte short is a
 /// change checked against a rule it never matched.
 fn run_git(directory: &Path, arguments: &[&str]) -> Result<String, GitError> {
+    if !directory.is_dir() {
+        // Said here, because the operating system answers a missing working directory with the same
+        // "not found" it answers a missing program with, and "git could not be run" is the wrong
+        // thing to tell someone whose worktree a crashed session took away.
+        return Err(GitError::CommandFailed {
+            command: arguments.join(" "),
+            stderr: format!("there is no directory at {}", directory.display()),
+        });
+    }
     let output = Command::new("git")
         .args(arguments)
         .current_dir(directory)

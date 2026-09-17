@@ -223,6 +223,39 @@ fn calls_a_worktree_dirty_whatever_the_repository_is_configured_to_show() {
 
 #[test]
 #[ignore = "needs the git program: cargo xtask check --integration"]
+fn refuses_a_tree_that_is_not_a_worktree_of_this_repository() {
+    // `is_clean` is asked whether a task's work is finished, so another repository's answer is
+    // worse than no answer at all — and a worktree a crashed session took away with it is not the
+    // git program failing to run, which is what a user would otherwise be told.
+    let repository = TempRepo::new("membership");
+    let elsewhere = TempRepo::new("membership-elsewhere");
+    let git = repository.adapter();
+
+    let foreign = git.is_clean(&elsewhere.path);
+    let Err(GitError::CommandFailed { stderr, .. }) = foreign else {
+        panic!("another repository is not an answer about this one: {foreign:?}");
+    };
+    assert!(
+        stderr.contains("not a working tree of this repository"),
+        "{stderr}"
+    );
+
+    let gone = git.is_clean(&repository.path.join(".farik/local/worktrees/FRK-9"));
+    let Err(GitError::CommandFailed { stderr, .. }) = gone else {
+        panic!("a worktree that is not there is not git failing to run: {gone:?}");
+    };
+    assert!(stderr.contains("there is no directory at"), "{stderr}");
+
+    // And a worktree of this repository is still an answer, which is the point of asking by
+    // repository rather than by path.
+    let worktree = repository.path.join(".farik/local/worktrees/FRK-1");
+    git.create_worktree(&worktree, "farik/FRK-1", "main")
+        .expect("the worktree is made");
+    assert!(git.is_clean(&worktree).expect("the read works"));
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
 fn counts_the_commits_a_branch_added_and_names_every_path_it_touched() {
     let repository = TempRepo::new("changed-paths");
     let git = repository.adapter();
