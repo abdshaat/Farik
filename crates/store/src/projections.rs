@@ -745,6 +745,75 @@ mod tests {
     }
 
     #[test]
+    fn keeps_the_triage_and_the_lock_when_the_contract_is_written_afterwards() {
+        // A summary carries a kind, a parent, a title, a status and a risk, and nothing else: the
+        // triage and the lock have their own events, so a summary must not speak for them. Triage
+        // always comes first (5.16 item 1, and the `draft -> refining` gate of 5.2), so a summary
+        // that reset the flag would un-triage every contract on the board.
+        let (log, projections) = a_board();
+        record(&log, &projections, &about(EventKind::TaskCreated, "FRK-1"));
+        record(
+            &log,
+            &projections,
+            &about(EventKind::RequestTriaged, "FRK-1"),
+        );
+        record(
+            &log,
+            &projections,
+            &about(EventKind::ContractLocked, "FRK-1"),
+        );
+        record(
+            &log,
+            &projections,
+            &written("FRK-1", "Add a logout page", "refining", "low", None),
+        );
+        let task = projections
+            .task(&"FRK-1".parse().expect("a task id"))
+            .expect("the read works")
+            .expect("on the board");
+        assert!(task.triaged, "the triage still stands");
+        assert!(task.locked, "and so does the lock");
+        assert_eq!(task.title, "Add a logout page", "and the rewrite landed");
+    }
+
+    #[test]
+    fn keeps_the_cursor_to_one_row_and_every_column_to_its_type() {
+        // What STRICT and the CHECKs are for: a second cursor would make "how far have the
+        // projections read" a question with two answers, and a flag that is neither 0 nor 1 is not
+        // a flag. SQLite has no boolean, so the CHECK is the type.
+        let (log, _projections) = a_board();
+        let connection = log.connection();
+        let refuses = |sql: &str, what: &str, says: &str| {
+            let refusal = connection.execute(sql, ()).expect_err(what);
+            assert!(refusal.to_string().contains(says), "{what}: {refusal}");
+        };
+        refuses(
+            "INSERT INTO projection_cursor (id, seq) VALUES (2, 7)",
+            "a second cursor",
+            "CHECK",
+        );
+        refuses(
+            "INSERT INTO projection_cursor (id, seq) VALUES (1, 'soon')",
+            "a word where a sequence number belongs",
+            "cannot store TEXT value",
+        );
+        refuses(
+            "INSERT INTO task_projections
+                 (task_id, kind, parent, title, status, risk, triaged, locked, updated_seq)
+             VALUES ('FRK-1', 'task', NULL, x'00', 'draft', 'low', 0, 0, 1)",
+            "a blob where a title belongs",
+            "cannot store BLOB value",
+        );
+        refuses(
+            "INSERT INTO task_projections
+                 (task_id, kind, parent, title, status, risk, triaged, locked, updated_seq)
+             VALUES ('FRK-2', 'task', NULL, 'a title', 'draft', 'low', 2, 0, 1)",
+            "a flag that is neither 0 nor 1",
+            "CHECK",
+        );
+    }
+
+    #[test]
     fn reads_what_it_was_handed_out_of_order_rather_than_stepping_over_it() {
         // Two processes each append and project what they appended, so the projections can be
         // handed event 3 before event 2. A cursor that moved to 3 would leave the board short of
