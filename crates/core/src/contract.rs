@@ -12,9 +12,9 @@ use crate::text::listed;
 pub use crate::generated::task_contract::{
     ExitCriterion, ExitCriterionVerification as VerificationWire,
     FarikTaskContract as TaskContract, FarikTaskContractBudget as Budget,
-    FarikTaskContractId as TaskId, FarikTaskContractNotes as Notes,
-    FarikTaskContractRequirementsItem as Requirement, FarikTaskContractRisk as Risk,
-    FarikTaskContractStatus as TaskStatus, Role,
+    FarikTaskContractId as TaskId, FarikTaskContractKind as TaskKind,
+    FarikTaskContractNotes as Notes, FarikTaskContractRequirementsItem as Requirement,
+    FarikTaskContractRisk as Risk, FarikTaskContractStatus as TaskStatus, Role,
 };
 
 /// A criterion's verification method with named variants. The generated wire enum names its

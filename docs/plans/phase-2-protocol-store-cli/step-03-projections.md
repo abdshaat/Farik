@@ -393,7 +393,7 @@ Files: modified `crates/store/src/projections.rs`, `crates/store/src/lib.rs`, `c
 Consumes: `Projections`, `open_projections`, `Projections::cursor` from Task 1; `FarikEvent`, `EventBody`, `ContractSummary` and the three summary vocabularies from `crates/protocol/src/event.rs`; `TaskId`, `TaskStatus`, `Risk` from `crates/core/src/contract.rs`
 Produces: `farik_store::TaskProjection`, `Projections::{apply, board, task}`, `farik_core::contract::TaskKind`
 
-- [ ] Write the failing tests. Replace the whole tests module of `crates/store/src/projections.rs` with:
+- [x] Write the failing tests. Replace the whole tests module of `crates/store/src/projections.rs` with:
 
   ```rust
   #[cfg(test)]
@@ -596,7 +596,7 @@ Produces: `farik_store::TaskProjection`, `Projections::{apply, board, task}`, `f
   }
   ```
 
-- [ ] Run them and confirm they fail because nothing is projected:
+- [x] Run them and confirm they fail because nothing is projected:
 
   ```
   cargo test -p farik-store
@@ -609,7 +609,7 @@ Produces: `farik_store::TaskProjection`, `Projections::{apply, board, task}`, `f
   # error[E0599]: no method named `task` found for struct `Projections` in the current scope
   ```
 
-- [ ] Give the contract's kind a name. In `crates/core/src/contract.rs`, replace the four lines of the `pub use` list from `FarikTaskContract as TaskContract` to `Role,`
+- [x] Give the contract's kind a name. In `crates/core/src/contract.rs`, replace the four lines of the `pub use` list from `FarikTaskContract as TaskContract` to `Role,`
 
   ```rust
       FarikTaskContract as TaskContract, FarikTaskContractBudget as Budget,
@@ -627,7 +627,7 @@ Produces: `farik_store::TaskProjection`, `Projections::{apply, board, task}`, `f
       FarikTaskContractRisk as Risk, FarikTaskContractStatus as TaskStatus, Role,
   ```
 
-- [ ] Let the board read the task id prefix. In `crates/store/src/event_log.rs`, replace
+- [x] Let the board read the task id prefix. In `crates/store/src/event_log.rs`, replace
 
   ```rust
   /// The prefix every task id this store hands out carries, from the contract schema's pattern.
@@ -641,7 +641,7 @@ Produces: `farik_store::TaskProjection`, `Projections::{apply, board, task}`, `f
   pub(crate) const TASK_ID_PREFIX: &str = "FRK";
   ```
 
-- [ ] Write the minimal implementation. In `crates/store/src/projections.rs`, replace the import block — the six lines from `use std::sync::Arc;` to `use crate::event_log::EventLog;` — with:
+- [x] Write the minimal implementation. In `crates/store/src/projections.rs`, replace the import block — the six lines from `use std::sync::Arc;` to `use crate::event_log::EventLog;` — with:
 
   ```rust
   use std::str::FromStr;
@@ -933,13 +933,13 @@ Produces: `farik_store::TaskProjection`, `Projections::{apply, board, task}`, `f
   }
   ```
 
-- [ ] Add `TaskProjection` to the re-export in `crates/store/src/lib.rs`, which becomes:
+- [x] Add `TaskProjection` to the re-export in `crates/store/src/lib.rs`, which becomes:
 
   ```rust
   pub use projections::{Projections, TaskProjection, open_projections};
   ```
 
-- [ ] Run the tests and confirm green:
+- [x] Run the tests and confirm green:
 
   ```
   cargo test -p farik-store
@@ -947,7 +947,7 @@ Produces: `farik_store::TaskProjection`, `Projections::{apply, board, task}`, `f
   #           test result: ok. 6 passed (event_log_file)
   ```
 
-- [ ] Run the format and lint checks, across the workspace this time because `farik-core` changed:
+- [x] Run the format and lint checks, across the workspace this time because `farik-core` changed:
 
   ```
   cargo fmt --all --check
@@ -955,7 +955,7 @@ Produces: `farik_store::TaskProjection`, `Projections::{apply, board, task}`, `f
   # expected: both silent
   ```
 
-- [ ] Commit: `feat(store): put a filed request on the board`
+- [x] Commit: `feat(store): put a filed request on the board`
 
 ### Task 3: Triage, and a contract the human holds
 

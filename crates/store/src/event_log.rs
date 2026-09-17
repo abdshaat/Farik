@@ -20,7 +20,7 @@ use crate::error::StoreError;
 use crate::migrations;
 
 /// The prefix every task id this store hands out carries, from the contract schema's pattern.
-const TASK_ID_PREFIX: &str = "FRK";
+pub(crate) const TASK_ID_PREFIX: &str = "FRK";
 
 /// How many times a connection tries to put the file in write-ahead logging mode before it gives
 /// up, and how long it waits between tries. `busy_timeout` does not cover this one lock, so this is
