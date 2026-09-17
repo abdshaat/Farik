@@ -7,7 +7,7 @@ Depends on: phase 0 (merged in #4), phase 1 (merged in #5), steps 01 and 02 of t
 
 A plan is `ready` only when a reviewer other than the author has confirmed the three rules in `docs/standards/workflow.md` stage 2 (Plan): every decision made, no ambiguity, no forward dependencies. Record who confirmed and when here.
 
-Readiness confirmed by: <pending — refused once on 2026-09-17, twelve findings, all taken>
+Readiness confirmed by: <pending — refused twice on 2026-09-17, sixteen findings, all taken>
 
 The first reviewer rebuilt the step outside the working tree from this plan's own blocks and reached
 `xtask check: ok` with every count exact, but three of the plan's own commands did not produce the
@@ -22,6 +22,17 @@ correct wherever it lives, and the test's assertions — made through `Projectio
 persisted board from one rebuilt on the spot. The test now asks another connection to the log's file
 what is in `task_projections` and `projection_cursor`, which is the property it was supposed to hold,
 and the mutation kills it (`left: 0`, `right: 1`).
+
+The second reviewer rebuilt it again and reached `xtask check: ok` with every count exact, the
+changed-file set exactly the File map, all six subjects accepted, every format and lint step silent,
+and Task 4's mutation producing the values this plan predicts. It refused on one finding, and that
+one was made by the first round's fix: moving `TaskId` into Task 3 put it one checklist item too
+late, so Task 3's red was a missing-import compile error rather than the two behavioural assertions
+the plan states — the failure `docs/standards/workflow.md` stage 3 names as the one that does not
+count. The import now goes in with the tests, before the red. Three smaller findings with it: the
+placement of `TaskProjection` had a literal reading that left `Projections` undocumented, a Decisions
+bullet disagreed with the text Task 6 writes about who first reads a cost, and the mutation step's
+prose claimed more than the mutation does.
 
 ## Goal
 
@@ -622,7 +633,7 @@ Produces: `farik_store::TaskProjection`, `Projections::{apply, board, task}`, `f
   use crate::event_log::{EventLog, TASK_ID_PREFIX};
   ```
 
-  insert after the module doc and before `pub struct Projections`:
+  insert before the doc comment of `pub struct Projections` — above it, not between it and the struct, which would leave `Projections` undocumented and `missing_docs` refuses that:
 
   ```rust
   /// What a board shows about one contract, as the log left it.
@@ -1015,6 +1026,12 @@ Produces: the `request.triaged`, `contract.locked` and `contract.unlocked` arms 
       }
   ```
 
+- [ ] Add `TaskId` to the tests module's `farik_core::contract` import, which these tests are the first to name, so that it becomes:
+
+  ```rust
+  use farik_core::contract::{Risk, TaskId, TaskKind, TaskStatus};
+  ```
+
 - [ ] Run them and confirm they fail because a triage and a lock change nothing:
 
   ```
@@ -1025,12 +1042,6 @@ Produces: the `request.triaged`, `contract.locked` and `contract.unlocked` arms 
   # ---- projections::tests::says_who_holds_a_contract_the_human_locked_and_gave_back stdout ----
   # locked
   # test result: FAILED. 25 passed; 2 failed
-  ```
-
-- [ ] Add `TaskId` to the tests module's `farik_core::contract` import, which the test above is the first to name, so that it becomes:
-
-  ```rust
-  use farik_core::contract::{Risk, TaskId, TaskKind, TaskStatus};
   ```
 
 - [ ] Write the minimal implementation. In `crates/store/src/projections.rs`, add `RequestTriagedBodySize` to the `farik_protocol::event` import, which becomes:
@@ -1359,10 +1370,12 @@ Produces: the catch-up in `open_projections`, and an `apply` that takes one even
   #  right: 1
   ```
 
-  The board is rebuilt from the log on open either way, so the cursor and the board the test
-  reads back through `Projections` cannot tell the two apart — only the query through another
-  connection to the file can. Undo all three edits before committing; nothing else depends on
-  them.
+  The board is rebuilt from the log on open either way, so nothing the test reads back through
+  `Projections` can tell the two apart — only the query through another connection to the file
+  can. (Run against the whole suite the same three edits also fail
+  `refuses_a_projected_row_it_cannot_read_back`, which writes through the log's own connection
+  and reads through `Projections`; the command above is scoped to the one test on purpose.)
+  Undo all three edits before committing; nothing else depends on them.
 
 - [ ] Commit: `feat(store): catch the projections up and take one event once`
 
@@ -1493,7 +1506,7 @@ This task changes documentation and has no test cycle. The `> ` marker on each b
 
 - [ ] In `docs/plans/project-plan.md`, in the phase 2 section, replace the line beginning `- Step 03: \`struct TaskProjection\`` with:
 
-  > - Step 03 (`farik-store::projections`): `struct TaskProjection { task_id: TaskId, kind: TaskKind, parent: Option<TaskId>, title: String, status: TaskStatus, risk: Risk, triaged: bool, locked: bool, updated_seq: u64 }` — the fields an event of this phase carries (changed 2026-09-17 by the step 03 plan: `assignee_id`, `reviewer_id`, `sprint_id` and `iteration` arrive with `task.transitioned` in phase 3 step 03, which is the event that carries them, as `cost_usd` arrives in 3.09 and `waiting_on_human`, `awaiting_approval` and `awaiting_integration` in 3.10; a column nothing can write is a column no test can hold to anything); `fn open_projections(log: Arc<EventLog>) -> Result<Projections, StoreError>` (an `Arc` rather than a reference, changed 2026-09-17 by the step 03 plan, because `rebuild` and the catch-up on open both read the log and phase 3 holds the two side by side, which is also what lets `rebuild(&self)` keep this signature); `impl Projections { fn rebuild(&self) -> Result<(), StoreError>; fn apply(&self, event: &FarikEvent) -> Result<(), StoreError>; fn board(&self) -> Result<Vec<TaskProjection>, StoreError>; fn task(&self, id: &TaskId) -> Result<Option<TaskProjection>, StoreError>; fn cursor(&self) -> Result<u64, StoreError> }` (opening catches up from the cursor; `apply` ignores an event at or before it, and moves the row and the cursor in one transaction; `rebuild` resets and replays). `farik-core` gains the alias `TaskKind` for `FarikTaskContractKind`. The projections live in the log's database and share its connection and lock, because a log at `:memory:` cannot be reached by a second connection. `enum CostScope`, `struct CostProjection` and `Projections::costs` move to phase 3 step 09, where `cost.recorded` arrives: no event of this phase carries a cost, and the first thing that reads one is phase 3 step 09's own `budget_state`, which arrives beside it.
+  > - Step 03 (`farik-store::projections`): `struct TaskProjection { task_id: TaskId, kind: TaskKind, parent: Option<TaskId>, title: String, status: TaskStatus, risk: Risk, triaged: bool, locked: bool, updated_seq: u64 }` — the fields an event of this phase carries (changed 2026-09-17 by the step 03 plan: `assignee_id`, `reviewer_id`, `sprint_id` and `iteration` arrive with `task.transitioned` in phase 3 step 03, which is the event that carries them, as `cost_usd` arrives in 3.09 and `waiting_on_human`, `awaiting_approval` and `awaiting_integration` in 3.10; a column nothing can write is a column no test can hold to anything); `fn open_projections(log: Arc<EventLog>) -> Result<Projections, StoreError>` (an `Arc` rather than a reference, changed 2026-09-17 by the step 03 plan, because `rebuild` and the catch-up on open both read the log and phase 3 holds the two side by side, which is also what lets `rebuild(&self)` keep this signature); `impl Projections { fn rebuild(&self) -> Result<(), StoreError>; fn apply(&self, event: &FarikEvent) -> Result<(), StoreError>; fn board(&self) -> Result<Vec<TaskProjection>, StoreError>; fn task(&self, id: &TaskId) -> Result<Option<TaskProjection>, StoreError>; fn cursor(&self) -> Result<u64, StoreError> }` (opening catches up from the cursor; `apply` ignores an event at or before it, and moves the row and the cursor in one transaction; `rebuild` resets and replays). `farik-core` gains the alias `TaskKind` for `FarikTaskContractKind`. The projections live in the log's database and share its connection and lock, because a log at `:memory:` cannot be reached by a second connection. `enum CostScope`, `struct CostProjection` and `Projections::costs` move to phase 3 step 09, where `cost.recorded` arrives: no event of this phase carries a cost, the first thing that reads one is phase 3 step 09's own `budget_state`, which arrives beside the event, and no view until phase 5 step 04.
 
 - [ ] In `docs/plans/project-plan.md`, append to the end of the phase 3 step 03 interface line — the line that begins `- Step 03:` and goes on to name `enum ToolError` — as a new sentence after its closing full stop:
 
