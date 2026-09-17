@@ -799,7 +799,7 @@ Produces: `Team::{active_agents, has_active}`, `Agent::tiers`, `From<RoleWire> f
 
 They arrive together because the rules are written in terms of who is active: a team needs an active Product Manager, and "active" is a question about the agents' status that nothing could ask yet. `Agent::tiers` comes with them because it is the other half of the same mapping — the permission tiers a team file spells one way and the governor another.
 
-- [ ] Write the failing tests. Replace the whole tests module of `crates/core/src/team.rs` with:
+- [x] Write the failing tests. Replace the whole tests module of `crates/core/src/team.rs` with:
 
   ```rust
   #[cfg(test)]
@@ -1154,7 +1154,7 @@ They arrive together because the rules are written in terms of who is active: a 
   }
   ```
 
-- [ ] Run them and confirm they fail because nothing knows who is active:
+- [x] Run them and confirm they fail because nothing knows who is active:
 
   ```
   cargo test -p farik-core --lib
@@ -1171,7 +1171,7 @@ They arrive together because the rules are written in terms of who is active: a 
   # error: could not compile `farik-core` (lib test) due to 11 previous errors
   ```
 
-- [ ] Write the minimal implementation. In `crates/core/src/team.rs`, add to the imports, after the `crate::contract` line — both names on one line, which is what rustfmt leaves alone:
+- [x] Write the minimal implementation. In `crates/core/src/team.rs`, add to the imports, after the `crate::contract` line — both names on one line, which is what rustfmt leaves alone:
 
   ```rust
   use crate::governor::permissions::{PermissionTier, default_tiers};
@@ -1183,7 +1183,7 @@ They arrive together because the rules are written in terms of who is active: a 
   use crate::contract::{named, pointer, repeated_ids, with_integers_normalised};
   ```
 
-- [ ] Insert, between the validator's statics and `validate_team`:
+- [x] Insert, between the validator's statics and `validate_team`:
 
   ```rust
   /// The two roles a team cannot work without, and what each of them is for.
@@ -1196,7 +1196,7 @@ They arrive together because the rules are written in terms of who is active: a 
   ];
   ```
 
-- [ ] Replace `validate_team`, whole, with the version that checks the three rules the schema cannot:
+- [x] Replace `validate_team`, whole, with the version that checks the three rules the schema cannot:
 
   ```rust
   /// Checks a value against `docs/schemas/team.schema.json` and, when it conforms, returns the typed
@@ -1264,7 +1264,7 @@ They arrive together because the rules are written in terms of who is active: a 
   }
   ```
 
-- [ ] Insert, after `validate_team`:
+- [x] Insert, after `validate_team`:
 
   ```rust
   impl Team {
@@ -1288,7 +1288,7 @@ They arrive together because the rules are written in terms of who is active: a 
   }
   ```
 
-- [ ] And after that, what an agent may do:
+- [x] And after that, what an agent may do:
 
   ```rust
   impl Agent {
@@ -1327,7 +1327,7 @@ They arrive together because the rules are written in terms of who is active: a 
   }
   ```
 
-- [ ] And after that:
+- [x] And after that:
 
   ```rust
   /// The team schema's roles are the contract schema's minus `human`: a contract may name the human
@@ -1361,7 +1361,7 @@ They arrive together because the rules are written in terms of who is active: a 
   }
   ```
 
-- [ ] Run the check and confirm green:
+- [x] Run the check and confirm green:
 
   ```
   cargo xtask check --integration
@@ -1371,7 +1371,7 @@ They arrive together because the rules are written in terms of who is active: a 
   #   test result: ok. 29 passed (xtask)
   ```
 
-- [ ] Commit: `feat(core): say who is active and what a team needs`
+- [x] Commit: `feat(core): say who is active and what a team needs`
 
 ### Task 3: The rules the governor applies
 
