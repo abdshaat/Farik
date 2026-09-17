@@ -1413,7 +1413,7 @@ Files: modified `crates/store/src/projections.rs`, `docs/plans/phase-2-protocol-
 Consumes: everything above
 Produces: `Projections::rebuild`
 
-- [ ] Write the failing test. Append to the tests module of `crates/store/src/projections.rs`, a blank line between it and the test above it:
+- [x] Write the failing test. Append to the tests module of `crates/store/src/projections.rs`, a blank line between it and the test above it:
 
   ```rust
       #[test]
@@ -1446,7 +1446,7 @@ Produces: `Projections::rebuild`
       }
   ```
 
-- [ ] Run it and confirm it fails because there is nothing to rebuild with:
+- [x] Run it and confirm it fails because there is nothing to rebuild with:
 
   ```
   cargo test -p farik-store --lib
@@ -1454,7 +1454,7 @@ Produces: `Projections::rebuild`
   # error[E0599]: no method named `rebuild` found for struct `Projections` in the current scope
   ```
 
-- [ ] Write the minimal implementation. In `crates/store/src/projections.rs`, say in the `Projections` doc comment what the repair is, replacing
+- [x] Write the minimal implementation. In `crates/store/src/projections.rs`, say in the `Projections` doc comment what the repair is, replacing
 
   ```rust
   /// The projections of one log: derived tables that answer a view in one query.
@@ -1504,7 +1504,7 @@ Produces: `Projections::rebuild`
       }
   ```
 
-- [ ] Run the tests and confirm green:
+- [x] Run the tests and confirm green:
 
   ```
   cargo test -p farik-store
@@ -1512,7 +1512,7 @@ Produces: `Projections::rebuild`
   #           test result: ok. 7 passed (event_log_file)
   ```
 
-- [ ] Run the format and lint checks:
+- [x] Run the format and lint checks:
 
   ```
   cargo fmt --all --check
@@ -1520,7 +1520,7 @@ Produces: `Projections::rebuild`
   # expected: both silent
   ```
 
-- [ ] Commit: `feat(store): build the board again from the log`
+- [x] Commit: `feat(store): build the board again from the log`
 
 ### Task 6: The plans say what the projections became
 

@@ -43,8 +43,9 @@ pub struct TaskProjection {
 
 /// The projections of one log: derived tables that answer a view in one query.
 ///
-/// They share the log's connection and its lock, so a view cannot read a half-written append, and
-/// a log opened in memory can be projected at all.
+/// Dropping them and replaying the log is always correct, which is what `rebuild` does. They share
+/// the log's connection and its lock, so a view cannot read a half-written append, and a log opened
+/// in memory can be projected at all.
 pub struct Projections {
     log: Arc<EventLog>,
 }
@@ -66,6 +67,27 @@ pub fn open_projections(log: Arc<EventLog>) -> Result<Projections, StoreError> {
 }
 
 impl Projections {
+    /// Throws the projections away and builds them again from the whole log.
+    ///
+    /// This is the repair: nothing in the tables is a source of truth, so a projection that has
+    /// drifted for any reason — a bug fixed since, a row changed by hand, a migration that added a
+    /// column — is corrected by reading the log again.
+    ///
+    /// # Errors
+    ///
+    /// `Sqlite` when the tables cannot be cleared or written; `InvalidEvent` when the log holds a
+    /// row that is not an event.
+    pub fn rebuild(&self) -> Result<(), StoreError> {
+        {
+            let mut connection = self.connection();
+            let transaction = connection.transaction()?;
+            transaction.execute("DELETE FROM task_projections", ())?;
+            write_cursor(&transaction, 0)?;
+            transaction.commit()?;
+        }
+        self.catch_up()
+    }
+
     /// Applies one event, and moves the cursor to it.
     ///
     /// An event at or before the cursor is ignored rather than applied twice: a caller that both
@@ -571,6 +593,7 @@ mod tests {
             "{refusal:?}"
         );
     }
+
     #[test]
     fn takes_the_kind_and_the_flag_from_the_triage() {
         // Triage decides whether a request is an epic or a task, and the board is where a user sees
@@ -653,6 +676,7 @@ mod tests {
         assert_eq!(projections.board().expect("the board reads"), Vec::new());
         assert_eq!(projections.cursor().expect("the cursor reads"), 1);
     }
+
     #[test]
     fn catches_up_with_everything_the_log_holds_when_it_is_opened() {
         // The projections are derived, so a process that appended and stopped before projecting has
@@ -695,5 +719,34 @@ mod tests {
         );
         assert_eq!(task.updated_seq, rewritten.envelope.seq);
         assert_eq!(projections.cursor().expect("the cursor reads"), 2);
+    }
+
+    #[test]
+    fn builds_the_board_again_from_the_log_when_it_is_told_to() {
+        // Nothing in the tables is a source of truth, so this is the repair for a row that drifted
+        // for any reason at all.
+        let (log, projections) = a_board();
+        record(&log, &projections, &about(EventKind::TaskCreated, "FRK-1"));
+        log.connection()
+            .execute(
+                "UPDATE task_projections SET title = 'something else', status = 'accepted'
+                 WHERE task_id = 'FRK-1'",
+                (),
+            )
+            .expect("a row is changed by hand");
+        log.connection()
+            .execute(
+                "INSERT INTO task_projections
+                     (task_id, kind, parent, title, status, risk, triaged, locked, updated_seq)
+                 VALUES ('FRK-7', 'task', NULL, 'never happened', 'draft', 'low', 0, 0, 1)",
+                (),
+            )
+            .expect("and a row is invented");
+        projections.rebuild().expect("the board is built again");
+        let board = projections.board().expect("the board reads");
+        assert_eq!(ids_of(&board), ["FRK-1"], "the invented row is gone");
+        assert_eq!(board[0].title, "Add a login page");
+        assert_eq!(board[0].status, TaskStatus::Draft);
+        assert_eq!(projections.cursor().expect("the cursor reads"), 1);
     }
 }
