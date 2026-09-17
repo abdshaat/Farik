@@ -6,7 +6,7 @@ use std::sync::Arc;
 use farik_core::contract::{Risk, TaskId, TaskKind, TaskStatus};
 use farik_protocol::event::{
     ContractSummary, ContractSummaryKind, ContractSummaryRisk, ContractSummaryStatus, EventBody,
-    FarikEvent,
+    FarikEvent, RequestTriagedBodySize,
 };
 use rusqlite::{Connection, Transaction};
 
@@ -206,10 +206,22 @@ fn apply_to(transaction: &Transaction<'_>, event: &FarikEvent) -> Result<(), Sto
     match &event.body {
         EventBody::TaskCreated(body) => write_summary(transaction, &id, &body.summary, seq),
         EventBody::ContractWritten(body) => write_summary(transaction, &id, &body.summary, seq),
-        EventBody::RequestTriaged(_)
-        | EventBody::ContractLocked(_)
-        | EventBody::ContractUnlocked(_)
-        | EventBody::DriftDetected(_)
+        EventBody::RequestTriaged(body) => {
+            // Triage decides the kind as well as recording that it happened (5.16 item 1).
+            let kind = match body.size {
+                RequestTriagedBodySize::Large => TaskKind::Epic,
+                RequestTriagedBodySize::Small => TaskKind::Task,
+            };
+            update(
+                transaction,
+                "UPDATE task_projections SET triaged = 1, kind = ?2, updated_seq = ?3
+                 WHERE task_id = ?1",
+                (&id, kind.to_string(), seq),
+            )
+        }
+        EventBody::ContractLocked(_) => set_locked(transaction, &id, true, seq),
+        EventBody::ContractUnlocked(_) => set_locked(transaction, &id, false, seq),
+        EventBody::DriftDetected(_)
         | EventBody::ProjectScanned(_)
         | EventBody::TeamUpdated(_)
         | EventBody::CriteriaUpdated(_) => Ok(()),
@@ -244,6 +256,33 @@ fn write_summary(
             seq,
         ),
     )?;
+    Ok(())
+}
+
+fn set_locked(
+    transaction: &Transaction<'_>,
+    task_id: &str,
+    locked: bool,
+    seq: i64,
+) -> Result<(), StoreError> {
+    update(
+        transaction,
+        "UPDATE task_projections SET locked = ?2, updated_seq = ?3 WHERE task_id = ?1",
+        (task_id, locked, seq),
+    )
+}
+
+/// Runs an update that has nothing to say about a contract the board has never heard of.
+///
+/// A lock, an unlock or a triage names a contract some earlier event created. When no row matches,
+/// the log is missing that earlier event, and there is nothing this table can invent: a row needs a
+/// title, a status and a risk, and only a summary carries them. Reconciliation is what reports it.
+fn update(
+    transaction: &Transaction<'_>,
+    sql: &str,
+    parameters: impl rusqlite::Params,
+) -> Result<(), StoreError> {
+    transaction.execute(sql, parameters)?;
     Ok(())
 }
 
@@ -320,7 +359,7 @@ mod tests {
     use super::{Arc, EventLog, FarikEvent, Projections, TaskProjection, open_projections};
     use crate::error::StoreError;
     use crate::event_log::{IN_MEMORY, open_event_log};
-    use farik_core::contract::{Risk, TaskKind, TaskStatus};
+    use farik_core::contract::{Risk, TaskId, TaskKind, TaskStatus};
 
     fn at(hour: u32) -> DateTime<Utc> {
         Utc.with_ymd_and_hms(2026, 9, 17, hour, 0, 0)
@@ -506,5 +545,87 @@ mod tests {
                 if detail.contains("FRK-1") && detail.contains("nearly done")),
             "{refusal:?}"
         );
+    }
+    #[test]
+    fn takes_the_kind_and_the_flag_from_the_triage() {
+        // Triage decides whether a request is an epic or a task, and the board is where a user sees
+        // that it has happened at all (`docs/SPEC.md` 5.16 item 1).
+        let (log, projections) = a_board();
+        record(&log, &projections, &about(EventKind::TaskCreated, "FRK-1"));
+        let triaged = record(
+            &log,
+            &projections,
+            &about(EventKind::RequestTriaged, "FRK-1"),
+        );
+        let task = projections
+            .task(&"FRK-1".parse().expect("a task id"))
+            .expect("the read works")
+            .expect("the contract is on the board");
+        assert!(task.triaged);
+        assert_eq!(task.kind, TaskKind::Task, "small is a task");
+        assert_eq!(task.updated_seq, triaged.envelope.seq);
+
+        let (log, projections) = a_board();
+        record(&log, &projections, &about(EventKind::TaskCreated, "FRK-2"));
+        let mut large = about(EventKind::RequestTriaged, "FRK-2");
+        large.body = event_from_value(&{
+            let mut wire = an_event_wire(EventKind::RequestTriaged);
+            wire["task_id"] = json!("FRK-2");
+            wire["body"]["size"] = json!("large");
+            wire
+        })
+        .expect("the fixture is schema-valid")
+        .body;
+        record(&log, &projections, &large);
+        assert_eq!(
+            projections
+                .task(&"FRK-2".parse().expect("a task id"))
+                .expect("the read works")
+                .expect("on the board")
+                .kind,
+            TaskKind::Epic,
+            "large is an epic"
+        );
+    }
+
+    #[test]
+    fn says_who_holds_a_contract_the_human_locked_and_gave_back() {
+        let (log, projections) = a_board();
+        record(&log, &projections, &about(EventKind::TaskCreated, "FRK-1"));
+        let id: TaskId = "FRK-1".parse().expect("a task id");
+        let held = |projections: &Projections| {
+            projections
+                .task(&id)
+                .expect("the read works")
+                .expect("on the board")
+                .locked
+        };
+        record(
+            &log,
+            &projections,
+            &about(EventKind::ContractLocked, "FRK-1"),
+        );
+        assert!(held(&projections), "locked");
+        record(
+            &log,
+            &projections,
+            &about(EventKind::ContractUnlocked, "FRK-1"),
+        );
+        assert!(!held(&projections), "given back");
+    }
+
+    #[test]
+    fn has_nothing_to_say_about_a_contract_whose_first_event_is_missing() {
+        // A lock names a contract some earlier event created, and a row needs a title, a status and
+        // a risk that only a summary carries. Refusing here would make one row unread the whole
+        // board; reconciliation is what reports a log that cannot be right.
+        let (log, projections) = a_board();
+        record(
+            &log,
+            &projections,
+            &about(EventKind::ContractLocked, "FRK-4"),
+        );
+        assert_eq!(projections.board().expect("the board reads"), Vec::new());
+        assert_eq!(projections.cursor().expect("the cursor reads"), 1);
     }
 }

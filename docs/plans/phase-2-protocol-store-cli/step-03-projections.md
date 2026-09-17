@@ -964,7 +964,7 @@ Files: modified `crates/store/src/projections.rs`, `docs/plans/phase-2-protocol-
 Consumes: `Projections::{apply, board, task}` from Task 2
 Produces: the `request.triaged`, `contract.locked` and `contract.unlocked` arms of `apply`
 
-- [ ] Write the failing tests. Append these three to the tests module of `crates/store/src/projections.rs`, a blank line between each and the test above it:
+- [x] Write the failing tests. Append these three to the tests module of `crates/store/src/projections.rs`, a blank line between each and the test above it:
 
   ```rust
       #[test]
@@ -1051,13 +1051,13 @@ Produces: the `request.triaged`, `contract.locked` and `contract.unlocked` arms 
       }
   ```
 
-- [ ] Add `TaskId` to the tests module's `farik_core::contract` import, which these tests are the first to name, so that it becomes:
+- [x] Add `TaskId` to the tests module's `farik_core::contract` import, which these tests are the first to name, so that it becomes:
 
   ```rust
   use farik_core::contract::{Risk, TaskId, TaskKind, TaskStatus};
   ```
 
-- [ ] Run them and confirm they fail because a triage and a lock change nothing:
+- [x] Run them and confirm they fail because a triage and a lock change nothing:
 
   ```
   cargo test -p farik-store --lib
@@ -1069,7 +1069,7 @@ Produces: the `request.triaged`, `contract.locked` and `contract.unlocked` arms 
   # test result: FAILED. 25 passed; 2 failed
   ```
 
-- [ ] Write the minimal implementation. In `crates/store/src/projections.rs`, add `RequestTriagedBodySize` to the `farik_protocol::event` import, which becomes:
+- [x] Write the minimal implementation. In `crates/store/src/projections.rs`, add `RequestTriagedBodySize` to the `farik_protocol::event` import, which becomes:
 
   ```rust
   use farik_protocol::event::{
@@ -1139,7 +1139,7 @@ Produces: the `request.triaged`, `contract.locked` and `contract.unlocked` arms 
   }
   ```
 
-- [ ] Run the tests and confirm green:
+- [x] Run the tests and confirm green:
 
   ```
   cargo test -p farik-store
@@ -1147,7 +1147,7 @@ Produces: the `request.triaged`, `contract.locked` and `contract.unlocked` arms 
   #           test result: ok. 6 passed (event_log_file)
   ```
 
-- [ ] Run the format and lint checks:
+- [x] Run the format and lint checks:
 
   ```
   cargo fmt --all --check
@@ -1155,7 +1155,7 @@ Produces: the `request.triaged`, `contract.locked` and `contract.unlocked` arms 
   # expected: both silent
   ```
 
-- [ ] Commit: `feat(store): record a triage and a contract the human holds`
+- [x] Commit: `feat(store): record a triage and a contract the human holds`
 
 ### Task 4: Catching up, and taking one event once
 
