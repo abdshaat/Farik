@@ -106,28 +106,27 @@ impl EventLog {
             detail: format!("an event was refused before it was appended: {detail}"),
         })?;
         let body = body_to_value(&checked.body).to_string();
-        let seq = {
-            let connection = self.connection();
-            connection.execute(
-                "INSERT INTO events
+        let connection = self.connection();
+        connection.execute(
+            "INSERT INTO events
                      (recorded_at, team_id, project_id, task_id, agent_id, session_id, kind, body)
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
-                (
-                    stamp(checked.envelope.recorded_at),
-                    &checked.envelope.team_id,
-                    &checked.envelope.project_id,
-                    checked.envelope.task_id.as_ref().map(|id| id.to_string()),
-                    checked.envelope.agent_id.as_ref(),
-                    checked.envelope.session_id.as_ref(),
-                    checked.body.kind().to_string(),
-                    body,
-                ),
-            )?;
+            (
+                stamp(checked.envelope.recorded_at),
+                &checked.envelope.team_id,
+                &checked.envelope.project_id,
+                checked.envelope.task_id.as_ref().map(|id| id.to_string()),
+                checked.envelope.agent_id.as_ref(),
+                checked.envelope.session_id.as_ref(),
+                checked.body.kind().to_string(),
+                body,
+            ),
+        )?;
+        let seq =
             u64::try_from(connection.last_insert_rowid()).map_err(|_| StoreError::Sqlite {
                 detail: "the log's sequence number is negative, which no append can produce"
                     .to_string(),
-            })?
-        };
+            })?;
         let appended = FarikEvent {
             envelope: EventEnvelope {
                 seq,
@@ -135,7 +134,11 @@ impl EventLog {
             },
             body: checked.body,
         };
+        // Announced while this lock is still held, so that two threads appending at once hand their
+        // subscribers the order the log gave them rather than the order they left the insert in.
+        // Nothing takes the subscribers' lock before this one, so holding both cannot deadlock.
         self.announce(&appended);
+        drop(connection);
         Ok(appended)
     }
 
@@ -386,6 +389,7 @@ fn statement_of(query: &EventQuery) -> Option<(String, Vec<SqlValue>)> {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
     use std::sync::mpsc::TryRecvError;
 
     use chrono::TimeZone;
@@ -422,6 +426,11 @@ mod tests {
             body: event.body,
         }
     }
+
+    /// Enough threads and appends that an announcement made outside the log's own lock is handed
+    /// out of order many times over, and few enough that the test is over in well under a second.
+    const THREADS: u32 = 16;
+    const APPENDS_PER_THREAD: u32 = 200;
 
     fn kinds_of(events: &[FarikEvent]) -> Vec<EventKind> {
         events.iter().map(|event| event.body.kind()).collect()
@@ -655,6 +664,35 @@ mod tests {
             matches!(&refusal, StoreError::InvalidEvent { detail } if detail.contains("event 1")),
             "{refusal:?}"
         );
+    }
+
+    #[test]
+    fn hands_a_subscriber_the_events_in_the_order_the_log_gave_them() {
+        // `append` takes `&self` so that one log can be shared, and `docs/SPEC.md` 8.5 pairs the
+        // log's monotonic sequence with this channel. A reader that is handed 34 and then 28 either
+        // skips events or replays them, and the log it would rebuild from is itself fine, so the
+        // announcement has to carry the order the log assigned rather than the order the threads
+        // happened to leave the insert in.
+        let log = Arc::new(a_log());
+        let stream = log.subscribe();
+        let threads: Vec<_> = (0..THREADS)
+            .map(|_| {
+                let log = Arc::clone(&log);
+                std::thread::spawn(move || {
+                    for _ in 0..APPENDS_PER_THREAD {
+                        log.append(&an_event(EventKind::TeamUpdated))
+                            .expect("appends");
+                    }
+                })
+            })
+            .collect();
+        for thread in threads {
+            thread.join().expect("the thread finishes");
+        }
+        let announced: Vec<u64> = stream.try_iter().map(|event| event.envelope.seq).collect();
+        let appended: Vec<u64> = (1..=u64::from(THREADS * APPENDS_PER_THREAD)).collect();
+        assert_eq!(announced.len(), appended.len(), "every append is announced");
+        assert_eq!(announced, appended, "in the order the log gave them");
     }
 
     #[test]
