@@ -1380,7 +1380,7 @@ Files: modified `crates/core/src/team.rs`, `docs/plans/phase-2-protocol-store-cl
 Consumes: `Team` from Tasks 1 and 2
 Produces: `Team::rules`
 
-- [ ] Write the failing tests. Replace the whole tests module of `crates/core/src/team.rs` with:
+- [x] Write the failing tests. Replace the whole tests module of `crates/core/src/team.rs` with:
 
   ```rust
   #[cfg(test)]
@@ -1794,7 +1794,7 @@ Produces: `Team::rules`
   }
   ```
 
-- [ ] Run them and confirm they fail because nothing answers what the rules are:
+- [x] Run them and confirm they fail because nothing answers what the rules are:
 
   ```
   cargo test -p farik-core --lib
@@ -1804,13 +1804,13 @@ Produces: `Team::rules`
   # error: could not compile `farik-core` (lib test) due to 3 previous errors
   ```
 
-- [ ] Write the minimal implementation. In `crates/core/src/team.rs`, add to the imports, after the `crate::governor::permissions` line:
+- [x] Write the minimal implementation. In `crates/core/src/team.rs`, add to the imports, after the `crate::governor::permissions` line:
 
   ```rust
   use crate::governor::team_rules::TeamRules;
   ```
 
-- [ ] Insert into `impl Team`, before `active_agents`:
+- [x] Insert into `impl Team`, before `active_agents`:
 
   ```rust
       /// The rules the governor applies, with what the team left out filled in from what
@@ -1863,7 +1863,7 @@ Produces: `Team::rules`
       }
   ```
 
-- [ ] Run the check and confirm green:
+- [x] Run the check and confirm green:
 
   ```
   cargo xtask check --integration
@@ -1873,7 +1873,7 @@ Produces: `Team::rules`
   #   test result: ok. 29 passed (xtask)
   ```
 
-- [ ] Commit: `feat(core): fill in the rules a team left out`
+- [x] Commit: `feat(core): fill in the rules a team left out`
 
 ### Task 4: The criterion library
 

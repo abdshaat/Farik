@@ -9,6 +9,7 @@ use serde_json::Value;
 
 use crate::contract::{named, pointer, repeated_ids, with_integers_normalised};
 use crate::governor::permissions::{PermissionTier, default_tiers};
+use crate::governor::team_rules::TeamRules;
 
 pub use crate::contract::{Role, ValidationError};
 pub use crate::generated::team::{
@@ -111,6 +112,55 @@ pub fn validate_team(input: &Value) -> Result<Team, Vec<ValidationError>> {
 }
 
 impl Team {
+    /// The rules the governor applies, with what the team left out filled in from what
+    /// `farik-core` ships (`docs/SPEC.md` section 5.12).
+    ///
+    /// The shipped protected paths are kept whatever the team writes, and the team's are added to
+    /// them: 5.12 says rules only narrow what a tier allows, and a team that could delete `.env`
+    /// from the list would be widening one.
+    #[must_use]
+    pub fn rules(&self) -> TeamRules {
+        let shipped = TeamRules::default();
+        let mut protected_paths = shipped.protected_paths;
+        for path in &self.rules.protected_paths {
+            let path = path.to_string();
+            if !protected_paths.contains(&path) {
+                protected_paths.push(path);
+            }
+        }
+        TeamRules {
+            protected_paths,
+            allowed_paths_ceiling: self
+                .rules
+                .allowed_paths_ceiling
+                .iter()
+                .map(|glob| glob.to_string())
+                .collect(),
+            required_criteria: self
+                .rules
+                .required_criteria
+                .as_deref()
+                .unwrap_or_default()
+                .iter()
+                .map(std::string::ToString::to_string)
+                .collect(),
+            require_new_tests: self
+                .rules
+                .require_new_tests
+                .unwrap_or(shipped.require_new_tests),
+            max_task_budget_usd: self
+                .rules
+                .max_task_budget_usd
+                .or(shipped.max_task_budget_usd),
+            forbidden_commands: self
+                .rules
+                .forbidden_commands
+                .iter()
+                .map(|pattern| pattern.to_string())
+                .collect(),
+        }
+    }
+
     /// The agents that take work. A paused agent keeps what it holds and is given nothing new; a
     /// retired one is kept only so that its past events still name someone (D18).
     pub fn active_agents(&self) -> impl Iterator<Item = &Agent> {
@@ -204,6 +254,7 @@ mod tests {
         AgentStatus, HumanAcceptsContracts, Integration, PermissionTier, PermissionTierWire, Role,
         RoleWire, Team, validate_team,
     };
+    use crate::governor::team_rules::{DEFAULT_MAX_TASK_BUDGET_USD, DEFAULT_PROTECTED_PATHS};
 
     fn team(wire: &Value) -> Team {
         validate_team(wire).expect("the fixture is a team")
@@ -393,6 +444,64 @@ mod tests {
             .collect();
         assert_eq!(messages.len(), 1, "{messages:?}");
         assert!(messages[0].contains("product_manager"), "{}", messages[0]);
+    }
+
+    #[test]
+    fn fills_in_every_rule_the_team_left_out() {
+        let rules = team(&a_team_wire()).rules();
+        assert_eq!(
+            rules.protected_paths,
+            DEFAULT_PROTECTED_PATHS.map(str::to_string),
+            "the five farik-core ships"
+        );
+        assert!(rules.allowed_paths_ceiling.is_empty(), "no ceiling");
+        assert!(rules.required_criteria.is_empty());
+        assert!(!rules.require_new_tests);
+        assert!(
+            rules
+                .max_task_budget_usd
+                .is_some_and(|cap| close(cap, DEFAULT_MAX_TASK_BUDGET_USD))
+        );
+        assert!(rules.forbidden_commands.is_empty());
+    }
+
+    #[test]
+    fn reads_the_rules_a_team_wrote() {
+        let rules = team(&a_full_team_wire()).rules();
+        assert_eq!(rules.allowed_paths_ceiling, ["src/**"]);
+        assert_eq!(rules.required_criteria, ["test", "review"]);
+        assert!(rules.require_new_tests);
+        assert!(
+            rules
+                .max_task_budget_usd
+                .is_some_and(|cap| close(cap, 12.5))
+        );
+        assert_eq!(rules.forbidden_commands, ["^rm -rf /"]);
+    }
+
+    #[test]
+    fn keeps_the_protected_paths_it_ships_and_adds_the_team_s() {
+        // 5.12: rules only narrow what a tier allows. A team that could drop `.env` from the list
+        // would be widening one, so the shipped paths are kept whatever the team writes.
+        let mut wire = a_team_wire();
+        wire["rules"]["protected_paths"] = json!(["infra/**", ".env"]);
+        let rules = team(&wire).rules();
+        for shipped in DEFAULT_PROTECTED_PATHS {
+            assert!(
+                rules.protected_paths.contains(&shipped.to_string()),
+                "{shipped} is kept"
+            );
+        }
+        assert!(rules.protected_paths.contains(&"infra/**".to_string()));
+        assert_eq!(
+            rules
+                .protected_paths
+                .iter()
+                .filter(|path| *path == ".env")
+                .count(),
+            1,
+            "and a path the team repeated is still one path"
+        );
     }
 
     #[test]
