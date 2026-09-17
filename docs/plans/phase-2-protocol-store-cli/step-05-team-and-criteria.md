@@ -2935,3 +2935,70 @@ This task changes documentation and has no test cycle. The `> ` marker on each b
 ## Open questions
 
 none
+
+## Review findings
+
+The landing review was a fresh session that did not write this step. It read the code against this
+plan, ran fifteen mutations and about forty-five hostile or merely odd values through both
+validators, fed `Team::rules` to the governor that consumes it, and checked the two schemas against
+the contract schema. Its verdict: nothing wrong in the decisions, and a layer of tests and two
+schema bounds missing around the seams.
+
+Taken, each with the mutant or the scenario that now fails without it:
+
+- **The integer normalisation both validators do was held by nothing.** Deleting
+  `with_integers_normalised` from either left every test green, while a team file saying
+  `wip_limit_per_agent: 2.0` — which JSON Schema calls an integer — would have been refused at the
+  root with a message about serde. One test per validator. Commit `1b1fdf8`.
+- **The root refusal was reachable and unhelpful.** The four session limits and `exit_code` were the
+  only numbers in either schema with no ceiling, so `max_input_tokens: 1.0e19` came back as "the
+  schema passed but the typed team could not be built: invalid type: floating point `1e+19`", and
+  the same in a criterion library named a generated Rust type and the words "untagged enum" at
+  someone editing YAML. The session limits now stop at the largest integer JSON holds exactly and an
+  exit code at what a process can return, so both are refused at their own pointer. `exit_code`'s
+  domain type is now the `i32` the project plan always recorded. Commit `1b1fdf8`.
+- **Every string and array ceiling in both schemas was unguarded**: ten could be deleted with the
+  suite still green. They have a test now. And the library's own ceiling was two hundred while a
+  contract takes a hundred exit criteria, so a library the validator accepted could expand into a
+  contract that was refused — a hundred now, for the reason spec 3 gives: the refusal prints what it
+  refused, and one nobody can read is not a refusal. Commit `1b1fdf8`.
+- **A bad id blamed the library.** `expand_criteria(("C0", "cargo-check"))` sent a person to
+  `criteria.yaml`, where nothing was wrong. It now reads "C0, the id given for cargo-check, is not
+  one a contract takes", and a test holds the whole sentence rather than its shape. Commit `14ea992`.
+- **One id given to two criteria expanded without complaint**, and `validate_contract` refused the
+  result a long way from the reference list that caused it. `CriteriaError::RepeatedId`, checked
+  before anything else is looked at. Commit `14ea992`.
+- **An agent could have `read` taken away** and still count as the team's active Software Developer.
+  5.6 says everyone reads; such an agent is one every tool call is refused for, in every session it
+  is ever given, and the file that did it looked fine. `validate_team` refuses it and says to pause
+  the agent instead. Commit `14ea992`.
+- **Two documentation mistakes in this step's own last commit**: D18 still carried the claim that
+  commit `145043e` said it had corrected, and the sentence about `revokes` was applied twice. Both
+  were the same bug in the script that applied them — two `quoted()` lookups matching the same
+  block. Fixed, and the Verification section is ticked, having been run.
+
+Recorded rather than fixed here, because `farik doctor` is where they belong (step 07, recorded on
+its row of the project plan):
+
+- **A team rule whose glob or regular expression does not compile is accepted**, and thereafter
+  refuses every command or every path check. That is what 5.12 and 5.6 say should happen, so it is
+  not a defect — but the person finds out one tool call at a time, and `farik-core` already links
+  `globset` and `regress`. `(?i)rm` is the natural thing to write and `regress` rejects it.
+- **A `verification` that matches no branch of its `oneOf`** — a one-letter typo in
+  `stdout_contains`, a `test` with no `command` — refuses with the whole object and the word
+  `oneOf`, naming neither the property nor the method. Shared verbatim with the contract schema, so
+  it is pre-existing; `.farik/team/criteria.yaml` is a file 5.13 expects people to hand-edit, which
+  is what raises the cost.
+
+Accepted as equivalent or immaterial, with the reviewer's reasons: `expand_criteria` taking the last
+match rather than the first for a repeated name (`validate_criteria` guarantees unique names, and
+the exposure is step 06's, whose scan builds templates directly); the order of the team's protected
+paths (they become a `GlobSet`); `require_new_tests` defaulting to `false` twice over; and an
+explicit empty `required_criteria` being indistinguishable from an absent one, which is what the
+schema promises. A display name of one space and a criterion text of ten spaces are accepted, as the
+contract schema already accepts for its own text.
+
+Two notes for step 06 and phase 3, from the reviewer: `Agent::tiers` returns a `Vec` whose order its
+doc comment defends, and the only consumer phase 3 has, `AgentGrants.tiers`, is a `BTreeSet` that
+discards it; and `ReadinessContext.active_agents_by_role` has no companion on `Team`, so every
+caller folds that map itself.
