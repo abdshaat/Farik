@@ -267,6 +267,25 @@ fn counts_the_commits_a_branch_added_and_names_every_path_it_touched() {
 
 #[test]
 #[ignore = "needs the git program: cargo xtask check --integration"]
+fn keeps_a_path_whose_name_begins_with_a_space() {
+    // The allowed-paths rule is asked about each path a change touched (5.6), so a path that comes
+    // back a byte short is a change checked against a rule it never matched. `-z` is what keeps a
+    // newline in a path; this is what keeps a space at the front of one.
+    let repository = TempRepo::new("odd-path");
+    let git = repository.adapter();
+    repository.git(&["checkout", "-b", "farik/FRK-1"]);
+    repository.write(" leading.txt", "a path that starts with a space\n");
+    repository.commit("feat: a path only a person could name");
+
+    assert_eq!(
+        git.changed_paths("main", "farik/FRK-1")
+            .expect("the read works"),
+        [" leading.txt"]
+    );
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
 fn names_both_sides_of_a_file_that_moved() {
     // The governor asks about each path a change touched (5.6), and a move touches two: a rename
     // reported only by its new name would let work land at a path nobody allowed.

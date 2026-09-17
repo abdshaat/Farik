@@ -309,7 +309,12 @@ impl Git {
     }
 }
 
-/// Runs git in `directory` and hands back what it said on standard output, trimmed.
+/// Runs git in `directory` and hands back what it said on standard output, with the newline git
+/// ends it with taken off.
+///
+/// Trimmed at the end only. A path may begin with a space, and `changed_paths` hands what comes
+/// back to the rule that asks about each path a change touched (5.6): a path a byte short is a
+/// change checked against a rule it never matched.
 fn run_git(directory: &Path, arguments: &[&str]) -> Result<String, GitError> {
     let output = Command::new("git")
         .args(arguments)
@@ -324,7 +329,9 @@ fn run_git(directory: &Path, arguments: &[&str]) -> Result<String, GitError> {
             stderr: String::from_utf8_lossy(&output.stderr).trim().to_string(),
         });
     }
-    Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+    Ok(String::from_utf8_lossy(&output.stdout)
+        .trim_end()
+        .to_string())
 }
 
 /// One `git log` line as a summary, or nothing when it is not one.
