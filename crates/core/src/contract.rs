@@ -1,10 +1,13 @@
 //! The task contract: `docs/schemas/task-contract.schema.json` as Rust types, and the validator
 //! that turns an untrusted JSON value into one.
 
+use std::collections::BTreeSet;
 use std::sync::LazyLock;
 
 use jsonschema::Validator;
 use serde_json::Value;
+
+use crate::text::listed;
 
 pub use crate::generated::task_contract::{
     ExitCriterion, ExitCriterionVerification as VerificationWire,
@@ -142,8 +145,9 @@ static VALIDATOR: LazyLock<Validator> = LazyLock::new(|| {
 ///
 /// # Errors
 ///
-/// Every schema violation, in the schema's order rather than the input's key order; or, when the
-/// schema passes but the typed contract cannot be built, one error at the root.
+/// Every schema violation, in the schema's order rather than the input's key order; one error at
+/// the root when the schema passes but the typed contract cannot be built; or one error at
+/// `/exit_criteria` or `/requirements` when two of them share an `id`.
 pub fn validate_contract(input: &Value) -> Result<TaskContract, Vec<ValidationError>> {
     let errors: Vec<ValidationError> = VALIDATOR
         .iter_errors(input)
@@ -155,14 +159,90 @@ pub fn validate_contract(input: &Value) -> Result<TaskContract, Vec<ValidationEr
     if !errors.is_empty() {
         return Err(errors);
     }
-    serde_json::from_value::<TaskContract>(with_integers_normalised(input)).map_err(|error| {
-        vec![ValidationError {
-            path: "/".to_string(),
+    let contract = serde_json::from_value::<TaskContract>(with_integers_normalised(input))
+        .map_err(|error| {
+            vec![ValidationError {
+                path: "/".to_string(),
+                message: format!(
+                    "the schema passed but the typed contract could not be built: {error}"
+                ),
+            }]
+        })?;
+    let mut errors = Vec::new();
+    let criteria = repeated_ids(
+        contract
+            .exit_criteria
+            .iter()
+            .map(|criterion| criterion.id.as_str()),
+    );
+    if !criteria.is_empty() {
+        errors.push(ValidationError {
+            path: "/exit_criteria".to_string(),
             message: format!(
-                "the schema passed but the typed contract could not be built: {error}"
+                "{} more than one exit criterion; give each criterion its own, because a \
+                 recorded result, a note, and an event all name a criterion by its id and cannot \
+                 tell two apart",
+                named(&criteria)
             ),
-        }]
-    })
+        });
+    }
+    let requirements = repeated_ids(
+        contract
+            .requirements
+            .iter()
+            .map(|requirement| requirement.id.as_str()),
+    );
+    if !requirements.is_empty() {
+        errors.push(ValidationError {
+            path: "/requirements".to_string(),
+            message: format!(
+                "{} more than one requirement; give each requirement its own, because an exit \
+                 criterion names the requirements it satisfies by their ids and cannot tell two \
+                 apart",
+                named(&requirements)
+            ),
+        });
+    }
+    if !errors.is_empty() {
+        return Err(errors);
+    }
+    Ok(contract)
+}
+
+/// Every id that names more than one of the things it was given, in the order they appear and
+/// without repeats. JSON Schema 2020-12 cannot say that a property is unique across an array, so
+/// the rule lives here, where every contract read from the wire passes.
+fn repeated_ids<'a>(ids: impl Iterator<Item = &'a str>) -> Vec<String> {
+    let mut seen: BTreeSet<&str> = BTreeSet::new();
+    let mut reported: BTreeSet<&str> = BTreeSet::new();
+    let mut repeated: Vec<String> = Vec::new();
+    for id in ids {
+        if !seen.insert(id) && reported.insert(id) {
+            repeated.push(id.to_string());
+        }
+    }
+    repeated
+}
+
+/// "the id C1 names" or "the ids C1, C2 name", so that a message reads as English either way.
+fn named(ids: &[String]) -> String {
+    let verb = if ids.len() == 1 { "names" } else { "name" };
+    format!("{} {verb}", listed("the id", "the ids", ids))
+}
+
+/// The `method` a verification names, read straight from the wire value, or `None` when the
+/// value carries no string there. `Verification::from` answers the same question but clones the
+/// command, the rubric, and `must_contain` to do it, which a check that only asks "is this one
+/// the human answers?" does not need.
+#[must_use]
+pub fn wire_method(verification: &VerificationWire) -> Option<&str> {
+    match verification {
+        VerificationWire::Variant0 { method, .. }
+        | VerificationWire::Variant1 { method, .. }
+        | VerificationWire::Variant2 { method, .. }
+        | VerificationWire::Variant3 { method, .. }
+        | VerificationWire::Variant4 { method, .. } => method.as_str(),
+    }
 }
 
 /// JSON Schema counts a number with a zero fraction as an integer and serde does not; such
@@ -211,6 +291,101 @@ mod tests {
 
     fn refusal(input: &serde_json::Value) -> Vec<ValidationError> {
         validate_contract(input).expect_err("expected a refusal")
+    }
+
+    #[test]
+    fn refuses_exit_criteria_that_share_an_id() {
+        // A recorded result, a note, and an event all name a criterion by its id, so two criteria
+        // with one id are indistinguishable downstream: one run would be credited to both, and a
+        // task could be accepted with a criterion nobody ran. JSON Schema 2020-12 cannot say a
+        // property is unique across an array, so the rule lives here rather than in the schema.
+        let mut input = a_contract_wire();
+        let twin = input["exit_criteria"][0].clone();
+        input["exit_criteria"] = json!([twin.clone(), twin]);
+        let errors = refusal(&input);
+        assert_eq!(errors.len(), 1);
+        assert_eq!(errors[0].path, "/exit_criteria");
+        assert_eq!(
+            errors[0].message,
+            "the id C1 names more than one exit criterion; give each criterion its own, because a \
+             recorded result, a note, and an event all name a criterion by its id and cannot tell \
+             two apart"
+        );
+    }
+
+    #[test]
+    fn refuses_requirements_that_share_an_id() {
+        // An exit criterion names the requirements it satisfies by their ids, so two requirements
+        // with one id are the same hole as two criteria with one id.
+        let mut input = a_contract_wire();
+        let twin = input["requirements"][0].clone();
+        input["requirements"] = json!([twin.clone(), twin]);
+        let errors = refusal(&input);
+        assert_eq!(errors.len(), 1);
+        assert_eq!(errors[0].path, "/requirements");
+        assert_eq!(
+            errors[0].message,
+            "the id R1 names more than one requirement; give each requirement its own, because an \
+             exit criterion names the requirements it satisfies by their ids and cannot tell two \
+             apart"
+        );
+    }
+
+    #[test]
+    fn reports_a_repeated_criterion_id_and_a_repeated_requirement_id_together() {
+        let mut input = a_contract_wire();
+        let criterion = input["exit_criteria"][0].clone();
+        input["exit_criteria"] = json!([criterion.clone(), criterion]);
+        let requirement = input["requirements"][0].clone();
+        input["requirements"] = json!([requirement.clone(), requirement]);
+        let errors = refusal(&input);
+        assert_eq!(
+            errors
+                .iter()
+                .map(|error| error.path.as_str())
+                .collect::<Vec<&str>>(),
+            ["/exit_criteria", "/requirements"]
+        );
+    }
+
+    #[test]
+    fn names_every_repeated_id_once_however_far_apart_they_are() {
+        let mut input = a_contract_wire();
+        let first = input["exit_criteria"][0].clone();
+        let named = |id: &str| {
+            let mut criterion = first.clone();
+            criterion["id"] = json!(id);
+            criterion
+        };
+        // C1 and C3 each name two criteria, never adjacent, and C1 names three.
+        input["exit_criteria"] = json!([
+            named("C1"),
+            named("C2"),
+            named("C3"),
+            named("C1"),
+            named("C3"),
+            named("C1"),
+        ]);
+        let errors = refusal(&input);
+        assert_eq!(errors.len(), 1);
+        assert!(
+            errors[0]
+                .message
+                .starts_with("the ids C1, C3 name more than one"),
+            "{}",
+            errors[0].message
+        );
+    }
+
+    #[test]
+    fn accepts_exit_criteria_whose_ids_are_all_distinct() {
+        let mut input = a_contract_wire();
+        let first = input["exit_criteria"][0].clone();
+        let mut second = first.clone();
+        second["id"] = json!("C2");
+        input["exit_criteria"] = json!([first, second]);
+        let contract = validate_contract(&input).expect("valid");
+        assert_eq!(contract.exit_criteria.len(), 2);
     }
 
     #[test]

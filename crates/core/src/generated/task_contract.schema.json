@@ -60,6 +60,7 @@
         "in_scope": {
           "type": "array",
           "minItems": 1,
+          "maxItems": 100,
           "items": {
             "type": "string"
           }
@@ -67,6 +68,7 @@
         "out_of_scope": {
           "type": "array",
           "minItems": 1,
+          "maxItems": 100,
           "items": {
             "type": "string"
           },
@@ -77,6 +79,7 @@
     "requirements": {
       "type": "array",
       "minItems": 1,
+      "maxItems": 100,
       "items": {
         "type": "object",
         "additionalProperties": false,
@@ -87,7 +90,7 @@
         "properties": {
           "id": {
             "type": "string",
-            "pattern": "^R[0-9]+$"
+            "pattern": "^R[1-9][0-9]*$"
           },
           "text": {
             "type": "string",
@@ -102,12 +105,14 @@
     "exit_criteria": {
       "type": "array",
       "minItems": 1,
+      "maxItems": 100,
       "items": {
         "$ref": "#/$defs/exitCriterion"
       }
     },
     "constraints": {
       "type": "array",
+      "maxItems": 100,
       "items": {
         "type": "string"
       },
@@ -115,6 +120,7 @@
     },
     "dependencies": {
       "type": "array",
+      "maxItems": 100,
       "items": {
         "type": "string",
         "pattern": "^FRK-[0-9]{1,6}$"
@@ -123,6 +129,7 @@
     },
     "references": {
       "type": "array",
+      "maxItems": 100,
       "items": {
         "type": "string",
         "format": "uri"
@@ -172,6 +179,7 @@
     "allowed_paths": {
       "type": "array",
       "minItems": 1,
+      "maxItems": 100,
       "items": {
         "type": "string"
       },
@@ -267,7 +275,7 @@
       "properties": {
         "id": {
           "type": "string",
-          "pattern": "^C[0-9]+$"
+          "pattern": "^C[1-9][0-9]*$"
         },
         "text": {
           "type": "string",
@@ -275,9 +283,10 @@
         },
         "satisfies": {
           "type": "array",
+          "maxItems": 100,
           "items": {
             "type": "string",
-            "pattern": "^R[0-9]+$"
+            "pattern": "^R[1-9][0-9]*$"
           },
           "description": "Requirement ids this criterion provides evidence for."
         },
@@ -357,6 +366,7 @@
                 },
                 "must_contain": {
                   "type": "array",
+                  "maxItems": 100,
                   "items": {
                     "type": "string"
                   }
@@ -376,6 +386,7 @@
                 "rubric": {
                   "type": "array",
                   "minItems": 1,
+                  "maxItems": 100,
                   "items": {
                     "type": "string"
                   },

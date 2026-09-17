@@ -31,9 +31,9 @@ impl ::std::str::FromStr for ExitCriterionId {
     type Err = self::error::ConversionError;
     fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
         static PATTERN: ::std::sync::LazyLock<::regress::Regex> =
-            ::std::sync::LazyLock::new(|| ::regress::Regex::new("^C[0-9]+$").unwrap());
+            ::std::sync::LazyLock::new(|| ::regress::Regex::new("^C[1-9][0-9]*$").unwrap());
         if PATTERN.find(value).is_none() {
-            return Err("doesn't match pattern \"^C[0-9]+$\"".into());
+            return Err("doesn't match pattern \"^C[1-9][0-9]*$\"".into());
         }
         Ok(Self(value.to_string()))
     }
@@ -83,9 +83,9 @@ impl ::std::str::FromStr for ExitCriterionSatisfiesItem {
     type Err = self::error::ConversionError;
     fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
         static PATTERN: ::std::sync::LazyLock<::regress::Regex> =
-            ::std::sync::LazyLock::new(|| ::regress::Regex::new("^R[0-9]+$").unwrap());
+            ::std::sync::LazyLock::new(|| ::regress::Regex::new("^R[1-9][0-9]*$").unwrap());
         if PATTERN.find(value).is_none() {
-            return Err("doesn't match pattern \"^R[0-9]+$\"".into());
+            return Err("doesn't match pattern \"^R[1-9][0-9]*$\"".into());
         }
         Ok(Self(value.to_string()))
     }
@@ -586,9 +586,9 @@ impl ::std::str::FromStr for FarikTaskContractRequirementsItemId {
     type Err = self::error::ConversionError;
     fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
         static PATTERN: ::std::sync::LazyLock<::regress::Regex> =
-            ::std::sync::LazyLock::new(|| ::regress::Regex::new("^R[0-9]+$").unwrap());
+            ::std::sync::LazyLock::new(|| ::regress::Regex::new("^R[1-9][0-9]*$").unwrap());
         if PATTERN.find(value).is_none() {
-            return Err("doesn't match pattern \"^R[0-9]+$\"".into());
+            return Err("doesn't match pattern \"^R[1-9][0-9]*$\"".into());
         }
         Ok(Self(value.to_string()))
     }

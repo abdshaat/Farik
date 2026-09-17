@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://farik.dev/schemas/prices.schema.json",
+  "title": "FarikPriceTable",
+  "description": "The model price table Farik ships and the user may override in .farik/prices.json: what one million tokens cost, per model id, in US dollars. See docs/SPEC.md section 5.5.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "source_url", "retrieved_at", "prices"],
+  "properties": {
+    "version": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "The table's format version; 1 for this shape."
+    },
+    "source_url": {
+      "type": "string",
+      "format": "uri",
+      "description": "The provider's published price page the numbers were copied from."
+    },
+    "retrieved_at": {
+      "type": "string",
+      "format": "date",
+      "description": "The day the numbers were copied, ISO 8601."
+    },
+    "prices": {
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": { "$ref": "#/$defs/modelPrice" },
+      "description": "Prices keyed by the provider's model id, exactly as the runtime reports it in usage."
+    }
+  },
+  "$defs": {
+    "modelPrice": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["input_usd_per_mtok", "output_usd_per_mtok", "cache_write_usd_per_mtok", "cache_read_usd_per_mtok"],
+      "properties": {
+        "input_usd_per_mtok": { "type": "number", "minimum": 0, "description": "Base input tokens." },
+        "output_usd_per_mtok": { "type": "number", "minimum": 0, "description": "Output tokens." },
+        "cache_write_usd_per_mtok": { "type": "number", "minimum": 0, "description": "Prompt cache writes with the five-minute duration, the one the agent engine uses." },
+        "cache_read_usd_per_mtok": { "type": "number", "minimum": 0, "description": "Prompt cache hits and refreshes." }
+      }
+    }
+  }
+}
