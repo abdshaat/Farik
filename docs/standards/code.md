@@ -16,7 +16,7 @@ The backend (every crate under `crates/`) is Rust. The front end (`packages/ui`,
 | Repository tasks | the `xtask` crate: `cargo xtask <check\|generate\|install-hooks\|commit-msg\|todos\|core-io>` | | Everything the repository needs to run on itself is a Rust program, so no Node toolchain is needed until the front end exists. |
 | Commit hooks | `cargo xtask install-hooks` writes `pre-commit` (format check, bare-TODO check) and `commit-msg` (Conventional Commits shape) | | Hooks are a convenience; CI is the enforcement. |
 | Versioning and changelog | `git-cliff` from Conventional Commits; workspace version in the root `Cargo.toml` | | |
-| Continuous integration | GitHub Actions | | One workflow, `check`, runs `cargo xtask check` on every pull request and on `main`. |
+| Continuous integration | GitHub Actions | | One workflow, `check`, runs `cargo xtask check --integration` on every pull request and on `main`. The flag adds the tests marked `#[ignore]` for needing a program the runner has; without it the same command runs everything else. |
 
 `cargo xtask check` is the single command that means "is this mergeable". It runs, in order: format check, clippy, tests, generated-file freshness, the bare-TODO check, and the no-I/O check on `farik-core`; once the front end exists it also runs `pnpm check` (typecheck, lint, format check, tests) for it. It exists from the first scaffold commit onward and it is never allowed to be red on `main`.
 

@@ -1,6 +1,6 @@
 # Phase 2, step 04: The git adapter
 
-Status: ready
+Status: done
 Branch: `claude/phase-0-implementation-izm38y` (the harness-assigned phase branch, left as assigned per `docs/standards/code.md`; a session may not push to another branch without permission, so phase 2 reuses it as phase 1 did; steps do not get their own)
 Spec: `docs/SPEC.md` section 8.1 (the git adapter lives in `farik-store`), 5.14 (a branch and a worktree per task, and what integration does), 5.6 (allowed paths, which is what asks about a change's paths); `docs/standards/code.md`, "Rust integration test"
 Depends on: phase 0 (merged in #4), phase 1 (merged in #5), steps 01, 02 and 03 of this phase (committed as 1f93550, 50b264e and e99deae)
@@ -1937,27 +1937,27 @@ Produces: a project plan and a standard that describe the adapter and the check 
 
 This task changes documentation and has no test cycle. The `> ` marker on each block below is this plan's and is not part of the text to write.
 
-- [ ] In `docs/plans/project-plan.md`, replace the line beginning `- Step 04 (\`farik-store::git\`):` with:
+- [x] In `docs/plans/project-plan.md`, replace the line beginning `- Step 04 (\`farik-store::git\`):` with:
 
   > - Step 04 (`farik-store::git`): `enum GitError { NotARepository, NotInstalled { detail }, CommandFailed { command, stderr } }` (the middle one added 2026-09-17 by the step 04 plan: folding "the git program is not on this machine" into `CommandFailed` would report an empty `stderr` for a command that never ran); `struct Git { root: PathBuf }`; `impl Git { fn open(root: PathBuf) -> Git; fn is_repository(&self) -> bool; fn head_summary(&self) -> Result<Option<HeadSummary>, GitError>; fn default_branch(&self) -> Result<String, GitError>; fn current_branch(&self) -> Result<String, GitError>; fn create_branch(&self, name, from) -> Result<(), GitError>; fn create_worktree(&self, path, branch, from) -> Result<(), GitError>; fn remove_worktree(&self, path) -> Result<(), GitError>; fn is_clean(&self, path) -> Result<bool, GitError>; fn commit_count(&self, base, head) -> Result<u32, GitError>; fn changed_paths(&self, base, head) -> Result<Vec<String>, GitError>; fn diff(&self, base, head) -> Result<String, GitError>; fn merge(&self, into, from, message) -> Result<MergeOutcome, GitError> }`; `struct HeadSummary { sha, committed_at, subject }`; `enum MergeOutcome { Merged { sha }, Conflicts(Vec<String>) }`. Every method runs the `git` program; every one asks `is_repository` first and answers `NotARepository` itself rather than passing on what git printed. `changed_paths` and `diff` take the three-dot range `base...head` and `commit_count` the two-dot `base..head`; a rename comes back as both of its paths, because 5.6 asks about each path a change touched. A conflicted merge is undone before `merge` returns, and `merge` leaves the repository on the branch it found it on, because `root` is the user's own checkout rather than a task's worktree. Phase 3 step 03 adds `commit` and `push`.
 
-- [ ] In `docs/plans/project-plan.md`, in the "Tests are split in three" bullet, replace `which runs in CI as a second job of the same \`check\` workflow from the step that adds the first test needing it (phase 2 step 04)` with:
+- [x] In `docs/plans/project-plan.md`, in the "Tests are split in three" bullet, replace `which runs in CI as a second job of the same \`check\` workflow from the step that adds the first test needing it (phase 2 step 04)` with:
 
   > which CI runs as the one job it has, because `--integration` only adds the ignored tests to the same `cargo test` invocation and a second job would compile the workspace again to run a superset of the first (changed 2026-09-17 by the step 04 plan; a second job starts paying for itself when a test needs Docker, which is phase 3 step 02)
 
-- [ ] In `docs/plans/project-plan.md`, in the phase 2 step table, replace the last cell of the step 04 row — `Repository queries, branches, worktrees, changed paths, diff, clean check, commit count, merge; the first integration test that needs a git binary, and the CI job for \`cargo xtask check --integration\`` — with:
+- [x] In `docs/plans/project-plan.md`, in the phase 2 step table, replace the last cell of the step 04 row — `Repository queries, branches, worktrees, changed paths, diff, clean check, commit count, merge; the first integration test that needs a git binary, and the CI job for \`cargo xtask check --integration\`` — with:
 
   > Repository queries, branches, worktrees, changed paths, diff, clean check, commit count, merge; the first tests that need a git binary, and the `--integration` flag CI runs them with
 
-- [ ] In `docs/plans/project-plan.md`, on the phase 2 step 04 line, nothing else changes: the `xtask::check` module the flag is parsed in is an `xtask` internal, and the project plan records what one step hands the next rather than how a repository task is laid out.
+- [x] In `docs/plans/project-plan.md`, on the phase 2 step 04 line, nothing else changes: the `xtask::check` module the flag is parsed in is an `xtask` internal, and the project plan records what one step hands the next rather than how a repository task is laid out.
 
-- [ ] In `docs/standards/code.md`, replace the note on the continuous integration row — `One workflow, \`check\`, runs \`cargo xtask check\` on every pull request and on \`main\`.` — with:
+- [x] In `docs/standards/code.md`, replace the note on the continuous integration row — `One workflow, \`check\`, runs \`cargo xtask check\` on every pull request and on \`main\`.` — with:
 
   > One workflow, `check`, runs `cargo xtask check --integration` on every pull request and on `main`. The flag adds the tests marked `#[ignore]` for needing a program the runner has; without it the same command runs everything else.
 
-- [ ] Set this plan's `Status:` to `done` and confirm every checkbox above is ticked, each in the commit of the task it belongs to.
+- [x] Set this plan's `Status:` to `done` and confirm every checkbox above is ticked, each in the commit of the task it belongs to.
 
-- [ ] Commit: `docs(docs): record what step 04 changed about the adapter`
+- [x] Commit: `docs(docs): record what step 04 changed about the adapter`
 
 ## Verification
 
