@@ -122,6 +122,87 @@ pub struct FarikEvent {
     pub body: EventBody,
 }
 
+/// The ids an event is stamped with. Everything an envelope has except the sequence number, which
+/// the store assigns, and the time, which the clock does.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct EventIds {
+    /// The team the event belongs to. Blank is refused.
+    pub team_id: String,
+    /// The project the event belongs to. Blank is refused.
+    pub project_id: String,
+    /// The contract the event is about, when it is about one.
+    pub task_id: Option<TaskId>,
+    /// The agent whose work produced the event, when an agent did.
+    pub agent_id: Option<String>,
+    /// The session the event was recorded in, when it was recorded in one.
+    pub session_id: Option<String>,
+}
+
+/// An event that has not been appended yet: everything a `FarikEvent` has except the sequence
+/// number, which the store assigns on append.
+#[derive(Debug, Clone, PartialEq)]
+pub struct NewEvent {
+    /// When the event was recorded, from the injected clock.
+    pub recorded_at: DateTime<Utc>,
+    /// The team the event belongs to.
+    pub team_id: String,
+    /// The project the event belongs to.
+    pub project_id: String,
+    /// The contract the event is about, when it is about one.
+    pub task_id: Option<TaskId>,
+    /// The agent whose work produced the event, when an agent did.
+    pub agent_id: Option<String>,
+    /// The session the event was recorded in, when it was recorded in one.
+    pub session_id: Option<String>,
+    /// What happened.
+    pub body: EventBody,
+}
+
+/// Why an event cannot be stamped.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum EventError {
+    /// An id that must name something was blank once trimmed.
+    BlankId {
+        /// The field: `team_id` or `project_id`.
+        field: String,
+    },
+}
+
+/// Stamps a body with the time it was recorded and the ids it belongs to. Trims every id and drops
+/// an optional one that is blank, because a blank id names nobody and the log would show an agent
+/// or a session that does not exist.
+///
+/// # Errors
+///
+/// `BlankId` when `team_id` or `project_id` is blank once trimmed; `team_id` is reported first.
+pub fn new_event(
+    body: EventBody,
+    recorded_at: DateTime<Utc>,
+    ids: EventIds,
+) -> Result<NewEvent, EventError> {
+    let team_id = named(&ids.team_id, "team_id")?;
+    let project_id = named(&ids.project_id, "project_id")?;
+    Ok(NewEvent {
+        recorded_at,
+        team_id,
+        project_id,
+        task_id: ids.task_id,
+        agent_id: optional_id(ids.agent_id.as_deref()),
+        session_id: optional_id(ids.session_id.as_deref()),
+        body,
+    })
+}
+
+fn named(value: &str, field: &str) -> Result<String, EventError> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return Err(EventError::BlankId {
+            field: field.to_string(),
+        });
+    }
+    Ok(trimmed.to_string())
+}
+
 /// Checks a value against `docs/schemas/event.schema.json` and, when it conforms, returns the
 /// typed event. Refuses anything the schema refuses; refuses a body that does not belong to the
 /// event's `kind`, which the schema cannot say; and refuses a blank `team_id` or `project_id`,
@@ -385,7 +466,8 @@ mod tests {
 
     use super::fixtures::{a_body_wire, a_contract_summary_wire, a_full_event_wire, an_event_wire};
     use super::{
-        EVERY_KIND, EventBody, EventKind, ValidationError, event_from_value, event_to_value,
+        EVERY_KIND, EventBody, EventError, EventIds, EventKind, ValidationError, event_from_value,
+        event_to_value, new_event,
     };
 
     fn refusal(input: &serde_json::Value) -> Vec<ValidationError> {
@@ -556,6 +638,82 @@ mod tests {
         let wire = event_to_value(&event);
         for absent in ["task_id", "agent_id", "session_id"] {
             assert!(wire.get(absent).is_none(), "{absent}");
+        }
+    }
+
+    fn some_ids() -> EventIds {
+        EventIds {
+            team_id: "farik".to_string(),
+            project_id: "farik".to_string(),
+            task_id: None,
+            agent_id: None,
+            session_id: None,
+        }
+    }
+
+    fn a_body() -> EventBody {
+        let event = event_from_value(&an_event_wire(EventKind::ContractLocked)).expect("valid");
+        event.body
+    }
+
+    fn at() -> chrono::DateTime<chrono::Utc> {
+        let event = event_from_value(&an_event_wire(EventKind::ContractLocked)).expect("valid");
+        event.envelope.recorded_at
+    }
+
+    #[test]
+    fn stamps_a_body_with_the_time_and_the_ids_it_belongs_to() {
+        let new = new_event(a_body(), at(), some_ids()).expect("stamped");
+        assert_eq!(new.team_id, "farik");
+        assert_eq!(new.project_id, "farik");
+        assert_eq!(new.recorded_at, at());
+        assert_eq!(new.body.kind(), EventKind::ContractLocked);
+        assert!(new.task_id.is_none());
+    }
+
+    #[test]
+    fn trims_every_id_and_forgets_an_optional_one_that_is_blank() {
+        let ids = EventIds {
+            team_id: "  farik  ".to_string(),
+            project_id: "  farik  ".to_string(),
+            agent_id: Some("  maya-chen  ".to_string()),
+            session_id: Some("   ".to_string()),
+            ..some_ids()
+        };
+        let new = new_event(a_body(), at(), ids).expect("stamped");
+        assert_eq!(new.team_id, "farik");
+        assert_eq!(new.project_id, "farik");
+        assert_eq!(new.agent_id.as_deref(), Some("maya-chen"));
+        assert!(new.session_id.is_none());
+    }
+
+    #[test]
+    fn refuses_to_stamp_an_event_with_a_blank_team_id_or_project_id() {
+        // A blank one names nobody, and the log would hold a record that cannot be attributed or
+        // read back. The reader refuses the same thing; this is the other door into the log.
+        for (field, ids) in [
+            (
+                "team_id",
+                EventIds {
+                    team_id: "   ".to_string(),
+                    ..some_ids()
+                },
+            ),
+            (
+                "project_id",
+                EventIds {
+                    project_id: String::new(),
+                    ..some_ids()
+                },
+            ),
+        ] {
+            let error = new_event(a_body(), at(), ids).expect_err("expected a refusal");
+            assert_eq!(
+                error,
+                EventError::BlankId {
+                    field: field.to_string()
+                }
+            );
         }
     }
 }

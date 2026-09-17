@@ -1330,7 +1330,7 @@ Files: modified `crates/protocol/src/event.rs`; tested by `crates/protocol/src/e
 Consumes: `EventBody`, `TaskId`, from Task 5
 Produces: `farik_protocol::event::{NewEvent, EventIds, EventError, new_event}`
 
-- [ ] Write the failing test. Append to the `tests` module of `crates/protocol/src/event.rs`:
+- [x] Write the failing test. Append to the `tests` module of `crates/protocol/src/event.rs`:
 
   ```rust
       fn some_ids() -> EventIds {
@@ -1419,7 +1419,7 @@ Produces: `farik_protocol::event::{NewEvent, EventIds, EventError, new_event}`
       };
   ```
 
-- [ ] Run it and confirm it fails because nothing stamps an event yet:
+- [x] Run it and confirm it fails because nothing stamps an event yet:
 
   ```
   cargo test -p farik-protocol
@@ -1427,7 +1427,7 @@ Produces: `farik_protocol::event::{NewEvent, EventIds, EventError, new_event}`
   #           `super::EventIds`, `super::new_event`
   ```
 
-- [ ] Write the minimal implementation. Insert into `crates/protocol/src/event.rs`, after `FarikEvent` and before `event_from_value`:
+- [x] Write the minimal implementation. Insert into `crates/protocol/src/event.rs`, after `FarikEvent` and before `event_from_value`:
 
   ```rust
   /// The ids an event is stamped with. Everything an envelope has except the sequence number, which
@@ -1512,14 +1512,14 @@ Produces: `farik_protocol::event::{NewEvent, EventIds, EventError, new_event}`
   }
   ```
 
-- [ ] Run the test and the crate's suite; confirm green:
+- [x] Run the test and the crate's suite; confirm green:
 
   ```
   cargo test -p farik-protocol
   # expected: all passing
   ```
 
-- [ ] Commit: `feat(protocol): stamp an event with its time and its ids`
+- [x] Commit: `feat(protocol): stamp an event with its time and its ids`
 
 ### Task 8: The command schema and the commands
 
