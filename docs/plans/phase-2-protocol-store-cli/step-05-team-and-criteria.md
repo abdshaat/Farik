@@ -2890,7 +2890,7 @@ This task changes documentation and has no test cycle. The `> ` marker on each b
 
 ## Verification
 
-- [ ] The whole check, from the workspace root:
+- [x] The whole check, from the workspace root:
 
   ```
   cargo xtask check --integration
@@ -2903,21 +2903,21 @@ This task changes documentation and has no test cycle. The `> ` marker on each b
   #   test result: ok. 29 passed (xtask)
   ```
 
-- [ ] The generated files are fresh, which the check already asks but which this step doubles the number of:
+- [x] The generated files are fresh, which the check already asks but which this step doubles the number of:
 
   ```
   cargo xtask generate --check
   # expected: silent
   ```
 
-- [ ] `farik-core` still performs no I/O:
+- [x] `farik-core` still performs no I/O:
 
   ```
   cargo xtask core-io
   # expected: silent
   ```
 
-- [ ] Every commit subject is accepted:
+- [x] Every commit subject is accepted:
 
   ```
   for subject in \\

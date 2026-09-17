@@ -206,8 +206,9 @@ pub enum ExitCriterionVerification {
 #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, Default, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct ExitCriterionVerificationVariant0Expect {
+    ///What a process can return. The default is 0.
     #[serde(default)]
-    pub exit_code: i64,
+    pub exit_code: i32,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
     pub stdout_contains: ::std::option::Option<::std::string::String>,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]

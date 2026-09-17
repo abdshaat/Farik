@@ -1083,7 +1083,7 @@ impl ::std::convert::TryFrom<::std::string::String> for RulesRequiredCriteriaIte
         value.parse()
     }
 }
-///Overrides for one session's limits. What is left out keeps the role's default (farik-core's default_session_limits).
+///Overrides for one session's limits. What is left out keeps the role's default (farik-core's default_session_limits). The ceiling is the largest integer JSON holds exactly: a number past it is refused here, naming the field, rather than by the typed build, naming serde.
 #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, Default, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct SessionLimits {

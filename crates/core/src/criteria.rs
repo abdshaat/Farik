@@ -291,6 +291,44 @@ mod tests {
     }
 
     #[test]
+    fn reads_an_exit_code_a_person_wrote_with_a_fraction() {
+        // The same reason as the team's numbers: 2.0 is an integer to JSON Schema, and without
+        // normalising it the refusal would name an untagged enum rather than the field.
+        let mut wire = a_criteria_library_wire();
+        wire["criteria"][0]["verification"]["expect"]["exit_code"] = json!(2.0);
+        let library = library(&wire);
+        let expanded = expand_criteria(&[("C1".to_string(), "cargo-check".to_string())], &library)
+            .expect("the name is known");
+        assert!(matches!(
+            Verification::from(&expanded[0].verification),
+            Verification::Command { exit_code: 2, .. }
+        ));
+    }
+
+    #[test]
+    fn refuses_a_library_longer_than_a_refusal_can_name() {
+        // A hundred, the ceiling every list in a contract has and for the same reason (spec 3):
+        // this refusal prints the list it refused, and one nobody can read is not a refusal.
+        let of_length = |length: usize| {
+            let one = a_criteria_library_wire()["criteria"][0].clone();
+            let mut wire = a_criteria_library_wire();
+            wire["criteria"] = Value::Array(
+                (0..length)
+                    .map(|index| {
+                        let mut criterion = one.clone();
+                        criterion["name"] = json!(format!("criterion-{index}"));
+                        criterion
+                    })
+                    .collect(),
+            );
+            wire
+        };
+        // Distinct names, so that the count is the only thing left to refuse.
+        library(&of_length(100));
+        assert_eq!(paths(&of_length(101)), ["/criteria"]);
+    }
+
+    #[test]
     fn refuses_a_name_that_is_not_a_slug() {
         for name in ["Cargo Check", "cargo_check", "-check", ""] {
             let mut wire = a_criteria_library_wire();

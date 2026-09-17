@@ -184,22 +184,26 @@
       "properties": {
         "max_input_tokens": {
           "type": "integer",
-          "minimum": 1
+          "minimum": 1,
+          "maximum": 9007199254740991
         },
         "max_output_tokens": {
           "type": "integer",
-          "minimum": 1
+          "minimum": 1,
+          "maximum": 9007199254740991
         },
         "max_wall_clock_seconds": {
           "type": "integer",
-          "minimum": 1
+          "minimum": 1,
+          "maximum": 9007199254740991
         },
         "max_tool_calls": {
           "type": "integer",
-          "minimum": 1
+          "minimum": 1,
+          "maximum": 9007199254740991
         }
       },
-      "description": "Overrides for one session's limits. What is left out keeps the role's default (farik-core's default_session_limits)."
+      "description": "Overrides for one session's limits. What is left out keeps the role's default (farik-core's default_session_limits). The ceiling is the largest integer JSON holds exactly: a number past it is refused here, naming the field, rather than by the typed build, naming serde."
     },
     "policy": {
       "type": "object",

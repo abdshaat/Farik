@@ -25,8 +25,9 @@ pub enum Verification {
     Command {
         /// Run inside the sandbox from the project root.
         command: String,
-        /// The exit code that counts as a pass; the schema's default is 0.
-        exit_code: i64,
+        /// The exit code that counts as a pass; the schema's default is 0. What a process can
+        /// return, which is what the schema now says too.
+        exit_code: i32,
         /// Text the standard output must contain.
         stdout_contains: Option<String>,
         /// Text the standard output must not contain.

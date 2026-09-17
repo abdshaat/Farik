@@ -212,8 +212,9 @@ pub enum CriterionTemplateVerification {
 #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, Default, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct CriterionTemplateVerificationVariant0Expect {
+    ///What a process can return. The default is 0.
     #[serde(default)]
-    pub exit_code: i64,
+    pub exit_code: i32,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
     pub stdout_contains: ::std::option::Option<::std::string::String>,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
@@ -223,7 +224,7 @@ pub struct CriterionTemplateVerificationVariant0Expect {
 #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct FarikCriteriaLibrary {
-    ///Names are unique, which JSON Schema cannot say and validate_criteria therefore does. A library may be empty: a project whose scan found nothing still has a file.
+    ///Names are unique, which JSON Schema cannot say and validate_criteria therefore does. A library may be empty: a project whose scan found nothing still has a file. A hundred at most, the same ceiling every list in a contract has and for the same reason (spec 3): the refusal that names what is wrong prints the list, and a refusal nobody can read is not one.
     pub criteria: ::std::vec::Vec<CriterionTemplate>,
 }
 /// Error types.

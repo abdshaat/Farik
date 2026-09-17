@@ -317,7 +317,10 @@
                   "properties": {
                     "exit_code": {
                       "type": "integer",
-                      "default": 0
+                      "default": 0,
+                      "minimum": -2147483648,
+                      "maximum": 2147483647,
+                      "description": "What a process can return. The default is 0."
                     },
                     "stdout_contains": {
                       "type": "string"

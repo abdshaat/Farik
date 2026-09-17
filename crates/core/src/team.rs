@@ -569,6 +569,60 @@ mod tests {
     }
 
     #[test]
+    fn reads_a_whole_number_a_person_wrote_with_a_fraction() {
+        // YAML and JSON both call 2.0 a number and JSON Schema calls it an integer, so a file that
+        // says `wip_limit_per_agent: 2.0` is one the schema accepts. Normalising it is what keeps
+        // the typed build from refusing it afterwards at the root, with a message about serde
+        // rather than about the field.
+        let mut wire = a_full_team_wire();
+        wire["policy"]["wip_limit_per_agent"] = json!(2.0);
+        wire["policy"]["blocked_limit_hours"] = json!(24.0);
+        wire["policy"]["max_iterations"] = json!(3.0);
+        wire["budgets"]["session"]["max_tool_calls"] = json!(200.0);
+        let team = team(&wire);
+        assert_eq!(team.policy.wip_limit_per_agent, 2);
+        assert_eq!(team.policy.blocked_limit_hours.get(), 24);
+        assert_eq!(team.policy.max_iterations.get(), 3);
+        assert_eq!(
+            team.budgets
+                .session
+                .expect("session limits")
+                .max_tool_calls
+                .map(std::num::NonZeroU64::get),
+            Some(200)
+        );
+    }
+
+    #[test]
+    fn refuses_a_number_or_a_list_the_schema_will_not_hold() {
+        // Every one of these is refused by the schema, at its own pointer, rather than by the typed
+        // build at the root: a person is told which field they got wrong. The session limits are
+        // capped at the largest integer JSON holds exactly, which is what makes 1e19 a refusal
+        // here instead of a sentence about serde and a nonzero u64.
+        let long_name = "a".repeat(101);
+        for (pointer, value) in [
+            ("/budgets/session/max_input_tokens", json!(1.0e19)),
+            ("/name", json!(long_name.clone())),
+            ("/agents/0/id", json!("a".repeat(65))),
+            ("/agents/0/display_name", json!(long_name.clone())),
+            ("/agents/0/model/id", json!(long_name.clone())),
+            ("/policy/integration_branch", json!("a".repeat(201))),
+            ("/rules/protected_paths", json!(vec!["src/**"; 101])),
+            ("/rules/forbidden_commands", json!(vec![""; 1])),
+        ] {
+            let mut wire = a_full_team_wire();
+            *wire
+                .pointer_mut(pointer)
+                .expect("the full fixture has every field") = value.clone();
+            let paths = paths(&wire);
+            assert!(
+                !paths.is_empty() && paths.iter().all(|path| path.starts_with(pointer)),
+                "{pointer}: {paths:?}"
+            );
+        }
+    }
+
+    #[test]
     fn a_role_s_tiers_are_the_user_s_to_widen_and_to_narrow() {
         // 5.6: a role's tiers are overridable per agent. Ada is a Product Manager, whose defaults
         // are read and network; she is granted execute and denied network.

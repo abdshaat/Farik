@@ -11,11 +11,11 @@
   "properties": {
     "criteria": {
       "type": "array",
-      "maxItems": 200,
+      "maxItems": 100,
       "items": {
         "$ref": "#/$defs/criterionTemplate"
       },
-      "description": "Names are unique, which JSON Schema cannot say and validate_criteria therefore does. A library may be empty: a project whose scan found nothing still has a file."
+      "description": "Names are unique, which JSON Schema cannot say and validate_criteria therefore does. A library may be empty: a project whose scan found nothing still has a file. A hundred at most, the same ceiling every list in a contract has and for the same reason (spec 3): the refusal that names what is wrong prints the list, and a refusal nobody can read is not one."
     }
   },
   "$defs": {
@@ -74,7 +74,10 @@
                   "properties": {
                     "exit_code": {
                       "type": "integer",
-                      "default": 0
+                      "default": 0,
+                      "minimum": -2147483648,
+                      "maximum": 2147483647,
+                      "description": "What a process can return. The default is 0."
                     },
                     "stdout_contains": {
                       "type": "string"
