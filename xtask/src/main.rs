@@ -81,12 +81,7 @@ fn check(root: &Path, tests: Tests) -> anyhow::Result<()> {
             "warnings",
         ],
     )?;
-    match tests {
-        Tests::WithoutTheOnesThatNeedAProgram => cargo(root, &["test", "--workspace"])?,
-        // `--include-ignored` rather than `--ignored`: this runs everything, so one command is the
-        // whole check rather than half of it.
-        Tests::All => cargo(root, &["test", "--workspace", "--", "--include-ignored"])?,
-    }
+    cargo(root, &xtask::check::test_arguments(tests))?;
     generate(root, true)?;
     todos(root)?;
     core_io(root)?;

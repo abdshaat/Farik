@@ -26,9 +26,24 @@ pub fn tests_requested(flag: Option<&str>) -> Result<Tests, String> {
     }
 }
 
+/// What `cargo` is given to run those tests.
+///
+/// Here rather than in `main.rs` because this is the half that matters: the flag's *effect* is one
+/// argument, continuous integration is one job running one command, and nothing else in the
+/// repository would notice if that argument went missing.
+#[must_use]
+pub fn test_arguments(tests: Tests) -> Vec<&'static str> {
+    match tests {
+        Tests::WithoutTheOnesThatNeedAProgram => vec!["test", "--workspace"],
+        // `--include-ignored` rather than `--ignored`: this runs everything, so one command is the
+        // whole check rather than half of it.
+        Tests::All => vec!["test", "--workspace", "--", "--include-ignored"],
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{Tests, tests_requested};
+    use super::{Tests, test_arguments, tests_requested};
 
     #[test]
     fn runs_the_tests_that_need_no_program_when_asked_for_nothing() {
@@ -41,6 +56,25 @@ mod tests {
     #[test]
     fn runs_everything_when_asked_for_the_integration_tests() {
         assert_eq!(tests_requested(Some("--integration")), Ok(Tests::All));
+    }
+
+    #[test]
+    fn runs_the_workspace_and_stops_there_when_the_flag_is_not_given() {
+        assert_eq!(
+            test_arguments(Tests::WithoutTheOnesThatNeedAProgram),
+            ["test", "--workspace"]
+        );
+    }
+
+    #[test]
+    fn asks_cargo_for_the_ignored_tests_when_it_is_asked_for_everything() {
+        // The one argument that runs the tests marked `#[ignore]`. Continuous integration is a
+        // single job running a single command, so if this went missing the whole integration suite
+        // would stop running and the check would still say ok.
+        assert_eq!(
+            test_arguments(Tests::All),
+            ["test", "--workspace", "--", "--include-ignored"]
+        );
     }
 
     #[test]
