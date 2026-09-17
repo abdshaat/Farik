@@ -444,11 +444,11 @@ Produces: the crate `farik-protocol`; `farik_protocol::generated::event::{EventK
 - [ ] Wire the schema into the generator. In `xtask/src/generate.rs`, change the array's length to 3 and append the entry:
 
   ```rust
-  GeneratedSchema {
-      schema: "docs/schemas/event.schema.json",
-      types: "crates/protocol/src/generated/event.rs",
-      schema_copy: "crates/protocol/src/generated/event.schema.json",
-  },
+      GeneratedSchema {
+          schema: "docs/schemas/event.schema.json",
+          types: "crates/protocol/src/generated/event.rs",
+          schema_copy: "crates/protocol/src/generated/event.schema.json",
+      },
   ```
 
   Create `crates/protocol/src/generated/mod.rs`, without the `command` line, which Task 8 adds:
@@ -573,7 +573,7 @@ Produces: `farik_core::contract::SCHEMA_JSON`
   # expected: all passing, including keeps_the_summary_vocabularies_the_contract_schema_owns
   ```
 
-- [ ] Commit: `feat(core): expose the contract schema so another crate can test against it`
+- [ ] Commit: `feat(core): expose the contract schema to another crate's tests`
 
   The type is `feat(core)` rather than `test(protocol)` because the change that makes the test
   possible is a widening of `farik-core`'s public interface, which is the half of the diff a
@@ -1091,7 +1091,7 @@ Produces: `farik_protocol::event::{EventEnvelope, EventBody, FarikEvent, EventKi
 - [ ] Tie the two lists of kinds together so that neither can gain a kind without the other. Add one line to `names_every_event_kind_as_an_entity_and_a_past_tense_verb` in `crates/protocol/src/lib.rs`, as the function's last statement, after the `for` loop:
 
   ```rust
-  assert_eq!(KINDS.map(|(_, kind)| kind), crate::event::EVERY_KIND);
+          assert_eq!(KINDS.map(|(_, kind)| kind), crate::event::EVERY_KIND);
   ```
 
   ```
@@ -1142,9 +1142,9 @@ Produces: `farik_protocol::event::event_to_value`
   and add `event_to_value` to that module's `use super::{...}` line, which becomes:
 
   ```rust
-  use super::{
-      EVERY_KIND, EventBody, EventKind, ValidationError, event_from_value, event_to_value,
-  };
+      use super::{
+          EVERY_KIND, EventBody, EventKind, ValidationError, event_from_value, event_to_value,
+      };
   ```
 
 - [ ] Run it and confirm it fails because the writer is missing:
@@ -1166,7 +1166,7 @@ Produces: `farik_protocol::event::event_to_value`
   use serde_json::{Map, Value};
   ```
 
-  then append to the module, after `event_from_value` and its helpers:
+  then insert immediately before `#[cfg(test)]`, which is the last item in the file:
 
   ```rust
   /// One event as the wire value the log holds, the inverse of `event_from_value`.
@@ -1413,10 +1413,10 @@ Produces: `farik_protocol::event::{NewEvent, EventIds, EventError, new_event}`
   and extend that module's `use super::{...}` line, which becomes:
 
   ```rust
-  use super::{
-      EVERY_KIND, EventBody, EventError, EventIds, EventKind, ValidationError, event_from_value,
-      event_to_value, new_event,
-  };
+      use super::{
+          EVERY_KIND, EventBody, EventError, EventIds, EventKind, ValidationError, event_from_value,
+          event_to_value, new_event,
+      };
   ```
 
 - [ ] Run it and confirm it fails because nothing stamps an event yet:
@@ -1585,11 +1585,11 @@ Produces: `farik_protocol::command::{Command, CommandName, RequestSize, command_
   Append the entry to `GENERATED_SCHEMAS` in `xtask/src/generate.rs` and change the array's length to 4:
 
   ```rust
-  GeneratedSchema {
-      schema: "docs/schemas/command.schema.json",
-      types: "crates/protocol/src/generated/command.rs",
-      schema_copy: "crates/protocol/src/generated/command.schema.json",
-  },
+      GeneratedSchema {
+          schema: "docs/schemas/command.schema.json",
+          types: "crates/protocol/src/generated/command.rs",
+          schema_copy: "crates/protocol/src/generated/command.schema.json",
+      },
   ```
 
   Declare the module in `crates/protocol/src/generated/mod.rs`, above `pub mod event;`:
@@ -2061,7 +2061,7 @@ This task changes documentation and has no test cycle. As in Task 3, the `> ` ma
 
   > Generated types derive `PartialEq` (`TypeSpaceSettings::with_derive`), so that a test can compare a generated value to an expected one; this holds for every schema the workspace adds, not only the ones that have it today.
 
-  The derive is turned on for the whole generator by phase 2 step 01, so a later step that adds a schema inherits it and should not have to rediscover why.
+  Note, not text to write: the derive is turned on for the whole generator by phase 2 step 01, so a later step that adds a schema inherits it rather than rediscovering why it is there.
 
 - [ ] In `CLAUDE.md`, replace the "Current state" section's paragraphs with:
 
