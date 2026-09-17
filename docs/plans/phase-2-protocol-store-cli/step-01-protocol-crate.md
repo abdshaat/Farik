@@ -1911,7 +1911,7 @@ Files: created `crates/protocol/src/clock.rs`; modified `crates/protocol/src/lib
 Consumes: nothing
 Produces: `farik_protocol::clock::{Clock, IdSource, FixedClock, SequentialIds}`
 
-- [ ] Write the failing test. Create `crates/protocol/src/clock.rs` with the module doc and the tests only:
+- [x] Write the failing test. Create `crates/protocol/src/clock.rs` with the module doc and the tests only:
 
   ```rust
   //! Time and identifiers, injected rather than read from the machine, so that a test decides both
@@ -1959,7 +1959,7 @@ Produces: `farik_protocol::clock::{Clock, IdSource, FixedClock, SequentialIds}`
   pub mod clock;
   ```
 
-- [ ] Run it and confirm it fails because the traits are missing:
+- [x] Run it and confirm it fails because the traits are missing:
 
   ```
   cargo test -p farik-protocol
@@ -1967,7 +1967,7 @@ Produces: `farik_protocol::clock::{Clock, IdSource, FixedClock, SequentialIds}`
   #           `super::FixedClock`, `super::IdSource`, `super::SequentialIds`
   ```
 
-- [ ] Write the minimal implementation. Insert into `crates/protocol/src/clock.rs`, between the module doc and the tests:
+- [x] Write the minimal implementation. Insert into `crates/protocol/src/clock.rs`, between the module doc and the tests:
 
   ```rust
   use std::sync::atomic::{AtomicU64, Ordering};
@@ -2035,14 +2035,14 @@ Produces: `farik_protocol::clock::{Clock, IdSource, FixedClock, SequentialIds}`
   }
   ```
 
-- [ ] Run the test and the whole workspace check; confirm green:
+- [x] Run the test and the whole workspace check; confirm green:
 
   ```
   cargo xtask check
   # expected: ends with "xtask check: ok"
   ```
 
-- [ ] Commit: `feat(protocol): inject time and identifiers through two traits`
+- [x] Commit: `feat(protocol): inject time and identifiers through two traits`
 
 ### Task 10: The plans say where the phase is
 

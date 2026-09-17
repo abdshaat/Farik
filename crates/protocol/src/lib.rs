@@ -1,6 +1,8 @@
 //! Farik's wire types: the event envelope, the event kinds, the commands, and the traits that
 //! keep the machine's clock and its identifiers out of the crates that decide things.
 
+/// Time and identifiers, injected rather than read from the machine.
+pub mod clock;
 /// The commands the daemon accepts.
 pub mod command;
 /// The event envelope, the event bodies, and the reader and writer of the wire form.
