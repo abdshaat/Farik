@@ -1882,7 +1882,7 @@ Files: created `docs/schemas/criteria.schema.json`, `crates/core/src/criteria.rs
 Consumes: the four `pub(crate)` helpers Task 1 made
 Produces: `farik_core::criteria::{CriteriaLibrary, CriterionTemplate, validate_criteria}`
 
-- [ ] Write the failing tests. Create `crates/core/src/criteria.rs` with the module doc and the fixtures declaration:
+- [x] Write the failing tests. Create `crates/core/src/criteria.rs` with the module doc and the fixtures declaration:
 
   ```rust
   //! The criterion library (`docs/SPEC.md` section 5.13): `docs/schemas/criteria.schema.json` as
@@ -1893,7 +1893,7 @@ Produces: `farik_core::criteria::{CriteriaLibrary, CriterionTemplate, validate_c
   pub mod fixtures;
   ```
 
-- [ ] Create `crates/core/src/criteria/fixtures.rs`:
+- [x] Create `crates/core/src/criteria/fixtures.rs`:
 
   ```rust
   use serde_json::{Value, json};
@@ -1972,7 +1972,7 @@ Produces: `farik_core::criteria::{CriteriaLibrary, CriterionTemplate, validate_c
   }
   ```
 
-- [ ] Append the tests module to `crates/core/src/criteria.rs`:
+- [x] Append the tests module to `crates/core/src/criteria.rs`:
 
   ```rust
   #[cfg(test)]
@@ -2064,14 +2064,14 @@ Produces: `farik_core::criteria::{CriteriaLibrary, CriterionTemplate, validate_c
   }
   ```
 
-- [ ] Declare the module in `crates/core/src/lib.rs`, after `contract` and before `generated`:
+- [x] Declare the module in `crates/core/src/lib.rs`, after `contract` and before `generated`:
 
   ```rust
   /// The criterion library and its validator.
   pub mod criteria;
   ```
 
-- [ ] Run them and confirm they fail because nothing of the library exists:
+- [x] Run them and confirm they fail because nothing of the library exists:
 
   ```
   cargo test -p farik-core --lib
@@ -2081,7 +2081,7 @@ Produces: `farik_core::criteria::{CriteriaLibrary, CriterionTemplate, validate_c
   # error: could not compile `farik-core` (lib test) due to 1 previous error
   ```
 
-- [ ] Write the schema. Create `docs/schemas/criteria.schema.json`. Its `verification` is a copy of the task contract schema's, and task 5 adds the test that holds the two copies to being identical:
+- [x] Write the schema. Create `docs/schemas/criteria.schema.json`. Its `verification` is a copy of the task contract schema's, and task 5 adds the test that holds the two copies to being identical:
 
   ```json
   {
@@ -2261,7 +2261,7 @@ Produces: `farik_core::criteria::{CriteriaLibrary, CriterionTemplate, validate_c
   }
   ```
 
-- [ ] Generate its types. In `xtask/src/generate.rs`, change the array's length to 6 and add the entry after the team's:
+- [x] Generate its types. In `xtask/src/generate.rs`, change the array's length to 6 and add the entry after the team's:
 
   ```rust
       GeneratedSchema {
@@ -2279,13 +2279,13 @@ Produces: `farik_core::criteria::{CriteriaLibrary, CriterionTemplate, validate_c
   #           generated crates/core/src/generated/criteria.schema.json
   ```
 
-- [ ] Declare the generated module in `crates/core/src/generated/mod.rs`. The list is alphabetical, so this goes before `prices`:
+- [x] Declare the generated module in `crates/core/src/generated/mod.rs`. The list is alphabetical, so this goes before `prices`:
 
   ```rust
   pub mod criteria;
   ```
 
-- [ ] Write the minimal implementation. In `crates/core/src/criteria.rs`, replace the module doc with the doc and its imports:
+- [x] Write the minimal implementation. In `crates/core/src/criteria.rs`, replace the module doc with the doc and its imports:
 
   ```rust
   //! The criterion library (`docs/SPEC.md` section 5.13): `docs/schemas/criteria.schema.json` as
@@ -2385,7 +2385,7 @@ Produces: `farik_core::criteria::{CriteriaLibrary, CriterionTemplate, validate_c
   }
   ```
 
-- [ ] Run the check and confirm green:
+- [x] Run the check and confirm green:
 
   ```
   cargo xtask check --integration
@@ -2395,7 +2395,7 @@ Produces: `farik_core::criteria::{CriteriaLibrary, CriterionTemplate, validate_c
   #   test result: ok. 29 passed (xtask)
   ```
 
-- [ ] Commit: `feat(core): read a criterion library and refuse a repeated name`
+- [x] Commit: `feat(core): read a criterion library and refuse a repeated name`
 
 ### Task 5: Expanding a reference into a criterion
 

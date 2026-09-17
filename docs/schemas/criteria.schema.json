@@ -1,0 +1,175 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://farik.dev/schemas/criteria.schema.json",
+  "title": "FarikCriteriaLibrary",
+  "description": "The named, reusable exit criteria a project verifies its work with, stored as .farik/team/criteria.yaml: the project's own check and test commands found by the project scan, and any the human adds. Referenced by name when a contract is written and expanded into it, so that contracts across a project verify the same way. See docs/SPEC.md section 5.13.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "criteria"
+  ],
+  "properties": {
+    "criteria": {
+      "type": "array",
+      "maxItems": 200,
+      "items": {
+        "$ref": "#/$defs/criterionTemplate"
+      },
+      "description": "Names are unique, which JSON Schema cannot say and validate_criteria therefore does. A library may be empty: a project whose scan found nothing still has a file."
+    }
+  },
+  "$defs": {
+    "criterionTemplate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "text",
+        "verification"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$",
+          "maxLength": 64,
+          "description": "What a contract refers to this criterion by. Kebab-case, unique in the library."
+        },
+        "text": {
+          "type": "string",
+          "minLength": 10,
+          "description": "What the criterion says, in the words it will carry into every contract that uses it."
+        },
+        "source": {
+          "type": "string",
+          "enum": [
+            "project_scan",
+            "human"
+          ],
+          "description": "Where it came from. Left out, the human's: a refresh of the project scan replaces what the scan found and never touches what a person wrote."
+        },
+        "verification": {
+          "type": "object",
+          "required": [
+            "method"
+          ],
+          "oneOf": [
+            {
+              "additionalProperties": false,
+              "required": [
+                "method",
+                "command",
+                "expect"
+              ],
+              "properties": {
+                "method": {
+                  "const": "command"
+                },
+                "command": {
+                  "type": "string",
+                  "description": "Run inside the sandbox from the project root."
+                },
+                "expect": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "exit_code": {
+                      "type": "integer",
+                      "default": 0
+                    },
+                    "stdout_contains": {
+                      "type": "string"
+                    },
+                    "stdout_not_contains": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "additionalProperties": false,
+              "required": [
+                "method",
+                "command"
+              ],
+              "properties": {
+                "method": {
+                  "const": "test"
+                },
+                "command": {
+                  "type": "string",
+                  "description": "A test command. Passes on exit code 0."
+                },
+                "new_tests_required": {
+                  "type": "boolean",
+                  "default": false,
+                  "description": "If true, the reviewer checks that the diff adds at least one test and that it fails on the base branch."
+                }
+              }
+            },
+            {
+              "additionalProperties": false,
+              "required": [
+                "method",
+                "path"
+              ],
+              "properties": {
+                "method": {
+                  "const": "artifact"
+                },
+                "path": {
+                  "type": "string",
+                  "description": "A file that must exist after the task, relative to the project root."
+                },
+                "must_contain": {
+                  "type": "array",
+                  "maxItems": 100,
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              }
+            },
+            {
+              "additionalProperties": false,
+              "required": [
+                "method",
+                "rubric"
+              ],
+              "properties": {
+                "method": {
+                  "const": "review"
+                },
+                "rubric": {
+                  "type": "array",
+                  "minItems": 1,
+                  "maxItems": 100,
+                  "items": {
+                    "type": "string"
+                  },
+                  "description": "Yes/no questions the reviewer answers with a cited reason each. Used where no command can decide."
+                }
+              }
+            },
+            {
+              "additionalProperties": false,
+              "required": [
+                "method",
+                "question"
+              ],
+              "properties": {
+                "method": {
+                  "const": "human"
+                },
+                "question": {
+                  "type": "string",
+                  "description": "What the human is asked to confirm. Satisfied only by a human.accepted event."
+                }
+              }
+            }
+          ]
+        }
+      }
+    }
+  }
+}
