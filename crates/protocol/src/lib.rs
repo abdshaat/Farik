@@ -1,6 +1,8 @@
 //! Farik's wire types: the event envelope, the event kinds, the commands, and the traits that
 //! keep the machine's clock and its identifiers out of the crates that decide things.
 
+/// The event envelope, the event bodies, and the reader and writer of the wire form.
+pub mod event;
 /// Types generated from `docs/schemas/`.
 pub mod generated;
 
@@ -27,6 +29,7 @@ mod tests {
             assert_eq!(kind.to_string(), wire);
             assert_eq!(wire.parse::<EventKind>().expect("a known kind"), kind);
         }
+        assert_eq!(KINDS.map(|(_, kind)| kind), crate::event::EVERY_KIND);
     }
 
     #[test]

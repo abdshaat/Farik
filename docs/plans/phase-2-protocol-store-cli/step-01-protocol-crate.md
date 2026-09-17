@@ -586,7 +586,7 @@ Files: created `crates/protocol/src/event.rs`, `crates/protocol/src/event/fixtur
 Consumes: `farik_protocol::generated::event::*` from Task 2; `farik_core::contract::{TaskId, ValidationError}` on `main`
 Produces: `farik_protocol::event::{EventEnvelope, EventBody, FarikEvent, EventKind, EVERY_KIND, event_from_value}` and `farik_protocol::event::fixtures::{an_event_wire, a_full_event_wire, a_body_wire, a_contract_summary_wire}`
 
-- [ ] Write the fixtures first; they are test data, not behavior, and every test below reads them. Create `crates/protocol/src/event/fixtures.rs`:
+- [x] Write the fixtures first; they are test data, not behavior, and every test below reads them. Create `crates/protocol/src/event/fixtures.rs`:
 
   ```rust
   //! Builders for test events, usable by every crate's tests.
@@ -662,7 +662,7 @@ Produces: `farik_protocol::event::{EventEnvelope, EventBody, FarikEvent, EventKi
   }
   ```
 
-- [ ] Write the failing test. Create `crates/protocol/src/event.rs` with the module doc, the fixtures declaration, and the tests, and nothing else yet:
+- [x] Write the failing test. Create `crates/protocol/src/event.rs` with the module doc, the fixtures declaration, and the tests, and nothing else yet:
 
   ```rust
   //! Farik's events: `docs/schemas/event.schema.json` as Rust types, the reader that turns an
@@ -831,7 +831,7 @@ Produces: `farik_protocol::event::{EventEnvelope, EventBody, FarikEvent, EventKi
   pub mod event;
   ```
 
-- [ ] Run it and confirm it fails because the reader and the types are missing:
+- [x] Run it and confirm it fails because the reader and the types are missing:
 
   ```
   cargo test -p farik-protocol
@@ -842,7 +842,7 @@ Produces: `farik_protocol::event::{EventEnvelope, EventBody, FarikEvent, EventKi
   #           `super::EventKind`, `super::ValidationError`, `super::event_from_value`
   ```
 
-- [ ] Write the minimal implementation. Insert into `crates/protocol/src/event.rs`, between the `//!` module doc and the `///` line that documents `pub mod fixtures;`:
+- [x] Write the minimal implementation. Insert into `crates/protocol/src/event.rs`, between the `//!` module doc and the `///` line that documents `pub mod fixtures;`:
 
   ```rust
   use std::str::FromStr;
@@ -1081,14 +1081,14 @@ Produces: `farik_protocol::event::{EventEnvelope, EventBody, FarikEvent, EventKi
   }
   ```
 
-- [ ] Run the test and the crate's suite; confirm green:
+- [x] Run the test and the crate's suite; confirm green:
 
   ```
   cargo test -p farik-protocol
   # expected: all passing, eleven tests in event::tests
   ```
 
-- [ ] Tie the two lists of kinds together so that neither can gain a kind without the other. Add one line to `names_every_event_kind_as_an_entity_and_a_past_tense_verb` in `crates/protocol/src/lib.rs`, as the function's last statement, after the `for` loop:
+- [x] Tie the two lists of kinds together so that neither can gain a kind without the other. Add one line to `names_every_event_kind_as_an_entity_and_a_past_tense_verb` in `crates/protocol/src/lib.rs`, as the function's last statement, after the `for` loop:
 
   ```rust
           assert_eq!(KINDS.map(|(_, kind)| kind), crate::event::EVERY_KIND);
@@ -1099,7 +1099,7 @@ Produces: `farik_protocol::event::{EventEnvelope, EventBody, FarikEvent, EventKi
   # expected: still all passing
   ```
 
-- [ ] Commit: `feat(protocol): read an event from its wire form`
+- [x] Commit: `feat(protocol): read an event from its wire form`
 
 ### Task 6: The writer and the round trip
 
