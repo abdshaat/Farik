@@ -43,7 +43,7 @@ The log answers "what happened"; after this step the store also answers "where i
 - The projections live in the log's own database and share its connection and its lock: chose that over a second connection to the same file because a log opened at `:memory:` cannot be reached by a second connection at all, so the projections of a test log would be untestable; and because sharing the lock means a view cannot read a half-written append. `EventLog::connection` becomes `pub(crate)` for it.
 - `Projections` holds an `Arc<EventLog>` and `open_projections` takes one: chose that over `open_projections(log: &EventLog)`, which the project plan records, because `rebuild` and the catch-up on open both have to read the log, and a `Projections` that borrows the log could not be held beside it — phase 3's `ToolContext` and `OrchestratorDeps` hold `Arc<EventLog>` and `Arc<Projections>` side by side. Keeping the `Arc` inside is what lets `rebuild(&self)` keep the signature the plan records. Task 6 records the change.
 - `TaskProjection` carries only the fields an event of this phase can fill — `task_id`, `kind`, `parent`, `title`, `status`, `risk`, `triaged`, `locked`, `updated_seq`. The `assignee_id`, `reviewer_id`, `sprint_id` and `iteration` the project plan lists arrive with `task.transitioned` in phase 3 step 03, which is the event that carries them: a column nothing can write is a column no test can hold to anything, and the plan already defers `cost_usd` to 3.09 and three flags to 3.10 on exactly this reasoning. Task 6 records it.
-- `CostScope`, `CostProjection` and `Projections::costs` are deferred to phase 3 step 09, where `cost.recorded` arrives: chose that over building them now because no event of this phase carries a cost and nothing reads one until phase 5 step 04, so the only test possible would be one that wrote the table by hand and read it back — a test of SQLite rather than of Farik. Task 6 records it.
+- `CostScope`, `CostProjection` and `Projections::costs` are deferred to phase 3 step 09, where `cost.recorded` arrives: chose that over building them now because no event of this phase carries a cost, the first thing that reads one is phase 3 step 09's own `budget_state`, which arrives beside the event, and no view reads one until phase 5 step 04, so the only test possible would be one that wrote the table by hand and read it back — a test of SQLite rather than of Farik. Task 6 records it.
 - An event at or before the cursor is ignored rather than applied again: chose idempotence over trusting the caller because a command that appends, projects, and also catches up on the next open would otherwise take one append in twice, and `updated_seq` would go backwards. The row and the cursor move in one transaction, so the cursor never claims work that was not done.
 - Opening catches up; `rebuild` resets the cursor and replays: chose two operations over one because they answer different questions. Catching up is the ordinary path and costs nothing when there is nothing to catch up on. `rebuild` is the repair, for a row that drifted for any reason at all — a bug fixed since, a row changed by hand, a migration that added a column.
 - An update that matches no row is a no-op, not a refusal: a `contract.locked` whose `task.created` is missing means a log that cannot be right, and a row needs a title, a status and a risk that only a summary carries. Refusing inside the store would make one bad row unread the whole board, which is the shape of defect the step 02 review found in `read`. `farik doctor` (step 05) is what reports a log and its files disagreeing, and it needs a board it can read to do that.
@@ -175,7 +175,9 @@ Produces: `farik_store::{Projections, open_projections}`, `Projections::cursor`
 
   ```
   cargo test -p farik-store
-  # expected: FAIL to compile, twice:
+  # expected: FAIL to compile, twice. Both errors appear when the target directory is warm,
+  # which it is after the baseline check stage 3 asks for; from cold, cargo stops after the
+  # first and prints `warning: build failed, waiting for other jobs to finish...`:
   # error[E0432]: unresolved imports `projections::Projections`, `projections::open_projections`
   # error[E0432]: unresolved imports `super::Arc`, `super::EventLog`, `super::Projections`,
   #   `super::open_projections`
@@ -1122,11 +1124,12 @@ Produces: the `request.triaged`, `contract.locked` and `contract.unlocked` arms 
   #           test result: ok. 6 passed (event_log_file)
   ```
 
-- [ ] Run the lint check:
+- [ ] Run the format and lint checks:
 
   ```
+  cargo fmt --all --check
   cargo clippy --workspace --all-targets -- -D warnings
-  # expected: silent
+  # expected: both silent
   ```
 
 - [ ] Commit: `feat(store): record a triage and a contract the human holds`
@@ -1330,11 +1333,12 @@ Produces: the catch-up in `open_projections`, and an `apply` that takes one even
   #           test result: ok. 7 passed (event_log_file)
   ```
 
-- [ ] Run the lint check:
+- [ ] Run the format and lint checks:
 
   ```
+  cargo fmt --all --check
   cargo clippy --workspace --all-targets -- -D warnings
-  # expected: silent
+  # expected: both silent
   ```
 
 - [ ] Confirm the reopen test is a pin rather than a passenger. Make these three edits, which give `Projections` a database of its own instead of the log's:
