@@ -1528,7 +1528,7 @@ Files: created `docs/schemas/command.schema.json`, `crates/protocol/src/command.
 Consumes: `farik_core::contract::{TaskContract, TaskId, ValidationError, validate_contract}` and `farik_core::contract::fixtures::a_contract_wire` on `main`
 Produces: `farik_protocol::command::{Command, CommandName, RequestSize, command_from_value}`
 
-- [ ] Write the schema. Create `docs/schemas/command.schema.json`:
+- [x] Write the schema. Create `docs/schemas/command.schema.json`:
 
   ```json
   {
@@ -1606,7 +1606,7 @@ Produces: `farik_protocol::command::{Command, CommandName, RequestSize, command_
   #           generated crates/protocol/src/generated/command.schema.json
   ```
 
-- [ ] Write the failing test. Create `crates/protocol/src/command.rs` with the module doc and the tests only:
+- [x] Write the failing test. Create `crates/protocol/src/command.rs` with the module doc and the tests only:
 
   ```rust
   //! The commands the daemon accepts: `docs/schemas/command.schema.json` as Rust types, and the
@@ -1728,7 +1728,7 @@ Produces: `farik_protocol::command::{Command, CommandName, RequestSize, command_
   pub mod command;
   ```
 
-- [ ] Run it and confirm it fails because nothing reads a command yet:
+- [x] Run it and confirm it fails because nothing reads a command yet:
 
   ```
   cargo test -p farik-protocol
@@ -1736,7 +1736,7 @@ Produces: `farik_protocol::command::{Command, CommandName, RequestSize, command_
   #           `super::RequestSize`, `super::ValidationError`, `super::command_from_value`
   ```
 
-- [ ] Write the minimal implementation. Insert into `crates/protocol/src/command.rs`, between the module doc and the tests:
+- [x] Write the minimal implementation. Insert into `crates/protocol/src/command.rs`, between the module doc and the tests:
 
   ```rust
   use std::str::FromStr;
@@ -1895,14 +1895,14 @@ Produces: `farik_protocol::command::{Command, CommandName, RequestSize, command_
   }
   ```
 
-- [ ] Run the test and the crate's suite; confirm green:
+- [x] Run the test and the crate's suite; confirm green:
 
   ```
   cargo test -p farik-protocol
   # expected: all passing, seven tests in command::tests
   ```
 
-- [ ] Commit: `feat(protocol): read a command from its wire form`
+- [x] Commit: `feat(protocol): read a command from its wire form`
 
 ### Task 9: Time and identifiers, injected
 

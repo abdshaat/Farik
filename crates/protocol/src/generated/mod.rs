@@ -5,4 +5,5 @@
 //! answers "which body is this?" by shape, and the event's `kind` is what decides it. A value is
 //! validated against the schema and then read by kind: `crate::event::event_from_value`.
 
+pub mod command;
 pub mod event;
