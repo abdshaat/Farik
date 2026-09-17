@@ -7,6 +7,7 @@
 
 use std::fmt;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use farik_core::contract::{TaskContract, TaskId, ValidationError, validate_contract};
 use farik_core::criteria::{CriteriaLibrary, validate_criteria};
@@ -98,6 +99,15 @@ const LOCAL_GITIGNORE: &str = "*\n";
 /// Where that file lives, relative to `.farik/`.
 const LOCAL_GITIGNORE_PATH: &str = "local/.gitignore";
 
+/// How many files this process has written beside another.
+///
+/// The rename that publishes a file is all or nothing; what is in the file being renamed is not. So
+/// two writers that shared it could publish a file holding half of each, or an empty one, or fail
+/// the rename outright because the other had already renamed it away. This and the process id make
+/// the name a writer's own, which is what the promise needs: `farik` and the daemon are different
+/// processes on one project (8.5), and tasks run at the same time (5.14).
+static WRITES_BESIDE: AtomicU64 = AtomicU64::new(0);
+
 impl ProjectFiles {
     /// The `.farik/` directory of the repository at `root`. Nothing is read and nothing is written
     /// until a method is called.
@@ -150,7 +160,7 @@ impl ProjectFiles {
     /// `Io` otherwise.
     pub fn read_team(&self) -> Result<Team, FilesError> {
         let value = self.read_yaml(TEAM)?;
-        validate_team(&value).map_err(|errors| self.refused(TEAM, &errors))
+        validate_team(&value).map_err(|errors| refused(TEAM, &errors))
     }
 
     /// Writes the team, after holding it to the same rules.
@@ -159,8 +169,8 @@ impl ProjectFiles {
     ///
     /// `Invalid` when the team is not one `validate_team` accepts, `Io` when it cannot be written.
     pub fn write_team(&self, team: &Team) -> Result<(), FilesError> {
-        let value = self.as_wire(TEAM, team)?;
-        validate_team(&value).map_err(|errors| self.refused(TEAM, &errors))?;
+        let value = as_wire(TEAM, team)?;
+        validate_team(&value).map_err(|errors| refused(TEAM, &errors))?;
         self.write_yaml(TEAM, &value)
     }
 
@@ -172,7 +182,7 @@ impl ProjectFiles {
     /// otherwise.
     pub fn read_criteria(&self) -> Result<CriteriaLibrary, FilesError> {
         let value = self.read_yaml(CRITERIA)?;
-        validate_criteria(&value).map_err(|errors| self.refused(CRITERIA, &errors))
+        validate_criteria(&value).map_err(|errors| refused(CRITERIA, &errors))
     }
 
     /// Writes the criterion library, after holding it to the same rules.
@@ -182,8 +192,8 @@ impl ProjectFiles {
     /// `Invalid` when the library is not one `validate_criteria` accepts, `Io` when it cannot be
     /// written.
     pub fn write_criteria(&self, library: &CriteriaLibrary) -> Result<(), FilesError> {
-        let value = self.as_wire(CRITERIA, library)?;
-        validate_criteria(&value).map_err(|errors| self.refused(CRITERIA, &errors))?;
+        let value = as_wire(CRITERIA, library)?;
+        validate_criteria(&value).map_err(|errors| refused(CRITERIA, &errors))?;
         self.write_yaml(CRITERIA, &value)
     }
 
@@ -196,7 +206,7 @@ impl ProjectFiles {
     pub fn read_contract(&self, id: &TaskId) -> Result<TaskContract, FilesError> {
         let path = contract_path(id);
         let value = self.read_yaml(&path)?;
-        let contract = validate_contract(&value).map_err(|errors| self.refused(&path, &errors))?;
+        let contract = validate_contract(&value).map_err(|errors| refused(&path, &errors))?;
         if contract.id == *id {
             Ok(contract)
         } else {
@@ -219,8 +229,8 @@ impl ProjectFiles {
     /// written.
     pub fn write_contract(&self, contract: &TaskContract) -> Result<(), FilesError> {
         let path = contract_path(&contract.id);
-        let value = self.as_wire(&path, contract)?;
-        validate_contract(&value).map_err(|errors| self.refused(&path, &errors))?;
+        let value = as_wire(&path, contract)?;
+        validate_contract(&value).map_err(|errors| refused(&path, &errors))?;
         self.write_yaml(&path, &value)
     }
 
@@ -253,6 +263,11 @@ impl ProjectFiles {
             let Some(name) = name.to_str().and_then(|name| name.strip_suffix(".yaml")) else {
                 continue;
             };
+            // A person may keep notes in a directory too, and one named like a contract would put
+            // a task on the board that cannot be read.
+            if !entry.path().is_file() {
+                continue;
+            }
             if let Ok(id) = TaskId::try_from(name) {
                 ids.push(id);
             }
@@ -341,7 +356,7 @@ impl ProjectFiles {
         })?;
         validate_price_table(&value)
             .map(Some)
-            .map_err(|errors| self.refused(PRICES, &errors))
+            .map_err(|errors| refused(PRICES, &errors))
     }
 
     /// What this machine knows, or the defaults when it has not been asked.
@@ -420,7 +435,36 @@ fn product_path(path: &str) -> Result<String, FilesError> {
     Ok(format!("product/{normalised}"))
 }
 
+/// Every refusal a validator gave, as one `Invalid`.
+fn refused(relative: &str, errors: &[ValidationError]) -> FilesError {
+    FilesError::Invalid {
+        path: ProjectFiles::named(relative),
+        detail: errors
+            .iter()
+            .map(|error| format!("{} {}", error.path, error.message))
+            .collect::<Vec<_>>()
+            .join("; "),
+    }
+}
+
+/// A typed value as the wire sees it, which is what a validator reads.
+///
+/// Every writer takes this step and then holds the result to its own file's rules, so that a value
+/// built in memory cannot become a file that cannot be read back. The round trip is the promise:
+/// what `write_team` accepts, `read_team` returns.
+fn as_wire<T: Serialize>(relative: &str, value: &T) -> Result<Value, FilesError> {
+    serde_json::to_value(value).map_err(|error| FilesError::Invalid {
+        path: ProjectFiles::named(relative),
+        detail: error.to_string(),
+    })
+}
+
 /// The path with every part of it that exists resolved, and the rest as it was written.
+///
+/// Only the resolved prefix decides anything for the one caller there is: a symlink can only lead
+/// somewhere through a component that exists, so both sides of `inside_product`'s comparison are
+/// shortened by the same components when the rest is left off. The rest is put back for the words of
+/// the refusal, and for a later caller that wants the whole path.
 ///
 /// `canonicalize` refuses a path that is not there, and most of these are not there yet. So the
 /// deepest part that does exist is resolved — which is what follows a symlink — and what is left is
@@ -461,19 +505,6 @@ impl ProjectFiles {
         format!(".farik/{relative}")
     }
 
-    /// Every refusal a validator gave, as one `Invalid`.
-    fn refused(&self, relative: &str, errors: &[ValidationError]) -> FilesError {
-        let _ = self;
-        FilesError::Invalid {
-            path: Self::named(relative),
-            detail: errors
-                .iter()
-                .map(|error| format!("{} {}", error.path, error.message))
-                .collect::<Vec<_>>()
-                .join("; "),
-        }
-    }
-
     fn make_directory(&self, path: &Path) -> Result<(), FilesError> {
         std::fs::create_dir_all(path).map_err(|error| FilesError::Io {
             path: self.beneath_the_root(path),
@@ -511,14 +542,19 @@ impl ProjectFiles {
     ///
     /// Nothing is made here, not even the directory the answer is about. A read that conjured
     /// `.farik/` would make a project of whatever directory it was pointed at.
+    ///
+    /// The answer is about the file system as it was when the question was asked. Nothing in this
+    /// module makes a symlink, so no caller can move the ground under itself, but a `git checkout`
+    /// or another program could between this and the write. What that costs is bounded by who can
+    /// write inside `.farik/` at all, which is the person whose project it is.
     fn inside_product(&self, path: &str) -> Result<String, FilesError> {
         let relative = product_path(path)?;
         let refuse = |detail: String| FilesError::Invalid {
             path: Self::named(&relative),
             detail,
         };
-        let boundary =
-            resolved(&self.path_of("product")).map_err(|error| refuse(error.to_string()))?;
+        let boundary = resolved(&self.path_of("product"))
+            .map_err(|error| refuse(format!("the project root could not be resolved: {error}")))?;
         let landing =
             resolved(&self.path_of(&relative)).map_err(|error| refuse(error.to_string()))?;
         if landing.starts_with(&boundary) {
@@ -536,8 +572,9 @@ impl ProjectFiles {
         let path = self.path_of(relative);
         match std::fs::read_to_string(&path) {
             // A byte-order mark is what a Windows editor puts at the front of a file it saved. It
-            // is not content, and a parser that meets one says the file holds two documents, which
-            // is not a thing a person can act on.
+            // is not content. The YAML parser tolerates one; `serde_json` does not, and refuses
+            // `prices.json` or `local/settings.json` at column 1 saying only that it expected a
+            // value, which is not a thing a person can act on.
             Ok(text) => Ok(text.strip_prefix('\u{feff}').unwrap_or(&text).to_string()),
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
                 Err(FilesError::NotFound {
@@ -563,10 +600,12 @@ impl ProjectFiles {
             self.make_directory(directory)?;
         }
         let beside = path.with_extension(format!(
-            "{}.writing",
+            "{}.{}-{}.writing",
             path.extension()
                 .and_then(std::ffi::OsStr::to_str)
-                .unwrap_or_default()
+                .unwrap_or_default(),
+            std::process::id(),
+            WRITES_BESIDE.fetch_add(1, Ordering::Relaxed)
         ));
         std::fs::write(&beside, text).map_err(|error| FilesError::Io {
             path: Self::named(relative),
@@ -593,19 +632,6 @@ impl ProjectFiles {
                     .render_with_formatter(&serde_saphyr::UserMessageFormatter)
                     .replace("<input>", &Self::named(relative)),
             }
-        })
-    }
-
-    /// A typed value as the wire sees it, which is what a validator reads.
-    ///
-    /// Every writer takes this step and then holds the result to its own file's rules, so that a
-    /// value built in memory cannot become a file that cannot be read back. The round trip is the
-    /// promise: what `write_team` accepts, `read_team` returns.
-    fn as_wire<T: Serialize>(&self, relative: &str, value: &T) -> Result<Value, FilesError> {
-        let _ = self;
-        serde_json::to_value(value).map_err(|error| FilesError::Invalid {
-            path: Self::named(relative),
-            detail: error.to_string(),
         })
     }
 

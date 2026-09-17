@@ -95,6 +95,22 @@ fn a_second_init_takes_nothing_away() {
 }
 
 #[test]
+fn a_second_init_keeps_what_a_person_added_to_the_ignore_file() {
+    // `write_if_absent` is what makes init safe to run twice, and the ignore file is the one thing
+    // init writes that is not the team.
+    let project = TempProject::new("init-gitignore");
+    let files = project.files();
+    files.init(&a_team()).expect("a project is made");
+    let ignore = project.root.join(".farik/local/.gitignore");
+    std::fs::write(&ignore, "*\n!notes.md\n").expect("a person keeps one file");
+    files.init(&a_team()).expect("and runs init again");
+    assert_eq!(
+        std::fs::read_to_string(&ignore).expect("it is still there"),
+        "*\n!notes.md\n"
+    );
+}
+
+#[test]
 fn reads_back_the_team_it_wrote() {
     let project = TempProject::new("round-trip-team");
     let files = project.files();
@@ -256,7 +272,7 @@ fn reads_a_file_a_windows_editor_saved() {
     // documents -- which is not a thing a person can act on.
     let project = TempProject::new("bom");
     let files = project.files();
-    files.write_team(&a_team()).expect("written");
+    files.init(&a_team()).expect("a project is made");
     let text = std::fs::read_to_string(project.root.join(".farik/team.yaml")).expect("the file");
     std::fs::write(
         project.root.join(".farik/team.yaml"),
@@ -264,6 +280,29 @@ fn reads_a_file_a_windows_editor_saved() {
     )
     .expect("saved again with a mark at the front");
     assert_eq!(files.read_team().expect("it still reads"), a_team());
+
+    // And the JSON files, which is where it matters: serde_json refuses a mark at column 1 and
+    // says only that it expected a value, while the YAML parser tolerates one.
+    std::fs::write(
+        project.root.join(".farik/prices.json"),
+        format!("\u{feff}{}", farik_core::pricing::prices::PRICES_JSON),
+    )
+    .expect("an override a windows editor saved");
+    assert!(
+        files.read_prices().expect("it still reads").is_some(),
+        "a mark is not content"
+    );
+    std::fs::write(
+        project.root.join(".farik/local/settings.json"),
+        "\u{feff}{\"sandbox\": \"none\"}\n",
+    )
+    .expect("settings a windows editor saved");
+    assert_eq!(
+        files.read_settings().expect("they still read"),
+        LocalSettings {
+            sandbox: Sandbox::None,
+        }
+    );
 }
 
 #[test]
@@ -299,6 +338,75 @@ fn leaves_nothing_half_written() {
             "a rename replaces the file; a write truncates it"
         );
     }
+}
+
+#[test]
+fn two_writers_on_one_project_never_publish_a_file_holding_both() {
+    // The file beside the one being written is named after the target, so every writer on one root
+    // -- in this process or another -- wrote the same one. The rename is atomic; what was in the
+    // shared file was not, so a reader could see a file holding bytes from both writes, or none.
+    let project = TempProject::new("two-writers");
+    project.files().init(&a_team()).expect("a project is made");
+    let first = "a".repeat(64 * 1024);
+    let second = "b".repeat(48 * 1024);
+    let done = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let writers: Vec<_> = [&first, &second]
+        .into_iter()
+        .map(|text| {
+            let files = project.files();
+            let text = text.clone();
+            std::thread::spawn(move || {
+                (0..200)
+                    .filter(|_| files.write_project_scan(&text).is_err())
+                    .count()
+            })
+        })
+        .collect();
+    let reader = {
+        let files = project.files();
+        let (first, second) = (first.clone(), second.clone());
+        let done = std::sync::Arc::clone(&done);
+        std::thread::spawn(move || {
+            let mut mixed = 0_usize;
+            while !done.load(std::sync::atomic::Ordering::Relaxed) {
+                match files.read_project_scan() {
+                    Ok(text) if text == first || text == second => {}
+                    Ok(_) | Err(_) => mixed += 1,
+                }
+            }
+            mixed
+        })
+    };
+    let refused: usize = writers
+        .into_iter()
+        .map(|writer| writer.join().expect("a writer finished"))
+        .sum();
+    done.store(true, std::sync::atomic::Ordering::Relaxed);
+    let mixed = reader.join().expect("the reader finished");
+    assert_eq!(
+        (refused, mixed),
+        (0, 0),
+        "every write lands and every read is one whole write or the other"
+    );
+}
+
+#[test]
+fn a_document_is_not_destroyed_by_another_ones_writing() {
+    // The two names are both a tool call's to choose, and the one being written used the other as
+    // the file it writes beside -- so writing `notes.md` renamed `notes.md.writing` away.
+    let project = TempProject::new("writing-collision");
+    let files = project.files();
+    files
+        .write_product_doc("notes.md.writing", "mine\n")
+        .expect("a document a person named oddly");
+    files
+        .write_product_doc("notes.md", "another\n")
+        .expect("and another beside it");
+    assert_eq!(
+        files.read_product_doc("notes.md.writing").as_deref(),
+        Ok("mine\n"),
+        "the first document is still there"
+    );
 }
 
 #[test]
@@ -379,6 +487,31 @@ fn refuses_a_contract_that_says_it_is_another() {
 }
 
 #[test]
+fn refuses_a_contract_and_a_library_that_break_a_rule_only_the_schema_knows() {
+    // Structurally these are what serde builds happily. The rules they break are the schema's, and
+    // "held to exactly the rules it would be held to arriving on the wire" is the whole promise: a
+    // contract with nothing to meet is not a contract, whatever serde makes of it.
+    let project = TempProject::new("schema-only");
+    let files = project.files();
+    files.init(&a_team()).expect("a project is made");
+    let mut wire = farik_core::contract::fixtures::a_contract_wire();
+    wire["id"] = serde_json::json!("FRK-1");
+    wire["exit_criteria"] = serde_json::json!([]);
+    std::fs::write(
+        project.root.join(".farik/contracts/FRK-1.yaml"),
+        serde_json::to_string(&wire).expect("a value writes as JSON, which is YAML"),
+    )
+    .expect("a contract with nothing to meet");
+    let Err(FilesError::Invalid { path, detail }) =
+        files.read_contract(&TaskId::try_from("FRK-1").expect("an id"))
+    else {
+        panic!("a contract with no exit criteria is not one");
+    };
+    assert_eq!(path, ".farik/contracts/FRK-1.yaml");
+    assert!(detail.contains("/exit_criteria"), "{detail}");
+}
+
+#[test]
 fn lists_contracts_in_the_order_a_board_shows_them() {
     let project = TempProject::new("list");
     let files = project.files();
@@ -388,6 +521,10 @@ fn lists_contracts_in_the_order_a_board_shows_them() {
     // A person's own notes in the same directory are not contracts and are not a problem either.
     std::fs::write(project.root.join(".farik/contracts/notes.md"), "mine\n").expect("a note");
     std::fs::write(project.root.join(".farik/contracts/FRK-3.txt"), "?\n").expect("not a contract");
+    // Nor is a directory a person named that way: a board that listed it would show a task that
+    // cannot be read.
+    std::fs::create_dir_all(project.root.join(".farik/contracts/FRK-9.yaml"))
+        .expect("notes kept in a directory");
 
     assert_eq!(
         files
@@ -512,6 +649,43 @@ fn refuses_a_product_document_that_leaves_product_through_a_link() {
 }
 
 #[test]
+fn refuses_a_product_document_that_leaves_product_for_a_name_beginning_the_same() {
+    // `Path::starts_with` is component-wise, and has to be: a textual prefix would let any sibling
+    // of product/ whose name begins with `product` be written to through a link inside it.
+    let project = TempProject::new("product-sibling");
+    let files = project.files();
+    files
+        .write_product_doc("kept.md", "# Kept\n")
+        .expect("a document is written, which makes product/");
+
+    #[cfg(unix)]
+    {
+        let sibling = project.root.join(".farik/product-secrets");
+        std::fs::create_dir_all(&sibling).expect("a sibling sharing the prefix");
+        std::os::unix::fs::symlink(&sibling, project.root.join(".farik/product/out"))
+            .expect("a link to it from inside product/");
+        let refused = files.write_product_doc("out/loot.md", "taken\n");
+        assert!(
+            matches!(refused, Err(FilesError::Invalid { .. })),
+            "product-secrets/ is not product/: {refused:?}"
+        );
+        assert!(!sibling.join("loot.md").exists(), "and nothing was written");
+    }
+}
+
+#[test]
+fn refuses_a_product_document_when_it_cannot_tell_where_product_is() {
+    // The boundary fails closed. A root that cannot be resolved means the answer to "is this
+    // inside product/" is unknown, and an unknown boundary is not a boundary.
+    let files = farik_store::files::ProjectFiles::open(std::path::PathBuf::new());
+    let Err(FilesError::Invalid { path, detail }) = files.read_product_doc("roadmap.md") else {
+        panic!("an unresolvable root is not a missing document");
+    };
+    assert_eq!(path, ".farik/product/roadmap.md");
+    assert!(detail.contains("project root"), "{detail}");
+}
+
+#[test]
 fn reading_a_product_document_makes_nothing() {
     // `.farik/` existing is what makes a directory a Farik project (spec 3). A read that made it,
     // to answer where a path lands, would make a project of whatever it was pointed at.
@@ -560,6 +734,19 @@ fn reads_no_prices_when_a_project_does_not_override_them() {
         panic!("half a price table is not one");
     };
     assert_eq!(path, ".farik/prices.json");
+
+    // And a whole table of a format this program does not read, which serde alone would accept:
+    // pricing a session against a later format would be guesswork.
+    std::fs::write(
+        project.root.join(".farik/prices.json"),
+        shipped.replace("\"version\": 1", "\"version\": 2"),
+    )
+    .expect("a table from a later Farik");
+    let Err(FilesError::Invalid { path, detail }) = files.read_prices() else {
+        panic!("a version this program does not know is not a table it can use");
+    };
+    assert_eq!(path, ".farik/prices.json");
+    assert!(detail.contains("/version"), "{detail}");
 }
 
 #[test]
