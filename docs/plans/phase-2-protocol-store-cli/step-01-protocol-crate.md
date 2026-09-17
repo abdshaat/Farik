@@ -98,7 +98,7 @@ Files: modified `xtask/src/generate.rs`, `crates/core/src/generated/task_contrac
 Consumes: `xtask::generate::{GENERATED_SCHEMAS, generate_types}` on `main`
 Produces: every generated type derives `PartialEq`
 
-- [ ] Write the failing test. Insert it in the `tests` module of `xtask/src/generate.rs`, immediately above `generates_a_formatted_module_with_the_header_and_the_type`. The probe schema's one property is `required` on purpose: an object whose every property is optional also gets `Default` in its derive list, and the assertion would then never hold.
+- [x] Write the failing test. Insert it in the `tests` module of `xtask/src/generate.rs`, immediately above `generates_a_formatted_module_with_the_header_and_the_type`. The probe schema's one property is `required` on purpose: an object whose every property is optional also gets `Default` in its derive list, and the assertion would then never hold.
 
   ```rust
       #[test]
@@ -116,7 +116,7 @@ Produces: every generated type derives `PartialEq`
       }
   ```
 
-- [ ] Run it and confirm it fails because the derive is missing:
+- [x] Run it and confirm it fails because the derive is missing:
 
   ```
   cargo test -p xtask generate::tests::derives_partial_eq
@@ -124,20 +124,20 @@ Produces: every generated type derives `PartialEq`
   #           #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug)]
   ```
 
-- [ ] Write the minimal implementation. In `generate_types`, after `settings.with_struct_builder(false);`, add one line:
+- [x] Write the minimal implementation. In `generate_types`, after `settings.with_struct_builder(false);`, add one line:
 
   ```rust
   settings.with_derive("PartialEq".to_string());
   ```
 
-- [ ] Run the test and the crate's suite; confirm green:
+- [x] Run the test and the crate's suite; confirm green:
 
   ```
   cargo test -p xtask
   # expected: all passing
   ```
 
-- [ ] Regenerate the committed files and confirm the workspace still builds:
+- [x] Regenerate the committed files and confirm the workspace still builds:
 
   ```
   cargo xtask generate
@@ -147,7 +147,7 @@ Produces: every generated type derives `PartialEq`
   # expected: ends with "xtask check: ok"
   ```
 
-- [ ] Commit: `feat(xtask): derive PartialEq on every generated type`
+- [x] Commit: `feat(xtask): derive PartialEq on every generated type`
 
 ### Task 2: The protocol crate and the event schema
 

@@ -38,6 +38,7 @@ pub fn generate_types(entry: &GeneratedSchema, schema_json: &str) -> anyhow::Res
         serde_json::from_str(schema_json).with_context(|| format!("parsing {}", entry.schema))?;
     let mut settings = typify::TypeSpaceSettings::default();
     settings.with_struct_builder(false);
+    settings.with_derive("PartialEq".to_string());
     let mut type_space = typify::TypeSpace::new(&settings);
     type_space
         .add_root_schema(schema)
@@ -81,6 +82,20 @@ mod tests {
         assert!(
             format!("{error:#}").starts_with("parsing docs/schemas/task-contract.schema.json"),
             "{error:#}"
+        );
+    }
+
+    #[test]
+    fn derives_partial_eq_so_that_a_generated_value_can_be_compared_to_an_expected_one() {
+        // Without it, a test that builds an event can only assert on its wire form, which is the
+        // thing the writer is supposed to be checked against.
+        let schema = r#"{"title": "Thing", "type": "object", "required": ["name"], "properties": {"name": {"type": "string"}}}"#;
+        let module = generate_types(&GENERATED_SCHEMAS[0], schema).expect("generated");
+        assert!(
+            module.contains(
+                "#[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]"
+            ),
+            "{module}"
         );
     }
 
