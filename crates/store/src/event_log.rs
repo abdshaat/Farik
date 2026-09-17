@@ -22,9 +22,6 @@ use crate::migrations;
 /// The prefix every task id this store hands out carries, from the contract schema's pattern.
 const TASK_ID_PREFIX: &str = "FRK";
 
-/// The highest number `^FRK-[0-9]{1,6}$` can spell.
-const HIGHEST_TASK_NUMBER: u64 = 999_999;
-
 /// How many times a connection tries to put the file in write-ahead logging mode before it gives
 /// up, and how long it waits between tries. `busy_timeout` does not cover this one lock, so this is
 /// the same waiting done by hand: a second at the outside, and nothing at all once the file is in
@@ -215,9 +212,9 @@ impl EventLog {
         let number = u64::try_from(next).map_err(|_| StoreError::Sqlite {
             detail: "the task id counter is negative, which no increment can produce".to_string(),
         })?;
-        if number > HIGHEST_TASK_NUMBER {
-            return Err(StoreError::TaskIdsExhausted { next: number });
-        }
+        // Where the counter ends is where the contract schema's pattern ends, and `TaskId` is
+        // generated from that pattern, so asking it is the only way to know the bound without
+        // writing it down a second time — and two spellings of one fact can disagree.
         format!("{TASK_ID_PREFIX}-{number}")
             .parse()
             .map_err(|_| StoreError::TaskIdsExhausted { next: number })
@@ -479,6 +476,20 @@ mod tests {
     /// out of order many times over, and few enough that the test is over in well under a second.
     const THREADS: u32 = 16;
     const APPENDS_PER_THREAD: u32 = 200;
+
+    /// Sets the task id counter, so that a test can stand at the end of what the schema can spell
+    /// without taking a million ids to get there.
+    fn set_counter(log: &EventLog, next: i64) {
+        log.connection
+            .lock()
+            .expect("a fresh lock")
+            .execute(
+                "INSERT INTO task_counters (prefix, next) VALUES ('FRK', ?1)
+                 ON CONFLICT (prefix) DO UPDATE SET next = ?1",
+                (next,),
+            )
+            .expect("the counter is set");
+    }
 
     fn kinds_of(events: &[FarikEvent]) -> Vec<EventKind> {
         events.iter().map(|event| event.body.kind()).collect()
@@ -774,21 +785,80 @@ mod tests {
     }
 
     #[test]
-    fn refuses_a_task_id_the_contract_schema_cannot_spell() {
-        // The pattern is `^FRK-[0-9]{1,6}$`, so the counter has an end. Refusing is the only honest
-        // answer: the alternative is handing back something that is not a task id.
+    fn hands_out_the_last_id_the_contract_schema_can_spell_and_then_refuses() {
+        // The pattern is `^FRK-[0-9]{1,6}$`, so the counter has an end, and both sides of it matter:
+        // refusing a number early costs a project an id it was entitled to, and refusing none at
+        // all hands back something that is not a task id.
         let log = a_log();
-        log.connection
+        set_counter(&log, 999_998);
+        assert_eq!(
+            log.next_task_id()
+                .expect("the last id there is")
+                .to_string(),
+            "FRK-999999"
+        );
+        assert_eq!(
+            log.next_task_id().expect_err("and none after it"),
+            StoreError::TaskIdsExhausted { next: 1_000_000 }
+        );
+    }
+
+    #[test]
+    fn refuses_a_row_whose_value_is_not_of_the_kind_its_column_promises() {
+        // Every table is STRICT, which is what makes a column's declared type a promise about what
+        // is in it rather than a hint. Without it SQLite stores whatever it is given and every
+        // reader afterwards has to defend against a team id that is not text at all.
+        //
+        // What STRICT refuses is a value it cannot convert: a blob is not text, and a word is not a
+        // number. It does convert a number to text, so a TEXT column is a promise about the kind of
+        // value that comes back out, not about what a caller may write.
+        let log = a_log();
+        let connection = log.connection.lock().expect("a fresh lock");
+        let not_text = connection
+            .execute(
+                "INSERT INTO events
+                     (recorded_at, team_id, project_id, kind, body)
+                 VALUES ('2026-09-17T10:00:00Z', X'0001', 'farik', 'team.updated', '{}')",
+                (),
+            )
+            .expect_err("a blob is not a team id");
+        assert!(
+            not_text.to_string().contains("cannot store BLOB value"),
+            "{not_text}"
+        );
+        let not_a_number = connection
+            .execute(
+                "INSERT INTO task_counters (prefix, next) VALUES ('FRK', 'the next one')",
+                (),
+            )
+            .expect_err("a word is not a counter");
+        assert!(
+            not_a_number.to_string().contains("cannot store TEXT value"),
+            "{not_a_number}"
+        );
+    }
+
+    #[test]
+    fn refuses_a_row_whose_body_is_not_json_at_all() {
+        // A body that is not JSON makes every later read of the log fail, whichever events the
+        // query asks for, because a read hands each row to the protocol crate's reader. Nothing
+        // this crate writes can produce such a row, so the engine is where it has to be stopped.
+        let log = a_log();
+        let refusal = log
+            .connection
             .lock()
             .expect("a fresh lock")
             .execute(
-                "INSERT INTO task_counters (prefix, next) VALUES ('FRK', 999999)",
+                "INSERT INTO events
+                     (recorded_at, team_id, project_id, kind, body)
+                 VALUES ('2026-09-17T10:00:00Z', 'farik', 'farik', 'team.updated',
+                         'not json at all')",
                 (),
             )
-            .expect("the counter is set");
-        assert_eq!(
-            log.next_task_id().expect_err("the millionth id"),
-            StoreError::TaskIdsExhausted { next: 1_000_000 }
+            .expect_err("a body is JSON or it is not a body");
+        assert!(
+            refusal.to_string().contains("CHECK constraint failed"),
+            "{refusal}"
         );
     }
 }

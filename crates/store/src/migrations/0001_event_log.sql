@@ -1,7 +1,9 @@
 -- The event log and the counter that hands out task ids (docs/SPEC.md 5.1, 8.4).
 --
--- Every table is STRICT: a column declared TEXT refuses an integer, so a row that does not mean
--- what it says cannot be written in the first place. The log is the source of truth for what
+-- Every table is STRICT, so a value SQLite cannot convert to the column's declared type is refused
+-- rather than stored as whatever it came in as: a blob is not a team id, and a word is not a
+-- counter. STRICT does convert a number to text, so a TEXT column is a promise about what comes
+-- back out rather than about what a caller may write. The log is the source of truth for what
 -- happened, and a log that accepts anything is not one. `schema_migrations` is not here: the
 -- ledger of what has been applied belongs to the applier, which makes it before it reads it.
 
@@ -19,7 +21,10 @@ CREATE TABLE events (
     agent_id    TEXT,
     session_id  TEXT,
     kind        TEXT NOT NULL,
-    body        TEXT NOT NULL
+    -- A body that is not JSON would make every later read of the log fail, whichever events the
+    -- query asked for, because a read hands each row to the protocol crate's reader. Nothing above
+    -- this table can write such a row; the engine is what stops everything else.
+    body        TEXT NOT NULL CHECK (json_valid(body))
 ) STRICT;
 
 CREATE INDEX events_by_task ON events (task_id, seq) WHERE task_id IS NOT NULL;
