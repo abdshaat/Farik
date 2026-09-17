@@ -8,7 +8,8 @@
 use std::fmt;
 use std::path::{Path, PathBuf};
 
-use farik_core::contract::ValidationError;
+use farik_core::contract::{TaskContract, TaskId, ValidationError, validate_contract};
+use farik_core::criteria::{CriteriaLibrary, validate_criteria};
 use farik_core::team::{Team, validate_team};
 use serde::Serialize;
 use serde_json::Value;
@@ -134,11 +135,112 @@ impl ProjectFiles {
         validate_team(&value).map_err(|errors| self.refused(TEAM, &errors))?;
         self.write_yaml(TEAM, &value)
     }
+
+    /// The criterion library, held to the rules one on the wire is held to.
+    ///
+    /// # Errors
+    ///
+    /// `NotFound` when there is no library, `Invalid` when it is not YAML or not a library, `Io`
+    /// otherwise.
+    pub fn read_criteria(&self) -> Result<CriteriaLibrary, FilesError> {
+        let value = self.read_yaml(CRITERIA)?;
+        validate_criteria(&value).map_err(|errors| self.refused(CRITERIA, &errors))
+    }
+
+    /// Writes the criterion library, after holding it to the same rules.
+    ///
+    /// # Errors
+    ///
+    /// `Invalid` when the library is not one `validate_criteria` accepts, `Io` when it cannot be
+    /// written.
+    pub fn write_criteria(&self, library: &CriteriaLibrary) -> Result<(), FilesError> {
+        let value = self.as_wire(CRITERIA, library)?;
+        validate_criteria(&value).map_err(|errors| self.refused(CRITERIA, &errors))?;
+        self.write_yaml(CRITERIA, &value)
+    }
+
+    /// One task's contract, held to the rules a contract on the wire is held to.
+    ///
+    /// # Errors
+    ///
+    /// `NotFound` when there is no contract with that id, `Invalid` when the file is not YAML or
+    /// not a contract, or when the contract in it carries a different id from the one asked for.
+    pub fn read_contract(&self, id: &TaskId) -> Result<TaskContract, FilesError> {
+        let path = contract_path(id);
+        let value = self.read_yaml(&path)?;
+        let contract = validate_contract(&value).map_err(|errors| self.refused(&path, &errors))?;
+        if contract.id == *id {
+            Ok(contract)
+        } else {
+            Err(FilesError::Invalid {
+                path: Self::named(&path),
+                detail: format!(
+                    "the contract in it says it is {}, and a contract lives in the file its own id \
+                     names",
+                    contract.id.as_str()
+                ),
+            })
+        }
+    }
+
+    /// Writes a contract to the file its own id names, after holding it to the same rules.
+    ///
+    /// # Errors
+    ///
+    /// `Invalid` when the contract is not one `validate_contract` accepts, `Io` when it cannot be
+    /// written.
+    pub fn write_contract(&self, contract: &TaskContract) -> Result<(), FilesError> {
+        let path = contract_path(&contract.id);
+        let value = self.as_wire(&path, contract)?;
+        validate_contract(&value).map_err(|errors| self.refused(&path, &errors))?;
+        self.write_yaml(&path, &value)
+    }
+
+    /// Every contract there is, by id, in the order a board shows them: by the number in the id, so
+    /// that the tenth task does not come before the ninth.
+    ///
+    /// A file under `contracts/` that is not a contract's is not one of them and is not an error
+    /// either: the directory is a person's to keep notes in.
+    ///
+    /// # Errors
+    ///
+    /// `Io` when the directory cannot be read. A project with no `.farik/` has no contracts, which
+    /// is not an error.
+    pub fn list_contracts(&self) -> Result<Vec<TaskId>, FilesError> {
+        let directory = self.farik().join("contracts");
+        if !directory.is_dir() {
+            return Ok(Vec::new());
+        }
+        let entries = std::fs::read_dir(&directory).map_err(|error| FilesError::Io {
+            path: ".farik/contracts".to_string(),
+            detail: error.to_string(),
+        })?;
+        let mut ids: Vec<TaskId> = Vec::new();
+        for entry in entries {
+            let entry = entry.map_err(|error| FilesError::Io {
+                path: ".farik/contracts".to_string(),
+                detail: error.to_string(),
+            })?;
+            let name = entry.file_name();
+            let Some(name) = name.to_str().and_then(|name| name.strip_suffix(".yaml")) else {
+                continue;
+            };
+            if let Ok(id) = TaskId::try_from(name) {
+                ids.push(id);
+            }
+        }
+        // By the number in the id, so that the tenth task does not come before the ninth. The
+        // parse cannot fail: `TaskId` is `FRK-` and one to six digits, which is what let it be
+        // built at all.
+        ids.sort_by_key(|id| id.as_str().trim_start_matches("FRK-").parse::<u64>().ok());
+        Ok(ids)
+    }
 }
 
 /// Where each file lives, relative to `.farik/`. One place, so that a reader of this module can see
 /// the whole layout at once and a change to it is one line.
 const TEAM: &str = "team.yaml";
+const CRITERIA: &str = "team/criteria.yaml";
 
 /// How a file a person edits by hand is read.
 ///
@@ -150,6 +252,11 @@ fn yaml_options() -> serde_saphyr::Options {
     let mut options = serde_saphyr::Options::default();
     options.strict_booleans = true;
     options
+}
+
+/// The file a contract lives in: the one its own id names.
+fn contract_path(id: &TaskId) -> String {
+    format!("contracts/{}.yaml", id.as_str())
 }
 
 impl ProjectFiles {
@@ -299,7 +406,9 @@ impl ProjectFiles {
 
 #[cfg(test)]
 mod tests {
-    use super::FilesError;
+    use farik_core::contract::TaskId;
+
+    use super::{FilesError, contract_path};
 
     #[test]
     fn says_what_it_could_not_use_and_why_in_plain_words() {
@@ -326,6 +435,14 @@ mod tests {
                 ".farik/team.yaml is not usable: /agents an agent id names one agent",
                 ".farik/team.yaml could not be used: Permission denied (os error 13)",
             ]
+        );
+    }
+
+    #[test]
+    fn names_the_file_a_contract_lives_in() {
+        assert_eq!(
+            contract_path(&TaskId::try_from("FRK-12").expect("an id")),
+            "contracts/FRK-12.yaml"
         );
     }
 }

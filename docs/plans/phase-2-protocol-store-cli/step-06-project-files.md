@@ -870,7 +870,7 @@ Files: modified `crates/store/src/files.rs`, `crates/store/tests/project_files.r
 Consumes: everything Task 1 made
 Produces: `ProjectFiles::{read_criteria, write_criteria, read_contract, write_contract, list_contracts}`
 
-- [ ] Write the failing tests. Replace `crates/store/tests/project_files.rs`, whole, with:
+- [x] Write the failing tests. Replace `crates/store/tests/project_files.rs`, whole, with:
 
   ```rust
   //! The files under `.farik/`, against a real directory.
@@ -1287,7 +1287,7 @@ Produces: `ProjectFiles::{read_criteria, write_criteria, read_contract, write_co
   }
   ```
 
-- [ ] Replace the tests module of `crates/store/src/files.rs` with:
+- [x] Replace the tests module of `crates/store/src/files.rs` with:
 
   ```rust
   #[cfg(test)]
@@ -1334,7 +1334,7 @@ Produces: `ProjectFiles::{read_criteria, write_criteria, read_contract, write_co
   }
   ```
 
-- [ ] Run them and confirm they fail because nothing names a contract's file and nothing reads one:
+- [x] Run them and confirm they fail because nothing names a contract's file and nothing reads one:
 
   ```
   cargo test -p farik-store --lib
@@ -1356,14 +1356,14 @@ Produces: `ProjectFiles::{read_criteria, write_criteria, read_contract, write_co
   #   errors
   ```
 
-- [ ] Write the minimal implementation. In `crates/store/src/files.rs`, replace the `farik_core::contract` import line with:
+- [x] Write the minimal implementation. In `crates/store/src/files.rs`, replace the `farik_core::contract` import line with:
 
   ```rust
   use farik_core::contract::{TaskContract, TaskId, ValidationError, validate_contract};
   use farik_core::criteria::{CriteriaLibrary, validate_criteria};
   ```
 
-- [ ] Insert into the first `impl ProjectFiles` block, after `write_team`:
+- [x] Insert into the first `impl ProjectFiles` block, after `write_team`:
 
   ```rust
       /// The criterion library, held to the rules one on the wire is held to.
@@ -1467,7 +1467,7 @@ Produces: `ProjectFiles::{read_criteria, write_criteria, read_contract, write_co
       }
   ```
 
-- [ ] Add the library's line to the layout, which becomes:
+- [x] Add the library's line to the layout, which becomes:
 
   ```rust
   /// Where each file lives, relative to `.farik/`. One place, so that a reader of this module can see
@@ -1476,7 +1476,7 @@ Produces: `ProjectFiles::{read_criteria, write_criteria, read_contract, write_co
   const CRITERIA: &str = "team/criteria.yaml";
   ```
 
-- [ ] And insert, after the layout and before the second `impl` block:
+- [x] And insert, after the layout and before the second `impl` block:
 
   ```rust
   /// The file a contract lives in: the one its own id names.
@@ -1485,7 +1485,7 @@ Produces: `ProjectFiles::{read_criteria, write_criteria, read_contract, write_co
   }
   ```
 
-- [ ] Run the check and confirm green:
+- [x] Run the check and confirm green:
 
   ```
   cargo xtask check --integration
@@ -1494,7 +1494,7 @@ Produces: `ProjectFiles::{read_criteria, write_criteria, read_contract, write_co
   #   test result: ok. 18 passed (crates/store/tests/project_files.rs)
   ```
 
-- [ ] Commit: `feat(store): read a contract back from the file its id names`
+- [x] Commit: `feat(store): read a contract back from the file its id names`
 
 ### Task 3: What an agent writes, and what a person writes
 

@@ -3,6 +3,8 @@
 //! Every test here needs somewhere to write and nothing else, so they run in the default
 //! `cargo xtask check` as `event_log_file.rs` does, rather than behind `--integration`.
 
+use farik_core::contract::{TaskId, validate_contract};
+use farik_core::criteria::{fixtures::a_criteria_library_wire, validate_criteria};
 use farik_store::files::FilesError;
 use farik_store::files::fixtures::{TempProject, a_team};
 
@@ -19,6 +21,13 @@ fn said_to_a_person(detail: &str) {
             "says {programmer} to a person editing a team file: {detail}"
         );
     }
+}
+
+/// The contract `farik-core`'s own fixture describes, with the id a test asks for.
+fn a_contract(id: &str) -> farik_core::contract::TaskContract {
+    let mut wire = farik_core::contract::fixtures::a_contract_wire();
+    wire["id"] = serde_json::json!(id);
+    validate_contract(&wire).expect("the fixture is a contract")
 }
 
 #[test]
@@ -97,6 +106,22 @@ fn reads_back_the_team_it_wrote() {
 }
 
 #[test]
+fn reads_back_the_criterion_library_it_wrote() {
+    let project = TempProject::new("round-trip-criteria");
+    let files = project.files();
+    let library = validate_criteria(&a_criteria_library_wire()).expect("the fixture is a library");
+    files
+        .write_criteria(&library)
+        .expect("the library is written");
+
+    assert_eq!(files.read_criteria().expect("the library"), library);
+    assert!(
+        project.root.join(".farik/team/criteria.yaml").is_file(),
+        "beside the team's other files, which is where 5.13 puts it"
+    );
+}
+
+#[test]
 fn says_there_is_no_team_when_there_is_none() {
     let project = TempProject::new("no-team");
     assert_eq!(
@@ -131,6 +156,38 @@ fn refuses_a_team_file_a_person_broke() {
         panic!("this is not YAML at all");
     };
     assert!(!detail.is_empty(), "the parser's own words");
+}
+
+#[test]
+fn refuses_a_library_and_a_contract_a_person_broke() {
+    // The same promise the team has: a file read back is held to what the same thing is held to
+    // arriving on the wire, and every writer runs that validator before it writes.
+    let project = TempProject::new("broken-others");
+    let files = project.files();
+    let library = validate_criteria(&a_criteria_library_wire()).expect("the fixture is a library");
+    files.write_criteria(&library).expect("written");
+    std::fs::write(
+        project.root.join(".farik/team/criteria.yaml"),
+        "criteria:\n  - name: one\n    text: A criterion of ten characters.\n    verification:\n      method: vibes\n",
+    )
+    .expect("a person edits it");
+    let Err(FilesError::Invalid { path, detail }) = files.read_criteria() else {
+        panic!("vibes is not a verification method");
+    };
+    assert_eq!(path, ".farik/team/criteria.yaml");
+    assert!(detail.contains("/criteria/0/verification"), "{detail}");
+
+    files.write_contract(&a_contract("FRK-1")).expect("written");
+    std::fs::write(
+        project.root.join(".farik/contracts/FRK-1.yaml"),
+        "id: FRK-1\ntitle: Too little to be a contract\n",
+    )
+    .expect("a person edits it too");
+    let id = TaskId::try_from("FRK-1").expect("an id");
+    assert!(
+        matches!(files.read_contract(&id), Err(FilesError::Invalid { .. })),
+        "half a contract is not one"
+    );
 }
 
 #[test]
@@ -258,4 +315,98 @@ fn refuses_to_write_a_team_that_could_not_be_read_back() {
         "{refused:?}"
     );
     assert!(!project.root.join(".farik/team.yaml").exists());
+}
+
+#[test]
+fn refuses_to_write_a_library_or_a_contract_that_could_not_be_read_back() {
+    let project = TempProject::new("write-invalid-others");
+    let files = project.files();
+    let mut library = validate_criteria(&a_criteria_library_wire()).expect("a library");
+    library.criteria[1].name = library.criteria[0].name.clone();
+    assert!(
+        matches!(
+            files.write_criteria(&library),
+            Err(FilesError::Invalid { .. })
+        ),
+        "a name names one criterion"
+    );
+    assert!(!project.root.join(".farik/team/criteria.yaml").exists());
+
+    let mut contract = a_contract("FRK-1");
+    contract.exit_criteria.clear();
+    assert!(
+        matches!(
+            files.write_contract(&contract),
+            Err(FilesError::Invalid { .. })
+        ),
+        "a contract with no exit criteria is not one"
+    );
+    assert!(!project.root.join(".farik/contracts/FRK-1.yaml").exists());
+}
+
+#[test]
+fn writes_a_contract_to_the_file_its_own_id_names() {
+    let project = TempProject::new("contracts");
+    let files = project.files();
+    let contract = a_contract("FRK-7");
+    files.write_contract(&contract).expect("it is written");
+
+    assert!(project.root.join(".farik/contracts/FRK-7.yaml").is_file());
+    let id = TaskId::try_from("FRK-7").expect("an id");
+    assert_eq!(files.read_contract(&id).expect("it reads back"), contract);
+}
+
+#[test]
+fn refuses_a_contract_that_says_it_is_another() {
+    // The file name and the id inside it are two claims about the same thing, and a board that
+    // believed the file name would show a task that does not exist.
+    let project = TempProject::new("contract-id");
+    let files = project.files();
+    files.write_contract(&a_contract("FRK-7")).expect("written");
+    std::fs::rename(
+        project.root.join(".farik/contracts/FRK-7.yaml"),
+        project.root.join(".farik/contracts/FRK-8.yaml"),
+    )
+    .expect("a person moves it");
+
+    let id = TaskId::try_from("FRK-8").expect("an id");
+    let Err(FilesError::Invalid { path, detail }) = files.read_contract(&id) else {
+        panic!("the contract inside says FRK-7");
+    };
+    assert_eq!(path, ".farik/contracts/FRK-8.yaml");
+    assert!(detail.contains("says it is FRK-7"), "{detail}");
+}
+
+#[test]
+fn lists_contracts_in_the_order_a_board_shows_them() {
+    let project = TempProject::new("list");
+    let files = project.files();
+    for id in ["FRK-10", "FRK-2", "FRK-1"] {
+        files.write_contract(&a_contract(id)).expect("written");
+    }
+    // A person's own notes in the same directory are not contracts and are not a problem either.
+    std::fs::write(project.root.join(".farik/contracts/notes.md"), "mine\n").expect("a note");
+    std::fs::write(project.root.join(".farik/contracts/FRK-3.txt"), "?\n").expect("not a contract");
+
+    assert_eq!(
+        files
+            .list_contracts()
+            .expect("they list")
+            .iter()
+            .map(|id| id.as_str().to_string())
+            .collect::<Vec<_>>(),
+        ["FRK-1", "FRK-2", "FRK-10"],
+        "by the number in the id, so the tenth does not come before the ninth"
+    );
+}
+
+#[test]
+fn a_project_with_nothing_in_it_has_no_contracts() {
+    assert!(
+        TempProject::new("list-empty")
+            .files()
+            .list_contracts()
+            .expect("an empty list, not a refusal")
+            .is_empty()
+    );
 }
