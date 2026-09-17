@@ -81,6 +81,16 @@ docs/plans/project-plan.md                    modifies: records what this step c
 docs/plans/phase-2-protocol-store-cli/step-02-event-log.md modifies: this plan, ticked as it goes
 ```
 
+The landing review added four files to this list, each in the commit that closes the finding it
+belongs to and each named in **Review findings** below:
+
+```
+crates/protocol/src/event/fixtures.rs         modifies: a_new_event, the builder two test files had copied
+docs/decisions/0006-hand-written-error-displays.md creates: why an error enum writes its own Display
+docs/standards/code.md                        modifies: rows for index, trigger and migration names; the error row points at ADR 0006
+docs/SPEC.md                                  modifies: 8.4 records where task ids come from and where they stop
+```
+
 ## Tasks
 
 ### Task 1: A log that opens, and a shape it brings up to date
@@ -672,7 +682,7 @@ Produces: `EventLog::append`, `EventLog::read`, `farik_store::EventQuery`, `fari
       }
   ```
 
-  then append these six tests to the module:
+  then append these six tests to the module, a blank line between each and the test above it:
 
   ```rust
       #[test]
@@ -1263,7 +1273,7 @@ Produces: `EventLog::subscribe`
       use chrono::TimeZone;
   ```
 
-  and append to the module:
+  and append to the module, a blank line between it and the test above it:
 
   ```rust
       #[test]
@@ -1406,7 +1416,7 @@ Files: modified `crates/store/src/event_log.rs`, `crates/store/tests/event_log_f
 Consumes: `EventLog`, `open_event_log` from Task 1; `StoreError::TaskIdsExhausted` from Task 1; `TaskId` from `crates/core/src/contract.rs`
 Produces: `EventLog::next_task_id`
 
-- [x] Write the failing tests. Append to the tests module of `crates/store/src/event_log.rs`:
+- [x] Write the failing tests. Append to the tests module of `crates/store/src/event_log.rs`, a blank line between each of these and the test above it:
 
   ```rust
       #[test]
@@ -1641,6 +1651,110 @@ This task changes documentation and has no test cycle. The `> ` marker on each b
 
 - [x] Commit: `docs(docs): record what step 02 changed about the store`
 
+## Review findings
+
+The landing review was a fresh session that did not write this step. It read the code against this
+plan and then against the world, and re-introduced nineteen mutations to see which the tests notice.
+Its verdict was **request changes**, on one correctness defect and seven surviving mutants.
+
+Everything below is closed. Each commit named is on this branch.
+
+### The defect, and a second one that writing its test turned up
+
+**Subscribers were handed sequence numbers out of order** (`5adeddb`). `announce` ran after the
+connection guard was released, so two threads appending to one shared log could reach their
+subscribers in the opposite order to the one the log assigned. Sixteen threads appending two hundred
+events each produced inversions on every run. The announcement now happens while the log's own lock
+is held. `docs/SPEC.md` 8.5 pairs the log's monotonic sequence with this channel, and step 03's
+projections keep a cursor: one handed 34 and then 28 either skips events or replays them, while the
+log it would rebuild from is itself fine.
+
+**Two processes opening a fresh log at the same moment could both fail to open it** (`4b3031f`). Not
+in the review; found by writing the concurrency test the review asked for. `migrations::apply` read
+the ledger before it took the write lock, so two processes both saw a migration as unapplied and both
+ran it, and the loser was told the tables already exist — a transaction that reads first and then
+finds it needs to write cannot wait, because another reader may be waiting to write the same rows, so
+SQLite refuses it at once rather than after `busy_timeout`. Changing the journal mode takes an
+exclusive lock that `busy_timeout` does not cover either. The transaction is now `Immediate` with the
+ledger read inside it, and a connection waits by hand for the journal mode, checking before each try
+whether the file is already in it.
+
+### The surviving mutants
+
+**The task id boundary was unfalsifiable in both directions** (`2c725d1`). `HIGHEST_TASK_NUMBER` one
+too high survived, because the `parse` that followed it yielded the same `TaskIdsExhausted` the check
+would have; one too low survived because nothing asserted `FRK-999999` is ever handed out. The
+constant is gone: where the counter ends is where the contract schema's pattern ends, and `TaskId` is
+generated from that pattern, so asking it is the only spelling of the bound. A test stands at 999_998
+and takes the last id and the refusal after it.
+
+**`STRICT` was pinned by nothing** (`2c725d1`). Removing it from all three tables left every test
+green. Writing the test found that the migration's comment was wrong about what `STRICT` does: it
+does not refuse an integer in a `TEXT` column, because affinity converts it. What it refuses is a
+value it cannot convert, so the test writes a blob into a team id and a word into the counter.
+
+**A body that was not JSON made every later read fail** (`2c725d1`), whichever events the query asked
+for, because a read hands each row to the protocol crate's reader. The column now carries
+`CHECK (json_valid(body))`, so the engine stops that as it stops an update and a delete.
+
+**A limit no `i64` can hold, clamped to zero instead of `i64::MAX`, passed every test** (`90c68b5`).
+It asks for more rows than the log will ever hold, which is all of them; a test says so.
+
+**An append that stored the caller's raw ids rather than the ones the wire rules settled on passed
+every test** (`90c68b5`), and would have made a query for the id the log had just reported answer
+nothing. A test appends `" farik "` and reads the event back by the trimmed agent id.
+
+**A `next_task_id` whose read came after its commit is the classic lost update.** The test that comes
+with `4b3031f` — four processes taking five hundred ids each from one file behind a barrier — kills
+the plausible wrong implementation, one that reads the number before writing it, on every run. It
+catches the narrower commit-before-read mutation about one run in four, and no amount of volume
+improved that: SQLite serialises the two write transactions, so the window is rare rather than
+common. **That mutant is an accepted survivor**: killing it needs a hook inside `next_task_id`, and
+what makes the real code correct is that the read *is* the write statement.
+
+**Removing `synchronous = FULL` changes nothing this build can observe**, because `FULL` is the
+compiled-in default of the bundled SQLite. **An accepted survivor**: the pragma is set for a build
+whose default is `NORMAL`, and a test that asserted it would pass either way. The comment in
+`crates/store/tests/event_log_file.rs` says that now, in place of the claim that `synchronous` leaves
+no trace to assert on.
+
+### The rest
+
+- **A missing announcement hung the job rather than failing it** (`90c68b5`): `cargo test` has no
+  timeout, so the two waits on a subscriber are bounded at five seconds.
+- **`wire_of` was a second hand-written writer of the envelope** (`90c68b5`), which is the hazard this
+  step made `body_to_value` public to avoid. It builds a `FarikEvent` and calls `event_to_value`, so
+  an optional field added to the envelope later cannot be silently dropped on the way in.
+- **`statement_of` returned an `Option` for a case a clamp already covers** (`90c68b5`). A sequence
+  number past what the engine can hold is clamped, and `read` has one path.
+- **`an_event` was copied verbatim into two test files** (`90c68b5`). It is
+  `farik_protocol::event::fixtures::a_new_event` now, where step 03 can reach it too.
+- **`INSERT OR REPLACE` in the migration ledger was unreachable and would have masked a ledger that
+  disagreed with the tables** (`4b3031f`): a plain insert, now that the write lock is held.
+- **The `thiserror` deviation was recorded only in this plan**, where the author of the next crate's
+  error enum would not look. It is ADR 0006 now, and `docs/standards/code.md`'s error row points
+  there. The ADR promises a test per crate that renders every variant, and
+  `crates/store/src/error.rs` has it.
+- **Three kinds of name were invented without a row in `docs/standards/code.md`**: the migration file
+  name, the index names, and the trigger names. Three rows added.
+- **A project's ceiling of 999,999 task ids was recorded nowhere a user would find it.**
+  `docs/SPEC.md` 8.4 now records where task ids come from and where they stop, in revision 0.4.
+- **The blank line between two tests.** The `chore(store)` commit in the task list tidied what tasks
+  1, 3 and 4 had appended without one; the review judged the commit right and the plan stale. Those
+  three instructions now say to leave the line, and the Verification section lists the subject.
+
+### Left for a later step, in writing
+
+- **A row that is valid JSON but does not match its kind still refuses every read.** That is the
+  design — refuse rather than half-read — but `farik doctor` (step 04) is what a user runs when the
+  log is in that state, and it cannot read past the row to report it. How `doctor` reads a poisoned
+  log is step 04's to decide rather than this step's to guess.
+- **`PRAGMA foreign_keys` is inert** while no table declares a foreign key. It is set for step 03's
+  projections, and is untestable until one does.
+- **The test order in `crates/store/src/event_log.rs` is the order execution produced**, not the order
+  the pre-verified draft had, because each task appends its tests. The plan's blocks are what govern,
+  and they are unchanged.
+
 ## Verification
 
 - [x] The whole check, from the workspace root:
@@ -1653,6 +1767,8 @@ This task changes documentation and has no test cycle. The `> ` marker on each b
   #   test result: ok. 12 passed (farik-store, the event_log module)
   #   test result: ok. 4 passed (crates/store/tests/event_log_file.rs)
   #   test result: ok. 24 passed (xtask)
+  # what it ended at once the landing review's findings were taken: 18 in the store's
+  # modules and 6 in its integration test, the other three unchanged
   ```
 
 - [x] Every commit subject is accepted:
@@ -1664,10 +1780,11 @@ This task changes documentation and has no test cycle. The `> ` marker on each b
     "feat(store): announce every append to its subscribers" \
     "feat(store): hand out one task id at a time" \
     "feat(store): write ahead of the database file" \
+    "chore(store): separate every test in the module by a blank line" \
     "docs(docs): record what step 02 changed about the store"; do
     printf '%s\n' "$subject" > /tmp/subject && cargo xtask commit-msg /tmp/subject
   done
-  # expected: silent, six times
+  # expected: silent, seven times
   ```
 
 ## Open questions

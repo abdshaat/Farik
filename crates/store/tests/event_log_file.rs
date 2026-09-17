@@ -120,8 +120,12 @@ fn keeps_two_logs_on_one_file_from_sharing_a_place_or_an_id() {
 #[test]
 fn writes_ahead_of_the_database_file() {
     // Write-ahead logging is what makes `synchronous = FULL` affordable, and it is a property of
-    // the file, so another connection can read it back. `synchronous` itself is per connection and
-    // leaves no trace to assert on.
+    // the file, so another connection can read it back.
+    //
+    // `synchronous` is not asserted here, and no test can pin it: it is per connection, and `FULL`
+    // is already the compiled-in default of the bundled SQLite, so setting it changes nothing this
+    // build can observe. It is set anyway, because a build whose default is `NORMAL` would
+    // otherwise lose an append that had returned.
     let directory = TempDir::new("writes-ahead");
     let log = open_event_log(&directory.db(), at(9)).expect("the log opens");
     log.append(&an_event(EventKind::TaskCreated))

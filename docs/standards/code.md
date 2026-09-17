@@ -78,7 +78,7 @@ The backend (every crate under `crates/`) is Rust. The front end (`packages/ui`,
 | Function, method, variable, field, module | `snake_case` | `evaluate_transition` |
 | Constant and static | `UPPER_SNAKE_CASE` | `DEFAULT_ITERATION_LIMIT`, `TRANSITION_TABLE` |
 | Boolean | reads as a question: `is_`, `has_`, `can_`, `should_` | `is_ready`, `has_reviewer` |
-| Function that may fail | returns `Result<T, E>` with a named error enum (`thiserror`) per crate; never panics across a crate boundary; `xtask` and binaries may use `anyhow` and `String` reasons | `fn open(...) -> Result<EventLog, StoreError>` |
+| Function that may fail | returns `Result<T, E>` with a named error enum per crate, its `Display` and `std::error::Error` hand-written while `thiserror` is not a dependency (ADR 0006); never panics across a crate boundary; `xtask` and binaries may use `anyhow` and `String` reasons | `fn open(...) -> Result<EventLog, StoreError>` |
 | Governor outcome | a refusal or a failure that is a normal outcome, not an error, is a value named `<Subject>Refusal` or `<Subject>Failure` in the `Err` position of a `Result`, or a `Vec` of them | `fn evaluate_transition(...) -> Result<TransitionDecision, TransitionRefusal>` |
 | Wire enums | `#[serde(rename_all = "snake_case")]` so that variants match the wire values | `InProgress` serialises as `in_progress` |
 | Error type | `<Subject>Error` enum, one variant per reason, `#[error]` message in plain words | `StoreError::Io { path, source }` |
@@ -116,6 +116,9 @@ Anything that leaves a process or is written to disk uses `snake_case` keys. Rus
 | Environment variable | `FARIK_` prefix, `UPPER_SNAKE_CASE` | `FARIK_DAILY_BUDGET_USD` |
 | Database table | `snake_case`, plural | `events`, `task_projections` |
 | Database column | `snake_case`; foreign keys `<entity>_id`; timestamps `<verb>_at` | `task_id`, `created_at` |
+| Database index | `<table>_by_<column>` | `events_by_task` |
+| Database trigger | `<table>_<what_it_does>` | `events_refuse_update` |
+| Migration file | `crates/<name>/src/migrations/<nnnn>_<subject>.sql`, four-digit from 0001, applied in order and never edited once shipped | `0001_event_log.sql` |
 
 ### Agents, roles, and skills
 

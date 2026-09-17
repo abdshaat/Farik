@@ -67,3 +67,58 @@ impl From<std::io::Error> for StoreError {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::StoreError;
+
+    /// Every variant, so that a hand-written `Display` cannot go stale when one is added: the
+    /// mitigation ADR 0006 promises in exchange for not taking `thiserror`.
+    fn every_refusal() -> [StoreError; 4] {
+        [
+            StoreError::Io {
+                detail: "the directory is read-only".to_string(),
+            },
+            StoreError::Sqlite {
+                detail: "database is locked".to_string(),
+            },
+            StoreError::InvalidEvent {
+                detail: "event 3 cannot be read back".to_string(),
+            },
+            StoreError::TaskIdsExhausted { next: 1_000_000 },
+        ]
+    }
+
+    #[test]
+    fn says_what_it_refused_and_why_in_plain_words() {
+        let said: Vec<String> = every_refusal()
+            .iter()
+            .map(std::string::ToString::to_string)
+            .collect();
+        assert_eq!(
+            said,
+            [
+                "the file system refused: the directory is read-only",
+                "sqlite refused: database is locked",
+                "the log holds a row that is not an event: event 3 cannot be read back",
+                "the task id counter reached 1000000, which no longer fits FRK- and six digits",
+            ]
+        );
+    }
+
+    #[test]
+    fn carries_the_reason_of_the_error_it_came_from() {
+        let io = StoreError::from(std::io::Error::other("no space left on device"));
+        assert_eq!(
+            io,
+            StoreError::Io {
+                detail: "no space left on device".to_string()
+            }
+        );
+        let sqlite = StoreError::from(rusqlite::Error::ExecuteReturnedResults);
+        assert!(
+            matches!(&sqlite, StoreError::Sqlite { detail } if detail.contains("Execute returned results")),
+            "{sqlite:?}"
+        );
+    }
+}
