@@ -27,6 +27,9 @@ Farik's log has a shape. When this step is done, `docs/schemas/event.schema.json
 - `ValidationError` is `farik_core::contract::ValidationError`, re-exported. `farik_core::pricing` already re-exports it for the price table; one shape of schema-validation error across the workspace is worth more than a name that matches its module.
 - The contract vocabulary is not duplicated silently. `contract_summary` in the event schema repeats the `kind`, `status`, and `risk` value lists of `task-contract.schema.json`, because one schema never references another, and a test in `farik-protocol` compares the two lists and fails when they drift. `farik_core::contract::SCHEMA_JSON` becomes public so that the test can read the contract schema the crate embeds. Rejected: typing those three fields as plain strings, which would leave the front end generating `string` where it should generate a union.
 - `contract_summary` carries only what phase 2 writes and the board shows: `kind`, `parent`, `title`, `status`, `risk`. `assignee`, `reviewer`, `sprint`, and `iteration` are not in it, because no event in this phase sets them; the step that first emits an event that does adds the field, per the every-phase decision that event kinds grow with the code.
+- `Command::TaskCreate` boxes its contract. A `TaskContract` is an order of magnitude larger than the other command's arguments and an enum is as large as its largest variant, so `clippy::large_enum_variant`, which `cargo xtask check` runs with `-D warnings`, refuses the unboxed form. This makes the field `Box<TaskContract>` where `docs/plans/project-plan.md` writes `TaskCreate { contract: TaskContract }`; the project plan's signatures are abbreviated by its own statement, and this is the step plan making one exact.
+- `EventError` carries no `Display` and no `std::error::Error`. `docs/standards/code.md` names `thiserror` for a crate's error enum, and the workspace pins no such dependency: `farik-core`'s seven error and refusal enums are plain enums the caller matches on, and one crate deviating would be the odd one out. The step that folds this into `StoreError` decides whether the workspace takes the dependency.
+- All nine of this phase's event kinds land in this step, though this step emits none of them. The every-phase decision says the step that first emits a kind adds it to the schema; the same project plan's step 01 interface list names all nine here, because the schema is one file and the crate that owns it is built once. Steps 02, 03, 05, and 06 are what emit them.
 - The command schema gets a reader and no writer. Nothing in this phase puts a command on a wire: the command line builds a `Command` in process. A writer would have no caller and no test that means anything.
 - `task_create`'s `contract` is typed `object` and nothing more. One schema never references another, and the contract's rules — the repeated criterion and requirement ids among them — live in `farik_core::contract::validate_contract`, which the reader calls, so a contract that arrives inside a command is held to exactly the rules a contract that arrives alone is.
 - `Clock` and `IdSource` are traits with no supertraits, as `docs/plans/project-plan.md` states them. `FixedClock` and `SequentialIds` ship in the crate rather than behind `#[cfg(test)]`, so that every other crate's tests can use them, as `contract::fixtures` does.
@@ -94,15 +97,14 @@ Files: modified `xtask/src/generate.rs`, `crates/core/src/generated/task_contrac
 Consumes: `xtask::generate::{GENERATED_SCHEMAS, generate_types}` on `main`
 Produces: every generated type derives `PartialEq`
 
-- [ ] Write the failing test. Append this to the `tests` module at the bottom of `xtask/src/generate.rs`:
+- [ ] Write the failing test. Append this to the `tests` module at the bottom of `xtask/src/generate.rs`, above `generates_a_formatted_module_with_the_header_and_the_type`. The probe schema's one property is `required` on purpose: an object whose every property is optional also gets `Default` in its derive list, and the assertion would then never hold.
 
   ```rust
   #[test]
   fn derives_partial_eq_so_that_a_generated_value_can_be_compared_to_an_expected_one() {
       // Without it, a test that builds an event can only assert on its wire form, which is the
       // thing the writer is supposed to be checked against.
-      let schema =
-          r#"{"title": "Thing", "type": "object", "properties": {"name": {"type": "string"}}}"#;
+      let schema = r#"{"title": "Thing", "type": "object", "required": ["name"], "properties": {"name": {"type": "string"}}}"#;
       let module = generate_types(&GENERATED_SCHEMAS[0], schema).expect("generated");
       assert!(
           module.contains(
@@ -124,10 +126,10 @@ Produces: every generated type derives `PartialEq`
 - [ ] Write the minimal implementation. In `generate_types`, after `settings.with_struct_builder(false);`, add one line:
 
   ```rust
-      settings.with_derive("PartialEq".to_string());
+  settings.with_derive("PartialEq".to_string());
   ```
 
-- [ ] Run the test and the workspace suite; confirm green:
+- [ ] Run the test and the crate's suite; confirm green:
 
   ```
   cargo test -p xtask
@@ -153,7 +155,7 @@ Files: created `docs/schemas/event.schema.json`, `crates/protocol/Cargo.toml`, `
 Consumes: `cargo xtask generate` from Task 1
 Produces: the crate `farik-protocol`; `farik_protocol::generated::event::{EventKind, ContractSummary, TaskCreatedBody, RequestTriagedBody, ContractWrittenBody, ContractLockedBody, ContractUnlockedBody, DriftDetectedBody, ProjectScannedBody, TeamUpdatedBody, CriteriaUpdatedBody, FarikEvent, EventBodyWire}`
 
-- [ ] Scaffold the crate so that there is something to run a test in. Add to the root `Cargo.toml`, in `[workspace.dependencies]`, in alphabetical order (between `chrono` and `globset`):
+- [ ] Scaffold the crate so that there is something to run a test in. Add to the root `Cargo.toml`, in `[workspace.dependencies]`, between `chrono` and `globset`:
 
   ```toml
   farik-core = { path = "crates/core" }
@@ -183,7 +185,7 @@ Produces: the crate `farik-protocol`; `farik_protocol::generated::event::{EventK
   workspace = true
   ```
 
-  Create `crates/protocol/src/lib.rs`:
+  Create `crates/protocol/src/lib.rs` with the crate doc and nothing else yet:
 
   ```rust
   //! Farik's wire types: the event envelope, the event kinds, the commands, and the traits that
@@ -231,7 +233,8 @@ Produces: the crate `farik-protocol`; `farik_protocol::generated::event::{EventK
 
   ```
   cargo test -p farik-protocol
-  # expected: FAIL to compile, error[E0433]: failed to resolve: could not find `generated` in the crate root
+  # expected: FAIL to compile, error[E0433]: failed to resolve: could not find `generated` in the
+  #           crate root
   ```
 
 - [ ] Write the schema. Create `docs/schemas/event.schema.json`:
@@ -261,7 +264,7 @@ Produces: the crate `farik-protocol`; `farik_protocol::generated::event::{EventK
       "recorded_at": {
         "type": "string",
         "format": "date-time",
-        "description": "When the event was recorded, from the injected clock. No crate below the runtime reads the machine's clock."
+        "description": "When the event was recorded, from the injected clock. Never read from the machine's clock by the crate that builds the event."
       },
       "team_id": {
         "type": "string",
@@ -323,7 +326,7 @@ Produces: the crate `farik-protocol`; `farik_protocol::generated::event::{EventK
       },
       "contractSummary": {
         "title": "Contract Summary",
-        "description": "The fields of a contract the board shows, repeated on every event that writes one so that the projections can be rebuilt from the log alone (docs/SPEC.md section 8.4). The vocabularies are task-contract.schema.json's, which owns them; a test in farik-protocol fails when the two drift.",
+        "description": "The fields of a contract the board shows, repeated on every event that writes one so that the projections can be rebuilt from the log alone (docs/SPEC.md section 8.4). The vocabularies match task-contract.schema.json, which is the source of truth for them; a test in farik-protocol fails when the two drift.",
         "type": "object",
         "additionalProperties": false,
         "required": ["kind", "title", "status", "risk"],
@@ -333,19 +336,7 @@ Produces: the crate `farik-protocol`; `farik_protocol::generated::event::{EventK
           "title": { "type": "string" },
           "status": {
             "type": "string",
-            "enum": [
-              "draft",
-              "refining",
-              "ready",
-              "assigned",
-              "in_progress",
-              "blocked",
-              "verifying",
-              "rejected",
-              "accepted",
-              "escalated",
-              "cancelled"
-            ]
+            "enum": ["draft", "refining", "ready", "assigned", "in_progress", "blocked", "verifying", "rejected", "accepted", "escalated", "cancelled"]
           },
           "risk": { "type": "string", "enum": ["low", "medium", "high"] }
         }
@@ -358,10 +349,7 @@ Produces: the crate `farik-protocol`; `farik_protocol::generated::event::{EventK
         "required": ["summary", "created_by"],
         "properties": {
           "summary": { "$ref": "#/$defs/contractSummary" },
-          "created_by": {
-            "type": "string",
-            "description": "The agent id that filed the request, or human."
-          }
+          "created_by": { "type": "string", "description": "The agent id that filed the request, or human." }
         }
       },
       "requestTriagedBody": {
@@ -410,14 +398,7 @@ Produces: the crate `farik-protocol`; `farik_protocol::generated::event::{EventK
         "additionalProperties": false,
         "required": ["drift", "detail"],
         "properties": {
-          "drift": {
-            "type": "string",
-            "enum": [
-              "contract_without_events",
-              "events_without_contract",
-              "status_mismatch"
-            ]
-          },
+          "drift": { "type": "string", "enum": ["contract_without_events", "events_without_contract", "status_mismatch"] },
           "detail": { "type": "string" }
         }
       },
@@ -459,30 +440,17 @@ Produces: the crate `farik-protocol`; `farik_protocol::generated::event::{EventK
   }
   ```
 
-- [ ] Wire the schema into the generator. In `xtask/src/generate.rs`, change the array's length and append the entry:
+- [ ] Wire the schema into the generator. In `xtask/src/generate.rs`, change the array's length to 3 and append the entry:
 
   ```rust
-  /// Every schema that has generated code.
-  pub const GENERATED_SCHEMAS: [GeneratedSchema; 3] = [
-      GeneratedSchema {
-          schema: "docs/schemas/task-contract.schema.json",
-          types: "crates/core/src/generated/task_contract.rs",
-          schema_copy: "crates/core/src/generated/task_contract.schema.json",
-      },
-      GeneratedSchema {
-          schema: "docs/schemas/prices.schema.json",
-          types: "crates/core/src/generated/prices.rs",
-          schema_copy: "crates/core/src/generated/prices.schema.json",
-      },
-      GeneratedSchema {
-          schema: "docs/schemas/event.schema.json",
-          types: "crates/protocol/src/generated/event.rs",
-          schema_copy: "crates/protocol/src/generated/event.schema.json",
-      },
-  ];
+  GeneratedSchema {
+      schema: "docs/schemas/event.schema.json",
+      types: "crates/protocol/src/generated/event.rs",
+      schema_copy: "crates/protocol/src/generated/event.schema.json",
+  },
   ```
 
-  Create `crates/protocol/src/generated/mod.rs`:
+  Create `crates/protocol/src/generated/mod.rs`, without the `command` line, which Task 8 adds:
 
   ```rust
   //! Rust types generated from the JSON Schemas in `docs/schemas/`. Regenerate with
@@ -526,21 +494,23 @@ Files: modified `docs/SPEC.md`
 Consumes: the kind list from Task 2
 Produces: section 8.5 lists the nine kinds of this phase
 
-This task changes documentation and has no test cycle; the check that matters is that the list in the spec and the list in the schema agree, which the reader of the pull request confirms.
+This task changes documentation and has no test cycle; the check that matters is that the list in the spec and the list in the schema agree, which the command below and the reader of the pull request confirm.
 
 - [ ] In `docs/SPEC.md` section 8.5, replace the sentence that begins "Kinds are named" with:
 
   > Kinds are named `<entity>.<past_tense_verb>` (see `docs/standards/code.md`) and include `task.transitioned`, `tool.called`, `tool.returned`, `tool.denied`, `message.posted`, `cost.recorded`, `budget.exhausted`, `escalation.raised`, `escalation.resolved`, `session.started`, `session.ended`, `review.recorded`, `human.accepted`, and, added in 0.2, `question.asked`, `question.answered`, `contract.locked`, `contract.unlocked`, `task.integrated`, `memory.written`, and, added in 0.3, `product_doc.written`, `request.triaged`, and, added in 0.4, `task.created`, `contract.written`, `drift.detected`, `project.scanned`, `team.updated`, `criteria.updated`.
 
-- [ ] In the version paragraph at the top of `docs/SPEC.md`, append to the end of the paragraph:
+- [ ] At the end of the version paragraph at the top of `docs/SPEC.md`, append:
 
   > Revision 0.4 (2026-09-17) names in section 8.5 the six event kinds phase 2 emits that earlier revisions left unlisted.
 
-- [ ] Confirm the two lists agree, by eye and by command:
+- [ ] Confirm the two lists agree:
 
   ```
   grep -o '"[a-z_]*\.[a-z_]*"' docs/schemas/event.schema.json | sort -u
-  # expected: the nine kinds, each of which appears in the sentence above
+  # expected, one per line: "contract.locked" "contract.unlocked" "contract.written"
+  #           "criteria.updated" "drift.detected" "project.scanned" "request.triaged"
+  #           "task.created" "team.updated" -- each of which appears in the sentence above
   ```
 
 - [ ] Commit: `docs(docs): name every event kind phase 2 emits in section 8.5`
@@ -562,9 +532,8 @@ Produces: `farik_core::contract::SCHEMA_JSON`
           let event: serde_json::Value =
               serde_json::from_str(include_str!("generated/event.schema.json"))
                   .expect("the embedded event schema is valid JSON");
-          let contract: serde_json::Value =
-              serde_json::from_str(farik_core::contract::SCHEMA_JSON)
-                  .expect("the embedded contract schema is valid JSON");
+          let contract: serde_json::Value = serde_json::from_str(farik_core::contract::SCHEMA_JSON)
+              .expect("the embedded contract schema is valid JSON");
           let summary = &event["$defs"]["contractSummary"]["properties"];
           let fields = &contract["properties"];
           assert_eq!(summary["kind"]["enum"], fields["kind"]["enum"]);
@@ -603,7 +572,11 @@ Produces: `farik_core::contract::SCHEMA_JSON`
   # expected: all passing, including keeps_the_summary_vocabularies_the_contract_schema_owns
   ```
 
-- [ ] Commit: `test(protocol): fail when the event schema's contract vocabularies drift`
+- [ ] Commit: `feat(core): expose the contract schema so another crate can test against it`
+
+  The type is `feat(core)` rather than `test(protocol)` because the change that makes the test
+  possible is a widening of `farik-core`'s public interface, which is the half of the diff a
+  reader of the history needs to find.
 
 ### Task 5: The envelope, the bodies, and the reader
 
@@ -691,8 +664,8 @@ Produces: `farik_protocol::event::{EventEnvelope, EventBody, FarikEvent, EventKi
 - [ ] Write the failing test. Create `crates/protocol/src/event.rs` with the module doc, the fixtures declaration, and the tests, and nothing else yet:
 
   ```rust
-  //! Farik's events: `docs/schemas/event.schema.json` as Rust types, and the reader that turns an
-  //! untrusted value into one.
+  //! Farik's events: `docs/schemas/event.schema.json` as Rust types, the reader that turns an
+  //! untrusted value into one, and the writer that turns one back.
 
   /// Builders for test events, usable by every crate's tests.
   pub mod fixtures;
@@ -723,7 +696,7 @@ Produces: `farik_protocol::event::{EventEnvelope, EventBody, FarikEvent, EventKi
       fn reads_every_optional_field_of_the_envelope() {
           let event = event_from_value(&a_full_event_wire(EventKind::TaskCreated)).expect("valid");
           assert_eq!(
-              event.envelope.task_id.as_ref().map(ToString::to_string),
+              event.envelope.task_id.as_ref().map(|id| id.to_string()),
               Some("FRK-1".to_string())
           );
           assert_eq!(event.envelope.agent_id.as_deref(), Some("maya-chen"));
@@ -759,7 +732,9 @@ Produces: `farik_protocol::event::{EventEnvelope, EventBody, FarikEvent, EventKi
               assert_eq!(errors.len(), 1, "{kind}");
               assert_eq!(errors[0].path, "/body", "{kind}");
               assert!(
-                  errors[0].message.starts_with(&format!("a {kind} event does not carry this body")),
+                  errors[0]
+                      .message
+                      .starts_with(&format!("a {kind} event does not carry this body")),
                   "{}",
                   errors[0].message
               );
@@ -802,15 +777,19 @@ Produces: `farik_protocol::event::{EventEnvelope, EventBody, FarikEvent, EventKi
 
       #[test]
       fn refuses_a_blank_team_id_and_a_blank_project_id() {
-          // The schema lets a string be empty; an event nobody can attribute to a team and a
-          // project cannot be read back out of the log, so the reader refuses it here.
+          // The schema lets a string be empty; an event nobody can attribute to a team and a project
+          // cannot be read back out of the log, so the reader refuses it here.
           for (field, path) in [("team_id", "/team_id"), ("project_id", "/project_id")] {
               let mut input = an_event_wire(EventKind::TaskCreated);
               input[field] = json!("   ");
               let errors = refusal(&input);
               assert_eq!(errors.len(), 1, "{field}");
               assert_eq!(errors[0].path, path);
-              assert!(errors[0].message.starts_with("is blank"), "{}", errors[0].message);
+              assert!(
+                  errors[0].message.starts_with("is blank"),
+                  "{}",
+                  errors[0].message
+              );
           }
       }
 
@@ -831,13 +810,15 @@ Produces: `farik_protocol::event::{EventEnvelope, EventBody, FarikEvent, EventKi
           let mut input = an_event_wire(EventKind::ContractWritten);
           let mut summary = a_contract_summary_wire();
           summary["parent"] = json!("FRK-3");
-          summary["kind"] = json!("task");
           input["body"]["summary"] = summary;
           let event = event_from_value(&input).expect("valid");
           let EventBody::ContractWritten(body) = event.body else {
               panic!("a contract.written event carries a contract.written body");
           };
-          assert_eq!(body.summary.parent.as_ref().map(ToString::to_string), Some("FRK-3".to_string()));
+          assert_eq!(
+              body.summary.parent.as_ref().map(|id| id.to_string()),
+              Some("FRK-3".to_string())
+          );
       }
   }
   ```
@@ -854,7 +835,8 @@ Produces: `farik_protocol::event::{EventEnvelope, EventBody, FarikEvent, EventKi
   ```
   cargo test -p farik-protocol
   # expected: FAIL to compile, error[E0432]: unresolved imports `super::EVERY_KIND`,
-  #           `super::EventBody`, `super::event_from_value`
+  #           `super::EventBody`, `super::EventKind`, `super::ValidationError`,
+  #           `super::event_from_value`
   ```
 
 - [ ] Write the minimal implementation. Insert into `crates/protocol/src/event.rs`, between the module doc and `pub mod fixtures;`:
@@ -873,9 +855,8 @@ Produces: `farik_protocol::event::{EventEnvelope, EventBody, FarikEvent, EventKi
   pub use crate::generated::event::{
       ContractLockedBody, ContractSummary, ContractSummaryKind, ContractSummaryParent,
       ContractSummaryRisk, ContractSummaryStatus, ContractUnlockedBody, ContractWrittenBody,
-      CriteriaUpdatedBody, DriftDetectedBody, DriftDetectedBodyDrift, EventKind,
-      ProjectScannedBody, RequestTriagedBody, RequestTriagedBodySize, TaskCreatedBody,
-      TeamUpdatedBody,
+      CriteriaUpdatedBody, DriftDetectedBody, DriftDetectedBodyDrift, EventKind, ProjectScannedBody,
+      RequestTriagedBody, RequestTriagedBodySize, TaskCreatedBody, TeamUpdatedBody,
   };
 
   use crate::generated::event::FarikEvent as EventWire;
@@ -992,8 +973,8 @@ Produces: `farik_protocol::event::{EventEnvelope, EventBody, FarikEvent, EventKi
   ///
   /// Every schema violation, in the schema's order rather than the input's key order; one error at
   /// `/body` when the body does not fit the kind; one error at `/team_id` or `/project_id` for a
-  /// blank id; one at `/task_id` for an id the contract's pattern refuses; or one error at the
-  /// root when the schema passes but the typed event cannot be built.
+  /// blank id; one at `/task_id` for an id the contract's pattern refuses; or one error at the root
+  /// when the schema passes but the typed event cannot be built.
   pub fn event_from_value(input: &Value) -> Result<FarikEvent, Vec<ValidationError>> {
       let errors: Vec<ValidationError> = VALIDATOR
           .iter_errors(input)
@@ -1039,9 +1020,9 @@ Produces: `farik_protocol::event::{EventEnvelope, EventBody, FarikEvent, EventKi
       })
   }
 
-  /// The body the kind says it is, read from the value. The wire enum answers "which body is
-  /// this?" by shape; the kind is what the event says it is, so the body is read by kind and one
-  /// that does not fit is refused.
+  /// The body the kind says it is, read from the value. The wire enum answers "which body is this?"
+  /// by shape; the kind is what the event says it is, so the body is read by kind and one that does
+  /// not fit is refused.
   fn body_from_value(kind: EventKind, body: &Value) -> Result<EventBody, Vec<ValidationError>> {
       Ok(match kind {
           EventKind::TaskCreated => EventBody::TaskCreated(read_body(body, kind)?),
@@ -1069,8 +1050,8 @@ Produces: `farik_protocol::event::{EventEnvelope, EventBody, FarikEvent, EventKi
   }
 
   fn required_id(value: &str, path: &str) -> Result<String, Vec<ValidationError>> {
-      let named = value.trim();
-      if named.is_empty() {
+      let trimmed = value.trim();
+      if trimmed.is_empty() {
           return Err(vec![ValidationError {
               path: path.to_string(),
               message: "is blank, and an event the log cannot attribute to a team and a project \
@@ -1078,7 +1059,7 @@ Produces: `farik_protocol::event::{EventEnvelope, EventBody, FarikEvent, EventKi
                   .to_string(),
           }]);
       }
-      Ok(named.to_string())
+      Ok(trimmed.to_string())
   }
 
   fn optional_id(value: Option<&str>) -> Option<String> {
@@ -1107,7 +1088,7 @@ Produces: `farik_protocol::event::{EventEnvelope, EventBody, FarikEvent, EventKi
 - [ ] Tie the two lists of kinds together so that neither can gain a kind without the other. Append one line to `names_every_event_kind_as_an_entity_and_a_past_tense_verb` in `crates/protocol/src/lib.rs`:
 
   ```rust
-          assert_eq!(KINDS.map(|(_, kind)| kind), crate::event::EVERY_KIND);
+  assert_eq!(KINDS.map(|(_, kind)| kind), crate::event::EVERY_KIND);
   ```
 
   ```
@@ -1155,7 +1136,13 @@ Produces: `farik_protocol::event::event_to_value`
       }
   ```
 
-  and add `event_to_value` to the `use super::{...}` line of that module.
+  and add `event_to_value` to that module's `use super::{...}` line, which becomes:
+
+  ```rust
+  use super::{
+      EVERY_KIND, EventBody, EventKind, ValidationError, event_from_value, event_to_value,
+  };
+  ```
 
 - [ ] Run it and confirm it fails because the writer is missing:
 
@@ -1164,25 +1151,27 @@ Produces: `farik_protocol::event::event_to_value`
   # expected: FAIL to compile, error[E0432]: unresolved import `super::event_to_value`
   ```
 
-- [ ] Write the minimal implementation. Change the `chrono` and `serde_json` imports at the top of `crates/protocol/src/event.rs` to
+- [ ] Write the minimal implementation. Change the two import lines at the top of `crates/protocol/src/event.rs` to
 
   ```rust
   use chrono::{DateTime, SecondsFormat, Utc};
   ```
 
+  and
+
   ```rust
   use serde_json::{Map, Value};
   ```
 
-  and append to the module, after `event_from_value` and its helpers:
+  then append to the module, after `event_from_value` and its helpers:
 
   ```rust
   /// One event as the wire value the log holds, the inverse of `event_from_value`.
   ///
   /// The crate writes the wire form itself, field by field, rather than deriving it: `serde_json`
-  /// answers with a `Result` whose error cannot happen for these types, and
-  /// `docs/standards/code.md` allows no `unwrap` or `expect` here, so the alternative is an
-  /// impossible error on every caller forever. The round-trip test is what keeps this honest.
+  /// answers with a `Result` whose error cannot happen for these types, and `docs/standards/code.md`
+  /// allows no `unwrap` or `expect` here, so the alternative is an impossible error on every caller
+  /// forever. The round-trip test is what keeps this honest.
   #[must_use]
   pub fn event_to_value(event: &FarikEvent) -> Value {
       let mut wire = Map::new();
@@ -1394,20 +1383,38 @@ Produces: `farik_protocol::event::{NewEvent, EventIds, EventError, new_event}`
           for (field, ids) in [
               (
                   "team_id",
-                  EventIds { team_id: "   ".to_string(), ..some_ids() },
+                  EventIds {
+                      team_id: "   ".to_string(),
+                      ..some_ids()
+                  },
               ),
               (
                   "project_id",
-                  EventIds { project_id: String::new(), ..some_ids() },
+                  EventIds {
+                      project_id: String::new(),
+                      ..some_ids()
+                  },
               ),
           ] {
               let error = new_event(a_body(), at(), ids).expect_err("expected a refusal");
-              assert_eq!(error, EventError::BlankId { field: field.to_string() });
+              assert_eq!(
+                  error,
+                  EventError::BlankId {
+                      field: field.to_string()
+                  }
+              );
           }
       }
   ```
 
-  and add `EventError`, `EventIds`, and `new_event` to the `use super::{...}` line of that module.
+  and extend that module's `use super::{...}` line, which becomes:
+
+  ```rust
+  use super::{
+      EVERY_KIND, EventBody, EventError, EventIds, EventKind, ValidationError, event_from_value,
+      event_to_value, new_event,
+  };
+  ```
 
 - [ ] Run it and confirm it fails because nothing stamps an event yet:
 
@@ -1417,11 +1424,11 @@ Produces: `farik_protocol::event::{NewEvent, EventIds, EventError, new_event}`
   #           `super::EventIds`, `super::new_event`
   ```
 
-- [ ] Write the minimal implementation. Append to `crates/protocol/src/event.rs`, after `FarikEvent`:
+- [ ] Write the minimal implementation. Insert into `crates/protocol/src/event.rs`, after `FarikEvent` and before `event_from_value`:
 
   ```rust
-  /// The ids an event is stamped with. Everything an envelope has except the sequence number,
-  /// which the store assigns, and the time, which the clock does.
+  /// The ids an event is stamped with. Everything an envelope has except the sequence number, which
+  /// the store assigns, and the time, which the clock does.
   #[derive(Debug, Clone, PartialEq, Eq, Default)]
   pub struct EventIds {
       /// The team the event belongs to. Blank is refused.
@@ -1466,9 +1473,9 @@ Produces: `farik_protocol::event::{NewEvent, EventIds, EventError, new_event}`
       },
   }
 
-  /// Stamps a body with the time it was recorded and the ids it belongs to. Trims every id and
-  /// drops an optional one that is blank, because a blank id names nobody and the log would show
-  /// an agent or a session that does not exist.
+  /// Stamps a body with the time it was recorded and the ids it belongs to. Trims every id and drops
+  /// an optional one that is blank, because a blank id names nobody and the log would show an agent
+  /// or a session that does not exist.
   ///
   /// # Errors
   ///
@@ -1540,7 +1547,6 @@ Produces: `farik_protocol::command::{Command, CommandName, RequestSize, command_
       },
       "commandBodyWire": {
         "title": "Command Body Wire",
-        "description": "Every body shape a command carries. The branches have distinct required properties and none accepts an unknown one; which one it must be is decided by command, in the reader.",
         "oneOf": [
           { "$ref": "#/$defs/taskCreateBody" },
           { "$ref": "#/$defs/requestTriageBody" }
@@ -1548,20 +1554,18 @@ Produces: `farik_protocol::command::{Command, CommandName, RequestSize, command_
       },
       "taskCreateBody": {
         "title": "Task Create Body",
-        "description": "File a contract as a draft request (docs/SPEC.md section 5.16 item 1).",
         "type": "object",
         "additionalProperties": false,
         "required": ["contract"],
         "properties": {
           "contract": {
             "type": "object",
-            "description": "A task contract. This schema says only that it is an object: one schema never references another, and the contract's rules, the repeated id ones among them, belong to farik_core::contract::validate_contract, which the reader calls."
+            "description": "A task contract. This schema says only that it is an object: one schema never references another, and the contract's rules, the repeated-id ones among them, belong to farik_core::contract::validate_contract, which the reader calls."
           }
         }
       },
       "requestTriageBody": {
         "title": "Request Triage Body",
-        "description": "Record triage's decision, or the human's overrule of it (docs/SPEC.md section 5.16).",
         "type": "object",
         "additionalProperties": false,
         "required": ["task_id", "size", "reason"],
@@ -1578,11 +1582,11 @@ Produces: `farik_protocol::command::{Command, CommandName, RequestSize, command_
   Append the entry to `GENERATED_SCHEMAS` in `xtask/src/generate.rs` and change the array's length to 4:
 
   ```rust
-      GeneratedSchema {
-          schema: "docs/schemas/command.schema.json",
-          types: "crates/protocol/src/generated/command.rs",
-          schema_copy: "crates/protocol/src/generated/command.schema.json",
-      },
+  GeneratedSchema {
+      schema: "docs/schemas/command.schema.json",
+      types: "crates/protocol/src/generated/command.rs",
+      schema_copy: "crates/protocol/src/generated/command.schema.json",
+  },
   ```
 
   Declare the module in `crates/protocol/src/generated/mod.rs`, above `pub mod event;`:
@@ -1641,8 +1645,11 @@ Produces: `farik_protocol::command::{Command, CommandName, RequestSize, command_
 
       #[test]
       fn reads_a_request_triage_command() {
-          let Command::RequestTriage { task_id, size, reason } =
-              command_from_value(&a_request_triage_wire()).expect("valid")
+          let Command::RequestTriage {
+              task_id,
+              size,
+              reason,
+          } = command_from_value(&a_request_triage_wire()).expect("valid")
           else {
               panic!("a request_triage command carries a size");
           };
@@ -1661,7 +1668,11 @@ Produces: `farik_protocol::command::{Command, CommandName, RequestSize, command_
           let errors = refusal(&input);
           assert_eq!(errors.len(), 1);
           assert_eq!(errors[0].path, "/body/contract/exit_criteria");
-          assert!(errors[0].message.starts_with("the id C1 names"), "{}", errors[0].message);
+          assert!(
+              errors[0].message.starts_with("the id C1 names"),
+              "{}",
+              errors[0].message
+          );
       }
 
       #[test]
@@ -1681,7 +1692,9 @@ Produces: `farik_protocol::command::{Command, CommandName, RequestSize, command_
           assert_eq!(errors.len(), 1);
           assert_eq!(errors[0].path, "/body");
           assert!(
-              errors[0].message.starts_with("a task_create command does not carry this body"),
+              errors[0]
+                  .message
+                  .starts_with("a task_create command does not carry this body"),
               "{}",
               errors[0].message
           );
@@ -1717,7 +1730,7 @@ Produces: `farik_protocol::command::{Command, CommandName, RequestSize, command_
   ```
   cargo test -p farik-protocol
   # expected: FAIL to compile, error[E0432]: unresolved imports `super::Command`,
-  #           `super::RequestSize`, `super::command_from_value`
+  #           `super::RequestSize`, `super::ValidationError`, `super::command_from_value`
   ```
 
 - [ ] Write the minimal implementation. Insert into `crates/protocol/src/command.rs`, between the module doc and the tests:
@@ -1726,12 +1739,12 @@ Produces: `farik_protocol::command::{Command, CommandName, RequestSize, command_
   use std::str::FromStr;
   use std::sync::LazyLock;
 
+  use farik_core::contract::validate_contract;
   use jsonschema::Validator;
   use serde::de::DeserializeOwned;
   use serde_json::Value;
 
   pub use farik_core::contract::{TaskContract, TaskId, ValidationError};
-  use farik_core::contract::validate_contract;
 
   pub use crate::generated::command::CommandName;
   use crate::generated::command::{
@@ -1763,24 +1776,15 @@ Produces: `farik_protocol::command::{Command, CommandName, RequestSize, command_
       Small,
   }
 
-  impl RequestSize {
-      /// The wire name: `large` or `small`.
-      #[must_use]
-      pub fn wire_name(self) -> &'static str {
-          match self {
-              Self::Large => "large",
-              Self::Small => "small",
-          }
-      }
-  }
-
   /// A request for the daemon to change something.
   #[derive(Debug, Clone, PartialEq)]
   pub enum Command {
-      /// File a contract as a draft request.
+      /// File a contract as a draft request. The contract is boxed because it is an order of
+      /// magnitude larger than every other command's arguments, and an enum is as large as its
+      /// largest variant.
       TaskCreate {
           /// The contract, already held to every rule `validate_contract` applies.
-          contract: TaskContract,
+          contract: Box<TaskContract>,
       },
       /// Record triage's decision, or the human's overrule of it.
       RequestTriage {
@@ -1795,15 +1799,15 @@ Produces: `farik_protocol::command::{Command, CommandName, RequestSize, command_
 
   /// Checks a value against `docs/schemas/command.schema.json` and, when it conforms, returns the
   /// typed command. The contract inside `task_create` goes through
-  /// `farik_core::contract::validate_contract`, so that a contract arriving inside a command is
-  /// held to exactly the rules one arriving alone is, the repeated id rules among them.
+  /// `farik_core::contract::validate_contract`, so that a contract arriving inside a command is held
+  /// to exactly the rules one arriving alone is, the repeated id rules among them.
   ///
   /// # Errors
   ///
   /// Every schema violation, in the schema's order rather than the input's key order; one error at
   /// `/body` when the body does not belong to the command; every violation the contract's own
-  /// validator reports, at its path under `/body/contract`; or one error at the root when the
-  /// schema passes but the typed command cannot be built.
+  /// validator reports, at its path under `/body/contract`; or one error at the root when the schema
+  /// passes but the typed command cannot be built.
   pub fn command_from_value(input: &Value) -> Result<Command, Vec<ValidationError>> {
       let errors: Vec<ValidationError> = VALIDATOR
           .iter_errors(input)
@@ -1818,25 +1822,24 @@ Produces: `farik_protocol::command::{Command, CommandName, RequestSize, command_
       let wire = serde_json::from_value::<CommandWire>(input.clone()).map_err(|error| {
           vec![ValidationError {
               path: "/".to_string(),
-              message: format!(
-                  "the schema passed but the typed command could not be built: {error}"
-              ),
+              message: format!("the schema passed but the typed command could not be built: {error}"),
           }]
       })?;
       match wire.command {
           CommandName::TaskCreate => {
               let body: TaskCreateBody = read_body(&input["body"], CommandName::TaskCreate)?;
-              let contract =
-                  validate_contract(&Value::Object(body.contract)).map_err(|errors| {
-                      errors
-                          .into_iter()
-                          .map(|error| ValidationError {
-                              path: under_contract(&error.path),
-                              message: error.message,
-                          })
-                          .collect::<Vec<ValidationError>>()
-                  })?;
-              Ok(Command::TaskCreate { contract })
+              let contract = validate_contract(&Value::Object(body.contract)).map_err(|errors| {
+                  errors
+                      .into_iter()
+                      .map(|error| ValidationError {
+                          path: under_contract(&error.path),
+                          message: error.message,
+                      })
+                      .collect::<Vec<ValidationError>>()
+              })?;
+              Ok(Command::TaskCreate {
+                  contract: Box::new(contract),
+              })
           }
           CommandName::RequestTriage => {
               let body: RequestTriageBody = read_body(&input["body"], CommandName::RequestTriage)?;
@@ -1870,8 +1873,8 @@ Produces: `farik_protocol::command::{Command, CommandName, RequestSize, command_
       })
   }
 
-  /// A contract's own error path, moved under the command that carried it. The validator reports
-  /// the contract's root as `/`, which under a command is the contract itself.
+  /// A contract's own error path, moved under the command that carried it. The validator reports the
+  /// contract's root as `/`, which under a command is the contract itself.
   fn under_contract(path: &str) -> String {
       if path == "/" {
           "/body/contract".to_string()
@@ -1968,8 +1971,8 @@ Produces: `farik_protocol::clock::{Clock, IdSource, FixedClock, SequentialIds}`
 
   use chrono::{DateTime, Utc};
 
-  /// Where the current time comes from. Nothing below the runtime reads the machine's clock, so
-  /// that a test decides what "now" is and a replayed log produces the same answers twice.
+  /// Where the current time comes from. Nothing below the runtime reads the machine's clock, so that
+  /// a test decides what "now" is and a replayed log produces the same answers twice.
   pub trait Clock {
       /// The time now, in UTC.
       fn now(&self) -> DateTime<Utc>;
@@ -2021,7 +2024,10 @@ Produces: `farik_protocol::clock::{Clock, IdSource, FixedClock, SequentialIds}`
 
   impl IdSource for SequentialIds {
       fn session_id(&self) -> String {
-          format!("session-{}", self.handed_out.fetch_add(1, Ordering::Relaxed) + 1)
+          format!(
+              "session-{}",
+              self.handed_out.fetch_add(1, Ordering::Relaxed) + 1
+          )
       }
   }
   ```
@@ -2040,7 +2046,7 @@ Produces: `farik_protocol::clock::{Clock, IdSource, FixedClock, SequentialIds}`
 Files: modified `docs/plans/project-plan.md`, `CLAUDE.md`, `README.md`, `docs/plans/phase-2-protocol-store-cli/step-01-protocol-crate.md`
 
 Consumes: nothing
-Produces: a project plan and a `CLAUDE.md` that describe the repository as it now is
+Produces: a project plan, a `README.md`, and a `CLAUDE.md` that describe the repository as it now is
 
 This task changes documentation and has no test cycle.
 
@@ -2054,11 +2060,13 @@ This task changes documentation and has no test cycle.
   >
   > Phase 1 (harness core) is done and merged (pull request #5): `farik-core` decides every rule of `docs/SPEC.md` section 5 that is a decision rather than an effect. Three rules of section 5 are recorded in `docs/plans/project-plan.md` as needing a decision in the spec rather than a function in `core`; read that note before adding one of them by hand.
   >
-  > Phase 2 (protocol, store, and the first command line) is in progress on `claude/phase-0-implementation-izm38y` (the harness-assigned branch, reused because a session may not push to another branch without permission). Its step plans live under `docs/plans/phase-2-protocol-store-cli/` and are written one at a time from `docs/plans/project-plan.md`.
+  > Phase 2 (protocol, store, and the first command line) is in progress on `claude/phase-0-implementation-izm38y` (the harness-assigned branch, reused because a session may not push to another branch without permission), in pull request #6. Its step plans live under `docs/plans/phase-2-protocol-store-cli/` and are written one at a time from `docs/plans/project-plan.md`.
 
 - [ ] In `README.md`, replace the status line with:
 
   > Status: phase 0 (foundation) and phase 1 (harness core) merged; phase 2 (protocol, store, and the first command line) in progress. Nothing runs for a user yet. Project standards are in place; see [CONTRIBUTING.md](CONTRIBUTING.md) before making a change.
+
+- [ ] Confirm the phase's draft pull request exists, is titled `phase 2: protocol, store, and the first command line`, follows `.github/pull_request_template.md`, and links this step plan. Open it if it does not; hard rule 11 of `CLAUDE.md` gives a pushed phase branch no other option. It is pull request #6, opened when this plan was pushed.
 
 - [ ] Set this plan's `Status:` to `done` and confirm every checkbox above is ticked.
 
@@ -2079,8 +2087,8 @@ The step's own behavior, run on its own:
 
 ```
 cargo test -p farik-protocol
-# expected: every test in lib, command::tests, clock::tests, and event::tests passing, and no
-#           test filtered out or ignored
+# expected: 29 tests passing -- 2 in lib, 17 in event::tests, 7 in command::tests, 3 in
+#           clock::tests -- and none filtered out or ignored
 ```
 
 The generated files are the schemas':
@@ -2093,3 +2101,4 @@ cargo xtask generate --check
 ## Open questions
 
 None.
+
