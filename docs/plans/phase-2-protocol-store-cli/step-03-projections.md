@@ -1555,6 +1555,98 @@ This task changes documentation and has no test cycle. The `> ` marker on each b
 
 - [x] Commit: `docs(docs): record what step 03 changed about the projections`
 
+## Review findings
+
+The landing review was a fresh session that did not write this step. It read the code against this
+plan and then against the world, re-introduced twenty-two mutations, and measured the catch-up on a
+real file of ten thousand events. Its verdict was **request changes**, on two correctness defects and
+five surviving mutants.
+
+Everything below is closed except the one deferral, which says why.
+
+### The two defects, both reproduced
+
+**An event applied out of order was dropped for good** (`e9b0742`). The guard that ignores an event
+at or before the cursor also swallowed one *past* it. Handed event 3 before event 2 — which is what
+two processes each appending and projecting what they appended produce — the cursor moved to 3, event
+2 was never applied, `catch_up` could not repair it because the cursor had passed the gap, and no
+error was returned. Four processes appending and projecting 150 events each left 597 of 600 contracts
+on the board on most runs, silently and permanently. An event past the next one is now a gap, and the
+events in between are read from the log, which is the one place they certainly are.
+
+**`apply`'s transaction was deferred, so it read before it wrote** (`e9b0742`). In WAL mode a
+transaction that takes its read lock first cannot be promoted when another connection has committed
+in between: SQLite refuses it at once and `busy_timeout` does not cover it. This is the defect step
+02's review fixed in `migrations::apply`, whose comment explains it at length — and the projections
+reintroduced it. 19 of 600 applies were refused with "database is locked". Both transactions here now
+take the write lock up front.
+
+Both are covered by one integration test, four processes behind a barrier, which fails on every run
+without either fix.
+
+### The surviving mutants
+
+**A summary must not speak for the triage or the lock** (`fb16bcb`). Adding `triaged = 0` or
+`locked = 0` to `write_summary`'s upsert left every test green. The schema settles it: a contract
+summary carries `kind`, `parent`, `title`, `status` and `risk`, and nothing else, so the flags belong
+to their own events. The sequence it breaks is the universal one — triage always precedes the
+contract being written (5.16 item 1, and the `draft -> refining` gate of 5.2) — so a wrong upsert
+would have un-triaged every contract on the board.
+
+**`STRICT`, the one-row `CHECK`, and the two boolean `CHECK`s were pinned by nothing** (`fb16bcb`).
+The same finding step 02's review made about migration 0001; the precedent had not carried into 0002.
+One test now writes a blob where a title belongs, a word where a sequence number belongs, a second
+cursor, and a flag that is neither 0 nor 1.
+
+**Nothing pinned the step's headline property** (`e9b0742`). Making `catch_up` read from sequence
+zero instead of the cursor left all tests green, because `apply`'s guard dropped the re-read events
+and the board came out identical — only the cost differed, and the cost is what the step is for.
+`catch_up` now says how many events it read, and a test asserts that a board which is already current
+reads zero.
+
+**Two mutants are accepted survivors, with the reason.** Changing the guard from `<=` to `<` is an
+equivalent mutant: `<` still drops every older event, and re-applying the event exactly at the cursor
+is harmless because every handler writes the same values. Dropping the two indexes changes
+performance only, and nothing queries by status or parent until step 06.
+
+### The rest
+
+- **A test this plan deleted** (`0f2234d`): Task 2 says to replace the whole tests module, which took
+  Task 1's test with it, and with it the only assertions that a fresh log's cursor is zero and that
+  the store knows two migrations. Both are back. The plan is at fault rather than the execution, and
+  Task 2's instruction should have said to append.
+- **The board's order had no tiebreak** (`0f2234d`): the schema's pattern allows a leading zero, so
+  `FRK-007` and `FRK-7` cast to one number. This store never writes one; a log written by another
+  tool could.
+- **Why a board may refuse a row when the log may not** (`0f2234d`): a board is derived, so `rebuild`
+  throws the row away without parsing it and `farik doctor` reaches a poisoned board that way. The
+  log has no such door. Said on `projection_of_row`, where the next reader will ask.
+- **`rebuild` is not atomic to a reader** (`0f2234d`), because the connection's lock may not be held
+  across the reads that refill the tables. Its doc says so, since step 05 will call it while a view
+  may be reading.
+- **`apply` takes an event this log returned** (`0f2234d`): the sequence number is what places it.
+- **The two indexes have no reader yet** (`0f2234d`), and the migration now says which views want
+  them, so the next reader does not go looking for the query.
+- **`projection_cursor` is singular** where `docs/standards/code.md` asks for plural (`0f2234d`): the
+  standard now records that a table holding one row by construction is singular.
+
+### Deferred, with the reason
+
+- **Catching up is one transaction per event, over a read with no limit.** Measured on a real file at
+  ten thousand events — the number `docs/SPEC.md` section 10 names — opening a cold board takes
+  1.59 s and `rebuild` 1.54 s, against 38 µs for the ordinary open and 1.7 ms to read a board of 400
+  rows. The cost is the commits, not the reading: appending those ten thousand events takes the same
+  1.6 s, about 160 µs each under `synchronous = FULL`. Peak memory for the whole process was 17 MB,
+  so the unbounded `Vec` is not the problem at this size. Batching with `EventQuery::limit`, one
+  transaction per batch, is the fix, and it has to be written against the gap repair above so that a
+  batch never commits a cursor past an event it skipped. Left for **step 05**, which is where
+  `farik doctor` calls `rebuild` and where the 1.5 s becomes something a user waits for; recorded
+  here so that step does not have to rediscover the measurement.
+- **`PRAGMA foreign_keys` is still inert.** Step 02's review noted it was set for this step's
+  projections. `task_projections.parent` is a plain column with no foreign key, and correctly so: an
+  upsert can create a child before its parent exists, which is the same reason an update that matches
+  no row is a no-op. The pragma stays for a later table that declares one.
+
 ## Verification
 
 - [x] The whole check, from the workspace root:
