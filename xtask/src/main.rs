@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode};
 
 use anyhow::{Context, bail};
+use xtask::check::Tests;
 
 fn main() -> ExitCode {
     let args: Vec<String> = env::args().skip(1).collect();
@@ -21,7 +22,11 @@ fn main() -> ExitCode {
 fn run(args: &[String]) -> anyhow::Result<()> {
     let root = workspace_root()?;
     match args.first().map(String::as_str) {
-        Some("check") => check(&root),
+        Some("check") => check(
+            &root,
+            xtask::check::tests_requested(args.get(1).map(String::as_str))
+                .map_err(anyhow::Error::msg)?,
+        ),
         Some("generate") => generate(
             &root,
             match args.get(1).map(String::as_str) {
@@ -39,7 +44,7 @@ fn run(args: &[String]) -> anyhow::Result<()> {
         Some("core-io") => core_io(&root),
         Some("install-hooks") => install_hooks(&root),
         _ => bail!(
-            "usage: cargo xtask <check|generate [--check]|pre-commit|commit-msg <file>|todos|core-io|install-hooks>"
+            "usage: cargo xtask <check [--integration]|generate [--check]|pre-commit|commit-msg <file>|todos|core-io|install-hooks>"
         ),
     }
 }
@@ -63,7 +68,7 @@ fn cargo(root: &Path, args: &[&str]) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn check(root: &Path) -> anyhow::Result<()> {
+fn check(root: &Path, tests: Tests) -> anyhow::Result<()> {
     cargo(root, &["fmt", "--all", "--check"])?;
     cargo(
         root,
@@ -76,7 +81,12 @@ fn check(root: &Path) -> anyhow::Result<()> {
             "warnings",
         ],
     )?;
-    cargo(root, &["test", "--workspace"])?;
+    match tests {
+        Tests::WithoutTheOnesThatNeedAProgram => cargo(root, &["test", "--workspace"])?,
+        // `--include-ignored` rather than `--ignored`: this runs everything, so one command is the
+        // whole check rather than half of it.
+        Tests::All => cargo(root, &["test", "--workspace", "--", "--include-ignored"])?,
+    }
     generate(root, true)?;
     todos(root)?;
     core_io(root)?;

@@ -1,5 +1,7 @@
 //! Repository tasks: the check command, hooks, and code generation. Run with `cargo xtask`.
 
+/// Which tests `cargo xtask check` runs.
+pub mod check;
 /// Commit message rules from `docs/standards/code.md`.
 pub mod commit_message;
 /// The rule that `farik-core` performs no I/O, hard rule 5 in `CLAUDE.md`.

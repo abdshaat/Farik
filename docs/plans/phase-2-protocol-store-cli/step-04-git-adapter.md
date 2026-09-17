@@ -94,7 +94,7 @@ Produces: `farik_store::{Git, GitError}`, `Git::{open, is_repository}`, `xtask::
 
 The flag arrives with the first test that needs it. Without it the eleven tests this step writes would be written and never run until the end, which is not a red-green cycle at all.
 
-- [ ] Write the failing tests. Create `crates/store/src/git.rs` with the module doc:
+- [x] Write the failing tests. Create `crates/store/src/git.rs` with the module doc:
 
   ```rust
   //! The repository Farik works in, driven through the `git` program rather than reimplemented
@@ -136,7 +136,7 @@ The flag arrives with the first test that needs it. Without it the eleven tests 
   }
   ```
 
-- [ ] Create `crates/store/tests/git.rs`:
+- [x] Create `crates/store/tests/git.rs`:
 
   ```rust
   //! The git adapter against a real repository.
@@ -255,7 +255,7 @@ The flag arrives with the first test that needs it. Without it the eleven tests 
   }
   ```
 
-- [ ] Declare the module in `crates/store/src/lib.rs`. rustfmt keeps both lists alphabetical, so this goes between `event_log` and `migrations` rather than at the end — replace
+- [x] Declare the module in `crates/store/src/lib.rs`. rustfmt keeps both lists alphabetical, so this goes between `event_log` and `migrations` rather than at the end — replace
 
   ```rust
   /// The event log.
@@ -271,7 +271,7 @@ The flag arrives with the first test that needs it. Without it the eleven tests 
   pub mod git;
   ```
 
-- [ ] Write the flag's failing test too. Create `xtask/src/check.rs` with the module doc:
+- [x] Write the flag's failing test too. Create `xtask/src/check.rs` with the module doc:
 
   ```rust
   //! Which tests `cargo xtask check` runs, and the flag that says so.
@@ -311,7 +311,7 @@ The flag arrives with the first test that needs it. Without it the eleven tests 
   }
   ```
 
-- [ ] Declare it in `xtask/src/lib.rs`. rustfmt keeps this list alphabetical as well, so it goes before `commit_message` rather than at the end — replace
+- [x] Declare it in `xtask/src/lib.rs`. rustfmt keeps this list alphabetical as well, so it goes before `commit_message` rather than at the end — replace
 
   ```rust
   /// Commit message rules from `docs/standards/code.md`.
@@ -327,7 +327,7 @@ The flag arrives with the first test that needs it. Without it the eleven tests 
   pub mod commit_message;
   ```
 
-- [ ] Run them and confirm they fail because there is no adapter and no flag. One command per target: `cargo test --workspace` compiles them in parallel and stops at whichever fails first, so what it prints is not the same twice running.
+- [x] Run them and confirm they fail because there is no adapter and no flag. One command per target: `cargo test --workspace` compiles them in parallel and stops at whichever fails first, so what it prints is not the same twice running.
 
   ```
   cargo test -p xtask --lib
@@ -346,7 +346,7 @@ The flag arrives with the first test that needs it. Without it the eleven tests 
   # error: could not compile `farik-store` (test "git") due to 1 previous error
   ```
 
-- [ ] Write the minimal implementation. Insert into `crates/store/src/git.rs`, between the module doc and the tests module:
+- [x] Write the minimal implementation. Insert into `crates/store/src/git.rs`, between the module doc and the tests module:
 
   ```rust
   use std::fmt;
@@ -450,13 +450,13 @@ The flag arrives with the first test that needs it. Without it the eleven tests 
   }
   ```
 
-- [ ] Re-export them from `crates/store/src/lib.rs`, after the `event_log` line and before the `projections` one:
+- [x] Re-export them from `crates/store/src/lib.rs`, after the `event_log` line and before the `projections` one:
 
   ```rust
   pub use git::{Git, GitError};
   ```
 
-- [ ] Write the flag's implementation. Insert into `xtask/src/check.rs`, between the module doc and the tests module:
+- [x] Write the flag's implementation. Insert into `xtask/src/check.rs`, between the module doc and the tests module:
 
   ```rust
   /// Which tests the check runs.
@@ -486,7 +486,7 @@ The flag arrives with the first test that needs it. Without it the eleven tests 
   }
   ```
 
-- [ ] Have `check` take it. In `xtask/src/main.rs`, add to the imports, after the `anyhow` line:
+- [x] Have `check` take it. In `xtask/src/main.rs`, add to the imports, after the `anyhow` line:
 
   ```rust
   use xtask::check::Tests;
@@ -554,7 +554,7 @@ The flag arrives with the first test that needs it. Without it the eleven tests 
   }
   ```
 
-- [ ] Have CI run it. Replace `.github/workflows/check.yml`, whole, with:
+- [x] Have CI run it. Replace `.github/workflows/check.yml`, whole, with:
 
   ```yaml
   name: check
@@ -585,7 +585,7 @@ The flag arrives with the first test that needs it. Without it the eleven tests 
         - run: cargo xtask check --integration
   ```
 
-- [ ] Run the check and confirm green:
+- [x] Run the check and confirm green:
 
   ```
   cargo xtask check --integration
@@ -596,7 +596,7 @@ The flag arrives with the first test that needs it. Without it the eleven tests 
   #   test result: ok. 27 passed (xtask)
   ```
 
-- [ ] Run the check both ways, and confirm the flag is what runs the ignored test:
+- [x] Run the check both ways, and confirm the flag is what runs the ignored test:
 
   ```
   cargo xtask check
@@ -607,7 +607,7 @@ The flag arrives with the first test that needs it. Without it the eleven tests 
   # expected: xtask: unknown flag --nonsense; usage: cargo xtask check [--integration]
   ```
 
-- [ ] Commit: `feat(store): open a repository, and run the tests that need git`
+- [x] Commit: `feat(store): open a repository, and run the tests that need git`
 
 ### Task 2: What is at the tip, and which branch
 
