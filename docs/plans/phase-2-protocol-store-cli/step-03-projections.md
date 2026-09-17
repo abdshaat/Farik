@@ -1,13 +1,20 @@
 # Phase 2, step 03: Projections
 
-Status: draft
+Status: ready
 Branch: `claude/phase-0-implementation-izm38y` (the harness-assigned phase branch, left as assigned per `docs/standards/code.md`; a session may not push to another branch without permission, so phase 2 reuses it as phase 1 did; steps do not get their own)
 Spec: `docs/SPEC.md` section 8.4 (storage), 10 (the UI stays responsive with ten thousand events), 5.1 (every action is an event), 5.2 (the lifecycle the board shows), 5.11 (a locked contract), 5.16 (triage)
 Depends on: phase 0 (merged in #4), phase 1 (merged in #5), steps 01 and 02 of this phase (committed as 1f93550 and 50b264e)
 
 A plan is `ready` only when a reviewer other than the author has confirmed the three rules in `docs/standards/workflow.md` stage 2 (Plan): every decision made, no ambiguity, no forward dependencies. Record who confirmed and when here.
 
-Readiness confirmed by: <pending — refused twice on 2026-09-17, sixteen findings, all taken>
+Readiness confirmed by: a fresh Claude Code review session, 2026-09-17, on the third round. It
+rebuilt the step outside the working tree from this plan's own blocks, applied in task order with
+nothing guessed, and reached `xtask check: ok` with every count this plan states: 225 `farik-core`,
+37 `farik-protocol`, 30 the store's modules, 7 its integration test, 24 `xtask`. `git status
+--porcelain` was nine paths identical to the File map with `Cargo.toml` and `Cargo.lock` untouched;
+all six commit subjects were accepted by `cargo xtask commit-msg`; every format and lint step was
+silent; Task 3's red produced its two behavioural assertion failures rather than a compile error; and
+Task 4's mutation killed the reopen test with `left: 0`, `right: 1`.
 
 The first reviewer rebuilt the step outside the working tree from this plan's own blocks and reached
 `xtask check: ok` with every count exact, but three of the plan's own commands did not produce the
