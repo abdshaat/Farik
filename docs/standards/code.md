@@ -114,7 +114,7 @@ Anything that leaves a process or is written to disk uses `snake_case` keys. Rus
 | Role id | `snake_case`, matches the schema enum | `product_manager` |
 | Permission tier | `snake_case` | `write_workspace` |
 | Environment variable | `FARIK_` prefix, `UPPER_SNAKE_CASE` | `FARIK_DAILY_BUDGET_USD` |
-| Database table | `snake_case`, plural | `events`, `task_projections` |
+| Database table | `snake_case`, plural; singular when the table holds one row by construction | `events`, `task_projections`, `projection_cursor` |
 | Database column | `snake_case`; foreign keys `<entity>_id`; timestamps `<verb>_at` | `task_id`, `created_at` |
 | Database index | `<table>_by_<column>` | `events_by_task` |
 | Database trigger | `<table>_<what_it_does>` | `events_refuse_update` |

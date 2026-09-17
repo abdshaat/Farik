@@ -20,6 +20,9 @@ CREATE TABLE task_projections (
     updated_seq INTEGER NOT NULL
 ) STRICT;
 
+-- Neither index has a reader yet: `board` reads every row and `task` reads by its key. They are
+-- here because a migration is never edited once it has shipped, and the views that want them are
+-- the board's filters (step 06) and the epic's children (phase 5).
 CREATE INDEX task_projections_by_status ON task_projections (status, task_id);
 CREATE INDEX task_projections_by_parent ON task_projections (parent, task_id)
     WHERE parent IS NOT NULL;

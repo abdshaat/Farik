@@ -73,6 +73,10 @@ impl Projections {
     /// drifted for any reason — a bug fixed since, a row changed by hand, a migration that added a
     /// column — is corrected by reading the log again.
     ///
+    /// Not atomic to a reader in another thread or process: the tables are emptied and committed
+    /// before the log is read back, because the connection's lock may not be held across the reads
+    /// that refill them. A board read while this is running is empty or half-built.
+    ///
     /// # Errors
     ///
     /// `Sqlite` when the tables cannot be cleared or written; `InvalidEvent` when the log holds a
@@ -101,10 +105,13 @@ impl Projections {
     /// between are read from the log rather than stepped over: a cursor that moved past an event
     /// nothing applied would leave the board short of the log for good, with nothing to notice.
     ///
+    /// The event must be one this log returned from `append`: the sequence number is what places
+    /// it, and one from another log would be placed by a number that means nothing here.
+    ///
     /// # Errors
     ///
-    /// `Sqlite` when the write fails; `InvalidEvent` when the log holds a row that is not an event,
-    /// which only a gap can reach.
+    /// `Sqlite` when the write or the cursor read fails; `InvalidEvent` when the log holds a row
+    /// that is not an event, which only a gap can reach.
     pub fn apply(&self, event: &FarikEvent) -> Result<(), StoreError> {
         if event.envelope.seq > self.cursor()?.saturating_add(1) {
             self.catch_up()?;
@@ -202,10 +209,18 @@ const SELECT_PROJECTION: &str = "SELECT task_id, kind, parent, title, status, ri
 
 /// The board is ordered by the number in the task id, not by the id itself: `FRK-10` sorts before
 /// `FRK-9` as text, and a board that puts the tenth task before the ninth is a board nobody trusts.
-const BY_NUMBER: &str = "CAST(substr(task_id, ?1) AS INTEGER)";
+///
+/// The id itself breaks a tie. The schema's pattern allows a leading zero, so `FRK-007` and `FRK-7`
+/// are two spellings of one number; this store never writes one, but a log written by another tool
+/// could, and two rows whose order is whatever SQLite happens to return is not an order.
+const BY_NUMBER: &str = "CAST(substr(task_id, ?1) AS INTEGER), task_id";
 
 /// Where the number starts in a task id, counting from one as `substr` does: past the prefix and
 /// the dash that follows it. Taken from the prefix rather than written down again.
+///
+/// A byte length, where `substr` counts characters. The two agree for every prefix the contract
+/// schema's pattern can spell, which is ASCII; a prefix outside it would need this to count
+/// characters too.
 fn number_offset() -> i64 {
     i64::try_from(TASK_ID_PREFIX.len() + 2).unwrap_or(i64::MAX)
 }
@@ -236,6 +251,12 @@ fn projected_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ProjectedRow> {
     ))
 }
 
+/// Reads one projected row back, refusing one it cannot.
+///
+/// A refusal here fails the whole board, which is what the step 02 review refused for the log's own
+/// `read`. The difference is the repair: a board is derived, so `rebuild` throws these rows away and
+/// reads the log again without parsing any of them, and `farik doctor` reaches a board in this state
+/// that way. The log has no such door — a row of it that cannot be read is the only copy.
 fn projection_of_row(row: ProjectedRow) -> Result<TaskProjection, StoreError> {
     let (task_id, kind, parent, title, status, risk, triaged, locked, updated_seq) = row;
     let refuse = |what: &str, value: &str| StoreError::InvalidEvent {
@@ -429,6 +450,7 @@ mod tests {
     use super::{Arc, EventLog, FarikEvent, Projections, TaskProjection, open_projections};
     use crate::error::StoreError;
     use crate::event_log::{IN_MEMORY, open_event_log};
+    use crate::migrations;
     use farik_core::contract::{Risk, TaskId, TaskKind, TaskStatus};
 
     fn at(hour: u32) -> DateTime<Utc> {
@@ -698,6 +720,19 @@ mod tests {
         );
         assert_eq!(projections.board().expect("the board reads"), Vec::new());
         assert_eq!(projections.cursor().expect("the cursor reads"), 1);
+    }
+
+    #[test]
+    fn opens_the_projections_of_a_log_that_has_read_nothing_yet() {
+        // The projection tables are part of the log's own database, applied as a migration like
+        // everything else in it, so opening the log is what makes them.
+        let (log, projections) = a_board();
+        assert_eq!(projections.cursor().expect("the cursor reads"), 0);
+        assert_eq!(
+            log.applied_migrations().expect("the ledger reads"),
+            migrations::known_versions()
+        );
+        assert_eq!(migrations::known_versions(), vec![1, 2]);
     }
 
     #[test]
