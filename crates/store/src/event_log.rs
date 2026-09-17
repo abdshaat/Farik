@@ -143,6 +143,10 @@ impl EventLog {
         // Announced while this lock is still held, so that two threads appending at once hand their
         // subscribers the order the log gave them rather than the order they left the insert in.
         // Nothing takes the subscribers' lock before this one, so holding both cannot deadlock.
+        //
+        // A subscriber's channel is unbounded, so this send cannot block, and the subscriber's own
+        // work happens on its own thread after this returns. A bounded channel here would deadlock
+        // against any subscriber that writes to this database — the projections do.
         self.announce(&appended);
         drop(connection);
         Ok(appended)
@@ -234,10 +238,14 @@ impl EventLog {
         Ok(versions)
     }
 
-    /// The connection, recovering from a lock another thread poisoned by panicking. A panic
-    /// somewhere else says nothing about this database, and refusing every later append because of
-    /// it would turn one bug into a stopped team.
-    fn connection(&self) -> MutexGuard<'_, Connection> {
+    /// The one connection this database has, recovering from a lock another thread poisoned by
+    /// panicking. A panic somewhere else says nothing about this database, and refusing every later
+    /// append because of it would turn one bug into a stopped team.
+    ///
+    /// The projections live in this database beside the log and take this same lock, so a view
+    /// cannot read a half-written append, and a log opened in memory can be projected at all — a
+    /// second connection could not reach it.
+    pub(crate) fn connection(&self) -> MutexGuard<'_, Connection> {
         self.connection
             .lock()
             .unwrap_or_else(PoisonError::into_inner)

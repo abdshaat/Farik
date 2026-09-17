@@ -14,10 +14,16 @@ struct Migration {
 /// Every migration, in the order they apply. A migration is never edited once it has shipped; a
 /// change to the shape is a new one, so that a database written by an older Farik reaches the same
 /// shape as one made today.
-const MIGRATIONS: [Migration; 1] = [Migration {
-    version: 1,
-    sql: include_str!("migrations/0001_event_log.sql"),
-}];
+const MIGRATIONS: [Migration; 2] = [
+    Migration {
+        version: 1,
+        sql: include_str!("migrations/0001_event_log.sql"),
+    },
+    Migration {
+        version: 2,
+        sql: include_str!("migrations/0002_projections.sql"),
+    },
+];
 
 /// Brings the database to the shape this version expects, and records what it applied. Applying to
 /// a database that is already current does nothing, so opening a log twice is not an error, and

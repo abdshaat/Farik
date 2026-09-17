@@ -7,6 +7,9 @@ pub mod error;
 pub mod event_log;
 /// The database's shape, as SQL applied in order.
 pub mod migrations;
+/// The board, derived from the log.
+pub mod projections;
 
 pub use error::StoreError;
 pub use event_log::{EventLog, EventQuery, IN_MEMORY, open_event_log};
+pub use projections::{Projections, open_projections};

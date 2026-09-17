@@ -114,7 +114,7 @@ Files: created `crates/store/src/migrations/0002_projections.sql`, `crates/store
 Consumes: `EventLog`, `open_event_log`, `IN_MEMORY`, `StoreError`, `migrations::known_versions` from step 02
 Produces: `farik_store::{Projections, open_projections}`, `Projections::cursor`
 
-- [ ] Write the failing test. Create `crates/store/src/projections.rs` with the module doc:
+- [x] Write the failing test. Create `crates/store/src/projections.rs` with the module doc:
 
   ```rust
   //! The board, read from the log rather than scanned out of it (`docs/SPEC.md` sections 8.4 and 10).
@@ -165,7 +165,7 @@ Produces: `farik_store::{Projections, open_projections}`, `Projections::cursor`
   }
   ```
 
-- [ ] Declare the module and re-export it. In `crates/store/src/lib.rs`, replace the five lines from `/// The database's shape` to the `pub use event_log::` line, the blank line between them included, with:
+- [x] Declare the module and re-export it. In `crates/store/src/lib.rs`, replace the five lines from `/// The database's shape` to the `pub use event_log::` line, the blank line between them included, with:
 
   ```rust
   /// The database's shape, as SQL applied in order.
@@ -178,7 +178,7 @@ Produces: `farik_store::{Projections, open_projections}`, `Projections::cursor`
   pub use projections::{Projections, open_projections};
   ```
 
-- [ ] Run it and confirm it fails because there is nothing to open:
+- [x] Run it and confirm it fails because there is nothing to open:
 
   ```
   cargo test -p farik-store
@@ -190,7 +190,7 @@ Produces: `farik_store::{Projections, open_projections}`, `Projections::cursor`
   #   `super::open_projections`
   ```
 
-- [ ] Write the minimal implementation. Create `crates/store/src/migrations/0002_projections.sql`:
+- [x] Write the minimal implementation. Create `crates/store/src/migrations/0002_projections.sql`:
 
   ```sql
   -- The board, derived from the log (docs/SPEC.md 5.1, 8.4, and 10).
@@ -227,7 +227,7 @@ Produces: `farik_store::{Projections, open_projections}`, `Projections::cursor`
   ) STRICT;
   ```
 
-- [ ] Add it to the list in `crates/store/src/migrations.rs`, replacing
+- [x] Add it to the list in `crates/store/src/migrations.rs`, replacing
 
   ```rust
   const MIGRATIONS: [Migration; 1] = [Migration {
@@ -251,7 +251,7 @@ Produces: `farik_store::{Projections, open_projections}`, `Projections::cursor`
   ];
   ```
 
-- [ ] Let the projections reach the log's connection. In `crates/store/src/event_log.rs`, replace
+- [x] Let the projections reach the log's connection. In `crates/store/src/event_log.rs`, replace
 
   ```rust
       /// The connection, recovering from a lock another thread poisoned by panicking. A panic
@@ -273,7 +273,23 @@ Produces: `farik_store::{Projections, open_projections}`, `Projections::cursor`
       pub(crate) fn connection(&self) -> MutexGuard<'_, Connection> {
   ```
 
-- [ ] Insert into `crates/store/src/projections.rs`, between the module doc and the tests module:
+- [x] Say in `crates/store/src/event_log.rs` why announcing under that lock is safe, now that something else takes it. Replace the line
+
+  ```rust
+          // Nothing takes the subscribers' lock before this one, so holding both cannot deadlock.
+  ```
+
+  with:
+
+  ```rust
+          // Nothing takes the subscribers' lock before this one, so holding both cannot deadlock.
+          //
+          // A subscriber's channel is unbounded, so this send cannot block, and the subscriber's own
+          // work happens on its own thread after this returns. A bounded channel here would deadlock
+          // against any subscriber that writes to this database — the projections do.
+  ```
+
+- [x] Insert into `crates/store/src/projections.rs`, between the module doc and the tests module:
 
   ```rust
   use std::sync::Arc;
@@ -352,7 +368,7 @@ Produces: `farik_store::{Projections, open_projections}`, `Projections::cursor`
   }
   ```
 
-- [ ] Run the tests and confirm green:
+- [x] Run the tests and confirm green:
 
   ```
   cargo test -p farik-store
@@ -360,7 +376,7 @@ Produces: `farik_store::{Projections, open_projections}`, `Projections::cursor`
   #           test result: ok. 6 passed (event_log_file)
   ```
 
-- [ ] Run the format and lint checks:
+- [x] Run the format and lint checks:
 
   ```
   cargo fmt --all --check
@@ -368,7 +384,7 @@ Produces: `farik_store::{Projections, open_projections}`, `Projections::cursor`
   # expected: both silent
   ```
 
-- [ ] Commit: `feat(store): open a log's projections and say how far they have read`
+- [x] Commit: `feat(store): open a log's projections and say how far they have read`
 
 ### Task 2: A filed request reaches the board
 
