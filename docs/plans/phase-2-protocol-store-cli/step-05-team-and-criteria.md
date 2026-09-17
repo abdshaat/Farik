@@ -2404,7 +2404,7 @@ Files: modified `crates/core/src/criteria.rs`, `docs/plans/phase-2-protocol-stor
 Consumes: everything above
 Produces: `farik_core::criteria::{CriteriaError, expand_criteria}`
 
-- [ ] Write the failing tests. Replace the whole tests module of `crates/core/src/criteria.rs` with:
+- [x] Write the failing tests. Replace the whole tests module of `crates/core/src/criteria.rs` with:
 
   ```rust
   #[cfg(test)]
@@ -2672,7 +2672,7 @@ Produces: `farik_core::criteria::{CriteriaError, expand_criteria}`
   }
   ```
 
-- [ ] Run them and confirm they fail because nothing expands a reference:
+- [x] Run them and confirm they fail because nothing expands a reference:
 
   ```
   cargo test -p farik-core --lib
@@ -2681,7 +2681,7 @@ Produces: `farik_core::criteria::{CriteriaError, expand_criteria}`
   # error: could not compile `farik-core` (lib test) due to 1 previous error
   ```
 
-- [ ] Write the minimal implementation. In `crates/core/src/criteria.rs`, replace the imports, whole, with:
+- [x] Write the minimal implementation. In `crates/core/src/criteria.rs`, replace the imports, whole, with:
 
   ```rust
   //! The criterion library (`docs/SPEC.md` section 5.13): `docs/schemas/criteria.schema.json` as
@@ -2711,7 +2711,7 @@ Produces: `farik_core::criteria::{CriteriaError, expand_criteria}`
   pub mod fixtures;
   ```
 
-- [ ] Insert, between the validator's statics and `validate_criteria`:
+- [x] Insert, between the validator's statics and `validate_criteria`:
 
   ```rust
   /// Why a reference could not be expanded into a criterion.
@@ -2752,7 +2752,7 @@ Produces: `farik_core::criteria::{CriteriaError, expand_criteria}`
   impl std::error::Error for CriteriaError {}
   ```
 
-- [ ] And append, after `validate_criteria`:
+- [x] And append, after `validate_criteria`:
 
   ```rust
   /// Expands references into a contract's exit criteria, in the order given.
@@ -2849,7 +2849,7 @@ Produces: `farik_core::criteria::{CriteriaError, expand_criteria}`
   }
   ```
 
-- [ ] Run the check and confirm green:
+- [x] Run the check and confirm green:
 
   ```
   cargo xtask check --integration
@@ -2859,7 +2859,7 @@ Produces: `farik_core::criteria::{CriteriaError, expand_criteria}`
   #   test result: ok. 29 passed (xtask)
   ```
 
-- [ ] Commit: `feat(core): expand a named criterion into a contract's own`
+- [x] Commit: `feat(core): expand a named criterion into a contract's own`
 
 ### Task 6: The plans say what the step became
 
