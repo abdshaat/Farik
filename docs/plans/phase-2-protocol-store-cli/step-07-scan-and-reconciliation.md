@@ -1,13 +1,17 @@
 # Phase 2, step 07: The project scan and reconciliation
 
-Status: draft
+Status: ready
 Branch: `claude/phase-0-implementation-izm38y` (the harness-assigned phase branch, left as assigned per `docs/standards/code.md`; a session may not push to another branch without permission, so phase 2 reuses it as phase 1 did; steps do not get their own)
 Spec: `docs/SPEC.md` section 4 (onboarding scans the tree and reads it back), 5.8 (the scan is stored as `project.md`), 5.13 (the criterion library holds the project's own check and test commands, found by the scan), 8.4 (the log is the source of truth for what happened, the files for what the team knows); F2, F16
 Depends on: phase 0 (merged in #4), phase 1 (merged in #5), steps 01 to 06 of this phase (last code commit `3004cfe`)
 
 A plan is `ready` only when a reviewer other than the author has confirmed the three rules in `docs/standards/workflow.md` stage 2 (Plan): every decision made, nothing ambiguous, no forward dependencies. Record who confirmed and when here.
 
-Readiness confirmed by: <pending>
+Readiness confirmed by: a review session that did not write this plan, on 2026-09-18, against `7f6f086`. It confirmed the three rules by rebuilding Tasks 1 to 4 from this plan alone in a fresh copy with a target directory of its own: every red exact, error for error and count for count; every green exact at 15, 18, 13 and 9 and at all nine counts of the whole check; Task 5 applied and checked clause by clause against the code the earlier tasks produced; the Verification section run whole, the commit-subject loop included; and the changed-file set exactly the File map's. It also mutated the two behaviours the previous round had added tests for and confirmed each test is the only one that notices, and grepped the deleted `order_of` to confirm one definition of the order is left.
+
+Four rounds. Round one found twelve things, eight of them defects in the code this plan produces: a language tie-break that did the opposite of its own comment, a commit in the future only caught at a whole day, a polyglot project losing the toolchain its language names, a subtree scanning as if it were the project, a one-package workspace calling itself a monorepo, an empty script becoming a criterion that verifies nothing, a test runner matched by prefix anywhere in the tree, and four public items nothing asserted. Round two found six more, the worst of them a record for the project plan that listed four `ScanError` variants where this plan builds five. Round three found five, the worst a second definition of the drift order that disagreed with the first and that no test could catch. Round four found none.
+
+Four observations it recorded rather than refused on, none of them grounds to stop: the sort key is the number in a task id, which is total over every id the store's counter can assign but not over two hand-named files differing only by a leading zero; "the commands those toolchains always have" is exact for cargo and go and a convention for poetry, uv and bundler; the tables' listing above is in declaration order, which is what it now says; and two of Task 2's anchors quote a backtick escaped inside a code span, which is the settled style of this phase's five merged step plans. The first two are taken after the step lands, with the rest of the landing pass.
 
 ## Goal
 
@@ -53,7 +57,7 @@ Two things, both about a project Farik has just been pointed at.
 
 `crates/store/src/scan.rs` holds `ProjectScan`, `ScanError`, `scan_project`, `seeded_library`, the detection tables, and the private `Reading` that is what one tree says about itself before any of it is put into words. `crates/store/src/reconcile.rs` holds `Drift`, `ReconcileError` and `reconcile`. `crates/store/src/git/fixtures.rs` holds `TempRepo` and the two free functions that run git in a directory that is not one.
 
-The tables, in the order the module reads them:
+The tables, in the order the module declares them:
 
 ```
 LANGUAGES         extension -> language; the project's is the one with the most tracked files
