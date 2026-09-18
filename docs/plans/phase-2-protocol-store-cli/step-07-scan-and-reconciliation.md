@@ -42,7 +42,7 @@ Two things, both about a project Farik has just been pointed at.
 - **Only what the log is authoritative about is a disagreement.** A contract's `status` and its `locked` flag are both moved by events (5.2, 5.11), so a file that says otherwise is a file to fix. Its title, kind, risk and parent are the contract's own (8.4), and the board's copy of them is a cache of the last event that mentioned the task: one that has fallen behind is a projection to rebuild, not a disagreement about the project.
 - **`Drift::LockMismatch` is added to the three the project plan named.** 5.11 makes the human's hold on a contract a governance fact, and it is written in both places. A file saying `locked: false` while the log says held would let work start on a contract nobody may touch.
 - **`Drift::ContractUnreadable` too.** A person runs this to find out what is wrong; stopping at the first file somebody broke would hide every other disagreement.
-- **The answer is ordered, so two runs can be compared.** By the number in the task id, and within one task in the order the variants are declared.
+- **The answer is ordered, so two runs can be compared.** By the number in the task id, with a stable sort, so two drifts about one task keep the order the loops found them in: a status before a lock. There is no second ranking beside that one — a first draft had an `order_of` function that ranked the five variants, it disagreed with the order the enum declares them in, and no test could tell, because a task whose contract cannot be read is passed over and can never carry a second drift. Found by the third readiness review.
 - **`TempRepo` becomes a public fixture** in `crates/store/src/git/fixtures.rs` rather than staying private to `tests/git.rs`, because the scan's tests need a repository and step 08's command line will too, and `docs/standards/code.md` says a crate's fixtures are public so another crate's tests can use them.
 - **The fixture's `git` is split into one that runs and one that asks.** A single method returning a `String` most callers ignore cannot satisfy clippy's `must_use_candidate` either way: with the attribute every setup call warns, without it the function does. `git` runs and returns nothing; `git_output` asks.
 - **`Git::root` is added and exercised.** A public accessor nothing asserts is what step 06's landing review found; one assertion in the tracked-paths test kills that mutant.
@@ -95,7 +95,7 @@ crates/store/tests/project_scan.rs            creates: the scan against a real r
 crates/store/tests/reconciliation.rs          creates: the files against the log
 crates/store/src/git.rs                       modifies: declares fixtures, adds root, top_level and tracked_paths, renames the splitter
 crates/store/src/lib.rs                       modifies: declares scan and reconcile
-crates/store/tests/git.rs                     modifies: uses the public fixture, gains two tests
+crates/store/tests/git.rs                     modifies: uses the public fixture, gains three tests
 docs/plans/project-plan.md                    modifies: records what this step's interface became
 docs/plans/phase-2-protocol-store-cli/step-07-scan-and-reconciliation.md modifies: this plan, ticked as it goes
 ```
@@ -1349,7 +1349,7 @@ Produces: `farik_store::{ProjectScan, ScanError, scan_project, seeded_library}`
   //! `cargo xtask check --integration`, as `git.rs` is and for the same reasons.
 
   use chrono::{DateTime, Utc};
-  use farik_store::git::fixtures::TempRepo;
+  use farik_store::git::fixtures::{TempRepo, git_in};
   use farik_store::{Git, ScanError, scan_project};
 
   /// A moment to scan at, so that "last commit today" is an answer rather than a guess.
@@ -1508,6 +1508,49 @@ Produces: `farik_store::{ProjectScan, ScanError, scan_project, seeded_library}`
           }),
           "a project is a git repository plus .farik/, and this is neither"
       );
+  }
+
+  #[test]
+  #[ignore = "needs the git program: cargo xtask check --integration"]
+  fn refuses_a_tree_that_is_missing_a_file_it_tracks() {
+      // The other half of the decision below: a manifest that is not JSON is a project mid-edit, and a
+      // manifest git tracks that is not there at all is a tree half-checked-out. The second is a fact
+      // about the checkout rather than about the project, so the scan refuses instead of guessing.
+      let repository = TempRepo::new("scan-missing-manifest");
+      repository.write("package-lock.json", "{\"lockfileVersion\":3}\n");
+      repository.write(
+          "package.json",
+          "{\"name\":\"app\",\"scripts\":{\"test\":\"vitest\"}}\n",
+      );
+      repository.write("src/index.ts", "export const one = 1;\n");
+      repository.commit("a project");
+      std::fs::remove_file(repository.path.join("package.json"))
+          .expect("and a half-checked-out tree");
+
+      let Err(ScanError::Io { path, detail }) = scan_project(&repository.adapter(), now()) else {
+          panic!("a file git tracks that is not there is a tree half-written");
+      };
+      assert_eq!(path, "package.json");
+      assert!(detail.contains("No such file or directory"), "{detail}");
+  }
+
+  #[test]
+  #[ignore = "needs the git program: cargo xtask check --integration"]
+  fn says_what_git_said_about_a_repository_with_no_working_tree() {
+      // A bare repository is a repository, so `is_repository` says yes, and it has nothing to scan.
+      // Saying that better needs a refusal of its own, which step 08's `farik doctor` row records; what
+      // this step promises is that git's own sentence reaches the person rather than being swallowed.
+      let bare = std::env::temp_dir().join(format!("farik-scan-bare-{}.git", std::process::id()));
+      let _ = std::fs::remove_dir_all(&bare);
+      std::fs::create_dir_all(&bare).expect("a directory");
+      git_in(&bare, &["init", "--bare", "-q"]);
+      let refused = scan_project(&Git::open(bare.clone()), now());
+      let _ = std::fs::remove_dir_all(&bare);
+
+      let Err(ScanError::Git { detail }) = refused else {
+          panic!("there is no working tree to scan: {refused:?}");
+      };
+      assert!(detail.contains("must be run in a work tree"), "{detail}");
   }
 
   #[test]
@@ -2359,7 +2402,7 @@ Produces: `farik_store::{ProjectScan, ScanError, scan_project, seeded_library}`
   cargo xtask check --integration
   # expected: ends with `xtask check: ok`, with
   #   test result: ok. 65 passed (farik-store)
-  #   test result: ok. 11 passed (crates/store/tests/project_scan.rs)
+  #   test result: ok. 13 passed (crates/store/tests/project_scan.rs)
   ```
 
 - [ ] Commit: `feat(store): read a repository and say what it is`
@@ -2861,8 +2904,10 @@ Produces: `farik_store::{Drift, ReconcileError, reconcile}`
   ```rust
   /// Every disagreement between the contracts on disk and what the log says of them.
   ///
-  /// The answer is ordered by the number in the task id, and within one task in the order the variants
-  /// are declared, so that two runs over one project print the same thing and a person can diff them.
+  /// The answer is ordered by the number in the task id, so that the tenth task does not come before
+  /// the ninth, and the sort is stable, so two drifts about one task keep the order they were found in:
+  /// a status before a lock. Two runs over one project therefore print the same thing and a person can
+  /// diff them.
   ///
   /// What the log says is read from the projections rather than from the log itself, so this leans on
   /// the handle being caught up. `open_projections` catches up when it opens, and a command that opens
@@ -2943,7 +2988,9 @@ Produces: `farik_store::{Drift, ReconcileError, reconcile}`
           }
       }
 
-      found.sort_by_key(|drift| (number_in(drift.task_id()), order_of(drift)));
+      // Stable, so what the loops above found about one task stays in the order they found it. There
+      // is no second ranking to disagree with that one.
+      found.sort_by_key(|drift| number_in(drift.task_id()));
       Ok(found)
   }
   ```
@@ -2969,17 +3016,6 @@ Produces: `farik_store::{Drift, ReconcileError, reconcile}`
           .trim_start_matches("FRK-")
           .parse()
           .unwrap_or_default()
-  }
-
-  /// Where a kind of disagreement comes in the order they are reported.
-  fn order_of(drift: &Drift) -> u8 {
-      match drift {
-          Drift::ContractWithoutEvents { .. } => 0,
-          Drift::EventsWithoutContract { .. } => 1,
-          Drift::ContractUnreadable { .. } => 2,
-          Drift::StatusMismatch { .. } => 3,
-          Drift::LockMismatch { .. } => 4,
-      }
   }
   ```
 
@@ -3013,9 +3049,9 @@ Produces: a project plan that describes the scan and the reconciliation as they 
 
 This task changes documentation and has no test cycle. The `> ` marker on the block below is this plan's and is not part of the text to write.
 
-- [ ] In `docs/plans/project-plan.md`, replace the phase 2 line beginning `- Step 07 (\`farik-store::scan\``) — everything up to and including `Result<Vec<Drift>, ReconcileError>`.` — with:
+- [ ] In `docs/plans/project-plan.md`, replace the whole of the one phase 2 line that begins `- Step 07 (` — the whole line, its closing full stop included — with:
 
-  > - Step 07 (`farik-store::scan` and `farik-store::reconcile`): `struct ProjectScan { read_back: String, detected_criteria: Vec<CriterionTemplate> }`; `fn scan_project(git: &Git, now: DateTime<Utc>) -> Result<ProjectScan, ScanError>` (the adapter rather than a root beside it, so the tree the paths are listed from is the tree the manifests are read from, and a clock rather than a sampled one, because the read-back says how long ago the last commit was; both changed 2026-09-18 by the step 07 plan); `enum ScanError { NotARepository { path }, NotTheRepositoryRoot { path, root }, Git { detail }, Io { path, detail }, Built { detail } }`; `fn seeded_library(found: &[CriterionTemplate], existing: Option<&CriteriaLibrary>) -> CriteriaLibrary` (what a previous scan found is replaced and what a person wrote is kept, which is what `criteria.schema.json` says of its `source` field; a name a person has used is left alone; the result may exceed the schema's ceiling and `write_criteria` is what refuses it). Every signal is a tracked path or a line in a manifest: the tree is read through `Git::tracked_paths`, so `.gitignore` decides what is not content. A Node project's commands are read from its own `package.json` scripts; cargo, go, poetry, uv and bundler have the commands they always have. Each criterion is built as a wire value and held to `validate_criteria` before it leaves the module. `enum Drift { ContractWithoutEvents, EventsWithoutContract, StatusMismatch, LockMismatch, ContractUnreadable }`, each with `task_id` and `detail`, with `Drift::{task_id, detail}` and `Display`; `fn reconcile(files: &ProjectFiles, projections: &Projections) -> Result<Vec<Drift>, ReconcileError>`; `enum ReconcileError { Files { detail }, Store { detail } }`. Added 2026-09-18 by the step 07 plan: `reconcile` takes the projections rather than the log, because what the log says the state is has one definition already and a second could disagree with it; `LockMismatch`, because 5.11 makes the human's hold a governance fact written in both places; and `ContractUnreadable`, because one file somebody broke must not hide every other disagreement. Only `status` and `locked` are disagreements: the file is the source of truth for a contract's title, kind, risk and parent (8.4), and the board's copy of those is a cache that `rebuild` fixes. Also added: `Git::tracked_paths` and `Git::root`, `git::fixtures::{TempRepo, git_in, git_output_in}` (moved out of `tests/git.rs` so the scan's and step 08's tests can use it), and `changed_paths_of` renamed `paths_of`, and `Git::top_level` so that a caller meaning the project rather than a subtree can ask. One toolchain is chosen and it is the one the tree's language names, a language tie goes to whichever comes first in the table, a workspace of one package is not a monorepo, a commit ahead of now is reported as its stamp, a script with nothing behind it is not a command, a test runner is named by its own file rather than by one that mentions it, a directory inside a repository is refused rather than scanned as a project, and cargo and go gained the build criterion F2 asks for by name — all eight found by the step 07 readiness review, which measured each against the code.
+  > - Step 07 (`farik-store::scan` and `farik-store::reconcile`): `struct ProjectScan { read_back: String, detected_criteria: Vec<CriterionTemplate> }`; `fn scan_project(git: &Git, now: DateTime<Utc>) -> Result<ProjectScan, ScanError>` (the adapter rather than a root beside it, so the tree the paths are listed from is the tree the manifests are read from, and a clock rather than a sampled one, because the read-back says how long ago the last commit was; both changed 2026-09-18 by the step 07 plan); `enum ScanError { NotARepository { path }, NotTheRepositoryRoot { path, root }, Git { detail }, Io { path, detail }, Built { detail } }`; `fn seeded_library(found: &[CriterionTemplate], existing: Option<&CriteriaLibrary>) -> CriteriaLibrary` (what a previous scan found is replaced and what a person wrote is kept, which is what `criteria.schema.json` says of its `source` field; a name a person has used is left alone; the result may exceed the schema's ceiling and `write_criteria` is what refuses it). Every signal is a tracked path or a line in a manifest: the tree is read through `Git::tracked_paths`, so `.gitignore` decides what is not content. A Node project's commands are read from its own `package.json` scripts; cargo, go, poetry, uv and bundler have the commands they always have. Each criterion is built as a wire value and held to `validate_criteria` before it leaves the module. `enum Drift { ContractWithoutEvents, EventsWithoutContract, StatusMismatch, LockMismatch, ContractUnreadable }`, each with `task_id` and `detail`, with `Drift::{task_id, detail}` and `Display`; `fn reconcile(files: &ProjectFiles, projections: &Projections) -> Result<Vec<Drift>, ReconcileError>` (ordered by the number in the task id, with a stable sort, so two drifts about one task keep the order they were found in); `enum ReconcileError { Files { detail }, Store { detail } }`. Added 2026-09-18 by the step 07 plan: `reconcile` takes the projections rather than the log, because what the log says the state is has one definition already and a second could disagree with it; `LockMismatch`, because 5.11 makes the human's hold a governance fact written in both places; and `ContractUnreadable`, because one file somebody broke must not hide every other disagreement. Only `status` and `locked` are disagreements: the file is the source of truth for a contract's title, kind, risk and parent (8.4), and the board's copy of those is a cache that `rebuild` fixes. Also added: `Git::tracked_paths` and `Git::root`, `git::fixtures::{TempRepo, git_in, git_output_in}` (moved out of `tests/git.rs` so the scan's and step 08's tests can use it), and `changed_paths_of` renamed `paths_of`, and `Git::top_level` so that a caller meaning the project rather than a subtree can ask. One toolchain is chosen and it is the one the tree's language names, a language tie goes to whichever comes first in the table, a workspace of one package is not a monorepo, a commit ahead of now is reported as its stamp, a script with nothing behind it is not a command, a test runner is named by its own file rather than by one that mentions it, a directory inside a repository is refused rather than scanned as a project, and cargo and go gained the build criterion F2 asks for by name — all eight found by the step 07 readiness review, which measured each against the code.
 
 - [ ] Set this plan's `Status:` to `done` and confirm every checkbox above is ticked, each in the commit of the task it belongs to.
 
@@ -3034,7 +3070,7 @@ This task changes documentation and has no test cycle. The `> ` marker on the bl
   #   test result: ok. 8 passed (crates/store/tests/event_log_file.rs)
   #   test result: ok. 18 passed (crates/store/tests/git.rs)
   #   test result: ok. 31 passed (crates/store/tests/project_files.rs)
-  #   test result: ok. 11 passed (crates/store/tests/project_scan.rs)
+  #   test result: ok. 13 passed (crates/store/tests/project_scan.rs)
   #   test result: ok. 9 passed (crates/store/tests/reconciliation.rs)
   #   test result: ok. 29 passed (xtask)
   ```
@@ -3045,7 +3081,7 @@ This task changes documentation and has no test cycle. The `> ` marker on the bl
   cargo xtask check
   # expected: ends with `xtask check: ok`, with
   #   test result: ok. 0 passed; 0 failed; 18 ignored (crates/store/tests/git.rs)
-  #   test result: ok. 0 passed; 0 failed; 11 ignored
+  #   test result: ok. 0 passed; 0 failed; 13 ignored
   #     (crates/store/tests/project_scan.rs)
   ```
 
