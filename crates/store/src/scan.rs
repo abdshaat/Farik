@@ -682,12 +682,14 @@ fn how_long_ago(committed_at: &str, now: DateTime<Utc>) -> String {
 #[cfg(test)]
 mod tests {
     use chrono::{DateTime, Utc};
-    use farik_core::criteria::{CriteriaLibrary, CriterionSource, validate_criteria};
+    use farik_core::criteria::{
+        CriteriaLibrary, CriterionSource, TemplateVerification, validate_criteria,
+    };
     use serde_json::json;
 
     use super::{
-        Reading, ScanError, TOOLCHAINS, how_long_ago, language_of, packages_in, scripts_in,
-        seeded_library, tests_in,
+        Reading, ScanError, TOOLCHAINS, cargo_workspace, how_long_ago, language_of, packages_in,
+        scripts_in, seeded_library, tests_in,
     };
 
     fn at(text: &str) -> DateTime<Utc> {
@@ -713,6 +715,11 @@ mod tests {
         assert_eq!(how_long_ago("2026-09-17T09:00:00+00:00", now), "today");
         assert_eq!(how_long_ago("2026-09-16T09:00:00+00:00", now), "yesterday");
         assert_eq!(
+            how_long_ago("2026-09-15T12:00:00+00:00", now),
+            "2 days ago",
+            "the first day counted in days rather than named"
+        );
+        assert_eq!(
             how_long_ago("2026-09-13T12:00:00+00:00", now),
             "4 days ago",
             "which is the read-back section 4 gives as its example"
@@ -724,6 +731,11 @@ mod tests {
         assert_eq!(
             how_long_ago("2026-08-18T12:00:00+00:00", now),
             "a month ago"
+        );
+        assert_eq!(
+            how_long_ago("2026-07-19T12:00:00+00:00", now),
+            "2 months ago",
+            "and the first day past a month, so both ends of that arm are pinned"
         );
         assert_eq!(
             how_long_ago("2026-03-17T12:00:00+00:00", now),
@@ -774,6 +786,16 @@ mod tests {
             Some("Rust"),
             "an extension is an extension whatever case a person typed it in"
         );
+        assert_eq!(
+            language_of(&strings(&["src/index.test.ts", "src/app.spec.tsx"])),
+            Some("TypeScript"),
+            "the extension is what follows the last dot: a test file is a file of its language"
+        );
+        assert_eq!(
+            language_of(&strings(&[".github/scripts/release.rs"])),
+            Some("Rust"),
+            "and a dotted directory is a directory, not an extension"
+        );
     }
 
     #[test]
@@ -807,6 +829,11 @@ mod tests {
             tests_in(&strings(&["docs/jest-to-vitest-migration.md"]), None),
             None,
             "and a file that writes about a runner is not a project that uses one"
+        );
+        assert_eq!(
+            tests_in(&strings(&["bin/pytest"]), None),
+            Some("pytest"),
+            "a committed wrapper script is named for its runner and carries no extension"
         );
         let manifest = json!({ "devDependencies": { "jest": "^30.0.0" } });
         assert_eq!(tests_in(&[], Some(&manifest)), Some("jest"));
@@ -918,6 +945,28 @@ mod tests {
                     .iter()
                     .all(|one| one.source == Some(CriterionSource::ProjectScan)),
                 "{}: the scan found these, and a refresh may replace them",
+                toolchain.name
+            );
+            let tests = criteria
+                .iter()
+                .find(|one| one.name.as_str() == "the-tests-pass")
+                .unwrap_or_else(|| panic!("{} offers a project no test command", toolchain.name));
+            assert!(
+                matches!(
+                    &tests.verification,
+                    TemplateVerification::Variant1 { new_tests_required, .. } if *new_tests_required
+                ),
+                "{}: the Definition of Ready's require_new_tests rule reads only the criteria whose \
+                 method is `test`, so a test seeded as an ordinary command would disable that rule \
+                 for every scanned project without failing anything",
+                toolchain.name
+            );
+            assert!(
+                criteria
+                    .iter()
+                    .filter(|one| one.name.as_str() != "the-tests-pass")
+                    .all(|one| matches!(&one.verification, TemplateVerification::Variant0 { .. })),
+                "{}: and a build or a linter is a command, which asks for no new test",
                 toolchain.name
             );
         }
@@ -1054,6 +1103,37 @@ mod tests {
             },
             "a project whose scan found nothing still has a library"
         );
+    }
+
+    #[test]
+    fn a_workspace_header_is_one_whatever_a_checkout_did_to_the_line() {
+        // `str::lines` strips \n and leaves \r, so without the trim a repository checked out on
+        // Windows with core.autocrlf=true would stop being a workspace: no `monorepo`, no package
+        // count. TOML also lets a person indent a table header. Every other fixture in this step
+        // writes the header at column 0 with LF, so nothing else asks the trim to do any work.
+        let directory = std::env::temp_dir().join(format!(
+            "farik-workspace-header-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        let _ = std::fs::remove_dir_all(&directory);
+        std::fs::create_dir_all(&directory).expect("a directory under the temporary directory");
+        let tracked = strings(&["Cargo.toml"]);
+        for text in [
+            "[workspace]\r\nmembers = []\r\n",
+            "  [workspace]\nmembers = []\n",
+        ] {
+            std::fs::write(directory.join("Cargo.toml"), text).expect("the manifest is written");
+            assert_eq!(cargo_workspace(&directory, &tracked), Ok(true), "{text:?}");
+        }
+        std::fs::write(directory.join("Cargo.toml"), "[package]\nname = \"one\"\n")
+            .expect("the manifest is written");
+        assert_eq!(
+            cargo_workspace(&directory, &tracked),
+            Ok(false),
+            "and a package is not a workspace"
+        );
+        let _ = std::fs::remove_dir_all(&directory);
     }
 
     #[test]

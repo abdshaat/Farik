@@ -45,6 +45,47 @@ fn reads_back_a_typescript_monorepo_the_way_section_4_does() {
 
 #[test]
 #[ignore = "needs the git program: cargo xtask check --integration"]
+fn reads_back_an_npm_workspace_that_declares_itself_in_its_manifest() {
+    // pnpm, turbo, nx, lerna and go each have a file of their own that says "workspace". A plain
+    // npm or yarn workspace — a very large share of the JavaScript projects onboarding will meet —
+    // says it only in `package.json`, under `workspaces`.
+    let repository = TempRepo::new("scan-npm-workspace");
+    repository.write("package-lock.json", "{\"lockfileVersion\":3}\n");
+    repository.write(
+        "package.json",
+        "{\"name\":\"root\",\"workspaces\":[\"packages/*\"]}\n",
+    );
+    repository.write("packages/a/package.json", "{\"name\":\"a\"}\n");
+    repository.write("packages/a/a.ts", "export const a = 1;\n");
+    repository.write("packages/b/package.json", "{\"name\":\"b\"}\n");
+    repository.write("packages/b/b.ts", "export const b = 2;\n");
+    repository.commit("an npm workspace");
+
+    assert_eq!(
+        read_back(&repository),
+        "TypeScript monorepo, npm, 2 packages, last commit today"
+    );
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn two_manifests_are_not_a_monorepo_unless_the_project_says_so() {
+    // The other half of the rule above: the signals are files, so a tree that declares no workspace
+    // anywhere is not one, however many manifests it holds.
+    let repository = TempRepo::new("scan-not-a-workspace");
+    repository.write("package-lock.json", "{\"lockfileVersion\":3}\n");
+    repository.write("package.json", "{\"name\":\"root\"}\n");
+    repository.write("packages/a/package.json", "{\"name\":\"a\"}\n");
+    repository.write("packages/a/a.ts", "export const a = 1;\n");
+    repository.write("packages/b/package.json", "{\"name\":\"b\"}\n");
+    repository.write("packages/b/b.ts", "export const b = 2;\n");
+    repository.commit("two manifests and no workspace");
+
+    assert_eq!(read_back(&repository), "TypeScript, npm, last commit today");
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
 fn reads_the_project_own_scripts_rather_than_guessing_them() {
     let repository = TempRepo::new("scan-scripts");
     repository.write("package-lock.json", "{\"lockfileVersion\":3}\n");
@@ -292,6 +333,18 @@ fn refuses_to_list_what_a_directory_that_is_not_a_repository_tracks() {
     let plain = std::env::temp_dir().join(format!("farik-tracked-plain-{}", std::process::id()));
     std::fs::create_dir_all(&plain).expect("a plain directory");
     let refused = Git::open(plain.clone()).tracked_paths();
+    let _ = std::fs::remove_dir_all(&plain);
+    assert_eq!(refused, Err(farik_store::GitError::NotARepository));
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn refuses_to_say_where_a_directory_that_is_not_a_repository_begins() {
+    // `top_level` promises this too, and `scan_project` asks `is_repository` first, so the pair of
+    // this test and the one above is what holds both refusals.
+    let plain = std::env::temp_dir().join(format!("farik-toplevel-plain-{}", std::process::id()));
+    std::fs::create_dir_all(&plain).expect("a plain directory");
+    let refused = Git::open(plain.clone()).top_level();
     let _ = std::fs::remove_dir_all(&plain);
     assert_eq!(refused, Err(farik_store::GitError::NotARepository));
 }
