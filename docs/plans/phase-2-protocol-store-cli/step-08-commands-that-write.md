@@ -148,7 +148,7 @@ write_criteria, read_project_scan, write_project_scan}` and `FilesError` from
 Produces: `run_cli`, `CliIo<'a>`, `Report`, `HUMAN`, `Project`, `ProjectIds`, `repository_root`,
 `slug`, `DATABASE`, `refusal::event`, `init::init`
 
-- [ ] Write the failing tests, which are the whole of `crates/cli/tests/commands.rs` for now:
+- [x] Write the failing tests, which are the whole of `crates/cli/tests/commands.rs` for now:
 
   ```rust
   //! The command line against a real repository.
@@ -459,7 +459,7 @@ Produces: `run_cli`, `CliIo<'a>`, `Report`, `HUMAN`, `Project`, `ProjectIds`, `r
   }
   ```
 
-- [ ] Run them and confirm they fail because the crate does not exist:
+- [x] Run them and confirm they fail because the crate does not exist:
 
   ```
   cargo test -p farik --test commands
@@ -469,7 +469,7 @@ Produces: `run_cli`, `CliIo<'a>`, `Report`, `HUMAN`, `Project`, `ProjectIds`, `r
   #   No such file or directory (os error 2)
   ```
 
-- [ ] Add the two dependencies the workspace does not have yet, in `Cargo.toml`, each pinned with `=`
+- [x] Add the two dependencies the workspace does not have yet, in `Cargo.toml`, each pinned with `=`
       as `docs/standards/code.md` asks: `clap` after `chrono`, `farik-store` after `farik-protocol`,
       both in the table's alphabetical order. `Cargo.lock` gains clap and its dependencies, written by
       cargo on the next build:
@@ -482,7 +482,7 @@ Produces: `run_cli`, `CliIo<'a>`, `Report`, `HUMAN`, `Project`, `ProjectIds`, `r
   farik-store = { path = "crates/store" }
   ```
 
-- [ ] Write `crates/cli/Cargo.toml`. The package is `farik` and so are the library and the binary
+- [x] Write `crates/cli/Cargo.toml`. The package is `farik` and so are the library and the binary
       (`docs/standards/code.md`); there are no dev-dependencies, because an integration test in a
       package may use that package's own dependencies:
 
@@ -515,7 +515,7 @@ Produces: `run_cli`, `CliIo<'a>`, `Report`, `HUMAN`, `Project`, `ProjectIds`, `r
   workspace = true
   ```
 
-- [ ] Write `crates/cli/src/main.rs`:
+- [x] Write `crates/cli/src/main.rs`:
 
   ```rust
   //! The `farik` command line. Everything it does is in the library beside this file, so that the
@@ -549,7 +549,7 @@ Produces: `run_cli`, `CliIo<'a>`, `Report`, `HUMAN`, `Project`, `ProjectIds`, `r
   }
   ```
 
-- [ ] Write `crates/cli/src/lib.rs`. `Commands` holds only `Init`; each task below adds its own
+- [x] Write `crates/cli/src/lib.rs`. `Commands` holds only `Init`; each task below adds its own
       subcommand, its arm, and whatever enum it needs:
 
   ```rust
@@ -700,7 +700,7 @@ Produces: `run_cli`, `CliIo<'a>`, `Report`, `HUMAN`, `Project`, `ProjectIds`, `r
   }
   ```
 
-- [ ] Write `crates/cli/src/project.rs`. `open_project` is task 3's, because task 1's only command is
+- [x] Write `crates/cli/src/project.rs`. `open_project` is task 3's, because task 1's only command is
       the one that makes the project:
 
   ```rust
@@ -880,7 +880,7 @@ Produces: `run_cli`, `CliIo<'a>`, `Report`, `HUMAN`, `Project`, `ProjectIds`, `r
   }
   ```
 
-- [ ] Write `crates/cli/src/refusal.rs`. Only the event refusals for now; the governor's
+- [x] Write `crates/cli/src/refusal.rs`. Only the event refusals for now; the governor's
       contract-write refusals arrive in task 6, with the command that meets them:
 
   ```rust
@@ -939,7 +939,7 @@ Produces: `run_cli`, `CliIo<'a>`, `Report`, `HUMAN`, `Project`, `ProjectIds`, `r
   }
   ```
 
-- [ ] Write `crates/cli/src/init.rs`:
+- [x] Write `crates/cli/src/init.rs`:
 
   ```rust
   //! `farik init`: make the repository this is run in a Farik project (F2).
@@ -1220,7 +1220,7 @@ Produces: `run_cli`, `CliIo<'a>`, `Report`, `HUMAN`, `Project`, `ProjectIds`, `r
   }
   ```
 
-- [ ] Run the tests and the crate's suite; confirm green:
+- [x] Run the tests and the crate's suite; confirm green:
 
   ```
   cargo test -p farik -- --include-ignored
@@ -1229,8 +1229,8 @@ Produces: `run_cli`, `CliIo<'a>`, `Report`, `HUMAN`, `Project`, `ProjectIds`, `r
   #   test result: ok. 8 passed (crates/cli/tests/commands.rs)
   ```
 
-- [ ] Refactor if there is duplication; keep green.
-- [ ] Commit: `feat(cli): make a repository a farik project`
+- [x] Refactor if there is duplication; keep green.
+- [x] Commit: `feat(cli): make a repository a farik project`
 
 ### Task 2: one YAML reader, for a file from anywhere
 

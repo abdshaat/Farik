@@ -1,0 +1,26 @@
+[package]
+name = "farik"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[lib]
+name = "farik"
+path = "src/lib.rs"
+
+[[bin]]
+name = "farik"
+path = "src/main.rs"
+
+[dependencies]
+chrono.workspace = true
+clap.workspace = true
+farik-core.workspace = true
+farik-protocol.workspace = true
+farik-store.workspace = true
+serde_json.workspace = true
+
+[lints]
+workspace = true
