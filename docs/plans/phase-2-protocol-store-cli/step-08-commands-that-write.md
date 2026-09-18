@@ -1,6 +1,6 @@
 # Phase 2, step 08: the command line, and the commands that write
 
-Status: in progress
+Status: done
 Branch: `claude/phase-0-implementation-izm38y` (the harness-assigned branch this phase is on; steps do not get their own)
 Spec: `docs/SPEC.md` sections 5.11 and 5.16, F2, F3
 Depends on: phase 0 (merged in #4), phase 1 (merged in #5), and steps 01 to 07 of this phase. Step 07 and its landing review are the eight commits `72a6d4c`, `b128d9a`, `5defee2`, `e1551d8`, `46be1ed`, `bb7b7de`, `b745067` and `ef0cdcf`; steps 01 to 06 have their own, earlier on this branch
@@ -3069,7 +3069,7 @@ Files: modified `docs/SPEC.md`, `docs/plans/project-plan.md`,
 Consumes: nothing
 Produces: nothing
 
-- [ ] `docs/SPEC.md` section 3, after the paragraph that says what a project is: what `farik init`
+- [x] `docs/SPEC.md` section 3, after the paragraph that says what a project is: what `farik init`
       writes, because the starter team is behaviour a person meets and nothing in the spec says it
       yet. Add:
 
@@ -3087,7 +3087,7 @@ Produces: nothing
   from the log thereafter.
   ```
 
-- [ ] `docs/plans/project-plan.md`: correct the interface lines this step changed. Step 08's `CliIo`
+- [x] `docs/plans/project-plan.md`: correct the interface lines this step changed. Step 08's `CliIo`
       gains its lifetime and `task::create`'s `cwd`; phase 1 step 08's line gains
       `check_human_triage`; step 06's line gains `yaml_value`. Record on step 09's row that
       `farik doctor` has nothing to say about a team file or a criterion library that cannot be read
@@ -3096,20 +3096,20 @@ Produces: nothing
       a blank reason until `command.schema.json` says so itself. Each carries the date and the
       reason, as the other corrections in that file do.
 
-- [ ] Tick every box in this plan that is not yet ticked, and set its `Status` to `done`.
+- [x] Tick every box in this plan that is not yet ticked, and set its `Status` to `done`.
 
-- [ ] Run the whole check; confirm green:
+- [x] Run the whole check; confirm green:
 
   ```
   cargo xtask check --integration
   # expected: ends with `xtask check: ok`
   ```
 
-- [ ] Commit: `docs(docs): record what the command line writes`
+- [x] Commit: `docs(docs): record what the command line writes`
 
 ## Verification
 
-- [ ] The whole check, from the workspace root:
+- [x] The whole check, from the workspace root:
 
   ```
   cargo xtask check --integration
@@ -3127,7 +3127,7 @@ Produces: nothing
   #   test result: ok. 29 passed (xtask)
   ```
 
-- [ ] The tests that need a program are still ignored without the flag, so they cannot pass silently:
+- [x] The tests that need a program are still ignored without the flag, so they cannot pass silently:
 
   ```
   cargo xtask check
@@ -3135,14 +3135,14 @@ Produces: nothing
   #   test result: ok. 2 passed; 0 failed; 25 ignored (crates/cli/tests/commands.rs)
   ```
 
-- [ ] `farik-core` still performs no I/O, which the gate this step adds does not change:
+- [x] `farik-core` still performs no I/O, which the gate this step adds does not change:
 
   ```
   cargo xtask core-io
   # expected: silent
   ```
 
-- [ ] One dependency was added, and it is pinned:
+- [x] One dependency was added, and it is pinned:
 
   ```
   git diff ef0cdcf -- Cargo.toml
@@ -3151,14 +3151,14 @@ Produces: nothing
   #   commits between it and this step carry plans and no manifest.
   ```
 
-- [ ] The command line answers for itself, run as a person would:
+- [x] The command line answers for itself, run as a person would:
 
   ```
   cargo run -q -p farik -- --help
   # expected: exit 0, and the four commands listed
   ```
 
-- [ ] Every commit subject is accepted:
+- [x] Every commit subject is accepted:
 
   ```
   for subject in \
