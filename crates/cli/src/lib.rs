@@ -6,6 +6,8 @@
 //! function, and writes the answer to the streams it was given, so a test runs a command without
 //! spawning a process (`docs/SPEC.md` sections 5.11, 5.16, F2, F3).
 
+/// Taking a contract from the team, and giving it back.
+pub mod contract;
 /// Making a repository a Farik project.
 pub mod init;
 /// The project a command runs against.
@@ -101,6 +103,11 @@ enum Commands {
         #[arg(long)]
         reason: String,
     },
+    /// Take a contract from the team, or give it back (5.11).
+    Contract {
+        #[command(subcommand)]
+        command: ContractCommands,
+    },
 }
 
 #[derive(Subcommand)]
@@ -109,6 +116,20 @@ enum TaskCommands {
     Create {
         /// The YAML contract to file. Farik assigns the id.
         file: PathBuf,
+    },
+}
+
+#[derive(Subcommand)]
+enum ContractCommands {
+    /// Take the contract: from now on it is yours, and agents may only record results and notes.
+    Lock {
+        /// The task whose contract it is.
+        task_id: String,
+    },
+    /// Give the contract back to the team.
+    Unlock {
+        /// The task whose contract it is.
+        task_id: String,
     },
 }
 
@@ -153,6 +174,14 @@ pub fn run_cli(args: &[String], io: &mut CliIo<'_>) -> i32 {
             reason,
         } => open_project(&io.cwd, now)
             .and_then(|project| triage::triage(&project, task_id, (*size).into(), reason, now)),
+        Commands::Contract {
+            command: ContractCommands::Lock { task_id },
+        } => open_project(&io.cwd, now)
+            .and_then(|project| contract::hold(&project, task_id, true, now)),
+        Commands::Contract {
+            command: ContractCommands::Unlock { task_id },
+        } => open_project(&io.cwd, now)
+            .and_then(|project| contract::hold(&project, task_id, false, now)),
     };
     report(outcome, parsed.json, io)
 }

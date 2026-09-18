@@ -720,6 +720,115 @@ fn refuses_a_triage_of_a_task_that_belongs_to_an_epic() {
 
 #[test]
 #[ignore = "needs the git program: cargo xtask check --integration"]
+fn takes_a_contract_and_gives_it_back() {
+    let repository = a_project("cli-lock");
+    let file = a_request_file(&repository, "request.yaml", "A board command");
+    run_in(
+        &repository.path,
+        &["task", "create", file.to_str().expect("a path")],
+    );
+
+    let taken = run_in(&repository.path, &["contract", "lock", "FRK-1"]);
+    assert_eq!(taken.code, 0, "{}", taken.err);
+    assert!(taken.out.contains("FRK-1 is yours"), "{}", taken.out);
+    assert!(
+        files_of(&repository)
+            .read_contract(&TaskId::try_from("FRK-1").expect("a task id"))
+            .expect("a contract")
+            .locked
+    );
+    assert!(
+        board_of(&repository)[0].4,
+        "the board says the human holds it"
+    );
+
+    let given = run_in(&repository.path, &["contract", "unlock", "FRK-1"]);
+    assert_eq!(given.code, 0, "{}", given.err);
+    assert!(
+        given.out.contains("FRK-1 is the team's again"),
+        "{}",
+        given.out
+    );
+    assert!(!board_of(&repository)[0].4, "and that it gave it back");
+    assert_eq!(
+        kinds_in(&repository)
+            .iter()
+            .rev()
+            .take(2)
+            .cloned()
+            .collect::<Vec<_>>(),
+        ["contract.unlocked", "contract.locked"]
+    );
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn refuses_to_take_a_contract_that_is_already_yours() {
+    let repository = a_project("cli-lock-twice");
+    let file = a_request_file(&repository, "request.yaml", "A board command");
+    run_in(
+        &repository.path,
+        &["task", "create", file.to_str().expect("a path")],
+    );
+    run_in(&repository.path, &["contract", "lock", "FRK-1"]);
+
+    let ran = run_in(&repository.path, &["contract", "lock", "FRK-1"]);
+
+    assert_eq!(ran.code, 1);
+    assert!(ran.err.contains("already yours"), "{}", ran.err);
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn refuses_to_take_a_contract_whose_task_is_finished() {
+    let repository = a_project("cli-lock-accepted");
+    let file = a_request_file(&repository, "request.yaml", "A board command");
+    run_in(
+        &repository.path,
+        &["task", "create", file.to_str().expect("a path")],
+    );
+    moved_to(&repository, "FRK-1", "accepted");
+
+    let ran = run_in(&repository.path, &["contract", "lock", "FRK-1"]);
+
+    assert_eq!(ran.code, 1);
+    assert!(
+        ran.err.contains("accepted") && ran.err.contains("nothing leaves that status"),
+        "{}",
+        ran.err
+    );
+
+    // And the governor is asked before the contract is found to be held already, so a task nothing
+    // can be written to says that rather than answering about the lock.
+    let files = files_of(&repository);
+    let id = TaskId::try_from("FRK-1").expect("a task id");
+    let mut contract = files.read_contract(&id).expect("a contract");
+    contract.locked = true;
+    files
+        .write_contract(&contract)
+        .expect("the contract is written");
+    let again = run_in(&repository.path, &["contract", "lock", "FRK-1"]);
+
+    assert_eq!(again.code, 1);
+    assert!(
+        again.err.contains("nothing leaves that status"),
+        "not `already yours`: {}",
+        again.err
+    );
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn refuses_a_task_id_that_is_not_one() {
+    let repository = a_project("cli-bad-id");
+    let ran = run_in(&repository.path, &["contract", "lock", "nine"]);
+
+    assert_eq!(ran.code, 1);
+    assert!(ran.err.contains("nine is not a task id"), "{}", ran.err);
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
 fn prints_what_it_did_as_json_when_asked() {
     let repository = a_project("cli-json");
     let file = a_request_file(&repository, "request.yaml", "A board command");
@@ -754,6 +863,20 @@ fn says_why_it_refused_as_json_when_asked() {
         "a script that asked for JSON gets JSON for the refusal too: {printed}"
     );
     assert!(ran.out.is_empty(), "and nothing on stdout: {}", ran.out);
+}
+
+#[test]
+fn says_what_it_can_do_when_asked() {
+    let ran = run_in(Path::new("."), &["--help"]);
+
+    assert_eq!(
+        ran.code, 0,
+        "help is what a person asked for, not a mistake"
+    );
+    for command in ["init", "task", "triage", "contract"] {
+        assert!(ran.out.contains(command), "{}", ran.out);
+    }
+    assert!(ran.err.is_empty(), "{}", ran.err);
 }
 
 #[test]

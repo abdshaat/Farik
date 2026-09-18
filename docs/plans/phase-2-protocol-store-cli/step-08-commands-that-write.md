@@ -2749,7 +2749,7 @@ Tasks 1 and 3; `check_contract_write`, `ContractWriteActor`, `TransitionActor` f
 `ProjectFiles::{read_contract, write_contract}` from `crates/store/src/files.rs`
 Produces: `contract::hold`
 
-- [ ] Add these to `crates/cli/tests/commands.rs`, after task 5's tests.
+- [x] Add these to `crates/cli/tests/commands.rs`, after task 5's tests.
       `says_what_it_can_do_when_asked` waits until now because only now is the claim it makes true:
       the help it reads lists all four commands:
 
@@ -2878,7 +2878,7 @@ Produces: `contract::hold`
   }
   ```
 
-- [ ] Run them and confirm they fail because the command is not there:
+- [x] Run them and confirm they fail because the command is not there:
 
   ```
   cargo test -p farik --test commands -- --include-ignored
@@ -2888,7 +2888,7 @@ Produces: `contract::hold`
   #   which lists only init, task and triage.
   ```
 
-- [ ] Add the module and the subcommand to `crates/cli/src/lib.rs`. The module declaration first,
+- [x] Add the module and the subcommand to `crates/cli/src/lib.rs`. The module declaration first,
       because the list is alphabetical:
 
   ```rust
@@ -2937,7 +2937,7 @@ Produces: `contract::hold`
               .and_then(|project| contract::hold(&project, task_id, false, now)),
   ```
 
-- [ ] Write `crates/cli/src/contract.rs`:
+- [x] Write `crates/cli/src/contract.rs`:
 
   ```rust
   //! `farik contract lock` and `farik contract unlock`: contract ownership (`docs/SPEC.md` section
@@ -3049,7 +3049,7 @@ Produces: `contract::hold`
   }
   ```
 
-- [ ] Run the tests and the crate's suite; confirm green:
+- [x] Run the tests and the crate's suite; confirm green:
 
   ```
   cargo test -p farik -- --include-ignored
@@ -3058,8 +3058,8 @@ Produces: `contract::hold`
   #   test result: ok. 27 passed (crates/cli/tests/commands.rs)
   ```
 
-- [ ] Refactor if there is duplication; keep green.
-- [ ] Commit: `feat(cli): take a contract from the team, and give it back`
+- [x] Refactor if there is duplication; keep green.
+- [x] Commit: `feat(cli): take a contract from the team, and give it back`
 
 ### Task 8: what the documents say
 
