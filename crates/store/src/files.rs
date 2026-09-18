@@ -409,6 +409,30 @@ fn yaml_options() -> serde_saphyr::Options {
     options
 }
 
+/// The wire value one piece of YAML holds, named by the path it came from so that a refusal says
+/// which file it is about.
+///
+/// This is the one place any YAML Farik reads is parsed, whatever directory it came from: a contract
+/// a person hands `farik task create` is held to the same dialect as the files under `.farik/` — no
+/// duplicate mapping key, no second document, the alias budget, and `true` spelled `true` (ADR 0007).
+///
+/// Read the way a file a person edits by hand should be. `UserMessageFormatter` is the crate's own
+/// answer to the question, and its own default is explicitly not for a person to read: it recommends
+/// the API call that would have accepted the file. And the name of the input is put back, because the
+/// crate does not know it and calls it `<input>`.
+///
+/// # Errors
+///
+/// `Invalid`, carrying the line, the column and the snippet `serde-saphyr` reports.
+pub fn yaml_value(text: &str, named: &str) -> Result<Value, FilesError> {
+    serde_saphyr::from_str_with_options(text, yaml_options()).map_err(|error| FilesError::Invalid {
+        path: named.to_string(),
+        detail: error
+            .render_with_formatter(&serde_saphyr::UserMessageFormatter)
+            .replace("<input>", named),
+    })
+}
+
 /// The file a contract lives in: the one its own id names.
 fn contract_path(id: &TaskId) -> String {
     format!("contracts/{}.yaml", id.as_str())
@@ -617,22 +641,10 @@ impl ProjectFiles {
         })
     }
 
-    /// One YAML file as an untrusted value, for a validator to hold to its rules.
-    ///
-    /// Read the way a file a person edits by hand should be. `UserMessageFormatter` is the crate's
-    /// own answer to the question, and its own default is explicitly not for a person to read: it
-    /// recommends the API call that would have accepted the file. And the name of the input is put
-    /// back, because the crate does not know it and calls it `<input>`.
+    /// One YAML file under `.farik/` as an untrusted value, for a validator to hold to its rules.
     fn read_yaml(&self, relative: &str) -> Result<Value, FilesError> {
         let text = self.read_text(relative)?;
-        serde_saphyr::from_str_with_options(&text, yaml_options()).map_err(|error| {
-            FilesError::Invalid {
-                path: Self::named(relative),
-                detail: error
-                    .render_with_formatter(&serde_saphyr::UserMessageFormatter)
-                    .replace("<input>", &Self::named(relative)),
-            }
-        })
+        yaml_value(&text, &Self::named(relative))
     }
 
     /// Writes a wire value as the YAML a person reads and edits.

@@ -1239,7 +1239,7 @@ Files: modified `crates/store/src/files.rs`, tested by `crates/store/tests/proje
 Consumes: `yaml_options`, `FilesError` from `crates/store/src/files.rs`
 Produces: `farik_store::files::yaml_value`
 
-- [ ] Write the failing test, at the end of `crates/store/tests/project_files.rs`:
+- [x] Write the failing test, at the end of `crates/store/tests/project_files.rs`:
 
   ```rust
 
@@ -1263,7 +1263,7 @@ Produces: `farik_store::files::yaml_value`
   }
   ```
 
-- [ ] Run it and confirm it fails because the function is not there:
+- [x] Run it and confirm it fails because the function is not there:
 
   ```
   cargo test -p farik-store --test project_files reads_one_yaml
@@ -1272,7 +1272,7 @@ Produces: `farik_store::files::yaml_value`
   #     ... not found in `farik_store::files`
   ```
 
-- [ ] Write the function, above `contract_path` so that it sits with the other free functions of the
+- [x] Write the function, above `contract_path` so that it sits with the other free functions of the
       module:
 
   ```rust
@@ -1301,7 +1301,7 @@ Produces: `farik_store::files::yaml_value`
   }
   ```
 
-- [ ] Make `read_yaml` call it, so the dialect is decided in one place. This **replaces** the whole
+- [x] Make `read_yaml` call it, so the dialect is decided in one place. This **replaces** the whole
       method, its doc comment included, which today reads:
 
   ```rust
@@ -1335,7 +1335,7 @@ Produces: `farik_store::files::yaml_value`
       }
   ```
 
-- [ ] Run the store's suite; confirm green:
+- [x] Run the store's suite; confirm green:
 
   ```
   cargo test -p farik-store
@@ -1344,8 +1344,8 @@ Produces: `farik_store::files::yaml_value`
   #   test result: ok. 32 passed (crates/store/tests/project_files.rs)
   ```
 
-- [ ] Refactor if there is duplication; keep green.
-- [ ] Commit: `refactor(store): read one yaml dialect wherever the file came from`
+- [x] Refactor if there is duplication; keep green.
+- [x] Commit: `refactor(store): read one yaml dialect wherever the file came from`
 
 ### Task 3: `farik task create`
 

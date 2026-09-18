@@ -782,3 +782,22 @@ fn a_machine_that_was_never_asked_runs_the_sandbox_the_spec_asks_for() {
         "snake_case on the wire, and a file a person can read"
     );
 }
+
+#[test]
+fn reads_one_yaml_dialect_whatever_directory_the_file_came_from() {
+    // `farik task create` is handed a contract from anywhere in the repository, and it goes through
+    // the same reader as the files under `.farik/`: one duplicate key is one refusal, wherever the
+    // file sits (ADR 0007).
+    let refused = farik_store::files::yaml_value("name: a\nname: b\n", "request.yaml")
+        .expect_err("a duplicate mapping key is not a document Farik reads");
+    let text = refused.to_string();
+    assert!(
+        text.contains("request.yaml") && text.contains("name"),
+        "the refusal names the file it is about and the key that is repeated: {text}"
+    );
+    assert_eq!(
+        farik_store::files::yaml_value("on: true\n", "request.yaml"),
+        Ok(serde_json::json!({ "on": true })),
+        "and `on` is a key rather than a boolean, which is the same dialect the store reads"
+    );
+}
