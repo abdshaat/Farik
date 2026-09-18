@@ -1360,10 +1360,12 @@ Consumes: `yaml_value` from Task 2; `Project`, `ProjectIds`, `repository_root` f
 write_contract, list_contracts}` from `crates/store/src/files.rs`
 Produces: `open_project`, `task::create`
 
-- [ ] Add these to `crates/cli/tests/commands.rs`. They are given in the order the finished file
-      holds them, which is where to put them: `a_request` after `a_project`, `a_request_file` after
-      `files_of`, `board_of` after `kinds_in`, and the eight tests after task 1's. Appending the three
-      helpers as one run compiles and passes too. The file's `use` block becomes, in full:
+- [ ] Add these to `crates/cli/tests/commands.rs`. They are given in the relative order the finished
+      file holds them, which is one place to put them: `a_request` after `a_project`,
+      `a_request_file` after `files_of`, `board_of` after `kinds_in`, and the eight tests after task
+      1's — though two of the eight sit after later tasks' tests in the finished file, so appending
+      all eleven items as one run compiles and passes just as well. The file's `use` block becomes,
+      in full:
 
   ```rust
   //! The command line against a real repository.
@@ -1691,8 +1693,16 @@ Produces: `open_project`, `task::create`
   pub use project::{Project, open_project};
   ```
 
-      the variant and its own enum, which **replace** the two lines that end the `Commands` enum
-      today (`    Init,` and the `}` under it):
+      then the variant and its own enum. These **replace** the three lines that end the `Commands`
+      enum today, which are:
+
+  ```rust
+      /// Make the repository this is run in a Farik project.
+      Init,
+  }
+  ```
+
+      and they replace them with:
 
   ```rust
       /// Make the repository this is run in a Farik project.
@@ -2088,7 +2098,7 @@ Consumes: `check_human_triage` from Task 4; `open_project`, `Project` from Tasks
 `crates/store/src/files.rs`
 Produces: `triage::triage`, `triage::status_of`
 
-- [ ] Add these to `crates/cli/tests/commands.rs`: the five tests after task 3's, and `moved_to` at
+- [ ] Add these to `crates/cli/tests/commands.rs`: the six tests after task 3's, and `moved_to` at
       the end of the file with the other helper that is not a test:
 
   ```rust
@@ -2308,7 +2318,7 @@ Produces: `triage::triage`, `triage::status_of`
 
   ```
   cargo test -p farik --test commands -- --include-ignored
-  # expected: exit 101, with five failures, every one of them
+  # expected: exit 101, with six failures, every one of them
   #   `error: unrecognized subcommand 'triage'` and clap's exit code 2 where the test
   #   expects 0 or 1.
   ```
@@ -3082,7 +3092,8 @@ Produces: nothing
       `check_human_triage`; step 06's line gains `yaml_value`. Record on step 09's row that
       `farik doctor` has nothing to say about a team file or a criterion library that cannot be read
       until it compares them, and on this phase's decisions that filing a task under an epic waits
-      for a projection carrying the epic's assignee (phase 3 step 03). Each carries the date and the
+      for a projection carrying the epic's assignee (phase 3 step 03) and that `farik triage` refuses
+      a blank reason until `command.schema.json` says so itself. Each carries the date and the
       reason, as the other corrections in that file do.
 
 - [ ] Tick every box in this plan that is not yet ticked, and set its `Status` to `done`.
@@ -3136,8 +3147,8 @@ Produces: nothing
   ```
   git diff ef0cdcf -- Cargo.toml
   # expected: two added lines, `clap = { version = "=4.6.7", features = ["derive"] }` and
-  #   `farik-store = { path = "crates/store" }`. `ef0cdcf` is step 07's last commit; every
-  #   commit between it and this step carries this plan and no manifest.
+  #   `farik-store = { path = "crates/store" }`. `ef0cdcf` is step 07's last commit; the
+  #   commits between it and this step carry plans and no manifest.
   ```
 
 - [ ] The command line answers for itself, run as a person would:
