@@ -1,13 +1,13 @@
 # Phase 2, step 08: the command line, and the commands that write
 
-Status: draft
+Status: in progress
 Branch: `claude/phase-0-implementation-izm38y` (the harness-assigned branch this phase is on; steps do not get their own)
 Spec: `docs/SPEC.md` sections 5.11 and 5.16, F2, F3
 Depends on: phase 0 (merged in #4), phase 1 (merged in #5), and steps 01 to 07 of this phase. Step 07 and its landing review are the eight commits `72a6d4c`, `b128d9a`, `5defee2`, `e1551d8`, `46be1ed`, `bb7b7de`, `b745067` and `ef0cdcf`; steps 01 to 06 have their own, earlier on this branch
 
 A plan is `ready` only when a reviewer other than the author has confirmed the three rules in `docs/standards/workflow.md` stage 2 (Plan): every decision made, no ambiguity, no forward dependencies. Record who confirmed and when here.
 
-Readiness confirmed by: <name>, <date>
+Readiness confirmed by: a fresh session that did not write this plan, on 2026-09-18, against `5f4ba72`, on the third round. It rebuilt the step from this plan alone in a scratch copy, applying every per-task delta in plan order with each quoted anchor asserted to occur exactly once, and reproduced every green — 4 and 8 at task 1, 66 and 32 at task 2, 4 and 16 at task 3, 267 at task 4, 4 and 22 at task 5, 5 at task 6, 5 and 27 at task 7 — with `cargo xtask check --integration` ending in `xtask check: ok` at all eleven per-target counts as written, `2 passed; 0 failed; 25 ignored` without the flag, `cargo xtask core-io` silent, `git diff ef0cdcf -- Cargo.toml` exactly the two pinned lines, `cargo run -q -p farik -- --help` listing the four commands, and all eight commit subjects accepted. After `cargo fmt` the files it produced were byte-identical to the verified draft. It probed the new work rather than reading it: reverting `init`'s read order leaves only `writes_nothing_at_all_when_it_has_to_refuse` failing, and removing the blank-`--reason` guard leaves only `refuses_a_triage_with_no_reason_written` failing, while a first `init` on a bare repository and the second run's "kept the team" path stay green. Its three findings — a delta that replaced two lines where three were meant, duplicating `Init`'s doc comment into `farik --help` where no test would see it, and task 5's test and failure counts left at five when its sixth test arrived — are taken in `5f4ba72`, whose three spots it re-read and confirmed. Two earlier rounds refused; their findings are taken in `3b4f8f6` and `b2f80d1`.
 
 ## Goal
 
