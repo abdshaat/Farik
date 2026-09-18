@@ -544,6 +544,182 @@ fn refuses_a_file_that_is_not_yaml() {
 
 #[test]
 #[ignore = "needs the git program: cargo xtask check --integration"]
+fn sizes_a_request_as_large_and_makes_it_an_epic() {
+    let repository = a_project("cli-triage-large");
+    let file = a_request_file(&repository, "request.yaml", "A whole board");
+    run_in(
+        &repository.path,
+        &["task", "create", file.to_str().expect("a path")],
+    );
+
+    let ran = run_in(
+        &repository.path,
+        &[
+            "triage",
+            "FRK-1",
+            "large",
+            "--reason",
+            "it is three screens and a migration",
+        ],
+    );
+
+    assert_eq!(ran.code, 0, "{}", ran.err);
+    assert!(
+        ran.out
+            .contains("FRK-1 is large: epic. it is three screens and a migration"),
+        "{}",
+        ran.out
+    );
+    assert_eq!(
+        files_of(&repository)
+            .read_contract(&TaskId::try_from("FRK-1").expect("a task id"))
+            .expect("a contract")
+            .kind
+            .to_string(),
+        "epic",
+        "the triage decides the kind and its own tool changes it (5.11)"
+    );
+    assert_eq!(
+        board_of(&repository),
+        [(
+            "FRK-1".to_string(),
+            "epic".to_string(),
+            "draft".to_string(),
+            true,
+            false
+        )]
+    );
+    assert_eq!(
+        kinds_in(&repository).last().map(String::as_str),
+        Some("request.triaged")
+    );
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn overrules_a_triage_while_the_request_is_still_a_draft() {
+    let repository = a_project("cli-triage-overrule");
+    let file = a_request_file(&repository, "request.yaml", "A whole board");
+    run_in(
+        &repository.path,
+        &["task", "create", file.to_str().expect("a path")],
+    );
+    run_in(
+        &repository.path,
+        &["triage", "FRK-1", "large", "--reason", "it looked large"],
+    );
+
+    let ran = run_in(
+        &repository.path,
+        &[
+            "triage",
+            "FRK-1",
+            "small",
+            "--reason",
+            "one screen after all",
+        ],
+    );
+
+    assert_eq!(ran.code, 0, "{}", ran.err);
+    assert_eq!(
+        board_of(&repository)[0].1,
+        "task",
+        "the user may overrule a triage until refining starts (5.16)"
+    );
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn refuses_a_triage_of_an_id_that_is_not_one() {
+    // What a person typed, not the `oneOf` sentence a schema refuses a whole body with.
+    let repository = a_project("cli-triage-bad-id");
+    let ran = run_in(
+        &repository.path,
+        &["triage", "nine", "large", "--reason", "it has no number"],
+    );
+
+    assert_eq!(ran.code, 1);
+    assert!(ran.err.contains("nine is not a task id"), "{}", ran.err);
+    assert!(!ran.err.contains("oneOf"), "{}", ran.err);
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn refuses_a_triage_with_no_reason_written() {
+    // 5.16 records the decision with a reason, and the log is where somebody reads it back.
+    let repository = a_project("cli-triage-no-reason");
+    let file = a_request_file(&repository, "request.yaml", "A whole board");
+    run_in(
+        &repository.path,
+        &["task", "create", file.to_str().expect("a path")],
+    );
+
+    let ran = run_in(
+        &repository.path,
+        &["triage", "FRK-1", "large", "--reason", "   "],
+    );
+
+    assert_eq!(ran.code, 1);
+    assert!(ran.err.contains("recorded with a reason"), "{}", ran.err);
+    assert_eq!(
+        kinds_in(&repository).last().map(String::as_str),
+        Some("task.created"),
+        "and nothing was recorded"
+    );
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn refuses_a_triage_once_refining_has_started() {
+    let repository = a_project("cli-triage-late");
+    let file = a_request_file(&repository, "request.yaml", "A whole board");
+    run_in(
+        &repository.path,
+        &["task", "create", file.to_str().expect("a path")],
+    );
+    moved_to(&repository, "FRK-1", "refining");
+
+    let ran = run_in(
+        &repository.path,
+        &["triage", "FRK-1", "large", "--reason", "too late"],
+    );
+
+    assert_eq!(ran.code, 1);
+    assert!(
+        ran.err.contains("refining") && ran.err.contains("5.16"),
+        "{}",
+        ran.err
+    );
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn refuses_a_triage_of_a_task_that_belongs_to_an_epic() {
+    let repository = a_project("cli-triage-child");
+    let file = a_request_file(&repository, "request.yaml", "A whole board");
+    run_in(
+        &repository.path,
+        &["task", "create", file.to_str().expect("a path")],
+    );
+    let files = files_of(&repository);
+    let id = TaskId::try_from("FRK-1").expect("a task id");
+    let mut contract = files.read_contract(&id).expect("a contract");
+    contract.parent = Some("FRK-2".parse().expect("a parent id"));
+    files
+        .write_contract(&contract)
+        .expect("the contract is written");
+
+    let ran = run_in(
+        &repository.path,
+        &["triage", "FRK-1", "large", "--reason", "not mine to size"],
+    );
+
+    assert_eq!(ran.code, 1);
+    assert!(ran.err.contains("belongs to an epic"), "{}", ran.err);
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
 fn prints_what_it_did_as_json_when_asked() {
     let repository = a_project("cli-json");
     let file = a_request_file(&repository, "request.yaml", "A board command");
@@ -587,4 +763,39 @@ fn refuses_an_invocation_it_cannot_use() {
     assert_eq!(ran.code, 2, "two is what a wrong command line exits with");
     assert!(ran.err.contains("nonsense"), "{}", ran.err);
     assert!(ran.out.is_empty(), "{}", ran.out);
+}
+
+/// Puts a task's board row at a status, so that a test can ask what a command does about one.
+///
+/// `contract.written` is the only event of this phase that moves a row, and its body carries a whole
+/// summary, so this rewrites the row's title, kind, risk and parent from the fixture as well. A
+/// governed transition is a `task.transitioned` event and rewrites none of that; it arrives with the
+/// runtime in phase 3, and so does the command that asks for one.
+fn moved_to(repository: &TempRepo, task_id: &str, status: &str) {
+    use farik_protocol::event::fixtures::{a_contract_summary_wire, an_event_wire};
+    use farik_protocol::event::{EventKind, NewEvent, event_from_value};
+
+    let log = farik_store::open_event_log(&repository.path.join(".farik/local/farik.db"), at())
+        .expect("the log opens");
+    let log = Arc::new(log);
+    let projections =
+        farik_store::open_projections(Arc::clone(&log)).expect("the projections open");
+    let mut summary = a_contract_summary_wire();
+    summary["status"] = json!(status);
+    let mut wire = an_event_wire(EventKind::ContractWritten);
+    wire["task_id"] = json!(task_id);
+    wire["body"]["summary"] = summary;
+    let event = event_from_value(&wire).expect("the fixture is schema-valid");
+    let written = NewEvent {
+        recorded_at: event.envelope.recorded_at,
+        team_id: event.envelope.team_id,
+        project_id: event.envelope.project_id,
+        task_id: event.envelope.task_id,
+        agent_id: event.envelope.agent_id,
+        session_id: event.envelope.session_id,
+        body: event.body,
+    };
+    projections
+        .apply(&log.append(&written).expect("appends"))
+        .expect("projects");
 }

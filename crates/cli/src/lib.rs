@@ -14,11 +14,13 @@ pub mod project;
 pub mod refusal;
 /// Filing a request.
 pub mod task;
+/// Sizing a request.
+pub mod triage;
 
 use std::io::Write;
 use std::path::PathBuf;
 
-use clap::{Parser, Subcommand};
+use clap::{Parser, Subcommand, ValueEnum};
 use farik_protocol::clock::Clock;
 use serde_json::{Value, json};
 
@@ -89,6 +91,16 @@ enum Commands {
         #[command(subcommand)]
         command: TaskCommands,
     },
+    /// Record how big a request is, or overrule the triage that did (5.16).
+    Triage {
+        /// The request being sized.
+        task_id: String,
+        /// Large becomes an epic; small becomes one standalone task.
+        size: SizeArgument,
+        /// Why, in your own words. The log keeps it.
+        #[arg(long)]
+        reason: String,
+    },
 }
 
 #[derive(Subcommand)]
@@ -98,6 +110,24 @@ enum TaskCommands {
         /// The YAML contract to file. Farik assigns the id.
         file: PathBuf,
     },
+}
+
+/// How big triage found a request, as a person types it.
+#[derive(Clone, Copy, ValueEnum)]
+enum SizeArgument {
+    /// A large request, which becomes an epic.
+    Large,
+    /// A small request, which becomes one standalone task.
+    Small,
+}
+
+impl From<SizeArgument> for farik_protocol::command::RequestSize {
+    fn from(size: SizeArgument) -> Self {
+        match size {
+            SizeArgument::Large => Self::Large,
+            SizeArgument::Small => Self::Small,
+        }
+    }
 }
 
 /// Runs one command and returns the code the process should exit with: 0 when it did what it said,
@@ -117,6 +147,12 @@ pub fn run_cli(args: &[String], io: &mut CliIo<'_>) -> i32 {
             command: TaskCommands::Create { file },
         } => open_project(&io.cwd, now)
             .and_then(|project| task::create(&project, &io.cwd, file, now)),
+        Commands::Triage {
+            task_id,
+            size,
+            reason,
+        } => open_project(&io.cwd, now)
+            .and_then(|project| triage::triage(&project, task_id, (*size).into(), reason, now)),
     };
     report(outcome, parsed.json, io)
 }

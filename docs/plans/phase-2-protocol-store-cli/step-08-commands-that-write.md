@@ -2098,7 +2098,7 @@ Consumes: `check_human_triage` from Task 4; `open_project`, `Project` from Tasks
 `crates/store/src/files.rs`
 Produces: `triage::triage`, `triage::status_of`
 
-- [ ] Add these to `crates/cli/tests/commands.rs`: the six tests after task 3's, and `moved_to` at
+- [x] Add these to `crates/cli/tests/commands.rs`: the six tests after task 3's, and `moved_to` at
       the end of the file with the other helper that is not a test:
 
   ```rust
@@ -2314,7 +2314,7 @@ Produces: `triage::triage`, `triage::status_of`
   }
   ```
 
-- [ ] Run them and confirm they fail because the command is not there:
+- [x] Run them and confirm they fail because the command is not there:
 
   ```
   cargo test -p farik --test commands -- --include-ignored
@@ -2323,7 +2323,7 @@ Produces: `triage::triage`, `triage::status_of`
   #   expects 0 or 1.
   ```
 
-- [ ] Add the module, the flag's value type and the subcommand to `crates/cli/src/lib.rs`. The module
+- [x] Add the module, the flag's value type and the subcommand to `crates/cli/src/lib.rs`. The module
       declaration after `pub mod task;`:
 
   ```rust
@@ -2385,7 +2385,7 @@ Produces: `triage::triage`, `triage::status_of`
               .and_then(|project| triage::triage(&project, task_id, (*size).into(), reason, now)),
   ```
 
-- [ ] Write `crates/cli/src/triage.rs`:
+- [x] Write `crates/cli/src/triage.rs`:
 
   ```rust
   //! `farik triage`: record how big a request is, or overrule the triage that did (`docs/SPEC.md`
@@ -2542,7 +2542,7 @@ Produces: `triage::triage`, `triage::status_of`
   }
   ```
 
-- [ ] Run the tests and the crate's suite; confirm green:
+- [x] Run the tests and the crate's suite; confirm green:
 
   ```
   cargo test -p farik -- --include-ignored
@@ -2551,8 +2551,8 @@ Produces: `triage::triage`, `triage::status_of`
   #   test result: ok. 22 passed (crates/cli/tests/commands.rs)
   ```
 
-- [ ] Refactor if there is duplication; keep green.
-- [ ] Commit: `feat(cli): size a request, and overrule the triage that did`
+- [x] Refactor if there is duplication; keep green.
+- [x] Commit: `feat(cli): size a request, and overrule the triage that did`
 
 ### Task 6: the governor's refusals in words
 
