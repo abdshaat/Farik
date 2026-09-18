@@ -2562,7 +2562,7 @@ Consumes: `ContractWriteRefusal`, `TaskStatus` from `crates/core/src/governor/ga
 `crates/core/src/contract.rs`
 Produces: `refusal::contract_write`
 
-- [ ] Write the failing test. Its `mod tests` head **replaces** the three lines task 1 wrote
+- [x] Write the failing test. Its `mod tests` head **replaces** the three lines task 1 wrote
       (`use farik_protocol::event::{EventError, EventKind};`, the blank line, and
       `use super::event;`):
 
@@ -2636,7 +2636,7 @@ Produces: `refusal::contract_write`
       }
   ```
 
-- [ ] Run it and confirm it fails because the function is not there:
+- [x] Run it and confirm it fails because the function is not there:
 
   ```
   cargo test -p farik --lib
@@ -2645,7 +2645,7 @@ Produces: `refusal::contract_write`
   #     ... no `contract_write` in `refusal`
   ```
 
-- [ ] Write the function, above `event`, with the import it needs above
+- [x] Write the function, above `event`, with the import it needs above
       `use farik_protocol::event::EventError;`:
 
   ```rust
@@ -2708,7 +2708,7 @@ Produces: `refusal::contract_write`
   }
   ```
 
-- [ ] Write the two helpers it reads a list with, below `event`:
+- [x] Write the two helpers it reads a list with, below `event`:
 
   ```rust
   /// A list in the words a person would read it out in.
@@ -2726,7 +2726,7 @@ Produces: `refusal::contract_write`
   }
   ```
 
-- [ ] Run the crate's unit tests; confirm green:
+- [x] Run the crate's unit tests; confirm green:
 
   ```
   cargo test -p farik --lib
@@ -2734,8 +2734,8 @@ Produces: `refusal::contract_write`
   #   test result: ok. 5 passed (crates/cli/src/lib.rs)
   ```
 
-- [ ] Refactor if there is duplication; keep green.
-- [ ] Commit: `feat(cli): say why the governor would not write a contract`
+- [x] Refactor if there is duplication; keep green.
+- [x] Commit: `feat(cli): say why the governor would not write a contract`
 
 ### Task 7: `farik contract lock` and `farik contract unlock`
 
