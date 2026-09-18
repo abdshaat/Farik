@@ -3,7 +3,7 @@
 Status: draft
 Branch: `claude/phase-0-implementation-izm38y` (the harness-assigned branch this phase is on; steps do not get their own)
 Spec: `docs/SPEC.md` sections 5.11 and 5.16, F2, F3
-Depends on: phase 0 (merged in #4), phase 1 (merged in #5), and steps 01 to 07 of this phase (committed as `72a6d4c`, `b128d9a`, `5defee2`, `e1551d8`, `46be1ed`, `bb7b7de`, `b745067`, `ef0cdcf`)
+Depends on: phase 0 (merged in #4), phase 1 (merged in #5), and steps 01 to 07 of this phase. Step 07 and its landing review are the eight commits `72a6d4c`, `b128d9a`, `5defee2`, `e1551d8`, `46be1ed`, `bb7b7de`, `b745067` and `ef0cdcf`; steps 01 to 06 have their own, earlier on this branch
 
 A plan is `ready` only when a reviewer other than the author has confirmed the three rules in `docs/standards/workflow.md` stage 2 (Plan): every decision made, no ambiguity, no forward dependencies. Record who confirmed and when here.
 
@@ -28,15 +28,16 @@ no agent runs, which is phase 3.
 - **Every command works from anywhere inside the repository.** The project is found by asking git for the top level (`Git::top_level`, step 07), not by looking for `.farik/` in the current directory: a project is a whole repository (`docs/SPEC.md` section 3), so `farik init` run in `src/` initialises the repository, not `src/`. Chose this over taking a path argument because `cd` is how a person chooses a repository and a path argument would need the same refusals twice.
 - **`team_id` and `project_id` are fixed by `farik init` and read back from the log's first event.** `init` derives them as the slug of the team's name and the slug of the repository root's directory name; every command after it reads the ids off the first event in the log. Chose this over recomputing them per run (renaming the directory would split one project's log in two) and over a field in `.farik/local/settings.json` (machine-specific and gitignored is the wrong home for a project's identity, and the log is already the source of truth for what happened — 8.4).
 - **A slug with nothing in it is `farik`.** A team called `プロジェクト` slugs to nothing, and `new_event` refuses a blank id. Chose a fallback over refusing the name, because the name is the person's and the id is Farik's problem.
-- **`farik init` writes a starter team of two agents when there is none.** `validate_team` wants two to seven agents with an active Product Manager and an active Software Developer (D18), and there is no team editor until phase 5, so a project with no team could not be initialised at all. They are called `Product Manager` and `Developer`, ids `product-manager` and `developer`: chose naming them after their roles over inventing human names, because the person renames them in the editor and a fake name in a file a person reads is a small lie. Both run `claude-opus-5` at effort `high`, which is what `docs/SPEC.md` 8.2 ships as the default for the Product Manager, the Architect and the Developer, and both ids are rows of the shipped price table. The policy it writes is the spec's own numbers — `blocked_limit_hours: 24` and `max_iterations: 3` (5.2), `integration: manual` (5.14), `daily_usd: 20` (5.5), `human_accepts_contracts: high_risk` (the default `team.schema.json` names) — except `wip_limit_per_agent`, which neither the spec nor the schema gives a default for: it is `1`, the number 6.2 calls the default, so a two-agent team holds two open tasks and a person meets the limit rather than discovering it later. `budgets.session` is left out, which means the session limits `farik-core` ships (5.5) rather than a second copy of them in every project's team file.
+- **`farik init` writes a starter team of two agents when there is none.** `validate_team` wants two to seven agents with an active Product Manager and an active Software Developer (D18), and there is no team editor until phase 5, so a project with no team could not be initialised at all. They are called `Product Manager` and `Developer`, ids `product-manager` and `developer`: chose naming them after their roles over inventing human names, because the person renames them in the editor and a fake name in a file a person reads is a small lie. Both run `claude-opus-5` at effort `high`, which is what `docs/SPEC.md` 8.2 ships as the default for the Product Manager, the Architect and the Developer, and both ids are rows of the shipped price table. The policy it writes is the spec's own numbers — `blocked_limit_hours: 24` and `max_iterations: 3` (5.2), `integration: manual` (5.14), `daily_usd: 20` (5.5), `human_accepts_contracts: high_risk` (the default `team.schema.json` names) — except `wip_limit_per_agent`, which the schema gives no default for and section 5 does not name: it is `1`, the number 6.2 calls the default, so a two-agent team holds two open tasks and a person meets the limit rather than discovering it later. `budgets.session` is left out, which means the session limits `farik-core` ships (5.5) rather than a second copy of them in every project's team file.
 - **A second `farik init` is a rescan.** It keeps the team and everything a person wrote, reads the repository again, and replaces the criteria the last scan found while keeping the ones a person added (`seeded_library`, step 07). It records `project.scanned` and `criteria.updated` and records `team.updated` only when it wrote the team. Chose this over refusing a second run, because the command a person reaches for when the project's test command changes is this one.
-- **A file that is there and cannot be read is not a file that is absent.** `init` reads the team and the criterion library through one helper that answers `None` only for `FilesError::NotFound` and refuses on anything else. Chose refusing over `.ok()`: `ProjectFiles::init` leaves a broken team file where it is and answers `Ok`, so a run that swallowed the difference would print "wrote .farik/team.yaml", record a `team.updated` naming two agents that are not in the file, and leave the file broken — and the log is append-only, so that record could never be taken back. `seeded_library` keeps only the criteria it is handed, so the same mistake on `.farik/team/criteria.yaml` — the file 5.13 most expects a person to hand-edit — would delete every criterion they wrote because one line has a typo in it. Both are measured in tests of their own.
+- **A file that is there and cannot be read is not a file that is absent.** `init` reads the team and the criterion library through one helper that answers `None` only for `FilesError::NotFound` and refuses on anything else. Chose refusing over `.ok()`: `ProjectFiles::init` leaves a broken team file where it is and answers `Ok`, so a run that swallowed the difference would print "wrote .farik/team.yaml", record a `team.updated` naming two agents that are not in the file, and leave the file broken — and the log is append-only, so that record could never be taken back. `seeded_library` keeps only the criteria it is handed, so the same mistake on `.farik/team/criteria.yaml` — the file 5.13 most expects a person to hand-edit — would delete every criterion they wrote because one line has a typo in it. Both are measured in tests of their own. Both files are also read *before* anything is written, so a run that refuses has written nothing: the other order leaves a team file behind that no `team.updated` will ever record, because the next run finds the file, says it kept the team already there, and the log is append-only.
 - **`farik init` refuses a directory that is not a git repository rather than running `git init`.** F2 gives "create a new one" to the app's project flow; one command that quietly makes a repository is a command that can make one in the wrong place. The refusal says to run `git init` first.
 - **`farik task create` refuses a file that sets a field that is not the author's**, naming them, rather than overwriting: the store's four (`id`, `created_by`, `created_at`, `updated_at`), the governor's five, the human's `locked`, and the two fixed at creation (`kind`, `parent`). The list is composed from `farik-core`'s public constants, so there is one list of who writes what. Chose refusing over overwriting because a command that silently replaced what somebody wrote would make the file and the filed contract two different things; chose it over accepting a person's `kind` because 5.16 gives the kind to the triage.
-- **`farik task create` refuses `parent`, which closes 5.16 item 3's human route until phase 3.** 5.16 item 3 says a task under an epic may be created by its epic's assignee *or by the human*, and `check_child_creation` in `farik-core` is the gate for it. Asking that gate needs the epic's `assignee_id`, and `TaskProjection` (step 03) does not carry one, so asking it here would be a forward dependency — and filing a child without asking it would put a task under an epic with no gate at all. So the command refuses `parent`, the refusal says which rule refuses it and what will open it, and the human's route into a breakdown waits for phase 3 step 03. Recorded in "out of scope" below rather than left to be noticed.
+- **`farik task create` refuses `parent`, which closes 5.16 item 3's human route until phase 3.** 5.16 item 3 says a task under an epic may be created by its epic's assignee *or by the human*, and `check_child_creation` in `farik-core` is the gate for it. It takes a `ParentEpic { status, assignee_id }`, and no projection carries an epic's assignee until phase 3 step 03. For a human actor the gate reads only the epic's status, so a blank `assignee_id` would pass today — and a governance predicate asked with a field invented at the call site is worse than one not asked yet, because that field feeds the branch deciding who may write the task at all. Filing a child without asking the gate would put a task under an epic with nothing checked. So the command refuses `parent`, the refusal says which rule refuses it and what will open it, and the human's route into a breakdown waits for phase 3 step 03. Recorded in "out of scope" below rather than left to be noticed.
 - **A filed request is one event, `task.created`.** Its body already carries the summary the board needs, and step 03's projections insert the row from it. Chose one event over `task.created` plus `contract.written`, because two events about one act would count the same write twice in the audit (F11) and in the cost report.
 - **`farik triage` writes the contract's `kind` as well as the event.** 5.11 says the kind is fixed at creation *and* that the triage's own tool changes it; step 03's projections already take the kind from `request.triaged`. Writing the file too keeps the file and the board saying the same thing, which matters because `reconcile` compares only `status` and `locked` and would not report this.
-- **A task id a person typed wrongly is the command line's refusal, not the schema's.** `farik triage` parses the id before it builds the command, so that a person reads `nine is not a task id` rather than the `oneOf` sentence a JSON Schema refuses a whole body with. The command is still built and validated afterwards, so a triage from a terminal is held to exactly the rules one from an agent is; the schema's own refusal for `task_id` is then unreachable, which is the point. `farik contract lock` already parses first, and step 09's `doctor` carries the same complaint about `criteria.yaml` on the project plan.
+- **A task id a person typed wrongly is the command line's refusal, not the schema's.** `farik triage` parses the id before it builds the command, so that a person reads `nine is not a task id` rather than the `oneOf` sentence a JSON Schema refuses a whole body with. The command is still built and validated afterwards, so a triage from a terminal is held to exactly the rules one from an agent is. With the id parsed, the size coming from an enum and `reason` a plain string in the schema, the body this command builds cannot be refused at all today: the call stays so that a rule added to `command.schema.json` tomorrow is enforced here without anybody remembering to add it. `farik contract lock` already parses first, and step 09's `doctor` carries the same complaint about `criteria.yaml` on the project plan.
+- **A triage with no reason written is refused by the command line.** 5.16 says the triage records its decision with a reason, and the log is where somebody reads it back months later; `command.schema.json` says `reason` is a string and nothing more. Chose refusing a blank one here over adding `minLength` to the schema, because the schema is step 01's file and a rule about what a person must write is a rule about this command; recorded so that the day the schema does say it, this is the check to remove.
 - **Whether the human may triage is a predicate in `farik-core`, `check_human_triage(status, has_parent)`.** 5.16 gives the user the size "until refining starts", and a task under an epic was never triaged. Chose adding the predicate to `governor::gates` over deciding it in the command line, because a rule of section 5 that lives in a binary is a rule the daemon and the app will each decide again. It is the human's gate only: the Product Manager's re-triage of a `refining` standalone task is the one tool gate of section 5 with no predicate in `core`, and `docs/plans/project-plan.md` records that it needs a decision in the spec first, so this step does not close it.
 - **Whether a contract may be locked is `check_contract_write`'s answer**, asked with `locked` as the only changed field and the human as the actor. Chose asking the existing gate over a new one: it already says that a task which is `accepted` or `cancelled` takes no write but a note, and that the lock is the human's field. The status comes from the log, which decides a task's status (8.4); the kind and the lock come from the file, which decides a contract's content (8.4). On a project where the two disagree — which is what `farik doctor` is for — the governor is asked about the status the log knows, because that is the status the transition table answers for. The gate is asked *before* the command notices that the contract is already held, so that a task nothing can be written to says so rather than answering about the lock; "already yours" is a sentence about what the person wants and the rule comes first.
 - **A path a person typed is relative to where they typed it.** `farik task create` resolves a relative file argument against `CliIo.cwd`, not against the process's own current directory and not against the repository root. Chose threading `cwd` into the command over reading through the process, because the whole reason the command is a library function is that a test can run it from a directory of its own, and a path that only worked in the binary would leave that seam with a hole in it.
@@ -67,8 +68,8 @@ Out of scope: reading the board, transitions, agents, and anything that runs a m
 ## Architecture notes
 
 `crates/cli` is new. It depends on `farik-core` (the rules), `farik-protocol` (the events, the
-commands, `Clock`), `farik-store` (the log, the projections, the files, git), `clap` and
-`serde_json`, and on nothing else; `farik-store` is added to the workspace's dependency table for the
+commands, `Clock`), `farik-store` (the log, the projections, the files, git), `chrono` (the stamps),
+`clap` and `serde_json`, and on nothing else; `farik-store` is added to the workspace's dependency table for the
 first time, as is `clap`. The crate is a leaf: nothing depends on it.
 
 Two crates change. `farik-core` gains one pure function, `governor::gates::check_human_triage`, which
@@ -136,8 +137,9 @@ Files: created `crates/cli/Cargo.toml`, `crates/cli/src/main.rs`, `crates/cli/sr
 `crates/cli/tests/commands.rs`; modified `Cargo.toml`, `Cargo.lock`
 
 Consumes: `Git::{open, top_level}`, `scan_project`, `seeded_library`, `ProjectScan` from
-`crates/store/src/{git.rs,scan.rs}`; `ProjectFiles::{open, init, read_team, read_criteria,
-write_criteria, write_project_scan}` and `FilesError` from `crates/store/src/files.rs`;
+`crates/store/src/{git.rs,scan.rs}`; `ProjectFiles::{open, init, read_team, write_team, read_criteria,
+write_criteria, read_project_scan, write_project_scan}` and `FilesError` from
+`crates/store/src/files.rs`;
 `open_event_log`, `EventLog::{append, read}`, `EventQuery` from `crates/store/src/event_log.rs`;
 `validate_team`, `Team` from `crates/core/src/team.rs`; `CriteriaLibrary`, `CriterionTemplate` from
 `crates/core/src/criteria.rs`; `new_event`, `EventIds`, `EventBody`, `EventError`,
@@ -376,6 +378,38 @@ Produces: `run_cli`, `CliIo<'a>`, `Report`, `HUMAN`, `Project`, `ProjectIds`, `r
               .expect("the file is still there"),
           broken,
           "and what the person wrote is still there to fix"
+      );
+  }
+
+  #[test]
+  #[ignore = "needs the git program: cargo xtask check --integration"]
+  fn writes_nothing_at_all_when_it_has_to_refuse() {
+      // Both hand-edited files are read before anything is written. The other order leaves a team file
+      // behind that no `team.updated` will ever record: the next run finds the file, says it kept the
+      // team already there, and the log is append-only, so the event that says where that team came
+      // from can never be added.
+      let repository = a_repository("cli-init-refuse-first");
+      repository.write(
+          ".farik/team/criteria.yaml",
+          "criteria:\n  - name: the-docs-are-updated\n    text: The documents say what changed.\n    source: human\n    verification:\n      method: comand\n",
+      );
+
+      let ran = run_in(&repository.path, &["init"]);
+
+      assert_eq!(ran.code, 1);
+      assert!(
+          ran.err.contains(".farik/team/criteria.yaml"),
+          "the refusal names the file: {}",
+          ran.err
+      );
+      assert!(
+          !repository.path.join(".farik/team.yaml").exists(),
+          "a run that refuses has written no team, so the run that follows it writes one and records \
+           that it did"
+      );
+      assert!(
+          !repository.path.join(".farik/local/farik.db").exists(),
+          "and no log, because nothing happened to record"
       );
   }
 
@@ -949,6 +983,11 @@ Produces: `run_cli`, `CliIo<'a>`, `Report`, `HUMAN`, `Project`, `ProjectIds`, `r
       // and `seeded_library` keeps only what it is given, so it would drop every criterion a person
       // wrote because one line of the library has a typo in it.
       let existing = absent_or(files.read_team())?;
+      let kept = absent_or(files.read_criteria())?;
+      // Both hand-edited files are read before anything is written, so that a run which refuses one of
+      // them has written nothing. The other order leaves a team file behind that no `team.updated` will
+      // ever record: the next run finds the file and takes the "kept the team" branch, and the log is
+      // append-only, so the event that says where that team came from can never be added.
       let team_was_written = existing.is_none();
       let team = match existing {
           Some(team) => team,
@@ -956,7 +995,6 @@ Produces: `run_cli`, `CliIo<'a>`, `Report`, `HUMAN`, `Project`, `ProjectIds`, `r
       };
       files.init(&team).map_err(|error| error.to_string())?;
 
-      let kept = absent_or(files.read_criteria())?;
       let library = seeded_library(&scan.detected_criteria, kept.as_ref());
       files
           .write_criteria(&library)
@@ -1188,7 +1226,7 @@ Produces: `run_cli`, `CliIo<'a>`, `Report`, `HUMAN`, `Project`, `ProjectIds`, `r
   cargo test -p farik -- --include-ignored
   # expected: exit 0, and
   #   test result: ok. 4 passed (crates/cli/src/lib.rs)
-  #   test result: ok. 7 passed (crates/cli/tests/commands.rs)
+  #   test result: ok. 8 passed (crates/cli/tests/commands.rs)
   ```
 
 - [ ] Refactor if there is duplication; keep green.
@@ -1245,6 +1283,11 @@ Produces: `farik_store::files::yaml_value`
   /// a person hands `farik task create` is held to the same dialect as the files under `.farik/` — no
   /// duplicate mapping key, no second document, the alias budget, and `true` spelled `true` (ADR 0007).
   ///
+  /// Read the way a file a person edits by hand should be. `UserMessageFormatter` is the crate's own
+  /// answer to the question, and its own default is explicitly not for a person to read: it recommends
+  /// the API call that would have accepted the file. And the name of the input is put back, because the
+  /// crate does not know it and calls it `<input>`.
+  ///
   /// # Errors
   ///
   /// `Invalid`, carrying the line, the column and the snippet `serde-saphyr` reports.
@@ -1258,10 +1301,34 @@ Produces: `farik_store::files::yaml_value`
   }
   ```
 
-- [ ] Make `read_yaml` call it, so the dialect is decided in one place. This **replaces** the method's
-      body, which today inlines `from_str_with_options` and the formatter:
+- [ ] Make `read_yaml` call it, so the dialect is decided in one place. This **replaces** the whole
+      method, its doc comment included, which today reads:
 
   ```rust
+      /// One YAML file as an untrusted value, for a validator to hold to its rules.
+      ///
+      /// Read the way a file a person edits by hand should be. `UserMessageFormatter` is the crate's
+      /// own answer to the question, and its own default is explicitly not for a person to read: it
+      /// recommends the API call that would have accepted the file. And the name of the input is put
+      /// back, because the crate does not know it and calls it `<input>`.
+      fn read_yaml(&self, relative: &str) -> Result<Value, FilesError> {
+          let text = self.read_text(relative)?;
+          serde_saphyr::from_str_with_options(&text, yaml_options()).map_err(|error| {
+              FilesError::Invalid {
+                  path: Self::named(relative),
+                  detail: error
+                      .render_with_formatter(&serde_saphyr::UserMessageFormatter)
+                      .replace("<input>", &Self::named(relative)),
+              }
+          })
+      }
+  ```
+
+      with this, the three sentences about the formatter having moved into `yaml_value`'s own doc
+      comment above, where the formatter now is:
+
+  ```rust
+      /// One YAML file under `.farik/` as an untrusted value, for a validator to hold to its rules.
       fn read_yaml(&self, relative: &str) -> Result<Value, FilesError> {
           let text = self.read_text(relative)?;
           yaml_value(&text, &Self::named(relative))
@@ -1293,8 +1360,10 @@ Consumes: `yaml_value` from Task 2; `Project`, `ProjectIds`, `repository_root` f
 write_contract, list_contracts}` from `crates/store/src/files.rs`
 Produces: `open_project`, `task::create`
 
-- [ ] Add these to `crates/cli/tests/commands.rs`: the three helpers with the helpers, the tests after
-      task 1's. The file's `use` block becomes, in full:
+- [ ] Add these to `crates/cli/tests/commands.rs`. They are given in the order the finished file
+      holds them, which is where to put them: `a_request` after `a_project`, `a_request_file` after
+      `files_of`, `board_of` after `kinds_in`, and the eight tests after task 1's. Appending the three
+      helpers as one run compiles and passes too. The file's `use` block becomes, in full:
 
   ```rust
   //! The command line against a real repository.
@@ -1622,9 +1691,12 @@ Produces: `open_project`, `task::create`
   pub use project::{Project, open_project};
   ```
 
-      the variant and its own enum, after `Init`:
+      the variant and its own enum, which **replace** the two lines that end the `Commands` enum
+      today (`    Init,` and the `}` under it):
 
   ```rust
+      /// Make the repository this is run in a Farik project.
+      Init,
       /// Work with one task.
       Task {
           #[command(subcommand)]
@@ -1714,9 +1786,12 @@ Produces: `open_project`, `task::create`
   /// the file and the contract two different things.
   ///
   /// `parent` is the one of these a person may legitimately write: 5.16 item 3 lets the human create a
-  /// task under an epic. The gate for that is `check_child_creation`, which needs the epic's assignee,
-  /// and no projection carries one until phase 3 step 03 — so filing a child here would either skip the
-  /// gate or depend on what does not exist yet. The refusal says so, and the project plan records it.
+  /// task under an epic. The gate for that is `check_child_creation`, and it takes a `ParentEpic` whose
+  /// `assignee_id` this command cannot fill: no projection carries one until phase 3 step 03. For a
+  /// human actor the gate reads only the epic's status, so a blank id would pass today — and a
+  /// governance predicate asked with a field invented at the call site is worse than one not asked yet,
+  /// because the branch that field feeds is the branch that says who may write the task at all. So the
+  /// refusal says which rule refuses `parent` and what will open it, and the project plan records it.
   fn not_the_authors() -> Vec<&'static str> {
       let mut fields: Vec<&'static str> = Vec::new();
       fields.extend(FIELDS_THE_STORE_OWNS);
@@ -1880,7 +1955,7 @@ Produces: `open_project`, `task::create`
   cargo test -p farik -- --include-ignored
   # expected: exit 0, and
   #   test result: ok. 4 passed (crates/cli/src/lib.rs)
-  #   test result: ok. 15 passed (crates/cli/tests/commands.rs)
+  #   test result: ok. 16 passed (crates/cli/tests/commands.rs)
   ```
 
 - [ ] Refactor if there is duplication; keep green.
@@ -2120,6 +2195,31 @@ Produces: `triage::triage`, `triage::status_of`
 
   #[test]
   #[ignore = "needs the git program: cargo xtask check --integration"]
+  fn refuses_a_triage_with_no_reason_written() {
+      // 5.16 records the decision with a reason, and the log is where somebody reads it back.
+      let repository = a_project("cli-triage-no-reason");
+      let file = a_request_file(&repository, "request.yaml", "A whole board");
+      run_in(
+          &repository.path,
+          &["task", "create", file.to_str().expect("a path")],
+      );
+
+      let ran = run_in(
+          &repository.path,
+          &["triage", "FRK-1", "large", "--reason", "   "],
+      );
+
+      assert_eq!(ran.code, 1);
+      assert!(ran.err.contains("recorded with a reason"), "{}", ran.err);
+      assert_eq!(
+          kinds_in(&repository).last().map(String::as_str),
+          Some("task.created"),
+          "and nothing was recorded"
+      );
+  }
+
+  #[test]
+  #[ignore = "needs the git program: cargo xtask check --integration"]
   fn refuses_a_triage_once_refining_has_started() {
       let repository = a_project("cli-triage-late");
       let file = a_request_file(&repository, "request.yaml", "A whole board");
@@ -2317,6 +2417,16 @@ Produces: `triage::triage`, `triage::status_of`
       let named: TaskId = task_id
           .parse()
           .map_err(|error| format!("{task_id} is not a task id: {error}"))?;
+      // 5.16 says the triage records its decision with a reason, and the log is where a person reads it
+      // back months later. A blank one is not a reason; the command schema says `reason` is a string and
+      // nothing more, so this is the place that holds it to being written.
+      if reason.trim().is_empty() {
+          return Err(
+              "a triage is recorded with a reason, and the log is where somebody reads it back: say \
+               why this is the size it is"
+                  .to_string(),
+          );
+      }
       let command = command_from_value(&json!({
           "command": "request_triage",
           "body": { "task_id": named.as_str(), "size": wire_size(size), "reason": reason }
@@ -2428,7 +2538,7 @@ Produces: `triage::triage`, `triage::status_of`
   cargo test -p farik -- --include-ignored
   # expected: exit 0, and
   #   test result: ok. 4 passed (crates/cli/src/lib.rs)
-  #   test result: ok. 20 passed (crates/cli/tests/commands.rs)
+  #   test result: ok. 22 passed (crates/cli/tests/commands.rs)
   ```
 
 - [ ] Refactor if there is duplication; keep green.
@@ -2935,7 +3045,7 @@ Produces: `contract::hold`
   cargo test -p farik -- --include-ignored
   # expected: exit 0, and
   #   test result: ok. 5 passed (crates/cli/src/lib.rs)
-  #   test result: ok. 25 passed (crates/cli/tests/commands.rs)
+  #   test result: ok. 27 passed (crates/cli/tests/commands.rs)
   ```
 
 - [ ] Refactor if there is duplication; keep green.
@@ -2957,7 +3067,7 @@ Produces: nothing
   `farik init` makes a repository a project: it writes `.farik/`, the event log under
   `.farik/local/`, `project.md` holding the scan's read-back, and a criterion library seeded from what
   the scan found. When there is no team file it writes a starter team of two agents — a Product Manager
-  and a Software Developer, the two a team cannot work without (5.1) — named after their roles for the
+  and a Software Developer, the two a team cannot work without (F1) — named after their roles for the
   user to rename in the team editor, on the models 8.2 ships, with one unfinished task per agent
   (`wip_limit_per_agent: 1`) and the rest of the policy as sections 5.2, 5.5 and 5.14 give it. A second
   `farik init` is a rescan: it keeps the team and the criteria a person wrote and replaces the ones the
@@ -2994,7 +3104,7 @@ Produces: nothing
   cargo xtask check --integration
   # expected: ends with `xtask check: ok`, with
   #   test result: ok. 5 passed (crates/cli/src/lib.rs)
-  #   test result: ok. 25 passed (crates/cli/tests/commands.rs)
+  #   test result: ok. 27 passed (crates/cli/tests/commands.rs)
   #   test result: ok. 267 passed (farik-core)
   #   test result: ok. 37 passed (farik-protocol)
   #   test result: ok. 66 passed (farik-store)
@@ -3011,7 +3121,7 @@ Produces: nothing
   ```
   cargo xtask check
   # expected: ends with `xtask check: ok`, with
-  #   test result: ok. 2 passed; 0 failed; 23 ignored (crates/cli/tests/commands.rs)
+  #   test result: ok. 2 passed; 0 failed; 25 ignored (crates/cli/tests/commands.rs)
   ```
 
 - [ ] `farik-core` still performs no I/O, which the gate this step adds does not change:
@@ -3024,10 +3134,10 @@ Produces: nothing
 - [ ] One dependency was added, and it is pinned:
 
   ```
-  git diff a4478aa -- Cargo.toml
+  git diff ef0cdcf -- Cargo.toml
   # expected: two added lines, `clap = { version = "=4.6.7", features = ["derive"] }` and
-  #   `farik-store = { path = "crates/store" }`. `a4478aa` is the commit that carried this
-  #   plan, which is the last one before the step.
+  #   `farik-store = { path = "crates/store" }`. `ef0cdcf` is step 07's last commit; every
+  #   commit between it and this step carries this plan and no manifest.
   ```
 
 - [ ] The command line answers for itself, run as a person would:
