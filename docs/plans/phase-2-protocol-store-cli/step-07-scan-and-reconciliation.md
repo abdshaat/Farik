@@ -22,6 +22,14 @@ Two things, both about a project Farik has just been pointed at.
 - **The scan's signals are files, not guesses.** Every one is a path the repository tracks or a line in one of its manifests. Nothing is inferred from a directory's name, nothing is executed, and the answer for one tree is the same every time — which is what lets the read-back be asserted character for character.
 - **The tree is read through git, not by walking the directory.** `Git::tracked_paths` runs `ls-files -z`, so `.gitignore` decides what is not content and Farik never has to know that `node_modules/` and `target/` exist. A test proves it: twenty TypeScript files git ignores do not make a Rust project a TypeScript one.
 - **`scan_project` takes the adapter and a clock, not a root and an adapter.** The project plan's line said `(root: &Path, git: &Git)`. Two roots beside each other can disagree, and then the tree the paths are listed from is not the tree the manifests are read from; the root comes from `Git::root` instead. And `now` is a parameter because the read-back says how long ago the last commit was, which a function that sampled the clock itself could not be held to — the pattern step 02 set with `open_event_log(path, now)`.
+- **One toolchain is chosen, not all of them**, because a criterion called `the-tests-pass` can only mean one command. A project with two markers — a Rust workspace with a front end, which is the shape this repository itself takes — gets the one whose language the tree says it mostly is, and falls back to the first marker in table order when the language names none of them. Found by the first readiness review: table order alone gave a Rust workspace pnpm's scripts and dropped `cargo test`, `cargo clippy` and `cargo fmt` from the library every contract in the project verifies with.
+- **A language tie goes to whichever comes first in the table.** `Iterator::max_by_key` keeps the last of equal keys, so the table is read backwards to get the first — the first readiness review found the code doing the opposite of what its own comment promised, on the first sentence a person ever sees from Farik.
+- **A workspace of one package is a workspace, not a monorepo.** One condition decides the word and the count together, so they cannot disagree; "1 packages" is not a count and a single package is not a monorepo.
+- **A commit ahead of now is reported as its stamp, however far ahead.** Two machines whose clocks disagree are hours apart, not days, so the comparison is between instants rather than between day counts.
+- **A subtree of a repository is not a project.** Section 4 asks a person to pick the project's folder; `Git::open` accepts any directory inside a repository, so `scan_project` asks git where the repository begins and refuses when it was pointed somewhere else. Scanning a subtree would answer confidently about a project it had only seen part of.
+- **A script name with nothing behind it is not a command.** `"test": ""` would become a criterion whose command exits 0 having verified nothing. What this cannot see is a stub that runs and fails on purpose, as `npm init` writes for `test`; that is a project telling its own tools something, and the person adopting Farik has to look at it.
+- **A test runner is named by its own file, not by a file that mentions it.** `vitest.config.ts` says the project tests with vitest; `jest-to-vitest-migration.md` says somebody wrote about it. The basename has to be the runner's name or begin with it and a dot.
+- **A contract that cannot be read is one variant, whichever way it failed.** Broken by hand, unreadable to this user, or gone between the listing and the read: `detail` carries the file adapter's own words, and no test can win that race, so a branch nothing can reach would be worse than one variant whose detail tells the truth.
 - **A Node project's commands are read, not invented.** F2 says to detect the project's test and build commands. For a toolchain whose commands live in a manifest, the scan reads `package.json`'s scripts and takes the five whose meaning is the same everywhere; for cargo, go, poetry, uv and bundler it uses the commands those toolchains always have. A closed list of script names is also what keeps a criterion's name inside the schema's kebab-case pattern.
 - **The scan builds its criteria as wire values and hands them to `validate_criteria`.** The tables in the module describe criteria; the library's own rules are what say whether they are ones. A name that is not kebab-case or a text under ten characters would otherwise be a defect nothing here would catch, and `ScanError::Built` reports it rather than unwrapping.
 - **A refresh replaces what a scan found and never touches what a person wrote.** `criteria.schema.json` says so of its `source` field, and `seeded_library` is where it is true: criteria whose source is `project_scan` are dropped, everything else is kept, and a name a person has used is a name the scan leaves alone.
@@ -771,6 +779,30 @@ Produces: `Git::tracked_paths` and `Git::root`
 
   #[test]
   #[ignore = "needs the git program: cargo xtask check --integration"]
+  fn says_where_the_repository_begins_whatever_directory_it_was_opened_on() {
+      // `Git::open` takes any directory inside a repository, so `root` and the repository's own root
+      // are two different questions. A caller that means the project rather than a subtree has to be
+      // able to tell.
+      let repository = TempRepo::new("top-level");
+      repository.write("crates/core/src/lib.rs", "pub fn one() -> u8 { 1 }\n");
+      repository.commit("a subdirectory");
+      let inside = Git::open(repository.path.join("crates/core"));
+
+      assert_eq!(
+          inside.root(),
+          repository.path.join("crates/core"),
+          "root is the directory it was opened on"
+      );
+      assert_eq!(
+          std::fs::canonicalize(inside.top_level().expect("git says where it begins"))
+              .expect("a real directory"),
+          std::fs::canonicalize(&repository.path).expect("a real directory"),
+          "and top_level is where the repository does"
+      );
+  }
+
+  #[test]
+  #[ignore = "needs the git program: cargo xtask check --integration"]
   fn lists_what_is_staged_in_a_repository_with_no_commit() {
       // A repository `farik init` has just made has an index and no commit, and onboarding scans it.
       let repository = TempRepo::new("tracked-staged");
@@ -795,9 +827,11 @@ Produces: `Git::tracked_paths` and `Git::root`
   cargo test -p farik-store --test git
   # expected: FAIL to compile, one error per call site:
   # error[E0599]: no method named `root` found for struct `Git` in the current scope
+  #   (twice)
+  # error[E0599]: no method named `top_level` found for struct `Git` in the current scope
   # error[E0599]: no method named `tracked_paths` found for struct `Git` in the current
   #   scope  (three times)
-  # error: could not compile `farik-store` (test "git") due to 4 previous errors
+  # error: could not compile `farik-store` (test "git") due to 6 previous errors
   ```
 
 - [ ] Write the minimal implementation. First the rename, because the method below calls the helper by its new name and a helper that splits git's `-z` output is no longer only about what changed. In `crates/store/src/git.rs`, replace the unit tests' import, whole — rustfmt sorts a braced group, and `paths_of` sorts after `path_argument` where `changed_paths_of` sorted before both:
@@ -808,15 +842,29 @@ Produces: `Git::tracked_paths` and `Git::root`
       };
   ```
 
-  then rename the remaining six occurrences of `changed_paths_of` to `paths_of`: its definition, its doc comment's subject, the call in `changed_paths`, the call in `merge`, and the two in the unit test that names it.
+  then rename the remaining six occurrences of `changed_paths_of` to `paths_of`: its definition, the call in `changed_paths`, the call in `merge`, and the three in `reads_the_paths_git_separated_by_nothing`. Its doc comment names no function and does not change.
 
 - [ ] Insert, before `/// Whether \`root\` is inside a git repository.`:
 
   ```rust
-      /// The repository's root, which is the project root.
+      /// The directory this adapter was opened on, which may be inside a repository rather than at
+      /// its root. `top_level` is what git says the root is.
       #[must_use]
       pub fn root(&self) -> &Path {
           &self.root
+      }
+
+      /// Where the repository begins, as git reports it.
+      ///
+      /// `Git::open` accepts any directory inside a repository, so the two can differ, and a caller
+      /// that means the project rather than a subtree has to ask.
+      ///
+      /// # Errors
+      ///
+      /// `NotARepository`, `NotInstalled`, or `CommandFailed` when git refuses.
+      pub fn top_level(&self) -> Result<String, GitError> {
+          self.require_repository()?;
+          self.at_root(&["rev-parse", "--show-toplevel"])
       }
   ```
 
@@ -844,7 +892,7 @@ Produces: `Git::tracked_paths` and `Git::root`
   ```
   cargo xtask check --integration
   # expected: ends with `xtask check: ok`, with
-  #   test result: ok. 17 passed (crates/store/tests/git.rs)
+  #   test result: ok. 18 passed (crates/store/tests/git.rs)
   ```
 
 - [ ] Commit: `feat(store): list what the repository tracks`
@@ -928,6 +976,11 @@ Produces: `farik_store::{ProjectScan, ScanError, scan_project, seeded_library}`
           let now = at("2026-09-17T12:00:00Z");
           assert_eq!(how_long_ago("yesterday-ish", now), "at yesterday-ish");
           assert_eq!(
+              how_long_ago("2026-09-17T13:00:00+00:00", now),
+              "at 2026-09-17T13:00:00+00:00",
+              "an hour ahead is ahead: two machines whose clocks disagree are hours apart, not days"
+          );
+          assert_eq!(
               how_long_ago("2026-09-18T12:00:00+00:00", now),
               "at 2026-09-18T12:00:00+00:00"
           );
@@ -944,6 +997,16 @@ Produces: `farik_store::{ProjectScan, ScanError, scan_project, seeded_library}`
               Some("Rust")
           );
           assert_eq!(language_of(&strings(&["README.md", "LICENSE"])), None);
+          assert_eq!(
+              language_of(&strings(&["one.ts", "two.rs"])),
+              Some("TypeScript"),
+              "a tie goes to whichever language comes first in the table"
+          );
+          assert_eq!(
+              language_of(&strings(&["one.rs", "two.py"])),
+              Some("Rust"),
+              "and the table's order is the order a person would name them in"
+          );
           assert_eq!(
               language_of(&strings(&["src/A.RS"])),
               Some("Rust"),
@@ -973,6 +1036,16 @@ Produces: `farik_store::{ProjectScan, ScanError, scan_project, seeded_library}`
               Some("vitest")
           );
           assert_eq!(tests_in(&strings(&["tests/test_it.py"]), None), None);
+          assert_eq!(
+              tests_in(&strings(&["packages/ui/vitest.config.ts"]), None),
+              Some("vitest"),
+              "a package's own configuration counts wherever it sits"
+          );
+          assert_eq!(
+              tests_in(&strings(&["docs/jest-to-vitest-migration.md"]), None),
+              None,
+              "and a file that writes about a runner is not a project that uses one"
+          );
           let manifest = json!({ "devDependencies": { "jest": "^30.0.0" } });
           assert_eq!(tests_in(&[], Some(&manifest)), Some("jest"));
           assert_eq!(tests_in(&[], None), None);
@@ -985,6 +1058,10 @@ Produces: `farik_store::{ProjectScan, ScanError, scan_project, seeded_library}`
           found.sort();
           assert_eq!(found, ["build", "test"]);
           assert!(scripts_in(None).is_empty());
+
+          // A name with nothing behind it would become a criterion whose command verifies nothing.
+          let empty = json!({ "scripts": { "test": "", "lint": "   ", "build": 7, "check": "tsc" } });
+          assert_eq!(scripts_in(Some(&empty)), ["check"]);
       }
 
       #[test]
@@ -1009,6 +1086,27 @@ Produces: `farik_store::{ProjectScan, ScanError, scan_project, seeded_library}`
                   at("2026-09-17T12:00:00Z")
               ),
               "TypeScript monorepo, pnpm, 3 packages, tests in vitest, last commit 4 days ago"
+          );
+      }
+
+      #[test]
+      fn a_workspace_of_one_package_is_not_a_monorepo() {
+          let reading = Reading {
+              language: Some("TypeScript"),
+              toolchain: Some(toolchain("pnpm")),
+              is_workspace: true,
+              packages: 1,
+              tests: None,
+              scripts: Vec::new(),
+          };
+          assert_eq!(
+              reading.read_back(
+                  &strings(&["package.json"]),
+                  None,
+                  at("2026-09-17T12:00:00Z")
+              ),
+              "TypeScript, pnpm, no commits yet",
+              "one package is a workspace and not a monorepo, and `1 packages` is not a count"
           );
       }
 
@@ -1217,12 +1315,19 @@ Produces: `farik_store::{ProjectScan, ScanError, scan_project, seeded_library}`
                       detail: "/criteria/0/name does not match".to_string()
                   }
                   .to_string(),
+                  ScanError::NotTheRepositoryRoot {
+                      path: "/home/ada/project/crates/core".to_string(),
+                      root: "/home/ada/project".to_string()
+                  }
+                  .to_string(),
               ],
               [
                   "/home/ada/notes is not a git repository",
                   "git refused: git is not installed",
                   "package.json could not be read: Permission denied (os error 13)",
                   "the scan built a criterion that is not one: /criteria/0/name does not match",
+                  "/home/ada/project/crates/core is inside the repository at /home/ada/project rather \
+                   than its root, and a project is a whole repository",
               ]
           );
       }
@@ -1328,7 +1433,13 @@ Produces: `farik_store::{ProjectScan, ScanError, scan_project, seeded_library}`
               .iter()
               .map(|one| one.name.as_str())
               .collect::<Vec<_>>(),
-          ["the-tests-pass", "clippy-is-clean", "formatting-is-clean"]
+          [
+              "the-tests-pass",
+              "the-build-succeeds",
+              "clippy-is-clean",
+              "formatting-is-clean"
+          ],
+          "F2 asks for the test and the build commands, and cargo has both"
       );
   }
 
@@ -1409,6 +1520,76 @@ Produces: `farik_store::{ProjectScan, ScanError, scan_project, seeded_library}`
           scan.detected_criteria.is_empty(),
           "no scripts could be read, so no criterion was found"
       );
+  }
+
+  #[test]
+  #[ignore = "needs the git program: cargo xtask check --integration"]
+  fn takes_the_toolchain_the_language_names_when_a_project_has_two() {
+      // A Rust workspace with a front end, which is the shape this repository itself takes. One
+      // toolchain is chosen, because a criterion called `the-tests-pass` can only mean one command,
+      // and the tree says this is mostly Rust.
+      let repository = TempRepo::new("scan-polyglot");
+      repository.write("Cargo.lock", "version = 4\n");
+      repository.write("Cargo.toml", "[workspace]\nmembers = [\"crates/*\"]\n");
+      repository.write("crates/core/Cargo.toml", "[package]\nname = \"core\"\n");
+      repository.write("crates/core/src/lib.rs", "pub fn one() -> u8 { 1 }\n");
+      repository.write("crates/store/Cargo.toml", "[package]\nname = \"store\"\n");
+      repository.write("crates/store/src/lib.rs", "pub fn two() -> u8 { 2 }\n");
+      repository.write("pnpm-lock.yaml", "lockfileVersion: '9.0'\n");
+      repository.write("package.json", "{\"scripts\":{\"build\":\"tsc -b\"}}\n");
+      repository.write("web/app.ts", "export const one = 1;\n");
+      repository.commit("a rust workspace with a front end");
+
+      let scan = scan_project(&repository.adapter(), now()).expect("it scans");
+      assert_eq!(
+          scan.read_back,
+          "Rust monorepo, cargo, 2 packages, last commit today"
+      );
+      assert_eq!(
+          scan.detected_criteria
+              .iter()
+              .map(|one| one.name.as_str())
+              .collect::<Vec<_>>(),
+          [
+              "the-tests-pass",
+              "the-build-succeeds",
+              "clippy-is-clean",
+              "formatting-is-clean"
+          ],
+          "the library gets the commands of the language the project is, not of the one it also has"
+      );
+  }
+
+  #[test]
+  #[ignore = "needs the git program: cargo xtask check --integration"]
+  fn refuses_a_directory_inside_a_repository_rather_than_scanning_a_subtree() {
+      // Onboarding asks a person to pick the project's folder (spec 4). A subtree would answer
+      // confidently about a project it had only seen part of.
+      let repository = TempRepo::new("scan-subtree");
+      repository.write("Cargo.lock", "version = 4\n");
+      repository.write("Cargo.toml", "[package]\nname = \"one\"\n");
+      repository.write("crates/core/src/lib.rs", "pub fn one() -> u8 { 1 }\n");
+      repository.commit("a project with a subdirectory");
+
+      let inside = Git::open(repository.path.join("crates/core"));
+      assert!(inside.is_repository(), "it is inside a repository");
+      let Err(ScanError::NotTheRepositoryRoot { path, root }) = scan_project(&inside, now()) else {
+          panic!("a subtree is not a project");
+      };
+      assert!(path.ends_with("crates/core"), "{path}");
+      assert!(!root.ends_with("crates/core"), "{root}");
+  }
+
+  #[test]
+  #[ignore = "needs the git program: cargo xtask check --integration"]
+  fn refuses_to_list_what_a_directory_that_is_not_a_repository_tracks() {
+      // `tracked_paths` promises this, and `scan_project` asks `is_repository` before it, so nothing
+      // else would notice if the adapter stopped checking.
+      let plain = std::env::temp_dir().join(format!("farik-tracked-plain-{}", std::process::id()));
+      std::fs::create_dir_all(&plain).expect("a plain directory");
+      let refused = Git::open(plain.clone()).tracked_paths();
+      let _ = std::fs::remove_dir_all(&plain);
+      assert_eq!(refused, Err(farik_store::GitError::NotARepository));
   }
 
   /// The command a template's verification runs, whichever method it is.
@@ -1498,6 +1679,15 @@ Produces: `farik_store::{ProjectScan, ScanError, scan_project, seeded_library}`
           /// The directory that was asked about.
           path: String,
       },
+      /// There is a repository, and this is a directory inside it rather than its root. Onboarding
+      /// asks a person to pick the project's folder (spec 4); scanning a subtree would answer
+      /// confidently about a project it had only seen part of.
+      NotTheRepositoryRoot {
+          /// The directory that was asked about.
+          path: String,
+          /// Where the repository actually begins.
+          root: String,
+      },
       /// Git refused.
       Git {
           /// What it said.
@@ -1525,6 +1715,11 @@ Produces: `farik_store::{ProjectScan, ScanError, scan_project, seeded_library}`
               Self::NotARepository { path } => {
                   write!(formatter, "{path} is not a git repository")
               }
+              Self::NotTheRepositoryRoot { path, root } => write!(
+                  formatter,
+                  "{path} is inside the repository at {root} rather than its root, and a project is a \
+                   whole repository"
+              ),
               Self::Git { detail } => write!(formatter, "git refused: {detail}"),
               Self::Io { path, detail } => write!(formatter, "{path} could not be read: {detail}"),
               Self::Built { detail } => write!(
@@ -1564,6 +1759,13 @@ Produces: `farik_store::{ProjectScan, ScanError, scan_project, seeded_library}`
       if !git.is_repository() {
           return Err(ScanError::NotARepository {
               path: git.root().display().to_string(),
+          });
+      }
+      let top = git.top_level()?;
+      if !same_directory(git.root(), Path::new(&top)) {
+          return Err(ScanError::NotTheRepositoryRoot {
+              path: git.root().display().to_string(),
+              root: top,
           });
       }
       let tracked = git.tracked_paths()?;
@@ -1659,11 +1861,17 @@ Produces: `farik_store::{ProjectScan, ScanError, scan_project, seeded_library}`
       Fixed(&'static [Verified]),
   }
 
-  /// A toolchain: the file that says a project uses it, what a person calls it, and where its commands
-  /// come from. The first marker found in the tracked tree wins, so the order is most specific first.
+  /// A toolchain: the file that says a project uses it, what a person calls it, the language whose
+  /// project it is, and where its commands come from.
+  ///
+  /// One toolchain is chosen, not all of them, because a criterion called `the-tests-pass` can only
+  /// mean one command. A project with two markers — a Rust workspace with a front end, which is the
+  /// shape this repository itself takes — gets the one whose language the tree says it mostly is, and
+  /// falls back to the first marker found when the language names none of them.
   struct Toolchain {
       marker: &'static str,
       name: &'static str,
+      language: &'static str,
       commands: Commands,
   }
 
@@ -1673,6 +1881,12 @@ Produces: `farik_store::{ProjectScan, ScanError, scan_project, seeded_library}`
           text: "Every test in the workspace passes: cargo test --workspace.",
           command: "cargo test --workspace",
           is_test: true,
+      },
+      Verified {
+          name: "the-build-succeeds",
+          text: "The workspace builds: cargo build --workspace.",
+          command: "cargo build --workspace",
+          is_test: false,
       },
       Verified {
           name: "clippy-is-clean",
@@ -1694,6 +1908,12 @@ Produces: `farik_store::{ProjectScan, ScanError, scan_project, seeded_library}`
           text: "Every test in the module passes: go test ./...",
           command: "go test ./...",
           is_test: true,
+      },
+      Verified {
+          name: "the-build-succeeds",
+          text: "The module builds: go build ./...",
+          command: "go build ./...",
+          is_test: false,
       },
       Verified {
           name: "vet-is-clean",
@@ -1721,46 +1941,55 @@ Produces: `farik_store::{ProjectScan, ScanError, scan_project, seeded_library}`
       Toolchain {
           marker: "pnpm-lock.yaml",
           name: "pnpm",
+          language: "TypeScript",
           commands: Commands::Scripts,
       },
       Toolchain {
           marker: "bun.lockb",
           name: "bun",
+          language: "TypeScript",
           commands: Commands::Scripts,
       },
       Toolchain {
           marker: "yarn.lock",
           name: "yarn",
+          language: "TypeScript",
           commands: Commands::Scripts,
       },
       Toolchain {
           marker: "package-lock.json",
           name: "npm",
+          language: "TypeScript",
           commands: Commands::Scripts,
       },
       Toolchain {
           marker: "Cargo.lock",
           name: "cargo",
+          language: "Rust",
           commands: Commands::Fixed(CARGO),
       },
       Toolchain {
           marker: "go.sum",
           name: "go",
+          language: "Go",
           commands: Commands::Fixed(GO),
       },
       Toolchain {
           marker: "poetry.lock",
           name: "poetry",
+          language: "Python",
           commands: Commands::Fixed(PYTEST),
       },
       Toolchain {
           marker: "uv.lock",
           name: "uv",
+          language: "Python",
           commands: Commands::Fixed(PYTEST),
       },
       Toolchain {
           marker: "Gemfile.lock",
           name: "bundler",
+          language: "Ruby",
           commands: Commands::Fixed(RSPEC),
       },
   ];
@@ -1848,9 +2077,12 @@ Produces: `farik_store::{ProjectScan, ScanError, scan_project, seeded_library}`
       /// Reads the tracked tree, and the one manifest whose contents matter.
       fn of(root: &Path, tracked: &[String]) -> Result<Self, ScanError> {
           let manifest = read_package_json(root, tracked)?;
+          let language = language_of(tracked);
+          let present = |toolchain: &&Toolchain| tracked.iter().any(|path| path == toolchain.marker);
           let toolchain = TOOLCHAINS
               .iter()
-              .find(|toolchain| tracked.iter().any(|path| path == toolchain.marker));
+              .find(|toolchain| present(toolchain) && Some(toolchain.language) == language)
+              .or_else(|| TOOLCHAINS.iter().find(present));
           let is_workspace = tracked
               .iter()
               .any(|path| WORKSPACE_MARKERS.contains(&path.as_str()))
@@ -1859,7 +2091,7 @@ Produces: `farik_store::{ProjectScan, ScanError, scan_project, seeded_library}`
                   .is_some_and(|value| value.get("workspaces").is_some())
               || cargo_workspace(root, tracked)?;
           Ok(Self {
-              language: language_of(tracked),
+              language,
               toolchain,
               is_workspace,
               packages: packages_in(tracked),
@@ -1879,8 +2111,11 @@ Produces: `farik_store::{ProjectScan, ScanError, scan_project, seeded_library}`
           if tracked.is_empty() {
               parts.push("nothing tracked yet".to_string());
           }
+          // A workspace of one package is a workspace and not a monorepo, and "1 packages" is not a
+          // count. One condition decides the word and the number together, so they cannot disagree.
+          let monorepo = self.is_workspace && self.packages > 1;
           if let Some(language) = self.language {
-              parts.push(if self.is_workspace {
+              parts.push(if monorepo {
                   format!("{language} monorepo")
               } else {
                   language.to_string()
@@ -1889,7 +2124,7 @@ Produces: `farik_store::{ProjectScan, ScanError, scan_project, seeded_library}`
           if let Some(toolchain) = self.toolchain {
               parts.push(toolchain.name.to_string());
           }
-          if self.is_workspace && self.packages > 1 {
+          if monorepo {
               parts.push(format!("{} packages", self.packages));
           }
           if let Some(tests) = self.tests {
@@ -1973,6 +2208,9 @@ Produces: `farik_store::{ProjectScan, ScanError, scan_project, seeded_library}`
       LANGUAGES
           .iter()
           .filter_map(|(_, language)| counted.get(language).map(|count| (*count, *language)))
+          // `max_by_key` keeps the last of equal keys, so the table is read backwards: a tie goes to
+          // whichever language comes first in it, which is what its own comment promises.
+          .rev()
           .max_by_key(|(count, _)| *count)
           .map(|(_, language)| language)
   }
@@ -1992,11 +2230,14 @@ Produces: `farik_store::{ProjectScan, ScanError, scan_project, seeded_library}`
 
   /// The test runner a tree names, by a configuration file of its own or by a dependency.
   fn tests_in(tracked: &[String], manifest: Option<&Value>) -> Option<&'static str> {
+      // The runner's own file, not a file that mentions it: `vitest.config.ts` says the project tests
+      // with vitest, and `jest-to-vitest-migration.md` says somebody wrote about it.
       let named = |needle: &str| {
           tracked.iter().any(|path| {
-              path.rsplit_once('/')
-                  .map_or(path.as_str(), |(_, name)| name)
-                  .starts_with(needle)
+              let name = path
+                  .rsplit_once('/')
+                  .map_or(path.as_str(), |(_, name)| name);
+              name == needle || name.starts_with(&format!("{needle}."))
           })
       };
       let depended = |needle: &str| {
@@ -2013,12 +2254,23 @@ Produces: `farik_store::{ProjectScan, ScanError, scan_project, seeded_library}`
           .map(|(_, shown)| *shown)
   }
 
-  /// The script names a `package.json` defines, of the ones the table knows.
+  /// The scripts a `package.json` defines that actually run something.
+  ///
+  /// A name with nothing behind it is not a command: `"test": ""` would become a criterion whose
+  /// command exits 0 having verified nothing, which is worse than no criterion at all. What this
+  /// cannot see is a stub that runs and fails on purpose, as `npm init` writes for `test`; that is a
+  /// project telling its own tools something, and the person who adopts Farik has to look at it.
   fn scripts_in(manifest: Option<&Value>) -> Vec<String> {
       manifest
           .and_then(|value| value.get("scripts"))
           .and_then(Value::as_object)
-          .map(|scripts| scripts.keys().cloned().collect())
+          .map(|scripts| {
+              scripts
+                  .iter()
+                  .filter(|(_, command)| command.as_str().is_some_and(|text| !text.trim().is_empty()))
+                  .map(|(name, _)| name.clone())
+                  .collect()
+          })
           .unwrap_or_default()
   }
 
@@ -2043,6 +2295,18 @@ Produces: `farik_store::{ProjectScan, ScanError, scan_project, seeded_library}`
           .any(|line| line.trim() == "[workspace]"))
   }
 
+  /// Whether two paths name one directory, once the links in each are followed.
+  ///
+  /// A path that cannot be resolved is not the same directory as one that can: the question is asked
+  /// of a repository git has just answered about, so a failure here is the directory going away
+  /// underneath, and the safe answer is no.
+  fn same_directory(one: &Path, other: &Path) -> bool {
+      match (std::fs::canonicalize(one), std::fs::canonicalize(other)) {
+          (Ok(one), Ok(other)) => one == other,
+          _ => false,
+      }
+  }
+
   /// One tracked file's text. A file git tracks that cannot be read is a tree half-written.
   fn read_tracked(root: &Path, relative: &str) -> Result<String, ScanError> {
       std::fs::read_to_string(root.join(relative)).map_err(|error| ScanError::Io {
@@ -2059,9 +2323,15 @@ Produces: `farik_store::{ProjectScan, ScanError, scan_project, seeded_library}`
       let Ok(committed) = DateTime::parse_from_rfc3339(committed_at) else {
           return format!("at {committed_at}");
       };
-      let days = (now - committed.with_timezone(&Utc)).num_days();
+      let committed = committed.with_timezone(&Utc);
+      // Ahead of now at all, not a whole day ahead: two machines whose clocks disagree are hours
+      // apart, and "today" for a commit that has not happened yet is a length of time nobody can
+      // check.
+      if committed > now {
+          return format!("at {committed_at}");
+      }
+      let days = (now - committed).num_days();
       match days {
-          ..=-1 => format!("at {committed_at}"),
           0 => "today".to_string(),
           1 => "yesterday".to_string(),
           2..=29 => format!("{days} days ago"),
@@ -2082,8 +2352,8 @@ Produces: `farik_store::{ProjectScan, ScanError, scan_project, seeded_library}`
   ```
   cargo xtask check --integration
   # expected: ends with `xtask check: ok`, with
-  #   test result: ok. 64 passed (farik-store)
-  #   test result: ok. 8 passed (crates/store/tests/project_scan.rs)
+  #   test result: ok. 65 passed (farik-store)
+  #   test result: ok. 11 passed (crates/store/tests/project_scan.rs)
   ```
 
 - [ ] Commit: `feat(store): read a repository and say what it is`
@@ -2110,7 +2380,9 @@ Produces: `farik_store::{Drift, ReconcileError, reconcile}`
   use farik_protocol::event::{EventKind, NewEvent, event_from_value};
   use farik_store::files::ProjectFiles;
   use farik_store::files::fixtures::TempProject;
-  use farik_store::{Drift, EventLog, IN_MEMORY, Projections, open_event_log, open_projections};
+  use farik_store::{
+      Drift, EventLog, IN_MEMORY, Projections, ReconcileError, open_event_log, open_projections,
+  };
   use serde_json::json;
 
   /// A log and the projections of it, both empty.
@@ -2218,6 +2490,14 @@ Produces: `farik_store::{Drift, ReconcileError, reconcile}`
       };
       assert_eq!(task_id, &an_id("FRK-7"));
       assert!(detail.contains("never heard of this task"), "{detail}");
+      // What a person is shown, which is `Drift`'s own two accessors and its `Display`.
+      assert_eq!(found[0].task_id(), &an_id("FRK-7"));
+      assert_eq!(found[0].detail(), detail);
+      assert_eq!(
+          found[0].to_string(),
+          "FRK-7: there is a contract file and the log has never heard of this task, so no transition \
+           of it was ever governed"
+      );
   }
 
   #[test]
@@ -2318,6 +2598,28 @@ Produces: `farik_store::{Drift, ReconcileError, reconcile}`
   }
 
   #[test]
+  fn says_what_it_could_not_compare_and_why() {
+      assert_eq!(
+          [
+              ReconcileError::Files {
+                  detail: ".farik/contracts could not be used: Permission denied (os error 13)"
+                      .to_string()
+              }
+              .to_string(),
+              ReconcileError::Store {
+                  detail: "sqlite refused: database is locked".to_string()
+              }
+              .to_string(),
+          ],
+          [
+              "the files could not be read: .farik/contracts could not be used: Permission denied \
+               (os error 13)",
+              "the board could not be read: sqlite refused: database is locked",
+          ]
+      );
+  }
+
+  #[test]
   fn reports_everything_it_found_in_an_order_two_runs_agree_on() {
       let project = TempProject::new("reconcile-order");
       let files = project.files();
@@ -2384,7 +2686,8 @@ Produces: `farik_store::{Drift, ReconcileError, reconcile}`
   ```
   cargo test -p farik-store --test reconciliation
   # expected: FAIL to compile,
-  # error[E0432]: unresolved import `farik_store::Drift`
+  # error[E0432]: unresolved imports `farik_store::Drift`,
+  #   `farik_store::ReconcileError`
   # error[E0425]: cannot find function `reconcile` in crate `farik_store`
   # error: could not compile `farik-store` (test "reconciliation") due to 2 previous
   #   errors
@@ -2452,8 +2755,14 @@ Produces: `farik_store::{Drift, ReconcileError, reconcile}`
           /// Both answers, the log's first.
           detail: String,
       },
-      /// There is a contract file with that id and it cannot be read as a contract. Reported here
-      /// rather than refused, so that one file a person broke does not hide every other disagreement.
+      /// A contract file with that id was listed and could not then be read as a contract: broken by
+      /// hand, unreadable to this user, or — if it went away between the listing and the read — no
+      /// longer there at all. Which of those it was is in `detail`, in the file adapter's own words,
+      /// because no test can win that race and a branch nothing can reach is worse than one variant
+      /// whose detail tells the truth.
+      ///
+      /// Reported here rather than refused, so that one file a person broke does not hide every other
+      /// disagreement.
       ContractUnreadable {
           /// Which task.
           task_id: TaskId,
@@ -2548,6 +2857,11 @@ Produces: `farik_store::{Drift, ReconcileError, reconcile}`
   ///
   /// The answer is ordered by the number in the task id, and within one task in the order the variants
   /// are declared, so that two runs over one project print the same thing and a person can diff them.
+  ///
+  /// What the log says is read from the projections rather than from the log itself, so this leans on
+  /// the handle being caught up. `open_projections` catches up when it opens, and a command that opens
+  /// them per run therefore always is; a handle held across appends without `apply` would report its
+  /// own lag as a `StatusMismatch`.
   ///
   /// # Errors
   ///
@@ -2679,7 +2993,7 @@ Produces: `farik_store::{Drift, ReconcileError, reconcile}`
   ```
   cargo xtask check --integration
   # expected: ends with `xtask check: ok`, with
-  #   test result: ok. 8 passed (crates/store/tests/reconciliation.rs)
+  #   test result: ok. 9 passed (crates/store/tests/reconciliation.rs)
   ```
 
 - [ ] Commit: `feat(store): say where the files and the log disagree`
@@ -2695,7 +3009,7 @@ This task changes documentation and has no test cycle. The `> ` marker on the bl
 
 - [ ] In `docs/plans/project-plan.md`, replace the phase 2 line beginning `- Step 07 (\`farik-store::scan\``) — everything up to and including `Result<Vec<Drift>, ReconcileError>`.` — with:
 
-  > - Step 07 (`farik-store::scan` and `farik-store::reconcile`): `struct ProjectScan { read_back: String, detected_criteria: Vec<CriterionTemplate> }`; `fn scan_project(git: &Git, now: DateTime<Utc>) -> Result<ProjectScan, ScanError>` (the adapter rather than a root beside it, so the tree the paths are listed from is the tree the manifests are read from, and a clock rather than a sampled one, because the read-back says how long ago the last commit was; both changed 2026-09-18 by the step 07 plan); `enum ScanError { NotARepository { path }, Git { detail }, Io { path, detail }, Built { detail } }`; `fn seeded_library(found: &[CriterionTemplate], existing: Option<&CriteriaLibrary>) -> CriteriaLibrary` (what a previous scan found is replaced and what a person wrote is kept, which is what `criteria.schema.json` says of its `source` field; a name a person has used is left alone; the result may exceed the schema's ceiling and `write_criteria` is what refuses it). Every signal is a tracked path or a line in a manifest: the tree is read through `Git::tracked_paths`, so `.gitignore` decides what is not content. A Node project's commands are read from its own `package.json` scripts; cargo, go, poetry, uv and bundler have the commands they always have. Each criterion is built as a wire value and held to `validate_criteria` before it leaves the module. `enum Drift { ContractWithoutEvents, EventsWithoutContract, StatusMismatch, LockMismatch, ContractUnreadable }`, each with `task_id` and `detail`, with `Drift::{task_id, detail}` and `Display`; `fn reconcile(files: &ProjectFiles, projections: &Projections) -> Result<Vec<Drift>, ReconcileError>`; `enum ReconcileError { Files { detail }, Store { detail } }`. Added 2026-09-18 by the step 07 plan: `reconcile` takes the projections rather than the log, because what the log says the state is has one definition already and a second could disagree with it; `LockMismatch`, because 5.11 makes the human's hold a governance fact written in both places; and `ContractUnreadable`, because one file somebody broke must not hide every other disagreement. Only `status` and `locked` are disagreements: the file is the source of truth for a contract's title, kind, risk and parent (8.4), and the board's copy of those is a cache that `rebuild` fixes. Also added: `Git::tracked_paths` and `Git::root`, `git::fixtures::{TempRepo, git_in, git_output_in}` (moved out of `tests/git.rs` so the scan's and step 08's tests can use it), and `changed_paths_of` renamed `paths_of`.
+  > - Step 07 (`farik-store::scan` and `farik-store::reconcile`): `struct ProjectScan { read_back: String, detected_criteria: Vec<CriterionTemplate> }`; `fn scan_project(git: &Git, now: DateTime<Utc>) -> Result<ProjectScan, ScanError>` (the adapter rather than a root beside it, so the tree the paths are listed from is the tree the manifests are read from, and a clock rather than a sampled one, because the read-back says how long ago the last commit was; both changed 2026-09-18 by the step 07 plan); `enum ScanError { NotARepository { path }, Git { detail }, Io { path, detail }, Built { detail } }`; `fn seeded_library(found: &[CriterionTemplate], existing: Option<&CriteriaLibrary>) -> CriteriaLibrary` (what a previous scan found is replaced and what a person wrote is kept, which is what `criteria.schema.json` says of its `source` field; a name a person has used is left alone; the result may exceed the schema's ceiling and `write_criteria` is what refuses it). Every signal is a tracked path or a line in a manifest: the tree is read through `Git::tracked_paths`, so `.gitignore` decides what is not content. A Node project's commands are read from its own `package.json` scripts; cargo, go, poetry, uv and bundler have the commands they always have. Each criterion is built as a wire value and held to `validate_criteria` before it leaves the module. `enum Drift { ContractWithoutEvents, EventsWithoutContract, StatusMismatch, LockMismatch, ContractUnreadable }`, each with `task_id` and `detail`, with `Drift::{task_id, detail}` and `Display`; `fn reconcile(files: &ProjectFiles, projections: &Projections) -> Result<Vec<Drift>, ReconcileError>`; `enum ReconcileError { Files { detail }, Store { detail } }`. Added 2026-09-18 by the step 07 plan: `reconcile` takes the projections rather than the log, because what the log says the state is has one definition already and a second could disagree with it; `LockMismatch`, because 5.11 makes the human's hold a governance fact written in both places; and `ContractUnreadable`, because one file somebody broke must not hide every other disagreement. Only `status` and `locked` are disagreements: the file is the source of truth for a contract's title, kind, risk and parent (8.4), and the board's copy of those is a cache that `rebuild` fixes. Also added: `Git::tracked_paths` and `Git::root`, `git::fixtures::{TempRepo, git_in, git_output_in}` (moved out of `tests/git.rs` so the scan's and step 08's tests can use it), and `changed_paths_of` renamed `paths_of`, and `Git::top_level` so that a caller meaning the project rather than a subtree can ask. One toolchain is chosen and it is the one the tree's language names, a language tie goes to whichever comes first in the table, a workspace of one package is not a monorepo, a commit ahead of now is reported as its stamp, a script with nothing behind it is not a command, a test runner is named by its own file rather than by one that mentions it, and a directory inside a repository is refused rather than scanned as a project — all eight found by the step 07 readiness review, which measured each of them against the code.
 
 - [ ] Set this plan's `Status:` to `done` and confirm every checkbox above is ticked, each in the commit of the task it belongs to.
 
@@ -2710,12 +3024,12 @@ This task changes documentation and has no test cycle. The `> ` marker on the bl
   # expected: ends with `xtask check: ok`, with
   #   test result: ok. 264 passed (farik-core)
   #   test result: ok. 37 passed (farik-protocol)
-  #   test result: ok. 64 passed (farik-store)
+  #   test result: ok. 65 passed (farik-store)
   #   test result: ok. 8 passed (crates/store/tests/event_log_file.rs)
-  #   test result: ok. 17 passed (crates/store/tests/git.rs)
+  #   test result: ok. 18 passed (crates/store/tests/git.rs)
   #   test result: ok. 31 passed (crates/store/tests/project_files.rs)
-  #   test result: ok. 8 passed (crates/store/tests/project_scan.rs)
-  #   test result: ok. 8 passed (crates/store/tests/reconciliation.rs)
+  #   test result: ok. 11 passed (crates/store/tests/project_scan.rs)
+  #   test result: ok. 9 passed (crates/store/tests/reconciliation.rs)
   #   test result: ok. 29 passed (xtask)
   ```
 
@@ -2724,8 +3038,9 @@ This task changes documentation and has no test cycle. The `> ` marker on the bl
   ```
   cargo xtask check
   # expected: ends with `xtask check: ok`, with
-  #   test result: ok. 0 passed; 0 failed; 17 ignored (crates/store/tests/git.rs)
-  #   test result: ok. 0 passed; 0 failed; 8 ignored (crates/store/tests/project_scan.rs)
+  #   test result: ok. 0 passed; 0 failed; 18 ignored (crates/store/tests/git.rs)
+  #   test result: ok. 0 passed; 0 failed; 11 ignored
+  #     (crates/store/tests/project_scan.rs)
   ```
 
 - [ ] `farik-core` still performs no I/O, which this step does not touch:
@@ -2738,9 +3053,10 @@ This task changes documentation and has no test cycle. The `> ` marker on the bl
 - [ ] No dependency was added:
 
   ```
-  git diff --stat main -- Cargo.toml Cargo.lock
-  # expected: no output for this step; the last change to either was step 06's
-  #   serde-saphyr
+  git diff --stat 3004cfe -- Cargo.toml Cargo.lock
+  # expected: no output. `3004cfe` is step 06's last code commit, which the header
+  #   names; the last change to either file was its serde-saphyr. Against `main` both
+  #   files differ by the whole phase, which is not the question.
   ```
 
 - [ ] Every commit subject is accepted:
