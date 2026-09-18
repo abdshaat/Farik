@@ -115,7 +115,7 @@ Files: created `crates/store/src/git/fixtures.rs`; modified `crates/store/src/gi
 Consumes: nothing from this plan
 Produces: `farik_store::git::fixtures::{TempRepo, git_in, git_output_in}`, which every later task's tests use
 
-- [ ] Write the failing test. Replace `crates/store/tests/git.rs`, whole, with this — the same file with its fixture taken out, importing the public one instead, and with the calls that want git's answer using `git_output`:
+- [x] Write the failing test. Replace `crates/store/tests/git.rs`, whole, with this — the same file with its fixture taken out, importing the public one instead, and with the calls that want git's answer using `git_output`:
 
   ```rust
   //! The git adapter against a real repository.
@@ -566,7 +566,7 @@ Produces: `farik_store::git::fixtures::{TempRepo, git_in, git_output_in}`, which
   }
   ```
 
-- [ ] Run it and confirm it fails because there is no such module yet:
+- [x] Run it and confirm it fails because there is no such module yet:
 
   ```
   cargo test -p farik-store --test git
@@ -575,7 +575,7 @@ Produces: `farik_store::git::fixtures::{TempRepo, git_in, git_output_in}`, which
   # error: could not compile `farik-store` (test "git") due to 1 previous error
   ```
 
-- [ ] Write the minimal implementation. Create `crates/store/src/git/fixtures.rs`:
+- [x] Write the minimal implementation. Create `crates/store/src/git/fixtures.rs`:
 
   ```rust
   //! A repository of its own, for tests in this crate and in others.
@@ -726,14 +726,14 @@ Produces: `farik_store::git::fixtures::{TempRepo, git_in, git_output_in}`, which
   }
   ```
 
-- [ ] Declare it in `crates/store/src/git.rs`, between the error's `std::error::Error` line and `HeadSummary`:
+- [x] Declare it in `crates/store/src/git.rs`, between the error's `std::error::Error` line and `HeadSummary`:
 
   ```rust
   /// A repository of its own, for tests in this crate and in others.
   pub mod fixtures;
   ```
 
-- [ ] Run the check and confirm green. Nothing moved but the fixture, so every count is what step 06 left:
+- [x] Run the check and confirm green. Nothing moved but the fixture, so every count is what step 06 left:
 
   ```
   cargo xtask check --integration
@@ -744,7 +744,7 @@ Produces: `farik_store::git::fixtures::{TempRepo, git_in, git_output_in}`, which
   #   test result: ok. 31 passed (crates/store/tests/project_files.rs)
   ```
 
-- [ ] Commit: `refactor(store): make the repository fixture public`
+- [x] Commit: `refactor(store): make the repository fixture public`
 
 ### Task 2: What the repository tracks
 

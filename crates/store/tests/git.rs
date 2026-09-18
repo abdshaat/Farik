@@ -5,101 +5,8 @@
 //! still builds them, so `cargo fmt` and `clippy` hold them to the same standard as everything else
 //! and they cannot rot unnoticed (`docs/standards/code.md`, "Rust integration test").
 
-use std::path::{Path, PathBuf};
-use std::process::Command;
-
+use farik_store::git::fixtures::{TempRepo, git_in};
 use farik_store::{Git, GitError, MergeOutcome};
-
-/// A repository of its own, removed when the test ends however the test ends.
-struct TempRepo {
-    path: PathBuf,
-}
-
-impl TempRepo {
-    /// A repository with one commit on `main`, holding `README.md`.
-    fn new(name: &str) -> Self {
-        let path = std::env::temp_dir().join(format!(
-            "farik-git-{name}-{}-{:?}",
-            std::process::id(),
-            std::thread::current().id()
-        ));
-        let _ = std::fs::remove_dir_all(&path);
-        std::fs::create_dir_all(&path).expect("a directory under the temporary directory");
-        let repository = Self { path };
-        repository.git(&["init", "-b", "main"]);
-        // An identity, because a machine that has none cannot commit at all, and no signing,
-        // because that would ask for a key nobody here has.
-        repository.git(&["config", "user.name", "Farik Test"]);
-        repository.git(&["config", "user.email", "test@farik.invalid"]);
-        repository.git(&["config", "commit.gpgsign", "false"]);
-        // And nothing of the person's own runs or is read inside a fixture. `Git` spawns its own
-        // children and honours their configuration on purpose, so the fixture's own configuration
-        // is where this has to be said: local beats global, and both the helper's git and the
-        // adapter's read it. A global `core.hooksPath` would otherwise run a contributor's hooks
-        // here, a global `core.excludesFile` would make a session's output an ignored file, and a
-        // global `core.attributesFile` marking `*.rs -diff` would print a patch as "Binary files
-        // differ" — the three ways a person's own configuration says what a path is.
-        repository.git(&["config", "core.hooksPath", "/dev/null"]);
-        repository.git(&["config", "core.excludesFile", "/dev/null"]);
-        repository.git(&["config", "core.attributesFile", "/dev/null"]);
-        repository.write("README.md", "the first line\n");
-        repository.commit("the first commit");
-        repository
-    }
-
-    fn adapter(&self) -> Git {
-        Git::open(self.path.clone())
-    }
-
-    fn write(&self, name: &str, text: &str) {
-        let path = self.path.join(name);
-        if let Some(directory) = path.parent() {
-            std::fs::create_dir_all(directory).expect("the directory the file is in");
-        }
-        std::fs::write(path, text).expect("the file is written");
-    }
-
-    fn commit(&self, message: &str) {
-        self.git(&["add", "-A"]);
-        self.git(&["commit", "-m", message]);
-    }
-
-    fn git(&self, arguments: &[&str]) -> String {
-        run_git(&self.path, arguments)
-    }
-}
-
-impl Drop for TempRepo {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.path);
-    }
-}
-
-/// Runs git directly, for the setup a test needs before the adapter is the thing under test.
-///
-/// The setup is held away from whatever the person running the tests has configured — a global
-/// `core.hooksPath` would otherwise run their hooks inside the fixture. What this cannot do is
-/// isolate the adapter: `Git` spawns its own children, and it honours the user's configuration on
-/// purpose, which is the whole reason Farik shells out to git at all. So no assertion in this file
-/// may rest on anything a setting can reshape — where one would, the adapter names the flag that
-/// makes the answer its own rather than the configuration's.
-fn run_git(directory: &Path, arguments: &[&str]) -> String {
-    let output = Command::new("git")
-        .args(arguments)
-        .current_dir(directory)
-        .env("GIT_CONFIG_GLOBAL", "/dev/null")
-        .env("GIT_CONFIG_SYSTEM", "/dev/null")
-        .env("LC_ALL", "C")
-        .output()
-        .expect("git runs");
-    assert!(
-        output.status.success(),
-        "git {}: {}",
-        arguments.join(" "),
-        String::from_utf8_lossy(&output.stderr)
-    );
-    String::from_utf8_lossy(&output.stdout).trim().to_string()
-}
 
 #[test]
 #[ignore = "needs the git program: cargo xtask check --integration"]
@@ -119,7 +26,7 @@ fn reads_the_commit_at_the_tip_and_says_when_there_is_none() {
     let empty = std::env::temp_dir().join(format!("farik-git-empty-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&empty);
     std::fs::create_dir_all(&empty).expect("a directory");
-    run_git(&empty, &["init", "-b", "main"]);
+    git_in(&empty, &["init", "-b", "main"]);
     assert_eq!(
         Git::open(empty.clone())
             .head_summary()
@@ -138,13 +45,13 @@ fn reads_the_commit_at_the_tip_and_says_when_there_is_none() {
         .head_summary()
         .expect("the read works")
         .expect("a repository with a commit has one");
-    assert_eq!(summary.sha, repository.git(&["rev-parse", "HEAD"]));
+    assert_eq!(summary.sha, repository.git_output(&["rev-parse", "HEAD"]));
     assert_eq!(summary.subject, "the second commit");
     // Strict ISO 8601, which is what a board and a log can order and a person can read. The
     // ordinary format git prints is neither: it separates the date from the time with a space.
     assert_eq!(
         summary.committed_at,
-        repository.git(&["log", "-1", "--format=%cI"])
+        repository.git_output(&["log", "-1", "--format=%cI"])
     );
     assert!(
         summary.committed_at.contains('T'),
@@ -179,7 +86,7 @@ fn reads_the_default_branch_from_the_remote_that_records_it() {
         std::thread::current().id()
     ));
     let _ = std::fs::remove_dir_all(&clone);
-    run_git(
+    git_in(
         &std::env::temp_dir(),
         &[
             "clone",
@@ -189,7 +96,7 @@ fn reads_the_default_branch_from_the_remote_that_records_it() {
         ],
     );
     let git = Git::open(clone.clone());
-    run_git(&clone, &["checkout", "-b", "farik/FRK-1"]);
+    git_in(&clone, &["checkout", "-b", "farik/FRK-1"]);
     assert_eq!(git.current_branch().expect("the read works"), "farik/FRK-1");
     assert_eq!(
         git.default_branch().expect("the read works"),
@@ -236,8 +143,8 @@ fn makes_a_branch_and_a_worktree_for_a_task_and_takes_the_worktree_away_again() 
     git.create_branch("farik/FRK-1", "main")
         .expect("the branch is made");
     assert_eq!(
-        repository.git(&["rev-parse", "farik/FRK-1"]),
-        repository.git(&["rev-parse", "main"]),
+        repository.git_output(&["rev-parse", "farik/FRK-1"]),
+        repository.git_output(&["rev-parse", "main"]),
         "the branch starts where it was told to"
     );
     let taken = git.create_branch("farik/FRK-1", "main");
@@ -272,7 +179,7 @@ fn makes_a_branch_and_a_worktree_for_a_task_and_takes_the_worktree_away_again() 
     assert!(!worktree.exists());
     assert!(
         repository
-            .git(&["branch", "--list", "farik/FRK-2"])
+            .git_output(&["branch", "--list", "farik/FRK-2"])
             .contains("farik/FRK-2"),
         "and the branch is kept"
     );
@@ -432,23 +339,23 @@ fn merges_a_finished_task_into_the_integration_branch() {
     let MergeOutcome::Merged { sha } = outcome else {
         panic!("it merged: {outcome:?}");
     };
-    assert_eq!(sha, repository.git(&["rev-parse", "main"]));
+    assert_eq!(sha, repository.git_output(&["rev-parse", "main"]));
     assert_eq!(
         git.current_branch().expect("the read works"),
         "farik/FRK-1",
         "and left the repository on the branch it found it on"
     );
     assert_eq!(
-        repository.git(&["log", "-1", "--format=%s", "main"]),
+        repository.git_output(&["log", "-1", "--format=%s", "main"]),
         "integrate FRK-1",
         "with a merge commit, so the task's commits survive"
     );
     assert_eq!(
-        repository.git(&["rev-list", "--count", "--merges", "main"]),
+        repository.git_output(&["rev-list", "--count", "--merges", "main"]),
         "1"
     );
     assert_eq!(
-        repository.git(&["show", "main:src/added.rs"]),
+        repository.git_output(&["show", "main:src/added.rs"]),
         "fn added() {}",
         "and the work is on the integration branch"
     );
@@ -507,7 +414,7 @@ fn names_what_conflicted_and_leaves_the_tree_as_it_was() {
     repository.git(&["checkout", "main"]);
     repository.write("README.md", "main's line\n");
     repository.commit("docs: main writes it too");
-    let before = repository.git(&["rev-parse", "main"]);
+    let before = repository.git_output(&["rev-parse", "main"]);
     repository.git(&["checkout", "farik/FRK-1"]);
 
     let outcome = git
@@ -518,7 +425,7 @@ fn names_what_conflicted_and_leaves_the_tree_as_it_was() {
         MergeOutcome::Conflicts(vec!["README.md".to_string()])
     );
     assert_eq!(
-        repository.git(&["rev-parse", "main"]),
+        repository.git_output(&["rev-parse", "main"]),
         before,
         "nothing was committed"
     );
@@ -532,7 +439,7 @@ fn names_what_conflicted_and_leaves_the_tree_as_it_was() {
         "and nothing was left half-merged"
     );
     assert_eq!(
-        repository.git(&["show", "main:README.md"]),
+        repository.git_output(&["show", "main:README.md"]),
         "main's line",
         "the integration branch's own work is untouched"
     );

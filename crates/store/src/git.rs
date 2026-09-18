@@ -39,6 +39,9 @@ impl fmt::Display for GitError {
 
 impl std::error::Error for GitError {}
 
+/// A repository of its own, for tests in this crate and in others.
+pub mod fixtures;
+
 /// What the tip of a branch is, as a board shows it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HeadSummary {
