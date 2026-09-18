@@ -4,12 +4,15 @@
 //! `cargo xtask check --integration`, as the store's own do and for the same reasons.
 
 use std::path::Path;
+use std::sync::Arc;
 
 use chrono::{DateTime, Utc};
 use farik::{CliIo, run_cli};
+use farik_core::contract::TaskId;
 use farik_protocol::clock::FixedClock;
 use farik_store::files::ProjectFiles;
 use farik_store::git::fixtures::TempRepo;
+use serde_json::{Value, json};
 
 /// The moment every test runs at, so that "last commit today" is an answer rather than a guess.
 fn at() -> DateTime<Utc> {
@@ -65,8 +68,48 @@ fn a_project(name: &str) -> TempRepo {
     repository
 }
 
+/// A contract a person would write, as YAML, with nothing in it that is not theirs to write.
+fn a_request(title: &str) -> String {
+    format!(
+        r"title: {title}
+intent: A person can read the board without opening a database.
+scope:
+  in_scope:
+    - the board command
+  out_of_scope:
+    - the web app
+requirements:
+  - id: R1
+    text: The board prints one line per task.
+exit_criteria:
+  - id: C1
+    text: Every test in the workspace passes.
+    satisfies:
+      - R1
+    verification:
+      method: test
+      command: cargo test --workspace
+      new_tests_required: true
+assignee_role: software_developer
+reviewer_role: architect
+risk: low
+budget:
+  max_cost_usd: 5
+allowed_paths:
+  - crates/cli/**
+"
+    )
+}
+
 fn files_of(repository: &TempRepo) -> ProjectFiles {
     ProjectFiles::open(repository.path.clone())
+}
+
+/// Writes a request to a file beside the repository and answers with its path.
+fn a_request_file(repository: &TempRepo, name: &str, title: &str) -> std::path::PathBuf {
+    let path = repository.path.join(name);
+    std::fs::write(&path, a_request(title)).expect("the request is written");
+    path
 }
 
 /// Every event kind the log holds, in order, so a test says what a command recorded.
@@ -77,6 +120,29 @@ fn kinds_in(repository: &TempRepo) -> Vec<String> {
         .expect("the log reads")
         .iter()
         .map(|event| event.body.kind().to_string())
+        .collect()
+}
+
+/// The board, so a test says what the log makes of what a command recorded.
+fn board_of(repository: &TempRepo) -> Vec<(String, String, String, bool, bool)> {
+    let log = Arc::new(
+        farik_store::open_event_log(&repository.path.join(".farik/local/farik.db"), at())
+            .expect("the log opens"),
+    );
+    farik_store::open_projections(log)
+        .expect("the projections open")
+        .board()
+        .expect("the board reads")
+        .iter()
+        .map(|row| {
+            (
+                row.task_id.as_str().to_string(),
+                row.kind.to_string(),
+                row.status.to_string(),
+                row.triaged,
+                row.locked,
+            )
+        })
         .collect()
 }
 
@@ -294,6 +360,224 @@ fn refuses_a_directory_that_is_not_a_repository() {
         ran.err
     );
     assert!(ran.out.is_empty(), "{}", ran.out);
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn refuses_every_other_command_until_the_project_exists() {
+    let repository = a_repository("cli-no-project");
+    let file = a_request_file(&repository, "request.yaml", "A board command");
+    let ran = run_in(
+        &repository.path,
+        &["task", "create", file.to_str().expect("a path")],
+    );
+
+    assert_eq!(ran.code, 1);
+    assert!(
+        ran.err.contains("there is no Farik project at") && ran.err.contains("farik init"),
+        "{}",
+        ran.err
+    );
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn files_a_contract_as_a_draft_request() {
+    let repository = a_project("cli-create");
+    let file = a_request_file(&repository, "request.yaml", "A board command");
+    let ran = run_in(
+        &repository.path,
+        &["task", "create", file.to_str().expect("a path")],
+    );
+
+    assert_eq!(ran.code, 0, "{}", ran.err);
+    assert!(
+        ran.out
+            .contains("FRK-1 filed as a draft request: A board command"),
+        "{}",
+        ran.out
+    );
+    assert!(ran.out.contains("farik triage"), "{}", ran.out);
+
+    let contract = files_of(&repository)
+        .read_contract(&TaskId::try_from("FRK-1").expect("a task id"))
+        .expect("a contract was written");
+    assert_eq!(contract.status.to_string(), "draft");
+    assert_eq!(contract.created_by.as_deref(), Some("human"));
+    assert_eq!(
+        contract.kind.to_string(),
+        "task",
+        "a request is a task until the triage says otherwise (5.16)"
+    );
+    assert_eq!(
+        board_of(&repository),
+        [(
+            "FRK-1".to_string(),
+            "task".to_string(),
+            "draft".to_string(),
+            false,
+            false
+        )],
+        "and the board knows it from the event alone"
+    );
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn reads_the_contract_from_where_the_command_was_run() {
+    // The path is the person's, so it is relative to the directory they typed it in — not to the
+    // repository root, which is where the project is, and not to whatever directory this process
+    // happens to be in.
+    let repository = a_project("cli-create-relative");
+    std::fs::create_dir_all(repository.path.join("notes")).expect("a directory");
+    std::fs::write(
+        repository.path.join("notes/request.yaml"),
+        a_request("A board command"),
+    )
+    .expect("the request is written");
+
+    let ran = run_in(
+        &repository.path.join("notes"),
+        &["task", "create", "request.yaml"],
+    );
+
+    assert_eq!(ran.code, 0, "{}", ran.err);
+    assert!(
+        ran.out.contains("FRK-1 filed as a draft request"),
+        "{}",
+        ran.out
+    );
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn refuses_a_request_that_sets_what_is_not_the_authors_to_set() {
+    let repository = a_project("cli-create-fields");
+    let path = repository.path.join("request.yaml");
+    std::fs::write(
+        &path,
+        format!(
+            "{}id: FRK-9\nstatus: ready\nlocked: true\nparent: FRK-2\n",
+            a_request("A board command")
+        ),
+    )
+    .expect("the request is written");
+    let ran = run_in(
+        &repository.path,
+        &["task", "create", path.to_str().expect("a path")],
+    );
+
+    assert_eq!(ran.code, 1);
+    assert!(
+        ran.err.contains("id") && ran.err.contains("status") && ran.err.contains("locked"),
+        "{}",
+        ran.err
+    );
+    assert!(
+        ran.err.contains("farik contract lock") && ran.err.contains("farik triage"),
+        "a refusal says what to do instead: {}",
+        ran.err
+    );
+    assert!(
+        ran.err.contains("parent") && ran.err.contains("5.16"),
+        "and `parent` is the one a person may legitimately write, so its refusal names the rule \
+         that will open it: {}",
+        ran.err
+    );
+    assert!(
+        files_of(&repository)
+            .list_contracts()
+            .expect("a list")
+            .is_empty(),
+        "and nothing was filed"
+    );
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn refuses_a_request_the_contract_rules_refuse() {
+    let repository = a_project("cli-create-invalid");
+    let path = repository.path.join("request.yaml");
+    std::fs::write(
+        &path,
+        a_request("A board command").replace("  - id: C1", "  - id: R1"),
+    )
+    .expect("the request is written");
+    let ran = run_in(
+        &repository.path,
+        &["task", "create", path.to_str().expect("a path")],
+    );
+
+    assert_eq!(ran.code, 1);
+    assert!(
+        ran.err.contains("is not a contract Farik can file"),
+        "{}",
+        ran.err
+    );
+    assert!(
+        files_of(&repository)
+            .list_contracts()
+            .expect("a list")
+            .is_empty(),
+        "and nothing was filed"
+    );
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn refuses_a_file_that_is_not_yaml() {
+    let repository = a_project("cli-create-not-yaml");
+    let path = repository.path.join("request.yaml");
+    std::fs::write(&path, "title: one\ntitle: two\n").expect("the request is written");
+    let ran = run_in(
+        &repository.path,
+        &["task", "create", path.to_str().expect("a path")],
+    );
+
+    assert_eq!(ran.code, 1);
+    assert!(
+        ran.err.contains("request.yaml"),
+        "the refusal names the file it is about: {}",
+        ran.err
+    );
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn prints_what_it_did_as_json_when_asked() {
+    let repository = a_project("cli-json");
+    let file = a_request_file(&repository, "request.yaml", "A board command");
+    let ran = run_in(
+        &repository.path,
+        &["--json", "task", "create", file.to_str().expect("a path")],
+    );
+
+    assert_eq!(ran.code, 0, "{}", ran.err);
+    let printed: Value = serde_json::from_str(ran.out.trim()).expect("one JSON object per run");
+    assert_eq!(printed["task_id"], json!("FRK-1"));
+    assert_eq!(printed["status"], json!("draft"));
+    assert_eq!(printed["path"], json!(".farik/contracts/FRK-1.yaml"));
+    assert!(printed["events"].is_array(), "{printed}");
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn says_why_it_refused_as_json_when_asked() {
+    let repository = a_project("cli-json-refusal");
+    let ran = run_in(
+        &repository.path,
+        &["--json", "task", "create", "nowhere.yaml"],
+    );
+
+    assert_eq!(ran.code, 1);
+    let printed: Value = serde_json::from_str(ran.err.trim()).expect("one JSON object per refusal");
+    assert!(
+        printed["error"]
+            .as_str()
+            .is_some_and(|text| text.contains("nowhere.yaml")),
+        "a script that asked for JSON gets JSON for the refusal too: {printed}"
+    );
+    assert!(ran.out.is_empty(), "and nothing on stdout: {}", ran.out);
 }
 
 #[test]

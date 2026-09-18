@@ -1360,7 +1360,7 @@ Consumes: `yaml_value` from Task 2; `Project`, `ProjectIds`, `repository_root` f
 write_contract, list_contracts}` from `crates/store/src/files.rs`
 Produces: `open_project`, `task::create`
 
-- [ ] Add these to `crates/cli/tests/commands.rs`. They are given in the relative order the finished
+- [x] Add these to `crates/cli/tests/commands.rs`. They are given in the relative order the finished
       file holds them, which is one place to put them: `a_request` after `a_project`,
       `a_request_file` after `files_of`, `board_of` after `kinds_in`, and the eight tests after task
       1's — though two of the eight sit after later tasks' tests in the finished file, so appending
@@ -1668,7 +1668,7 @@ Produces: `open_project`, `task::create`
   }
   ```
 
-- [ ] Run them and confirm they fail because the command is not there:
+- [x] Run them and confirm they fail because the command is not there:
 
   ```
   cargo test -p farik --test commands -- --include-ignored
@@ -1679,7 +1679,7 @@ Produces: `open_project`, `task::create`
   #   that is not there yet.
   ```
 
-- [ ] Add the module and the subcommand to `crates/cli/src/lib.rs`. The module declaration after
+- [x] Add the module and the subcommand to `crates/cli/src/lib.rs`. The module declaration after
       `pub mod refusal;`:
 
   ```rust
@@ -1733,7 +1733,7 @@ Produces: `open_project`, `task::create`
               .and_then(|project| task::create(&project, &io.cwd, file, now)),
   ```
 
-- [ ] Add `open_project` to `crates/cli/src/project.rs`, above `repository_root`. Its `use
+- [x] Add `open_project` to `crates/cli/src/project.rs`, above `repository_root`. Its `use
       farik_store::{...}` line becomes `use farik_store::{EventLog, EventQuery, Git,
       open_event_log};`:
 
@@ -1768,7 +1768,7 @@ Produces: `open_project`, `task::create`
   }
   ```
 
-- [ ] Write `crates/cli/src/task.rs`:
+- [x] Write `crates/cli/src/task.rs`:
 
   ```rust
   //! `farik task create`: file a YAML contract as a draft request (F3, `docs/SPEC.md` section 5.16).
@@ -1959,7 +1959,7 @@ Produces: `open_project`, `task::create`
   }
   ```
 
-- [ ] Run the tests and the crate's suite; confirm green:
+- [x] Run the tests and the crate's suite; confirm green:
 
   ```
   cargo test -p farik -- --include-ignored
@@ -1968,8 +1968,8 @@ Produces: `open_project`, `task::create`
   #   test result: ok. 16 passed (crates/cli/tests/commands.rs)
   ```
 
-- [ ] Refactor if there is duplication; keep green.
-- [ ] Commit: `feat(cli): file a yaml contract as a draft request`
+- [x] Refactor if there is duplication; keep green.
+- [x] Commit: `feat(cli): file a yaml contract as a draft request`
 
 ### Task 4: the gate that says who may size a request
 

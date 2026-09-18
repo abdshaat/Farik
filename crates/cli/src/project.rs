@@ -8,7 +8,7 @@ use chrono::{DateTime, Utc};
 use farik_core::team::Team;
 use farik_protocol::event::{EventBody, EventIds, NewEvent, new_event};
 use farik_store::files::ProjectFiles;
-use farik_store::{EventLog, EventQuery, Git};
+use farik_store::{EventLog, EventQuery, Git, open_event_log};
 
 /// Where the event log lives, under the gitignored `.farik/local/` (D5).
 pub(crate) const DATABASE: &str = ".farik/local/farik.db";
@@ -102,6 +102,35 @@ impl Project {
             .map(|recorded| recorded.envelope.seq)
             .map_err(|error| error.to_string())
     }
+}
+
+/// The project the command was run in: the repository root, whatever directory under it the person
+/// stood in.
+///
+/// # Errors
+///
+/// A sentence saying that this is not a git repository, that it is not a Farik project yet, or what
+/// the team file or the log got wrong.
+pub fn open_project(cwd: &Path, now: DateTime<Utc>) -> Result<Project, String> {
+    let root = repository_root(cwd)?;
+    let files = ProjectFiles::open(root.clone());
+    let team = files.read_team().map_err(|error| match error {
+        farik_store::files::FilesError::NotFound { .. } => format!(
+            "there is no Farik project at {}: run farik init to make one",
+            root.display()
+        ),
+        other => other.to_string(),
+    })?;
+    let log =
+        Arc::new(open_event_log(&root.join(DATABASE), now).map_err(|error| error.to_string())?);
+    let ids = ProjectIds::of(&log, &team, &root)?;
+    Ok(Project {
+        root,
+        files,
+        log,
+        team,
+        ids,
+    })
 }
 
 /// The root of the repository the command was run in, as git reports it.

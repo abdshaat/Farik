@@ -12,6 +12,8 @@ pub mod init;
 pub mod project;
 /// The governor's refusals in words.
 pub mod refusal;
+/// Filing a request.
+pub mod task;
 
 use std::io::Write;
 use std::path::PathBuf;
@@ -20,7 +22,7 @@ use clap::{Parser, Subcommand};
 use farik_protocol::clock::Clock;
 use serde_json::{Value, json};
 
-pub use project::Project;
+pub use project::{Project, open_project};
 
 /// Everything the command line needs from outside itself: where to write, where it is run, and what
 /// time it is.
@@ -82,6 +84,20 @@ struct Cli {
 enum Commands {
     /// Make the repository this is run in a Farik project.
     Init,
+    /// Work with one task.
+    Task {
+        #[command(subcommand)]
+        command: TaskCommands,
+    },
+}
+
+#[derive(Subcommand)]
+enum TaskCommands {
+    /// File a contract as a draft request.
+    Create {
+        /// The YAML contract to file. Farik assigns the id.
+        file: PathBuf,
+    },
 }
 
 /// Runs one command and returns the code the process should exit with: 0 when it did what it said,
@@ -97,6 +113,10 @@ pub fn run_cli(args: &[String], io: &mut CliIo<'_>) -> i32 {
     let now = io.clock.now();
     let outcome = match &parsed.command {
         Commands::Init => init::init(&io.cwd, now),
+        Commands::Task {
+            command: TaskCommands::Create { file },
+        } => open_project(&io.cwd, now)
+            .and_then(|project| task::create(&project, &io.cwd, file, now)),
     };
     report(outcome, parsed.json, io)
 }
