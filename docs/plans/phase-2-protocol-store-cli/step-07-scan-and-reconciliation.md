@@ -1,6 +1,6 @@
 # Phase 2, step 07: The project scan and reconciliation
 
-Status: ready
+Status: done
 Branch: `claude/phase-0-implementation-izm38y` (the harness-assigned phase branch, left as assigned per `docs/standards/code.md`; a session may not push to another branch without permission, so phase 2 reuses it as phase 1 did; steps do not get their own)
 Spec: `docs/SPEC.md` section 4 (onboarding scans the tree and reads it back), 5.8 (the scan is stored as `project.md`), 5.13 (the criterion library holds the project's own check and test commands, found by the scan), 8.4 (the log is the source of truth for what happened, the files for what the team knows); F2, F16
 Depends on: phase 0 (merged in #4), phase 1 (merged in #5), steps 01 to 06 of this phase (last code commit `3004cfe`)
@@ -3053,17 +3053,17 @@ Produces: a project plan that describes the scan and the reconciliation as they 
 
 This task changes documentation and has no test cycle. The `> ` marker on the block below is this plan's and is not part of the text to write.
 
-- [ ] In `docs/plans/project-plan.md`, replace the whole of the one phase 2 line that begins `- Step 07 (` — the whole line, its closing full stop included — with:
+- [x] In `docs/plans/project-plan.md`, replace the whole of the one phase 2 line that begins `- Step 07 (` — the whole line, its closing full stop included — with:
 
   > - Step 07 (`farik-store::scan` and `farik-store::reconcile`): `struct ProjectScan { read_back: String, detected_criteria: Vec<CriterionTemplate> }`; `fn scan_project(git: &Git, now: DateTime<Utc>) -> Result<ProjectScan, ScanError>` (the adapter rather than a root beside it, so the tree the paths are listed from is the tree the manifests are read from, and a clock rather than a sampled one, because the read-back says how long ago the last commit was; both changed 2026-09-18 by the step 07 plan); `enum ScanError { NotARepository { path }, NotTheRepositoryRoot { path, root }, Git { detail }, Io { path, detail }, Built { detail } }`; `fn seeded_library(found: &[CriterionTemplate], existing: Option<&CriteriaLibrary>) -> CriteriaLibrary` (what a previous scan found is replaced and what a person wrote is kept, which is what `criteria.schema.json` says of its `source` field; a name a person has used is left alone; the result may exceed the schema's ceiling and `write_criteria` is what refuses it). Every signal is a tracked path or a line in a manifest: the tree is read through `Git::tracked_paths`, so `.gitignore` decides what is not content. A Node project's commands are read from its own `package.json` scripts; cargo, go, poetry, uv and bundler have the commands they always have. Each criterion is built as a wire value and held to `validate_criteria` before it leaves the module. `enum Drift { ContractWithoutEvents, EventsWithoutContract, StatusMismatch, LockMismatch, ContractUnreadable }`, each with `task_id` and `detail`, with `Drift::{task_id, detail}` and `Display`; `fn reconcile(files: &ProjectFiles, projections: &Projections) -> Result<Vec<Drift>, ReconcileError>` (ordered by the number in the task id, with a stable sort, so two drifts about one task keep the order they were found in); `enum ReconcileError { Files { detail }, Store { detail } }`. Added 2026-09-18 by the step 07 plan: `reconcile` takes the projections rather than the log, because what the log says the state is has one definition already and a second could disagree with it; `LockMismatch`, because 5.11 makes the human's hold a governance fact written in both places; and `ContractUnreadable`, because one file somebody broke must not hide every other disagreement. Only `status` and `locked` are disagreements: the file is the source of truth for a contract's title, kind, risk and parent (8.4), and the board's copy of those is a cache that `rebuild` fixes. Also added: `Git::tracked_paths` and `Git::root`, `git::fixtures::{TempRepo, git_in, git_output_in}` (moved out of `tests/git.rs` so the scan's and step 08's tests can use it), and `changed_paths_of` renamed `paths_of`, and `Git::top_level` so that a caller meaning the project rather than a subtree can ask. One toolchain is chosen and it is the one the tree's language names, a language tie goes to whichever comes first in the table, a workspace of one package is not a monorepo, a commit ahead of now is reported as its stamp, a script with nothing behind it is not a command, a test runner is named by its own file rather than by one that mentions it, a directory inside a repository is refused rather than scanned as a project, and cargo and go gained the build criterion F2 asks for by name — all eight found by the step 07 readiness review, which measured each against the code.
 
-- [ ] Set this plan's `Status:` to `done` and confirm every checkbox above is ticked, each in the commit of the task it belongs to.
+- [x] Set this plan's `Status:` to `done` and confirm every checkbox above is ticked, each in the commit of the task it belongs to.
 
-- [ ] Commit: `docs(docs): record what step 07 changed about the scan`
+- [x] Commit: `docs(docs): record what step 07 changed about the scan`
 
 ## Verification
 
-- [ ] The whole check, from the workspace root:
+- [x] The whole check, from the workspace root:
 
   ```
   cargo xtask check --integration
@@ -3079,7 +3079,7 @@ This task changes documentation and has no test cycle. The `> ` marker on the bl
   #   test result: ok. 29 passed (xtask)
   ```
 
-- [ ] The tests that need a program are still ignored without the flag, so they cannot pass silently:
+- [x] The tests that need a program are still ignored without the flag, so they cannot pass silently:
 
   ```
   cargo xtask check
@@ -3089,14 +3089,14 @@ This task changes documentation and has no test cycle. The `> ` marker on the bl
   #     (crates/store/tests/project_scan.rs)
   ```
 
-- [ ] `farik-core` still performs no I/O, which this step does not touch:
+- [x] `farik-core` still performs no I/O, which this step does not touch:
 
   ```
   cargo xtask core-io
   # expected: silent
   ```
 
-- [ ] No dependency was added:
+- [x] No dependency was added:
 
   ```
   git diff --stat 3004cfe -- Cargo.toml Cargo.lock
@@ -3105,7 +3105,7 @@ This task changes documentation and has no test cycle. The `> ` marker on the bl
   #   files differ by the whole phase, which is not the question.
   ```
 
-- [ ] Every commit subject is accepted:
+- [x] Every commit subject is accepted:
 
   ```
   for subject in \
