@@ -914,7 +914,7 @@ Files: created `crates/store/src/scan.rs`, `crates/store/tests/project_scan.rs`;
 Consumes: everything above
 Produces: `farik_store::{ProjectScan, ScanError, scan_project, seeded_library}`
 
-- [ ] Write the failing tests. Create `crates/store/src/scan.rs` with the module doc and the tests module, and nothing else yet:
+- [x] Write the failing tests. Create `crates/store/src/scan.rs` with the module doc and the tests module, and nothing else yet:
 
   ```rust
   //! The project scan (`docs/SPEC.md` section 4's onboarding, 5.8, 5.13, F2 and F16).
@@ -1344,7 +1344,7 @@ Produces: `farik_store::{ProjectScan, ScanError, scan_project, seeded_library}`
   }
   ```
 
-- [ ] Create `crates/store/tests/project_scan.rs`:
+- [x] Create `crates/store/tests/project_scan.rs`:
 
   ```rust
   //! The project scan against a real repository.
@@ -1655,14 +1655,14 @@ Produces: `farik_store::{ProjectScan, ScanError, scan_project, seeded_library}`
   }
   ```
 
-- [ ] Declare the module in `crates/store/src/lib.rs`, after `projections` and before `pub use`:
+- [x] Declare the module in `crates/store/src/lib.rs`, after `projections` and before `pub use`:
 
   ```rust
   /// What the repository says it is.
   pub mod scan;
   ```
 
-- [ ] Run them and confirm they fail because nothing of the scan exists. One command per target: `cargo test -p farik-store` builds both at once and cancels whichever it had not finished when the other failed, so which errors a run prints is a race.
+- [x] Run them and confirm they fail because nothing of the scan exists. One command per target: `cargo test -p farik-store` builds both at once and cancels whichever it had not finished when the other failed, so which errors a run prints is a race.
 
   ```
   cargo test -p farik-store --lib
@@ -1685,7 +1685,7 @@ Produces: `farik_store::{ProjectScan, ScanError, scan_project, seeded_library}`
   # error: could not compile `farik-store` (test "project_scan") due to 1 previous error
   ```
 
-- [ ] Write the minimal implementation. In `crates/store/src/scan.rs`, put the imports between the module doc and the tests module, so that the top of the file reads, whole:
+- [x] Write the minimal implementation. In `crates/store/src/scan.rs`, put the imports between the module doc and the tests module, so that the top of the file reads, whole:
 
   ```rust
   //! The project scan (`docs/SPEC.md` section 4's onboarding, 5.8, 5.13, F2 and F16).
@@ -1720,7 +1720,7 @@ Produces: `farik_store::{ProjectScan, ScanError, scan_project, seeded_library}`
   }
   ```
 
-- [ ] Then, after it, why a project could not be scanned:
+- [x] Then, after it, why a project could not be scanned:
 
   ```rust
   /// Why a project could not be scanned.
@@ -1794,7 +1794,7 @@ Produces: `farik_store::{ProjectScan, ScanError, scan_project, seeded_library}`
   }
   ```
 
-- [ ] Then the scan itself:
+- [x] Then the scan itself:
 
   ```rust
   /// Reads a repository and says what it is.
@@ -1831,7 +1831,7 @@ Produces: `farik_store::{ProjectScan, ScanError, scan_project, seeded_library}`
   }
   ```
 
-- [ ] Then what a project's library becomes after one:
+- [x] Then what a project's library becomes after one:
 
   ```rust
   /// The criterion library a project has after a scan.
@@ -1870,7 +1870,7 @@ Produces: `farik_store::{ProjectScan, ScanError, scan_project, seeded_library}`
   }
   ```
 
-- [ ] Then the tables every signal is read from:
+- [x] Then the tables every signal is read from:
 
   ```rust
   /// The extension a file carries and the language it counts for. The language of a project is the one
@@ -2113,7 +2113,7 @@ Produces: `farik_store::{ProjectScan, ScanError, scan_project, seeded_library}`
   ];
   ```
 
-- [ ] Then what one tree says about itself:
+- [x] Then what one tree says about itself:
 
   ```rust
   /// What one tree says about itself, before any of it is put into words.
@@ -2226,7 +2226,7 @@ Produces: `farik_store::{ProjectScan, ScanError, scan_project, seeded_library}`
   }
   ```
 
-- [ ] And last the helpers, which is where the module ends and the tests module begins:
+- [x] And last the helpers, which is where the module ends and the tests module begins:
 
   ```rust
   /// One criterion as the library's schema sees it, for `validate_criteria` to hold to its rules.
@@ -2394,13 +2394,13 @@ Produces: `farik_store::{ProjectScan, ScanError, scan_project, seeded_library}`
   }
   ```
 
-- [ ] Export it from `crates/store/src/lib.rs`, after the `projections` re-export:
+- [x] Export it from `crates/store/src/lib.rs`, after the `projections` re-export:
 
   ```rust
   pub use scan::{ProjectScan, ScanError, scan_project, seeded_library};
   ```
 
-- [ ] Run the check and confirm green:
+- [x] Run the check and confirm green:
 
   ```
   cargo xtask check --integration
@@ -2409,7 +2409,7 @@ Produces: `farik_store::{ProjectScan, ScanError, scan_project, seeded_library}`
   #   test result: ok. 13 passed (crates/store/tests/project_scan.rs)
   ```
 
-- [ ] Commit: `feat(store): read a repository and say what it is`
+- [x] Commit: `feat(store): read a repository and say what it is`
 
 ### Task 4: Where the files and the log disagree
 
