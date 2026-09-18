@@ -146,9 +146,10 @@ impl From<StoreError> for ReconcileError {
 /// Every disagreement between the contracts on disk and what the log says of them.
 ///
 /// The answer is ordered by the number in the task id, so that the tenth task does not come before
-/// the ninth, and the sort is stable, so two drifts about one task keep the order they were found in:
-/// a status before a lock. Two runs over one project therefore print the same thing and a person can
-/// diff them.
+/// the ninth, then by the id itself, because the schema lets one number be spelled more than one way;
+/// and the sort is stable, so two drifts about one task keep the order they were found in: a status
+/// before a lock. Two runs over one project therefore print the same thing and a person can diff
+/// them.
 ///
 /// What the log says is read from the projections rather than from the log itself, so this leans on
 /// the handle being caught up. `open_projections` catches up when it opens, and a command that opens
@@ -231,7 +232,12 @@ pub fn reconcile(
 
     // Stable, so what the loops above found about one task stays in the order they found it. There
     // is no second ranking to disagree with that one.
-    found.sort_by_key(|drift| number_in(drift.task_id()));
+    found.sort_by_key(|drift| {
+        (
+            number_in(drift.task_id()),
+            drift.task_id().as_str().to_string(),
+        )
+    });
     Ok(found)
 }
 
@@ -247,6 +253,9 @@ fn held(locked: bool) -> &'static str {
 /// The number in a task id, for ordering, so that the tenth task does not come before the ninth.
 ///
 /// The parse cannot fail: a `TaskId` is `FRK-` and one to six digits, which is what let it be built.
+/// The number is not unique, though: the schema allows a leading zero, so `FRK-01` and `FRK-1` are
+/// two spellings of one number, and the caller breaks that tie with the id itself the way the board's
+/// own order does.
 fn number_in(task_id: &TaskId) -> u64 {
     task_id
         .as_str()

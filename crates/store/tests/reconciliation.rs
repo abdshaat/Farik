@@ -294,6 +294,32 @@ fn reports_everything_it_found_in_an_order_two_runs_agree_on() {
 }
 
 #[test]
+fn orders_two_spellings_of_one_number_by_the_id_itself() {
+    let project = TempProject::new("reconcile-two-spellings");
+    let files = project.files();
+    let (log, projections) = a_board();
+    // `FRK-01` and `FRK-1` are two spellings of one number, and each is found by a different loop:
+    // the board knows the first and the files hold the second. Nothing but a tie-break decides
+    // which comes out first, and "whichever loop got there" is not an order a person can diff.
+    on_the_board(&log, &projections, "FRK-01", "ready", false);
+    files
+        .write_contract(&a_contract("FRK-1", TaskStatus::Draft, false))
+        .expect("written");
+
+    assert_eq!(
+        drifts(&files, &projections)
+            .iter()
+            .map(|drift| (drift.task_id().as_str().to_string(), name_of(drift)))
+            .collect::<Vec<_>>(),
+        [
+            ("FRK-01".to_string(), "EventsWithoutContract"),
+            ("FRK-1".to_string(), "ContractWithoutEvents"),
+        ],
+        "the id breaks the tie, the way the board's own order does"
+    );
+}
+
+#[test]
 fn a_project_with_no_farik_directory_at_all_has_nothing_to_report() {
     let project = TempProject::new("reconcile-nothing");
     let (_log, projections) = a_board();
