@@ -2418,7 +2418,7 @@ Files: created `crates/store/src/reconcile.rs`, `crates/store/tests/reconciliati
 Consumes: everything above
 Produces: `farik_store::{Drift, ReconcileError, reconcile}`
 
-- [ ] Write the failing tests. Create `crates/store/tests/reconciliation.rs`:
+- [x] Write the failing tests. Create `crates/store/tests/reconciliation.rs`:
 
   ```rust
   //! The files against the log, in a real project.
@@ -2734,7 +2734,7 @@ Produces: `farik_store::{Drift, ReconcileError, reconcile}`
   }
   ```
 
-- [ ] Run them and confirm they fail because nothing compares the two yet:
+- [x] Run them and confirm they fail because nothing compares the two yet:
 
   ```
   cargo test -p farik-store --test reconciliation
@@ -2746,7 +2746,7 @@ Produces: `farik_store::{Drift, ReconcileError, reconcile}`
   #   errors
   ```
 
-- [ ] Write the minimal implementation. Create `crates/store/src/reconcile.rs` with the module doc and its imports:
+- [x] Write the minimal implementation. Create `crates/store/src/reconcile.rs` with the module doc and its imports:
 
   ```rust
   //! Where the files and the log disagree (`docs/SPEC.md` section 8.4).
@@ -2772,7 +2772,7 @@ Produces: `farik_store::{Drift, ReconcileError, reconcile}`
   use crate::projections::Projections;
   ```
 
-- [ ] Then one disagreement:
+- [x] Then one disagreement:
 
   ```rust
   /// One disagreement between the files and the log.
@@ -2857,7 +2857,7 @@ Produces: `farik_store::{Drift, ReconcileError, reconcile}`
   }
   ```
 
-- [ ] Then why the two could not be compared at all:
+- [x] Then why the two could not be compared at all:
 
   ```rust
   /// Why the files and the log could not be compared at all.
@@ -2903,7 +2903,7 @@ Produces: `farik_store::{Drift, ReconcileError, reconcile}`
   }
   ```
 
-- [ ] Then the comparison:
+- [x] Then the comparison:
 
   ```rust
   /// Every disagreement between the contracts on disk and what the log says of them.
@@ -2999,7 +2999,7 @@ Produces: `farik_store::{Drift, ReconcileError, reconcile}`
   }
   ```
 
-- [ ] And last its two helpers:
+- [x] And last its two helpers:
 
   ```rust
   /// Whether the human is holding the contract, in words rather than in a boolean.
@@ -3023,7 +3023,7 @@ Produces: `farik_store::{Drift, ReconcileError, reconcile}`
   }
   ```
 
-- [ ] Declare it in `crates/store/src/lib.rs`, before `scan`, and export it before `scan`'s own line:
+- [x] Declare it in `crates/store/src/lib.rs`, before `scan`, and export it before `scan`'s own line:
 
   ```rust
   /// Where the files and the log disagree.
@@ -3034,7 +3034,7 @@ Produces: `farik_store::{Drift, ReconcileError, reconcile}`
   pub use reconcile::{Drift, ReconcileError, reconcile};
   ```
 
-- [ ] Run the check and confirm green:
+- [x] Run the check and confirm green:
 
   ```
   cargo xtask check --integration
@@ -3042,7 +3042,7 @@ Produces: `farik_store::{Drift, ReconcileError, reconcile}`
   #   test result: ok. 9 passed (crates/store/tests/reconciliation.rs)
   ```
 
-- [ ] Commit: `feat(store): say where the files and the log disagree`
+- [x] Commit: `feat(store): say where the files and the log disagree`
 
 ### Task 5: The plans say what the step became
 

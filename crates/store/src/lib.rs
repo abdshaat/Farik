@@ -13,6 +13,8 @@ pub mod git;
 pub mod migrations;
 /// The board, derived from the log.
 pub mod projections;
+/// Where the files and the log disagree.
+pub mod reconcile;
 /// What the repository says it is.
 pub mod scan;
 
@@ -20,4 +22,5 @@ pub use error::StoreError;
 pub use event_log::{EventLog, EventQuery, IN_MEMORY, open_event_log};
 pub use git::{Git, GitError, HeadSummary, MergeOutcome};
 pub use projections::{Projections, TaskProjection, open_projections};
+pub use reconcile::{Drift, ReconcileError, reconcile};
 pub use scan::{ProjectScan, ScanError, scan_project, seeded_library};
