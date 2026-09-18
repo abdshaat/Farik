@@ -82,6 +82,26 @@ impl Git {
         Self { root }
     }
 
+    /// The directory this adapter was opened on, which may be inside a repository rather than at
+    /// its root. `top_level` is what git says the root is.
+    #[must_use]
+    pub fn root(&self) -> &Path {
+        &self.root
+    }
+
+    /// Where the repository begins, as git reports it.
+    ///
+    /// `Git::open` accepts any directory inside a repository, so the two can differ, and a caller
+    /// that means the project rather than a subtree has to ask.
+    ///
+    /// # Errors
+    ///
+    /// `NotARepository`, `NotInstalled`, or `CommandFailed` when git refuses.
+    pub fn top_level(&self) -> Result<String, GitError> {
+        self.require_repository()?;
+        self.at_root(&["rev-parse", "--show-toplevel"])
+    }
+
     /// Whether `root` is inside a git repository.
     #[must_use]
     pub fn is_repository(&self) -> bool {
@@ -221,7 +241,22 @@ impl Git {
         self.require_repository()?;
         let range = format!("{base}...{head}");
         let listed = self.at_root(&["diff", "--no-renames", "--name-only", "-z", &range])?;
-        Ok(changed_paths_of(&listed))
+        Ok(paths_of(&listed))
+    }
+
+    /// Every path the repository tracks, in git's own order.
+    ///
+    /// Through git rather than by walking the directory, so that `.gitignore` decides what is not
+    /// content without Farik having to know that `node_modules/` and `target/` exist. What git
+    /// tracks is the index, so a repository with no commit yet lists what has been staged.
+    ///
+    /// # Errors
+    ///
+    /// `NotARepository`, `NotInstalled`, or `CommandFailed` when git refuses.
+    pub fn tracked_paths(&self) -> Result<Vec<String>, GitError> {
+        self.require_repository()?;
+        let listed = self.at_root(&["ls-files", "-z"])?;
+        Ok(paths_of(&listed))
     }
 
     /// What `head` changed since it and `base` last agreed, as a patch.
@@ -300,7 +335,7 @@ impl Git {
             }),
             Err(refusal) => {
                 let conflicted = self.at_root(&["diff", "--name-only", "--diff-filter=U", "-z"])?;
-                let conflicts = changed_paths_of(&conflicted);
+                let conflicts = paths_of(&conflicted);
                 if conflicts.is_empty() {
                     // It refused for some other reason, and that reason is the answer.
                     return Err(refusal);
@@ -427,7 +462,7 @@ fn path_argument(path: &Path) -> Result<String, GitError> {
 }
 
 /// git's `-z` output as paths. Nothing is split on a newline, because a path may hold one.
-fn changed_paths_of(listed: &str) -> Vec<String> {
+fn paths_of(listed: &str) -> Vec<String> {
     listed
         .split('\0')
         .filter(|path| !path.is_empty())
@@ -440,8 +475,7 @@ mod tests {
     use std::path::{Path, PathBuf};
 
     use super::{
-        Git, GitError, HeadSummary, changed_paths_of, default_branch_of, head_summary_of,
-        path_argument,
+        Git, GitError, HeadSummary, default_branch_of, head_summary_of, path_argument, paths_of,
     };
 
     /// What `git log --format=%H%x1f%cI%x1f%s` prints for one commit.
@@ -508,13 +542,13 @@ mod tests {
     #[test]
     fn reads_the_paths_git_separated_by_nothing() {
         assert_eq!(
-            changed_paths_of("src/lib.rs\0docs/SPEC.md\0"),
+            paths_of("src/lib.rs\0docs/SPEC.md\0"),
             ["src/lib.rs", "docs/SPEC.md"]
         );
-        assert_eq!(changed_paths_of(""), Vec::<String>::new());
+        assert_eq!(paths_of(""), Vec::<String>::new());
         // A newline in a path is what `-z` is for: nothing here splits on one.
         assert_eq!(
-            changed_paths_of("a file\nwith a newline\0other.rs\0"),
+            paths_of("a file\nwith a newline\0other.rs\0"),
             ["a file\nwith a newline", "other.rs"]
         );
     }

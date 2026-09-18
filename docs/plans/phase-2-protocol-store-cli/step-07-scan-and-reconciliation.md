@@ -753,7 +753,7 @@ Files: modified `crates/store/src/git.rs`, `crates/store/tests/git.rs`, `docs/pl
 Consumes: Task 1's fixture
 Produces: `Git::tracked_paths` and `Git::root`
 
-- [ ] Write the failing tests. In `crates/store/tests/git.rs`, insert before the `#[test]` of `fn keeps_a_path_whose_name_begins_with_a_space` — before its attributes, not between them and the function:
+- [x] Write the failing tests. In `crates/store/tests/git.rs`, insert before the `#[test]` of `fn keeps_a_path_whose_name_begins_with_a_space` — before its attributes, not between them and the function:
 
   ```rust
   #[test]
@@ -831,7 +831,7 @@ Produces: `Git::tracked_paths` and `Git::root`
   }
   ```
 
-- [ ] Run them and confirm they fail because the adapter answers neither question yet:
+- [x] Run them and confirm they fail because the adapter answers neither question yet:
 
   ```
   cargo test -p farik-store --test git
@@ -844,7 +844,7 @@ Produces: `Git::tracked_paths` and `Git::root`
   # error: could not compile `farik-store` (test "git") due to 6 previous errors
   ```
 
-- [ ] Write the minimal implementation. First the rename, because the method below calls the helper by its new name and a helper that splits git's `-z` output is no longer only about what changed. In `crates/store/src/git.rs`, replace the unit tests' import, whole — rustfmt sorts a braced group, and `paths_of` sorts after `path_argument` where `changed_paths_of` sorted before both:
+- [x] Write the minimal implementation. First the rename, because the method below calls the helper by its new name and a helper that splits git's `-z` output is no longer only about what changed. In `crates/store/src/git.rs`, replace the unit tests' import, whole — rustfmt sorts a braced group, and `paths_of` sorts after `path_argument` where `changed_paths_of` sorted before both:
 
   ```rust
       use super::{
@@ -854,7 +854,7 @@ Produces: `Git::tracked_paths` and `Git::root`
 
   then rename the remaining six occurrences of `changed_paths_of` to `paths_of`: its definition, the call in `changed_paths`, the call in `merge`, and the three in `reads_the_paths_git_separated_by_nothing`. Its doc comment names no function and does not change.
 
-- [ ] Insert, before `/// Whether \`root\` is inside a git repository.`:
+- [x] Insert, before `/// Whether \`root\` is inside a git repository.`:
 
   ```rust
       /// The directory this adapter was opened on, which may be inside a repository rather than at
@@ -878,7 +878,7 @@ Produces: `Git::tracked_paths` and `Git::root`
       }
   ```
 
-- [ ] And insert, before `/// What \`head\` changed since it and \`base\` last agreed, as a patch.`:
+- [x] And insert, before `/// What \`head\` changed since it and \`base\` last agreed, as a patch.`:
 
   ```rust
       /// Every path the repository tracks, in git's own order.
@@ -897,7 +897,7 @@ Produces: `Git::tracked_paths` and `Git::root`
       }
   ```
 
-- [ ] Run the check and confirm green:
+- [x] Run the check and confirm green:
 
   ```
   cargo xtask check --integration
@@ -905,7 +905,7 @@ Produces: `Git::tracked_paths` and `Git::root`
   #   test result: ok. 18 passed (crates/store/tests/git.rs)
   ```
 
-- [ ] Commit: `feat(store): list what the repository tracks`
+- [x] Commit: `feat(store): list what the repository tracks`
 
 ### Task 3: The scan
 

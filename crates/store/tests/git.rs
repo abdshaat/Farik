@@ -285,6 +285,80 @@ fn counts_the_commits_a_branch_added_and_names_every_path_it_touched() {
 
 #[test]
 #[ignore = "needs the git program: cargo xtask check --integration"]
+fn lists_what_the_repository_tracks_and_not_what_it_ignores() {
+    let repository = TempRepo::new("tracked");
+    assert_eq!(
+        repository.adapter().root(),
+        repository.path,
+        "the adapter answers about the directory it was opened on"
+    );
+    repository.write(".gitignore", "ignored/\n*.log\n");
+    repository.write("src/lib.rs", "// code\n");
+    repository.write("a path with a space.md", "# spaces\n");
+    repository.write("ignored/secret.txt", "not content\n");
+    repository.write("noisy.log", "not content\n");
+    repository.commit("a tree to scan");
+
+    assert_eq!(
+        repository.adapter().tracked_paths().expect("it lists"),
+        [
+            ".gitignore",
+            "README.md",
+            "a path with a space.md",
+            "src/lib.rs"
+        ],
+        "what git ignores is not content, and Farik does not have to know what to ignore"
+    );
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn says_where_the_repository_begins_whatever_directory_it_was_opened_on() {
+    // `Git::open` takes any directory inside a repository, so `root` and the repository's own root
+    // are two different questions. A caller that means the project rather than a subtree has to be
+    // able to tell.
+    let repository = TempRepo::new("top-level");
+    repository.write("crates/core/src/lib.rs", "pub fn one() -> u8 { 1 }\n");
+    repository.commit("a subdirectory");
+    let inside = Git::open(repository.path.join("crates/core"));
+
+    assert_eq!(
+        inside.root(),
+        repository.path.join("crates/core"),
+        "root is the directory it was opened on"
+    );
+    assert_eq!(
+        std::fs::canonicalize(inside.top_level().expect("git says where it begins"))
+            .expect("a real directory"),
+        std::fs::canonicalize(&repository.path).expect("a real directory"),
+        "and top_level is where the repository does"
+    );
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn lists_what_is_staged_in_a_repository_with_no_commit() {
+    // A repository `farik init` has just made has an index and no commit, and onboarding scans it.
+    // The fixture commits, so the commit goes: `git rm --cached` alone would only unstage the file
+    // and leave HEAD where it was, and the test would prove nothing about a repository with none.
+    let repository = TempRepo::new("tracked-staged");
+    repository.git(&["update-ref", "-d", "HEAD"]);
+    repository.git(&["rm", "--cached", "-q", "README.md"]);
+    assert_eq!(
+        repository.adapter().tracked_paths().expect("it lists"),
+        Vec::<String>::new(),
+        "nothing is tracked once the only file is out of the index"
+    );
+    repository.write("staged.rs", "// staged\n");
+    repository.git(&["add", "staged.rs"]);
+    assert_eq!(
+        repository.adapter().tracked_paths().expect("it lists"),
+        ["staged.rs"]
+    );
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
 fn keeps_a_path_whose_name_begins_with_a_space() {
     // The allowed-paths rule is asked about each path a change touched (5.6), so a path that comes
     // back a byte short is a change checked against a rule it never matched. `-z` is what keeps a
