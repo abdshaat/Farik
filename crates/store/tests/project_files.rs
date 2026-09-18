@@ -349,6 +349,13 @@ fn two_writers_on_one_project_never_publish_a_file_holding_both() {
     project.files().init(&a_team()).expect("a project is made");
     let first = "a".repeat(64 * 1024);
     let second = "b".repeat(48 * 1024);
+    // One of them is published before the reader starts, so that "there is no file yet" is not a
+    // thing this test can see. Every read after this is of a file some writer has published, which
+    // is what the assertion below is about.
+    project
+        .files()
+        .write_project_scan(&first)
+        .expect("one of them is there before anything reads");
     let done = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
     let writers: Vec<_> = [&first, &second]
         .into_iter()
