@@ -1979,7 +1979,7 @@ Consumes: `GateResult`, `verdict`, `TaskStatus`, `TASK_STATUSES` from
 `crates/core/src/governor/{gates.rs,task_status.rs}`
 Produces: `farik_core::governor::gates::check_human_triage`
 
-- [ ] Write the failing tests, at the end of `gates.rs`'s `mod tests`, and add `check_human_triage` to
+- [x] Write the failing tests, at the end of `gates.rs`'s `mod tests`, and add `check_human_triage` to
       that module's `use super::{...}` list:
 
   ```rust
@@ -2023,7 +2023,7 @@ Produces: `farik_core::governor::gates::check_human_triage`
       }
   ```
 
-- [ ] Run them and confirm they fail because the gate is not there:
+- [x] Run them and confirm they fail because the gate is not there:
 
   ```
   cargo test -p farik-core --lib governor::gates
@@ -2032,7 +2032,7 @@ Produces: `farik_core::governor::gates::check_human_triage`
   #     ... no `check_human_triage` in `governor::gates`
   ```
 
-- [ ] Write the gate, above `check_blocker_resolved`:
+- [x] Write the gate, above `check_blocker_resolved`:
 
   ```rust
   /// Whether the human may say how big a request is (`docs/SPEC.md` section 5.16): the request is
@@ -2072,7 +2072,7 @@ Produces: `farik_core::governor::gates::check_human_triage`
   }
   ```
 
-- [ ] Run the crate's suite and the no-I/O check; confirm green:
+- [x] Run the crate's suite and the no-I/O check; confirm green:
 
   ```
   cargo test -p farik-core
@@ -2083,8 +2083,8 @@ Produces: `farik_core::governor::gates::check_human_triage`
   # expected: silent
   ```
 
-- [ ] Refactor if there is duplication; keep green.
-- [ ] Commit: `feat(core): say who may size a request, and until when`
+- [x] Refactor if there is duplication; keep green.
+- [x] Commit: `feat(core): say who may size a request, and until when`
 
 ### Task 5: `farik triage`
 
