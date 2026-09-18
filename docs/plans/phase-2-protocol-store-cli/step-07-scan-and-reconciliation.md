@@ -3123,3 +3123,120 @@ This task changes documentation and has no test cycle. The `> ` marker on the bl
 ## Open questions
 
 none
+
+## Review findings
+
+The landing review was a fresh session that did not write this step. It ran seventy-seven mutants,
+one per behaviour the code claims, the whole suite for each with `--integration`, reverting between;
+measured ninety-six concurrent scans of one repository from eight threads; and swept the modules for
+panics, slicing, integer edges and leaked paths. Sixty-one mutants died. Of the sixteen that lived,
+four it argued were equivalent or unreachable, one it could not decide either way, two it advised
+leaving, and nine were gaps it then wrote and verified the killing assertion for.
+
+Of those nine gaps, every one was a rule the code gets right that nothing held: the assertion was
+missing, so the behaviour could be deleted with `cargo xtask check --integration` green. That is the
+mirror image of what the four readiness rounds found before execution, where the defects were claims
+that had drifted from the code. Writing the code against a plan that says what it must do catches the
+code; only mutating the code catches the tests.
+
+The code changed in `bb7b7de`, `b745067` and this commit. The task blocks above are what was executed
+and are left as they were; this section is what changed after them. The counts in Verification are
+step 07's at landing; the suite is now `264 / 37 / 66 / 8 / 18 / 31 / 16 / 10 / 29`, ending
+`xtask check: ok`.
+
+One shipped defect, fixed in `bb7b7de`:
+
+- **`reconcile`'s order was not the order it promised.** `number_in` maps `FRK-01` and `FRK-1` — two
+  spellings of one number, which `^FRK-[0-9]{1,6}$` allows — to the same key, and the sort had no
+  tie-break, so which of the two came first was decided by whichever loop happened to find it, or,
+  for two contract files, by `read_dir`. The doc above it says two runs over one project print the
+  same thing and a person can diff them, and that was false: stable on one ext4 directory, not across
+  a fresh clone, a restore, or a rehash — which are the situations `farik doctor` exists for.
+  `projections.rs` broke this exact tie in step 03, with a comment saying why: this store never writes
+  a leading zero, but a log or a hand-written contract file from another tool can. The sort now takes
+  the id itself as its second key, and `orders_two_spellings_of_one_number_by_the_id_itself` pins it
+  by giving one spelling to the board and the other to the files, so no tie-break means the wrong
+  order deterministically rather than by luck.
+
+Nine rules that nothing held, one assertion each, in `b745067`. Each was watched failing against its
+own mutant before it was kept:
+
+- **The `test` verification method was asserted by nothing.** Replacing `criterion`'s `if is_test`
+  with `if false` — so every criterion the scan seeds becomes an ordinary `command` one — passed the
+  whole suite. `require_new_tests` (spec 5.9, `new_tests_required_by_rule`) reads only the criteria
+  whose method is `test`, so a scan that stopped emitting one would make that Definition-of-Ready rule
+  pass vacuously for every contract in every scanned project, with the check green. A governance rule
+  silently disabled is the worst thing in this step, and the existing test looked like it covered it:
+  it checks the name, the source, and that the library accepts the criterion, and the integration
+  helper `command_of` deliberately accepts both methods.
+- **The `workspaces` key was untested.** `WORKSPACE_MARKERS` covers pnpm, turbo, nx, lerna and go; a
+  plain npm or yarn workspace declares itself only in `package.json`, and no fixture had that key. A
+  very large share of the JavaScript projects onboarding will meet would have read back as a single
+  package — the first sentence a person sees from Farik.
+- **Its negative was untested too.** The no-`Cargo.toml` guard returning `true` survived: every
+  fixture with more than one package declared a workspace some other way, so "two manifests" and "a
+  monorepo" were the same thing as far as the check could see.
+- **The `[workspace]` trim was untested.** `str::lines` strips `\n` and leaves `\r`, so without the
+  trim a repository checked out on Windows with `core.autocrlf=true`, or a `Cargo.toml` whose table
+  header somebody indented, stops being a workspace. Every fixture wrote LF at column 0.
+- **`rsplit_once('.')` was untested.** Every path in every fixture has exactly one dot, so first-dot
+  and last-dot agreed throughout. With the first dot, `index.test.ts`, `vite.config.ts` and anything
+  under `.github/` count for no language — and the language is both the first word of the read-back
+  and the input to the toolchain choice.
+- **Two `how_long_ago` boundaries were open.** The cases pinned days 0, 1, 4, 29, 30 and 184, which
+  left `2..=29`'s start and `30..=59`'s end free: a two-day-old commit could read `0 months ago` and a
+  sixty-day-old one `a month ago`.
+- **`top_level` refused nothing.** Dropping its `require_repository()?` survived, because
+  `scan_project` asks `is_repository` first — the same hole
+  `refuses_to_list_what_a_directory_that_is_not_a_repository_tracks` was written to close for
+  `tracked_paths`, which `top_level` never got a pair for. Its own doc comment promises
+  `NotARepository`.
+- **`tests_in`'s exact-name half was untested.** Reachable by a committed wrapper script named
+  `pytest` with no extension; one line closes it.
+
+Two doc claims corrected here, from the same review's reading rather than its mutants:
+
+- **What a lagging projections handle reports.** `reconcile`'s doc said such a handle would report its
+  own lag as a `StatusMismatch`. The reviewer's probe — append, then reconcile before `apply` — got
+  the stronger `ContractWithoutEvents`, whose sentence says no transition of the task was ever
+  governed. A person reading that about a task they have just created would think something far worse
+  had happened than a handle being one event behind.
+- **What `Commands::Fixed` is.** "The commands this toolchain always has" is true of cargo and go and
+  not of poetry, uv and bundler, whose marker names a package manager and says nothing about the test
+  runner. The doc now says which it is, and names the gate the project plan carries.
+
+Accepted as the reviewer argued, not taken:
+
+- **`packages_in`'s `contains('/')` guard is equivalent.** `rsplit_once('/')` returns `None` exactly
+  when there is no `/`, so `is_some_and` already implies the guard; it stays as a statement of intent.
+- **`same_directory`'s `_ => false` is unreachable.** `run_git` refuses a path that is not a
+  directory, so `is_repository()` is false before this is asked; only a directory removed between
+  `top_level()` and the comparison reaches it, which is the race the doc comment names.
+- **`number_in`'s `unwrap_or_default()` is unobservable.** After `FRK-` is trimmed the parse cannot
+  fail. It is also what masked the ordering defect above, which is why the fix was the caller's key
+  rather than this fallback.
+- **`sort_unstable_by_key` could not be told apart.** The reviewer built the worst reachable case —
+  eleven tasks each drifting on status and lock — and the pairs still came out status before lock, so
+  no defect could be exhibited; equal keys here only occur in adjacent runs of two. Not a finding, and
+  the stable sort stays because the code promises the order.
+- **Both `ReconcileError` conversions can be swapped undetected.** `says_what_it_could_not_compare_and_why`
+  builds the two variants by hand, so it asserts the sentences and not the mapping; reaching either
+  arm needs an I/O or SQLite failure nothing in this repository can provoke without a fault-injection
+  seam. Left, with the note that the test reads stronger than it is.
+- **Removing `validate_criteria` from `criteria()` is invisible.** Every table entry is valid, so
+  bypassing the guard changes nothing; the pair of mutants (bypass plus a `GO` text under ten
+  characters) dies, which is what shows the guard is live and load-bearing for the tables. Asserting
+  the guard rather than its effect would need a deliberately bad table.
+- **Two locale-dependent assertions stand.** `must be run in a work tree` and
+  `No such file or directory` rest on git's and libc's English, as `crates/store/tests/git.rs:224`
+  already does.
+
+Recorded on the project plan rather than taken here:
+
+- **The poetry, uv and bundler test commands are guesses**, which contradicts this step's own first
+  decision. Gating `PYTEST` and `RSPEC` on the evidence `tests_in` already reads is about ten lines
+  and one test, but it is a behaviour change, and changing behaviour inside a landed step without a
+  plan decision inverts the workflow's order. It is an open decision of phase 2 now.
+- **`ProjectFiles::list_contracts` has the same missing tie-break** as `reconcile` had. It is step
+  06's code and step 08 is the step whose `doctor` and `board` print that list, so step 08's row
+  carries the one-line fix and its test.

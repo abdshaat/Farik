@@ -154,7 +154,8 @@ impl From<StoreError> for ReconcileError {
 /// What the log says is read from the projections rather than from the log itself, so this leans on
 /// the handle being caught up. `open_projections` catches up when it opens, and a command that opens
 /// them per run therefore always is; a handle held across appends without `apply` would report its
-/// own lag as a `StatusMismatch`.
+/// own lag as drift — a `StatusMismatch` for a task it has seen before, and, for a task it has never
+/// heard of, the stronger `ContractWithoutEvents`, which says nothing ever governed it.
 ///
 /// # Errors
 ///

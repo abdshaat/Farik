@@ -204,7 +204,14 @@ enum Commands {
     /// Whatever this project's own `package.json` calls its scripts, run through this manager. The
     /// project's commands are the project's to name; the scan reads them rather than guessing.
     Scripts,
-    /// The commands this toolchain always has.
+    /// The commands a project on this toolchain conventionally has.
+    ///
+    /// For cargo and go these are facts about the toolchain: `cargo test --workspace` and
+    /// `go test ./...` are what the tool is. For poetry, uv and bundler the marker names a package
+    /// manager and says nothing about the test runner, so `pytest` and `bundle exec rspec` are
+    /// conventions about the project rather than signals read from it — the one place in this module
+    /// that guesses. A poetry project on `unittest` is seeded a command that is not installed, which
+    /// is why the project plan carries gating these two on the evidence `tests_in` already reads.
     Fixed(&'static [Verified]),
 }
 
