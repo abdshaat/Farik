@@ -496,6 +496,42 @@ pub fn check_blocker_written(blocker: Option<&Blocker>) -> GateResult {
     verdict(reasons)
 }
 
+/// Whether the human may say how big a request is (`docs/SPEC.md` section 5.16): the request is
+/// still a draft, and it is a request rather than a task an epic's breakdown made.
+///
+/// 5.16 gives the user the triage decision "until refining starts", and the first thing that happens
+/// to a request is triage, so the one status this is open at is `draft`. It is the same rule for the
+/// first triage and for an overrule of one: what makes an overrule an overrule is that a decision is
+/// already recorded, and nothing about who may record one changes.
+///
+/// A task under an epic was never triaged — its epic was (5.16 item 3) — so sizing one would answer a
+/// question nobody asked and change the kind its readiness was judged against.
+///
+/// This is the human's gate. The one change the Product Manager may make to a triage — re-sizing a
+/// `refining` standalone task it has found to be larger than the triage thought — is the one tool
+/// gate of section 5 with no predicate here, and `docs/plans/project-plan.md` records why: it needs a
+/// decision in the spec first.
+///
+/// # Errors
+///
+/// One reason when refining has started, and one when the task belongs to an epic.
+pub fn check_human_triage(status: TaskStatus, has_parent: bool) -> GateResult {
+    let mut reasons = Vec::new();
+    if status != TaskStatus::Draft {
+        reasons.push(format!(
+            "the request is {status} and a triage is the first thing that happens to one: 5.16 \
+             gives you the size until refining starts"
+        ));
+    }
+    if has_parent {
+        reasons.push(
+            "this task belongs to an epic, and an epic's tasks are not triaged: the epic was (5.16)"
+                .to_string(),
+        );
+    }
+    verdict(reasons)
+}
+
 /// The `BlockerResolved` gate of `blocked -> in_progress` (`docs/SPEC.md` section 5.2): a written
 /// resolution, so that the next session knows what changed.
 ///
@@ -857,7 +893,8 @@ mod tests {
         FIELDS_ONLY_THE_HUMAN_WRITES, FIELDS_THE_GOVERNOR_WRITES, FIELDS_THE_STORE_OWNS,
         ParentEpic, Rejection, WorkState, check_assignment, check_blocker_resolved,
         check_blocker_written, check_child_creation, check_children_done, check_contract_write,
-        check_criteria_recorded, check_product_doc_write, check_rejection_reasons,
+        check_criteria_recorded, check_human_triage, check_product_doc_write,
+        check_rejection_reasons,
     };
     use crate::contract::{Role, TaskContract, TaskStatus, VerificationWire};
     use crate::generated::task_contract::ExitCriterionVerificationVariant0Expect;
@@ -2720,6 +2757,45 @@ mod tests {
                 &["scope".to_string()]
             ),
             Ok(ContractWriteOutcome::ReturnsToRefining)
+        );
+    }
+
+    #[test]
+    fn lets_the_human_size_a_request_that_is_still_a_draft() {
+        assert_eq!(check_human_triage(TaskStatus::Draft, false), Ok(()));
+    }
+
+    #[test]
+    fn refuses_a_triage_once_refining_has_started() {
+        // 5.16 gives the user the size "until refining starts", and a triage is the first thing
+        // that happens to a request, so `draft` is the one status this is open at.
+        for status in TASK_STATUSES {
+            if status == TaskStatus::Draft {
+                continue;
+            }
+            assert_eq!(
+                reasons(check_human_triage(status, false)),
+                [format!(
+                    "the request is {status} and a triage is the first thing that happens to one: \
+                     5.16 gives you the size until refining starts"
+                )],
+                "{status}"
+            );
+        }
+    }
+
+    #[test]
+    fn refuses_a_triage_of_a_task_that_belongs_to_an_epic() {
+        assert_eq!(
+            reasons(check_human_triage(TaskStatus::Draft, true)),
+            [
+                "this task belongs to an epic, and an epic's tasks are not triaged: the epic was (5.16)"
+            ]
+        );
+        assert_eq!(
+            reasons(check_human_triage(TaskStatus::Refining, true)).len(),
+            2,
+            "both reasons, so a caller that fixes what it is told makes progress"
         );
     }
 }

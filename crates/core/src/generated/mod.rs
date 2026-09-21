@@ -4,5 +4,7 @@
 //! verification's `method` is a plain value here), so a value is validated against the schema
 //! before it is deserialised: `crate::contract::validate_contract` for the task contract.
 
+pub mod criteria;
 pub mod prices;
 pub mod task_contract;
+pub mod team;

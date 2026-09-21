@@ -1,0 +1,19 @@
+[package]
+name = "farik-protocol"
+description = "The event envelope, the event kinds, the commands, and the clock and identifier traits shared by the daemon and the front end."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+chrono.workspace = true
+farik-core.workspace = true
+jsonschema.workspace = true
+regress.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+
+[lints]
+workspace = true

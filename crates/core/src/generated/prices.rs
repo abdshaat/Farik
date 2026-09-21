@@ -2,7 +2,7 @@
 #![allow(clippy::all, clippy::pedantic, missing_docs)]
 
 ///The model price table Farik ships and the user may override in .farik/prices.json: what one million tokens cost, per model id, in US dollars. See docs/SPEC.md section 5.5.
-#[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug)]
+#[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct FarikPriceTable {
     ///Prices keyed by the provider's model id, exactly as the runtime reports it in usage.
@@ -15,7 +15,7 @@ pub struct FarikPriceTable {
     pub version: ::std::num::NonZeroU64,
 }
 ///`ModelPrice`
-#[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug)]
+#[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct ModelPrice {
     ///Prompt cache hits and refreshes.

@@ -1,0 +1,199 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://farik.dev/schemas/event.schema.json",
+  "title": "Farik Event",
+  "description": "One record in Farik's append-only log (docs/SPEC.md section 8.5). The envelope says where the event belongs and when it was recorded; kind says what happened and body carries that kind's payload. The pairing of kind and body is checked by the reader, farik_protocol::event::event_from_value, and not here: a schema that pairs them with if and then cannot be turned into Rust types by the generator.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "seq",
+    "recorded_at",
+    "team_id",
+    "project_id",
+    "kind",
+    "body"
+  ],
+  "properties": {
+    "seq": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 18446744073709551615,
+      "description": "The event's place in the log. Assigned by the store on append and never reused. The upper bound is the store's counter's, so that a number past it is refused here, at its own path, rather than by the reader's typing at the root."
+    },
+    "recorded_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "When the event was recorded, from the injected clock. Never read from the machine's clock by the crate that builds the event."
+    },
+    "team_id": {
+      "type": "string",
+      "description": "The team the event belongs to. A blank one is refused by the reader."
+    },
+    "project_id": {
+      "type": "string",
+      "description": "The project the event belongs to. A blank one is refused by the reader."
+    },
+    "task_id": {
+      "type": "string",
+      "pattern": "^FRK-[0-9]{1,6}$",
+      "description": "The contract the event is about, when it is about one."
+    },
+    "agent_id": {
+      "type": "string",
+      "description": "The agent whose work produced the event, when an agent did."
+    },
+    "session_id": {
+      "type": "string",
+      "description": "The session the event was recorded in, when it was recorded in one."
+    },
+    "kind": {
+      "$ref": "#/$defs/eventKind"
+    },
+    "body": {
+      "$ref": "#/$defs/eventBodyWire"
+    }
+  },
+  "$defs": {
+    "eventKind": {
+      "type": "string",
+      "enum": [
+        "task.created",
+        "request.triaged",
+        "contract.written",
+        "contract.locked",
+        "contract.unlocked",
+        "drift.detected",
+        "project.scanned",
+        "team.updated",
+        "criteria.updated"
+      ]
+    },
+    "eventBodyWire": {
+      "title": "Event Body Wire",
+      "description": "Every body shape the log holds. The branches have distinct required properties and none accepts an unknown one, so a body matches exactly one. Which one it must be is decided by kind, in the reader.",
+      "oneOf": [
+        { "$ref": "#/$defs/taskCreatedBody" },
+        { "$ref": "#/$defs/requestTriagedBody" },
+        { "$ref": "#/$defs/contractWrittenBody" },
+        { "$ref": "#/$defs/contractLockedBody" },
+        { "$ref": "#/$defs/contractUnlockedBody" },
+        { "$ref": "#/$defs/driftDetectedBody" },
+        { "$ref": "#/$defs/projectScannedBody" },
+        { "$ref": "#/$defs/teamUpdatedBody" },
+        { "$ref": "#/$defs/criteriaUpdatedBody" }
+      ]
+    },
+    "contractSummary": {
+      "title": "Contract Summary",
+      "description": "The fields of a contract the board shows, repeated on every event that writes one so that the projections can be rebuilt from the log alone (docs/SPEC.md section 8.4). The vocabularies match task-contract.schema.json, which is the source of truth for them; a test in farik-protocol fails when the two drift.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "title", "status", "risk"],
+      "properties": {
+        "kind": { "type": "string", "enum": ["epic", "task"] },
+        "parent": { "type": "string", "pattern": "^FRK-[0-9]{1,6}$" },
+        "title": { "type": "string" },
+        "status": {
+          "type": "string",
+          "enum": ["draft", "refining", "ready", "assigned", "in_progress", "blocked", "verifying", "rejected", "accepted", "escalated", "cancelled"]
+        },
+        "risk": { "type": "string", "enum": ["low", "medium", "high"] }
+      }
+    },
+    "taskCreatedBody": {
+      "title": "Task Created Body",
+      "description": "A request was filed as a draft contract (docs/SPEC.md section 5.16 item 1).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["summary", "created_by"],
+      "properties": {
+        "summary": { "$ref": "#/$defs/contractSummary" },
+        "created_by": { "type": "string", "description": "The agent id that filed the request, or human." }
+      }
+    },
+    "requestTriagedBody": {
+      "title": "Request Triaged Body",
+      "description": "Triage sized a request (docs/SPEC.md section 5.16).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["size", "reason", "triaged_by"],
+      "properties": {
+        "size": { "type": "string", "enum": ["large", "small"] },
+        "reason": { "type": "string" },
+        "triaged_by": { "type": "string" }
+      }
+    },
+    "contractWrittenBody": {
+      "title": "Contract Written Body",
+      "description": "A contract's content was written or changed.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["summary", "written_by"],
+      "properties": {
+        "summary": { "$ref": "#/$defs/contractSummary" },
+        "written_by": { "type": "string" }
+      }
+    },
+    "contractLockedBody": {
+      "title": "Contract Locked Body",
+      "description": "A human took ownership of a contract (docs/SPEC.md section 5.11).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["locked_by"],
+      "properties": { "locked_by": { "type": "string" } }
+    },
+    "contractUnlockedBody": {
+      "title": "Contract Unlocked Body",
+      "description": "A human gave a contract back to the team (docs/SPEC.md section 5.11).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["unlocked_by"],
+      "properties": { "unlocked_by": { "type": "string" } }
+    },
+    "driftDetectedBody": {
+      "title": "Drift Detected Body",
+      "description": "Reconciliation found the files and the log disagreeing (docs/SPEC.md section 8.4).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["drift", "detail"],
+      "properties": {
+        "drift": { "type": "string", "enum": ["contract_without_events", "events_without_contract", "status_mismatch", "lock_mismatch", "contract_unreadable"] },
+        "detail": { "type": "string" }
+      }
+    },
+    "projectScannedBody": {
+      "title": "Project Scanned Body",
+      "description": "The project scan read the repository back to the user and proposed criteria for the library (docs/SPEC.md section 5.13).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["read_back", "detected_criteria"],
+      "properties": {
+        "read_back": { "type": "string" },
+        "detected_criteria": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "teamUpdatedBody": {
+      "title": "Team Updated Body",
+      "description": "The team file was written.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["team_name", "agent_ids", "updated_by"],
+      "properties": {
+        "team_name": { "type": "string" },
+        "agent_ids": { "type": "array", "items": { "type": "string" } },
+        "updated_by": { "type": "string" }
+      }
+    },
+    "criteriaUpdatedBody": {
+      "title": "Criteria Updated Body",
+      "description": "The criterion library was written (docs/SPEC.md section 5.13).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["criterion_names", "updated_by"],
+      "properties": {
+        "criterion_names": { "type": "array", "items": { "type": "string" } },
+        "updated_by": { "type": "string" }
+      }
+    }
+  }
+}

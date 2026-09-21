@@ -1,0 +1,19 @@
+[package]
+name = "farik-store"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+chrono.workspace = true
+farik-core.workspace = true
+farik-protocol.workspace = true
+rusqlite.workspace = true
+serde.workspace = true
+serde-saphyr.workspace = true
+serde_json.workspace = true
+
+[lints]
+workspace = true

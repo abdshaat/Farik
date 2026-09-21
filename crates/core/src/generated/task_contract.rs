@@ -2,7 +2,7 @@
 #![allow(clippy::all, clippy::pedantic, missing_docs)]
 
 ///`ExitCriterion`
-#[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug)]
+#[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct ExitCriterion {
     pub id: ExitCriterionId,
@@ -167,7 +167,7 @@ impl<'de> ::serde::Deserialize<'de> for ExitCriterionText {
     }
 }
 ///`ExitCriterionVerification`
-#[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug)]
+#[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
 #[serde(untagged, deny_unknown_fields)]
 pub enum ExitCriterionVerification {
     Variant0 {
@@ -203,18 +203,19 @@ pub enum ExitCriterionVerification {
     },
 }
 ///`ExitCriterionVerificationVariant0Expect`
-#[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, Default)]
+#[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, Default, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct ExitCriterionVerificationVariant0Expect {
+    ///What a process can return. The default is 0.
     #[serde(default)]
-    pub exit_code: i64,
+    pub exit_code: i32,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
     pub stdout_contains: ::std::option::Option<::std::string::String>,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
     pub stdout_not_contains: ::std::option::Option<::std::string::String>,
 }
 ///The document that makes an epic or a task ready. An epic is a large request from the user, written by the Product Manager after asking the user its questions and approved by the user before it is broken down; a task is one deliverable of an epic, written by the epic's assignee, or a standalone task from a small request, written by the Product Manager. Triage decides which (docs/SPEC.md 5.16). Checked by the governor (structural rules) and the Scrum Master (judgment rules) before any work starts.
-#[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug)]
+#[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct FarikTaskContract {
     ///Glob patterns relative to the project root. The governor refuses acceptance if the task's diff touches anything outside them.
@@ -273,7 +274,7 @@ pub struct FarikTaskContract {
     pub updated_at: ::std::option::Option<::chrono::DateTime<::chrono::offset::Utc>>,
 }
 ///`FarikTaskContractBudget`
-#[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug)]
+#[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct FarikTaskContractBudget {
     pub max_cost_usd: f64,
@@ -494,7 +495,7 @@ impl ::std::default::Default for FarikTaskContractKind {
     }
 }
 ///`FarikTaskContractNotes`
-#[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, Default)]
+#[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, Default, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct FarikTaskContractNotes {
     ///Written by the assignee before declaring done: what changed, what was not done, what to look at first.
@@ -559,7 +560,7 @@ impl<'de> ::serde::Deserialize<'de> for FarikTaskContractParent {
     }
 }
 ///`FarikTaskContractRequirementsItem`
-#[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug)]
+#[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct FarikTaskContractRequirementsItem {
     pub id: FarikTaskContractRequirementsItemId,
@@ -725,7 +726,7 @@ impl ::std::convert::TryFrom<::std::string::String> for FarikTaskContractRisk {
     }
 }
 ///`FarikTaskContractScope`
-#[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug)]
+#[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct FarikTaskContractScope {
     pub in_scope: ::std::vec::Vec<::std::string::String>,

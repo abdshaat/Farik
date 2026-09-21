@@ -4,6 +4,15 @@ on:
   push:
     branches: [main]
 jobs:
+  # One job, running the check with `--integration`, because the runner has git and the flag's only
+  # effect is to include the tests marked `#[ignore]` for needing it. A second job would compile the
+  # workspace again to run a superset of what this one ran. When a test needs Docker (phase 3 step
+  # 02), the separation starts paying for itself and this becomes two jobs.
+  #
+  # What that costs: nothing here runs `cargo xtask check` without the flag any more, so a break in
+  # the flagless path — a test wrongly marked `#[ignore]` and so run by nobody's default command, or
+  # the default arm itself — would reach `main` unseen. The command a contributor runs is what
+  # guards it.
   check:
     runs-on: ubuntu-latest
     steps:
@@ -13,4 +22,5 @@ jobs:
           toolchain: 1.98.1
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
-      - run: cargo xtask check
+      - run: git --version
+      - run: cargo xtask check --integration
