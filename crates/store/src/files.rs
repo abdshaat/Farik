@@ -272,10 +272,18 @@ impl ProjectFiles {
                 ids.push(id);
             }
         }
-        // By the number in the id, so that the tenth task does not come before the ninth. The
-        // parse cannot fail: `TaskId` is `FRK-` and one to six digits, which is what let it be
-        // built at all.
-        ids.sort_by_key(|id| id.as_str().trim_start_matches("FRK-").parse::<u64>().ok());
+        // By the number in the id, so that the tenth task does not come before the ninth, and then
+        // by the id itself, because the schema's pattern allows a leading zero: `FRK-01` and `FRK-1`
+        // are two spellings of one number, and without the second key the order between them is
+        // whatever `read_dir` gave, which is stable on one filesystem and not across a fresh clone.
+        // `projections` broke this tie in step 03 and `reconcile` in step 07. The parse cannot fail:
+        // `TaskId` is `FRK-` and one to six digits, which is what let it be built at all.
+        ids.sort_by_key(|id| {
+            (
+                id.as_str().trim_start_matches("FRK-").parse::<u64>().ok(),
+                id.as_str().to_string(),
+            )
+        });
         Ok(ids)
     }
 

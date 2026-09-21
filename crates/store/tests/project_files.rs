@@ -801,3 +801,45 @@ fn reads_one_yaml_dialect_whatever_directory_the_file_came_from() {
         "and `on` is a key rather than a boolean, which is the same dialect the store reads"
     );
 }
+
+#[test]
+fn lists_two_spellings_of_one_number_in_an_order_that_is_not_the_filesystem_s() {
+    // The schema allows a leading zero, so `FRK-01` and `FRK-1` are two spellings of one number. The
+    // number alone is not a key: without the id behind it the order falls to `read_dir`, which is
+    // stable on one filesystem and not across a fresh clone or a restore. `projections` broke this
+    // tie in step 03 and `reconcile` in step 07.
+    let project = TempProject::new("list-two-spellings");
+    let files = project.files();
+    for id in [
+        "FRK-1",
+        "FRK-01",
+        "FRK-001",
+        "FRK-0001",
+        "FRK-00001",
+        "FRK-000001",
+    ] {
+        let mut contract = farik_core::contract::fixtures::a_contract_wire();
+        contract["id"] = serde_json::json!(id);
+        files
+            .write_contract(&validate_contract(&contract).expect("a contract"))
+            .expect("written");
+    }
+
+    assert_eq!(
+        files
+            .list_contracts()
+            .expect("a list")
+            .iter()
+            .map(|id| id.as_str().to_string())
+            .collect::<Vec<_>>(),
+        [
+            "FRK-000001",
+            "FRK-00001",
+            "FRK-0001",
+            "FRK-001",
+            "FRK-01",
+            "FRK-1"
+        ],
+        "by the number, then by the id itself"
+    );
+}
