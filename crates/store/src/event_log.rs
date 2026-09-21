@@ -29,6 +29,15 @@ pub(crate) const TASK_ID_PREFIX: &str = "FRK";
 const JOURNAL_MODE_TRIES: u32 = 50;
 const JOURNAL_MODE_WAIT: Duration = Duration::from_millis(20);
 
+/// How long a statement waits for another connection's write lock before it gives up.
+///
+/// Thirty seconds rather than five, raised 2026-09-21 after CI refused ten processes appending to
+/// one log with `database is locked`: `synchronous = FULL` makes every commit an fsync, and on a
+/// loaded runner ten of those queued behind one another take longer than five seconds. A command
+/// that waits is doing what a person would want; one that refuses because another `farik` was
+/// mid-append is not, and 8.5 says two processes on one project is the ordinary case.
+const BUSY_TIMEOUT: Duration = Duration::from_secs(30);
+
 /// The path that opens a database in memory rather than on disk, for tests and for a dry run.
 pub const IN_MEMORY: &str = ":memory:";
 
@@ -78,7 +87,7 @@ pub fn open_event_log(path: &Path, now: DateTime<Utc>) -> Result<EventLog, Store
         std::fs::create_dir_all(directory)?;
     }
     let mut connection = Connection::open(path)?;
-    connection.busy_timeout(Duration::from_secs(5))?;
+    connection.busy_timeout(BUSY_TIMEOUT)?;
     if !in_memory {
         // The log is the source of truth for what happened, so an append that returned must
         // survive the machine losing power: `FULL` is that promise, and write-ahead logging is what
