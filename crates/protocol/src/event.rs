@@ -4,10 +4,10 @@
 use std::str::FromStr;
 use std::sync::LazyLock;
 
-use chrono::{DateTime, SecondsFormat, Utc};
+use chrono::{DateTime, Utc};
 use jsonschema::Validator;
-use serde::de::DeserializeOwned;
-use serde_json::{Map, Value};
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
 
 pub use farik_core::contract::{TaskId, ValidationError};
 
@@ -129,45 +129,68 @@ pub const EVERY_KIND: [EventKind; 9] = [
     EventKind::CriteriaUpdated,
 ];
 
+/// The ids an event is stamped with: which team and project it belongs to, and the contract, agent
+/// and session it is about when it is about one.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize)]
+pub struct EventIds {
+    /// The team the event belongs to. Blank is refused.
+    pub team_id: String,
+    /// The project the event belongs to. Blank is refused.
+    pub project_id: String,
+    /// The contract the event is about, when it is about one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub task_id: Option<TaskId>,
+    /// The agent whose work produced the event, when an agent did.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub agent_id: Option<String>,
+    /// The session the event was recorded in, when it was recorded in one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub session_id: Option<String>,
+}
+
 /// Everything one event records except what happened: where it belongs and when it was recorded.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct EventEnvelope {
     /// The event's place in the log, assigned by the store on append.
     pub seq: u64,
     /// When the event was recorded, from the injected clock.
     pub recorded_at: DateTime<Utc>,
-    /// The team the event belongs to.
-    pub team_id: String,
-    /// The project the event belongs to.
-    pub project_id: String,
-    /// The contract the event is about, when it is about one.
-    pub task_id: Option<TaskId>,
-    /// The agent whose work produced the event, when an agent did.
-    pub agent_id: Option<String>,
-    /// The session the event was recorded in, when it was recorded in one.
-    pub session_id: Option<String>,
+    /// The ids the event is stamped with.
+    #[serde(flatten)]
+    pub ids: EventIds,
 }
 
-/// What happened: one variant per event kind, each holding that kind's body.
-#[derive(Debug, Clone, PartialEq)]
+/// What happened: one variant per event kind, each holding that kind's body. On the wire it is the
+/// event's `kind` and `body` side by side.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", content = "body")]
 pub enum EventBody {
     /// A request was filed as a draft contract.
+    #[serde(rename = "task.created")]
     TaskCreated(TaskCreatedBody),
     /// Triage sized a request.
+    #[serde(rename = "request.triaged")]
     RequestTriaged(RequestTriagedBody),
     /// A contract's content was written or changed.
+    #[serde(rename = "contract.written")]
     ContractWritten(ContractWrittenBody),
     /// A human took ownership of a contract.
+    #[serde(rename = "contract.locked")]
     ContractLocked(ContractLockedBody),
     /// A human gave a contract back to the team.
+    #[serde(rename = "contract.unlocked")]
     ContractUnlocked(ContractUnlockedBody),
     /// Reconciliation found the files and the log disagreeing.
+    #[serde(rename = "drift.detected")]
     DriftDetected(DriftDetectedBody),
     /// The project scan read the repository back to the user.
+    #[serde(rename = "project.scanned")]
     ProjectScanned(ProjectScannedBody),
     /// The team file was written.
+    #[serde(rename = "team.updated")]
     TeamUpdated(TeamUpdatedBody),
     /// The criterion library was written.
+    #[serde(rename = "criteria.updated")]
     CriteriaUpdated(CriteriaUpdatedBody),
 }
 
@@ -190,28 +213,14 @@ impl EventBody {
 }
 
 /// One record of the log.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct FarikEvent {
     /// Where the event belongs and when it was recorded.
+    #[serde(flatten)]
     pub envelope: EventEnvelope,
     /// What happened.
+    #[serde(flatten)]
     pub body: EventBody,
-}
-
-/// The ids an event is stamped with. Everything an envelope has except the sequence number, which
-/// the store assigns, and the time, which the clock does.
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub struct EventIds {
-    /// The team the event belongs to. Blank is refused.
-    pub team_id: String,
-    /// The project the event belongs to. Blank is refused.
-    pub project_id: String,
-    /// The contract the event is about, when it is about one.
-    pub task_id: Option<TaskId>,
-    /// The agent whose work produced the event, when an agent did.
-    pub agent_id: Option<String>,
-    /// The session the event was recorded in, when it was recorded in one.
-    pub session_id: Option<String>,
 }
 
 /// An event that has not been appended yet: everything a `FarikEvent` has except the sequence
@@ -220,16 +229,8 @@ pub struct EventIds {
 pub struct NewEvent {
     /// When the event was recorded, from the injected clock.
     pub recorded_at: DateTime<Utc>,
-    /// The team the event belongs to.
-    pub team_id: String,
-    /// The project the event belongs to.
-    pub project_id: String,
-    /// The contract the event is about, when it is about one.
-    pub task_id: Option<TaskId>,
-    /// The agent whose work produced the event, when an agent did.
-    pub agent_id: Option<String>,
-    /// The session the event was recorded in, when it was recorded in one.
-    pub session_id: Option<String>,
+    /// The ids the event is stamped with.
+    pub ids: EventIds,
     /// What happened.
     pub body: EventBody,
 }
@@ -274,11 +275,13 @@ pub fn new_event(
     }
     Ok(NewEvent {
         recorded_at,
-        team_id,
-        project_id,
-        task_id: ids.task_id,
-        agent_id: optional_id(ids.agent_id.as_deref()),
-        session_id: optional_id(ids.session_id.as_deref()),
+        ids: EventIds {
+            team_id,
+            project_id,
+            task_id: ids.task_id,
+            agent_id: optional_id(ids.agent_id.as_deref()),
+            session_id: optional_id(ids.session_id.as_deref()),
+        },
         body,
     })
 }
@@ -316,7 +319,7 @@ pub fn event_from_value(input: &Value) -> Result<FarikEvent, Vec<ValidationError
         }]
     })?;
     let envelope = envelope_from_wire(&wire)?;
-    if is_about_one_contract(wire.kind) && envelope.task_id.is_none() {
+    if is_about_one_contract(wire.kind) && envelope.ids.task_id.is_none() {
         return Err(vec![ValidationError {
             path: "/task_id".to_string(),
             message: format!(
@@ -326,7 +329,17 @@ pub fn event_from_value(input: &Value) -> Result<FarikEvent, Vec<ValidationError
             ),
         }]);
     }
-    let mut body = body_from_value(wire.kind, &input["body"])?;
+    // The wire enum answers "which body is this?" by shape; the kind is what the event says it
+    // is, so the body is read by kind and one that does not fit is refused.
+    let mut body = serde_json::from_value::<EventBody>(
+        serde_json::json!({ "kind": wire.kind, "body": input["body"] }),
+    )
+    .map_err(|error| {
+        vec![ValidationError {
+            path: "/body".to_string(),
+            message: format!("a {} event does not carry this body: {error}", wire.kind),
+        }]
+    })?;
     if let Some((field, actor)) = attribution(&mut body) {
         let named = actor.trim();
         if named.is_empty() {
@@ -391,40 +404,13 @@ fn envelope_from_wire(wire: &EventWire) -> Result<EventEnvelope, Vec<ValidationE
     Ok(EventEnvelope {
         seq: wire.seq,
         recorded_at: wire.recorded_at,
-        team_id,
-        project_id,
-        task_id,
-        agent_id: optional_id(wire.agent_id.as_deref()),
-        session_id: optional_id(wire.session_id.as_deref()),
-    })
-}
-
-/// The body the kind says it is, read from the value. The wire enum answers "which body is this?"
-/// by shape; the kind is what the event says it is, so the body is read by kind and one that does
-/// not fit is refused.
-fn body_from_value(kind: EventKind, body: &Value) -> Result<EventBody, Vec<ValidationError>> {
-    Ok(match kind {
-        EventKind::TaskCreated => EventBody::TaskCreated(read_body(body, kind)?),
-        EventKind::RequestTriaged => EventBody::RequestTriaged(read_body(body, kind)?),
-        EventKind::ContractWritten => EventBody::ContractWritten(read_body(body, kind)?),
-        EventKind::ContractLocked => EventBody::ContractLocked(read_body(body, kind)?),
-        EventKind::ContractUnlocked => EventBody::ContractUnlocked(read_body(body, kind)?),
-        EventKind::DriftDetected => EventBody::DriftDetected(read_body(body, kind)?),
-        EventKind::ProjectScanned => EventBody::ProjectScanned(read_body(body, kind)?),
-        EventKind::TeamUpdated => EventBody::TeamUpdated(read_body(body, kind)?),
-        EventKind::CriteriaUpdated => EventBody::CriteriaUpdated(read_body(body, kind)?),
-    })
-}
-
-fn read_body<Body: DeserializeOwned>(
-    body: &Value,
-    kind: EventKind,
-) -> Result<Body, Vec<ValidationError>> {
-    serde_json::from_value::<Body>(body.clone()).map_err(|error| {
-        vec![ValidationError {
-            path: "/body".to_string(),
-            message: format!("a {kind} event does not carry this body: {error}"),
-        }]
+        ids: EventIds {
+            team_id,
+            project_id,
+            task_id,
+            agent_id: optional_id(wire.agent_id.as_deref()),
+            session_id: optional_id(wire.session_id.as_deref()),
+        },
     })
 }
 
@@ -460,149 +446,30 @@ fn pointer(path: &str) -> String {
 /// it is not byte-for-byte what that function was given: a timestamp is written in UTC in one
 /// spelling whatever spelling it arrived in, and every id is written trimmed.
 ///
-/// The crate writes the wire form itself, field by field, rather than deriving it: `serde_json`
-/// answers with a `Result` whose error cannot happen for these types, and `docs/standards/code.md`
-/// allows no `unwrap` or `expect` here, so the alternative is an impossible error on every caller
-/// forever. The round-trip test is what keeps this honest.
+/// # Panics
+///
+/// Never: serialising derived strings, numbers and timestamps under string keys cannot fail.
 #[must_use]
 pub fn event_to_value(event: &FarikEvent) -> Value {
-    let mut wire = Map::new();
-    wire.insert("seq".to_string(), Value::from(event.envelope.seq));
-    wire.insert(
-        "recorded_at".to_string(),
-        Value::String(
-            event
-                .envelope
-                .recorded_at
-                .to_rfc3339_opts(SecondsFormat::AutoSi, true),
-        ),
-    );
-    wire.insert(
-        "team_id".to_string(),
-        Value::String(event.envelope.team_id.clone()),
-    );
-    wire.insert(
-        "project_id".to_string(),
-        Value::String(event.envelope.project_id.clone()),
-    );
-    if let Some(task_id) = &event.envelope.task_id {
-        wire.insert("task_id".to_string(), Value::String(task_id.to_string()));
-    }
-    if let Some(agent_id) = &event.envelope.agent_id {
-        wire.insert("agent_id".to_string(), Value::String(agent_id.clone()));
-    }
-    if let Some(session_id) = &event.envelope.session_id {
-        wire.insert("session_id".to_string(), Value::String(session_id.clone()));
-    }
-    wire.insert(
-        "kind".to_string(),
-        Value::String(event.body.kind().to_string()),
-    );
-    wire.insert("body".to_string(), body_to_value(&event.body));
-    Value::Object(wire)
+    serde_json::to_value(event).expect(
+        "an event serialises: every field is a derived string, number or timestamp under a string \
+         key, which serde_json cannot refuse",
+    )
 }
 
 /// One body as the canonical wire value its kind's schema describes. The store holds this rather
 /// than the whole event, because the envelope's fields are the log's own columns.
+///
+/// # Panics
+///
+/// Never: serialising derived strings and lists of strings under string keys cannot fail.
 #[must_use]
 pub fn body_to_value(body: &EventBody) -> Value {
-    let mut wire = Map::new();
-    match body {
-        EventBody::TaskCreated(body) => {
-            wire.insert("summary".to_string(), summary_to_value(&body.summary));
-            wire.insert(
-                "created_by".to_string(),
-                Value::String(body.created_by.clone()),
-            );
-        }
-        EventBody::RequestTriaged(body) => {
-            wire.insert("size".to_string(), Value::String(body.size.to_string()));
-            wire.insert("reason".to_string(), Value::String(body.reason.clone()));
-            wire.insert(
-                "triaged_by".to_string(),
-                Value::String(body.triaged_by.clone()),
-            );
-        }
-        EventBody::ContractWritten(body) => {
-            wire.insert("summary".to_string(), summary_to_value(&body.summary));
-            wire.insert(
-                "written_by".to_string(),
-                Value::String(body.written_by.clone()),
-            );
-        }
-        EventBody::ContractLocked(body) => {
-            wire.insert(
-                "locked_by".to_string(),
-                Value::String(body.locked_by.clone()),
-            );
-        }
-        EventBody::ContractUnlocked(body) => {
-            wire.insert(
-                "unlocked_by".to_string(),
-                Value::String(body.unlocked_by.clone()),
-            );
-        }
-        EventBody::DriftDetected(body) => {
-            wire.insert("drift".to_string(), Value::String(body.drift.to_string()));
-            wire.insert("detail".to_string(), Value::String(body.detail.clone()));
-        }
-        EventBody::ProjectScanned(body) => {
-            wire.insert(
-                "read_back".to_string(),
-                Value::String(body.read_back.clone()),
-            );
-            wire.insert(
-                "detected_criteria".to_string(),
-                strings(&body.detected_criteria),
-            );
-        }
-        EventBody::TeamUpdated(body) => {
-            wire.insert(
-                "team_name".to_string(),
-                Value::String(body.team_name.clone()),
-            );
-            wire.insert("agent_ids".to_string(), strings(&body.agent_ids));
-            wire.insert(
-                "updated_by".to_string(),
-                Value::String(body.updated_by.clone()),
-            );
-        }
-        EventBody::CriteriaUpdated(body) => {
-            wire.insert(
-                "criterion_names".to_string(),
-                strings(&body.criterion_names),
-            );
-            wire.insert(
-                "updated_by".to_string(),
-                Value::String(body.updated_by.clone()),
-            );
-        }
-    }
-    Value::Object(wire)
-}
-
-fn summary_to_value(summary: &ContractSummary) -> Value {
-    let mut wire = Map::new();
-    wire.insert("kind".to_string(), Value::String(summary.kind.to_string()));
-    if let Some(parent) = &summary.parent {
-        wire.insert("parent".to_string(), Value::String(parent.to_string()));
-    }
-    wire.insert("title".to_string(), Value::String(summary.title.clone()));
-    wire.insert(
-        "status".to_string(),
-        Value::String(summary.status.to_string()),
+    let mut tagged = serde_json::to_value(body).expect(
+        "a body serialises: every field is a derived string or list of strings under a string \
+         key, which serde_json cannot refuse",
     );
-    wire.insert("risk".to_string(), Value::String(summary.risk.to_string()));
-    Value::Object(wire)
-}
-
-fn strings(values: &[String]) -> Value {
-    Value::Array(
-        values
-            .iter()
-            .map(|value| Value::String(value.clone()))
-            .collect(),
-    )
+    tagged["body"].take()
 }
 
 #[cfg(test)]
@@ -625,9 +492,9 @@ mod tests {
             let event = event_from_value(&an_event_wire(kind)).expect("valid");
             assert_eq!(event.body.kind(), kind);
             assert_eq!(event.envelope.seq, 1);
-            assert_eq!(event.envelope.team_id, "farik");
+            assert_eq!(event.envelope.ids.team_id, "farik");
             assert_eq!(
-                event.envelope.task_id.is_some(),
+                event.envelope.ids.task_id.is_some(),
                 super::is_about_one_contract(kind),
                 "{kind}"
             );
@@ -638,11 +505,11 @@ mod tests {
     fn reads_every_optional_field_of_the_envelope() {
         let event = event_from_value(&a_full_event_wire(EventKind::TaskCreated)).expect("valid");
         assert_eq!(
-            event.envelope.task_id.as_ref().map(|id| id.to_string()),
+            event.envelope.ids.task_id.as_ref().map(|id| id.to_string()),
             Some("FRK-1".to_string())
         );
-        assert_eq!(event.envelope.agent_id.as_deref(), Some("maya-chen"));
-        assert_eq!(event.envelope.session_id.as_deref(), Some("session-1"));
+        assert_eq!(event.envelope.ids.agent_id.as_deref(), Some("maya-chen"));
+        assert_eq!(event.envelope.ids.session_id.as_deref(), Some("session-1"));
     }
 
     #[test]
@@ -742,9 +609,9 @@ mod tests {
         input["agent_id"] = json!("  maya-chen  ");
         input["session_id"] = json!("   ");
         let event = event_from_value(&input).expect("valid");
-        assert_eq!(event.envelope.team_id, "farik");
-        assert_eq!(event.envelope.agent_id.as_deref(), Some("maya-chen"));
-        assert!(event.envelope.session_id.is_none());
+        assert_eq!(event.envelope.ids.team_id, "farik");
+        assert_eq!(event.envelope.ids.agent_id.as_deref(), Some("maya-chen"));
+        assert!(event.envelope.ids.session_id.is_none());
     }
 
     #[test]
@@ -815,11 +682,11 @@ mod tests {
     #[test]
     fn stamps_a_body_with_the_time_and_the_ids_it_belongs_to() {
         let new = new_event(a_body(), at(), some_ids()).expect("stamped");
-        assert_eq!(new.team_id, "farik");
-        assert_eq!(new.project_id, "farik");
+        assert_eq!(new.ids.team_id, "farik");
+        assert_eq!(new.ids.project_id, "farik");
         assert_eq!(new.recorded_at, at());
         assert_eq!(new.body.kind(), EventKind::ProjectScanned);
-        assert!(new.task_id.is_none());
+        assert!(new.ids.task_id.is_none());
     }
 
     #[test]
@@ -832,10 +699,10 @@ mod tests {
             ..some_ids()
         };
         let new = new_event(a_body(), at(), ids).expect("stamped");
-        assert_eq!(new.team_id, "farik");
-        assert_eq!(new.project_id, "farik");
-        assert_eq!(new.agent_id.as_deref(), Some("maya-chen"));
-        assert!(new.session_id.is_none());
+        assert_eq!(new.ids.team_id, "farik");
+        assert_eq!(new.ids.project_id, "farik");
+        assert_eq!(new.ids.agent_id.as_deref(), Some("maya-chen"));
+        assert!(new.ids.session_id.is_none());
     }
 
     #[test]

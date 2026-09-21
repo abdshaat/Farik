@@ -8,7 +8,7 @@ The backend (every crate under `crates/`) is Rust. The front end (`packages/ui`,
 
 | Concern | Backend (Rust) | Front end (TypeScript) | Notes |
 |---|---|---|---|
-| Language | Rust, stable, pinned in `rust-toolchain.toml`; edition 2024; `unsafe_code = "forbid"` | TypeScript, `strict: true`, `noUncheckedIndexedAccess: true`, `exactOptionalPropertyTypes: true` | No `unwrap` or `expect` outside tests and `LazyLock` initialisers, and none without a message that says why it cannot fail. No `any` outside a `// reason:` comment; no `@ts-ignore`. |
+| Language | Rust, stable, pinned in `rust-toolchain.toml`; edition 2024; `unsafe_code = "forbid"` | TypeScript, `strict: true`, `noUncheckedIndexedAccess: true`, `exactOptionalPropertyTypes: true` | No `unwrap` or `expect` outside tests, `LazyLock` initialisers, and `serde_json::to_value` on a type whose `Serialize` is derived with string keys (it cannot fail, and a `Result` for it would push an impossible error onto every caller), and none without a message that says why it cannot fail. No `any` outside a `// reason:` comment; no `@ts-ignore`. |
 | Package manager | Cargo workspace; `Cargo.lock` committed; every dependency pinned with `=` | pnpm workspace; lockfile committed; `pnpm install --frozen-lockfile` in CI | Dependencies are exact versions in both. |
 | Lint and format | `rustfmt` and `clippy` with `-D warnings`, `clippy::all` and `clippy::pedantic` on | Biome, one config at the root | A warning nobody fixes is noise; both toolchains fail on warnings. |
 | Tests | `cargo test`; unit tests in the module they test, integration tests under `tests/` | Vitest, co-located | Coverage is reported, not gated; a coverage gate rewards bad tests. |

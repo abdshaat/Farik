@@ -53,8 +53,8 @@ impl ProjectIds {
             .map_err(|error| error.to_string())?;
         if let Some(event) = first.first() {
             return Ok(Self {
-                team_id: event.envelope.team_id.clone(),
-                project_id: event.envelope.project_id.clone(),
+                team_id: event.envelope.ids.team_id.clone(),
+                project_id: event.envelope.ids.project_id.clone(),
             });
         }
         Ok(Self {

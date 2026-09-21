@@ -911,11 +911,7 @@ fn moved_to(repository: &TempRepo, task_id: &str, status: &str) {
     let event = event_from_value(&wire).expect("the fixture is schema-valid");
     let written = NewEvent {
         recorded_at: event.envelope.recorded_at,
-        team_id: event.envelope.team_id,
-        project_id: event.envelope.project_id,
-        task_id: event.envelope.task_id,
-        agent_id: event.envelope.agent_id,
-        session_id: event.envelope.session_id,
+        ids: event.envelope.ids,
         body: event.body,
     };
     projections

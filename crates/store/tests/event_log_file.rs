@@ -291,7 +291,7 @@ fn projects_every_event_when_several_processes_append_and_project_at_once() {
                     let mut refused = Vec::new();
                     for event in 0..EVENTS_PER_PROCESS {
                         let mut filed = an_event(EventKind::TaskCreated);
-                        filed.task_id = Some(
+                        filed.ids.task_id = Some(
                             format!("FRK-{}", process * EVENTS_PER_PROCESS + event + 1)
                                 .parse()
                                 .expect("a task id"),

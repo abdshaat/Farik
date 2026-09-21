@@ -281,7 +281,7 @@ fn projection_of_row(row: ProjectedRow) -> Result<TaskProjection, StoreError> {
 
 /// Applies one event to the projection tables, leaving the cursor to the caller.
 fn apply_to(transaction: &Transaction<'_>, event: &FarikEvent) -> Result<(), StoreError> {
-    let Some(task_id) = &event.envelope.task_id else {
+    let Some(task_id) = &event.envelope.ids.task_id else {
         // Only the five kinds that are about one contract touch the board, and the protocol crate
         // refuses one of those without a task id. The rest — a scan, a team, a criterion library,
         // a drift report — are about the project.
@@ -482,7 +482,7 @@ mod tests {
     /// The fixture event of one kind, about the contract `task_id`.
     fn about(kind: EventKind, task_id: &str) -> NewEvent {
         let mut event = a_new_event(kind);
-        event.task_id = Some(task_id.parse().expect("a task id"));
+        event.ids.task_id = Some(task_id.parse().expect("a task id"));
         event
     }
 
@@ -507,11 +507,7 @@ mod tests {
         let event = event_from_value(&wire).expect("the fixture is schema-valid");
         NewEvent {
             recorded_at: event.envelope.recorded_at,
-            team_id: event.envelope.team_id,
-            project_id: event.envelope.project_id,
-            task_id: event.envelope.task_id,
-            agent_id: event.envelope.agent_id,
-            session_id: event.envelope.session_id,
+            ids: event.envelope.ids,
             body: event.body,
         }
     }
