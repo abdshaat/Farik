@@ -91,6 +91,15 @@ impl Project {
         .map_err(|error| crate::refusal::event(&error))
     }
 
+    /// The board this project's log makes, caught up to the log as it is now.
+    ///
+    /// # Errors
+    ///
+    /// The sentence the store's refusal reads as.
+    pub fn projections(&self) -> Result<farik_store::Projections, String> {
+        farik_store::open_projections(Arc::clone(&self.log)).map_err(|error| error.to_string())
+    }
+
     /// Appends one event and answers with the sequence number the log gave it.
     ///
     /// # Errors

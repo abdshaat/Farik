@@ -6,16 +6,26 @@
 //! function, and writes the answer to the streams it was given, so a test runs a command without
 //! spawning a process (`docs/SPEC.md` sections 5.11, 5.16, F2, F3).
 
+/// The lifecycle, one line per task.
+pub mod board;
 /// Taking a contract from the team, and giving it back.
 pub mod contract;
+/// Everything this project disagrees with itself about.
+pub mod doctor;
 /// Making a repository a Farik project.
 pub mod init;
+/// The event log, filtered and exported.
+pub mod log;
 /// The project a command runs against.
 pub mod project;
 /// The governor's refusals in words.
 pub mod refusal;
+/// One contract, and what happened to it.
+pub mod show;
 /// Filing a request.
 pub mod task;
+/// The team's rules and its criterion library.
+pub mod team;
 /// Sizing a request.
 pub mod triage;
 
@@ -55,6 +65,10 @@ pub struct Report {
     pub lines: Vec<String>,
     /// The same, as an object a script can read.
     pub json: Value,
+    /// When this is set, `--json` prints one of these per line instead of `json`. `farik log` is the
+    /// one command that uses it: F11 calls the log an export, and an export read a line at a time is
+    /// what survives being large.
+    pub json_lines: Option<Vec<Value>>,
 }
 
 /// The command ran and did what it said.
@@ -108,6 +122,44 @@ enum Commands {
         #[command(subcommand)]
         command: ContractCommands,
     },
+    /// Show the lifecycle, one line per task.
+    Board,
+    /// Show the event log, oldest first. With --json, one JSON object per line.
+    Log {
+        /// Only events about this task.
+        #[arg(long)]
+        task: Option<String>,
+        /// Only events of this kind.
+        #[arg(long)]
+        kind: Option<String>,
+        /// At most this many, from the oldest up.
+        #[arg(long)]
+        limit: Option<usize>,
+    },
+    /// Say where the files and the log disagree, and what else this project got wrong.
+    Doctor,
+    /// Show the team's rules (5.12).
+    Rules {
+        #[command(subcommand)]
+        command: RulesCommands,
+    },
+    /// Show the criterion library (5.13).
+    Criteria {
+        #[command(subcommand)]
+        command: CriteriaCommands,
+    },
+}
+
+#[derive(Subcommand)]
+enum RulesCommands {
+    /// Print the rules every command and every path check is held to.
+    Show,
+}
+
+#[derive(Subcommand)]
+enum CriteriaCommands {
+    /// Print every criterion a contract may refer to by name.
+    List,
 }
 
 #[derive(Subcommand)]
@@ -116,6 +168,11 @@ enum TaskCommands {
     Create {
         /// The YAML contract to file. Farik assigns the id.
         file: PathBuf,
+    },
+    /// Show one contract and what happened to it.
+    Show {
+        /// The task to show.
+        task_id: String,
     },
 }
 
@@ -182,6 +239,30 @@ pub fn run_cli(args: &[String], io: &mut CliIo<'_>) -> i32 {
             command: ContractCommands::Unlock { task_id },
         } => open_project(&io.cwd, now)
             .and_then(|project| contract::hold(&project, task_id, false, now)),
+        Commands::Task {
+            command: TaskCommands::Show { task_id },
+        } => open_project(&io.cwd, now).and_then(|project| show::show(&project, task_id)),
+        Commands::Board => open_project(&io.cwd, now).and_then(|project| board::board(&project)),
+        Commands::Log { task, kind, limit } => open_project(&io.cwd, now)
+            .and_then(|project| log::log(&project, task.as_ref(), kind.as_ref(), *limit)),
+        Commands::Doctor => {
+            let found =
+                open_project(&io.cwd, now).and_then(|project| doctor::doctor(&project, now));
+            // `doctor` exits 1 when it found something, so that a script can gate on it. That is not
+            // a refusal, so the report goes to stdout as any other command's does.
+            let told = match &found {
+                Ok(report) => doctor::found_something(report),
+                Err(_) => false,
+            };
+            let code = report(found, parsed.json, io);
+            return if told && code == OK { REFUSED } else { code };
+        }
+        Commands::Rules {
+            command: RulesCommands::Show,
+        } => open_project(&io.cwd, now).and_then(|project| team::rules(&project)),
+        Commands::Criteria {
+            command: CriteriaCommands::List,
+        } => open_project(&io.cwd, now).and_then(|project| team::criteria(&project)),
     };
     report(outcome, parsed.json, io)
 }
@@ -191,7 +272,14 @@ fn report(outcome: Result<Report, String>, as_json: bool, io: &mut CliIo<'_>) ->
     match outcome {
         Ok(done) => {
             if as_json {
-                say(&mut io.stdout, &format!("{}", done.json));
+                match &done.json_lines {
+                    Some(lines) => {
+                        for line in lines {
+                            say(&mut io.stdout, &format!("{line}"));
+                        }
+                    }
+                    None => say(&mut io.stdout, &format!("{}", done.json)),
+                }
             } else {
                 for line in &done.lines {
                     say(&mut io.stdout, line);

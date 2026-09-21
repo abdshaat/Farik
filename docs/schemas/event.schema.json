@@ -157,7 +157,7 @@
       "additionalProperties": false,
       "required": ["drift", "detail"],
       "properties": {
-        "drift": { "type": "string", "enum": ["contract_without_events", "events_without_contract", "status_mismatch"] },
+        "drift": { "type": "string", "enum": ["contract_without_events", "events_without_contract", "status_mismatch", "lock_mismatch", "contract_unreadable"] },
         "detail": { "type": "string" }
       }
     },

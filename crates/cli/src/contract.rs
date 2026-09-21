@@ -103,5 +103,6 @@ pub fn hold(
             "locked": held,
             "events": [seq],
         }),
+        json_lines: None,
     })
 }

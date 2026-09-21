@@ -138,6 +138,7 @@ pub fn init(cwd: &Path, now: DateTime<Utc>) -> Result<Report, String> {
             "criteria": names_of(&library.criteria),
             "events": recorded,
         }),
+        json_lines: None,
     })
 }
 

@@ -153,6 +153,7 @@ pub fn create(
             "path": format!(".farik/contracts/{}.yaml", contract.id.as_str()),
             "events": [seq],
         }),
+        json_lines: None,
     })
 }
 

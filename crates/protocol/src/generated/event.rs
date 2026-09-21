@@ -310,6 +310,10 @@ pub enum DriftDetectedBodyDrift {
     EventsWithoutContract,
     #[serde(rename = "status_mismatch")]
     StatusMismatch,
+    #[serde(rename = "lock_mismatch")]
+    LockMismatch,
+    #[serde(rename = "contract_unreadable")]
+    ContractUnreadable,
 }
 impl ::std::fmt::Display for DriftDetectedBodyDrift {
     fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
@@ -317,6 +321,8 @@ impl ::std::fmt::Display for DriftDetectedBodyDrift {
             Self::ContractWithoutEvents => f.write_str("contract_without_events"),
             Self::EventsWithoutContract => f.write_str("events_without_contract"),
             Self::StatusMismatch => f.write_str("status_mismatch"),
+            Self::LockMismatch => f.write_str("lock_mismatch"),
+            Self::ContractUnreadable => f.write_str("contract_unreadable"),
         }
     }
 }
@@ -327,6 +333,8 @@ impl ::std::str::FromStr for DriftDetectedBodyDrift {
             "contract_without_events" => Ok(Self::ContractWithoutEvents),
             "events_without_contract" => Ok(Self::EventsWithoutContract),
             "status_mismatch" => Ok(Self::StatusMismatch),
+            "lock_mismatch" => Ok(Self::LockMismatch),
+            "contract_unreadable" => Ok(Self::ContractUnreadable),
             _ => Err("invalid value".into()),
         }
     }

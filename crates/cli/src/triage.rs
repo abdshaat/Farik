@@ -118,6 +118,7 @@ pub fn triage(
             "reason": reason,
             "events": [seq],
         }),
+        json_lines: None,
     })
 }
 
