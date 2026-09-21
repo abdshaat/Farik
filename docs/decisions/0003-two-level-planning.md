@@ -1,7 +1,7 @@
 # 0003. Two-level planning: phases and steps, fully decided before code
 
 Date: 2026-09-14
-Status: accepted
+Status: accepted, amended by ADR 0008 (2026-09-21)
 
 ## Context
 
@@ -12,6 +12,8 @@ The alternative is to keep single-level plans and rely on review to catch both p
 ## Decision
 
 Planning is two-level. The project plan divides the project into phases and phases into steps. Each phase is one branch and one pull request; each step has its own plan and lands as commits on the phase branch. A plan is ready to execute only when every decision it rests on is written down, nothing in it is ambiguous, and it depends on nothing that is not already merged or already committed earlier on the same phase branch. These three rules are checked by a reviewer before the first task starts. Details in `docs/standards/workflow.md` stage 2 (Plan).
+
+Amended by ADR 0008 (2026-09-21): the two levels and the three rules stand, but a step plan states its decisions, its public signatures, its file map and its test list rather than the implementation itself, and the readiness review is one round rather than as many as the plan invites.
 
 ## Consequences
 
