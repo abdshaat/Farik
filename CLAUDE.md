@@ -34,4 +34,6 @@ Phase 0 (foundation) is done and merged (pull request #4): the Cargo workspace, 
 
 Phase 1 (harness core) is done and merged (pull request #5): `farik-core` decides every rule of `docs/SPEC.md` section 5 that is a decision rather than an effect. Three rules of section 5 are recorded in `docs/plans/project-plan.md` as needing a decision in the spec rather than a function in `core`; read that note before adding one of them by hand.
 
-Phase 2 (protocol, store, and the first command line) is in progress on `claude/phase-0-implementation-izm38y` (the harness-assigned branch, reused because a session may not push to another branch without permission), in pull request #6. Its step plans live under `docs/plans/phase-2-protocol-store-cli/` and are written one at a time from `docs/plans/project-plan.md`.
+Phase 2 (protocol, store, and the first command line) is done and merged (pull request #6): the event log, projections, the git adapter, the `.farik/` files, the project scan, reconciliation, and eleven `farik` commands. Its step plans live under `docs/plans/phase-2-protocol-store-cli/`. Two of its steps carry a gap the pull request records: step 08's landing review was cut off by a rate limit and step 09 was not reviewed at all.
+
+Phase 3 (runtime and Milestone 0) is next and is the first phase planned under ADR 0008. The step plans of phases 0 to 2 were written under the old template and are ten to fifty times the size the new one asks for; read them for what was decided, not as examples to copy.
