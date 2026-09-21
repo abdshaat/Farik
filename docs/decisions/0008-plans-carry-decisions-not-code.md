@@ -27,6 +27,8 @@ Execution gets slower per step, and that is the point: the work returns to the e
 
 A plan that no longer carries its code can be under-specified in a way the old template made impossible. The guard is that its signatures and its test list are exact. A step whose interfaces cannot be written down without a forward reference is still a step in the wrong order, and the no-forward-dependency rule is unaffected, because it is a statement about interfaces and plans keep those.
 
+This is the first place Farik's workflow departs from the superpowers plugin adopted in ADR 0001 rather than merely adding to it. The plugin's planning skill writes the implementation into the plan, which is where the habit came from, and it will go on doing so. `docs/standards/workflow.md` is the contract and the plugin is the implementation, so a plan the plugin drafts is edited down before review — a manual step, and the most likely way this decision quietly stops being followed.
+
 Nothing enforces the size target mechanically. A `cargo xtask` check over plan files was considered and not built: a line count is a poor proxy for the thing being limited, and a target a reviewer applies is enough while there is one reviewer.
 
 The three phases already merged were planned under the old template. Their plans are left as they are; they are the evidence for this decision and rewriting them would cost what this decision is meant to save.

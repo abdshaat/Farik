@@ -10,6 +10,8 @@ Thank you for considering it. Farik holds itself to the same discipline it impos
 
 Install the [superpowers](https://github.com/obra/superpowers) plugin; its skills implement the workflow above and trigger on their own. The repository's `CLAUDE.md` carries the Farik-specific rules. Check the plugin's README for the current install command.
 
+They diverge in one place. The plugin's planning skill writes the implementation into the plan, which `docs/standards/workflow.md` stage 2 stopped asking for in ADR 0008. Edit a drafted plan down to its decisions, signatures, file map and test list before sending it for review; the document wins over the plugin.
+
 ## If you work by hand
 
 Follow `docs/standards/workflow.md` step by step. The project plan is `docs/plans/project-plan.md`, the step plan template is `docs/plans/step-template.md`, and the ADR template is `docs/decisions/0000-template.md`. The pull request template asks for the evidence the workflow requires; a pull request without it will be sent back.

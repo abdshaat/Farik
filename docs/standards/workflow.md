@@ -19,7 +19,7 @@ Each of these words has exactly one meaning in this repository. Documents that n
 
 The product has its own vocabulary (task contract, sprint, ceremony, governor, tier) in `docs/SPEC.md` section 13. "Task" there means a contracted unit of work for an agent team and is unrelated to a plan task here; the two never appear in the same document except the project plan, which says which it means.
 
-The process is the one enforced by the [superpowers](https://github.com/obra/superpowers) plugin for Claude Code, adopted as-is with Farik-specific paths and a few additions. Contributors using Claude Code should install the plugin; its skills trigger automatically. Contributors working by hand follow the same steps manually. ADR 0001 records the adoption.
+The process is the one enforced by the [superpowers](https://github.com/obra/superpowers) plugin for Claude Code, adopted with Farik-specific paths, a few additions, and — since ADR 0008 — one departure: the plugin's planning skill writes the implementation into the plan, and stage 2 above does not. Where the two disagree this document wins, which is what ADR 0001 said would happen. Contributors using Claude Code should install the plugin and let its skills trigger, but a plan it drafts is edited down to what stage 2 asks for before it goes to a reviewer. Contributors working by hand follow the same steps manually. ADR 0001 records the adoption.
 
 ## The sequence
 

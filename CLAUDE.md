@@ -8,7 +8,7 @@ Farik is an operating system for small teams of AI agents with a governance harn
 - Code: `docs/standards/code.md`. Naming (branches, commits, files, identifiers, wire formats, events), style, and the toolchain.
 - Decisions: `docs/decisions/`. Read the existing ADRs before proposing a change that touches architecture, tooling, or process. Add one when you make such a change.
 
-If the superpowers plugin is installed, its skills implement this workflow; use them. If it is not, follow the workflow document by hand. Either way the rules below hold.
+If the superpowers plugin is installed, its skills implement this workflow; use them, with one exception: its planning skill writes the implementation into the plan and hard rule 3 does not, so edit a plan it drafts down to decisions, signatures, the file map and the test list before review (ADR 0008). If the plugin is not installed, follow the workflow document by hand. Either way the rules below hold.
 
 ## Hard rules
 
