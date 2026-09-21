@@ -358,6 +358,7 @@ dependencies = [
  "regress",
  "serde",
  "serde_json",
+ "typify",
 ]
 
 [[package]]
@@ -370,6 +371,7 @@ dependencies = [
  "regress",
  "serde",
  "serde_json",
+ "typify",
 ]
 
 [[package]]
@@ -826,16 +828,6 @@ name = "pkg-config"
 version = "0.3.34"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f6b464fbc74e149a392436b17d523f769e057cb6877f6a5c4618bc6f11800548"
-
-[[package]]
-name = "prettyplease"
-version = "0.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2bfe0f4c752e450fc2faf62654f1c134747922825d5b04ca717b8874f41a40c0"
-dependencies = [
- "proc-macro2",
- "syn 3.0.5",
-]
 
 [[package]]
 name = "proc-macro2"
@@ -1432,11 +1424,7 @@ name = "xtask"
 version = "0.0.0"
 dependencies = [
  "anyhow",
- "prettyplease",
- "schemars",
  "serde_json",
- "syn 3.0.5",
- "typify",
 ]
 
 [[package]]

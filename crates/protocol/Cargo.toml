@@ -12,6 +12,7 @@ chrono.workspace = true
 farik-core.workspace = true
 jsonschema.workspace = true
 regress.workspace = true
+typify.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 

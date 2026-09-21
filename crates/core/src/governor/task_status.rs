@@ -32,9 +32,10 @@ mod tests {
 
     #[test]
     fn lists_every_status_of_the_schema_exactly_once() {
-        let schema: Value =
-            serde_json::from_str(include_str!("../generated/task_contract.schema.json"))
-                .expect("the embedded schema is valid JSON");
+        let schema: Value = serde_json::from_str(include_str!(
+            "../../../../docs/schemas/task-contract.schema.json"
+        ))
+        .expect("the embedded schema is valid JSON");
         let wire: Vec<String> = schema["properties"]["status"]["enum"]
             .as_array()
             .expect("status is an enum")

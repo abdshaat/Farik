@@ -91,7 +91,7 @@ Before any claim that a task, a plan, or a pull request is done:
 
 Phrases that are not allowed in a completion claim: "should work", "probably passes", "seems to work", "I'm confident", "done" without output. A paraphrased success report from an agent or a subagent is not evidence either. Evidence is the command and its output, pasted into the pull request.
 
-The full check is `cargo xtask check` once the workspace exists (format check, clippy, tests, generated-file freshness, the bare-TODO check, the core no-I/O check, and the front end's checks once it exists). Until then there is no check command, and the verification section of a pull request says so explicitly.
+The full check is `cargo xtask check` once the workspace exists (format check, clippy, tests, the bare-TODO check, the core no-I/O check, and the front end's checks once it exists). Until then there is no check command, and the verification section of a pull request says so explicitly.
 
 ### 5. Pull request and review
 

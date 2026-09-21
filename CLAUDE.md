@@ -26,7 +26,7 @@ If the superpowers plugin is installed, its skills implement this workflow; use 
 
 ## Commands
 
-`cargo xtask check` is the full check (format, clippy, tests, generated-file freshness, bare-TODO check, the core no-I/O check; plus the front end's `pnpm check` once it exists) once the workspace is scaffolded. Until the scaffold exists there is no check command; say so in any verification section rather than implying one ran.
+`cargo xtask check` is the full check (format, clippy, tests, bare-TODO check, the core no-I/O check; plus the front end's `pnpm check` once it exists) once the workspace is scaffolded. Until the scaffold exists there is no check command; say so in any verification section rather than implying one ran.
 
 ## Current state
 

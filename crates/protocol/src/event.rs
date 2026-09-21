@@ -23,12 +23,12 @@ use crate::generated::event::FarikEvent as EventWire;
 /// Builders for test events, usable by every crate's tests.
 pub mod fixtures;
 
-const SCHEMA_JSON: &str = include_str!("generated/event.schema.json");
+const SCHEMA_JSON: &str = include_str!("../../../docs/schemas/event.schema.json");
 
 static VALIDATOR: LazyLock<Validator> = LazyLock::new(|| {
     let schema: Value = serde_json::from_str(SCHEMA_JSON).expect(
-        "the embedded event schema is valid JSON: it is a copy of docs/schemas/ written by \
-         cargo xtask generate and checked for freshness by cargo xtask check",
+        "the embedded event schema is valid JSON: it is the file in docs/schemas/ \
+         that typify generated this crate's types from at compile time",
     );
     jsonschema::options()
         .should_validate_formats(true)
