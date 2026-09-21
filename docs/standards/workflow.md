@@ -14,7 +14,7 @@ Each of these words has exactly one meaning in this repository. Documents that n
 | Phase | A body of product work in the project plan that ends in something usable; one branch, one pull request | `docs/plans/project-plan.md`, ADR 0003 |
 | Step | A unit of work inside a phase with its own plan file; lands as commits on the phase branch | `docs/plans/project-plan.md`, `docs/plans/step-template.md` |
 | Task | A unit inside a step plan with its own test cycle and its own commit | `docs/plans/step-template.md` |
-| Checklist item | One two-to-five-minute action inside a task: write the failing test, watch it fail, and so on | `docs/plans/step-template.md` |
+| Checklist item | One step of a task's red-green-refactor loop: the tests written and watched to fail, the code that makes them pass, the refactor, the commit | `docs/plans/step-template.md` |
 | Gate | A rule a reviewer or the check command applies before something moves on (readiness of a plan, Definition of Done of a change) | this document |
 
 The product has its own vocabulary (task contract, sprint, ceremony, governor, tier) in `docs/SPEC.md` section 13. "Task" there means a contracted unit of work for an agent team and is unrelated to a plan task here; the two never appear in the same document except the project plan, which says which it means.
@@ -43,7 +43,7 @@ Planning has two levels, and both are written before any product code.
 
 The project plan, `docs/plans/project-plan.md`, divides the whole project into phases and each phase into steps. A phase is a body of work that ends in something a person can use or verify (a command-line harness, a running desktop shell). A step is a self-contained unit of work inside a phase, executed from its own plan and landed as a group of commits on the phase branch. A phase is one pull request. The project plan lists every phase and step in order, one line each, with the decisions each phase depends on and whether each decision is made. A step is not started until every decision its phase depends on is recorded as made, in the project plan or in an ADR.
 
-The step plan, one file per step at `docs/plans/phase-<n>-<name>/step-<nn>-<name>.md`, is written from `docs/plans/step-template.md` for a skilled developer who knows nothing about this codebase or the problem domain. Its header carries the goal, the spec reference (section and F-number), the decisions it rests on, the steps it depends on, the architecture notes, and the global constraints. Then tasks.
+The step plan, one file per step at `docs/plans/phase-<n>-<name>/step-<nn>-<name>.md`, is written from `docs/plans/step-template.md` for a skilled developer who knows nothing about this codebase or the problem domain. Its header carries the goal, the spec reference (section and F-number), the decisions it rests on, the steps it depends on, the architecture notes, the global constraints, the file map, and the interfaces the step consumes and produces. Then tasks.
 
 A plan states what has been decided and what the boundaries are; it does not contain the implementation. Signatures yes, function bodies no. Test names and what each asserts yes, test code no. Exact file paths yes, and expected command output yes, because that is the verification and nothing else checks it. A plan carrying its own implementation is the codebase written twice, and the copy in Markdown is the one no compiler can read; ADR 0008 records the measurements that settled this. A plan past roughly 300 lines is usually a step that wants splitting, or a plan that has started writing the code.
 
