@@ -28,7 +28,7 @@ ADRs added or changed, or "none".
 ## Checklist
 
 - [ ] Every task in every step plan of the phase is ticked and has a commit
-- [ ] Each step was reviewed against its plan when it landed, and the review is recorded in this thread
+- [ ] Each step was reviewed against its plan when it landed, with mutation as the bar, and the review is recorded in this thread
 - [ ] New behavior has tests that were watched to fail first
 - [ ] No files changed outside the plan's file map, or the plan was updated and the reason is above
 - [ ] `docs/SPEC.md` updated if behavior changed
