@@ -14,12 +14,12 @@ Each of these words has exactly one meaning in this repository. Documents that n
 | Phase | A body of product work in the project plan that ends in something usable; one branch, one pull request | `docs/plans/project-plan.md`, ADR 0003 |
 | Step | A unit of work inside a phase with its own plan file; lands as commits on the phase branch | `docs/plans/project-plan.md`, `docs/plans/step-template.md` |
 | Task | A unit inside a step plan with its own test cycle and its own commit | `docs/plans/step-template.md` |
-| Checklist item | One two-to-five-minute action inside a task: write the failing test, watch it fail, and so on | `docs/plans/step-template.md` |
+| Checklist item | One step of a task's red-green-refactor loop: the tests written and watched to fail, the code that makes them pass, the refactor, the commit | `docs/plans/step-template.md` |
 | Gate | A rule a reviewer or the check command applies before something moves on (readiness of a plan, Definition of Done of a change) | this document |
 
 The product has its own vocabulary (task contract, sprint, ceremony, governor, tier) in `docs/SPEC.md` section 13. "Task" there means a contracted unit of work for an agent team and is unrelated to a plan task here; the two never appear in the same document except the project plan, which says which it means.
 
-The process is the one enforced by the [superpowers](https://github.com/obra/superpowers) plugin for Claude Code, adopted as-is with Farik-specific paths and a few additions. Contributors using Claude Code should install the plugin; its skills trigger automatically. Contributors working by hand follow the same steps manually. ADR 0001 records the adoption.
+The process is the one enforced by the [superpowers](https://github.com/obra/superpowers) plugin for Claude Code, adopted with Farik-specific paths, a few additions, and — since ADR 0008 — one departure: the plugin's planning skill writes the implementation into the plan, and stage 2 above does not. Where the two disagree this document wins, which is what ADR 0001 said would happen. Contributors using Claude Code should install the plugin and let its skills trigger, but a plan it drafts is edited down to what stage 2 asks for before it goes to a reviewer. Contributors working by hand follow the same steps manually. ADR 0001 records the adoption.
 
 ## The sequence
 
@@ -43,15 +43,21 @@ Planning has two levels, and both are written before any product code.
 
 The project plan, `docs/plans/project-plan.md`, divides the whole project into phases and each phase into steps. A phase is a body of work that ends in something a person can use or verify (a command-line harness, a running desktop shell). A step is a self-contained unit of work inside a phase, executed from its own plan and landed as a group of commits on the phase branch. A phase is one pull request. The project plan lists every phase and step in order, one line each, with the decisions each phase depends on and whether each decision is made. A step is not started until every decision its phase depends on is recorded as made, in the project plan or in an ADR.
 
-The step plan, one file per step at `docs/plans/phase-<n>-<name>/step-<nn>-<name>.md`, is written from `docs/plans/step-template.md` for a skilled developer who knows nothing about this codebase or the problem domain. Its header carries the goal, the spec reference (section and F-number), the decisions it rests on, the steps it depends on, the architecture notes, and the global constraints. Then tasks.
+The step plan, one file per step at `docs/plans/phase-<n>-<name>/step-<nn>-<name>.md`, is written from `docs/plans/step-template.md` for a skilled developer who knows nothing about this codebase or the problem domain. Its header carries the goal, the spec reference (section and F-number), the decisions it rests on, the steps it depends on, the architecture notes, the global constraints, the file map, and the interfaces the step consumes and produces. Then tasks.
 
-A task is the smallest unit that carries its own test cycle and deserves a fresh reviewer's look. Each task lists the exact files it creates, modifies, and tests; the interfaces it consumes from earlier tasks and produces for later ones; the actual code, not "add validation here"; the exact commands to run with expected output; and a checkbox per checklist item. Checklist items take two to five minutes each: write the failing test, watch it fail, write the minimal code, watch it pass, commit. Repeat code across tasks rather than referencing an earlier task. Define every type and signature inside the plan. Map the file structure before writing tasks so that two tasks never fight over one file.
+A plan states what has been decided and what the boundaries are; it does not contain the implementation. Signatures yes, function bodies no. Test names and what each asserts yes, test code no. Exact file paths yes, and expected command output yes, because that is the verification and nothing else checks it. A plan carrying its own implementation is the codebase written twice, and the copy in Markdown is the one no compiler can read; ADR 0008 records the measurements that settled this. A plan past roughly 300 lines is usually a step that wants splitting, or a plan that has started writing the code.
 
-Three rules decide whether a plan is ready to execute. A reviewer checks all three before the first task starts, and a plan that fails any of them goes back to brainstorming.
+A task is the smallest unit that carries its own test cycle and deserves a fresh reviewer's look. Each task lists the exact files it creates, modifies, and tests; the interfaces it consumes from earlier tasks and produces for later ones; the tests to write, each named and each with what it asserts; and a checkbox per step of the loop. Map the file structure before writing tasks so that two tasks never fight over one file, and state every type and signature the step produces or consumes, which is what the no-forward-dependency rule is checked against.
+
+Three rules decide whether a plan is ready to execute. A reviewer other than the author checks all three before the first task starts, and a plan that fails any of them goes back to brainstorming.
+
+That review is one round. A second round happens only when the first finds a decision the plan rests on that has not been made — the one failure that execution cannot recover from, because an undecided question gets decided silently and differently by whoever hits it next. Everything else the reviewer finds is written down and carried into execution. Rounds three and beyond are a sign that the plan is being proof-read rather than reviewed, which is work the compiler does better and faster.
 
 Every decision is made. Features, enhancements, names, data shapes, library choices, error behavior: all decided and written down in the plan's Decisions section or in an ADR it links. A decision that affects more than one step is an ADR. The Open questions section of a ready plan says "none".
 
-No ambiguity. Every file path is exact. Every code block is the code that will be written. Every command has its expected output. Words like "appropriate", "as needed", "and so on", "TBD", and "similar to" fail review, as does any task whose checklist items a second reader could carry out differently from the first.
+No ambiguity, in what the plan is for: the decisions, the boundaries, the interfaces. Every file path is exact. Every signature is exact. Every named test says what it asserts, specifically enough that two people would write the same assertion. Every command has its expected output. Words like "appropriate", "as needed", "and so on", "TBD", and "similar to" fail review.
+
+Ambiguity inside an implementation is not this gate's job. A type that does not line up, a call with the wrong arity, a case left unhandled: `cargo check` finds those in seconds and a reader finds them in an hour, if at all. The plan fixes what the compiler cannot know — what was decided and why — and the compiler and a test watched to fail take the rest.
 
 No forward dependencies. A step depends only on phases already merged to `main` and on earlier steps already committed on the same phase branch. A task depends only on earlier tasks in the same plan. Nothing in a plan stubs, mocks, or leaves a placeholder for work that a later step will do; if a later step needs an interface, the later step adds it. Phases are ordered so that this holds across the whole project plan, and a step whose plan cannot be written without a forward reference means the phase is in the wrong order.
 
@@ -95,6 +101,8 @@ Then open the phase's pull request to `main` using the template. One phase is on
 
 A pull request never contains work from two phases. Each step inside a phase is still reviewed as it lands: the reviewer reads the step's commits against its plan on the phase branch and records the review in the pull request thread, so that the final review of the whole phase is a confirmation rather than a first reading.
 
+This landing review is where the defects are, and it is not optional. It reads running code, not a plan, and its acceptance bar is mutation: re-introduce the bug each test claims to catch and confirm the suite notices. A test that passes both with the code and with the code broken is not a test, and a green check does not distinguish them. Phase 2's landing reviews refused sixteen times and found ten correctness defects that a green check had not — out-of-order sequence numbers, a deferred transaction refusing nineteen times in six hundred, `is_clean` answering about a different repository, a product boundary failing open. None were findable by reading a plan. Reviewer attention is the scarce thing this workflow spends, and this is where it buys the most.
+
 Reviewers report findings by severity: critical (blocks merge: correctness, security, a rule in this document broken), important (must be addressed or explicitly deferred with a reason), and minor (author's call). A critical finding is never resolved by a comment; it is resolved by a commit.
 
 Receiving review: address each finding or reply with a reason; never resolve a thread silently. Push fixes as new commits, not force-pushes, so the reviewer can see what changed.
@@ -124,3 +132,5 @@ When something is broken, resist the urge to try fixes. Follow the four steps of
 ## What this workflow costs
 
 It is slower per change than editing and hoping. That is the point, and it is also a real cost. Expect the first few changes to feel heavy while templates and habits settle. If a stage consistently produces nothing of value for a class of change, propose removing it for that class through an ADR rather than skipping it quietly.
+
+That clause has been used once. After three phases, the measurements said the plan stage was absorbing the work the execution stage was meant to do, at ten hours of planning per fourteen minutes of execution across five steps, while the defects went on being found in running code. ADR 0008 is the result, and it changed what a plan contains rather than removing the stage.
