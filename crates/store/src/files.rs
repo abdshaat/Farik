@@ -432,9 +432,11 @@ fn yaml_options() -> serde_saphyr::Options {
 /// The wire value one piece of YAML holds, named by the path it came from so that a refusal says
 /// which file it is about.
 ///
-/// This is the one place any YAML Farik reads is parsed, whatever directory it came from: a contract
-/// a person hands `farik task create` is held to the same dialect as the files under `.farik/` — no
-/// duplicate mapping key, no second document, the alias budget, and `true` spelled `true` (ADR 0007).
+/// This is the one place the YAML a project holds or a person hands Farik is parsed, whatever
+/// directory it came from: a contract a person hands `farik task create` is held to the same dialect
+/// as the files under `.farik/` — no duplicate mapping key, no second document, the alias budget,
+/// and `true` spelled `true` (ADR 0007). The other place is `farik-roles`, which reads the role
+/// files embedded in the binary with the same options, because it cannot depend on this crate.
 ///
 /// Read the way a file a person edits by hand should be. `UserMessageFormatter` is the crate's own
 /// answer to the question, and its own default is explicitly not for a person to read: it recommends

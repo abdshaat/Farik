@@ -236,8 +236,8 @@ fn parse_skill(name: &str, text: &str) -> Result<Skill, String> {
     })
 }
 
-/// The YAML dialect every file Farik reads is held to (ADR 0007): `true` spelled `true`, as
-/// `farik_store::files` reads it.
+/// The YAML dialect every file Farik reads is held to (ADR 0007): `true` spelled `true`. A copy of
+/// `farik_store::files`' options, since this crate cannot depend on the store; keep the two equal.
 fn yaml_options() -> serde_saphyr::Options {
     let mut options = serde_saphyr::Options::default();
     options.strict_booleans = true;
@@ -261,7 +261,7 @@ mod tests {
     use farik_core::team::Effort;
     use serde_json::Value;
 
-    use super::{RoleDefinition, RoleError, SCHEMA_JSON, load_role, parse_role};
+    use super::{RoleDefinition, RoleError, SCHEMA_JSON, load_role, parse_role, yaml_options};
 
     const PM_YAML: &str = include_str!("../roles/product_manager/role.yaml");
     const PM_SYSTEM: &str = include_str!("../roles/product_manager/system.md");
@@ -340,7 +340,8 @@ mod tests {
         for directory in &directories {
             let yaml = std::fs::read_to_string(roles.join(directory).join("role.yaml"))
                 .expect("a role.yaml");
-            let value: Value = serde_saphyr::from_str(&yaml).expect("the role file is YAML");
+            let value: Value = serde_saphyr::from_str_with_options(&yaml, yaml_options())
+                .expect("the role file is YAML");
             let errors: Vec<String> = validator
                 .iter_errors(&value)
                 .map(|error| error.to_string())
@@ -367,7 +368,8 @@ mod tests {
                     .and_then(|rest| rest.split_once("\n---\n"))
                     .map(|(front, _)| front)
                     .expect("a frontmatter");
-                let front: Value = serde_saphyr::from_str(front).expect("YAML frontmatter");
+                let front: Value = serde_saphyr::from_str_with_options(front, yaml_options())
+                    .expect("YAML frontmatter");
                 assert_eq!(front["name"], Value::String(skill.to_string()));
             }
         }
@@ -414,6 +416,22 @@ mod tests {
             )],
         ));
         assert!(detail.contains("writing-task-contracts"), "{detail}");
+    }
+
+    /// ADR 0007: YAML 1.1's `no` is a word, not `false`, here as in `farik-store`. The role file
+    /// is read into a `Value`, where the dialect decides; the frontmatter's typed fields would take
+    /// `no` as a string under either setting.
+    #[test]
+    fn reads_the_role_file_with_strict_booleans() {
+        let yaml = PM_YAML.replace("  - release scope\n", "  - release scope\n  - no\n");
+        let definition = parse_role(
+            Role::ProductManager,
+            &yaml,
+            PM_SYSTEM,
+            &[("writing-task-contracts", PM_SKILL)],
+        )
+        .expect("the role loads");
+        assert_eq!(definition.produces.last().map(String::as_str), Some("no"));
     }
 
     #[test]
