@@ -8,6 +8,7 @@ pub mod session;
 /// The Claude Code program's `stream-json` lines, read as session events.
 pub mod stream;
 
+pub use recorded::{RecordedAdapter, Transcript};
 pub use session::{
     EndReason, McpServerConfig, McpTransport, RuntimeAdapter, RuntimeError, SessionEvent,
     SessionHandle, SessionPurpose, SessionSpec,

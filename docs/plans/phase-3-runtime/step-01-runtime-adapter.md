@@ -141,7 +141,7 @@ Tests (plain `#[test]`, reading with `try_recv`):
 - `ends_an_aborted_session_with_aborted` — asserts that after `abort()`, the next event read is `Ended { reason: Aborted, .. }` and the channel then closes, whatever the transcript held after that point.
 - `hands_out_the_session_id_of_the_spec` — asserts `handle.session_id() == spec.session_id`, and that a handle from `resume("s-9", "continue")` reports `s-9` and puts `continue` in `sent()`.
 
-- [ ] `feat(runtime): replay recorded transcripts through the adapter trait`
+- [x] `feat(runtime): replay recorded transcripts through the adapter trait`
 
 ## Verification
 
