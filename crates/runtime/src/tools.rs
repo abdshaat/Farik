@@ -298,6 +298,7 @@ pub async fn call_tool(
         "farik_write_note" => work::write_note(&call, parse(input)?),
         "farik_ask_human" => work::ask_human(&call, parse(input)?),
         "farik_write_product_doc" => work::write_product_doc(&call, parse(input)?),
+        "farik_exec" => exec::exec(&call, parse(input)?).await,
         _ => Err(ToolError::Failed {
             detail: format!("{name} is listed and has no handler"),
         }),

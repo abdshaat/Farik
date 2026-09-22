@@ -4,7 +4,7 @@
 use farik_core::contract::{Role, TaskStatus};
 use farik_core::criteria::CriteriaError;
 use farik_core::governor::gates::ContractWriteRefusal;
-use farik_core::governor::permissions::ToolRefusal;
+use farik_core::governor::permissions::{CommandRefusal, ToolRefusal};
 use farik_core::team::AgentStatus;
 
 use super::ToolError;
@@ -56,6 +56,10 @@ pub(crate) enum Refusal {
     UnknownCriterion { criterion_id: String },
     /// This note is another's to write.
     NotTheNotesWriter { agent_id: String, kind: String },
+    /// `evaluate_command` refused.
+    Command(CommandRefusal),
+    /// A command's directory is outside the workspace.
+    OutsideWorkspace { cwd: String },
 }
 
 impl Refusal {
@@ -125,6 +129,11 @@ impl Refusal {
             Self::UnknownCriterion { criterion_id } => (
                 "unknown_criterion",
                 format!("the contract has no criterion {criterion_id}"),
+            ),
+            Self::Command(refusal) => command(refusal),
+            Self::OutsideWorkspace { cwd } => (
+                "outside_workspace",
+                format!("{cwd} is not a directory inside the task's workspace"),
             ),
             Self::NotTheNotesWriter { agent_id, kind } => (
                 "not_the_notes_writer",
@@ -197,6 +206,25 @@ fn triage(role: Role, status: TaskStatus, has_parent: bool, triaged: bool) -> St
         (role, _) => format!(
             "role {role} does not triage: the Scrum Master does, or the Product Manager on a team \
              without one (5.16)"
+        ),
+    }
+}
+
+fn command(refusal: &CommandRefusal) -> (&'static str, String) {
+    match refusal {
+        CommandRefusal::GitViaExec => (
+            "git_via_exec",
+            "use farik_git_status, farik_git_diff, farik_git_commit, or farik_git_push".to_string(),
+        ),
+        CommandRefusal::ForbiddenCommand { pattern } => (
+            "command_forbidden",
+            format!("the command matches the team's forbidden pattern {pattern} (5.12)"),
+        ),
+        CommandRefusal::InvalidPattern { pattern, detail } => (
+            "invalid_pattern",
+            format!(
+                "the team's forbidden pattern {pattern} does not compile, so nothing runs: {detail}"
+            ),
         ),
     }
 }

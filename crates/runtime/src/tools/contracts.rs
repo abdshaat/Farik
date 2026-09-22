@@ -1,8 +1,4 @@
 //! Triage, contract writing, and filing tasks: the tools that decide what a task is.
-#![expect(
-    dead_code,
-    reason = "the handlers arrive with the later tasks of phase 3 step 05"
-)]
 
 use farik_core::contract::{Role, TaskContract, TaskId, TaskKind, TaskStatus, validate_contract};
 use farik_core::criteria::expand_criteria;

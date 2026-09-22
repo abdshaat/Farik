@@ -19,6 +19,7 @@ use farik_store::{EventQuery, IN_MEMORY, Projections, open_event_log, open_proje
 use serde_json::{Value, json};
 
 use super::{ToolContext, ToolDeps, ToolError, call_tool};
+use crate::exec::Executor;
 use crate::transitions::Transitions;
 
 /// The time every fixture event and every tool call is stamped with.
@@ -105,6 +106,20 @@ impl TestProject {
         input: Value,
     ) -> Result<Value, ToolError> {
         run(&self.context(agent, task), name, input)
+    }
+
+    /// Calls one tool as `agent` on `task` with `executor`.
+    pub(crate) fn call_with(
+        &self,
+        executor: Arc<dyn Executor>,
+        agent: &str,
+        task: Option<&str>,
+        name: &str,
+        input: Value,
+    ) -> Result<Value, ToolError> {
+        let mut context = self.context(agent, task);
+        context.executor = Some(executor);
+        run(&context, name, input)
     }
 
     /// Every event of these kinds, oldest first; every event when `kinds` is empty.

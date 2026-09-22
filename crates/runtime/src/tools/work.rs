@@ -1,9 +1,5 @@
 //! The work tools: transitions, assignment, blocks, criterion results, notes, questions, and
 //! product documents.
-#![expect(
-    dead_code,
-    reason = "the handlers arrive with the later tasks of phase 3 step 05"
-)]
 
 use std::str::FromStr;
 

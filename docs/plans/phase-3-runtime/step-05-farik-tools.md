@@ -144,7 +144,7 @@ Files: `tools/exec.rs`, on a `HostSandbox`
 - `refuses_a_forbidden_command` — with a team rule forbidding `rm -rf *`, that command is `Refused` starting `command_forbidden`.
 - `caps_the_timeout` — `timeout_seconds: 99999` runs with 1800 (asserted through a recording executor).
 
-- [ ] `feat(runtime): add farik_exec`
+- [x] `feat(runtime): add farik_exec`
 
 ### Task 6: git
 
