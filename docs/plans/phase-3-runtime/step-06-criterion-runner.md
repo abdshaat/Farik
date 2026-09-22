@@ -74,7 +74,7 @@ Files: created `crates/runtime/src/criteria.rs`; modified `crates/runtime/src/li
 - `asks_for_a_review_or_a_human_instead_of_running` — `review` gives `NeedsReview` with its rubric, `human` `NeedsHuman` with its question.
 - `keeps_the_last_two_thousand_bytes_of_output` — output of 5,000 `a`s then `END`: the evidence ends with `END` and holds at most 2,000 bytes of stdout.
 
-- [ ] `feat(runtime): run command and artifact criteria and ask for the rest`
+- [x] `feat(runtime): run command and artifact criteria and ask for the rest`
 
 ### Task 2: test criteria and new tests
 

@@ -3,6 +3,8 @@
 
 /// What a session cost, and what each budget has left.
 pub mod cost;
+/// Contract exit criteria, run and judged.
+pub mod criteria;
 /// Commands run on an agent's behalf, and what came of them.
 pub mod exec;
 /// Sessions replayed from recorded transcripts.
