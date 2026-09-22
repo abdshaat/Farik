@@ -128,7 +128,16 @@ fn stops_a_command_at_the_deadline_inside_the_container() {
         .expect("the command runs");
     assert!(started.elapsed() < 10 * SECOND);
     assert!(result.timed_out);
-    let processes = docker(&["exec", sandbox.name(), "ps"]);
+    // Busybox's `timeout` leaves its watcher, whose command line still reads `... sleep 30`, for
+    // the `-k 2` grace after the command itself is killed; the check waits that out.
+    let mut processes = String::new();
+    for _ in 0..50 {
+        processes = docker(&["exec", sandbox.name(), "ps"]);
+        if !processes.contains("sleep 30") {
+            break;
+        }
+        std::thread::sleep(SECOND / 10);
+    }
     assert!(!processes.contains("sleep 30"), "{processes}");
     Box::new(sandbox)
         .discard()
