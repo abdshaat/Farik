@@ -324,6 +324,50 @@ fn reports_a_team_rule_that_does_not_compile() {
     );
 }
 
+/// Runs doctor on a project whose team rules are `rules`, and says it found `rule` and `pattern`.
+fn reports_a_glob_that_does_not_compile(name: &str, rules: &str, rule: &str, pattern: &str) {
+    let repository = a_project_with_a_task(name);
+    let team = std::fs::read_to_string(repository.path.join(".farik/team.yaml")).expect("read");
+    std::fs::write(
+        repository.path.join(".farik/team.yaml"),
+        team.replace("rules: {}", rules),
+    )
+    .expect("write");
+
+    let ran = run_in(&repository.path, &["doctor"]);
+
+    assert_eq!(ran.code, 1, "{}", ran.err);
+    assert!(
+        ran.out.contains(&format!(
+            "{rule} has a glob that does not compile, \"{pattern}\""
+        )),
+        "the report names the rule and the pattern: {}",
+        ran.out
+    );
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn reports_a_protected_path_that_does_not_compile() {
+    reports_a_glob_that_does_not_compile(
+        "read-doctor-protected",
+        "rules:\n  protected_paths:\n    - \"a/[\"\n",
+        "protected_paths",
+        "a/[",
+    );
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn reports_an_allowed_paths_ceiling_that_does_not_compile() {
+    reports_a_glob_that_does_not_compile(
+        "read-doctor-ceiling",
+        "rules:\n  allowed_paths_ceiling:\n    - \"b/[\"\n",
+        "allowed_paths_ceiling",
+        "b/[",
+    );
+}
+
 #[test]
 #[ignore = "needs the git program: cargo xtask check --integration"]
 fn reports_a_setting_farik_does_not_know() {
