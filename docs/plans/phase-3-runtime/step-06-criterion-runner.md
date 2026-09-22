@@ -8,7 +8,7 @@ Readiness confirmed by: fresh-session reviewer, 2026-09-22 (two rounds: the seco
 
 ## Goal
 
-A contract's exit criteria can be run by Farik rather than described: a `command` criterion runs and is judged by its exit code and output, a `test` criterion runs its command and, when it asks for new tests, is judged also on whether the diff adds a test that fails on the base branch, and an `artifact` criterion is judged by the file's presence and content. `review` and `human` criteria come back as the rubric or the question someone has to answer. Each result carries evidence a reviewer and the human can read. Out of scope: who runs them and records the results (the orchestrator's verify session, step 11) and the tools an agent uses to record its own (step 05).
+A contract's exit criteria can be run by Farik rather than described: a `command` criterion runs and is judged by its exit code and output, a `test` criterion runs its command and, when it asks for new tests, is judged also on whether the diff adds a test that fails on the base branch, and an `artifact` criterion is judged by the file's presence and content. `review` and `human` criteria come back as the rubric or the question someone has to answer. Each result carries evidence a reviewer and the human can read. Out of scope: who runs them and records the results (the orchestrator's verify session, step 12) and the tools an agent uses to record its own (step 05).
 
 ## Decisions
 
