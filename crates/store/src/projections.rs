@@ -15,9 +15,8 @@ use crate::event_log::{EventLog, EventQuery, TASK_ID_PREFIX};
 
 /// What a board shows about one contract, as the log left it.
 ///
-/// Every field comes from an event a command emits. The assignee, the reviewer, the sprint and the
-/// iteration arrive with `task.transitioned` later in phase 3; a column nothing can write is a
-/// column no test can hold to anything.
+/// Every field comes from an event a command or the governor emits. The sprint arrives with phase
+/// 4, which has the sprints; a column nothing can write is a column no test can hold to anything.
 #[derive(Debug, Clone, PartialEq)]
 pub struct TaskProjection {
     /// The contract this is about.
@@ -42,6 +41,13 @@ pub struct TaskProjection {
     /// What the task has cost, in dollars: the sum of its `cost.recorded` events, `0.0` when
     /// there are none.
     pub cost_usd: f64,
+    /// The agent the last `task.transitioned` left the contract with, if any.
+    pub assignee_id: Option<String>,
+    /// The agent reviewing it, as the last `task.transitioned` said.
+    pub reviewer_id: Option<String>,
+    /// How many times the task has been returned to work after a rejection, as the last
+    /// `task.transitioned` said; `0` before any.
+    pub iteration: u32,
 }
 
 /// A key that costs are summed by (`docs/SPEC.md` 5.5).
@@ -295,7 +301,8 @@ impl Projections {
 const SELECT_PROJECTION: &str = "SELECT task_id, kind, parent, title, status, risk, triaged, \
                                  locked, updated_seq, \
                                  (SELECT COALESCE(SUM(cost_usd), 0.0) FROM cost_records \
-                                  WHERE cost_records.task_id = task_projections.task_id) \
+                                  WHERE cost_records.task_id = task_projections.task_id), \
+                                 assignee_id, reviewer_id, iteration \
                                  FROM task_projections";
 
 /// The board is ordered by the number in the task id, not by the id itself: `FRK-10` sorts before
@@ -327,6 +334,9 @@ type ProjectedRow = (
     bool,
     i64,
     f64,
+    Option<String>,
+    Option<String>,
+    i64,
 );
 
 fn projected_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ProjectedRow> {
@@ -341,6 +351,9 @@ fn projected_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ProjectedRow> {
         row.get(7)?,
         row.get(8)?,
         row.get(9)?,
+        row.get(10)?,
+        row.get(11)?,
+        row.get(12)?,
     ))
 }
 
@@ -351,7 +364,21 @@ fn projected_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ProjectedRow> {
 /// reads the log again without parsing any of them, and `farik doctor` reaches a board in this state
 /// that way. The log has no such door — a row of it that cannot be read is the only copy.
 fn projection_of_row(row: ProjectedRow) -> Result<TaskProjection, StoreError> {
-    let (task_id, kind, parent, title, status, risk, triaged, locked, updated_seq, cost_usd) = row;
+    let (
+        task_id,
+        kind,
+        parent,
+        title,
+        status,
+        risk,
+        triaged,
+        locked,
+        updated_seq,
+        cost_usd,
+        assignee_id,
+        reviewer_id,
+        iteration,
+    ) = row;
     let refuse = |what: &str, value: &str| StoreError::InvalidEvent {
         detail: format!("the projection of {task_id} holds {value:?} as its {what}"),
     };
@@ -370,6 +397,10 @@ fn projection_of_row(row: ProjectedRow) -> Result<TaskProjection, StoreError> {
         updated_seq: u64::try_from(updated_seq)
             .map_err(|_| refuse("sequence number", &updated_seq.to_string()))?,
         cost_usd,
+        assignee_id,
+        reviewer_id,
+        iteration: u32::try_from(iteration)
+            .map_err(|_| refuse("iteration", &iteration.to_string()))?,
     })
 }
 
@@ -410,13 +441,36 @@ fn apply_to(transaction: &Transaction<'_>, event: &FarikEvent) -> Result<(), Sto
         }
         EventBody::ContractLocked(_) => set_locked(transaction, &id, true, seq),
         EventBody::ContractUnlocked(_) => set_locked(transaction, &id, false, seq),
+        EventBody::TaskTransitioned(body) => {
+            // The wire's status is the contract schema's own list, which a test in
+            // `farik-protocol` holds to it, so every value it can carry reads here.
+            let to = TaskStatus::from_str(&body.to.to_string()).map_err(|_| {
+                StoreError::InvalidEvent {
+                    detail: format!("event {seq} moves {id} to {}, which is no status", body.to),
+                }
+            })?;
+            update(
+                transaction,
+                "UPDATE task_projections
+                 SET status = ?2, assignee_id = ?3, reviewer_id = ?4, iteration = ?5,
+                     updated_seq = ?6
+                 WHERE task_id = ?1",
+                (
+                    &id,
+                    to.to_string(),
+                    body.assignee.as_ref(),
+                    body.reviewer.as_ref(),
+                    body.iteration,
+                    seq,
+                ),
+            )
+        }
         EventBody::DriftDetected(_)
         | EventBody::ProjectScanned(_)
         | EventBody::TeamUpdated(_)
         | EventBody::CriteriaUpdated(_)
         | EventBody::CostRecorded(_)
         | EventBody::BudgetExhausted(_)
-        | EventBody::TaskTransitioned(_)
         | EventBody::TransitionRefused(_)
         | EventBody::EscalationRaised(_)
         | EventBody::ContractEvaluated(_) => Ok(()),
@@ -669,6 +723,9 @@ mod tests {
                 locked: false,
                 updated_seq: filed.envelope.seq,
                 cost_usd: 0.0,
+                assignee_id: None,
+                reviewer_id: None,
+                iteration: 0,
             }]
         );
         assert_eq!(projections.cursor().expect("the cursor reads"), 1);
@@ -705,7 +762,48 @@ mod tests {
                 locked: false,
                 updated_seq: rewritten.envelope.seq,
                 cost_usd: 0.0,
+                assignee_id: None,
+                reviewer_id: None,
+                iteration: 0,
             }
+        );
+    }
+
+    #[test]
+    fn moves_a_task_on_the_board_when_it_transitions() {
+        let (log, projections) = a_board();
+        record(&log, &projections, &about(EventKind::TaskCreated, "FRK-1"));
+        // The fixture is `ready -> assigned` to dev-a, reviewed by dev-b, at iteration 0.
+        let moved = record(
+            &log,
+            &projections,
+            &about(EventKind::TaskTransitioned, "FRK-1"),
+        );
+        let row = projections
+            .task(&"FRK-1".parse().expect("a task id"))
+            .expect("the read works")
+            .expect("on the board");
+        assert_eq!(row.status, TaskStatus::Assigned);
+        assert_eq!(row.assignee_id.as_deref(), Some("dev-a"));
+        assert_eq!(row.reviewer_id.as_deref(), Some("dev-b"));
+        assert_eq!(row.iteration, 0);
+        assert_eq!(row.updated_seq, moved.envelope.seq);
+    }
+
+    #[test]
+    fn leaves_the_board_alone_on_a_refusal() {
+        let (log, projections) = a_board();
+        record(&log, &projections, &about(EventKind::TaskCreated, "FRK-1"));
+        let before = projections.board().expect("the board reads");
+        let refused = record(
+            &log,
+            &projections,
+            &about(EventKind::TransitionRefused, "FRK-1"),
+        );
+        assert_eq!(projections.board().expect("the board reads"), before);
+        assert_eq!(
+            projections.cursor().expect("the cursor reads"),
+            refused.envelope.seq
         );
     }
 
@@ -865,7 +963,7 @@ mod tests {
             log.applied_migrations().expect("the ledger reads"),
             migrations::known_versions()
         );
-        assert_eq!(migrations::known_versions(), vec![1, 2, 3]);
+        assert_eq!(migrations::known_versions(), vec![1, 2, 3, 4]);
     }
 
     #[test]

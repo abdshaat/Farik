@@ -98,7 +98,7 @@ Tests:
 - `leaves_the_board_alone_on_a_refusal` — a `transition.refused` changes nothing in the row but the cursor.
 - The existing `known_versions()` assertion becomes `[1, 2, 3, 4]`.
 
-- [ ] `feat(store): show assignee, reviewer, and iteration on the board`
+- [x] `feat(store): show assignee, reviewer, and iteration on the board`
 
 ### Task 3: the context from the store
 
