@@ -114,7 +114,7 @@ Tests:
 - `prices_with_the_shipped_table_when_there_is_no_override` — equals `*PRICE_TABLE`.
 - `prices_with_the_override_as_a_whole` — an override naming one model only: the result has that one model, and a model only the shipped table has is absent.
 
-- [ ] `feat(store): choose the project's prices or the shipped table`
+- [x] `feat(store): choose the project's prices or the shipped table`
 
 ### Task 4: recording costs and exhausted budgets
 

@@ -843,3 +843,47 @@ fn lists_two_spellings_of_one_number_in_an_order_that_is_not_the_filesystem_s() 
         "by the number, then by the id itself"
     );
 }
+
+#[test]
+fn prices_with_the_shipped_table_when_there_is_no_override() {
+    let project = TempProject::new("effective-shipped");
+    let files = project.files();
+    files.init(&a_team()).expect("a project is made");
+    assert_eq!(
+        files.effective_prices().expect("the shipped table"),
+        *farik_core::pricing::prices::PRICE_TABLE
+    );
+}
+
+#[test]
+fn prices_with_the_override_as_a_whole() {
+    // 5.5 calls the file an override: a model the user took out of it is not priced from the
+    // shipped table behind their back.
+    let project = TempProject::new("effective-override");
+    let files = project.files();
+    files.init(&a_team()).expect("a project is made");
+    std::fs::write(
+        project.root.join(".farik/prices.json"),
+        r#"{
+  "version": 1,
+  "source_url": "https://example.com/prices",
+  "retrieved_at": "2026-09-22",
+  "prices": {
+    "claude-opus-5": {
+      "input_usd_per_mtok": 1.0,
+      "output_usd_per_mtok": 2.0,
+      "cache_write_usd_per_mtok": 0.25,
+      "cache_read_usd_per_mtok": 0.5
+    }
+  }
+}
+"#,
+    )
+    .expect("an override of one model");
+    let prices = files.effective_prices().expect("the override");
+    assert_eq!(
+        prices.prices.keys().map(String::as_str).collect::<Vec<_>>(),
+        ["claude-opus-5"]
+    );
+    assert!(!prices.prices.contains_key("claude-fable-5"));
+}

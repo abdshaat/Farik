@@ -12,6 +12,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use farik_core::contract::{TaskContract, TaskId, ValidationError, validate_contract};
 use farik_core::criteria::{CriteriaLibrary, validate_criteria};
 use farik_core::governor::paths::normalise;
+use farik_core::pricing::prices::PRICE_TABLE;
 use farik_core::pricing::{PriceTable, validate_price_table};
 use farik_core::team::{AgentId, Team, validate_team};
 use serde::{Deserialize, Serialize};
@@ -365,6 +366,17 @@ impl ProjectFiles {
         validate_price_table(&value)
             .map(Some)
             .map_err(|errors| refused(PRICES, &errors))
+    }
+
+    /// The prices this project's costs are computed with: its `.farik/prices.json` as a whole when
+    /// there is one, else the shipped table. Never a merge of the two, because 5.5 calls the file
+    /// an override, and a model the user took out of it would still be priced by a merge.
+    ///
+    /// # Errors
+    ///
+    /// Those of `read_prices`.
+    pub fn effective_prices(&self) -> Result<PriceTable, FilesError> {
+        Ok(self.read_prices()?.unwrap_or_else(|| PRICE_TABLE.clone()))
     }
 
     /// What this machine knows, or the defaults when it has not been asked.
