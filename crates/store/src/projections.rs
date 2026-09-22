@@ -315,7 +315,9 @@ fn apply_to(transaction: &Transaction<'_>, event: &FarikEvent) -> Result<(), Sto
         EventBody::DriftDetected(_)
         | EventBody::ProjectScanned(_)
         | EventBody::TeamUpdated(_)
-        | EventBody::CriteriaUpdated(_) => Ok(()),
+        | EventBody::CriteriaUpdated(_)
+        | EventBody::CostRecorded(_)
+        | EventBody::BudgetExhausted(_) => Ok(()),
     }
 }
 

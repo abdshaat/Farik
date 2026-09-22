@@ -12,10 +12,12 @@ use serde_json::Value;
 pub use farik_core::contract::{TaskId, ValidationError};
 
 pub use crate::generated::event::{
+    BudgetExhaustedBody, BudgetExhaustedBodyConsequence, BudgetExhaustedBodyScope,
     ContractLockedBody, ContractSummary, ContractSummaryKind, ContractSummaryParent,
     ContractSummaryRisk, ContractSummaryStatus, ContractUnlockedBody, ContractWrittenBody,
-    CriteriaUpdatedBody, DriftDetectedBody, DriftDetectedBodyDrift, EventKind, ProjectScannedBody,
-    RequestTriagedBody, RequestTriagedBodySize, TaskCreatedBody, TeamUpdatedBody,
+    CostRecordedBody, CostRecordedBodyPurpose, CriteriaUpdatedBody, DriftDetectedBody,
+    DriftDetectedBodyDrift, EventKind, ProjectScannedBody, RequestTriagedBody,
+    RequestTriagedBodySize, TaskCreatedBody, TeamUpdatedBody, TokenUsage,
 };
 
 use crate::generated::event::FarikEvent as EventWire;
@@ -40,7 +42,7 @@ static VALIDATOR: LazyLock<Validator> = LazyLock::new(|| {
 });
 
 /// One validator per kind, each holding that kind's body schema alone. The event schema types
-/// `body` as a choice of nine shapes, so it can only say that a body matched none of them; these
+/// `body` as a choice of eleven shapes, so it can only say that a body matched none of them; these
 /// say what is wrong with the one shape the event's `kind` asked for.
 static BODY_VALIDATORS: LazyLock<Vec<Validator>> = LazyLock::new(|| {
     let schema: Value = serde_json::from_str(SCHEMA_JSON).expect(
@@ -82,6 +84,8 @@ fn body_def_name(kind: EventKind) -> &'static str {
         EventKind::ProjectScanned => "projectScannedBody",
         EventKind::TeamUpdated => "teamUpdatedBody",
         EventKind::CriteriaUpdated => "criteriaUpdatedBody",
+        EventKind::CostRecorded => "costRecordedBody",
+        EventKind::BudgetExhausted => "budgetExhaustedBody",
     }
 }
 
@@ -100,8 +104,9 @@ pub fn is_about_one_contract(kind: EventKind) -> bool {
     )
 }
 
-/// The field naming who acted, for the kinds that name one, and nothing for `drift.detected` and
-/// `project.scanned`, which record what Farik itself found.
+/// The field naming who acted, for the kinds that name one, and nothing for `drift.detected`,
+/// `project.scanned`, `cost.recorded`, and `budget.exhausted`, which record what Farik itself
+/// found or counted.
 fn attribution(body: &mut EventBody) -> Option<(&'static str, &mut String)> {
     match body {
         EventBody::TaskCreated(body) => Some(("created_by", &mut body.created_by)),
@@ -111,13 +116,16 @@ fn attribution(body: &mut EventBody) -> Option<(&'static str, &mut String)> {
         EventBody::ContractUnlocked(body) => Some(("unlocked_by", &mut body.unlocked_by)),
         EventBody::TeamUpdated(body) => Some(("updated_by", &mut body.updated_by)),
         EventBody::CriteriaUpdated(body) => Some(("updated_by", &mut body.updated_by)),
-        EventBody::DriftDetected(_) | EventBody::ProjectScanned(_) => None,
+        EventBody::DriftDetected(_)
+        | EventBody::ProjectScanned(_)
+        | EventBody::CostRecorded(_)
+        | EventBody::BudgetExhausted(_) => None,
     }
 }
 
 /// Every kind the log holds in this phase, in the order `docs/schemas/event.schema.json` lists
 /// them. The step that adds a kind adds it here.
-pub const EVERY_KIND: [EventKind; 9] = [
+pub const EVERY_KIND: [EventKind; 11] = [
     EventKind::TaskCreated,
     EventKind::RequestTriaged,
     EventKind::ContractWritten,
@@ -127,6 +135,8 @@ pub const EVERY_KIND: [EventKind; 9] = [
     EventKind::ProjectScanned,
     EventKind::TeamUpdated,
     EventKind::CriteriaUpdated,
+    EventKind::CostRecorded,
+    EventKind::BudgetExhausted,
 ];
 
 /// The ids an event is stamped with: which team and project it belongs to, and the contract, agent
@@ -192,6 +202,12 @@ pub enum EventBody {
     /// The criterion library was written.
     #[serde(rename = "criteria.updated")]
     CriteriaUpdated(CriteriaUpdatedBody),
+    /// A session's usage report was priced.
+    #[serde(rename = "cost.recorded")]
+    CostRecorded(CostRecordedBody),
+    /// A budget ran out.
+    #[serde(rename = "budget.exhausted")]
+    BudgetExhausted(BudgetExhaustedBody),
 }
 
 impl EventBody {
@@ -208,6 +224,8 @@ impl EventBody {
             Self::ProjectScanned(_) => EventKind::ProjectScanned,
             Self::TeamUpdated(_) => EventKind::TeamUpdated,
             Self::CriteriaUpdated(_) => EventKind::CriteriaUpdated,
+            Self::CostRecorded(_) => EventKind::CostRecorded,
+            Self::BudgetExhausted(_) => EventKind::BudgetExhausted,
         }
     }
 }
@@ -356,7 +374,7 @@ pub fn event_from_value(input: &Value) -> Result<FarikEvent, Vec<ValidationError
 }
 
 /// The schema's own failures. A failure inside `body` is reported by the schema once, at `/body`,
-/// because `body` there is a choice of nine shapes and the schema can only say that none matched.
+/// because `body` there is a choice of eleven shapes and the schema can only say that none matched.
 /// The event's `kind` says which one it was meant to be, so such a failure is asked again of that
 /// shape alone and reported where it actually is.
 fn schema_errors(input: &Value) -> Vec<ValidationError> {
@@ -737,7 +755,7 @@ mod tests {
 
     #[test]
     fn reports_a_malformed_field_inside_a_body_at_its_own_path() {
-        // The schema types `body` as a choice of nine shapes, so it reports a failure anywhere
+        // The schema types `body` as a choice of eleven shapes, so it reports a failure anywhere
         // inside one at `/body`, with the whole body echoed back. The kind says which shape the
         // body was meant to be, so the reader checks it again against that one alone.
         let mut input = an_event_wire(EventKind::ProjectScanned);
@@ -856,6 +874,24 @@ mod tests {
                 kind: EventKind::ContractLocked
             }
         );
+    }
+
+    #[test]
+    fn refuses_a_cost_with_a_negative_amount() {
+        let mut input = an_event_wire(EventKind::CostRecorded);
+        input["body"]["cost_usd"] = json!(-0.01);
+        let errors = refusal(&input);
+        assert_eq!(errors.len(), 1);
+        assert!(errors[0].path.ends_with("/cost_usd"), "{}", errors[0].path);
+    }
+
+    #[test]
+    fn refuses_a_cost_for_an_unknown_purpose() {
+        let mut input = an_event_wire(EventKind::CostRecorded);
+        input["body"]["purpose"] = json!("lunch");
+        let errors = refusal(&input);
+        assert_eq!(errors.len(), 1);
+        assert_eq!(errors[0].path, "/body/purpose");
     }
 
     #[test]

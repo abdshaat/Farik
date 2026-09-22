@@ -65,7 +65,9 @@
         "drift.detected",
         "project.scanned",
         "team.updated",
-        "criteria.updated"
+        "criteria.updated",
+        "cost.recorded",
+        "budget.exhausted"
       ]
     },
     "eventBodyWire": {
@@ -80,7 +82,9 @@
         { "$ref": "#/$defs/driftDetectedBody" },
         { "$ref": "#/$defs/projectScannedBody" },
         { "$ref": "#/$defs/teamUpdatedBody" },
-        { "$ref": "#/$defs/criteriaUpdatedBody" }
+        { "$ref": "#/$defs/criteriaUpdatedBody" },
+        { "$ref": "#/$defs/costRecordedBody" },
+        { "$ref": "#/$defs/budgetExhaustedBody" }
       ]
     },
     "contractSummary": {
@@ -193,6 +197,43 @@
       "properties": {
         "criterion_names": { "type": "array", "items": { "type": "string" } },
         "updated_by": { "type": "string" }
+      }
+    },
+    "costRecordedBody": {
+      "title": "Cost Recorded Body",
+      "description": "What one session's usage report cost (docs/SPEC.md section 5.5), priced when it was recorded so that a later change to the prices does not rewrite what was charged. The envelope names the session, the agent, and the task when there is one.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["purpose", "model_id", "usage", "cost_usd"],
+      "properties": {
+        "purpose": { "type": "string", "enum": ["triage", "refine", "plan", "implement", "verify", "ceremony", "conversation"] },
+        "model_id": { "type": "string", "minLength": 1 },
+        "usage": { "$ref": "#/$defs/tokenUsage" },
+        "cost_usd": { "type": "number", "minimum": 0 }
+      }
+    },
+    "tokenUsage": {
+      "title": "Token Usage",
+      "description": "The tokens one usage report counted. The ceiling is the largest integer JSON holds exactly.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["input_tokens", "output_tokens", "cache_read_tokens", "cache_write_tokens"],
+      "properties": {
+        "input_tokens": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 },
+        "output_tokens": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 },
+        "cache_read_tokens": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 },
+        "cache_write_tokens": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 }
+      }
+    },
+    "budgetExhaustedBody": {
+      "title": "Budget Exhausted Body",
+      "description": "A budget of docs/SPEC.md section 5.5 ran out, recorded once when it crossed from having room to none. The envelope is the session's that crossed it.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["scope", "consequence"],
+      "properties": {
+        "scope": { "type": "string", "enum": ["session_tokens", "session_wall_clock", "session_tool_calls", "task_usd", "task_sessions", "sprint_usd", "day_usd"] },
+        "consequence": { "type": "string", "enum": ["end_session_and_block_task", "escalate_task", "stop_new_assignments", "pause_team"] }
       }
     }
   }

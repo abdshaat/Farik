@@ -82,6 +82,18 @@ pub fn a_body_wire(kind: EventKind) -> Value {
             "criterion_names": ["the check passes"],
             "updated_by": "human"
         }),
+        EventKind::CostRecorded => json!({
+            "purpose": "implement",
+            "model_id": "claude-sonnet-4-5",
+            "usage": {
+                "input_tokens": 1000,
+                "output_tokens": 100,
+                "cache_read_tokens": 0,
+                "cache_write_tokens": 0
+            },
+            "cost_usd": 0.5
+        }),
+        EventKind::BudgetExhausted => json!({ "scope": "day_usd", "consequence": "pause_team" }),
     }
 }
 

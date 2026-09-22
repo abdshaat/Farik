@@ -84,7 +84,7 @@ Tests:
 - `refuses_a_cost_for_an_unknown_purpose` — `purpose: "lunch"` is refused at `/body/purpose`.
 - The existing `writes_back_exactly_the_value_it_read_for_every_kind` covers both kinds' round trip once they are in `EVERY_KIND` and `a_body_wire`; it is extended, not duplicated.
 
-- [ ] `feat(protocol): add the cost.recorded and budget.exhausted events`
+- [x] `feat(protocol): add the cost.recorded and budget.exhausted events`
 
 ### Task 2: costs in the projections
 
