@@ -96,6 +96,15 @@ impl SandboxFactory for HostSandboxFactory {
     ) -> Result<Box<dyn Sandbox>, SandboxError> {
         Ok(Box::new(HostSandbox::new(worktree.to_path_buf())))
     }
+
+    fn create_base(
+        &self,
+        _project_id: &str,
+        _task_id: &TaskId,
+        worktree: &Path,
+    ) -> Result<Box<dyn Sandbox>, SandboxError> {
+        Ok(Box::new(HostSandbox::new(worktree.to_path_buf())))
+    }
 }
 
 #[cfg(test)]
@@ -329,6 +338,19 @@ mod tests {
         let task_id = TaskId::try_from("FRK-1").expect("an id");
         let sandbox = HostSandboxFactory
             .create("p", &task_id, &root, false)
+            .expect("a host sandbox is always available");
+        let result = sandbox
+            .run("pwd", "", 5 * SECOND, &no_env())
+            .expect("the command runs");
+        assert_eq!(result.stdout.trim_end(), canonical(&root));
+    }
+
+    #[test]
+    fn creates_a_base_sandbox_rooted_at_the_worktree_it_is_given() {
+        let root = fresh_root("base");
+        let task_id = TaskId::try_from("FRK-1").expect("an id");
+        let sandbox = HostSandboxFactory
+            .create_base("p", &task_id, &root)
             .expect("a host sandbox is always available");
         let result = sandbox
             .run("pwd", "", 5 * SECOND, &no_env())

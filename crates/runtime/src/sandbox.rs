@@ -85,4 +85,19 @@ pub trait SandboxFactory: Send + Sync {
         worktree: &Path,
         network: bool,
     ) -> Result<Box<dyn Sandbox>, SandboxError>;
+
+    /// A second sandbox for `task_id` of `project_id`, rooted at `worktree` (the task's base
+    /// branch, checked out on its own) with the network off, for running the task's new tests
+    /// against the code they are meant to fail on (5.4). It must not collide with the task's own
+    /// sandbox, which the verify session holds while this one runs.
+    ///
+    /// # Errors
+    ///
+    /// `DockerUnavailable`, `ImageMissing`, or `ContainerFailed`, for a container sandbox.
+    fn create_base(
+        &self,
+        project_id: &str,
+        task_id: &TaskId,
+        worktree: &Path,
+    ) -> Result<Box<dyn Sandbox>, SandboxError>;
 }

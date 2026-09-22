@@ -91,7 +91,7 @@ Files: modified `crates/runtime/src/criteria.rs`, `crates/store/src/git.rs`, `cr
 - `replaces_a_base_worktree_left_by_a_crash` — with a registered worktree already at that path, and separately with a plain directory git does not know, the check runs and cleans up.
 - Store tests (`crates/store/tests/git.rs`, ignored): `makes_a_detached_worktree_at_a_commit`, `reads_a_file_at_a_revision`, `lists_added_and_modified_paths_but_not_deleted_ones`, `finds_the_merge_base_of_two_branches`.
 
-- [ ] `feat(runtime): run test criteria and check that new tests fail on the base branch`
+- [x] `feat(runtime): run test criteria and check that new tests fail on the base branch`
 
 ## Verification
 

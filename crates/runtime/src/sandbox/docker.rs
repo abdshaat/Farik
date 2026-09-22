@@ -37,6 +37,25 @@ impl DockerSandbox {
         network: bool,
         image: &str,
     ) -> Result<DockerSandbox, SandboxError> {
+        Self::start(
+            container_name(project_id, task_id),
+            project_id,
+            task_id,
+            worktree,
+            network,
+            image,
+        )
+    }
+
+    /// `create`, under the container name `name`.
+    fn start(
+        name: String,
+        project_id: &str,
+        task_id: &TaskId,
+        worktree: &Path,
+        network: bool,
+        image: &str,
+    ) -> Result<DockerSandbox, SandboxError> {
         // `--mount` splits on commas and wants an absolute source.
         if !worktree.is_absolute() || worktree.to_string_lossy().contains(',') {
             return Err(SandboxError::ContainerFailed {
@@ -54,7 +73,6 @@ impl DockerSandbox {
                 image: image.to_owned(),
             });
         }
-        let name = container_name(project_id, task_id);
         // Absent is the usual answer, and not an error.
         docker(&["rm", "-f", &name])?;
         let user = format!("{}:{}", id("-u")?, id("-g")?);
@@ -176,6 +194,29 @@ impl SandboxFactory for DockerSandboxFactory {
         let sandbox = DockerSandbox::create(project_id, task_id, worktree, network, &self.image)?;
         Ok(Box::new(sandbox))
     }
+
+    fn create_base(
+        &self,
+        project_id: &str,
+        task_id: &TaskId,
+        worktree: &Path,
+    ) -> Result<Box<dyn Sandbox>, SandboxError> {
+        let sandbox = DockerSandbox::start(
+            base_container_name(project_id, task_id),
+            project_id,
+            task_id,
+            worktree,
+            false,
+            &self.image,
+        )?;
+        Ok(Box::new(sandbox))
+    }
+}
+
+/// `farik-<project>-<task_id>-base`: the task's own name with a suffix, so the base run never
+/// replaces the container the verify session is holding.
+fn base_container_name(project_id: &str, task_id: &TaskId) -> String {
+    format!("{}-base", container_name(project_id, task_id))
 }
 
 /// `farik-<project>-<task_id>`, lowercased with everything outside `[a-z0-9_.-]` made `-`.
@@ -247,7 +288,8 @@ mod tests {
     use std::process::{ExitStatus, Output};
 
     use super::{
-        DockerSandbox, SandboxError, container_name, is_container_gone, removed, whole_seconds,
+        DockerSandbox, SandboxError, base_container_name, container_name, is_container_gone,
+        removed, whole_seconds,
     };
     use crate::exec::{Executor, Finished};
 
@@ -321,6 +363,16 @@ mod tests {
         let own = "No such container: frk-1\nthe server is not running\n";
         assert!(!is_container_gone(&with_stderr(own)));
         assert!(!is_container_gone(&with_stderr("")));
+    }
+
+    #[test]
+    fn names_the_base_container_apart_from_the_task_s_own() {
+        let task = TaskId::try_from("FRK-12").expect("an id");
+        assert_eq!(
+            base_container_name("My Project/1", &task),
+            "farik-my-project-1-frk-12-base"
+        );
+        assert_ne!(base_container_name("p", &task), container_name("p", &task));
     }
 
     #[test]

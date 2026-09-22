@@ -194,6 +194,61 @@ impl Git {
         Ok(())
     }
 
+    /// Makes a worktree at `path` with `at` checked out and no branch: a place to look at a commit
+    /// that nothing will commit to, such as the base a task's new tests are run against (5.4).
+    ///
+    /// # Errors
+    ///
+    /// `CommandFailed` when the path is taken or `at` names nothing.
+    pub fn create_detached_worktree(&self, path: &Path, at: &str) -> Result<(), GitError> {
+        self.require_repository()?;
+        let path = path_argument(path)?;
+        self.at_root(&["worktree", "add", "--detach", &path, at])?;
+        Ok(())
+    }
+
+    /// The commit `a` and `b` last agreed on: the one `a...b` diffs from.
+    ///
+    /// # Errors
+    ///
+    /// `CommandFailed` when either name is unknown or they share no history.
+    pub fn merge_base(&self, a: &str, b: &str) -> Result<String, GitError> {
+        self.require_repository()?;
+        self.at_root(&["merge-base", a, b])
+    }
+
+    /// The file at `path` as `rev` has it, byte for byte (read as UTF-8 with replacement).
+    ///
+    /// # Errors
+    ///
+    /// `CommandFailed` when `rev` names nothing or has no such file.
+    pub fn file_at(&self, rev: &str, path: &str) -> Result<String, GitError> {
+        self.require_repository()?;
+        // Not trimmed, unlike every other answer: a file's trailing newlines are its content.
+        let object = format!("{rev}:{path}");
+        run_git_untrimmed(&self.root, &["show", "--no-textconv", &object])
+    }
+
+    /// The paths `head` added or modified since it and `base` last agreed; a deleted path is not
+    /// one, and a renamed file counts as added.
+    ///
+    /// # Errors
+    ///
+    /// `CommandFailed` when either name is unknown.
+    pub fn added_or_modified_paths(&self, base: &str, head: &str) -> Result<Vec<String>, GitError> {
+        self.require_repository()?;
+        let range = format!("{base}...{head}");
+        let listed = self.at_root(&[
+            "diff",
+            "--no-renames",
+            "--name-only",
+            "--diff-filter=AM",
+            "-z",
+            &range,
+        ])?;
+        Ok(paths_of(&listed))
+    }
+
     /// Whether the tree at `path` has nothing uncommitted, untracked files included.
     ///
     /// `--untracked-files=normal` is what makes that promise true rather than hopeful: a user with
@@ -440,6 +495,13 @@ const COMMON_DIRECTORY: [&str; 3] = ["rev-parse", "--path-format=absolute", "--g
 /// back to the rule that asks about each path a change touched (5.6): a path a byte short is a
 /// change checked against a rule it never matched.
 fn run_git(directory: &Path, arguments: &[&str]) -> Result<String, GitError> {
+    Ok(run_git_untrimmed(directory, arguments)?
+        .trim_end()
+        .to_string())
+}
+
+/// Runs git in `directory` and hands back what it said on standard output, exactly.
+fn run_git_untrimmed(directory: &Path, arguments: &[&str]) -> Result<String, GitError> {
     if !directory.is_dir() {
         // Said here, because the operating system answers a missing working directory with the same
         // "not found" it answers a missing program with, and "git could not be run" is the wrong
@@ -462,9 +524,7 @@ fn run_git(directory: &Path, arguments: &[&str]) -> Result<String, GitError> {
             stderr: String::from_utf8_lossy(&output.stderr).trim().to_string(),
         });
     }
-    Ok(String::from_utf8_lossy(&output.stdout)
-        .trim_end()
-        .to_string())
+    Ok(String::from_utf8_lossy(&output.stdout).into_owned())
 }
 
 /// One `git log` line as a summary, or nothing when it is not one.

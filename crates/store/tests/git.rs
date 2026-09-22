@@ -556,6 +556,29 @@ fn commits_the_named_paths_and_returns_the_sha() {
 
 #[test]
 #[ignore = "needs the git program: cargo xtask check --integration"]
+fn makes_a_detached_worktree_at_a_commit() {
+    let repository = TempRepo::new("detached-worktree");
+    let first = repository.git_output(&["rev-parse", "HEAD"]);
+    repository.write("second.txt", "and a second\n");
+    repository.commit("the second commit");
+    let git = repository.adapter();
+    let path = repository.path.join(".farik/local/worktrees/FRK-1-base");
+    git.create_detached_worktree(&path, &first)
+        .expect("the worktree is made");
+    assert_eq!(git_output_in(&path, &["rev-parse", "HEAD"]), first);
+    assert!(path.join("README.md").exists());
+    assert!(
+        !path.join("second.txt").exists(),
+        "it is at the first commit"
+    );
+    // Detached: no branch was made for it, so removing it leaves nothing behind.
+    assert_eq!(git_output_in(&path, &["branch", "--show-current"]), "");
+    git.remove_worktree(&path).expect("the worktree is removed");
+    assert!(!path.exists());
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
 fn pushes_a_branch_to_a_remote() {
     let repository = TempRepo::new("push");
     let origin = repository.path.with_extension("origin.git");
@@ -575,4 +598,60 @@ fn pushes_a_branch_to_a_remote() {
         repository.git_output(&["rev-parse", "HEAD"])
     );
     let _ = std::fs::remove_dir_all(&origin);
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn reads_a_file_at_a_revision() {
+    let repository = TempRepo::new("file-at");
+    repository.git(&["checkout", "-b", "farik/FRK-1"]);
+    repository.write("tests/new.sh", "exit 0\n\n");
+    repository.commit("add a test");
+    repository.git(&["checkout", "main"]);
+    let git = repository.adapter();
+    assert_eq!(
+        git.file_at("farik/FRK-1", "tests/new.sh"),
+        Ok("exit 0\n\n".to_owned()),
+        "the file as committed, trailing newlines and all"
+    );
+    assert!(matches!(
+        git.file_at("main", "tests/new.sh"),
+        Err(GitError::CommandFailed { .. })
+    ));
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn lists_added_and_modified_paths_but_not_deleted_ones() {
+    let repository = TempRepo::new("added-or-modified");
+    repository.write("doomed.txt", "going\n");
+    repository.commit("a file to delete");
+    repository.git(&["checkout", "-b", "farik/FRK-1"]);
+    repository.write("README.md", "changed\n");
+    repository.write("tests/new.sh", "exit 0\n");
+    std::fs::remove_file(repository.path.join("doomed.txt")).expect("the file is deleted");
+    repository.commit("change, add, delete");
+    let mut paths = repository
+        .adapter()
+        .added_or_modified_paths("main", "farik/FRK-1")
+        .expect("the diff is read");
+    paths.sort();
+    assert_eq!(paths, ["README.md", "tests/new.sh"]);
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn finds_the_merge_base_of_two_branches() {
+    let repository = TempRepo::new("merge-base");
+    let fork = repository.git_output(&["rev-parse", "HEAD"]);
+    repository.git(&["checkout", "-b", "farik/FRK-1"]);
+    repository.write("task.txt", "the task\n");
+    repository.commit("the task");
+    repository.git(&["checkout", "main"]);
+    repository.write("main.txt", "main moved on\n");
+    repository.commit("main moves on");
+    assert_eq!(
+        repository.adapter().merge_base("main", "farik/FRK-1"),
+        Ok(fork)
+    );
 }

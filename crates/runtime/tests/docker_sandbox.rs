@@ -9,7 +9,9 @@ use std::process::Command;
 use std::time::{Duration, Instant};
 
 use farik_core::contract::TaskId;
-use farik_runtime::{DockerSandbox, ExecError, Executor, Sandbox, SandboxError};
+use farik_runtime::{
+    DockerSandbox, DockerSandboxFactory, ExecError, Executor, Sandbox, SandboxError, SandboxFactory,
+};
 
 const IMAGE: &str = "alpine:3.22";
 const SECOND: Duration = Duration::from_secs(1);
@@ -255,6 +257,31 @@ fn does_not_report_a_timeout_for_a_command_that_finished() {
     Box::new(sandbox)
         .discard()
         .expect("the container is removed");
+}
+
+#[test]
+#[ignore = "needs docker"]
+fn makes_a_base_container_beside_the_task_s_own_with_no_network() {
+    let factory = DockerSandboxFactory {
+        image: IMAGE.to_owned(),
+    };
+    let project = project("base");
+    let own = factory
+        .create(&project, &task(), &worktree("base-own"), true)
+        .unwrap_or_else(|error| panic!("the task's sandbox could not be made: {error}"));
+    let base = factory
+        .create_base(&project, &task(), &worktree("base"))
+        .unwrap_or_else(|error| panic!("the base sandbox could not be made: {error}"));
+    // `project` is already in Docker's alphabet, so the names are spelled out rather than derived.
+    let own_name = format!("farik-{project}-frk-1");
+    let base_name = format!("{own_name}-base");
+    assert_eq!(containers_named(&own_name), 1);
+    assert_eq!(containers_named(&base_name), 1, "both run side by side");
+    let mode = docker(&["inspect", "-f", "{{.HostConfig.NetworkMode}}", &base_name]);
+    assert_eq!(mode.trim(), "none");
+    base.discard().expect("the base container is removed");
+    assert_eq!(containers_named(&base_name), 0);
+    own.discard().expect("the task's container is removed");
 }
 
 #[test]
