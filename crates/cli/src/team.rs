@@ -1,6 +1,6 @@
 //! `farik rules show` and `farik criteria list`: the two team files a person hand-edits (F15, F16).
 
-use farik_core::criteria::{CriterionTemplate, TemplateVerification};
+use farik_core::criteria::TemplateVerification;
 use serde_json::json;
 
 use crate::Report;
@@ -126,10 +126,4 @@ fn how_of(verification: &TemplateVerification) -> String {
         TemplateVerification::Variant3 { rubric, .. } => rubric.join("; "),
         TemplateVerification::Variant4 { question, .. } => question.clone(),
     }
-}
-
-/// Every criterion in the library, for a caller that wants the values rather than the words.
-#[must_use]
-pub fn named(criteria: &[CriterionTemplate]) -> Vec<String> {
-    criteria.iter().map(|one| one.name.to_string()).collect()
 }
