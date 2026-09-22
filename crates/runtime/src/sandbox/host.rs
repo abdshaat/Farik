@@ -236,6 +236,64 @@ mod tests {
     }
 
     #[test]
+    fn ends_a_background_child_once_the_shell_has_exited() {
+        let sandbox = HostSandbox::new(fresh_root("background"));
+        let started = Instant::now();
+        let result = sandbox
+            .run("sleep 33 & echo started", "", 60 * SECOND, &no_env())
+            .expect("the command runs");
+        assert!(started.elapsed() < 5 * SECOND);
+        assert!(!result.timed_out);
+        assert_eq!(result.stdout, "started\n");
+        let deadline = Instant::now() + SECOND;
+        loop {
+            let found = std::process::Command::new("pgrep")
+                .args(["-f", "sleep 33"])
+                .output()
+                .expect("pgrep runs");
+            if !found.status.success() {
+                break;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "the background sleep outlived sh"
+            );
+            std::thread::sleep(Duration::from_millis(50));
+        }
+    }
+
+    #[test]
+    fn does_not_cut_output_of_exactly_a_mebibyte() {
+        let sandbox = HostSandbox::new(fresh_root("exact"));
+        let result = sandbox
+            .run(
+                &format!("head -c {OUTPUT_LIMIT_BYTES} /dev/zero | tr '\\0' a"),
+                "",
+                30 * SECOND,
+                &no_env(),
+            )
+            .expect("the command runs");
+        assert_eq!(result.stdout.len(), OUTPUT_LIMIT_BYTES);
+        assert!(!result.truncated);
+    }
+
+    #[test]
+    fn says_it_cut_when_only_standard_error_overflowed() {
+        let sandbox = HostSandbox::new(fresh_root("stderr"));
+        let result = sandbox
+            .run(
+                "head -c 3000000 /dev/zero | tr '\\0' a >&2",
+                "",
+                30 * SECOND,
+                &no_env(),
+            )
+            .expect("the command runs");
+        assert_eq!(result.stdout, "");
+        assert_eq!(result.stderr.len(), OUTPUT_LIMIT_BYTES);
+        assert!(result.truncated);
+    }
+
+    #[test]
     fn keeps_the_first_mebibyte_of_output_and_says_it_cut() {
         let sandbox = HostSandbox::new(fresh_root("mebibyte"));
         let result = sandbox

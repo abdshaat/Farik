@@ -91,6 +91,7 @@ Tests, each in a fresh directory under `std::env::temp_dir()` named with the pro
 - `creates_a_host_sandbox_rooted_at_the_worktree` — `HostSandboxFactory.create("p", FRK-1, root, false)` gives a sandbox whose `pwd` prints the canonical root.
 - `discards_a_host_sandbox_without_touching_the_workspace` — `discard` is `Ok` and the root still exists.
 - `displays_each_error_in_words` — `ImageMissing { image: "farik/sandbox:0.0.0" }` displays a sentence containing the image; `DockerUnavailable` one containing `docker`; `ExecError::OutsideWorkspace { cwd: "../x" }` one containing `../x`.
+- Added by the landing review: `returns_by_the_deadline_when_an_escaped_child_holds_the_pipe` (`setsid sleep 4 & echo started` with a 1.5 s timeout returns within 2.5 s), `ends_a_background_child_once_the_shell_has_exited` (`sleep 33 & echo started` with a 60 s timeout returns quickly, not timed out, and no `sleep 33` is left within a 1 s `pgrep` retry loop), `does_not_cut_output_of_exactly_a_mebibyte` (exactly `OUTPUT_LIMIT_BYTES` is kept whole, `truncated == false`), and `says_it_cut_when_only_standard_error_overflowed`.
 
 - [x] `feat(runtime): run commands in a task's workspace on the host`
 
