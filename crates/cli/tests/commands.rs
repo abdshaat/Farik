@@ -955,6 +955,70 @@ fn refuses_to_take_a_contract_whose_task_is_finished() {
     );
 }
 
+/// A project with FRK-1 filed and a second contract, FRK-7, written straight to its file, so that
+/// the log has never heard of it.
+fn a_project_with_a_contract_only_the_files_know(name: &str) -> TempRepo {
+    let repository = a_project(name);
+    let file = a_request_file(&repository, "request.yaml", "A board command");
+    let filed = run_in(
+        &repository.path,
+        &["task", "create", file.to_str().expect("a path")],
+    );
+    assert_eq!(filed.code, 0, "{}", filed.err);
+    let files = files_of(&repository);
+    let mut contract = files
+        .read_contract(&TaskId::try_from("FRK-1").expect("a task id"))
+        .expect("a contract");
+    contract.id = TaskId::try_from("FRK-7").expect("a task id");
+    files
+        .write_contract(&contract)
+        .expect("the contract is written");
+    repository
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn shows_the_status_the_log_says_and_that_the_file_disagrees() {
+    let repository = a_project("cli-show-status");
+    let file = a_request_file(&repository, "request.yaml", "A board command");
+    run_in(
+        &repository.path,
+        &["task", "create", file.to_str().expect("a path")],
+    );
+    moved_to(&repository, "FRK-1", "refining");
+
+    let ran = run_in(&repository.path, &["task", "show", "FRK-1"]);
+
+    assert_eq!(ran.code, 0, "{}", ran.err);
+    assert_eq!(
+        ran.out.lines().nth(1),
+        Some("refining task, low risk"),
+        "the log decides a task's status (8.4): {}",
+        ran.out
+    );
+    assert!(
+        ran.out
+            .contains("the file says draft and the log says refining"),
+        "and a disagreement is said, not settled silently: {}",
+        ran.out
+    );
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn shows_a_task_the_log_has_never_heard_of_and_says_so() {
+    let repository = a_project_with_a_contract_only_the_files_know("cli-show-unheard");
+
+    let ran = run_in(&repository.path, &["task", "show", "FRK-7"]);
+
+    assert_eq!(ran.code, 0, "{}", ran.err);
+    assert!(
+        ran.out.contains("the log has never heard of this task"),
+        "{}",
+        ran.out
+    );
+}
+
 #[test]
 #[ignore = "needs the git program: cargo xtask check --integration"]
 fn refuses_a_task_id_that_is_not_one() {
