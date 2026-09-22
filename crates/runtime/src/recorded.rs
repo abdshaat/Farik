@@ -164,8 +164,8 @@ fn locked<Value>(mutex: &Mutex<Value>) -> MutexGuard<'_, Value> {
 mod tests {
     use tokio::sync::mpsc::error::TryRecvError;
 
-    use super::RecordedAdapter;
     use super::fixtures::{a_session_spec, reads_a_file, write_denied};
+    use super::{RecordedAdapter, Transcript};
     use crate::session::{EndReason, RuntimeAdapter, RuntimeError, SessionEvent, SessionHandle};
     use crate::stream::StreamParser;
 
@@ -266,5 +266,23 @@ mod tests {
             .expect("a second transcript is left");
         assert_eq!(resumed.session_id(), "s-9");
         assert_eq!(adapter.sent(), vec!["continue".to_string()]);
+    }
+
+    #[test]
+    fn refuses_to_replay_a_transcript_that_does_not_parse() {
+        let adapter = RecordedAdapter::new(vec![Transcript::from_jsonl("not json\n")]);
+        assert!(matches!(
+            adapter.start_session(a_session_spec()),
+            Err(RuntimeError::Protocol { .. })
+        ));
+    }
+
+    #[test]
+    fn passes_over_blank_lines_in_a_transcript() {
+        let transcript = Transcript::from_jsonl("{\"type\":\"a\"}\n\n   \n{\"type\":\"b\"}\n");
+        assert_eq!(
+            transcript.lines().collect::<Vec<_>>(),
+            vec!["{\"type\":\"a\"}", "{\"type\":\"b\"}"]
+        );
     }
 }

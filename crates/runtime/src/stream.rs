@@ -49,7 +49,11 @@ impl StreamParser {
                     self.tools_by_id.insert(id.to_string(), name.to_string());
                     events.push(SessionEvent::ToolCalled {
                         tool: name.to_string(),
-                        input: block.get("input").cloned().unwrap_or(Value::Null),
+                        input: block.get("input").cloned().ok_or_else(|| {
+                            RuntimeError::Protocol {
+                                detail: "a tool_use block has no input".to_string(),
+                            }
+                        })?,
                     });
                 }
                 _ => {}
@@ -96,11 +100,12 @@ impl StreamParser {
         }
         let what = "a permission_denied line";
         let id = string_field(value, "tool_use_id", what)?;
-        self.denied_ids.insert(id.to_string());
-        Ok(vec![SessionEvent::ToolDenied {
+        let denied = SessionEvent::ToolDenied {
             tool: string_field(value, "tool_name", what)?.to_string(),
             reason: string_field(value, "decision_reason", what)?.to_string(),
-        }])
+        };
+        self.denied_ids.insert(id.to_string());
+        Ok(vec![denied])
     }
 }
 
@@ -311,6 +316,7 @@ mod tests {
             r#"{"type":"something_new"}"#,
             r#"{"type":"system","subtype":"init"}"#,
             r#"{"type":"assistant","message":{"content":[{"type":"thinking","thinking":"","signature":""}]}}"#,
+            r#"{"type":"user","message":{"content":"hi"}}"#,
         ] {
             assert_eq!(one_line(line), Ok(Vec::new()), "{line}");
         }
@@ -365,6 +371,79 @@ mod tests {
             vec![SessionEvent::ToolReturned {
                 tool: "Grep".to_string(),
                 output: "a\nb".to_string(),
+            }]
+        );
+    }
+
+    #[test]
+    fn joins_several_errors_and_otherwise_ends_with_the_result_text() {
+        let events = one_line(
+            r#"{"type":"result","subtype":"error_during_execution","errors":["a","b"],"usage":{"input_tokens":0,"output_tokens":0,"cache_read_input_tokens":0,"cache_creation_input_tokens":0}}"#,
+        )
+        .expect("a result line parses");
+        assert_eq!(
+            events.last(),
+            Some(&SessionEvent::Ended {
+                reason: EndReason::Error,
+                detail: "a; b".to_string(),
+            })
+        );
+        assert_eq!(
+            events_of(&reads_a_file()).last(),
+            Some(&SessionEvent::Ended {
+                reason: EndReason::Completed,
+                detail: "hello fixture".to_string(),
+            })
+        );
+    }
+
+    #[test]
+    fn refuses_a_known_line_missing_a_field_it_reads() {
+        let usage = r#""usage":{"input_tokens":0,"output_tokens":0,"cache_read_input_tokens":0,"cache_creation_input_tokens":0}"#;
+        let cases = [
+            (format!(r#"{{"type":"result",{usage}}}"#), "subtype"),
+            (
+                r#"{"type":"result","subtype":"success","usage":{"input_tokens":0,"cache_read_input_tokens":0,"cache_creation_input_tokens":0}}"#.to_string(),
+                "output_tokens",
+            ),
+            (
+                r#"{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Read","input":{}}]}}"#.to_string(),
+                "id",
+            ),
+            (
+                r#"{"type":"assistant","message":{"content":[{"type":"tool_use","id":"t","name":"Read"}]}}"#.to_string(),
+                "input",
+            ),
+            (
+                r#"{"type":"assistant","message":{"content":[{"type":"text"}]}}"#.to_string(),
+                "text",
+            ),
+            (
+                r#"{"type":"system","subtype":"permission_denied","tool_use_id":"t","tool_name":"Write"}"#.to_string(),
+                "decision_reason",
+            ),
+        ];
+        for (line, field) in cases {
+            match one_line(&line) {
+                Err(RuntimeError::Protocol { detail }) => {
+                    assert!(detail.contains(field), "{field} not in {detail}");
+                }
+                other => panic!("expected a refusal naming {field} for {line}, got {other:?}"),
+            }
+        }
+    }
+
+    #[test]
+    fn reports_the_denials_decision_reason_rather_than_its_message() {
+        let events = one_line(
+            r#"{"type":"system","subtype":"permission_denied","tool_use_id":"t","tool_name":"Write","decision_reason":"the hook said no","message":"something else"}"#,
+        )
+        .expect("a denial parses");
+        assert_eq!(
+            events,
+            vec![SessionEvent::ToolDenied {
+                tool: "Write".to_string(),
+                reason: "the hook said no".to_string(),
             }]
         );
     }
