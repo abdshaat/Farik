@@ -91,9 +91,19 @@ pub fn create(
         ));
     }
 
+    // Past every contract the repository already holds as well as the counter: the log is
+    // machine-local and the contracts are committed (8.4), so on a fresh clone the counter alone
+    // would hand out FRK-1 again. `list_contracts` is in number order, so the last is the highest.
+    let taken = project
+        .files
+        .list_contracts()
+        .map_err(|error| error.to_string())?
+        .last()
+        .and_then(|id| id.as_str().trim_start_matches("FRK-").parse::<u64>().ok())
+        .unwrap_or(0);
     let task_id = project
         .log
-        .next_task_id()
+        .next_task_id_above(taken)
         .map_err(|error| error.to_string())?;
     let stamp = now.to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
     object.insert("id".to_string(), json!(task_id.to_string()));
@@ -123,7 +133,7 @@ pub fn create(
 
     project
         .files
-        .write_contract(&contract)
+        .create_contract(&contract)
         .map_err(|error| error.to_string())?;
     let event = project.event(
         EventBody::TaskCreated(TaskCreatedBody {

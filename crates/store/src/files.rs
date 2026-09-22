@@ -234,6 +234,29 @@ impl ProjectFiles {
         self.write_yaml(&path, &value)
     }
 
+    /// Writes a new contract, refusing when its file is already there rather than writing over it.
+    ///
+    /// `write_contract` overwrites, which is what an update wants. A new contract that landed on an
+    /// existing file would replace somebody's committed work, so this is the path creation takes.
+    ///
+    /// # Errors
+    ///
+    /// `Invalid` when the file is already there or the contract is not one `validate_contract`
+    /// accepts, `Io` when it cannot be written.
+    pub fn create_contract(&self, contract: &TaskContract) -> Result<(), FilesError> {
+        let path = contract_path(&contract.id);
+        // ponytail: checked then written, not one atomic operation; the log's counter is what keeps
+        // two processes apart, and this only catches an id that collides with a file.
+        if self.path_of(&path).exists() {
+            return Err(FilesError::Invalid {
+                path: Self::named(&path),
+                detail: "a contract is already there, and a new one does not replace it"
+                    .to_string(),
+            });
+        }
+        self.write_contract(contract)
+    }
+
     /// Every contract there is, by id, in the order a board shows them: by the number in the id, so
     /// that the tenth task does not come before the ninth.
     ///

@@ -424,6 +424,39 @@ fn files_a_contract_as_a_draft_request() {
 
 #[test]
 #[ignore = "needs the git program: cargo xtask check --integration"]
+fn never_hands_out_an_id_a_committed_contract_already_has() {
+    // The log is machine-local and the contracts travel with the repository (8.4), so a fresh clone
+    // has the files and a counter at zero. Taking the id from the counter alone would file the next
+    // request as FRK-1 and write it over the contract a teammate committed.
+    let repository = a_project("cli-create-fresh-clone");
+    let first = a_request_file(&repository, "first.yaml", "The committed one");
+    let filed = run_in(
+        &repository.path,
+        &["task", "create", first.to_str().expect("a path")],
+    );
+    assert_eq!(filed.code, 0, "{}", filed.err);
+    std::fs::remove_dir_all(repository.path.join(".farik/local")).expect("a fresh clone");
+
+    let second = a_request_file(&repository, "second.yaml", "The new one");
+    let ran = run_in(
+        &repository.path,
+        &["task", "create", second.to_str().expect("a path")],
+    );
+
+    assert_eq!(ran.code, 0, "{}", ran.err);
+    assert!(ran.out.contains("FRK-2 filed"), "{}", ran.out);
+    assert_eq!(
+        files_of(&repository)
+            .read_contract(&TaskId::try_from("FRK-1").expect("a task id"))
+            .expect("the committed contract is still there")
+            .title
+            .as_str(),
+        "The committed one"
+    );
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
 fn reads_the_contract_from_where_the_command_was_run() {
     // The path is the person's, so it is relative to the directory they typed it in — not to the
     // repository root, which is where the project is, and not to whatever directory this process
