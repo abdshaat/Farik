@@ -312,7 +312,10 @@ mod tests {
     };
     use serde_json::json;
 
-    use super::{CostError, CostSource, budget_state, record_exhaustion, record_session_cost};
+    use super::{
+        CostError, CostSource, budget_state, consequence_wire, purpose_wire, record_exhaustion,
+        record_session_cost, scope_wire,
+    };
     use crate::session::SessionPurpose;
 
     fn at(text: &str) -> DateTime<Utc> {
@@ -400,26 +403,85 @@ mod tests {
             &log,
             &projections,
             &source(ids(Some("FRK-1"), "s1")),
-            &usage(1_000_000, 500_000),
+            &Usage {
+                cache_read_tokens: 2_000_000,
+                cache_write_tokens: 4_000_000,
+                ..usage(1_000_000, 500_000)
+            },
             &prices(),
             &clock(),
         )
         .expect("recorded");
-        assert!(close(charged, 2.0), "{charged}");
+        assert!(close(charged, 4.0), "{charged}");
         let events = everything(&log);
         assert_eq!(events.len(), 2);
         let recorded = &events[1];
         let EventBody::CostRecorded(body) = &recorded.body else {
             panic!("a cost.recorded, not {:?}", recorded.body.kind());
         };
-        assert!(close(body.cost_usd, 2.0));
+        assert!(close(body.cost_usd, 4.0));
+        assert_eq!(
+            (body.usage.input_tokens, body.usage.output_tokens),
+            (1_000_000, 500_000)
+        );
+        assert_eq!(body.usage.cache_read_tokens, 2_000_000);
+        assert_eq!(body.usage.cache_write_tokens, 4_000_000);
         assert_eq!(body.purpose, CostRecordedBodyPurpose::Implement);
         assert_eq!(recorded.envelope.ids, ids(Some("FRK-1"), "s1"));
         let task = projections
             .task(&"FRK-1".parse().expect("a task id"))
             .expect("the read works")
             .expect("on the board");
-        assert!(close(task.cost_usd, 2.0));
+        assert!(close(task.cost_usd, 4.0));
+    }
+
+    #[test]
+    fn writes_every_purpose_scope_and_consequence_by_its_own_wire_name() {
+        for purpose in [
+            SessionPurpose::Triage,
+            SessionPurpose::Refine,
+            SessionPurpose::Plan,
+            SessionPurpose::Implement,
+            SessionPurpose::Verify,
+            SessionPurpose::Ceremony,
+            SessionPurpose::Conversation,
+        ] {
+            assert_eq!(
+                serde_json::to_value(purpose_wire(purpose)).expect("serializes"),
+                serde_json::to_value(purpose).expect("serializes"),
+            );
+        }
+        for (scope, wire) in [
+            (BudgetScope::SessionTokens, "session_tokens"),
+            (BudgetScope::SessionWallClock, "session_wall_clock"),
+            (BudgetScope::SessionToolCalls, "session_tool_calls"),
+            (BudgetScope::TaskUsd, "task_usd"),
+            (BudgetScope::TaskSessions, "task_sessions"),
+            (BudgetScope::SprintUsd, "sprint_usd"),
+            (BudgetScope::DayUsd, "day_usd"),
+        ] {
+            assert_eq!(
+                serde_json::to_value(scope_wire(scope)).expect("serializes"),
+                wire
+            );
+        }
+        for (consequence, wire) in [
+            (
+                BudgetConsequence::EndSessionAndBlockTask,
+                "end_session_and_block_task",
+            ),
+            (BudgetConsequence::EscalateTask, "escalate_task"),
+            (
+                BudgetConsequence::StopNewAssignments,
+                "stop_new_assignments",
+            ),
+            (BudgetConsequence::PauseTeam, "pause_team"),
+        ] {
+            assert_eq!(
+                serde_json::to_value(consequence_wire(consequence)).expect("serializes"),
+                wire
+            );
+        }
     }
 
     #[test]
