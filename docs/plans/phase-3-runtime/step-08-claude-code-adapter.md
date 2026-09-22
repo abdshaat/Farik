@@ -1,0 +1,127 @@
+# Phase 3, step 08: Claude Code adapter
+
+Status: ready
+Branch: `phase/3-runtime`
+Spec: `docs/SPEC.md` sections 8.2, 8.6; ADR 0004, ADR 0005
+Depends on: step 07 of this phase (`builtin_tool_tier`, the daemon's routes, `DaemonInfo`), a start gate: Task 1 does not begin until step 07's last commit is on this branch; step 01 (`RuntimeAdapter`, `StreamParser`)
+Readiness confirmed by: fresh-session reviewer, 2026-09-22 (two rounds: the second on the false fact and the undecided decision the first found; findings folded in)
+
+## Goal
+
+A session is a real Claude Code process: started with the agent's prompt, model, effort, and only the tools its tiers allow; wired to Farik's MCP server, hooks, and permission tool; authenticated with the user's API key or subscription token and nothing else from the user's settings; stopped at its wall-clock limit or when the caller aborts it; and read back as session events. Farik refuses to run on a Claude Code older than the one it was tested against. The log records when each session started and ended. Out of scope: which session to start and when (steps 11 and 12), the prompt's text (step 10), costing usage (step 03, called by step 11).
+
+## Decisions
+
+Measured on `claude` 2.1.280, 2026-09-22: `--append-system-prompt-file <path>` exists though `--help` does not list it, refuses a missing file, and reaches the model; `--tools <names>` restricts the built-in tools to a list; `--setting-sources ""` loads none of the user's settings, so the user's own hooks do not fire in a Farik session; `--session-id <uuid>` becomes the hook's `session_id`; a hook's deny arrives as the error `tool_result` `PreToolUse:<tool> hook error: <reason>` with no `permission_denied` line. And, with `--setting-sources ""`, a `--settings` `permissions.deny` of `Read(**/*.pem)` and `Read(.env)`, and a `PreToolUse` hook that allowed everything: `Read` of `.env` was refused ("File is in a directory that is denied by your permission settings"), `Grep` for a string in a non-hidden `server.pem` left that file out of its results, and `Glob` of `**/*.pem` found no files. So `Read(<glob>)` deny rules cover the search tools and hold after the hook's allow, which is what step 07's residual rests on; the refused call reaches the stream as an error `tool_result` and stays `ToolReturned` there, as a permission-prompt denial does, because the daemon logs the hook's own denials and these two are Claude Code's. And a project `CLAUDE.md` in the working directory did not reach the model under `--setting-sources ""` (asked its name, it did not give the file's). Rejected alternatives: `--bare` skips settings hooks, which Farik's governor is; isolating with `CLAUDE_CONFIG_DIR` is not needed once `--setting-sources ""` was measured to keep the repository's and the user's settings out.
+
+- The command line: `claude -p --output-format stream-json --input-format stream-json --verbose --session-id <id> --model <model> --effort <effort> --append-system-prompt-file <file> --tools <allowed built-ins, comma-separated> --disallowedTools Bash --mcp-config <json> --strict-mcp-config --permission-prompt-tool mcp__farik__permission --max-turns <limits.max_tool_calls + 1> --setting-sources "" --settings <json>`, run in `spec.cwd`. The allowed built-ins are those `builtin_tool_tier` gives a tier the agent holds; `--tools` is the allowlist and `--disallowedTools Bash` stays as a second, explicit refusal of the one tool ADR 0004 names. `--max-turns` is the tool-call limit plus one, because `hits_the_turn_limit.jsonl` shows `--max-turns 1` allowing one tool round and then cutting the answer (`num_turns: 2`, `error_max_turns`); the daemon's count (step 07) is the real limit and this is the backstop. `--max-turns` is hidden from `--help`; that fixture is the evidence it exists. `spec.farik_tools` is not put on the command line, because the hook enforces which Farik tools a session may call. Revision 8's `disallowed_builtin_tools` becomes `SessionSpec::builtin_tools`, the allowlist (a field change to step 01's struct).
+- `--mcp-config` names a file, `.farik/local/sessions/<id>/mcp.json` with mode 0600, holding `{ "mcpServers": { "farik": { "type": "http", "url": "http://127.0.0.1:<port>/mcp", "headers": { "Authorization": "Bearer <token>", "X-Farik-Session": "<id>" } } } }` plus the spec's other servers, because a process's command line is readable by every user of the machine through `/proc/<pid>/cmdline`. `spec.mcp_servers` holds only servers other than Farik's (none in this phase), a server there named `farik` is refused with `Spawn`, and `SessionSpec`'s doc comment says so. In no-sandbox mode a host command runs as the same user and can read the Claude Code process's `/proc/<pid>/environ` (the credential) and its session's files (the token); `docs/SPEC.md` 8.6 records this as a residual of host mode beside step 02's.
+- `--settings` is `{ "hooks": { "PreToolUse": [ { "matcher": "*", "hooks": [ { "type": "command", "command": "<farik> hook pre-tool-use --daemon <daemon.json>" } ] } ], "PostToolUse": [ same with post-tool-use ] }, "permissions": { "deny": [ "Read(<glob>)" for each protected path ] } }`, the deny rules being step 07's answer to searches over protected files. `<farik>` is the adapter's `hook_command`, which the command line passes as its own `current_exe()`.
+- The settings JSON is built at each session start from the team file as it is then, so a protected path added between sessions applies to the next one. The prompt file is `.farik/local/sessions/<id>/system-prompt.md`, kept after the session, because the log says what the session was told and the file is the exact text; `.farik/local/` is never committed.
+- Credential: `ClaudeCredential::ApiKey` sets `ANTHROPIC_API_KEY`, `OauthToken` sets `CLAUDE_CODE_OAUTH_TOKEN`, and the child's environment is otherwise only `ClaudeConfig::env`, the base the command line fills from its own environment with `PATH`, `HOME`, `USER`, `LANG`, `TERM`, and `TMPDIR` when set: nothing else is inherited, so `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_BASE_URL`, a provider switch (`CLAUDE_CODE_USE_BEDROCK`, `_VERTEX`), `CLAUDE_CONFIG_DIR`, or another secret in the user's shell cannot change which account pays or reach the session, and a test passes its own map instead of setting the process's. `credential_from_env` reads the API key first, else the token, and a blank value is none.
+- Version: `ClaudeAdapter::new` runs `<claude> --version`, reads the leading `major.minor.patch`, and refuses one older than `MIN_CLAUDE_VERSION` (`2.1.272`) with `RuntimeError::VersionTooOld`; a missing program is `RuntimeError::Spawn`.
+- The process is `tokio::process` (the `process` feature). The first user message is the spec's `initial_prompt` as one `stream-json` user line. Stdout lines go through a `StreamParser` on a task that forwards events to the session's channel; stderr keeps its last 4 KiB for the detail of an error end. The session ends at the first `result` line: lines after it are dropped, stdin is closed, and the process is given 5 s to exit and then killed. A later turn is `resume`. `send` refuses with `Spawn` ("a Farik session takes one message; resume it for another"), because a message sent mid-turn makes Claude Code emit a second `result` that nobody would read (its `queued_turn_count`); after the end it answers `Limit` or `Aborted` if the session ended that way. `start_session` spawns tasks and must be called inside a `tokio` runtime; the process tests are `#[tokio::test]`.
+- The process runs in its own process group (`process_group(0)`), and every kill is of the group (step 02's `kill -s KILL -- -<pgid>`), because Claude Code's own children (ripgrep, an MCP server) and a fake script's `sleep` would otherwise hold stdout open. `abort` kills the group and the session ends `Aborted`; the wall clock kills it at `limits.max_wall_clock` and it ends `Limit`; in both, `Ended` is sent at once, not after the pipe closes. A process that exits without a `result` line ends `Error` with the stderr tail.
+- `resume(session_id, prompt)` runs the same command line with `--resume <id>` in place of `--session-id`, which needs the spec the adapter started it with; the adapter keeps them in memory, and a session it did not start is `Spawn` ("this adapter did not start that session"). Recovery (step 11) starts fresh sessions rather than resuming across a restart.
+- The parser learns hook denials: a `tool_result` with `is_error` whose text starts `PreToolUse:<tool> hook error: ` is `ToolDenied { tool, reason }` with the text after it, recorded as `hook_denies_a_write.jsonl` from that session (step 01's other rules are unchanged). The daemon has already logged `tool.denied`; the stream's copy is for the orchestrator's reading of the session.
+- Events added: `session.started { purpose, model, effort }` and `session.ended { reason: completed | aborted | limit | error, detail }`, with the session, agent, and task on the envelope; `record_session_started` and `record_session_ended` in `farik-runtime::sessions`, which step 11 calls. `docs/SPEC.md` 8.5 already lists both.
+- The live test is `crates/cli/tests/live_claude.rs`, in the command line's crate because the hooks need the `farik` binary and there it is `env!("CARGO_BIN_EXE_farik")`. It runs only with `FARIK_LIVE_TESTS=1` and a credential in the environment: a haiku session in a temporary repository with a served daemon reads a file through `Read`, is denied a `Write` outside its allowed paths, finds nothing from a protected `.env` holding a secret with `Grep`, and ends `Completed`; the log holds `tool.called` and `tool.denied`, the stream ends with usage, and the `init` line's `tools` are the `--tools` given. It costs a few cents and never runs in CI. `docs/standards/code.md` already has the live-test row revision 8 asked for; nothing is added there.
+- `BUILTIN_TOOLS` in `claude.rs` lists the names `allowed_builtins` asks `builtin_tool_tier` about. `--effort` takes `Effort`'s snake_case name. `session.started` and `session.ended` are not about one contract and have no attribution field; `EVERY_KIND` grows; the envelope comes from `ids`. `DaemonInfo`'s `Debug` prints its token as `[redacted]`.
+
+## File map
+
+```
+crates/runtime/Cargo.toml                    modifies: tokio `process`, `io-util`
+crates/runtime/src/session.rs                modifies: `builtin_tools` replaces `disallowed_builtin_tools`
+crates/runtime/src/recorded/fixtures.rs      modifies: the spec's new field; `hook_denies_a_write()`
+crates/runtime/src/stream.rs                 modifies: hook denials; tests
+crates/runtime/src/recorded/transcripts/hook_denies_a_write.jsonl   creates
+crates/runtime/src/claude.rs                 creates: ClaudeAdapter, ClaudeConfig, ClaudeCredential, Secret, credential_from_env, claude_args, MIN_CLAUDE_VERSION; tests
+crates/runtime/src/sessions.rs               creates: record_session_started, record_session_ended; tests
+crates/runtime/tests/claude_process.rs       creates: the adapter against a fake `claude` script
+crates/cli/tests/live_claude.rs              creates: the live test
+docs/schemas/event.schema.json, crates/protocol/src/event.rs, event/fixtures.rs   modifies: session.started, session.ended
+crates/runtime/src/lib.rs                    modifies: modules
+docs/SPEC.md                                 modifies: 8.2 (the credentials, the environment, the allowlist, the user's settings not loaded), 8.6 (the host-mode `/proc` residual)
+docs/plans/project-plan.md                   modifies: step 08's interface line
+```
+
+## Interfaces
+
+Consumes: `RuntimeAdapter`, `SessionHandle`, `SessionSpec`, `SessionEvent`, `StreamParser`, `RuntimeError` (step 01); `builtin_tool_tier`, `DaemonInfo`, and for the live test `DaemonState`, `register_session`, `serve`, `DaemonHandle` (step 07), `ToolDeps` (step 05); `PermissionTier`; `EventLog`, `EventIds`, `new_event`, `Clock`.
+
+Produces:
+
+```rust
+pub const MIN_CLAUDE_VERSION: &str = "2.1.272";
+pub struct Secret(String);  impl Secret { pub fn new(value: String) -> Secret; pub fn expose(&self) -> &str; }   // Debug prints [redacted]
+pub enum ClaudeCredential { ApiKey(Secret), OauthToken(Secret) }
+pub fn credential_from_env(env: &BTreeMap<String, String>) -> Option<ClaudeCredential>;
+pub struct ClaudeConfig { pub claude_path: PathBuf, pub hook_command: PathBuf, pub daemon_file: PathBuf, pub daemon: DaemonInfo, pub sessions_dir: PathBuf, pub team_file: PathBuf, pub env: BTreeMap<String, String> }
+pub const BUILTIN_TOOLS: &[&str];
+pub struct ClaudeAdapter { /* credential, config, specs by session */ }
+impl ClaudeAdapter { pub fn new(credential: ClaudeCredential, config: ClaudeConfig) -> Result<ClaudeAdapter, RuntimeError>; }
+impl RuntimeAdapter for ClaudeAdapter { .. }
+pub fn claude_args(spec: &SessionSpec, config: &ClaudeConfig, session_dir: &Path, resume: bool) -> Vec<String>;   // session_dir holds system-prompt.md and mcp.json, written by the adapter before spawning
+pub fn allowed_builtins(tiers: &BTreeSet<PermissionTier>) -> Vec<String>;
+SessionSpec { .., pub builtin_tools: Vec<String>, .. }   // replaces disallowed_builtin_tools
+// sessions
+pub fn record_session_started(log: &EventLog, spec: &SessionSpec, ids: &EventIds, clock: &dyn Clock) -> Result<(), StoreError>;
+pub fn record_session_ended(log: &EventLog, session_id: &str, reason: EndReason, detail: &str, ids: &EventIds, clock: &dyn Clock) -> Result<(), StoreError>;
+```
+
+## Tasks
+
+### Task 1: the events and the parser's hook denials
+
+- `writes_back_exactly_the_value_it_read_for_every_kind` (existing) covers the two.
+- `records_a_session_starting_and_ending` — the log holds `session.started` with the spec's purpose and model, and `session.ended { reason: limit }`, each with the session, agent, and task ids.
+- `reads_a_hook_denial_as_a_denied_tool` — `hook_denies_a_write()` yields `ToolDenied { tool: "Write", reason: "farik says no" }` and no `ToolReturned` for it.
+
+- [ ] `feat(runtime): record sessions and read hook denials from the stream`
+
+### Task 2: the command line and the credential
+
+Pure functions, tested in `claude.rs` (the MCP file test writes to a temporary sessions directory):
+
+- `builds_the_command_line_claude_code_needs` — for a spec with `builtin_tools: [Read, Grep]`: the args hold, in order, every flag of the decision; `--tools` is `Read,Grep`; `--max-turns` the spec's tool-call limit plus one; `--setting-sources` followed by an empty string; `--mcp-config` a path, and no argument holds the token.
+- `refuses_a_spec_that_names_its_own_farik_server` — `Spawn`.
+- `passes_only_the_base_environment_and_one_credential` — the child environment built from a base holding `PATH` and a credential is `PATH` plus that credential's one variable.
+- `puts_the_session_and_token_in_the_mcp_config_file` — the file at the `--mcp-config` path has mode 0600, parses, and `mcpServers.farik.headers` has the bearer token and the session id, and `url` the daemon's port.
+- `wires_both_hooks_and_the_protected_paths_into_the_settings` — the `--settings` JSON has one `PreToolUse` and one `PostToolUse` command naming `--daemon` and the file, and `permissions.deny` has `Read(.env)` for a protected `.env`.
+- `resumes_with_the_same_line_and_the_resume_flag` — `resume: true` gives `--resume <id>` and no `--session-id`.
+- `allows_only_the_builtins_the_tiers_grant` — `{Read}` gives `Glob, Grep, LS, Read, ToolSearch`; `{Read, WriteWorkspace}` adds the four writers; never `Bash`.
+- `prefers_the_api_key_and_ignores_blank_values` — both set: `ApiKey`; key blank and token set: `OauthToken`; neither: `None`.
+- `hides_a_secret_when_printed` — `format!("{:?}", credential)` contains `[redacted]` and not the value.
+- `refuses_a_claude_code_older_than_the_minimum` — `2.1.200 (Claude Code)` is `VersionTooOld { found: "2.1.200", required: "2.1.272" }`; `2.1.280 (Claude Code)` passes; `3.0.0` passes.
+
+- [ ] `feat(runtime): build the claude code command line for a session`
+
+### Task 3: the process
+
+`crates/runtime/tests/claude_process.rs`, `#[tokio::test]`, with a fake `claude`: a shell script each test writes into its own temporary directory with absolute paths baked in, which answers `--version` with a version it is given, otherwise records its arguments and environment to files beside it, reads one stdin line, and prints the transcript at a baked-in path.
+
+- `plays_a_session_through_the_process` — the adapter's events equal the parser's events for `reads_a_file()`, then the channel closes; the script saw the credential's variable and not the other; the prompt file holds the spec's system prompt.
+- `sends_the_first_prompt_as_a_stream_json_user_line` — the line the script read is `{"type":"user","message":{"role":"user","content":"<initial_prompt>"}}`.
+- `ends_a_session_at_its_wall_clock_limit` — a script that prints nothing and sleeps, with a 1 s limit: `Ended { reason: Limit }` within 5 s and the process is gone.
+- `ends_an_aborted_session` — `abort` on a script that starts a background `sleep 60` and waits: `Ended { reason: Aborted }` within 2 s, and no `sleep 60` of that script remains (pgrep retry loop).
+- `refuses_a_second_message` — `send` during a session is `Spawn` naming resume.
+- `ends_with_the_stderr_tail_when_the_process_dies_without_a_result` — a script that writes `boom` to stderr and exits 1: `Ended { reason: Error, detail }` containing `boom`.
+- `refuses_to_resume_a_session_it_did_not_start` — `Spawn`.
+
+- [ ] `feat(runtime): run claude code sessions as child processes`
+
+### Task 4: the live test
+
+- `live_session_reads_is_denied_and_completes` (in `crates/cli/tests/live_claude.rs`) — as the decision says; skipped (returns early, printed) without `FARIK_LIVE_TESTS=1`.
+
+- [ ] `test(runtime): add the live claude code session test`
+
+## Verification
+
+```
+cargo xtask check --integration
+# expected: xtask check: ok
+FARIK_LIVE_TESTS=1 cargo test -p farik --test live_claude
+# expected: 1 passed (run by the human, with a credential; costs a few cents)
+```
