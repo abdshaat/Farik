@@ -1,0 +1,84 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://farik.dev/schemas/role.schema.json",
+  "title": "FarikRole",
+  "description": "What a role is: its mandate, what it produces, what it may not do, its default model, and its skills, stored as roles/<role_id>/role.yaml next to system.md and skills/. A role's permission tiers and session limits are not here: they are the governor's defaults (farik_core::governor::permissions::default_tiers, farik_core::budget::default_session_limits), overridden per agent in the team file. See docs/SPEC.md section 6.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "id",
+    "mandate",
+    "produces",
+    "forbidden",
+    "model",
+    "skills"
+  ],
+  "properties": {
+    "id": {
+      "type": "string",
+      "enum": [
+        "product_manager",
+        "scrum_master",
+        "architect",
+        "software_developer",
+        "marketing_specialist"
+      ],
+      "description": "The role, equal to its directory's name. `human` is a role a contract may name as a reviewer, never one an agent is instantiated from."
+    },
+    "mandate": {
+      "type": "string",
+      "minLength": 1,
+      "description": "What the role is for, in a sentence or a paragraph."
+    },
+    "produces": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "description": "What the role's work leaves behind."
+    },
+    "forbidden": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "description": "What the role may not do. The governor enforces in code what it can of this; the list is what the role is told."
+    },
+    "model": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "effort"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100,
+          "description": "The provider's model id the role runs on unless the agent names its own in the team file."
+        },
+        "effort": {
+          "type": "string",
+          "enum": [
+            "low",
+            "medium",
+            "high"
+          ],
+          "description": "How hard the model thinks by default."
+        }
+      }
+    },
+    "skills": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$",
+        "maxLength": 64
+      },
+      "description": "The skills the role ships with, each the name of a directory under skills/ holding a SKILL.md."
+    }
+  }
+}

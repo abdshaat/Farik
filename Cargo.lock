@@ -375,6 +375,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "farik-roles"
+version = "0.0.0"
+dependencies = [
+ "farik-core",
+ "jsonschema",
+ "regress",
+ "serde",
+ "serde-saphyr",
+ "serde_json",
+ "typify",
+]
+
+[[package]]
 name = "farik-runtime"
 version = "0.0.0"
 dependencies = [

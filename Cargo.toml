@@ -15,6 +15,7 @@ chrono = { version = "=0.4.45", features = ["serde"] }
 clap = { version = "=4.6.7", features = ["derive"] }
 farik-core = { path = "crates/core" }
 farik-protocol = { path = "crates/protocol" }
+farik-roles = { path = "crates/roles" }
 farik-runtime = { path = "crates/runtime" }
 farik-store = { path = "crates/store" }
 globset = { version = "=0.4.20", default-features = false }

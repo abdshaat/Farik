@@ -65,7 +65,7 @@ pub fn default_reviewer_role(team: &Team, kind: TaskKind, assignee_role: Role) -
 - `refuses_a_skill_without_frontmatter` — `parse_role` with a `SKILL.md` that does not open with `---` is `Invalid` naming the skill.
 - `lists_the_agent_roles_in_the_schema` — the schema's `id` enum equals `Role`'s values less `human`.
 
-- [ ] `feat(roles): ship the product manager and the software developer as data`
+- [x] `feat(roles): ship the product manager and the software developer as data`
 
 ### Task 2: who reviews
 
