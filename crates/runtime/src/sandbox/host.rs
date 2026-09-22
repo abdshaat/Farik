@@ -220,6 +220,22 @@ mod tests {
     }
 
     #[test]
+    fn returns_by_the_deadline_when_an_escaped_child_holds_the_pipe() {
+        let sandbox = HostSandbox::new(fresh_root("escaped"));
+        let timeout = Duration::from_millis(1500);
+        let started = Instant::now();
+        let result = sandbox
+            .run("setsid sleep 4 & echo started", "", timeout, &no_env())
+            .expect("the command runs");
+        assert!(
+            started.elapsed() < timeout + SECOND,
+            "returned after {:?}",
+            started.elapsed()
+        );
+        assert_eq!(result.stdout, "started\n");
+    }
+
+    #[test]
     fn keeps_the_first_mebibyte_of_output_and_says_it_cut() {
         let sandbox = HostSandbox::new(fresh_root("mebibyte"));
         let result = sandbox

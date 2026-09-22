@@ -99,12 +99,19 @@ mod supervise {
     use std::io::Read;
     use std::os::unix::process::ExitStatusExt;
     use std::process::{Child, Command, Stdio};
-    use std::thread::{self, JoinHandle};
+    use std::sync::mpsc::{self, Receiver};
+    use std::sync::{Arc, Mutex, PoisonError};
+    use std::thread;
     use std::time::{Duration, Instant};
 
     use super::{ExecError, OUTPUT_LIMIT_BYTES};
 
     const POLL: Duration = Duration::from_millis(20);
+
+    /// How long the pipes are read after the process has exited. A process that escaped its group
+    /// (`setsid`) can hold a pipe open for as long as it likes; what it wrote by then is kept, and
+    /// the rest is not waited for, so that `run` returns by its deadline.
+    const READ_GRACE: Duration = Duration::from_millis(500);
 
     /// A process that has exited, with what it wrote.
     pub(crate) struct Finished {
@@ -120,7 +127,8 @@ mod supervise {
 
     /// Runs `command` with both pipes drained on their own threads, calls `kill` once if it is
     /// still running after `kill_after`, and `after_exit` once it has exited, before the readers
-    /// are joined (so a background child still holding a pipe can be ended there).
+    /// are waited for (so a background child still holding a pipe can be ended there). The readers
+    /// get `READ_GRACE` after the exit, and no longer.
     pub(crate) fn supervise(
         command: &mut Command,
         kill_after: Duration,
@@ -156,8 +164,9 @@ mod supervise {
         };
         after_exit(&child);
         let elapsed = started.elapsed();
-        let (stdout, stdout_cut) = join(stdout);
-        let (stderr, stderr_cut) = join(stderr);
+        let until = Instant::now() + READ_GRACE;
+        let (stdout, stdout_cut) = collect(stdout, until);
+        let (stderr, stderr_cut) = collect(stderr, until);
         let status = status.map_err(|error| ExecError::SpawnFailed {
             detail: error.to_string(),
         })?;
@@ -175,35 +184,54 @@ mod supervise {
         })
     }
 
-    type Reader = Option<JoinHandle<(Vec<u8>, bool)>>;
+    /// What a pipe's reader has kept so far, and a channel that disconnects when it has finished.
+    type Reader = Option<(Arc<Mutex<Kept>>, Receiver<()>)>;
 
-    fn drain<Stream: Read + Send + 'static>(stream: Option<Stream>) -> Reader {
-        stream.map(|mut stream| thread::spawn(move || keep_the_head(&mut stream)))
+    /// The head of a stream, and whether more followed.
+    #[derive(Default)]
+    struct Kept {
+        bytes: Vec<u8>,
+        cut: bool,
     }
 
-    /// The first `OUTPUT_LIMIT_BYTES` of `stream`, and whether more followed; reads to the end.
-    fn keep_the_head(stream: &mut dyn Read) -> (Vec<u8>, bool) {
-        let mut kept = Vec::new();
-        let mut cut = false;
+    fn drain<Stream: Read + Send + 'static>(stream: Option<Stream>) -> Reader {
+        stream.map(|mut stream| {
+            let kept = Arc::new(Mutex::new(Kept::default()));
+            let (done, finished) = mpsc::channel::<()>();
+            let shared = Arc::clone(&kept);
+            thread::spawn(move || {
+                keep_the_head(&mut stream, &shared);
+                drop(done);
+            });
+            (kept, finished)
+        })
+    }
+
+    /// Keeps the first `OUTPUT_LIMIT_BYTES` of `stream` in `kept`, and whether more followed;
+    /// reads to the end.
+    fn keep_the_head(stream: &mut dyn Read, kept: &Mutex<Kept>) {
         let mut buffer = [0_u8; 16 * 1024];
         loop {
             match stream.read(&mut buffer) {
                 Err(error) if error.kind() == std::io::ErrorKind::Interrupted => {}
                 Ok(0) | Err(_) => break,
                 Ok(read) => {
-                    let room = OUTPUT_LIMIT_BYTES - kept.len();
-                    kept.extend_from_slice(&buffer[..read.min(room)]);
-                    cut |= read > room;
+                    let mut kept = kept.lock().unwrap_or_else(PoisonError::into_inner);
+                    let room = OUTPUT_LIMIT_BYTES - kept.bytes.len();
+                    kept.bytes.extend_from_slice(&buffer[..read.min(room)]);
+                    kept.cut |= read > room;
                 }
             }
         }
-        (kept, cut)
     }
 
-    fn join(reader: Reader) -> (String, bool) {
-        let (bytes, cut) = reader
-            .and_then(|handle| handle.join().ok())
-            .unwrap_or_default();
-        (String::from_utf8_lossy(&bytes).into_owned(), cut)
+    /// What `reader` kept, once it has finished or `until` has passed, whichever is first.
+    fn collect(reader: Reader, until: Instant) -> (String, bool) {
+        let Some((kept, finished)) = reader else {
+            return (String::new(), false);
+        };
+        let _ = finished.recv_timeout(until.saturating_duration_since(Instant::now()));
+        let kept = std::mem::take(&mut *kept.lock().unwrap_or_else(PoisonError::into_inner));
+        (String::from_utf8_lossy(&kept.bytes).into_owned(), kept.cut)
     }
 }
