@@ -194,6 +194,7 @@ impl Transitions {
         // A poisoned lock is a request that panicked part-way; what it left is in the store, which
         // is read afresh here, so there is nothing to distrust in the lock itself.
         let _held = self.requests.lock().unwrap_or_else(PoisonError::into_inner);
+        let ask = &tidied(ask);
         let context = self.context(request, ask, team)?;
         let decided = match refused_before_the_governor(request, ask, team, &context.contract) {
             Some(refusal) => Err(refusal),
@@ -370,6 +371,7 @@ impl Transitions {
         ask: &TransitionAsk,
         team: &Team,
     ) -> Result<TransitionContext, TransitionError> {
+        let ask = &tidied(ask);
         let id = &request.task_id;
         let board = self.projections.board()?;
         let row = row_of(&board, id)?;
@@ -530,6 +532,22 @@ impl Transitions {
             allowed_paths: epic.allowed_paths.iter().map(ToString::to_string).collect(),
             remaining_budget_usd: remaining,
         }))
+    }
+}
+
+/// The ask with its agent ids trimmed and a blank one taken as none, so that the check before the
+/// governor, the governor, the file, and the log all read the same ids.
+fn tidied(ask: &TransitionAsk) -> TransitionAsk {
+    let tidy = |id: &Option<String>| {
+        id.as_deref()
+            .map(str::trim)
+            .filter(|id| !id.is_empty())
+            .map(str::to_string)
+    };
+    TransitionAsk {
+        assignee_id: tidy(&ask.assignee_id),
+        reviewer_id: tidy(&ask.reviewer_id),
+        ..ask.clone()
     }
 }
 
@@ -1796,6 +1814,44 @@ mod tests {
             assignment_failures(&outcome),
             vec!["the request names no reviewer, and an assignment names both agents".to_string()]
         );
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn records_a_blank_reviewer_as_none() {
+        let project = Project::new("assign-blank", a_team(|_| {}), at(12));
+        project.file("FRK-1", |wire| wire["kind"] = json!("epic"));
+        project.created_under("FRK-1", "ready", "epic", None);
+        let outcome = project.ask(
+            &a_request(
+                "FRK-1",
+                TaskStatus::Assigned,
+                TransitionActor::ProductManager,
+                Some("maya"),
+            ),
+            &TransitionAsk {
+                assignee_id: Some(" maya ".to_string()),
+                reviewer_id: Some("  ".to_string()),
+                ..TransitionAsk::default()
+            },
+        );
+        assert!(
+            matches!(outcome, TransitionOutcome::Moved(_)),
+            "{outcome:?}"
+        );
+        let moves = project.events("FRK-1", &[EventKind::TaskTransitioned]);
+        assert_eq!(moved_body(&moves[0]).assignee.as_deref(), Some("maya"));
+        assert_eq!(moved_body(&moves[0]).reviewer, None);
+        let id = "FRK-1".parse().expect("a task id");
+        let file = project.files.read_contract(&id).expect("the file reads");
+        assert_eq!(file.assignee.as_deref(), Some("maya"));
+        assert_eq!(file.reviewer, None);
+        let row = project
+            .projections
+            .task(&id)
+            .expect("the board reads")
+            .expect("on the board");
+        assert_eq!(row.reviewer_id, None);
     }
 
     #[test]
