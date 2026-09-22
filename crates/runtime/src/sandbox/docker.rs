@@ -28,7 +28,8 @@ impl DockerSandbox {
     /// # Errors
     ///
     /// `DockerUnavailable` when `docker version` fails, `ImageMissing` when the image is not on
-    /// this machine (nothing is pulled), and `ContainerFailed` when `docker run` refuses.
+    /// this machine (nothing is pulled), and `ContainerFailed` when `docker run` refuses or `worktree` is relative or holds a comma,
+    /// which `--mount` cannot name.
     pub fn create(
         project_id: &str,
         task_id: &TaskId,
@@ -36,6 +37,15 @@ impl DockerSandbox {
         network: bool,
         image: &str,
     ) -> Result<DockerSandbox, SandboxError> {
+        // `--mount` splits on commas and wants an absolute source.
+        if !worktree.is_absolute() || worktree.to_string_lossy().contains(',') {
+            return Err(SandboxError::ContainerFailed {
+                detail: format!(
+                    "the worktree {} cannot be mounted: it must be absolute and hold no comma",
+                    worktree.display()
+                ),
+            });
+        }
         if !docker(&["version"]).is_ok_and(|output| output.status.success()) {
             return Err(SandboxError::DockerUnavailable);
         }
@@ -226,9 +236,30 @@ mod tests {
     use farik_core::contract::TaskId;
 
     use std::collections::BTreeMap;
+    use std::path::Path;
 
-    use super::{DockerSandbox, container_name, is_container_gone, whole_seconds};
+    use super::{DockerSandbox, SandboxError, container_name, is_container_gone, whole_seconds};
     use crate::exec::{Executor, Finished};
+
+    #[test]
+    fn refuses_a_worktree_the_mount_cannot_name() {
+        let task = TaskId::try_from("FRK-1").expect("an id");
+        for worktree in ["/tmp/a,b", "relative/worktree"] {
+            let refused = DockerSandbox::create(
+                "p",
+                &task,
+                Path::new(worktree),
+                false,
+                "farik/no-such-image:0",
+            );
+            match refused.err() {
+                Some(SandboxError::ContainerFailed { detail }) => {
+                    assert!(detail.contains(worktree), "{detail}");
+                }
+                other => panic!("{worktree}: {other:?}"),
+            }
+        }
+    }
 
     #[test]
     fn takes_the_longest_timeout_without_overflowing() {
