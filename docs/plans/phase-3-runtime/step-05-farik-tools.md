@@ -103,7 +103,7 @@ Files: `Cargo.toml`, `crates/runtime/Cargo.toml`, `tools.rs`, `tools/reading.rs`
 - `reads_a_task_with_its_board_row` — `farik_read_task` returns the contract and a `board` object whose `status` is the board's.
 - `reads_the_board_the_rules_and_the_criteria` — each returns what `board()`, `team.rules()`, and `read_criteria()` hold, as JSON.
 
-- [ ] `feat(runtime): add the farik tool framework and the reading tools`
+- [x] `feat(runtime): add the farik tool framework and the reading tools`
 
 ### Task 3: triage, contracts, and filing tasks
 

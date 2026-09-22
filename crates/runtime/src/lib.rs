@@ -13,6 +13,8 @@ pub mod sandbox;
 pub mod session;
 /// The Claude Code program's `stream-json` lines, read as session events.
 pub mod stream;
+/// Farik's own tools, each checked against the agent's tier and the rule that owns it.
+pub mod tools;
 /// Transition requests, judged by the governor on the store's facts and recorded either way.
 pub mod transitions;
 
@@ -28,3 +30,4 @@ pub use session::{
     SessionHandle, SessionPurpose, SessionSpec,
 };
 pub use stream::StreamParser;
+pub use tools::{FarikTool, ToolContext, ToolDeps, ToolError, call_tool, tool_descriptors};

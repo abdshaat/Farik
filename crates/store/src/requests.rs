@@ -1,14 +1,18 @@
 //! Filing a request (F3, `docs/SPEC.md` section 5.16): one piece of code for the command line and
 //! for the agents' `farik_create_task`, so that a request is filed exactly one way whoever files it.
+//! Beside it, the JSON the board, the rules, and the criterion library are shown as, for the same
+//! reason: `farik board --json` and `farik_read_board` say one thing.
 
 use std::fmt;
 
 use chrono::{DateTime, Utc};
 use farik_core::contract::{TaskContract, TaskId};
+use farik_core::criteria::{CriteriaLibrary, TemplateVerification};
 use farik_core::governor::gates::{
     FIELDS_FIXED_AT_CREATION, FIELDS_ONLY_THE_HUMAN_WRITES, FIELDS_THE_GOVERNOR_WRITES,
     FIELDS_THE_STORE_OWNS,
 };
+use farik_core::governor::team_rules::TeamRules;
 use farik_protocol::command::{Command, command_from_value};
 use farik_protocol::event::{
     ContractSummary, EventBody, EventIds, RequestTriagedBody, RequestTriagedBodySize,
@@ -17,7 +21,7 @@ use farik_protocol::event::{
 use serde_json::{Value, json};
 
 use crate::files::{FilesError, ProjectFiles};
-use crate::{EventLog, StoreError};
+use crate::{EventLog, StoreError, TaskProjection};
 
 /// Why a request was not filed.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -197,6 +201,82 @@ pub fn summary_of(contract: &TaskContract) -> ContractSummary {
         "a contract's own kind, risk, status and title are the summary's, and both vocabularies \
          come from task-contract.schema.json, which a test in farik-protocol holds to agreeing",
     )
+}
+
+/// One board row as JSON, as `farik board --json` prints it.
+#[must_use]
+pub fn board_row_json(row: &TaskProjection) -> Value {
+    json!({
+        "task_id": row.task_id.as_str(),
+        "kind": row.kind.to_string(),
+        "parent": row.parent.as_ref().map(|parent| parent.as_str().to_string()),
+        "title": row.title,
+        "status": row.status.to_string(),
+        "risk": row.risk.to_string(),
+        "triaged": row.triaged,
+        "locked": row.locked,
+    })
+}
+
+/// The board as JSON: `{ "tasks": [...] }`, one row each, in the order given.
+#[must_use]
+pub fn board_json(rows: &[TaskProjection]) -> Value {
+    json!({ "tasks": rows.iter().map(board_row_json).collect::<Vec<_>>() })
+}
+
+/// The rules the governor applies as JSON, as `farik rules show --json` prints them.
+#[must_use]
+pub fn rules_json(rules: &TeamRules) -> Value {
+    json!({
+        "protected_paths": rules.protected_paths,
+        "allowed_paths_ceiling": rules.allowed_paths_ceiling,
+        "required_criteria": rules.required_criteria,
+        "require_new_tests": rules.require_new_tests,
+        "max_task_budget_usd": rules.max_task_budget_usd,
+        "forbidden_commands": rules.forbidden_commands,
+    })
+}
+
+/// The criterion library as JSON, as `farik criteria list --json` prints it.
+#[must_use]
+pub fn criteria_json(library: &CriteriaLibrary) -> Value {
+    json!({
+        "criteria": library
+            .criteria
+            .iter()
+            .map(|one| json!({
+                "name": one.name.as_str(),
+                "text": one.text.as_str(),
+                "source": one.source.as_ref().map(ToString::to_string),
+                "method": criterion_method(&one.verification),
+                "how": criterion_how(&one.verification),
+            }))
+            .collect::<Vec<_>>(),
+    })
+}
+
+/// How a criterion is verified, in the one word the schema's `method` carries.
+#[must_use]
+pub fn criterion_method(verification: &TemplateVerification) -> &'static str {
+    match verification {
+        TemplateVerification::Variant0 { .. } => "command",
+        TemplateVerification::Variant1 { .. } => "test",
+        TemplateVerification::Variant2 { .. } => "artifact",
+        TemplateVerification::Variant3 { .. } => "review",
+        TemplateVerification::Variant4 { .. } => "human",
+    }
+}
+
+/// What is actually run, read or asked, which is the part a person checks.
+#[must_use]
+pub fn criterion_how(verification: &TemplateVerification) -> String {
+    match verification {
+        TemplateVerification::Variant0 { command, .. }
+        | TemplateVerification::Variant1 { command, .. } => command.clone(),
+        TemplateVerification::Variant2 { path, .. } => path.clone(),
+        TemplateVerification::Variant3 { rubric, .. } => rubric.join("; "),
+        TemplateVerification::Variant4 { question, .. } => question.clone(),
+    }
 }
 
 #[cfg(test)]

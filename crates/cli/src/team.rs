@@ -1,7 +1,7 @@
 //! `farik rules show` and `farik criteria list`: the two team files a person hand-edits (F15, F16).
 
-use farik_core::criteria::{CriterionTemplate, TemplateVerification};
-use serde_json::json;
+use farik_core::criteria::CriterionTemplate;
+use farik_store::requests::{criteria_json, criterion_how, criterion_method, rules_json};
 
 use crate::Report;
 use crate::project::Project;
@@ -40,14 +40,7 @@ pub fn rules(project: &Project) -> Result<Report, String> {
     ];
     Ok(Report {
         lines,
-        json: json!({
-            "protected_paths": rules.protected_paths,
-            "allowed_paths_ceiling": rules.allowed_paths_ceiling,
-            "required_criteria": rules.required_criteria,
-            "require_new_tests": rules.require_new_tests,
-            "max_task_budget_usd": rules.max_task_budget_usd,
-            "forbidden_commands": rules.forbidden_commands,
-        }),
+        json: rules_json(&rules),
         json_lines: None,
     })
 }
@@ -68,7 +61,7 @@ pub fn criteria(project: &Project) -> Result<Report, String> {
                 "no criteria: farik init seeds them from what the repository says about itself"
                     .to_string(),
             ],
-            json: json!({ "criteria": [] }),
+            json: criteria_json(&library),
             json_lines: None,
         });
     }
@@ -79,53 +72,19 @@ pub fn criteria(project: &Project) -> Result<Report, String> {
             format!(
                 "{:<22} {:<9} {:<12} {}",
                 one.name.as_str(),
-                method_of(&one.verification),
+                criterion_method(&one.verification),
                 one.source
                     .as_ref()
                     .map_or("human".to_string(), ToString::to_string),
-                how_of(&one.verification)
+                criterion_how(&one.verification)
             )
         })
         .collect();
     Ok(Report {
         lines,
-        json: json!({
-            "criteria": library
-                .criteria
-                .iter()
-                .map(|one| json!({
-                    "name": one.name.as_str(),
-                    "text": one.text.as_str(),
-                    "source": one.source.as_ref().map(ToString::to_string),
-                    "method": method_of(&one.verification),
-                    "how": how_of(&one.verification),
-                }))
-                .collect::<Vec<_>>(),
-        }),
+        json: criteria_json(&library),
         json_lines: None,
     })
-}
-
-/// How a criterion is verified, in the one word the schema's `method` carries.
-fn method_of(verification: &TemplateVerification) -> &'static str {
-    match verification {
-        TemplateVerification::Variant0 { .. } => "command",
-        TemplateVerification::Variant1 { .. } => "test",
-        TemplateVerification::Variant2 { .. } => "artifact",
-        TemplateVerification::Variant3 { .. } => "review",
-        TemplateVerification::Variant4 { .. } => "human",
-    }
-}
-
-/// What is actually run, read or asked, which is the part a person checks.
-fn how_of(verification: &TemplateVerification) -> String {
-    match verification {
-        TemplateVerification::Variant0 { command, .. }
-        | TemplateVerification::Variant1 { command, .. } => command.clone(),
-        TemplateVerification::Variant2 { path, .. } => path.clone(),
-        TemplateVerification::Variant3 { rubric, .. } => rubric.join("; "),
-        TemplateVerification::Variant4 { question, .. } => question.clone(),
-    }
 }
 
 /// Every criterion in the library, for a caller that wants the values rather than the words.
