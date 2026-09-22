@@ -15,8 +15,8 @@ pub use crate::generated::event::{
     BudgetExhaustedBody, BudgetExhaustedBodyConsequence, BudgetExhaustedBodyScope,
     ContractLockedBody, ContractSummary, ContractSummaryKind, ContractSummaryParent,
     ContractSummaryRisk, ContractSummaryStatus, ContractUnlockedBody, ContractWrittenBody,
-    CostRecordedBody, CostRecordedBodyPurpose, CriteriaUpdatedBody, DriftDetectedBody,
-    DriftDetectedBodyDrift, EventKind, ProjectScannedBody, RequestTriagedBody,
+    CostRecordedBody, CostRecordedBodyModelId, CostRecordedBodyPurpose, CriteriaUpdatedBody,
+    DriftDetectedBody, DriftDetectedBodyDrift, EventKind, ProjectScannedBody, RequestTriagedBody,
     RequestTriagedBodySize, TaskCreatedBody, TeamUpdatedBody, TokenUsage,
 };
 

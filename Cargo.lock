@@ -378,7 +378,10 @@ dependencies = [
 name = "farik-runtime"
 version = "0.0.0"
 dependencies = [
+ "chrono",
  "farik-core",
+ "farik-protocol",
+ "farik-store",
  "serde",
  "serde_json",
  "tokio",

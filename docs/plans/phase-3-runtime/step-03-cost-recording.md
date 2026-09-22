@@ -133,7 +133,7 @@ Tests, on a log in memory with `FixedClock` at `2026-09-22T10:00:00Z` and a pric
 - `leaves_a_session_without_a_task_unbounded_by_task_budgets` — `task: None`: `task_max_usd == f64::INFINITY`, `task_max_sessions == u32::MAX`.
 - `records_an_exhausted_budget_once_when_it_is_crossed` — before at 19.0 of 20 for the day, after at 21.0: one `budget.exhausted` with `scope: day_usd`, `consequence: pause_team`, and the envelope ids passed, is appended and returned; calling again with before and after both past 20 appends nothing.
 
-- [ ] `feat(runtime): record session costs and exhausted budgets`
+- [x] `feat(runtime): record session costs and exhausted budgets`
 
 ## Verification
 
