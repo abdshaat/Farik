@@ -896,7 +896,7 @@ mod tests {
     use farik_core::budget::default_session_limits;
     use farik_core::contract::fixtures::a_contract_wire;
     use farik_core::contract::{Role, TaskStatus, validate_contract};
-    use farik_core::governor::gates::{Blocker, DependencyState};
+    use farik_core::governor::gates::{Blocker, DependencyState, Rejection};
     use farik_core::governor::transition::TransitionRefusal;
     use farik_core::governor::transition::TransitionRequest;
     use farik_core::governor::transition_table::GateId;
@@ -906,7 +906,8 @@ mod tests {
     use farik_protocol::clock::Clock;
     use farik_protocol::event::{
         ContractEvaluatedBodyGate, EscalationRaisedBodyReason, EventBody, EventIds, EventKind,
-        FarikEvent, NewEvent, event_from_value,
+        FarikEvent, GateWire, NewEvent, TaskStatusWire, TaskTransitionedBodyEffectsItem,
+        TransitionRefusedBodyRefusal, event_from_value,
     };
     use farik_store::EventQuery;
     use farik_store::files::ProjectFiles;
@@ -1628,10 +1629,17 @@ mod tests {
         }
     }
 
-    fn refused_details(event: &FarikEvent) -> Vec<String> {
+    fn refused_body(event: &FarikEvent) -> &farik_protocol::event::TransitionRefusedBody {
         match &event.body {
-            EventBody::TransitionRefused(body) => body.details.clone(),
+            EventBody::TransitionRefused(body) => body,
             other => panic!("expected a transition.refused, got {other:?}"),
+        }
+    }
+
+    fn escalation_body(event: &FarikEvent) -> &farik_protocol::event::EscalationRaisedBody {
+        match &event.body {
+            EventBody::EscalationRaised(body) => body,
+            other => panic!("expected an escalation.raised, got {other:?}"),
         }
     }
 
@@ -1659,7 +1667,10 @@ mod tests {
                 TransitionActor::ProductManager,
                 Some("maya"),
             ),
-            &assigning("dev-a", "dev-b"),
+            &TransitionAsk {
+                session_id: Some("s-7".to_string()),
+                ..assigning("dev-a", "dev-b")
+            },
         );
         assert!(
             matches!(outcome, TransitionOutcome::Moved(_)),
@@ -1667,6 +1678,7 @@ mod tests {
         );
         let moves = project.events("FRK-1", &[EventKind::TaskTransitioned]);
         assert_eq!(moves.len(), 1);
+        assert_eq!(moves[0].envelope.ids.session_id.as_deref(), Some("s-7"));
         let body = moved_body(&moves[0]);
         assert_eq!(body.requested_by, "maya");
         assert_eq!(body.assignee.as_deref(), Some("dev-a"));
@@ -1737,30 +1749,53 @@ mod tests {
                 .is_empty()
         );
         assert_eq!(project.file_value("FRK-1"), before);
+    }
 
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn lets_the_human_review_an_epic_only_when_no_scrum_master_is_active() {
+        let project = Project::new("assign-epic", a_team(|_| {}), at(12));
         // An epic on a team with no Scrum Master is the Product Manager's, reviewed by the human,
         // who has no agent id (5.16 item 4).
-        project.file("FRK-2", |wire| wire["kind"] = json!("epic"));
-        project.created_under("FRK-2", "ready", "epic", None);
+        for task in ["FRK-1", "FRK-2"] {
+            project.file(task, |wire| wire["kind"] = json!("epic"));
+            project.created_under(task, "ready", "epic", None);
+        }
         let epic = TransitionAsk {
             assignee_id: Some("maya".to_string()),
             ..TransitionAsk::default()
         };
-        let outcome = project.ask(
-            &a_request(
-                "FRK-2",
+        let assigning_epic = |task| {
+            a_request(
+                task,
                 TaskStatus::Assigned,
                 TransitionActor::ProductManager,
                 Some("maya"),
-            ),
-            &epic,
-        );
+            )
+        };
+        let outcome = project.ask(&assigning_epic("FRK-1"), &epic);
         assert!(
             matches!(outcome, TransitionOutcome::Moved(_)),
             "{outcome:?}"
         );
-        let moves = project.events("FRK-2", &[EventKind::TaskTransitioned]);
+        let moves = project.events("FRK-1", &[EventKind::TaskTransitioned]);
         assert_eq!(moved_body(&moves[0]).reviewer, None);
+
+        // With a Scrum Master active, the epic's reviewer is an agent, and the ask must name it.
+        let with_sam = a_team(|wire| {
+            wire["agents"]
+                .as_array_mut()
+                .expect("a list of agents")
+                .push(an_agent_wire("sam", "scrum_master"));
+        });
+        let outcome = project
+            .transitions
+            .request(&assigning_epic("FRK-2"), &epic, &with_sam)
+            .expect("the request is judged");
+        assert_eq!(
+            assignment_failures(&outcome),
+            vec!["the request names no reviewer, and an assignment names both agents".to_string()]
+        );
     }
 
     #[test]
@@ -1835,6 +1870,18 @@ mod tests {
             matches!(outcome, TransitionOutcome::Moved(_)),
             "{outcome:?}"
         );
+        let escalating = a_request(
+            "FRK-1",
+            TaskStatus::Escalated,
+            TransitionActor::Governor,
+            None,
+        );
+        *project.clock.0.lock().expect("the clock") = at(9) + chrono::Duration::hours(23);
+        let outcome = project.ask(&escalating, &TransitionAsk::default());
+        assert!(
+            matches!(outcome, TransitionOutcome::Refused(_)),
+            "a day's limit is not reached in 23 hours: {outcome:?}"
+        );
         *project.clock.0.lock().expect("the clock") = at(9) + chrono::Duration::hours(25);
         let outcome = project.ask(
             &a_request(
@@ -1892,19 +1939,53 @@ mod tests {
         );
         let refusals = project.events("FRK-1", &[EventKind::TransitionRefused]);
         assert_eq!(refusals.len(), 1);
+        let body = refused_body(&refusals[0]);
+        assert_eq!(body.from, TaskStatusWire::Ready);
+        assert_eq!(body.refusal, TransitionRefusedBodyRefusal::NotTheNamedAgent);
         assert_eq!(
-            refused_details(&refusals[0]),
+            body.details,
             vec!["not the named agent: asked dev-a".to_string()]
         );
         assert_eq!(project.file_value("FRK-1"), before);
+
+        // A Product Manager who is paused holds the role no longer.
+        let paused = a_team(|wire| {
+            wire["agents"][0]["status"] = json!("paused");
+            wire["agents"]
+                .as_array_mut()
+                .expect("a list of agents")
+                .push(an_agent_wire("ada", "product_manager"));
+        });
+        let outcome = project
+            .transitions
+            .request(
+                &a_request(
+                    "FRK-1",
+                    TaskStatus::Assigned,
+                    TransitionActor::ProductManager,
+                    Some("maya"),
+                ),
+                &assigning("dev-a", "dev-b"),
+                &paused,
+            )
+            .expect("the request is judged");
+        assert!(
+            matches!(
+                outcome,
+                TransitionOutcome::Refused(TransitionRefusal::NotTheNamedAgent { .. })
+            ),
+            "{outcome:?}"
+        );
     }
 
     #[test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
-    fn records_a_refusal_with_every_reason() {
+    fn records_a_refusal_with_every_reason_its_gate_gave() {
         let project = Project::new("refusal-reasons", a_team(|_| {}), at(12));
         project.file("FRK-1", |_| {});
         project.created("FRK-1", "ready");
+        // The Product Manager is neither the contract's assignee role nor its reviewer role, and
+        // would review its own work: one gate, several reasons.
         let outcome = project.ask(
             &a_request(
                 "FRK-1",
@@ -1912,16 +1993,22 @@ mod tests {
                 TransitionActor::ProductManager,
                 Some("maya"),
             ),
-            &assigning("dev-a", "dev-a"),
+            &assigning("maya", "maya"),
         );
-        assert!(!assignment_failures(&outcome).is_empty());
+        let reasons = assignment_failures(&outcome);
+        assert!(reasons.len() >= 2, "{reasons:?}");
         let refusals = project.events("FRK-1", &[EventKind::TransitionRefused]);
-        let details = refused_details(&refusals[0]);
+        let body = refused_body(&refusals[0]);
+        assert_eq!(body.from, TaskStatusWire::Ready);
+        assert_eq!(body.to, TaskStatusWire::Assigned);
+        assert_eq!(body.refusal, TransitionRefusedBodyRefusal::GateFailed);
+        assert_eq!(body.details, reasons);
         assert!(
-            details
+            body.details
                 .iter()
                 .any(|detail| detail.contains("cannot review its own work")),
-            "{details:?}"
+            "{:?}",
+            body.details
         );
     }
 
@@ -1985,6 +2072,7 @@ mod tests {
             escalation.reason,
             EscalationRaisedBodyReason::ReadinessFailures
         );
+        assert_eq!(escalation.detail, "readiness_exhausted");
         let row = project
             .projections
             .task(&"FRK-1".parse().expect("a task id"))
@@ -2020,11 +2108,110 @@ mod tests {
             "{outcome:?}"
         );
         let moves = project.events("FRK-1", &[EventKind::TaskTransitioned]);
-        assert_eq!(moved_body(&moves[1]).iteration, 2);
+        let body = moved_body(&moves[1]);
+        assert_eq!(body.iteration, 2);
+        assert_eq!(body.gate, GateWire::IterationBelowLimit);
+        assert_eq!(
+            body.effects,
+            vec![
+                TaskTransitionedBodyEffectsItem::IncrementIteration,
+                TaskTransitionedBodyEffectsItem::ResetBlocker
+            ]
+        );
+        // A move that is not an assignment keeps the people the task has.
+        assert_eq!(body.assignee.as_deref(), Some("dev-a"));
+        assert_eq!(body.reviewer.as_deref(), Some("dev-b"));
+        assert_eq!(moves[1].envelope.ids.agent_id, None);
         let file = project
             .files
             .read_contract(&"FRK-1".parse().expect("a task id"))
             .expect("the file reads");
         assert_eq!(file.iteration, 2);
+        assert_eq!(file.assignee.as_deref(), Some("dev-a"));
+        assert_eq!(file.reviewer.as_deref(), Some("dev-b"));
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn records_the_resolution_and_the_rejection_a_move_was_judged_on() {
+        let project = Project::new("evidence", a_team(|_| {}), at(12));
+        let people = json!({ "assignee": "dev-a", "reviewer": "dev-b", "iteration": 1 });
+        project.file("FRK-1", |_| {});
+        project.created("FRK-1", "in_progress");
+        project.moved("FRK-1", "in_progress", "blocked", &people, at(10));
+        // The human is no agent, whatever id the request carries.
+        let outcome = project.ask(
+            &a_request(
+                "FRK-1",
+                TaskStatus::InProgress,
+                TransitionActor::Human,
+                Some("maya"),
+            ),
+            &TransitionAsk {
+                blocker_resolution: Some("the key arrived".to_string()),
+                ..TransitionAsk::default()
+            },
+        );
+        assert!(
+            matches!(outcome, TransitionOutcome::Moved(_)),
+            "{outcome:?}"
+        );
+        let moves = project.events("FRK-1", &[EventKind::TaskTransitioned]);
+        let body = moved_body(&moves[1]);
+        assert_eq!(body.blocker_resolution.as_deref(), Some("the key arrived"));
+        assert_eq!(body.gate, GateWire::BlockerResolved);
+        assert_eq!(body.requested_by, "human");
+        assert_eq!(moves[1].envelope.ids.agent_id, None);
+
+        project.file("FRK-2", |wire| wire["budget"]["max_iterations"] = json!(1));
+        project.created("FRK-2", "in_progress");
+        project.moved("FRK-2", "in_progress", "verifying", &people, at(10));
+        let rejection = TransitionAsk {
+            rejection: Some(Rejection {
+                failed_criterion_ids: vec!["C1".to_string()],
+                reasons: "the form has no labels".to_string(),
+            }),
+            ..TransitionAsk::default()
+        };
+        let outcome = project.ask(
+            &a_request(
+                "FRK-2",
+                TaskStatus::Rejected,
+                TransitionActor::Reviewer,
+                Some("dev-b"),
+            ),
+            &rejection,
+        );
+        assert!(
+            matches!(outcome, TransitionOutcome::Moved(_)),
+            "{outcome:?}"
+        );
+        let outcome = project.ask(
+            &a_request(
+                "FRK-2",
+                TaskStatus::Escalated,
+                TransitionActor::Governor,
+                None,
+            ),
+            &rejection,
+        );
+        assert!(
+            matches!(outcome, TransitionOutcome::Moved(_)),
+            "{outcome:?}"
+        );
+        let moves = project.events("FRK-2", &[EventKind::TaskTransitioned]);
+        let recorded = moved_body(&moves[1])
+            .rejection
+            .as_ref()
+            .expect("a rejection");
+        assert_eq!(recorded.failed_criterion_ids, vec!["C1".to_string()]);
+        assert_eq!(recorded.reasons, "the form has no labels");
+        let escalations = project.events("FRK-2", &[EventKind::EscalationRaised]);
+        let escalation = escalation_body(&escalations[0]);
+        assert_eq!(escalation.reason, EscalationRaisedBodyReason::Iterations);
+        assert_eq!(
+            escalation.detail,
+            "iteration_limit_reached: the form has no labels"
+        );
     }
 }
