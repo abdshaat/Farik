@@ -533,6 +533,24 @@ fn hands_out_an_id_past_contracts_a_pull_brought_in() {
 
 #[test]
 #[ignore = "needs the git program: cargo xtask check --integration"]
+fn hands_out_an_id_past_the_highest_number_not_the_highest_spelling() {
+    // FRK-10 sorts before FRK-9 as text; the id has to be past the tenth.
+    let repository = a_project("cli-create-ten");
+    a_contract_file_at(&repository, "FRK-9");
+    a_contract_file_at(&repository, "FRK-10");
+
+    let file = a_request_file(&repository, "request.yaml", "The new one");
+    let ran = run_in(
+        &repository.path,
+        &["task", "create", file.to_str().expect("a path")],
+    );
+
+    assert_eq!(ran.code, 0, "{}", ran.err);
+    assert!(ran.out.contains("FRK-11 filed"), "{}", ran.out);
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
 fn reads_the_contract_from_where_the_command_was_run() {
     // The path is the person's, so it is relative to the directory they typed it in — not to the
     // repository root, which is where the project is, and not to whatever directory this process
