@@ -103,7 +103,7 @@ Tests:
 - `displays_a_version_too_old_error_with_both_versions` — asserts that `RuntimeError::VersionTooOld { found: "2.1.200", required: "2.1.272" }` displays a sentence containing both version strings.
 - `serialises_session_purposes_in_snake_case` — asserts that `serde_json::to_value(SessionPurpose::Implement)` is `"implement"` and that each of the seven round-trips.
 
-- [ ] `feat(runtime): add the session vocabulary and the runtime crate`
+- [x] `feat(runtime): add the session vocabulary and the runtime crate`
 
 ### Task 2: the stream-json parser
 

@@ -157,7 +157,7 @@
             "medium",
             "high"
           ],
-          "description": "How hard the model thinks. The runtime's own Effort arrives in phase 3."
+          "description": "How hard the model thinks. The runtime passes this value to the program as it is (farik_runtime::SessionSpec::effort)."
         }
       }
     },
