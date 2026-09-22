@@ -45,9 +45,11 @@ library (`farik_read_criteria`) first. Then write, with `farik_write_contract`:
   least one `out_of_scope` item that says where the work stops. An empty exclusion list predicts
   scope creep.
 - **Exit criteria**: see below.
-- **Assignee role and reviewer role**: a Developer's task is reviewed by the Architect when the
-  team has one, else by another Developer; an Architect's or a Marketing Specialist's by you.
-  Nobody reviews their own work.
+- **Assignee role and reviewer role**: a Developer's task is reviewed by an active Architect when
+  the team has one, else by another active Developer, which needs two active Developers; an
+  Architect's or a Marketing Specialist's by you. Paused and retired agents do not count. When
+  the team has neither, the contract fails readiness: ask the user for a reviewer with
+  `farik_ask_human` rather than naming one nobody can staff. Nobody reviews their own work.
 - **Risk** and **budget**: set both. A task's budget is within the team's maximum and what is left
   of the sprint, and a task under an epic within what is left of the epic.
 - **Dependencies**: only tasks that exist and are at least `ready`.
