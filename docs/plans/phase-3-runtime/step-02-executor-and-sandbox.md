@@ -111,6 +111,7 @@ Tests, all `#[ignore = "needs docker"]`, on `alpine:3.22`, each with its own pro
 - `answers_container_gone_after_discard` — create handle A, then B with the same ids (which replaces A's container), discard B: `run` on A is `Err(ExecError::ContainerGone)`.
 - `passes_only_the_environment_it_was_given_into_the_container` — `env` in the container lacks `CARGO_MANIFEST_DIR` (present in the test process) and contains `GIVEN=yes`.
 - `names_a_container_docker_accepts_from_any_project_id` — project id `My Project/1` gives a container named `farik-my-project-1-frk-1` (the task id lowercased too, since Docker names are case-sensitive and one rule for the whole name is simpler), and `name()` returns it.
+- Added by the landing review: `has_the_network_when_asked` (with `network: true`, the inspected network mode is not `none`), `does_not_report_a_timeout_for_a_command_that_finished` (`true` gives `timed_out == false`), and `runs_in_a_subdirectory_of_the_workspace` (`pwd` in `cwd = "sub"` prints `/workspace/sub`); and, not ignored, the unit test `tells_docker_saying_the_container_is_gone_from_a_command_saying_it` on hand-built stderr (docker's `No such container` and `is not running` lines are gone; a command's own stderr with those words is not).
 
 - [x] `feat(runtime): run commands in a docker container per task`
 
@@ -120,5 +121,5 @@ Tests, all `#[ignore = "needs docker"]`, on `alpine:3.22`, each with its own pro
 cargo xtask check
 # expected: xtask check: ok
 cargo xtask check --integration
-# expected: xtask check: ok, the nine docker tests among those run (CI; this machine has no Docker)
+# expected: xtask check: ok, the docker tests among those run (CI; this machine has no Docker)
 ```

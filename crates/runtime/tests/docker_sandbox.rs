@@ -214,3 +214,50 @@ fn names_a_container_docker_accepts_from_any_project_id() {
         .discard()
         .expect("the container is removed");
 }
+
+#[test]
+#[ignore = "needs docker"]
+fn has_the_network_when_asked() {
+    let sandbox = create("network-on", true);
+    let mode = docker(&[
+        "inspect",
+        "-f",
+        "{{.HostConfig.NetworkMode}}",
+        sandbox.name(),
+    ]);
+    assert!(!mode.trim().is_empty(), "the container was not inspected");
+    assert_ne!(mode.trim(), "none");
+    Box::new(sandbox)
+        .discard()
+        .expect("the container is removed");
+}
+
+#[test]
+#[ignore = "needs docker"]
+fn does_not_report_a_timeout_for_a_command_that_finished() {
+    let sandbox = create("finished", false);
+    let result = sandbox
+        .run("true", "", 30 * SECOND, &no_env())
+        .expect("the command runs");
+    assert_eq!(result.exit_code, 0, "{}", result.stderr);
+    assert!(!result.timed_out);
+    Box::new(sandbox)
+        .discard()
+        .expect("the container is removed");
+}
+
+#[test]
+#[ignore = "needs docker"]
+fn runs_in_a_subdirectory_of_the_workspace() {
+    let root = worktree("subdirectory");
+    std::fs::create_dir(root.join("sub")).expect("sub can be made");
+    let sandbox = create_at("subdirectory", &root, false);
+    let result = sandbox
+        .run("pwd", "sub", 30 * SECOND, &no_env())
+        .expect("the command runs");
+    assert_eq!(result.exit_code, 0, "{}", result.stderr);
+    assert_eq!(result.stdout, "/workspace/sub\n");
+    Box::new(sandbox)
+        .discard()
+        .expect("the container is removed");
+}

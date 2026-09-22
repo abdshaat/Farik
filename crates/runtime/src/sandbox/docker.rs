@@ -222,7 +222,32 @@ mod tests {
 
     use farik_core::contract::TaskId;
 
-    use super::{container_name, whole_seconds};
+    use super::{container_name, is_container_gone, whole_seconds};
+    use crate::exec::Finished;
+
+    fn with_stderr(stderr: &str) -> Finished {
+        Finished {
+            exit_code: 1,
+            stdout: String::new(),
+            stderr: stderr.to_owned(),
+            truncated: false,
+            killed: false,
+            elapsed: Duration::ZERO,
+        }
+    }
+
+    #[test]
+    fn tells_docker_saying_the_container_is_gone_from_a_command_saying_it() {
+        let missing = "Error response from daemon: No such container: farik-p-frk-1";
+        let stopped = "Error response from daemon: container 0123abcd is not running";
+        assert!(is_container_gone(&with_stderr(missing)));
+        assert!(is_container_gone(&with_stderr(&format!(
+            "noise\n{stopped}\n"
+        ))));
+        let own = "No such container: frk-1\nthe server is not running\n";
+        assert!(!is_container_gone(&with_stderr(own)));
+        assert!(!is_container_gone(&with_stderr("")));
+    }
 
     #[test]
     fn names_a_container_by_docker_rule_and_rounds_the_timeout_up() {
