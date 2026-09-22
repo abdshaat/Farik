@@ -7,14 +7,14 @@ use std::collections::BTreeSet;
 use std::fmt;
 use std::sync::{Arc, LazyLock};
 
-use farik_core::contract::TaskId;
+use farik_core::contract::{Role, TaskContract, TaskId};
 use farik_core::governor::permissions::{
     AgentGrants, PermissionTier, ToolCallContext, ToolCallRequest, ToolDescriptor,
     evaluate_tool_call,
 };
 use farik_core::team::{Agent, AgentStatus, Team};
 use farik_protocol::clock::Clock;
-use farik_protocol::event::EventIds;
+use farik_protocol::event::{EventBody, EventIds, FarikEvent, new_event};
 use farik_store::files::ProjectFiles;
 use farik_store::{EventLog, Git, Projections, TaskProjection};
 use schemars::JsonSchema;
@@ -288,6 +288,9 @@ pub async fn call_tool(
         "farik_read_board" => nothing_in(input).and_then(|()| reading::read_board(&call)),
         "farik_read_rules" => nothing_in(input).map(|()| reading::read_rules(&call)),
         "farik_read_criteria" => nothing_in(input).and_then(|()| reading::read_criteria(&call)),
+        "farik_triage_request" => contracts::triage(&call, &parse(input)?),
+        "farik_write_contract" => contracts::write_contract(&call, parse(input)?),
+        "farik_create_task" => contracts::create_task(&call, parse(input)?),
         _ => Err(ToolError::Failed {
             detail: format!("{name} is listed and has no handler"),
         }),
@@ -348,6 +351,34 @@ impl Call<'_> {
         &self.context.deps
     }
 
+    fn agent_id(&self) -> &str {
+        self.agent.id.as_str()
+    }
+
+    fn role(&self) -> Role {
+        Role::from(self.agent.role)
+    }
+
+    /// The session's task, or `no_task`.
+    fn task(&self) -> Result<&TaskId, ToolError> {
+        self.context
+            .task_id
+            .as_ref()
+            .ok_or_else(|| Refusal::NoTask.into())
+    }
+
+    /// The contract of `task`, with the status, people, and iteration the board gives it: the log
+    /// decides where a task is (8.4).
+    fn contract(&self, task: &TaskId) -> Result<(TaskContract, TaskProjection), ToolError> {
+        let row = self.row(task)?;
+        let mut contract = self.deps().files.read_contract(task).map_err(failed)?;
+        contract.status = row.status;
+        contract.assignee.clone_from(&row.assignee_id);
+        contract.reviewer.clone_from(&row.reviewer_id);
+        contract.iteration = row.iteration.into();
+        Ok((contract, row))
+    }
+
     /// The board's row of `task`, or `no_such_task`.
     fn row(&self, task: &TaskId) -> Result<TaskProjection, ToolError> {
         self.deps()
@@ -396,6 +427,30 @@ impl Call<'_> {
             },
         )
         .map_err(|refusal| Refusal::Tool(refusal).into())
+    }
+
+    /// The ids an event of this call is stamped with: the agent, the session, and `task`.
+    fn ids(&self, task: Option<&TaskId>) -> EventIds {
+        EventIds {
+            task_id: task.cloned(),
+            agent_id: Some(self.agent_id().to_string()),
+            session_id: Some(self.context.session_id.clone()),
+            ..self.deps().ids.clone()
+        }
+    }
+
+    /// Appends one event, stamped with the agent, the session, and `task` when it is about one,
+    /// and projects it.
+    fn append(&self, task: Option<&TaskId>, body: EventBody) -> Result<FarikEvent, ToolError> {
+        let deps = self.deps();
+        let event = new_event(body, deps.clock.now(), self.ids(task)).map_err(|error| {
+            ToolError::Failed {
+                detail: format!("the event cannot be stamped: {error:?}"),
+            }
+        })?;
+        let appended = deps.log.append(&event).map_err(failed)?;
+        deps.projections.apply(&appended).map_err(failed)?;
+        Ok(appended)
     }
 }
 

@@ -277,8 +277,14 @@ impl Projections {
 
     /// Applies every event the log has that the cursor has not reached, and says how many that
     /// was. Zero is the ordinary answer, and the one `docs/SPEC.md` section 10 asks for: a board
-    /// that is already current costs nothing to open.
-    fn catch_up(&self) -> Result<usize, StoreError> {
+    /// that is already current costs nothing to open. A caller that appended through something
+    /// that does not project, such as `requests::file_request`, calls this after it.
+    ///
+    /// # Errors
+    ///
+    /// `Sqlite` when a projection cannot be written; `InvalidEvent` when the log holds a row that
+    /// is not an event.
+    pub fn catch_up(&self) -> Result<usize, StoreError> {
         let after_seq = self.cursor()?;
         let behind = self.log.read(&EventQuery {
             after_seq: Some(after_seq),

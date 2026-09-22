@@ -12,10 +12,10 @@ use farik_core::criteria::validate_criteria;
 use farik_core::team::fixtures::{a_team_wire, an_agent_wire};
 use farik_core::team::{Team, validate_team};
 use farik_protocol::clock::{Clock, FixedClock};
-use farik_protocol::event::{EventIds, FarikEvent, NewEvent, event_from_value};
+use farik_protocol::event::{EventIds, EventKind, FarikEvent, NewEvent, event_from_value};
 use farik_store::files::ProjectFiles;
 use farik_store::git::fixtures::TempRepo;
-use farik_store::{IN_MEMORY, Projections, open_event_log, open_projections};
+use farik_store::{EventQuery, IN_MEMORY, Projections, open_event_log, open_projections};
 use serde_json::{Value, json};
 
 use super::{ToolContext, ToolDeps, ToolError, call_tool};
@@ -107,6 +107,33 @@ impl TestProject {
         run(&self.context(agent, task), name, input)
     }
 
+    /// Every event of these kinds, oldest first; every event when `kinds` is empty.
+    pub(crate) fn events(&self, kinds: &[EventKind]) -> Vec<FarikEvent> {
+        self.deps
+            .log
+            .read(&EventQuery {
+                kinds: kinds.to_vec(),
+                ..EventQuery::default()
+            })
+            .expect("the log reads")
+    }
+
+    /// How many events the log holds.
+    pub(crate) fn event_count(&self) -> usize {
+        self.events(&[]).len()
+    }
+
+    /// The contract file of `task`, as a value.
+    pub(crate) fn file(&self, task: &str) -> Value {
+        serde_json::to_value(
+            self.deps
+                .files
+                .read_contract(&task.parse().expect("a task id"))
+                .expect("the file reads"),
+        )
+        .expect("a contract serialises")
+    }
+
     /// The fixture contract as `task`, a Software Developer's reviewed by another, written to its
     /// file with `change` applied, and put on the board by a `task.created` in `status`.
     pub(crate) fn filed_with(
@@ -127,6 +154,9 @@ impl TestProject {
         }
         change(&mut wire);
         let contract = validate_contract(&wire).expect("the fixture is a contract");
+        // The counter hands out every id a project has, so a fixture task takes one too, and a
+        // task filed after it is not given its id.
+        self.deps.log.next_task_id().expect("an id is handed out");
         self.deps
             .files
             .write_contract(&contract)

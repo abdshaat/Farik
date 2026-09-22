@@ -118,7 +118,7 @@ Files: `tools/contracts.rs`
 - `refuses_an_epic_write_while_a_question_is_unanswered` — after a `question.asked` for the epic, `Refused`.
 - `files_a_child_of_an_epic_its_assignee_breaks_down` — the epic in progress, assigned to `pm`: `farik_create_task` with `parent` files a child; from `dev-a` it is `Refused` by the child-creation gate.
 
-- [ ] `feat(runtime): add the triage, contract, and task filing tools`
+- [x] `feat(runtime): add the triage, contract, and task filing tools`
 
 ### Task 4: transitions, results, notes, questions, product documents
 
