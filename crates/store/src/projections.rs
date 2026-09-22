@@ -5,8 +5,8 @@ use std::sync::Arc;
 
 use farik_core::contract::{Risk, TaskId, TaskKind, TaskStatus};
 use farik_protocol::event::{
-    ContractSummary, ContractSummaryKind, ContractSummaryRisk, ContractSummaryStatus, EventBody,
-    FarikEvent, RequestTriagedBodySize,
+    ContractSummary, ContractSummaryKind, ContractSummaryRisk, ContractSummaryStatus,
+    CostRecordedBody, EventBody, FarikEvent, RequestTriagedBodySize,
 };
 use rusqlite::{Connection, Transaction, TransactionBehavior};
 
@@ -15,10 +15,10 @@ use crate::event_log::{EventLog, EventQuery, TASK_ID_PREFIX};
 
 /// What a board shows about one contract, as the log left it.
 ///
-/// Every field comes from an event a phase 2 command emits. The assignee, the reviewer, the sprint
-/// and the iteration arrive with `task.transitioned` in phase 3, and `cost_usd` with
-/// `cost.recorded`; a column nothing can write is a column no test can hold to anything.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// Every field comes from an event a command emits. The assignee, the reviewer, the sprint and the
+/// iteration arrive with `task.transitioned` later in phase 3; a column nothing can write is a
+/// column no test can hold to anything.
+#[derive(Debug, Clone, PartialEq)]
 pub struct TaskProjection {
     /// The contract this is about.
     pub task_id: TaskId,
@@ -39,6 +39,39 @@ pub struct TaskProjection {
     /// The sequence number of the last event that changed this row, which is what says how fresh it
     /// is and which event to blame for what it says.
     pub updated_seq: u64,
+    /// What the task has cost, in dollars: the sum of its `cost.recorded` events, `0.0` when
+    /// there are none.
+    pub cost_usd: f64,
+}
+
+/// A key that costs are summed by (`docs/SPEC.md` 5.5).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CostScope {
+    /// By task id. A cost with no task is in no task's row.
+    Task,
+    /// By agent id.
+    Agent,
+    /// By session id.
+    Session,
+    /// By the UTC date the cost was recorded on, as `YYYY-MM-DD`.
+    Day,
+}
+
+/// What one key of a scope has spent.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CostProjection {
+    /// The scope this row sums by.
+    pub scope: CostScope,
+    /// The task id, agent id, session id, or day.
+    pub key: String,
+    /// Dollars, as priced when each cost was recorded.
+    pub usd: f64,
+    /// Input tokens.
+    pub input_tokens: u64,
+    /// Output tokens.
+    pub output_tokens: u64,
+    /// How many distinct sessions the costs came from.
+    pub sessions: u32,
 }
 
 /// The projections of one log: derived tables that answer a view in one query.
@@ -89,6 +122,7 @@ impl Projections {
             let transaction =
                 connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
             transaction.execute("DELETE FROM task_projections", ())?;
+            transaction.execute("DELETE FROM cost_records", ())?;
             write_cursor(&transaction, 0)?;
             transaction.commit()?;
         }
@@ -170,6 +204,60 @@ impl Projections {
         }
     }
 
+    /// What each key of `scope` has spent: tasks by the number in the id, as `board` is; the other
+    /// scopes by key as text.
+    ///
+    /// # Errors
+    ///
+    /// `Sqlite` when the read fails; `InvalidEvent` when a sum cannot be read back as a count.
+    pub fn costs(&self, scope: CostScope) -> Result<Vec<CostProjection>, StoreError> {
+        let (column, order) = match scope {
+            CostScope::Task => ("task_id", BY_NUMBER),
+            CostScope::Agent => ("agent_id", "agent_id"),
+            CostScope::Session => ("session_id", "session_id"),
+            CostScope::Day => ("day", "day"),
+        };
+        let connection = self.connection();
+        let mut statement = connection.prepare(&format!(
+            "SELECT {column}, SUM(cost_usd), SUM(input_tokens), SUM(output_tokens),
+                    COUNT(DISTINCT session_id)
+             FROM cost_records WHERE {column} IS NOT NULL
+             GROUP BY {column} ORDER BY {order}"
+        ))?;
+        // Only the task order has a parameter; SQLite refuses one bound to nothing.
+        let parameters: Vec<i64> = match scope {
+            CostScope::Task => vec![number_offset()],
+            _ => Vec::new(),
+        };
+        let rows = statement.query_map(rusqlite::params_from_iter(parameters), |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, f64>(1)?,
+                row.get::<_, i64>(2)?,
+                row.get::<_, i64>(3)?,
+                row.get::<_, i64>(4)?,
+            ))
+        })?;
+        let mut costs = Vec::new();
+        for row in rows {
+            let (key, usd, input_tokens, output_tokens, sessions) = row?;
+            let refuse = |what: &str, value: i64| StoreError::InvalidEvent {
+                detail: format!("the costs of {key} hold {value} as their {what}"),
+            };
+            costs.push(CostProjection {
+                scope,
+                usd,
+                input_tokens: u64::try_from(input_tokens)
+                    .map_err(|_| refuse("input tokens", input_tokens))?,
+                output_tokens: u64::try_from(output_tokens)
+                    .map_err(|_| refuse("output tokens", output_tokens))?,
+                sessions: u32::try_from(sessions).map_err(|_| refuse("sessions", sessions))?,
+                key,
+            });
+        }
+        Ok(costs)
+    }
+
     /// How far into the log the projections have read: the sequence number of the last event
     /// applied, or zero when none has been.
     ///
@@ -205,7 +293,10 @@ impl Projections {
 }
 
 const SELECT_PROJECTION: &str = "SELECT task_id, kind, parent, title, status, risk, triaged, \
-                                 locked, updated_seq FROM task_projections";
+                                 locked, updated_seq, \
+                                 (SELECT COALESCE(SUM(cost_usd), 0.0) FROM cost_records \
+                                  WHERE cost_records.task_id = task_projections.task_id) \
+                                 FROM task_projections";
 
 /// The board is ordered by the number in the task id, not by the id itself: `FRK-10` sorts before
 /// `FRK-9` as text, and a board that puts the tenth task before the ninth is a board nobody trusts.
@@ -235,6 +326,7 @@ type ProjectedRow = (
     bool,
     bool,
     i64,
+    f64,
 );
 
 fn projected_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ProjectedRow> {
@@ -248,6 +340,7 @@ fn projected_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ProjectedRow> {
         row.get(6)?,
         row.get(7)?,
         row.get(8)?,
+        row.get(9)?,
     ))
 }
 
@@ -258,7 +351,7 @@ fn projected_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ProjectedRow> {
 /// reads the log again without parsing any of them, and `farik doctor` reaches a board in this state
 /// that way. The log has no such door — a row of it that cannot be read is the only copy.
 fn projection_of_row(row: ProjectedRow) -> Result<TaskProjection, StoreError> {
-    let (task_id, kind, parent, title, status, risk, triaged, locked, updated_seq) = row;
+    let (task_id, kind, parent, title, status, risk, triaged, locked, updated_seq, cost_usd) = row;
     let refuse = |what: &str, value: &str| StoreError::InvalidEvent {
         detail: format!("the projection of {task_id} holds {value:?} as its {what}"),
     };
@@ -276,23 +369,28 @@ fn projection_of_row(row: ProjectedRow) -> Result<TaskProjection, StoreError> {
         locked,
         updated_seq: u64::try_from(updated_seq)
             .map_err(|_| refuse("sequence number", &updated_seq.to_string()))?,
+        cost_usd,
     })
 }
 
 /// Applies one event to the projection tables, leaving the cursor to the caller.
 fn apply_to(transaction: &Transaction<'_>, event: &FarikEvent) -> Result<(), StoreError> {
-    let Some(task_id) = &event.envelope.ids.task_id else {
-        // Only the five kinds that are about one contract touch the board, and the protocol crate
-        // refuses one of those without a task id. The rest — a scan, a team, a criterion library,
-        // a drift report — are about the project.
-        return Ok(());
-    };
     let seq = i64::try_from(event.envelope.seq).map_err(|_| StoreError::Sqlite {
         detail: format!(
             "event {} is past what the engine can hold",
             event.envelope.seq
         ),
     })?;
+    if let EventBody::CostRecorded(body) = &event.body {
+        // Before the guard below: a cost with no task still costs its agent, session, and day.
+        write_cost(transaction, event, body, seq)?;
+    }
+    let Some(task_id) = &event.envelope.ids.task_id else {
+        // Only the five kinds that are about one contract touch the board, and the protocol crate
+        // refuses one of those without a task id. The rest — a scan, a team, a criterion library,
+        // a drift report — are about the project.
+        return Ok(());
+    };
     let id = task_id.to_string();
     match &event.body {
         EventBody::TaskCreated(body) => write_summary(transaction, &id, &body.summary, seq),
@@ -319,6 +417,34 @@ fn apply_to(transaction: &Transaction<'_>, event: &FarikEvent) -> Result<(), Sto
         | EventBody::CostRecorded(_)
         | EventBody::BudgetExhausted(_) => Ok(()),
     }
+}
+
+/// Keeps one `cost.recorded` as a row, dated by the UTC day it was recorded on.
+fn write_cost(
+    transaction: &Transaction<'_>,
+    event: &FarikEvent,
+    body: &CostRecordedBody,
+    seq: i64,
+) -> Result<(), StoreError> {
+    let ids = &event.envelope.ids;
+    transaction.execute(
+        "INSERT INTO cost_records (seq, task_id, agent_id, session_id, day, purpose, model_id,
+                                   input_tokens, output_tokens, cost_usd)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+        (
+            seq,
+            ids.task_id.as_ref().map(|id| id.to_string()),
+            ids.agent_id.as_ref(),
+            ids.session_id.as_ref(),
+            event.envelope.recorded_at.date_naive().to_string(),
+            body.purpose.to_string(),
+            body.model_id.as_str(),
+            body.usage.input_tokens,
+            body.usage.output_tokens,
+            body.cost_usd,
+        ),
+    )?;
+    Ok(())
 }
 
 /// Writes what a summary says, creating the row when this is the first event about the contract.
@@ -449,7 +575,10 @@ mod tests {
     use farik_protocol::event::{EventKind, NewEvent, event_from_value};
     use serde_json::json;
 
-    use super::{Arc, EventLog, FarikEvent, Projections, TaskProjection, open_projections};
+    use super::{
+        Arc, CostProjection, CostScope, EventLog, FarikEvent, Projections, TaskProjection,
+        open_projections,
+    };
     use crate::error::StoreError;
     use crate::event_log::{IN_MEMORY, open_event_log};
     use crate::migrations;
@@ -535,6 +664,7 @@ mod tests {
                 triaged: false,
                 locked: false,
                 updated_seq: filed.envelope.seq,
+                cost_usd: 0.0,
             }]
         );
         assert_eq!(projections.cursor().expect("the cursor reads"), 1);
@@ -570,6 +700,7 @@ mod tests {
                 triaged: false,
                 locked: false,
                 updated_seq: rewritten.envelope.seq,
+                cost_usd: 0.0,
             }
         );
     }
@@ -730,7 +861,7 @@ mod tests {
             log.applied_migrations().expect("the ledger reads"),
             migrations::known_versions()
         );
-        assert_eq!(migrations::known_versions(), vec![1, 2]);
+        assert_eq!(migrations::known_versions(), vec![1, 2, 3]);
     }
 
     #[test]
@@ -914,5 +1045,168 @@ mod tests {
         assert_eq!(board[0].title, "Add a login page");
         assert_eq!(board[0].status, TaskStatus::Draft);
         assert_eq!(projections.cursor().expect("the cursor reads"), 1);
+    }
+
+    /// A `cost.recorded` for `task_id` (or no task), by `agent` in `session`, recorded at ten on
+    /// `day`, of `usd` dollars and `input` and `output` tokens.
+    fn cost(
+        task_id: Option<&str>,
+        agent: &str,
+        session: &str,
+        day: &str,
+        (usd, input, output): (f64, u64, u64),
+    ) -> NewEvent {
+        let mut wire = an_event_wire(EventKind::CostRecorded);
+        if let Some(task_id) = task_id {
+            wire["task_id"] = json!(task_id);
+        }
+        wire["agent_id"] = json!(agent);
+        wire["session_id"] = json!(session);
+        wire["recorded_at"] = json!(format!("{day}T10:00:00Z"));
+        wire["body"]["cost_usd"] = json!(usd);
+        wire["body"]["usage"]["input_tokens"] = json!(input);
+        wire["body"]["usage"]["output_tokens"] = json!(output);
+        let event = event_from_value(&wire).expect("the fixture is schema-valid");
+        NewEvent {
+            recorded_at: event.envelope.recorded_at,
+            ids: event.envelope.ids,
+            body: event.body,
+        }
+    }
+
+    fn row(
+        scope: CostScope,
+        key: &str,
+        (usd, input_tokens, output_tokens, sessions): (f64, u64, u64, u32),
+    ) -> CostProjection {
+        CostProjection {
+            scope,
+            key: key.to_string(),
+            usd,
+            input_tokens,
+            output_tokens,
+            sessions,
+        }
+    }
+
+    fn cost_on_board(projections: &Projections, task_id: &str) -> f64 {
+        projections
+            .task(&task_id.parse().expect("a task id"))
+            .expect("the read works")
+            .expect("on the board")
+            .cost_usd
+    }
+
+    #[test]
+    fn sums_a_tasks_costs_on_the_board() {
+        let (log, projections) = a_board();
+        record(&log, &projections, &about(EventKind::TaskCreated, "FRK-1"));
+        record(&log, &projections, &about(EventKind::TaskCreated, "FRK-2"));
+        for usd in [0.25, 0.5] {
+            let spent = cost(Some("FRK-1"), "a", "s1", "2026-09-22", (usd, 1, 1));
+            record(&log, &projections, &spent);
+        }
+        assert!((cost_on_board(&projections, "FRK-1") - 0.75).abs() < f64::EPSILON);
+        assert!(cost_on_board(&projections, "FRK-2").abs() < f64::EPSILON);
+    }
+
+    /// The three records `groups_costs_by_each_scope` describes.
+    fn three_costs_for_one_task(log: &EventLog, projections: &Projections) {
+        record(log, projections, &about(EventKind::TaskCreated, "FRK-1"));
+        for spent in [
+            cost(Some("FRK-1"), "a", "s1", "2026-09-21", (1.0, 100, 10)),
+            cost(Some("FRK-1"), "a", "s2", "2026-09-22", (2.0, 200, 20)),
+            cost(Some("FRK-1"), "b", "s3", "2026-09-22", (4.0, 400, 40)),
+        ] {
+            record(log, projections, &spent);
+        }
+    }
+
+    #[test]
+    fn groups_costs_by_each_scope() {
+        let (log, projections) = a_board();
+        three_costs_for_one_task(&log, &projections);
+        let costs = |scope| projections.costs(scope).expect("the costs read");
+        assert_eq!(
+            costs(CostScope::Agent),
+            vec![
+                row(CostScope::Agent, "a", (3.0, 300, 30, 2)),
+                row(CostScope::Agent, "b", (4.0, 400, 40, 1)),
+            ]
+        );
+        assert_eq!(
+            costs(CostScope::Session),
+            vec![
+                row(CostScope::Session, "s1", (1.0, 100, 10, 1)),
+                row(CostScope::Session, "s2", (2.0, 200, 20, 1)),
+                row(CostScope::Session, "s3", (4.0, 400, 40, 1)),
+            ]
+        );
+        assert_eq!(
+            costs(CostScope::Day),
+            vec![
+                row(CostScope::Day, "2026-09-21", (1.0, 100, 10, 1)),
+                row(CostScope::Day, "2026-09-22", (6.0, 600, 60, 2)),
+            ]
+        );
+    }
+
+    #[test]
+    fn counts_a_cost_with_no_task_in_every_other_scope() {
+        let (log, projections) = a_board();
+        record(
+            &log,
+            &projections,
+            &cost(None, "a", "s1", "2026-09-22", (1.0, 100, 10)),
+        );
+        let one = (1.0, 100, 10, 1);
+        assert_eq!(
+            projections.costs(CostScope::Day).expect("the costs read"),
+            vec![row(CostScope::Day, "2026-09-22", one)]
+        );
+        assert_eq!(
+            projections.costs(CostScope::Agent).expect("the costs read"),
+            vec![row(CostScope::Agent, "a", one)]
+        );
+        assert_eq!(
+            projections
+                .costs(CostScope::Session)
+                .expect("the costs read"),
+            vec![row(CostScope::Session, "s1", one)]
+        );
+        assert_eq!(
+            projections.costs(CostScope::Task).expect("the costs read"),
+            Vec::new()
+        );
+    }
+
+    #[test]
+    fn counts_a_tasks_distinct_sessions() {
+        let (log, projections) = a_board();
+        record(&log, &projections, &about(EventKind::TaskCreated, "FRK-1"));
+        for session in ["a", "a", "b"] {
+            let spent = cost(Some("FRK-1"), "x", session, "2026-09-22", (1.0, 1, 1));
+            record(&log, &projections, &spent);
+        }
+        let tasks = projections.costs(CostScope::Task).expect("the costs read");
+        assert_eq!(tasks.len(), 1);
+        assert_eq!(tasks[0].key, "FRK-1");
+        assert_eq!(tasks[0].sessions, 2);
+    }
+
+    #[test]
+    fn rebuilds_costs_from_the_log() {
+        let (log, projections) = a_board();
+        three_costs_for_one_task(&log, &projections);
+        let before = projections.costs(CostScope::Task).expect("the costs read");
+        projections.rebuild().expect("the board is built again");
+        assert_eq!(
+            projections.costs(CostScope::Task).expect("the costs read"),
+            before
+        );
+        assert_eq!(
+            before,
+            vec![row(CostScope::Task, "FRK-1", (7.0, 700, 70, 3))]
+        );
     }
 }

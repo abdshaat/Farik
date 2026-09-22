@@ -101,7 +101,7 @@ Tests, each on a log in memory:
 - `rebuilds_costs_from_the_log` — after `rebuild`, `costs(Task)` equals what it was before, not double.
 - The existing assertion that `known_versions() == [1, 2]` becomes `[1, 2, 3]`; no new test duplicates it.
 
-- [ ] `feat(store): project costs by task, agent, session, and day`
+- [x] `feat(store): project costs by task, agent, session, and day`
 
 ### Task 3: which prices apply
 
