@@ -495,6 +495,42 @@ fn never_hands_out_an_id_a_committed_contract_already_has() {
     );
 }
 
+/// Writes a contract straight to its file, as a pull or a clone would bring one in, with no event.
+fn a_contract_file_at(repository: &TempRepo, id: &str) {
+    let mut wire = farik_core::contract::fixtures::a_contract_wire();
+    wire["id"] = json!(id);
+    let contract = farik_core::contract::validate_contract(&wire).expect("the fixture is one");
+    files_of(repository)
+        .write_contract(&contract)
+        .expect("the contract is written");
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn hands_out_an_id_past_contracts_a_pull_brought_in() {
+    // The log is kept, so its counter already stands at 1 and the id comes from moving it on, not
+    // from starting it: the counter has to jump past what arrived rather than count one on.
+    let repository = a_project("cli-create-pulled");
+    let first = a_request_file(&repository, "first.yaml", "The first one");
+    let created = run_in(
+        &repository.path,
+        &["task", "create", first.to_str().expect("a path")],
+    );
+    assert_eq!(created.code, 0, "{}", created.err);
+    for id in ["FRK-2", "FRK-3", "FRK-4", "FRK-5"] {
+        a_contract_file_at(&repository, id);
+    }
+
+    let second = a_request_file(&repository, "second.yaml", "The new one");
+    let ran = run_in(
+        &repository.path,
+        &["task", "create", second.to_str().expect("a path")],
+    );
+
+    assert_eq!(ran.code, 0, "{}", ran.err);
+    assert!(ran.out.contains("FRK-6 filed"), "{}", ran.out);
+}
+
 #[test]
 #[ignore = "needs the git program: cargo xtask check --integration"]
 fn reads_the_contract_from_where_the_command_was_run() {

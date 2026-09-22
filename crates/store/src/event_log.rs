@@ -849,6 +849,18 @@ mod tests {
     }
 
     #[test]
+    fn moves_a_counter_that_already_counts_past_an_id_taken_since() {
+        // A pull brings in contracts the counter has not seen: the counter's row already exists,
+        // so this is the conflict branch, and it has to jump rather than count one on.
+        let log = a_log();
+        assert_eq!(log.next_task_id().expect("an id").to_string(), "FRK-1");
+        assert_eq!(
+            log.next_task_id_above(10).expect("an id").to_string(),
+            "FRK-11"
+        );
+    }
+
+    #[test]
     fn hands_out_the_last_id_the_contract_schema_can_spell_and_then_refuses() {
         // The pattern is `^FRK-[0-9]{1,6}$`, so the counter has an end, and both sides of it matter:
         // refusing a number early costs a project an id it was entitled to, and refusing none at
