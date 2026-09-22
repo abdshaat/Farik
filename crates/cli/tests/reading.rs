@@ -11,8 +11,17 @@ use farik_protocol::clock::FixedClock;
 use farik_store::git::fixtures::TempRepo;
 use serde_json::Value;
 
+/// The moment every test runs at, fixed rather than read from the wall clock (code.md).
+const NOW: &str = "2026-09-22T12:00:00Z";
+
+/// When the project's own commit was made: earlier the same day as `NOW`.
+const COMMITTED: &str = "2026-09-22T09:00:00Z";
+
+/// `NOW`, as the clock the command line is handed.
 fn at() -> DateTime<Utc> {
-    Utc::now()
+    DateTime::parse_from_rfc3339(NOW)
+        .expect("a moment")
+        .with_timezone(&Utc)
 }
 
 struct Ran {
@@ -50,7 +59,7 @@ fn a_project_with_a_task(name: &str) -> TempRepo {
     repository.write("Cargo.lock", "version = 4\n");
     repository.write("Cargo.toml", "[package]\nname = \"one\"\n");
     repository.write("src/lib.rs", "pub fn one() -> u8 { 1 }\n");
-    repository.commit("a project");
+    repository.commit_at("a project", COMMITTED);
     let init = run_in(&repository.path, &["init"]);
     assert_eq!(init.code, 0, "{}", init.err);
     repository.write("request.yaml", &a_request("Show the board"));
@@ -114,7 +123,7 @@ fn says_when_the_board_is_empty() {
     let repository = TempRepo::new("read-board-empty");
     repository.write("Cargo.lock", "version = 4\n");
     repository.write("Cargo.toml", "[package]\nname = \"one\"\n");
-    repository.commit("a project");
+    repository.commit_at("a project", COMMITTED);
     run_in(&repository.path, &["init"]);
 
     let ran = run_in(&repository.path, &["board"]);

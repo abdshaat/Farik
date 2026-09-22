@@ -78,6 +78,30 @@ impl TempRepo {
         self.git(&["commit", "-m", message]);
     }
 
+    /// Stages everything and commits it as made at `date`, an ISO 8601 moment, so that a test
+    /// that reads how long ago the last commit was does not read the wall clock.
+    ///
+    /// # Panics
+    ///
+    /// When git refuses.
+    pub fn commit_at(&self, message: &str, date: &str) {
+        self.git(&["add", "-A"]);
+        let output = Command::new("git")
+            .args(["commit", "-m", message])
+            .current_dir(&self.path)
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("GIT_CONFIG_SYSTEM", "/dev/null")
+            .env("GIT_AUTHOR_DATE", date)
+            .env("GIT_COMMITTER_DATE", date)
+            .output()
+            .expect("git runs");
+        assert!(
+            output.status.success(),
+            "git commit: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
     /// Runs git in this repository, for the setup a test needs.
     ///
     /// # Panics

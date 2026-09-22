@@ -14,9 +14,18 @@ use farik_store::files::ProjectFiles;
 use farik_store::git::fixtures::TempRepo;
 use serde_json::{Value, json};
 
-/// The moment every test runs at, so that "last commit today" is an answer rather than a guess.
+/// The moment every test runs at, fixed rather than read from the wall clock (code.md), so that
+/// "last commit today" is an answer rather than a guess.
+const NOW: &str = "2026-09-22T12:00:00Z";
+
+/// When the project's own commit was made: earlier the same day as `NOW`.
+const COMMITTED: &str = "2026-09-22T09:00:00Z";
+
+/// `NOW`, as the clock the command line is handed.
 fn at() -> DateTime<Utc> {
-    Utc::now()
+    DateTime::parse_from_rfc3339(NOW)
+        .expect("a moment")
+        .with_timezone(&Utc)
 }
 
 /// What one run of the command line did.
@@ -56,7 +65,7 @@ fn a_repository(name: &str) -> TempRepo {
     repository.write("Cargo.lock", "version = 4\n");
     repository.write("Cargo.toml", "[package]\nname = \"one\"\n");
     repository.write("src/lib.rs", "pub fn one() -> u8 { 1 }\n");
-    repository.commit("a project");
+    repository.commit_at("a project", COMMITTED);
     repository
 }
 
