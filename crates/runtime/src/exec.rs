@@ -92,7 +92,7 @@ pub(crate) fn workspace_relative(cwd: &str) -> Result<Option<String>, ExecError>
 }
 
 #[cfg(unix)]
-pub(crate) use supervise::supervise;
+pub(crate) use supervise::{Finished, supervise};
 
 #[cfg(unix)]
 mod supervise {
@@ -114,6 +114,8 @@ mod supervise {
         pub truncated: bool,
         /// Whether `kill_after` passed and `kill` was called.
         pub killed: bool,
+        /// How long it ran, on the host clock.
+        pub elapsed: Duration,
     }
 
     /// Runs `command` with both pipes drained on their own threads, calls `kill` once if it is
@@ -153,6 +155,7 @@ mod supervise {
             thread::sleep(POLL);
         };
         after_exit(&child);
+        let elapsed = started.elapsed();
         let (stdout, stdout_cut) = join(stdout);
         let (stderr, stderr_cut) = join(stderr);
         let status = status.map_err(|error| ExecError::SpawnFailed {
@@ -168,6 +171,7 @@ mod supervise {
             stderr,
             truncated: stdout_cut || stderr_cut,
             killed,
+            elapsed,
         })
     }
 

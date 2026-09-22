@@ -15,6 +15,8 @@ pub mod stream;
 pub use exec::{ExecError, ExecResult, Executor, OUTPUT_LIMIT_BYTES};
 pub use recorded::{RecordedAdapter, Transcript};
 #[cfg(unix)]
+pub use sandbox::docker::{DockerSandbox, DockerSandboxFactory};
+#[cfg(unix)]
 pub use sandbox::host::{HostSandbox, HostSandboxFactory};
 pub use sandbox::{SANDBOX_IMAGE, Sandbox, SandboxError, SandboxFactory};
 pub use session::{

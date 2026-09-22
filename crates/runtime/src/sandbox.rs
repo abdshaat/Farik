@@ -8,6 +8,9 @@ use farik_core::contract::TaskId;
 
 use crate::exec::Executor;
 
+/// Commands run in a Docker container per task.
+#[cfg(unix)]
+pub mod docker;
 /// Commands run on the host, inside the task's worktree.
 #[cfg(unix)]
 pub mod host;

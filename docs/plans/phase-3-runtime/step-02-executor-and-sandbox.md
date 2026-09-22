@@ -112,7 +112,7 @@ Tests, all `#[ignore = "needs docker"]`, on `alpine:3.22`, each with its own pro
 - `passes_only_the_environment_it_was_given_into_the_container` — `env` in the container lacks `CARGO_MANIFEST_DIR` (present in the test process) and contains `GIVEN=yes`.
 - `names_a_container_docker_accepts_from_any_project_id` — project id `My Project/1` gives a container named `farik-my-project-1-frk-1` (the task id lowercased too, since Docker names are case-sensitive and one rule for the whole name is simpler), and `name()` returns it.
 
-- [ ] `feat(runtime): run commands in a docker container per task`
+- [x] `feat(runtime): run commands in a docker container per task`
 
 ## Verification
 
