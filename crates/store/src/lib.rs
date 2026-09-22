@@ -15,6 +15,8 @@ pub mod migrations;
 pub mod projections;
 /// Where the files and the log disagree.
 pub mod reconcile;
+/// Filing a request, for every caller.
+pub mod requests;
 /// What the repository says it is.
 pub mod scan;
 

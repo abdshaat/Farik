@@ -89,7 +89,7 @@ Files: the schema, `event.rs`, `event/fixtures.rs`, `crates/store/src/requests.r
 - `files_a_child_as_a_triaged_task_of_its_epic` — with `parent: FRK-1`, the contract's `kind` is `task`, `parent` FRK-1, `status` `draft`, the log holds `task.created` then `request.triaged { size: small }`, and the board row is `triaged`.
 - `refuses_a_request_that_sets_an_id` — the refusal names `id`; nothing is filed. The command line's existing tests pass unchanged, which is the refactor's check.
 
-- [ ] `refactor(store): file requests in the store for every caller`
+- [x] `refactor(store): file requests in the store for every caller`
 
 ### Task 2: the framework and the reading tools
 

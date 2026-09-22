@@ -22,11 +22,12 @@ pub use crate::generated::event::{
     ContractEvaluatedBody, ContractEvaluatedBodyGate, ContractLockedBody, ContractSummary,
     ContractSummaryKind, ContractSummaryParent, ContractSummaryRisk, ContractSummaryStatus,
     ContractUnlockedBody, ContractWrittenBody, CostRecordedBody, CostRecordedBodyModelId,
-    CostRecordedBodyPurpose, CriteriaUpdatedBody, DriftDetectedBody, DriftDetectedBodyDrift,
-    EscalationRaisedBody, EscalationRaisedBodyReason, EventKind, ProjectScannedBody,
-    RequestTriagedBody, RequestTriagedBodySize, TaskCreatedBody, TaskTransitionedBody,
-    TaskTransitionedBodyEffectsItem, TeamUpdatedBody, TokenUsage, TransitionRefusedBody,
-    TransitionRefusedBodyRefusal,
+    CostRecordedBodyPurpose, CriteriaUpdatedBody, CriterionRecordedBody,
+    CriterionRecordedBodyRunBy, DriftDetectedBody, DriftDetectedBodyDrift, EscalationRaisedBody,
+    EscalationRaisedBodyReason, EventKind, NoteWrittenBody, NoteWrittenBodyKind,
+    ProductDocWrittenBody, ProjectScannedBody, QuestionAskedBody, RequestTriagedBody,
+    RequestTriagedBodySize, TaskCreatedBody, TaskTransitionedBody, TaskTransitionedBodyEffectsItem,
+    TeamUpdatedBody, TokenUsage, TransitionRefusedBody, TransitionRefusedBodyRefusal,
 };
 
 use crate::generated::event::FarikEvent as EventWire;
@@ -51,7 +52,7 @@ static VALIDATOR: LazyLock<Validator> = LazyLock::new(|| {
 });
 
 /// One validator per kind, each holding that kind's body schema alone. The event schema types
-/// `body` as a choice of fifteen shapes, so it can only say that a body matched none of them; these
+/// `body` as a choice of nineteen shapes, so it can only say that a body matched none of them; these
 /// say what is wrong with the one shape the event's `kind` asked for.
 static BODY_VALIDATORS: LazyLock<Vec<Validator>> = LazyLock::new(|| {
     let schema: Value = serde_json::from_str(SCHEMA_JSON).expect(
@@ -99,6 +100,10 @@ fn body_def_name(kind: EventKind) -> &'static str {
         EventKind::TransitionRefused => "transitionRefusedBody",
         EventKind::EscalationRaised => "escalationRaisedBody",
         EventKind::ContractEvaluated => "contractEvaluatedBody",
+        EventKind::CriterionRecorded => "criterionRecordedBody",
+        EventKind::NoteWritten => "noteWrittenBody",
+        EventKind::QuestionAsked => "questionAskedBody",
+        EventKind::ProductDocWritten => "productDocWrittenBody",
     }
 }
 
@@ -118,6 +123,9 @@ pub fn is_about_one_contract(kind: EventKind) -> bool {
             | EventKind::TransitionRefused
             | EventKind::EscalationRaised
             | EventKind::ContractEvaluated
+            | EventKind::CriterionRecorded
+            | EventKind::NoteWritten
+            | EventKind::ProductDocWritten
     )
 }
 
@@ -136,6 +144,10 @@ fn attribution(body: &mut EventBody) -> Option<(&'static str, &mut String)> {
         EventBody::CriteriaUpdated(body) => Some(("updated_by", &mut body.updated_by)),
         EventBody::TaskTransitioned(body) => Some(("requested_by", &mut body.requested_by)),
         EventBody::TransitionRefused(body) => Some(("requested_by", &mut body.requested_by)),
+        EventBody::CriterionRecorded(body) => Some(("recorded_by", &mut body.recorded_by)),
+        EventBody::NoteWritten(body) => Some(("written_by", &mut body.written_by)),
+        EventBody::QuestionAsked(body) => Some(("asked_by", &mut body.asked_by)),
+        EventBody::ProductDocWritten(body) => Some(("written_by", &mut body.written_by)),
         EventBody::DriftDetected(_)
         | EventBody::ProjectScanned(_)
         | EventBody::CostRecorded(_)
@@ -147,7 +159,7 @@ fn attribution(body: &mut EventBody) -> Option<(&'static str, &mut String)> {
 
 /// Every kind the log holds in this phase, in the order `docs/schemas/event.schema.json` lists
 /// them. The step that adds a kind adds it here.
-pub const EVERY_KIND: [EventKind; 15] = [
+pub const EVERY_KIND: [EventKind; 19] = [
     EventKind::TaskCreated,
     EventKind::RequestTriaged,
     EventKind::ContractWritten,
@@ -163,6 +175,10 @@ pub const EVERY_KIND: [EventKind; 15] = [
     EventKind::TransitionRefused,
     EventKind::EscalationRaised,
     EventKind::ContractEvaluated,
+    EventKind::CriterionRecorded,
+    EventKind::NoteWritten,
+    EventKind::QuestionAsked,
+    EventKind::ProductDocWritten,
 ];
 
 /// The ids an event is stamped with: which team and project it belongs to, and the contract, agent
@@ -246,6 +262,18 @@ pub enum EventBody {
     /// A contract was held to the Definition of Ready or of Done.
     #[serde(rename = "contract.evaluated")]
     ContractEvaluated(ContractEvaluatedBody),
+    /// An agent recorded an exit criterion's result.
+    #[serde(rename = "criterion.recorded")]
+    CriterionRecorded(CriterionRecordedBody),
+    /// An agent wrote a note about the work.
+    #[serde(rename = "note.written")]
+    NoteWritten(NoteWrittenBody),
+    /// An agent asked the human a question.
+    #[serde(rename = "question.asked")]
+    QuestionAsked(QuestionAskedBody),
+    /// The Product Manager wrote a product document.
+    #[serde(rename = "product_doc.written")]
+    ProductDocWritten(ProductDocWrittenBody),
 }
 
 impl EventBody {
@@ -268,6 +296,10 @@ impl EventBody {
             Self::TransitionRefused(_) => EventKind::TransitionRefused,
             Self::EscalationRaised(_) => EventKind::EscalationRaised,
             Self::ContractEvaluated(_) => EventKind::ContractEvaluated,
+            Self::CriterionRecorded(_) => EventKind::CriterionRecorded,
+            Self::NoteWritten(_) => EventKind::NoteWritten,
+            Self::QuestionAsked(_) => EventKind::QuestionAsked,
+            Self::ProductDocWritten(_) => EventKind::ProductDocWritten,
         }
     }
 }
@@ -416,7 +448,7 @@ pub fn event_from_value(input: &Value) -> Result<FarikEvent, Vec<ValidationError
 }
 
 /// The schema's own failures. A failure inside `body` is reported by the schema once, at `/body`,
-/// because `body` there is a choice of fifteen shapes and the schema can only say that none matched.
+/// because `body` there is a choice of nineteen shapes and the schema can only say that none matched.
 /// The event's `kind` says which one it was meant to be, so such a failure is asked again of that
 /// shape alone and reported where it actually is.
 fn schema_errors(input: &Value) -> Vec<ValidationError> {
@@ -797,7 +829,7 @@ mod tests {
 
     #[test]
     fn reports_a_malformed_field_inside_a_body_at_its_own_path() {
-        // The schema types `body` as a choice of fifteen shapes, so it reports a failure anywhere
+        // The schema types `body` as a choice of nineteen shapes, so it reports a failure anywhere
         // inside one at `/body`, with the whole body echoed back. The kind says which shape the
         // body was meant to be, so the reader checks it again against that one alone.
         let mut input = an_event_wire(EventKind::ProjectScanned);
@@ -864,6 +896,10 @@ mod tests {
             (EventKind::CriteriaUpdated, "updated_by"),
             (EventKind::TaskTransitioned, "requested_by"),
             (EventKind::TransitionRefused, "requested_by"),
+            (EventKind::CriterionRecorded, "recorded_by"),
+            (EventKind::NoteWritten, "written_by"),
+            (EventKind::QuestionAsked, "asked_by"),
+            (EventKind::ProductDocWritten, "written_by"),
         ] {
             let mut input = an_event_wire(kind);
             input["body"][field] = json!("   ");
@@ -981,11 +1017,23 @@ mod tests {
             EventKind::TransitionRefused,
             EventKind::EscalationRaised,
             EventKind::ContractEvaluated,
+            EventKind::CriterionRecorded,
+            EventKind::NoteWritten,
+            EventKind::ProductDocWritten,
         ] {
             let body = event_from_value(&an_event_wire(kind)).expect("valid").body;
             let error = new_event(body, at(), some_ids()).expect_err("expected a refusal");
             assert_eq!(error, EventError::NoContractNamed { kind }, "{kind}");
         }
+    }
+
+    #[test]
+    fn stamps_a_question_asked_outside_any_task() {
+        // A conversation with no task can ask the human something (5.16).
+        let body = event_from_value(&an_event_wire(EventKind::QuestionAsked))
+            .expect("valid")
+            .body;
+        assert!(new_event(body, at(), some_ids()).is_ok());
     }
 
     #[test]

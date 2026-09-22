@@ -122,6 +122,26 @@ pub fn a_body_wire(kind: EventKind) -> Value {
             "passed": false,
             "failures": ["the contract has no exit criteria"]
         }),
+        EventKind::CriterionRecorded => json!({
+            "criterion_id": "C1",
+            "passed": true,
+            "evidence": "cargo xtask check: ok",
+            "run_by": "assignee",
+            "recorded_by": "dev-a"
+        }),
+        EventKind::NoteWritten => json!({
+            "kind": "completion",
+            "text": "The login page is done and its tests pass.",
+            "written_by": "dev-a"
+        }),
+        EventKind::QuestionAsked => json!({
+            "question": "Should a login page remember the user?",
+            "asked_by": "maya-chen"
+        }),
+        EventKind::ProductDocWritten => json!({
+            "path": "prd.md",
+            "written_by": "maya-chen"
+        }),
     }
 }
 

@@ -71,7 +71,11 @@
         "task.transitioned",
         "transition.refused",
         "escalation.raised",
-        "contract.evaluated"
+        "contract.evaluated",
+        "criterion.recorded",
+        "note.written",
+        "question.asked",
+        "product_doc.written"
       ]
     },
     "eventBodyWire": {
@@ -92,7 +96,11 @@
         { "$ref": "#/$defs/taskTransitionedBody" },
         { "$ref": "#/$defs/transitionRefusedBody" },
         { "$ref": "#/$defs/escalationRaisedBody" },
-        { "$ref": "#/$defs/contractEvaluatedBody" }
+        { "$ref": "#/$defs/contractEvaluatedBody" },
+        { "$ref": "#/$defs/criterionRecordedBody" },
+        { "$ref": "#/$defs/noteWrittenBody" },
+        { "$ref": "#/$defs/questionAskedBody" },
+        { "$ref": "#/$defs/productDocWrittenBody" }
       ]
     },
     "contractSummary": {
@@ -344,6 +352,54 @@
         "gate": { "type": "string", "enum": ["definition_of_ready", "definition_of_done"] },
         "passed": { "type": "boolean" },
         "failures": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "criterionRecordedBody": {
+      "title": "Criterion Recorded Body",
+      "description": "An exit criterion's result, recorded by the agent that ran it (docs/SPEC.md section 5.4). run_by is the runner's relation to the contract; the Definition of Done reads the latest result per criterion and runner since the task last entered in_progress.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["criterion_id", "passed", "evidence", "run_by", "recorded_by"],
+      "properties": {
+        "criterion_id": { "type": "string" },
+        "passed": { "type": "boolean" },
+        "evidence": { "type": "string" },
+        "run_by": { "type": "string", "enum": ["assignee", "reviewer"] },
+        "recorded_by": { "type": "string" }
+      }
+    },
+    "noteWrittenBody": {
+      "title": "Note Written Body",
+      "description": "A note about the work on a contract (docs/SPEC.md section 5.4): the assignee's completion note, the reviewer's review note, or either's progress note. It does not touch the contract's own notes field.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "text", "written_by"],
+      "properties": {
+        "kind": { "type": "string", "enum": ["completion", "review", "progress"] },
+        "text": { "type": "string" },
+        "written_by": { "type": "string" }
+      }
+    },
+    "questionAskedBody": {
+      "title": "Question Asked Body",
+      "description": "An agent asked the human a question (docs/SPEC.md section 5.16). The event's sequence number is the question's id. A conversation with no task can ask one, so the envelope names a task only when there is one.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["question", "asked_by"],
+      "properties": {
+        "question": { "type": "string" },
+        "asked_by": { "type": "string" }
+      }
+    },
+    "productDocWrittenBody": {
+      "title": "Product Doc Written Body",
+      "description": "The Product Manager wrote a product document for an approved epic (docs/SPEC.md section 5.16). path is relative to .farik/product/.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "written_by"],
+      "properties": {
+        "path": { "type": "string" },
+        "written_by": { "type": "string" }
       }
     }
   }
