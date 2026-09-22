@@ -526,6 +526,50 @@ fn refuses_a_request_that_sets_what_is_not_the_authors_to_set() {
     );
 }
 
+/// Files a request with one line added to it, and says that it was refused for that field and that
+/// nothing was filed.
+fn refused_for_one_field(name: &str, line: &str, field: &str) {
+    let repository = a_project(name);
+    let path = repository.path.join("request.yaml");
+    std::fs::write(&path, format!("{}{line}\n", a_request("A board command")))
+        .expect("the request is written");
+    let ran = run_in(
+        &repository.path,
+        &["task", "create", path.to_str().expect("a path")],
+    );
+
+    assert_eq!(ran.code, 1, "{}", ran.out);
+    assert!(
+        ran.err
+            .contains(&format!("sets {field}, which a request does not")),
+        "{}",
+        ran.err
+    );
+    assert!(
+        files_of(&repository)
+            .list_contracts()
+            .expect("a list")
+            .is_empty(),
+        "and nothing was filed"
+    );
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn refuses_a_request_that_sets_a_field_the_store_owns() {
+    refused_for_one_field(
+        "cli-create-store-field",
+        "created_at: 2026-01-01T00:00:00Z",
+        "created_at",
+    );
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn refuses_a_request_that_sets_a_field_fixed_at_creation() {
+    refused_for_one_field("cli-create-fixed-field", "kind: epic", "kind");
+}
+
 #[test]
 #[ignore = "needs the git program: cargo xtask check --integration"]
 fn refuses_a_request_the_contract_rules_refuse() {
