@@ -124,7 +124,7 @@ Tests, each driving a fresh parser through a whole fixture unless it says otherw
 - `refuses_a_result_without_usage` — asserts `Err(RuntimeError::Protocol { detail })` with `detail` naming `usage`.
 - `joins_the_text_blocks_of_a_tool_result_array` — one `tool_use` line then a `user` line whose `content` is `[{"type":"text","text":"a"},{"type":"text","text":"b"}]`: asserts `ToolReturned { output: "a\nb" }`.
 
-- [ ] `feat(runtime): parse claude code stream-json into session events`
+- [x] `feat(runtime): parse claude code stream-json into session events`
 
 ### Task 3: the recorded adapter
 
