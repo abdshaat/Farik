@@ -16,6 +16,10 @@ use crate::generated::role::{FarikRole, FarikRoleModelEffort};
 
 /// Types generated from `docs/schemas/role.schema.json`.
 pub mod generated;
+/// Which role reviews a task (D7).
+mod reviewer;
+
+pub use reviewer::{REVIEWER_ROLE_FOR, default_reviewer_role};
 
 const SCHEMA_JSON: &str = include_str!("../../../docs/schemas/role.schema.json");
 

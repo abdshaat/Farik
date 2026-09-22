@@ -77,7 +77,7 @@ pub fn default_reviewer_role(team: &Team, kind: TaskKind, assignee_role: Role) -
 - `passes_over_a_paused_architect` — an Architect paused, two Developers: `Some(SoftwareDeveloper)`; one active Developer and one paused: `None`, as readiness counts.
 - `leaves_an_epics_reviewer_to_the_assignment_gate` — `kind: Epic`: `None` whatever the assignee's role.
 
-- [ ] `feat(roles): resolve which role reviews a task`
+- [x] `feat(roles): resolve which role reviews a task`
 
 ## Verification
 
