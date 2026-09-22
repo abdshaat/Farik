@@ -28,8 +28,8 @@ impl DockerSandbox {
     /// # Errors
     ///
     /// `DockerUnavailable` when `docker version` fails, `ImageMissing` when the image is not on
-    /// this machine (nothing is pulled), and `ContainerFailed` when `docker run` refuses or `worktree` is relative or holds a comma,
-    /// which `--mount` cannot name.
+    /// this machine (nothing is pulled), and `ContainerFailed` when `docker run` refuses or
+    /// `worktree` is relative or holds a comma, which `--mount` cannot name.
     pub fn create(
         project_id: &str,
         task_id: &TaskId,
@@ -143,14 +143,20 @@ impl Executor for DockerSandbox {
 
 impl Sandbox for DockerSandbox {
     fn discard(self: Box<Self>) -> Result<(), SandboxError> {
-        let output = docker(&["rm", "-f", &self.name])?;
-        if !output.status.success() {
-            return Err(SandboxError::ContainerFailed {
-                detail: stderr_of(&output),
-            });
-        }
-        Ok(())
+        removed(&docker(&["rm", "-f", &self.name])?)
     }
+}
+
+/// What `docker rm -f` answering `output` means for `discard`: a container already gone is
+/// discarded, since that is all `discard` asks. Older dockers refuse a missing one; newer ones do
+/// not.
+fn removed(output: &Output) -> Result<(), SandboxError> {
+    if !output.status.success() && !stderr_of(output).contains("No such container") {
+        return Err(SandboxError::ContainerFailed {
+            detail: stderr_of(output),
+        });
+    }
+    Ok(())
 }
 
 /// Makes Docker sandboxes from one image.
@@ -236,10 +242,32 @@ mod tests {
     use farik_core::contract::TaskId;
 
     use std::collections::BTreeMap;
+    use std::os::unix::process::ExitStatusExt;
     use std::path::Path;
+    use std::process::{ExitStatus, Output};
 
-    use super::{DockerSandbox, SandboxError, container_name, is_container_gone, whole_seconds};
+    use super::{
+        DockerSandbox, SandboxError, container_name, is_container_gone, removed, whole_seconds,
+    };
     use crate::exec::{Executor, Finished};
+
+    #[test]
+    fn counts_a_container_already_gone_as_discarded() {
+        let answer = |stderr: &str| Output {
+            status: ExitStatus::from_raw(1 << 8),
+            stdout: Vec::new(),
+            stderr: stderr.as_bytes().to_vec(),
+        };
+        let missing = "Error response from daemon: No such container: farik-p-frk-1\n";
+        assert_eq!(removed(&answer(missing)), Ok(()));
+        let refused = "Error response from daemon: could not kill: permission denied\n";
+        assert_eq!(
+            removed(&answer(refused)),
+            Err(SandboxError::ContainerFailed {
+                detail: refused.trim().to_owned()
+            })
+        );
+    }
 
     #[test]
     fn refuses_a_worktree_the_mount_cannot_name() {

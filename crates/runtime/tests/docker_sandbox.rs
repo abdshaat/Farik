@@ -217,6 +217,17 @@ fn names_a_container_docker_accepts_from_any_project_id() {
 
 #[test]
 #[ignore = "needs docker"]
+fn discards_a_container_already_gone() {
+    let first = create("discarded", false);
+    let second = create("discarded", false);
+    Box::new(second)
+        .discard()
+        .expect("the container is removed");
+    assert_eq!(Box::new(first).discard(), Ok(()));
+}
+
+#[test]
+#[ignore = "needs docker"]
 fn has_the_network_when_asked() {
     let sandbox = create("network-on", true);
     let mode = docker(&[
