@@ -48,6 +48,14 @@ pub(crate) enum Refusal {
     GateFailed { details: Vec<String> },
     /// The store would not file the request.
     RequestRefused { reason: String },
+    /// The caller is none of the actors the move's rows name.
+    ActorNotAllowed { detail: String },
+    /// The caller is neither the assignee nor the reviewer.
+    NotTheRunner { agent_id: String },
+    /// The contract has no such criterion.
+    UnknownCriterion { criterion_id: String },
+    /// This note is another's to write.
+    NotTheNotesWriter { agent_id: String, kind: String },
 }
 
 impl Refusal {
@@ -106,6 +114,29 @@ impl Refusal {
             ),
             Self::GateFailed { details } => ("gate_failed", details.join("; ")),
             Self::RequestRefused { reason } => ("request_refused", format!("the request {reason}")),
+            Self::ActorNotAllowed { detail } => ("actor_not_allowed", detail.clone()),
+            Self::NotTheRunner { agent_id } => (
+                "not_the_runner",
+                format!(
+                    "{agent_id} is neither the assignee nor the reviewer, and a result is recorded \
+                     by the agent that ran it"
+                ),
+            ),
+            Self::UnknownCriterion { criterion_id } => (
+                "unknown_criterion",
+                format!("the contract has no criterion {criterion_id}"),
+            ),
+            Self::NotTheNotesWriter { agent_id, kind } => (
+                "not_the_notes_writer",
+                format!(
+                    "a {kind} note is written by {}, and {agent_id} is not",
+                    match kind.as_str() {
+                        "completion" => "the assignee",
+                        "review" => "the reviewer",
+                        _ => "the assignee or the reviewer",
+                    }
+                ),
+            ),
         };
         format!("{kind}: {detail}")
     }

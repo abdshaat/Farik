@@ -10,7 +10,7 @@ use std::time::Duration;
 
 use farik_core::budget::SessionLedger;
 use farik_core::contract::{Role, TaskContract, TaskId, TaskKind, TaskStatus};
-use farik_core::governor::done::DoneEvidence;
+use farik_core::governor::done::{CriterionResult, DoneEvidence, RunBy};
 use farik_core::governor::escalation::EscalationReason;
 use farik_core::governor::gates::{
     AssignmentInput, AssignmentRequester, Blocker, ChildState, DependencyState, Rejection,
@@ -25,10 +25,11 @@ use farik_core::governor::transition_table::{GateId, TransitionActor};
 use farik_core::team::{AgentStatus, HumanAcceptsContracts, Team};
 use farik_protocol::clock::Clock;
 use farik_protocol::event::{
-    BlockerWire, ContractEvaluatedBody, ContractEvaluatedBodyGate, EscalationRaisedBody,
-    EscalationRaisedBodyReason, EventBody, EventIds, EventKind, FarikEvent, GateWire,
-    RejectionWire, TaskStatusWire, TaskTransitionedBody, TaskTransitionedBodyEffectsItem,
-    TransitionActorWire, TransitionRefusedBody, TransitionRefusedBodyRefusal, new_event,
+    BlockerWire, ContractEvaluatedBody, ContractEvaluatedBodyGate, CriterionRecordedBodyRunBy,
+    EscalationRaisedBody, EscalationRaisedBodyReason, EventBody, EventIds, EventKind, FarikEvent,
+    GateWire, NoteWrittenBodyKind, RejectionWire, TaskStatusWire, TaskTransitionedBody,
+    TaskTransitionedBodyEffectsItem, TransitionActorWire, TransitionRefusedBody,
+    TransitionRefusedBodyRefusal, new_event,
 };
 use farik_store::files::{FilesError, ProjectFiles};
 use farik_store::{EventLog, EventQuery, Git, GitError, Projections, StoreError, TaskProjection};
@@ -428,6 +429,7 @@ impl Transitions {
             .collect();
         let assignment = assignment(ask, team, &board, day_left, dependencies);
 
+        let (results, completion_note, review_note) = evidence_since_work_began(&history);
         let hours = team.policy.blocked_limit_hours.get();
         Ok(TransitionContext {
             triaged: row.triaged,
@@ -447,7 +449,7 @@ impl Transitions {
                 given: false,
             },
             assignment,
-            assignee_results: Vec::new(),
+            assignee_results: results.clone(),
             work,
             blocker: ask.blocker.clone(),
             blocker_resolution: ask.blocker_resolution.clone(),
@@ -456,10 +458,10 @@ impl Transitions {
             now,
             blocked_limit: Duration::from_secs(hours.saturating_mul(3600)),
             done: DoneEvidence {
-                results: Vec::new(),
+                results,
                 changed_paths,
-                completion_note: None,
-                review_note: None,
+                completion_note,
+                review_note,
                 human_accepted: false,
             },
             rejection: ask.rejection.clone(),
@@ -667,7 +669,7 @@ fn requested_by(request: &TransitionRequest) -> String {
 
 /// Every reason a refusal gives: each gate's words, or for the refusals that are not a gate's, one
 /// sentence of the refusal's own.
-fn refusal_details(refusal: &TransitionRefusal) -> Vec<String> {
+pub(crate) fn refusal_details(refusal: &TransitionRefusal) -> Vec<String> {
     match refusal {
         TransitionRefusal::GateFailed { failures } => failures
             .iter()
@@ -702,7 +704,7 @@ fn refusal_details(refusal: &TransitionRefusal) -> Vec<String> {
     }
 }
 
-fn refusal_wire(refusal: &TransitionRefusal) -> TransitionRefusedBodyRefusal {
+pub(crate) fn refusal_wire(refusal: &TransitionRefusal) -> TransitionRefusedBodyRefusal {
     match refusal {
         TransitionRefusal::WrongTask { .. } => TransitionRefusedBodyRefusal::WrongTask,
         TransitionRefusal::NoSuchTransition { .. } => {
@@ -723,7 +725,7 @@ fn status_wire(status: TaskStatus) -> Result<TaskStatusWire, TransitionError> {
     })
 }
 
-fn actor_wire(actor: TransitionActor) -> TransitionActorWire {
+pub(crate) fn actor_wire(actor: TransitionActor) -> TransitionActorWire {
     match actor {
         TransitionActor::ProductManager => TransitionActorWire::ProductManager,
         TransitionActor::ScrumMaster => TransitionActorWire::ScrumMaster,
@@ -884,6 +886,45 @@ fn readiness_failed_attempts(history: &[FarikEvent]) -> u32 {
         })
         .count();
     u32::try_from(failed).unwrap_or(u32::MAX)
+}
+
+/// The criterion results and notes recorded since the task last entered `in_progress`, so that a
+/// rejected iteration's evidence does not pass the next: the latest result per criterion and
+/// runner, and the latest completion and review notes.
+fn evidence_since_work_began(
+    history: &[FarikEvent],
+) -> (Vec<CriterionResult>, Option<String>, Option<String>) {
+    let since =
+        last_move_into(history, TaskStatus::InProgress).map_or(0, |event| event.envelope.seq);
+    let mut results: Vec<CriterionResult> = Vec::new();
+    let mut completion_note = None;
+    let mut review_note = None;
+    for event in history.iter().filter(|event| event.envelope.seq > since) {
+        match &event.body {
+            EventBody::CriterionRecorded(body) => {
+                let run_by = match body.run_by {
+                    CriterionRecordedBodyRunBy::Assignee => RunBy::Assignee,
+                    CriterionRecordedBodyRunBy::Reviewer => RunBy::Reviewer,
+                };
+                results.retain(|result| {
+                    result.criterion_id != body.criterion_id || result.run_by != run_by
+                });
+                results.push(CriterionResult {
+                    criterion_id: body.criterion_id.clone(),
+                    passed: body.passed,
+                    evidence: body.evidence.clone(),
+                    run_by,
+                });
+            }
+            EventBody::NoteWritten(body) => match body.kind {
+                NoteWrittenBodyKind::Completion => completion_note = Some(body.text.clone()),
+                NoteWrittenBodyKind::Review => review_note = Some(body.text.clone()),
+                NoteWrittenBodyKind::Progress => {}
+            },
+            _ => {}
+        }
+    }
+    (results, completion_note, review_note)
 }
 
 fn is_move_into(event: &FarikEvent, status: TaskStatus) -> bool {

@@ -133,7 +133,7 @@ Files: `tools/work.rs`, `transitions.rs`
 - `refuses_a_product_document_before_the_user_approves_the_epic` — `Refused` with the gate's words about approval; no file under `product/`.
 - `declares_a_block_with_its_blocker` — the board says `blocked` and the `task.transitioned` carries the blocker.
 
-- [ ] `feat(runtime): add the work, question, and product document tools`
+- [x] `feat(runtime): add the work, question, and product document tools`
 
 ### Task 5: commands
 

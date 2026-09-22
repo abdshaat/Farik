@@ -291,6 +291,13 @@ pub async fn call_tool(
         "farik_triage_request" => contracts::triage(&call, &parse(input)?),
         "farik_write_contract" => contracts::write_contract(&call, parse(input)?),
         "farik_create_task" => contracts::create_task(&call, parse(input)?),
+        "farik_request_transition" => work::request_transition(&call, parse(input)?),
+        "farik_assign_task" => work::assign_task(&call, parse(input)?),
+        "farik_declare_blocked" => work::declare_blocked(&call, parse(input)?),
+        "farik_record_criterion_result" => work::record_criterion(&call, parse(input)?),
+        "farik_write_note" => work::write_note(&call, parse(input)?),
+        "farik_ask_human" => work::ask_human(&call, parse(input)?),
+        "farik_write_product_doc" => work::write_product_doc(&call, parse(input)?),
         _ => Err(ToolError::Failed {
             detail: format!("{name} is listed and has no handler"),
         }),
