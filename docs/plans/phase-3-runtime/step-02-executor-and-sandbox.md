@@ -92,7 +92,7 @@ Tests, each in a fresh directory under `std::env::temp_dir()` named with the pro
 - `discards_a_host_sandbox_without_touching_the_workspace` — `discard` is `Ok` and the root still exists.
 - `displays_each_error_in_words` — `ImageMissing { image: "farik/sandbox:0.0.0" }` displays a sentence containing the image; `DockerUnavailable` one containing `docker`; `ExecError::OutsideWorkspace { cwd: "../x" }` one containing `../x`.
 
-- [ ] `feat(runtime): run commands in a task's workspace on the host`
+- [x] `feat(runtime): run commands in a task's workspace on the host`
 
 ### Task 2: the Docker sandbox
 
