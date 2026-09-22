@@ -1021,6 +1021,29 @@ fn shows_a_task_the_log_has_never_heard_of_and_says_so() {
 
 #[test]
 #[ignore = "needs the git program: cargo xtask check --integration"]
+fn refuses_to_change_a_task_the_log_has_never_heard_of() {
+    // The log decides a task's status (8.4), so a contract it has no row for has no status for the
+    // governor to be asked about, and guessing `draft` would let a file nobody filed be triaged.
+    let repository = a_project_with_a_contract_only_the_files_know("cli-unheard");
+    let before = kinds_in(&repository);
+
+    for args in [
+        &["triage", "FRK-7", "small", "--reason", "one screen"][..],
+        &["contract", "lock", "FRK-7"][..],
+    ] {
+        let ran = run_in(&repository.path, args);
+        assert_eq!(ran.code, 1, "{args:?}: {}", ran.out);
+        assert!(
+            ran.err.contains("the log has never heard of FRK-7"),
+            "{args:?}: {}",
+            ran.err
+        );
+    }
+    assert_eq!(kinds_in(&repository), before, "and nothing was recorded");
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
 fn refuses_a_task_id_that_is_not_one() {
     let repository = a_project("cli-bad-id");
     let ran = run_in(&repository.path, &["contract", "lock", "nine"]);
