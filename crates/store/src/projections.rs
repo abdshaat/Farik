@@ -1297,6 +1297,41 @@ mod tests {
     }
 
     #[test]
+    fn dates_a_cost_by_the_utc_day_it_was_recorded_on() {
+        let (log, projections) = a_board();
+        for at in ["2026-09-21T23:30:00Z", "2026-09-22T00:30:00Z"] {
+            let mut spent = cost(None, "a", "s1", "2026-09-21", (1.0, 1, 1));
+            spent.recorded_at = at.parse().expect("a timestamp");
+            record(&log, &projections, &spent);
+        }
+        let one = (1.0, 1, 1, 1);
+        assert_eq!(
+            projections.costs(CostScope::Day).expect("the costs read"),
+            vec![
+                row(CostScope::Day, "2026-09-21", one),
+                row(CostScope::Day, "2026-09-22", one),
+            ]
+        );
+    }
+
+    #[test]
+    fn orders_task_costs_by_the_number_in_the_id() {
+        let (log, projections) = a_board();
+        for task_id in ["FRK-10", "FRK-9"] {
+            record(&log, &projections, &about(EventKind::TaskCreated, task_id));
+            let spent = cost(Some(task_id), "a", "s1", "2026-09-22", (1.0, 1, 1));
+            record(&log, &projections, &spent);
+        }
+        let keys: Vec<String> = projections
+            .costs(CostScope::Task)
+            .expect("the costs read")
+            .into_iter()
+            .map(|row| row.key)
+            .collect();
+        assert_eq!(keys, ["FRK-9", "FRK-10"]);
+    }
+
+    #[test]
     fn rebuilds_costs_from_the_log() {
         let (log, projections) = a_board();
         three_costs_for_one_task(&log, &projections);
