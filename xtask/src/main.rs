@@ -27,14 +27,6 @@ fn run(args: &[String]) -> anyhow::Result<()> {
             xtask::check::tests_requested(args.get(1).map(String::as_str))
                 .map_err(anyhow::Error::msg)?,
         ),
-        Some("generate") => generate(
-            &root,
-            match args.get(1).map(String::as_str) {
-                None => false,
-                Some("--check") => true,
-                Some(flag) => bail!("unknown flag {flag}; usage: cargo xtask generate [--check]"),
-            },
-        ),
         Some("pre-commit") => pre_commit(&root),
         Some("commit-msg") => commit_msg(
             args.get(1)
@@ -44,7 +36,7 @@ fn run(args: &[String]) -> anyhow::Result<()> {
         Some("core-io") => core_io(&root),
         Some("install-hooks") => install_hooks(&root),
         _ => bail!(
-            "usage: cargo xtask <check [--integration]|generate [--check]|pre-commit|commit-msg <file>|todos|core-io|install-hooks>"
+            "usage: cargo xtask <check [--integration]|pre-commit|commit-msg <file>|todos|core-io|install-hooks>"
         ),
     }
 }
@@ -82,7 +74,6 @@ fn check(root: &Path, tests: Tests) -> anyhow::Result<()> {
         ],
     )?;
     cargo(root, &xtask::check::test_arguments(tests))?;
-    generate(root, true)?;
     todos(root)?;
     core_io(root)?;
     println!("xtask check: ok");
@@ -145,38 +136,6 @@ fn core_io(root: &Path) -> anyhow::Result<()> {
         "farik-core performs no I/O (hard rule 5):\n{}",
         findings.join("\n")
     );
-}
-
-fn generate(root: &Path, check_only: bool) -> anyhow::Result<()> {
-    for entry in &xtask::generate::GENERATED_SCHEMAS {
-        let schema_json = fs::read_to_string(root.join(entry.schema))
-            .with_context(|| format!("reading {}", entry.schema))?;
-        let types = xtask::generate::generate_types(entry, &schema_json)?;
-        let outputs = [(entry.types, types), (entry.schema_copy, schema_json)];
-        for (path, wanted) in outputs {
-            let current = read_if_present(&root.join(path))?;
-            if check_only {
-                if current != wanted {
-                    bail!(
-                        "{path} is out of date with {}; run cargo xtask generate",
-                        entry.schema
-                    );
-                }
-            } else if current != wanted {
-                fs::write(root.join(path), &wanted).with_context(|| format!("writing {path}"))?;
-                println!("generated {path}");
-            }
-        }
-    }
-    Ok(())
-}
-
-fn read_if_present(path: &Path) -> anyhow::Result<String> {
-    match fs::read_to_string(path) {
-        Ok(text) => Ok(text),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(String::new()),
-        Err(error) => Err(error).with_context(|| format!("reading {}", path.display())),
-    }
 }
 
 fn install_hooks(root: &Path) -> anyhow::Result<()> {

@@ -18,14 +18,11 @@ farik-protocol = { path = "crates/protocol" }
 farik-store = { path = "crates/store" }
 globset = { version = "=0.4.20", default-features = false }
 jsonschema = { version = "=0.56.0", default-features = false }
-prettyplease = "=0.3.0"
 regress = "=0.12.0"
 rusqlite = { version = "=0.40.2", features = ["bundled"] }
-schemars = "=0.8.22"
 serde = { version = "=1.0.229", features = ["derive"] }
 serde-saphyr = "=1.3.0"
 serde_json = "=1.0.151"
-syn = { version = "=3.0.5", features = ["full"] }
 typify = "=0.8.0"
 
 [workspace.lints.rust]

@@ -114,7 +114,7 @@ pub mod fixtures;
 /// The contract schema this crate validates against, embedded at compile time. Public so that a
 /// crate whose own schema repeats one of the contract's vocabularies can test that it still
 /// matches, one schema never being allowed to reference another.
-pub const SCHEMA_JSON: &str = include_str!("generated/task_contract.schema.json");
+pub const SCHEMA_JSON: &str = include_str!("../../../docs/schemas/task-contract.schema.json");
 
 /// One way in which a value failed the contract schema.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -127,8 +127,8 @@ pub struct ValidationError {
 
 static VALIDATOR: LazyLock<Validator> = LazyLock::new(|| {
     let schema: Value = serde_json::from_str(SCHEMA_JSON).expect(
-        "the embedded contract schema is valid JSON: it is a copy of docs/schemas/ written by \
-         cargo xtask generate and checked for freshness by cargo xtask check",
+        "the embedded contract schema is valid JSON: it is the file in docs/schemas/ \
+         that typify generated this crate's types from at compile time",
     );
     jsonschema::options()
         .should_validate_formats(true)

@@ -41,7 +41,7 @@ mod tests {
         // One schema never references another, so the event schema repeats the contract's kind,
         // status, and risk lists. This is what stops the copy from drifting from the original.
         let event: serde_json::Value =
-            serde_json::from_str(include_str!("generated/event.schema.json"))
+            serde_json::from_str(include_str!("../../../docs/schemas/event.schema.json"))
                 .expect("the embedded event schema is valid JSON");
         let contract: serde_json::Value = serde_json::from_str(farik_core::contract::SCHEMA_JSON)
             .expect("the embedded contract schema is valid JSON");
@@ -54,7 +54,7 @@ mod tests {
         // Every copy of the task id's pattern, not only the summary's: the envelope's and the
         // command's are what farik_core's TaskId::from_str is then handed.
         let command: serde_json::Value =
-            serde_json::from_str(include_str!("generated/command.schema.json"))
+            serde_json::from_str(include_str!("../../../docs/schemas/command.schema.json"))
                 .expect("the embedded command schema is valid JSON");
         for copy in [
             &event["properties"]["task_id"]["pattern"],

@@ -22,12 +22,12 @@ pub use crate::generated::team::{
 /// Wire fixtures for tests, in this crate and in others.
 pub mod fixtures;
 
-const SCHEMA_JSON: &str = include_str!("generated/team.schema.json");
+const SCHEMA_JSON: &str = include_str!("../../../docs/schemas/team.schema.json");
 
 static VALIDATOR: LazyLock<Validator> = LazyLock::new(|| {
     let schema: Value = serde_json::from_str(SCHEMA_JSON).expect(
-        "the embedded team schema is valid JSON: it is a copy of docs/schemas/ written by \
-         cargo xtask generate and checked for freshness by cargo xtask check",
+        "the embedded team schema is valid JSON: it is the file in docs/schemas/ \
+         that typify generated this crate's types from at compile time",
     );
     jsonschema::options()
         .should_validate_formats(true)

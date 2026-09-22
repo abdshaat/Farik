@@ -69,6 +69,7 @@ pub fn log(
                     event.body.kind().to_string(),
                     event
                         .envelope
+                        .ids
                         .task_id
                         .as_ref()
                         .map_or("-", |id| id.as_str())

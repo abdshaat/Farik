@@ -128,11 +128,16 @@ impl EventLog {
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
             (
                 stamp(checked.envelope.recorded_at),
-                &checked.envelope.team_id,
-                &checked.envelope.project_id,
-                checked.envelope.task_id.as_ref().map(|id| id.to_string()),
-                checked.envelope.agent_id.as_ref(),
-                checked.envelope.session_id.as_ref(),
+                &checked.envelope.ids.team_id,
+                &checked.envelope.ids.project_id,
+                checked
+                    .envelope
+                    .ids
+                    .task_id
+                    .as_ref()
+                    .map(|id| id.to_string()),
+                checked.envelope.ids.agent_id.as_ref(),
+                checked.envelope.ids.session_id.as_ref(),
                 checked.body.kind().to_string(),
                 body,
             ),
@@ -282,11 +287,7 @@ fn wire_of(event: &NewEvent, seq: u64) -> Value {
         envelope: EventEnvelope {
             seq,
             recorded_at: event.recorded_at,
-            team_id: event.team_id.clone(),
-            project_id: event.project_id.clone(),
-            task_id: event.task_id.clone(),
-            agent_id: event.agent_id.clone(),
-            session_id: event.session_id.clone(),
+            ids: event.ids.clone(),
         },
         body: event.body.clone(),
     })
@@ -580,14 +581,14 @@ mod tests {
         // `new_event`. The log is the source of truth and cannot be corrected afterwards.
         let log = a_log();
         let mut blank = an_event(EventKind::TeamUpdated);
-        blank.team_id = "  ".to_string();
+        blank.ids.team_id = "  ".to_string();
         let refusal = log.append(&blank).expect_err("a blank team id is refused");
         assert!(
             matches!(&refusal, StoreError::InvalidEvent { detail } if detail.contains("team_id")),
             "{refusal:?}"
         );
         let mut unnamed = an_event(EventKind::ContractWritten);
-        unnamed.task_id = None;
+        unnamed.ids.task_id = None;
         assert!(matches!(
             log.append(&unnamed),
             Err(StoreError::InvalidEvent { .. })
@@ -680,7 +681,7 @@ mod tests {
     fn reads_the_events_one_agent_produced() {
         let log = a_log();
         let mut by_maya = an_event(EventKind::TeamUpdated);
-        by_maya.agent_id = Some("maya-chen".to_string());
+        by_maya.ids.agent_id = Some("maya-chen".to_string());
         log.append(&by_maya).expect("appends");
         log.append(&an_event(EventKind::TaskCreated))
             .expect("appends");
@@ -706,11 +707,11 @@ mod tests {
         // its caller it stored.
         let log = a_log();
         let mut padded = an_event(EventKind::TeamUpdated);
-        padded.team_id = " farik ".to_string();
-        padded.agent_id = Some(" maya-chen ".to_string());
+        padded.ids.team_id = " farik ".to_string();
+        padded.ids.agent_id = Some(" maya-chen ".to_string());
         let appended = log.append(&padded).expect("appends");
-        assert_eq!(appended.envelope.team_id, "farik");
-        assert_eq!(appended.envelope.agent_id.as_deref(), Some("maya-chen"));
+        assert_eq!(appended.envelope.ids.team_id, "farik");
+        assert_eq!(appended.envelope.ids.agent_id.as_deref(), Some("maya-chen"));
         let by_agent = EventQuery {
             agent_id: Some("maya-chen".to_string()),
             ..EventQuery::default()

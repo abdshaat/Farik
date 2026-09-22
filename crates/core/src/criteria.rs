@@ -24,12 +24,12 @@ use crate::generated::task_contract::{
 /// Wire fixtures for tests, in this crate and in others.
 pub mod fixtures;
 
-const SCHEMA_JSON: &str = include_str!("generated/criteria.schema.json");
+const SCHEMA_JSON: &str = include_str!("../../../docs/schemas/criteria.schema.json");
 
 static VALIDATOR: LazyLock<Validator> = LazyLock::new(|| {
     let schema: Value = serde_json::from_str(SCHEMA_JSON).expect(
-        "the embedded criteria schema is valid JSON: it is a copy of docs/schemas/ written by \
-         cargo xtask generate and checked for freshness by cargo xtask check",
+        "the embedded criteria schema is valid JSON: it is the file in docs/schemas/ \
+         that typify generated this crate's types from at compile time",
     );
     jsonschema::options()
         .should_validate_formats(true)
@@ -566,9 +566,10 @@ mod tests {
         // `criteria.schema.json` carries a copy of the contract schema's `verification`, and
         // `verification_of` is the mapping between the two Rust types that copy produces. If the
         // two ever drift, that mapping quietly starts lying, so the copy is checked here.
-        let contract: Value =
-            serde_json::from_str(include_str!("generated/task_contract.schema.json"))
-                .expect("the embedded contract schema is valid JSON");
+        let contract: Value = serde_json::from_str(include_str!(
+            "../../../docs/schemas/task-contract.schema.json"
+        ))
+        .expect("the embedded contract schema is valid JSON");
         let library: Value =
             serde_json::from_str(SCHEMA_JSON).expect("the embedded criteria schema is valid JSON");
         let copy = &library["$defs"]["criterionTemplate"]["properties"]["verification"];

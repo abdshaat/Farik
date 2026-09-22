@@ -12,12 +12,12 @@ pub use crate::generated::prices::{FarikPriceTable as PriceTable, ModelPrice};
 /// The price table Farik ships.
 pub mod prices;
 
-const SCHEMA_JSON: &str = include_str!("generated/prices.schema.json");
+const SCHEMA_JSON: &str = include_str!("../../../docs/schemas/prices.schema.json");
 
 static VALIDATOR: LazyLock<Validator> = LazyLock::new(|| {
     let schema: Value = serde_json::from_str(SCHEMA_JSON).expect(
-        "the embedded price schema is valid JSON: it is a copy of docs/schemas/ written by \
-         cargo xtask generate and checked for freshness by cargo xtask check",
+        "the embedded price schema is valid JSON: it is the file in docs/schemas/ \
+         that typify generated this crate's types from at compile time",
     );
     jsonschema::options()
         .should_validate_formats(true)

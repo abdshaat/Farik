@@ -1909,9 +1909,10 @@ mod tests {
     fn gives_every_field_of_the_schema_to_exactly_one_owner() {
         // The gate's answer is the six sets, so a field in two of them, or in none, is a hole. The
         // schema is the list: it forbids properties it does not name.
-        let schema: serde_json::Value =
-            serde_json::from_str(include_str!("../generated/task_contract.schema.json"))
-                .expect("the generated schema copy");
+        let schema: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../../docs/schemas/task-contract.schema.json"
+        ))
+        .expect("the generated schema copy");
         let mut declared: Vec<&str> = schema["properties"]
             .as_object()
             .expect("an object of properties")
