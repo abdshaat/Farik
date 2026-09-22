@@ -20,6 +20,7 @@ RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
         | sh -s -- -y --no-modify-path --profile minimal --default-toolchain 1.98.1 --component rustfmt,clippy \
     && chmod -R a+rwX /usr/local/cargo /usr/local/rustup
 
-RUN npm install -g pnpm && chmod -R a+rwX /usr/local/lib/node_modules
+# pnpm pinned, like everything else the repository depends on (docs/standards/code.md).
+RUN npm install -g pnpm@10.34.5 && chmod -R a+rwX /usr/local/lib/node_modules
 
 WORKDIR /workspace
