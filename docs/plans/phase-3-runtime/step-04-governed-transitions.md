@@ -114,7 +114,7 @@ Tests:
 - `reads_the_blocked_time_from_the_last_move_into_blocked` — `blocked_at` equals that event's `recorded_at`.
 - `reads_children_from_the_board` — an epic with two child rows gives two `ChildState`s with their statuses.
 
-- [ ] `feat(runtime): build a transition's context from the store`
+- [x] `feat(runtime): build a transition's context from the store`
 
 ### Task 4: judging and recording a request
 

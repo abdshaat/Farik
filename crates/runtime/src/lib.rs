@@ -13,6 +13,8 @@ pub mod sandbox;
 pub mod session;
 /// The Claude Code program's `stream-json` lines, read as session events.
 pub mod stream;
+/// Transition requests, judged by the governor on the store's facts and recorded either way.
+pub mod transitions;
 
 pub use exec::{ExecError, ExecResult, Executor, OUTPUT_LIMIT_BYTES};
 pub use recorded::{RecordedAdapter, Transcript};
