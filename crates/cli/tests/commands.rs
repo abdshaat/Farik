@@ -969,11 +969,11 @@ fn refuses_to_take_a_contract_whose_task_is_finished() {
 fn a_project_with_a_contract_only_the_files_know(name: &str) -> TempRepo {
     let repository = a_project(name);
     let file = a_request_file(&repository, "request.yaml", "A board command");
-    let filed = run_in(
+    let created = run_in(
         &repository.path,
         &["task", "create", file.to_str().expect("a path")],
     );
-    assert_eq!(filed.code, 0, "{}", filed.err);
+    assert_eq!(created.code, 0, "{}", created.err);
     let files = files_of(&repository);
     let mut contract = files
         .read_contract(&TaskId::try_from("FRK-1").expect("a task id"))
