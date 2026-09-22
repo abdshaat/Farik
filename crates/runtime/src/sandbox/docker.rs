@@ -111,7 +111,7 @@ impl Executor for DockerSandbox {
             .args(["sh", "-c", command]);
         let finished = supervise(
             &mut client,
-            timeout + CLIENT_GRACE,
+            timeout.saturating_add(CLIENT_GRACE),
             |child| {
                 let _ = child.kill();
             },
@@ -176,7 +176,10 @@ fn container_name(project_id: &str, task_id: &TaskId) -> String {
 
 /// The timeout in whole seconds for `timeout(1)`, rounded up, and at least one.
 fn whole_seconds(timeout: Duration) -> u64 {
-    (timeout.as_secs() + u64::from(timeout.subsec_nanos() > 0)).max(1)
+    timeout
+        .as_secs()
+        .saturating_add(u64::from(timeout.subsec_nanos() > 0))
+        .max(1)
 }
 
 /// Whether docker itself, rather than the command, said the container is gone. Only docker's own
@@ -222,8 +225,20 @@ mod tests {
 
     use farik_core::contract::TaskId;
 
-    use super::{container_name, is_container_gone, whole_seconds};
-    use crate::exec::Finished;
+    use std::collections::BTreeMap;
+
+    use super::{DockerSandbox, container_name, is_container_gone, whole_seconds};
+    use crate::exec::{Executor, Finished};
+
+    #[test]
+    fn takes_the_longest_timeout_without_overflowing() {
+        assert_eq!(whole_seconds(Duration::MAX), u64::MAX);
+        let sandbox = DockerSandbox {
+            name: format!("farik-no-such-container-{}", std::process::id()),
+        };
+        // Whatever docker answers here (it may not even be installed), `run` must not panic.
+        let _ = sandbox.run("true", "", Duration::MAX, &BTreeMap::new());
+    }
 
     fn with_stderr(stderr: &str) -> Finished {
         Finished {
