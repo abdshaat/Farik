@@ -132,7 +132,7 @@ Tests:
 - `escalates_on_the_third_readiness_failure` — after two failed evaluations since refining, a third failing `refining → ready` then `refining → escalated` by the governor: `Moved`, `escalation.raised { reason: readiness_failures }` follows the `task.transitioned`, and the board says `escalated`.
 - `increments_the_iteration_when_a_rejected_task_returns` — `rejected → in_progress` by the governor on a task at iteration 1: the event and file say iteration 2.
 
-- [ ] `feat(runtime): judge transition requests and record the answer`
+- [x] `feat(runtime): judge transition requests and record the answer`
 
 ## Verification
 
