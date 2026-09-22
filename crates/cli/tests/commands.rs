@@ -203,6 +203,37 @@ fn makes_a_project_out_of_a_repository() {
 
 #[test]
 #[ignore = "needs the git program: cargo xtask check --integration"]
+fn keeps_the_team_id_the_first_init_gave_after_the_team_is_renamed() {
+    // The ids are fixed by the log's first event, so renaming the team does not split one
+    // project's log in two (section 3).
+    let repository = a_project("cli-ids-fixed");
+    let mut team = files_of(&repository).read_team().expect("a team");
+    team.name = "Renamed".parse().expect("a team name");
+    files_of(&repository)
+        .write_team(&team)
+        .expect("the team is written");
+
+    let file = a_request_file(&repository, "request.yaml", "A board command");
+    let ran = run_in(
+        &repository.path,
+        &["task", "create", file.to_str().expect("a path")],
+    );
+    assert_eq!(ran.code, 0, "{}", ran.err);
+
+    let log = farik_store::open_event_log(&repository.path.join(".farik/local/farik.db"), at())
+        .expect("the log opens");
+    let events = log
+        .read(&farik_store::EventQuery::default())
+        .expect("the log reads");
+    let first = &events.first().expect("init recorded events").envelope.ids;
+    let last = &events.last().expect("and the create one").envelope.ids;
+    assert_ne!(first.team_id, "renamed", "the first id is the old name's");
+    assert_eq!(last.team_id, first.team_id);
+    assert_eq!(last.project_id, first.project_id);
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
 fn a_second_init_rescans_and_keeps_the_team() {
     let repository = a_project("cli-init-again");
     let mut team = files_of(&repository).read_team().expect("a team");
