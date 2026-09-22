@@ -930,6 +930,24 @@ mod tests {
     }
 
     #[test]
+    fn refuses_a_cost_with_a_property_it_does_not_know() {
+        let mut input = an_event_wire(EventKind::CostRecorded);
+        input["body"]["discount_usd"] = json!(1.0);
+        let errors = refusal(&input);
+        assert_eq!(errors.len(), 1);
+        assert_eq!(errors[0].path, "/body");
+    }
+
+    #[test]
+    fn refuses_a_token_count_past_what_json_holds_exactly() {
+        let mut input = an_event_wire(EventKind::CostRecorded);
+        input["body"]["usage"]["input_tokens"] = json!(9_007_199_254_740_992_u64);
+        let errors = refusal(&input);
+        assert_eq!(errors.len(), 1);
+        assert_eq!(errors[0].path, "/body/usage/input_tokens");
+    }
+
+    #[test]
     fn refuses_a_cost_for_an_unknown_purpose() {
         let mut input = an_event_wire(EventKind::CostRecorded);
         input["body"]["purpose"] = json!("lunch");
