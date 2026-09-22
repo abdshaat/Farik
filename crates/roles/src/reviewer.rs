@@ -228,6 +228,28 @@ mod tests {
         );
     }
 
+    /// Phase 4 decides who reviews the Product Manager's and the Scrum Master's own tasks; until
+    /// then no team, however fully staffed, gets an answer for them.
+    #[test]
+    fn has_no_reviewer_for_the_product_manager_or_the_scrum_master() {
+        // Seven, the team's limit: two of each role the mutated rows could prefer for itself.
+        let everyone = a_team(&[
+            ("pm-b", "product_manager", "active"),
+            ("sm-a", "scrum_master", "active"),
+            ("sm-b", "scrum_master", "active"),
+            ("arch", "architect", "active"),
+            ("dev", "software_developer", "active"),
+            ("mark", "marketing_specialist", "active"),
+        ]);
+        for assignee in [Role::ProductManager, Role::ScrumMaster] {
+            assert_eq!(
+                default_reviewer_role(&everyone, TaskKind::Task, assignee),
+                None,
+                "{assignee}"
+            );
+        }
+    }
+
     #[test]
     fn leaves_an_epics_reviewer_to_the_assignment_gate() {
         for assignee in [

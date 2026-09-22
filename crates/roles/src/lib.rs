@@ -267,6 +267,9 @@ mod tests {
     const PM_SYSTEM: &str = include_str!("../roles/product_manager/system.md");
     const PM_SKILL: &str =
         include_str!("../roles/product_manager/skills/writing-task-contracts/SKILL.md");
+    const SD_YAML: &str = include_str!("../roles/software_developer/role.yaml");
+    const SD_SKILL: &str =
+        include_str!("../roles/software_developer/skills/implementing-a-contract/SKILL.md");
 
     fn loaded(role: Role) -> RoleDefinition {
         load_role(role).expect("a shipped role loads")
@@ -392,6 +395,15 @@ mod tests {
         }
     }
 
+    fn pm_with_skill(skill: &str) -> Result<RoleDefinition, RoleError> {
+        parse_role(
+            Role::ProductManager,
+            PM_YAML,
+            PM_SYSTEM,
+            &[("writing-task-contracts", skill)],
+        )
+    }
+
     #[test]
     fn refuses_a_role_file_that_breaks_the_schema() {
         let yaml = format!("{PM_YAML}\nmascot: a penguin\n");
@@ -402,20 +414,70 @@ mod tests {
             &[("writing-task-contracts", PM_SKILL)],
         ));
         assert!(detail.contains("mascot"), "{detail}");
+        assert!(detail.contains("role.schema.json"), "{detail}");
+    }
+
+    #[test]
+    fn refuses_a_role_file_that_is_another_roles() {
+        let detail = invalid_detail(parse_role(
+            Role::ProductManager,
+            SD_YAML,
+            PM_SYSTEM,
+            &[("implementing-a-contract", SD_SKILL)],
+        ));
+        assert!(
+            detail.contains("role.yaml says it is software_developer"),
+            "{detail}"
+        );
+    }
+
+    #[test]
+    fn refuses_a_named_skill_with_no_skill_file() {
+        let detail = invalid_detail(parse_role(Role::ProductManager, PM_YAML, PM_SYSTEM, &[]));
+        assert!(
+            detail.contains("names the skill writing-task-contracts, which has no SKILL.md"),
+            "{detail}"
+        );
     }
 
     #[test]
     fn refuses_a_skill_without_frontmatter() {
-        let detail = invalid_detail(parse_role(
-            Role::ProductManager,
-            PM_YAML,
-            PM_SYSTEM,
-            &[(
-                "writing-task-contracts",
-                "# Writing task contracts\n\nNo frontmatter.\n",
-            )],
+        let detail = invalid_detail(pm_with_skill(
+            "# Writing task contracts\n---\nNo opening line.\n",
         ));
-        assert!(detail.contains("writing-task-contracts"), "{detail}");
+        assert!(
+            detail.contains("skills/writing-task-contracts/SKILL.md does not open with a --- line"),
+            "{detail}"
+        );
+    }
+
+    #[test]
+    fn refuses_a_frontmatter_that_is_never_closed() {
+        let detail = invalid_detail(pm_with_skill(
+            "---\nname: writing-task-contracts\ndescription: Contracts.\n",
+        ));
+        assert!(detail.contains("no --- line closing"), "{detail}");
+    }
+
+    #[test]
+    fn refuses_a_frontmatter_key_the_format_does_not_have() {
+        let detail = invalid_detail(pm_with_skill(
+            "---\nname: writing-task-contracts\ndescription: Contracts.\nlicense: MIT\n---\nBody.\n",
+        ));
+        assert!(detail.contains("not a skill's"), "{detail}");
+        assert!(detail.contains("license"), "{detail}");
+    }
+
+    #[test]
+    fn refuses_a_skill_named_other_than_its_directory() {
+        let detail = invalid_detail(pm_with_skill(
+            "---\nname: writing-contracts\ndescription: Contracts.\n---\nBody.\n",
+        ));
+        assert!(
+            detail
+                .contains("calls itself writing-contracts, and a skill's name is its directory's"),
+            "{detail}"
+        );
     }
 
     /// ADR 0007: YAML 1.1's `no` is a word, not `false`, here as in `farik-store`. The role file
