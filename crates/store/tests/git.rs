@@ -5,7 +5,7 @@
 //! still builds them, so `cargo fmt` and `clippy` hold them to the same standard as everything else
 //! and they cannot rot unnoticed (`docs/standards/code.md`, "Rust integration test").
 
-use farik_store::git::fixtures::{TempRepo, git_in};
+use farik_store::git::fixtures::{TempRepo, git_in, git_output_in};
 use farik_store::{Git, GitError, MergeOutcome};
 
 #[test]
@@ -517,4 +517,62 @@ fn names_what_conflicted_and_leaves_the_tree_as_it_was() {
         "main's line",
         "the integration branch's own work is untouched"
     );
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn commits_the_named_paths_and_returns_the_sha() {
+    let repository = TempRepo::new("commit-paths");
+    repository.write("named.txt", "the one to commit\n");
+    repository.write("other.txt", "the one to leave\n");
+    let git = repository.adapter();
+    assert!(
+        git.status(&repository.path)
+            .expect("the status reads")
+            .contains("named.txt"),
+        "the status shows what is changed"
+    );
+
+    let sha = git
+        .commit(
+            &repository.path,
+            "add the named file",
+            &["named.txt".to_string()],
+        )
+        .expect("the commit is made");
+
+    assert_eq!(sha, repository.git_output(&["rev-parse", "HEAD"]));
+    assert_eq!(
+        repository.git_output(&["show", "--name-only", "--format=", "HEAD"]),
+        "named.txt",
+        "only the named path is in the commit"
+    );
+    assert_eq!(
+        git.status(&repository.path).expect("the status reads"),
+        "?? other.txt",
+        "and the other is left as it was"
+    );
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn pushes_a_branch_to_a_remote() {
+    let repository = TempRepo::new("push");
+    let origin = repository.path.with_extension("origin.git");
+    let _ = std::fs::remove_dir_all(&origin);
+    std::fs::create_dir_all(&origin).expect("a directory for the remote");
+    git_in(&origin, &["init", "--bare", "-b", "main"]);
+    repository.git(&["remote", "add", "origin", origin.to_str().expect("a path")]);
+    repository.git(&["branch", "farik/FRK-1"]);
+
+    repository
+        .adapter()
+        .push("origin", "farik/FRK-1")
+        .expect("the branch is pushed");
+
+    assert_eq!(
+        git_output_in(&origin, &["rev-parse", "farik/FRK-1"]),
+        repository.git_output(&["rev-parse", "HEAD"])
+    );
+    let _ = std::fs::remove_dir_all(&origin);
 }

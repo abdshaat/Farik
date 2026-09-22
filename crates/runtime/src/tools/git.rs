@@ -1,11 +1,18 @@
-//! The git tools, on the task's worktree (ADR 0004).
-#![expect(
-    dead_code,
-    reason = "the handlers arrive with the later tasks of phase 3 step 05"
-)]
+//! The git tools, on the task's worktree (ADR 0004): four tools rather than one, so that each
+//! carries one tier and is checked as its own tool.
 
+use std::path::PathBuf;
+
+use farik_core::contract::TaskId;
 use schemars::JsonSchema;
 use serde::Deserialize;
+use serde_json::{Value, json};
+
+use super::{Call, ToolError, failed};
+use crate::transitions::integration_branch;
+
+/// The remote a task branch is pushed to.
+const REMOTE: &str = "origin";
 
 /// `farik_git_commit`'s input.
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -15,4 +22,139 @@ pub(crate) struct CommitInput {
     message: String,
     /// The paths to commit, relative to the worktree.
     paths: Vec<String>,
+}
+
+/// `farik_git_status`: what is uncommitted in the task's worktree, and whether nothing is.
+pub(super) fn status(call: &Call<'_>) -> Result<Value, ToolError> {
+    let status = call
+        .deps()
+        .git
+        .status(&worktree(call, call.task()?))
+        .map_err(failed)?;
+    Ok(json!({ "clean": status.is_empty(), "status": status }))
+}
+
+/// `farik_git_diff`: what the task branch changed since the integration branch, as a patch.
+pub(super) fn diff(call: &Call<'_>) -> Result<Value, ToolError> {
+    let task = call.task()?;
+    let git = &call.deps().git;
+    let base = integration_branch(&call.team, git).map_err(failed)?;
+    let diff = git.diff(&base, &branch(task)).map_err(failed)?;
+    Ok(json!({ "diff": diff }))
+}
+
+/// `farik_git_commit`: commits the named paths of the task's worktree on the task branch.
+pub(super) fn commit(call: &Call<'_>, input: &CommitInput) -> Result<Value, ToolError> {
+    let sha = call
+        .deps()
+        .git
+        .commit(&worktree(call, call.task()?), &input.message, &input.paths)
+        .map_err(failed)?;
+    Ok(json!({ "sha": sha }))
+}
+
+/// `farik_git_push`: pushes the task branch to `origin`.
+pub(super) fn push(call: &Call<'_>) -> Result<Value, ToolError> {
+    let branch = branch(call.task()?);
+    call.deps().git.push(REMOTE, &branch).map_err(failed)?;
+    Ok(json!({ "remote": REMOTE, "branch": branch }))
+}
+
+/// The task's worktree, `.farik/local/worktrees/<id>` (5.14).
+fn worktree(call: &Call<'_>, task: &TaskId) -> PathBuf {
+    call.deps()
+        .files
+        .root()
+        .join(".farik/local/worktrees")
+        .join(task.as_str())
+}
+
+/// The task's branch, `farik/<id>`.
+fn branch(task: &TaskId) -> String {
+    format!("farik/{}", task.as_str())
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use crate::tools::ToolError;
+    use crate::tools::fixtures::{TestProject, a_team_of_three};
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn commits_through_the_tool_on_the_tasks_worktree() {
+        let project = TestProject::new("tools-git-commit", &a_team_of_three(|_| {}));
+        project.filed("FRK-1", "assigned", "task", None);
+        project.moved(
+            "FRK-1",
+            "assigned",
+            "in_progress",
+            &json!({ "assignee": "dev-a", "reviewer": "dev-b" }),
+        );
+        let worktree = project.repo.path.join(".farik/local/worktrees/FRK-1");
+        project
+            .deps
+            .git
+            .create_worktree(&worktree, "farik/FRK-1", "main")
+            .expect("the task's worktree is made");
+        std::fs::create_dir_all(worktree.join("src/login")).expect("a directory");
+        std::fs::write(worktree.join("src/login/form.ts"), "export {};\n").expect("a file");
+
+        let status = project
+            .call("dev-a", Some("FRK-1"), "farik_git_status", json!({}))
+            .expect("the status reads");
+        assert_eq!(status["clean"], false);
+        let committed = project
+            .call(
+                "dev-a",
+                Some("FRK-1"),
+                "farik_git_commit",
+                json!({ "message": "add the login form", "paths": ["src/login/form.ts"] }),
+            )
+            .expect("the assignee commits");
+        let head = farik_store::git::fixtures::git_output_in(&worktree, &["rev-parse", "HEAD"]);
+        assert_eq!(committed["sha"], head);
+
+        let status = project
+            .call("dev-a", Some("FRK-1"), "farik_git_status", json!({}))
+            .expect("the status reads");
+        assert_eq!(status["clean"], true, "{status}");
+        let diff = project
+            .call("dev-a", Some("FRK-1"), "farik_git_diff", json!({}))
+            .expect("the diff reads");
+        assert!(
+            diff["diff"]
+                .as_str()
+                .expect("a patch")
+                .contains("b/src/login/form.ts"),
+            "{diff}"
+        );
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn refuses_git_tools_without_a_task() {
+        // `git_remote` too, so that the push is refused for the task it lacks, not the tier.
+        let project = TestProject::new(
+            "tools-git-no-task",
+            &a_team_of_three(|wire| wire["agents"][1]["grants"] = json!(["git_remote"])),
+        );
+        for (name, input) in [
+            ("farik_git_status", json!({})),
+            ("farik_git_diff", json!({})),
+            (
+                "farik_git_commit",
+                json!({ "message": "m", "paths": ["a"] }),
+            ),
+            ("farik_git_push", json!({})),
+        ] {
+            match project.call("dev-a", None, name, input) {
+                Err(ToolError::Refused { reason }) => {
+                    assert!(reason.starts_with("no_task: "), "{name}: {reason}");
+                }
+                other => panic!("{name}: expected a refusal, got {other:?}"),
+            }
+        }
+    }
 }

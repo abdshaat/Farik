@@ -155,7 +155,7 @@ Files: `tools/git.rs`, `crates/store/src/git.rs`, `crates/store/tests/git.rs`
 - `commits_through_the_tool_on_the_tasks_worktree` — `farik_git_commit` in the worktree returns the sha; `farik_git_status` then reports clean.
 - `refuses_git_tools_without_a_task` — each is `Refused`.
 
-- [ ] `feat(runtime): add the git tools`
+- [x] `feat(runtime): add the git tools`
 
 ## Verification
 

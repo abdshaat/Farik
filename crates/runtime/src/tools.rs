@@ -299,6 +299,10 @@ pub async fn call_tool(
         "farik_ask_human" => work::ask_human(&call, parse(input)?),
         "farik_write_product_doc" => work::write_product_doc(&call, parse(input)?),
         "farik_exec" => exec::exec(&call, parse(input)?).await,
+        "farik_git_status" => nothing_in(input).and_then(|()| git::status(&call)),
+        "farik_git_diff" => nothing_in(input).and_then(|()| git::diff(&call)),
+        "farik_git_commit" => git::commit(&call, &parse(input)?),
+        "farik_git_push" => nothing_in(input).and_then(|()| git::push(&call)),
         _ => Err(ToolError::Failed {
             detail: format!("{name} is listed and has no handler"),
         }),

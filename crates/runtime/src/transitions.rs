@@ -484,10 +484,7 @@ impl Transitions {
         if !worktree.is_dir() {
             return Ok((WorkState::default(), Vec::new()));
         }
-        let base = match &team.policy.integration_branch {
-            Some(branch) => branch.to_string(),
-            None => self.git.default_branch()?,
-        };
+        let base = integration_branch(team, &self.git)?;
         let branch = format!("farik/{}", id.as_str());
         let work = WorkState {
             commits: self.git.commit_count(&base, &branch)?,
@@ -943,6 +940,19 @@ fn last_move_into(history: &[FarikEvent], status: TaskStatus) -> Option<&FarikEv
 /// pins, so `None` is a log no Farik wrote.
 fn wire_status(status: TaskStatusWire) -> Option<TaskStatus> {
     TaskStatus::from_str(&status.to_string()).ok()
+}
+
+/// The branch a task's work is measured against and merges into: the team's
+/// `policy.integration_branch`, or the repository's default branch when the team names none.
+///
+/// # Errors
+///
+/// What `Git::default_branch` refuses, asked only when the team names no branch.
+pub(crate) fn integration_branch(team: &Team, git: &Git) -> Result<String, GitError> {
+    match &team.policy.integration_branch {
+        Some(branch) => Ok(branch.to_string()),
+        None => git.default_branch(),
+    }
 }
 
 #[cfg(test)]

@@ -209,9 +209,51 @@ impl Git {
     /// `CommandFailed` when `path` is not a working tree of this repository, including when it is
     /// not there at all.
     pub fn is_clean(&self, path: &Path) -> Result<bool, GitError> {
+        Ok(self.status(path)?.is_empty())
+    }
+
+    /// What is uncommitted in the tree at `path`, as `git status --porcelain` prints it: one line
+    /// per path, and nothing at all when the tree is clean. Untracked files are listed whatever
+    /// the user configured, for the reason `is_clean` gives.
+    ///
+    /// # Errors
+    ///
+    /// `CommandFailed` when `path` is not a working tree of this repository, including when it is
+    /// not there at all.
+    pub fn status(&self, path: &Path) -> Result<String, GitError> {
         self.require_repository()?;
         self.require_worktree_of_this_repository(path)?;
-        Ok(run_git(path, &["status", "--porcelain", "--untracked-files=normal"])?.is_empty())
+        run_git(path, &["status", "--porcelain", "--untracked-files=normal"])
+    }
+
+    /// Commits `paths` of the tree at `path` with `message`, and answers the new commit's sha.
+    ///
+    /// Only the named paths are staged (`git add -- <paths>`), so what else a session left in its
+    /// worktree stays out of the commit; a new file is staged as readily as a changed one.
+    ///
+    /// # Errors
+    ///
+    /// `CommandFailed` when `path` is not a working tree of this repository, a path matches
+    /// nothing, or there is nothing to commit.
+    pub fn commit(&self, path: &Path, message: &str, paths: &[String]) -> Result<String, GitError> {
+        self.require_repository()?;
+        self.require_worktree_of_this_repository(path)?;
+        let mut add = vec!["add", "--"];
+        add.extend(paths.iter().map(String::as_str));
+        run_git(path, &add)?;
+        run_git(path, &["commit", "-m", message])?;
+        run_git(path, &["rev-parse", "HEAD"])
+    }
+
+    /// Pushes the local branch `branch` to `remote`, under the same name there.
+    ///
+    /// # Errors
+    ///
+    /// `CommandFailed` when the remote or the branch is unknown, or the remote refuses the push.
+    pub fn push(&self, remote: &str, branch: &str) -> Result<(), GitError> {
+        self.require_repository()?;
+        self.at_root(&["push", remote, branch])?;
+        Ok(())
     }
 
     /// How many commits `head` has that `base` does not.
