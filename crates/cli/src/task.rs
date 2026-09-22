@@ -91,22 +91,11 @@ pub fn create(
         ));
     }
 
-    // Past every contract the repository already holds as well as the counter: the log is
-    // machine-local and the contracts are committed (8.4), so on a fresh clone the counter alone
-    // would hand out FRK-1 again. `list_contracts` is in number order, so the last is the highest.
-    let taken = project
-        .files
-        .list_contracts()
-        .map_err(|error| error.to_string())?
-        .last()
-        .and_then(|id| id.as_str().trim_start_matches("FRK-").parse::<u64>().ok())
-        .unwrap_or(0);
-    let task_id = project
-        .log
-        .next_task_id_above(taken)
-        .map_err(|error| error.to_string())?;
+    // Held to the rules before an id is taken, so that a refused request does not use one up. The
+    // id is not the author's and a rule about it is not one the author can break, so the contract
+    // is checked under a stand-in and given its real id once it passes.
     let stamp = now.to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
-    object.insert("id".to_string(), json!(task_id.to_string()));
+    object.insert("id".to_string(), json!("FRK-0"));
     object.insert("status".to_string(), json!("draft"));
     object.insert("created_by".to_string(), json!(HUMAN));
     object.insert("created_at".to_string(), json!(stamp));
@@ -127,9 +116,24 @@ pub fn create(
                 .join("; ")
         )
     })?;
-    let Command::TaskCreate { contract } = command else {
+    let Command::TaskCreate { mut contract } = command else {
         return Err("the command line built a command the reader did not read back".to_string());
     };
+
+    // Past every contract the repository already holds as well as the counter: the log is
+    // machine-local and the contracts are committed (8.4), so on a fresh clone the counter alone
+    // would hand out FRK-1 again. `list_contracts` is in number order, so the last is the highest.
+    let taken = project
+        .files
+        .list_contracts()
+        .map_err(|error| error.to_string())?
+        .last()
+        .and_then(|id| id.as_str().trim_start_matches("FRK-").parse::<u64>().ok())
+        .unwrap_or(0);
+    contract.id = project
+        .log
+        .next_task_id_above(taken)
+        .map_err(|error| error.to_string())?;
 
     project
         .files

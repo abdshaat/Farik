@@ -558,6 +558,36 @@ fn refuses_a_request_the_contract_rules_refuse() {
 
 #[test]
 #[ignore = "needs the git program: cargo xtask check --integration"]
+fn a_refused_request_does_not_use_up_an_id() {
+    let repository = a_project("cli-create-refused-id");
+    let path = repository.path.join("broken.yaml");
+    std::fs::write(
+        &path,
+        a_request("A board command").replace("  - id: C1", "  - id: R1"),
+    )
+    .expect("the request is written");
+    let refused = run_in(
+        &repository.path,
+        &["task", "create", path.to_str().expect("a path")],
+    );
+    assert_eq!(refused.code, 1, "{}", refused.out);
+
+    let file = a_request_file(&repository, "request.yaml", "A board command");
+    let ran = run_in(
+        &repository.path,
+        &["task", "create", file.to_str().expect("a path")],
+    );
+
+    assert_eq!(ran.code, 0, "{}", ran.err);
+    assert!(
+        ran.out.contains("FRK-1 filed"),
+        "the next id is the next one, not one past a refusal: {}",
+        ran.out
+    );
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
 fn refuses_a_file_that_is_not_yaml() {
     let repository = a_project("cli-create-not-yaml");
     let path = repository.path.join("request.yaml");
