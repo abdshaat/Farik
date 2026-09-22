@@ -927,6 +927,24 @@ fn refuses_to_take_a_contract_that_is_already_yours() {
 
 #[test]
 #[ignore = "needs the git program: cargo xtask check --integration"]
+fn refuses_to_give_back_a_contract_that_is_already_the_teams() {
+    let repository = a_project("cli-unlock-twice");
+    let file = a_request_file(&repository, "request.yaml", "A board command");
+    run_in(
+        &repository.path,
+        &["task", "create", file.to_str().expect("a path")],
+    );
+    let before = kinds_in(&repository);
+
+    let ran = run_in(&repository.path, &["contract", "unlock", "FRK-1"]);
+
+    assert_eq!(ran.code, 1, "{}", ran.out);
+    assert!(ran.err.contains("already the team's"), "{}", ran.err);
+    assert_eq!(kinds_in(&repository), before, "and nothing was recorded");
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
 fn refuses_to_take_a_contract_whose_task_is_finished() {
     let repository = a_project("cli-lock-accepted");
     let file = a_request_file(&repository, "request.yaml", "A board command");
