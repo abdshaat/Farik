@@ -567,12 +567,52 @@ mod tests {
                 ..DEFAULT_SESSION_LIMITS
             }
         );
+        // The Scrum Master's own default stays where the team sets nothing.
+        let read = state(&projections, &team, Role::ScrumMaster, None);
+        assert_eq!(read.session_limits.max_input_tokens, 100_000);
+        assert_eq!(read.session_limits.max_output_tokens, 20_000);
+        let team = a_team(Some(json!({ "max_output_tokens": 9_000 })));
+        let read = state(&projections, &team, Role::SoftwareDeveloper, None);
+        assert_eq!(read.session_limits.max_output_tokens, 9_000);
         let team = a_team(Some(
             json!({ "max_wall_clock_seconds": 60, "max_tool_calls": 7 }),
         ));
         let read = state(&projections, &team, Role::SoftwareDeveloper, None);
         assert_eq!(read.session_limits.max_wall_clock, Duration::from_mins(1));
         assert_eq!(read.session_limits.max_tool_calls, 7);
+    }
+
+    #[test]
+    fn saturates_a_limit_past_what_a_count_of_sessions_or_tool_calls_holds() {
+        let (_log, projections) = a_board();
+        let past_u32 = u64::from(u32::MAX) + 1;
+        let team = a_team(Some(json!({ "max_tool_calls": past_u32 })));
+        let contract = a_contract("FRK-1", 5.0, past_u32);
+        let read = state(
+            &projections,
+            &team,
+            Role::SoftwareDeveloper,
+            Some(&contract),
+        );
+        assert_eq!(read.session_limits.max_tool_calls, u32::MAX);
+        assert_eq!(read.task_max_sessions, u32::MAX);
+    }
+
+    #[test]
+    fn counts_nothing_spent_today_when_the_only_costs_are_yesterdays() {
+        let (log, projections) = a_board();
+        let yesterday = FixedClock::new(at("2026-09-21T10:00:00Z"));
+        record_session_cost(
+            &log,
+            &projections,
+            &source(ids(None, "a")),
+            &usage(1_000_000, 0),
+            &prices(),
+            &yesterday,
+        )
+        .expect("recorded");
+        let read = state(&projections, &a_team(None), Role::SoftwareDeveloper, None);
+        assert!(close(read.day_spent_usd, 0.0), "{}", read.day_spent_usd);
     }
 
     #[test]
