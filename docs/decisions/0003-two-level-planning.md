@@ -13,8 +13,6 @@ The alternative is to keep single-level plans and rely on review to catch both p
 
 Planning is two-level. The project plan divides the project into phases and phases into steps. Each phase is one branch and one pull request; each step has its own plan and lands as commits on the phase branch. A plan is ready to execute only when every decision it rests on is written down, nothing in it is ambiguous, and it depends on nothing that is not already merged or already committed earlier on the same phase branch. These three rules are checked by a reviewer before the first task starts. Details in `docs/standards/workflow.md` stage 2 (Plan).
 
-Amended by ADR 0008 (2026-09-21): the two levels and the three rules stand, but a step plan states its decisions, its public signatures, its file map and its test list rather than the implementation itself, and the readiness review is one round rather than as many as the plan invites.
-
 ## Consequences
 
 Planning takes longer and happens earlier. Decisions that would otherwise be made in the moment are made up front, some of them before the information that would make them easy is available. When such a decision turns out wrong, the fix is an ADR and a change to the project plan, not a quiet workaround.

@@ -1,7 +1,7 @@
 # 0001. Adopt the superpowers workflow for all changes
 
 Date: 2026-09-14
-Status: accepted; stage 2 amended by ADR 0008 (2026-09-21)
+Status: accepted; stage 2 amended by ADR 0008 (2026-09-21); plan drafting and per-task review amended by ADR 0010 (2026-09-22)
 
 ## Context
 
@@ -18,7 +18,5 @@ Adopt the superpowers workflow as Farik's contribution workflow, documented in `
 Every change, including the initial scaffold, gets a written plan before code. Per-change overhead goes up, especially for small changes, and the first weeks will feel slow.
 
 The workflow depends on a third-party plugin's conventions. If the plugin changes its skills materially, `workflow.md` is the contract and the plugin is the implementation; the document wins, and this ADR is revisited.
-
-That clause fired on 2026-09-21, in the other direction: the plugin did not change, ADR 0008 changed what stage 2's plans contain, and the plugin's planning skill now over-produces against this repository's template. The document wins, as written. The rest of the sequence — brainstorm, TDD execution, verification with evidence, staged review, branch finishing — is untouched.
 
 The repository becomes a worked example of the discipline the product sells. Its plans, ADRs, and pull requests are usable as reference material for Farik's own Product Manager and Scrum Master roles.

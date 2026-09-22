@@ -27,10 +27,8 @@ ADRs added or changed, or "none".
 
 ## Checklist
 
-- [ ] Every task in every step plan of the phase is ticked and has a commit
+- [ ] Every task in every step plan of the phase is ticked by its commit, and its tests were watched to fail first
 - [ ] Each step was reviewed against its plan when it landed, with mutation as the bar, and the review is recorded in this thread
-- [ ] New behavior has tests that were watched to fail first
 - [ ] No files changed outside the plan's file map, or the plan was updated and the reason is above
-- [ ] `docs/SPEC.md` updated if behavior changed
-- [ ] Commit messages and branch follow `docs/standards/code.md`
-- [ ] I have not approved my own pull request
+- [ ] `docs/SPEC.md` and any other document describing changed behavior updated; an ADR for any decision a future contributor would want the reason for
+- [ ] Commit messages and branch follow `docs/standards/code.md` (the commit-msg hook is local; CI does not check them)
