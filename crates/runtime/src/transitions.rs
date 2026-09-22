@@ -890,11 +890,13 @@ fn wire_status(status: TaskStatusWire) -> Option<TaskStatus> {
 mod tests {
     use std::path::Path;
     use std::sync::Arc;
+    use std::time::Duration;
 
     use chrono::{DateTime, TimeZone, Utc};
+    use farik_core::budget::default_session_limits;
     use farik_core::contract::fixtures::a_contract_wire;
     use farik_core::contract::{Role, TaskStatus, validate_contract};
-    use farik_core::governor::gates::Blocker;
+    use farik_core::governor::gates::{Blocker, DependencyState};
     use farik_core::governor::transition::TransitionRefusal;
     use farik_core::governor::transition::TransitionRequest;
     use farik_core::governor::transition_table::GateId;
@@ -994,7 +996,7 @@ mod tests {
             body: &Value,
             recorded_at: DateTime<Utc>,
         ) -> FarikEvent {
-            let wire = json!({
+            self.append_wire(&json!({
                 "seq": 1,
                 "recorded_at": recorded_at.to_rfc3339(),
                 "team_id": "farik",
@@ -1002,8 +1004,36 @@ mod tests {
                 "task_id": task,
                 "kind": kind,
                 "body": body,
-            });
-            let event = event_from_value(&wire).expect("the fixture is schema-valid");
+            }))
+        }
+
+        /// A `cost.recorded` of `usd` dollars against `task`, today.
+        fn spent(&self, task: &str, usd: f64) {
+            self.append_wire(&json!({
+                "seq": 1,
+                "recorded_at": at(10).to_rfc3339(),
+                "team_id": "farik",
+                "project_id": "farik",
+                "task_id": task,
+                "agent_id": "dev-a",
+                "session_id": "s-1",
+                "kind": "cost.recorded",
+                "body": {
+                    "purpose": "implement",
+                    "model_id": "claude-sonnet-4-5",
+                    "usage": {
+                        "input_tokens": 1000,
+                        "output_tokens": 100,
+                        "cache_read_tokens": 0,
+                        "cache_write_tokens": 0
+                    },
+                    "cost_usd": usd
+                },
+            }));
+        }
+
+        fn append_wire(&self, wire: &Value) -> FarikEvent {
+            let event = event_from_value(wire).expect("the fixture is schema-valid");
             let appended = self
                 .log
                 .append(&NewEvent {
@@ -1192,6 +1222,36 @@ mod tests {
             &TransitionAsk::default(),
         );
         assert_eq!(context.readiness_failed_attempts, 1);
+
+        // A failed Definition of Done is not a readiness failure.
+        project.record(
+            "FRK-1",
+            "contract.evaluated",
+            &json!({ "gate": "definition_of_done", "passed": false, "failures": [] }),
+            at(10),
+        );
+        let request = a_request("FRK-1", TaskStatus::Ready, TransitionActor::Governor, None);
+        assert_eq!(
+            project
+                .context(&request, &TransitionAsk::default())
+                .readiness_failed_attempts,
+            1
+        );
+
+        // A re-triage starts refining over, as a move into refining does.
+        project.record(
+            "FRK-1",
+            "request.triaged",
+            &json!({ "size": "large", "reason": "Two deliverables.", "triaged_by": "maya" }),
+            at(11),
+        );
+        project.evaluated("FRK-1", false);
+        assert_eq!(
+            project
+                .context(&request, &TransitionAsk::default())
+                .readiness_failed_attempts,
+            1
+        );
     }
 
     #[test]
@@ -1292,6 +1352,18 @@ mod tests {
             vec!["src/login/form.rs".to_string()]
         );
 
+        std::fs::write(worktree.join("scratch.txt"), "not committed\n").expect("written");
+        let dirty = project.context(
+            &a_request(
+                "FRK-1",
+                TaskStatus::Verifying,
+                TransitionActor::Assignee,
+                Some("dev-a"),
+            ),
+            &TransitionAsk::default(),
+        );
+        assert!(!dirty.work.worktree_clean);
+
         let context = project.context(
             &a_request(
                 "FRK-2",
@@ -1357,6 +1429,195 @@ mod tests {
                 ("FRK-2".to_string(), TaskStatus::Accepted),
                 ("FRK-3".to_string(), TaskStatus::Ready),
             ]
+        );
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn reads_the_epics_remaining_budget_and_the_days_remainder() {
+        let project = Project::new("epic-budget", a_team(|_| {}), at(12));
+        project.file("FRK-1", |wire| {
+            wire["kind"] = json!("epic");
+            wire["budget"]["max_cost_usd"] = json!(12);
+            wire["allowed_paths"] = json!(["src/**", "docs/**"]);
+        });
+        project.created_under("FRK-1", "in_progress", "epic", None);
+        project.spent("FRK-1", 2.5);
+        for (task, status, max) in [
+            ("FRK-2", "refining", 1),
+            ("FRK-3", "ready", 3),
+            ("FRK-4", "cancelled", 4),
+        ] {
+            project.file(task, |wire| {
+                wire["parent"] = json!("FRK-1");
+                wire["budget"]["max_cost_usd"] = json!(max);
+            });
+            project.created_under(task, status, "task", Some("FRK-1"));
+        }
+        let request = a_request("FRK-2", TaskStatus::Ready, TransitionActor::Governor, None);
+        let context = project.context(&request, &TransitionAsk::default());
+        let parent = context.readiness.parent.expect("the epic");
+        // Twelve, less the epic's own 2.50, less the live sibling's 3; not the cancelled one's
+        // 4, nor the child's own 1.
+        assert!(
+            (parent.remaining_budget_usd - 6.5).abs() < 1e-9,
+            "{}",
+            parent.remaining_budget_usd
+        );
+        assert_eq!(parent.status, TaskStatus::InProgress);
+        assert_eq!(
+            parent.allowed_paths,
+            vec!["src/**".to_string(), "docs/**".to_string()]
+        );
+        assert!((context.readiness.remaining_sprint_budget_usd - 17.5).abs() < 1e-9);
+
+        // A day spent past its budget leaves nothing, not less than nothing.
+        let poor = a_team(|wire| wire["budgets"]["daily_usd"] = json!(1));
+        let context = project
+            .transitions
+            .context(&request, &TransitionAsk::default(), &poor)
+            .expect("the context reads");
+        assert!(context.readiness.remaining_sprint_budget_usd.abs() < 1e-12);
+        assert!(context.readiness.remaining_sprint_budget_usd >= 0.0);
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn reads_the_rest_of_the_context_from_the_store_and_the_team() {
+        let team = a_team(|wire| {
+            let agents = wire["agents"].as_array_mut().expect("a list of agents");
+            agents.push(an_agent_wire("sam", "scrum_master"));
+            let mut paused = an_agent_wire("dev-c", "software_developer");
+            paused["status"] = json!("paused");
+            agents.push(paused);
+        });
+        let project = Project::new("context-sources", team, at(12));
+        project.file("FRK-1", |wire| {
+            wire["assignee_role"] = json!("scrum_master");
+            wire["dependencies"] = json!(["FRK-2", "FRK-9"]);
+        });
+        project.created("FRK-1", "ready");
+        project.spent("FRK-1", 1.5);
+        project.created("FRK-2", "in_progress");
+        project.created("FRK-3", "ready");
+        project.moved(
+            "FRK-3",
+            "ready",
+            "assigned",
+            &json!({ "assignee": "dev-a", "reviewer": "dev-b" }),
+            at(10),
+        );
+        project.created("FRK-4", "ready");
+        project.moved(
+            "FRK-4",
+            "assigned",
+            "cancelled",
+            &json!({ "assignee": "dev-a", "reviewer": "dev-b" }),
+            at(10),
+        );
+        let request = a_request(
+            "FRK-1",
+            TaskStatus::Assigned,
+            TransitionActor::ScrumMaster,
+            Some("sam"),
+        );
+        let context = project.context(&request, &assigning("dev-a", "dev-b"));
+
+        assert!(!context.triaged);
+        assert_eq!(
+            context.readiness.dependency_statuses,
+            [("FRK-2".to_string(), TaskStatus::InProgress)]
+                .into_iter()
+                .collect()
+        );
+        assert_eq!(
+            context.readiness.active_agents_by_role,
+            [
+                (Role::ProductManager, 1),
+                (Role::ScrumMaster, 1),
+                (Role::SoftwareDeveloper, 2),
+            ]
+            .into_iter()
+            .collect()
+        );
+        assert!(context.readiness.requires_judgment_review);
+        assert!(!context.acceptance.given);
+        assert_eq!(context.blocked_limit, Duration::from_hours(24));
+        assert_eq!(
+            context.budget.session_limits,
+            default_session_limits(Role::ScrumMaster)
+        );
+        assert!((context.budget.task_max_usd - 5.0).abs() < 1e-9);
+        assert!((context.budget.task_spent_usd - 1.5).abs() < 1e-9);
+        let assignment = context.assignment.expect("an assignment");
+        assert!(assignment.has_active_scrum_master);
+        assert_eq!(assignment.assignee_open_tasks, 1);
+        assert_eq!(
+            assignment.dependencies,
+            vec![DependencyState {
+                task_id: "FRK-2".to_string(),
+                status: TaskStatus::InProgress,
+                integrated: false,
+            }]
+        );
+
+        project.record(
+            "FRK-1",
+            "request.triaged",
+            &json!({ "size": "small", "reason": "One deliverable.", "triaged_by": "maya" }),
+            at(11),
+        );
+        assert!(project.context(&request, &TransitionAsk::default()).triaged);
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn reads_the_integration_branch_from_the_policy_and_only_for_a_worktree() {
+        let project = Project::new("integration-branch", a_team(|_| {}), at(12));
+        for task in ["FRK-1", "FRK-2"] {
+            project.file(task, |_| {});
+            project.created(task, "in_progress");
+        }
+        let worktree = project.repo.path.join(".farik/local/worktrees/FRK-1");
+        project
+            .repo
+            .adapter()
+            .create_worktree(&worktree, "farik/FRK-1", "main")
+            .expect("the worktree is made");
+        std::fs::write(worktree.join("form.rs"), "fn form() {}\n").expect("written");
+        git_in(&worktree, &["add", "-A"]);
+        git_in(&worktree, &["commit", "-m", "the form"]);
+        git_in(&project.repo.path, &["branch", "develop", "farik/FRK-1"]);
+        // With no remote and a detached head, git can name no default branch.
+        git_in(&project.repo.path, &["checkout", "--detach"]);
+        let verifying = |task| {
+            a_request(
+                task,
+                TaskStatus::Verifying,
+                TransitionActor::Assignee,
+                Some("dev-a"),
+            )
+        };
+
+        let develop = a_team(|wire| wire["policy"]["integration_branch"] = json!("develop"));
+        let context = project
+            .transitions
+            .context(&verifying("FRK-1"), &TransitionAsk::default(), &develop)
+            .expect("the policy's branch needs no default");
+        assert_eq!(context.work.commits, 0);
+        assert!(context.done.changed_paths.is_empty());
+
+        // A task with no worktree asks git nothing, so the missing default is no error.
+        project.context(&verifying("FRK-2"), &TransitionAsk::default());
+        assert!(
+            project
+                .transitions
+                .context(
+                    &verifying("FRK-1"),
+                    &TransitionAsk::default(),
+                    &project.team
+                )
+                .is_err()
         );
     }
 
