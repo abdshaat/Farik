@@ -94,6 +94,34 @@ pub fn a_body_wire(kind: EventKind) -> Value {
             "cost_usd": 0.5
         }),
         EventKind::BudgetExhausted => json!({ "scope": "day_usd", "consequence": "pause_team" }),
+        EventKind::TaskTransitioned => json!({
+            "from": "ready",
+            "to": "assigned",
+            "actor": "product_manager",
+            "requested_by": "maya-chen",
+            "gate": "assignment",
+            "effects": [],
+            "assignee": "dev-a",
+            "reviewer": "dev-b",
+            "iteration": 0
+        }),
+        EventKind::TransitionRefused => json!({
+            "from": "ready",
+            "to": "assigned",
+            "actor": "product_manager",
+            "requested_by": "maya-chen",
+            "refusal": "gate_failed",
+            "details": ["the reviewer is the assignee"]
+        }),
+        EventKind::EscalationRaised => json!({
+            "reason": "blocker_age",
+            "detail": "blocked_age: no key"
+        }),
+        EventKind::ContractEvaluated => json!({
+            "gate": "definition_of_ready",
+            "passed": false,
+            "failures": ["the contract has no exit criteria"]
+        }),
     }
 }
 

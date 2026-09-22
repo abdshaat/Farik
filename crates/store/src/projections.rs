@@ -386,7 +386,7 @@ fn apply_to(transaction: &Transaction<'_>, event: &FarikEvent) -> Result<(), Sto
         write_cost(transaction, event, body, seq)?;
     }
     let Some(task_id) = &event.envelope.ids.task_id else {
-        // Only the five kinds that are about one contract touch the board, and the protocol crate
+        // Only the kinds that are about one contract touch the board, and the protocol crate
         // refuses one of those without a task id. The rest — a scan, a team, a criterion library,
         // a drift report — are about the project.
         return Ok(());
@@ -415,7 +415,11 @@ fn apply_to(transaction: &Transaction<'_>, event: &FarikEvent) -> Result<(), Sto
         | EventBody::TeamUpdated(_)
         | EventBody::CriteriaUpdated(_)
         | EventBody::CostRecorded(_)
-        | EventBody::BudgetExhausted(_) => Ok(()),
+        | EventBody::BudgetExhausted(_)
+        | EventBody::TaskTransitioned(_)
+        | EventBody::TransitionRefused(_)
+        | EventBody::EscalationRaised(_)
+        | EventBody::ContractEvaluated(_) => Ok(()),
     }
 }
 

@@ -86,7 +86,7 @@ Tests:
 - `refuses_an_escalation_for_an_unknown_reason` — `reason: "boredom"` is refused at `/body/reason`.
 - `refuses_a_contract_event_without_a_task` — `new_event` of each of the four with `task_id: None` is `Err(EventError::NoContractNamed { .. })`.
 
-- [ ] `feat(protocol): add the transition, refusal, escalation, and evaluation events`
+- [x] `feat(protocol): add the transition, refusal, escalation, and evaluation events`
 
 ### Task 2: the board follows transitions
 

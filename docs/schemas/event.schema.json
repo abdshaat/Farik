@@ -67,7 +67,11 @@
         "team.updated",
         "criteria.updated",
         "cost.recorded",
-        "budget.exhausted"
+        "budget.exhausted",
+        "task.transitioned",
+        "transition.refused",
+        "escalation.raised",
+        "contract.evaluated"
       ]
     },
     "eventBodyWire": {
@@ -84,7 +88,11 @@
         { "$ref": "#/$defs/teamUpdatedBody" },
         { "$ref": "#/$defs/criteriaUpdatedBody" },
         { "$ref": "#/$defs/costRecordedBody" },
-        { "$ref": "#/$defs/budgetExhaustedBody" }
+        { "$ref": "#/$defs/budgetExhaustedBody" },
+        { "$ref": "#/$defs/taskTransitionedBody" },
+        { "$ref": "#/$defs/transitionRefusedBody" },
+        { "$ref": "#/$defs/escalationRaisedBody" },
+        { "$ref": "#/$defs/contractEvaluatedBody" }
       ]
     },
     "contractSummary": {
@@ -234,6 +242,108 @@
       "properties": {
         "scope": { "type": "string", "enum": ["session_tokens", "session_wall_clock", "session_tool_calls", "task_usd", "task_sessions", "sprint_usd", "day_usd"] },
         "consequence": { "type": "string", "enum": ["end_session_and_block_task", "escalate_task", "stop_new_assignments", "pause_team"] }
+      }
+    },
+    "taskStatus": {
+      "title": "Task Status",
+      "description": "Where a contract is in the lifecycle of docs/SPEC.md section 5.2, the contract schema's own list.",
+      "type": "string",
+      "enum": ["draft", "refining", "ready", "assigned", "in_progress", "blocked", "verifying", "rejected", "accepted", "escalated", "cancelled"]
+    },
+    "transitionActor": {
+      "title": "Transition Actor",
+      "description": "Which of the lifecycle's actors asked for a move (docs/SPEC.md section 5.2).",
+      "type": "string",
+      "enum": ["product_manager", "scrum_master", "assignee", "reviewer", "governor", "human"]
+    },
+    "gateId": {
+      "title": "Gate Id",
+      "description": "The gate of the row a move took (docs/SPEC.md section 5.2); none for a row with no gate.",
+      "type": "string",
+      "enum": ["none", "triaged", "definition_of_ready", "readiness_exhausted", "contract_requires_human", "assignment", "criteria_recorded", "blocker_written", "blocker_resolved", "blocked_age", "definition_of_done", "rejection_reasons", "iteration_below_limit", "iteration_limit_reached", "governor_escalation"]
+    },
+    "blockerWire": {
+      "title": "Blocker Wire",
+      "description": "What the assignee wrote when it blocked a task: what is in the way and what is needed.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["description", "needed"],
+      "properties": {
+        "description": { "type": "string" },
+        "needed": { "type": "string" }
+      }
+    },
+    "rejectionWire": {
+      "title": "Rejection Wire",
+      "description": "What the reviewer wrote when it rejected the work: the criteria that failed and why.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["failed_criterion_ids", "reasons"],
+      "properties": {
+        "failed_criterion_ids": { "type": "array", "items": { "type": "string" } },
+        "reasons": { "type": "string" }
+      }
+    },
+    "taskTransitionedBody": {
+      "title": "Task Transitioned Body",
+      "description": "The governor moved a contract (docs/SPEC.md section 5.2). requested_by is the agent id that asked, or human, or governor; effects are what the decision recorded with the move; assignee, reviewer, and iteration are the contract's after it; blocker, blocker_resolution, and rejection are the evidence the move was judged on, when the requester brought any.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["from", "to", "actor", "requested_by", "gate", "effects", "iteration"],
+      "properties": {
+        "from": { "$ref": "#/$defs/taskStatus" },
+        "to": { "$ref": "#/$defs/taskStatus" },
+        "actor": { "$ref": "#/$defs/transitionActor" },
+        "requested_by": { "type": "string" },
+        "gate": { "$ref": "#/$defs/gateId" },
+        "effects": {
+          "type": "array",
+          "items": { "type": "string", "enum": ["increment_iteration", "raise_escalation", "reset_blocker", "stamp_blocked_at"] }
+        },
+        "assignee": { "type": "string" },
+        "reviewer": { "type": "string" },
+        "iteration": { "type": "integer", "minimum": 0, "maximum": 4294967295 },
+        "blocker": { "$ref": "#/$defs/blockerWire" },
+        "blocker_resolution": { "type": "string" },
+        "rejection": { "$ref": "#/$defs/rejectionWire" }
+      }
+    },
+    "transitionRefusedBody": {
+      "title": "Transition Refused Body",
+      "description": "The governor refused to move a contract (docs/SPEC.md section 5.2), with every reason it gave. Nothing else changed.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["from", "to", "actor", "requested_by", "refusal", "details"],
+      "properties": {
+        "from": { "$ref": "#/$defs/taskStatus" },
+        "to": { "$ref": "#/$defs/taskStatus" },
+        "actor": { "$ref": "#/$defs/transitionActor" },
+        "requested_by": { "type": "string" },
+        "refusal": { "type": "string", "enum": ["wrong_task", "no_such_transition", "actor_not_allowed", "not_the_named_agent", "gate_failed"] },
+        "details": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "escalationRaisedBody": {
+      "title": "Escalation Raised Body",
+      "description": "A move sent a contract to the human (docs/SPEC.md section 5.7). detail names the gate that opened the move and, when there are any, the words it was about.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["reason", "detail"],
+      "properties": {
+        "reason": { "type": "string", "enum": ["budget", "sessions", "iterations", "blocker_age", "permission", "risk_gate", "approval", "readiness_failures", "integration", "explicit_request"] },
+        "detail": { "type": "string" }
+      }
+    },
+    "contractEvaluatedBody": {
+      "title": "Contract Evaluated Body",
+      "description": "A contract was held to the Definition of Ready (docs/SPEC.md section 5.3) or of Done (5.4), and whether it passed, with every failure. Recorded before the move or refusal it explains.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["gate", "passed", "failures"],
+      "properties": {
+        "gate": { "type": "string", "enum": ["definition_of_ready", "definition_of_done"] },
+        "passed": { "type": "boolean" },
+        "failures": { "type": "array", "items": { "type": "string" } }
       }
     }
   }
