@@ -1,6 +1,5 @@
-//! A contract's exit criteria, run rather than described (`docs/SPEC.md` 5.4 and 5.13): a command
-//! judged by its exit code and output, a test command, a file's presence and content. A `review`
-//! or `human` criterion is handed back as what somebody has to answer.
+//! A contract's exit criteria, run and judged (`docs/SPEC.md` 5.4, 5.13): commands, tests, and
+//! artifacts through an executor, and the questions a reviewer or the human has to answer.
 
 use std::collections::BTreeMap;
 use std::fmt;
@@ -12,22 +11,22 @@ use farik_core::governor::done::{CriterionResult, RunBy};
 use farik_core::governor::paths::normalise;
 use farik_store::{Git, GitError};
 
-use crate::exec::{ExecError, ExecResult, Executor, OUTPUT_LIMIT_BYTES};
+use crate::exec::{ExecError, ExecResult, Executor};
 use crate::sandbox::{SandboxError, SandboxFactory};
 
-/// How long one criterion may run, so that a test suite that hangs is a failed criterion rather
-/// than a stuck verify session.
+/// How long one criterion may run, so that a suite that hangs is a failed criterion rather than
+/// a stuck verify session.
 pub const CRITERION_TIMEOUT: Duration = Duration::from_mins(15);
 
-/// How much of each stream the evidence keeps: the end, where a test runner prints its summary.
+/// How much of the end of each stream the evidence keeps: a test runner's summary is at the end.
 const TAIL_BYTES: usize = 2000;
 
-/// What came of a criterion: a result, or the question somebody has to answer instead.
+/// What came of one criterion: a result, or the question someone has to answer instead (5.4).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CriterionOutcome {
-    /// It ran, and this is what came of it.
+    /// It ran, and this is its verdict and evidence.
     Result(CriterionResult),
-    /// A `review` criterion: the reviewer answers each question with a cited reason.
+    /// A `review` criterion: a reviewer answers each question with a cited reason.
     NeedsReview {
         /// The questions.
         rubric: Vec<String>,
@@ -39,16 +38,16 @@ pub enum CriterionOutcome {
     },
 }
 
-/// Why a criterion could not be run at all. A criterion that fails is a result, not this.
+/// Why a criterion could not be run at all. A criterion that runs and fails is a result.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CriterionError {
-    /// The command could not be run.
+    /// The executor did not run the command.
     Exec(ExecError),
-    /// Git refused something the base-branch check needed.
+    /// Git refused, in the new-tests check.
     Git(GitError),
-    /// The base-branch check's sandbox could not be made or discarded.
+    /// The base run's sandbox could not be made or discarded.
     Sandbox(SandboxError),
-    /// A test file could not be written into the base worktree, or a leftover one removed.
+    /// A head test file could not be written into the base worktree, or the worktree removed.
     Io {
         /// The file or directory.
         path: String,
@@ -61,17 +60,16 @@ impl fmt::Display for CriterionError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Exec(error) => write!(formatter, "the criterion could not be run: {error}"),
-            Self::Git(error) => write!(
-                formatter,
-                "the base-branch check could not be made: {error}"
-            ),
+            Self::Git(error) => {
+                write!(formatter, "the new-tests check could not read git: {error}")
+            }
             Self::Sandbox(error) => {
-                write!(formatter, "the base-branch check had no sandbox: {error}")
+                write!(formatter, "the base-branch run has no sandbox: {error}")
             }
             Self::Io { path, detail } => {
                 write!(
                     formatter,
-                    "the base-branch check could not write {path}: {detail}"
+                    "{path} could not be written on the base branch: {detail}"
                 )
             }
         }
@@ -98,127 +96,57 @@ impl From<SandboxError> for CriterionError {
     }
 }
 
-/// Runs one criterion in the executor's workspace root, stopping any command at `timeout`, and
-/// stamps the result with `run_by`. A `review` or `human` criterion runs nothing.
+/// What the new-tests check found in a task's diff.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NewTestsCheck {
+    /// Whether the diff adds or modifies a test file.
+    pub adds_tests: bool,
+    /// Whether the test command, with those files, fails on the base branch.
+    pub fails_on_base: bool,
+    /// The test files the diff adds or modifies, in git's order.
+    pub test_files: Vec<String>,
+}
+
+/// Where a task's diff is, and how to run its tests against the base branch.
+pub struct NewTestsInput<'a> {
+    /// The project's repository.
+    pub git: &'a Git,
+    /// The branch the task's branch is judged against.
+    pub base: &'a str,
+    /// The task's branch.
+    pub head: &'a str,
+    /// Where the base run's sandbox comes from.
+    pub sandboxes: &'a dyn SandboxFactory,
+    /// The project, for naming the base sandbox.
+    pub project_id: &'a str,
+    /// The task, for naming the base worktree and sandbox.
+    pub task_id: &'a TaskId,
+}
+
+/// Runs `criterion` in `executor`'s workspace root with `timeout`, and stamps `run_by` on the
+/// result. `review` and `human` criteria run nothing and come back as their questions. A `test`
+/// criterion that requires new tests fails here, since the diff is not known: `run_criteria` is
+/// what runs the base-branch check.
 ///
 /// # Errors
 ///
-/// `Exec` when the command could not be run at all.
+/// `Exec` when the executor does not run the command.
 pub fn run_criterion(
     criterion: &ExitCriterion,
     executor: &dyn Executor,
     run_by: RunBy,
     timeout: Duration,
 ) -> Result<CriterionOutcome, CriterionError> {
-    run_one(criterion, executor, run_by, timeout, None)
+    judge(criterion, executor, run_by, timeout, None)
 }
 
-/// `run_criterion`, with the diff a `test` criterion's new-tests check needs when there is one.
-fn run_one(
-    criterion: &ExitCriterion,
-    executor: &dyn Executor,
-    run_by: RunBy,
-    timeout: Duration,
-    new_tests: Option<&NewTestsInput<'_>>,
-) -> Result<CriterionOutcome, CriterionError> {
-    let (passed, evidence) = match Verification::from(&criterion.verification) {
-        Verification::Command {
-            command,
-            exit_code,
-            stdout_contains,
-            stdout_not_contains,
-        } => {
-            let result = executor.run(&command, "", timeout, &BTreeMap::new())?;
-            let mut evidence = Evidence::ran(&command, &result);
-            let mut passed = !result.timed_out && result.exit_code == exit_code;
-            if let Some(wanted) = stdout_contains {
-                let holds = result.stdout.contains(&wanted);
-                evidence.line(format!("stdout contains {wanted:?}: {}", yes(holds)));
-                passed &= holds;
-            }
-            if let Some(unwanted) = stdout_not_contains {
-                let lacks = !result.stdout.contains(&unwanted);
-                evidence.line(format!(
-                    "stdout does not contain {unwanted:?}: {}",
-                    yes(lacks)
-                ));
-                passed &= lacks;
-            }
-            (passed, evidence.with_output(&result))
-        }
-        Verification::Test {
-            command,
-            new_tests_required,
-        } => {
-            let result = executor.run(&command, "", timeout, &BTreeMap::new())?;
-            let mut evidence = Evidence::ran(&command, &result);
-            let mut passed = !result.timed_out && result.exit_code == 0;
-            if new_tests_required {
-                match new_tests {
-                    None => {
-                        evidence.line(
-                            "the base-branch check was not run: no diff was given".to_owned(),
-                        );
-                        passed = false;
-                    }
-                    Some(input) => {
-                        let check = check_new_tests(&command, input)?;
-                        evidence.line(format!("adds tests: {}", yes(check.adds_tests)));
-                        evidence.line(format!("fails on base: {}", yes(check.fails_on_base)));
-                        evidence.line(
-                            format!("test files: {}", check.test_files.join(", "))
-                                .trim_end()
-                                .to_owned(),
-                        );
-                        passed &= check.adds_tests && check.fails_on_base;
-                    }
-                }
-            }
-            (passed, evidence.with_output(&result))
-        }
-        Verification::Artifact { path, must_contain } => {
-            let Some(relative) = normalise(&path) else {
-                return Ok(result_of(
-                    criterion,
-                    run_by,
-                    false,
-                    format!(
-                        "the path {path:?} {}, so nothing was read",
-                        why_outside(&path)
-                    ),
-                ));
-            };
-            let command = format!("cat -- {}", single_quoted(&relative));
-            let result = executor.run(&command, "", timeout, &BTreeMap::new())?;
-            let mut evidence = Evidence::ran(&command, &result);
-            let mut passed = !result.timed_out && result.exit_code == 0;
-            if result.truncated {
-                evidence.line(format!(
-                    "file larger than {} MiB",
-                    OUTPUT_LIMIT_BYTES / (1024 * 1024)
-                ));
-                passed = false;
-            }
-            for wanted in &must_contain {
-                let holds = result.stdout.contains(wanted.as_str());
-                evidence.line(format!("contains {wanted:?}: {}", yes(holds)));
-                passed &= holds;
-            }
-            (passed, evidence.with_output(&result))
-        }
-        Verification::Review { rubric } => return Ok(CriterionOutcome::NeedsReview { rubric }),
-        Verification::Human { question } => {
-            return Ok(CriterionOutcome::NeedsHuman { question });
-        }
-    };
-    Ok(result_of(criterion, run_by, passed, evidence))
-}
-
-/// Runs every criterion of `contract` in its order, each with `CRITERION_TIMEOUT`.
+/// Runs every exit criterion of `contract`, in the contract's order, each with
+/// `CRITERION_TIMEOUT`, and a `test` criterion that requires new tests with the base-branch check
+/// on `new_tests` when it is given.
 ///
 /// # Errors
 ///
-/// The first criterion that could not be run at all ends the run with its error.
+/// The first criterion that could not be run stops the rest, with its error.
 pub fn run_criteria(
     contract: &TaskContract,
     executor: &dyn Executor,
@@ -228,50 +156,20 @@ pub fn run_criteria(
     contract
         .exit_criteria
         .iter()
-        .map(|criterion| run_one(criterion, executor, run_by, CRITERION_TIMEOUT, new_tests))
+        .map(|criterion| judge(criterion, executor, run_by, CRITERION_TIMEOUT, new_tests))
         .collect()
 }
 
-/// What the new-tests check found.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct NewTestsCheck {
-    /// Whether the diff adds or modifies a test file.
-    pub adds_tests: bool,
-    /// Whether the test command fails on the base branch with those test files in it.
-    pub fails_on_base: bool,
-    /// The test files the diff adds or modifies.
-    pub test_files: Vec<String>,
-}
-
-/// What the new-tests check needs to know about the task's diff.
-pub struct NewTestsInput<'a> {
-    /// The project's repository.
-    pub git: &'a Git,
-    /// The branch the task integrates into.
-    pub base: &'a str,
-    /// The task's branch.
-    pub head: &'a str,
-    /// Where the base run's sandbox comes from.
-    pub sandboxes: &'a dyn SandboxFactory,
-    /// The project, for the sandbox's name.
-    pub project_id: &'a str,
-    /// The task, for the sandbox's name and the base worktree's.
-    pub task_id: &'a TaskId,
-}
-
-/// Whether the task's diff adds a test, and whether that test fails on the base branch (5.4).
-///
-/// The head's version of each test file is written into a detached worktree at the merge base, at
-/// `<root>/.farik/local/worktrees/<id>-base`, and `command` is run there in a sandbox from
-/// `create_base` with `CRITERION_TIMEOUT`. Failing is a non-zero exit or a timeout. A worktree left
-/// at that path by a crash is removed first; the sandbox and the worktree are removed again on
-/// every way out. A diff with no test file runs nothing.
+/// Whether the diff from `input.base` to `input.head` adds a test file, and whether `command`
+/// fails with the head's test files on the base branch: in a detached worktree at the merge base,
+/// `<root>/.farik/local/worktrees/<id>-base` (one left by a crash removed first), in a sandbox
+/// from `create_base`. The sandbox is discarded and the worktree removed on every way out; when
+/// the run and the cleanup both fail, the run's error is the one returned.
 ///
 /// # Errors
 ///
-/// `Git` when the diff, the merge base, a file, or the worktree cannot be had; `Sandbox` when the
-/// base sandbox cannot be made or discarded; `Exec` when the command cannot be run; `Io` when a
-/// test file cannot be written. When the run and the cleanup both fail, the run's error.
+/// `Git` when git refuses, `Io` when a test file cannot be written, `Sandbox` when the base
+/// sandbox cannot be made or discarded, and `Exec` when the command does not run.
 pub fn check_new_tests(
     command: &str,
     input: &NewTestsInput<'_>,
@@ -295,82 +193,119 @@ pub fn check_new_tests(
         .root()
         .join(".farik/local/worktrees")
         .join(format!("{}-base", input.task_id.as_str()));
-    clear_leftover(input.git, &worktree)?;
-    input.git.create_detached_worktree(&worktree, &at)?;
-    let ran = run_on_base(command, input, &worktree, &test_files);
-    let removed = input.git.remove_worktree(&worktree);
-    let result = ran?;
+    remove_base_worktree(input.git, &worktree)?;
+    let ran = input
+        .git
+        .create_detached_worktree(&worktree, &at)
+        .map_err(CriterionError::from)
+        .and_then(|()| run_on_base(command, input, &test_files, &worktree));
+    let removed = remove_base_worktree(input.git, &worktree);
+    let fails_on_base = ran?;
     removed?;
     Ok(NewTestsCheck {
         adds_tests: true,
-        fails_on_base: result.timed_out || result.exit_code != 0,
+        fails_on_base,
         test_files,
     })
 }
 
-/// Whether `path` is a test file: a segment `tests`, `test`, `__tests__`, or `spec`, or a file name
-/// `test_*`, `*_test.*`, `*.test.*`, `*.spec.*`, or `*_spec.*`. Unit tests inside a source file
-/// (Rust's `#[cfg(test)]` modules) are not separable from the code they test and do not count: a
-/// known ceiling, whose upgrade is a per-language filter over the diff's hunks.
+/// Whether `path` names a test file: a directory `tests`, `test`, `__tests__`, or `spec` on the
+/// way, or a file name `test_*`, `*_test.*`, `*.test.*`, `*.spec.*`, or `*_spec.*`. A unit test
+/// inside a source file does not count (a known ceiling; the upgrade is a per-language hunk
+/// filter).
 #[must_use]
 pub fn is_test_file(path: &str) -> bool {
-    let name = path.rsplit('/').next().unwrap_or(path);
-    path.split('/')
-        .any(|segment| matches!(segment, "tests" | "test" | "__tests__" | "spec"))
+    let segments: Vec<&str> = path.split('/').collect();
+    let name = segments.last().copied().unwrap_or_default();
+    segments
+        .iter()
+        .any(|segment| matches!(*segment, "tests" | "test" | "__tests__" | "spec"))
         || name.starts_with("test_")
         || ["_test.", ".test.", ".spec.", "_spec."]
             .iter()
-            .any(|marker| name.contains(marker))
+            .any(|infix| name.contains(infix))
 }
 
-/// Removes a base worktree a crash left at `worktree`: one git has registered, and then whatever
-/// directory is still there, which covers one git no longer knows.
-fn clear_leftover(git: &Git, worktree: &Path) -> Result<(), CriterionError> {
-    match git.remove_worktree(worktree) {
-        Err(GitError::CommandFailed { stderr, .. }) if stderr.contains("is not a working tree") => {
+fn judge(
+    criterion: &ExitCriterion,
+    executor: &dyn Executor,
+    run_by: RunBy,
+    timeout: Duration,
+    new_tests: Option<&NewTestsInput<'_>>,
+) -> Result<CriterionOutcome, CriterionError> {
+    let (passed, evidence) = match Verification::from(&criterion.verification) {
+        Verification::Review { rubric } => return Ok(CriterionOutcome::NeedsReview { rubric }),
+        Verification::Human { question } => return Ok(CriterionOutcome::NeedsHuman { question }),
+        Verification::Command {
+            command,
+            exit_code,
+            stdout_contains,
+            stdout_not_contains,
+        } => {
+            let ran = run(executor, &command, timeout)?;
+            let mut lines = opening(&command, &ran);
+            let mut passed = !ran.timed_out && ran.exit_code == exit_code;
+            if let Some(wanted) = stdout_contains {
+                let holds = ran.stdout.contains(&wanted);
+                lines.push(answer(&format!("stdout contains \"{wanted}\""), holds));
+                passed &= holds;
+            }
+            if let Some(unwanted) = stdout_not_contains {
+                let holds = !ran.stdout.contains(&unwanted);
+                lines.push(answer(
+                    &format!("stdout does not contain \"{unwanted}\""),
+                    holds,
+                ));
+                passed &= holds;
+            }
+            (passed, closing(lines, &ran))
         }
-        other => other?,
-    }
-    if worktree.exists() {
-        std::fs::remove_dir_all(worktree).map_err(|error| io_error(worktree, &error))?;
-    }
-    Ok(())
-}
-
-/// Writes the head's test files into the base worktree and runs `command` there, discarding the
-/// sandbox whatever the run did.
-fn run_on_base(
-    command: &str,
-    input: &NewTestsInput<'_>,
-    worktree: &Path,
-    test_files: &[String],
-) -> Result<ExecResult, CriterionError> {
-    for file in test_files {
-        let text = input.git.file_at(input.head, file)?;
-        let path = worktree.join(file);
-        if let Some(directory) = path.parent() {
-            std::fs::create_dir_all(directory).map_err(|error| io_error(directory, &error))?;
+        Verification::Test {
+            command,
+            new_tests_required,
+        } => {
+            let ran = run(executor, &command, timeout)?;
+            let mut lines = opening(&command, &ran);
+            let mut passed = !ran.timed_out && ran.exit_code == 0;
+            if new_tests_required {
+                if let Some(input) = new_tests {
+                    let check = check_new_tests(&command, input)?;
+                    lines.push(answer("adds tests", check.adds_tests));
+                    lines.push(answer("fails on base", check.fails_on_base));
+                    lines.push(format!("test files: {}", check.test_files.join(", ")));
+                    passed &= check.adds_tests && check.fails_on_base;
+                } else {
+                    lines.push("the base-branch check was not run: no diff was given".to_owned());
+                    passed = false;
+                }
+            }
+            (passed, closing(lines, &ran))
         }
-        std::fs::write(&path, text).map_err(|error| io_error(&path, &error))?;
-    }
-    let sandbox = input
-        .sandboxes
-        .create_base(input.project_id, input.task_id, worktree)?;
-    let ran = sandbox.run(command, "", CRITERION_TIMEOUT, &BTreeMap::new());
-    let discarded = sandbox.discard();
-    let result = ran?;
-    discarded?;
-    Ok(result)
+        Verification::Artifact { path, must_contain } => {
+            let Some(relative) = normalise(&path) else {
+                let why = outside_why(&path);
+                let evidence = format!("the artifact path \"{path}\" {why}: nothing was read");
+                return Ok(verdict(criterion, run_by, false, evidence));
+            };
+            let command = format!("cat -- '{}'", relative.replace('\'', r"'\''"));
+            let ran = run(executor, &command, timeout)?;
+            let mut lines = opening(&command, &ran);
+            let mut passed = !ran.timed_out && ran.exit_code == 0 && !ran.truncated;
+            if ran.truncated {
+                lines.push("file larger than 1 MiB".to_owned());
+            }
+            for wanted in &must_contain {
+                let holds = ran.stdout.contains(wanted.as_str());
+                lines.push(answer(&format!("contains \"{wanted}\""), holds));
+                passed &= holds;
+            }
+            (passed, closing(lines, &ran))
+        }
+    };
+    Ok(verdict(criterion, run_by, passed, evidence))
 }
 
-fn io_error(path: &Path, error: &std::io::Error) -> CriterionError {
-    CriterionError::Io {
-        path: path.display().to_string(),
-        detail: error.to_string(),
-    }
-}
-
-fn result_of(
+fn verdict(
     criterion: &ExitCriterion,
     run_by: RunBy,
     passed: bool,
@@ -384,41 +319,37 @@ fn result_of(
     })
 }
 
-/// The evidence's lines, in the order the plan fixes: the command, how it ended, each
-/// expectation, and then the tail of each stream.
-struct Evidence {
-    lines: Vec<String>,
+/// Runs `command` in the workspace root with no added environment.
+fn run(executor: &dyn Executor, command: &str, timeout: Duration) -> Result<ExecResult, ExecError> {
+    executor.run(command, "", timeout, &BTreeMap::new())
 }
 
-impl Evidence {
-    fn ran(command: &str, result: &ExecResult) -> Evidence {
-        let ended = if result.timed_out {
-            "timed out".to_owned()
-        } else {
-            format!("exit {}", result.exit_code)
-        };
-        Evidence {
-            lines: vec![format!("$ {command}"), ended],
-        }
-    }
-
-    fn line(&mut self, line: String) {
-        self.lines.push(line);
-    }
-
-    /// The lines with each stream's tail after them; a stream that printed nothing is left out.
-    fn with_output(mut self, result: &ExecResult) -> String {
-        for (name, text) in [("stdout", &result.stdout), ("stderr", &result.stderr)] {
-            if !text.is_empty() {
-                self.lines
-                    .push(format!("{name} (last {TAIL_BYTES} bytes):\n{}", tail(text)));
-            }
-        }
-        self.lines.join("\n")
-    }
+/// The command, and how it ended.
+fn opening(command: &str, ran: &ExecResult) -> Vec<String> {
+    let ended = if ran.timed_out {
+        "timed out".to_owned()
+    } else {
+        format!("exit {}", ran.exit_code)
+    };
+    vec![format!("$ {command}"), ended]
 }
 
-/// The last `TAIL_BYTES` of `text`, or a little fewer so as to start on a character.
+fn answer(question: &str, holds: bool) -> String {
+    format!("{question}: {}", if holds { "yes" } else { "no" })
+}
+
+/// The lines so far, then the tail of each stream that said anything.
+fn closing(mut lines: Vec<String>, ran: &ExecResult) -> String {
+    for (name, text) in [("stdout", &ran.stdout), ("stderr", &ran.stderr)] {
+        if !text.is_empty() {
+            lines.push(format!("{name} (last {TAIL_BYTES} bytes):"));
+            lines.push(tail(text).to_owned());
+        }
+    }
+    lines.join("\n")
+}
+
+/// The last `TAIL_BYTES` of `text`, or fewer, cut on a character boundary.
 fn tail(text: &str) -> &str {
     let mut start = text.len().saturating_sub(TAIL_BYTES);
     while !text.is_char_boundary(start) {
@@ -427,24 +358,68 @@ fn tail(text: &str) -> &str {
     &text[start..]
 }
 
-fn yes(holds: bool) -> &'static str {
-    if holds { "yes" } else { "no" }
-}
-
-/// `text` as one shell word: single-quoted, with a `'` inside written `'\''`.
-fn single_quoted(text: &str) -> String {
-    format!("'{}'", text.replace('\'', r"'\''"))
-}
-
-/// Why `normalise` refused `path`, in words.
-fn why_outside(path: &str) -> &'static str {
+/// Why `normalise` refused `path`, in the words the evidence uses.
+fn outside_why(path: &str) -> &'static str {
     let unified = path.replace('\\', "/");
     if unified.starts_with('/') || unified.chars().nth(1) == Some(':') {
         "is absolute"
-    } else if unified.split('/').any(|segment| segment == "..") {
-        "climbs out of the workspace"
+    } else if unified
+        .split('/')
+        .all(|segment| segment.is_empty() || segment == ".")
+    {
+        "names the workspace itself"
     } else {
-        "names the workspace itself rather than a file in it"
+        "climbs out of the workspace"
+    }
+}
+
+/// Writes the head's `test_files` into the base `worktree` and runs `command` there; whether it
+/// failed, a timeout counting as a failure.
+fn run_on_base(
+    command: &str,
+    input: &NewTestsInput<'_>,
+    test_files: &[String],
+    worktree: &Path,
+) -> Result<bool, CriterionError> {
+    for path in test_files {
+        let content = input.git.file_at(input.head, path)?;
+        let target = worktree.join(path);
+        let written = match target.parent() {
+            Some(parent) => std::fs::create_dir_all(parent),
+            None => Ok(()),
+        }
+        .and_then(|()| std::fs::write(&target, content));
+        written.map_err(|error| CriterionError::Io {
+            path: path.clone(),
+            detail: error.to_string(),
+        })?;
+    }
+    let sandbox = input
+        .sandboxes
+        .create_base(input.project_id, input.task_id, worktree)?;
+    let ran = run(sandbox.as_ref(), command, CRITERION_TIMEOUT);
+    let discarded = sandbox.discard();
+    let ran = ran?;
+    discarded?;
+    Ok(ran.timed_out || ran.exit_code != 0)
+}
+
+/// Removes the base worktree at `worktree`, whether git has it registered or it is a directory a
+/// crash left behind that git no longer knows.
+fn remove_base_worktree(git: &Git, worktree: &Path) -> Result<(), CriterionError> {
+    match git.remove_worktree(worktree) {
+        // ponytail: git's English words for a path it has no worktree at; a translated git
+        // refuses here instead, and pinning the store's git to one locale is the upgrade.
+        Err(GitError::CommandFailed { stderr, .. }) if stderr.contains("is not a working tree") => {
+        }
+        other => other?,
+    }
+    match std::fs::remove_dir_all(worktree) {
+        Err(error) if error.kind() != std::io::ErrorKind::NotFound => Err(CriterionError::Io {
+            path: worktree.display().to_string(),
+            detail: error.to_string(),
+        }),
+        _ => Ok(()),
     }
 }
 
