@@ -65,6 +65,17 @@ pub enum OrchestratorError {
     Transition(TransitionError),
     /// A cost could not be recorded, or a budget read.
     Cost(CostError),
+    /// What was asked cannot be done to the task as it stands, such as integrating one that is
+    /// not accepted.
+    Refused {
+        /// Why, starting with a word a program can match.
+        reason: String,
+    },
+    /// The integration lock could not be taken.
+    Lock {
+        /// What the operating system said.
+        detail: String,
+    },
 }
 
 impl fmt::Display for OrchestratorError {
@@ -78,6 +89,13 @@ impl fmt::Display for OrchestratorError {
             Self::Role(error) => write!(formatter, "the role failed: {error}"),
             Self::Transition(error) => write!(formatter, "the transition failed: {error}"),
             Self::Cost(error) => write!(formatter, "the cost failed: {error}"),
+            Self::Refused { reason } => write!(formatter, "refused: {reason}"),
+            Self::Lock { detail } => {
+                write!(
+                    formatter,
+                    "the integration lock could not be taken: {detail}"
+                )
+            }
         }
     }
 }
@@ -149,6 +167,28 @@ pub enum TickReport {
     },
 }
 
+/// What came of integrating an accepted task (5.14).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum IntegrationOutcome {
+    /// Its branch is in the integration branch, at this commit.
+    Merged {
+        /// The integration branch's commit holding it.
+        sha: String,
+    },
+    /// A pull request was opened for it, at this address.
+    PullRequestOpened {
+        /// The pull request's address.
+        url: String,
+    },
+    /// Its pull request is open on the forge, waiting for the human.
+    AwaitingForge,
+    /// It could not land, and the human was told why in these words.
+    Escalated {
+        /// The escalation's detail.
+        detail: String,
+    },
+}
+
 /// Farik running a project's team. ponytail: one session at a time, a session pool when a team
 /// outgrows a WIP limit of one.
 pub struct Orchestrator {
@@ -193,6 +233,24 @@ impl Orchestrator {
             }
         }
         Ok(())
+    }
+
+    /// Integrates an accepted task now, as the human asks (`farik integrate`), whatever
+    /// escalations it carries: under `manual` a merge into the integration branch with no push,
+    /// under `auto_merge` the merge and the push to `origin` when there is one. A task already
+    /// integrated answers the commit it was integrated at and does nothing. One task integrates at
+    /// a time, across processes too.
+    ///
+    /// # Errors
+    ///
+    /// `Refused` for a task that is not an accepted task, or under a policy this cannot drive yet;
+    /// `Lock` when the integration lock cannot be taken; the store's, the files', and git's own
+    /// failures. A merge or push that cannot land is not an error: it is `Escalated`.
+    pub async fn integrate(
+        &self,
+        task_id: &TaskId,
+    ) -> Result<IntegrationOutcome, OrchestratorError> {
+        integrate::integrate(self, task_id).await
     }
 
     /// Stops `run_until_idle` before its next tick. A session already running runs to its end.
@@ -272,6 +330,8 @@ mod tests {
         SessionStartedBodyPurpose,
     };
 
+    use farik_store::git::fixtures::git_output_in;
+
     use crate::orchestrator::fixtures::Harness;
     use crate::recorded::fixtures::{
         accept_frk_1, implement_finishes_frk_1, plan_assigns_frk_1, review_writes_note,
@@ -335,7 +395,9 @@ mod tests {
     #[tokio::test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn takes_one_task_from_ready_to_accepted() {
-        let harness = Harness::new("orch-one-task", |_| {});
+        let harness = Harness::new("orch-one-task", |wire| {
+            wire["policy"]["integration"] = serde_json::json!("auto_merge");
+        });
         harness.ready("FRK-1");
         let adapter = harness.recorded(vec![
             plan_assigns_frk_1(),
@@ -344,6 +406,7 @@ mod tests {
             accept_frk_1(),
         ]);
         let orchestrator = harness.orchestrator(adapter.clone());
+        let base = git_output_in(&harness.project.repo.path, &["rev-parse", "main"]);
 
         orchestrator
             .run_until_idle()
@@ -353,11 +416,11 @@ mod tests {
         assert_eq!(harness.row("FRK-1").status, TaskStatus::Accepted);
         let git = &harness.project.deps.git;
         assert_eq!(
-            git.commit_count("main", "farik/FRK-1").expect("git counts"),
+            git.commit_count(&base, "farik/FRK-1").expect("git counts"),
             1
         );
         assert_eq!(
-            git.changed_paths("main", "farik/FRK-1").expect("git lists"),
+            git.changed_paths(&base, "farik/FRK-1").expect("git lists"),
             vec!["done.txt".to_string()]
         );
         assert_eq!(
@@ -415,5 +478,23 @@ mod tests {
         }
         assert_eq!(adapter.started().len(), 4);
         assert_eq!(adapter.transcripts_left(), 0);
+        let integrated = harness.events(&[EventKind::TaskIntegrated]);
+        assert!(
+            matches!(
+                &integrated[..],
+                [one] if matches!(&one.body, EventBody::TaskIntegrated(body)
+                    if body.sha == git_output_in(&harness.project.repo.path, &["rev-parse", "main"]))
+            ),
+            "{integrated:?}"
+        );
+        assert!(!harness.worktree("FRK-1").exists());
+        assert_eq!(
+            git_output_in(
+                &harness.project.repo.path,
+                &["branch", "--list", "farik/FRK-1"]
+            )
+            .trim(),
+            "farik/FRK-1"
+        );
     }
 }

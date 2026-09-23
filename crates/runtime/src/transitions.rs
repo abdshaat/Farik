@@ -958,10 +958,16 @@ fn wire_status(status: TaskStatusWire) -> Option<TaskStatus> {
 ///
 /// # Errors
 ///
-/// What `Git::default_branch` refuses, asked only when the team names no branch.
+/// `CommandFailed` naming the team's branch when git would not take it for a branch name
+/// (`Git::check_branch_name`); what `Git::default_branch` refuses, asked only when the team names
+/// no branch.
 pub(crate) fn integration_branch(team: &Team, git: &Git) -> Result<String, GitError> {
     match &team.policy.integration_branch {
-        Some(branch) => Ok(branch.to_string()),
+        Some(branch) => {
+            // The team file's word reaches refspecs and options, so git judges it first.
+            git.check_branch_name(branch.as_str())?;
+            Ok(branch.to_string())
+        }
         None => git.default_branch(),
     }
 }
@@ -1649,6 +1655,28 @@ mod tests {
             at(11),
         );
         assert!(project.context(&request, &TransitionAsk::default()).triaged);
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn refuses_an_integration_branch_git_would_not_name() {
+        let project = Project::new("integration-branch-name", a_team(|_| {}), at(12));
+        for name in ["main:other", "-f"] {
+            let team = a_team(|wire| wire["policy"]["integration_branch"] = json!(name));
+            match super::integration_branch(&team, &project.repo.adapter()) {
+                Err(farik_store::GitError::CommandFailed { stderr, .. }) => {
+                    assert!(stderr.contains(name), "{name}: {stderr}");
+                }
+                other => panic!("{name}: expected a refusal, got {other:?}"),
+            }
+        }
+        assert_eq!(
+            super::integration_branch(
+                &a_team(|wire| wire["policy"]["integration_branch"] = json!("release/1.0")),
+                &project.repo.adapter()
+            ),
+            Ok("release/1.0".to_string())
+        );
     }
 
     #[test]

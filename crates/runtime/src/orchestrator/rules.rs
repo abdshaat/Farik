@@ -12,7 +12,7 @@ use farik_core::team::{Agent, Team};
 use farik_protocol::event::{EventBody, EventKind, FarikEvent};
 use farik_store::{EventQuery, Git, TaskProjection};
 
-use super::integrate::cleanup;
+use super::integrate::{awaiting, cleanup};
 use super::messages::{Resume, implement_message, plan_message};
 use super::session::{SessionAsk, SessionEnd, run_session};
 use super::verify::verifying;
@@ -51,6 +51,14 @@ pub(super) async fn tick(orchestrator: &Orchestrator) -> Result<TickReport, Orch
         .filter(|row| matches!(row.status, TaskStatus::Accepted | TaskStatus::Cancelled))
     {
         if let Some(report) = cleanup(orchestrator, row)? {
+            return Ok(report);
+        }
+    }
+    for row in board
+        .iter()
+        .filter(|row| row.status == TaskStatus::Accepted)
+    {
+        if let Some(report) = awaiting(orchestrator, &team, row).await? {
             return Ok(report);
         }
     }

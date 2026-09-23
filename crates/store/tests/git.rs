@@ -655,3 +655,144 @@ fn finds_the_merge_base_of_two_branches() {
         Ok(fork)
     );
 }
+
+/// A bare repository beside `repository`, added to it as `origin`.
+fn with_origin(repository: &TempRepo) -> std::path::PathBuf {
+    let origin = repository.path.with_extension("origin.git");
+    let _ = std::fs::remove_dir_all(&origin);
+    std::fs::create_dir_all(&origin).expect("a directory for the remote");
+    git_in(&origin, &["init", "--bare", "-b", "main"]);
+    repository.git(&["remote", "add", "origin", origin.to_str().expect("a path")]);
+    origin
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn knows_whether_a_remote_exists() {
+    let repository = TempRepo::new("has-remote");
+    assert_eq!(repository.adapter().has_remote("origin"), Ok(false));
+    let origin = with_origin(&repository);
+    assert_eq!(repository.adapter().has_remote("origin"), Ok(true));
+    assert_eq!(repository.adapter().has_remote("upstream"), Ok(false));
+    let _ = std::fs::remove_dir_all(&origin);
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn fast_forwards_a_branch_to_its_remote() {
+    let repository = TempRepo::new("fast-forward");
+    let origin = with_origin(&repository);
+    repository.git(&["branch", "develop"]);
+    repository.git(&["push", "origin", "main", "develop"]);
+    // A second clone moves both branches on the remote.
+    let other = repository.path.with_extension("other");
+    let _ = std::fs::remove_dir_all(&other);
+    git_in(
+        repository.path.parent().expect("a parent"),
+        &[
+            "clone",
+            origin.to_str().expect("a path"),
+            other.to_str().expect("a path"),
+        ],
+    );
+    git_in(&other, &["config", "user.name", "Farik Test"]);
+    git_in(&other, &["config", "user.email", "test@farik.invalid"]);
+    git_in(&other, &["config", "commit.gpgsign", "false"]);
+    for branch in ["main", "develop"] {
+        git_in(&other, &["checkout", branch]);
+        std::fs::write(other.join(format!("{branch}.txt")), branch).expect("written");
+        git_in(&other, &["add", "-A"]);
+        git_in(&other, &["commit", "-m", branch]);
+        git_in(&other, &["push", "origin", branch]);
+    }
+    let adapter = repository.adapter();
+
+    adapter
+        .fetch_fast_forward("origin", "main")
+        .expect("the checked-out branch fast-forwards");
+    adapter
+        .fetch_fast_forward("origin", "develop")
+        .expect("a branch not checked out fast-forwards");
+
+    for branch in ["main", "develop"] {
+        assert_eq!(
+            repository.git_output(&["rev-parse", branch]),
+            git_output_in(&origin, &["rev-parse", branch])
+        );
+    }
+    assert!(
+        repository.path.join("main.txt").is_file(),
+        "the checkout moved with it"
+    );
+
+    // Diverged: a local commit origin lacks, and one on origin the local branch lacks.
+    for branch in ["main", "develop"] {
+        git_in(&other, &["checkout", branch]);
+        std::fs::write(other.join("again.txt"), branch).expect("written");
+        git_in(&other, &["add", "-A"]);
+        git_in(&other, &["commit", "-m", "again"]);
+        git_in(&other, &["push", "origin", branch]);
+    }
+    repository.write("local.txt", "local\n");
+    repository.commit("a local commit");
+    repository.git(&["branch", "-f", "develop", "main"]);
+    for branch in ["main", "develop"] {
+        let before = repository.git_output(&["rev-parse", branch]);
+        let refused = adapter.fetch_fast_forward("origin", branch);
+        assert!(
+            matches!(refused, Err(GitError::CommandFailed { .. })),
+            "{branch}: {refused:?}"
+        );
+        assert_eq!(repository.git_output(&["rev-parse", branch]), before);
+    }
+    let _ = std::fs::remove_dir_all(&origin);
+    let _ = std::fs::remove_dir_all(&other);
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn pushes_and_fetches_without_a_prompt() {
+    use std::io::{Read, Write};
+
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("a port");
+    let port = listener.local_addr().expect("an address").port();
+    std::thread::spawn(move || {
+        for stream in listener.incoming() {
+            let Ok(mut stream) = stream else { continue };
+            let mut request = Vec::new();
+            let mut buffer = [0_u8; 1024];
+            while !request.windows(4).any(|window| window == b"\r\n\r\n") {
+                match stream.read(&mut buffer) {
+                    Ok(0) | Err(_) => break,
+                    Ok(read) => request.extend_from_slice(&buffer[..read]),
+                }
+            }
+            let _ = stream.write_all(
+                b"HTTP/1.1 401 Unauthorized\r\nWWW-Authenticate: Basic realm=\"farik\"\r\n\
+                  Content-Length: 0\r\nConnection: close\r\n\r\n",
+            );
+        }
+    });
+    let repository = TempRepo::new("no-prompt");
+    repository.git(&[
+        "remote",
+        "add",
+        "origin",
+        &format!("http://127.0.0.1:{port}/r.git"),
+    ]);
+    let adapter = repository.adapter();
+    let started = std::time::Instant::now();
+
+    for refused in [
+        adapter.push("origin", "refs/heads/main"),
+        adapter.fetch_fast_forward("origin", "main"),
+    ] {
+        match refused {
+            Err(GitError::CommandFailed { stderr, .. }) => {
+                assert!(stderr.contains("terminal prompts disabled"), "{stderr}");
+            }
+            other => panic!("expected a refusal, got {other:?}"),
+        }
+    }
+    assert!(started.elapsed() < std::time::Duration::from_secs(30));
+}

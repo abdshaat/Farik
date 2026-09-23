@@ -311,6 +311,60 @@ impl Git {
         Ok(())
     }
 
+    /// Whether the repository has a remote named `name`.
+    ///
+    /// # Errors
+    ///
+    /// `NotARepository`, `NotInstalled`, or `CommandFailed` when git refuses.
+    pub fn has_remote(&self, name: &str) -> Result<bool, GitError> {
+        self.require_repository()?;
+        Ok(self
+            .at_root(&["remote"])?
+            .lines()
+            .any(|remote| remote == name))
+    }
+
+    /// Brings the local branch `branch` up to `remote`'s, only by fast-forward. The branch checked
+    /// out at the root is fetched and then merged `--ff-only`, since git will not fetch into the
+    /// checked-out branch; any other is fetched straight into its ref, which git refuses unless it
+    /// fast-forwards. The branch is spelled `refs/heads/<branch>` in the refspec, so that a tag of
+    /// the same name is not taken for it.
+    ///
+    /// # Errors
+    ///
+    /// `CommandFailed` when the remote cannot be reached, or the local branch holds a commit the
+    /// remote's lacks; the local branch is left where it was.
+    pub fn fetch_fast_forward(&self, remote: &str, branch: &str) -> Result<(), GitError> {
+        self.require_repository()?;
+        let reference = format!("refs/heads/{branch}");
+        if self.current_branch().ok().as_deref() == Some(branch) {
+            self.at_root(&["fetch", remote, &reference])?;
+            self.at_root(&["merge", "--ff-only", "FETCH_HEAD"])?;
+        } else {
+            self.at_root(&["fetch", remote, &format!("{reference}:{reference}")])?;
+        }
+        Ok(())
+    }
+
+    /// Refuses a name git would not take for a branch, such as `main:other` or `-f`, so that
+    /// nothing a team file says reaches a refspec or an option.
+    ///
+    /// # Errors
+    ///
+    /// `CommandFailed` naming it when git refuses it; `NotInstalled` when git cannot be run.
+    pub fn check_branch_name(&self, name: &str) -> Result<(), GitError> {
+        run_git(&self.root, &["check-ref-format", "--branch", name]).map_err(
+            |error| match error {
+                GitError::CommandFailed { command, stderr } => GitError::CommandFailed {
+                    command,
+                    stderr: format!("{name:?} is not a name git takes for a branch: {stderr}"),
+                },
+                other => other,
+            },
+        )?;
+        Ok(())
+    }
+
     /// How many commits `head` has that `base` does not.
     ///
     /// # Errors
@@ -393,7 +447,7 @@ impl Git {
     /// reads HEAD, moves it, and puts it back, so two of these at once on one repository interleave:
     /// measured on this code, sixteen runs in forty left the checkout on the wrong branch and one in
     /// forty landed the merge commit on a branch nobody named, while the caller was told it merged.
-    /// The lock belongs to whatever drives integration — phase 3 step 10 — rather than to a method
+    /// The lock belongs to whatever drives integration — phase 3 step 13 — rather than to a method
     /// that cannot see the other caller. Everything else here is safe side by side: a worktree per
     /// task touches no shared head.
     ///
@@ -511,9 +565,16 @@ fn run_git_untrimmed(directory: &Path, arguments: &[&str]) -> Result<String, Git
             stderr: format!("there is no directory at {}", directory.display()),
         });
     }
+    // No git Farik runs has a person at a terminal to answer it, so a push or fetch that wants a
+    // credential fails with git's words rather than waiting on a prompt nobody sees. An empty
+    // `GIT_ASKPASS` is what stops git reaching for an askpass program too (an editor's, say, set
+    // in the environment Farik was started from, or `core.askPass`, or `SSH_ASKPASS`), which is a
+    // prompt by another name; a credential helper still answers.
     let output = Command::new("git")
         .args(arguments)
         .current_dir(directory)
+        .env("GIT_TERMINAL_PROMPT", "0")
+        .env("GIT_ASKPASS", "")
         .output()
         .map_err(|error| GitError::NotInstalled {
             detail: error.to_string(),

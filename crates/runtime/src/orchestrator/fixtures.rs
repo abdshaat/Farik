@@ -14,6 +14,7 @@ use farik_core::pricing::Usage;
 use farik_protocol::clock::SequentialIds;
 use farik_protocol::event::{EventKind, FarikEvent, NewEvent, event_from_value};
 use farik_store::TaskProjection;
+use farik_store::git::fixtures::git_in;
 use serde_json::{Value, json};
 use tokio::sync::mpsc::{Receiver, Sender, channel};
 
@@ -197,6 +198,66 @@ impl Harness {
             .git
             .remove_worktree(&self.worktree(task))
             .expect("the task's worktree is removed");
+    }
+
+    /// Writes `text` to `path` at the root, on the branch checked out there, and commits that path
+    /// alone, leaving `.farik/` out of it.
+    pub(crate) fn commit_at_root(&self, path: &str, text: &str, message: &str) {
+        let root = &self.project.repo.path;
+        std::fs::write(root.join(path), text).expect("the file is written");
+        git_in(root, &["add", "--", path]);
+        git_in(root, &["commit", "-m", message]);
+    }
+
+    /// `task` accepted, its worktree gone, with `a.txt`'s first line changed on its branch and
+    /// changed differently on `main` afterwards, so that merging it conflicts in `a.txt`.
+    pub(crate) fn accepted_in_conflict(&self, task: &str) {
+        self.commit_at_root("a.txt", "first\n", "Add a.txt");
+        self.accepted_with_worktree(task);
+        let worktree = self.worktree(task);
+        std::fs::write(worktree.join("a.txt"), "the task's\n").expect("written");
+        self.project
+            .deps
+            .git
+            .commit(&worktree, "Change a.txt", &["a.txt".to_string()])
+            .expect("the branch's change is committed");
+        self.project
+            .deps
+            .git
+            .remove_worktree(&worktree)
+            .expect("the worktree is removed");
+        self.commit_at_root("a.txt", "main's\n", "Change a.txt on main");
+    }
+
+    /// Resolves `accepted_in_conflict` by a commit on `main` restoring `a.txt` to its text at the
+    /// branch point.
+    pub(crate) fn resolve_the_conflict(&self) {
+        self.commit_at_root("a.txt", "first\n", "Restore a.txt");
+    }
+
+    /// A bare repository beside the project, added to it as `origin`, with `main` pushed there.
+    pub(crate) fn with_origin(&self) -> PathBuf {
+        let origin = self.project.repo.path.with_extension("origin.git");
+        let _ = std::fs::remove_dir_all(&origin);
+        std::fs::create_dir_all(&origin).expect("a directory for the remote");
+        git_in(&origin, &["init", "--bare", "-b", "main"]);
+        let root = &self.project.repo.path;
+        git_in(
+            root,
+            &["remote", "add", "origin", origin.to_str().expect("a path")],
+        );
+        git_in(root, &["push", "origin", "main"]);
+        origin
+    }
+
+    /// `origin` added at a path where there is no repository, so that every push to it fails.
+    pub(crate) fn with_origin_nowhere(&self) {
+        let nowhere = self.project.repo.path.with_extension("nowhere.git");
+        let _ = std::fs::remove_dir_all(&nowhere);
+        git_in(
+            &self.project.repo.path,
+            &["remote", "add", "origin", nowhere.to_str().expect("a path")],
+        );
     }
 
     /// Files `task` and moves it through `in_progress` to `blocked`, held by `assignee`.
