@@ -3,8 +3,9 @@
 //! that is not served, and a runner that answers a replayed session's Farik tool calls the way the
 //! daemon's MCP server would.
 
-use std::path::PathBuf;
-use std::sync::Arc;
+use std::collections::BTreeMap;
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
 
 use farik_core::contract::TaskId;
 use farik_protocol::clock::SequentialIds;
@@ -15,8 +16,8 @@ use serde_json::{Value, json};
 use super::{Orchestrator, OrchestratorDeps};
 use crate::daemon::{DaemonState, HookRequest, decide_pre_tool_use};
 use crate::recorded::{RecordedAdapter, ToolRunner, Transcript};
-use crate::sandbox::SandboxFactory;
 use crate::sandbox::host::HostSandboxFactory;
+use crate::sandbox::{Sandbox, SandboxError, SandboxFactory};
 use crate::session::RuntimeAdapter;
 use crate::tools::call_tool;
 use crate::tools::fixtures::{TestProject, a_team_of_three};
@@ -161,6 +162,51 @@ impl Harness {
     /// Every event of these kinds, oldest first; every event when `kinds` is empty.
     pub(crate) fn events(&self, kinds: &[EventKind]) -> Vec<FarikEvent> {
         self.project.events(kinds)
+    }
+}
+
+/// A host sandbox factory that counts the sandboxes it made for each task.
+#[derive(Default)]
+pub(crate) struct CountingSandboxFactory {
+    created: Mutex<BTreeMap<String, u32>>,
+}
+
+impl CountingSandboxFactory {
+    /// How many sandboxes `create` made for `task`.
+    pub(crate) fn created(&self, task: &str) -> u32 {
+        self.created
+            .lock()
+            .expect("no test panics holding it")
+            .get(task)
+            .copied()
+            .unwrap_or(0)
+    }
+}
+
+impl SandboxFactory for CountingSandboxFactory {
+    fn create(
+        &self,
+        project_id: &str,
+        task_id: &TaskId,
+        worktree: &Path,
+        network: bool,
+    ) -> Result<Box<dyn Sandbox>, SandboxError> {
+        *self
+            .created
+            .lock()
+            .expect("no test panics holding it")
+            .entry(task_id.as_str().to_string())
+            .or_insert(0) += 1;
+        HostSandboxFactory.create(project_id, task_id, worktree, network)
+    }
+
+    fn create_base(
+        &self,
+        project_id: &str,
+        task_id: &TaskId,
+        worktree: &Path,
+    ) -> Result<Box<dyn Sandbox>, SandboxError> {
+        HostSandboxFactory.create_base(project_id, task_id, worktree)
     }
 }
 

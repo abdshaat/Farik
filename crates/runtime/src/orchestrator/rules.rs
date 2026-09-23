@@ -2,26 +2,47 @@
 //! rules in order, one per state, and each rule the tasks in its state by their number; the first
 //! that acts ends the tick.
 
-use farik_core::contract::{Role, TaskContract, TaskKind, TaskStatus};
+use std::sync::Arc;
+
+use farik_core::contract::{Role, TaskContract, TaskId, TaskKind, TaskStatus};
 use farik_core::governor::transition::TransitionRequest;
 use farik_core::governor::transition_table::TransitionActor;
 use farik_core::team::{Agent, Team};
-use farik_store::TaskProjection;
+use farik_protocol::event::{EventBody, EventKind};
+use farik_store::{EventQuery, Git, TaskProjection};
 
-use super::messages::plan_message;
+use super::messages::{Resume, implement_message, plan_message};
 use super::session::{SessionAsk, SessionEnd, run_session};
-use super::{OrchestratorDeps, OrchestratorError, TickReport};
+use super::{Orchestrator, OrchestratorDeps, OrchestratorError, TickReport, worktree};
+use crate::exec::Executor;
 use crate::session::{EndReason, SessionPurpose};
-use crate::transitions::TransitionAsk;
+use crate::transitions::{TransitionAsk, TransitionOutcome, integration_branch, refusal_details};
 
 /// What a tick says when no rule matched.
 const NOTHING_TO_DO: &str = "nothing on the board needs doing";
 
 /// One tick: the first rule that acts, or `Idle`.
-pub(super) async fn tick(deps: &OrchestratorDeps) -> Result<TickReport, OrchestratorError> {
+pub(super) async fn tick(orchestrator: &Orchestrator) -> Result<TickReport, OrchestratorError> {
+    let deps = &orchestrator.deps;
     let team = deps.tools.files.read_team()?;
     let mut board = deps.tools.projections.board()?;
     board.sort_by_key(|row| task_number(row.task_id.as_str()));
+    for row in board
+        .iter()
+        .filter(|row| row.status == TaskStatus::InProgress)
+    {
+        if let Some(report) = in_progress(orchestrator, &team, row).await? {
+            return Ok(report);
+        }
+    }
+    for row in board
+        .iter()
+        .filter(|row| row.status == TaskStatus::Assigned)
+    {
+        if let Some(report) = assigned(deps, &team, row)? {
+            return Ok(report);
+        }
+    }
     for row in board.iter().filter(|row| row.status == TaskStatus::Ready) {
         if let Some(report) = ready(deps, &team, &board, row).await? {
             return Ok(report);
@@ -30,6 +51,132 @@ pub(super) async fn tick(deps: &OrchestratorDeps) -> Result<TickReport, Orchestr
     Ok(TickReport::Idle {
         why: NOTHING_TO_DO.to_string(),
     })
+}
+
+/// Rule 6: a task `in_progress` gets its assignee's implement session, in its worktree, with its
+/// sandbox, told where an earlier session left the work. A task whose assignee is not active is
+/// passed over: every tool call of its session would be refused.
+async fn in_progress(
+    orchestrator: &Orchestrator,
+    team: &Team,
+    row: &TaskProjection,
+) -> Result<Option<TickReport>, OrchestratorError> {
+    let deps = &orchestrator.deps;
+    let Some(assignee) = active(team, row.assignee_id.as_deref()) else {
+        return Ok(None);
+    };
+    let contract = deps.tools.files.read_contract(&row.task_id)?;
+    let sandbox = orchestrator.sandbox_for(&row.task_id, team)?;
+    let resume = resume(deps, team, &row.task_id)?;
+    let executor: Arc<dyn Executor> = sandbox;
+    let end = run_session(
+        deps,
+        team,
+        SessionAsk {
+            agent: assignee,
+            contract: &contract,
+            purpose: SessionPurpose::Implement,
+            cwd: worktree(deps, &row.task_id),
+            executor: Some(executor),
+            initial_prompt: implement_message(&contract, &resume),
+        },
+    )
+    .await?;
+    Ok(Some(acted(row, assignee, "implement", &end)))
+}
+
+/// Where the task's work stands: its branch's tip when the branch has a commit past the
+/// integration branch, and the last note written since it last moved into `in_progress`.
+fn resume(
+    deps: &OrchestratorDeps,
+    team: &Team,
+    task_id: &TaskId,
+) -> Result<Resume, OrchestratorError> {
+    let worktree = worktree(deps, task_id);
+    let last_commit = if worktree.is_dir() {
+        let git = &deps.tools.git;
+        let base = integration_branch(team, git)?;
+        if git.commit_count(&base, &format!("farik/{}", task_id.as_str()))? > 0 {
+            Git::open(worktree).head_summary()?
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+    let history = deps.tools.log.read(&EventQuery {
+        task_id: Some(task_id.clone()),
+        kinds: vec![EventKind::TaskTransitioned, EventKind::NoteWritten],
+        ..EventQuery::default()
+    })?;
+    let mut last_note = None;
+    for event in &history {
+        match &event.body {
+            EventBody::TaskTransitioned(body) if body.to.to_string() == "in_progress" => {
+                last_note = None;
+            }
+            EventBody::NoteWritten(body) => {
+                last_note = Some((body.kind.to_string(), body.text.clone()));
+            }
+            _ => {}
+        }
+    }
+    Ok(Resume {
+        last_commit,
+        last_note,
+    })
+}
+
+/// Rule 7: a task `assigned` gets its worktree on `farik/<id>` from the integration branch,
+/// reused when it is already there, and is moved to `in_progress` as its assignee asks. No session
+/// starts: the next tick's rule 6 starts it. A task whose assignee is not active is passed over.
+fn assigned(
+    deps: &OrchestratorDeps,
+    team: &Team,
+    row: &TaskProjection,
+) -> Result<Option<TickReport>, OrchestratorError> {
+    let Some(assignee) = active(team, row.assignee_id.as_deref()) else {
+        return Ok(None);
+    };
+    let worktree = worktree(deps, &row.task_id);
+    let branch = format!("farik/{}", row.task_id.as_str());
+    if !worktree.is_dir() {
+        let git = &deps.tools.git;
+        git.create_worktree(&worktree, &branch, &integration_branch(team, git)?)?;
+    }
+    let outcome = deps.tools.transitions.request(
+        &TransitionRequest {
+            task_id: row.task_id.clone(),
+            to: TaskStatus::InProgress,
+            actor: TransitionActor::Assignee,
+            agent_id: Some(assignee.id.to_string()),
+        },
+        &TransitionAsk::default(),
+        team,
+    )?;
+    let what = match outcome {
+        TransitionOutcome::Moved(_) => {
+            format!(
+                "started it for {} in its worktree on {branch}",
+                assignee.id.as_str()
+            )
+        }
+        TransitionOutcome::Refused(refusal) => format!(
+            "the governor would not start it: {}",
+            refusal_details(&refusal).join("; ")
+        ),
+    };
+    Ok(Some(TickReport::Acted {
+        task_id: row.task_id.clone(),
+        what,
+    }))
+}
+
+/// The team's agent of that id, when it is active.
+fn active<'a>(team: &'a Team, agent_id: Option<&str>) -> Option<&'a Agent> {
+    let agent_id = agent_id?;
+    team.active_agents()
+        .find(|agent| agent.id.as_str() == agent_id)
 }
 
 /// Rule 8: a standalone task that is `ready` gets a plan session of its assigner (the active Scrum
@@ -167,18 +314,23 @@ fn task_number(task: &str) -> u64 {
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeSet;
+    use std::sync::Arc;
 
     use farik_core::contract::{Role, TaskStatus};
     use farik_protocol::event::{
-        EventBody, EventKind, SessionEndedBodyReason, SessionStartedBodyPurpose,
+        CriterionRecordedBodyRunBy, EventBody, EventKind, NoteWrittenBodyKind,
+        SessionEndedBodyReason, SessionStartedBodyPurpose, TransitionActorWire,
     };
     use farik_roles::RoleError;
+    use farik_store::git::fixtures::git_output_in;
     use serde_json::json;
 
     use crate::claude::allowed_builtins;
-    use crate::orchestrator::fixtures::Harness;
+    use crate::orchestrator::fixtures::{CountingSandboxFactory, Harness};
     use crate::orchestrator::{OrchestratorError, TickReport};
-    use crate::recorded::fixtures::{plan_assigns_frk_1, reads_a_file};
+    use crate::recorded::fixtures::{
+        implement_finishes_frk_1, implement_stops_early, plan_assigns_frk_1, reads_a_file,
+    };
     use crate::session::SessionPurpose;
 
     const NOTHING_TO_DO: &str = "nothing on the board needs doing";
@@ -417,5 +569,149 @@ mod tests {
             }))
         );
         assert!(adapter.started().is_empty());
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn starts_an_assigned_task_in_its_worktree() {
+        let harness = Harness::new("orch-start", |_| {});
+        harness.assigned("FRK-1", "dev-a", "dev-b");
+        let adapter = harness.recorded(Vec::new());
+        let orchestrator = harness.orchestrator(adapter.clone());
+
+        let report = orchestrator.tick().await.expect("the tick runs");
+
+        assert_eq!(acted_on(&report), Some("FRK-1"), "{report:?}");
+        let worktree = harness.worktree("FRK-1");
+        assert!(worktree.is_dir());
+        assert_eq!(
+            git_output_in(&worktree, &["rev-parse", "--abbrev-ref", "HEAD"]),
+            "farik/FRK-1"
+        );
+        let moves = harness.events(&[EventKind::TaskTransitioned]);
+        match &moves.last().expect("a move").body {
+            EventBody::TaskTransitioned(body) => {
+                assert_eq!(body.from.to_string(), "assigned");
+                assert_eq!(body.to.to_string(), "in_progress");
+                assert_eq!(body.actor, TransitionActorWire::Assignee);
+                assert_eq!(body.requested_by, "dev-a");
+            }
+            other => panic!("expected a move, got {other:?}"),
+        }
+        assert!(adapter.started().is_empty());
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn runs_the_implement_session_in_the_worktree_with_the_sandbox() {
+        let harness = Harness::new("orch-implement", |_| {});
+        harness.assigned("FRK-1", "dev-a", "dev-b");
+        let adapter = harness.recorded(vec![implement_finishes_frk_1()]);
+        let sandboxes = Arc::new(CountingSandboxFactory::default());
+        let orchestrator = harness.orchestrator_with(adapter.clone(), sandboxes.clone());
+
+        orchestrator.tick().await.expect("the task starts");
+        let report = orchestrator.tick().await.expect("the session runs");
+
+        assert_eq!(acted_on(&report), Some("FRK-1"), "{report:?}");
+        let started = adapter.started();
+        assert_eq!(started.len(), 1);
+        assert_eq!(started[0].purpose, SessionPurpose::Implement);
+        assert_eq!(started[0].agent_id, "dev-a");
+        assert_eq!(started[0].cwd, harness.worktree("FRK-1"));
+        assert_eq!(sandboxes.created("FRK-1"), 1);
+        let git = &harness.project.deps.git;
+        assert_eq!(
+            git.commit_count("main", "farik/FRK-1").expect("git counts"),
+            1
+        );
+        assert_eq!(
+            git.changed_paths("main", "farik/FRK-1").expect("git lists"),
+            vec!["done.txt".to_string()]
+        );
+        assert_eq!(harness.row("FRK-1").status, TaskStatus::Verifying);
+        assert!(harness.events(&[EventKind::CriterionRecorded]).iter().any(|event| matches!(
+            &event.body,
+            EventBody::CriterionRecorded(body) if body.run_by == CriterionRecordedBodyRunBy::Assignee
+        )));
+        assert!(
+            harness
+                .events(&[EventKind::NoteWritten])
+                .iter()
+                .any(|event| matches!(
+                    &event.body,
+                    EventBody::NoteWritten(body) if body.kind == NoteWrittenBodyKind::Completion
+                ))
+        );
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn resumes_an_implement_session_that_stopped_early() {
+        let harness = Harness::new("orch-resume", |_| {});
+        harness.assigned("FRK-1", "dev-a", "dev-b");
+        let adapter = harness.recorded(vec![implement_stops_early(), implement_finishes_frk_1()]);
+        let orchestrator = harness.orchestrator(adapter.clone());
+
+        orchestrator.tick().await.expect("the task starts");
+        orchestrator.tick().await.expect("the first session runs");
+        assert_eq!(harness.row("FRK-1").status, TaskStatus::InProgress);
+        orchestrator.tick().await.expect("the second session runs");
+
+        let started = adapter.started();
+        assert_eq!(started.len(), 2);
+        assert!(
+            !started[0].initial_prompt.contains("Resuming"),
+            "{}",
+            started[0].initial_prompt
+        );
+        let head = git_output_in(&harness.project.repo.path, &["rev-parse", "farik/FRK-1"]);
+        let prompt = &started[1].initial_prompt;
+        assert!(
+            prompt.contains(&format!("Resuming: last commit {head}")),
+            "{prompt}"
+        );
+        assert!(
+            prompt.contains("done.txt committed; C1 not run yet."),
+            "{prompt}"
+        );
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn works_nearest_to_done_first() {
+        let harness = Harness::new("orch-order-assigned", |_| {});
+        harness.ready("FRK-1");
+        harness.assigned("FRK-2", "dev-a", "dev-b");
+        let adapter = harness.recorded(vec![plan_assigns_frk_1()]);
+        let orchestrator = harness.orchestrator(adapter.clone());
+        let report = orchestrator.tick().await.expect("the tick runs");
+        assert_eq!(acted_on(&report), Some("FRK-2"), "{report:?}");
+        assert!(adapter.started().is_empty());
+
+        let harness = Harness::new("orch-order-in-progress", |_| {});
+        harness.ready("FRK-1");
+        harness.in_progress("FRK-2", "dev-a", "dev-b");
+        harness.assigned("FRK-3", "dev-b", "dev-a");
+        let adapter = harness.recorded(vec![implement_stops_early()]);
+        let orchestrator = harness.orchestrator(adapter.clone());
+        let report = orchestrator.tick().await.expect("the tick runs");
+        assert_eq!(acted_on(&report), Some("FRK-2"), "{report:?}");
+        assert_eq!(adapter.started()[0].purpose, SessionPurpose::Implement);
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn stops_between_ticks() {
+        let harness = Harness::new("orch-stop", |_| {});
+        harness.ready("FRK-1");
+        let adapter = harness.recorded(vec![plan_assigns_frk_1()]);
+        let orchestrator = harness.orchestrator(adapter.clone());
+
+        orchestrator.stop();
+        orchestrator.run_until_idle().await.expect("nothing runs");
+
+        assert!(adapter.started().is_empty());
+        assert_eq!(harness.row("FRK-1").status, TaskStatus::Ready);
     }
 }

@@ -2,10 +2,15 @@
 //! Each tick reads the board, does the first thing on it that needs doing, running at most one
 //! session to its end, and says what it did.
 
+use std::collections::BTreeMap;
 use std::fmt;
-use std::sync::Arc;
+use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex, PoisonError};
 
 use farik_core::contract::TaskId;
+use farik_core::governor::permissions::PermissionTier;
+use farik_core::team::Team;
 use farik_protocol::clock::IdSource;
 use farik_roles::RoleError;
 use farik_store::files::FilesError;
@@ -13,7 +18,7 @@ use farik_store::{GitError, StoreError};
 
 use crate::cost::CostError;
 use crate::daemon::DaemonState;
-use crate::sandbox::{SandboxError, SandboxFactory};
+use crate::sandbox::{Sandbox, SandboxError, SandboxFactory};
 use crate::session::{RuntimeAdapter, RuntimeError};
 use crate::tools::ToolDeps;
 use crate::transitions::TransitionError;
@@ -146,13 +151,21 @@ pub enum TickReport {
 /// outgrows a WIP limit of one.
 pub struct Orchestrator {
     deps: OrchestratorDeps,
+    /// Each task's sandbox, made the first time a session of the task needs one in this process.
+    sandboxes: Mutex<BTreeMap<TaskId, Arc<dyn Sandbox>>>,
+    /// Read before each tick of `run_until_idle`.
+    stopped: AtomicBool,
 }
 
 impl Orchestrator {
     /// An orchestrator that has done nothing yet.
     #[must_use]
     pub fn new(deps: OrchestratorDeps) -> Orchestrator {
-        Orchestrator { deps }
+        Orchestrator {
+            deps,
+            sandboxes: Mutex::new(BTreeMap::new()),
+            stopped: AtomicBool::new(false),
+        }
     }
 
     /// Does the first thing on the board that needs doing, running at most one session to its
@@ -163,6 +176,69 @@ impl Orchestrator {
     /// When the store, the files, git, a sandbox, a role, the budgets, or the runtime fail; a
     /// session that cannot start is `Runtime`, after its start and its end are recorded.
     pub async fn tick(&self) -> Result<TickReport, OrchestratorError> {
-        rules::tick(&self.deps).await
+        rules::tick(self).await
     }
+
+    /// Ticks until a tick is idle or `stop` was called.
+    ///
+    /// # Errors
+    ///
+    /// The first error a tick returns.
+    pub async fn run_until_idle(&self) -> Result<(), OrchestratorError> {
+        while !self.stopped.load(Ordering::SeqCst) {
+            if let TickReport::Idle { .. } = self.tick().await? {
+                break;
+            }
+        }
+        Ok(())
+    }
+
+    /// Stops `run_until_idle` before its next tick. A session already running runs to its end.
+    pub fn stop(&self) {
+        self.stopped.store(true, Ordering::SeqCst);
+    }
+
+    /// The task's sandbox: the one made for it earlier in this process, or a new one rooted at
+    /// its worktree, with the network on when its assignee holds `network`.
+    fn sandbox_for(
+        &self,
+        task_id: &TaskId,
+        team: &Team,
+    ) -> Result<Arc<dyn Sandbox>, OrchestratorError> {
+        let mut sandboxes = self
+            .sandboxes
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        if let Some(sandbox) = sandboxes.get(task_id) {
+            return Ok(Arc::clone(sandbox));
+        }
+        let assignee = self
+            .deps
+            .tools
+            .projections
+            .task(task_id)?
+            .and_then(|row| row.assignee_id);
+        let network = team
+            .agents
+            .iter()
+            .find(|agent| Some(agent.id.as_str()) == assignee.as_deref())
+            .is_some_and(|agent| agent.tiers().contains(&PermissionTier::Network));
+        let sandbox: Arc<dyn Sandbox> = Arc::from(self.deps.sandboxes.create(
+            &self.deps.tools.ids.project_id,
+            task_id,
+            &worktree(&self.deps, task_id),
+            network,
+        )?);
+        sandboxes.insert(task_id.clone(), Arc::clone(&sandbox));
+        Ok(sandbox)
+    }
+}
+
+/// A task's worktree, `.farik/local/worktrees/<id>` (5.14).
+fn worktree(deps: &OrchestratorDeps, task_id: &TaskId) -> PathBuf {
+    deps.tools
+        .files
+        .root()
+        .join(".farik/local/worktrees")
+        .join(task_id.as_str())
 }

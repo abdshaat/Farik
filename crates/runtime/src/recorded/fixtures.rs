@@ -70,3 +70,17 @@ pub fn replays_farik_read_board() -> Transcript {
 pub fn plan_assigns_frk_1() -> Transcript {
     Transcript::from_jsonl(include_str!("transcripts/plan_assigns_frk_1.jsonl"))
 }
+
+/// `dev-a`'s implement session of FRK-1, done: `touch done.txt` through `farik_exec`, a commit of
+/// it, C1 recorded as passed, a completion note, and `verifying` asked for. Hand-written.
+#[must_use]
+pub fn implement_finishes_frk_1() -> Transcript {
+    Transcript::from_jsonl(include_str!("transcripts/implement_finishes_frk_1.jsonl"))
+}
+
+/// `dev-a`'s implement session of FRK-1, stopped early: `touch done.txt`, a commit of it, and a
+/// progress note saying C1 has not run. Hand-written.
+#[must_use]
+pub fn implement_stops_early() -> Transcript {
+    Transcript::from_jsonl(include_str!("transcripts/implement_stops_early.jsonl"))
+}
