@@ -639,6 +639,23 @@ mod tests {
         assert!(reason.contains("C2 is a command criterion"), "{reason}");
         assert_eq!(project.event_count(), before, "nothing is appended");
 
+        let project = a_project("tools-criterion-farik-runs-artifact");
+        in_progress_with(
+            &project,
+            json!({
+                "id": "C2",
+                "text": "done.txt says done.",
+                "verification": { "method": "artifact", "path": "done.txt", "must_contain": ["done"] }
+            }),
+        );
+        let before = project.event_count();
+        let reason = refused_with(
+            record(&project, "dev-b", "C2", true),
+            "criterion_run_by_farik",
+        );
+        assert!(reason.contains("C2 is a artifact criterion"), "{reason}");
+        assert_eq!(project.event_count(), before, "nothing is appended");
+
         let project = a_project("tools-criterion-review");
         in_progress(&project);
         record(&project, "dev-b", "C2", true).expect("the reviewer answers a review criterion");

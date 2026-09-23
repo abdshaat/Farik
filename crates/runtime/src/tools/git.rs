@@ -154,11 +154,15 @@ mod tests {
     #[test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
     fn refuses_a_commit_from_anyone_but_the_assignee() {
-        // `git_remote` for the reviewer too, so that its push is refused for who it is, not its
-        // tier.
+        // `git_remote` for the reviewer too, and both git tiers for the Product Manager, who
+        // neither holds nor reviews the task, so that each is refused for who it is, not its
+        // tiers.
         let project = TestProject::new(
             "tools-git-reviewer",
-            &a_team_of_three(|wire| wire["agents"][2]["grants"] = json!(["git_remote"])),
+            &a_team_of_three(|wire| {
+                wire["agents"][0]["grants"] = json!(["git_local", "git_remote"]);
+                wire["agents"][2]["grants"] = json!(["git_remote"]);
+            }),
         );
         project.filed("FRK-1", "assigned", "task", None);
         project.moved(
@@ -177,18 +181,20 @@ mod tests {
         std::fs::write(worktree.join("src/login/form.ts"), "export {};\n").expect("a file");
         let commit = json!({ "message": "add the login form", "paths": ["src/login/form.ts"] });
 
-        for (name, input) in [
-            ("farik_git_commit", commit.clone()),
-            ("farik_git_push", json!({})),
-        ] {
-            match project.call("dev-b", Some("FRK-1"), name, input) {
-                Err(ToolError::Refused { reason }) => {
-                    assert!(
-                        reason.starts_with("not_the_named_agent: "),
-                        "{name}: {reason}"
-                    );
+        for agent in ["dev-b", "pm"] {
+            for (name, input) in [
+                ("farik_git_commit", commit.clone()),
+                ("farik_git_push", json!({})),
+            ] {
+                match project.call(agent, Some("FRK-1"), name, input) {
+                    Err(ToolError::Refused { reason }) => {
+                        assert!(
+                            reason.starts_with("not_the_named_agent: "),
+                            "{agent} {name}: {reason}"
+                        );
+                    }
+                    other => panic!("{agent} {name}: expected a refusal, got {other:?}"),
                 }
-                other => panic!("{name}: expected a refusal, got {other:?}"),
             }
         }
         let git = &project.deps.git;
