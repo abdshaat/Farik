@@ -6,14 +6,24 @@ use std::fmt;
 use std::io::Write as _;
 use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
+use std::process::Stdio;
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+use std::time::Duration;
 
 use farik_core::governor::permissions::PermissionTier;
 use farik_core::team::validate_team;
 use farik_store::files::yaml_value;
 use serde_json::{Value, json};
+use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncReadExt, AsyncWriteExt, BufReader};
+use tokio::process::{Child, ChildStdin, ChildStdout};
+use tokio::sync::mpsc::{Receiver, Sender, channel};
+use tokio_util::sync::CancellationToken;
 
 use crate::daemon::{DaemonInfo, builtin_tool_tier};
-use crate::session::{McpTransport, RuntimeError, SessionSpec};
+use crate::session::{
+    EndReason, McpTransport, RuntimeAdapter, RuntimeError, SessionEvent, SessionHandle, SessionSpec,
+};
+use crate::stream::StreamParser;
 
 /// The oldest Claude Code Farik runs on: the one its flags and stream were measured against.
 pub const MIN_CLAUDE_VERSION: &str = "2.1.272";
@@ -52,6 +62,12 @@ const API_KEY: &str = "ANTHROPIC_API_KEY";
 const OAUTH_TOKEN: &str = "CLAUDE_CODE_OAUTH_TOKEN";
 const SYSTEM_PROMPT_FILE: &str = "system-prompt.md";
 const MCP_CONFIG_FILE: &str = "mcp.json";
+/// How much of the program's standard error an error end keeps.
+const STDERR_TAIL_BYTES: usize = 4_096;
+/// How long the program has to exit once its result is read.
+const EXIT_GRACE: Duration = Duration::from_secs(5);
+/// Why `send` refuses while a session runs.
+const ONE_MESSAGE: &str = "a Farik session takes one message; resume it for another";
 
 /// A value that must not be printed: its `Debug` says `[redacted]`.
 #[derive(Clone, PartialEq, Eq)]
@@ -117,6 +133,340 @@ pub struct ClaudeConfig {
     pub team_file: PathBuf,
     /// The whole environment the program gets besides its credential; nothing else is inherited.
     pub env: BTreeMap<String, String>,
+}
+
+/// Starts Claude Code sessions as child processes, and resumes the ones it started.
+pub struct ClaudeAdapter {
+    credential: ClaudeCredential,
+    config: ClaudeConfig,
+    specs: Mutex<BTreeMap<String, SessionSpec>>,
+}
+
+impl fmt::Debug for ClaudeAdapter {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("ClaudeAdapter")
+            .field("credential", &self.credential)
+            .field("config", &self.config)
+            .finish_non_exhaustive()
+    }
+}
+
+impl ClaudeAdapter {
+    /// An adapter for the program at `config.claude_path`, once `<claude> --version` says it is
+    /// no older than `MIN_CLAUDE_VERSION`.
+    ///
+    /// # Errors
+    ///
+    /// `Spawn` when the program cannot be run or names no version; `VersionTooOld` when it is
+    /// older than the minimum.
+    pub fn new(
+        credential: ClaudeCredential,
+        config: ClaudeConfig,
+    ) -> Result<ClaudeAdapter, RuntimeError> {
+        let output = std::process::Command::new(&config.claude_path)
+            .arg("--version")
+            .env_clear()
+            .envs(&config.env)
+            .stdin(Stdio::null())
+            .output()
+            .map_err(|error| RuntimeError::Spawn {
+                detail: format!("{} cannot be run: {error}", config.claude_path.display()),
+            })?;
+        check_version(&String::from_utf8_lossy(&output.stdout))?;
+        Ok(ClaudeAdapter {
+            credential,
+            config,
+            specs: Mutex::new(BTreeMap::new()),
+        })
+    }
+
+    fn run(
+        &self,
+        spec: &SessionSpec,
+        prompt: &str,
+        resume: bool,
+    ) -> Result<Box<dyn SessionHandle>, RuntimeError> {
+        if tokio::runtime::Handle::try_current().is_err() {
+            return Err(RuntimeError::Spawn {
+                detail: "a session is started inside a tokio runtime".to_string(),
+            });
+        }
+        let session_dir = self.config.sessions_dir.join(&spec.session_id);
+        let args = claude_args(spec, &self.config, &session_dir, resume)?;
+        write_session_files(spec, &self.config, &session_dir)?;
+        let mut child = tokio::process::Command::new(&self.config.claude_path)
+            .args(&args)
+            .current_dir(&spec.cwd)
+            .env_clear()
+            .envs(child_env(&self.credential, &self.config.env))
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            // Its own group, so that a kill reaches the program's children, which would otherwise
+            // hold its standard output open.
+            .process_group(0)
+            .kill_on_drop(true)
+            .spawn()
+            .map_err(|error| RuntimeError::Spawn {
+                detail: format!(
+                    "{} cannot be run: {error}",
+                    self.config.claude_path.display()
+                ),
+            })?;
+        let (Some(pid), Some(stdin), Some(stdout), Some(stderr)) = (
+            child.id(),
+            child.stdin.take(),
+            child.stdout.take(),
+            child.stderr.take(),
+        ) else {
+            return Err(RuntimeError::Spawn {
+                detail: "the program's pipes were not opened".to_string(),
+            });
+        };
+        let (sender, receiver) = channel(64);
+        let ended = Arc::new(Mutex::new(None));
+        let cancel = CancellationToken::new();
+        let process = Process {
+            child,
+            pid,
+            stdin,
+            stdout,
+            tail: collect_tail(stderr),
+        };
+        tokio::spawn(supervise(
+            process,
+            user_line(prompt),
+            spec.limits.max_wall_clock,
+            sender,
+            Arc::clone(&ended),
+            cancel.clone(),
+        ));
+        Ok(Box::new(ClaudeSession {
+            session_id: spec.session_id.clone(),
+            receiver,
+            ended,
+            cancel,
+        }))
+    }
+}
+
+impl RuntimeAdapter for ClaudeAdapter {
+    fn start_session(&self, spec: SessionSpec) -> Result<Box<dyn SessionHandle>, RuntimeError> {
+        let handle = self.run(&spec, &spec.initial_prompt, false)?;
+        locked(&self.specs).insert(spec.session_id.clone(), spec);
+        Ok(handle)
+    }
+
+    fn resume(
+        &self,
+        session_id: &str,
+        prompt: &str,
+    ) -> Result<Box<dyn SessionHandle>, RuntimeError> {
+        let spec = locked(&self.specs)
+            .get(session_id)
+            .cloned()
+            .ok_or_else(|| RuntimeError::Spawn {
+                detail: format!("this adapter did not start that session: {session_id}"),
+            })?;
+        self.run(&spec, prompt, true)
+    }
+}
+
+/// A running Claude Code session.
+struct ClaudeSession {
+    session_id: String,
+    receiver: Receiver<SessionEvent>,
+    ended: Arc<Mutex<Option<EndReason>>>,
+    cancel: CancellationToken,
+}
+
+impl SessionHandle for ClaudeSession {
+    fn session_id(&self) -> &str {
+        &self.session_id
+    }
+
+    fn events(&mut self) -> &mut Receiver<SessionEvent> {
+        &mut self.receiver
+    }
+
+    fn send(&self, _text: &str) -> Result<(), RuntimeError> {
+        // A message sent mid-turn makes the program answer with a second result nobody reads.
+        Err(match *locked(&self.ended) {
+            Some(EndReason::Aborted) => RuntimeError::Aborted,
+            Some(EndReason::Limit) => RuntimeError::Limit,
+            _ => RuntimeError::Spawn {
+                detail: ONE_MESSAGE.to_string(),
+            },
+        })
+    }
+
+    fn abort(&self) -> Result<(), RuntimeError> {
+        self.cancel.cancel();
+        Ok(())
+    }
+}
+
+/// The program, and the pipes the supervisor reads and writes.
+struct Process {
+    child: Child,
+    pid: u32,
+    stdin: ChildStdin,
+    stdout: ChildStdout,
+    tail: tokio::task::JoinHandle<Vec<u8>>,
+}
+
+/// How the supervisor stopped reading.
+enum Stop {
+    /// The program's `result` line: the session is over, and the program may exit on its own.
+    Result,
+    /// Farik stopped it; the group is killed.
+    Killed(EndReason, String),
+    /// The program closed its output without a result.
+    Exited,
+}
+
+/// Plays the program's output as events until its result, its wall clock, its caller's abort, or
+/// its exit, whichever is first; sends `Ended` at once; then sees the process gone.
+async fn supervise(
+    process: Process,
+    first_line: String,
+    wall_clock: Duration,
+    sender: Sender<SessionEvent>,
+    ended: Arc<Mutex<Option<EndReason>>>,
+    cancel: CancellationToken,
+) {
+    let Process {
+        mut child,
+        pid,
+        mut stdin,
+        stdout,
+        tail,
+    } = process;
+    // A program that stopped reading ends with its output, which is read below.
+    let _ = stdin.write_all(first_line.as_bytes()).await;
+    let _ = stdin.flush().await;
+    let mut lines = BufReader::new(stdout).lines();
+    let mut parser = StreamParser::default();
+    let deadline = tokio::time::sleep(wall_clock);
+    tokio::pin!(deadline);
+    let stop = loop {
+        let line = tokio::select! {
+            () = cancel.cancelled() => {
+                break Stop::Killed(EndReason::Aborted, "aborted by its caller".to_string());
+            }
+            () = &mut deadline => {
+                break Stop::Killed(
+                    EndReason::Limit,
+                    format!("the session ran past its wall clock of {} s", wall_clock.as_secs()),
+                );
+            }
+            () = sender.closed() => {
+                break Stop::Killed(EndReason::Aborted, "nobody reads the session".to_string());
+            }
+            line = lines.next_line() => line,
+        };
+        let Ok(Some(line)) = line else {
+            break Stop::Exited;
+        };
+        if line.trim().is_empty() {
+            continue;
+        }
+        let events = match parser.parse_line(&line) {
+            Ok(events) => events,
+            Err(error) => break Stop::Killed(EndReason::Error, error.to_string()),
+        };
+        let mut is_over = false;
+        for event in events {
+            if let SessionEvent::Ended { reason, .. } = &event {
+                *locked(&ended) = Some(*reason);
+                is_over = true;
+            }
+            let _ = sender.send(event).await;
+        }
+        if is_over {
+            break Stop::Result;
+        }
+    };
+    match stop {
+        Stop::Result => {
+            drop(stdin);
+            if tokio::time::timeout(EXIT_GRACE, child.wait())
+                .await
+                .is_err()
+            {
+                kill_group(pid).await;
+            }
+        }
+        Stop::Killed(reason, detail) => {
+            *locked(&ended) = Some(reason);
+            let _ = sender.send(SessionEvent::Ended { reason, detail }).await;
+            kill_group(pid).await;
+        }
+        Stop::Exited => {
+            drop(stdin);
+            let status = child.wait().await;
+            let tail = tail.await.unwrap_or_default();
+            *locked(&ended) = Some(EndReason::Error);
+            let status = status.map_or_else(|error| error.to_string(), |status| status.to_string());
+            let detail = format!(
+                "the program ended without a result ({status}): {}",
+                String::from_utf8_lossy(&tail).trim()
+            );
+            let _ = sender
+                .send(SessionEvent::Ended {
+                    reason: EndReason::Error,
+                    detail,
+                })
+                .await;
+        }
+    }
+    let _ = child.wait().await;
+    // Whatever the program left behind in its group goes with it.
+    kill_group(pid).await;
+}
+
+/// Reads `stderr` to its end, keeping the last `STDERR_TAIL_BYTES`.
+fn collect_tail(
+    mut stderr: impl AsyncRead + Unpin + Send + 'static,
+) -> tokio::task::JoinHandle<Vec<u8>> {
+    tokio::spawn(async move {
+        let mut tail = Vec::new();
+        let mut buffer = [0_u8; 4_096];
+        while let Ok(read) = stderr.read(&mut buffer).await {
+            if read == 0 {
+                break;
+            }
+            tail.extend_from_slice(&buffer[..read]);
+            if tail.len() > STDERR_TAIL_BYTES {
+                tail.drain(..tail.len() - STDERR_TAIL_BYTES);
+            }
+        }
+        tail
+    })
+}
+
+/// Kills the process group `pid` leads through the shell's `kill` builtin, as the host sandbox
+/// does: no `unsafe`, and `/bin/kill` may be absent. A group already empty is not an error.
+async fn kill_group(pid: u32) {
+    let _ = tokio::process::Command::new("sh")
+        .arg("-c")
+        .arg(format!("kill -s KILL -- -{pid} 2>/dev/null"))
+        .status()
+        .await;
+}
+
+/// The one `stream-json` user line a session is given.
+fn user_line(prompt: &str) -> String {
+    format!(
+        "{{\"type\":\"user\",\"message\":{{\"role\":\"user\",\"content\":{}}}}}\n",
+        Value::String(prompt.to_string())
+    )
+}
+
+/// A poisoned lock only means a task panicked while holding it; what it guards is still whole.
+fn locked<Value>(mutex: &Mutex<Value>) -> MutexGuard<'_, Value> {
+    mutex.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
 /// The built-in tools `tiers` grant, from `BUILTIN_TOOLS`, in name order. Never `Bash`, which
