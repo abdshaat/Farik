@@ -28,6 +28,7 @@ use tokio::signal::unix::{SignalKind, signal};
 use tokio::sync::mpsc::UnboundedReceiver;
 
 use crate::daemon_client::{ClientError, DaemonAddress, exchange, read_daemon_file};
+use crate::doctor::unpriced;
 use crate::project::Project;
 use crate::{CliIo, Engine, Interrupts};
 
@@ -336,8 +337,9 @@ impl Driver {
 
 /// Starts a process driving the project, in order: the lock, the interrupt listener, the
 /// settings (warning on standard error in no-sandbox mode), the credential and `claude` for the
-/// Claude Code engine, the daemon, the adapter, the orchestrator and its command handler, and
-/// recovery (5.15). A step that fails refuses with the lock given back and nothing left running.
+/// Claude Code engine, the prices (warning on standard error of each model no price table prices,
+/// ADR 0015), the daemon, the adapter, the orchestrator and its command handler, and recovery
+/// (5.15). A step that fails refuses with the lock given back and nothing left running.
 ///
 /// # Errors
 ///
@@ -373,6 +375,10 @@ pub(crate) async fn start(project: &Project, io: &mut CliIo<'_>) -> Result<Drive
         ClaudeCredential::ApiKey(_) => "ANTHROPIC_API_KEY",
         ClaudeCredential::OauthToken(_) => "CLAUDE_CODE_OAUTH_TOKEN",
     });
+    // Every session reads the prices, so a table that cannot be read is refused here, once.
+    for sentence in unpriced(project)? {
+        let _ = writeln!(io.stderr, "warning: {sentence}.");
+    }
     let tools = tool_deps(project, io)?;
     let daemon = Arc::new(DaemonState::new(Arc::clone(&tools)));
     let handle = serve(

@@ -24,9 +24,10 @@ use farik_runtime::{RecordedAdapter, RuntimeAdapter, Transcript};
 use farik_store::git::fixtures::TempRepo;
 use serde_json::{Value, json};
 
+use farik_core::team::fixtures::an_agent_wire;
 use project::{
-    a_bare_env, a_project, a_team, events, filed, hold_the_run_lock, moved, no_sandbox, record,
-    record_as, run, run_with, scratch, status_of,
+    a_bare_env, a_project, a_team, a_team_with, events, filed, hold_the_run_lock, moved,
+    no_sandbox, record, record_as, run, run_with, scratch, status_of,
 };
 
 /// An engine replaying `transcripts`, whose Farik tool calls the driving process's daemon answers.
@@ -231,6 +232,66 @@ fn warns_on_every_start_in_no_sandbox_mode() {
     let ran = run(&repository.path, &["answer", &n.to_string(), "Yes."]);
     assert_eq!(ran.code, 0, "{}", ran.err);
     assert!(!warned(&ran.err), "{}", ran.err);
+}
+
+/// What every start says of `claude-unknown-9`, used by `dev`.
+const UNPRICED_WARNING: &str = "warning: no price table prices claude-unknown-9 (used by dev): \
+    its usage is recorded at no cost, and no dollar limit counts it. Add it to \
+    .farik/prices.json to price it.";
+
+/// A team of `pm` and `dev`, with `dev` on a model the shipped table does not price.
+fn a_team_on_an_unpriced_model(name: &str) -> TempRepo {
+    a_team_with(name, |wire| {
+        let mut dev = an_agent_wire("dev", "software_developer");
+        dev["model"] = json!({ "id": "claude-unknown-9" });
+        wire["agents"] = json!([an_agent_wire("pm", "product_manager"), dev]);
+    })
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn warns_on_every_start_of_a_model_no_table_prices() {
+    let repository = a_team_on_an_unpriced_model("run-warns-unpriced");
+    for _ in 0..2 {
+        let ran = run_with(&repository.path, &["run"], |io| {
+            io.engine = recorded(Vec::new());
+        });
+        assert_eq!(ran.code, 0, "{}", ran.err);
+        assert!(
+            ran.err.lines().any(|line| line == UNPRICED_WARNING),
+            "{}",
+            ran.err
+        );
+    }
+
+    let priced = a_team("run-warns-priced");
+    let ran = run_with(&priced.path, &["run"], |io| {
+        io.engine = recorded(Vec::new());
+    });
+    assert_eq!(ran.code, 0, "{}", ran.err);
+    assert!(!ran.err.contains("no price table prices"), "{}", ran.err);
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn refuses_to_start_on_a_price_table_it_cannot_read() {
+    let repository = a_team("run-prices-unreadable");
+    std::fs::write(
+        repository.path.join(".farik/prices.json"),
+        "{\"version\": 2}",
+    )
+    .expect("the override is written");
+    let before = events(&repository, &[]).len();
+
+    let ran = run_with(&repository.path, &["run"], |io| {
+        io.engine = recorded(Vec::new());
+    });
+
+    assert_eq!(ran.code, 1, "{}", ran.out);
+    assert!(ran.err.contains(".farik/prices.json"), "{}", ran.err);
+    assert!(!daemon_file(&repository).exists());
+    lock_is_free(&repository);
+    assert_eq!(events(&repository, &[]).len(), before);
 }
 
 #[test]

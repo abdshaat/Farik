@@ -394,6 +394,78 @@ fn reports_a_team_file_that_cannot_be_read() {
     );
 }
 
+/// A team of `pm` and `dev`, with `dev` on a model the shipped table does not price.
+#[cfg(unix)]
+fn a_team_on_an_unpriced_model(name: &str) -> TempRepo {
+    project::a_team_with(name, |wire| {
+        let mut dev = farik_core::team::fixtures::an_agent_wire("dev", "software_developer");
+        dev["model"] = serde_json::json!({ "id": "claude-unknown-9" });
+        wire["agents"] = serde_json::json!([
+            farik_core::team::fixtures::an_agent_wire("pm", "product_manager"),
+            dev,
+        ]);
+    })
+}
+
+/// What doctor says of `claude-unknown-9`, used by `dev`.
+const UNPRICED_FINDING: &str = ".farik/team.yaml: no price table prices claude-unknown-9 (used by \
+    dev): its usage is recorded at no cost, and no dollar limit counts it. Add it to \
+    .farik/prices.json to price it (5.5)";
+
+#[cfg(unix)]
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn reports_a_model_no_price_table_prices() {
+    let repository = a_team_on_an_unpriced_model("read-doctor-unpriced");
+
+    let ran = run_in(&repository.path, &["doctor"]);
+
+    assert_eq!(ran.code, 1, "{}", ran.out);
+    assert!(
+        ran.out.lines().any(|line| line == UNPRICED_FINDING),
+        "{}",
+        ran.out
+    );
+
+    let mut prices: Value =
+        serde_json::from_str(farik_core::pricing::prices::PRICES_JSON).expect("the shipped table");
+    prices["prices"]["claude-unknown-9"] = prices["prices"]["claude-opus-5"].clone();
+    std::fs::write(
+        repository.path.join(".farik/prices.json"),
+        prices.to_string(),
+    )
+    .expect("the override is written");
+
+    let ran = run_in(&repository.path, &["doctor"]);
+
+    assert_eq!(ran.code, 0, "{}", ran.out);
+    assert!(!ran.out.contains("claude-unknown-9"), "{}", ran.out);
+}
+
+#[cfg(unix)]
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn reports_a_price_table_it_cannot_read() {
+    let repository = a_team_on_an_unpriced_model("read-doctor-prices");
+    std::fs::write(
+        repository.path.join(".farik/prices.json"),
+        "{\"version\": 2}",
+    )
+    .expect("the override is written");
+
+    let ran = run_in(&repository.path, &["doctor"]);
+
+    assert_eq!(ran.code, 1, "{}", ran.out);
+    assert!(ran.out.contains(".farik/prices.json"), "{}", ran.out);
+    assert!(
+        !ran.out
+            .lines()
+            .any(|line| line.starts_with(".farik/team.yaml: no price table prices")),
+        "{}",
+        ran.out
+    );
+}
+
 /// Walks `task` from `draft` through `path`, as the governor's moves.
 #[cfg(unix)]
 fn walked(repository: &TempRepo, task: &str, path: &[&str]) {
