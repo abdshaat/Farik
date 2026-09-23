@@ -83,7 +83,11 @@
         "session.started",
         "session.ended",
         "task.integrated",
-        "pull_request.opened"
+        "pull_request.opened",
+        "question.answered",
+        "human.accepted",
+        "escalation.resolved",
+        "agent.updated"
       ]
     },
     "eventBodyWire": {
@@ -116,7 +120,11 @@
         { "$ref": "#/$defs/sessionStartedBody" },
         { "$ref": "#/$defs/sessionEndedBody" },
         { "$ref": "#/$defs/taskIntegratedBody" },
-        { "$ref": "#/$defs/pullRequestOpenedBody" }
+        { "$ref": "#/$defs/pullRequestOpenedBody" },
+        { "$ref": "#/$defs/questionAnsweredBody" },
+        { "$ref": "#/$defs/humanAcceptedBody" },
+        { "$ref": "#/$defs/escalationResolvedBody" },
+        { "$ref": "#/$defs/agentUpdatedBody" }
       ]
     },
     "contractSummary": {
@@ -210,7 +218,7 @@
     },
     "teamUpdatedBody": {
       "title": "Team Updated Body",
-      "description": "The team file was written.",
+      "description": "The team file was written. A status change alone is agent.updated.",
       "type": "object",
       "additionalProperties": false,
       "required": ["team_name", "agent_ids", "updated_by"],
@@ -310,7 +318,7 @@
     },
     "taskTransitionedBody": {
       "title": "Task Transitioned Body",
-      "description": "The governor moved a contract (docs/SPEC.md section 5.2). requested_by is the agent id that asked, or human, or governor; effects are what the decision recorded with the move; assignee, reviewer, and iteration are the contract's after it; blocker, blocker_resolution, and rejection are the evidence the move was judged on, when the requester brought any.",
+      "description": "The governor moved a contract (docs/SPEC.md section 5.2). requested_by is the agent id that asked, or human, or governor; effects are what the decision recorded with the move; assignee, reviewer, and iteration are the contract's after it; blocker, blocker_resolution, and rejection are the evidence the move was judged on, when the requester brought any; reason is the human's words for a move they asked for.",
       "type": "object",
       "additionalProperties": false,
       "required": ["from", "to", "actor", "requested_by", "gate", "effects", "iteration"],
@@ -329,7 +337,8 @@
         "iteration": { "type": "integer", "minimum": 0, "maximum": 4294967295 },
         "blocker": { "$ref": "#/$defs/blockerWire" },
         "blocker_resolution": { "type": "string" },
-        "rejection": { "$ref": "#/$defs/rejectionWire" }
+        "rejection": { "$ref": "#/$defs/rejectionWire" },
+        "reason": { "type": "string" }
       }
     },
     "transitionRefusedBody": {
@@ -430,6 +439,54 @@
         "url": { "type": "string" },
         "number": { "type": "integer", "minimum": 0, "maximum": 18446744073709551615 },
         "branch": { "type": "string" }
+      }
+    },
+    "questionAnsweredBody": {
+      "title": "Question Answered Body",
+      "description": "The human answered a question an agent asked (docs/SPEC.md section 5.7): question_id is the sequence number of its question.asked, whose task, when it has one, is on this event's envelope too.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["question_id", "answer", "answered_by"],
+      "properties": {
+        "question_id": { "type": "integer", "minimum": 1, "maximum": 18446744073709551615 },
+        "answer": { "type": "string" },
+        "answered_by": { "type": "string" }
+      }
+    },
+    "humanAcceptedBody": {
+      "title": "Human Accepted Body",
+      "description": "The human approved a contract (subject contract, docs/SPEC.md section 5.16 item 2) or accepted a result (subject result, 5.4), with the words they gave, when they gave any.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["subject", "accepted_by"],
+      "properties": {
+        "subject": { "type": "string", "enum": ["contract", "result"] },
+        "accepted_by": { "type": "string" },
+        "message": { "type": "string" }
+      }
+    },
+    "escalationResolvedBody": {
+      "title": "Escalation Resolved Body",
+      "description": "The human resolved an escalation (docs/SPEC.md section 5.7): the contract moved out of escalated to to, and message is what the next session about it is given.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["to", "message", "resolved_by"],
+      "properties": {
+        "to": { "$ref": "#/$defs/taskStatus" },
+        "message": { "type": "string" },
+        "resolved_by": { "type": "string" }
+      }
+    },
+    "agentUpdatedBody": {
+      "title": "Agent Updated Body",
+      "description": "An agent's status changed in the team file (docs/SPEC.md F1): a paused agent takes no work and its sessions end at their next tool call.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["agent_id", "status", "updated_by"],
+      "properties": {
+        "agent_id": { "type": "string" },
+        "status": { "type": "string", "enum": ["active", "paused", "retired"] },
+        "updated_by": { "type": "string" }
       }
     },
     "questionAskedBody": {

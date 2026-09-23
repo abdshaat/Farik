@@ -155,7 +155,7 @@ Files: the two schemas, `command.rs`, `event.rs`, `event/fixtures.rs`, the migra
 - `awaits_approval_from_the_escalation_until_the_next_move` — `escalation.raised { approval }` sets it; `{ risk_gate }` on FRK-2 sets it; `{ iterations }` on FRK-3 does not; FRK-1's `escalated → ready` clears it.
 - `reads_an_older_log_into_the_new_columns` — a version-5 database (`apply_through(.., 5, ..)`) holding an `escalated` row whose last escalation is `approval` and a row with a `question.asked`, once opened: the first awaits approval and the second waits on the human.
 
-- [ ] `feat(protocol): add the human's commands and the events they record`
+- [x] `feat(protocol): add the human's commands and the events they record`
 
 ### Task 3: the gates read the human
 

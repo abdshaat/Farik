@@ -13,13 +13,35 @@
   "$defs": {
     "commandName": {
       "type": "string",
-      "enum": ["task_create", "request_triage"]
+      "enum": [
+        "task_create",
+        "request_triage",
+        "task_transition",
+        "human_accept",
+        "escalation_resolve",
+        "question_answer",
+        "contract_lock",
+        "contract_unlock",
+        "task_integrate",
+        "agent_update",
+        "session_stop",
+        "run_stop"
+      ]
     },
     "commandBodyWire": {
       "title": "Command Body Wire",
+      "description": "Every body shape a command carries. The branches have distinct required properties and none accepts an unknown one, so a body matches exactly one; contract_lock, contract_unlock, and task_integrate share taskIdBody for that reason. Which one a command must carry is decided by command, in the reader.",
       "oneOf": [
         { "$ref": "#/$defs/taskCreateBody" },
-        { "$ref": "#/$defs/requestTriageBody" }
+        { "$ref": "#/$defs/requestTriageBody" },
+        { "$ref": "#/$defs/taskTransitionBody" },
+        { "$ref": "#/$defs/humanAcceptBody" },
+        { "$ref": "#/$defs/escalationResolveBody" },
+        { "$ref": "#/$defs/questionAnswerBody" },
+        { "$ref": "#/$defs/taskIdBody" },
+        { "$ref": "#/$defs/agentUpdateBody" },
+        { "$ref": "#/$defs/sessionStopBody" },
+        { "$ref": "#/$defs/emptyBody" }
       ]
     },
     "taskCreateBody": {
@@ -44,6 +66,109 @@
         "size": { "type": "string", "enum": ["large", "small"] },
         "reason": { "type": "string" }
       }
+    },
+    "taskTransitionBody": {
+      "title": "Task Transition Body",
+      "description": "The human moves a task (docs/SPEC.md section 5.2) from any status but escalated. reason is recorded on the move; from blocked it is also the blocker's resolution, and into escalated it is the escalation's words.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["task_id", "to", "reason"],
+      "properties": {
+        "task_id": { "type": "string", "pattern": "^FRK-[0-9]{1,6}$" },
+        "to": { "$ref": "#/$defs/taskStatus" },
+        "reason": { "type": "string" }
+      }
+    },
+    "humanAcceptBody": {
+      "title": "Human Accept Body",
+      "description": "The human approves a contract awaiting approval, or accepts a result that waits for them (docs/SPEC.md sections 5.4 and 5.16). An epic's result needs a message, which the reader's caller holds it to.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["task_id", "subject"],
+      "properties": {
+        "task_id": { "type": "string", "pattern": "^FRK-[0-9]{1,6}$" },
+        "subject": { "type": "string", "enum": ["contract", "result"] },
+        "message": { "type": "string" }
+      }
+    },
+    "escalationResolveBody": {
+      "title": "Escalation Resolve Body",
+      "description": "The human resolves an escalation (docs/SPEC.md section 5.7) by moving the task to a status, with a message the next session about it is given.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["task_id", "to", "message"],
+      "properties": {
+        "task_id": { "type": "string", "pattern": "^FRK-[0-9]{1,6}$" },
+        "to": { "$ref": "#/$defs/taskStatus" },
+        "message": { "type": "string" }
+      }
+    },
+    "questionAnswerBody": {
+      "title": "Question Answer Body",
+      "description": "The human answers a question an agent asked (docs/SPEC.md section 5.7): question_id is the sequence number of its question.asked.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["question_id", "answer"],
+      "properties": {
+        "question_id": { "type": "integer", "minimum": 1, "maximum": 18446744073709551615 },
+        "answer": { "type": "string" }
+      }
+    },
+    "taskIdBody": {
+      "title": "Task Id Body",
+      "description": "The body of a command that names one task and nothing else: contract_lock, contract_unlock, and task_integrate.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["task_id"],
+      "properties": {
+        "task_id": { "type": "string", "pattern": "^FRK-[0-9]{1,6}$" }
+      }
+    },
+    "agentUpdateBody": {
+      "title": "Agent Update Body",
+      "description": "The human changes an agent's status (docs/SPEC.md F1). Only the status in phase 3; phase 5's team builder widens it.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["agent_id", "status"],
+      "properties": {
+        "agent_id": { "type": "string", "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$" },
+        "status": { "type": "string", "enum": ["active", "paused", "retired"] }
+      }
+    },
+    "sessionStopBody": {
+      "title": "Session Stop Body",
+      "description": "The human stops a running session (docs/SPEC.md section 5.2).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["session_id"],
+      "properties": {
+        "session_id": { "type": "string", "minLength": 1 }
+      }
+    },
+    "emptyBody": {
+      "title": "Empty Body",
+      "description": "The body of a command that carries nothing: run_stop.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {}
+    },
+    "taskStatus": {
+      "title": "Task Status",
+      "description": "Where a contract is in the lifecycle of docs/SPEC.md section 5.2, the contract schema's own list.",
+      "type": "string",
+      "enum": [
+        "draft",
+        "refining",
+        "ready",
+        "assigned",
+        "in_progress",
+        "blocked",
+        "verifying",
+        "rejected",
+        "accepted",
+        "escalated",
+        "cancelled"
+      ]
     }
   }
 }

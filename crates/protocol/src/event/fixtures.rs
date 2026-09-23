@@ -134,22 +134,48 @@ pub fn a_body_wire(kind: EventKind) -> Value {
             "text": "The login page is done and its tests pass.",
             "written_by": "dev-a"
         }),
-        EventKind::ReviewRecorded => {
-            json!({ "reviewer": "dev-b", "criteria_run": 2, "passed": true })
-        }
-        EventKind::QuestionAsked => json!({
-            "question": "Should a login page remember the user?",
-            "asked_by": "maya-chen"
-        }),
-        EventKind::ProductDocWritten => json!({
-            "path": "prd.md",
-            "written_by": "maya-chen"
-        }),
+        EventKind::ReviewRecorded | EventKind::ProductDocWritten => a_record_body_wire(kind),
         EventKind::ToolCalled => a_tool_body_wire("input", "{\"file_path\":\"src/lib.rs\"}"),
         EventKind::ToolDenied => a_tool_body_wire("reason", "tool_not_allowed: Bash has no tier"),
         EventKind::ToolReturned => a_tool_body_wire("output", "{\"type\":\"text\"}"),
         EventKind::SessionStarted | EventKind::SessionEnded => a_session_body_wire(kind),
         EventKind::TaskIntegrated | EventKind::PullRequestOpened => an_integration_body_wire(kind),
+        EventKind::QuestionAsked
+        | EventKind::QuestionAnswered
+        | EventKind::HumanAccepted
+        | EventKind::EscalationResolved
+        | EventKind::AgentUpdated => a_human_body_wire(kind),
+    }
+}
+
+/// A review summed up, or a product document written.
+fn a_record_body_wire(kind: EventKind) -> Value {
+    if kind == EventKind::ReviewRecorded {
+        json!({ "reviewer": "dev-b", "criteria_run": 2, "passed": true })
+    } else {
+        json!({ "path": "prd.md", "written_by": "maya-chen" })
+    }
+}
+
+/// A body of a question to the human or of the human's own acts: a question, an answer to question
+/// 3, an acceptance of a result with its words, a resolution back to `refining`, and a pause of
+/// `dev-a`.
+fn a_human_body_wire(kind: EventKind) -> Value {
+    match kind {
+        EventKind::QuestionAsked => json!({
+            "question": "Should a login page remember the user?",
+            "asked_by": "maya-chen"
+        }),
+        EventKind::QuestionAnswered => {
+            json!({ "question_id": 3, "answer": "Yes.", "answered_by": "human" })
+        }
+        EventKind::HumanAccepted => {
+            json!({ "subject": "result", "accepted_by": "human", "message": "Both look right." })
+        }
+        EventKind::EscalationResolved => {
+            json!({ "to": "refining", "message": "Split it by page.", "resolved_by": "human" })
+        }
+        _ => json!({ "agent_id": "dev-a", "status": "paused", "updated_by": "human" }),
     }
 }
 

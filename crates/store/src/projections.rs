@@ -6,7 +6,7 @@ use std::sync::Arc;
 use farik_core::contract::{Risk, TaskId, TaskKind, TaskStatus};
 use farik_protocol::event::{
     ContractSummary, ContractSummaryKind, ContractSummaryRisk, ContractSummaryStatus,
-    CostRecordedBody, EventBody, FarikEvent, RequestTriagedBodySize,
+    CostRecordedBody, EscalationRaisedBodyReason, EventBody, FarikEvent, RequestTriagedBodySize,
 };
 use rusqlite::{Connection, Transaction, TransactionBehavior};
 
@@ -17,6 +17,9 @@ use crate::event_log::{EventLog, EventQuery, TASK_ID_PREFIX};
 ///
 /// Every field comes from an event a command or the governor emits. The sprint arrives with phase
 /// 4, which has the sprints; a column nothing can write is a column no test can hold to anything.
+// The flags are what a board shows, each a yes or no a row is filtered by; a state machine of them
+// would be a second copy of the lifecycle the status already holds.
+#[allow(clippy::struct_excessive_bools)]
 #[derive(Debug, Clone, PartialEq)]
 pub struct TaskProjection {
     /// The contract this is about.
@@ -52,6 +55,12 @@ pub struct TaskProjection {
     /// set by its move into `accepted`, cleared by `task.integrated` (5.14). Never set for an
     /// epic, whose children carry the branches.
     pub awaiting_integration: bool,
+    /// Whether a question asked about the contract is still unanswered (5.7): a `question.asked`
+    /// counts one up and a `question.answered` one down.
+    pub waiting_on_human: bool,
+    /// Whether the contract waits for the human's approval (5.16 item 2): set by an
+    /// `escalation.raised` with reason `approval` or `risk_gate`, cleared by its next move.
+    pub awaiting_approval: bool,
 }
 
 /// A key that costs are summed by (`docs/SPEC.md` 5.5).
@@ -312,7 +321,8 @@ const SELECT_PROJECTION: &str = "SELECT task_id, kind, parent, title, status, ri
                                  locked, updated_seq, \
                                  (SELECT COALESCE(SUM(cost_usd), 0.0) FROM cost_records \
                                   WHERE cost_records.task_id = task_projections.task_id), \
-                                 assignee_id, reviewer_id, iteration, awaiting_integration \
+                                 assignee_id, reviewer_id, iteration, awaiting_integration, \
+                                 open_questions > 0, awaiting_approval \
                                  FROM task_projections";
 
 /// The board is ordered by the number in the task id, not by the id itself: `FRK-10` sorts before
@@ -348,6 +358,8 @@ type ProjectedRow = (
     Option<String>,
     i64,
     bool,
+    bool,
+    bool,
 );
 
 fn projected_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ProjectedRow> {
@@ -366,6 +378,8 @@ fn projected_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ProjectedRow> {
         row.get(11)?,
         row.get(12)?,
         row.get(13)?,
+        row.get(14)?,
+        row.get(15)?,
     ))
 }
 
@@ -391,6 +405,8 @@ fn projection_of_row(row: ProjectedRow) -> Result<TaskProjection, StoreError> {
         reviewer_id,
         iteration,
         awaiting_integration,
+        waiting_on_human,
+        awaiting_approval,
     ) = row;
     let refuse = |what: &str, value: &str| StoreError::InvalidEvent {
         detail: format!("the projection of {task_id} holds {value:?} as its {what}"),
@@ -415,6 +431,8 @@ fn projection_of_row(row: ProjectedRow) -> Result<TaskProjection, StoreError> {
         iteration: u32::try_from(iteration)
             .map_err(|_| refuse("iteration", &iteration.to_string()))?,
         awaiting_integration,
+        waiting_on_human,
+        awaiting_approval,
     })
 }
 
@@ -469,7 +487,7 @@ fn apply_to(transaction: &Transaction<'_>, event: &FarikEvent) -> Result<(), Sto
                 // row's kind says whether there is a branch to integrate.
                 "UPDATE task_projections
                  SET status = ?2, assignee_id = ?3, reviewer_id = ?4, iteration = ?5,
-                     updated_seq = ?6,
+                     updated_seq = ?6, awaiting_approval = 0,
                      awaiting_integration = CASE WHEN ?2 = 'accepted' THEN kind = 'task'
                                                  ELSE awaiting_integration END
                  WHERE task_id = ?1",
@@ -489,6 +507,9 @@ fn apply_to(transaction: &Transaction<'_>, event: &FarikEvent) -> Result<(), Sto
              WHERE task_id = ?1",
             (&id, seq),
         ),
+        EventBody::QuestionAsked(_)
+        | EventBody::QuestionAnswered(_)
+        | EventBody::EscalationRaised(_) => apply_waiting(transaction, &id, &event.body, seq),
         EventBody::DriftDetected(_)
         | EventBody::PullRequestOpened(_)
         | EventBody::ProjectScanned(_)
@@ -497,18 +518,60 @@ fn apply_to(transaction: &Transaction<'_>, event: &FarikEvent) -> Result<(), Sto
         | EventBody::CostRecorded(_)
         | EventBody::BudgetExhausted(_)
         | EventBody::TransitionRefused(_)
-        | EventBody::EscalationRaised(_)
         | EventBody::ContractEvaluated(_)
         | EventBody::CriterionRecorded(_)
         | EventBody::NoteWritten(_)
         | EventBody::ReviewRecorded(_)
-        | EventBody::QuestionAsked(_)
         | EventBody::ProductDocWritten(_)
         | EventBody::ToolCalled(_)
         | EventBody::ToolDenied(_)
         | EventBody::ToolReturned(_)
         | EventBody::SessionStarted(_)
-        | EventBody::SessionEnded(_) => Ok(()),
+        | EventBody::SessionEnded(_)
+        | EventBody::HumanAccepted(_)
+        | EventBody::EscalationResolved(_)
+        | EventBody::AgentUpdated(_) => Ok(()),
+    }
+}
+
+/// The two columns that say what the board waits on the human for: an open question (5.7) and an
+/// approval (5.16 item 2).
+fn apply_waiting(
+    transaction: &Transaction<'_>,
+    id: &str,
+    body: &EventBody,
+    seq: i64,
+) -> Result<(), StoreError> {
+    match body {
+        EventBody::QuestionAsked(_) => update(
+            transaction,
+            "UPDATE task_projections SET open_questions = open_questions + 1, updated_seq = ?2
+             WHERE task_id = ?1",
+            (id, seq),
+        ),
+        EventBody::QuestionAnswered(_) => update(
+            transaction,
+            "UPDATE task_projections SET open_questions = max(0, open_questions - 1),
+                 updated_seq = ?2
+             WHERE task_id = ?1",
+            (id, seq),
+        ),
+        EventBody::EscalationRaised(body) => update(
+            transaction,
+            // The two reasons of the `ContractRequiresHuman` gate; any other escalation is not
+            // waiting on an approval.
+            "UPDATE task_projections SET awaiting_approval = ?2, updated_seq = ?3
+             WHERE task_id = ?1",
+            (
+                id,
+                matches!(
+                    body.reason,
+                    EscalationRaisedBodyReason::Approval | EscalationRaisedBodyReason::RiskGate
+                ),
+                seq,
+            ),
+        ),
+        _ => Ok(()),
     }
 }
 
@@ -762,6 +825,8 @@ mod tests {
                 reviewer_id: None,
                 iteration: 0,
                 awaiting_integration: false,
+                waiting_on_human: false,
+                awaiting_approval: false,
             }]
         );
         assert_eq!(projections.cursor().expect("the cursor reads"), 1);
@@ -802,6 +867,8 @@ mod tests {
                 reviewer_id: None,
                 iteration: 0,
                 awaiting_integration: false,
+                waiting_on_human: false,
+                awaiting_approval: false,
             }
         );
     }
@@ -1000,7 +1067,7 @@ mod tests {
             log.applied_migrations().expect("the ledger reads"),
             migrations::known_versions()
         );
-        assert_eq!(migrations::known_versions(), vec![1, 2, 3, 4, 5]);
+        assert_eq!(migrations::known_versions(), vec![1, 2, 3, 4, 5, 6]);
     }
 
     #[test]
@@ -1279,6 +1346,129 @@ mod tests {
         assert!(awaiting(&projections, "FRK-1"));
         assert!(!awaiting(&projections, "FRK-2"));
         assert!(!awaiting(&projections, "FRK-3"));
+        let _ = std::fs::remove_dir_all(&directory);
+    }
+
+    /// The fixture event of `kind` about `task_id` with `body` in place of the fixture's.
+    fn with_body(kind: EventKind, task_id: &str, body: serde_json::Value) -> NewEvent {
+        let mut wire = an_event_wire(kind);
+        wire["task_id"] = json!(task_id);
+        wire["body"] = body;
+        let event = event_from_value(&wire).expect("the fixture is schema-valid");
+        NewEvent {
+            recorded_at: event.envelope.recorded_at,
+            ids: event.envelope.ids,
+            body: event.body,
+        }
+    }
+
+    fn row_of(projections: &Projections, task_id: &str) -> TaskProjection {
+        projections
+            .task(&task_id.parse().expect("a task id"))
+            .expect("the read works")
+            .expect("on the board")
+    }
+
+    #[test]
+    fn waits_on_the_human_while_a_question_is_open() {
+        let (log, projections) = a_board();
+        record(&log, &projections, &about(EventKind::TaskCreated, "FRK-1"));
+        assert!(!row_of(&projections, "FRK-1").waiting_on_human);
+        let first = record(
+            &log,
+            &projections,
+            &about(EventKind::QuestionAsked, "FRK-1"),
+        );
+        let second = record(
+            &log,
+            &projections,
+            &about(EventKind::QuestionAsked, "FRK-1"),
+        );
+        assert!(row_of(&projections, "FRK-1").waiting_on_human);
+
+        let answer = |question: &FarikEvent| {
+            with_body(
+                EventKind::QuestionAnswered,
+                "FRK-1",
+                json!({
+                    "question_id": question.envelope.seq,
+                    "answer": "Yes.",
+                    "answered_by": "human"
+                }),
+            )
+        };
+        record(&log, &projections, &answer(&first));
+        assert!(
+            row_of(&projections, "FRK-1").waiting_on_human,
+            "one question is still open"
+        );
+        record(&log, &projections, &answer(&second));
+        assert!(!row_of(&projections, "FRK-1").waiting_on_human);
+    }
+
+    #[test]
+    fn awaits_approval_from_the_escalation_until_the_next_move() {
+        let (log, projections) = a_board();
+        for task in ["FRK-1", "FRK-2", "FRK-3"] {
+            record(&log, &projections, &about(EventKind::TaskCreated, task));
+        }
+        let escalation = |task: &str, reason: &str| {
+            with_body(
+                EventKind::EscalationRaised,
+                task,
+                json!({ "reason": reason, "detail": "contract_requires_human" }),
+            )
+        };
+        record(&log, &projections, &escalation("FRK-1", "approval"));
+        record(&log, &projections, &escalation("FRK-2", "risk_gate"));
+        record(&log, &projections, &escalation("FRK-3", "iterations"));
+        assert!(row_of(&projections, "FRK-1").awaiting_approval);
+        assert!(row_of(&projections, "FRK-2").awaiting_approval);
+        assert!(!row_of(&projections, "FRK-3").awaiting_approval);
+
+        record(&log, &projections, &moved("FRK-1", "escalated", "ready"));
+        assert!(!row_of(&projections, "FRK-1").awaiting_approval);
+        assert!(row_of(&projections, "FRK-2").awaiting_approval);
+    }
+
+    #[test]
+    fn reads_an_older_log_into_the_new_columns() {
+        let directory = std::env::temp_dir().join(format!(
+            "farik-older-human-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        let _ = std::fs::remove_dir_all(&directory);
+        std::fs::create_dir_all(&directory).expect("a directory under the temporary directory");
+        let path = directory.join("farik.db");
+        {
+            let mut connection = rusqlite::Connection::open(&path).expect("the database opens");
+            migrations::apply_through(&mut connection, 5, at(9)).expect("version 5 applies");
+            connection
+                .execute_batch(
+                    "INSERT INTO events (seq, recorded_at, team_id, project_id, task_id, kind, body)
+                     VALUES
+                       (1, '2026-09-17T10:00:00Z', 'farik', 'farik', 'FRK-1', 'task.transitioned',
+                        '{\"from\":\"refining\",\"to\":\"escalated\",\"actor\":\"governor\",\"requested_by\":\"governor\",\"gate\":\"contract_requires_human\",\"effects\":[\"raise_escalation\"],\"iteration\":0}'),
+                       (2, '2026-09-17T10:00:00Z', 'farik', 'farik', 'FRK-1', 'escalation.raised',
+                        '{\"reason\":\"approval\",\"detail\":\"contract_requires_human\"}'),
+                       (3, '2026-09-17T10:00:00Z', 'farik', 'farik', 'FRK-2', 'question.asked',
+                        '{\"question\":\"Should done.txt be empty?\",\"asked_by\":\"pm\"}');
+                     INSERT INTO task_projections
+                         (task_id, kind, parent, title, status, risk, triaged, locked, updated_seq)
+                     VALUES ('FRK-1', 'epic', NULL, 'an epic', 'escalated', 'low', 1, 0, 2),
+                            ('FRK-2', 'task', NULL, 'a task', 'refining', 'low', 1, 0, 3);
+                     INSERT INTO projection_cursor (id, seq) VALUES (1, 3);",
+                )
+                .expect("the older rows are written");
+        }
+        let log = Arc::new(open_event_log(&path, at(10)).expect("the log opens"));
+        let projections = Projections { log };
+
+        assert!(row_of(&projections, "FRK-1").awaiting_approval);
+        assert!(!row_of(&projections, "FRK-1").waiting_on_human);
+        assert!(row_of(&projections, "FRK-2").waiting_on_human);
+        assert!(!row_of(&projections, "FRK-2").awaiting_approval);
         let _ = std::fs::remove_dir_all(&directory);
     }
 

@@ -275,6 +275,7 @@ impl Transitions {
                 failed_criterion_ids: rejection.failed_criterion_ids.clone(),
                 reasons: rejection.reasons.clone(),
             }),
+            reason: None,
         };
         self.append(request, ask, EventBody::TaskTransitioned(body))?;
         for effect in &decision.effects {
