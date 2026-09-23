@@ -187,7 +187,8 @@ fn project_document(scan: &ProjectScan, library: &CriteriaLibrary) -> String {
 ///
 /// The team editor (F1) is how a person renames them, adds the other roles, and changes the models.
 /// Both get `claude-opus-5` at `high`, which is what `docs/SPEC.md` 8.2 ships as the default for the
-/// Product Manager, the Architect and the Developer.
+/// Product Manager, the Architect and the Developer. It sets no dollar limit, which is the user's
+/// to set (ADR 0015).
 ///
 /// # Errors
 ///
@@ -214,7 +215,7 @@ fn starter_team(project: &str) -> Result<Team, String> {
                 "model": { "id": "claude-opus-5", "effort": "high" }
             }
         ],
-        "budgets": { "daily_usd": 20 },
+        "budgets": {},
         "policy": {
             "human_accepts_contracts": "high_risk",
             "wip_limit_per_agent": 1,
@@ -270,6 +271,18 @@ mod tests {
             ],
             "8.2 ships Opus 5 at high for the Product Manager, the Architect and the Developer, and \
              this team is two of those three"
+        );
+    }
+
+    #[test]
+    fn starts_a_project_with_no_dollar_limit() {
+        let team = starter_team("notes").expect("a team");
+        assert_eq!(team.budgets.daily_usd, None, "Farik ships no daily budget");
+        assert!(team.budgets.session.is_none());
+        assert_eq!(
+            team.rules().max_task_budget_usd,
+            None,
+            "nor a cap on a task"
         );
     }
 
