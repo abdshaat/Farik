@@ -142,7 +142,17 @@ pub fn a_body_wire(kind: EventKind) -> Value {
             "path": "prd.md",
             "written_by": "maya-chen"
         }),
+        EventKind::ToolCalled => a_tool_body_wire("input", "{\"file_path\":\"src/lib.rs\"}"),
+        EventKind::ToolDenied => a_tool_body_wire("reason", "tool_not_allowed: Bash has no tier"),
+        EventKind::ToolReturned => a_tool_body_wire("output", "{\"type\":\"text\"}"),
     }
+}
+
+/// A `tool.` body of a `Read`, with its one field of its own.
+fn a_tool_body_wire(field: &str, value: &str) -> Value {
+    let mut body = json!({ "tool": "Read" });
+    body[field] = json!(value);
+    body
 }
 
 /// A schema-valid contract summary: a task in `draft`, with no parent.

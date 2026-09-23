@@ -5,6 +5,8 @@
 pub mod cost;
 /// Contract exit criteria, run and judged.
 pub mod criteria;
+/// The local service: the hooks around every tool call, and Farik's tools over MCP.
+pub mod daemon;
 /// Commands run on an agent's behalf, and what came of them.
 pub mod exec;
 /// A session's system prompt, assembled in one fixed order.

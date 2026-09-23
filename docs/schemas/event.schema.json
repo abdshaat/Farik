@@ -75,7 +75,10 @@
         "criterion.recorded",
         "note.written",
         "question.asked",
-        "product_doc.written"
+        "product_doc.written",
+        "tool.called",
+        "tool.denied",
+        "tool.returned"
       ]
     },
     "eventBodyWire": {
@@ -100,7 +103,10 @@
         { "$ref": "#/$defs/criterionRecordedBody" },
         { "$ref": "#/$defs/noteWrittenBody" },
         { "$ref": "#/$defs/questionAskedBody" },
-        { "$ref": "#/$defs/productDocWrittenBody" }
+        { "$ref": "#/$defs/productDocWrittenBody" },
+        { "$ref": "#/$defs/toolCalledBody" },
+        { "$ref": "#/$defs/toolDeniedBody" },
+        { "$ref": "#/$defs/toolReturnedBody" }
       ]
     },
     "contractSummary": {
@@ -400,6 +406,43 @@
       "properties": {
         "path": { "type": "string" },
         "written_by": { "type": "string" }
+      }
+    },
+    "toolCalledBody": {
+      "title": "Tool Called Body",
+      "description": "The PreToolUse hook allowed a tool call (docs/SPEC.md sections 5.6 and 8.2). input is the compact JSON of the call's input, cut to at most 4 KiB, ending in [cut at 4 KiB] when it was cut. The envelope names the session, the agent, and the task when the session has one.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["tool", "input"],
+      "properties": {
+        "tool": { "type": "string" },
+        "tool_use_id": { "type": "string" },
+        "input": { "type": "string" }
+      }
+    },
+    "toolDeniedBody": {
+      "title": "Tool Denied Body",
+      "description": "The PreToolUse hook denied a tool call (docs/SPEC.md sections 5.6 and 8.2). reason starts with the refusal's kind in snake_case, then a colon, then what it says.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["tool", "reason"],
+      "properties": {
+        "tool": { "type": "string" },
+        "tool_use_id": { "type": "string" },
+        "reason": { "type": "string" }
+      }
+    },
+    "toolReturnedBody": {
+      "title": "Tool Returned Body",
+      "description": "A tool call the hook allowed returned (docs/SPEC.md section 8.2). output is the compact JSON of what it returned, cut to at most 4 KiB, ending in [cut at 4 KiB] when it was cut. A call that failed leaves no tool.returned.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["tool", "output"],
+      "properties": {
+        "tool": { "type": "string" },
+        "tool_use_id": { "type": "string" },
+        "output": { "type": "string" },
+        "duration_ms": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 }
       }
     }
   }

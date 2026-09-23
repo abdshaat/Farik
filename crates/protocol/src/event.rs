@@ -27,7 +27,8 @@ pub use crate::generated::event::{
     EscalationRaisedBodyReason, EventKind, NoteWrittenBody, NoteWrittenBodyKind,
     ProductDocWrittenBody, ProjectScannedBody, QuestionAskedBody, RequestTriagedBody,
     RequestTriagedBodySize, TaskCreatedBody, TaskTransitionedBody, TaskTransitionedBodyEffectsItem,
-    TeamUpdatedBody, TokenUsage, TransitionRefusedBody, TransitionRefusedBodyRefusal,
+    TeamUpdatedBody, TokenUsage, ToolCalledBody, ToolDeniedBody, ToolReturnedBody,
+    TransitionRefusedBody, TransitionRefusedBodyRefusal,
 };
 
 use crate::generated::event::FarikEvent as EventWire;
@@ -52,7 +53,7 @@ static VALIDATOR: LazyLock<Validator> = LazyLock::new(|| {
 });
 
 /// One validator per kind, each holding that kind's body schema alone. The event schema types
-/// `body` as a choice of nineteen shapes, so it can only say that a body matched none of them; these
+/// `body` as a choice of twenty-two shapes, so it can only say that a body matched none of them; these
 /// say what is wrong with the one shape the event's `kind` asked for.
 static BODY_VALIDATORS: LazyLock<Vec<Validator>> = LazyLock::new(|| {
     let schema: Value = serde_json::from_str(SCHEMA_JSON).expect(
@@ -104,6 +105,9 @@ fn body_def_name(kind: EventKind) -> &'static str {
         EventKind::NoteWritten => "noteWrittenBody",
         EventKind::QuestionAsked => "questionAskedBody",
         EventKind::ProductDocWritten => "productDocWrittenBody",
+        EventKind::ToolCalled => "toolCalledBody",
+        EventKind::ToolDenied => "toolDeniedBody",
+        EventKind::ToolReturned => "toolReturnedBody",
     }
 }
 
@@ -132,7 +136,8 @@ pub fn is_about_one_contract(kind: EventKind) -> bool {
 /// The field naming who acted, for the kinds that name one, and nothing for `drift.detected`,
 /// `project.scanned`, `cost.recorded`, `budget.exhausted`, `escalation.raised`, and
 /// `contract.evaluated`, which record what Farik itself found, counted, or judged; the move or the
-/// refusal they come with names who asked.
+/// refusal they come with names who asked. Nor for the three `tool.` kinds, whose envelope names
+/// the agent and the session that called.
 fn attribution(body: &mut EventBody) -> Option<(&'static str, &mut String)> {
     match body {
         EventBody::TaskCreated(body) => Some(("created_by", &mut body.created_by)),
@@ -153,13 +158,16 @@ fn attribution(body: &mut EventBody) -> Option<(&'static str, &mut String)> {
         | EventBody::CostRecorded(_)
         | EventBody::BudgetExhausted(_)
         | EventBody::EscalationRaised(_)
-        | EventBody::ContractEvaluated(_) => None,
+        | EventBody::ContractEvaluated(_)
+        | EventBody::ToolCalled(_)
+        | EventBody::ToolDenied(_)
+        | EventBody::ToolReturned(_) => None,
     }
 }
 
 /// Every kind the log holds in this phase, in the order `docs/schemas/event.schema.json` lists
 /// them. The step that adds a kind adds it here.
-pub const EVERY_KIND: [EventKind; 19] = [
+pub const EVERY_KIND: [EventKind; 22] = [
     EventKind::TaskCreated,
     EventKind::RequestTriaged,
     EventKind::ContractWritten,
@@ -179,6 +187,9 @@ pub const EVERY_KIND: [EventKind; 19] = [
     EventKind::NoteWritten,
     EventKind::QuestionAsked,
     EventKind::ProductDocWritten,
+    EventKind::ToolCalled,
+    EventKind::ToolDenied,
+    EventKind::ToolReturned,
 ];
 
 /// The ids an event is stamped with: which team and project it belongs to, and the contract, agent
@@ -274,6 +285,15 @@ pub enum EventBody {
     /// The Product Manager wrote a product document.
     #[serde(rename = "product_doc.written")]
     ProductDocWritten(ProductDocWrittenBody),
+    /// The `PreToolUse` hook allowed a tool call.
+    #[serde(rename = "tool.called")]
+    ToolCalled(ToolCalledBody),
+    /// The `PreToolUse` hook denied a tool call.
+    #[serde(rename = "tool.denied")]
+    ToolDenied(ToolDeniedBody),
+    /// A tool call returned, as the `PostToolUse` hook reported it.
+    #[serde(rename = "tool.returned")]
+    ToolReturned(ToolReturnedBody),
 }
 
 impl EventBody {
@@ -300,6 +320,9 @@ impl EventBody {
             Self::NoteWritten(_) => EventKind::NoteWritten,
             Self::QuestionAsked(_) => EventKind::QuestionAsked,
             Self::ProductDocWritten(_) => EventKind::ProductDocWritten,
+            Self::ToolCalled(_) => EventKind::ToolCalled,
+            Self::ToolDenied(_) => EventKind::ToolDenied,
+            Self::ToolReturned(_) => EventKind::ToolReturned,
         }
     }
 }
@@ -448,7 +471,7 @@ pub fn event_from_value(input: &Value) -> Result<FarikEvent, Vec<ValidationError
 }
 
 /// The schema's own failures. A failure inside `body` is reported by the schema once, at `/body`,
-/// because `body` there is a choice of nineteen shapes and the schema can only say that none matched.
+/// because `body` there is a choice of twenty-two shapes and the schema can only say that none matched.
 /// The event's `kind` says which one it was meant to be, so such a failure is asked again of that
 /// shape alone and reported where it actually is.
 fn schema_errors(input: &Value) -> Vec<ValidationError> {
@@ -829,7 +852,7 @@ mod tests {
 
     #[test]
     fn reports_a_malformed_field_inside_a_body_at_its_own_path() {
-        // The schema types `body` as a choice of nineteen shapes, so it reports a failure anywhere
+        // The schema types `body` as a choice of twenty-two shapes, so it reports a failure anywhere
         // inside one at `/body`, with the whole body echoed back. The kind says which shape the
         // body was meant to be, so the reader checks it again against that one alone.
         let mut input = an_event_wire(EventKind::ProjectScanned);

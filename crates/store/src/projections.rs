@@ -483,7 +483,10 @@ fn apply_to(transaction: &Transaction<'_>, event: &FarikEvent) -> Result<(), Sto
         | EventBody::CriterionRecorded(_)
         | EventBody::NoteWritten(_)
         | EventBody::QuestionAsked(_)
-        | EventBody::ProductDocWritten(_) => Ok(()),
+        | EventBody::ProductDocWritten(_)
+        | EventBody::ToolCalled(_)
+        | EventBody::ToolDenied(_)
+        | EventBody::ToolReturned(_) => Ok(()),
     }
 }
 

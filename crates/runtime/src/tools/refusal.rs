@@ -64,7 +64,7 @@ pub(crate) enum Refusal {
 
 impl Refusal {
     /// The kind, then what it says.
-    fn reason(&self) -> String {
+    pub(crate) fn reason(&self) -> String {
         let (kind, detail) = match self {
             Self::AgentNotActive { agent_id, status } => (
                 "agent_not_active",

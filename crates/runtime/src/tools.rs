@@ -27,10 +27,10 @@ use crate::transitions::Transitions;
 mod contracts;
 mod exec;
 #[cfg(test)]
-mod fixtures;
+pub(crate) mod fixtures;
 mod git;
 mod reading;
-mod refusal;
+pub(crate) mod refusal;
 mod work;
 
 use refusal::Refusal;
