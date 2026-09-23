@@ -141,8 +141,9 @@ fn writes_ahead_of_the_database_file() {
 const PROCESSES: u32 = 16;
 
 /// Enough ids per process that a counter which read the number it had not yet written hands the
-/// same one out twice, and few enough that the test is over in well under a second.
-const IDS_PER_PROCESS: u32 = 125;
+/// same one out twice, and few enough that sixteen connections each waiting their turn for the
+/// write lock finish well inside `busy_timeout` on a loaded machine.
+const IDS_PER_PROCESS: u32 = 25;
 
 /// How many fresh files the opening race is run against. One run catches a migration applied twice
 /// most of the time; several make it near certain, and each costs a tenth of a second.

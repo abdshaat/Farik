@@ -13,7 +13,7 @@ use farik_protocol::event::{
     EventEnvelope, EventKind, FarikEvent, NewEvent, body_to_value, event_from_value, event_to_value,
 };
 use rusqlite::types::Value as SqlValue;
-use rusqlite::{Connection, params_from_iter};
+use rusqlite::{Connection, TransactionBehavior, params_from_iter};
 use serde_json::{Map, Value};
 
 use crate::error::StoreError;
@@ -215,7 +215,9 @@ impl EventLog {
     /// no longer fits the contract schema's pattern; `InvalidEvent` never.
     pub fn next_task_id(&self) -> Result<TaskId, StoreError> {
         let mut connection = self.connection();
-        let transaction = connection.transaction()?;
+        // `Immediate` takes the write lock before the counter is touched, so a connection waiting
+        // for it waits out `busy_timeout` rather than being refused at once for having read first.
+        let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let next: i64 = transaction.query_row(
             "INSERT INTO task_counters (prefix, next) VALUES (?1, 1)
              ON CONFLICT (prefix) DO UPDATE SET next = next + 1
