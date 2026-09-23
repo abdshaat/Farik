@@ -9,7 +9,8 @@ use std::io::{Read as _, Write as _};
 use std::net::Ipv4Addr;
 use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex, MutexGuard};
+use std::pin::Pin;
+use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
 
 use axum::extract::{Request, State};
 use axum::http::{StatusCode, header};
@@ -26,9 +27,15 @@ use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
+use farik_protocol::command::{
+    Command, CommandReply, ReplyKind, command_from_value, reply_to_value,
+};
+use serde_json::Value;
+
 use self::mcp::FarikMcp;
 
 use crate::exec::Executor;
+use crate::orchestrator::{CommandError, CommandReport, reply_of};
 use crate::tools::{ToolContext, ToolDeps};
 
 #[cfg(test)]
@@ -90,12 +97,21 @@ pub(crate) struct Session {
     pub(crate) stop_reason: Option<String>,
 }
 
-/// What the daemon holds: the project's tools, the sessions it answers for, and the notice a
-/// session's loop waits on for a stop.
+/// What `POST /command` hands a command the human gave to: the orchestrator driving the project in
+/// this process (`crate::orchestrator::command_handler`).
+pub type CommandHandler = Arc<
+    dyn Fn(Command) -> Pin<Box<dyn Future<Output = Result<CommandReport, CommandError>> + Send>>
+        + Send
+        + Sync,
+>;
+
+/// What the daemon holds: the project's tools, the sessions it answers for, the notice a
+/// session's loop waits on for a stop, and who takes the human's commands.
 pub struct DaemonState {
     deps: Arc<ToolDeps>,
     sessions: Mutex<BTreeMap<String, Session>>,
     stops: tokio::sync::Notify,
+    commands: OnceLock<CommandHandler>,
 }
 
 impl DaemonState {
@@ -106,7 +122,22 @@ impl DaemonState {
             deps,
             sessions: Mutex::new(BTreeMap::new()),
             stops: tokio::sync::Notify::new(),
+            commands: OnceLock::new(),
         }
+    }
+
+    /// Hands the human's commands to `handler` from now on. It is set once the orchestrator
+    /// exists, which is after the daemon is served, since the adapter the orchestrator holds needs
+    /// the served port and token. Answers `true`, or `false` when a handler was already set, which
+    /// is kept.
+    pub fn set_command_handler(&self, handler: CommandHandler) -> bool {
+        self.commands.set(handler).is_ok()
+    }
+
+    /// The ids of every registered session, in order.
+    #[must_use]
+    pub fn session_ids(&self) -> Vec<String> {
+        self.sessions().keys().cloned().collect()
     }
 
     /// Answers for `registration`'s session from now on, with no tool calls made. A session
@@ -391,6 +422,7 @@ pub(crate) fn router(state: Arc<DaemonState>, token: &str, cancel: CancellationT
     Router::new()
         .route("/hook/pre-tool-use", post(pre_tool_use))
         .route("/hook/post-tool-use", post(post_tool_use))
+        .route("/command", post(command))
         .with_state(state)
         .merge(mcp)
         .layer(middleware::from_fn_with_state(expected, require_token))
@@ -431,6 +463,37 @@ async fn pre_tool_use(
     }
 }
 
+/// A command the human gave from another terminal, handled by this process's orchestrator and
+/// answered with the reply wire. A command that is not one is `invalid`, with every error the
+/// schema found; a daemon with no handler answers `failed`. The command runs on a task of its own,
+/// so that a client that goes away does not cut it off half done.
+async fn command(State(state): State<Arc<DaemonState>>, Json(value): Json<Value>) -> Response {
+    let reply = match command_from_value(&value) {
+        Err(errors) => CommandReply::Error {
+            kind: ReplyKind::Invalid,
+            detail: errors
+                .iter()
+                .map(|error| format!("{} {}", error.path, error.message))
+                .collect::<Vec<_>>()
+                .join("; "),
+        },
+        Ok(command) => match state.commands.get() {
+            None => CommandReply::Error {
+                kind: ReplyKind::Failed,
+                detail: "this daemon takes no commands".to_string(),
+            },
+            Some(handler) => match tokio::spawn(handler(command)).await {
+                Ok(result) => reply_of(result),
+                Err(error) => CommandReply::Error {
+                    kind: ReplyKind::Failed,
+                    detail: format!("the command's task failed: {error}"),
+                },
+            },
+        },
+    };
+    Json(reply_to_value(&reply)).into_response()
+}
+
 async fn post_tool_use(
     State(state): State<Arc<DaemonState>>,
     Json(request): Json<HookRequest>,
@@ -454,9 +517,14 @@ mod tests {
     use tokio_util::sync::CancellationToken;
     use tower::ServiceExt;
 
+    use farik_protocol::event::EventKind;
+    use serde_json::json;
+
     use super::fixtures::{PRE_READ, TestDaemon};
-    use super::{DaemonConfig, DaemonInfo, SessionRegistration, router, serve};
+    use super::{DaemonConfig, DaemonInfo, DaemonState, SessionRegistration, router, serve};
     use crate::exec::Executor;
+    use crate::orchestrator::command_handler;
+    use crate::orchestrator::fixtures::Harness;
     use crate::sandbox::host::HostSandbox;
 
     const TOKEN: &str = "a-token";
@@ -656,6 +724,107 @@ mod tests {
         assert!(Arc::ptr_eq(&context.deps, &daemon.project.deps));
         daemon.state.end_session("s-exec");
         assert!(daemon.state.tool_context("s-exec").is_none());
+    }
+
+    async fn body_of(answer: axum::response::Response) -> Value {
+        serde_json::from_slice(
+            &to_bytes(answer.into_body(), usize::MAX)
+                .await
+                .expect("a body"),
+        )
+        .expect("JSON")
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn answers_a_command_on_the_daemon() {
+        let harness = Harness::new("daemon-command", |_| {});
+        harness.file("FRK-1", "refining", |_| {});
+        let question = harness.project.record(
+            "FRK-1",
+            "question.asked",
+            &json!({ "question": "Should done.txt be empty?", "asked_by": "pm" }),
+        );
+        let n = question.envelope.seq;
+        let orchestrator = Arc::new(harness.orchestrator(harness.recorded(Vec::new())));
+        assert!(
+            harness
+                .daemon
+                .set_command_handler(command_handler(Arc::clone(&orchestrator)))
+        );
+        let send = |token: Option<&str>, body: Value| {
+            router(harness.daemon.clone(), TOKEN, CancellationToken::new())
+                .oneshot(post("/command", token, &body))
+        };
+
+        let answer = send(
+            Some(TOKEN),
+            json!({ "command": "question_answer", "body": { "question_id": n, "answer": "Yes." } }),
+        )
+        .await
+        .expect("the router answers");
+        assert_eq!(answer.status(), StatusCode::OK);
+        let body = body_of(answer).await;
+        let answered = harness.events(&[EventKind::QuestionAnswered]);
+        assert_eq!(answered.len(), 1);
+        assert_eq!(body["events"], json!([answered[0].envelope.seq]), "{body}");
+        assert!(body["said"].is_string(), "{body}");
+
+        let answer = send(
+            Some(TOKEN),
+            json!({ "command": "question_answer", "body": { "question_id": n, "answer": 7 } }),
+        )
+        .await
+        .expect("the router answers");
+        assert_eq!(answer.status(), StatusCode::OK);
+        let body = body_of(answer).await;
+        assert_eq!(body["error"]["kind"], "invalid", "{body}");
+
+        let answer = send(None, json!({ "command": "run_stop", "body": {} }))
+            .await
+            .expect("the router answers");
+        assert_eq!(answer.status(), StatusCode::UNAUTHORIZED);
+
+        let bare = Arc::new(DaemonState::new(Arc::clone(&harness.project.deps)));
+        let answer = router(bare, TOKEN, CancellationToken::new())
+            .oneshot(post(
+                "/command",
+                Some(TOKEN),
+                &json!({ "command": "run_stop", "body": {} }),
+            ))
+            .await
+            .expect("the router answers");
+        assert_eq!(answer.status(), StatusCode::OK);
+        let body = body_of(answer).await;
+        assert_eq!(body["error"]["kind"], "failed", "{body}");
+        assert_eq!(body["error"]["detail"], "this daemon takes no commands");
+
+        assert!(
+            !harness
+                .daemon
+                .set_command_handler(command_handler(orchestrator))
+        );
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn lists_every_registered_session() {
+        let daemon = TestDaemon::new("daemon-session-ids", |_| {});
+        // A daemon of its own: the fixture's already answers for a session.
+        let state = DaemonState::new(Arc::clone(&daemon.project.deps));
+        for id in ["s-2", "s-1"] {
+            state.register_session(SessionRegistration {
+                session_id: id.to_string(),
+                agent_id: "dev-a".to_string(),
+                task_id: None,
+                cwd: daemon.worktree.clone(),
+                executor: None,
+                limits: DEFAULT_SESSION_LIMITS,
+            });
+        }
+        assert_eq!(state.session_ids(), ["s-1", "s-2"]);
+        state.end_session("s-1");
+        assert_eq!(state.session_ids(), ["s-2"]);
     }
 
     #[test]

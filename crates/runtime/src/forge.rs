@@ -28,6 +28,17 @@ pub struct PullRequest {
     pub number: u64,
 }
 
+/// An issue on the forge, as `farik contract new --from` reads it.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct Issue {
+    /// Its title.
+    pub title: String,
+    /// Its text.
+    pub body: String,
+    /// Its address.
+    pub url: String,
+}
+
 /// Where a pull request stands.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PullRequestState {
@@ -179,6 +190,17 @@ impl Forge {
         }
     }
 
+    /// The issue at `url`: `gh issue view <url> --json title,body,url`.
+    ///
+    /// # Errors
+    ///
+    /// `Missing` when the program cannot be run; `Failed` when it exits non-zero, with its
+    /// standard error, or when its answer is not an issue.
+    pub fn issue(&self, url: &str) -> Result<Issue, ForgeError> {
+        let viewed = self.run(&["issue", "view", url, "--json", "title,body,url"], None)?;
+        serde_json::from_str(&viewed).map_err(|_| unreadable("gh issue view", &viewed))
+    }
+
     /// Runs the program in the root with `arguments`, giving it `stdin` (or nothing), and answers
     /// its standard output.
     fn run(&self, arguments: &[&str], stdin: Option<&str>) -> Result<String, ForgeError> {
@@ -228,7 +250,7 @@ fn unreadable(command: &str, output: &str) -> ForgeError {
 mod tests {
     use std::path::PathBuf;
 
-    use super::{Forge, ForgeError, PullRequest, PullRequestState};
+    use super::{Forge, ForgeError, Issue, PullRequest, PullRequestState};
     use crate::orchestrator::fixtures::FakeGh;
 
     const BODY: &str = "## Intent\nDone.\n";
@@ -345,6 +367,31 @@ mod tests {
             gh.calls()[0],
             strings(&["pr", "view", url, "--json", "state,mergeCommit"])
         );
+    }
+
+    #[test]
+    fn reads_an_issue_with_gh() {
+        let gh = FakeGh::new("issue");
+        gh.answers("view", r#"{"title":"T","body":"B","url":"u"}"#, "", 0);
+        let forge = gh.forge(&std::env::temp_dir());
+        let url = "https://github.com/o/r/issues/3";
+
+        assert_eq!(
+            forge.issue(url),
+            Ok(Issue {
+                title: "T".to_string(),
+                body: "B".to_string(),
+                url: "u".to_string(),
+            })
+        );
+        assert_eq!(
+            gh.calls(),
+            vec![strings(&["issue", "view", url, "--json", "title,body,url"])]
+        );
+
+        gh.answers("view", "", "not found", 1);
+        let detail = failed(forge.issue(url));
+        assert!(detail.contains("not found"), "{detail}");
     }
 
     #[test]

@@ -17,7 +17,9 @@ use super::messages::{Resume, implement_message, plan_message};
 use super::requests;
 use super::session::{SessionAsk, SessionEnd, run_session};
 use super::verify::verifying;
-use super::{Orchestrator, OrchestratorDeps, OrchestratorError, TickReport, worktree};
+use super::{
+    Orchestrator, OrchestratorDeps, OrchestratorError, TickReport, TickRules, TickScope, worktree,
+};
 use crate::cost::budget_state;
 use crate::exec::Executor;
 use crate::session::{EndReason, SessionPurpose};
@@ -39,8 +41,12 @@ pub(super) enum Room {
     DaySpent,
 }
 
-/// One tick: the first rule that acts, or `Idle`.
-pub(super) async fn tick(orchestrator: &Orchestrator) -> Result<TickReport, OrchestratorError> {
+/// One tick within `scope`: the first rule of the scope's set that acts on a task in scope, or
+/// `Idle`. A rule outside the set passes its tasks over, as a spent budget does.
+pub(super) async fn tick(
+    orchestrator: &Orchestrator,
+    scope: &TickScope,
+) -> Result<TickReport, OrchestratorError> {
     let deps = &orchestrator.deps;
     // A command another process handled is on this process's board before anything is read.
     deps.tools.projections.catch_up()?;
@@ -48,66 +54,111 @@ pub(super) async fn tick(orchestrator: &Orchestrator) -> Result<TickReport, Orch
     // The store gives the board in the order of the number in each task id, which is how ties
     // are broken.
     let board = deps.tools.projections.board()?;
+    let in_scope = |row: &&TaskProjection| {
+        scope
+            .task_id
+            .as_ref()
+            .is_none_or(|task_id| &row.task_id == task_id)
+    };
+    let runs = |rule: u8| rule_runs(scope.rules, rule);
     let mut day_spent = false;
-    for row in board
-        .iter()
-        .filter(|row| matches!(row.status, TaskStatus::Accepted | TaskStatus::Cancelled))
-    {
-        if let Some(report) = cleanup(orchestrator, row)? {
-            return Ok(report);
+    if runs(1) {
+        for row in board
+            .iter()
+            .filter(|row| matches!(row.status, TaskStatus::Accepted | TaskStatus::Cancelled))
+            .filter(in_scope)
+        {
+            if let Some(report) = cleanup(orchestrator, row)? {
+                return Ok(report);
+            }
         }
     }
-    for row in board
-        .iter()
-        .filter(|row| row.status == TaskStatus::Accepted)
-    {
-        if let Some(report) = awaiting(orchestrator, &team, row).await? {
-            return Ok(report);
+    if runs(2) {
+        for row in board
+            .iter()
+            .filter(|row| row.status == TaskStatus::Accepted)
+            .filter(in_scope)
+        {
+            if let Some(report) = awaiting(orchestrator, &team, row).await? {
+                return Ok(report);
+            }
         }
     }
-    for row in waiting_on_nobody(&board, TaskStatus::Rejected) {
-        if let Some(report) = rejected(deps, &team, row)? {
-            return Ok(report);
+    if runs(3) {
+        for row in waiting_on_nobody(&board, TaskStatus::Rejected).filter(in_scope) {
+            if let Some(report) = rejected(deps, &team, row)? {
+                return Ok(report);
+            }
         }
     }
-    for row in waiting_on_nobody(&board, TaskStatus::Blocked) {
-        if let Some(report) = blocked(deps, &team, row)? {
-            return Ok(report);
+    if runs(4) {
+        for row in waiting_on_nobody(&board, TaskStatus::Blocked).filter(in_scope) {
+            if let Some(report) = blocked(deps, &team, row)? {
+                return Ok(report);
+            }
         }
     }
-    for row in waiting_on_nobody(&board, TaskStatus::Verifying) {
-        if let Some(report) = verifying(orchestrator, &team, row, &mut day_spent).await? {
-            return Ok(report);
+    if runs(5) {
+        for row in waiting_on_nobody(&board, TaskStatus::Verifying).filter(in_scope) {
+            if let Some(report) = verifying(orchestrator, &team, row, &mut day_spent).await? {
+                return Ok(report);
+            }
         }
     }
-    for row in waiting_on_nobody(&board, TaskStatus::InProgress) {
-        if let Some(report) = in_progress(orchestrator, &team, row, &mut day_spent).await? {
-            return Ok(report);
+    // Planning runs an epic's breakdown and close-out, which are plan sessions, and no
+    // implement session.
+    let epics_only = scope.rules == TickRules::Planning;
+    if runs(6) || epics_only {
+        for row in waiting_on_nobody(&board, TaskStatus::InProgress)
+            .filter(in_scope)
+            .filter(|row| !epics_only || requests::is_epic(row))
+        {
+            if let Some(report) = in_progress(orchestrator, &team, row, &mut day_spent).await? {
+                return Ok(report);
+            }
         }
     }
-    for row in waiting_on_nobody(&board, TaskStatus::Assigned) {
-        if let Some(report) = assigned(deps, &team, row)? {
-            return Ok(report);
+    if runs(7) {
+        for row in waiting_on_nobody(&board, TaskStatus::Assigned).filter(in_scope) {
+            if let Some(report) = assigned(deps, &team, row)? {
+                return Ok(report);
+            }
         }
     }
-    for row in waiting_on_nobody(&board, TaskStatus::Ready) {
-        if let Some(report) = ready(deps, &team, &board, row, &mut day_spent).await? {
-            return Ok(report);
+    if runs(8) {
+        for row in waiting_on_nobody(&board, TaskStatus::Ready).filter(in_scope) {
+            if let Some(report) = ready(deps, &team, &board, row, &mut day_spent).await? {
+                return Ok(report);
+            }
         }
     }
-    for row in waiting_on_nobody(&board, TaskStatus::Refining) {
-        if let Some(report) = requests::refining(deps, &team, row, &mut day_spent).await? {
-            return Ok(report);
+    if runs(9) {
+        for row in waiting_on_nobody(&board, TaskStatus::Refining).filter(in_scope) {
+            if let Some(report) = requests::refining(deps, &team, row, &mut day_spent).await? {
+                return Ok(report);
+            }
         }
     }
-    for row in waiting_on_nobody(&board, TaskStatus::Draft) {
-        if let Some(report) = requests::draft(deps, &team, row, &mut day_spent).await? {
-            return Ok(report);
+    if runs(10) {
+        for row in waiting_on_nobody(&board, TaskStatus::Draft).filter(in_scope) {
+            if let Some(report) = requests::draft(deps, &team, row, &mut day_spent).await? {
+                return Ok(report);
+            }
         }
     }
     Ok(TickReport::Idle {
         why: if day_spent { DAY_SPENT } else { NOTHING_TO_DO }.to_string(),
     })
+}
+
+/// Whether `rules` runs rule `rule` (1 to 10, in the order of work) for every task. `Planning`
+/// runs rule 6 for epics alone, which the tick decides.
+fn rule_runs(rules: TickRules, rule: u8) -> bool {
+    match rules {
+        TickRules::All => true,
+        TickRules::Planning => matches!(rule, 8..=10),
+        TickRules::Refining => matches!(rule, 9 | 10),
+    }
 }
 
 /// The tasks in `status`, in the board's order, but those waiting on the human's answer to a
@@ -605,7 +656,7 @@ mod tests {
         BrokenSandboxFactory, CountingSandboxFactory, ExecutorWitness, Harness,
         UnremovableSandboxFactory, UsageThenWaitAdapter,
     };
-    use crate::orchestrator::{Orchestrator, OrchestratorError, TickReport};
+    use crate::orchestrator::{Orchestrator, OrchestratorError, TickReport, TickRules, TickScope};
     use crate::recorded::fixtures::{
         accept_frk_1, implement_finishes_frk_1, implement_stops_early, plan_assigns_frk_1,
         reads_a_file, review_answers_nothing, review_writes_note,
@@ -622,6 +673,129 @@ mod tests {
             TickReport::Acted { task_id, .. } => Some(task_id.as_str()),
             TickReport::Idle { .. } => None,
         }
+    }
+
+    /// A transcript with every `from` in its text replaced by `to`.
+    fn rewritten(transcript: &Transcript, from: &str, to: &str) -> Transcript {
+        Transcript::from_jsonl(
+            &transcript
+                .lines()
+                .collect::<Vec<_>>()
+                .join("\n")
+                .replace(from, to),
+        )
+    }
+
+    /// Records `task`'s triage as the human's, `small`.
+    fn triaged_small(harness: &Harness, task: &str) {
+        harness.project.record(
+            task,
+            "request.triaged",
+            &json!({ "size": "small", "reason": "One file.", "triaged_by": "human" }),
+        );
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn acts_only_on_the_task_in_scope() {
+        let harness = Harness::new("orch-scope-task", |wire| {
+            wire["policy"]["wip_limit_per_agent"] = json!(2);
+        });
+        harness.ready("FRK-1");
+        harness.assigned("FRK-2", "dev-b", "dev-a");
+        let adapter = harness.recorded(vec![plan_assigns_frk_1()]);
+        let orchestrator = harness.orchestrator(adapter.clone());
+
+        let report = orchestrator
+            .tick_within(&TickScope {
+                task_id: Some("FRK-1".parse().expect("a task id")),
+                rules: TickRules::All,
+            })
+            .await
+            .expect("the tick runs");
+
+        assert_eq!(acted_on(&report), Some("FRK-1"), "{report:?}");
+        let started = adapter.started();
+        assert_eq!(started.len(), 1);
+        assert_eq!(started[0].purpose, SessionPurpose::Plan);
+        assert_eq!(harness.row("FRK-2").status, TaskStatus::Assigned);
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn refines_and_nothing_else_under_the_refining_rules() {
+        let harness = Harness::new("orch-scope-refining", |_| {});
+        harness.ready("FRK-1");
+        harness.file("FRK-2", "draft", |_| {});
+        triaged_small(&harness, "FRK-2");
+        let adapter = harness.recorded(vec![plan_assigns_frk_1()]);
+        let orchestrator = harness.orchestrator(adapter.clone());
+        let refining = TickScope {
+            task_id: None,
+            rules: TickRules::Refining,
+        };
+
+        let report = orchestrator
+            .tick_within(&refining)
+            .await
+            .expect("the tick runs");
+
+        assert_eq!(acted_on(&report), Some("FRK-2"), "{report:?}");
+        assert_eq!(harness.row("FRK-2").status, TaskStatus::Refining);
+        harness.project.record(
+            "FRK-2",
+            "question.asked",
+            &json!({ "question": "Should done.txt be empty?", "asked_by": "pm" }),
+        );
+        let report = orchestrator
+            .tick_within(&refining)
+            .await
+            .expect("the tick runs");
+        assert!(matches!(report, TickReport::Idle { .. }), "{report:?}");
+        assert!(adapter.started().is_empty());
+        assert_eq!(harness.row("FRK-1").status, TaskStatus::Ready);
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn plans_without_running_criteria_or_merging() {
+        let harness = Harness::new("orch-scope-planning", |wire| {
+            wire["policy"]["wip_limit_per_agent"] = json!(3);
+            wire["policy"]["integration"] = json!("auto_merge");
+        });
+        harness.verifying("FRK-1");
+        harness.accepted("FRK-2");
+        harness.assigned("FRK-3", "dev-b", "dev-a");
+        harness.ready("FRK-4");
+        let adapter = harness.recorded(vec![rewritten(&plan_assigns_frk_1(), "FRK-1", "FRK-4")]);
+        let orchestrator = harness.orchestrator(adapter.clone());
+        let planning = TickScope {
+            task_id: None,
+            rules: TickRules::Planning,
+        };
+
+        for _ in 0..10 {
+            if let TickReport::Idle { .. } = orchestrator
+                .tick_within(&planning)
+                .await
+                .expect("the tick runs")
+            {
+                break;
+            }
+        }
+
+        let started = adapter.started();
+        assert_eq!(started.len(), 1);
+        assert_eq!(started[0].purpose, SessionPurpose::Plan);
+        assert_eq!(
+            started[0].task_id.as_ref().map(|task| task.as_str()),
+            Some("FRK-4")
+        );
+        assert_eq!(harness.row("FRK-4").status, TaskStatus::Assigned);
+        assert!(harness.events(&[EventKind::CriterionRecorded]).is_empty());
+        assert!(harness.events(&[EventKind::TaskIntegrated]).is_empty());
+        assert_eq!(harness.row("FRK-3").status, TaskStatus::Assigned);
+        assert!(!harness.worktree("FRK-3").exists());
     }
 
     #[tokio::test]

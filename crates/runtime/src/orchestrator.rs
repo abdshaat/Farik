@@ -12,13 +12,13 @@ use farik_core::contract::TaskId;
 use farik_core::governor::permissions::PermissionTier;
 use farik_core::team::Team;
 use farik_protocol::clock::IdSource;
-use farik_protocol::command::Command;
+use farik_protocol::command::{Command, CommandReply, ReplyKind};
 use farik_roles::RoleError;
 use farik_store::files::FilesError;
 use farik_store::{GitError, StoreError};
 
 use crate::cost::CostError;
-use crate::daemon::DaemonState;
+use crate::daemon::{CommandHandler, DaemonState};
 use crate::forge::{Forge, ForgeError};
 use crate::sandbox::{Sandbox, SandboxError, SandboxFactory};
 use crate::session::{RuntimeAdapter, RuntimeError};
@@ -187,6 +187,31 @@ pub enum TickReport {
     },
 }
 
+/// Which of the rules a tick runs (`docs/SPEC.md` 8.2): every one, the planning ones, or the
+/// refining ones.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum TickRules {
+    /// Every rule, as `farik run` ticks.
+    #[default]
+    All,
+    /// Plan without doing, as `farik plan` ticks: triage and `draft -> refining` (rule 10),
+    /// refining and the governor's judgment (rule 9), the plan sessions that assign and an
+    /// approved epic's assignment (rule 8), and an epic's breakdown and close-out (rule 6 for an
+    /// epic alone). No cleanup, integration, criterion run, worktree, or start of work.
+    Planning,
+    /// Triage and refining alone (rules 9 and 10), as `farik contract new` ticks.
+    Refining,
+}
+
+/// What a tick may act on: one task, or every task, under a set of rules.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct TickScope {
+    /// The task every rule is confined to, when one is named.
+    pub task_id: Option<TaskId>,
+    /// The rules the tick runs.
+    pub rules: TickRules,
+}
+
 /// What came of integrating an accepted task (5.14).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum IntegrationOutcome {
@@ -297,7 +322,22 @@ impl Orchestrator {
     /// When the store, the files, git, a sandbox, a role, the budgets, or the runtime fail; a
     /// session that cannot start is `Runtime`, after its start and its end are recorded.
     pub async fn tick(&self) -> Result<TickReport, OrchestratorError> {
-        rules::tick(self).await
+        self.tick_within(&TickScope::default()).await
+    }
+
+    /// `tick`, confined to `scope`: its task alone when it names one, and its rules alone.
+    ///
+    /// # Errors
+    ///
+    /// As `tick`.
+    pub async fn tick_within(&self, scope: &TickScope) -> Result<TickReport, OrchestratorError> {
+        rules::tick(self, scope).await
+    }
+
+    /// Whether `stop` was called.
+    #[must_use]
+    pub fn is_stopped(&self) -> bool {
+        self.stopped.load(Ordering::SeqCst)
     }
 
     /// Ticks until a tick is idle or `stop` was called.
@@ -306,7 +346,7 @@ impl Orchestrator {
     ///
     /// The first error a tick returns.
     pub async fn run_until_idle(&self) -> Result<(), OrchestratorError> {
-        while !self.stopped.load(Ordering::SeqCst) {
+        while !self.is_stopped() {
             if let TickReport::Idle { .. } = self.tick().await? {
                 break;
             }
@@ -424,6 +464,61 @@ impl Orchestrator {
     }
 }
 
+/// The daemon's handler of the human's commands (`POST /command`): each command handled by
+/// `orchestrator`, the one driving the project in this process.
+#[must_use]
+pub fn command_handler(orchestrator: Arc<Orchestrator>) -> CommandHandler {
+    Arc::new(move |command| {
+        let orchestrator = Arc::clone(&orchestrator);
+        Box::pin(async move { orchestrator.handle(command).await })
+    })
+}
+
+/// A command's outcome as the reply the daemon sends back.
+#[must_use]
+pub fn reply_of(result: Result<CommandReport, CommandError>) -> CommandReply {
+    match result {
+        Ok(report) => CommandReply::Done {
+            said: report.said,
+            events: report.events,
+        },
+        Err(CommandError::Invalid { detail }) => CommandReply::Error {
+            kind: ReplyKind::Invalid,
+            detail,
+        },
+        Err(CommandError::Refused { reason }) => CommandReply::Error {
+            kind: ReplyKind::Refused,
+            detail: reason,
+        },
+        Err(CommandError::NotFound { what }) => CommandReply::Error {
+            kind: ReplyKind::NotFound,
+            detail: what,
+        },
+        Err(CommandError::Failed { detail }) => CommandReply::Error {
+            kind: ReplyKind::Failed,
+            detail,
+        },
+    }
+}
+
+/// A reply from another process's daemon as the outcome `handle` would have given here:
+/// `reply_of`'s inverse.
+///
+/// # Errors
+///
+/// The `CommandError` of the reply's kind, carrying its detail.
+pub fn result_of(reply: CommandReply) -> Result<CommandReport, CommandError> {
+    match reply {
+        CommandReply::Done { said, events } => Ok(CommandReport { said, events }),
+        CommandReply::Error { kind, detail } => Err(match kind {
+            ReplyKind::Invalid => CommandError::Invalid { detail },
+            ReplyKind::Refused => CommandError::Refused { reason: detail },
+            ReplyKind::NotFound => CommandError::NotFound { what: detail },
+            ReplyKind::Failed => CommandError::Failed { detail },
+        }),
+    }
+}
+
 /// A task's worktree, `.farik/local/worktrees/<id>` (5.14).
 fn worktree(deps: &OrchestratorDeps, task_id: &TaskId) -> PathBuf {
     deps.tools
@@ -507,6 +602,16 @@ mod tests {
                 other => panic!("a note.written, got {other:?}"),
             })
             .collect()
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn says_whether_it_was_stopped() {
+        let harness = Harness::new("orch-is-stopped", |_| {});
+        let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
+        assert!(!orchestrator.is_stopped());
+        orchestrator.stop();
+        assert!(orchestrator.is_stopped());
     }
 
     #[tokio::test]

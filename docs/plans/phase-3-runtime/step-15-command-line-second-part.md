@@ -139,7 +139,7 @@ Files: `daemon.rs`, `orchestrator.rs`, `orchestrator/rules.rs`, `forge.rs`, ADR 
 - `says_whether_it_was_stopped` — `is_stopped()` false, then true after `stop()`.
 - `reads_an_issue_with_gh` — `FakeGh` answering `view` with `{"title":"T","body":"B","url":"u"}`: `Issue { T, B, u }`, one call `issue view <url> --json title,body,url`; exit 1 with stderr `not found`: `Failed` containing it.
 
-- [ ] `feat(runtime): take the human's commands on the daemon, and tick within a scope`
+- [x] `feat(runtime): take the human's commands on the daemon, and tick within a scope`
 
 ### Task 3: the human's commands from any terminal
 
