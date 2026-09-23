@@ -394,22 +394,27 @@ fn reports_a_team_file_that_cannot_be_read() {
     );
 }
 
-/// A team of `pm` and `dev`, with `dev` on a model the shipped table does not price.
+/// A team of `pm`, `dev`, and `dev-2`, with both developers on a model the shipped table does not
+/// price.
 #[cfg(unix)]
 fn a_team_on_an_unpriced_model(name: &str) -> TempRepo {
     project::a_team_with(name, |wire| {
-        let mut dev = farik_core::team::fixtures::an_agent_wire("dev", "software_developer");
-        dev["model"] = serde_json::json!({ "id": "claude-unknown-9" });
+        let on_unknown_9 = |id: &str| {
+            let mut dev = farik_core::team::fixtures::an_agent_wire(id, "software_developer");
+            dev["model"] = serde_json::json!({ "id": "claude-unknown-9" });
+            dev
+        };
         wire["agents"] = serde_json::json!([
             farik_core::team::fixtures::an_agent_wire("pm", "product_manager"),
-            dev,
+            on_unknown_9("dev"),
+            on_unknown_9("dev-2"),
         ]);
     })
 }
 
-/// What doctor says of `claude-unknown-9`, used by `dev`.
+/// What doctor says of `claude-unknown-9`, used by `dev` and `dev-2`.
 const UNPRICED_FINDING: &str = ".farik/team.yaml: no price table prices claude-unknown-9 (used by \
-    dev): its usage is recorded at no cost, and no dollar limit counts it. Add it to \
+    dev, dev-2): its usage is recorded at no cost, and no dollar limit counts it. Add it to \
     .farik/prices.json to price it (5.5)";
 
 #[cfg(unix)]

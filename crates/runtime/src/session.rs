@@ -293,6 +293,22 @@ mod tests {
     }
 
     #[test]
+    fn takes_the_roles_effort_whatever_it_is_when_the_agent_names_none() {
+        // Every role Farik ships runs at high effort, so the fallback is proved on one that does
+        // not.
+        let mut role = load_role(Role::SoftwareDeveloper).expect("Farik ships the role");
+        role.effort = Effort::Medium;
+        assert_eq!(
+            session_model(&an_agent(Some(json!({ "id": "claude-sonnet-5" }))), &role),
+            ("claude-sonnet-5".to_string(), Effort::Medium)
+        );
+        assert_eq!(
+            session_model(&an_agent(None), &role),
+            (role.model.clone(), Effort::Medium)
+        );
+    }
+
+    #[test]
     fn displays_a_version_too_old_error_with_both_versions() {
         let error = RuntimeError::VersionTooOld {
             found: "2.1.200".to_string(),

@@ -611,7 +611,8 @@ mod tests {
         paused["status"] = json!("paused");
         let mut wire = a_team_wire();
         wire["agents"] = json!([
-            on("pm", "product_manager", None),
+            // Its own model is the one its triage sessions run on: named once, not twice.
+            on("pm", "product_manager", Some("claude-sonnet-5")),
             on("dev-a", "software_developer", Some("claude-unknown-9")),
             on("dev-b", "software_developer", Some("claude-unknown-9")),
             paused,
