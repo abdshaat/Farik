@@ -9,7 +9,7 @@ use super::{PriceTable, validate_price_table};
 pub const PRICES_JSON: &str = r#"{
   "version": 1,
   "source_url": "https://platform.claude.com/docs/en/about-claude/pricing",
-  "retrieved_at": "2026-09-16",
+  "retrieved_at": "2026-09-23",
   "prices": {
     "claude-fable-5-1": {
       "input_usd_per_mtok": 10.0,
@@ -22,6 +22,12 @@ pub const PRICES_JSON: &str = r#"{
       "output_usd_per_mtok": 50.0,
       "cache_write_usd_per_mtok": 12.5,
       "cache_read_usd_per_mtok": 1.0
+    },
+    "claude-opus-5-5": {
+      "input_usd_per_mtok": 4.0,
+      "output_usd_per_mtok": 20.0,
+      "cache_write_usd_per_mtok": 5.0,
+      "cache_read_usd_per_mtok": 0.2
     },
     "claude-opus-5": {
       "input_usd_per_mtok": 5.0,

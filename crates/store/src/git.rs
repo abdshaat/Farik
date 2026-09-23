@@ -151,7 +151,12 @@ impl Git {
     /// detached head is not a branch.
     pub fn current_branch(&self) -> Result<String, GitError> {
         self.require_repository()?;
-        self.at_root(&["symbolic-ref", "--short", "HEAD"])
+        // Not `--short`, which says `heads/main` when a tag is also named `main`.
+        let reference = self.at_root(&["symbolic-ref", "HEAD"])?;
+        Ok(reference
+            .strip_prefix("refs/heads/")
+            .unwrap_or(&reference)
+            .to_string())
     }
 
     /// Makes a branch at `from`, without checking it out.
@@ -194,6 +199,61 @@ impl Git {
         Ok(())
     }
 
+    /// Makes a worktree at `path` with `at` checked out and no branch: a place to look at a commit
+    /// that nothing will commit to, such as the base a task's new tests are run against (5.4).
+    ///
+    /// # Errors
+    ///
+    /// `CommandFailed` when the path is taken or `at` names nothing.
+    pub fn create_detached_worktree(&self, path: &Path, at: &str) -> Result<(), GitError> {
+        self.require_repository()?;
+        let path = path_argument(path)?;
+        self.at_root(&["worktree", "add", "--detach", &path, at])?;
+        Ok(())
+    }
+
+    /// The commit `a` and `b` last agreed on: the one `a...b` diffs from.
+    ///
+    /// # Errors
+    ///
+    /// `CommandFailed` when either name is unknown or they share no history.
+    pub fn merge_base(&self, a: &str, b: &str) -> Result<String, GitError> {
+        self.require_repository()?;
+        self.at_root(&["merge-base", a, b])
+    }
+
+    /// The file at `path` as `rev` has it, byte for byte (read as UTF-8 with replacement).
+    ///
+    /// # Errors
+    ///
+    /// `CommandFailed` when `rev` names nothing or has no such file.
+    pub fn file_at(&self, rev: &str, path: &str) -> Result<String, GitError> {
+        self.require_repository()?;
+        // Not trimmed, unlike every other answer: a file's trailing newlines are its content.
+        let object = format!("{rev}:{path}");
+        run_git_untrimmed(&self.root, &["show", "--no-textconv", &object])
+    }
+
+    /// The paths `head` added or modified since it and `base` last agreed; a deleted path is not
+    /// one, and a renamed file counts as added.
+    ///
+    /// # Errors
+    ///
+    /// `CommandFailed` when either name is unknown.
+    pub fn added_or_modified_paths(&self, base: &str, head: &str) -> Result<Vec<String>, GitError> {
+        self.require_repository()?;
+        let range = format!("{base}...{head}");
+        let listed = self.at_root(&[
+            "diff",
+            "--no-renames",
+            "--name-only",
+            "--diff-filter=AM",
+            "-z",
+            &range,
+        ])?;
+        Ok(paths_of(&listed))
+    }
+
     /// Whether the tree at `path` has nothing uncommitted, untracked files included.
     ///
     /// `--untracked-files=normal` is what makes that promise true rather than hopeful: a user with
@@ -209,9 +269,113 @@ impl Git {
     /// `CommandFailed` when `path` is not a working tree of this repository, including when it is
     /// not there at all.
     pub fn is_clean(&self, path: &Path) -> Result<bool, GitError> {
+        Ok(self.status(path)?.is_empty())
+    }
+
+    /// What is uncommitted in the tree at `path`, as `git status --porcelain` prints it: one line
+    /// per path, and nothing at all when the tree is clean. Untracked files are listed whatever
+    /// the user configured, for the reason `is_clean` gives.
+    ///
+    /// # Errors
+    ///
+    /// `CommandFailed` when `path` is not a working tree of this repository, including when it is
+    /// not there at all.
+    pub fn status(&self, path: &Path) -> Result<String, GitError> {
         self.require_repository()?;
         self.require_worktree_of_this_repository(path)?;
-        Ok(run_git(path, &["status", "--porcelain", "--untracked-files=normal"])?.is_empty())
+        run_git(path, &["status", "--porcelain", "--untracked-files=normal"])
+    }
+
+    /// Commits `paths` of the tree at `path` with `message`, and answers the new commit's sha.
+    ///
+    /// Only the named paths are staged (`git --literal-pathspecs add -- <paths>`), so what else a
+    /// session left in its worktree stays out of the commit; a new file is staged as readily as a
+    /// changed one. Each path is read as a path, never as a glob or a pathspec magic word, because
+    /// the protected-path check (5.6) read it as one: a pattern would stage files that check never
+    /// saw. A directory still stages what is under it, so the caller names files.
+    ///
+    /// # Errors
+    ///
+    /// `CommandFailed` when `path` is not a working tree of this repository, a path matches
+    /// nothing, or there is nothing to commit.
+    pub fn commit(&self, path: &Path, message: &str, paths: &[String]) -> Result<String, GitError> {
+        self.require_repository()?;
+        self.require_worktree_of_this_repository(path)?;
+        let mut add = vec!["--literal-pathspecs", "add", "--"];
+        add.extend(paths.iter().map(String::as_str));
+        run_git(path, &add)?;
+        run_git(path, &["commit", "-m", message])?;
+        run_git(path, &["rev-parse", "HEAD"])
+    }
+
+    /// Pushes the local branch `branch` to `remote`, under the same name there.
+    ///
+    /// # Errors
+    ///
+    /// `CommandFailed` when the remote or the branch is unknown, or the remote refuses the push.
+    pub fn push(&self, remote: &str, branch: &str) -> Result<(), GitError> {
+        self.require_repository()?;
+        run_git_reaching_remote(&self.root, &["push", remote, branch])?;
+        Ok(())
+    }
+
+    /// Whether the repository has a remote named `name`.
+    ///
+    /// # Errors
+    ///
+    /// `NotARepository`, `NotInstalled`, or `CommandFailed` when git refuses.
+    pub fn has_remote(&self, name: &str) -> Result<bool, GitError> {
+        self.require_repository()?;
+        Ok(self
+            .at_root(&["remote"])?
+            .lines()
+            .any(|remote| remote == name))
+    }
+
+    /// Brings the local branch `branch` up to `remote`'s, only by fast-forward. The branch checked
+    /// out at the root is fetched and then merged `--ff-only`, since git will not fetch into the
+    /// checked-out branch; any other is fetched straight into its ref, which git refuses unless it
+    /// fast-forwards. The branch is spelled `refs/heads/<branch>` in the refspec, so that a tag of
+    /// the same name is not taken for it.
+    ///
+    /// # Errors
+    ///
+    /// `CommandFailed` when the remote cannot be reached, or the local branch holds a commit the
+    /// remote's lacks; the local branch is left where it was.
+    pub fn fetch_fast_forward(&self, remote: &str, branch: &str) -> Result<(), GitError> {
+        self.require_repository()?;
+        let reference = format!("refs/heads/{branch}");
+        // A detached root has no branch checked out, which is not this one.
+        let checked_out = self.current_branch().ok();
+        if checked_out.as_deref() == Some(branch) {
+            run_git_reaching_remote(&self.root, &["fetch", remote, &reference])?;
+            self.at_root(&["merge", "--ff-only", "FETCH_HEAD"])?;
+        } else {
+            let refspec = format!("{reference}:{reference}");
+            run_git_reaching_remote(&self.root, &["fetch", remote, &refspec])?;
+        }
+        Ok(())
+    }
+
+    /// Refuses a name git would not take for a branch, such as `main:other` or `-f`, so that
+    /// nothing a team file says reaches a refspec or an option. A name git takes but reads as
+    /// another is refused too: `@` is `HEAD`, and git prints the branch `@{-1}` stands for rather
+    /// than the name, so the name must be what git prints for it.
+    ///
+    /// # Errors
+    ///
+    /// `CommandFailed` naming it when git refuses it or reads it as another; `NotInstalled` when
+    /// git cannot be run.
+    pub fn check_branch_name(&self, name: &str) -> Result<(), GitError> {
+        let refused = || GitError::CommandFailed {
+            command: format!("check-ref-format --branch {name}"),
+            stderr: format!("{name} is not a name git takes for a branch"),
+        };
+        match self.at_root(&["check-ref-format", "--branch", name]) {
+            Ok(printed) if name != "@" && printed == name => Ok(()),
+            Ok(_) | Err(GitError::CommandFailed { .. }) => Err(refused()),
+            Err(other) => Err(other),
+        }
     }
 
     /// How many commits `head` has that `base` does not.
@@ -296,7 +460,7 @@ impl Git {
     /// reads HEAD, moves it, and puts it back, so two of these at once on one repository interleave:
     /// measured on this code, sixteen runs in forty left the checkout on the wrong branch and one in
     /// forty landed the merge commit on a branch nobody named, while the caller was told it merged.
-    /// The lock belongs to whatever drives integration — phase 3 step 10 — rather than to a method
+    /// The lock belongs to whatever drives integration — phase 3 step 13 — rather than to a method
     /// that cannot see the other caller. Everything else here is safe side by side: a worktree per
     /// task touches no shared head.
     ///
@@ -398,6 +562,28 @@ const COMMON_DIRECTORY: [&str; 3] = ["rev-parse", "--path-format=absolute", "--g
 /// back to the rule that asks about each path a change touched (5.6): a path a byte short is a
 /// change checked against a rule it never matched.
 fn run_git(directory: &Path, arguments: &[&str]) -> Result<String, GitError> {
+    Ok(run_git_untrimmed(directory, arguments)?
+        .trim_end()
+        .to_string())
+}
+
+/// Runs git in `directory` and hands back what it said on standard output, exactly.
+fn run_git_untrimmed(directory: &Path, arguments: &[&str]) -> Result<String, GitError> {
+    run_git_with(directory, arguments, false)
+}
+
+/// Runs git in `directory`, as one that may reach a remote: ssh is run in batch mode unless the
+/// user chose how to run it.
+fn run_git_reaching_remote(directory: &Path, arguments: &[&str]) -> Result<String, GitError> {
+    let batch_ssh = wants_batch_ssh(directory, |name| std::env::var_os(name).is_some());
+    Ok(run_git_with(directory, arguments, batch_ssh)?
+        .trim_end()
+        .to_string())
+}
+
+/// Runs git in `directory` with `git_environment(batch_ssh)`, and hands back its standard output
+/// exactly.
+fn run_git_with(directory: &Path, arguments: &[&str], batch_ssh: bool) -> Result<String, GitError> {
     if !directory.is_dir() {
         // Said here, because the operating system answers a missing working directory with the same
         // "not found" it answers a missing program with, and "git could not be run" is the wrong
@@ -410,6 +596,7 @@ fn run_git(directory: &Path, arguments: &[&str]) -> Result<String, GitError> {
     let output = Command::new("git")
         .args(arguments)
         .current_dir(directory)
+        .envs(git_environment(batch_ssh))
         .output()
         .map_err(|error| GitError::NotInstalled {
             detail: error.to_string(),
@@ -420,9 +607,33 @@ fn run_git(directory: &Path, arguments: &[&str]) -> Result<String, GitError> {
             stderr: String::from_utf8_lossy(&output.stderr).trim().to_string(),
         });
     }
-    Ok(String::from_utf8_lossy(&output.stdout)
-        .trim_end()
-        .to_string())
+    Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+}
+
+/// What every git Farik runs is given in its environment. No git Farik runs has a person at a
+/// terminal to answer it: a push or fetch that wants a credential fails with git's words instead of
+/// waiting on a prompt nobody sees. The empty `GIT_ASKPASS` stops git asking an askpass program
+/// instead (an editor's terminal sets one, and `core.askPass` or `SSH_ASKPASS` may name another); a
+/// credential helper still answers. Neither stops ssh, which asks on the terminal itself for a host
+/// key or a passphrase, so a git that may reach a remote over ssh gets `batch_ssh`: ssh in batch
+/// mode, which fails instead of asking.
+fn git_environment(batch_ssh: bool) -> Vec<(&'static str, &'static str)> {
+    let mut environment = vec![("GIT_TERMINAL_PROMPT", "0"), ("GIT_ASKPASS", "")];
+    if batch_ssh {
+        environment.push(("GIT_SSH_COMMAND", "ssh -o BatchMode=yes"));
+    }
+    environment
+}
+
+/// Whether a git in `directory` that may reach a remote should run ssh in batch mode: only when the
+/// user chose no ssh command of their own, in the environment (`GIT_SSH_COMMAND`, or `GIT_SSH`,
+/// which `GIT_SSH_COMMAND` would take the place of) or in git's configuration (`core.sshCommand`).
+/// `is_set` says whether an environment variable is set.
+fn wants_batch_ssh(directory: &Path, is_set: impl Fn(&str) -> bool) -> bool {
+    !is_set("GIT_SSH_COMMAND")
+        && !is_set("GIT_SSH")
+        // `--get` exits 1 when the key is not set.
+        && run_git(directory, &["config", "--get", "core.sshCommand"]).is_err()
 }
 
 /// One `git log` line as a summary, or nothing when it is not one.
@@ -475,8 +686,10 @@ mod tests {
     use std::path::{Path, PathBuf};
 
     use super::{
-        Git, GitError, HeadSummary, default_branch_of, head_summary_of, path_argument, paths_of,
+        Git, GitError, HeadSummary, default_branch_of, git_environment, head_summary_of,
+        path_argument, paths_of, wants_batch_ssh,
     };
+    use crate::git::fixtures::TempRepo;
 
     /// What `git log --format=%H%x1f%cI%x1f%s` prints for one commit.
     fn a_log_line(subject: &str) -> String {
@@ -592,6 +805,39 @@ mod tests {
                  exists",
             ]
         );
+    }
+
+    #[test]
+    fn runs_git_with_nobody_to_answer_a_prompt() {
+        assert_eq!(
+            git_environment(false),
+            [("GIT_TERMINAL_PROMPT", "0"), ("GIT_ASKPASS", "")]
+        );
+        // BatchMode makes ssh fail rather than ask for a host key or a passphrase.
+        assert_eq!(
+            git_environment(true),
+            [
+                ("GIT_TERMINAL_PROMPT", "0"),
+                ("GIT_ASKPASS", ""),
+                ("GIT_SSH_COMMAND", "ssh -o BatchMode=yes"),
+            ]
+        );
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn leaves_ssh_to_a_user_who_chose_how_to_run_it() {
+        let repository = TempRepo::new("batch-ssh");
+        let nothing_set = |_: &str| false;
+        assert!(wants_batch_ssh(&repository.path, nothing_set));
+        for chosen in ["GIT_SSH_COMMAND", "GIT_SSH"] {
+            assert!(
+                !wants_batch_ssh(&repository.path, |name: &str| name == chosen),
+                "{chosen}"
+            );
+        }
+        repository.git(&["config", "core.sshCommand", "ssh -i ~/.ssh/farik"]);
+        assert!(!wants_batch_ssh(&repository.path, nothing_set));
     }
 
     #[test]

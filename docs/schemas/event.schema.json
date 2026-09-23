@@ -65,7 +65,29 @@
         "drift.detected",
         "project.scanned",
         "team.updated",
-        "criteria.updated"
+        "criteria.updated",
+        "cost.recorded",
+        "budget.exhausted",
+        "task.transitioned",
+        "transition.refused",
+        "escalation.raised",
+        "contract.evaluated",
+        "criterion.recorded",
+        "note.written",
+        "review.recorded",
+        "question.asked",
+        "product_doc.written",
+        "tool.called",
+        "tool.denied",
+        "tool.returned",
+        "session.started",
+        "session.ended",
+        "task.integrated",
+        "pull_request.opened",
+        "question.answered",
+        "human.accepted",
+        "escalation.resolved",
+        "agent.updated"
       ]
     },
     "eventBodyWire": {
@@ -80,7 +102,29 @@
         { "$ref": "#/$defs/driftDetectedBody" },
         { "$ref": "#/$defs/projectScannedBody" },
         { "$ref": "#/$defs/teamUpdatedBody" },
-        { "$ref": "#/$defs/criteriaUpdatedBody" }
+        { "$ref": "#/$defs/criteriaUpdatedBody" },
+        { "$ref": "#/$defs/costRecordedBody" },
+        { "$ref": "#/$defs/budgetExhaustedBody" },
+        { "$ref": "#/$defs/taskTransitionedBody" },
+        { "$ref": "#/$defs/transitionRefusedBody" },
+        { "$ref": "#/$defs/escalationRaisedBody" },
+        { "$ref": "#/$defs/contractEvaluatedBody" },
+        { "$ref": "#/$defs/criterionRecordedBody" },
+        { "$ref": "#/$defs/noteWrittenBody" },
+        { "$ref": "#/$defs/reviewRecordedBody" },
+        { "$ref": "#/$defs/questionAskedBody" },
+        { "$ref": "#/$defs/productDocWrittenBody" },
+        { "$ref": "#/$defs/toolCalledBody" },
+        { "$ref": "#/$defs/toolDeniedBody" },
+        { "$ref": "#/$defs/toolReturnedBody" },
+        { "$ref": "#/$defs/sessionStartedBody" },
+        { "$ref": "#/$defs/sessionEndedBody" },
+        { "$ref": "#/$defs/taskIntegratedBody" },
+        { "$ref": "#/$defs/pullRequestOpenedBody" },
+        { "$ref": "#/$defs/questionAnsweredBody" },
+        { "$ref": "#/$defs/humanAcceptedBody" },
+        { "$ref": "#/$defs/escalationResolvedBody" },
+        { "$ref": "#/$defs/agentUpdatedBody" }
       ]
     },
     "contractSummary": {
@@ -174,7 +218,7 @@
     },
     "teamUpdatedBody": {
       "title": "Team Updated Body",
-      "description": "The team file was written.",
+      "description": "The team file was written. A status change alone is agent.updated.",
       "type": "object",
       "additionalProperties": false,
       "required": ["team_name", "agent_ids", "updated_by"],
@@ -193,6 +237,339 @@
       "properties": {
         "criterion_names": { "type": "array", "items": { "type": "string" } },
         "updated_by": { "type": "string" }
+      }
+    },
+    "costRecordedBody": {
+      "title": "Cost Recorded Body",
+      "description": "What one session's usage report cost (docs/SPEC.md section 5.5), priced when it was recorded so that a later change to the prices does not rewrite what was charged. The envelope names the session, the agent, and the task when there is one.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["purpose", "model_id", "usage", "cost_usd"],
+      "properties": {
+        "purpose": { "type": "string", "enum": ["triage", "refine", "plan", "implement", "verify", "ceremony", "conversation"] },
+        "model_id": { "type": "string", "minLength": 1 },
+        "usage": { "$ref": "#/$defs/tokenUsage" },
+        "cost_usd": { "type": "number", "minimum": 0 },
+        "unpriced": { "type": "boolean", "default": false, "description": "True when no price table in use priced the model: the tokens are recorded, the cost is zero, and no dollar limit counts it (ADR 0015). Left out, as an older log leaves it, the cost was priced." }
+      }
+    },
+    "tokenUsage": {
+      "title": "Token Usage",
+      "description": "The tokens one usage report counted. The ceiling is the largest integer JSON holds exactly.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["input_tokens", "output_tokens", "cache_read_tokens", "cache_write_tokens"],
+      "properties": {
+        "input_tokens": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 },
+        "output_tokens": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 },
+        "cache_read_tokens": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 },
+        "cache_write_tokens": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 }
+      }
+    },
+    "budgetExhaustedBody": {
+      "title": "Budget Exhausted Body",
+      "description": "A budget of docs/SPEC.md section 5.5 ran out, recorded once when it crossed from having room to none. The envelope is the session's that crossed it.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["scope", "consequence"],
+      "properties": {
+        "scope": { "type": "string", "enum": ["session_tokens", "session_wall_clock", "session_tool_calls", "task_usd", "task_sessions", "sprint_usd", "day_usd"] },
+        "consequence": { "type": "string", "enum": ["end_session_and_block_task", "escalate_task", "stop_new_assignments", "pause_team"] }
+      }
+    },
+    "taskStatus": {
+      "title": "Task Status",
+      "description": "Where a contract is in the lifecycle of docs/SPEC.md section 5.2, the contract schema's own list.",
+      "type": "string",
+      "enum": ["draft", "refining", "ready", "assigned", "in_progress", "blocked", "verifying", "rejected", "accepted", "escalated", "cancelled"]
+    },
+    "transitionActor": {
+      "title": "Transition Actor",
+      "description": "Which of the lifecycle's actors asked for a move (docs/SPEC.md section 5.2).",
+      "type": "string",
+      "enum": ["product_manager", "scrum_master", "assignee", "reviewer", "governor", "human"]
+    },
+    "gateId": {
+      "title": "Gate Id",
+      "description": "The gate of the row a move took (docs/SPEC.md section 5.2); none for a row with no gate.",
+      "type": "string",
+      "enum": ["none", "triaged", "definition_of_ready", "readiness_exhausted", "contract_requires_human", "assignment", "criteria_recorded", "blocker_written", "blocker_resolved", "blocked_age", "definition_of_done", "rejection_reasons", "iteration_below_limit", "iteration_limit_reached", "governor_escalation"]
+    },
+    "blockerWire": {
+      "title": "Blocker Wire",
+      "description": "What the assignee wrote when it blocked a task: what is in the way and what is needed.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["description", "needed"],
+      "properties": {
+        "description": { "type": "string" },
+        "needed": { "type": "string" }
+      }
+    },
+    "rejectionWire": {
+      "title": "Rejection Wire",
+      "description": "What the reviewer wrote when it rejected the work: the criteria that failed and why.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["failed_criterion_ids", "reasons"],
+      "properties": {
+        "failed_criterion_ids": { "type": "array", "items": { "type": "string" } },
+        "reasons": { "type": "string" }
+      }
+    },
+    "taskTransitionedBody": {
+      "title": "Task Transitioned Body",
+      "description": "The governor moved a contract (docs/SPEC.md section 5.2). requested_by is the agent id that asked, or human, or governor; effects are what the decision recorded with the move; assignee, reviewer, and iteration are the contract's after it; blocker, blocker_resolution, and rejection are the evidence the move was judged on, when the requester brought any; reason is the human's words for a move they asked for.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["from", "to", "actor", "requested_by", "gate", "effects", "iteration"],
+      "properties": {
+        "from": { "$ref": "#/$defs/taskStatus" },
+        "to": { "$ref": "#/$defs/taskStatus" },
+        "actor": { "$ref": "#/$defs/transitionActor" },
+        "requested_by": { "type": "string" },
+        "gate": { "$ref": "#/$defs/gateId" },
+        "effects": {
+          "type": "array",
+          "items": { "type": "string", "enum": ["increment_iteration", "raise_escalation", "reset_blocker", "stamp_blocked_at"] }
+        },
+        "assignee": { "type": "string" },
+        "reviewer": { "type": "string" },
+        "iteration": { "type": "integer", "minimum": 0, "maximum": 4294967295 },
+        "blocker": { "$ref": "#/$defs/blockerWire" },
+        "blocker_resolution": { "type": "string" },
+        "rejection": { "$ref": "#/$defs/rejectionWire" },
+        "reason": { "type": "string" }
+      }
+    },
+    "transitionRefusedBody": {
+      "title": "Transition Refused Body",
+      "description": "The governor refused to move a contract (docs/SPEC.md section 5.2), with every reason it gave. Nothing else changed.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["from", "to", "actor", "requested_by", "refusal", "details"],
+      "properties": {
+        "from": { "$ref": "#/$defs/taskStatus" },
+        "to": { "$ref": "#/$defs/taskStatus" },
+        "actor": { "$ref": "#/$defs/transitionActor" },
+        "requested_by": { "type": "string" },
+        "refusal": { "type": "string", "enum": ["wrong_task", "no_such_transition", "actor_not_allowed", "not_the_named_agent", "gate_failed"] },
+        "details": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "escalationRaisedBody": {
+      "title": "Escalation Raised Body",
+      "description": "A move sent a contract to the human (docs/SPEC.md section 5.7), or an accepted contract's integration could not land (5.14), which moves nothing: the contract stays accepted. detail names the gate that opened the move and, when there are any, the words it was about; for reason integration, what failed in git's or gh's words.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["reason", "detail"],
+      "properties": {
+        "reason": { "type": "string", "enum": ["budget", "sessions", "iterations", "blocker_age", "permission", "risk_gate", "approval", "readiness_failures", "integration", "explicit_request"] },
+        "detail": { "type": "string" }
+      }
+    },
+    "contractEvaluatedBody": {
+      "title": "Contract Evaluated Body",
+      "description": "A contract was held to the Definition of Ready (docs/SPEC.md section 5.3) or of Done (5.4), and whether it passed, with every failure. Recorded before the move or refusal it explains.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["gate", "passed", "failures"],
+      "properties": {
+        "gate": { "type": "string", "enum": ["definition_of_ready", "definition_of_done"] },
+        "passed": { "type": "boolean" },
+        "failures": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "criterionRecordedBody": {
+      "title": "Criterion Recorded Body",
+      "description": "An exit criterion's result, recorded by the agent that ran it (docs/SPEC.md section 5.4). run_by is the runner's relation to the contract; the Definition of Done reads the latest result per criterion and runner since the task last entered in_progress.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["criterion_id", "passed", "evidence", "run_by", "recorded_by"],
+      "properties": {
+        "criterion_id": { "type": "string" },
+        "passed": { "type": "boolean" },
+        "evidence": { "type": "string" },
+        "run_by": { "type": "string", "enum": ["assignee", "reviewer"] },
+        "recorded_by": { "type": "string" }
+      }
+    },
+    "noteWrittenBody": {
+      "title": "Note Written Body",
+      "description": "A note about the work on a contract (docs/SPEC.md section 5.4): the assignee's completion note, the reviewer's review note, or either's progress note. It does not touch the contract's own notes field.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "text", "written_by"],
+      "properties": {
+        "kind": { "type": "string", "enum": ["completion", "review", "progress"] },
+        "text": { "type": "string" },
+        "written_by": { "type": "string" }
+      }
+    },
+    "reviewRecordedBody": {
+      "title": "Review Recorded Body",
+      "description": "One verification of a contract summed up (docs/SPEC.md section 5.4), recorded once per verification when the reviewer's session ends and every criterion other than a human one has a reviewer result: criteria_run is how many criteria have one, and passed is whether each one's latest passed. reviewer names the reviewer the verification was about. Nothing gates on it; the metrics read it.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["reviewer", "criteria_run", "passed"],
+      "properties": {
+        "reviewer": { "type": "string" },
+        "criteria_run": { "type": "integer", "minimum": 0, "maximum": 4294967295 },
+        "passed": { "type": "boolean" }
+      }
+    },
+    "taskIntegratedBody": {
+      "title": "Task Integrated Body",
+      "description": "An accepted task's branch reached the integration branch (docs/SPEC.md section 5.14): sha is the integration branch's commit that holds it, into is that branch, and integrated_by is governor for Farik's own merge and human for the human's integrate or a pull request the human merged on the forge.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sha", "into", "integrated_by"],
+      "properties": {
+        "sha": { "type": "string" },
+        "into": { "type": "string" },
+        "integrated_by": { "type": "string", "enum": ["governor", "human"] }
+      }
+    },
+    "pullRequestOpenedBody": {
+      "title": "Pull Request Opened Body",
+      "description": "Farik pushed an accepted task's branch and opened a pull request for it under the pull_request policy (docs/SPEC.md section 5.14): its url, its number on the forge, and the branch it merges.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["url", "number", "branch"],
+      "properties": {
+        "url": { "type": "string" },
+        "number": { "type": "integer", "minimum": 0, "maximum": 18446744073709551615 },
+        "branch": { "type": "string" }
+      }
+    },
+    "questionAnsweredBody": {
+      "title": "Question Answered Body",
+      "description": "The human answered a question an agent asked (docs/SPEC.md section 5.7): question_id is the sequence number of its question.asked, whose task, when it has one, is on this event's envelope too.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["question_id", "answer", "answered_by"],
+      "properties": {
+        "question_id": { "type": "integer", "minimum": 1, "maximum": 18446744073709551615 },
+        "answer": { "type": "string" },
+        "answered_by": { "type": "string" }
+      }
+    },
+    "humanAcceptedBody": {
+      "title": "Human Accepted Body",
+      "description": "The human approved a contract (subject contract, docs/SPEC.md section 5.16 item 2) or accepted a result (subject result, 5.4), with the words they gave, when they gave any.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["subject", "accepted_by"],
+      "properties": {
+        "subject": { "type": "string", "enum": ["contract", "result"] },
+        "accepted_by": { "type": "string" },
+        "message": { "type": "string" }
+      }
+    },
+    "escalationResolvedBody": {
+      "title": "Escalation Resolved Body",
+      "description": "The human resolved an escalation (docs/SPEC.md section 5.7): the contract moved out of escalated to to, and message is what the next session about it is given.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["to", "message", "resolved_by"],
+      "properties": {
+        "to": { "$ref": "#/$defs/taskStatus" },
+        "message": { "type": "string" },
+        "resolved_by": { "type": "string" }
+      }
+    },
+    "agentUpdatedBody": {
+      "title": "Agent Updated Body",
+      "description": "An agent's status changed in the team file (docs/SPEC.md F1): a paused agent takes no work and its sessions end at their next tool call.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["agent_id", "status", "updated_by"],
+      "properties": {
+        "agent_id": { "type": "string" },
+        "status": { "type": "string", "enum": ["active", "paused", "retired"] },
+        "updated_by": { "type": "string" }
+      }
+    },
+    "questionAskedBody": {
+      "title": "Question Asked Body",
+      "description": "An agent asked the human a question (docs/SPEC.md section 5.16). The event's sequence number is the question's id. A conversation with no task can ask one, so the envelope names a task only when there is one.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["question", "asked_by"],
+      "properties": {
+        "question": { "type": "string" },
+        "asked_by": { "type": "string" }
+      }
+    },
+    "productDocWrittenBody": {
+      "title": "Product Doc Written Body",
+      "description": "The Product Manager wrote a product document for an approved epic (docs/SPEC.md section 5.16). path is relative to .farik/product/.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "written_by"],
+      "properties": {
+        "path": { "type": "string" },
+        "written_by": { "type": "string" }
+      }
+    },
+    "toolCalledBody": {
+      "title": "Tool Called Body",
+      "description": "The PreToolUse hook allowed a tool call (docs/SPEC.md sections 5.6 and 8.2). input is the compact JSON of the call's input, cut to at most 4 KiB, ending in [cut at 4 KiB] when it was cut. The envelope names the session, the agent, and the task when the session has one.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["tool", "input"],
+      "properties": {
+        "tool": { "type": "string" },
+        "tool_use_id": { "type": "string" },
+        "input": { "type": "string" }
+      }
+    },
+    "toolDeniedBody": {
+      "title": "Tool Denied Body",
+      "description": "The PreToolUse hook denied a tool call (docs/SPEC.md sections 5.6 and 8.2). reason starts with the refusal's kind in snake_case, then a colon, then what it says.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["tool", "reason"],
+      "properties": {
+        "tool": { "type": "string" },
+        "tool_use_id": { "type": "string" },
+        "reason": { "type": "string" }
+      }
+    },
+    "toolReturnedBody": {
+      "title": "Tool Returned Body",
+      "description": "A tool call the hook allowed returned (docs/SPEC.md section 8.2). output is the compact JSON of what it returned, cut to at most 4 KiB, ending in [cut at 4 KiB] when it was cut. A call that failed leaves no tool.returned.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["tool", "output"],
+      "properties": {
+        "tool": { "type": "string" },
+        "tool_use_id": { "type": "string" },
+        "output": { "type": "string" },
+        "duration_ms": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 }
+      }
+    },
+    "sessionStartedBody": {
+      "title": "Session Started Body",
+      "description": "A Claude Code session started (docs/SPEC.md sections 8.2 and 8.5): why, on which model, and how hard it thinks. The envelope names the session, the agent, and the task when the session has one; the exact system prompt it was given is kept in .farik/local/sessions/<session_id>/system-prompt.md.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["purpose", "model", "effort"],
+      "properties": {
+        "purpose": { "type": "string", "enum": ["triage", "refine", "plan", "implement", "verify", "ceremony", "conversation"] },
+        "model": { "type": "string", "minLength": 1 },
+        "effort": { "type": "string", "enum": ["low", "medium", "high"] }
+      }
+    },
+    "sessionEndedBody": {
+      "title": "Session Ended Body",
+      "description": "A Claude Code session ended (docs/SPEC.md sections 8.2 and 8.5): completed when the model finished its turn, aborted when its caller stopped it, limit when a limit did, error when the program failed; detail is what the program said about it. The envelope names the session, the agent, and the task when the session has one.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["reason", "detail"],
+      "properties": {
+        "reason": { "type": "string", "enum": ["completed", "aborted", "limit", "error"] },
+        "detail": { "type": "string" }
       }
     }
   }

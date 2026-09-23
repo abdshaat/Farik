@@ -2,28 +2,31 @@
 //! tests run a command without spawning a process.
 
 use std::path::PathBuf;
+use std::sync::Arc;
 
-use chrono::Utc;
-use farik::{CliIo, run_cli};
-use farik_protocol::clock::Clock;
-
-/// The wall clock, which is the only thing the binary has that a test does not want.
-struct SystemClock;
-
-impl Clock for SystemClock {
-    fn now(&self) -> chrono::DateTime<Utc> {
-        Utc::now()
-    }
-}
+use farik::ids::{RandomSessionIds, SystemClock};
+use farik::{CliIo, Engine, Interrupts, run_cli};
 
 fn main() -> std::process::ExitCode {
     let arguments: Vec<String> = std::env::args().collect();
-    let mut io = CliIo {
-        stdout: Box::new(std::io::stdout()),
-        stderr: Box::new(std::io::stderr()),
-        cwd: std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
-        clock: Box::new(SystemClock),
-    };
+    let mut io = CliIo::new(
+        std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
+        Box::new(std::io::stdout()),
+        Box::new(std::io::stderr()),
+        Arc::new(SystemClock),
+    );
+    io.stdin = Box::new(std::io::stdin());
+    io.env = std::env::vars_os()
+        .map(|(name, value)| {
+            (
+                name.to_string_lossy().into_owned(),
+                value.to_string_lossy().into_owned(),
+            )
+        })
+        .collect();
+    io.engine = Engine::Claude;
+    io.interrupts = Interrupts::CtrlC;
+    io.session_ids = Arc::new(RandomSessionIds);
     let code = run_cli(&arguments, &mut io);
     std::process::ExitCode::from(u8::try_from(code).unwrap_or(1))
 }

@@ -13,11 +13,14 @@ use farik_protocol::event::{
     EventEnvelope, EventKind, FarikEvent, NewEvent, body_to_value, event_from_value, event_to_value,
 };
 use rusqlite::types::Value as SqlValue;
-use rusqlite::{Connection, params_from_iter};
+use rusqlite::{Connection, TransactionBehavior, params_from_iter};
 use serde_json::{Map, Value};
 
 use crate::error::StoreError;
 use crate::migrations;
+
+/// A log that refuses one kind of event, for tests in this crate and in others.
+pub mod fixtures;
 
 /// The prefix every task id this store hands out carries, from the contract schema's pattern.
 pub(crate) const TASK_ID_PREFIX: &str = "FRK";
@@ -231,7 +234,9 @@ impl EventLog {
         let taken =
             i64::try_from(taken).map_err(|_| StoreError::TaskIdsExhausted { next: taken })?;
         let mut connection = self.connection();
-        let transaction = connection.transaction()?;
+        // `Immediate` takes the write lock before the counter is touched, so a connection waiting
+        // for it waits out `busy_timeout` rather than being refused at once for having read first.
+        let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let next: i64 = transaction.query_row(
             "INSERT INTO task_counters (prefix, next) VALUES (?1, ?2 + 1)
              ON CONFLICT (prefix) DO UPDATE SET next = max(next, ?2) + 1
@@ -478,6 +483,29 @@ mod tests {
 
     fn a_log() -> EventLog {
         open_event_log(Path::new(IN_MEMORY), at(9)).expect("a log in memory opens")
+    }
+
+    #[test]
+    fn refuses_the_one_kind_its_fixture_names_and_takes_the_rest() {
+        let log = a_log();
+        super::fixtures::refuse_appends_of(&log, EventKind::CostRecorded);
+        let refusal = log
+            .append(&an_event(EventKind::CostRecorded))
+            .expect_err("the fixture refuses a cost");
+        assert!(
+            refusal
+                .to_string()
+                .contains("this log refuses cost.recorded"),
+            "{refusal}"
+        );
+        log.append(&an_event(EventKind::SessionEnded))
+            .expect("every other kind is taken");
+        assert_eq!(
+            log.read(&EventQuery::default())
+                .expect("the log reads")
+                .len(),
+            1
+        );
     }
 
     /// Enough threads and appends that an announcement made outside the log's own lock is handed

@@ -70,7 +70,7 @@ pub fn a_full_team_wire() -> Value {
             "wip_limit_per_agent": 2,
             "blocked_limit_hours": 24,
             "max_iterations": 3,
-            "integration": "local_merge",
+            "integration": "auto_merge",
             "integration_branch": "trunk"
         },
         "rules": {

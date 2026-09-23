@@ -5,7 +5,7 @@
 //! still builds them, so `cargo fmt` and `clippy` hold them to the same standard as everything else
 //! and they cannot rot unnoticed (`docs/standards/code.md`, "Rust integration test").
 
-use farik_store::git::fixtures::{TempRepo, git_in};
+use farik_store::git::fixtures::{TempRepo, git_in, git_output_in};
 use farik_store::{Git, GitError, MergeOutcome};
 
 #[test]
@@ -71,6 +71,17 @@ fn answers_with_the_branch_it_is_on_when_there_is_no_remote_to_ask() {
     assert_eq!(git.default_branch().expect("the read works"), "main");
     repository.git(&["checkout", "-b", "farik/FRK-1"]);
     assert_eq!(git.current_branch().expect("the read works"), "farik/FRK-1");
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn names_the_branch_it_is_on_when_a_tag_has_its_name() {
+    // `symbolic-ref --short` would say `heads/main`, to tell it from the tag.
+    let repository = TempRepo::new("branch-and-tag");
+    repository.git(&["tag", "main"]);
+    let git = repository.adapter();
+    assert_eq!(git.current_branch().expect("the read works"), "main");
+    assert_eq!(git.default_branch().expect("the read works"), "main");
 }
 
 #[test]
@@ -517,4 +528,339 @@ fn names_what_conflicted_and_leaves_the_tree_as_it_was() {
         "main's line",
         "the integration branch's own work is untouched"
     );
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn commits_the_named_paths_and_returns_the_sha() {
+    let repository = TempRepo::new("commit-paths");
+    repository.write("named.txt", "the one to commit\n");
+    repository.write("other.txt", "the one to leave\n");
+    let git = repository.adapter();
+    assert!(
+        git.status(&repository.path)
+            .expect("the status reads")
+            .contains("named.txt"),
+        "the status shows what is changed"
+    );
+
+    let sha = git
+        .commit(
+            &repository.path,
+            "add the named file",
+            &["named.txt".to_string()],
+        )
+        .expect("the commit is made");
+
+    assert_eq!(sha, repository.git_output(&["rev-parse", "HEAD"]));
+    assert_eq!(
+        repository.git_output(&["show", "--name-only", "--format=", "HEAD"]),
+        "named.txt",
+        "only the named path is in the commit"
+    );
+    assert_eq!(
+        git.status(&repository.path).expect("the status reads"),
+        "?? other.txt",
+        "and the other is left as it was"
+    );
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn commits_a_named_path_as_a_path_and_never_as_a_pattern() {
+    // The protected-path check (5.6) reads each named path as a path, so git must too: a glob
+    // or a pathspec magic word would stage files the check never saw.
+    let repository = TempRepo::new("commit-literal");
+    repository.write("src/a.ts", "export {};\n");
+    repository.write("src/k.pem", "a key\n");
+    let git = repository.adapter();
+    let before = repository.git_output(&["rev-parse", "HEAD"]);
+
+    for pattern in ["src/*", "src/*.ts", ":(glob)src/**"] {
+        let refused = git.commit(&repository.path, "m", &[pattern.to_string()]);
+        assert!(
+            matches!(refused, Err(GitError::CommandFailed { .. })),
+            "{pattern}: {refused:?}"
+        );
+    }
+    assert_eq!(repository.git_output(&["rev-parse", "HEAD"]), before);
+    assert_eq!(
+        repository.git_output(&["diff", "--cached", "--name-only"]),
+        "",
+        "nothing is left staged"
+    );
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn makes_a_detached_worktree_at_a_commit() {
+    let repository = TempRepo::new("detached-worktree");
+    let first = repository.git_output(&["rev-parse", "HEAD"]);
+    repository.write("second.txt", "and a second\n");
+    repository.commit("the second commit");
+    let git = repository.adapter();
+    let path = repository.path.join(".farik/local/worktrees/FRK-1-base");
+    git.create_detached_worktree(&path, &first)
+        .expect("the worktree is made");
+    assert_eq!(git_output_in(&path, &["rev-parse", "HEAD"]), first);
+    assert!(path.join("README.md").exists());
+    assert!(
+        !path.join("second.txt").exists(),
+        "it is at the first commit"
+    );
+    // Detached: no branch was made for it, so removing it leaves nothing behind.
+    assert_eq!(git_output_in(&path, &["branch", "--show-current"]), "");
+    git.remove_worktree(&path).expect("the worktree is removed");
+    assert!(!path.exists());
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn pushes_a_branch_to_a_remote() {
+    let repository = TempRepo::new("push");
+    let origin = repository.path.with_extension("origin.git");
+    let _ = std::fs::remove_dir_all(&origin);
+    std::fs::create_dir_all(&origin).expect("a directory for the remote");
+    git_in(&origin, &["init", "--bare", "-b", "main"]);
+    repository.git(&["remote", "add", "origin", origin.to_str().expect("a path")]);
+    repository.git(&["branch", "farik/FRK-1"]);
+
+    repository
+        .adapter()
+        .push("origin", "farik/FRK-1")
+        .expect("the branch is pushed");
+
+    assert_eq!(
+        git_output_in(&origin, &["rev-parse", "farik/FRK-1"]),
+        repository.git_output(&["rev-parse", "HEAD"])
+    );
+    let _ = std::fs::remove_dir_all(&origin);
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn reads_a_file_at_a_revision() {
+    let repository = TempRepo::new("file-at");
+    repository.git(&["checkout", "-b", "farik/FRK-1"]);
+    repository.write("tests/new.sh", "exit 0\n\n");
+    repository.commit("add a test");
+    repository.git(&["checkout", "main"]);
+    let git = repository.adapter();
+    assert_eq!(
+        git.file_at("farik/FRK-1", "tests/new.sh"),
+        Ok("exit 0\n\n".to_owned()),
+        "the file as committed, trailing newlines and all"
+    );
+    assert!(matches!(
+        git.file_at("main", "tests/new.sh"),
+        Err(GitError::CommandFailed { .. })
+    ));
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn lists_added_and_modified_paths_but_not_deleted_ones() {
+    let repository = TempRepo::new("added-or-modified");
+    repository.write("doomed.txt", "going\n");
+    repository.commit("a file to delete");
+    repository.git(&["checkout", "-b", "farik/FRK-1"]);
+    repository.write("README.md", "changed\n");
+    repository.write("tests/new.sh", "exit 0\n");
+    std::fs::remove_file(repository.path.join("doomed.txt")).expect("the file is deleted");
+    repository.commit("change, add, delete");
+    let mut paths = repository
+        .adapter()
+        .added_or_modified_paths("main", "farik/FRK-1")
+        .expect("the diff is read");
+    paths.sort();
+    assert_eq!(paths, ["README.md", "tests/new.sh"]);
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn finds_the_merge_base_of_two_branches() {
+    let repository = TempRepo::new("merge-base");
+    let fork = repository.git_output(&["rev-parse", "HEAD"]);
+    repository.git(&["checkout", "-b", "farik/FRK-1"]);
+    repository.write("task.txt", "the task\n");
+    repository.commit("the task");
+    repository.git(&["checkout", "main"]);
+    repository.write("main.txt", "main moved on\n");
+    repository.commit("main moves on");
+    assert_eq!(
+        repository.adapter().merge_base("main", "farik/FRK-1"),
+        Ok(fork)
+    );
+}
+
+/// A bare repository beside `repository`, added to it as `origin`.
+fn with_origin(repository: &TempRepo) -> std::path::PathBuf {
+    let origin = repository.path.with_extension("origin.git");
+    let _ = std::fs::remove_dir_all(&origin);
+    std::fs::create_dir_all(&origin).expect("a directory for the remote");
+    git_in(&origin, &["init", "--bare", "-b", "main"]);
+    repository.git(&["remote", "add", "origin", origin.to_str().expect("a path")]);
+    origin
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn knows_whether_a_remote_exists() {
+    let repository = TempRepo::new("has-remote");
+    assert_eq!(repository.adapter().has_remote("origin"), Ok(false));
+    // A remote whose name begins with `origin` is not `origin`.
+    repository.git(&["remote", "add", "origin-mirror", "/nowhere"]);
+    assert_eq!(repository.adapter().has_remote("origin"), Ok(false));
+    let origin = with_origin(&repository);
+    assert_eq!(repository.adapter().has_remote("origin"), Ok(true));
+    assert_eq!(repository.adapter().has_remote("upstream"), Ok(false));
+    let _ = std::fs::remove_dir_all(&origin);
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn fast_forwards_a_branch_to_its_remote() {
+    let repository = TempRepo::new("fast-forward");
+    let origin = with_origin(&repository);
+    repository.git(&["branch", "develop"]);
+    repository.git(&["push", "origin", "main", "develop"]);
+    // A second clone moves both branches on the remote.
+    let other = repository.path.with_extension("other");
+    let _ = std::fs::remove_dir_all(&other);
+    git_in(
+        repository.path.parent().expect("a parent"),
+        &[
+            "clone",
+            origin.to_str().expect("a path"),
+            other.to_str().expect("a path"),
+        ],
+    );
+    git_in(&other, &["config", "user.name", "Farik Test"]);
+    git_in(&other, &["config", "user.email", "test@farik.invalid"]);
+    git_in(&other, &["config", "commit.gpgsign", "false"]);
+    for branch in ["main", "develop"] {
+        git_in(&other, &["checkout", branch]);
+        std::fs::write(other.join(format!("{branch}.txt")), branch).expect("written");
+        git_in(&other, &["add", "-A"]);
+        git_in(&other, &["commit", "-m", branch]);
+        git_in(&other, &["push", "origin", branch]);
+    }
+    // A tag on `origin` named as each branch, at the commit the branch was at: a refspec that did
+    // not spell `refs/heads/` would fetch the tag.
+    for branch in ["main", "develop"] {
+        git_in(&origin, &["tag", branch, &format!("{branch}~1")]);
+    }
+    let adapter = repository.adapter();
+
+    adapter
+        .fetch_fast_forward("origin", "main")
+        .expect("the checked-out branch fast-forwards");
+    adapter
+        .fetch_fast_forward("origin", "develop")
+        .expect("a branch not checked out fast-forwards");
+
+    for branch in ["main", "develop"] {
+        let reference = format!("refs/heads/{branch}");
+        assert_eq!(
+            repository.git_output(&["rev-parse", &reference]),
+            git_output_in(&origin, &["rev-parse", &reference])
+        );
+    }
+    assert!(
+        repository.path.join("main.txt").is_file(),
+        "the checkout moved with it"
+    );
+
+    // Diverged: a local commit origin lacks, and one on origin the local branch lacks.
+    for branch in ["main", "develop"] {
+        git_in(&other, &["checkout", branch]);
+        std::fs::write(other.join("again.txt"), branch).expect("written");
+        git_in(&other, &["add", "-A"]);
+        git_in(&other, &["commit", "-m", "again"]);
+        git_in(&other, &["push", "origin", branch]);
+    }
+    repository.write("local.txt", "local\n");
+    repository.commit("a local commit");
+    repository.git(&["branch", "-f", "develop", "refs/heads/main"]);
+    for branch in ["main", "develop"] {
+        let reference = format!("refs/heads/{branch}");
+        let before = repository.git_output(&["rev-parse", &reference]);
+        let refused = adapter.fetch_fast_forward("origin", branch);
+        assert!(
+            matches!(refused, Err(GitError::CommandFailed { .. })),
+            "{branch}: {refused:?}"
+        );
+        assert_eq!(repository.git_output(&["rev-parse", &reference]), before);
+    }
+    let _ = std::fs::remove_dir_all(&origin);
+    let _ = std::fs::remove_dir_all(&other);
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn pushes_and_fetches_without_a_prompt() {
+    use std::io::{Read, Write};
+
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("a port");
+    let port = listener.local_addr().expect("an address").port();
+    std::thread::spawn(move || {
+        for stream in listener.incoming() {
+            let Ok(mut stream) = stream else { continue };
+            let mut request = Vec::new();
+            let mut buffer = [0_u8; 1024];
+            while !request.windows(4).any(|window| window == b"\r\n\r\n") {
+                match stream.read(&mut buffer) {
+                    Ok(0) | Err(_) => break,
+                    Ok(read) => request.extend_from_slice(&buffer[..read]),
+                }
+            }
+            let _ = stream.write_all(
+                b"HTTP/1.1 401 Unauthorized\r\nWWW-Authenticate: Basic realm=\"farik\"\r\n\
+                  Content-Length: 0\r\nConnection: close\r\n\r\n",
+            );
+        }
+    });
+    let repository = TempRepo::new("no-prompt");
+    repository.git(&[
+        "remote",
+        "add",
+        "origin",
+        &format!("http://127.0.0.1:{port}/r.git"),
+    ]);
+    let adapter = repository.adapter();
+    let started = std::time::Instant::now();
+
+    for refused in [
+        adapter.push("origin", "refs/heads/main"),
+        adapter.fetch_fast_forward("origin", "main"),
+    ] {
+        match refused {
+            Err(GitError::CommandFailed { stderr, .. }) => {
+                assert!(stderr.contains("terminal prompts disabled"), "{stderr}");
+            }
+            other => panic!("expected a refusal, got {other:?}"),
+        }
+    }
+    assert!(started.elapsed() < std::time::Duration::from_secs(30));
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn refuses_a_branch_name_git_would_read_as_another() {
+    let repository = TempRepo::new("branch-name");
+    repository.git(&["checkout", "-b", "other"]);
+    repository.git(&["checkout", "main"]);
+    let adapter = repository.adapter();
+    // `@` is HEAD, and `@{-1}` the branch checked out before: git prints `other` for it.
+    for name in ["@", "@{-1}", "main:other", "-f"] {
+        match adapter.check_branch_name(name) {
+            Err(GitError::CommandFailed { stderr, .. }) => {
+                assert!(stderr.contains(name), "{name}: {stderr}");
+            }
+            other => panic!("{name}: expected a refusal, got {other:?}"),
+        }
+    }
+    for name in ["main", "release/1.0"] {
+        assert_eq!(adapter.check_branch_name(name), Ok(()), "{name}");
+    }
 }

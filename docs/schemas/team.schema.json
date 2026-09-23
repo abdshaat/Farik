@@ -157,21 +157,18 @@
             "medium",
             "high"
           ],
-          "description": "How hard the model thinks. The runtime's own Effort arrives in phase 3."
+          "description": "How hard the model thinks. The runtime passes this value to the program as it is (farik_runtime::SessionSpec::effort)."
         }
       }
     },
     "budgets": {
       "type": "object",
       "additionalProperties": false,
-      "required": [
-        "daily_usd"
-      ],
       "properties": {
         "daily_usd": {
           "type": "number",
           "exclusiveMinimum": 0,
-          "description": "What the team may spend in a day before it pauses (spec 5.5). A sprint's own budget belongs to the sprint, not here."
+          "description": "What the team may spend in a day before it pauses (spec 5.5). Left out, the day has no dollar limit: Farik ships none (ADR 0015). A sprint's own budget belongs to the sprint, not here."
         },
         "session": {
           "$ref": "#/$defs/sessionLimits"
@@ -246,7 +243,7 @@
           "type": "string",
           "enum": [
             "manual",
-            "local_merge",
+            "auto_merge",
             "pull_request"
           ],
           "description": "What happens to a task's branch after it is accepted (spec 5.14)."
@@ -304,7 +301,7 @@
         "max_task_budget_usd": {
           "type": "number",
           "exclusiveMinimum": 0,
-          "description": "The most one task's budget may be. Left out, the five dollars farik-core ships; to lift the cap in practice, write a number large enough. There is no way to say \"no cap\", because a team that can turn a rule off is a rule that only narrows in name (spec 5.12)."
+          "description": "The most one task's budget may be. Left out, no cap: Farik ships no dollar limit (ADR 0015). An absent rule narrows nothing, and so it loosens nothing either (spec 5.12)."
         },
         "forbidden_commands": {
           "type": "array",

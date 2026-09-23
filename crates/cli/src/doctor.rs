@@ -4,7 +4,8 @@
 //! beyond it are the ones earlier steps of this phase recorded as being nobody's to report: a team
 //! rule that does not compile, a setting Farik does not know, a criterion whose verification matches
 //! no branch of its `oneOf`, a repository with no working tree, and a team file or criterion library
-//! that is there and cannot be read.
+//! that is there and cannot be read. A sixth names each active agent's model that no price table
+//! prices (ADR 0015).
 
 use chrono::{DateTime, Utc};
 use farik_core::governor::paths::{
@@ -13,6 +14,7 @@ use farik_core::governor::paths::{
 use farik_core::governor::permissions::{CommandRefusal, evaluate_command};
 use farik_protocol::event::EventBody;
 use farik_protocol::generated::event::{DriftDetectedBody, DriftDetectedBodyDrift};
+use farik_runtime::cost::unpriced_models;
 use farik_store::files::FilesError;
 use farik_store::{Drift, reconcile};
 use serde_json::{Value, json};
@@ -53,6 +55,7 @@ pub fn doctor(project: &Project, now: DateTime<Utc>) -> Result<Report, String> {
     findings.extend(rules_that_do_not_compile(project));
     findings.extend(settings_farik_does_not_know(project));
     findings.extend(criteria_that_match_no_branch(project));
+    findings.extend(models_no_price_table_prices(project));
 
     let lines = if findings.is_empty() {
         vec!["nothing to report: the files and the log agree".to_string()]
@@ -124,6 +127,44 @@ fn rules_that_do_not_compile(project: &Project) -> Vec<String> {
         ));
     }
     found
+}
+
+/// Each active agent's model that no price table prices, whose usage is recorded at no cost and
+/// counted by no dollar limit (ADR 0015); or, when the prices or a role cannot be read, that
+/// sentence alone, since no model can be checked against them.
+fn models_no_price_table_prices(project: &Project) -> Vec<String> {
+    match unpriced(project) {
+        Ok(sentences) => sentences
+            .into_iter()
+            .map(|sentence| format!(".farik/team.yaml: {sentence} (5.5)"))
+            .collect(),
+        Err(sentence) => vec![sentence],
+    }
+}
+
+/// One sentence per model an active agent uses that the project's prices do not price, in the
+/// words `farik doctor` and every driving start share: the model, the ids of the agents that use
+/// it, what that means, and how to price it.
+///
+/// # Errors
+///
+/// The sentence of the price table or the role that cannot be read.
+pub(crate) fn unpriced(project: &Project) -> Result<Vec<String>, String> {
+    let prices = project
+        .files
+        .effective_prices()
+        .map_err(|error| error.to_string())?;
+    let models = unpriced_models(&project.team, &prices).map_err(|error| error.to_string())?;
+    Ok(models
+        .into_iter()
+        .map(|(model, ids)| {
+            format!(
+                "no price table prices {model} (used by {}): its usage is recorded at no cost, \
+                 and no dollar limit counts it. Add it to .farik/prices.json to price it",
+                ids.join(", ")
+            )
+        })
+        .collect())
 }
 
 /// A key in `.farik/local/settings.json` that Farik does not know.

@@ -119,6 +119,7 @@ pub fn init(cwd: &Path, now: DateTime<Utc>) -> Result<Report, String> {
                 .collect::<Vec<_>>()
                 .join(", ")
         ));
+        lines.push(AUTO_MERGE_NOTICE.to_string());
     } else {
         lines.push("kept the team already in .farik/team.yaml".to_string());
     }
@@ -141,6 +142,13 @@ pub fn init(cwd: &Path, now: DateTime<Utc>) -> Result<Report, String> {
         json_lines: None,
     })
 }
+
+/// What the report says when it writes the starter team, whose policy pushes to `origin` on the
+/// user's behalf: a default that reaches outside the machine is one the user is told of (5.6,
+/// ADR 0012).
+const AUTO_MERGE_NOTICE: &str = "Integration: auto_merge. Accepted work is merged into the \
+                                 integration branch and pushed to origin when there is one; \
+                                 policy.integration in .farik/team.yaml changes it.";
 
 /// What a file holds, nothing when there is no such file, and a refusal when there is one and it
 /// cannot be read.
@@ -179,7 +187,8 @@ fn project_document(scan: &ProjectScan, library: &CriteriaLibrary) -> String {
 ///
 /// The team editor (F1) is how a person renames them, adds the other roles, and changes the models.
 /// Both get `claude-opus-5` at `high`, which is what `docs/SPEC.md` 8.2 ships as the default for the
-/// Product Manager, the Architect and the Developer.
+/// Product Manager, the Architect and the Developer. It sets no dollar limit, which is the user's
+/// to set (ADR 0015).
 ///
 /// # Errors
 ///
@@ -206,13 +215,13 @@ fn starter_team(project: &str) -> Result<Team, String> {
                 "model": { "id": "claude-opus-5", "effort": "high" }
             }
         ],
-        "budgets": { "daily_usd": 20 },
+        "budgets": {},
         "policy": {
             "human_accepts_contracts": "high_risk",
             "wip_limit_per_agent": 1,
             "blocked_limit_hours": 24,
             "max_iterations": 3,
-            "integration": "manual"
+            "integration": "auto_merge"
         },
         "rules": {}
     });
@@ -266,16 +275,27 @@ mod tests {
     }
 
     #[test]
+    fn starts_a_project_with_no_dollar_limit() {
+        let team = starter_team("notes").expect("a team");
+        assert_eq!(team.budgets.daily_usd, None, "Farik ships no daily budget");
+        assert!(team.budgets.session.is_none());
+        assert_eq!(
+            team.rules().max_task_budget_usd,
+            None,
+            "nor a cap on a task"
+        );
+    }
+
+    #[test]
     fn starts_a_team_on_the_limits_the_spec_ships() {
         let team = starter_team("notes").expect("a team");
         assert_eq!(
             team.policy.wip_limit_per_agent, 1,
             "one unfinished task per agent (section 3)"
         );
-        assert!(
-            (team.budgets.daily_usd - 20.0).abs() < 1e-9,
-            "the daily budget is 20 dollars (5.5): {}",
-            team.budgets.daily_usd
+        assert_eq!(
+            team.budgets.daily_usd, None,
+            "the starter team ships no daily dollar budget (ADR 0015)"
         );
     }
 

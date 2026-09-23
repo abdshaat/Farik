@@ -12,6 +12,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use farik_core::contract::{TaskContract, TaskId, ValidationError, validate_contract};
 use farik_core::criteria::{CriteriaLibrary, validate_criteria};
 use farik_core::governor::paths::normalise;
+use farik_core::pricing::prices::PRICE_TABLE;
 use farik_core::pricing::{PriceTable, validate_price_table};
 use farik_core::team::{AgentId, Team, validate_team};
 use serde::{Deserialize, Serialize};
@@ -192,9 +193,7 @@ impl ProjectFiles {
     /// `Invalid` when the library is not one `validate_criteria` accepts, `Io` when it cannot be
     /// written.
     pub fn write_criteria(&self, library: &CriteriaLibrary) -> Result<(), FilesError> {
-        let value = as_wire(CRITERIA, library)?;
-        validate_criteria(&value).map_err(|errors| refused(CRITERIA, &errors))?;
-        self.write_yaml(CRITERIA, &value)
+        self.write_text(CRITERIA, &criteria_yaml(library)?)
     }
 
     /// One task's contract, held to the rules a contract on the wire is held to.
@@ -228,10 +227,7 @@ impl ProjectFiles {
     /// `Invalid` when the contract is not one `validate_contract` accepts, `Io` when it cannot be
     /// written.
     pub fn write_contract(&self, contract: &TaskContract) -> Result<(), FilesError> {
-        let path = contract_path(&contract.id);
-        let value = as_wire(&path, contract)?;
-        validate_contract(&value).map_err(|errors| refused(&path, &errors))?;
-        self.write_yaml(&path, &value)
+        self.write_text(&contract_path(&contract.id), &contract_yaml(contract)?)
     }
 
     /// Writes a new contract, refusing when its file is already there rather than writing over it.
@@ -390,6 +386,17 @@ impl ProjectFiles {
             .map_err(|errors| refused(PRICES, &errors))
     }
 
+    /// The prices this project's costs are computed with: its `.farik/prices.json` as a whole when
+    /// there is one, else the shipped table. Never a merge of the two, because 5.5 calls the file
+    /// an override, and a model the user took out of it would still be priced by a merge.
+    ///
+    /// # Errors
+    ///
+    /// Those of `read_prices`.
+    pub fn effective_prices(&self) -> Result<PriceTable, FilesError> {
+        Ok(self.read_prices()?.unwrap_or_else(|| PRICE_TABLE.clone()))
+    }
+
     /// What this machine knows, or the defaults when it has not been asked.
     ///
     /// # Errors
@@ -443,9 +450,11 @@ fn yaml_options() -> serde_saphyr::Options {
 /// The wire value one piece of YAML holds, named by the path it came from so that a refusal says
 /// which file it is about.
 ///
-/// This is the one place any YAML Farik reads is parsed, whatever directory it came from: a contract
-/// a person hands `farik task create` is held to the same dialect as the files under `.farik/` — no
-/// duplicate mapping key, no second document, the alias budget, and `true` spelled `true` (ADR 0007).
+/// This is the one place the YAML a project holds or a person hands Farik is parsed, whatever
+/// directory it came from: a contract a person hands `farik task create` is held to the same dialect
+/// as the files under `.farik/` — no duplicate mapping key, no second document, the alias budget,
+/// and `true` spelled `true` (ADR 0007). The other place is `farik-roles`, which reads the role
+/// files embedded in the binary with the same options, because it cannot depend on this crate.
 ///
 /// Read the way a file a person edits by hand should be. `UserMessageFormatter` is the crate's own
 /// answer to the question, and its own default is explicitly not for a person to read: it recommends
@@ -461,6 +470,40 @@ pub fn yaml_value(text: &str, named: &str) -> Result<Value, FilesError> {
         detail: error
             .render_with_formatter(&serde_saphyr::UserMessageFormatter)
             .replace("<input>", named),
+    })
+}
+
+/// A contract as the YAML its file holds, after holding it to the rules a contract on the wire is
+/// held to. `write_contract` writes this text, and a session's prompt shows it, so the dialect is
+/// decided here once.
+///
+/// # Errors
+///
+/// `Invalid` when the contract is not one `validate_contract` accepts or cannot be written as YAML.
+pub fn contract_yaml(contract: &TaskContract) -> Result<String, FilesError> {
+    let path = contract_path(&contract.id);
+    let value = as_wire(&path, contract)?;
+    validate_contract(&value).map_err(|errors| refused(&path, &errors))?;
+    yaml_text(&path, &value)
+}
+
+/// The criterion library as the YAML its file holds, after holding it to the same rules.
+/// `write_criteria` writes this text, and a session's prompt shows it.
+///
+/// # Errors
+///
+/// `Invalid` when the library is not one `validate_criteria` accepts or cannot be written as YAML.
+pub fn criteria_yaml(library: &CriteriaLibrary) -> Result<String, FilesError> {
+    let value = as_wire(CRITERIA, library)?;
+    validate_criteria(&value).map_err(|errors| refused(CRITERIA, &errors))?;
+    yaml_text(CRITERIA, &value)
+}
+
+/// A wire value as the YAML a person reads and edits.
+fn yaml_text(relative: &str, value: &Value) -> Result<String, FilesError> {
+    serde_saphyr::to_string(value).map_err(|error| FilesError::Invalid {
+        path: ProjectFiles::named(relative),
+        detail: error.to_string(),
     })
 }
 
@@ -680,11 +723,7 @@ impl ProjectFiles {
 
     /// Writes a wire value as the YAML a person reads and edits.
     fn write_yaml(&self, relative: &str, value: &Value) -> Result<(), FilesError> {
-        let text = serde_saphyr::to_string(value).map_err(|error| FilesError::Invalid {
-            path: Self::named(relative),
-            detail: error.to_string(),
-        })?;
-        self.write_text(relative, &text)
+        self.write_text(relative, &yaml_text(relative, value)?)
     }
 }
 

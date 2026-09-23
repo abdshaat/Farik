@@ -4,10 +4,11 @@ on:
   push:
     branches: [main]
 jobs:
-  # One job, running the check with `--integration`, because the runner has git and the flag's only
-  # effect is to include the tests marked `#[ignore]` for needing it. A second job would compile the
-  # workspace again to run a superset of what this one ran. When a test needs Docker (phase 3 step
-  # 02), the separation starts paying for itself and this becomes two jobs.
+  # One job, running the check with `--integration`, because the runner has git and Docker and the
+  # flag's only effect is to include the tests marked `#[ignore]` for needing them. A second job
+  # would compile the workspace again to run a superset of what this one ran; the Docker tests of
+  # phase 3 step 02 only add ignored tests to the same `cargo test`, so they do not change that.
+  # Their image is pulled first, because the sandbox never pulls one.
   #
   # What that costs: nothing here runs `cargo xtask check` without the flag any more, so a break in
   # the flagless path — a test wrongly marked `#[ignore]` and so run by nobody's default command, or
@@ -23,4 +24,5 @@ jobs:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
       - run: git --version
+      - run: docker pull alpine:3.22
       - run: cargo xtask check --integration

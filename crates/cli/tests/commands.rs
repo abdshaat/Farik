@@ -3,12 +3,17 @@
 //! Every test here needs the `git` program, so every one is `#[ignore]`d and run by
 //! `cargo xtask check --integration`, as the store's own do and for the same reasons.
 
+#[cfg(unix)]
+#[path = "shared/project.rs"]
+mod project;
+
 use std::path::Path;
 use std::sync::Arc;
 
 use chrono::{DateTime, Utc};
 use farik::{CliIo, run_cli};
 use farik_core::contract::TaskId;
+use farik_core::team::Integration;
 use farik_protocol::clock::FixedClock;
 use farik_store::files::ProjectFiles;
 use farik_store::git::fixtures::TempRepo;
@@ -40,12 +45,12 @@ fn run_in(cwd: &Path, args: &[&str]) -> Ran {
     let mut out = Vec::new();
     let mut err = Vec::new();
     let code = {
-        let mut io = CliIo {
-            stdout: Box::new(&mut out),
-            stderr: Box::new(&mut err),
-            cwd: cwd.to_path_buf(),
-            clock: Box::new(FixedClock::new(at())),
-        };
+        let mut io = CliIo::new(
+            cwd.to_path_buf(),
+            Box::new(&mut out),
+            Box::new(&mut err),
+            Arc::new(FixedClock::new(at())),
+        );
         let arguments: Vec<String> = std::iter::once("farik")
             .chain(args.iter().copied())
             .map(ToString::to_string)
@@ -208,6 +213,20 @@ fn makes_a_project_out_of_a_repository() {
         repository.path.join(".farik/local/.gitignore").is_file(),
         "the log is local and not committed (D5)"
     );
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn writes_a_starter_team_that_merges_on_its_own() {
+    let repository = a_repository("cli-init-auto-merge");
+    let ran = run_in(&repository.path, &["init"]);
+
+    assert_eq!(ran.code, 0, "{}", ran.err);
+    let team = files_of(&repository)
+        .read_team()
+        .expect("a team was written");
+    assert_eq!(team.policy.integration, Integration::AutoMerge);
+    assert!(ran.out.contains("pushed to origin"), "{}", ran.out);
 }
 
 #[test]
@@ -1223,4 +1242,125 @@ fn moved_to(repository: &TempRepo, task_id: &str, status: &str) {
     projections
         .apply(&log.append(&written).expect("appends"))
         .expect("projects");
+}
+
+/// Files a request titled `title` and sizes it `size`, as the human does.
+#[cfg(unix)]
+fn sized(repository: &TempRepo, name: &str, title: &str, size: &str) {
+    let file = a_request_file(repository, name, title);
+    let filed = run_in(
+        &repository.path,
+        &["task", "create", file.to_str().expect("a path")],
+    );
+    assert_eq!(filed.code, 0, "{}", filed.err);
+    let id = filed
+        .out
+        .split_whitespace()
+        .next()
+        .expect("an id")
+        .to_string();
+    let ran = run_in(
+        &repository.path,
+        &["triage", &id, size, "--reason", "As it is."],
+    );
+    assert_eq!(ran.code, 0, "{}", ran.err);
+}
+
+/// Walks `task` from `draft` through `path`, as the governor's moves.
+#[cfg(unix)]
+fn walked(repository: &TempRepo, task: &str, path: &[&str]) {
+    let mut from = "draft";
+    for to in path {
+        project::moved(repository, task, from, to, &json!({}));
+        from = to;
+    }
+}
+
+#[cfg(unix)]
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn files_a_task_under_an_epic_in_progress() {
+    use farik_protocol::event::{EventBody, EventKind};
+
+    let repository = a_project("cli-child");
+    sized(&repository, "epic.yaml", "A whole board", "large");
+    walked(
+        &repository,
+        "FRK-1",
+        &["refining", "ready", "assigned", "in_progress"],
+    );
+    let child = a_request_file(&repository, "child.yaml", "One row of the board");
+
+    let ran = run_in(
+        &repository.path,
+        &[
+            "task",
+            "create",
+            child.to_str().expect("a path"),
+            "--parent",
+            "FRK-1",
+        ],
+    );
+
+    assert_eq!(ran.code, 0, "{}", ran.err);
+    assert!(
+        ran.out.starts_with("FRK-2 filed as a task of FRK-1: "),
+        "{}",
+        ran.out
+    );
+    let contract = files_of(&repository)
+        .read_contract(&TaskId::try_from("FRK-2").expect("a task id"))
+        .expect("the child is written");
+    assert_eq!(
+        contract.parent.as_ref().map(|parent| parent.as_str()),
+        Some("FRK-1")
+    );
+    assert_eq!(contract.kind.to_string(), "task");
+    let triaged = project::events(&repository, &[EventKind::RequestTriaged])
+        .pop()
+        .expect("the child's triage");
+    let EventBody::RequestTriaged(body) = &triaged.body else {
+        panic!("a triage");
+    };
+    assert_eq!(body.size.to_string(), "small");
+    assert_eq!(body.triaged_by, "human");
+    assert_eq!(body.reason, "a task of FRK-1");
+}
+
+#[cfg(unix)]
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn refuses_a_parent_that_is_not_an_epic_in_progress() {
+    let repository = a_project("cli-child-refused");
+    sized(&repository, "task.yaml", "One board", "small");
+    sized(&repository, "epic.yaml", "A whole board", "large");
+    walked(&repository, "FRK-2", &["refining", "ready"]);
+    let child = a_request_file(&repository, "child.yaml", "One row of the board");
+    let before = kinds_in(&repository).len();
+
+    for (parent, words) in [
+        ("FRK-1", "is not an epic"),
+        (
+            "FRK-2",
+            "the epic is ready and its tasks are written while it is in progress",
+        ),
+    ] {
+        let ran = run_in(
+            &repository.path,
+            &[
+                "task",
+                "create",
+                child.to_str().expect("a path"),
+                "--parent",
+                parent,
+            ],
+        );
+        assert_eq!(ran.code, 1, "{}", ran.out);
+        assert!(ran.err.contains(words), "{}", ran.err);
+    }
+    assert_eq!(kinds_in(&repository).len(), before);
+    assert!(
+        !repository.path.join(".farik/contracts/FRK-3.yaml").exists(),
+        "nothing is filed"
+    );
 }

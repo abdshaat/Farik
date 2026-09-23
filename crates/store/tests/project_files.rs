@@ -7,7 +7,7 @@ use farik_core::contract::{TaskId, validate_contract};
 use farik_core::criteria::{fixtures::a_criteria_library_wire, validate_criteria};
 use farik_core::team::AgentId;
 use farik_store::files::fixtures::{TempProject, a_team};
-use farik_store::files::{FilesError, LocalSettings, Sandbox};
+use farik_store::files::{FilesError, LocalSettings, Sandbox, contract_yaml, criteria_yaml};
 
 /// Holds a refusal to `docs/standards/code.md`: it is read by the person who edited the file, so it
 /// names the file, quotes the line, and says nothing about the API that would have accepted it.
@@ -473,6 +473,28 @@ fn writes_a_contract_to_the_file_its_own_id_names() {
 }
 
 #[test]
+fn writes_the_yaml_the_files_hold() {
+    // A session's prompt shows the contract and the library as this text, so that the model reads
+    // what a person reads in .farik/ and what the governor judges; a second writer would drift.
+    let project = TempProject::new("yaml-text");
+    let files = project.files();
+    let contract = a_contract("FRK-7");
+    let library = validate_criteria(&a_criteria_library_wire()).expect("the fixture is a library");
+    files.write_contract(&contract).expect("it is written");
+    files.write_criteria(&library).expect("it is written");
+
+    let on_disk = |path: &str| std::fs::read_to_string(project.root.join(path)).expect("the file");
+    assert_eq!(
+        contract_yaml(&contract).expect("the text"),
+        on_disk(".farik/contracts/FRK-7.yaml")
+    );
+    assert_eq!(
+        criteria_yaml(&library).expect("the text"),
+        on_disk(".farik/team/criteria.yaml")
+    );
+}
+
+#[test]
 fn creates_a_contract_only_where_there_is_none() {
     // An update overwrites the file it names; a new contract must not, because the file already
     // there is somebody's committed work and nothing else holds a copy of it.
@@ -868,4 +890,48 @@ fn lists_two_spellings_of_one_number_in_an_order_that_is_not_the_filesystem_s() 
         ],
         "by the number, then by the id itself"
     );
+}
+
+#[test]
+fn prices_with_the_shipped_table_when_there_is_no_override() {
+    let project = TempProject::new("effective-shipped");
+    let files = project.files();
+    files.init(&a_team()).expect("a project is made");
+    assert_eq!(
+        files.effective_prices().expect("the shipped table"),
+        *farik_core::pricing::prices::PRICE_TABLE
+    );
+}
+
+#[test]
+fn prices_with_the_override_as_a_whole() {
+    // 5.5 calls the file an override: a model the user took out of it is not priced from the
+    // shipped table behind their back.
+    let project = TempProject::new("effective-override");
+    let files = project.files();
+    files.init(&a_team()).expect("a project is made");
+    std::fs::write(
+        project.root.join(".farik/prices.json"),
+        r#"{
+  "version": 1,
+  "source_url": "https://example.com/prices",
+  "retrieved_at": "2026-09-22",
+  "prices": {
+    "claude-opus-5": {
+      "input_usd_per_mtok": 1.0,
+      "output_usd_per_mtok": 2.0,
+      "cache_write_usd_per_mtok": 0.25,
+      "cache_read_usd_per_mtok": 0.5
+    }
+  }
+}
+"#,
+    )
+    .expect("an override of one model");
+    let prices = files.effective_prices().expect("the override");
+    assert_eq!(
+        prices.prices.keys().map(String::as_str).collect::<Vec<_>>(),
+        ["claude-opus-5"]
+    );
+    assert!(!prices.prices.contains_key("claude-fable-5"));
 }

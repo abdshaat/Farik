@@ -633,7 +633,8 @@ mod tests {
 
     use super::fixtures::{a_contract, a_ready_context};
     use super::{
-        JudgmentReview, ParentState, ReadinessContext, ReadinessRule as R, evaluate_readiness,
+        JudgmentReview, ParentState, ReadinessContext, ReadinessRule as R, TeamRules,
+        evaluate_readiness,
     };
     use crate::contract::{Role, TaskContract, TaskStatus, VerificationWire};
     use crate::generated::task_contract::FarikTaskContractKind as Kind;
@@ -749,6 +750,16 @@ mod tests {
             failed_rules(&a_contract(), &context),
             [R::BudgetWithinSprint]
         );
+    }
+
+    #[test]
+    fn fits_any_budget_in_a_sprint_with_no_limit() {
+        // ADR 0015: a team with no sprint budget has an infinite one left, however much it spent.
+        let mut context = a_ready_context();
+        context.remaining_sprint_budget_usd = f64::INFINITY;
+        let mut contract = a_contract();
+        contract.budget.max_cost_usd = 1000.0;
+        assert_eq!(evaluate_readiness(&contract, &context), Ok(()));
     }
 
     #[test]
@@ -936,6 +947,15 @@ mod tests {
         );
         context.rules.max_task_budget_usd = None;
         assert_eq!(evaluate_readiness(&a_contract(), &context), Ok(()));
+    }
+
+    #[test]
+    fn accepts_any_budget_under_the_default_rules_which_set_no_cap() {
+        let mut contract = a_contract();
+        contract.budget.max_cost_usd = 12.0;
+        let context = a_ready_context();
+        assert_eq!(context.rules, TeamRules::default());
+        assert_eq!(evaluate_readiness(&contract, &context), Ok(()));
     }
 
     #[test]

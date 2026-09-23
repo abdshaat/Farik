@@ -10,33 +10,88 @@
 pub mod board;
 /// Taking a contract from the team, and giving it back.
 pub mod contract;
+/// Writing a contract with the Product Manager at the terminal.
+#[cfg(unix)]
+mod contract_new;
+/// One exchange with the daemon a `daemon.json` names.
+pub mod daemon_client;
 /// Everything this project disagrees with itself about.
 pub mod doctor;
+/// The hooks Claude Code runs around a tool call, carried to the daemon and back.
+pub mod hook;
+/// The human's commands, from any terminal.
+#[cfg(unix)]
+pub mod human;
+/// The wall clock and the session ids the binary hands the command line.
+pub mod ids;
 /// Making a repository a Farik project.
 pub mod init;
 /// The event log, filtered and exported.
 pub mod log;
+/// The harness metrics.
+pub mod metrics;
+/// Text as a terminal may be given it.
+pub mod printable;
 /// The project a command runs against.
 pub mod project;
 /// The governor's refusals in words.
 pub mod refusal;
+/// `farik run` and `farik plan`.
+#[cfg(unix)]
+mod run;
 /// One contract, and what happened to it.
 pub mod show;
+/// Who drives a project, and how a command reaches it.
+#[cfg(unix)]
+mod start;
 /// Filing a request.
 pub mod task;
 /// The team's rules and its criterion library.
 pub mod team;
 /// Sizing a request.
 pub mod triage;
+/// What waits on the human.
+#[cfg(unix)]
+mod waiting;
 
-use std::io::Write;
+use std::collections::BTreeMap;
+use std::io::{Read, Write};
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use clap::{Parser, Subcommand, ValueEnum};
-use farik_protocol::clock::Clock;
+use farik_core::contract::{TaskId, TaskStatus};
+use farik_protocol::clock::{Clock, IdSource, SequentialIds};
+use farik_protocol::command::{AcceptSubject, Command};
+#[cfg(unix)]
+use farik_runtime::RuntimeAdapter;
+#[cfg(unix)]
+use farik_runtime::daemon::DaemonState;
 use serde_json::{Value, json};
 
 pub use project::{Project, open_project};
+
+/// What makes the adapter a driving process's sessions start through, given its daemon: the
+/// recorded adapter over the daemon's tools in a test.
+#[cfg(unix)]
+pub type AdapterFactory = Arc<dyn Fn(Arc<DaemonState>) -> Arc<dyn RuntimeAdapter> + Send + Sync>;
+
+/// What runs a driving process's sessions.
+#[cfg(unix)]
+pub enum Engine {
+    /// The Claude Code program, with the credential in the environment: what `farik` runs.
+    Claude,
+    /// The adapter the factory makes: what a test runs. Nothing a user sets makes `farik` replay.
+    Given(AdapterFactory),
+}
+
+/// Where a driving process hears that the person wants it to stop.
+pub enum Interrupts {
+    /// Ctrl-C at the terminal.
+    CtrlC,
+    /// One `()` per interrupt, from a test; a closed channel never fires.
+    Channel(tokio::sync::mpsc::UnboundedReceiver<()>),
+}
 
 /// Everything the command line needs from outside itself: where to write, where it is run, and what
 /// time it is.
@@ -46,14 +101,54 @@ pub use project::{Project, open_project};
 /// `Vec<u8>`; the clock is injected for the same reason an event's `recorded_at` is (`docs/SPEC.md`
 /// section 8.4).
 pub struct CliIo<'a> {
+    /// What a command reads: the hook commands' JSON from Claude Code, and the answers
+    /// `farik contract new` asks for. Owned, so that one reader thread can hold it.
+    pub stdin: Box<dyn Read + Send>,
     /// What a person or a script asked for.
     pub stdout: Box<dyn Write + 'a>,
-    /// Why Farik would not do something, and nothing else.
+    /// Why Farik would not do something, and warnings.
     pub stderr: Box<dyn Write + 'a>,
     /// Where the command was run, which is how the project is found.
     pub cwd: PathBuf,
     /// The time every event this run records is stamped with.
-    pub clock: Box<dyn Clock>,
+    pub clock: Arc<dyn Clock + Send + Sync>,
+    /// The environment: the credential, `PATH`, and what a session is given. A test passes its
+    /// own, since setting a process's variable is `unsafe`.
+    pub env: BTreeMap<String, String>,
+    /// What runs a driving process's sessions.
+    #[cfg(unix)]
+    pub engine: Engine,
+    /// Where a driving process hears Ctrl-C.
+    pub interrupts: Interrupts,
+    /// Where session ids come from.
+    pub session_ids: Arc<dyn IdSource + Send + Sync>,
+}
+
+impl<'a> CliIo<'a> {
+    /// A harness writing to `stdout` and `stderr`, run in `cwd` at `clock`'s time, with nothing on
+    /// standard input, an empty environment, the Claude Code engine, interrupts that never come,
+    /// and session ids `session-1`, `session-2`, and so on.
+    #[must_use]
+    pub fn new(
+        cwd: PathBuf,
+        stdout: Box<dyn Write + 'a>,
+        stderr: Box<dyn Write + 'a>,
+        clock: Arc<dyn Clock + Send + Sync>,
+    ) -> CliIo<'a> {
+        let (_, never) = tokio::sync::mpsc::unbounded_channel();
+        CliIo {
+            stdin: Box::new(std::io::empty()),
+            stdout,
+            stderr,
+            cwd,
+            clock,
+            env: BTreeMap::new(),
+            #[cfg(unix)]
+            engine: Engine::Claude,
+            interrupts: Interrupts::Channel(never),
+            session_ids: Arc::new(SequentialIds::new()),
+        }
+    }
 }
 
 /// What a command did: the lines a person reads, and the same thing as JSON for `--json`.
@@ -136,6 +231,8 @@ enum Commands {
         #[arg(long)]
         limit: Option<usize>,
     },
+    /// Show the harness metrics over the whole project (F17).
+    Metrics,
     /// Say where the files and the log disagree, and what else this project got wrong.
     Doctor,
     /// Show the team's rules (5.12).
@@ -147,6 +244,116 @@ enum Commands {
     Criteria {
         #[command(subcommand)]
         command: CriteriaCommands,
+    },
+    /// Carry a Claude Code hook's JSON to the daemon and its answer back (8.2).
+    Hook {
+        #[command(subcommand)]
+        command: HookCommands,
+    },
+    /// Drive the team until nothing needs doing, a stop, or Ctrl-C (8.2).
+    Run,
+    /// Plan without doing: triage, contracts, breakdowns, and assignments, and no work (8.2).
+    Plan,
+    /// Approve a contract that awaits your approval (5.16).
+    Approve {
+        /// The task whose contract it is.
+        task_id: String,
+    },
+    /// Accept a result that waits for you (5.4).
+    Accept {
+        /// The task whose result it is.
+        task_id: String,
+        /// Your review, which an epic's result needs.
+        #[arg(long)]
+        message: Option<String>,
+    },
+    /// Answer a question an agent asked (5.7).
+    Answer {
+        /// The question's number, as farik run prints it.
+        question_id: u64,
+        /// Your answer.
+        #[arg(required = true, trailing_var_arg = true, allow_hyphen_values = true)]
+        answer: Vec<String>,
+    },
+    /// Integrate an accepted task now (5.14).
+    Integrate {
+        /// The accepted task.
+        task_id: String,
+    },
+    /// Resolve an escalation by moving the task, with a message for the next session (5.7).
+    Resolve {
+        /// The escalated task.
+        task_id: String,
+        /// Where it goes.
+        status: StatusArgument,
+        /// What the next session about it is told.
+        #[arg(required = true, trailing_var_arg = true, allow_hyphen_values = true)]
+        message: Vec<String>,
+    },
+    /// Cancel a task (5.2).
+    Cancel {
+        /// The task.
+        task_id: String,
+        /// Why.
+        #[arg(required = true, trailing_var_arg = true, allow_hyphen_values = true)]
+        reason: Vec<String>,
+    },
+    /// Stop the process driving this project after its session, or stop one session now (5.2).
+    Stop {
+        /// A session id, or a task whose running session to stop.
+        target: Option<String>,
+    },
+}
+
+/// A status, as a person types it: the wire's spelling.
+#[derive(Clone, Copy, ValueEnum)]
+#[value(rename_all = "snake_case")]
+enum StatusArgument {
+    Draft,
+    Refining,
+    Ready,
+    Assigned,
+    InProgress,
+    Blocked,
+    Verifying,
+    Rejected,
+    Accepted,
+    Escalated,
+    Cancelled,
+}
+
+impl From<StatusArgument> for TaskStatus {
+    fn from(status: StatusArgument) -> Self {
+        match status {
+            StatusArgument::Draft => Self::Draft,
+            StatusArgument::Refining => Self::Refining,
+            StatusArgument::Ready => Self::Ready,
+            StatusArgument::Assigned => Self::Assigned,
+            StatusArgument::InProgress => Self::InProgress,
+            StatusArgument::Blocked => Self::Blocked,
+            StatusArgument::Verifying => Self::Verifying,
+            StatusArgument::Rejected => Self::Rejected,
+            StatusArgument::Accepted => Self::Accepted,
+            StatusArgument::Escalated => Self::Escalated,
+            StatusArgument::Cancelled => Self::Cancelled,
+        }
+    }
+}
+
+#[derive(Subcommand)]
+enum HookCommands {
+    /// Ask the daemon whether a tool call may go ahead, and print its answer. Denies when it
+    /// cannot ask.
+    PreToolUse {
+        /// The daemon's `daemon.json`.
+        #[arg(long)]
+        daemon: PathBuf,
+    },
+    /// Tell the daemon what a tool call returned. Prints nothing.
+    PostToolUse {
+        /// The daemon's `daemon.json`.
+        #[arg(long)]
+        daemon: PathBuf,
     },
 }
 
@@ -164,15 +371,21 @@ enum CriteriaCommands {
 
 #[derive(Subcommand)]
 enum TaskCommands {
-    /// File a contract as a draft request.
+    /// File a contract as a draft request, or as a task of an epic in progress.
     Create {
         /// The YAML contract to file. Farik assigns the id.
         file: PathBuf,
+        /// The epic the task is filed under (5.16).
+        #[arg(long)]
+        parent: Option<String>,
     },
     /// Show one contract and what happened to it.
     Show {
         /// The task to show.
         task_id: String,
+        /// Also show its branch's diff.
+        #[arg(long)]
+        diff: bool,
     },
 }
 
@@ -187,6 +400,23 @@ enum ContractCommands {
     Unlock {
         /// The task whose contract it is.
         task_id: String,
+    },
+    /// File a request from a brief or an issue and write its contract with the Product Manager,
+    /// answering its questions here (5.13).
+    #[command(group(clap::ArgGroup::new("source").required(true).args(["brief", "from"])))]
+    New {
+        /// What you want, in your words: its first line is the title, the whole the intent.
+        #[arg(long)]
+        brief: Option<String>,
+        /// An issue on the forge to file instead, read with gh.
+        #[arg(long)]
+        from: Option<String>,
+        /// Size it now: large becomes an epic, small a standalone task (5.16).
+        #[arg(long)]
+        size: Option<SizeArgument>,
+        /// Take the contract once the Product Manager has written it (5.11).
+        #[arg(long)]
+        lock: bool,
     },
 }
 
@@ -218,33 +448,53 @@ pub fn run_cli(args: &[String], io: &mut CliIo<'_>) -> i32 {
         Ok(parsed) => parsed,
         Err(error) => return usage(&error, io),
     };
+    if let Commands::Hook { command } = &parsed.command {
+        return match command {
+            HookCommands::PreToolUse { daemon } => hook::pre_tool_use(&io.cwd.join(daemon), io),
+            HookCommands::PostToolUse { daemon } => hook::post_tool_use(&io.cwd.join(daemon), io),
+        };
+    }
     let now = io.clock.now();
+    if let Commands::Run
+    | Commands::Plan
+    | Commands::Contract {
+        command: ContractCommands::New { .. },
+    } = &parsed.command
+    {
+        return drive(&parsed.command, parsed.json, io);
+    }
     let outcome = match &parsed.command {
         Commands::Init => init::init(&io.cwd, now),
         Commands::Task {
-            command: TaskCommands::Create { file },
+            command: TaskCommands::Create { file, parent },
         } => open_project(&io.cwd, now)
-            .and_then(|project| task::create(&project, &io.cwd, file, now)),
-        Commands::Triage {
-            task_id,
-            size,
-            reason,
+            .and_then(|project| task::create(&project, &io.cwd, file, parent.as_deref(), now)),
+        Commands::Triage { .. }
+        | Commands::Contract {
+            command: ContractCommands::Lock { .. } | ContractCommands::Unlock { .. },
         } => open_project(&io.cwd, now)
-            .and_then(|project| triage::triage(&project, task_id, (*size).into(), reason, now)),
-        Commands::Contract {
-            command: ContractCommands::Lock { task_id },
-        } => open_project(&io.cwd, now)
-            .and_then(|project| contract::hold(&project, task_id, true, now)),
-        Commands::Contract {
-            command: ContractCommands::Unlock { task_id },
-        } => open_project(&io.cwd, now)
-            .and_then(|project| contract::hold(&project, task_id, false, now)),
+            .and_then(|project| phase_two_write(&parsed.command, &project, now)),
+        Commands::Approve { .. }
+        | Commands::Accept { .. }
+        | Commands::Answer { .. }
+        | Commands::Integrate { .. }
+        | Commands::Resolve { .. }
+        | Commands::Cancel { .. } => open_project(&io.cwd, now).and_then(|project| {
+            let (name, command) = humans(&parsed.command)?;
+            human_command(&project, command, name, io)
+        }),
+        Commands::Stop { target } => {
+            open_project(&io.cwd, now).and_then(|project| stop(&project, target.as_deref()))
+        }
         Commands::Task {
-            command: TaskCommands::Show { task_id },
-        } => open_project(&io.cwd, now).and_then(|project| show::show(&project, task_id)),
+            command: TaskCommands::Show { task_id, diff },
+        } => open_project(&io.cwd, now).and_then(|project| show::show(&project, task_id, *diff)),
         Commands::Board => open_project(&io.cwd, now).and_then(|project| board::board(&project)),
         Commands::Log { task, kind, limit } => open_project(&io.cwd, now)
             .and_then(|project| log::log(&project, task.as_ref(), kind.as_ref(), *limit)),
+        Commands::Metrics => {
+            open_project(&io.cwd, now).and_then(|project| metrics::metrics(&project))
+        }
         Commands::Doctor => {
             let found =
                 open_project(&io.cwd, now).and_then(|project| doctor::doctor(&project, now));
@@ -263,8 +513,224 @@ pub fn run_cli(args: &[String], io: &mut CliIo<'_>) -> i32 {
         Commands::Criteria {
             command: CriteriaCommands::List,
         } => open_project(&io.cwd, now).and_then(|project| team::criteria(&project)),
+        Commands::Hook { .. }
+        | Commands::Run
+        | Commands::Plan
+        | Commands::Contract {
+            command: ContractCommands::New { .. },
+        } => unreachable!("a hook, run, plan, or contract new command returned above"),
     };
     report(outcome, parsed.json, io)
+}
+
+/// One of phase 2's writes, which reach the process driving the project when one does.
+fn phase_two_write(
+    command: &Commands,
+    project: &Project,
+    now: chrono::DateTime<chrono::Utc>,
+) -> Result<Report, String> {
+    match command {
+        Commands::Triage {
+            task_id,
+            size,
+            reason,
+        } => here_or_sent(
+            project,
+            || triage::triage(project, task_id, (*size).into(), reason, now),
+            || triage::command_of(task_id, (*size).into(), reason),
+        ),
+        Commands::Contract {
+            command: ContractCommands::Lock { task_id },
+        } => here_or_sent(
+            project,
+            || contract::hold(project, task_id, true, now),
+            || {
+                Ok(Command::ContractLock {
+                    task_id: task(task_id)?,
+                })
+            },
+        ),
+        Commands::Contract {
+            command: ContractCommands::Unlock { task_id },
+        } => here_or_sent(
+            project,
+            || contract::hold(project, task_id, false, now),
+            || {
+                Ok(Command::ContractUnlock {
+                    task_id: task(task_id)?,
+                })
+            },
+        ),
+        _ => Err("this is not one of phase 2's writes".to_string()),
+    }
+}
+
+/// A task id a person typed.
+fn task(task_id: &str) -> Result<TaskId, String> {
+    task_id
+        .parse()
+        .map_err(|error| format!("{task_id} is not a task id: {error}"))
+}
+
+/// The human's command a subcommand stands for, and its name as typed.
+fn humans(command: &Commands) -> Result<(&'static str, Command), String> {
+    Ok(match command {
+        Commands::Approve { task_id } => (
+            "approve",
+            Command::HumanAccept {
+                task_id: task(task_id)?,
+                subject: AcceptSubject::Contract,
+                message: None,
+            },
+        ),
+        Commands::Accept { task_id, message } => (
+            "accept",
+            Command::HumanAccept {
+                task_id: task(task_id)?,
+                subject: AcceptSubject::Result,
+                message: message.clone(),
+            },
+        ),
+        Commands::Answer {
+            question_id,
+            answer,
+        } => (
+            "answer",
+            Command::QuestionAnswer {
+                question_id: *question_id,
+                answer: answer.join(" "),
+            },
+        ),
+        Commands::Integrate { task_id } => (
+            "integrate",
+            Command::TaskIntegrate {
+                task_id: task(task_id)?,
+            },
+        ),
+        Commands::Resolve {
+            task_id,
+            status,
+            message,
+        } => (
+            "resolve",
+            Command::EscalationResolve {
+                task_id: task(task_id)?,
+                to: (*status).into(),
+                message: message.join(" "),
+            },
+        ),
+        Commands::Cancel { task_id, reason } => (
+            "cancel",
+            Command::TaskTransition {
+                task_id: task(task_id)?,
+                to: TaskStatus::Cancelled,
+                reason: reason.join(" "),
+            },
+        ),
+        _ => return Err("this is not one of the human's commands".to_string()),
+    })
+}
+
+#[cfg(unix)]
+fn here_or_sent(
+    project: &Project,
+    here: impl FnOnce() -> Result<Report, String>,
+    command: impl FnOnce() -> Result<Command, String>,
+) -> Result<Report, String> {
+    start::here_or_sent(project, here, command)
+}
+
+#[cfg(not(unix))]
+fn here_or_sent(
+    _project: &Project,
+    here: impl FnOnce() -> Result<Report, String>,
+    _command: impl FnOnce() -> Result<Command, String>,
+) -> Result<Report, String> {
+    here()
+}
+
+#[cfg(unix)]
+fn human_command(
+    project: &Project,
+    command: Command,
+    name: &str,
+    io: &CliIo<'_>,
+) -> Result<Report, String> {
+    human::human(project, command, name, io)
+}
+
+#[cfg(not(unix))]
+fn human_command(
+    _project: &Project,
+    _command: Command,
+    name: &str,
+    _io: &CliIo<'_>,
+) -> Result<Report, String> {
+    Err(format!(
+        "farik {name} needs the daemon, which runs on Linux and macOS"
+    ))
+}
+
+/// `farik run`, `farik plan`, or `farik contract new`, which drive the project, write as they go,
+/// and answer their own exit code.
+#[cfg(unix)]
+fn drive(command: &Commands, as_json: bool, io: &mut CliIo<'_>) -> i32 {
+    use farik_runtime::orchestrator::TickRules;
+
+    let project = match open_project(&io.cwd, io.clock.now()) {
+        Ok(project) => project,
+        Err(error) => return run::refuse(io, as_json, &error),
+    };
+    match command {
+        Commands::Contract {
+            command:
+                ContractCommands::New {
+                    brief,
+                    from,
+                    size,
+                    lock,
+                },
+        } => {
+            let source = match (brief, from) {
+                (Some(brief), _) => contract_new::Source::Brief(brief),
+                (None, Some(url)) => contract_new::Source::Issue(url),
+                (None, None) => {
+                    return run::refuse(io, as_json, "give --brief or --from");
+                }
+            };
+            contract_new::contract_new(
+                &project,
+                &contract_new::Asked {
+                    source,
+                    size: size.map(Into::into),
+                    lock: *lock,
+                },
+                io,
+                as_json,
+            )
+        }
+        Commands::Plan => run::drive(&project, TickRules::Planning, io, as_json),
+        _ => run::drive(&project, TickRules::All, io, as_json),
+    }
+}
+
+#[cfg(not(unix))]
+fn drive(_command: &Commands, as_json: bool, io: &mut CliIo<'_>) -> i32 {
+    report(
+        Err("farik run needs the daemon, which runs on Linux and macOS".to_string()),
+        as_json,
+        io,
+    )
+}
+
+#[cfg(unix)]
+fn stop(project: &Project, target: Option<&str>) -> Result<Report, String> {
+    human::stop(project, target)
+}
+
+#[cfg(not(unix))]
+fn stop(_project: &Project, _target: Option<&str>) -> Result<Report, String> {
+    Err("farik stop needs the daemon, which runs on Linux and macOS".to_string())
 }
 
 /// Writes what the command did, or why it would not, and answers with the exit code.
@@ -311,8 +777,9 @@ fn usage(error: &clap::Error, io: &mut CliIo<'_>) -> i32 {
     }
 }
 
-/// One line to a stream. A stream that cannot be written to is a pipe that was closed, which is not
-/// something to tell the person about on the stream that just closed.
+/// One line to a stream, its control characters escaped (`printable`), since much of what the
+/// command line prints an agent wrote. A stream that cannot be written to is a pipe that was
+/// closed, which is not something to tell the person about on the stream that just closed.
 fn say(stream: &mut Box<dyn Write + '_>, line: &str) {
-    let _ = writeln!(stream, "{line}");
+    let _ = writeln!(stream, "{}", printable::printable(line));
 }

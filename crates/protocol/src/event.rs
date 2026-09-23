@@ -12,10 +12,27 @@ use serde_json::Value;
 pub use farik_core::contract::{TaskId, ValidationError};
 
 pub use crate::generated::event::{
-    ContractLockedBody, ContractSummary, ContractSummaryKind, ContractSummaryParent,
-    ContractSummaryRisk, ContractSummaryStatus, ContractUnlockedBody, ContractWrittenBody,
-    CriteriaUpdatedBody, DriftDetectedBody, DriftDetectedBodyDrift, EventKind, ProjectScannedBody,
-    RequestTriagedBody, RequestTriagedBodySize, TaskCreatedBody, TeamUpdatedBody,
+    AgentUpdatedBody, AgentUpdatedBodyStatus, BudgetExhaustedBody, BudgetExhaustedBodyConsequence,
+    BudgetExhaustedBodyScope, ContractEvaluatedBody, ContractEvaluatedBodyGate, ContractLockedBody,
+    ContractSummary, ContractSummaryKind, ContractSummaryParent, ContractSummaryRisk,
+    ContractSummaryStatus, ContractUnlockedBody, ContractWrittenBody, CostRecordedBody,
+    CostRecordedBodyModelId, CostRecordedBodyPurpose, CriteriaUpdatedBody, CriterionRecordedBody,
+    CriterionRecordedBodyRunBy, DriftDetectedBody, DriftDetectedBodyDrift, EscalationRaisedBody,
+    EscalationRaisedBodyReason, EscalationResolvedBody, EventKind, HumanAcceptedBody,
+    HumanAcceptedBodySubject, NoteWrittenBody, NoteWrittenBodyKind, ProductDocWrittenBody,
+    ProjectScannedBody, PullRequestOpenedBody, QuestionAnsweredBody, QuestionAskedBody,
+    RequestTriagedBody, RequestTriagedBodySize, ReviewRecordedBody, SessionEndedBody,
+    SessionEndedBodyReason, SessionStartedBody, SessionStartedBodyEffort, SessionStartedBodyModel,
+    SessionStartedBodyPurpose, TaskCreatedBody, TaskIntegratedBody, TaskIntegratedBodyIntegratedBy,
+    TaskTransitionedBody, TaskTransitionedBodyEffectsItem, TeamUpdatedBody, TokenUsage,
+    ToolCalledBody, ToolDeniedBody, ToolReturnedBody, TransitionRefusedBody,
+    TransitionRefusedBodyRefusal,
+};
+/// The generated names of the vocabularies the governor's events repeat, renamed at the edge so
+/// that they cannot be mistaken for `farik-core`'s own types of the same name.
+pub use crate::generated::event::{
+    BlockerWire, GateId as GateWire, RejectionWire, TaskStatus as TaskStatusWire,
+    TransitionActor as TransitionActorWire,
 };
 
 use crate::generated::event::FarikEvent as EventWire;
@@ -40,7 +57,7 @@ static VALIDATOR: LazyLock<Validator> = LazyLock::new(|| {
 });
 
 /// One validator per kind, each holding that kind's body schema alone. The event schema types
-/// `body` as a choice of nine shapes, so it can only say that a body matched none of them; these
+/// `body` as a choice of thirty-one shapes, so it can only say that a body matched none of them; these
 /// say what is wrong with the one shape the event's `kind` asked for.
 static BODY_VALIDATORS: LazyLock<Vec<Validator>> = LazyLock::new(|| {
     let schema: Value = serde_json::from_str(SCHEMA_JSON).expect(
@@ -82,6 +99,28 @@ fn body_def_name(kind: EventKind) -> &'static str {
         EventKind::ProjectScanned => "projectScannedBody",
         EventKind::TeamUpdated => "teamUpdatedBody",
         EventKind::CriteriaUpdated => "criteriaUpdatedBody",
+        EventKind::CostRecorded => "costRecordedBody",
+        EventKind::BudgetExhausted => "budgetExhaustedBody",
+        EventKind::TaskTransitioned => "taskTransitionedBody",
+        EventKind::TransitionRefused => "transitionRefusedBody",
+        EventKind::EscalationRaised => "escalationRaisedBody",
+        EventKind::ContractEvaluated => "contractEvaluatedBody",
+        EventKind::CriterionRecorded => "criterionRecordedBody",
+        EventKind::NoteWritten => "noteWrittenBody",
+        EventKind::ReviewRecorded => "reviewRecordedBody",
+        EventKind::QuestionAsked => "questionAskedBody",
+        EventKind::ProductDocWritten => "productDocWrittenBody",
+        EventKind::ToolCalled => "toolCalledBody",
+        EventKind::ToolDenied => "toolDeniedBody",
+        EventKind::ToolReturned => "toolReturnedBody",
+        EventKind::SessionStarted => "sessionStartedBody",
+        EventKind::SessionEnded => "sessionEndedBody",
+        EventKind::TaskIntegrated => "taskIntegratedBody",
+        EventKind::PullRequestOpened => "pullRequestOpenedBody",
+        EventKind::QuestionAnswered => "questionAnsweredBody",
+        EventKind::HumanAccepted => "humanAcceptedBody",
+        EventKind::EscalationResolved => "escalationResolvedBody",
+        EventKind::AgentUpdated => "agentUpdatedBody",
     }
 }
 
@@ -97,11 +136,27 @@ pub fn is_about_one_contract(kind: EventKind) -> bool {
             | EventKind::ContractWritten
             | EventKind::ContractLocked
             | EventKind::ContractUnlocked
+            | EventKind::TaskTransitioned
+            | EventKind::TransitionRefused
+            | EventKind::EscalationRaised
+            | EventKind::ContractEvaluated
+            | EventKind::CriterionRecorded
+            | EventKind::NoteWritten
+            | EventKind::ReviewRecorded
+            | EventKind::ProductDocWritten
+            | EventKind::TaskIntegrated
+            | EventKind::PullRequestOpened
+            | EventKind::HumanAccepted
+            | EventKind::EscalationResolved
     )
 }
 
-/// The field naming who acted, for the kinds that name one, and nothing for `drift.detected` and
-/// `project.scanned`, which record what Farik itself found.
+/// The field naming who acted, for the kinds that name one, and nothing for `drift.detected`,
+/// `project.scanned`, `cost.recorded`, `budget.exhausted`, `escalation.raised`,
+/// `contract.evaluated`, and `pull_request.opened`, which record what Farik itself found, counted,
+/// judged, or did; the move or the refusal they come with names who asked. `task.integrated` names
+/// who integrated in a closed vocabulary, `governor` or `human`, which cannot be blank. Nor for the three `tool.` kinds and the two `session.`
+/// kinds, whose envelope names the agent and the session.
 fn attribution(body: &mut EventBody) -> Option<(&'static str, &mut String)> {
     match body {
         EventBody::TaskCreated(body) => Some(("created_by", &mut body.created_by)),
@@ -111,13 +166,36 @@ fn attribution(body: &mut EventBody) -> Option<(&'static str, &mut String)> {
         EventBody::ContractUnlocked(body) => Some(("unlocked_by", &mut body.unlocked_by)),
         EventBody::TeamUpdated(body) => Some(("updated_by", &mut body.updated_by)),
         EventBody::CriteriaUpdated(body) => Some(("updated_by", &mut body.updated_by)),
-        EventBody::DriftDetected(_) | EventBody::ProjectScanned(_) => None,
+        EventBody::TaskTransitioned(body) => Some(("requested_by", &mut body.requested_by)),
+        EventBody::TransitionRefused(body) => Some(("requested_by", &mut body.requested_by)),
+        EventBody::CriterionRecorded(body) => Some(("recorded_by", &mut body.recorded_by)),
+        EventBody::NoteWritten(body) => Some(("written_by", &mut body.written_by)),
+        EventBody::ReviewRecorded(body) => Some(("reviewer", &mut body.reviewer)),
+        EventBody::QuestionAsked(body) => Some(("asked_by", &mut body.asked_by)),
+        EventBody::ProductDocWritten(body) => Some(("written_by", &mut body.written_by)),
+        EventBody::QuestionAnswered(body) => Some(("answered_by", &mut body.answered_by)),
+        EventBody::HumanAccepted(body) => Some(("accepted_by", &mut body.accepted_by)),
+        EventBody::EscalationResolved(body) => Some(("resolved_by", &mut body.resolved_by)),
+        EventBody::AgentUpdated(body) => Some(("updated_by", &mut body.updated_by)),
+        EventBody::DriftDetected(_)
+        | EventBody::ProjectScanned(_)
+        | EventBody::CostRecorded(_)
+        | EventBody::BudgetExhausted(_)
+        | EventBody::EscalationRaised(_)
+        | EventBody::ContractEvaluated(_)
+        | EventBody::ToolCalled(_)
+        | EventBody::ToolDenied(_)
+        | EventBody::ToolReturned(_)
+        | EventBody::SessionStarted(_)
+        | EventBody::SessionEnded(_)
+        | EventBody::TaskIntegrated(_)
+        | EventBody::PullRequestOpened(_) => None,
     }
 }
 
 /// Every kind the log holds in this phase, in the order `docs/schemas/event.schema.json` lists
 /// them. The step that adds a kind adds it here.
-pub const EVERY_KIND: [EventKind; 9] = [
+pub const EVERY_KIND: [EventKind; 31] = [
     EventKind::TaskCreated,
     EventKind::RequestTriaged,
     EventKind::ContractWritten,
@@ -127,6 +205,28 @@ pub const EVERY_KIND: [EventKind; 9] = [
     EventKind::ProjectScanned,
     EventKind::TeamUpdated,
     EventKind::CriteriaUpdated,
+    EventKind::CostRecorded,
+    EventKind::BudgetExhausted,
+    EventKind::TaskTransitioned,
+    EventKind::TransitionRefused,
+    EventKind::EscalationRaised,
+    EventKind::ContractEvaluated,
+    EventKind::CriterionRecorded,
+    EventKind::NoteWritten,
+    EventKind::ReviewRecorded,
+    EventKind::QuestionAsked,
+    EventKind::ProductDocWritten,
+    EventKind::ToolCalled,
+    EventKind::ToolDenied,
+    EventKind::ToolReturned,
+    EventKind::SessionStarted,
+    EventKind::SessionEnded,
+    EventKind::TaskIntegrated,
+    EventKind::PullRequestOpened,
+    EventKind::QuestionAnswered,
+    EventKind::HumanAccepted,
+    EventKind::EscalationResolved,
+    EventKind::AgentUpdated,
 ];
 
 /// The ids an event is stamped with: which team and project it belongs to, and the contract, agent
@@ -192,6 +292,72 @@ pub enum EventBody {
     /// The criterion library was written.
     #[serde(rename = "criteria.updated")]
     CriteriaUpdated(CriteriaUpdatedBody),
+    /// A session's usage report was priced.
+    #[serde(rename = "cost.recorded")]
+    CostRecorded(CostRecordedBody),
+    /// A budget ran out.
+    #[serde(rename = "budget.exhausted")]
+    BudgetExhausted(BudgetExhaustedBody),
+    /// The governor moved a contract.
+    #[serde(rename = "task.transitioned")]
+    TaskTransitioned(TaskTransitionedBody),
+    /// The governor refused to move a contract.
+    #[serde(rename = "transition.refused")]
+    TransitionRefused(TransitionRefusedBody),
+    /// A move sent a contract to the human.
+    #[serde(rename = "escalation.raised")]
+    EscalationRaised(EscalationRaisedBody),
+    /// A contract was held to the Definition of Ready or of Done.
+    #[serde(rename = "contract.evaluated")]
+    ContractEvaluated(ContractEvaluatedBody),
+    /// An agent recorded an exit criterion's result.
+    #[serde(rename = "criterion.recorded")]
+    CriterionRecorded(CriterionRecordedBody),
+    /// An agent wrote a note about the work.
+    #[serde(rename = "note.written")]
+    NoteWritten(NoteWrittenBody),
+    /// A reviewer's verification of a contract was summed up.
+    #[serde(rename = "review.recorded")]
+    ReviewRecorded(ReviewRecordedBody),
+    /// An agent asked the human a question.
+    #[serde(rename = "question.asked")]
+    QuestionAsked(QuestionAskedBody),
+    /// The Product Manager wrote a product document.
+    #[serde(rename = "product_doc.written")]
+    ProductDocWritten(ProductDocWrittenBody),
+    /// The `PreToolUse` hook allowed a tool call.
+    #[serde(rename = "tool.called")]
+    ToolCalled(ToolCalledBody),
+    /// The `PreToolUse` hook denied a tool call.
+    #[serde(rename = "tool.denied")]
+    ToolDenied(ToolDeniedBody),
+    /// A tool call returned, as the `PostToolUse` hook reported it.
+    #[serde(rename = "tool.returned")]
+    ToolReturned(ToolReturnedBody),
+    /// A Claude Code session started.
+    #[serde(rename = "session.started")]
+    SessionStarted(SessionStartedBody),
+    /// A Claude Code session ended.
+    #[serde(rename = "session.ended")]
+    SessionEnded(SessionEndedBody),
+    /// An accepted task's branch reached the integration branch.
+    #[serde(rename = "task.integrated")]
+    TaskIntegrated(TaskIntegratedBody),
+    /// Farik opened a pull request for an accepted task.
+    #[serde(rename = "pull_request.opened")]
+    PullRequestOpened(PullRequestOpenedBody),
+    /// The human answered a question.
+    #[serde(rename = "question.answered")]
+    QuestionAnswered(QuestionAnsweredBody),
+    /// The human approved a contract or accepted a result.
+    #[serde(rename = "human.accepted")]
+    HumanAccepted(HumanAcceptedBody),
+    /// The human resolved an escalation.
+    #[serde(rename = "escalation.resolved")]
+    EscalationResolved(EscalationResolvedBody),
+    /// An agent's status changed in the team file.
+    #[serde(rename = "agent.updated")]
+    AgentUpdated(AgentUpdatedBody),
 }
 
 impl EventBody {
@@ -208,6 +374,28 @@ impl EventBody {
             Self::ProjectScanned(_) => EventKind::ProjectScanned,
             Self::TeamUpdated(_) => EventKind::TeamUpdated,
             Self::CriteriaUpdated(_) => EventKind::CriteriaUpdated,
+            Self::CostRecorded(_) => EventKind::CostRecorded,
+            Self::BudgetExhausted(_) => EventKind::BudgetExhausted,
+            Self::TaskTransitioned(_) => EventKind::TaskTransitioned,
+            Self::TransitionRefused(_) => EventKind::TransitionRefused,
+            Self::EscalationRaised(_) => EventKind::EscalationRaised,
+            Self::ContractEvaluated(_) => EventKind::ContractEvaluated,
+            Self::CriterionRecorded(_) => EventKind::CriterionRecorded,
+            Self::NoteWritten(_) => EventKind::NoteWritten,
+            Self::ReviewRecorded(_) => EventKind::ReviewRecorded,
+            Self::QuestionAsked(_) => EventKind::QuestionAsked,
+            Self::ProductDocWritten(_) => EventKind::ProductDocWritten,
+            Self::ToolCalled(_) => EventKind::ToolCalled,
+            Self::ToolDenied(_) => EventKind::ToolDenied,
+            Self::ToolReturned(_) => EventKind::ToolReturned,
+            Self::SessionStarted(_) => EventKind::SessionStarted,
+            Self::SessionEnded(_) => EventKind::SessionEnded,
+            Self::TaskIntegrated(_) => EventKind::TaskIntegrated,
+            Self::PullRequestOpened(_) => EventKind::PullRequestOpened,
+            Self::QuestionAnswered(_) => EventKind::QuestionAnswered,
+            Self::HumanAccepted(_) => EventKind::HumanAccepted,
+            Self::EscalationResolved(_) => EventKind::EscalationResolved,
+            Self::AgentUpdated(_) => EventKind::AgentUpdated,
         }
     }
 }
@@ -356,7 +544,7 @@ pub fn event_from_value(input: &Value) -> Result<FarikEvent, Vec<ValidationError
 }
 
 /// The schema's own failures. A failure inside `body` is reported by the schema once, at `/body`,
-/// because `body` there is a choice of nine shapes and the schema can only say that none matched.
+/// because `body` there is a choice of thirty-one shapes and the schema can only say that none matched.
 /// The event's `kind` says which one it was meant to be, so such a failure is asked again of that
 /// shape alone and reported where it actually is.
 fn schema_errors(input: &Value) -> Vec<ValidationError> {
@@ -638,6 +826,20 @@ mod tests {
             let event = event_from_value(&wire).expect("valid");
             assert_eq!(event_to_value(&event), wire, "{kind}");
         }
+        for name in [
+            "question.answered",
+            "human.accepted",
+            "escalation.resolved",
+            "agent.updated",
+        ] {
+            let kind: EventKind =
+                serde_json::from_value(json!(name)).unwrap_or_else(|_| panic!("{name} is a kind"));
+            assert!(EVERY_KIND.contains(&kind), "{name}");
+        }
+        let mut moved = a_full_event_wire(EventKind::TaskTransitioned);
+        moved["body"]["reason"] = json!("stopped by the human");
+        let event = event_from_value(&moved).expect("a move may carry the human's reason");
+        assert_eq!(event_to_value(&event), moved);
     }
 
     #[test]
@@ -737,7 +939,7 @@ mod tests {
 
     #[test]
     fn reports_a_malformed_field_inside_a_body_at_its_own_path() {
-        // The schema types `body` as a choice of nine shapes, so it reports a failure anywhere
+        // The schema types `body` as a choice of thirty-one shapes, so it reports a failure anywhere
         // inside one at `/body`, with the whole body echoed back. The kind says which shape the
         // body was meant to be, so the reader checks it again against that one alone.
         let mut input = an_event_wire(EventKind::ProjectScanned);
@@ -802,6 +1004,13 @@ mod tests {
             (EventKind::ContractUnlocked, "unlocked_by"),
             (EventKind::TeamUpdated, "updated_by"),
             (EventKind::CriteriaUpdated, "updated_by"),
+            (EventKind::TaskTransitioned, "requested_by"),
+            (EventKind::TransitionRefused, "requested_by"),
+            (EventKind::CriterionRecorded, "recorded_by"),
+            (EventKind::NoteWritten, "written_by"),
+            (EventKind::ReviewRecorded, "reviewer"),
+            (EventKind::QuestionAsked, "asked_by"),
+            (EventKind::ProductDocWritten, "written_by"),
         ] {
             let mut input = an_event_wire(kind);
             input["body"][field] = json!("   ");
@@ -856,6 +1065,113 @@ mod tests {
                 kind: EventKind::ContractLocked
             }
         );
+    }
+
+    #[test]
+    fn reads_a_cost_without_unpriced_as_priced() {
+        let mut input = an_event_wire(EventKind::CostRecorded);
+        input["body"]
+            .as_object_mut()
+            .expect("the body is an object")
+            .remove("unpriced");
+        let event = event_from_value(&input).expect("an older log's cost reads");
+        let EventBody::CostRecorded(body) = &event.body else {
+            panic!("a cost.recorded, not {:?}", event.body.kind());
+        };
+        assert!(!body.unpriced);
+    }
+
+    #[test]
+    fn keeps_an_unpriced_cost() {
+        let mut input = an_event_wire(EventKind::CostRecorded);
+        input["body"]["unpriced"] = json!(true);
+        input["body"]["cost_usd"] = json!(0);
+        let event = event_from_value(&input).expect("an unpriced cost is valid");
+        let EventBody::CostRecorded(body) = &event.body else {
+            panic!("a cost.recorded, not {:?}", event.body.kind());
+        };
+        assert!(body.unpriced);
+        assert_eq!(event_to_value(&event)["body"]["unpriced"], json!(true));
+    }
+
+    #[test]
+    fn refuses_a_cost_with_a_negative_amount() {
+        let mut input = an_event_wire(EventKind::CostRecorded);
+        input["body"]["cost_usd"] = json!(-0.01);
+        let errors = refusal(&input);
+        assert_eq!(errors.len(), 1);
+        assert!(errors[0].path.ends_with("/cost_usd"), "{}", errors[0].path);
+    }
+
+    #[test]
+    fn refuses_a_cost_with_a_property_it_does_not_know() {
+        let mut input = an_event_wire(EventKind::CostRecorded);
+        input["body"]["discount_usd"] = json!(1.0);
+        let errors = refusal(&input);
+        assert_eq!(errors.len(), 1);
+        assert_eq!(errors[0].path, "/body");
+    }
+
+    #[test]
+    fn refuses_a_token_count_past_what_json_holds_exactly() {
+        let mut input = an_event_wire(EventKind::CostRecorded);
+        input["body"]["usage"]["input_tokens"] = json!(9_007_199_254_740_992_u64);
+        let errors = refusal(&input);
+        assert_eq!(errors.len(), 1);
+        assert_eq!(errors[0].path, "/body/usage/input_tokens");
+    }
+
+    #[test]
+    fn refuses_a_cost_for_an_unknown_purpose() {
+        let mut input = an_event_wire(EventKind::CostRecorded);
+        input["body"]["purpose"] = json!("lunch");
+        let errors = refusal(&input);
+        assert_eq!(errors.len(), 1);
+        assert_eq!(errors[0].path, "/body/purpose");
+    }
+
+    #[test]
+    fn refuses_a_transition_to_a_status_that_does_not_exist() {
+        let mut input = an_event_wire(EventKind::TaskTransitioned);
+        input["body"]["to"] = json!("done");
+        let errors = refusal(&input);
+        assert_eq!(errors.len(), 1);
+        assert_eq!(errors[0].path, "/body/to");
+    }
+
+    #[test]
+    fn refuses_an_escalation_for_an_unknown_reason() {
+        let mut input = an_event_wire(EventKind::EscalationRaised);
+        input["body"]["reason"] = json!("boredom");
+        let errors = refusal(&input);
+        assert_eq!(errors.len(), 1);
+        assert_eq!(errors[0].path, "/body/reason");
+    }
+
+    #[test]
+    fn refuses_a_contract_event_without_a_task() {
+        for kind in [
+            EventKind::TaskTransitioned,
+            EventKind::TransitionRefused,
+            EventKind::EscalationRaised,
+            EventKind::ContractEvaluated,
+            EventKind::CriterionRecorded,
+            EventKind::NoteWritten,
+            EventKind::ProductDocWritten,
+        ] {
+            let body = event_from_value(&an_event_wire(kind)).expect("valid").body;
+            let error = new_event(body, at(), some_ids()).expect_err("expected a refusal");
+            assert_eq!(error, EventError::NoContractNamed { kind }, "{kind}");
+        }
+    }
+
+    #[test]
+    fn stamps_a_question_asked_outside_any_task() {
+        // A conversation with no task can ask the human something (5.16).
+        let body = event_from_value(&an_event_wire(EventKind::QuestionAsked))
+            .expect("valid")
+            .body;
+        assert!(new_event(body, at(), some_ids()).is_ok());
     }
 
     #[test]

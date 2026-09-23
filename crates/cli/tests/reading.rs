@@ -3,7 +3,12 @@
 //! Every test here needs the `git` program, so every one is `#[ignore]`d and run by
 //! `cargo xtask check --integration`, as the rest of this crate's do.
 
+#[cfg(unix)]
+#[path = "shared/project.rs"]
+mod project;
+
 use std::path::Path;
+use std::sync::Arc;
 
 use chrono::{DateTime, Utc};
 use farik::{CliIo, run_cli};
@@ -34,12 +39,12 @@ fn run_in(cwd: &Path, args: &[&str]) -> Ran {
     let mut out = Vec::new();
     let mut err = Vec::new();
     let code = {
-        let mut io = CliIo {
-            stdout: Box::new(&mut out),
-            stderr: Box::new(&mut err),
-            cwd: cwd.to_path_buf(),
-            clock: Box::new(FixedClock::new(at())),
-        };
+        let mut io = CliIo::new(
+            cwd.to_path_buf(),
+            Box::new(&mut out),
+            Box::new(&mut err),
+            Arc::new(FixedClock::new(at())),
+        );
         let arguments: Vec<String> = std::iter::once("farik")
             .chain(args.iter().copied())
             .map(ToString::to_string)
@@ -439,5 +444,483 @@ fn reports_a_team_file_that_cannot_be_read() {
         ran.err.contains("team.yaml") || ran.out.contains("team.yaml"),
         "{}",
         ran.err
+    );
+}
+
+/// A team of `pm`, `dev`, and `dev-2`, with both developers on a model the shipped table does not
+/// price.
+#[cfg(unix)]
+fn a_team_on_an_unpriced_model(name: &str) -> TempRepo {
+    project::a_team_with(name, |wire| {
+        let on_unknown_9 = |id: &str| {
+            let mut dev = farik_core::team::fixtures::an_agent_wire(id, "software_developer");
+            dev["model"] = serde_json::json!({ "id": "claude-unknown-9" });
+            dev
+        };
+        wire["agents"] = serde_json::json!([
+            farik_core::team::fixtures::an_agent_wire("pm", "product_manager"),
+            on_unknown_9("dev"),
+            on_unknown_9("dev-2"),
+        ]);
+    })
+}
+
+/// What doctor says of `claude-unknown-9`, used by `dev` and `dev-2`.
+const UNPRICED_FINDING: &str = ".farik/team.yaml: no price table prices claude-unknown-9 (used by \
+    dev, dev-2): its usage is recorded at no cost, and no dollar limit counts it. Add it to \
+    .farik/prices.json to price it (5.5)";
+
+#[cfg(unix)]
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn reports_a_model_no_price_table_prices() {
+    let repository = a_team_on_an_unpriced_model("read-doctor-unpriced");
+
+    let ran = run_in(&repository.path, &["doctor"]);
+
+    assert_eq!(ran.code, 1, "{}", ran.out);
+    assert!(
+        ran.out.lines().any(|line| line == UNPRICED_FINDING),
+        "{}",
+        ran.out
+    );
+
+    let mut prices: Value =
+        serde_json::from_str(farik_core::pricing::prices::PRICES_JSON).expect("the shipped table");
+    prices["prices"]["claude-unknown-9"] = prices["prices"]["claude-opus-5"].clone();
+    std::fs::write(
+        repository.path.join(".farik/prices.json"),
+        prices.to_string(),
+    )
+    .expect("the override is written");
+
+    let ran = run_in(&repository.path, &["doctor"]);
+
+    assert_eq!(ran.code, 0, "{}", ran.out);
+    assert!(!ran.out.contains("claude-unknown-9"), "{}", ran.out);
+}
+
+#[cfg(unix)]
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn reports_a_price_table_it_cannot_read() {
+    let repository = a_team_on_an_unpriced_model("read-doctor-prices");
+    std::fs::write(
+        repository.path.join(".farik/prices.json"),
+        "{\"version\": 2}",
+    )
+    .expect("the override is written");
+
+    let ran = run_in(&repository.path, &["doctor"]);
+
+    assert_eq!(ran.code, 1, "{}", ran.out);
+    assert!(ran.out.contains(".farik/prices.json"), "{}", ran.out);
+    assert!(
+        !ran.out
+            .lines()
+            .any(|line| line.starts_with(".farik/team.yaml: no price table prices")),
+        "{}",
+        ran.out
+    );
+}
+
+/// Walks `task` from `draft` through `path`, as the governor's moves.
+#[cfg(unix)]
+fn walked(repository: &TempRepo, task: &str, path: &[&str]) {
+    let mut from = "draft";
+    for to in path {
+        project::moved(repository, task, from, to, &serde_json::json!({}));
+        from = to;
+    }
+}
+
+#[cfg(unix)]
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn shows_a_tasks_events_cost_and_children() {
+    use farik_protocol::event::EventIds;
+    use farik_store::requests::file_request;
+    use serde_json::json;
+
+    let repository = a_project_with_a_task("read-show-story");
+    let sized = run_in(
+        &repository.path,
+        &["triage", "FRK-1", "large", "--reason", "Three screens."],
+    );
+    assert_eq!(sized.code, 0, "{}", sized.err);
+    walked(
+        &repository,
+        "FRK-1",
+        &["refining", "ready", "assigned", "in_progress"],
+    );
+    let log = project::log_of(&repository);
+    let first = project::events(&repository, &[]);
+    let ids = EventIds {
+        task_id: None,
+        agent_id: None,
+        session_id: None,
+        ..first[0].envelope.ids.clone()
+    };
+    file_request(
+        &project::files_of(&repository),
+        &log,
+        farik_store::files::yaml_value(&a_request("Show one row"), "child.yaml")
+            .expect("the child is YAML"),
+        "human",
+        Some(&"FRK-1".parse().expect("a task id")),
+        at(),
+        &ids,
+    )
+    .expect("the child is filed");
+    project::record_as(
+        &repository,
+        "FRK-1",
+        Some(("pm", "s-1")),
+        "cost.recorded",
+        &json!({
+            "purpose": "plan",
+            "model_id": "claude-opus-5",
+            "usage": {
+                "input_tokens": 1000,
+                "output_tokens": 100,
+                "cache_read_tokens": 0,
+                "cache_write_tokens": 0
+            },
+            "cost_usd": 0.5
+        }),
+    );
+
+    let ran = run_in(&repository.path, &["task", "show", "FRK-1"]);
+
+    assert_eq!(ran.code, 0, "{}", ran.err);
+    for expected in [
+        "request.triaged — large by human: ",
+        "cost: $0.50 of $5.00; sessions: 1;",
+        "children",
+        "  FRK-2 draft ",
+    ] {
+        assert!(ran.out.contains(expected), "{expected:?} in {}", ran.out);
+    }
+    let ran = run_in(&repository.path, &["--json", "task", "show", "FRK-1"]);
+    assert_eq!(ran.code, 0, "{}", ran.err);
+    let shown: Value = serde_json::from_str(ran.out.trim()).expect("JSON");
+    assert_eq!(shown["cost"]["usd"], 0.5, "{shown}");
+    assert_eq!(shown["children"][0]["task_id"], "FRK-2", "{shown}");
+}
+
+#[cfg(unix)]
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn shows_a_tasks_diff_before_and_after_integration() {
+    use serde_json::json;
+
+    let repository = a_project_with_a_task("read-show-diff");
+    let ran = run_in(&repository.path, &["task", "show", "FRK-1", "--diff"]);
+    assert_eq!(ran.code, 1, "{}", ran.out);
+    assert!(ran.err.contains("has no branch yet"), "{}", ran.err);
+
+    let branch_with = |task: &str, file: &str| {
+        repository.git(&["checkout", "-q", "-b", &format!("farik/{task}")]);
+        repository.write(file, "done\n");
+        repository.git(&["add", "--", file]);
+        repository.git(&["commit", "-q", "-m", &format!("Add {file}")]);
+        repository.git(&["checkout", "-q", "main"]);
+    };
+    branch_with("FRK-1", "done.txt");
+    let ran = run_in(&repository.path, &["task", "show", "FRK-1", "--diff"]);
+    assert_eq!(ran.code, 0, "{}", ran.err);
+    assert!(ran.out.contains("+++ b/done.txt"), "{}", ran.out);
+
+    repository.git(&["merge", "-q", "--no-ff", "-m", "Merge FRK-1", "farik/FRK-1"]);
+    let sha = repository.git_output(&["rev-parse", "HEAD"]);
+    project::record(
+        &repository,
+        "FRK-1",
+        "task.integrated",
+        &json!({ "sha": sha, "into": "main", "integrated_by": "human" }),
+    );
+    let ran = run_in(&repository.path, &["task", "show", "FRK-1", "--diff"]);
+    assert_eq!(ran.code, 0, "{}", ran.err);
+    assert!(ran.out.contains("+++ b/done.txt"), "{}", ran.out);
+
+    repository.write("second.yaml", &a_request("Show a second board"));
+    let filed = run_in(&repository.path, &["task", "create", "second.yaml"]);
+    assert_eq!(filed.code, 0, "{}", filed.err);
+    branch_with("FRK-2", "b.txt");
+    repository.git(&["merge", "-q", "--ff-only", "farik/FRK-2"]);
+    let head = repository.git_output(&["rev-parse", "HEAD"]);
+    project::record(
+        &repository,
+        "FRK-2",
+        "task.integrated",
+        &json!({ "sha": head, "into": "main", "integrated_by": "human" }),
+    );
+    let ran = run_in(&repository.path, &["task", "show", "FRK-2", "--diff"]);
+    assert_eq!(ran.code, 0, "{}", ran.err);
+    assert!(
+        ran.out.contains("farik/FRK-2 is wholly in main"),
+        "{}",
+        ran.out
+    );
+
+    repository.write("third.yaml", &a_request("Show a third board"));
+    let filed = run_in(&repository.path, &["task", "create", "third.yaml"]);
+    assert_eq!(filed.code, 0, "{}", filed.err);
+    let sized = run_in(
+        &repository.path,
+        &["triage", "FRK-3", "large", "--reason", "Many boards."],
+    );
+    assert_eq!(sized.code, 0, "{}", sized.err);
+    let ran = run_in(&repository.path, &["task", "show", "FRK-3", "--diff"]);
+    assert_eq!(ran.code, 1, "{}", ran.out);
+    assert!(
+        ran.err.contains("is an epic and has no branch"),
+        "{}",
+        ran.err
+    );
+}
+
+/// `a_project_with_a_task` and a second request, both accepted, with every metric a different
+/// number so that no line or field can be printed from another's value:
+///
+/// - FRK-1 (one `test` criterion) is verified twice, the human unblocking it once and one
+///   escalation raised; FRK-2 (a `command` and a `review` criterion) is verified once and accepted
+///   first time, and escalated once after. So two accepted tasks, 50% first pass, 1.50
+///   interventions each, and two criteria of three run by Farik.
+/// - Three sessions cost $0.50 of implement, $1.00 of verify, and $0.50 of triage, each in an ISO
+///   week of its own: $1.00 per accepted task, of which the largest purpose is $0.50, over three
+///   active weeks.
+#[cfg(unix)]
+fn accepted_project(name: &str) -> TempRepo {
+    use chrono::TimeZone;
+    use serde_json::json;
+
+    let repository = a_project_with_a_task(name);
+    repository.write(
+        "second.yaml",
+        &a_request("Show one task").replace(
+            r"  - id: C1
+    text: Every test in the workspace passes.
+    satisfies:
+      - R1
+    verification:
+      method: test
+      command: cargo test --workspace
+      new_tests_required: true
+",
+            r"  - id: C1
+    text: The board command exits cleanly.
+    satisfies:
+      - R1
+    verification:
+      method: command
+      command: farik board
+      expect:
+        exit_code: 0
+  - id: C2
+    text: The board reads well.
+    satisfies:
+      - R1
+    verification:
+      method: review
+      rubric:
+        - Is each line one task?
+",
+        ),
+    );
+    let filed = run_in(&repository.path, &["task", "create", "second.yaml"]);
+    assert_eq!(filed.code, 0, "{}", filed.err);
+    assert!(filed.out.starts_with("FRK-2 "), "{}", filed.out);
+
+    let by = |actor: &str| json!({ "actor": actor, "requested_by": actor });
+    for (from, to, actor) in [
+        ("in_progress", "blocked", "assignee"),
+        ("blocked", "in_progress", "human"),
+        ("in_progress", "verifying", "assignee"),
+        ("verifying", "escalated", "governor"),
+    ] {
+        project::moved(&repository, "FRK-1", from, to, &by(actor));
+    }
+    project::record(
+        &repository,
+        "FRK-1",
+        "escalation.raised",
+        &json!({ "reason": "iterations", "detail": "Two tries." }),
+    );
+    for (from, to, actor) in [
+        ("escalated", "in_progress", "human"),
+        ("in_progress", "verifying", "assignee"),
+        ("verifying", "accepted", "product_manager"),
+    ] {
+        project::moved(&repository, "FRK-1", from, to, &by(actor));
+    }
+    for (from, to, actor) in [
+        ("in_progress", "verifying", "assignee"),
+        ("verifying", "accepted", "product_manager"),
+    ] {
+        project::moved(&repository, "FRK-2", from, to, &by(actor));
+    }
+    project::record(
+        &repository,
+        "FRK-2",
+        "escalation.raised",
+        &json!({ "reason": "integration", "detail": "A conflict." }),
+    );
+
+    for (task, session, purpose, usd, day) in [
+        ("FRK-1", "s1", "implement", 0.5, 7),
+        ("FRK-1", "s2", "verify", 1.0, 14),
+        ("FRK-2", "s3", "triage", 0.5, 21),
+    ] {
+        project::record_on(
+            &repository,
+            task,
+            Some(("dev-a", session)),
+            "cost.recorded",
+            &json!({
+                "purpose": purpose,
+                "model_id": "claude-sonnet-4-5",
+                "usage": {
+                    "input_tokens": 1000,
+                    "output_tokens": 100,
+                    "cache_read_tokens": 0,
+                    "cache_write_tokens": 0
+                },
+                "cost_usd": usd
+            }),
+            Utc.with_ymd_and_hms(2026, 9, day, 10, 0, 0)
+                .single()
+                .expect("a real hour"),
+        );
+    }
+    repository
+}
+
+#[cfg(unix)]
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn prints_the_harness_metrics() {
+    let repository = accepted_project("read-metrics");
+    let ran = run_in(&repository.path, &["metrics"]);
+
+    assert_eq!(ran.code, 0, "{}", ran.err);
+    assert_eq!(
+        ran.out.lines().collect::<Vec<_>>(),
+        [
+            "accepted tasks: 2",
+            "first-pass acceptance: 50.0%",
+            "human interventions per accepted task: 1.50",
+            "cost per accepted task: $1.00",
+            "  triage: $0.25",
+            "  refine: $0.00",
+            "  plan: $0.00",
+            "  implement: $0.25",
+            "  verify: $0.50",
+            "  ceremony: $0.00",
+            "  conversation: $0.00",
+            "criteria verified by command, test, or artifact: 66.7%",
+            "active weeks: 3",
+        ]
+    );
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn prints_none_before_a_task_is_accepted() {
+    let repository = a_project_with_a_task("read-metrics-none");
+    let ran = run_in(&repository.path, &["metrics"]);
+
+    assert_eq!(ran.code, 0, "{}", ran.err);
+    let none = "none yet, no task has been accepted";
+    assert_eq!(
+        ran.out.lines().map(str::to_string).collect::<Vec<_>>(),
+        [
+            "accepted tasks: 0".to_string(),
+            format!("first-pass acceptance: {none}"),
+            format!("human interventions per accepted task: {none}"),
+            format!("cost per accepted task: {none}"),
+            format!("criteria verified by command, test, or artifact: {none}"),
+            "active weeks: 0".to_string(),
+        ]
+    );
+}
+
+#[cfg(unix)]
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn prints_the_harness_metrics_as_json() {
+    let repository = accepted_project("read-metrics-json");
+    let ran = run_in(&repository.path, &["metrics", "--json"]);
+    assert_eq!(ran.code, 0, "{}", ran.err);
+    let metrics: Value = serde_json::from_str(ran.out.trim()).expect("one JSON object");
+    assert_eq!(
+        metrics,
+        serde_json::json!({
+            "accepted_tasks": 2,
+            "first_pass_acceptance_rate": 0.5,
+            "interventions_per_accepted_task": 1.5,
+            "cost_per_accepted_task_usd": {
+                "total": 1.0,
+                "by_purpose": {
+                    "triage": 0.25,
+                    "refine": 0.0,
+                    "plan": 0.0,
+                    "implement": 0.25,
+                    "verify": 0.5,
+                    "ceremony": 0.0,
+                    "conversation": 0.0
+                }
+            },
+            "mechanically_verified_criteria_share": 2.0 / 3.0,
+            "active_weeks": 3
+        })
+    );
+
+    let repository = a_project_with_a_task("read-metrics-json-none");
+    let ran = run_in(&repository.path, &["metrics", "--json"]);
+    assert_eq!(ran.code, 0, "{}", ran.err);
+    let metrics: Value = serde_json::from_str(ran.out.trim()).expect("one JSON object");
+    for field in [
+        "first_pass_acceptance_rate",
+        "interventions_per_accepted_task",
+        "cost_per_accepted_task_usd",
+        "mechanically_verified_criteria_share",
+    ] {
+        assert_eq!(metrics[field], Value::Null, "{field}: {metrics}");
+    }
+    assert_eq!(metrics["active_weeks"], 0);
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn has_no_sprint_flag_until_sprints_exist() {
+    let repository = a_project_with_a_task("read-metrics-sprint");
+    let ran = run_in(&repository.path, &["metrics", "--sprint", "S1"]);
+    assert_eq!(ran.code, 2, "{}{}", ran.out, ran.err);
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn prints_the_control_characters_an_agent_wrote_escaped() {
+    use serde_json::json;
+
+    let repository = a_project_with_a_task("read-show-escaped");
+    project::record(
+        &repository,
+        "FRK-1",
+        "question.asked",
+        &json!({ "question": "Clear\u{1b}[2Jthe\u{7}screen?\tNo.", "asked_by": "pm" }),
+    );
+
+    let shown = run_in(&repository.path, &["task", "show", "FRK-1"]);
+
+    assert_eq!(shown.code, 0, "{}", shown.err);
+    assert!(!shown.out.contains(['\u{1b}', '\u{7}']), "{:?}", shown.out);
+    assert!(
+        shown
+            .out
+            .contains("from pm: Clear\\u001b[2Jthe\\u0007screen?\tNo."),
+        "{:?}",
+        shown.out
     );
 }

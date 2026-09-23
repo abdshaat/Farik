@@ -82,7 +82,127 @@ pub fn a_body_wire(kind: EventKind) -> Value {
             "criterion_names": ["the check passes"],
             "updated_by": "human"
         }),
+        EventKind::CostRecorded => json!({
+            "purpose": "implement",
+            "model_id": "claude-sonnet-4-5",
+            "usage": {
+                "input_tokens": 1000,
+                "output_tokens": 100,
+                "cache_read_tokens": 0,
+                "cache_write_tokens": 0
+            },
+            "cost_usd": 0.5,
+            "unpriced": false
+        }),
+        EventKind::BudgetExhausted => json!({ "scope": "day_usd", "consequence": "pause_team" }),
+        EventKind::TaskTransitioned => json!({
+            "from": "ready",
+            "to": "assigned",
+            "actor": "product_manager",
+            "requested_by": "maya-chen",
+            "gate": "assignment",
+            "effects": [],
+            "assignee": "dev-a",
+            "reviewer": "dev-b",
+            "iteration": 0
+        }),
+        EventKind::TransitionRefused => json!({
+            "from": "ready",
+            "to": "assigned",
+            "actor": "product_manager",
+            "requested_by": "maya-chen",
+            "refusal": "gate_failed",
+            "details": ["the reviewer is the assignee"]
+        }),
+        EventKind::EscalationRaised => json!({
+            "reason": "blocker_age",
+            "detail": "blocked_age: no key"
+        }),
+        EventKind::ContractEvaluated => json!({
+            "gate": "definition_of_ready",
+            "passed": false,
+            "failures": ["the contract has no exit criteria"]
+        }),
+        EventKind::CriterionRecorded => json!({
+            "criterion_id": "C1",
+            "passed": true,
+            "evidence": "cargo xtask check: ok",
+            "run_by": "assignee",
+            "recorded_by": "dev-a"
+        }),
+        EventKind::NoteWritten => json!({
+            "kind": "completion",
+            "text": "The login page is done and its tests pass.",
+            "written_by": "dev-a"
+        }),
+        EventKind::ReviewRecorded | EventKind::ProductDocWritten => a_record_body_wire(kind),
+        EventKind::ToolCalled => a_tool_body_wire("input", "{\"file_path\":\"src/lib.rs\"}"),
+        EventKind::ToolDenied => a_tool_body_wire("reason", "tool_not_allowed: Bash has no tier"),
+        EventKind::ToolReturned => a_tool_body_wire("output", "{\"type\":\"text\"}"),
+        EventKind::SessionStarted | EventKind::SessionEnded => a_session_body_wire(kind),
+        EventKind::TaskIntegrated | EventKind::PullRequestOpened => an_integration_body_wire(kind),
+        EventKind::QuestionAsked
+        | EventKind::QuestionAnswered
+        | EventKind::HumanAccepted
+        | EventKind::EscalationResolved
+        | EventKind::AgentUpdated => a_human_body_wire(kind),
     }
+}
+
+/// A review summed up, or a product document written.
+fn a_record_body_wire(kind: EventKind) -> Value {
+    if kind == EventKind::ReviewRecorded {
+        json!({ "reviewer": "dev-b", "criteria_run": 2, "passed": true })
+    } else {
+        json!({ "path": "prd.md", "written_by": "maya-chen" })
+    }
+}
+
+/// A body of a question to the human or of the human's own acts: a question, an answer to question
+/// 3, an acceptance of a result with its words, a resolution back to `refining`, and a pause of
+/// `dev-a`.
+fn a_human_body_wire(kind: EventKind) -> Value {
+    match kind {
+        EventKind::QuestionAsked => json!({
+            "question": "Should a login page remember the user?",
+            "asked_by": "maya-chen"
+        }),
+        EventKind::QuestionAnswered => {
+            json!({ "question_id": 3, "answer": "Yes.", "answered_by": "human" })
+        }
+        EventKind::HumanAccepted => {
+            json!({ "subject": "result", "accepted_by": "human", "message": "Both look right." })
+        }
+        EventKind::EscalationResolved => {
+            json!({ "to": "refining", "message": "Split it by page.", "resolved_by": "human" })
+        }
+        _ => json!({ "agent_id": "dev-a", "status": "paused", "updated_by": "human" }),
+    }
+}
+
+/// An integration body: FRK-1 merged into `main` by the governor, or its pull request 7 opened.
+fn an_integration_body_wire(kind: EventKind) -> Value {
+    if kind == EventKind::TaskIntegrated {
+        json!({ "sha": "4b825dc642cb6eb9a060e54bf8d69288fbee4904", "into": "main", "integrated_by": "governor" })
+    } else {
+        json!({ "url": "https://github.com/o/r/pull/7", "number": 7, "branch": "farik/FRK-1" })
+    }
+}
+
+/// A `session.` body: an implement session on haiku that started, or that completed.
+fn a_session_body_wire(kind: EventKind) -> Value {
+    if kind == EventKind::SessionStarted {
+        json!({ "purpose": "implement", "model": "claude-haiku-4-5-20251001", "effort": "high" })
+    } else {
+        json!({ "reason": "completed", "detail": "done" })
+    }
+}
+
+/// A `tool.` body of a `Read`, with its one field of its own.
+fn a_tool_body_wire(field: &str, value: &str) -> Value {
+    let mut body = json!({ "tool": "Read" });
+    body[field] = json!(value);
+    body
 }
 
 /// A schema-valid contract summary: a task in `draft`, with no parent.

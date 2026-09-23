@@ -3,29 +3,16 @@
 
 use chrono::{DateTime, Utc};
 use farik_core::contract::TaskId;
-use farik_core::governor::gates::{ContractWriteActor, check_contract_write};
-use farik_core::governor::transition_table::TransitionActor;
-use farik_protocol::event::EventBody;
-use farik_protocol::generated::event::{ContractLockedBody, ContractUnlockedBody};
+use farik_protocol::event::EventIds;
+use farik_store::requests::hold_contract;
 use serde_json::json;
 
+use crate::Report;
 use crate::project::Project;
-use crate::triage::status_of;
-use crate::{HUMAN, Report};
 
-/// Takes a contract, or gives it back.
-///
-/// Whether the write is allowed is `check_contract_write`'s answer, asked with `locked` as the only
-/// field changing and the human as the actor: the lock is the human's field alone, locking is not a
-/// content change and so does not send the task back to `refining`, and a task that is `accepted` or
-/// `cancelled` takes no write but a note.
-///
-/// The status comes from the log, which is what decides a task's status (8.4), and the kind and the
-/// lock from the file, which is what decides a contract's content (8.4, and the project plan's note
-/// on step 07). On a project where the two disagree — which is what `farik doctor` is for — the
-/// governor is asked about the status the log knows, because that is the one the transition table
-/// answers for. The gate is asked before the contract is found to be held already, so that a task
-/// nothing can be written to says so rather than answering about the lock.
+/// Takes a contract, or gives it back, through `farik_store::requests::hold_contract`, the one
+/// way every caller does it: the governor's `check_contract_write` decides, the file and the log
+/// record it.
 ///
 /// # Errors
 ///
@@ -40,53 +27,17 @@ pub fn hold(
     let task_id: TaskId = task_id
         .parse()
         .map_err(|error| format!("{task_id} is not a task id: {error}"))?;
-    let contract = project
-        .files
-        .read_contract(&task_id)
-        .map_err(|error| error.to_string())?;
-    let status = status_of(project, &task_id)?;
-    check_contract_write(
-        contract.kind,
-        status,
-        contract.locked,
-        &ContractWriteActor {
-            kind: TransitionActor::Human,
-            agent_id: None,
-        },
-        &["locked".to_string()],
+    let projections = project.projections()?;
+    let event = hold_contract(
+        &project.files,
+        &project.log,
+        &projections,
+        &task_id,
+        held,
+        now,
+        &event_ids(project),
     )
-    .map_err(|refusal| crate::refusal::contract_write(&refusal))?;
-    if contract.locked == held {
-        return Err(format!(
-            "{} is already {}",
-            task_id.as_str(),
-            if held {
-                "yours: farik contract unlock gives it back"
-            } else {
-                "the team's"
-            }
-        ));
-    }
-
-    let mut written = contract;
-    written.locked = held;
-    written.updated_at = Some(now);
-    project
-        .files
-        .write_contract(&written)
-        .map_err(|error| error.to_string())?;
-
-    let body = if held {
-        EventBody::ContractLocked(ContractLockedBody {
-            locked_by: HUMAN.to_string(),
-        })
-    } else {
-        EventBody::ContractUnlocked(ContractUnlockedBody {
-            unlocked_by: HUMAN.to_string(),
-        })
-    };
-    let event = project.event(body, now, Some(task_id.clone()))?;
-    let seq = project.append(&event)?;
+    .map_err(|error| error.to_string())?;
 
     Ok(Report {
         lines: vec![if held {
@@ -101,8 +52,17 @@ pub fn hold(
         json: json!({
             "task_id": task_id.to_string(),
             "locked": held,
-            "events": [seq],
+            "events": [event.envelope.seq],
         }),
         json_lines: None,
     })
+}
+
+/// The ids every event this project records carries, with no task, agent, or session named.
+pub(crate) fn event_ids(project: &Project) -> EventIds {
+    EventIds {
+        team_id: project.ids.team_id.clone(),
+        project_id: project.ids.project_id.clone(),
+        ..EventIds::default()
+    }
 }

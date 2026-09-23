@@ -1,6 +1,6 @@
 //! `farik board`: the lifecycle, one line per task (F3).
 
-use serde_json::json;
+use farik_store::requests::board_json;
 
 use crate::Report;
 use crate::project::Project;
@@ -24,7 +24,7 @@ pub fn board(project: &Project) -> Result<Report, String> {
             lines: vec![
                 "no tasks yet: farik task create files one from a YAML contract".to_string(),
             ],
-            json: json!({ "tasks": [] }),
+            json: board_json(&rows),
             json_lines: None,
         });
     }
@@ -53,24 +53,9 @@ pub fn board(project: &Project) -> Result<Report, String> {
             )
         })
         .collect();
-    let tasks: Vec<_> = rows
-        .iter()
-        .map(|row| {
-            json!({
-                "task_id": row.task_id.as_str(),
-                "kind": row.kind.to_string(),
-                "parent": row.parent.as_ref().map(|parent| parent.as_str().to_string()),
-                "title": row.title,
-                "status": row.status.to_string(),
-                "risk": row.risk.to_string(),
-                "triaged": row.triaged,
-                "locked": row.locked,
-            })
-        })
-        .collect();
     Ok(Report {
         lines,
-        json: json!({ "tasks": tasks }),
+        json: board_json(&rows),
         json_lines: None,
     })
 }

@@ -9,18 +9,23 @@ pub mod event_log;
 pub mod files;
 /// The repository Farik works in.
 pub mod git;
+/// The harness metrics, from the projections.
+pub mod metrics;
 /// The database's shape, as SQL applied in order.
 pub mod migrations;
 /// The board, derived from the log.
 pub mod projections;
 /// Where the files and the log disagree.
 pub mod reconcile;
+/// Filing a request, for every caller.
+pub mod requests;
 /// What the repository says it is.
 pub mod scan;
 
 pub use error::StoreError;
 pub use event_log::{EventLog, EventQuery, IN_MEMORY, open_event_log};
 pub use git::{Git, GitError, HeadSummary, MergeOutcome};
-pub use projections::{Projections, TaskProjection, open_projections};
+pub use metrics::{CostSplit, HarnessMetrics, MetricsError};
+pub use projections::{CostProjection, CostScope, Projections, TaskProjection, open_projections};
 pub use reconcile::{Drift, ReconcileError, reconcile};
 pub use scan::{ProjectScan, ScanError, scan_project, seeded_library};

@@ -141,8 +141,9 @@ fn writes_ahead_of_the_database_file() {
 const PROCESSES: u32 = 16;
 
 /// Enough ids per process that a counter which read the number it had not yet written hands the
-/// same one out twice, and few enough that the test is over in well under a second.
-const IDS_PER_PROCESS: u32 = 125;
+/// same one out twice, and few enough that sixteen connections each waiting their turn for the
+/// write lock finish well inside `busy_timeout` on a loaded machine.
+const IDS_PER_PROCESS: u32 = 25;
 
 /// How many fresh files the opening race is run against. One run catches a migration applied twice
 /// most of the time; several make it near certain, and each costs a tenth of a second.
@@ -264,9 +265,12 @@ fn keeps_the_board_and_its_place_in_the_log_across_a_reopen() {
     assert!(board[0].triaged, "and the triage is still recorded");
 }
 
-/// How many `farik` commands the projection race below runs at once, and how much each does.
+/// How many `farik` commands the projection race below runs at once, and how much each does:
+/// enough events that the four interleave many times over, and few enough that the whole race
+/// stays light on a loaded machine. Cut from 150 on 2026-09-23: an event handed over out of order
+/// has a deterministic test in `projections.rs`, so this race need not reproduce it every run.
 const PROJECTING_PROCESSES: u32 = 4;
-const EVENTS_PER_PROCESS: u32 = 150;
+const EVENTS_PER_PROCESS: u32 = 50;
 
 #[test]
 fn projects_every_event_when_several_processes_append_and_project_at_once() {

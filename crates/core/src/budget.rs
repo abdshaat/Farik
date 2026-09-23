@@ -29,12 +29,6 @@ pub const DEFAULT_SESSION_LIMITS: SessionLimits = SessionLimits {
     max_tool_calls: 200,
 };
 
-/// The shipped sprint budget in dollars (project plan D3).
-pub const DEFAULT_SPRINT_BUDGET_USD: f64 = 15.0;
-
-/// The shipped daily budget in dollars (project plan D3).
-pub const DEFAULT_DAY_BUDGET_USD: f64 = 20.0;
-
 /// The session limits a role gets by default: the Scrum Master half the tokens of the team
 /// default, every other role the team default.
 #[must_use]
@@ -224,9 +218,8 @@ mod tests {
     use std::time::Duration;
 
     use super::{
-        BudgetConsequence as C, BudgetScope as B, BudgetState, DEFAULT_DAY_BUDGET_USD,
-        DEFAULT_SESSION_LIMITS, DEFAULT_SPRINT_BUDGET_USD, Exhausted, SessionLedger, SessionLimits,
-        add_usage, check_budgets, default_session_limits,
+        BudgetConsequence as C, BudgetScope as B, BudgetState, DEFAULT_SESSION_LIMITS, Exhausted,
+        SessionLedger, SessionLimits, add_usage, check_budgets, default_session_limits,
     };
     use crate::contract::Role;
     use crate::pricing::Usage;
@@ -238,11 +231,11 @@ mod tests {
             task_spent_usd: 1.0,
             task_max_usd: 5.0,
             task_sessions: 1,
-            task_max_sessions: 5,
+            task_max_sessions: 12,
             sprint_spent_usd: 3.0,
-            sprint_max_usd: DEFAULT_SPRINT_BUDGET_USD,
+            sprint_max_usd: 15.0,
             day_spent_usd: 4.0,
-            day_max_usd: DEFAULT_DAY_BUDGET_USD,
+            day_max_usd: 20.0,
         }
     }
 
@@ -372,7 +365,7 @@ mod tests {
     #[test]
     fn escalates_the_task_when_its_sessions_run_out() {
         let mut state = a_state();
-        state.task_sessions = 5;
+        state.task_sessions = 12;
         assert_eq!(
             check_budgets(&state),
             [exhausted(B::TaskSessions, C::EscalateTask)]

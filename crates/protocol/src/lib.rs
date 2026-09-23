@@ -15,7 +15,7 @@ mod tests {
     use crate::generated::event::EventKind;
 
     /// Every kind the log holds in this phase, with the wire name the schema gives it.
-    const KINDS: [(&str, EventKind); 9] = [
+    const KINDS: [(&str, EventKind); 31] = [
         ("task.created", EventKind::TaskCreated),
         ("request.triaged", EventKind::RequestTriaged),
         ("contract.written", EventKind::ContractWritten),
@@ -25,6 +25,28 @@ mod tests {
         ("project.scanned", EventKind::ProjectScanned),
         ("team.updated", EventKind::TeamUpdated),
         ("criteria.updated", EventKind::CriteriaUpdated),
+        ("cost.recorded", EventKind::CostRecorded),
+        ("budget.exhausted", EventKind::BudgetExhausted),
+        ("task.transitioned", EventKind::TaskTransitioned),
+        ("transition.refused", EventKind::TransitionRefused),
+        ("escalation.raised", EventKind::EscalationRaised),
+        ("contract.evaluated", EventKind::ContractEvaluated),
+        ("criterion.recorded", EventKind::CriterionRecorded),
+        ("note.written", EventKind::NoteWritten),
+        ("review.recorded", EventKind::ReviewRecorded),
+        ("question.asked", EventKind::QuestionAsked),
+        ("product_doc.written", EventKind::ProductDocWritten),
+        ("tool.called", EventKind::ToolCalled),
+        ("tool.denied", EventKind::ToolDenied),
+        ("tool.returned", EventKind::ToolReturned),
+        ("session.started", EventKind::SessionStarted),
+        ("session.ended", EventKind::SessionEnded),
+        ("task.integrated", EventKind::TaskIntegrated),
+        ("pull_request.opened", EventKind::PullRequestOpened),
+        ("question.answered", EventKind::QuestionAnswered),
+        ("human.accepted", EventKind::HumanAccepted),
+        ("escalation.resolved", EventKind::EscalationResolved),
+        ("agent.updated", EventKind::AgentUpdated),
     ];
 
     #[test]
@@ -49,6 +71,10 @@ mod tests {
         let fields = &contract["properties"];
         assert_eq!(summary["kind"]["enum"], fields["kind"]["enum"]);
         assert_eq!(summary["status"]["enum"], fields["status"]["enum"]);
+        assert_eq!(
+            event["$defs"]["taskStatus"]["enum"],
+            fields["status"]["enum"]
+        );
         assert_eq!(summary["risk"]["enum"], fields["risk"]["enum"]);
         assert_eq!(summary["parent"]["pattern"], fields["parent"]["pattern"]);
         // Every copy of the task id's pattern, not only the summary's: the envelope's and the

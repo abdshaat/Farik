@@ -85,3 +85,14 @@ snippet renderer and their support crates. That is recorded here rather than lef
   the duplicate key, the second document, the scalar YAML has an opinion about, and the words the
   refusal is in — has a test of its own in `crates/store/tests/project_files.rs`, so a regression in
   it fails our suite rather than reaching a team file.
+
+Amended 2026-09-22, from the phase 3 step 09 landing review: `farik-store` is no longer the only
+crate that parses YAML. `farik-roles` reads each shipped role's `role.yaml` and its skills'
+`SKILL.md` frontmatter, embedded in the binary, and it cannot depend on the store, which does I/O.
+It holds them to the same dialect with the same `serde-saphyr` options (`strict_booleans`, the
+crate's defaults otherwise) and the same `UserMessageFormatter` rendering, in a copy of the options
+function whose test pins `strict_booleans`. And it is the one place Farik derives serde for a YAML
+shape: a skill's frontmatter is read straight into a struct with `deny_unknown_fields`, because
+the Agent Skills format is two strings and has no JSON Schema of ours to hold it to. `role.yaml`
+still goes through a `Value` and `docs/schemas/role.schema.json`. Replacing the crate is now a
+change to two modules rather than one.

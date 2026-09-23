@@ -157,8 +157,9 @@ mod tests {
             table.source_url,
             "https://platform.claude.com/docs/en/about-claude/pricing"
         );
-        assert_eq!(table.prices.len(), 12);
+        assert_eq!(table.prices.len(), 13);
         let spot = [
+            ("claude-opus-5-5", 4.0, 20.0, 5.0, 0.2),
             ("claude-fable-5-1", 10.0, 50.0, 12.5, 0.25),
             ("claude-fable-5", 10.0, 50.0, 12.5, 1.0),
             ("claude-opus-5", 5.0, 25.0, 6.25, 0.5),
@@ -244,6 +245,17 @@ mod tests {
         };
         let cost = compute_cost_usd(&usage, "claude-opus-5", &PRICE_TABLE).expect("priced");
         assert!(close(cost, 0.625), "{cost}");
+    }
+
+    #[test]
+    fn computes_the_cost_of_opus_5_5() {
+        let usage = Usage {
+            input_tokens: 1_000_000,
+            output_tokens: 1_000_000,
+            ..Usage::default()
+        };
+        let cost = compute_cost_usd(&usage, "claude-opus-5-5", &PRICE_TABLE).expect("priced");
+        assert!(close(cost, 24.0), "{cost}");
     }
 
     #[test]
