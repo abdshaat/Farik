@@ -1117,10 +1117,22 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn accepts_a_task_result_only_where_the_human_is_asked() {
         let harness = Harness::new("human-accept-result", |wire| {
-            wire["policy"]["wip_limit_per_agent"] = json!(2);
+            wire["policy"]["wip_limit_per_agent"] = json!(4);
         });
         harness.verifying_with("FRK-1", true, true, |wire| wire["risk"] = json!("high"));
         harness.verifying("FRK-2");
+        harness.file("FRK-3", "in_progress", |wire| wire["risk"] = json!("high"));
+        harness.verifying_with("FRK-4", true, true, |wire| {
+            wire["exit_criteria"]
+                .as_array_mut()
+                .expect("a list of criteria")
+                .push(json!({
+                    "id": "C2",
+                    "text": "The founder read it.",
+                    "satisfies": ["R1"],
+                    "verification": { "method": "human", "question": "Is it right?" }
+                }));
+        });
         let orchestrator = an_orchestrator(&harness);
         let accept = |id: &str| Command::HumanAccept {
             task_id: task(id),
@@ -1142,6 +1154,16 @@ mod tests {
         assert!(again.starts_with("already_accepted"), "{again}");
         let low = refused(&orchestrator, accept("FRK-2")).await;
         assert!(low.starts_with("not_waiting_for_the_human"), "{low}");
+        // A high-risk task waits for the human only once it is verifying.
+        let working = refused(&orchestrator, accept("FRK-3")).await;
+        assert!(
+            working.starts_with("not_waiting_for_the_human"),
+            "{working}"
+        );
+        // A low-risk task with a human criterion waits for the human's answer.
+        handled(&orchestrator, accept("FRK-4")).await;
+        let accepted = last(&harness, EventKind::HumanAccepted).expect("the acceptance");
+        assert_eq!(accepted.envelope.ids.task_id, Some(task("FRK-4")));
     }
 
     #[tokio::test]
@@ -1149,6 +1171,23 @@ mod tests {
     async fn accepts_an_epic_only_after_farik_ran_its_criteria() {
         let harness = Harness::new("human-accept-epic", |_| {});
         an_epic(&harness, "FRK-1", "in_progress", a_command_criterion());
+        let mut with_an_artifact = a_command_criterion();
+        with_an_artifact
+            .as_array_mut()
+            .expect("a list of criteria")
+            .push(json!({
+                "id": "C2",
+                "text": "done.txt says done.",
+                "verification": { "method": "artifact", "path": "done.txt", "must_contain": ["done"] }
+            }));
+        an_epic(&harness, "FRK-2", "in_progress", with_an_artifact);
+        harness.project.moved(
+            "FRK-2",
+            "in_progress",
+            "verifying",
+            &json!({ "assignee": "pm" }),
+        );
+        governor_result(&harness, "FRK-2", true);
         harness.project.moved(
             "FRK-1",
             "in_progress",
@@ -1164,6 +1203,20 @@ mod tests {
 
         let not_run = refused(&orchestrator, accept(Some("Looks right."))).await;
         assert!(not_run.starts_with("criteria_not_run"), "{not_run}");
+        // An artifact criterion is Farik's to run too.
+        let artifact = refused(
+            &orchestrator,
+            Command::HumanAccept {
+                task_id: task("FRK-2"),
+                subject: AcceptSubject::Result,
+                message: Some("Looks right.".to_string()),
+            },
+        )
+        .await;
+        assert!(
+            artifact.starts_with("criteria_not_run") && artifact.contains("C2"),
+            "{artifact}"
+        );
         governor_result(&harness, "FRK-1", false);
         let failed = refused(&orchestrator, accept(Some("Looks right."))).await;
         assert!(failed.starts_with("criterion_failed"), "{failed}");
@@ -1373,6 +1426,25 @@ mod tests {
             panic!("a triage");
         };
         assert_eq!(body.triaged_by, "human");
+        for command in [
+            Command::ContractLock {
+                task_id: task("FRK-9"),
+            },
+            Command::ContractUnlock {
+                task_id: task("FRK-9"),
+            },
+            Command::RequestTriage {
+                task_id: task("FRK-9"),
+                size: RequestSize::Small,
+                reason: "One file.".to_string(),
+            },
+        ] {
+            let answer = orchestrator.handle(command.clone()).await;
+            assert!(
+                matches!(&answer, Err(CommandError::NotFound { what }) if what == "task FRK-9"),
+                "{command:?}: {answer:?}"
+            );
+        }
 
         let integrated = handled(
             &orchestrator,

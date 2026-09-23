@@ -2640,23 +2640,34 @@ mod tests {
                 .given
         );
 
-        project.moved("FRK-1", "escalated", "refining", &json!({}), at(11));
-        project.record(
-            "FRK-1",
-            "contract.written",
-            &json!({
-                "summary": { "kind": "epic", "title": "Add a login page", "status": "refining", "risk": "low" },
-                "written_by": "maya"
-            }),
-            at(11),
-        );
-        assert!(
-            !project
+        let given = || {
+            project
                 .context(&approving, &TransitionAsk::default())
                 .acceptance
-                .given,
-            "an approval is of the contract as it was"
-        );
+                .given
+        };
+        let written = || {
+            project.record(
+                "FRK-1",
+                "contract.written",
+                &json!({
+                    "summary": { "kind": "epic", "title": "Add a login page", "status": "refining", "risk": "low" },
+                    "written_by": "maya"
+                }),
+                at(11),
+            );
+        };
+        // Each half of 5.16 item 1 ends the approval on its own: a new write, and a return to
+        // refining.
+        written();
+        assert!(!given(), "an approval is of the contract as it was written");
+        accepted(&project, "FRK-1", "contract", None);
+        assert!(given());
+        project.moved("FRK-1", "escalated", "refining", &json!({}), at(11));
+        assert!(!given(), "a return to refining ends the approval");
+        // The human's acceptance of a result is not an approval of the contract.
+        accepted(&project, "FRK-1", "result", None);
+        assert!(!given(), "only an acceptance of the contract approves it");
     }
 
     #[test]
@@ -2750,6 +2761,8 @@ mod tests {
         project.moved("FRK-1", "assigned", "in_progress", &people, at(9));
         project.moved("FRK-1", "in_progress", "verifying", &people, at(10));
         governor_result(&project, "FRK-1", "C1");
+        // A review note an agent wrote does not stand in for the human's words.
+        note(&project, "FRK-1", "review", "maya");
         accepted(&project, "FRK-1", "result", Some("Both look right."));
 
         let context = project.context(&accepting("FRK-1"), &TransitionAsk::default());
@@ -2785,8 +2798,14 @@ mod tests {
         let people = json!({ "assignee": "dev-a", "reviewer": "dev-b" });
         project.moved("FRK-2", "assigned", "in_progress", &people, at(9));
         project.moved("FRK-2", "in_progress", "verifying", &people, at(10));
+        note(&project, "FRK-2", "review", "dev-b");
         accepted(&project, "FRK-2", "result", Some("Both look right."));
         let context = project.context(&accepting("FRK-2"), &TransitionAsk::default());
+        assert_eq!(
+            context.done.review_note.as_deref(),
+            Some("The review note."),
+            "a task's review note is its reviewer's"
+        );
         assert!(
             !context
                 .done

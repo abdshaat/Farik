@@ -855,6 +855,16 @@ mod tests {
             daemon.state.stop_reason(DEV_SESSION).as_deref(),
             Some("stopped by the human")
         );
+        // The first reason a session is given is the one kept.
+        assert!(
+            daemon
+                .state
+                .request_stop(DEV_SESSION, "agent paused by the user")
+        );
+        assert_eq!(
+            daemon.state.stop_reason(DEV_SESSION).as_deref(),
+            Some("stopped by the human")
+        );
         let read = json!({ "file_path": daemon.inside("src/a.rs") });
         let decision = decide_pre_tool_use(&daemon.dev_call("Read", &read), &daemon.state);
         assert!(!decision.allow, "{decision:?}");

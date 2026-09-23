@@ -1453,12 +1453,22 @@ mod tests {
                        (2, '2026-09-17T10:00:00Z', 'farik', 'farik', 'FRK-1', 'escalation.raised',
                         '{\"reason\":\"approval\",\"detail\":\"contract_requires_human\"}'),
                        (3, '2026-09-17T10:00:00Z', 'farik', 'farik', 'FRK-2', 'question.asked',
-                        '{\"question\":\"Should done.txt be empty?\",\"asked_by\":\"pm\"}');
+                        '{\"question\":\"Should done.txt be empty?\",\"asked_by\":\"pm\"}'),
+                       (4, '2026-09-17T10:00:00Z', 'farik', 'farik', 'FRK-3', 'escalation.raised',
+                        '{\"reason\":\"approval\",\"detail\":\"contract_requires_human\"}'),
+                       (5, '2026-09-17T10:00:00Z', 'farik', 'farik', 'FRK-3', 'task.transitioned',
+                        '{\"from\":\"escalated\",\"to\":\"ready\",\"actor\":\"human\",\"requested_by\":\"human\",\"effects\":[],\"iteration\":0}'),
+                       (6, '2026-09-17T10:00:00Z', 'farik', 'farik', 'FRK-4', 'escalation.raised',
+                        '{\"reason\":\"approval\",\"detail\":\"contract_requires_human\"}'),
+                       (7, '2026-09-17T10:00:00Z', 'farik', 'farik', 'FRK-4', 'escalation.raised',
+                        '{\"reason\":\"iterations\",\"detail\":\"too many\"}');
                      INSERT INTO task_projections
                          (task_id, kind, parent, title, status, risk, triaged, locked, updated_seq)
                      VALUES ('FRK-1', 'epic', NULL, 'an epic', 'escalated', 'low', 1, 0, 2),
-                            ('FRK-2', 'task', NULL, 'a task', 'refining', 'low', 1, 0, 3);
-                     INSERT INTO projection_cursor (id, seq) VALUES (1, 3);",
+                            ('FRK-2', 'task', NULL, 'a task', 'refining', 'low', 1, 0, 3),
+                            ('FRK-3', 'epic', NULL, 'an approved epic', 'ready', 'low', 1, 0, 5),
+                            ('FRK-4', 'task', NULL, 'escalated again', 'escalated', 'low', 1, 0, 7);
+                     INSERT INTO projection_cursor (id, seq) VALUES (1, 7);",
                 )
                 .expect("the older rows are written");
         }
@@ -1469,6 +1479,9 @@ mod tests {
         assert!(!row_of(&projections, "FRK-1").waiting_on_human);
         assert!(row_of(&projections, "FRK-2").waiting_on_human);
         assert!(!row_of(&projections, "FRK-2").awaiting_approval);
+        // A move after the approval's escalation ends it, and so does a later escalation.
+        assert!(!row_of(&projections, "FRK-3").awaiting_approval);
+        assert!(!row_of(&projections, "FRK-4").awaiting_approval);
         let _ = std::fs::remove_dir_all(&directory);
     }
 
