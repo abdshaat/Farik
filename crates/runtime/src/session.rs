@@ -79,11 +79,14 @@ pub struct SessionSpec {
     pub model: String,
     /// How hard the model thinks.
     pub effort: Effort,
-    /// The Farik tools the session may call, by name.
+    /// The Farik tools the session may call, by name. The daemon's hook enforces it; nothing
+    /// puts it on the program's command line.
     pub farik_tools: Vec<String>,
-    /// The program's own tools the session may not call.
-    pub disallowed_builtin_tools: Vec<String>,
-    /// The MCP servers it is given, Farik's own among them.
+    /// The program's own tools the session may call, and no other: the allowlist
+    /// (`claude::allowed_builtins` gives the ones an agent's tiers grant).
+    pub builtin_tools: Vec<String>,
+    /// The MCP servers it is given besides Farik's own, which the runtime adds itself; a server
+    /// here named `farik` is refused.
     pub mcp_servers: Vec<McpServerConfig>,
     /// The directory it works in.
     pub cwd: PathBuf,

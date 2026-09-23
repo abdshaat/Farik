@@ -21,7 +21,9 @@ pub fn a_session_spec() -> SessionSpec {
         model: "claude-haiku-4-5-20251001".to_string(),
         effort: Effort::High,
         farik_tools: vec!["farik_read_task".to_string()],
-        disallowed_builtin_tools: vec!["Bash".to_string()],
+        builtin_tools: ["Glob", "Grep", "Read", "ToolSearch"]
+            .map(str::to_string)
+            .to_vec(),
         mcp_servers: Vec::new(),
         cwd: PathBuf::from("/workspace"),
         limits: DEFAULT_SESSION_LIMITS,

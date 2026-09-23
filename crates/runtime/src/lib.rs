@@ -1,6 +1,9 @@
 //! Farik's agent runtime: a session is started, read, talked to, and stopped through one trait
 //! (`docs/SPEC.md` section 8.2), whatever program or recording is behind it.
 
+/// The Claude Code program as a runtime: its command line, credential, and version.
+#[cfg(unix)]
+pub mod claude;
 /// What a session cost, and what each budget has left.
 pub mod cost;
 /// Contract exit criteria, run and judged.

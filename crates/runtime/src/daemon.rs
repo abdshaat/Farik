@@ -151,8 +151,9 @@ pub struct DaemonConfig {
     pub daemon_file: PathBuf,
 }
 
-/// What `daemon.json` holds: how a hook reaches the daemon.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+/// What `daemon.json` holds: how a hook reaches the daemon. Its `Debug` prints the token as
+/// `[redacted]`, so a logged value does not hand it out.
+#[derive(Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct DaemonInfo {
     /// The port on `127.0.0.1`.
     pub port: u16,
@@ -160,6 +161,17 @@ pub struct DaemonInfo {
     pub token: String,
     /// The daemon's process.
     pub pid: u32,
+}
+
+impl fmt::Debug for DaemonInfo {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("DaemonInfo")
+            .field("port", &self.port)
+            .field("token", &"[redacted]")
+            .field("pid", &self.pid)
+            .finish()
+    }
 }
 
 /// A daemon that is up.
