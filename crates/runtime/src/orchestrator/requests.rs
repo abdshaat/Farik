@@ -971,6 +971,21 @@ mod tests {
 
     #[tokio::test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn readies_a_written_contract_whatever_the_day_cost_without_a_daily_budget() {
+        let harness = Harness::new("req-no-day", |wire| wire["budgets"] = json!({}));
+        harness.spent(None, "s-0", 25.0);
+        let adapter = harness.recorded(vec![refine_writes_task_frk_1()]);
+        let orchestrator = harness.orchestrator(adapter.clone());
+        refining(&harness, &orchestrator, RequestSize::Small).await;
+        orchestrator.tick().await.expect("the contract is written");
+
+        orchestrator.tick().await.expect("the tick runs");
+
+        assert_eq!(harness.row("FRK-1").status, TaskStatus::Ready);
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn returns_a_failing_contract_with_its_failures() {
         let harness = Harness::new("req-failing", |wire| {
             wire["rules"]["max_task_budget_usd"] = json!(5);

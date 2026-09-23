@@ -2984,6 +2984,23 @@ mod tests {
 
     #[tokio::test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn assigns_a_ready_task_whatever_the_day_cost_without_a_daily_budget() {
+        // No daily budget leaves an unbounded day, however much of it went, and the assignment
+        // gate reads that as room for any task's budget.
+        let harness = Harness::new("orch-budget-no-day-assign", |wire| {
+            wire["budgets"] = json!({});
+        });
+        harness.spent(None, "s-0", 25.0);
+        harness.ready("FRK-1");
+        let orchestrator = harness.orchestrator(harness.recorded(vec![plan_assigns_frk_1()]));
+
+        orchestrator.tick().await.expect("the tick runs");
+
+        assert_eq!(harness.row("FRK-1").status, TaskStatus::Assigned);
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn breaks_ties_by_the_number_in_the_task_id() {
         // Filed tenth first, so that neither the order of filing nor the order of the ids as text
         // puts FRK-2 first.
