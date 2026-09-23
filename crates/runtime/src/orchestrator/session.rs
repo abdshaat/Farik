@@ -15,11 +15,11 @@ use farik_roles::load_role;
 
 use super::{OrchestratorDeps, OrchestratorError};
 use crate::claude::allowed_builtins;
-use crate::cost::{CostSource, budget_state, record_exhaustion, record_session_cost};
+use crate::cost::{CostError, CostSource, budget_state, record_exhaustion, record_session_cost};
 use crate::daemon::SessionRegistration;
 use crate::exec::Executor;
 use crate::prompt::{PromptInput, assemble_system_prompt};
-use crate::session::{EndReason, SessionEvent, SessionPurpose, SessionSpec};
+use crate::session::{EndReason, SessionEvent, SessionHandle, SessionPurpose, SessionSpec};
 use crate::sessions::{record_session_ended, record_session_started};
 use crate::tools::tool_descriptors;
 
@@ -153,7 +153,9 @@ fn session_spec(
 /// nothing, so that it counts as one of the task's sessions. Each usage report is costed and the
 /// budgets it exhausts recorded; the session is aborted when one of them is not the task's
 /// sessions, which crosses at the last session a task is allowed, a session to finish rather than
-/// to cut.
+/// to cut. Once the session is started, whatever fails ends it: it is aborted, and its zero cost
+/// and its end are recorded as far as they can be before the error is returned, so that no
+/// session runs on, or goes uncounted, after the tick has given up on it.
 async fn drive(
     deps: &OrchestratorDeps,
     team: &Team,
@@ -186,21 +188,74 @@ async fn drive(
         )
     };
     record_session_started(&tools.log, spec, &tools.ids, clock)?;
-    let mut handle = match deps.adapter.start_session(spec.clone()) {
-        Ok(handle) => handle,
-        Err(error) => {
-            cost(&Usage::default())?;
-            record_session_ended(
-                &tools.log,
-                &spec.session_id,
-                EndReason::Error,
-                &error.to_string(),
-                &ids,
-                clock,
-            )?;
-            return Err(error.into());
+    let mut costed = false;
+    let read = match deps.adapter.start_session(spec.clone()) {
+        Ok(mut handle) => {
+            let running = Running {
+                deps,
+                team,
+                role,
+                contract,
+                spec,
+                ids: &ids,
+            };
+            let read = read_to_end(&running, &mut *handle, &cost, &mut costed).await;
+            if read.is_err() {
+                // The error is what the tick reports; an abort that fails too adds nothing to it.
+                let _ = handle.abort();
+            }
+            read
         }
+        Err(error) => Err(error.into()),
     };
+    let (reason, detail) = match &read {
+        Ok((reason, detail)) => (*reason, detail.clone()),
+        Err(error) => (EndReason::Error, error.to_string()),
+    };
+    let zero = if costed {
+        Ok(())
+    } else {
+        cost(&Usage::default()).map(|_| ())
+    };
+    let ended = record_session_ended(&tools.log, &spec.session_id, reason, &detail, &ids, clock);
+    // A session that failed is reported by what failed it; its zero cost and its end are
+    // recorded as far as they can be, and their own failures would only hide the first.
+    let read = read?;
+    zero?;
+    ended?;
+    Ok(read)
+}
+
+/// A started session, and what its budgets are read against.
+#[derive(Clone, Copy)]
+struct Running<'a> {
+    deps: &'a OrchestratorDeps,
+    team: &'a Team,
+    role: Role,
+    contract: &'a TaskContract,
+    spec: &'a SessionSpec,
+    ids: &'a EventIds,
+}
+
+/// Reads the started session's events until it ends, costing each usage report, recording the
+/// budgets it exhausts, and aborting the session when one of them is not the task's sessions.
+/// `costed` says whether a usage report was costed.
+async fn read_to_end(
+    running: &Running<'_>,
+    handle: &mut dyn SessionHandle,
+    cost: &impl Fn(&Usage) -> Result<f64, CostError>,
+    costed: &mut bool,
+) -> Result<(EndReason, String), OrchestratorError> {
+    let Running {
+        deps,
+        team,
+        role,
+        contract,
+        spec,
+        ids,
+    } = *running;
+    let tools = &deps.tools;
+    let clock = &*tools.clock;
     let started_at = clock.now();
     let state = |ledger: &SessionLedger| {
         budget_state(
@@ -213,13 +268,12 @@ async fn drive(
         )
     };
     let mut ledger = SessionLedger::default();
-    let mut costed = false;
-    let (reason, detail) = loop {
+    loop {
         match handle.events().recv().await {
             Some(SessionEvent::UsageReported(usage)) => {
                 let before = state(&ledger)?;
                 let cost_usd = cost(&usage)?;
-                costed = true;
+                *costed = true;
                 ledger = SessionLedger {
                     tool_calls: deps
                         .daemon
@@ -229,14 +283,8 @@ async fn drive(
                     ..add_usage(&ledger, &usage, cost_usd)
                 };
                 let after = state(&ledger)?;
-                let crossed = record_exhaustion(
-                    &tools.log,
-                    &tools.projections,
-                    &before,
-                    &after,
-                    &ids,
-                    clock,
-                )?;
+                let crossed =
+                    record_exhaustion(&tools.log, &tools.projections, &before, &after, ids, clock)?;
                 if crossed
                     .iter()
                     .any(|exhausted| exhausted.scope != BudgetScope::TaskSessions)
@@ -244,19 +292,14 @@ async fn drive(
                     handle.abort()?;
                 }
             }
-            Some(SessionEvent::Ended { reason, detail }) => break (reason, detail),
+            Some(SessionEvent::Ended { reason, detail }) => return Ok((reason, detail)),
             Some(_) => {}
             None => {
-                break (
+                return Ok((
                     EndReason::Error,
                     "the session's events stopped without an end".to_string(),
-                );
+                ));
             }
         }
-    };
-    if !costed {
-        cost(&Usage::default())?;
     }
-    record_session_ended(&tools.log, &spec.session_id, reason, &detail, &ids, clock)?;
-    Ok((reason, detail))
 }

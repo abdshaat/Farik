@@ -1640,6 +1640,82 @@ mod tests {
         ));
     }
 
+    /// A `.farik/prices.json` that prices a model no agent of the harness runs, so that costing any
+    /// of their sessions fails.
+    fn prices_without_the_teams_models(harness: &Harness) {
+        let prices = json!({
+            "version": 1,
+            "source_url": "https://example.com/prices",
+            "retrieved_at": "2026-09-22",
+            "prices": {
+                "test-model": {
+                    "input_usd_per_mtok": 1.0,
+                    "output_usd_per_mtok": 2.0,
+                    "cache_read_usd_per_mtok": 0.5,
+                    "cache_write_usd_per_mtok": 0.25
+                }
+            }
+        });
+        std::fs::write(
+            harness.project.repo.path.join(".farik/prices.json"),
+            prices.to_string(),
+        )
+        .expect("the override is written");
+    }
+
+    /// The reason of every `session.ended`, in order.
+    fn end_reasons(harness: &Harness) -> Vec<SessionEndedBodyReason> {
+        harness
+            .events(&[EventKind::SessionEnded])
+            .iter()
+            .filter_map(|event| match &event.body {
+                EventBody::SessionEnded(body) => Some(body.reason),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn ends_a_session_that_fails_after_it_started() {
+        let harness = Harness::new("orch-session-fails", |_| {});
+        prices_without_the_teams_models(&harness);
+        harness.in_progress("FRK-1", "dev-a", "dev-b");
+        let adapter = Arc::new(UsageThenWaitAdapter::waiting(a_thousand_tokens()));
+        let orchestrator = harness.orchestrator(adapter.clone());
+
+        // A session left running waits for ever.
+        let ticked = tokio::time::timeout(Duration::from_secs(10), orchestrator.tick())
+            .await
+            .expect("the tick ends");
+
+        assert!(
+            matches!(ticked, Err(OrchestratorError::Cost(_))),
+            "{ticked:?}"
+        );
+        assert_eq!(adapter.aborts(), 1);
+        assert_eq!(end_reasons(&harness), vec![SessionEndedBodyReason::Error]);
+        let session_id = adapter.started()[0].session_id.clone();
+        assert!(harness.daemon.tool_context(&session_id).is_none());
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn ends_a_session_that_cannot_start_when_its_cost_fails() {
+        let harness = Harness::new("orch-session-no-start-no-cost", |_| {});
+        prices_without_the_teams_models(&harness);
+        harness.ready("FRK-1");
+        let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
+
+        let ticked = orchestrator.tick().await;
+
+        assert!(
+            matches!(ticked, Err(OrchestratorError::Runtime(_))),
+            "{ticked:?}"
+        );
+        assert_eq!(end_reasons(&harness), vec![SessionEndedBodyReason::Error]);
+    }
+
     #[tokio::test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn records_the_task_on_every_sessions_cost() {
