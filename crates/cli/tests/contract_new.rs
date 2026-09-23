@@ -26,8 +26,8 @@ use farik_store::git::fixtures::TempRepo;
 use serde_json::{Value, json};
 
 use project::{
-    LiveDriver, a_bare_env, a_claude_saying, a_team, events, files_of, hold_the_run_lock, record,
-    record_as, run_with, scratch, status_of,
+    LiveDriver, a_bare_env, a_claude_saying, a_team, events, filed, files_of, hold_the_run_lock,
+    joined, record, record_as, run_with, scratch, status_of,
 };
 
 const BRIEF: &str = "Add done.txt and a check that it exists.";
@@ -76,15 +76,36 @@ fn question_seq(repository: &TempRepo) -> u64 {
         .seq
 }
 
+/// `transcript` with every `FRK-1` in it naming `task` instead.
+fn about(transcript: &Transcript, task: &str) -> Transcript {
+    Transcript::from_jsonl(
+        &transcript
+            .lines()
+            .collect::<Vec<_>>()
+            .join("\n")
+            .replace("FRK-1", task),
+    )
+}
+
 #[test]
 #[ignore = "needs the git program: cargo xtask check --integration"]
 fn writes_a_small_request_with_the_product_manager() {
     let repository = a_team("new-small");
+    // Two drafts besides the request: FRK-1, which triage would start a session for, and FRK-2,
+    // whose question waits on the person. Neither is this command's to act on or to ask.
+    filed(&repository, "Add done.txt first");
+    let other = filed(&repository, "Add done.txt second");
+    record(
+        &repository,
+        &other,
+        "question.asked",
+        &json!({ "question": "Which done.txt?", "asked_by": "pm" }),
+    );
 
     let ran = contract_new(
         &repository,
         &["--brief", BRIEF, "--size", "small"],
-        vec![refine_writes_task_frk_1()],
+        vec![about(&refine_writes_task_frk_1(), "FRK-3")],
         "",
     );
 
@@ -93,8 +114,8 @@ fn writes_a_small_request_with_the_product_manager() {
         in_order(
             &ran.out,
             &[
-                &format!("FRK-1 filed as a draft request: {BRIEF}"),
-                "FRK-1 sized small by you, so it is a standalone task",
+                &format!("FRK-3 filed as a draft request: {BRIEF}"),
+                "FRK-3 sized small by you, so it is a standalone task",
                 "contract.written",
                 "C1",
                 "readiness: passed",
@@ -103,13 +124,24 @@ fn writes_a_small_request_with_the_product_manager() {
         "{}",
         ran.out
     );
-    assert_eq!(status_of(&repository, "FRK-1"), "ready");
+    assert!(!ran.out.contains("answer> "), "{}", ran.out);
+    assert_eq!(status_of(&repository, "FRK-3"), "ready");
     let started = events(&repository, &[EventKind::SessionStarted]);
     assert_eq!(started.len(), 1);
+    assert_eq!(
+        started[0]
+            .envelope
+            .ids
+            .task_id
+            .as_ref()
+            .map(|task| task.as_str()),
+        Some("FRK-3")
+    );
     assert!(matches!(
         &started[0].body,
         EventBody::SessionStarted(body) if body.purpose.to_string() == "refine"
     ));
+    assert_eq!(status_of(&repository, "FRK-1"), "draft");
 }
 
 #[test]
@@ -142,6 +174,8 @@ fn asks_its_questions_at_the_terminal() {
         assert!(ran.out.contains(expected), "{expected:?} in {}", ran.out);
     }
     assert_eq!(ran.out.matches("answer> ").count(), 2, "{}", ran.out);
+    // The blank line is asked again, not sent as an answer for handle to refuse.
+    assert!(!ran.err.contains("farik: "), "{}", ran.err);
     let answers = events(&repository, &[EventKind::QuestionAnswered]);
     assert_eq!(answers.len(), 1);
     assert!(matches!(
@@ -211,7 +245,7 @@ fn ends_at_the_prompt_on_an_interrupt() {
     }
     std::thread::sleep(Duration::from_millis(200));
     interrupt.send(()).expect("the command listens");
-    let ran = running.join().expect("the command ends");
+    let ran = joined(running, "the command");
 
     assert_eq!(ran.code, 130, "{}\n{}", ran.out, ran.err);
     let n = question_seq(&repository);

@@ -26,8 +26,9 @@ use serde_json::{Value, json};
 
 use farik_core::team::fixtures::an_agent_wire;
 use project::{
-    a_bare_env, a_claude_saying, a_project, a_team, a_team_with, events, filed, hold_the_run_lock,
-    moved, no_sandbox, record, record_as, run, run_with, status_of,
+    LiveDriver, a_bare_env, a_claude_saying, a_high_risk_task_verifying, a_project, a_team,
+    a_team_with, events, filed, hold_the_run_lock, joined, moved, no_sandbox, record, record_as,
+    run, run_with, scratch, status_of,
 };
 
 /// An engine replaying `transcripts`, whose Farik tool calls the driving process's daemon answers.
@@ -288,6 +289,53 @@ fn refuses_a_second_driver() {
 
 #[test]
 #[ignore = "needs the git program: cargo xtask check --integration"]
+fn names_the_driving_process_a_second_driver_found() {
+    let repository = a_project("run-second-named");
+    let driver = LiveDriver::new(&repository);
+
+    let ran = run_with(&repository.path, &["run"], |io| {
+        io.engine = recorded(Vec::new());
+    });
+
+    assert_eq!(ran.code, 1, "{}", ran.out);
+    assert!(
+        ran.err.contains(&format!(
+            "another farik process is driving this project (pid {} in .farik/local/daemon.json)",
+            driver.pid()
+        )),
+        "{}",
+        ran.err
+    );
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn passes_over_a_claude_that_is_not_executable() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let repository = a_project("run-claude-not-executable");
+    let directory = scratch("claude-not-executable");
+    let claude = directory.join("claude");
+    std::fs::write(&claude, "#!/bin/sh\necho '2.1.280 (Claude Code)'\n").expect("written");
+    std::fs::set_permissions(&claude, std::fs::Permissions::from_mode(0o644)).expect("set");
+
+    let ran = run_with(&repository.path, &["run"], |io| {
+        io.env
+            .insert("PATH".to_string(), directory.display().to_string());
+        io.env
+            .insert("ANTHROPIC_API_KEY".to_string(), "sk-test".to_string());
+    });
+
+    assert_eq!(ran.code, 1, "{}", ran.out);
+    assert!(
+        ran.err.contains("there is no claude on PATH"),
+        "{}",
+        ran.err
+    );
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
 fn runs_a_task_to_acceptance_and_says_what_waits() {
     let repository = a_team("run-to-acceptance");
     let task = a_small_request(&repository);
@@ -396,7 +444,7 @@ fn stops_after_the_session_then_aborts_it_on_ctrl_c() {
     std::thread::sleep(Duration::from_millis(300));
     assert_eq!(adapter.aborts(), 0);
     interrupt.send(()).expect("the run listens");
-    let ran = running.join().expect("the run ends");
+    let ran = joined(running, "the run");
 
     assert_eq!(ran.code, 130, "{}\n{}", ran.out, ran.err);
     assert!(
@@ -412,6 +460,55 @@ fn stops_after_the_session_then_aborts_it_on_ctrl_c() {
     ));
     assert!(events(&repository, &[EventKind::EscalationRaised]).is_empty());
     assert_eq!(status_of(&repository, &task), "refining");
+    assert!(!daemon_file(&repository).exists());
+    lock_is_free(&repository);
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn exits_130_after_one_ctrl_c_once_the_session_ends() {
+    let repository = a_team("run-one-ctrl-c");
+    a_small_request(&repository);
+    let adapter = Arc::new(UsageThenWaitAdapter::waiting(Usage::default()));
+    let (interrupt, interrupts) = tokio::sync::mpsc::unbounded_channel();
+    let root = repository.path.clone();
+    let engine = given(&adapter);
+
+    let running = std::thread::spawn(move || {
+        run_with(&root, &["run"], |io| {
+            io.engine = engine;
+            io.interrupts = Interrupts::Channel(interrupts);
+        })
+    });
+    wait_for(&repository, EventKind::SessionStarted, 1);
+    interrupt.send(()).expect("the run listens");
+    std::thread::sleep(Duration::from_millis(300));
+    adapter.complete();
+    let ran = joined(running, "the run");
+
+    assert_eq!(ran.code, 130, "{}\n{}", ran.out, ran.err);
+    assert!(ran.out.lines().any(|line| line == "stopped"), "{}", ran.out);
+    assert_eq!(adapter.aborts(), 0);
+    assert_eq!(adapter.started().len(), 1);
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn exits_1_when_a_tick_fails() {
+    let repository = a_team("run-tick-fails");
+    a_small_request(&repository);
+
+    // The refine session has no transcript to play, so it cannot start, which fails the tick.
+    let ran = run_with(&repository.path, &["run"], |io| {
+        io.engine = recorded(Vec::new());
+    });
+
+    assert_eq!(ran.code, 1, "{}\n{}", ran.out, ran.err);
+    assert!(
+        ran.err.lines().any(|line| line.starts_with("farik: ")),
+        "{}",
+        ran.err
+    );
     assert!(!daemon_file(&repository).exists());
     lock_is_free(&repository);
 }
@@ -434,7 +531,7 @@ fn stops_a_plan_through_farik_stop() {
     let stop = run(&repository.path, &["stop"]);
     assert_eq!(stop.code, 0, "{}", stop.err);
     adapter.complete();
-    let ran = planning.join().expect("the plan ends");
+    let ran = joined(planning, "the plan");
 
     assert_eq!(ran.code, 0, "{}\n{}", ran.out, ran.err);
     assert!(ran.out.lines().any(|line| line == "stopped"), "{}", ran.out);
@@ -542,5 +639,46 @@ fn lists_what_waits_on_the_human() {
         last["waiting_on_you"].as_array().map(Vec::len),
         Some(3),
         "{last}"
+    );
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn lists_a_high_risk_result_and_no_answered_question() {
+    let repository = a_team("plan-waiting");
+    let task = a_high_risk_task_verifying(&repository, "Add done.txt");
+    let n = record(
+        &repository,
+        &task,
+        "question.asked",
+        &json!({ "question": "Should done.txt be empty?", "asked_by": "dev-a" }),
+    )
+    .envelope
+    .seq;
+    record(
+        &repository,
+        &task,
+        "question.answered",
+        &json!({ "question_id": n, "answer": "Yes.", "answered_by": "human" }),
+    );
+
+    let ran = run_with(&repository.path, &["plan"], |io| {
+        io.engine = recorded(Vec::new());
+    });
+
+    assert_eq!(ran.code, 0, "{}\n{}", ran.out, ran.err);
+    let after: Vec<&str> = ran
+        .out
+        .lines()
+        .skip_while(|line| !line.starts_with("idle:"))
+        .skip(1)
+        .collect();
+    assert_eq!(
+        after,
+        [format!(
+            "{task} may need your acceptance: farik accept {task} --message <your review>"
+        )],
+        "{}",
+        ran.out
     );
 }
