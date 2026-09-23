@@ -1,10 +1,10 @@
 # Phase 3, step 12: Orchestrator, verification
 
-Status: draft
+Status: ready
 Branch: `phase/3-runtime`
 Spec: `docs/SPEC.md` sections 5.2, 5.4, 8.5, F6
 Depends on: step 11 of this phase (`Orchestrator`, the session mechanics, `RecordedAdapter::with_tools`, `orchestrator::fixtures`), a start gate: Task 1 does not begin until step 11's last commit is on this branch; step 06 (`run_criteria`); step 05 (the tools)
-Readiness confirmed by: pending
+Readiness confirmed by: fresh-session reviewer, 2026-09-22 (step 12: two rounds; step 13: one round after its rewrite; findings folded in)
 
 ## Goal
 
@@ -20,9 +20,11 @@ A task that asks for `verifying` is checked the way 5.4 says: Farik runs the con
   3. A review note and a failed reviewer result: Farik files `verifying → rejected` on the reviewer's behalf, as `Reviewer` with the reviewer's id, `Rejection { failed_criterion_ids, reasons: <the review note> }`, and `TransitionAsk::session_id` the session on the review note's `note.written` envelope, so that the log ties the rejection to the session whose words it carries; 5.4 says Farik files it. Rejected: another reviewer session told to reject, which spends a session to get the same words and may again not comply. The ids come from the contract and the note is non-blank, so `RejectionReasons` opens; were it refused, the refusal passes the task over (above).
   4. A review note, nothing failed, and a criterion other than a `human` one with no reviewer result (a `review` criterion the reviewer did not answer): the reviewer's session again, its message naming the criteria still unanswered; `max_sessions` bounds it (step 11).
   5. A review note and every criterion other than a `human` one passed by the reviewer: when `requires_human_acceptance(contract)` (risk `high`) or the contract has any `human` criterion, no rule until step 14 adds `human.accepted`, which is the only thing that satisfies either, so no session is spent on a request the Definition of Done must refuse; otherwise the Product Manager's `verify` session. A refused `accepted` (a path outside `allowed_paths`, a missing completion note) passes the task over (above).
+- The human's acceptance and a `human` criterion are two separate facts in `done.rs`. `DoneEvidence::human_accepted` answers `HumanAccepted` (risk `high`, and every epic). A `human` criterion needs a passing `CriterionResult { run_by: Human }` (`HumanCriterionAccepted`), and nothing on the wire can carry one, because `criterion.recorded`'s `run_by` is `assignee` or `reviewer` only. Step 14's choice, written on its interface line in the project plan with this plan: `Transitions::context` reads `human.accepted { subject: result }` twice, as `done.human_accepted` and as one passing `CriterionResult { run_by: Human, evidence: "human.accepted at seq <n>" }` for each `human` criterion of the contract. So one acceptance answers them all. Chose it over adding `human` to `criterion.recorded`'s `run_by`, because 5.4 item 1 says a `human` criterion is satisfied "only by an explicit human acceptance event", and one event keeps one path to it. The ceiling is that the human cannot pass one `human` criterion and fail another. A per-criterion answer is a `run_by: human` added when a contract needs one.
 - The reviewer's session: `purpose: Verify`, the contract's reviewer, `cwd` the task's worktree so that it reads the real code, `builtin_tools` from `allowed_builtins` of the read tier alone, and no executor in its registration, so `farik_exec` is `ToolError::Failed` (the test runner takes the executor from `tool_context` at each call, step 11, so it sees the same none). Chose the worktree over a detached read-only worktree (step 06's `create_detached_worktree`): the hazard is the reviewer changing the work under review, and the Farik git tools act on the task's worktree whatever the session's `cwd`, so a second worktree would not close it; the two rules below do, and the read-only built-ins keep Claude Code's own writers out of the session (the hook still judges by the agent's tiers, so the `--tools` allowlist is what stops them, a residual 5.4 records). Its first message, built in `messages.rs`: the task's id and title, the rubric of each `review` criterion, each Farik result (id, passed, evidence), the completion note, and the diff (`Git::diff` from the integration branch to `farik/<id>`, cut at 64 KiB), each inside `untrusted_block`; nothing from any implement session.
 - The Product Manager's session: `purpose: Verify`, `cwd` the worktree, read-tier built-ins, no executor; its first message holds the review note and the reviewer's results inside `untrusted_block` and tells it the review passed every criterion and to request `accepted` with `farik_request_transition`. These are Farik's words in the first message rather than `human_message`, which step 10 keeps for the human's own words and caps at 16 KiB, too small for a diff. Step 10's `This session` text for `verify` covers both sessions (step 10's plan, amended with this one).
 - Two tool rules close the reviewer's reach into the work (5.1: nobody grades their own homework, and nobody rewrites what they grade): `farik_record_criterion_result` refuses the reviewer a `command`, `test`, or `artifact` criterion (`criterion_run_by_farik: <id> is a <method> criterion, which Farik runs for the reviewer`), so a reviewer cannot record a pass over Farik's failure, the latest result per runner being what the gate reads; `farik_git_commit` and `farik_git_push` refuse anyone but the task's assignee (`not_the_named_agent`). Both in `tools/refusal.rs` with the rest.
+- `farik_record_criterion_result` also refuses a `human` criterion from any agent (`criterion_answered_by_the_human: <id> is a human criterion, which only the human answers`). Without this, a reviewer's failed H1 would send the task to `rejected` by rule 3 over a criterion only the human answers, and a passing H1 would be a result the Definition of Done ignores. The reviewer therefore records `review` criteria alone. Chose refusing every agent over refusing the reviewer alone: the assignee's result for a `human` criterion counts for nothing either, because `check_criteria_recorded` skips `human` criteria, and one rule with no role in it is the smaller one.
 - `review.recorded { reviewer, criteria_run, passed }` (8.5 already names it), once per verification: appended when a reviewer's session ends, no `review.recorded` exists since the last move into `verifying`, and every criterion other than a `human` one has a reviewer result; `criteria_run` the number of criteria with a reviewer result, `passed` true exactly when each one's latest passed. It is about one contract; `reviewer` is its attribution. Nothing reads it in phase 3 but the metrics (step 16), which is why it is a summary rather than a gate.
 - `OrchestratorError` gains `Criterion(CriterionError)`.
 
@@ -38,8 +40,8 @@ crates/runtime/src/tools/work.rs, tools/git.rs, tools/refusal.rs   modifies: the
 crates/runtime/src/recorded/transcripts/review_writes_note.jsonl, review_answers_nothing.jsonl, accept_frk_1.jsonl   creates
 crates/runtime/src/recorded/fixtures.rs           modifies: the three transcripts
 crates/runtime/tests/one_task.rs                  creates: the end-to-end test, ignored (needs git)
-docs/SPEC.md                                      modifies: 5.4 (Farik runs the mechanical criteria as the reviewer, recorded by the governor; the reviewer may not record them or commit; Farik files a failed review's rejection with the review note; a task with a `human` criterion waits for the human; the read-only built-ins residual)
-docs/plans/project-plan.md                        modifies: step 12's interface line
+docs/SPEC.md                                      modifies: 5.4 (Farik runs the mechanical criteria as the reviewer, recorded by the governor; the reviewer may not record them or commit; no agent records a `human` criterion; Farik files a failed review's rejection with the review note; a task with a `human` criterion waits for the human; the read-only built-ins residual)
+docs/plans/project-plan.md                        modifies: step 12's interface line, as landed (step 14's line took the human's acceptance with this plan)
 ```
 
 ## Interfaces
@@ -59,12 +61,13 @@ pub enum OrchestratorError { .., Criterion(CriterionError) }
 
 The harness is step 11's. `review_writes_note` calls `farik_write_note { kind: review }` and nothing else; `review_answers_nothing` the same without recording R1; `accept_frk_1` calls `farik_request_transition { to: accepted }`. Each has one `result` line.
 
-### Task 1: the event, and the tools' two rules
+### Task 1: the event, and the tools' rules
 
 Files: the schema, `event.rs`, `event/fixtures.rs`, `tools/work.rs`, `tools/git.rs`, `tools/refusal.rs`
 
 - `writes_back_exactly_the_value_it_read_for_every_kind` (existing) covers `review.recorded`.
 - `refuses_the_reviewer_a_criterion_farik_runs` — `dev-b`, FRK-1's reviewer, recording C1 (`command`) is `Refused` starting `criterion_run_by_farik`, and nothing is appended; recording a `review` criterion R1 is accepted with `run_by: reviewer`; `dev-a` recording C1 is accepted with `run_by: assignee`.
+- `refuses_anyone_a_human_criterion` — FRK-1 with a `human` criterion H1: `dev-b` recording H1, failed, is `Refused` starting `criterion_answered_by_the_human`, and `dev-a` recording it passed is refused the same way; nothing is appended.
 - `refuses_a_commit_from_anyone_but_the_assignee` — `dev-b`'s `farik_git_commit` on FRK-1 is `Refused` starting `not_the_named_agent` and the branch has no new commit; `dev-a`'s commits.
 
 - [ ] `feat(runtime): keep a task's reviewer out of the work it reviews`
