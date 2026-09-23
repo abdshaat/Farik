@@ -369,11 +369,12 @@ impl SandboxFactory for CountingSandboxFactory {
 }
 
 /// An adapter whose every session reports `usage` at once and then either ends `completed` at
-/// once or waits for `abort` and ends `aborted`: the one shape a recorded transcript, which
-/// reports usage only on its last line, cannot show.
+/// once or waits for `abort` and ends `aborted`, or, when its abort fails, waits for ever: the
+/// shapes a recorded transcript, which reports usage only on its last line, cannot show.
 pub(crate) struct UsageThenWaitAdapter {
     usage: Usage,
     completes: bool,
+    abort_fails: bool,
     started: Mutex<Vec<SessionSpec>>,
     aborts: Arc<AtomicU32>,
 }
@@ -381,18 +382,24 @@ pub(crate) struct UsageThenWaitAdapter {
 impl UsageThenWaitAdapter {
     /// Sessions that report `usage` and wait to be aborted.
     pub(crate) fn waiting(usage: Usage) -> Self {
-        Self::new(usage, false)
+        Self::new(usage, false, false)
     }
 
     /// Sessions that report `usage` and end `completed`.
     pub(crate) fn completing(usage: Usage) -> Self {
-        Self::new(usage, true)
+        Self::new(usage, true, false)
     }
 
-    fn new(usage: Usage, completes: bool) -> Self {
+    /// Sessions that report `usage` and wait, and whose every abort is counted and fails.
+    pub(crate) fn failing_to_abort(usage: Usage) -> Self {
+        Self::new(usage, false, true)
+    }
+
+    fn new(usage: Usage, completes: bool, abort_fails: bool) -> Self {
         Self {
             usage,
             completes,
+            abort_fails,
             started: Mutex::new(Vec::new()),
             aborts: Arc::new(AtomicU32::new(0)),
         }
@@ -434,6 +441,7 @@ impl RuntimeAdapter for UsageThenWaitAdapter {
             receiver,
             sender: Mutex::new(sender),
             aborts: Arc::clone(&self.aborts),
+            abort_fails: self.abort_fails,
         };
         self.started
             .lock()
@@ -459,6 +467,7 @@ struct WaitingSession {
     receiver: Receiver<SessionEvent>,
     sender: Mutex<Option<Sender<SessionEvent>>>,
     aborts: Arc<AtomicU32>,
+    abort_fails: bool,
 }
 
 impl SessionHandle for WaitingSession {
@@ -476,6 +485,11 @@ impl SessionHandle for WaitingSession {
 
     fn abort(&self) -> Result<(), RuntimeError> {
         self.aborts.fetch_add(1, Ordering::SeqCst);
+        if self.abort_fails {
+            return Err(RuntimeError::Spawn {
+                detail: "the session would not stop".to_string(),
+            });
+        }
         if let Some(sender) = self
             .sender
             .lock()

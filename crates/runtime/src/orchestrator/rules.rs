@@ -1905,7 +1905,35 @@ mod tests {
     #[tokio::test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn ends_a_session_that_fails_after_it_started() {
-        let harness = Harness::new("orch-session-fails", |_| {});
+        // The usage crosses the session's tokens, and the abort that follows fails: the tick
+        // fails with the session running, which is then aborted again and ended.
+        let harness = Harness::new("orch-session-fails", |wire| {
+            wire["budgets"]["session"] = json!({ "max_input_tokens": 100 });
+        });
+        harness.in_progress("FRK-1", "dev-a", "dev-b");
+        let adapter = Arc::new(UsageThenWaitAdapter::failing_to_abort(a_thousand_tokens()));
+        let orchestrator = harness.orchestrator(adapter.clone());
+
+        // A tick that waits for the session's end waits for ever.
+        let ticked = tokio::time::timeout(Duration::from_secs(10), orchestrator.tick())
+            .await
+            .expect("the tick ends");
+
+        assert!(
+            matches!(ticked, Err(OrchestratorError::Runtime(_))),
+            "{ticked:?}"
+        );
+        assert_eq!(adapter.aborts(), 2);
+        assert_eq!(end_reasons(&harness), vec![SessionEndedBodyReason::Error]);
+        assert_eq!(harness.events(&[EventKind::CostRecorded]).len(), 1);
+        let session_id = adapter.started()[0].session_id.clone();
+        assert!(harness.daemon.tool_context(&session_id).is_none());
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn ends_a_session_whose_usage_cannot_be_costed() {
+        let harness = Harness::new("orch-session-uncosted", |_| {});
         prices_without_the_teams_models(&harness);
         harness.in_progress("FRK-1", "dev-a", "dev-b");
         let adapter = Arc::new(UsageThenWaitAdapter::waiting(a_thousand_tokens()));
@@ -1922,8 +1950,6 @@ mod tests {
         );
         assert_eq!(adapter.aborts(), 1);
         assert_eq!(end_reasons(&harness), vec![SessionEndedBodyReason::Error]);
-        let session_id = adapter.started()[0].session_id.clone();
-        assert!(harness.daemon.tool_context(&session_id).is_none());
     }
 
     #[tokio::test]
