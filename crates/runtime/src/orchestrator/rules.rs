@@ -647,6 +647,7 @@ mod tests {
     };
     use farik_protocol::event::{NewEvent, event_from_value};
     use farik_roles::RoleError;
+    use farik_store::event_log::fixtures::refuse_appends_of;
     use farik_store::git::fixtures::git_output_in;
     use serde_json::json;
 
@@ -2859,6 +2860,53 @@ mod tests {
             matches!(&costs[..], [cost] if matches!(&cost.body, EventBody::CostRecorded(body) if body.unpriced)),
             "{costs:?}"
         );
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn ends_a_session_that_cannot_start_when_its_zero_cost_is_refused() {
+        let harness = Harness::new("orch-session-no-start-no-cost", |_| {});
+        harness.ready("FRK-1");
+        refuse_appends_of(&harness.project.deps.log, EventKind::CostRecorded);
+        let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
+
+        let ticked = orchestrator.tick().await;
+
+        // The start failed first, and that is what the tick says; the refused cost hides neither
+        // it nor the session's end.
+        assert!(
+            matches!(ticked, Err(OrchestratorError::Runtime(_))),
+            "{ticked:?}"
+        );
+        assert!(harness.events(&[EventKind::CostRecorded]).is_empty());
+        assert_eq!(end_reasons(&harness), vec![SessionEndedBodyReason::Error]);
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn ends_a_session_that_reported_no_usage_when_its_zero_cost_is_refused() {
+        let harness = Harness::new("orch-session-no-usage-no-cost", |_| {});
+        harness.in_progress("FRK-1", "dev-a", "dev-b");
+        refuse_appends_of(&harness.project.deps.log, EventKind::CostRecorded);
+        let init = implement_stops_early()
+            .lines()
+            .next()
+            .expect("a transcript starts with its init")
+            .to_string();
+        let orchestrator =
+            harness.orchestrator(harness.recorded(vec![Transcript::from_jsonl(&init)]));
+
+        let ticked = orchestrator.tick().await;
+
+        assert!(
+            matches!(
+                ticked,
+                Err(OrchestratorError::Cost(CostError::Store { ref detail }))
+                    if detail.contains("this log refuses cost.recorded")
+            ),
+            "{ticked:?}"
+        );
+        assert_eq!(end_reasons(&harness), vec![SessionEndedBodyReason::Error]);
     }
 
     #[tokio::test]
