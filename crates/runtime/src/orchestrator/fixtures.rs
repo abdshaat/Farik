@@ -5,22 +5,27 @@
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 
 use farik_core::contract::TaskId;
+use farik_core::pricing::Usage;
 use farik_protocol::clock::SequentialIds;
-use farik_protocol::event::{EventKind, FarikEvent};
+use farik_protocol::event::{EventKind, FarikEvent, NewEvent, event_from_value};
 use farik_store::TaskProjection;
 use serde_json::{Value, json};
+use tokio::sync::mpsc::{Receiver, Sender, channel};
 
 use super::{Orchestrator, OrchestratorDeps};
 use crate::daemon::{DaemonState, HookRequest, decide_pre_tool_use};
 use crate::recorded::{RecordedAdapter, ToolRunner, Transcript};
 use crate::sandbox::host::HostSandboxFactory;
 use crate::sandbox::{Sandbox, SandboxError, SandboxFactory};
-use crate::session::RuntimeAdapter;
+use crate::session::{
+    EndReason, RuntimeAdapter, RuntimeError, SessionEvent, SessionHandle, SessionSpec,
+};
 use crate::tools::call_tool;
-use crate::tools::fixtures::{TestProject, a_team_of_three};
+use crate::tools::fixtures::{TestProject, a_team_of_three, at};
 
 /// The prefix Claude Code gives the tools of Farik's own MCP server.
 const FARIK_PREFIX: &str = "mcp__farik__";
@@ -139,6 +144,45 @@ impl Harness {
         self.project.moved(task, "in_progress", "blocked", &body);
     }
 
+    /// A `cost.recorded` of `usd` dollars by `dev-a` in session `session`, against `task` when one
+    /// is named, today.
+    pub(crate) fn spent(&self, task: Option<&str>, session: &str, usd: f64) {
+        let mut wire = json!({
+            "seq": 1,
+            "recorded_at": at().to_rfc3339(),
+            "team_id": "farik",
+            "project_id": "farik",
+            "agent_id": "dev-a",
+            "session_id": session,
+            "kind": "cost.recorded",
+            "body": {
+                "purpose": "implement",
+                "model_id": "claude-opus-5",
+                "usage": {
+                    "input_tokens": 1000,
+                    "output_tokens": 100,
+                    "cache_read_tokens": 0,
+                    "cache_write_tokens": 0
+                },
+                "cost_usd": usd
+            },
+        });
+        if let Some(task) = task {
+            wire["task_id"] = json!(task);
+        }
+        let event = event_from_value(&wire).expect("the fixture is schema-valid");
+        let deps = &self.project.deps;
+        let appended = deps
+            .log
+            .append(&NewEvent {
+                recorded_at: event.envelope.recorded_at,
+                ids: event.envelope.ids,
+                body: event.body,
+            })
+            .expect("appends");
+        deps.projections.apply(&appended).expect("projects");
+    }
+
     /// The task's worktree, `.farik/local/worktrees/<task>`.
     pub(crate) fn worktree(&self, task: &str) -> PathBuf {
         self.project
@@ -207,6 +251,129 @@ impl SandboxFactory for CountingSandboxFactory {
         worktree: &Path,
     ) -> Result<Box<dyn Sandbox>, SandboxError> {
         HostSandboxFactory.create_base(project_id, task_id, worktree)
+    }
+}
+
+/// An adapter whose every session reports `usage` at once and then either ends `completed` at
+/// once or waits for `abort` and ends `aborted`: the one shape a recorded transcript, which
+/// reports usage only on its last line, cannot show.
+pub(crate) struct UsageThenWaitAdapter {
+    usage: Usage,
+    completes: bool,
+    started: Mutex<Vec<SessionSpec>>,
+    aborts: Arc<AtomicU32>,
+}
+
+impl UsageThenWaitAdapter {
+    /// Sessions that report `usage` and wait to be aborted.
+    pub(crate) fn waiting(usage: Usage) -> Self {
+        Self::new(usage, false)
+    }
+
+    /// Sessions that report `usage` and end `completed`.
+    pub(crate) fn completing(usage: Usage) -> Self {
+        Self::new(usage, true)
+    }
+
+    fn new(usage: Usage, completes: bool) -> Self {
+        Self {
+            usage,
+            completes,
+            started: Mutex::new(Vec::new()),
+            aborts: Arc::new(AtomicU32::new(0)),
+        }
+    }
+
+    /// Every spec a session was started with, in order.
+    pub(crate) fn started(&self) -> Vec<SessionSpec> {
+        self.started
+            .lock()
+            .expect("no test panics holding it")
+            .clone()
+    }
+
+    /// How many times a session of this adapter was aborted.
+    pub(crate) fn aborts(&self) -> u32 {
+        self.aborts.load(Ordering::SeqCst)
+    }
+}
+
+impl RuntimeAdapter for UsageThenWaitAdapter {
+    fn start_session(&self, spec: SessionSpec) -> Result<Box<dyn SessionHandle>, RuntimeError> {
+        let (sender, receiver) = channel(4);
+        sender
+            .try_send(SessionEvent::UsageReported(self.usage))
+            .expect("the channel has room");
+        let sender = if self.completes {
+            sender
+                .try_send(SessionEvent::Ended {
+                    reason: EndReason::Completed,
+                    detail: "done".to_string(),
+                })
+                .expect("the channel has room");
+            None
+        } else {
+            Some(sender)
+        };
+        let handle = WaitingSession {
+            session_id: spec.session_id.clone(),
+            receiver,
+            sender: Mutex::new(sender),
+            aborts: Arc::clone(&self.aborts),
+        };
+        self.started
+            .lock()
+            .expect("no test panics holding it")
+            .push(spec);
+        Ok(Box::new(handle))
+    }
+
+    fn resume(
+        &self,
+        _session_id: &str,
+        _prompt: &str,
+    ) -> Result<Box<dyn SessionHandle>, RuntimeError> {
+        Err(RuntimeError::Spawn {
+            detail: "this adapter does not resume".to_string(),
+        })
+    }
+}
+
+/// A session of `UsageThenWaitAdapter`.
+struct WaitingSession {
+    session_id: String,
+    receiver: Receiver<SessionEvent>,
+    sender: Mutex<Option<Sender<SessionEvent>>>,
+    aborts: Arc<AtomicU32>,
+}
+
+impl SessionHandle for WaitingSession {
+    fn session_id(&self) -> &str {
+        &self.session_id
+    }
+
+    fn events(&mut self) -> &mut Receiver<SessionEvent> {
+        &mut self.receiver
+    }
+
+    fn send(&self, _text: &str) -> Result<(), RuntimeError> {
+        Ok(())
+    }
+
+    fn abort(&self) -> Result<(), RuntimeError> {
+        self.aborts.fetch_add(1, Ordering::SeqCst);
+        if let Some(sender) = self
+            .sender
+            .lock()
+            .expect("no test panics holding it")
+            .take()
+        {
+            let _ = sender.try_send(SessionEvent::Ended {
+                reason: EndReason::Aborted,
+                detail: "aborted".to_string(),
+            });
+        }
+        Ok(())
     }
 }
 

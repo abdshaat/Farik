@@ -5,7 +5,7 @@ use std::collections::BTreeSet;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use farik_core::budget::SessionLedger;
+use farik_core::budget::{BudgetScope, SessionLedger, add_usage};
 use farik_core::contract::{Role, TaskContract};
 use farik_core::governor::permissions::PermissionTier;
 use farik_core::pricing::Usage;
@@ -15,7 +15,7 @@ use farik_roles::load_role;
 
 use super::{OrchestratorDeps, OrchestratorError};
 use crate::claude::allowed_builtins;
-use crate::cost::{CostSource, budget_state, record_session_cost};
+use crate::cost::{CostSource, budget_state, record_exhaustion, record_session_cost};
 use crate::daemon::SessionRegistration;
 use crate::exec::Executor;
 use crate::prompt::{PromptInput, assemble_system_prompt};
@@ -55,6 +55,7 @@ pub(super) async fn run_session(
     ask: SessionAsk<'_>,
 ) -> Result<SessionEnd, OrchestratorError> {
     let spec = session_spec(deps, team, &ask)?;
+    let role = Role::from(ask.agent.role);
     deps.daemon.register_session(SessionRegistration {
         session_id: spec.session_id.clone(),
         agent_id: spec.agent_id.clone(),
@@ -63,7 +64,7 @@ pub(super) async fn run_session(
         executor: ask.executor,
         limits: spec.limits,
     });
-    let ended = drive(deps, &spec).await;
+    let ended = drive(deps, team, role, ask.contract, &spec).await;
     deps.daemon.end_session(&spec.session_id);
     ended
 }
@@ -134,9 +135,16 @@ fn session_spec(
 }
 
 /// Starts the session, reads it to its end, and records its start, its costs, and its end. A
-/// session that cannot start is recorded as started, costing nothing, and ended in an error.
+/// session that cannot start, or that ends without reporting usage, is recorded as costing
+/// nothing, so that it counts as one of the task's sessions. Each usage report is costed and the
+/// budgets it exhausts recorded; the session is aborted when one of them is not the task's
+/// sessions, which crosses at the last session a task is allowed, a session to finish rather than
+/// to cut.
 async fn drive(
     deps: &OrchestratorDeps,
+    team: &Team,
+    role: Role,
+    contract: &TaskContract,
     spec: &SessionSpec,
 ) -> Result<SessionEnd, OrchestratorError> {
     let tools = &deps.tools;
@@ -179,10 +187,48 @@ async fn drive(
             return Err(error.into());
         }
     };
+    let started_at = clock.now();
+    let state = |ledger: &SessionLedger| {
+        budget_state(
+            &tools.projections,
+            team,
+            role,
+            Some(contract),
+            ledger,
+            clock.now(),
+        )
+    };
+    let mut ledger = SessionLedger::default();
+    let mut costed = false;
     let (reason, detail) = loop {
         match handle.events().recv().await {
             Some(SessionEvent::UsageReported(usage)) => {
-                cost(&usage)?;
+                let before = state(&ledger)?;
+                let cost_usd = cost(&usage)?;
+                costed = true;
+                ledger = SessionLedger {
+                    tool_calls: deps
+                        .daemon
+                        .tool_calls(&spec.session_id)
+                        .unwrap_or(ledger.tool_calls),
+                    wall_clock: (clock.now() - started_at).to_std().unwrap_or_default(),
+                    ..add_usage(&ledger, &usage, cost_usd)
+                };
+                let after = state(&ledger)?;
+                let crossed = record_exhaustion(
+                    &tools.log,
+                    &tools.projections,
+                    &before,
+                    &after,
+                    &ids,
+                    clock,
+                )?;
+                if crossed
+                    .iter()
+                    .any(|exhausted| exhausted.scope != BudgetScope::TaskSessions)
+                {
+                    handle.abort()?;
+                }
             }
             Some(SessionEvent::Ended { reason, detail }) => break (reason, detail),
             Some(_) => {}
@@ -194,6 +240,9 @@ async fn drive(
             }
         }
     };
+    if !costed {
+        cost(&Usage::default())?;
+    }
     record_session_ended(&tools.log, &spec.session_id, reason, &detail, &ids, clock)?;
     Ok(SessionEnd { reason, detail })
 }

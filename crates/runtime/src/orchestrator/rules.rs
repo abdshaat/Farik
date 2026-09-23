@@ -4,6 +4,7 @@
 
 use std::sync::Arc;
 
+use farik_core::budget::{BudgetScope, SessionLedger, check_budgets};
 use farik_core::contract::{Role, TaskContract, TaskId, TaskKind, TaskStatus};
 use farik_core::governor::transition::TransitionRequest;
 use farik_core::governor::transition_table::TransitionActor;
@@ -14,12 +15,26 @@ use farik_store::{EventQuery, Git, TaskProjection};
 use super::messages::{Resume, implement_message, plan_message};
 use super::session::{SessionAsk, SessionEnd, run_session};
 use super::{Orchestrator, OrchestratorDeps, OrchestratorError, TickReport, worktree};
+use crate::cost::budget_state;
 use crate::exec::Executor;
 use crate::session::{EndReason, SessionPurpose};
 use crate::transitions::{TransitionAsk, TransitionOutcome, integration_branch, refusal_details};
 
 /// What a tick says when no rule matched.
 const NOTHING_TO_DO: &str = "nothing on the board needs doing";
+/// What a tick says when the only rules that matched would have started a session on a spent day.
+const DAY_SPENT: &str = "the team's daily budget is spent";
+
+/// Whether a budget stops a session from starting for a task.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Room {
+    /// Nothing stops it.
+    Free,
+    /// The task's dollars or sessions are spent: no session for this task.
+    TaskSpent,
+    /// The team's day is spent: no session at all.
+    DaySpent,
+}
 
 /// One tick: the first rule that acts, or `Idle`.
 pub(super) async fn tick(orchestrator: &Orchestrator) -> Result<TickReport, OrchestratorError> {
@@ -27,11 +42,12 @@ pub(super) async fn tick(orchestrator: &Orchestrator) -> Result<TickReport, Orch
     let team = deps.tools.files.read_team()?;
     let mut board = deps.tools.projections.board()?;
     board.sort_by_key(|row| task_number(row.task_id.as_str()));
+    let mut day_spent = false;
     for row in board
         .iter()
         .filter(|row| row.status == TaskStatus::InProgress)
     {
-        if let Some(report) = in_progress(orchestrator, &team, row).await? {
+        if let Some(report) = in_progress(orchestrator, &team, row, &mut day_spent).await? {
             return Ok(report);
         }
     }
@@ -44,13 +60,47 @@ pub(super) async fn tick(orchestrator: &Orchestrator) -> Result<TickReport, Orch
         }
     }
     for row in board.iter().filter(|row| row.status == TaskStatus::Ready) {
-        if let Some(report) = ready(deps, &team, &board, row).await? {
+        if let Some(report) = ready(deps, &team, &board, row, &mut day_spent).await? {
             return Ok(report);
         }
     }
     Ok(TickReport::Idle {
-        why: NOTHING_TO_DO.to_string(),
+        why: if day_spent { DAY_SPENT } else { NOTHING_TO_DO }.to_string(),
     })
+}
+
+/// Whether the budgets leave room for a session about `contract`, read with an empty session
+/// ledger: the day's dollars, then the task's dollars and sessions. `day_spent` is set when the
+/// day is what stops it.
+fn room(
+    deps: &OrchestratorDeps,
+    team: &Team,
+    contract: &TaskContract,
+    day_spent: &mut bool,
+) -> Result<Room, OrchestratorError> {
+    let state = budget_state(
+        &deps.tools.projections,
+        team,
+        contract.assignee_role,
+        Some(contract),
+        &SessionLedger::default(),
+        deps.tools.clock.now(),
+    )?;
+    let exhausted: Vec<BudgetScope> = check_budgets(&state)
+        .into_iter()
+        .map(|exhausted| exhausted.scope)
+        .collect();
+    if exhausted.contains(&BudgetScope::DayUsd) {
+        *day_spent = true;
+        return Ok(Room::DaySpent);
+    }
+    if exhausted
+        .iter()
+        .any(|scope| matches!(scope, BudgetScope::TaskUsd | BudgetScope::TaskSessions))
+    {
+        return Ok(Room::TaskSpent);
+    }
+    Ok(Room::Free)
 }
 
 /// Rule 6: a task `in_progress` gets its assignee's implement session, in its worktree, with its
@@ -60,12 +110,16 @@ async fn in_progress(
     orchestrator: &Orchestrator,
     team: &Team,
     row: &TaskProjection,
+    day_spent: &mut bool,
 ) -> Result<Option<TickReport>, OrchestratorError> {
     let deps = &orchestrator.deps;
     let Some(assignee) = active(team, row.assignee_id.as_deref()) else {
         return Ok(None);
     };
     let contract = deps.tools.files.read_contract(&row.task_id)?;
+    if room(deps, team, &contract, day_spent)? != Room::Free {
+        return Ok(None);
+    }
     let sandbox = orchestrator.sandbox_for(&row.task_id, team)?;
     let resume = resume(deps, team, &row.task_id)?;
     let executor: Arc<dyn Executor> = sandbox;
@@ -187,6 +241,7 @@ async fn ready(
     team: &Team,
     board: &[TaskProjection],
     row: &TaskProjection,
+    day_spent: &mut bool,
 ) -> Result<Option<TickReport>, OrchestratorError> {
     if row.kind != TaskKind::Task || row.parent.is_some() {
         return Ok(None);
@@ -195,6 +250,9 @@ async fn ready(
         return Ok(None);
     };
     let contract = deps.tools.files.read_contract(&row.task_id)?;
+    if room(deps, team, &contract, day_spent)? != Room::Free {
+        return Ok(None);
+    }
     let assignees: Vec<String> = team
         .active_agents()
         .filter(|agent| Role::from(agent.role) == contract.assignee_role)
@@ -315,19 +373,23 @@ fn task_number(task: &str) -> u64 {
 mod tests {
     use std::collections::BTreeSet;
     use std::sync::Arc;
+    use std::time::Duration;
 
     use farik_core::contract::{Role, TaskStatus};
+    use farik_core::pricing::Usage;
     use farik_protocol::event::{
-        CriterionRecordedBodyRunBy, EventBody, EventKind, NoteWrittenBodyKind,
-        SessionEndedBodyReason, SessionStartedBodyPurpose, TransitionActorWire,
+        BudgetExhaustedBodyScope, CriterionRecordedBodyRunBy, EventBody, EventKind,
+        NoteWrittenBodyKind, SessionEndedBodyReason, SessionStartedBodyPurpose,
+        TransitionActorWire,
     };
     use farik_roles::RoleError;
     use farik_store::git::fixtures::git_output_in;
     use serde_json::json;
 
     use crate::claude::allowed_builtins;
-    use crate::orchestrator::fixtures::{CountingSandboxFactory, Harness};
+    use crate::orchestrator::fixtures::{CountingSandboxFactory, Harness, UsageThenWaitAdapter};
     use crate::orchestrator::{OrchestratorError, TickReport};
+    use crate::recorded::Transcript;
     use crate::recorded::fixtures::{
         implement_finishes_frk_1, implement_stops_early, plan_assigns_frk_1, reads_a_file,
     };
@@ -713,5 +775,226 @@ mod tests {
 
         assert!(adapter.started().is_empty());
         assert_eq!(harness.row("FRK-1").status, TaskStatus::Ready);
+    }
+
+    /// Usage past a session's 100 input tokens and under every dollar budget.
+    fn a_thousand_tokens() -> Usage {
+        Usage {
+            input_tokens: 1000,
+            output_tokens: 10,
+            cache_read_tokens: 0,
+            cache_write_tokens: 0,
+        }
+    }
+
+    fn scopes_exhausted(harness: &Harness) -> Vec<BudgetExhaustedBodyScope> {
+        harness
+            .events(&[EventKind::BudgetExhausted])
+            .iter()
+            .filter_map(|event| match &event.body {
+                EventBody::BudgetExhausted(body) => Some(body.scope),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn passes_over_a_task_out_of_sessions() {
+        let harness = Harness::new("orch-budget-sessions", |_| {});
+        harness.file("FRK-1", "ready", |wire| {
+            wire["budget"]["max_sessions"] = json!(1);
+        });
+        harness.spent(Some("FRK-1"), "s-0", 0.01);
+        harness.ready("FRK-2");
+        let adapter = harness.recorded(vec![reads_a_file()]);
+        let orchestrator = harness.orchestrator(adapter.clone());
+
+        let report = orchestrator.tick().await.expect("the tick runs");
+
+        assert_eq!(acted_on(&report), Some("FRK-2"), "{report:?}");
+        let started = adapter.started();
+        assert_eq!(started.len(), 1);
+        assert_eq!(started[0].purpose, SessionPurpose::Plan);
+        assert_eq!(
+            started[0].task_id.as_ref().map(|task| task.as_str()),
+            Some("FRK-2")
+        );
+        harness.project.moved(
+            "FRK-2",
+            "ready",
+            "cancelled",
+            &json!({ "actor": "human", "requested_by": "human" }),
+        );
+        let report = orchestrator.tick().await.expect("the tick runs");
+        assert_eq!(
+            report,
+            TickReport::Idle {
+                why: NOTHING_TO_DO.to_string()
+            }
+        );
+        assert_eq!(harness.row("FRK-1").status, TaskStatus::Ready);
+        assert!(harness.events(&[EventKind::EscalationRaised]).is_empty());
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn passes_over_a_task_out_of_dollars() {
+        let harness = Harness::new("orch-budget-dollars", |_| {});
+        harness.in_progress("FRK-1", "dev-a", "dev-b");
+        harness.spent(Some("FRK-1"), "s-0", 3.0);
+        harness.spent(Some("FRK-1"), "s-0", 2.0);
+        let adapter = harness.recorded(vec![implement_stops_early()]);
+        let orchestrator = harness.orchestrator(adapter.clone());
+
+        orchestrator.tick().await.expect("the tick runs");
+
+        assert!(adapter.started().is_empty(), "{:?}", adapter.started());
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn aborts_a_session_whose_usage_crosses_a_budget() {
+        let harness = Harness::new("orch-budget-abort", |wire| {
+            wire["budgets"]["session"] = json!({ "max_input_tokens": 100 });
+        });
+        harness.in_progress("FRK-1", "dev-a", "dev-b");
+        let adapter = Arc::new(UsageThenWaitAdapter::waiting(a_thousand_tokens()));
+        let orchestrator = harness.orchestrator(adapter.clone());
+
+        // A session nobody aborts waits for ever.
+        tokio::time::timeout(Duration::from_secs(10), orchestrator.tick())
+            .await
+            .expect("the session was aborted")
+            .expect("the tick runs");
+
+        assert_eq!(adapter.aborts(), 1);
+        assert_eq!(
+            scopes_exhausted(&harness),
+            vec![BudgetExhaustedBodyScope::SessionTokens]
+        );
+        let ends = harness.events(&[EventKind::BudgetExhausted, EventKind::SessionEnded]);
+        assert_eq!(ends.len(), 2, "{ends:?}");
+        assert!(matches!(
+            &ends[1].body,
+            EventBody::SessionEnded(body) if body.reason == SessionEndedBodyReason::Aborted
+        ));
+        assert_eq!(harness.row("FRK-1").status, TaskStatus::InProgress);
+        assert!(harness.events(&[EventKind::EscalationRaised]).is_empty());
+        assert!(harness.events(&[EventKind::NoteWritten]).is_empty());
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn finishes_the_last_session_a_task_is_allowed() {
+        let harness = Harness::new("orch-budget-last-session", |_| {});
+        harness.file("FRK-1", "ready", |wire| {
+            wire["budget"]["max_sessions"] = json!(2);
+        });
+        harness.project.moved(
+            "FRK-1",
+            "ready",
+            "assigned",
+            &json!({ "assignee": "dev-a", "reviewer": "dev-b" }),
+        );
+        harness.project.moved(
+            "FRK-1",
+            "assigned",
+            "in_progress",
+            &json!({ "assignee": "dev-a", "reviewer": "dev-b" }),
+        );
+        harness.spent(Some("FRK-1"), "s-0", 0.01);
+        let adapter = Arc::new(UsageThenWaitAdapter::completing(a_thousand_tokens()));
+        let orchestrator = harness.orchestrator(adapter.clone());
+
+        orchestrator.tick().await.expect("the last session runs");
+
+        assert_eq!(adapter.aborts(), 0);
+        assert_eq!(
+            scopes_exhausted(&harness),
+            vec![BudgetExhaustedBodyScope::TaskSessions]
+        );
+        let report = orchestrator.tick().await.expect("the tick runs");
+        assert_eq!(
+            report,
+            TickReport::Idle {
+                why: NOTHING_TO_DO.to_string()
+            }
+        );
+        assert_eq!(adapter.started().len(), 1);
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn counts_a_session_that_reported_no_usage() {
+        let harness = Harness::new("orch-budget-no-usage", |_| {});
+        harness.in_progress("FRK-1", "dev-a", "dev-b");
+        let recorded = reads_a_file();
+        let without_result: Vec<&str> = recorded
+            .lines()
+            .filter(|line| !line.contains("\"type\":\"result\""))
+            .collect::<Vec<_>>();
+        let transcript = Transcript::from_jsonl(&without_result.join("\n"));
+        let adapter = harness.recorded(vec![transcript]);
+        let orchestrator = harness.orchestrator(adapter);
+
+        orchestrator.tick().await.expect("the tick runs");
+
+        let costs = harness.events(&[EventKind::CostRecorded]);
+        assert_eq!(costs.len(), 1, "{costs:?}");
+        assert!(matches!(
+            &costs[0].body,
+            EventBody::CostRecorded(body) if body.usage.input_tokens == 0 && body.usage.output_tokens == 0
+        ));
+        let ends = harness.events(&[EventKind::SessionEnded]);
+        assert!(matches!(
+            &ends[..],
+            [end] if matches!(&end.body, EventBody::SessionEnded(body) if body.reason == SessionEndedBodyReason::Error)
+        ));
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn records_the_task_on_every_sessions_cost() {
+        let harness = Harness::new("orch-budget-task-costs", |_| {});
+        harness.ready("FRK-1");
+        let adapter = harness.recorded(vec![plan_assigns_frk_1(), implement_finishes_frk_1()]);
+        let orchestrator = harness.orchestrator(adapter);
+
+        for _ in 0..3 {
+            orchestrator.tick().await.expect("the tick runs");
+        }
+
+        let costs = harness.events(&[EventKind::CostRecorded]);
+        assert_eq!(costs.len(), 2, "{costs:?}");
+        for cost in &costs {
+            assert_eq!(
+                cost.envelope.ids.task_id.as_ref().map(|task| task.as_str()),
+                Some("FRK-1")
+            );
+        }
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn starts_nothing_when_the_day_is_spent() {
+        let harness = Harness::new("orch-budget-day", |_| {});
+        harness.spent(None, "s-0", 20.0);
+        harness.ready("FRK-1");
+        harness.assigned("FRK-2", "dev-a", "dev-b");
+        let adapter = harness.recorded(vec![plan_assigns_frk_1(), implement_stops_early()]);
+        let orchestrator = harness.orchestrator(adapter.clone());
+
+        let first = orchestrator.tick().await.expect("the tick runs");
+        assert_eq!(acted_on(&first), Some("FRK-2"), "{first:?}");
+        assert_eq!(harness.row("FRK-2").status, TaskStatus::InProgress);
+        let second = orchestrator.tick().await.expect("the tick runs");
+        assert_eq!(
+            second,
+            TickReport::Idle {
+                why: "the team's daily budget is spent".to_string()
+            }
+        );
+        assert!(adapter.started().is_empty());
     }
 }
