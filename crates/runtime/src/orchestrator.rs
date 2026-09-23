@@ -18,6 +18,7 @@ use farik_store::{GitError, StoreError};
 
 use crate::cost::CostError;
 use crate::daemon::DaemonState;
+use crate::forge::{Forge, ForgeError};
 use crate::sandbox::{Sandbox, SandboxError, SandboxFactory};
 use crate::session::{RuntimeAdapter, RuntimeError};
 use crate::tools::ToolDeps;
@@ -43,6 +44,8 @@ pub struct OrchestratorDeps {
     pub sandboxes: Arc<dyn SandboxFactory>,
     /// Where session ids come from.
     pub session_ids: Arc<dyn IdSource + Send + Sync>,
+    /// The forge pull requests are opened on, under the `pull_request` policy.
+    pub forge: Arc<Forge>,
 }
 
 /// Why a tick could not finish. Something the governor refused is not one of these: it is an
@@ -76,6 +79,8 @@ pub enum OrchestratorError {
         /// What the operating system said.
         detail: String,
     },
+    /// The forge could not answer.
+    Forge(ForgeError),
 }
 
 impl fmt::Display for OrchestratorError {
@@ -96,6 +101,7 @@ impl fmt::Display for OrchestratorError {
                     "the integration lock could not be taken: {detail}"
                 )
             }
+            Self::Forge(error) => write!(formatter, "the forge failed: {error}"),
         }
     }
 }
@@ -141,6 +147,12 @@ impl From<RoleError> for OrchestratorError {
 impl From<TransitionError> for OrchestratorError {
     fn from(error: TransitionError) -> Self {
         Self::Transition(error)
+    }
+}
+
+impl From<ForgeError> for OrchestratorError {
+    fn from(error: ForgeError) -> Self {
+        Self::Forge(error)
     }
 }
 
@@ -237,13 +249,15 @@ impl Orchestrator {
 
     /// Integrates an accepted task now, as the human asks (`farik integrate`), whatever
     /// escalations it carries: under `manual` a merge into the integration branch with no push,
-    /// under `auto_merge` the merge and the push to `origin` when there is one. A task already
-    /// integrated answers the commit it was integrated at and does nothing. One task integrates at
-    /// a time, across processes too.
+    /// under `auto_merge` the merge and the push to `origin` when there is one, under
+    /// `pull_request` a pull request opened when none was since acceptance, else the recorded one
+    /// read (`AwaitingForge` while open; when closed, `Merged` if the branch is in the integration
+    /// branch all the same). A task already integrated answers the commit it was integrated at and
+    /// does nothing. One task integrates at a time, across processes too.
     ///
     /// # Errors
     ///
-    /// `Refused` for a task that is not an accepted task, or under a policy this cannot drive yet;
+    /// `Refused` for a task that is not an accepted task;
     /// `Lock` when the integration lock cannot be taken; the store's, the files', and git's own
     /// failures. A merge or push that cannot land is not an error: it is `Escalated`.
     pub async fn integrate(

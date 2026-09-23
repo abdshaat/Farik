@@ -14,7 +14,7 @@ use farik_core::pricing::Usage;
 use farik_protocol::clock::SequentialIds;
 use farik_protocol::event::{EventKind, FarikEvent, NewEvent, event_from_value};
 use farik_store::TaskProjection;
-use farik_store::git::fixtures::git_in;
+use farik_store::git::fixtures::{git_in, git_output_in};
 use serde_json::{Value, json};
 use tokio::sync::mpsc::{Receiver, Sender, channel};
 
@@ -38,6 +38,8 @@ const FARIK_PREFIX: &str = "mcp__farik__";
 pub(crate) struct Harness {
     pub(crate) project: TestProject,
     pub(crate) daemon: Arc<DaemonState>,
+    /// The `gh` every orchestrator of this harness drives, answering nothing until told.
+    pub(crate) gh: FakeGh,
 }
 
 impl Harness {
@@ -50,7 +52,12 @@ impl Harness {
         });
         let project = TestProject::new(name, &team);
         let daemon = Arc::new(DaemonState::new(Arc::clone(&project.deps)));
-        Self { project, daemon }
+        let gh = FakeGh::new(name);
+        Self {
+            project,
+            daemon,
+            gh,
+        }
     }
 
     /// A recorded adapter playing `transcripts`, whose Farik tool calls this harness's daemon
@@ -74,12 +81,23 @@ impl Harness {
         adapter: Arc<dyn RuntimeAdapter>,
         sandboxes: Arc<dyn SandboxFactory>,
     ) -> Orchestrator {
+        self.orchestrator_with_forge(adapter, sandboxes, self.gh.forge(&self.project.repo.path))
+    }
+
+    /// An orchestrator over this project with `adapter`, `sandboxes`, and `forge`.
+    pub(crate) fn orchestrator_with_forge(
+        &self,
+        adapter: Arc<dyn RuntimeAdapter>,
+        sandboxes: Arc<dyn SandboxFactory>,
+        forge: Forge,
+    ) -> Orchestrator {
         Orchestrator::new(OrchestratorDeps {
             tools: Arc::clone(&self.project.deps),
             daemon: Arc::clone(&self.daemon),
             adapter,
             sandboxes,
             session_ids: Arc::new(SequentialIds::new()),
+            forge: Arc::new(forge),
         })
     }
 
@@ -248,6 +266,44 @@ impl Harness {
         );
         git_in(root, &["push", "origin", "main"]);
         origin
+    }
+
+    /// Merges `task`'s branch into `origin`'s `main` from a clone of `origin` of its own, as the
+    /// human merging its pull request on the forge would, and answers the merge commit.
+    pub(crate) fn merge_on_the_forge(&self, origin: &Path, task: &str) -> String {
+        let clone = self.project.repo.path.with_extension("forge");
+        let _ = std::fs::remove_dir_all(&clone);
+        let parent = clone.parent().expect("a parent");
+        git_in(
+            parent,
+            &[
+                "clone",
+                origin.to_str().expect("a path"),
+                clone.to_str().expect("a path"),
+            ],
+        );
+        git_in(&clone, &["config", "user.name", "Farik Test"]);
+        git_in(&clone, &["config", "user.email", "test@farik.invalid"]);
+        git_in(&clone, &["config", "commit.gpgsign", "false"]);
+        let root = self.project.repo.path.to_str().expect("a path").to_string();
+        git_in(
+            &clone,
+            &["fetch", &root, &format!("refs/heads/farik/{task}")],
+        );
+        git_in(
+            &clone,
+            &[
+                "merge",
+                "--no-ff",
+                "-m",
+                &format!("Merge pull request for {task}"),
+                "FETCH_HEAD",
+            ],
+        );
+        git_in(&clone, &["push", "origin", "main"]);
+        let sha = git_output_in(&clone, &["rev-parse", "HEAD"]);
+        let _ = std::fs::remove_dir_all(&clone);
+        sha
     }
 
     /// `origin` added at a path where there is no repository, so that every push to it fails.

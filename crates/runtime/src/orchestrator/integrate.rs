@@ -9,22 +9,27 @@ use std::sync::Arc;
 use farik_core::contract::{TaskId, TaskKind, TaskStatus};
 use farik_core::team::{Integration, Team};
 use farik_protocol::event::{
-    EscalationRaisedBody, EscalationRaisedBodyReason, EventBody, EventIds, EventKind,
-    TaskIntegratedBody, TaskIntegratedBodyIntegratedBy, new_event,
+    EscalationRaisedBody, EscalationRaisedBodyReason, EventBody, EventIds, EventKind, FarikEvent,
+    NoteWrittenBodyKind, PullRequestOpenedBody, TaskIntegratedBody, TaskIntegratedBodyIntegratedBy,
+    new_event,
 };
 use farik_store::files::FilesError;
 use farik_store::{EventQuery, Git, GitError, MergeOutcome, TaskProjection};
 
 use super::{IntegrationOutcome, Orchestrator, OrchestratorError, TickReport, worktree};
+use crate::forge::{Forge, PullRequestState};
 use crate::tools::ToolDeps;
 use crate::transitions::{TransitionError, integration_branch};
 
 /// Where the integration lock lives, under the project root.
 const LOCK: &str = ".farik/local/integration.lock";
 
-/// Rule 2: an accepted task awaiting integration under `auto_merge` is merged and pushed, unless
-/// an integration escalation was raised since it was accepted: that one is the human's, through
-/// `integrate`, and is not tried again on every tick.
+/// Rule 2: an accepted task awaiting integration under `auto_merge` is merged and pushed, and
+/// under `pull_request` has its pull request opened, then its state read on each tick until it is
+/// merged or closed; an open one is not an action, and the tick goes on. None of it once an
+/// integration escalation was raised since the task was accepted: that one is the human's,
+/// through `integrate`, and is not tried again on every tick. ponytail: one gh call per open pull
+/// request per tick; a slower poll when a board holds many.
 pub(super) async fn awaiting(
     orchestrator: &Orchestrator,
     team: &Team,
@@ -32,13 +37,15 @@ pub(super) async fn awaiting(
 ) -> Result<Option<TickReport>, OrchestratorError> {
     if row.kind != TaskKind::Task
         || !row.awaiting_integration
-        || team.policy.integration != Integration::AutoMerge
+        || team.policy.integration == Integration::Manual
         || escalated_since_accepted(&orchestrator.deps.tools, &row.task_id)?
     {
         return Ok(None);
     }
     let outcome = match attempt(orchestrator, team, &row.task_id, false).await {
-        Err(OrchestratorError::Refused { .. }) => return Ok(None),
+        Err(OrchestratorError::Refused { .. }) | Ok(IntegrationOutcome::AwaitingForge) => {
+            return Ok(None);
+        }
         other => other?,
     };
     Ok(Some(TickReport::Acted {
@@ -71,9 +78,10 @@ async fn attempt(
     by_human: bool,
 ) -> Result<IntegrationOutcome, OrchestratorError> {
     let tools = Arc::clone(&orchestrator.deps.tools);
+    let forge = Arc::clone(&orchestrator.deps.forge);
     let team = team.clone();
     let task_id = task_id.clone();
-    tokio::task::spawn_blocking(move || integrate_locked(&tools, &team, &task_id, by_human))
+    tokio::task::spawn_blocking(move || integrate_locked(&tools, &forge, &team, &task_id, by_human))
         .await
         .unwrap_or_else(|error| std::panic::resume_unwind(error.into_panic()))
 }
@@ -82,6 +90,7 @@ async fn attempt(
 /// by the policy in force, unless it is no longer awaiting integration.
 fn integrate_locked(
     tools: &ToolDeps,
+    forge: &Forge,
     team: &Team,
     task_id: &TaskId,
     by_human: bool,
@@ -119,16 +128,206 @@ fn integrate_locked(
             sha: last_integrated_sha(tools, task_id)?.unwrap_or_default(),
         });
     }
-    let pushes = match team.policy.integration {
-        Integration::AutoMerge => true,
-        Integration::Manual => false,
-        Integration::PullRequest => {
-            return Err(OrchestratorError::Refused {
-                reason: "unsupported_policy: pull_request".to_string(),
-            });
+    match team.policy.integration {
+        Integration::AutoMerge => merge(tools, team, &row, by_human, true),
+        Integration::Manual => merge(tools, team, &row, by_human, false),
+        Integration::PullRequest => through_the_forge(tools, forge, team, &row, by_human),
+    }
+}
+
+/// Under `pull_request`: opens the task's pull request when none was opened since it was
+/// accepted, pushing its branch first; otherwise reads the one opened. Merged on the forge, the
+/// local integration branch is brought up to it and the task recorded as the human's
+/// integration. Closed, the human's own `integrate` asks whether the branch is in the integration
+/// branch all the same (merged by hand, or through another pull request); the tick only says so.
+fn through_the_forge(
+    tools: &ToolDeps,
+    forge: &Forge,
+    team: &Team,
+    row: &TaskProjection,
+    by_human: bool,
+) -> Result<IntegrationOutcome, OrchestratorError> {
+    let git = &tools.git;
+    let id = row.task_id.as_str();
+    let branch = format!("farik/{id}");
+    let into = match integration_branch(team, git) {
+        Ok(into) => into,
+        Err(error) => return escalate(tools, &row.task_id, format!("{error}")),
+    };
+    let Some(url) = opened_since_accepted(tools, &row.task_id)? else {
+        return open(tools, forge, row, &branch, &into);
+    };
+    let state = match forge.pull_request_state(&url) {
+        Ok(state) => state,
+        Err(error) => {
+            return escalate(
+                tools,
+                &row.task_id,
+                format!("the state of {url} could not be read: {error}"),
+            );
         }
     };
-    merge(tools, team, &row, by_human, pushes)
+    match state {
+        PullRequestState::Open => Ok(IntegrationOutcome::AwaitingForge),
+        PullRequestState::Merged { sha } => {
+            let fetched = git.fetch_fast_forward("origin", &into);
+            record_integrated(tools, &row.task_id, &sha, &into, true)?;
+            if let Err(error) = fetched {
+                return escalate(
+                    tools,
+                    &row.task_id,
+                    format!(
+                        "{url} was merged as {sha}, but the local {into} could not be brought up \
+                         to it: {}; run git pull origin {into} in the repository",
+                        git_words(&error)
+                    ),
+                );
+            }
+            Ok(IntegrationOutcome::Merged { sha })
+        }
+        PullRequestState::Closed if !by_human => escalate(
+            tools,
+            &row.task_id,
+            format!(
+                "the pull request {url} was closed without merging; reopen it on the forge or \
+                 merge {branch}, then run farik integrate {id}"
+            ),
+        ),
+        PullRequestState::Closed => {
+            let merged = git
+                .fetch_fast_forward("origin", &into)
+                .and_then(|()| git.commit_count(&into, &branch));
+            match merged {
+                Ok(0) => {
+                    // A branch's merge base with itself is its head: the commit of `into` that
+                    // holds the task's branch.
+                    let sha = git.merge_base(&into, &into)?;
+                    record_integrated(tools, &row.task_id, &sha, &into, true)?;
+                    Ok(IntegrationOutcome::Merged { sha })
+                }
+                Ok(_) => escalate(
+                    tools,
+                    &row.task_id,
+                    format!(
+                        "the pull request {url} was closed without merging, and {branch} is not \
+                         in {into}: reopen it on the forge or merge the branch, then run farik \
+                         integrate {id}"
+                    ),
+                ),
+                Err(error) => escalate(
+                    tools,
+                    &row.task_id,
+                    format!(
+                        "the pull request {url} was closed without merging, and whether {branch} \
+                         is in {into} could not be read: {}",
+                        git_words(&error)
+                    ),
+                ),
+            }
+        }
+    }
+}
+
+/// Pushes `branch` to `origin` and opens its pull request into `into`, recording it; each failure,
+/// no `origin` among them, is an integration escalation with its words.
+fn open(
+    tools: &ToolDeps,
+    forge: &Forge,
+    row: &TaskProjection,
+    branch: &str,
+    into: &str,
+) -> Result<IntegrationOutcome, OrchestratorError> {
+    let git = &tools.git;
+    match git.has_remote("origin") {
+        Ok(true) => {}
+        Ok(false) => {
+            return escalate(
+                tools,
+                &row.task_id,
+                format!(
+                    "there is no origin to push {branch} to and open its pull request on; add \
+                     one, or choose another policy.integration"
+                ),
+            );
+        }
+        Err(error) => return escalate(tools, &row.task_id, git_words(&error)),
+    }
+    if let Err(error) = git.push("origin", &format!("refs/heads/{branch}")) {
+        return escalate(
+            tools,
+            &row.task_id,
+            format!("pushing {branch} to origin failed: {}", git_words(&error)),
+        );
+    }
+    let body = pull_request_body(tools, &row.task_id)?;
+    let title = format!("{}: {}", row.task_id.as_str(), row.title);
+    let opened = match forge.open_pull_request(into, branch, &title, &body) {
+        Ok(opened) => opened,
+        Err(error) => {
+            return escalate(
+                tools,
+                &row.task_id,
+                format!("the pull request for {branch} could not be opened: {error}"),
+            );
+        }
+    };
+    append(
+        tools,
+        &row.task_id,
+        EventBody::PullRequestOpened(PullRequestOpenedBody {
+            url: opened.url.clone(),
+            number: opened.number,
+            branch: branch.to_string(),
+        }),
+    )?;
+    Ok(IntegrationOutcome::PullRequestOpened { url: opened.url })
+}
+
+/// The pull request's body: the contract's intent, the completion note, and the review note, each
+/// under its own heading; a note never written is said to be missing.
+fn pull_request_body(tools: &ToolDeps, task_id: &TaskId) -> Result<String, OrchestratorError> {
+    let contract = tools.files.read_contract(task_id)?;
+    let notes = tools.log.read(&EventQuery {
+        task_id: Some(task_id.clone()),
+        kinds: vec![EventKind::NoteWritten],
+        ..EventQuery::default()
+    })?;
+    let last = |kind: NoteWrittenBodyKind| {
+        notes
+            .iter()
+            .rev()
+            .find_map(|event| match &event.body {
+                EventBody::NoteWritten(body) if body.kind == kind => Some(body.text.clone()),
+                _ => None,
+            })
+            .unwrap_or_else(|| "(none was written)".to_string())
+    };
+    Ok(format!(
+        "## Intent\n\n{}\n\n## Completion note\n\n{}\n\n## Review note\n\n{}\n",
+        contract.intent.as_str(),
+        last(NoteWrittenBodyKind::Completion),
+        last(NoteWrittenBodyKind::Review)
+    ))
+}
+
+/// The url of the task's `pull_request.opened` since it last moved into `accepted`.
+fn opened_since_accepted(
+    tools: &ToolDeps,
+    task_id: &TaskId,
+) -> Result<Option<String>, OrchestratorError> {
+    let history = tools.log.read(&EventQuery {
+        task_id: Some(task_id.clone()),
+        kinds: vec![EventKind::TaskTransitioned, EventKind::PullRequestOpened],
+        ..EventQuery::default()
+    })?;
+    Ok(history
+        .iter()
+        .rev()
+        .take_while(|event| !is_move_into_accepted(event))
+        .find_map(|event| match &event.body {
+            EventBody::PullRequestOpened(body) => Some(body.url.clone()),
+            _ => None,
+        }))
 }
 
 /// Merges `farik/<id>` into the integration branch and records it; then, when `pushes` and the
@@ -170,19 +369,7 @@ fn merge(
             );
         }
     };
-    append(
-        tools,
-        &row.task_id,
-        EventBody::TaskIntegrated(TaskIntegratedBody {
-            sha: sha.clone(),
-            into: into.clone(),
-            integrated_by: if by_human {
-                TaskIntegratedBodyIntegratedBy::Human
-            } else {
-                TaskIntegratedBodyIntegratedBy::Governor
-            },
-        }),
-    )?;
+    record_integrated(tools, &row.task_id, &sha, &into, by_human)?;
     if pushes {
         let push = git.has_remote("origin").and_then(|has| {
             if has {
@@ -204,6 +391,34 @@ fn merge(
         }
     }
     Ok(IntegrationOutcome::Merged { sha })
+}
+
+/// Records the task's branch as in `into` at `sha`, by the human or by Farik.
+fn record_integrated(
+    tools: &ToolDeps,
+    task_id: &TaskId,
+    sha: &str,
+    into: &str,
+    by_human: bool,
+) -> Result<(), OrchestratorError> {
+    append(
+        tools,
+        task_id,
+        EventBody::TaskIntegrated(TaskIntegratedBody {
+            sha: sha.to_string(),
+            into: into.to_string(),
+            integrated_by: if by_human {
+                TaskIntegratedBodyIntegratedBy::Human
+            } else {
+                TaskIntegratedBodyIntegratedBy::Governor
+            },
+        }),
+    )
+}
+
+/// Whether the event is a move into `accepted`.
+fn is_move_into_accepted(event: &FarikEvent) -> bool {
+    matches!(&event.body, EventBody::TaskTransitioned(body) if body.to.to_string() == "accepted")
 }
 
 /// What git said, without the adapter's framing.
@@ -280,9 +495,7 @@ fn escalated_since_accepted(tools: &ToolDeps, task_id: &TaskId) -> Result<bool, 
     Ok(history
         .iter()
         .rev()
-        .take_while(|event| {
-            !matches!(&event.body, EventBody::TaskTransitioned(body) if body.to.to_string() == "accepted")
-        })
+        .take_while(|event| !is_move_into_accepted(event))
         .any(|event| {
             matches!(&event.body, EventBody::EscalationRaised(body)
                 if body.reason == EscalationRaisedBodyReason::Integration)
@@ -377,8 +590,8 @@ fn remove_worktree(git: &Git, path: &Path) -> Result<(), OrchestratorError> {
 mod tests {
     use farik_core::contract::TaskStatus;
     use farik_protocol::event::{
-        EscalationRaisedBody, EscalationRaisedBodyReason, EventBody, EventKind, TaskIntegratedBody,
-        TaskIntegratedBodyIntegratedBy,
+        EscalationRaisedBody, EscalationRaisedBodyReason, EventBody, EventKind,
+        PullRequestOpenedBody, TaskIntegratedBody, TaskIntegratedBodyIntegratedBy,
     };
     use farik_store::git::fixtures::{git_in, git_output_in};
     use serde_json::json;
@@ -686,5 +899,227 @@ mod tests {
                 "{round}"
             );
         }
+    }
+
+    const PULL_URL: &str = "https://github.com/o/r/pull/7";
+    const OPEN: &str = r#"{"mergeCommit":null,"state":"OPEN"}"#;
+
+    /// FRK-1 accepted under `pull_request` with `origin`, its review note written, and, when
+    /// `opened`, its pull request 7 already recorded.
+    fn a_pull_request(name: &str, opened: bool) -> (Harness, std::path::PathBuf) {
+        let harness = under(name, "pull_request");
+        let origin = harness.with_origin();
+        harness.accepted("FRK-1");
+        harness.project.record(
+            "FRK-1",
+            "note.written",
+            &json!({ "kind": "review", "text": "C1 passes; done.txt is there.", "written_by": "dev-b" }),
+        );
+        if opened {
+            harness.project.record(
+                "FRK-1",
+                "pull_request.opened",
+                &json!({ "url": PULL_URL, "number": 7, "branch": "farik/FRK-1" }),
+            );
+        }
+        (harness, origin)
+    }
+
+    fn opened(harness: &Harness) -> Vec<PullRequestOpenedBody> {
+        harness
+            .events(&[EventKind::PullRequestOpened])
+            .into_iter()
+            .map(|event| match event.body {
+                EventBody::PullRequestOpened(body) => body,
+                other => panic!("a pull_request.opened, got {other:?}"),
+            })
+            .collect()
+    }
+
+    fn creates(harness: &Harness) -> usize {
+        harness
+            .gh
+            .calls()
+            .iter()
+            .filter(|call| call.get(1).map(String::as_str) == Some("create"))
+            .count()
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn opens_a_pull_request_for_an_accepted_task() {
+        let (harness, origin) = a_pull_request("int-pr-opens", false);
+        harness.gh.answers("list", "[]", "", 0);
+        harness
+            .gh
+            .answers("create", &format!("{PULL_URL}\n"), "", 0);
+        let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
+
+        orchestrator.tick().await.expect("the tick runs");
+
+        assert_eq!(
+            git_output_in(&origin, &["rev-parse", "farik/FRK-1"]),
+            at_root(&harness, &["rev-parse", "farik/FRK-1"])
+        );
+        let recorded = opened(&harness);
+        assert_eq!(recorded.len(), 1, "{recorded:?}");
+        assert_eq!(recorded[0].number, 7);
+        assert_eq!(recorded[0].branch, "farik/FRK-1");
+        assert_eq!(recorded[0].url, PULL_URL);
+        let body = harness.gh.stdin_of("create");
+        let contract = harness
+            .project
+            .deps
+            .files
+            .read_contract(&task("FRK-1"))
+            .expect("the contract reads");
+        let places: Vec<usize> = [
+            "## Intent",
+            contract.intent.as_str(),
+            "## Completion note",
+            "Added done.txt; nothing left out.",
+            "## Review note",
+            "C1 passes; done.txt is there.",
+        ]
+        .iter()
+        .map(|text| {
+            body.find(text)
+                .unwrap_or_else(|| panic!("{text:?} in {body}"))
+        })
+        .collect();
+        assert!(places.is_sorted(), "{body}");
+
+        harness.gh.answers("view", OPEN, "", 0);
+        assert_eq!(
+            orchestrator.integrate(&task("FRK-1")).await,
+            Ok(IntegrationOutcome::AwaitingForge)
+        );
+        assert_eq!(opened(&harness).len(), 1);
+        assert_eq!(creates(&harness), 1);
+        let _ = std::fs::remove_dir_all(&origin);
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn waits_while_the_pull_request_is_open() {
+        let (harness, origin) = a_pull_request("int-pr-waits", true);
+        harness.gh.answers("view", OPEN, "", 0);
+        let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
+        let before = harness.events(&[]).len();
+
+        assert_eq!(orchestrator.tick().await.expect("the tick runs"), idle());
+
+        assert_eq!(harness.events(&[]).len(), before);
+        let _ = std::fs::remove_dir_all(&origin);
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn records_a_pull_request_merged_on_the_forge() {
+        let (harness, origin) = a_pull_request("int-pr-merged", true);
+        let sha = harness.merge_on_the_forge(&origin, "FRK-1");
+        harness.gh.answers(
+            "view",
+            &format!(r#"{{"state":"MERGED","mergeCommit":{{"oid":"{sha}"}}}}"#),
+            "",
+            0,
+        );
+        let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
+
+        orchestrator.tick().await.expect("the tick runs");
+
+        let integrated = integrations(&harness);
+        assert_eq!(integrated.len(), 1, "{integrated:?}");
+        assert_eq!(integrated[0].sha, sha);
+        assert_eq!(
+            integrated[0].integrated_by,
+            TaskIntegratedBodyIntegratedBy::Human
+        );
+        assert_eq!(at_root(&harness, &["rev-parse", "main"]), sha);
+        assert!(escalations(&harness).is_empty());
+        let _ = std::fs::remove_dir_all(&origin);
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn escalates_a_closed_pull_request_once() {
+        let (harness, origin) = a_pull_request("int-pr-closed", true);
+        harness
+            .gh
+            .answers("view", r#"{"mergeCommit":null,"state":"CLOSED"}"#, "", 0);
+        let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
+
+        orchestrator.tick().await.expect("the tick runs");
+
+        let raised = escalations(&harness);
+        assert_eq!(raised.len(), 1, "{raised:?}");
+        assert!(
+            raised[0].detail.contains("was closed without merging"),
+            "{}",
+            raised[0].detail
+        );
+        let calls = harness.gh.calls().len();
+        assert_eq!(orchestrator.tick().await.expect("the tick runs"), idle());
+        assert_eq!(harness.gh.calls().len(), calls);
+        let _ = std::fs::remove_dir_all(&origin);
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn integrates_a_closed_pull_request_the_human_merged() {
+        let (harness, origin) = a_pull_request("int-pr-closed-merged", true);
+        harness
+            .gh
+            .answers("view", r#"{"mergeCommit":null,"state":"CLOSED"}"#, "", 0);
+        let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
+        orchestrator.tick().await.expect("the tick runs");
+
+        let again = orchestrator.integrate(&task("FRK-1")).await;
+        assert!(
+            matches!(&again, Ok(IntegrationOutcome::Escalated { detail }) if detail.contains("reopen it")),
+            "{again:?}"
+        );
+        assert_eq!(escalations(&harness).len(), 2);
+
+        let sha = harness.merge_on_the_forge(&origin, "FRK-1");
+        assert_eq!(
+            orchestrator.integrate(&task("FRK-1")).await,
+            Ok(IntegrationOutcome::Merged { sha: sha.clone() })
+        );
+        let integrated = integrations(&harness);
+        assert_eq!(integrated.len(), 1);
+        assert_eq!(integrated[0].sha, sha);
+        assert_eq!(
+            integrated[0].integrated_by,
+            TaskIntegratedBodyIntegratedBy::Human
+        );
+        assert_eq!(at_root(&harness, &["rev-parse", "main"]), sha);
+        let _ = std::fs::remove_dir_all(&origin);
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn escalates_when_gh_is_missing() {
+        let (harness, origin) = a_pull_request("int-pr-no-gh", false);
+        let orchestrator = harness.orchestrator_with_forge(
+            harness.recorded(Vec::new()),
+            std::sync::Arc::new(crate::sandbox::host::HostSandboxFactory),
+            crate::forge::Forge {
+                program: "/nonexistent/farik/gh".into(),
+                root: harness.project.repo.path.clone(),
+            },
+        );
+
+        orchestrator.tick().await.expect("the tick runs");
+
+        let raised = escalations(&harness);
+        assert_eq!(raised.len(), 1, "{raised:?}");
+        assert!(
+            raised[0].detail.contains("/nonexistent/farik/gh"),
+            "{}",
+            raised[0].detail
+        );
+        assert!(opened(&harness).is_empty());
+        let _ = std::fs::remove_dir_all(&origin);
     }
 }
