@@ -566,7 +566,9 @@ pub fn claude_args(
     resume: bool,
 ) -> Result<Vec<String>, RuntimeError> {
     refuse_a_farik_server(spec)?;
-    let settings = settings_json(config, &protected_paths(&config.team_file)?);
+    let protected = protected_paths(&config.team_file)?;
+    refuse_an_unexpressible_glob(&protected)?;
+    let settings = settings_json(config, &protected);
     let session_flag = if resume { "--resume" } else { "--session-id" };
     let args = [
         "-p",
@@ -713,26 +715,47 @@ fn protected_paths(team_file: &Path) -> Result<Vec<String>, RuntimeError> {
     Ok(team.rules().protected_paths)
 }
 
+/// Refuses a protected path that a `Read(<glob>)` rule cannot say as it is: Claude Code reads a
+/// rule's content up to its parentheses and takes a backslash as an escape, and in `-p` mode it
+/// ignores settings it cannot read without a word, so such a path would leave the session with
+/// no deny rules at all.
+fn refuse_an_unexpressible_glob(protected: &[String]) -> Result<(), RuntimeError> {
+    match protected.iter().find(|glob| {
+        glob.chars()
+            .any(|character| matches!(character, '(' | ')' | '\\') || character.is_control())
+    }) {
+        Some(glob) => Err(RuntimeError::Spawn {
+            detail: format!(
+                "the protected path {glob:?} cannot be expressed as a Read rule: it holds a \
+                 parenthesis, a backslash, or a control character"
+            ),
+        }),
+        None => Ok(()),
+    }
+}
+
 /// `--settings`: both hooks on every tool, and a `Read` deny rule for each protected path, which
 /// Claude Code also holds its search tools to.
 fn settings_json(config: &ClaudeConfig, protected: &[String]) -> Value {
-    let hook = |event: &str| {
+    let hook = |command: String| {
         json!([{
             "matcher": "*",
-            "hooks": [{
-                "type": "command",
-                "command": format!(
-                    "{} hook {event} --daemon {}",
-                    shell_quoted(&config.hook_command.display().to_string()),
-                    shell_quoted(&config.daemon_file.display().to_string())
-                ),
-            }],
+            "hooks": [{ "type": "command", "command": command }],
         }])
+    };
+    let line = |event: &str| {
+        format!(
+            "{} hook {event} --daemon {}",
+            shell_quoted(&config.hook_command.display().to_string()),
+            shell_quoted(&config.daemon_file.display().to_string())
+        )
     };
     json!({
         "hooks": {
-            "PreToolUse": hook("pre-tool-use"),
-            "PostToolUse": hook("post-tool-use"),
+            // Claude Code blocks a call only on exit 2; a hook that cannot run at all (127, 126)
+            // or fails otherwise would let the call through, so every failure becomes 2.
+            "PreToolUse": hook(format!("{} || exit 2", line("pre-tool-use"))),
+            "PostToolUse": hook(line("post-tool-use")),
         },
         "permissions": {
             "deny": protected.iter().map(|path| format!("Read({path})")).collect::<Vec<_>>(),
@@ -779,8 +802,10 @@ mod tests {
     use std::path::{Path, PathBuf};
 
     use farik_core::governor::permissions::PermissionTier;
+    use farik_core::team::fixtures::a_team_wire;
+    use farik_core::team::validate_team;
     use farik_store::files::fixtures::{TempProject, a_team};
-    use serde_json::Value;
+    use serde_json::{Value, json};
 
     use super::{
         ClaudeConfig, ClaudeCredential, Secret, allowed_builtins, check_version, child_env,
@@ -1011,6 +1036,94 @@ mod tests {
             .collect();
         assert!(deny.contains(&"Read(.env)"), "{deny:?}");
         assert!(deny.contains(&"Read(**/*.pem)"), "{deny:?}");
+    }
+
+    #[test]
+    fn makes_the_pre_tool_use_hook_block_when_it_cannot_run() {
+        let project = a_project("claude-hook-fails-closed");
+        let config = ClaudeConfig {
+            hook_command: PathBuf::from("/opt/it's here/farik"),
+            daemon_file: PathBuf::from("/tmp/a dir/daemon.json"),
+            ..config(&project)
+        };
+        let spec = spec();
+        let args = claude_args(&spec, &config, &session_dir(&config, &spec), false)
+            .expect("the args are built");
+        let settings = settings(&args);
+        assert_eq!(
+            settings["hooks"]["PreToolUse"][0]["hooks"][0]["command"],
+            r"'/opt/it'\''s here/farik' hook pre-tool-use --daemon '/tmp/a dir/daemon.json' || exit 2"
+        );
+        assert_eq!(
+            settings["hooks"]["PostToolUse"][0]["hooks"][0]["command"],
+            r"'/opt/it'\''s here/farik' hook post-tool-use --daemon '/tmp/a dir/daemon.json'"
+        );
+    }
+
+    #[test]
+    fn runs_the_hook_command_as_one_word_each_and_blocks_when_it_is_missing() {
+        let project = a_project("claude-hook-shell");
+        let bin = project.root.join("a 'quoted' dir");
+        std::fs::create_dir_all(&bin).expect("the directory");
+        let farik = bin.join("farik");
+        std::fs::write(&farik, "#!/bin/sh\nprintf '%s\\n' \"$@\"\nexit 1\n").expect("written");
+        std::fs::set_permissions(&farik, std::fs::Permissions::from_mode(0o755))
+            .expect("executable");
+        let config = ClaudeConfig {
+            hook_command: farik.clone(),
+            daemon_file: bin.join("daemon.json"),
+            ..config(&project)
+        };
+        let spec = spec();
+        let args = claude_args(&spec, &config, &session_dir(&config, &spec), false)
+            .expect("the args are built");
+        let command = settings(&args)["hooks"]["PreToolUse"][0]["hooks"][0]["command"]
+            .as_str()
+            .expect("a command")
+            .to_string();
+        let run = |line: &str| {
+            std::process::Command::new("sh")
+                .arg("-c")
+                .arg(line)
+                .output()
+                .expect("sh runs")
+        };
+        let ran = run(&command);
+        assert_eq!(ran.status.code(), Some(2), "a failing hook blocks");
+        assert_eq!(
+            String::from_utf8_lossy(&ran.stdout),
+            format!(
+                "hook\npre-tool-use\n--daemon\n{}\n",
+                bin.join("daemon.json").display()
+            )
+        );
+        std::fs::remove_file(&farik).expect("removed");
+        assert_eq!(
+            run(&command).status.code(),
+            Some(2),
+            "a missing hook blocks"
+        );
+    }
+
+    #[test]
+    fn refuses_a_protected_path_a_read_rule_cannot_express() {
+        for glob in ["infra/(old)/**", "a)b", "back\\slash", "new\nline"] {
+            let project = TempProject::new("claude-unexpressible-glob");
+            let mut wire = a_team_wire();
+            wire["rules"]["protected_paths"] = json!([glob]);
+            project
+                .files()
+                .write_team(&validate_team(&wire).expect("a team"))
+                .expect("the team is written");
+            let config = config(&project);
+            let spec = spec();
+            match claude_args(&spec, &config, &session_dir(&config, &spec), false) {
+                Err(RuntimeError::Spawn { detail }) => {
+                    assert!(detail.contains("cannot be expressed"), "{detail}");
+                }
+                other => panic!("expected {glob:?} refused, got {other:?}"),
+            }
+        }
     }
 
     #[test]
