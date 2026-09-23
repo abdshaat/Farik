@@ -14,7 +14,7 @@ use farik_core::governor::permissions::PermissionTier;
 use farik_core::team::validate_team;
 use farik_store::files::yaml_value;
 use serde_json::{Value, json};
-use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncReadExt, AsyncWriteExt, BufReader};
+use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncReadExt, AsyncWriteExt, BufReader, Lines};
 use tokio::process::{Child, ChildStdin, ChildStdout};
 use tokio::sync::mpsc::{Receiver, Sender, channel};
 use tokio_util::sync::CancellationToken;
@@ -66,6 +66,8 @@ const MCP_CONFIG_FILE: &str = "mcp.json";
 const STDERR_TAIL_BYTES: usize = 4_096;
 /// How long the program has to exit once its result is read.
 const EXIT_GRACE: Duration = Duration::from_secs(5);
+/// How long an error end waits for the rest of standard error once the group is killed.
+const TAIL_GRACE: Duration = Duration::from_millis(500);
 /// Why `send` refuses while a session runs.
 const ONE_MESSAGE: &str = "a Farik session takes one message; resume it for another";
 
@@ -326,8 +328,33 @@ enum Stop {
     Exited,
 }
 
+/// Kills the program's group if the supervisor is dropped before it has seen the group killed,
+/// as it is when the runtime it runs on shuts down, so that nothing the program started outlives
+/// the runtime.
+struct GroupGuard {
+    pid: u32,
+    is_armed: bool,
+}
+
+impl Drop for GroupGuard {
+    fn drop(&mut self) {
+        if self.is_armed {
+            // A drop cannot await; the shell's `kill` returns at once.
+            let _ = std::process::Command::new("sh")
+                .arg("-c")
+                .arg(kill_line(self.pid))
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .status();
+        }
+    }
+}
+
 /// Plays the program's output as events until its result, its wall clock, its caller's abort, or
-/// its exit, whichever is first; sends `Ended` at once; then sees the process gone.
+/// its exit, whichever is first; sends `Ended` once the program is stopped; then sees its group
+/// gone. Neither a caller that stops reading nor a child that holds a pipe open delays the wall
+/// clock or the abort.
 async fn supervise(
     process: Process,
     first_line: String,
@@ -343,27 +370,87 @@ async fn supervise(
         stdout,
         tail,
     } = process;
+    let mut guard = GroupGuard {
+        pid,
+        is_armed: true,
+    };
     // A program that stopped reading ends with its output, which is read below.
     let _ = stdin.write_all(first_line.as_bytes()).await;
     let _ = stdin.flush().await;
     let mut lines = BufReader::new(stdout).lines();
+    let stop = play(&mut lines, wall_clock, &sender, &ended, &cancel).await;
+    drop(stdin);
+    if matches!(stop, Stop::Result) {
+        // The program's output closes as it exits; lines after the result are dropped. One that
+        // has not exited within its grace is killed below.
+        let _ = tokio::time::timeout(EXIT_GRACE, async {
+            while let Ok(Some(_)) = lines.next_line().await {}
+        })
+        .await;
+    }
+    // The one kill: the program, if it still runs, and whatever it left behind in its group,
+    // which may hold its standard error open. It comes before the leader is reaped, so the
+    // group's id cannot yet name another group.
+    kill_group(pid).await;
+    guard.is_armed = false;
+    let status = tokio::time::timeout(EXIT_GRACE, child.wait()).await;
+    let last = match stop {
+        Stop::Result => None,
+        Stop::Killed(reason, detail) => Some((reason, detail)),
+        Stop::Exited => {
+            let tail = tokio::time::timeout(TAIL_GRACE, tail)
+                .await
+                .ok()
+                .and_then(Result::ok)
+                .unwrap_or_default();
+            let status = match status {
+                Ok(Ok(status)) => status.to_string(),
+                Ok(Err(error)) => error.to_string(),
+                Err(_) => "it did not exit".to_string(),
+            };
+            Some((
+                EndReason::Error,
+                format!(
+                    "the program ended without a result ({status}): {}",
+                    String::from_utf8_lossy(&tail).trim()
+                ),
+            ))
+        }
+    };
+    if let Some((reason, detail)) = last {
+        *locked(&ended) = Some(reason);
+        let _ = sender.send(SessionEvent::Ended { reason, detail }).await;
+    }
+}
+
+/// Plays the program's output to `sender` until its result, its wall clock, its caller's abort,
+/// a line the parser refuses, its caller leaving, or its exit, and says which.
+async fn play(
+    lines: &mut Lines<BufReader<ChildStdout>>,
+    wall_clock: Duration,
+    sender: &Sender<SessionEvent>,
+    ended: &Mutex<Option<EndReason>>,
+    cancel: &CancellationToken,
+) -> Stop {
     let mut parser = StreamParser::default();
     let deadline = tokio::time::sleep(wall_clock);
     tokio::pin!(deadline);
-    let stop = loop {
+    let aborted = || Stop::Killed(EndReason::Aborted, "aborted by its caller".to_string());
+    let limit = || {
+        Stop::Killed(
+            EndReason::Limit,
+            format!(
+                "the session ran past its wall clock of {} s",
+                wall_clock.as_secs()
+            ),
+        )
+    };
+    let unread = || Stop::Killed(EndReason::Aborted, "nobody reads the session".to_string());
+    'read: loop {
         let line = tokio::select! {
-            () = cancel.cancelled() => {
-                break Stop::Killed(EndReason::Aborted, "aborted by its caller".to_string());
-            }
-            () = &mut deadline => {
-                break Stop::Killed(
-                    EndReason::Limit,
-                    format!("the session ran past its wall clock of {} s", wall_clock.as_secs()),
-                );
-            }
-            () = sender.closed() => {
-                break Stop::Killed(EndReason::Aborted, "nobody reads the session".to_string());
-            }
+            () = cancel.cancelled() => break aborted(),
+            () = &mut deadline => break limit(),
+            () = sender.closed() => break unread(),
             line = lines.next_line() => line,
         };
         let Ok(Some(line)) = line else {
@@ -378,52 +465,25 @@ async fn supervise(
         };
         let mut is_over = false;
         for event in events {
+            // A caller that does not read must not hold the wall clock or the abort off.
+            let permit = tokio::select! {
+                () = cancel.cancelled() => break 'read aborted(),
+                () = &mut deadline => break 'read limit(),
+                permit = sender.reserve() => permit,
+            };
+            let Ok(permit) = permit else {
+                break 'read unread();
+            };
             if let SessionEvent::Ended { reason, .. } = &event {
-                *locked(&ended) = Some(*reason);
+                *locked(ended) = Some(*reason);
                 is_over = true;
             }
-            let _ = sender.send(event).await;
+            permit.send(event);
         }
         if is_over {
             break Stop::Result;
         }
-    };
-    match stop {
-        Stop::Result => {
-            drop(stdin);
-            if tokio::time::timeout(EXIT_GRACE, child.wait())
-                .await
-                .is_err()
-            {
-                kill_group(pid).await;
-            }
-        }
-        Stop::Killed(reason, detail) => {
-            *locked(&ended) = Some(reason);
-            let _ = sender.send(SessionEvent::Ended { reason, detail }).await;
-            kill_group(pid).await;
-        }
-        Stop::Exited => {
-            drop(stdin);
-            let status = child.wait().await;
-            let tail = tail.await.unwrap_or_default();
-            *locked(&ended) = Some(EndReason::Error);
-            let status = status.map_or_else(|error| error.to_string(), |status| status.to_string());
-            let detail = format!(
-                "the program ended without a result ({status}): {}",
-                String::from_utf8_lossy(&tail).trim()
-            );
-            let _ = sender
-                .send(SessionEvent::Ended {
-                    reason: EndReason::Error,
-                    detail,
-                })
-                .await;
-        }
     }
-    let _ = child.wait().await;
-    // Whatever the program left behind in its group goes with it.
-    kill_group(pid).await;
 }
 
 /// Reads `stderr` to its end, keeping the last `STDERR_TAIL_BYTES`.
@@ -451,9 +511,17 @@ fn collect_tail(
 async fn kill_group(pid: u32) {
     let _ = tokio::process::Command::new("sh")
         .arg("-c")
-        .arg(format!("kill -s KILL -- -{pid} 2>/dev/null"))
+        .arg(kill_line(pid))
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
         .status()
         .await;
+}
+
+/// The shell line that kills the process group `pid` leads.
+fn kill_line(pid: u32) -> String {
+    format!("kill -s KILL -- -{pid} 2>/dev/null")
 }
 
 /// The one `stream-json` user line a session is given.

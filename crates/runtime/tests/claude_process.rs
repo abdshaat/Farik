@@ -345,3 +345,140 @@ fn refuses_a_claude_code_that_is_too_old_or_missing() {
         Err(RuntimeError::Spawn { .. })
     ));
 }
+
+/// A script body that prints `count` text lines, starts a background `sleep` whose pid it writes
+/// to `sleep`, and waits for it.
+fn floods_then_sleeps(count: u32) -> String {
+    format!(
+        "i=0\n\
+         while [ $i -lt {count} ]; do\n\
+         echo '{{\"type\":\"assistant\",\"message\":{{\"content\":[{{\"type\":\"text\",\"text\":\"x\"}}]}}}}'\n\
+         i=$((i+1))\n\
+         done\n\
+         sleep 30 &\n\
+         echo $! > \"$dir/sleep\"\n\
+         wait"
+    )
+}
+
+#[tokio::test]
+async fn ends_at_the_wall_clock_even_when_nobody_reads_the_events() {
+    let fake = Fake::new("wall-clock-unread", &floods_then_sleeps(200));
+    let mut spec = fake.spec();
+    spec.limits.max_wall_clock = Duration::from_secs(1);
+    let mut handle = fake
+        .adapter()
+        .start_session(spec)
+        .expect("the session starts");
+    let pid = fake.wait_for("pid").await;
+    let sleep = fake.wait_for("sleep").await;
+    assert!(
+        gone_within(&pid, Duration::from_secs(2)).await,
+        "the program outlived its wall clock"
+    );
+    assert!(
+        gone_within(&sleep, Duration::from_secs(1)).await,
+        "the program's child outlived its wall clock"
+    );
+    let events = tokio::time::timeout(Duration::from_secs(5), drain(handle.as_mut()))
+        .await
+        .expect("the session ends");
+    assert!(
+        matches!(
+            events.last(),
+            Some(SessionEvent::Ended {
+                reason: EndReason::Limit,
+                ..
+            })
+        ),
+        "{:?}",
+        events.last()
+    );
+    assert!(matches!(handle.send("more"), Err(RuntimeError::Limit)));
+}
+
+#[tokio::test]
+async fn aborts_even_when_nobody_reads_the_events() {
+    let fake = Fake::new("aborted-unread", &floods_then_sleeps(200));
+    let mut handle = fake
+        .adapter()
+        .start_session(fake.spec())
+        .expect("the session starts");
+    let pid = fake.wait_for("pid").await;
+    let sleep = fake.wait_for("sleep").await;
+    handle.abort().expect("the session is stopped");
+    assert!(
+        gone_within(&pid, Duration::from_secs(2)).await,
+        "the program outlived its abort"
+    );
+    assert!(
+        gone_within(&sleep, Duration::from_secs(1)).await,
+        "the program's child outlived its abort"
+    );
+    let events = tokio::time::timeout(Duration::from_secs(5), drain(handle.as_mut()))
+        .await
+        .expect("the session ends");
+    assert!(
+        matches!(
+            events.last(),
+            Some(SessionEvent::Ended {
+                reason: EndReason::Aborted,
+                ..
+            })
+        ),
+        "{:?}",
+        events.last()
+    );
+}
+
+#[tokio::test]
+async fn ends_at_once_when_the_program_exits_leaving_a_child_on_its_stderr() {
+    let fake = Fake::new(
+        "exits-leaving-a-child",
+        "sleep 20 >/dev/null &\necho $! > \"$dir/sleep\"\necho boom >&2\nexit 1",
+    );
+    let mut handle = fake
+        .adapter()
+        .start_session(fake.spec())
+        .expect("the session starts");
+    match next_within(handle.as_mut(), Duration::from_secs(2)).await {
+        Some(SessionEvent::Ended {
+            reason: EndReason::Error,
+            detail,
+        }) => assert!(detail.contains("boom"), "{detail}"),
+        other => panic!("expected an error end, got {other:?}"),
+    }
+    let sleep = fake.wait_for("sleep").await;
+    assert!(
+        gone_within(&sleep, Duration::from_secs(2)).await,
+        "the program's child outlived it"
+    );
+}
+
+#[test]
+fn kills_the_group_when_the_runtime_shuts_down() {
+    let fake = Fake::new(
+        "runtime-shutdown",
+        "sleep 60 &\necho $! > \"$dir/sleep\"\nwait",
+    );
+    let runtime = tokio::runtime::Runtime::new().expect("a runtime");
+    let sleep = runtime.block_on(async {
+        let handle = fake
+            .adapter()
+            .start_session(fake.spec())
+            .expect("the session starts");
+        let sleep = fake.wait_for("sleep").await;
+        // The handle outlives the runtime, so only the runtime's end stops the session.
+        std::mem::forget(handle);
+        sleep
+    });
+    drop(runtime);
+    let deadline = std::time::Instant::now() + Duration::from_secs(2);
+    while is_alive(&sleep) && std::time::Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    assert!(
+        !is_alive(&sleep),
+        "the program's child outlived the runtime"
+    );
+}
