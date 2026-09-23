@@ -567,6 +567,32 @@ fn commits_the_named_paths_and_returns_the_sha() {
 
 #[test]
 #[ignore = "needs the git program: cargo xtask check --integration"]
+fn commits_a_named_path_as_a_path_and_never_as_a_pattern() {
+    // The protected-path check (5.6) reads each named path as a path, so git must too: a glob
+    // or a pathspec magic word would stage files the check never saw.
+    let repository = TempRepo::new("commit-literal");
+    repository.write("src/a.ts", "export {};\n");
+    repository.write("src/k.pem", "a key\n");
+    let git = repository.adapter();
+    let before = repository.git_output(&["rev-parse", "HEAD"]);
+
+    for pattern in ["src/*", "src/*.ts", ":(glob)src/**"] {
+        let refused = git.commit(&repository.path, "m", &[pattern.to_string()]);
+        assert!(
+            matches!(refused, Err(GitError::CommandFailed { .. })),
+            "{pattern}: {refused:?}"
+        );
+    }
+    assert_eq!(repository.git_output(&["rev-parse", "HEAD"]), before);
+    assert_eq!(
+        repository.git_output(&["diff", "--cached", "--name-only"]),
+        "",
+        "nothing is left staged"
+    );
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
 fn makes_a_detached_worktree_at_a_commit() {
     let repository = TempRepo::new("detached-worktree");
     let first = repository.git_output(&["rev-parse", "HEAD"]);

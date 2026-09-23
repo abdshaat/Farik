@@ -288,8 +288,11 @@ impl Git {
 
     /// Commits `paths` of the tree at `path` with `message`, and answers the new commit's sha.
     ///
-    /// Only the named paths are staged (`git add -- <paths>`), so what else a session left in its
-    /// worktree stays out of the commit; a new file is staged as readily as a changed one.
+    /// Only the named paths are staged (`git --literal-pathspecs add -- <paths>`), so what else a
+    /// session left in its worktree stays out of the commit; a new file is staged as readily as a
+    /// changed one. Each path is read as a path, never as a glob or a pathspec magic word, because
+    /// the protected-path check (5.6) read it as one: a pattern would stage files that check never
+    /// saw. A directory still stages what is under it, so the caller names files.
     ///
     /// # Errors
     ///
@@ -298,7 +301,7 @@ impl Git {
     pub fn commit(&self, path: &Path, message: &str, paths: &[String]) -> Result<String, GitError> {
         self.require_repository()?;
         self.require_worktree_of_this_repository(path)?;
-        let mut add = vec!["add", "--"];
+        let mut add = vec!["--literal-pathspecs", "add", "--"];
         add.extend(paths.iter().map(String::as_str));
         run_git(path, &add)?;
         run_git(path, &["commit", "-m", message])?;

@@ -45,13 +45,19 @@ pub(super) fn diff(call: &Call<'_>) -> Result<Value, ToolError> {
 }
 
 /// `farik_git_commit`: commits the named paths of the task's worktree on the task branch, for the
-/// task's assignee alone.
+/// task's assignee alone. A path that is a directory is refused rather than staged whole: the path
+/// checks of 5.6 judged the directory's name, not the files under it, and a protected one among
+/// them would be committed.
 pub(super) fn commit(call: &Call<'_>, input: &CommitInput) -> Result<Value, ToolError> {
     let task = assignees_task(call)?;
+    let worktree = worktree(call, task);
+    if let Some(path) = input.paths.iter().find(|path| worktree.join(path).is_dir()) {
+        return Err(Refusal::PathIsADirectory { path: path.clone() }.into());
+    }
     let sha = call
         .deps()
         .git
-        .commit(&worktree(call, task), &input.message, &input.paths)
+        .commit(&worktree, &input.message, &input.paths)
         .map_err(failed)?;
     Ok(json!({ "sha": sha }))
 }
@@ -148,6 +154,63 @@ mod tests {
                 .expect("a patch")
                 .contains("b/src/login/form.ts"),
             "{diff}"
+        );
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn refuses_to_commit_a_directory_that_holds_a_protected_file() {
+        // `src/login/**` is allowed and `**/*.pem` protected (5.12's default), so the directory
+        // passes both path checks while git would stage the key under it.
+        let project = TestProject::new("tools-git-directory", &a_team_of_three(|_| {}));
+        project.filed("FRK-1", "assigned", "task", None);
+        project.moved(
+            "FRK-1",
+            "assigned",
+            "in_progress",
+            &json!({ "assignee": "dev-a", "reviewer": "dev-b" }),
+        );
+        let worktree = project.repo.path.join(".farik/local/worktrees/FRK-1");
+        project
+            .deps
+            .git
+            .create_worktree(&worktree, "farik/FRK-1", "main")
+            .expect("the task's worktree is made");
+        std::fs::create_dir_all(worktree.join("src/login")).expect("a directory");
+        std::fs::write(worktree.join("src/login/form.ts"), "export {};\n").expect("a file");
+        std::fs::write(worktree.join("src/login/k.pem"), "a key\n").expect("a key");
+
+        for path in ["src/login", "src/login/"] {
+            match project.call(
+                "dev-a",
+                Some("FRK-1"),
+                "farik_git_commit",
+                json!({ "message": "add the login form", "paths": [path] }),
+            ) {
+                Err(ToolError::Refused { reason }) => assert_eq!(
+                    reason,
+                    format!("path_is_a_directory: {path} is a directory; name the files to commit")
+                ),
+                other => panic!("{path}: expected a refusal, got {other:?}"),
+            }
+        }
+        let git = &project.deps.git;
+        assert_eq!(
+            git.commit_count("main", "farik/FRK-1").expect("git counts"),
+            0
+        );
+        project
+            .call(
+                "dev-a",
+                Some("FRK-1"),
+                "farik_git_commit",
+                json!({ "message": "add the login form", "paths": ["src/login/form.ts"] }),
+            )
+            .expect("the file itself is committed");
+        assert_eq!(
+            git.changed_paths("main", "farik/FRK-1")
+                .expect("git lists the paths"),
+            ["src/login/form.ts"]
         );
     }
 

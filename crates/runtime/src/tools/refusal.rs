@@ -77,6 +77,9 @@ pub(crate) enum Refusal {
     Command(CommandRefusal),
     /// A command's directory is outside the workspace.
     OutsideWorkspace { cwd: String },
+    /// A commit named a directory, which git would stage whole, files the path checks never saw
+    /// among it.
+    PathIsADirectory { path: String },
 }
 
 impl Refusal {
@@ -155,6 +158,10 @@ impl Refusal {
             | Self::CriterionAnsweredByTheHuman { .. }
             | Self::NotTheNamedAgent { .. } => self.reach(),
             Self::Command(refusal) => command(refusal),
+            Self::PathIsADirectory { path } => (
+                "path_is_a_directory",
+                format!("{path} is a directory; name the files to commit"),
+            ),
             Self::OutsideWorkspace { cwd } => (
                 "outside_workspace",
                 format!("{cwd} is not a directory inside the task's workspace"),
