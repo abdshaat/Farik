@@ -93,7 +93,7 @@ The first line before " / " is the title; the brief passed is title, a blank lin
 3. `docker build -t farik/sandbox:<version> crates/runtime/sandbox` (version from the workspace `Cargo.toml`), then the crates layer from `~/farik-m0/crates.Dockerfile` (`FROM farik/sandbox:<version>`; `COPY . /tmp/fetch`; `RUN cd /tmp/fetch && cargo fetch --locked && rm -rf /tmp/fetch && chmod -R a+rwX /usr/local/cargo`; `ENV CARGO_NET_OFFLINE=true`), context the clone, same tag. Smoke: in a throwaway clone of `origin.git`, `docker run --rm --network none --user $(id -u):$(id -g) -v <it>:/workspace farik/sandbox:<version> cargo test -p farik --no-run` → exit 0, `Finished`; then the same `docker run` with `cargo test -p farik --test reading -- --include-ignored` → exit 0, `test result: ok`, which proves git and the offline crates inside the container as the user's uid; then delete that clone.
 4. Write `team.yaml` as above and record its sha256. Hand over to [F].
 
-- [ ] Task 1 [A]: `docs(runtime): say the sandbox image is built by hand for now`
+- [x] Task 1 [A]: `docs(runtime): say the sandbox image is built by hand for now`
 
 ### Stage 2: the project [F]
 
