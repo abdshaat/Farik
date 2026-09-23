@@ -1,5 +1,7 @@
 //! Transcripts recorded from `claude` 2.1.280 with `--model haiku` on 2026-09-22, trimmed of
-//! hook lines, thinking signatures, and machine paths. For tests, in this crate and in others.
+//! hook lines, thinking signatures, and machine paths; and transcripts of Farik tool calls,
+//! hand-written in the same shapes, which no recording can hold because the answers depend on the
+//! project a test builds. For tests, in this crate and in others.
 
 use std::path::PathBuf;
 
@@ -60,4 +62,11 @@ pub fn hook_denies_a_write() -> Transcript {
 #[must_use]
 pub fn replays_farik_read_board() -> Transcript {
     Transcript::from_jsonl(include_str!("transcripts/replays_farik_read_board.jsonl"))
+}
+
+/// The Product Manager's plan session: `farik_assign_task` of FRK-1 to `dev-a`, reviewed by
+/// `dev-b`, and a successful end. Hand-written.
+#[must_use]
+pub fn plan_assigns_frk_1() -> Transcript {
+    Transcript::from_jsonl(include_str!("transcripts/plan_assigns_frk_1.jsonl"))
 }

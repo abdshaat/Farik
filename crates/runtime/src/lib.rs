@@ -13,6 +13,9 @@ pub mod criteria;
 pub mod daemon;
 /// Commands run on an agent's behalf, and what came of them.
 pub mod exec;
+/// Farik running its team: the board read, the next thing on it done, one session at a time.
+#[cfg(unix)]
+pub mod orchestrator;
 /// A session's system prompt, assembled in one fixed order.
 pub mod prompt;
 /// Sessions replayed from recorded transcripts.
