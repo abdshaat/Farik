@@ -97,7 +97,7 @@ Files: modified `crates/runtime/src/prompt.rs`
 - `cuts_a_long_memory_and_says_so` — 40,960 ASCII bytes of memory: the block holds exactly the first 32,768, then `\n[cut at 32 KiB]`; with a two-byte character straddling byte 32,768, the cut falls before that character.
 - `leaves_the_role_uncut` — a 40 KiB role prompt appears whole.
 
-- [ ] `feat(runtime): mark untrusted prompt content and bound its size`
+- [x] `feat(runtime): mark untrusted prompt content and bound its size`
 
 ## Verification
 
