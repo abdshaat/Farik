@@ -175,7 +175,11 @@ fn asks_its_questions_at_the_terminal() {
     }
     assert_eq!(ran.out.matches("answer> ").count(), 2, "{}", ran.out);
     // The blank line is asked again, not sent as an answer for handle to refuse.
-    assert!(!ran.err.contains("farik: "), "{}", ran.err);
+    assert!(
+        !ran.err.lines().any(|line| line.starts_with("farik: ")),
+        "{}",
+        ran.err
+    );
     let answers = events(&repository, &[EventKind::QuestionAnswered]);
     assert_eq!(answers.len(), 1);
     assert!(matches!(

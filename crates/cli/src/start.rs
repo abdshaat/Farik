@@ -298,8 +298,10 @@ pub(crate) fn driven_elsewhere(root: &Path) -> String {
 pub(crate) const NO_SANDBOX_WARNING: &str = "warning: no-sandbox mode (.farik/local/settings.json \
     says sandbox: none). Agents' commands run on this machine as you, with your HOME: they can \
     read your credential files (~/.git-credentials, ~/.ssh, ~/.claude/.credentials.json, the gh \
-    configuration) and push with a git hidden in a script, which farik_exec's check does not see. \
-    The governor still checks every path and permission it is asked about.";
+    configuration), push with a git hidden in a script, which farik_exec's check does not see, and \
+    read .farik/local/daemon.json, whose token lets them act as you through farik: approve, \
+    accept, answer, and integrate. The governor still checks every path and permission it is \
+    asked about.";
 
 /// The variables of the environment a Claude Code session is given besides its credential.
 const SESSION_ENV: [&str; 6] = ["PATH", "HOME", "USER", "LANG", "TERM", "TMPDIR"];

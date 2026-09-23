@@ -88,7 +88,9 @@ fn a_small_request(repository: &TempRepo) -> String {
 
 /// The warning every start in no-sandbox mode prints.
 fn warned(err: &str) -> bool {
-    err.contains("~/.git-credentials") && err.contains("a git hidden in a script")
+    err.contains("~/.git-credentials")
+        && err.contains("a git hidden in a script")
+        && err.contains(".farik/local/daemon.json, whose token lets them act as you through farik")
 }
 
 fn lock_is_free(repository: &TempRepo) {
