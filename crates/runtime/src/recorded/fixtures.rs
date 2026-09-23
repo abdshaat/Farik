@@ -46,3 +46,9 @@ pub fn write_denied() -> Transcript {
 pub fn hits_the_turn_limit() -> Transcript {
     Transcript::from_jsonl(include_str!("transcripts/hits_the_turn_limit.jsonl"))
 }
+
+/// A Read, then a Write the `PreToolUse` hook denied with `farik says no`, and a successful end.
+#[must_use]
+pub fn hook_denies_a_write() -> Transcript {
+    Transcript::from_jsonl(include_str!("transcripts/hook_denies_a_write.jsonl"))
+}

@@ -78,7 +78,9 @@
         "product_doc.written",
         "tool.called",
         "tool.denied",
-        "tool.returned"
+        "tool.returned",
+        "session.started",
+        "session.ended"
       ]
     },
     "eventBodyWire": {
@@ -106,7 +108,9 @@
         { "$ref": "#/$defs/productDocWrittenBody" },
         { "$ref": "#/$defs/toolCalledBody" },
         { "$ref": "#/$defs/toolDeniedBody" },
-        { "$ref": "#/$defs/toolReturnedBody" }
+        { "$ref": "#/$defs/toolReturnedBody" },
+        { "$ref": "#/$defs/sessionStartedBody" },
+        { "$ref": "#/$defs/sessionEndedBody" }
       ]
     },
     "contractSummary": {
@@ -443,6 +447,29 @@
         "tool_use_id": { "type": "string" },
         "output": { "type": "string" },
         "duration_ms": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 }
+      }
+    },
+    "sessionStartedBody": {
+      "title": "Session Started Body",
+      "description": "A Claude Code session started (docs/SPEC.md sections 8.2 and 8.5): why, on which model, and how hard it thinks. The envelope names the session, the agent, and the task when the session has one; the exact system prompt it was given is kept in .farik/local/sessions/<session_id>/system-prompt.md.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["purpose", "model", "effort"],
+      "properties": {
+        "purpose": { "type": "string", "enum": ["triage", "refine", "plan", "implement", "verify", "ceremony", "conversation"] },
+        "model": { "type": "string", "minLength": 1 },
+        "effort": { "type": "string", "enum": ["low", "medium", "high"] }
+      }
+    },
+    "sessionEndedBody": {
+      "title": "Session Ended Body",
+      "description": "A Claude Code session ended (docs/SPEC.md sections 8.2 and 8.5): completed when the model finished its turn, aborted when its caller stopped it, limit when a limit did, error when the program failed; detail is what the program said about it. The envelope names the session, the agent, and the task when the session has one.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["reason", "detail"],
+      "properties": {
+        "reason": { "type": "string", "enum": ["completed", "aborted", "limit", "error"] },
+        "detail": { "type": "string" }
       }
     }
   }

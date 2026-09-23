@@ -86,10 +86,20 @@ impl StreamParser {
                         "a tool_result names tool_use_id {id}, which no tool_use called"
                     ),
                 })?;
-            events.push(SessionEvent::ToolReturned {
-                tool: tool.clone(),
-                output: tool_output(block.get("content")),
-            });
+            let output = tool_output(block.get("content"));
+            let is_error = block.get("is_error").and_then(Value::as_bool) == Some(true);
+            // Claude Code reports a hook's deny as the call's error, with no line of its own.
+            let hook_denial = format!("PreToolUse:{tool} hook error: ");
+            match output.strip_prefix(&hook_denial) {
+                Some(reason) if is_error => events.push(SessionEvent::ToolDenied {
+                    tool: tool.clone(),
+                    reason: reason.to_string(),
+                }),
+                _ => events.push(SessionEvent::ToolReturned {
+                    tool: tool.clone(),
+                    output,
+                }),
+            }
         }
         Ok(events)
     }
@@ -190,7 +200,9 @@ mod tests {
 
     use super::StreamParser;
     use crate::recorded::Transcript;
-    use crate::recorded::fixtures::{hits_the_turn_limit, reads_a_file, write_denied};
+    use crate::recorded::fixtures::{
+        hits_the_turn_limit, hook_denies_a_write, reads_a_file, write_denied,
+    };
     use crate::session::{EndReason, RuntimeError, SessionEvent};
 
     fn events_of(transcript: &Transcript) -> Vec<SessionEvent> {
@@ -445,6 +457,25 @@ mod tests {
                 tool: "Write".to_string(),
                 reason: "the hook said no".to_string(),
             }]
+        );
+    }
+
+    #[test]
+    fn reads_a_hook_denial_as_a_denied_tool() {
+        let events = events_of(&hook_denies_a_write());
+        assert!(
+            events.contains(&SessionEvent::ToolDenied {
+                tool: "Write".to_string(),
+                reason: "farik says no".to_string(),
+            }),
+            "{events:?}"
+        );
+        assert!(
+            !events.iter().any(|event| matches!(
+                event,
+                SessionEvent::ToolReturned { tool, .. } if tool == "Write"
+            )),
+            "{events:?}"
         );
     }
 }

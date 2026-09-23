@@ -27,6 +27,7 @@ Measured on `claude` 2.1.280, 2026-09-22: `--append-system-prompt-file <path>` e
 - Events added: `session.started { purpose, model, effort }` and `session.ended { reason: completed | aborted | limit | error, detail }`, with the session, agent, and task on the envelope; `record_session_started` and `record_session_ended` in `farik-runtime::sessions`, which step 11 calls. `docs/SPEC.md` 8.5 already lists both.
 - The live test is `crates/cli/tests/live_claude.rs`, in the command line's crate because the hooks need the `farik` binary and there it is `env!("CARGO_BIN_EXE_farik")`. It runs only with `FARIK_LIVE_TESTS=1` and a credential in the environment: a haiku session in a temporary repository with a served daemon reads a file through `Read`, is denied a `Write` outside its allowed paths, finds nothing from a protected `.env` holding a secret with `Grep`, and ends `Completed`; the log holds `tool.called` and `tool.denied`, the stream ends with usage, and the `init` line's `tools` are the `--tools` given. It costs a few cents and never runs in CI. `docs/standards/code.md` already has the live-test row revision 8 asked for; nothing is added there.
 - `BUILTIN_TOOLS` in `claude.rs` lists the names `allowed_builtins` asks `builtin_tool_tier` about. `--effort` takes `Effort`'s snake_case name. `session.started` and `session.ended` are not about one contract and have no attribution field; `EVERY_KIND` grows; the envelope comes from `ids`. `DaemonInfo`'s `Debug` prints its token as `[redacted]`.
+- Changed 2026-09-22 in execution (Task 1): `hook_denies_a_write.jsonl` was already on the branch, recorded from a real session by step 07 (`ca1853a`), so it is used as it is rather than created. `session.started`'s `model` has the schema's `minLength: 1`, as `cost.recorded`'s `model_id` does. A stamping failure in `record_session_*` is `StoreError::InvalidEvent`, the one `StoreError` that says an event is malformed. The two `session.` bodies are built by a helper in `event/fixtures.rs`, because `a_body_wire` was at clippy's line limit.
 
 ## File map
 
@@ -78,7 +79,7 @@ pub fn record_session_ended(log: &EventLog, session_id: &str, reason: EndReason,
 - `records_a_session_starting_and_ending` — the log holds `session.started` with the spec's purpose and model, and `session.ended { reason: limit }`, each with the session, agent, and task ids.
 - `reads_a_hook_denial_as_a_denied_tool` — `hook_denies_a_write()` yields `ToolDenied { tool: "Write", reason: "farik says no" }` and no `ToolReturned` for it.
 
-- [ ] `feat(runtime): record sessions and read hook denials from the stream`
+- [x] `feat(runtime): record sessions and read hook denials from the stream`
 
 ### Task 2: the command line and the credential
 

@@ -145,6 +145,16 @@ pub fn a_body_wire(kind: EventKind) -> Value {
         EventKind::ToolCalled => a_tool_body_wire("input", "{\"file_path\":\"src/lib.rs\"}"),
         EventKind::ToolDenied => a_tool_body_wire("reason", "tool_not_allowed: Bash has no tier"),
         EventKind::ToolReturned => a_tool_body_wire("output", "{\"type\":\"text\"}"),
+        EventKind::SessionStarted | EventKind::SessionEnded => a_session_body_wire(kind),
+    }
+}
+
+/// A `session.` body: an implement session on haiku that started, or that completed.
+fn a_session_body_wire(kind: EventKind) -> Value {
+    if kind == EventKind::SessionStarted {
+        json!({ "purpose": "implement", "model": "claude-haiku-4-5-20251001", "effort": "high" })
+    } else {
+        json!({ "reason": "completed", "detail": "done" })
     }
 }
 

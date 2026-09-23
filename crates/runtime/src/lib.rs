@@ -18,6 +18,8 @@ pub mod recorded;
 pub mod sandbox;
 /// What a session is, what it reports, and the traits every runtime implements.
 pub mod session;
+/// When each session started and how it ended, in the log.
+pub mod sessions;
 /// The Claude Code program's `stream-json` lines, read as session events.
 pub mod stream;
 /// Farik's own tools, each checked against the agent's tier and the rule that owns it.
