@@ -20,7 +20,7 @@ use farik_protocol::command::Command;
 use farik_protocol::event::{EventIds, EventKind, FarikEvent, NewEvent, event_from_value};
 use farik_runtime::ToolDeps;
 use farik_runtime::daemon::{DaemonConfig, DaemonHandle, DaemonState, serve};
-use farik_runtime::orchestrator::CommandReport;
+use farik_runtime::orchestrator::{CommandError, CommandReport};
 use farik_runtime::transitions::Transitions;
 use farik_store::files::{LocalSettings, ProjectFiles, Sandbox};
 use farik_store::git::fixtures::TempRepo;
@@ -265,6 +265,43 @@ pub fn filed(repository: &TempRepo, title: &str) -> String {
         .to_string()
 }
 
+/// Files `a_request(title)` of risk `high`, which waits for the human's acceptance, and walks it
+/// to `verifying` as `dev-a`'s, reviewed by `dev-b`. Answers its id.
+pub fn a_high_risk_task_verifying(repository: &TempRepo, title: &str) -> String {
+    let path = repository.path.join(format!("high-{}.yaml", title.len()));
+    std::fs::write(&path, a_request(title).replace("risk: low", "risk: high"))
+        .expect("the request is written");
+    let ran = run(
+        &repository.path,
+        &["task", "create", path.to_str().expect("a path")],
+    );
+    assert_eq!(ran.code, 0, "{}", ran.err);
+    let _ = std::fs::remove_file(&path);
+    let task = ran
+        .out
+        .split_whitespace()
+        .next()
+        .expect("the id first")
+        .to_string();
+    record(
+        repository,
+        &task,
+        "request.triaged",
+        &json!({ "size": "small", "reason": "One file.", "triaged_by": "human" }),
+    );
+    let people = json!({ "assignee": "dev-a", "reviewer": "dev-b" });
+    for (from, to) in [
+        ("draft", "refining"),
+        ("refining", "ready"),
+        ("ready", "assigned"),
+        ("assigned", "in_progress"),
+        ("in_progress", "verifying"),
+    ] {
+        moved(repository, &task, from, to, &people);
+    }
+    task
+}
+
 /// Holds this project's run lock for as long as it lives, as a process driving it does.
 pub fn hold_the_run_lock(repository: &TempRepo) -> File {
     let path = repository.path.join(".farik/local/run.lock");
@@ -333,6 +370,20 @@ pub struct LiveDriver {
 
 impl LiveDriver {
     pub fn new(repository: &TempRepo) -> LiveDriver {
+        LiveDriver::answering(
+            repository,
+            Ok(CommandReport {
+                said: "handled by the run".to_string(),
+                events: Vec::new(),
+            }),
+        )
+    }
+
+    /// A driver whose handler records each command and answers `answer`.
+    pub fn answering(
+        repository: &TempRepo,
+        answer: Result<CommandReport, CommandError>,
+    ) -> LiveDriver {
         let lock = hold_the_run_lock(repository);
         let runtime = tokio::runtime::Builder::new_multi_thread()
             .worker_threads(2)
@@ -347,12 +398,8 @@ impl LiveDriver {
                 .lock()
                 .expect("no test panics holding it")
                 .push(command);
-            Box::pin(async {
-                Ok(CommandReport {
-                    said: "handled by the run".to_string(),
-                    events: Vec::new(),
-                })
-            })
+            let answer = answer.clone();
+            Box::pin(async move { answer })
         }));
         let handle = runtime
             .block_on(serve(
