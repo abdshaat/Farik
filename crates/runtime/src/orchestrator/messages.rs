@@ -372,7 +372,7 @@ mod tests {
     }
 
     /// An event of FRK-1 at `seq`, of `kind`, with `body`.
-    fn event(seq: u64, kind: &str, body: Value) -> FarikEvent {
+    fn event(seq: u64, kind: &str, body: &Value) -> FarikEvent {
         event_from_value(&json!({
             "seq": seq,
             "recorded_at": at().to_rfc3339(),
@@ -488,7 +488,7 @@ mod tests {
             event(
                 1,
                 "session.started",
-                json!({
+                &json!({
                     "purpose": "refine",
                     "model": "claude-opus-5",
                     "effort": "high"
@@ -497,7 +497,7 @@ mod tests {
             event(
                 2,
                 "human.accepted",
-                json!({
+                &json!({
                     "subject": "contract",
                     "accepted_by": "human",
                     "message": "Keep it to one file."
@@ -506,7 +506,7 @@ mod tests {
             event(
                 3,
                 "human.accepted",
-                json!({
+                &json!({
                     "subject": "contract",
                     "accepted_by": "human"
                 }),
