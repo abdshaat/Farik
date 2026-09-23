@@ -151,7 +151,12 @@ impl Git {
     /// detached head is not a branch.
     pub fn current_branch(&self) -> Result<String, GitError> {
         self.require_repository()?;
-        self.at_root(&["symbolic-ref", "--short", "HEAD"])
+        // Not `--short`, which says `heads/main` when a tag is also named `main`.
+        let reference = self.at_root(&["symbolic-ref", "HEAD"])?;
+        Ok(reference
+            .strip_prefix("refs/heads/")
+            .unwrap_or(&reference)
+            .to_string())
     }
 
     /// Makes a branch at `from`, without checking it out.

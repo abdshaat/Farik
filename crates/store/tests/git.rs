@@ -75,6 +75,17 @@ fn answers_with_the_branch_it_is_on_when_there_is_no_remote_to_ask() {
 
 #[test]
 #[ignore = "needs the git program: cargo xtask check --integration"]
+fn names_the_branch_it_is_on_when_a_tag_has_its_name() {
+    // `symbolic-ref --short` would say `heads/main`, to tell it from the tag.
+    let repository = TempRepo::new("branch-and-tag");
+    repository.git(&["tag", "main"]);
+    let git = repository.adapter();
+    assert_eq!(git.current_branch().expect("the read works"), "main");
+    assert_eq!(git.default_branch().expect("the read works"), "main");
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
 fn reads_the_default_branch_from_the_remote_that_records_it() {
     // A repository with a remote records its default branch, and that is the integration branch
     // (5.14) — not whatever a session happens to have checked out at the time.
