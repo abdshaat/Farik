@@ -647,10 +647,7 @@ mod tests {
         ContractAcceptance, GateFailure, TransitionContext, TransitionDecision, TransitionEffect,
         TransitionRefusal, TransitionRequest, evaluate_transition,
     };
-    use crate::budget::{
-        BudgetState, DEFAULT_DAY_BUDGET_USD, DEFAULT_SESSION_LIMITS, DEFAULT_SPRINT_BUDGET_USD,
-        SessionLedger,
-    };
+    use crate::budget::{BudgetState, DEFAULT_SESSION_LIMITS, SessionLedger};
     use crate::contract::{Role, TaskStatus};
     use crate::generated::task_contract::FarikTaskContractKind as Kind;
     use crate::generated::task_contract::FarikTaskContractRisk as Risk;
@@ -705,9 +702,9 @@ mod tests {
             task_sessions: 1,
             task_max_sessions: 5,
             sprint_spent_usd: 3.0,
-            sprint_max_usd: DEFAULT_SPRINT_BUDGET_USD,
+            sprint_max_usd: 15.0,
             day_spent_usd: 4.0,
-            day_max_usd: DEFAULT_DAY_BUDGET_USD,
+            day_max_usd: 20.0,
         }
     }
 

@@ -277,7 +277,7 @@ mod tests {
         AgentStatus, HumanAcceptsContracts, Integration, PermissionTier, PermissionTierWire, Role,
         RoleWire, Team, validate_team,
     };
-    use crate::governor::team_rules::{DEFAULT_MAX_TASK_BUDGET_USD, DEFAULT_PROTECTED_PATHS};
+    use crate::governor::team_rules::DEFAULT_PROTECTED_PATHS;
 
     fn team(wire: &Value) -> Team {
         validate_team(wire).expect("the fixture is a team")
@@ -303,10 +303,18 @@ mod tests {
 
     #[test]
     fn reads_a_team_with_only_what_it_must_have() {
-        let team = team(&a_team_wire());
+        let mut wire = a_team_wire();
+        wire["budgets"]
+            .as_object_mut()
+            .expect("the fixture's budgets are an object")
+            .remove("daily_usd");
+        let team = team(&wire);
         assert_eq!(team.name.as_str(), "Farik");
         assert_eq!(team.agents.len(), 2);
-        assert!(close(team.budgets.daily_usd, 20.0));
+        assert!(
+            team.budgets.daily_usd.is_none(),
+            "no daily budget is a day with no dollar limit (ADR 0015)"
+        );
         assert!(team.budgets.session.is_none(), "the role's limits stand");
         assert_eq!(
             team.policy.human_accepts_contracts,
@@ -488,11 +496,7 @@ mod tests {
         assert!(rules.allowed_paths_ceiling.is_empty(), "no ceiling");
         assert!(rules.required_criteria.is_empty());
         assert!(!rules.require_new_tests);
-        assert!(
-            rules
-                .max_task_budget_usd
-                .is_some_and(|cap| close(cap, DEFAULT_MAX_TASK_BUDGET_USD))
-        );
+        assert_eq!(rules.max_task_budget_usd, None, "no cap (ADR 0015)");
         assert!(rules.forbidden_commands.is_empty());
     }
 

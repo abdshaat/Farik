@@ -4,7 +4,7 @@
 use std::io::{BufRead, BufReader, Read, Write};
 
 use farik_core::contract::{TaskId, TaskStatus};
-use farik_core::governor::team_rules::DEFAULT_MAX_TASK_BUDGET_USD;
+use farik_core::governor::team_rules::TeamRules;
 use farik_protocol::command::{Command, RequestSize};
 use farik_protocol::event::{EventBody, EventKind};
 use farik_runtime::forge::{Forge, Issue};
@@ -26,6 +26,9 @@ use crate::{CliIo, HUMAN};
 
 /// Every text of a request the Product Manager replaces while refining it.
 pub(crate) const PLACEHOLDER: &str = "(placeholder, for the Product Manager to write)";
+/// The budget a request is filed with when the team caps no task's budget (ADR 0015). The Product
+/// Manager rewrites it while refining, as it rewrites every placeholder.
+pub(crate) const PLACEHOLDER_MAX_COST_USD: f64 = 20.0;
 /// The longest title a contract has (the schema's `maxLength`).
 const TITLE_LIMIT: usize = 120;
 /// Why the human's size was given, as the log keeps it.
@@ -187,6 +190,14 @@ fn sized_line(task_id: &TaskId, size: RequestSize) -> String {
 }
 
 /// What filing did: the request is this process's to drive, or another process drives it.
+/// The budget a request is filed with: the team's cap on a task's budget when it has one, and
+/// otherwise `PLACEHOLDER_MAX_COST_USD`.
+pub(crate) fn placeholder_budget_usd(rules: &TeamRules) -> f64 {
+    rules
+        .max_task_budget_usd
+        .unwrap_or(PLACEHOLDER_MAX_COST_USD)
+}
+
 enum Filed {
     Here(TaskId),
     HandedOver,
@@ -201,12 +212,11 @@ fn file(
     as_json: bool,
 ) -> Result<Filed, String> {
     let (title, brief) = title_and_brief(project, &asked.source, io)?;
-    let max_cost_usd = project
-        .team
-        .rules()
-        .max_task_budget_usd
-        .unwrap_or(DEFAULT_MAX_TASK_BUDGET_USD);
-    let wire = request_from_brief(&title, &brief, max_cost_usd)?;
+    let wire = request_from_brief(
+        &title,
+        &brief,
+        placeholder_budget_usd(&project.team.rules()),
+    )?;
     let driven_elsewhere = match try_lock(&project.root)? {
         Some(lock) => {
             drop(lock);
@@ -636,7 +646,9 @@ mod tests {
     use farik_runtime::forge::Issue;
     use serde_json::{Value, json};
 
-    use super::{PLACEHOLDER, brief_from_issue, request_from_brief};
+    use farik_core::governor::team_rules::TeamRules;
+
+    use super::{PLACEHOLDER, brief_from_issue, placeholder_budget_usd, request_from_brief};
 
     /// Every string in `value` that is one of its texts, as against its ids, roles, and risk.
     fn texts(value: &Value) -> Vec<String> {
@@ -658,8 +670,9 @@ mod tests {
         let brief = "Add done.txt and a check that it exists";
         assert_eq!(brief.len(), 39);
         let brief = format!("{brief}.");
+        let budget = placeholder_budget_usd(&TeamRules::default());
         let mut request =
-            request_from_brief("Add done.txt", &brief, 5.0).expect("a request is built");
+            request_from_brief("Add done.txt", &brief, budget).expect("a request is built");
         assert!(texts(&request).iter().all(|text| text == PLACEHOLDER));
         request["id"] = json!("FRK-1");
         request["status"] = json!("draft");
@@ -667,6 +680,16 @@ mod tests {
 
         assert!(request_from_brief("Add done.txt", "A brief too short.!", 5.0).is_err());
         assert!(request_from_brief("Ad", &brief, 5.0).is_err());
+    }
+
+    #[test]
+    fn places_a_budget_of_the_team_cap_or_twenty_dollars() {
+        let capped = TeamRules {
+            max_task_budget_usd: Some(12.5),
+            ..TeamRules::default()
+        };
+        assert!((placeholder_budget_usd(&capped) - 12.5).abs() < 1e-9);
+        assert!((placeholder_budget_usd(&TeamRules::default()) - 20.0).abs() < 1e-9);
     }
 
     #[test]

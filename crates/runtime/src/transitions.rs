@@ -1487,6 +1487,39 @@ mod tests {
 
     #[test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn reads_no_days_remainder_without_a_daily_budget() {
+        let project = Project::new(
+            "no-daily-budget",
+            a_team(|wire| wire["budgets"] = json!({})),
+            at(12),
+        );
+        project.file("FRK-1", |_| {});
+        project.created("FRK-1", "ready");
+        project.spent("FRK-1", 1000.0);
+        let readiness = project.context(
+            &a_request("FRK-1", TaskStatus::Ready, TransitionActor::Governor, None),
+            &TransitionAsk::default(),
+        );
+        let left = readiness.readiness.remaining_sprint_budget_usd;
+        assert!(left.is_infinite() && left > 0.0, "{left}");
+        let context = project.context(
+            &a_request(
+                "FRK-1",
+                TaskStatus::Assigned,
+                TransitionActor::ProductManager,
+                Some("maya"),
+            ),
+            &assigning("dev-a", "dev-b"),
+        );
+        let left = context
+            .assignment
+            .expect("an assignment")
+            .remaining_sprint_budget_usd;
+        assert!(left.is_infinite() && left > 0.0, "{left}");
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
     fn reads_the_policy_that_asks_the_human_for_every_contract() {
         let project = Project::new("policy", a_team(|_| {}), at(12));
         project.file("FRK-1", |_| {});

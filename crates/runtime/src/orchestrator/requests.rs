@@ -752,7 +752,8 @@ mod tests {
         crate::tools::call_tool(&harness.project.context(agent, task), tool, input).await
     }
 
-    /// The failing write the tests seed: a budget over the team's cap of 5 dollars.
+    /// The failing write the tests seed: a budget of 50 dollars, over the 20 the team's day has and
+    /// over a cap of 5 dollars where a test sets one.
     async fn write_over_the_cap(harness: &Harness) {
         call(
             harness,
@@ -971,7 +972,9 @@ mod tests {
     #[tokio::test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn returns_a_failing_contract_with_its_failures() {
-        let harness = Harness::new("req-failing", |_| {});
+        let harness = Harness::new("req-failing", |wire| {
+            wire["rules"]["max_task_budget_usd"] = json!(5);
+        });
         let adapter = harness.recorded(vec![replays_farik_read_board()]);
         let orchestrator = harness.orchestrator(adapter.clone());
         refining(&harness, &orchestrator, RequestSize::Small).await;

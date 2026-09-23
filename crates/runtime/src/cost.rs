@@ -133,7 +133,8 @@ pub fn record_session_cost(
 ///
 /// The session limits are the role's defaults with each field `team.budgets.session` sets put in
 /// its place. The task's come from its contract, and a session with no task is bounded by none. The
-/// day is the UTC date of `now`. The sprint's is unbounded until sprints exist.
+/// day is the UTC date of `now`, and a team that sets no daily budget has an unbounded day (ADR
+/// 0015). The sprint's is unbounded until sprints exist.
 ///
 /// # Errors
 ///
@@ -184,7 +185,7 @@ pub fn budget_state(
         sprint_spent_usd: 0.0,
         sprint_max_usd: f64::INFINITY,
         day_spent_usd: day.map_or(0.0, |row| row.usd),
-        day_max_usd: team.budgets.daily_usd,
+        day_max_usd: team.budgets.daily_usd.unwrap_or(f64::INFINITY),
     })
 }
 
@@ -294,7 +295,7 @@ mod tests {
     use chrono::{DateTime, Utc};
     use farik_core::budget::{
         BudgetConsequence, BudgetScope, BudgetState, DEFAULT_SESSION_LIMITS, Exhausted,
-        SessionLedger, default_session_limits,
+        SessionLedger, check_budgets, default_session_limits,
     };
     use farik_core::contract::fixtures::a_contract_wire;
     use farik_core::contract::{Role, TaskContract, validate_contract};
@@ -605,6 +606,32 @@ mod tests {
         assert!(close(read.day_max_usd, 20.0));
         assert!(read.sprint_max_usd.is_infinite() && read.sprint_max_usd > 0.0);
         assert!(close(read.sprint_spent_usd, 0.0));
+    }
+
+    #[test]
+    fn leaves_the_day_unbounded_without_a_daily_budget() {
+        let (log, projections) = a_board();
+        record_session_cost(
+            &log,
+            &projections,
+            &source(ids(None, "a")),
+            &usage(1_000_000_000, 0),
+            &prices(),
+            &clock(),
+        )
+        .expect("recorded");
+        let mut wire = a_team_wire();
+        wire["budgets"] = json!({});
+        let team = validate_team(&wire).expect("a team with no daily budget");
+        let read = state(&projections, &team, Role::SoftwareDeveloper, None);
+        assert!(read.day_max_usd.is_infinite() && read.day_max_usd > 0.0);
+        assert!(close(read.day_spent_usd, 1000.0), "{}", read.day_spent_usd);
+        assert!(
+            !check_budgets(&read)
+                .iter()
+                .any(|exhausted| exhausted.scope == BudgetScope::DayUsd),
+            "no daily budget is spent"
+        );
     }
 
     #[test]

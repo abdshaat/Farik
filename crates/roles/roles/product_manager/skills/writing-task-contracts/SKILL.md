@@ -50,8 +50,9 @@ library (`farik_read_criteria`) first. Then write, with `farik_write_contract`:
   Architect's or a Marketing Specialist's by you. Paused and retired agents do not count. When
   the team has neither, the contract fails readiness: ask the user for a reviewer with
   `farik_ask_human` rather than naming one nobody can staff. Nobody reviews their own work.
-- **Risk** and **budget**: set both. A task's budget is within the team's maximum and what is left
-  of the sprint, and a task under an epic within what is left of the epic.
+- **Risk** and **budget**: set both. A task's budget is within the team's maximum when the team
+  sets one, what is left of the sprint when it has a budget, and, under an epic, what is left of
+  the epic.
 - **Dependencies**: only tasks that exist and are at least `ready`.
 
 ## 4. Exit criteria
@@ -79,7 +80,8 @@ Before you ask for `ready`, check that:
 - the intent is non-empty and states the user-facing reason;
 - there is at least one exit criterion, each with a valid method, and every `command` and `test`
   criterion has its command and its expected result;
-- the budget is set and fits the sprint, the team's maximum and, under an epic, the epic;
+- the budget is set and fits the sprint when it has a budget, the team's maximum when there is
+  one, and, under an epic, the epic;
 - the team has a reviewer: one active agent of the reviewer role, or two when it is the
   assignee's role;
 - risk is set and scope names at least one `out_of_scope` item;

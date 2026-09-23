@@ -2855,6 +2855,34 @@ mod tests {
 
     #[tokio::test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn starts_sessions_whatever_the_day_cost_without_a_daily_budget() {
+        let harness = Harness::new("orch-budget-no-day", |wire| wire["budgets"] = json!({}));
+        harness.spent(None, "s-0", 20.0);
+        harness.ready("FRK-1");
+        harness.assigned("FRK-2", "dev-a", "dev-b");
+        // Rule 6 comes before rule 8, so FRK-2's implement session is the first one started.
+        let adapter = harness.recorded(vec![implement_stops_early(), plan_assigns_frk_1()]);
+        let orchestrator = harness.orchestrator(adapter.clone());
+
+        let first = orchestrator.tick().await.expect("the tick runs");
+        assert_eq!(acted_on(&first), Some("FRK-2"), "{first:?}");
+        let second = orchestrator.tick().await.expect("the tick runs");
+        assert_ne!(
+            second,
+            TickReport::Idle {
+                why: "the team's daily budget is spent".to_string()
+            }
+        );
+        let started = adapter.started();
+        assert_eq!(
+            started[0].task_id.as_ref().map(|task| task.as_str()),
+            Some("FRK-2")
+        );
+        assert_eq!(started[0].purpose, SessionPurpose::Implement);
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn breaks_ties_by_the_number_in_the_task_id() {
         // Filed tenth first, so that neither the order of filing nor the order of the ids as text
         // puts FRK-2 first.

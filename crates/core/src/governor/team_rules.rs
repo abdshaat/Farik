@@ -5,9 +5,6 @@ use std::sync::LazyLock;
 pub const DEFAULT_PROTECTED_PATHS: [&str; 5] =
     [".env", ".env.*", "**/*.pem", "**/*.key", ".farik/local/**"];
 
-/// The cap on one task's budget in dollars unless the human raises it (project plan D3).
-pub const DEFAULT_MAX_TASK_BUDGET_USD: f64 = 5.0;
-
 /// Constraints the human writes once in `.farik/team.yaml` under `rules`, applied by the governor
 /// to every contract and every tool call (`docs/SPEC.md` section 5.12). Rules never loosen a
 /// permission tier; they only narrow what a granted tier allows.
@@ -21,7 +18,7 @@ pub struct TeamRules {
     pub required_criteria: Vec<String>,
     /// Whether every `test` criterion must set `new_tests_required`.
     pub require_new_tests: bool,
-    /// The most a contract's `max_cost_usd` may be; `None` means no cap.
+    /// The most a contract's `max_cost_usd` may be; `None`, the default, means no cap (ADR 0015).
     pub max_task_budget_usd: Option<f64>,
     /// Regular expressions a command must not match.
     pub forbidden_commands: Vec<String>,
@@ -37,7 +34,7 @@ impl Default for TeamRules {
             allowed_paths_ceiling: Vec::new(),
             required_criteria: Vec::new(),
             require_new_tests: false,
-            max_task_budget_usd: Some(DEFAULT_MAX_TASK_BUDGET_USD),
+            max_task_budget_usd: None,
             forbidden_commands: Vec::new(),
         }
     }
@@ -51,13 +48,13 @@ mod tests {
     use super::{DEFAULT_TEAM_RULES, TeamRules};
 
     #[test]
-    fn protects_the_secret_paths_and_caps_a_task_at_five_dollars_by_default() {
+    fn protects_the_secret_paths_and_caps_no_task_by_default() {
         let rules = TeamRules::default();
         assert_eq!(
             rules.protected_paths,
             [".env", ".env.*", "**/*.pem", "**/*.key", ".farik/local/**"]
         );
-        assert_eq!(rules.max_task_budget_usd, Some(5.0));
+        assert_eq!(rules.max_task_budget_usd, None);
     }
 
     #[test]
