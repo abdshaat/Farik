@@ -170,7 +170,7 @@ Files: `transitions.rs`, `tools/contracts.rs`, `tools/work.rs` (tests needing gi
 - `lets_an_epic_be_written_once_its_question_is_answered` — `question_unanswered` while the question is open; after a `question.answered` naming its seq, the write is accepted.
 - `writes_a_product_document_once_the_epic_is_approved` — after `human.accepted { contract }` with the epic `ready`: the document is written and `product_doc.written` appended; with the same epic `cancelled`: refused. Step 05's refusal test passes unchanged.
 
-- [ ] `feat(runtime): read the human's approvals, acceptances, and answers in every gate`
+- [x] `feat(runtime): read the human's approvals, acceptances, and answers in every gate`
 
 ### Task 4: the human's commands
 

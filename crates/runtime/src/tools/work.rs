@@ -11,6 +11,7 @@ use farik_protocol::event::{
     CriterionRecordedBody, CriterionRecordedBodyRunBy, EventBody, NoteWrittenBody,
     NoteWrittenBodyKind, ProductDocWrittenBody, QuestionAskedBody,
 };
+use farik_store::EventQuery;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -18,7 +19,7 @@ use serde_json::{Value, json};
 use super::refusal::Refusal;
 use super::{Call, ToolError, failed};
 use crate::transitions::{
-    TransitionAsk, TransitionOutcome, actor_wire, refusal_details, refusal_wire,
+    TransitionAsk, TransitionOutcome, actor_wire, contract_accepted, refusal_details, refusal_wire,
 };
 
 /// What is in the way, for a block.
@@ -316,16 +317,29 @@ pub(super) fn ask_human(call: &Call<'_>, input: AskHumanInput) -> Result<Value, 
     }))
 }
 
-/// Writes a product document for the session's epic when `check_product_doc_write` allows it.
-/// The user's approval is recorded from phase 3 step 14, so until then none is given.
+/// Writes a product document for the session's epic when `check_product_doc_write` allows it: the
+/// user's approval is a `human.accepted { contract }` of the contract the epic has now.
 pub(super) fn write_product_doc(
     call: &Call<'_>,
     input: WriteProductDocInput,
 ) -> Result<Value, ToolError> {
     let task = call.task()?;
     let (contract, row) = call.contract(task)?;
-    check_product_doc_write(contract.kind, row.status, false, call.role())
-        .map_err(|details| Refusal::GateFailed { details })?;
+    let history = call
+        .deps()
+        .log
+        .read(&EventQuery {
+            task_id: Some(task.clone()),
+            ..EventQuery::default()
+        })
+        .map_err(failed)?;
+    check_product_doc_write(
+        contract.kind,
+        row.status,
+        contract_accepted(&history),
+        call.role(),
+    )
+    .map_err(|details| Refusal::GateFailed { details })?;
     call.deps()
         .files
         .write_product_doc(&input.path, &input.content)
@@ -788,6 +802,39 @@ mod tests {
             !project.repo.path.join(".farik/product/prd.md").exists(),
             "nothing is written"
         );
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn writes_a_product_document_once_the_epic_is_approved() {
+        let project = a_project("tools-product-doc-approved");
+        project.filed("FRK-1", "escalated", "epic", None);
+        project.moved("FRK-1", "refining", "escalated", &json!({}));
+        project.record(
+            "FRK-1",
+            "human.accepted",
+            &json!({ "subject": "contract", "accepted_by": "human" }),
+        );
+        project.moved("FRK-1", "escalated", "ready", &json!({}));
+        let write = || {
+            project.call(
+                "pm",
+                Some("FRK-1"),
+                "farik_write_product_doc",
+                json!({ "path": "prd.md", "content": "# Sign-in" }),
+            )
+        };
+        write().expect("the human approved the epic's contract");
+        assert_eq!(
+            std::fs::read_to_string(project.repo.path.join(".farik/product/prd.md"))
+                .expect("the document is written"),
+            "# Sign-in"
+        );
+        assert_eq!(project.events(&[EventKind::ProductDocWritten]).len(), 1);
+
+        project.moved("FRK-1", "ready", "cancelled", &json!({}));
+        let reason = refused_with(write(), "gate_failed");
+        assert!(reason.contains("cancelled"), "{reason}");
     }
 
     #[test]

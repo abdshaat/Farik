@@ -9,7 +9,7 @@ use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 
 use farik_core::budget::SessionLedger;
-use farik_core::contract::{Role, TaskContract, TaskId, TaskKind, TaskStatus};
+use farik_core::contract::{Role, TaskContract, TaskId, TaskKind, TaskStatus, wire_method};
 use farik_core::governor::done::{CriterionResult, DoneEvidence, RunBy};
 use farik_core::governor::escalation::EscalationReason;
 use farik_core::governor::gates::{
@@ -27,9 +27,9 @@ use farik_protocol::clock::Clock;
 use farik_protocol::event::{
     BlockerWire, ContractEvaluatedBody, ContractEvaluatedBodyGate, CriterionRecordedBodyRunBy,
     EscalationRaisedBody, EscalationRaisedBodyReason, EventBody, EventIds, EventKind, FarikEvent,
-    GateWire, NoteWrittenBodyKind, RejectionWire, TaskStatusWire, TaskTransitionedBody,
-    TaskTransitionedBodyEffectsItem, TransitionActorWire, TransitionRefusedBody,
-    TransitionRefusedBodyRefusal, new_event,
+    GateWire, HumanAcceptedBodySubject, NoteWrittenBodyKind, RejectionWire, TaskStatusWire,
+    TaskTransitionedBody, TaskTransitionedBodyEffectsItem, TransitionActorWire,
+    TransitionRefusedBody, TransitionRefusedBodyRefusal, new_event,
 };
 use farik_store::files::{FilesError, ProjectFiles};
 use farik_store::{EventLog, EventQuery, Git, GitError, Projections, StoreError, TaskProjection};
@@ -71,6 +71,9 @@ pub struct TransitionAsk {
     /// Why Farik could not run one of the task's criteria for its reviewer, for a reason that is
     /// not the work's: the words of the governor's escalation (5.4).
     pub criterion_unrunnable: Option<String>,
+    /// The human's words for a move they asked for, recorded on the move; into `escalated` they
+    /// are also the escalation's.
+    pub reason: Option<String>,
 }
 
 /// The governor's answer, which is recorded either way.
@@ -275,7 +278,7 @@ impl Transitions {
                 failed_criterion_ids: rejection.failed_criterion_ids.clone(),
                 reasons: rejection.reasons.clone(),
             }),
-            reason: None,
+            reason: ask.reason.clone(),
         };
         self.append(request, ask, EventBody::TaskTransitioned(body))?;
         for effect in &decision.effects {
@@ -296,8 +299,8 @@ impl Transitions {
 
     /// The gate that opened an escalation, and the words it was about when there are any: the
     /// rejection's reasons, the blocker's description, which for `blocked -> escalated` (asked by
-    /// the governor with an empty ask) is read from the task's last move into `blocked`, or why
-    /// Farik could not run a criterion.
+    /// the governor with an empty ask) is read from the task's last move into `blocked`, the
+    /// human's reason, or why Farik could not run a criterion.
     fn escalation_detail(
         &self,
         request: &TransitionRequest,
@@ -314,6 +317,7 @@ impl Transitions {
                     .as_ref()
                     .map(|blocker| blocker.description.clone())
             })
+            .or_else(|| ask.reason.clone())
             .or_else(|| ask.criterion_unrunnable.clone());
         if words.is_none() && decision.from == TaskStatus::Blocked {
             let history = self.log.read(&EventQuery {
@@ -422,25 +426,27 @@ impl Transitions {
 
         let (work, changed_paths) = self.work(id, team)?;
 
-        // A dependency is integrated once it is accepted and no longer awaiting integration
-        // (5.14): an accepted epic never awaits, its children carrying the branches.
-        let dependencies = contract
-            .dependencies
-            .iter()
-            .filter_map(|dependency| {
-                board
-                    .iter()
-                    .find(|row| row.task_id.as_str() == dependency.as_str())
-                    .map(|row| DependencyState {
-                        task_id: dependency.to_string(),
-                        status: row.status,
-                        integrated: row.status == TaskStatus::Accepted && !row.awaiting_integration,
-                    })
-            })
-            .collect();
-        let assignment = assignment(ask, team, &board, day_left, dependencies);
+        let assignment = assignment(
+            ask,
+            team,
+            &board,
+            day_left,
+            dependency_states(&contract, &board),
+        );
 
         let (results, completion_note, review_note) = evidence_since_work_began(&history);
+        let done = with_the_humans_acceptance(
+            &contract,
+            team,
+            &history,
+            DoneEvidence {
+                results: results.clone(),
+                changed_paths,
+                completion_note,
+                review_note,
+                human_accepted: false,
+            },
+        );
         let hours = team.policy.blocked_limit_hours.get();
         Ok(TransitionContext {
             triaged: row.triaged,
@@ -457,10 +463,10 @@ impl Transitions {
             acceptance: ContractAcceptance {
                 required_by_policy: team.policy.human_accepts_contracts
                     == HumanAcceptsContracts::All,
-                given: false,
+                given: contract_accepted(&history),
             },
             assignment,
-            assignee_results: results.clone(),
+            assignee_results: results,
             work,
             blocker: ask.blocker.clone(),
             blocker_resolution: ask.blocker_resolution.clone(),
@@ -468,13 +474,7 @@ impl Transitions {
                 .map(|event| event.envelope.recorded_at),
             now,
             blocked_limit: Duration::from_secs(hours.saturating_mul(3600)),
-            done: DoneEvidence {
-                results,
-                changed_paths,
-                completion_note,
-                review_note,
-                human_accepted: false,
-            },
+            done,
             rejection: ask.rejection.clone(),
             budget,
             permission_denied: ask.permission_denied,
@@ -598,9 +598,7 @@ fn refused_before_the_governor(
     if contract.status != TaskStatus::Ready || request.to != TaskStatus::Assigned {
         return None;
     }
-    // An epic on a team with no active Scrum Master is reviewed by the human (5.16 item 4), who
-    // has no agent id.
-    let human_reviews = contract.kind == TaskKind::Epic && !team.has_active(Role::ScrumMaster);
+    let human_reviews = reviewed_by_the_human(contract, team);
     let mut details = Vec::new();
     for (what, id) in [
         ("assignee", &ask.assignee_id),
@@ -629,6 +627,12 @@ fn refused_before_the_governor(
             details,
         }],
     })
+}
+
+/// Whether the human reviews this contract: an epic, on a team with no active Scrum Master, is
+/// reviewed by the human (5.16 item 4), who has no agent id.
+pub(crate) fn reviewed_by_the_human(contract: &TaskContract, team: &Team) -> bool {
+    contract.kind == TaskKind::Epic && !team.has_active(Role::ScrumMaster)
 }
 
 /// The Definition of Ready or Done evaluations a decision holds: the decided row's gate when it
@@ -802,6 +806,26 @@ fn row_of<'a>(
         })
 }
 
+/// The contract's dependencies the board holds. One is integrated once it is accepted and no
+/// longer awaiting integration (5.14): an accepted epic never awaits, its children carrying the
+/// branches.
+fn dependency_states(contract: &TaskContract, board: &[TaskProjection]) -> Vec<DependencyState> {
+    contract
+        .dependencies
+        .iter()
+        .filter_map(|dependency| {
+            board
+                .iter()
+                .find(|row| row.task_id.as_str() == dependency.as_str())
+                .map(|row| DependencyState {
+                    task_id: dependency.to_string(),
+                    status: row.status,
+                    integrated: row.status == TaskStatus::Accepted && !row.awaiting_integration,
+                })
+        })
+        .collect()
+}
+
 /// The pair an assignment would name, from the ask's ids and the team's roles, when the ask names
 /// an assignee. `requested_by` is the governor's to set from the request's actor.
 fn assignment(
@@ -895,6 +919,83 @@ fn readiness_failed_attempts(history: &[FarikEvent]) -> u32 {
         })
         .count();
     u32::try_from(failed).unwrap_or(u32::MAX)
+}
+
+/// Whether the human accepted the contract the task has now (5.16 item 2): a `human.accepted
+/// { subject: contract }` after the task's last `contract.written` and its last move into
+/// `refining`, since a contract written or refined again is not the one the human approved.
+pub(crate) fn contract_accepted(history: &[FarikEvent]) -> bool {
+    let since = history
+        .iter()
+        .filter(|event| {
+            event.body.kind() == EventKind::ContractWritten
+                || is_move_into(event, TaskStatus::Refining)
+        })
+        .map(|event| event.envelope.seq)
+        .max()
+        .unwrap_or(0);
+    history.iter().any(|event| {
+        event.envelope.seq > since
+            && matches!(
+                &event.body,
+                EventBody::HumanAccepted(body) if body.subject == HumanAcceptedBodySubject::Contract
+            )
+    })
+}
+
+/// The human's acceptance of the task's result since its last move into `verifying`, the last
+/// one when there are several: its sequence number and its words.
+pub(crate) fn result_accepted(history: &[FarikEvent]) -> Option<(u64, Option<String>)> {
+    let since =
+        last_move_into(history, TaskStatus::Verifying).map_or(0, |event| event.envelope.seq);
+    history
+        .iter()
+        .rev()
+        .filter(|event| event.envelope.seq > since)
+        .find_map(|event| match &event.body {
+            EventBody::HumanAccepted(body) if body.subject == HumanAcceptedBodySubject::Result => {
+                Some((event.envelope.seq, body.message.clone()))
+            }
+            _ => None,
+        })
+}
+
+/// The Done evidence with the human's acceptance of the result read into it (5.4): the
+/// acceptance itself, and one passing `Human` result for each `human` criterion, which is the one
+/// path to them. For an epic the human reviews (ADR 0013), it also stands for the reviewer's
+/// answer to each `review` criterion, and its words are the review note.
+fn with_the_humans_acceptance(
+    contract: &TaskContract,
+    team: &Team,
+    history: &[FarikEvent],
+    mut done: DoneEvidence,
+) -> DoneEvidence {
+    let Some((seq, message)) = result_accepted(history) else {
+        return done;
+    };
+    done.human_accepted = true;
+    let evidence = format!("human.accepted at seq {seq}");
+    let reviews = reviewed_by_the_human(contract, team);
+    for criterion in &contract.exit_criteria {
+        let run_by = match wire_method(&criterion.verification) {
+            Some("human") => RunBy::Human,
+            Some("review") if reviews => RunBy::Reviewer,
+            _ => continue,
+        };
+        let id = criterion.id.to_string();
+        done.results
+            .retain(|result| result.criterion_id != id || result.run_by != run_by);
+        done.results.push(CriterionResult {
+            criterion_id: id,
+            passed: true,
+            evidence: evidence.clone(),
+            run_by,
+        });
+    }
+    if reviews {
+        done.review_note = message;
+    }
+    done
 }
 
 /// The criterion results and notes recorded since the task last entered `in_progress`, so that a
@@ -1002,7 +1103,7 @@ mod tests {
     use farik_store::{EventLog, IN_MEMORY, Projections, open_event_log, open_projections};
     use serde_json::{Value, json};
 
-    use super::{TransitionAsk, TransitionOutcome, Transitions};
+    use super::{TransitionAsk, TransitionOutcome, Transitions, reviewed_by_the_human};
 
     /// A clock a test moves by hand, for a block that has to age.
     struct MovableClock(std::sync::Mutex<DateTime<Utc>>);
@@ -2453,6 +2554,306 @@ mod tests {
         assert_eq!(
             escalation.detail,
             "iteration_limit_reached: the form has no labels"
+        );
+    }
+
+    /// A `human.accepted` of `subject` about `task`, with `message` when given.
+    fn accepted(project: &Project, task: &str, subject: &str, message: Option<&str>) -> FarikEvent {
+        let mut body = json!({ "subject": subject, "accepted_by": "human" });
+        if let Some(message) = message {
+            body["message"] = json!(message);
+        }
+        project.record(task, "human.accepted", &body, at(11))
+    }
+
+    /// A passing result for `criterion` of `task`, as the reviewer's run Farik recorded.
+    fn governor_result(project: &Project, task: &str, criterion: &str) -> FarikEvent {
+        project.record(
+            task,
+            "criterion.recorded",
+            &json!({
+                "criterion_id": criterion,
+                "passed": true,
+                "evidence": "at abc: exit 0",
+                "run_by": "reviewer",
+                "recorded_by": "governor"
+            }),
+            at(10),
+        )
+    }
+
+    fn note(project: &Project, task: &str, kind: &str, by: &str) {
+        project.record(
+            task,
+            "note.written",
+            &json!({ "kind": kind, "text": format!("The {kind} note."), "written_by": by }),
+            at(10),
+        );
+    }
+
+    /// An epic the Product Manager wrote for the human to review, with `criteria`.
+    fn an_epic(project: &Project, task: &str, criteria: &Value) {
+        project.file(task, |wire| {
+            wire["kind"] = json!("epic");
+            wire["assignee_role"] = json!("product_manager");
+            wire["reviewer_role"] = json!("human");
+            wire["exit_criteria"] = criteria.clone();
+        });
+    }
+
+    fn accepting(task: &str) -> TransitionRequest {
+        a_request(
+            task,
+            TaskStatus::Accepted,
+            TransitionActor::ProductManager,
+            Some("maya"),
+        )
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn reads_the_approval_of_the_contract_the_task_has_now() {
+        let project = Project::new("approval-now", a_team(|_| {}), at(12));
+        an_epic(&project, "FRK-1", &a_contract_wire()["exit_criteria"]);
+        project.created_under("FRK-1", "draft", "epic", None);
+        project.moved("FRK-1", "draft", "refining", &json!({}), at(9));
+        project.moved("FRK-1", "refining", "escalated", &json!({}), at(9));
+        project.record(
+            "FRK-1",
+            "escalation.raised",
+            &json!({ "reason": "approval", "detail": "contract_requires_human" }),
+            at(9),
+        );
+        let approving = a_request("FRK-1", TaskStatus::Ready, TransitionActor::Human, None);
+        assert!(
+            !project
+                .context(&approving, &TransitionAsk::default())
+                .acceptance
+                .given
+        );
+
+        accepted(&project, "FRK-1", "contract", None);
+        assert!(
+            project
+                .context(&approving, &TransitionAsk::default())
+                .acceptance
+                .given
+        );
+
+        project.moved("FRK-1", "escalated", "refining", &json!({}), at(11));
+        project.record(
+            "FRK-1",
+            "contract.written",
+            &json!({
+                "summary": { "kind": "epic", "title": "Add a login page", "status": "refining", "risk": "low" },
+                "written_by": "maya"
+            }),
+            at(11),
+        );
+        assert!(
+            !project
+                .context(&approving, &TransitionAsk::default())
+                .acceptance
+                .given,
+            "an approval is of the contract as it was"
+        );
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn accepts_a_high_risk_task_once_the_human_has() {
+        let project = Project::new("high-risk-accept", a_team(|_| {}), at(12));
+        project.file("FRK-1", |wire| wire["risk"] = json!("high"));
+        project.created("FRK-1", "assigned");
+        let people = json!({ "assignee": "dev-a", "reviewer": "dev-b" });
+        project.moved("FRK-1", "assigned", "in_progress", &people, at(9));
+        governor_result(&project, "FRK-1", "C1");
+        note(&project, "FRK-1", "completion", "dev-a");
+        note(&project, "FRK-1", "review", "dev-b");
+        accepted(&project, "FRK-1", "result", None);
+        project.moved("FRK-1", "in_progress", "verifying", &people, at(11));
+
+        let outcome = project.ask(&accepting("FRK-1"), &TransitionAsk::default());
+        let TransitionOutcome::Refused(refusal) = outcome else {
+            panic!("an acceptance from before this verification: {outcome:?}");
+        };
+        assert!(
+            super::refusal_details(&refusal)
+                .iter()
+                .any(|detail| detail.contains("a high risk task is accepted by the human")),
+            "{refusal:?}"
+        );
+
+        accepted(&project, "FRK-1", "result", None);
+        let outcome = project.ask(&accepting("FRK-1"), &TransitionAsk::default());
+        assert!(
+            matches!(outcome, TransitionOutcome::Moved(_)),
+            "{outcome:?}"
+        );
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn answers_every_human_criterion_with_one_acceptance() {
+        let project = Project::new("human-criteria", a_team(|_| {}), at(12));
+        project.file("FRK-1", |wire| {
+            wire["exit_criteria"] = json!([
+                { "id": "C1", "text": "It builds.", "verification": { "method": "command", "command": "true", "expect": {} } },
+                { "id": "C2", "text": "The founder signed in.", "verification": { "method": "human", "question": "Did you sign in?" } },
+                { "id": "C3", "text": "The founder signed out.", "verification": { "method": "human", "question": "Did you sign out?" } }
+            ]);
+        });
+        project.created("FRK-1", "assigned");
+        let people = json!({ "assignee": "dev-a", "reviewer": "dev-b" });
+        project.moved("FRK-1", "assigned", "in_progress", &people, at(9));
+        project.moved("FRK-1", "in_progress", "verifying", &people, at(10));
+        let acceptance = accepted(&project, "FRK-1", "result", None);
+
+        let context = project.context(&accepting("FRK-1"), &TransitionAsk::default());
+        let evidence = format!("human.accepted at seq {}", acceptance.envelope.seq);
+        let human: Vec<_> = context
+            .done
+            .results
+            .iter()
+            .filter(|result| result.run_by == farik_core::governor::done::RunBy::Human)
+            .map(|result| {
+                (
+                    result.criterion_id.clone(),
+                    result.passed,
+                    result.evidence.clone(),
+                )
+            })
+            .collect();
+        assert_eq!(
+            human,
+            vec![
+                ("C2".to_string(), true, evidence.clone()),
+                ("C3".to_string(), true, evidence),
+            ]
+        );
+        assert!(context.done.human_accepted);
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn takes_the_humans_acceptance_as_an_epics_review_answers() {
+        use farik_core::governor::done::RunBy;
+        let project = Project::new("epic-review-answers", a_team(|_| {}), at(12));
+        let criteria = json!([
+            { "id": "C1", "text": "done.txt exists.", "verification": { "method": "command", "command": "test -f done.txt", "expect": {} } },
+            { "id": "C2", "text": "done.txt says it.", "verification": { "method": "review", "rubric": ["Does done.txt say what the request asked?"] } },
+            { "id": "C3", "text": "The founder read it.", "verification": { "method": "human", "question": "Is it right?" } }
+        ]);
+        an_epic(&project, "FRK-1", &criteria);
+        project.created_under("FRK-1", "assigned", "epic", None);
+        let people = json!({ "assignee": "maya" });
+        project.moved("FRK-1", "assigned", "in_progress", &people, at(9));
+        project.moved("FRK-1", "in_progress", "verifying", &people, at(10));
+        governor_result(&project, "FRK-1", "C1");
+        accepted(&project, "FRK-1", "result", Some("Both look right."));
+
+        let context = project.context(&accepting("FRK-1"), &TransitionAsk::default());
+        let of = |id: &str, run_by: RunBy| {
+            context
+                .done
+                .results
+                .iter()
+                .find(|result| result.criterion_id == id && result.run_by == run_by)
+                .map(|result| (result.passed, result.evidence.clone()))
+        };
+        assert_eq!(
+            of("C1", RunBy::Reviewer),
+            Some((true, "at abc: exit 0".to_string())),
+            "C1 is still Farik's run"
+        );
+        assert_eq!(
+            of("C2", RunBy::Reviewer).map(|(passed, _)| passed),
+            Some(true)
+        );
+        assert_eq!(of("C3", RunBy::Human).map(|(passed, _)| passed), Some(true));
+        assert_eq!(
+            context.done.review_note.as_deref(),
+            Some("Both look right.")
+        );
+        assert!(context.done.human_accepted);
+
+        project.file("FRK-2", |wire| {
+            wire["id"] = json!("FRK-2");
+            wire["exit_criteria"] = criteria.clone();
+        });
+        project.created("FRK-2", "assigned");
+        let people = json!({ "assignee": "dev-a", "reviewer": "dev-b" });
+        project.moved("FRK-2", "assigned", "in_progress", &people, at(9));
+        project.moved("FRK-2", "in_progress", "verifying", &people, at(10));
+        accepted(&project, "FRK-2", "result", Some("Both look right."));
+        let context = project.context(&accepting("FRK-2"), &TransitionAsk::default());
+        assert!(
+            !context
+                .done
+                .results
+                .iter()
+                .any(|result| result.run_by == RunBy::Reviewer),
+            "dev-b answers a task's review criteria, not the human's acceptance"
+        );
+    }
+
+    #[test]
+    fn names_the_human_as_reviewer_of_epics_only_without_a_scrum_master() {
+        let mut epic_wire = a_contract_wire();
+        epic_wire["kind"] = json!("epic");
+        epic_wire["assignee_role"] = json!("product_manager");
+        epic_wire["reviewer_role"] = json!("human");
+        let epic = validate_contract(&epic_wire).expect("an epic");
+        let task = validate_contract(&a_contract_wire()).expect("a task");
+        let team = a_team(|_| {});
+        assert!(reviewed_by_the_human(&epic, &team));
+        assert!(!reviewed_by_the_human(&task, &team));
+        let with_a_scrum_master = a_team(|wire| {
+            wire["agents"]
+                .as_array_mut()
+                .expect("a list of agents")
+                .push(an_agent_wire("sam", "scrum_master"));
+        });
+        assert!(!reviewed_by_the_human(&epic, &with_a_scrum_master));
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn records_the_humans_reason_on_their_move() {
+        let project = Project::new("human-reason", a_team(|_| {}), at(12));
+        project.file("FRK-1", |_| {});
+        project.created("FRK-1", "assigned");
+        let people = json!({ "assignee": "dev-a", "reviewer": "dev-b" });
+        project.moved("FRK-1", "assigned", "in_progress", &people, at(9));
+
+        let outcome = project.ask(
+            &a_request("FRK-1", TaskStatus::Escalated, TransitionActor::Human, None),
+            &TransitionAsk {
+                reason: Some("stopped by the human".to_string()),
+                ..TransitionAsk::default()
+            },
+        );
+        assert!(
+            matches!(outcome, TransitionOutcome::Moved(_)),
+            "{outcome:?}"
+        );
+        let moves = project.events("FRK-1", &[EventKind::TaskTransitioned]);
+        assert_eq!(
+            moved_body(moves.last().expect("the human's move"))
+                .reason
+                .as_deref(),
+            Some("stopped by the human")
+        );
+        let escalations = project.events("FRK-1", &[EventKind::EscalationRaised]);
+        let escalation = escalation_body(&escalations[0]);
+        assert_eq!(
+            escalation.reason,
+            EscalationRaisedBodyReason::ExplicitRequest
+        );
+        assert!(
+            escalation.detail.ends_with("stopped by the human"),
+            "{}",
+            escalation.detail
         );
     }
 }

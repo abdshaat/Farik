@@ -285,19 +285,28 @@ fn contract_writer(
     })
 }
 
-/// Whether a question about `task` has been asked. None is answered until `question.answered`
-/// exists (phase 3 step 14), so every one asked is open.
+/// Whether a question about `task` is still open: asked, and named by no `question.answered`
+/// (5.7).
 fn has_asked(call: &Call<'_>, task: &TaskId) -> Result<bool, ToolError> {
-    Ok(!call
+    let events = call
         .deps()
         .log
         .read(&EventQuery {
             task_id: Some(task.clone()),
-            kinds: vec![EventKind::QuestionAsked],
+            kinds: vec![EventKind::QuestionAsked, EventKind::QuestionAnswered],
             ..EventQuery::default()
         })
-        .map_err(failed)?
-        .is_empty())
+        .map_err(failed)?;
+    let answered: Vec<u64> = events
+        .iter()
+        .filter_map(|event| match &event.body {
+            EventBody::QuestionAnswered(body) => Some(body.question_id.get()),
+            _ => None,
+        })
+        .collect();
+    Ok(events.iter().any(|event| {
+        event.body.kind() == EventKind::QuestionAsked && !answered.contains(&event.envelope.seq)
+    }))
 }
 
 /// Fills `reviewer_role` with the role the team can staff (D7) when `assignee_role` is there and
@@ -592,6 +601,42 @@ mod tests {
                 json!({ "fields": { "intent": "Something else entirely, and longer." } }),
             ),
             "question_unanswered",
+        );
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn lets_an_epic_be_written_once_its_question_is_answered() {
+        let project = a_project("tools-write-answered");
+        project.filed("FRK-1", "refining", "epic", None);
+        let question = project.record(
+            "FRK-1",
+            "question.asked",
+            &json!({ "question": "Who signs in?", "asked_by": "pm" }),
+        );
+        let write = || {
+            project.call(
+                "pm",
+                Some("FRK-1"),
+                "farik_write_contract",
+                json!({ "fields": { "intent": "Something else entirely, and longer." } }),
+            )
+        };
+        refused_with(write(), "question_unanswered");
+
+        project.record(
+            "FRK-1",
+            "question.answered",
+            &json!({
+                "question_id": question.envelope.seq,
+                "answer": "Anyone with an account.",
+                "answered_by": "human"
+            }),
+        );
+        write().expect("the question is answered, so the epic is written");
+        assert_eq!(
+            project.file("FRK-1")["intent"],
+            "Something else entirely, and longer."
         );
     }
 
