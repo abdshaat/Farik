@@ -19,9 +19,14 @@ use axum::routing::post;
 use axum::{Json, Router};
 use farik_core::budget::SessionLimits;
 use farik_core::contract::TaskId;
+use rmcp::transport::streamable_http_server::session::local::LocalSessionManager;
+use rmcp::transport::streamable_http_server::{StreamableHttpServerConfig, StreamableHttpService};
 use tokio::net::TcpListener;
 use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
+use tokio_util::sync::CancellationToken;
+
+use self::mcp::FarikMcp;
 
 use crate::exec::Executor;
 use crate::tools::ToolDeps;
@@ -29,6 +34,7 @@ use crate::tools::ToolDeps;
 #[cfg(test)]
 pub(crate) mod fixtures;
 mod hooks;
+mod mcp;
 
 pub use hooks::{
     HookDecision, HookRequest, builtin_tool_tier, decide_pre_tool_use, record_post_tool_use,
@@ -161,6 +167,7 @@ pub struct DaemonHandle {
     /// How it is reached.
     pub info: DaemonInfo,
     daemon_file: PathBuf,
+    cancel: CancellationToken,
     stop: oneshot::Sender<()>,
     server: JoinHandle<std::io::Result<()>>,
 }
@@ -172,6 +179,9 @@ impl DaemonHandle {
     ///
     /// `Io` when the server failed or the file cannot be removed.
     pub async fn shutdown(self) -> Result<(), DaemonError> {
+        // The MCP sessions first: Claude Code holds an event stream open with keep-alives, and a
+        // graceful shutdown would wait on it forever.
+        self.cancel.cancel();
         // The server may have stopped already, in which case there is nobody to tell.
         let _ = self.stop.send(());
         let served = self.server.await.map_err(|error| DaemonError::Io {
@@ -218,7 +228,8 @@ pub async fn serve(
         token,
         pid: std::process::id(),
     };
-    let app = router(state, &info.token);
+    let cancel = CancellationToken::new();
+    let app = router(state, &info.token, cancel.clone());
     let (stop, stopped) = oneshot::channel::<()>();
     let server = tokio::spawn(async move {
         axum::serve(listener, app)
@@ -230,6 +241,7 @@ pub async fn serve(
     let handle = DaemonHandle {
         info,
         daemon_file: config.daemon_file,
+        cancel,
         stop,
         server,
     };
@@ -282,13 +294,31 @@ fn random_token() -> Result<String, DaemonError> {
         }))
 }
 
-/// The routes, each behind the token.
-pub(crate) fn router(state: Arc<DaemonState>, token: &str) -> Router {
+/// The routes, each behind the token: the two hooks, and Farik's MCP server for the session
+/// `X-Farik-Session` names. `cancel` ends every MCP session, whose event streams a graceful
+/// shutdown would otherwise wait on forever.
+pub(crate) fn router(state: Arc<DaemonState>, token: &str, cancel: CancellationToken) -> Router {
     let expected: Arc<str> = Arc::from(format!("Bearer {token}"));
+    let deps = Arc::clone(state.deps());
+    let server = StreamableHttpService::new(
+        move || Ok(FarikMcp::new(Arc::clone(&deps))),
+        Arc::new(LocalSessionManager::default()),
+        // The stateful sessions Claude Code opens with `initialize` are the default.
+        StreamableHttpServerConfig::default()
+            .with_json_response(true)
+            .with_cancellation_token(cancel),
+    );
+    let mcp = Router::new()
+        .route_service("/mcp", server)
+        .layer(middleware::from_fn_with_state(
+            Arc::clone(&state),
+            mcp::require_session,
+        ));
     Router::new()
         .route("/hook/pre-tool-use", post(pre_tool_use))
         .route("/hook/post-tool-use", post(post_tool_use))
         .with_state(state)
+        .merge(mcp)
         .layer(middleware::from_fn_with_state(expected, require_token))
 }
 
@@ -333,6 +363,7 @@ mod tests {
     use axum::body::{Body, to_bytes};
     use axum::http::{Request, StatusCode};
     use serde_json::Value;
+    use tokio_util::sync::CancellationToken;
     use tower::ServiceExt;
 
     use super::fixtures::{PRE_READ, TestDaemon};
@@ -355,9 +386,9 @@ mod tests {
     async fn refuses_a_request_without_the_token() {
         let daemon = TestDaemon::new("daemon-token", |_| {});
         let body = daemon.recorded(PRE_READ);
-        for path in ["/hook/pre-tool-use", "/hook/post-tool-use"] {
+        for path in ["/hook/pre-tool-use", "/hook/post-tool-use", "/mcp"] {
             for token in [None, Some("another-token")] {
-                let answer = router(daemon.state.clone(), TOKEN)
+                let answer = router(daemon.state.clone(), TOKEN, CancellationToken::new())
                     .oneshot(post(path, token, &body))
                     .await
                     .expect("the router answers");
@@ -381,7 +412,7 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn answers_the_pre_tool_use_hook() {
         let daemon = TestDaemon::new("daemon-pre", |_| {});
-        let answer = router(daemon.state.clone(), TOKEN)
+        let answer = router(daemon.state.clone(), TOKEN, CancellationToken::new())
             .oneshot(post(
                 "/hook/pre-tool-use",
                 Some(TOKEN),
@@ -435,5 +466,89 @@ mod tests {
         handle.shutdown().await.expect("the daemon stops");
         assert!(!daemon_file.exists());
         assert!(std::net::TcpStream::connect(("127.0.0.1", port)).is_err());
+    }
+    /// Sends one raw HTTP/1.1 request and reads until `until` appears in what came back.
+    async fn exchange(stream: &mut tokio::net::TcpStream, request: &str, until: &str) -> String {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        stream.write_all(request.as_bytes()).await.expect("sent");
+        let mut seen = Vec::new();
+        let mut buffer = [0_u8; 4096];
+        while !String::from_utf8_lossy(&seen).contains(until) {
+            let read = stream.read(&mut buffer).await.expect("read");
+            assert!(
+                read > 0,
+                "closed before {until}: {}",
+                String::from_utf8_lossy(&seen)
+            );
+            seen.extend_from_slice(&buffer[..read]);
+        }
+        String::from_utf8_lossy(&seen).to_string()
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn shuts_down_while_a_session_holds_an_event_stream_open() {
+        let daemon = TestDaemon::new("daemon-stream", |_| {});
+        let handle = serve(
+            DaemonConfig {
+                port: None,
+                daemon_file: daemon.project.repo.path.join(".farik/local/daemon.json"),
+            },
+            daemon.state.clone(),
+        )
+        .await
+        .expect("the daemon is up");
+        let headers = format!(
+            "Host: 127.0.0.1\r\nAuthorization: Bearer {}\r\nX-Farik-Session: {}\r\n\
+             Accept: application/json, text/event-stream\r\n",
+            handle.info.token,
+            super::fixtures::DEV_SESSION
+        );
+        let initialize = serde_json::json!({
+            "jsonrpc": "2.0", "id": 1, "method": "initialize",
+            "params": {
+                "protocolVersion": "2025-06-18",
+                "capabilities": {},
+                "clientInfo": { "name": "claude-code", "version": "2.1.280" }
+            }
+        })
+        .to_string();
+        let mut first = tokio::net::TcpStream::connect(("127.0.0.1", handle.info.port))
+            .await
+            .expect("connects");
+        let answered = exchange(
+            &mut first,
+            &format!(
+                "POST /mcp HTTP/1.1\r\n{headers}Content-Type: application/json\r\n\
+                 Content-Length: {}\r\n\r\n{initialize}",
+                initialize.len()
+            ),
+            "protocolVersion",
+        )
+        .await;
+        let session = answered
+            .lines()
+            .find_map(|line| {
+                let (name, value) = line.split_once(':')?;
+                name.eq_ignore_ascii_case("mcp-session-id")
+                    .then(|| value.trim().to_string())
+            })
+            .expect("a session id");
+        let mut stream = tokio::net::TcpStream::connect(("127.0.0.1", handle.info.port))
+            .await
+            .expect("connects");
+        exchange(
+            &mut stream,
+            &format!(
+                "GET /mcp HTTP/1.1\r\n{headers}Mcp-Session-Id: {session}\r\n\
+                 MCP-Protocol-Version: 2025-06-18\r\n\r\n"
+            ),
+            "200 OK",
+        )
+        .await;
+        tokio::time::timeout(std::time::Duration::from_secs(10), handle.shutdown())
+            .await
+            .expect("the daemon stops with a stream open")
+            .expect("the daemon stops");
     }
 }
