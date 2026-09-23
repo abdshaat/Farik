@@ -907,4 +907,31 @@ mod tests {
         );
         assert_eq!(adapter.transcripts_left(), 0);
     }
+
+    #[test]
+    fn gives_back_every_outcome_the_reply_carried() {
+        use super::{CommandError, CommandReport, reply_of, result_of};
+
+        let outcomes = [
+            Ok(CommandReport {
+                said: "done".to_string(),
+                events: vec![7],
+            }),
+            Err(CommandError::Invalid {
+                detail: "a blank answer".to_string(),
+            }),
+            Err(CommandError::Refused {
+                reason: "already_answered: question 7".to_string(),
+            }),
+            Err(CommandError::NotFound {
+                what: "question 9".to_string(),
+            }),
+            Err(CommandError::Failed {
+                detail: "the store failed".to_string(),
+            }),
+        ];
+        for outcome in outcomes {
+            assert_eq!(result_of(reply_of(outcome.clone())), outcome);
+        }
+    }
 }

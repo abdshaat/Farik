@@ -660,7 +660,7 @@ mod tests {
     use crate::orchestrator::{Orchestrator, OrchestratorError, TickReport, TickRules, TickScope};
     use crate::recorded::fixtures::{
         accept_frk_1, implement_finishes_frk_1, implement_stops_early, plan_assigns_frk_1,
-        reads_a_file, review_answers_nothing, review_writes_note,
+        reads_a_file, replays_farik_read_board, review_answers_nothing, review_writes_note,
     };
     use crate::recorded::{RecordedAdapter, Transcript};
     use crate::session::SessionPurpose;
@@ -704,6 +704,8 @@ mod tests {
         });
         harness.ready("FRK-1");
         harness.assigned("FRK-2", "dev-b", "dev-a");
+        // Accepted with its worktree left, which the cleanup rule, first of all, would remove.
+        harness.accepted_with_worktree("FRK-3");
         let adapter = harness.recorded(vec![plan_assigns_frk_1()]);
         let orchestrator = harness.orchestrator(adapter.clone());
 
@@ -720,6 +722,7 @@ mod tests {
         assert_eq!(started.len(), 1);
         assert_eq!(started[0].purpose, SessionPurpose::Plan);
         assert_eq!(harness.row("FRK-2").status, TaskStatus::Assigned);
+        assert!(harness.worktree("FRK-3").exists());
     }
 
     #[tokio::test]
@@ -768,7 +771,30 @@ mod tests {
         harness.accepted("FRK-2");
         harness.assigned("FRK-3", "dev-b", "dev-a");
         harness.ready("FRK-4");
-        let adapter = harness.recorded(vec![rewritten(&plan_assigns_frk_1(), "FRK-1", "FRK-4")]);
+        // A task in progress, whose implement session is work, and an epic in progress whose one
+        // task was cancelled, whose breakdown is planning. One session is all the epic has room
+        // for, so that its breakdown, which files nothing here, is not asked for again.
+        harness.in_progress("FRK-5", "dev-b", "dev-a");
+        harness
+            .project
+            .filed_with("FRK-6", "ready", "epic", None, |wire| {
+                wire["assignee_role"] = json!("product_manager");
+                wire["reviewer_role"] = json!("human");
+                wire["budget"]["max_sessions"] = json!(1);
+            });
+        let pm = json!({ "actor": "product_manager", "requested_by": "pm", "assignee": "pm" });
+        harness.project.moved("FRK-6", "ready", "assigned", &pm);
+        harness
+            .project
+            .moved("FRK-6", "assigned", "in_progress", &pm);
+        harness.file_under("FRK-7", "ready", Some("FRK-6"), |_| {});
+        harness
+            .project
+            .moved("FRK-7", "ready", "cancelled", &json!({}));
+        let adapter = harness.recorded(vec![
+            replays_farik_read_board(),
+            rewritten(&plan_assigns_frk_1(), "FRK-1", "FRK-4"),
+        ]);
         let orchestrator = harness.orchestrator(adapter.clone());
         let planning = TickScope {
             task_id: None,
@@ -785,14 +811,28 @@ mod tests {
             }
         }
 
-        let started = adapter.started();
-        assert_eq!(started.len(), 1);
-        assert_eq!(started[0].purpose, SessionPurpose::Plan);
+        let started: Vec<(String, SessionPurpose)> = adapter
+            .started()
+            .iter()
+            .map(|spec| {
+                (
+                    spec.task_id
+                        .clone()
+                        .map(|task| task.to_string())
+                        .unwrap_or_default(),
+                    spec.purpose,
+                )
+            })
+            .collect();
         assert_eq!(
-            started[0].task_id.as_ref().map(|task| task.as_str()),
-            Some("FRK-4")
+            started,
+            [
+                ("FRK-6".to_string(), SessionPurpose::Plan),
+                ("FRK-4".to_string(), SessionPurpose::Plan)
+            ]
         );
         assert_eq!(harness.row("FRK-4").status, TaskStatus::Assigned);
+        assert_eq!(harness.row("FRK-5").status, TaskStatus::InProgress);
         assert!(harness.events(&[EventKind::CriterionRecorded]).is_empty());
         assert!(harness.events(&[EventKind::TaskIntegrated]).is_empty());
         assert_eq!(harness.row("FRK-3").status, TaskStatus::Assigned);

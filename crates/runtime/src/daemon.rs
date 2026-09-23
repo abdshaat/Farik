@@ -819,6 +819,53 @@ mod tests {
         );
     }
 
+    #[tokio::test(flavor = "multi_thread")]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn finishes_a_command_whose_client_went_away() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        use std::time::{Duration, Instant};
+
+        use crate::orchestrator::CommandReport;
+
+        let daemon = TestDaemon::new("daemon-command-gone", |_| {});
+        let state = Arc::new(DaemonState::new(Arc::clone(&daemon.project.deps)));
+        let done = Arc::new(AtomicBool::new(false));
+        let begun = Arc::new(tokio::sync::Notify::new());
+        let (finished, beginning) = (Arc::clone(&done), Arc::clone(&begun));
+        state.set_command_handler(Arc::new(move |_| {
+            let (finished, beginning) = (Arc::clone(&finished), Arc::clone(&beginning));
+            Box::pin(async move {
+                beginning.notify_one();
+                tokio::time::sleep(Duration::from_millis(300)).await;
+                finished.store(true, Ordering::SeqCst);
+                Ok(CommandReport {
+                    said: "handled".to_string(),
+                    events: Vec::new(),
+                })
+            })
+        }));
+        let request = router(state, TOKEN, CancellationToken::new()).oneshot(post(
+            "/command",
+            Some(TOKEN),
+            &json!({ "command": "run_stop", "body": {} }),
+        ));
+
+        // The request is dropped once its command has begun, as a client that hangs up drops it.
+        tokio::select! {
+            _ = request => panic!("the command answered before its client went away"),
+            () = begun.notified() => {}
+        }
+
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while !done.load(Ordering::SeqCst) {
+            assert!(
+                Instant::now() < deadline,
+                "the command was cut off with its client"
+            );
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    }
+
     #[test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
     fn lists_every_registered_session() {
