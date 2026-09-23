@@ -2,7 +2,7 @@
 //! human gives the orchestrator, each judged and recorded through the store and the governor, so
 //! that any process may handle one.
 
-use farik_core::contract::{TaskContract, TaskId, TaskStatus, wire_method};
+use farik_core::contract::{TaskContract, TaskId, TaskKind, TaskStatus, wire_method};
 use farik_core::governor::done::requires_human_acceptance;
 use farik_core::governor::gates::Blocker;
 use farik_core::governor::transition::TransitionRequest;
@@ -20,7 +20,8 @@ use super::verify::{governor_results, since_verifying};
 use super::{CommandError, CommandReport, IntegrationOutcome, Orchestrator, OrchestratorError};
 use crate::tools::ToolDeps;
 use crate::transitions::{
-    TransitionAsk, TransitionOutcome, refusal_details, result_accepted, reviewed_by_the_human,
+    TransitionAsk, TransitionOutcome, contract_accepted, refusal_details, result_accepted,
+    reviewed_by_the_human,
 };
 
 /// Who the human is in the log.
@@ -221,8 +222,10 @@ fn answer_question(
     })
 }
 
-/// Approves a contract awaiting approval (5.16 item 2): `escalated -> ready` as the human, then,
-/// on the move, `human.accepted { contract }`.
+/// Approves a contract awaiting approval (5.16 item 2): `human.accepted { contract }`, then
+/// `escalated -> ready` as the human. The approval is recorded first because it is the authority
+/// the move is made on; a move the governor refuses leaves it on a task still escalated and still
+/// awaiting approval, which a second approval moves.
 fn approve(
     tools: &ToolDeps,
     task_id: &TaskId,
@@ -239,14 +242,7 @@ fn approve(
         });
     }
     let team = tools.files.read_team().map_err(failed)?;
-    let mut events = human_moves(
-        tools,
-        &team,
-        task_id,
-        TaskStatus::Ready,
-        &TransitionAsk::default(),
-    )?;
-    events.push(append(
+    let mut events = vec![append(
         tools,
         Some(task_id.clone()),
         EventBody::HumanAccepted(HumanAcceptedBody {
@@ -254,6 +250,13 @@ fn approve(
             accepted_by: HUMAN.to_string(),
             message: message.filter(|text| !text.trim().is_empty()),
         }),
+    )?];
+    events.extend(human_moves(
+        tools,
+        &team,
+        task_id,
+        TaskStatus::Ready,
+        &TransitionAsk::default(),
     )?);
     Ok(CommandReport {
         said: format!("{} is approved and ready", task_id.as_str()),
@@ -275,13 +278,7 @@ fn accept_result(
     if row.status != TaskStatus::Verifying {
         return Err(not_waiting(&row));
     }
-    let history = tools
-        .log
-        .read(&EventQuery {
-            task_id: Some(task_id.clone()),
-            ..EventQuery::default()
-        })
-        .map_err(failed)?;
+    let history = history_of(tools, task_id)?;
     if result_accepted(&history).is_some() {
         return Err(CommandError::Refused {
             reason: format!(
@@ -314,6 +311,20 @@ fn accept_result(
         said: format!("{}'s result is accepted by the human", task_id.as_str()),
         events: vec![seq],
     })
+}
+
+/// Every event of the task, oldest first.
+fn history_of(
+    tools: &ToolDeps,
+    task_id: &TaskId,
+) -> Result<Vec<farik_protocol::event::FarikEvent>, CommandError> {
+    tools
+        .log
+        .read(&EventQuery {
+            task_id: Some(task_id.clone()),
+            ..EventQuery::default()
+        })
+        .map_err(failed)
 }
 
 fn not_waiting(row: &TaskProjection) -> CommandError {
@@ -383,7 +394,8 @@ fn mechanical_criteria_passed(
 
 /// Resolves an escalation (5.7): `escalated -> to` as the human, then, on the move,
 /// `escalation.resolved { to, message }`. Never to `ready` while the contract awaits approval,
-/// which is `HumanAccept`'s.
+/// which is `HumanAccept`'s, nor for an epic whose contract the human has not approved, which
+/// reaches `ready` only by that approval (5.16 item 2).
 fn resolve(
     tools: &ToolDeps,
     task_id: &TaskId,
@@ -406,6 +418,19 @@ fn resolve(
             reason: format!(
                 "use_human_accept: {} awaits the human's approval, which human_accept of its \
                  contract gives",
+                task_id.as_str()
+            ),
+        });
+    }
+    if to == TaskStatus::Ready
+        && row.kind == TaskKind::Epic
+        && !contract_accepted(&history_of(tools, task_id)?)
+    {
+        return Err(CommandError::Refused {
+            reason: format!(
+                "use_human_accept: {} is an epic whose contract the human has not approved, and \
+                 an epic reaches ready only by human_accept of its contract: resolve it to \
+                 refining, and once its contract passes it waits for that approval",
                 task_id.as_str()
             ),
         });
@@ -913,6 +938,52 @@ mod tests {
 
     #[tokio::test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn answers_each_of_two_questions_on_its_own() {
+        let harness = Harness::new("human-two-answers", |_| {});
+        harness.file("FRK-1", "refining", |_| {});
+        let asked = |question: &str| {
+            harness
+                .project
+                .record(
+                    "FRK-1",
+                    "question.asked",
+                    &json!({ "question": question, "asked_by": "pm" }),
+                )
+                .envelope
+                .seq
+        };
+        let first = asked("Should done.txt be empty?");
+        let second = asked("Should it end with a newline?");
+        let orchestrator = an_orchestrator(&harness);
+        handled(
+            &orchestrator,
+            Command::QuestionAnswer {
+                question_id: first,
+                answer: "Yes.".to_string(),
+            },
+        )
+        .await;
+        assert!(harness.row("FRK-1").waiting_on_human);
+
+        let report = handled(
+            &orchestrator,
+            Command::QuestionAnswer {
+                question_id: second,
+                answer: "No.".to_string(),
+            },
+        )
+        .await;
+        let answer = last(&harness, EventKind::QuestionAnswered).expect("the answer is recorded");
+        assert_eq!(report.events, vec![answer.envelope.seq]);
+        let EventBody::QuestionAnswered(body) = &answer.body else {
+            panic!("an answer");
+        };
+        assert_eq!(body.question_id.get(), second);
+        assert!(!harness.row("FRK-1").waiting_on_human);
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn answers_a_question_once() {
         let harness = Harness::new("human-answer", |_| {});
         harness.file("FRK-1", "refining", |_| {});
@@ -1017,13 +1088,15 @@ mod tests {
                 "human".to_string()
             )
         );
+        // The approval is the authority the move is made on, so it is recorded first.
         let accepted = last(&harness, EventKind::HumanAccepted).expect("the approval");
-        assert!(accepted.envelope.seq > moved.envelope.seq);
+        assert!(accepted.envelope.seq < moved.envelope.seq);
         let EventBody::HumanAccepted(body) = &accepted.body else {
             panic!("an acceptance");
         };
         assert_eq!(body.subject, HumanAcceptedBodySubject::Contract);
-        assert_eq!(report.events.last(), Some(&accepted.envelope.seq));
+        assert_eq!(report.events.first(), Some(&accepted.envelope.seq));
+        assert_eq!(report.events.last(), Some(&moved.envelope.seq));
         let row = harness.row("FRK-1");
         assert_eq!(row.status, TaskStatus::Ready);
         assert!(!row.awaiting_approval);
@@ -1164,6 +1237,35 @@ mod tests {
         .await;
         assert!(governor.starts_with("transition_refused"), "{governor}");
         assert_eq!(harness.events(&[EventKind::EscalationResolved]).len(), 1);
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn keeps_an_unapproved_epic_from_ready() {
+        let harness = Harness::new("human-resolve-epic", |_| {});
+        an_epic(&harness, "FRK-1", "refining", a_command_criterion());
+        escalated(&harness, "FRK-1", "readiness_failures");
+        an_epic(&harness, "FRK-2", "refining", a_command_criterion());
+        harness.project.record(
+            "FRK-2",
+            "human.accepted",
+            &json!({ "subject": "contract", "accepted_by": "human" }),
+        );
+        escalated(&harness, "FRK-2", "budget");
+        let orchestrator = an_orchestrator(&harness);
+        let to_ready = |id: &str| Command::EscalationResolve {
+            task_id: task(id),
+            to: TaskStatus::Ready,
+            message: "Go.".to_string(),
+        };
+
+        let unapproved = refused(&orchestrator, to_ready("FRK-1")).await;
+        assert!(unapproved.starts_with("use_human_accept"), "{unapproved}");
+        assert_eq!(harness.row("FRK-1").status, TaskStatus::Escalated);
+        assert!(harness.events(&[EventKind::EscalationResolved]).is_empty());
+
+        handled(&orchestrator, to_ready("FRK-2")).await;
+        assert_eq!(harness.row("FRK-2").status, TaskStatus::Ready);
     }
 
     #[tokio::test]

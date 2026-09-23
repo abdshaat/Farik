@@ -352,7 +352,7 @@ fn changed_fields(before: &Value, after: &Value) -> Vec<String> {
 
 #[cfg(test)]
 mod tests {
-    use farik_protocol::event::{EventBody, EventKind};
+    use farik_protocol::event::{EventBody, EventKind, FarikEvent};
     use serde_json::{Value, json};
 
     use crate::tools::ToolError;
@@ -638,6 +638,45 @@ mod tests {
             project.file("FRK-1")["intent"],
             "Something else entirely, and longer."
         );
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn waits_for_every_question_before_an_epic_is_written() {
+        let project = a_project("tools-write-two-questions");
+        project.filed("FRK-1", "refining", "epic", None);
+        let asked = |question: &str| {
+            project.record(
+                "FRK-1",
+                "question.asked",
+                &json!({ "question": question, "asked_by": "pm" }),
+            )
+        };
+        let first = asked("Who signs in?");
+        let second = asked("Do they stay signed in?");
+        let answer = |question: &FarikEvent| {
+            project.record(
+                "FRK-1",
+                "question.answered",
+                &json!({
+                    "question_id": question.envelope.seq,
+                    "answer": "Yes.",
+                    "answered_by": "human"
+                }),
+            );
+        };
+        let write = || {
+            project.call(
+                "pm",
+                Some("FRK-1"),
+                "farik_write_contract",
+                json!({ "fields": { "intent": "Something else entirely, and longer." } }),
+            )
+        };
+        answer(&first);
+        refused_with(write(), "question_unanswered");
+        answer(&second);
+        write().expect("both questions are answered, so the epic is written");
     }
 
     #[test]
