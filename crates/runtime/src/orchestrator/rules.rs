@@ -19,7 +19,7 @@ use super::{Orchestrator, OrchestratorDeps, OrchestratorError, TickReport, workt
 use crate::cost::budget_state;
 use crate::exec::Executor;
 use crate::session::{EndReason, SessionPurpose};
-use crate::transitions::{TransitionAsk, TransitionOutcome, integration_branch, refusal_details};
+use crate::transitions::{TransitionAsk, TransitionOutcome, integration_branch};
 
 /// What a tick says when no rule matched.
 const NOTHING_TO_DO: &str = "nothing on the board needs doing";
@@ -44,8 +44,13 @@ pub(super) async fn tick(orchestrator: &Orchestrator) -> Result<TickReport, Orch
     let mut board = deps.tools.projections.board()?;
     board.sort_by_key(|row| task_number(row.task_id.as_str()));
     let mut day_spent = false;
-    if let Some(row) = board.iter().find(|row| row.status == TaskStatus::Rejected) {
-        return rejected(deps, &team, row);
+    for row in board
+        .iter()
+        .filter(|row| row.status == TaskStatus::Rejected)
+    {
+        if let Some(report) = rejected(deps, &team, row)? {
+            return Ok(report);
+        }
     }
     for row in board.iter().filter(|row| row.status == TaskStatus::Blocked) {
         if let Some(report) = blocked(deps, &team, row)? {
@@ -88,34 +93,42 @@ pub(super) async fn tick(orchestrator: &Orchestrator) -> Result<TickReport, Orch
 
 /// Rule 3: a task `rejected` goes back to `in_progress` for its next iteration, or, when the
 /// governor refuses that at the iteration limit, to `escalated`; both asked as the governor, whose
-/// effects count the iteration and raise the escalation.
+/// effects count the iteration and raise the escalation. A task whose escalation was refused since
+/// it was rejected is passed over, as is one the governor would move neither way: the refusal is
+/// on the board for the human, and asking again would record it again on every tick.
 fn rejected(
     deps: &OrchestratorDeps,
     team: &Team,
     row: &TaskProjection,
-) -> Result<TickReport, OrchestratorError> {
+) -> Result<Option<TickReport>, OrchestratorError> {
+    if refused_since_entering(
+        deps,
+        &row.task_id,
+        TaskStatus::Rejected,
+        TaskStatus::Escalated,
+    )? {
+        return Ok(None);
+    }
     let what = match governor_moves(deps, team, row, TaskStatus::InProgress)? {
-        TransitionOutcome::Moved(_) => "returned it to its assignee for another iteration".into(),
+        TransitionOutcome::Moved(_) => "returned it to its assignee for another iteration",
         TransitionOutcome::Refused(_) => {
             match governor_moves(deps, team, row, TaskStatus::Escalated)? {
                 TransitionOutcome::Moved(_) => {
-                    "escalated it: it was rejected as often as it may be".to_string()
+                    "escalated it: it was rejected as often as it may be"
                 }
-                TransitionOutcome::Refused(refusal) => format!(
-                    "the governor would neither return nor escalate it: {}",
-                    refusal_details(&refusal).join("; ")
-                ),
+                TransitionOutcome::Refused(_) => return Ok(None),
             }
         }
     };
-    Ok(TickReport::Acted {
+    Ok(Some(TickReport::Acted {
         task_id: row.task_id.clone(),
-        what,
-    })
+        what: what.to_string(),
+    }))
 }
 
 /// Rule 4: a task `blocked` for at least the team's `blocked_limit_hours` is escalated as the
-/// governor, whose `BlockedAge` gate decides; a younger block has no rule.
+/// governor, whose `BlockedAge` gate decides; a younger block has no rule, nor has one whose
+/// escalation was refused since it blocked.
 fn blocked(
     deps: &OrchestratorDeps,
     team: &Team,
@@ -127,20 +140,23 @@ fn blocked(
         return Ok(None);
     };
     let hours = i64::try_from(team.policy.blocked_limit_hours.get()).unwrap_or(i64::MAX);
-    if deps.tools.clock.now() - blocked_at < chrono::Duration::hours(hours) {
+    if deps.tools.clock.now() - blocked_at < chrono::Duration::hours(hours)
+        || refused_since_entering(
+            deps,
+            &row.task_id,
+            TaskStatus::Blocked,
+            TaskStatus::Escalated,
+        )?
+    {
         return Ok(None);
     }
-    let what = match governor_moves(deps, team, row, TaskStatus::Escalated)? {
-        TransitionOutcome::Moved(_) => format!("escalated it: blocked for {hours} hours or more"),
-        TransitionOutcome::Refused(refusal) => format!(
-            "the governor would not escalate it: {}",
-            refusal_details(&refusal).join("; ")
-        ),
-    };
-    Ok(Some(TickReport::Acted {
-        task_id: row.task_id.clone(),
-        what,
-    }))
+    match governor_moves(deps, team, row, TaskStatus::Escalated)? {
+        TransitionOutcome::Moved(_) => Ok(Some(TickReport::Acted {
+            task_id: row.task_id.clone(),
+            what: format!("escalated it: blocked for {hours} hours or more"),
+        })),
+        TransitionOutcome::Refused(_) => Ok(None),
+    }
 }
 
 /// Asks the governor, as itself, to move the task to `to`.
@@ -176,6 +192,33 @@ fn last_move_into(
     Ok(moves.into_iter().rev().find(|event| {
         matches!(&event.body, EventBody::TaskTransitioned(body) if body.to.to_string() == status.to_string())
     }))
+}
+
+/// Whether the task's move from `from` to `to` was refused since the task last moved into `from`.
+/// Such a move is not asked again until the task moves: nothing but a move changes what the
+/// governor would answer, and the refusal is on the board for the human.
+fn refused_since_entering(
+    deps: &OrchestratorDeps,
+    task_id: &TaskId,
+    from: TaskStatus,
+    to: TaskStatus,
+) -> Result<bool, OrchestratorError> {
+    let history = deps.tools.log.read(&EventQuery {
+        task_id: Some(task_id.clone()),
+        kinds: vec![EventKind::TaskTransitioned, EventKind::TransitionRefused],
+        ..EventQuery::default()
+    })?;
+    let (from, to) = (from.to_string(), to.to_string());
+    Ok(history
+        .iter()
+        .rev()
+        .take_while(|event| {
+            !matches!(&event.body, EventBody::TaskTransitioned(body) if body.to.to_string() == from)
+        })
+        .any(|event| {
+            matches!(&event.body, EventBody::TransitionRefused(body)
+                if body.from.to_string() == from && body.to.to_string() == to)
+        }))
 }
 
 /// Whether the budgets leave room for a session about `contract`, read with an empty session
@@ -307,7 +350,8 @@ fn resume(
 
 /// Rule 7: a task `assigned` gets its worktree on `farik/<id>` from the integration branch,
 /// reused when it is already there, and is moved to `in_progress` as its assignee asks. No session
-/// starts: the next tick's rule 6 starts it. A task whose assignee is not active is passed over.
+/// starts: the next tick's rule 6 starts it. A task whose assignee is not active is passed over, as
+/// is one whose start the governor refused, now or since it was assigned.
 fn assigned(
     deps: &OrchestratorDeps,
     team: &Team,
@@ -316,6 +360,14 @@ fn assigned(
     let Some(assignee) = active(team, row.assignee_id.as_deref()) else {
         return Ok(None);
     };
+    if refused_since_entering(
+        deps,
+        &row.task_id,
+        TaskStatus::Assigned,
+        TaskStatus::InProgress,
+    )? {
+        return Ok(None);
+    }
     let worktree = worktree(deps, &row.task_id);
     let branch = format!("farik/{}", row.task_id.as_str());
     if !worktree.is_dir() {
@@ -332,22 +384,16 @@ fn assigned(
         &TransitionAsk::default(),
         team,
     )?;
-    let what = match outcome {
-        TransitionOutcome::Moved(_) => {
-            format!(
+    match outcome {
+        TransitionOutcome::Moved(_) => Ok(Some(TickReport::Acted {
+            task_id: row.task_id.clone(),
+            what: format!(
                 "started it for {} in its worktree on {branch}",
                 assignee.id.as_str()
-            )
-        }
-        TransitionOutcome::Refused(refusal) => format!(
-            "the governor would not start it: {}",
-            refusal_details(&refusal).join("; ")
-        ),
-    };
-    Ok(Some(TickReport::Acted {
-        task_id: row.task_id.clone(),
-        what,
-    }))
+            ),
+        })),
+        TransitionOutcome::Refused(_) => Ok(None),
+    }
 }
 
 /// The team's agent of that id, when it is active.
@@ -521,13 +567,14 @@ mod tests {
     use crate::orchestrator::fixtures::{
         CountingSandboxFactory, ExecutorWitness, Harness, UsageThenWaitAdapter,
     };
-    use crate::orchestrator::{OrchestratorError, TickReport};
+    use crate::orchestrator::{Orchestrator, OrchestratorError, TickReport};
     use crate::recorded::fixtures::{
         accept_frk_1, implement_finishes_frk_1, implement_stops_early, plan_assigns_frk_1,
         reads_a_file, review_answers_nothing, review_writes_note,
     };
     use crate::recorded::{RecordedAdapter, Transcript};
     use crate::session::SessionPurpose;
+    use crate::tools::fixtures::at;
 
     const NOTHING_TO_DO: &str = "nothing on the board needs doing";
 
@@ -1018,6 +1065,165 @@ mod tests {
         assert_eq!(harness.row("FRK-1").status, TaskStatus::Blocked);
     }
 
+    /// A `transition.refused` of `task`'s move from `from` to `to`, asked by `actor` as
+    /// `requested_by`.
+    fn refused(harness: &Harness, task: &str, from: &str, to: &str, actor: &str, by: &str) {
+        harness.project.record(
+            task,
+            "transition.refused",
+            &json!({
+                "from": from,
+                "to": to,
+                "actor": actor,
+                "requested_by": by,
+                "refusal": "gate_failed",
+                "details": ["the gate did not open"]
+            }),
+        );
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn passes_over_a_move_that_was_refused() {
+        let harness = Harness::new("orch-refused-start", |_| {});
+        harness.assigned("FRK-1", "dev-a", "dev-b");
+        refused(
+            &harness,
+            "FRK-1",
+            "assigned",
+            "in_progress",
+            "assignee",
+            "dev-a",
+        );
+        harness.rejected("FRK-2", 3, "C1: done.txt missing");
+        refused(
+            &harness,
+            "FRK-2",
+            "rejected",
+            "escalated",
+            "governor",
+            "governor",
+        );
+        harness.blocked_hours_ago("FRK-3", "dev-b", "dev-a", 25);
+        refused(
+            &harness,
+            "FRK-3",
+            "blocked",
+            "escalated",
+            "governor",
+            "governor",
+        );
+        let adapter = harness.recorded(Vec::new());
+        let orchestrator = harness.orchestrator(adapter.clone());
+
+        let report = orchestrator.tick().await.expect("the tick runs");
+
+        assert_eq!(
+            report,
+            TickReport::Idle {
+                why: NOTHING_TO_DO.to_string()
+            }
+        );
+        assert_eq!(harness.events(&[EventKind::TransitionRefused]).len(), 3);
+        assert_eq!(harness.row("FRK-1").status, TaskStatus::Assigned);
+        assert_eq!(harness.row("FRK-2").status, TaskStatus::Rejected);
+        assert_eq!(harness.row("FRK-3").status, TaskStatus::Blocked);
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn asks_again_after_another_refusal() {
+        // A human's refused request to resume a blocked task says nothing about its escalation.
+        let harness = Harness::new("orch-refused-other", |_| {});
+        harness.blocked_hours_ago("FRK-1", "dev-a", "dev-b", 25);
+        refused(
+            &harness,
+            "FRK-1",
+            "blocked",
+            "in_progress",
+            "human",
+            "human",
+        );
+        let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
+
+        let report = orchestrator.tick().await.expect("the tick runs");
+
+        assert_eq!(acted_on(&report), Some("FRK-1"), "{report:?}");
+        assert_eq!(harness.row("FRK-1").status, TaskStatus::Escalated);
+
+        // Nor does a refusal from before the task last blocked.
+        let harness = Harness::new("orch-refused-earlier", |_| {});
+        harness.blocked_hours_ago("FRK-1", "dev-a", "dev-b", 25);
+        refused(
+            &harness,
+            "FRK-1",
+            "blocked",
+            "escalated",
+            "governor",
+            "governor",
+        );
+        let people = json!({ "actor": "human", "requested_by": "human" });
+        harness
+            .project
+            .moved("FRK-1", "blocked", "in_progress", &people);
+        let mut body = json!({ "assignee": "dev-a", "reviewer": "dev-b" });
+        body["blocker"] = json!({ "description": "the API is down again", "needed": "the API" });
+        harness.project.moved_at(
+            at() - chrono::Duration::hours(25),
+            "FRK-1",
+            "in_progress",
+            "blocked",
+            &body,
+        );
+        let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
+
+        let report = orchestrator.tick().await.expect("the tick runs");
+
+        assert_eq!(acted_on(&report), Some("FRK-1"), "{report:?}");
+        assert_eq!(harness.row("FRK-1").status, TaskStatus::Escalated);
+    }
+
+    /// `run_until_idle` on a thread of its own, which is left behind if the run does not end
+    /// within ten seconds: a run that does not stop at an idle tick ticks for ever without
+    /// yielding, so no timer on its own runtime could stop it.
+    fn run_until_idle_within_ten_seconds(
+        orchestrator: Orchestrator,
+    ) -> Result<(), OrchestratorError> {
+        let (sender, receiver) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let runtime = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .expect("a runtime is built");
+            let _ = sender.send(runtime.block_on(orchestrator.run_until_idle()));
+        });
+        receiver
+            .recv_timeout(Duration::from_secs(10))
+            .expect("the run ends")
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn runs_until_a_tick_is_idle() {
+        let harness = Harness::new("orch-run-until-idle", |_| {});
+        harness.file("FRK-1", "ready", |wire| {
+            wire["budget"]["max_sessions"] = json!(1);
+        });
+        harness.project.moved(
+            "FRK-1",
+            "ready",
+            "assigned",
+            &json!({ "assignee": "dev-a", "reviewer": "dev-b" }),
+        );
+        let adapter = harness.recorded(vec![implement_stops_early()]);
+        let orchestrator = harness.orchestrator(adapter.clone());
+
+        run_until_idle_within_ten_seconds(orchestrator).expect("the run is idle");
+
+        assert_eq!(adapter.started().len(), 1);
+        assert_eq!(harness.row("FRK-1").status, TaskStatus::InProgress);
+    }
+
     #[tokio::test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn picks_a_rejected_task_before_a_ready_one() {
@@ -1437,6 +1643,27 @@ mod tests {
             }
         );
         assert_eq!(adapter.started().len(), 2);
+        assert_eq!(harness.row("FRK-1").status, TaskStatus::Verifying);
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn runs_until_idle_past_a_refused_acceptance() {
+        let harness = Harness::new("orch-verify-refused-run", |_| {});
+        harness.verifying_with("FRK-1", true, false, |_| {});
+        let adapter = harness.recorded(vec![review_writes_note(), accept_frk_1(), accept_frk_1()]);
+        let orchestrator = harness.orchestrator(adapter.clone());
+
+        run_until_idle_within_ten_seconds(orchestrator).expect("the run is idle");
+
+        assert_eq!(
+            sessions(&adapter),
+            vec![
+                ("dev-b".to_string(), SessionPurpose::Verify),
+                ("pm".to_string(), SessionPurpose::Verify),
+            ]
+        );
+        assert_eq!(harness.events(&[EventKind::TransitionRefused]).len(), 1);
         assert_eq!(harness.row("FRK-1").status, TaskStatus::Verifying);
     }
 
