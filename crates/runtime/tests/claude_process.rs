@@ -30,6 +30,11 @@ impl Fake {
     }
 
     fn with_version(name: &str, version: &str, body: &str) -> Fake {
+        Fake::with_version_command(name, &format!("echo '{version} (Claude Code)'"), body)
+    }
+
+    /// A fake whose answer to `--version` is the shell line `version_command`.
+    fn with_version_command(name: &str, version_command: &str, body: &str) -> Fake {
         let project = TempProject::new(&format!("claude-process-{name}"));
         project
             .files()
@@ -40,7 +45,7 @@ impl Fake {
         let script = format!(
             "#!/bin/sh\n\
              dir='{dir}'\n\
-             if [ \"$1\" = \"--version\" ]; then echo '{version} (Claude Code)'; exit 0; fi\n\
+             if [ \"$1\" = \"--version\" ]; then {version_command}; exit 0; fi\n\
              printf '%s\\n' \"$@\" > \"$dir/args\"\n\
              env > \"$dir/env\"\n\
              echo $$ > \"$dir/pid\"\n\
@@ -185,6 +190,15 @@ async fn plays_a_session_through_the_process() {
     );
     assert!(!env.contains("CLAUDE_CODE_OAUTH_TOKEN"), "{env}");
     assert!(!env.contains("CARGO_MANIFEST_DIR"), "{env}");
+    assert!(
+        env.lines().any(|line| line == "DISABLE_AUTOUPDATER=1"),
+        "{env}"
+    );
+    assert!(
+        env.lines()
+            .any(|line| line == "CLAUDE_CODE_DISABLE_AUTO_MEMORY=1"),
+        "{env}"
+    );
     let prompt = fake
         .project
         .root
@@ -481,4 +495,76 @@ fn kills_the_group_when_the_runtime_shuts_down() {
         !is_alive(&sleep),
         "the program's child outlived the runtime"
     );
+}
+
+#[test]
+fn asks_the_version_with_only_the_base_environment() {
+    let fake = Fake::with_version_command(
+        "version-env",
+        "env > \"$dir/version-env\"; echo '2.1.280 (Claude Code)'",
+        "exit 0",
+    );
+    fake.adapter();
+    let env = fake.written("version-env");
+    assert!(env.contains("PATH=/usr/bin:/bin"), "{env}");
+    assert!(!env.contains("CARGO_MANIFEST_DIR"), "{env}");
+}
+
+#[test]
+fn refuses_a_claude_code_that_does_not_say_its_version_in_time() {
+    let fake = Fake::with_version_command("version-hangs", "exec sleep 30", "exit 0");
+    let started = std::time::Instant::now();
+    match ClaudeAdapter::new(
+        ClaudeCredential::ApiKey(Secret::new(API_KEY.to_string())),
+        fake.config(),
+    ) {
+        Err(RuntimeError::Spawn { detail }) => assert!(detail.contains("--version"), "{detail}"),
+        other => panic!("expected a refusal, got {other:?}"),
+    }
+    assert!(
+        started.elapsed() < Duration::from_secs(15),
+        "{:?}",
+        started.elapsed()
+    );
+}
+
+#[tokio::test]
+async fn refuses_to_resume_a_session_that_is_still_running() {
+    let fake = Fake::new("resume-running", "sleep 30");
+    let adapter = fake.adapter();
+    let spec = fake.spec();
+    let handle = adapter
+        .start_session(spec.clone())
+        .expect("the session starts");
+    fake.wait_for("stdin").await;
+    match adapter.resume(&spec.session_id, "go on") {
+        Err(RuntimeError::Spawn { detail }) => assert!(detail.contains("running"), "{detail}"),
+        other => panic!("expected a refusal, got {:?}", other.map(|_| ())),
+    }
+    handle.abort().expect("the session is stopped");
+}
+
+#[tokio::test]
+async fn gives_a_subscription_session_no_api_key_from_its_base() {
+    let fake = Fake::new(
+        "oauth",
+        &format!("cat '{}'", transcript_path("reads_a_file").display()),
+    );
+    let mut config = fake.config();
+    config.env.insert(
+        "ANTHROPIC_API_KEY".to_string(),
+        "sk-from-the-base".to_string(),
+    );
+    let adapter = ClaudeAdapter::new(
+        ClaudeCredential::OauthToken(Secret::new("the-token".to_string())),
+        config,
+    )
+    .expect("the fake is new enough");
+    let mut handle = adapter
+        .start_session(fake.spec())
+        .expect("the session starts");
+    drain(handle.as_mut()).await;
+    let env = fake.written("env");
+    assert!(env.contains("CLAUDE_CODE_OAUTH_TOKEN=the-token"), "{env}");
+    assert!(!env.contains("ANTHROPIC_API_KEY"), "{env}");
 }

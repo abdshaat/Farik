@@ -5,6 +5,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::io::Write as _;
 use std::os::unix::fs::OpenOptionsExt;
+use std::os::unix::process::CommandExt as _;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
@@ -60,12 +61,21 @@ const FARIK_SERVER: &str = "farik";
 const REFUSED_BUILTIN: &str = "Bash";
 const API_KEY: &str = "ANTHROPIC_API_KEY";
 const OAUTH_TOKEN: &str = "CLAUDE_CODE_OAUTH_TOKEN";
+/// What every session's environment sets, whatever the base says: no update of the program in the
+/// middle of a session, and no memory of its own beside the agent's (both read so by `claude`
+/// 2.1.280, which takes `1` as true).
+const QUIET: &[(&str, &str)] = &[
+    ("CLAUDE_CODE_DISABLE_AUTO_MEMORY", "1"),
+    ("DISABLE_AUTOUPDATER", "1"),
+];
 const SYSTEM_PROMPT_FILE: &str = "system-prompt.md";
 const MCP_CONFIG_FILE: &str = "mcp.json";
 /// How much of the program's standard error an error end keeps.
 const STDERR_TAIL_BYTES: usize = 4_096;
 /// How long the program has to exit once its result is read.
 const EXIT_GRACE: Duration = Duration::from_secs(5);
+/// How long `claude --version` has to answer.
+const VERSION_TIMEOUT: Duration = Duration::from_secs(10);
 /// How long an error end waits for the rest of standard error once the group is killed.
 const TAIL_GRACE: Duration = Duration::from_millis(500);
 /// Why `send` refuses while a session runs.
@@ -118,8 +128,9 @@ pub fn credential_from_env(env: &BTreeMap<String, String>) -> Option<ClaudeCrede
         .or_else(|| named(OAUTH_TOKEN).map(ClaudeCredential::OauthToken))
 }
 
-/// Where the program is, what its hooks run, and what its sessions are given.
-#[derive(Debug, Clone)]
+/// Where the program is, what its hooks run, and what its sessions are given. Its `Debug` names
+/// the environment's variables and not their values, which may be secrets.
+#[derive(Clone)]
 pub struct ClaudeConfig {
     /// The `claude` program.
     pub claude_path: PathBuf,
@@ -137,11 +148,28 @@ pub struct ClaudeConfig {
     pub env: BTreeMap<String, String>,
 }
 
+impl fmt::Debug for ClaudeConfig {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("ClaudeConfig")
+            .field("claude_path", &self.claude_path)
+            .field("hook_command", &self.hook_command)
+            .field("daemon_file", &self.daemon_file)
+            .field("daemon", &self.daemon)
+            .field("sessions_dir", &self.sessions_dir)
+            .field("team_file", &self.team_file)
+            .field("env", &self.env.keys().collect::<Vec<_>>())
+            .finish()
+    }
+}
+
 /// Starts Claude Code sessions as child processes, and resumes the ones it started.
 pub struct ClaudeAdapter {
     credential: ClaudeCredential,
     config: ClaudeConfig,
-    specs: Mutex<BTreeMap<String, SessionSpec>>,
+    /// Each session this adapter started: its spec, and a token cancelled once its process is
+    /// gone.
+    specs: Mutex<BTreeMap<String, (SessionSpec, CancellationToken)>>,
 }
 
 impl fmt::Debug for ClaudeAdapter {
@@ -166,16 +194,7 @@ impl ClaudeAdapter {
         credential: ClaudeCredential,
         config: ClaudeConfig,
     ) -> Result<ClaudeAdapter, RuntimeError> {
-        let output = std::process::Command::new(&config.claude_path)
-            .arg("--version")
-            .env_clear()
-            .envs(&config.env)
-            .stdin(Stdio::null())
-            .output()
-            .map_err(|error| RuntimeError::Spawn {
-                detail: format!("{} cannot be run: {error}", config.claude_path.display()),
-            })?;
-        check_version(&String::from_utf8_lossy(&output.stdout))?;
+        check_version(&version_output(&config)?)?;
         Ok(ClaudeAdapter {
             credential,
             config,
@@ -188,7 +207,7 @@ impl ClaudeAdapter {
         spec: &SessionSpec,
         prompt: &str,
         resume: bool,
-    ) -> Result<Box<dyn SessionHandle>, RuntimeError> {
+    ) -> Result<(Box<dyn SessionHandle>, CancellationToken), RuntimeError> {
         if tokio::runtime::Handle::try_current().is_err() {
             return Err(RuntimeError::Spawn {
                 detail: "a session is started inside a tokio runtime".to_string(),
@@ -229,6 +248,7 @@ impl ClaudeAdapter {
         let (sender, receiver) = channel(64);
         let ended = Arc::new(Mutex::new(None));
         let cancel = CancellationToken::new();
+        let done = CancellationToken::new();
         let process = Process {
             child,
             pid,
@@ -243,20 +263,22 @@ impl ClaudeAdapter {
             sender,
             Arc::clone(&ended),
             cancel.clone(),
+            done.clone(),
         ));
-        Ok(Box::new(ClaudeSession {
+        let handle: Box<dyn SessionHandle> = Box::new(ClaudeSession {
             session_id: spec.session_id.clone(),
             receiver,
             ended,
             cancel,
-        }))
+        });
+        Ok((handle, done))
     }
 }
 
 impl RuntimeAdapter for ClaudeAdapter {
     fn start_session(&self, spec: SessionSpec) -> Result<Box<dyn SessionHandle>, RuntimeError> {
-        let handle = self.run(&spec, &spec.initial_prompt, false)?;
-        locked(&self.specs).insert(spec.session_id.clone(), spec);
+        let (handle, done) = self.run(&spec, &spec.initial_prompt, false)?;
+        locked(&self.specs).insert(spec.session_id.clone(), (spec, done));
         Ok(handle)
     }
 
@@ -265,13 +287,20 @@ impl RuntimeAdapter for ClaudeAdapter {
         session_id: &str,
         prompt: &str,
     ) -> Result<Box<dyn SessionHandle>, RuntimeError> {
-        let spec = locked(&self.specs)
+        let (spec, done) = locked(&self.specs)
             .get(session_id)
             .cloned()
             .ok_or_else(|| RuntimeError::Spawn {
                 detail: format!("this adapter did not start that session: {session_id}"),
             })?;
-        self.run(&spec, prompt, true)
+        if !done.is_cancelled() {
+            return Err(RuntimeError::Spawn {
+                detail: format!("that session is still running: {session_id}"),
+            });
+        }
+        let (handle, done) = self.run(&spec, prompt, true)?;
+        locked(&self.specs).insert(spec.session_id.clone(), (spec, done));
+        Ok(handle)
     }
 }
 
@@ -331,23 +360,33 @@ enum Stop {
 /// Kills the program's group if the supervisor is dropped before it has seen the group killed,
 /// as it is when the runtime it runs on shuts down, so that nothing the program started outlives
 /// the runtime.
+/// Whether or not it kills, it says the session is over through `done` as it goes.
 struct GroupGuard {
     pid: u32,
     is_armed: bool,
+    done: CancellationToken,
+}
+
+impl GroupGuard {
+    /// Kills the group `pid` leads without awaiting, which a drop cannot; the shell's `kill`
+    /// returns at once.
+    fn kill_now(pid: u32) {
+        let _ = std::process::Command::new("sh")
+            .arg("-c")
+            .arg(kill_line(pid))
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status();
+    }
 }
 
 impl Drop for GroupGuard {
     fn drop(&mut self) {
         if self.is_armed {
-            // A drop cannot await; the shell's `kill` returns at once.
-            let _ = std::process::Command::new("sh")
-                .arg("-c")
-                .arg(kill_line(self.pid))
-                .stdin(Stdio::null())
-                .stdout(Stdio::null())
-                .stderr(Stdio::null())
-                .status();
+            GroupGuard::kill_now(self.pid);
         }
+        self.done.cancel();
     }
 }
 
@@ -362,6 +401,7 @@ async fn supervise(
     sender: Sender<SessionEvent>,
     ended: Arc<Mutex<Option<EndReason>>>,
     cancel: CancellationToken,
+    done: CancellationToken,
 ) {
     let Process {
         mut child,
@@ -373,6 +413,7 @@ async fn supervise(
     let mut guard = GroupGuard {
         pid,
         is_armed: true,
+        done,
     };
     // A program that stopped reading ends with its output, which is read below.
     let _ = stdin.write_all(first_line.as_bytes()).await;
@@ -394,6 +435,8 @@ async fn supervise(
     kill_group(pid).await;
     guard.is_armed = false;
     let status = tokio::time::timeout(EXIT_GRACE, child.wait()).await;
+    // The process is gone, so the session may be resumed.
+    guard.done.cancel();
     let last = match stop {
         Stop::Result => None,
         Stop::Killed(reason, detail) => Some((reason, detail)),
@@ -640,7 +683,7 @@ pub fn write_session_files(
         .map_err(|error| io(&mcp, error))
 }
 
-/// The program's whole environment: `base`, and the credential's one variable.
+/// The program's whole environment: `base`, the credential's one variable, and `QUIET`.
 #[must_use]
 pub fn child_env(
     credential: &ClaudeCredential,
@@ -654,7 +697,52 @@ pub fn child_env(
         ClaudeCredential::OauthToken(secret) => (OAUTH_TOKEN, secret),
     };
     env.insert(name.to_string(), secret.expose().to_string());
+    for (name, value) in QUIET {
+        env.insert((*name).to_string(), (*value).to_string());
+    }
     env
+}
+
+/// What `<claude> --version` prints, run with only the base environment and given
+/// `VERSION_TIMEOUT` to answer.
+fn version_output(config: &ClaudeConfig) -> Result<String, RuntimeError> {
+    let refused = |detail: String| RuntimeError::Spawn {
+        detail: format!("`{} --version` {detail}", config.claude_path.display()),
+    };
+    let mut child = std::process::Command::new(&config.claude_path)
+        .arg("--version")
+        .env_clear()
+        .envs(&config.env)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .process_group(0)
+        .spawn()
+        .map_err(|error| refused(format!("cannot be run: {error}")))?;
+    let deadline = std::time::Instant::now() + VERSION_TIMEOUT;
+    loop {
+        match child.try_wait() {
+            Ok(Some(_)) => break,
+            Ok(None) if std::time::Instant::now() < deadline => {
+                std::thread::sleep(Duration::from_millis(20));
+            }
+            Ok(None) => {
+                GroupGuard::kill_now(child.id());
+                let _ = child.wait();
+                return Err(refused(format!(
+                    "did not answer within {} s",
+                    VERSION_TIMEOUT.as_secs()
+                )));
+            }
+            Err(error) => return Err(refused(format!("cannot be waited for: {error}"))),
+        }
+    }
+    let mut output = String::new();
+    if let Some(mut stdout) = child.stdout.take() {
+        std::io::Read::read_to_string(&mut stdout, &mut output)
+            .map_err(|error| refused(format!("cannot be read: {error}")))?;
+    }
+    Ok(output)
 }
 
 /// Reads what `claude --version` printed and refuses a version older than `MIN_CLAUDE_VERSION`.
@@ -957,21 +1045,35 @@ mod tests {
     fn passes_only_the_base_environment_and_one_credential() {
         let base = BTreeMap::from([("PATH".to_string(), "/usr/bin".to_string())]);
         let api_key = ClaudeCredential::ApiKey(Secret::new("sk-key".to_string()));
+        let quiet = |pairs: [(&str, &str); 2]| -> BTreeMap<String, String> {
+            pairs
+                .into_iter()
+                .chain([
+                    ("CLAUDE_CODE_DISABLE_AUTO_MEMORY", "1"),
+                    ("DISABLE_AUTOUPDATER", "1"),
+                ])
+                .map(|(key, value)| (key.to_string(), value.to_string()))
+                .collect()
+        };
         assert_eq!(
             child_env(&api_key, &base),
-            BTreeMap::from([
-                ("ANTHROPIC_API_KEY".to_string(), "sk-key".to_string()),
-                ("PATH".to_string(), "/usr/bin".to_string()),
-            ])
+            quiet([("ANTHROPIC_API_KEY", "sk-key"), ("PATH", "/usr/bin")])
         );
         let token = ClaudeCredential::OauthToken(Secret::new("oauth".to_string()));
         assert_eq!(
             child_env(&token, &base),
-            BTreeMap::from([
-                ("CLAUDE_CODE_OAUTH_TOKEN".to_string(), "oauth".to_string()),
-                ("PATH".to_string(), "/usr/bin".to_string()),
-            ])
+            quiet([("CLAUDE_CODE_OAUTH_TOKEN", "oauth"), ("PATH", "/usr/bin")])
         );
+        let overridden = BTreeMap::from([
+            ("DISABLE_AUTOUPDATER".to_string(), "0".to_string()),
+            (
+                "CLAUDE_CODE_DISABLE_AUTO_MEMORY".to_string(),
+                "0".to_string(),
+            ),
+        ]);
+        let env = child_env(&token, &overridden);
+        assert_eq!(env["DISABLE_AUTOUPDATER"], "1");
+        assert_eq!(env["CLAUDE_CODE_DISABLE_AUTO_MEMORY"], "1");
     }
 
     #[test]
@@ -1228,6 +1330,19 @@ mod tests {
         let project = TempProject::new("claude-debug");
         let printed = format!("{:?}", config(&project).daemon);
         assert!(printed.contains("[redacted]"), "{printed}");
+        assert!(!printed.contains(TOKEN), "{printed}");
+    }
+
+    #[test]
+    fn prints_a_config_without_its_environment_s_values() {
+        let project = TempProject::new("claude-config-debug");
+        let config = ClaudeConfig {
+            env: BTreeMap::from([("SOME_TOKEN".to_string(), "a-value-not-to-print".to_string())]),
+            ..config(&project)
+        };
+        let printed = format!("{config:?}");
+        assert!(printed.contains("SOME_TOKEN"), "{printed}");
+        assert!(!printed.contains("a-value-not-to-print"), "{printed}");
         assert!(!printed.contains(TOKEN), "{printed}");
     }
 
