@@ -185,7 +185,7 @@ Files: `orchestrator.rs`, `orchestrator/human.rs`, `docs/SPEC.md` (5.7)
 - `locks_triages_and_integrates_through_one_door` — `ContractLock` and `ContractUnlock` append their events; `RequestTriage` appends `request.triaged { triaged_by: human }`; `TaskIntegrate` on an accepted task under `manual` appends `task.integrated { integrated_by: human }` with `said` containing `merged`; `TaskCreate` is `Invalid`.
 - `stops_the_run_through_handle` — `RunStop` answers with `events` empty, and a following `run_until_idle` runs no tick (step 11's `stop`, which never aborts a session, is what it calls; step 11 tests that).
 
-- [ ] `feat(runtime): handle the human's commands`
+- [x] `feat(runtime): handle the human's commands`
 
 ### Task 5: stopping and pausing
 

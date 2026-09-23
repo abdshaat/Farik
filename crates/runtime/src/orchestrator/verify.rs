@@ -506,7 +506,7 @@ fn reviewer_results(context: &TransitionContext) -> Vec<CriterionResult> {
 /// The results Farik recorded as the governor since `since`, the latest per criterion. Farik's own
 /// carry no agent on their envelope; `recorded_by` alone would trust an agent the team named
 /// `governor`.
-fn governor_results(history: &[FarikEvent], since: u64) -> Vec<CriterionResult> {
+pub(super) fn governor_results(history: &[FarikEvent], since: u64) -> Vec<CriterionResult> {
     let mut results: Vec<CriterionResult> = Vec::new();
     for event in history
         .iter()
@@ -532,7 +532,7 @@ fn is_human(criterion: &ExitCriterion) -> bool {
 }
 
 /// Every event about the task, oldest first.
-fn history(
+pub(super) fn history(
     deps: &OrchestratorDeps,
     task_id: &TaskId,
 ) -> Result<Vec<FarikEvent>, OrchestratorError> {
@@ -543,7 +543,7 @@ fn history(
 }
 
 /// The sequence number of the task's last move into `verifying`, or 0.
-fn since_verifying(history: &[FarikEvent]) -> u64 {
+pub(super) fn since_verifying(history: &[FarikEvent]) -> u64 {
     history
         .iter()
         .rev()

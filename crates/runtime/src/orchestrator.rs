@@ -12,6 +12,7 @@ use farik_core::contract::TaskId;
 use farik_core::governor::permissions::PermissionTier;
 use farik_core::team::Team;
 use farik_protocol::clock::IdSource;
+use farik_protocol::command::Command;
 use farik_roles::RoleError;
 use farik_store::files::FilesError;
 use farik_store::{GitError, StoreError};
@@ -26,6 +27,7 @@ use crate::transitions::TransitionError;
 
 #[cfg(test)]
 pub(crate) mod fixtures;
+mod human;
 mod integrate;
 mod messages;
 mod recover;
@@ -202,6 +204,54 @@ pub enum IntegrationOutcome {
     },
 }
 
+/// What a command the human gave did, for the command line to print.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CommandReport {
+    /// One sentence saying what happened.
+    pub said: String,
+    /// The sequence numbers of the events the command appended, in order.
+    pub events: Vec<u64>,
+}
+
+/// Why a command the human gave did nothing.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CommandError {
+    /// The command is not one that can be handled as given: a blank answer, reason, or message,
+    /// or a command this door does not take.
+    Invalid {
+        /// What is wrong with it.
+        detail: String,
+    },
+    /// The command cannot be done to what it names as it stands.
+    Refused {
+        /// Why, starting with a `snake_case` kind and `: `, as the tools' refusals do.
+        reason: String,
+    },
+    /// What the command names does not exist.
+    NotFound {
+        /// The task, question, agent, or session named.
+        what: String,
+    },
+    /// The store, a file, git, or the orchestrator failed.
+    Failed {
+        /// What failed, in its words.
+        detail: String,
+    },
+}
+
+impl fmt::Display for CommandError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Invalid { detail } => write!(formatter, "invalid: {detail}"),
+            Self::Refused { reason } => write!(formatter, "refused: {reason}"),
+            Self::NotFound { what } => write!(formatter, "not found: {what}"),
+            Self::Failed { detail } => write!(formatter, "failed: {detail}"),
+        }
+    }
+}
+
+impl std::error::Error for CommandError {}
+
 /// What `recover` found and did.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RecoveryReport {
@@ -277,6 +327,22 @@ impl Orchestrator {
         task_id: &TaskId,
     ) -> Result<IntegrationOutcome, OrchestratorError> {
         integrate::integrate(self, task_id).await
+    }
+
+    /// Does what the human asks (`docs/SPEC.md` sections 5.2, 5.7, 5.11, 5.14, 5.16, F1): answer
+    /// a question, approve a contract or accept a result, resolve an escalation, move, lock,
+    /// triage, or integrate a task, pause an agent, stop a session or the run. Every command takes
+    /// effect through the store and the files, so any process may handle it, except `SessionStop`,
+    /// which reaches only a session registered in this process.
+    ///
+    /// # Errors
+    ///
+    /// `Invalid` for a blank answer, reason, or message, and for `TaskCreate`; `Refused` with a
+    /// `snake_case` kind first when the command cannot be done as things stand, the governor's
+    /// own refusals as `transition_refused`; `NotFound` naming what is not there; `Failed` when
+    /// the store, a file, git, or the orchestrator fails.
+    pub async fn handle(&self, command: Command) -> Result<CommandReport, CommandError> {
+        human::handle(self, command).await
     }
 
     /// Picks up a run that was killed (5.15), before the first tick: every session the log shows
