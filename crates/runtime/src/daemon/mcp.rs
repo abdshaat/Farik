@@ -10,9 +10,9 @@ use axum::http::request::Parts;
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
 use rmcp::model::{
-    CallToolRequestParams, CallToolResponse, CallToolResult, ContentBlock, Implementation,
-    InitializeResult, JsonObject, ListToolsResult, PaginatedRequestParams, ServerCapabilities,
-    Tool,
+    CacheScope, CallToolRequestParams, CallToolResponse, CallToolResult, ContentBlock,
+    Implementation, InitializeResult, JsonObject, ListToolsResult, PaginatedRequestParams,
+    ServerCapabilities, Tool,
 };
 use rmcp::service::RequestContext;
 use rmcp::{ErrorData, RoleServer, ServerHandler};
@@ -138,6 +138,12 @@ fn calling_session(context: &RequestContext<RoleServer>) -> Result<CallingSessio
 }
 
 /// The Farik tools the session was given, and the permission-prompt tool.
+///
+/// Protocol `2026-07-28` requires a list result to say how long it stays fresh and who may
+/// cache it, and Claude Code 2.1.280 drops every tool of a list without them. The list is the
+/// session's own, so only its client may cache it, and it is fresh for no time at all, because
+/// a session ends and the list with it. `rmcp` sends both fields to older peers too, whose
+/// schemas allow a result any other field.
 fn listed(calling: &CallingSession) -> ListToolsResult {
     let mut tools: Vec<Tool> = tool_descriptors()
         .into_iter()
@@ -158,6 +164,8 @@ fn listed(calling: &CallingSession) -> ListToolsResult {
         })),
     ));
     ListToolsResult::with_all_items(tools)
+        .with_ttl_ms(0)
+        .with_cache_scope(CacheScope::Private)
 }
 
 /// A schema as the object MCP carries it in; a schema that is not an object is carried empty.
@@ -188,14 +196,20 @@ mod tests {
 
     const TOKEN: &str = "a-token";
     const VERSION: &str = "2025-06-18";
+    /// The version Claude Code 2.1.280 speaks, measured on 2026-09-23: no `initialize` and no
+    /// MCP session, `server/discover` first, and every request naming the version in its
+    /// `_meta` and its headers.
+    const MODERN_VERSION: &str = "2026-07-28";
 
-    /// One MCP client of the router, as Claude Code is one: `initialize` first, then every
-    /// request with the session id it answered.
+    /// One MCP client of the router: a legacy one does `initialize` first, then sends every
+    /// request with the session id it answered; a modern one, as Claude Code 2.1.280 is, names
+    /// the protocol version on every request instead.
     struct Client {
         app: Router,
         farik_session: String,
         mcp_session: Option<String>,
         next_id: u64,
+        modern: bool,
     }
 
     impl Client {
@@ -205,6 +219,15 @@ mod tests {
                 farik_session: farik_session.to_string(),
                 mcp_session: None,
                 next_id: 1,
+                modern: false,
+            }
+        }
+
+        /// A client of protocol `2026-07-28`.
+        fn modern(daemon: &TestDaemon, farik_session: &str) -> Self {
+            Self {
+                modern: true,
+                ..Self::new(daemon, farik_session)
             }
         }
 
@@ -219,6 +242,15 @@ mod tests {
                 request = request
                     .header("Mcp-Session-Id", session)
                     .header("MCP-Protocol-Version", VERSION);
+            }
+            if self.modern {
+                request = request.header("MCP-Protocol-Version", MODERN_VERSION);
+                if let Some(method) = message["method"].as_str() {
+                    request = request.header("Mcp-Method", method);
+                }
+                if let Some(name) = message["params"]["name"].as_str() {
+                    request = request.header("Mcp-Name", name);
+                }
             }
             let answer = tokio::time::timeout(
                 Duration::from_secs(10),
@@ -246,9 +278,19 @@ mod tests {
             (status, message_in(&text))
         }
 
-        async fn request(&mut self, method: &str, params: Value) -> Value {
+        async fn request(&mut self, method: &str, mut params: Value) -> Value {
             let id = self.next_id;
             self.next_id += 1;
+            if self.modern {
+                params["_meta"] = json!({
+                    "io.modelcontextprotocol/protocolVersion": MODERN_VERSION,
+                    "io.modelcontextprotocol/clientCapabilities": {},
+                    "io.modelcontextprotocol/clientInfo": {
+                        "name": "claude-code",
+                        "version": "2.1.280"
+                    }
+                });
+            }
             let (status, answer) = self
                 .send(&json!({ "jsonrpc": "2.0", "id": id, "method": method, "params": params }))
                 .await;
@@ -401,6 +443,36 @@ mod tests {
         for tool in answer["result"]["tools"].as_array().expect("a list") {
             assert_eq!(tool["inputSchema"]["type"], "object", "{tool}");
         }
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn answers_a_modern_client_as_protocol_2026_07_28_requires() {
+        let daemon = TestDaemon::new("mcp-modern", |_| {});
+        let mut client = Client::modern(&daemon, DEV_SESSION);
+        let discovered = client.request("server/discover", json!({})).await;
+        assert!(
+            discovered["result"]["supportedVersions"]
+                .as_array()
+                .is_some_and(|versions| versions.contains(&json!(MODERN_VERSION))),
+            "{discovered}"
+        );
+        let listed = client.request("tools/list", json!({})).await;
+        assert_eq!(
+            listed["result"]["resultType"],
+            json!("complete"),
+            "{listed}"
+        );
+        assert_eq!(listed["result"]["ttlMs"], json!(0), "{listed}");
+        assert_eq!(listed["result"]["cacheScope"], json!("private"), "{listed}");
+        let called = client.call("farik_read_board", json!({})).await;
+        assert_eq!(
+            called["result"]["resultType"],
+            json!("complete"),
+            "{called}"
+        );
+        assert_ne!(called["result"]["isError"], json!(true), "{called}");
+        assert!(text_of(&called).contains("FRK-1"), "{called}");
     }
 
     #[tokio::test(flavor = "multi_thread")]
