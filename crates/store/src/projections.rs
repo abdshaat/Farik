@@ -321,7 +321,7 @@ impl Projections {
 
     /// The log's own connection: the projections live in the same database, and share its lock so
     /// that a view cannot read a half-written append.
-    fn connection(&self) -> std::sync::MutexGuard<'_, Connection> {
+    pub(crate) fn connection(&self) -> std::sync::MutexGuard<'_, Connection> {
         self.log.connection()
     }
 }
