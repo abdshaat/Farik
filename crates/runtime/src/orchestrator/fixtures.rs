@@ -134,6 +134,47 @@ impl Harness {
             .expect("the task's worktree is made");
     }
 
+    /// Files `task` `ready` with `change`, and moves it through `in_progress` to `verifying`, held
+    /// by `dev-a` and reviewed by `dev-b`, with its worktree made; `done.txt` committed on its
+    /// branch when `commits_done`, and `dev-a`'s completion note written when `notes`.
+    pub(crate) fn verifying_with(
+        &self,
+        task: &str,
+        commits_done: bool,
+        notes: bool,
+        change: impl FnOnce(&mut Value),
+    ) {
+        self.file(task, "ready", change);
+        let people = json!({ "assignee": "dev-a", "reviewer": "dev-b" });
+        self.project.moved(task, "ready", "assigned", &people);
+        self.project.moved(task, "assigned", "in_progress", &people);
+        let worktree = self.worktree(task);
+        let git = &self.project.deps.git;
+        git.create_worktree(&worktree, &format!("farik/{task}"), "main")
+            .expect("the task's worktree is made");
+        if commits_done {
+            std::fs::write(worktree.join("done.txt"), "").expect("done.txt is written");
+            git.commit(&worktree, "Add done.txt", &["done.txt".to_string()])
+                .expect("done.txt is committed");
+        }
+        if notes {
+            self.project.record(
+                task,
+                "note.written",
+                &json!({ "kind": "completion", "text": "Added done.txt; nothing left out.", "written_by": "dev-a" }),
+            );
+        }
+        let mut body = people;
+        body["actor"] = json!("assignee");
+        body["requested_by"] = json!("dev-a");
+        self.project.moved(task, "in_progress", "verifying", &body);
+    }
+
+    /// `verifying_with` `done.txt` committed, the note written, and no change.
+    pub(crate) fn verifying(&self, task: &str) {
+        self.verifying_with(task, true, true, |_| {});
+    }
+
     /// Files `task` and moves it through `in_progress` to `blocked`, held by `assignee`.
     pub(crate) fn blocked(&self, task: &str, assignee: &str, reviewer: &str) {
         self.blocked_hours_ago(task, assignee, reviewer, 0);
@@ -231,6 +272,54 @@ impl Harness {
     /// Every event of these kinds, oldest first; every event when `kinds` is empty.
     pub(crate) fn events(&self, kinds: &[EventKind]) -> Vec<FarikEvent> {
         self.project.events(kinds)
+    }
+}
+
+/// An adapter that says, for each session it starts, whether the daemon registered it with an
+/// executor, and starts it with the adapter it wraps.
+pub(crate) struct ExecutorWitness {
+    inner: Arc<dyn RuntimeAdapter>,
+    daemon: Arc<DaemonState>,
+    seen: Mutex<Vec<bool>>,
+}
+
+impl ExecutorWitness {
+    /// A witness of `inner`'s sessions as `daemon` registered them.
+    pub(crate) fn new(inner: Arc<dyn RuntimeAdapter>, daemon: Arc<DaemonState>) -> Self {
+        Self {
+            inner,
+            daemon,
+            seen: Mutex::new(Vec::new()),
+        }
+    }
+
+    /// For each session started, in order, whether its registration had an executor.
+    pub(crate) fn had_executor(&self) -> Vec<bool> {
+        self.seen.lock().expect("no test panics holding it").clone()
+    }
+}
+
+impl RuntimeAdapter for ExecutorWitness {
+    fn start_session(&self, spec: SessionSpec) -> Result<Box<dyn SessionHandle>, RuntimeError> {
+        let executor = self
+            .daemon
+            .tool_context(&spec.session_id)
+            .expect("the session is registered before it starts")
+            .executor
+            .is_some();
+        self.seen
+            .lock()
+            .expect("no test panics holding it")
+            .push(executor);
+        self.inner.start_session(spec)
+    }
+
+    fn resume(
+        &self,
+        session_id: &str,
+        prompt: &str,
+    ) -> Result<Box<dyn SessionHandle>, RuntimeError> {
+        self.inner.resume(session_id, prompt)
     }
 }
 

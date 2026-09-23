@@ -14,6 +14,7 @@ use farik_store::{EventQuery, Git, TaskProjection};
 
 use super::messages::{Resume, implement_message, plan_message};
 use super::session::{SessionAsk, SessionEnd, run_session};
+use super::verify::verifying;
 use super::{Orchestrator, OrchestratorDeps, OrchestratorError, TickReport, worktree};
 use crate::cost::budget_state;
 use crate::exec::Executor;
@@ -27,7 +28,7 @@ const DAY_SPENT: &str = "the team's daily budget is spent";
 
 /// Whether a budget stops a session from starting for a task.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Room {
+pub(super) enum Room {
     /// Nothing stops it.
     Free,
     /// The task's dollars or sessions are spent: no session for this task.
@@ -48,6 +49,14 @@ pub(super) async fn tick(orchestrator: &Orchestrator) -> Result<TickReport, Orch
     }
     for row in board.iter().filter(|row| row.status == TaskStatus::Blocked) {
         if let Some(report) = blocked(deps, &team, row)? {
+            return Ok(report);
+        }
+    }
+    for row in board
+        .iter()
+        .filter(|row| row.status == TaskStatus::Verifying)
+    {
+        if let Some(report) = verifying(orchestrator, &team, row, &mut day_spent).await? {
             return Ok(report);
         }
     }
@@ -172,7 +181,7 @@ fn last_move_into(
 /// Whether the budgets leave room for a session about `contract`, read with an empty session
 /// ledger: the day's dollars, then the task's dollars and sessions. `day_spent` is set when the
 /// day is what stops it.
-fn room(
+pub(super) fn room(
     deps: &OrchestratorDeps,
     team: &Team,
     contract: &TaskContract,
@@ -232,6 +241,7 @@ async fn in_progress(
             purpose: SessionPurpose::Implement,
             cwd: worktree(deps, &row.task_id),
             executor: Some(executor),
+            read_only: false,
             initial_prompt: implement_message(&contract, &resume),
         },
     )
@@ -341,7 +351,7 @@ fn assigned(
 }
 
 /// The team's agent of that id, when it is active.
-fn active<'a>(team: &'a Team, agent_id: Option<&str>) -> Option<&'a Agent> {
+pub(super) fn active<'a>(team: &'a Team, agent_id: Option<&str>) -> Option<&'a Agent> {
     let agent_id = agent_id?;
     team.active_agents()
         .find(|agent| agent.id.as_str() == agent_id)
@@ -393,6 +403,7 @@ async fn ready(
             purpose: SessionPurpose::Plan,
             cwd: deps.tools.files.root().to_path_buf(),
             executor: None,
+            read_only: false,
             initial_prompt: plan_message(&contract, &assignees, &reviewers),
         },
     )
@@ -458,7 +469,12 @@ fn dependencies_integrated(
 }
 
 /// What a tick that ran a session says.
-fn acted(row: &TaskProjection, agent: &Agent, purpose: &str, end: &SessionEnd) -> TickReport {
+pub(super) fn acted(
+    row: &TaskProjection,
+    agent: &Agent,
+    purpose: &str,
+    end: &SessionEnd,
+) -> TickReport {
     let how = match end.reason {
         EndReason::Completed => "completed",
         EndReason::Aborted => "was aborted",
@@ -490,10 +506,11 @@ mod tests {
     use std::time::Duration;
 
     use farik_core::contract::{Role, TaskStatus};
+    use farik_core::governor::permissions::PermissionTier;
     use farik_core::pricing::Usage;
     use farik_protocol::event::{
         BudgetExhaustedBodyScope, CriterionRecordedBodyRunBy, EscalationRaisedBodyReason,
-        EventBody, EventKind, NoteWrittenBodyKind, SessionEndedBodyReason,
+        EventBody, EventKind, NoteWrittenBodyKind, ReviewRecordedBody, SessionEndedBodyReason,
         SessionStartedBodyPurpose, TransitionActorWire,
     };
     use farik_roles::RoleError;
@@ -501,12 +518,15 @@ mod tests {
     use serde_json::json;
 
     use crate::claude::allowed_builtins;
-    use crate::orchestrator::fixtures::{CountingSandboxFactory, Harness, UsageThenWaitAdapter};
-    use crate::orchestrator::{OrchestratorError, TickReport};
-    use crate::recorded::Transcript;
-    use crate::recorded::fixtures::{
-        implement_finishes_frk_1, implement_stops_early, plan_assigns_frk_1, reads_a_file,
+    use crate::orchestrator::fixtures::{
+        CountingSandboxFactory, ExecutorWitness, Harness, UsageThenWaitAdapter,
     };
+    use crate::orchestrator::{OrchestratorError, TickReport};
+    use crate::recorded::fixtures::{
+        accept_frk_1, implement_finishes_frk_1, implement_stops_early, plan_assigns_frk_1,
+        reads_a_file, review_answers_nothing, review_writes_note,
+    };
+    use crate::recorded::{RecordedAdapter, Transcript};
     use crate::session::SessionPurpose;
 
     const NOTHING_TO_DO: &str = "nothing on the board needs doing";
@@ -1011,6 +1031,437 @@ mod tests {
 
         assert_eq!(acted_on(&report), Some("FRK-2"), "{report:?}");
         assert!(adapter.started().is_empty());
+    }
+
+    /// The `criterion.recorded` events Farik recorded as the governor, as (id, passed).
+    fn governor_runs(harness: &Harness) -> Vec<(String, bool)> {
+        harness
+            .events(&[EventKind::CriterionRecorded])
+            .iter()
+            .filter_map(|event| match &event.body {
+                EventBody::CriterionRecorded(body) if body.recorded_by == "governor" => {
+                    assert_eq!(body.run_by, CriterionRecordedBodyRunBy::Reviewer);
+                    Some((body.criterion_id.clone(), body.passed))
+                }
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// Every `review.recorded` body.
+    fn reviews(harness: &Harness) -> Vec<ReviewRecordedBody> {
+        harness
+            .events(&[EventKind::ReviewRecorded])
+            .iter()
+            .filter_map(|event| match &event.body {
+                EventBody::ReviewRecorded(body) => Some(body.clone()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// The (agent, purpose) of every session started.
+    fn sessions(adapter: &RecordedAdapter) -> Vec<(String, SessionPurpose)> {
+        adapter
+            .started()
+            .iter()
+            .map(|spec| (spec.agent_id.clone(), spec.purpose))
+            .collect()
+    }
+
+    /// The text of `source`'s untrusted block in `text`, or nothing.
+    fn block<'a>(text: &'a str, source: &str) -> &'a str {
+        let open = format!("<untrusted source=\"{source}\">");
+        text.split_once(&open)
+            .and_then(|(_, rest)| rest.split_once("</untrusted>"))
+            .map_or("", |(inside, _)| inside)
+    }
+
+    /// A `review` criterion C2.
+    fn with_a_review_criterion(wire: &mut serde_json::Value) {
+        push_criterion(
+            wire,
+            json!({
+                "id": "C2",
+                "text": "The file is where it belongs.",
+                "verification": { "method": "review", "rubric": ["Is done.txt at the root?"] }
+            }),
+        );
+    }
+
+    fn push_criterion(wire: &mut serde_json::Value, criterion: serde_json::Value) {
+        wire["exit_criteria"]
+            .as_array_mut()
+            .expect("a list of criteria")
+            .push(criterion);
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn runs_the_criteria_as_the_reviewer_before_the_review() {
+        let harness = Harness::new("orch-verify-runs", |_| {});
+        harness.verifying("FRK-1");
+        let recorded = harness.recorded(vec![review_writes_note()]);
+        let witness = Arc::new(ExecutorWitness::new(
+            recorded.clone(),
+            Arc::clone(&harness.daemon),
+        ));
+        let orchestrator = harness.orchestrator(witness.clone());
+
+        let report = orchestrator.tick().await.expect("the tick runs");
+
+        assert_eq!(acted_on(&report), Some("FRK-1"), "{report:?}");
+        let events = harness.events(&[EventKind::CriterionRecorded, EventKind::SessionStarted]);
+        let kinds: Vec<EventKind> = events.iter().map(|event| event.body.kind()).collect();
+        assert_eq!(
+            kinds,
+            vec![EventKind::CriterionRecorded, EventKind::SessionStarted]
+        );
+        match &events[0].body {
+            EventBody::CriterionRecorded(body) => {
+                assert_eq!(body.criterion_id, "C1");
+                assert!(body.passed, "{}", body.evidence);
+                assert_eq!(body.run_by, CriterionRecordedBodyRunBy::Reviewer);
+                assert_eq!(body.recorded_by, "governor");
+            }
+            other => panic!("expected a criterion, got {other:?}"),
+        }
+        assert!(matches!(
+            &events[1].body,
+            EventBody::SessionStarted(body) if body.purpose == SessionStartedBodyPurpose::Verify
+        ));
+        assert_eq!(events[1].envelope.ids.agent_id.as_deref(), Some("dev-b"));
+        let started = recorded.started();
+        assert_eq!(started.len(), 1);
+        assert_eq!(started[0].purpose, SessionPurpose::Verify);
+        assert_eq!(started[0].agent_id, "dev-b");
+        assert_eq!(started[0].cwd, harness.worktree("FRK-1"));
+        assert_eq!(
+            started[0].builtin_tools,
+            allowed_builtins(&BTreeSet::from([PermissionTier::Read]))
+        );
+        assert_eq!(witness.had_executor(), vec![false]);
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn shows_the_reviewer_the_diff_and_the_note_and_not_the_transcript() {
+        let harness = Harness::new("orch-verify-shows", |_| {});
+        harness.assigned("FRK-1", "dev-a", "dev-b");
+        let adapter = harness.recorded(vec![implement_finishes_frk_1(), review_writes_note()]);
+        let orchestrator = harness.orchestrator(adapter.clone());
+
+        for _ in 0..3 {
+            orchestrator.tick().await.expect("the tick runs");
+        }
+
+        let started = adapter.started();
+        assert_eq!(started.len(), 2);
+        assert_eq!(started[1].purpose, SessionPurpose::Verify);
+        let prompt = &started[1].initial_prompt;
+        assert!(block(prompt, "diff").contains("b/done.txt"), "{prompt}");
+        assert!(
+            block(prompt, "completion_note").contains("Added done.txt; nothing left out."),
+            "{prompt}"
+        );
+        assert!(
+            block(prompt, "results").contains("$ test -f done.txt"),
+            "{prompt}"
+        );
+        assert!(
+            !prompt.contains("FRK-1 is done and waiting for review."),
+            "{prompt}"
+        );
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn does_not_run_the_criteria_twice_in_one_verification() {
+        let harness = Harness::new("orch-verify-once", |_| {});
+        harness.verifying_with("FRK-1", true, true, with_a_review_criterion);
+        let adapter = harness.recorded(vec![review_answers_nothing(), review_answers_nothing()]);
+        let orchestrator = harness.orchestrator(adapter.clone());
+
+        orchestrator.tick().await.expect("the first review runs");
+        assert_eq!(governor_runs(&harness), vec![("C1".to_string(), true)]);
+        orchestrator.tick().await.expect("the second review runs");
+
+        assert_eq!(adapter.started().len(), 2);
+        assert_eq!(governor_runs(&harness), vec![("C1".to_string(), true)]);
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn runs_only_the_criteria_farik_has_not_run() {
+        let harness = Harness::new("orch-verify-remaining", |_| {});
+        harness.verifying_with("FRK-1", true, true, |wire| {
+            push_criterion(
+                wire,
+                json!({
+                    "id": "C2",
+                    "text": "done.txt is still there.",
+                    "verification": {
+                        "method": "command",
+                        "command": "test -f done.txt",
+                        "expect": { "exit_code": 0 }
+                    }
+                }),
+            );
+        });
+        harness.project.record(
+            "FRK-1",
+            "criterion.recorded",
+            &json!({
+                "criterion_id": "C1",
+                "passed": true,
+                "evidence": "$ test -f done.txt\nexit 0",
+                "run_by": "reviewer",
+                "recorded_by": "governor"
+            }),
+        );
+        let adapter = harness.recorded(vec![review_writes_note()]);
+        let orchestrator = harness.orchestrator(adapter);
+
+        orchestrator.tick().await.expect("the tick runs");
+
+        assert_eq!(
+            governor_runs(&harness),
+            vec![("C1".to_string(), true), ("C2".to_string(), true)]
+        );
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn rejects_a_failed_review_with_the_reviewers_note() {
+        let harness = Harness::new("orch-verify-rejects", |_| {});
+        harness.verifying_with("FRK-1", false, true, |_| {});
+        let adapter = harness.recorded(vec![review_writes_note(), accept_frk_1()]);
+        let orchestrator = harness.orchestrator(adapter.clone());
+
+        orchestrator.tick().await.expect("the review runs");
+        assert_eq!(governor_runs(&harness), vec![("C1".to_string(), false)]);
+        orchestrator.tick().await.expect("the rejection is filed");
+
+        let notes = harness.events(&[EventKind::NoteWritten]);
+        let review = notes
+            .iter()
+            .rev()
+            .find(|event| {
+                matches!(&event.body, EventBody::NoteWritten(body) if body.kind == NoteWrittenBodyKind::Review)
+            })
+            .expect("a review note");
+        let EventBody::NoteWritten(note) = &review.body else {
+            panic!("a note");
+        };
+        let transitions = harness.events(&[EventKind::TaskTransitioned]);
+        let rejection = transitions.last().expect("a move");
+        let EventBody::TaskTransitioned(moved) = &rejection.body else {
+            panic!("a move");
+        };
+        assert_eq!(moved.from.to_string(), "verifying");
+        assert_eq!(moved.to.to_string(), "rejected");
+        assert_eq!(moved.actor, TransitionActorWire::Reviewer);
+        assert_eq!(moved.requested_by, "dev-b");
+        let reasons = moved
+            .rejection
+            .as_ref()
+            .expect("the move carries its rejection");
+        assert_eq!(reasons.failed_criterion_ids, vec!["C1".to_string()]);
+        assert_eq!(reasons.reasons, note.text);
+        assert!(review.envelope.ids.session_id.is_some());
+        assert_eq!(
+            rejection.envelope.ids.session_id,
+            review.envelope.ids.session_id
+        );
+        assert_eq!(
+            sessions(&adapter),
+            vec![("dev-b".to_string(), SessionPurpose::Verify)]
+        );
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn asks_the_reviewer_again_for_an_unanswered_criterion() {
+        let harness = Harness::new("orch-verify-again", |_| {});
+        harness.verifying_with("FRK-1", true, true, with_a_review_criterion);
+        let adapter = harness.recorded(vec![review_answers_nothing(), review_answers_nothing()]);
+        let orchestrator = harness.orchestrator(adapter.clone());
+
+        orchestrator.tick().await.expect("the first review runs");
+        orchestrator.tick().await.expect("the second review runs");
+
+        let started = adapter.started();
+        assert_eq!(
+            sessions(&adapter),
+            vec![
+                ("dev-b".to_string(), SessionPurpose::Verify),
+                ("dev-b".to_string(), SessionPurpose::Verify),
+            ]
+        );
+        assert!(
+            !started[0].initial_prompt.contains("Still unanswered"),
+            "{}",
+            started[0].initial_prompt
+        );
+        let prompt = &started[1].initial_prompt;
+        assert!(prompt.contains("Still unanswered: C2"), "{prompt}");
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn hands_a_passed_review_to_the_product_manager() {
+        let harness = Harness::new("orch-verify-hands-on", |_| {});
+        harness.verifying("FRK-1");
+        let adapter = harness.recorded(vec![review_writes_note(), accept_frk_1()]);
+        let orchestrator = harness.orchestrator(adapter.clone());
+
+        orchestrator.tick().await.expect("the review runs");
+        assert_eq!(
+            reviews(&harness),
+            vec![ReviewRecordedBody {
+                reviewer: "dev-b".to_string(),
+                criteria_run: 1,
+                passed: true
+            }]
+        );
+        orchestrator
+            .tick()
+            .await
+            .expect("the Product Manager's session runs");
+
+        let started = adapter.started();
+        assert_eq!(
+            sessions(&adapter),
+            vec![
+                ("dev-b".to_string(), SessionPurpose::Verify),
+                ("pm".to_string(), SessionPurpose::Verify),
+            ]
+        );
+        let prompt = &started[1].initial_prompt;
+        assert!(
+            block(prompt, "review_note").contains("the diff adds done.txt and nothing else"),
+            "{prompt}"
+        );
+        assert!(prompt.contains("`accepted`"), "{prompt}");
+        assert_eq!(started[1].cwd, harness.worktree("FRK-1"));
+        assert_eq!(harness.row("FRK-1").status, TaskStatus::Accepted);
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn leaves_a_high_risk_task_for_the_human() {
+        let harness = Harness::new("orch-verify-high-risk", |_| {});
+        harness.verifying_with("FRK-1", true, true, |wire| wire["risk"] = json!("high"));
+        let adapter = harness.recorded(vec![review_writes_note(), accept_frk_1()]);
+        let orchestrator = harness.orchestrator(adapter.clone());
+
+        orchestrator.tick().await.expect("the review runs");
+        let report = orchestrator.tick().await.expect("the tick runs");
+
+        assert_eq!(
+            report,
+            TickReport::Idle {
+                why: NOTHING_TO_DO.to_string()
+            }
+        );
+        assert_eq!(
+            sessions(&adapter),
+            vec![("dev-b".to_string(), SessionPurpose::Verify)]
+        );
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn leaves_a_task_with_a_human_criterion_for_the_human() {
+        let harness = Harness::new("orch-verify-human-criterion", |_| {});
+        harness.verifying_with("FRK-1", true, true, |wire| {
+            push_criterion(
+                wire,
+                json!({
+                    "id": "C2",
+                    "text": "The founder has opened done.txt.",
+                    "verification": { "method": "human", "question": "Did you open done.txt?" }
+                }),
+            );
+        });
+        let adapter = harness.recorded(vec![
+            review_writes_note(),
+            review_writes_note(),
+            accept_frk_1(),
+        ]);
+        let orchestrator = harness.orchestrator(adapter.clone());
+
+        orchestrator.tick().await.expect("the review runs");
+        let report = orchestrator.tick().await.expect("the tick runs");
+
+        assert_eq!(
+            reviews(&harness),
+            vec![ReviewRecordedBody {
+                reviewer: "dev-b".to_string(),
+                criteria_run: 1,
+                passed: true
+            }]
+        );
+        assert_eq!(
+            report,
+            TickReport::Idle {
+                why: NOTHING_TO_DO.to_string()
+            }
+        );
+        assert_eq!(
+            sessions(&adapter),
+            vec![("dev-b".to_string(), SessionPurpose::Verify)]
+        );
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn passes_over_a_task_whose_request_was_refused() {
+        let harness = Harness::new("orch-verify-refused", |_| {});
+        harness.verifying_with("FRK-1", true, false, |_| {});
+        let adapter = harness.recorded(vec![review_writes_note(), accept_frk_1(), accept_frk_1()]);
+        let orchestrator = harness.orchestrator(adapter.clone());
+
+        orchestrator.tick().await.expect("the review runs");
+        orchestrator
+            .tick()
+            .await
+            .expect("the Product Manager's session runs");
+        assert_eq!(harness.events(&[EventKind::TransitionRefused]).len(), 1);
+        let report = orchestrator.tick().await.expect("the tick runs");
+
+        assert_eq!(
+            report,
+            TickReport::Idle {
+                why: NOTHING_TO_DO.to_string()
+            }
+        );
+        assert_eq!(adapter.started().len(), 2);
+        assert_eq!(harness.row("FRK-1").status, TaskStatus::Verifying);
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn records_the_review_once_per_verification() {
+        // The first session writes no note, so the reviewer is asked again after every criterion
+        // already has its result.
+        let harness = Harness::new("orch-verify-review-once", |_| {});
+        harness.verifying("FRK-1");
+        let adapter = harness.recorded(vec![reads_a_file(), review_writes_note()]);
+        let orchestrator = harness.orchestrator(adapter.clone());
+
+        orchestrator.tick().await.expect("the first review runs");
+        assert_eq!(reviews(&harness).len(), 1);
+        orchestrator.tick().await.expect("the second review runs");
+
+        assert_eq!(
+            sessions(&adapter),
+            vec![
+                ("dev-b".to_string(), SessionPurpose::Verify),
+                ("dev-b".to_string(), SessionPurpose::Verify),
+            ]
+        );
+        assert_eq!(reviews(&harness).len(), 1);
     }
 
     /// Usage past a session's 100 input tokens and under every dollar budget.

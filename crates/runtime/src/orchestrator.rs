@@ -17,6 +17,7 @@ use farik_store::files::FilesError;
 use farik_store::{GitError, StoreError};
 
 use crate::cost::CostError;
+use crate::criteria::CriterionError;
 use crate::daemon::DaemonState;
 use crate::sandbox::{Sandbox, SandboxError, SandboxFactory};
 use crate::session::{RuntimeAdapter, RuntimeError};
@@ -28,6 +29,7 @@ pub(crate) mod fixtures;
 mod messages;
 mod rules;
 mod session;
+mod verify;
 
 /// What the orchestrator works with.
 pub struct OrchestratorDeps {
@@ -63,6 +65,8 @@ pub enum OrchestratorError {
     Transition(TransitionError),
     /// A cost could not be recorded, or a budget read.
     Cost(CostError),
+    /// A criterion Farik runs for the reviewer could not be run.
+    Criterion(CriterionError),
 }
 
 impl fmt::Display for OrchestratorError {
@@ -76,6 +80,7 @@ impl fmt::Display for OrchestratorError {
             Self::Role(error) => write!(formatter, "the role failed: {error}"),
             Self::Transition(error) => write!(formatter, "the transition failed: {error}"),
             Self::Cost(error) => write!(formatter, "the cost failed: {error}"),
+            Self::Criterion(error) => write!(formatter, "the criterion failed: {error}"),
         }
     }
 }
@@ -121,6 +126,12 @@ impl From<RoleError> for OrchestratorError {
 impl From<TransitionError> for OrchestratorError {
     fn from(error: TransitionError) -> Self {
         Self::Transition(error)
+    }
+}
+
+impl From<CriterionError> for OrchestratorError {
+    fn from(error: CriterionError) -> Self {
+        Self::Criterion(error)
     }
 }
 

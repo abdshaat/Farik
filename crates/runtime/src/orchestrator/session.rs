@@ -35,12 +35,17 @@ pub(super) struct SessionAsk<'a> {
     pub(super) cwd: PathBuf,
     /// Where its commands run, when it runs any.
     pub(super) executor: Option<Arc<dyn Executor>>,
+    /// Whether it gets the read tier's built-ins alone, whatever the agent's tiers: a verify
+    /// session reads the work and does not change it.
+    pub(super) read_only: bool,
     /// Its first message.
     pub(super) initial_prompt: String,
 }
 
 /// How a session ended.
 pub(super) struct SessionEnd {
+    /// The session.
+    pub(super) session_id: String,
     /// Why.
     pub(super) reason: EndReason,
     /// What the program said.
@@ -66,7 +71,12 @@ pub(super) async fn run_session(
     });
     let ended = drive(deps, team, role, ask.contract, &spec).await;
     deps.daemon.end_session(&spec.session_id);
-    ended
+    let (reason, detail) = ended?;
+    Ok(SessionEnd {
+        session_id: spec.session_id,
+        reason,
+        detail,
+    })
 }
 
 /// The spec of the session `ask` describes, its prompt assembled from the files as they are now.
@@ -87,7 +97,11 @@ fn session_spec(
     let memory = files.read_memory(&ask.agent.id)?;
     let criteria = files.read_criteria()?;
     let tiers: BTreeSet<PermissionTier> = ask.agent.tiers().into_iter().collect();
-    let builtin_tools = allowed_builtins(&tiers);
+    let builtin_tools = if ask.read_only {
+        allowed_builtins(&BTreeSet::from([PermissionTier::Read]))
+    } else {
+        allowed_builtins(&tiers)
+    };
     let tools = tool_descriptors();
     let farik_tools = tools
         .iter()
@@ -146,7 +160,7 @@ async fn drive(
     role: Role,
     contract: &TaskContract,
     spec: &SessionSpec,
-) -> Result<SessionEnd, OrchestratorError> {
+) -> Result<(EndReason, String), OrchestratorError> {
     let tools = &deps.tools;
     let clock = &*tools.clock;
     let ids = EventIds {
@@ -244,5 +258,5 @@ async fn drive(
         cost(&Usage::default())?;
     }
     record_session_ended(&tools.log, &spec.session_id, reason, &detail, &ids, clock)?;
-    Ok(SessionEnd { reason, detail })
+    Ok((reason, detail))
 }

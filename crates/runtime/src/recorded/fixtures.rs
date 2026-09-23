@@ -84,3 +84,22 @@ pub fn implement_finishes_frk_1() -> Transcript {
 pub fn implement_stops_early() -> Transcript {
     Transcript::from_jsonl(include_str!("transcripts/implement_stops_early.jsonl"))
 }
+
+/// `dev-b`'s verify session of FRK-1: a review note, and nothing else. Hand-written.
+#[must_use]
+pub fn review_writes_note() -> Transcript {
+    Transcript::from_jsonl(include_str!("transcripts/review_writes_note.jsonl"))
+}
+
+/// `dev-b`'s verify session of FRK-1 that answers no `review` criterion: a review note, and
+/// nothing else. Hand-written.
+#[must_use]
+pub fn review_answers_nothing() -> Transcript {
+    Transcript::from_jsonl(include_str!("transcripts/review_answers_nothing.jsonl"))
+}
+
+/// The Product Manager's verify session of FRK-1: `accepted` asked for. Hand-written.
+#[must_use]
+pub fn accept_frk_1() -> Transcript {
+    Transcript::from_jsonl(include_str!("transcripts/accept_frk_1.jsonl"))
+}
