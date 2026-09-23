@@ -1958,6 +1958,9 @@ mod tests {
                          (task_id, kind, parent, title, status, risk, triaged, locked, updated_seq)
                      VALUES ('FRK-1', 'task', NULL, 'Add a login page', 'verifying', 'low', 0, 0,
                              4);
+                     INSERT INTO task_projections
+                         (task_id, kind, parent, title, status, risk, triaged, locked, updated_seq)
+                     VALUES ('FRK-9', 'task', NULL, 'Not in the log', 'ready', 'low', 0, 0, 5);
                      INSERT INTO cost_records
                          (seq, task_id, agent_id, session_id, day, purpose, model_id,
                           input_tokens, output_tokens, cost_usd)
@@ -1977,6 +1980,13 @@ mod tests {
             (row.cost_usd - 0.5).abs() < f64::EPSILON,
             "{}",
             row.cost_usd
+        );
+        assert_eq!(
+            projections
+                .task(&"FRK-9".parse().expect("a task id"))
+                .expect("the board reads"),
+            None,
+            "a row the log never created is not kept"
         );
         let _ = std::fs::remove_dir_all(&directory);
     }

@@ -265,9 +265,12 @@ fn keeps_the_board_and_its_place_in_the_log_across_a_reopen() {
     assert!(board[0].triaged, "and the triage is still recorded");
 }
 
-/// How many `farik` commands the projection race below runs at once, and how much each does.
+/// How many `farik` commands the projection race below runs at once, and how much each does:
+/// enough events that the four interleave many times over, and few enough that the whole race
+/// stays light on a loaded machine. Cut from 150 on 2026-09-23: an event handed over out of order
+/// has a deterministic test in `projections.rs`, so this race need not reproduce it every run.
 const PROJECTING_PROCESSES: u32 = 4;
-const EVENTS_PER_PROCESS: u32 = 150;
+const EVENTS_PER_PROCESS: u32 = 50;
 
 #[test]
 fn projects_every_event_when_several_processes_append_and_project_at_once() {

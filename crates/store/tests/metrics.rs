@@ -357,6 +357,11 @@ fn counts_active_weeks() {
 #[test]
 fn says_none_for_every_rate_before_a_task_is_accepted() {
     let recorded = Recorded::new("none-yet");
+    recorded.contract("FRK-2", &["command"]);
+    recorded.created("FRK-2", "epic", None);
+    recorded.walked("FRK-2", &TO_WORK);
+    recorded.moved("FRK-2", "in_progress", "verifying", "assignee");
+    recorded.moved("FRK-2", "verifying", "accepted", "product_manager");
     recorded.created("FRK-1", "task", None);
     recorded.walked("FRK-1", &TO_WORK);
     recorded.escalated("FRK-1", "iterations");
@@ -386,6 +391,34 @@ fn does_not_count_an_acceptance_without_a_verification_as_first_pass() {
     assert_eq!(metrics.accepted_tasks, 1);
     assert_eq!(metrics.first_pass_acceptance_rate, Some(0.0));
     assert_eq!(metrics.mechanically_verified_criteria_share, Some(1.0));
+}
+
+#[test]
+fn counts_neither_a_rejection_nor_a_second_verification_as_first_pass() {
+    let recorded = Recorded::new("not-first-pass");
+    for task in ["FRK-1", "FRK-2", "FRK-3"] {
+        recorded.contract(task, &["command"]);
+        recorded.created(task, "task", None);
+        recorded.walked(task, &TO_WORK);
+    }
+    // Verified once, rejected, and accepted by the human resolving the escalation.
+    recorded.moved("FRK-1", "in_progress", "verifying", "assignee");
+    recorded.moved("FRK-1", "verifying", "rejected", "reviewer");
+    recorded.moved("FRK-1", "rejected", "escalated", "governor");
+    recorded.moved("FRK-1", "escalated", "accepted", "human");
+    // Verified twice and never rejected.
+    recorded.moved("FRK-2", "in_progress", "verifying", "assignee");
+    recorded.moved("FRK-2", "verifying", "escalated", "governor");
+    recorded.moved("FRK-2", "escalated", "in_progress", "human");
+    recorded.moved("FRK-2", "in_progress", "verifying", "assignee");
+    recorded.moved("FRK-2", "verifying", "accepted", "product_manager");
+    // Verified once and accepted: the one first pass.
+    recorded.moved("FRK-3", "in_progress", "verifying", "assignee");
+    recorded.moved("FRK-3", "verifying", "accepted", "product_manager");
+
+    let metrics = metrics_of(&recorded);
+    assert_eq!(metrics.accepted_tasks, 3);
+    assert_eq!(metrics.first_pass_acceptance_rate, Some(1.0 / 3.0));
 }
 
 #[test]
