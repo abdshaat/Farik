@@ -549,3 +549,137 @@ fn shows_a_tasks_diff_before_and_after_integration() {
         ran.err
     );
 }
+
+/// `a_project_with_a_task` with FRK-1 verified once and accepted, and one implement session's
+/// cost of half a dollar.
+#[cfg(unix)]
+fn accepted_project(name: &str) -> TempRepo {
+    use serde_json::json;
+
+    let repository = a_project_with_a_task(name);
+    project::moved(
+        &repository,
+        "FRK-1",
+        "in_progress",
+        "verifying",
+        &json!({ "actor": "assignee", "requested_by": "dev-a" }),
+    );
+    project::moved(
+        &repository,
+        "FRK-1",
+        "verifying",
+        "accepted",
+        &json!({ "actor": "product_manager", "requested_by": "pm" }),
+    );
+    project::record_as(
+        &repository,
+        "FRK-1",
+        Some(("dev-a", "s1")),
+        "cost.recorded",
+        &json!({
+            "purpose": "implement",
+            "model_id": "claude-sonnet-4-5",
+            "usage": {
+                "input_tokens": 1000,
+                "output_tokens": 100,
+                "cache_read_tokens": 0,
+                "cache_write_tokens": 0
+            },
+            "cost_usd": 0.5
+        }),
+    );
+    repository
+}
+
+#[cfg(unix)]
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn prints_the_harness_metrics() {
+    let repository = accepted_project("read-metrics");
+    let ran = run_in(&repository.path, &["metrics"]);
+
+    assert_eq!(ran.code, 0, "{}", ran.err);
+    assert_eq!(
+        ran.out.lines().collect::<Vec<_>>(),
+        [
+            "accepted tasks: 1",
+            "first-pass acceptance: 100.0%",
+            "human interventions per accepted task: 0.00",
+            "cost per accepted task: $0.50",
+            "  triage: $0.00",
+            "  refine: $0.00",
+            "  plan: $0.00",
+            "  implement: $0.50",
+            "  verify: $0.00",
+            "  ceremony: $0.00",
+            "  conversation: $0.00",
+            "criteria verified by command, test, or artifact: 100.0%",
+            "active weeks: 1",
+        ]
+    );
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn prints_none_before_a_task_is_accepted() {
+    let repository = a_project_with_a_task("read-metrics-none");
+    let ran = run_in(&repository.path, &["metrics"]);
+
+    assert_eq!(ran.code, 0, "{}", ran.err);
+    let none = "none yet, no task has been accepted";
+    assert_eq!(
+        ran.out.lines().map(str::to_string).collect::<Vec<_>>(),
+        [
+            "accepted tasks: 0".to_string(),
+            format!("first-pass acceptance: {none}"),
+            format!("human interventions per accepted task: {none}"),
+            format!("cost per accepted task: {none}"),
+            format!("criteria verified by command, test, or artifact: {none}"),
+            "active weeks: 0".to_string(),
+        ]
+    );
+}
+
+#[cfg(unix)]
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn prints_the_harness_metrics_as_json() {
+    let repository = accepted_project("read-metrics-json");
+    let ran = run_in(&repository.path, &["metrics", "--json"]);
+    assert_eq!(ran.code, 0, "{}", ran.err);
+    let metrics: Value = serde_json::from_str(ran.out.trim()).expect("one JSON object");
+    assert_eq!(metrics["accepted_tasks"], 1);
+    assert_eq!(metrics["first_pass_acceptance_rate"], 1.0);
+    assert_eq!(metrics["interventions_per_accepted_task"], 0.0);
+    assert_eq!(metrics["cost_per_accepted_task_usd"]["total"], 0.5);
+    let by_purpose = metrics["cost_per_accepted_task_usd"]["by_purpose"]
+        .as_object()
+        .expect("the split is an object");
+    assert_eq!(by_purpose.len(), 7, "{by_purpose:?}");
+    assert_eq!(by_purpose["implement"], 0.5);
+    assert_eq!(by_purpose["triage"], 0.0);
+    assert_eq!(metrics["mechanically_verified_criteria_share"], 1.0);
+    assert_eq!(metrics["active_weeks"], 1);
+
+    let repository = a_project_with_a_task("read-metrics-json-none");
+    let ran = run_in(&repository.path, &["metrics", "--json"]);
+    assert_eq!(ran.code, 0, "{}", ran.err);
+    let metrics: Value = serde_json::from_str(ran.out.trim()).expect("one JSON object");
+    for field in [
+        "first_pass_acceptance_rate",
+        "interventions_per_accepted_task",
+        "cost_per_accepted_task_usd",
+        "mechanically_verified_criteria_share",
+    ] {
+        assert_eq!(metrics[field], Value::Null, "{field}: {metrics}");
+    }
+    assert_eq!(metrics["active_weeks"], 0);
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn has_no_sprint_flag_until_sprints_exist() {
+    let repository = a_project_with_a_task("read-metrics-sprint");
+    let ran = run_in(&repository.path, &["metrics", "--sprint", "S1"]);
+    assert_eq!(ran.code, 2, "{}{}", ran.out, ran.err);
+}

@@ -32,6 +32,7 @@ Signatures, not bodies; test names and what each asserts, not test code; around 
 - No ADR. The definitions are recorded in SPEC F17, which the metrics serve, and nothing but this step and step 18's report reads them.
 - Changed 2026-09-23 in execution (Task 1): the counts are added up in `apply_to` inside the two existing updates, `task.transitioned`'s and `apply_waiting`'s `escalation.raised`, rather than by updates of their own. The migration deletes `projection_cursor`'s row rather than writing it back to 0, which `read_cursor` already reads as 0.
 - Changed 2026-09-23 in execution (Task 2): the contract schema holds an exit criterion's id to `C<n>` (as step 12 found), so the recorded project's criteria are numbered `C1`, `C2` in the order listed whatever their method, rather than `R1` and `H1` for a review and a human one; and a `command` criterion's minimal body carries `expect: { exit_code: 0 }`, which the schema requires. `mechanically_verified_criteria_share` is also `None` when the accepted rows' contracts hold no criterion at all, which the schema's `minItems` never lets happen, rather than a division by zero.
+- Changed 2026-09-23 in execution (Task 3): `has_no_sprint_flag_until_sprints_exist` passed before the command existed, since clap exits 2 for an unknown subcommand as for an unknown flag; it holds that `--sprint` stays refused now that `metrics` is known. `accepted_project`'s moves carry the actor and requester named (`assignee` `dev-a`, `product_manager` `pm`) through the shared harness's `moved`, and its cost is recorded through `record_as` with the project's own ids.
 
 ## File map
 
@@ -155,7 +156,7 @@ The `accepted_project` helper in the test is `a_project_with_a_task` (FRK-1's cr
 - `prints_the_harness_metrics_as_json`: `--json` in `accepted_project` prints one object in which `accepted_tasks` is 1, `first_pass_acceptance_rate` is 1.0, `interventions_per_accepted_task` is 0.0, `cost_per_accepted_task_usd.total` is 0.5, `by_purpose` has seven keys with `implement` 0.5 and `triage` 0.0, `mechanically_verified_criteria_share` is 1.0, and `active_weeks` is 1. In `a_project_with_a_task`, the four `Option` fields are `null` and `active_weeks` is 0.
 - `has_no_sprint_flag_until_sprints_exist`: `farik metrics --sprint S1` exits 2.
 
-- [ ] `feat(cli): print the harness metrics`
+- [x] `feat(cli): print the harness metrics`
 
 ## Verification
 

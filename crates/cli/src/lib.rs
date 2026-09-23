@@ -28,6 +28,8 @@ pub mod ids;
 pub mod init;
 /// The event log, filtered and exported.
 pub mod log;
+/// The harness metrics.
+pub mod metrics;
 /// The project a command runs against.
 pub mod project;
 /// The governor's refusals in words.
@@ -227,6 +229,8 @@ enum Commands {
         #[arg(long)]
         limit: Option<usize>,
     },
+    /// Show the harness metrics over the whole project (F17).
+    Metrics,
     /// Say where the files and the log disagree, and what else this project got wrong.
     Doctor,
     /// Show the team's rules (5.12).
@@ -486,6 +490,9 @@ pub fn run_cli(args: &[String], io: &mut CliIo<'_>) -> i32 {
         Commands::Board => open_project(&io.cwd, now).and_then(|project| board::board(&project)),
         Commands::Log { task, kind, limit } => open_project(&io.cwd, now)
             .and_then(|project| log::log(&project, task.as_ref(), kind.as_ref(), *limit)),
+        Commands::Metrics => {
+            open_project(&io.cwd, now).and_then(|project| metrics::metrics(&project))
+        }
         Commands::Doctor => {
             let found =
                 open_project(&io.cwd, now).and_then(|project| doctor::doctor(&project, now));
