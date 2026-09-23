@@ -1168,6 +1168,16 @@ mod tests {
     }
 
     #[test]
+    fn assigns_a_task_when_the_sprint_has_no_limit() {
+        // ADR 0015: a team with no sprint budget has an infinite one left, however much it spent.
+        let mut input = an_assignment();
+        input.remaining_sprint_budget_usd = f64::INFINITY;
+        let mut contract = a_contract();
+        contract.budget.max_cost_usd = 1000.0;
+        assert_eq!(check_assignment(&contract, &input), Ok(()));
+    }
+
+    #[test]
     fn assigns_a_task_only_once_every_dependency_is_accepted_and_integrated() {
         let contract = a_depending_contract();
         let mut input = an_assignment();
