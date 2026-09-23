@@ -445,6 +445,7 @@ impl Transitions {
                 completion_note,
                 review_note,
                 human_accepted: false,
+                protected_paths: team.rules().protected_paths,
             },
         );
         let hours = team.policy.blocked_limit_hours.get();
@@ -2701,6 +2702,34 @@ mod tests {
         // The human's acceptance of a result is not an approval of the contract.
         accepted(&project, "FRK-1", "result", None);
         assert!(!given(), "only an acceptance of the contract approves it");
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn hands_the_done_check_the_teams_protected_paths() {
+        // The Definition of Done refuses a diff that touches one (5.4), and can only if it is
+        // told which: the shipped list and the team's own.
+        let project = Project::new(
+            "done-protected",
+            a_team(|wire| wire["rules"]["protected_paths"] = json!(["infra/**"])),
+            at(12),
+        );
+        project.file("FRK-1", |_| {});
+        project.created("FRK-1", "assigned");
+        let people = json!({ "assignee": "dev-a", "reviewer": "dev-b" });
+        project.moved("FRK-1", "assigned", "in_progress", &people, at(9));
+        project.moved("FRK-1", "in_progress", "verifying", &people, at(10));
+
+        let protected = project
+            .context(&accepting("FRK-1"), &TransitionAsk::default())
+            .done
+            .protected_paths;
+        for glob in ["infra/**", "**/*.pem", ".env"] {
+            assert!(
+                protected.iter().any(|path| path == glob),
+                "{glob}: {protected:?}"
+            );
+        }
     }
 
     #[test]

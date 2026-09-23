@@ -5,7 +5,7 @@
 use crate::contract::{ExitCriterion, TaskContract, wire_method};
 use crate::generated::task_contract::FarikTaskContractKind as Kind;
 use crate::generated::task_contract::FarikTaskContractRisk as Risk;
-use crate::governor::paths::{GlobError, PathRefusal, check_allowed_paths};
+use crate::governor::paths::{GlobError, PathRefusal, check_allowed_paths, check_protected_paths};
 use crate::text::{distinct, listed};
 
 /// Who ran a criterion.
@@ -46,6 +46,8 @@ pub struct DoneEvidence {
     pub review_note: Option<String>,
     /// Whether the human has accepted the task.
     pub human_accepted: bool,
+    /// The team's protected globs (5.6, 5.12), which no accepted diff may touch.
+    pub protected_paths: Vec<String>,
 }
 
 /// One rule of the Definition of Done. Failures are reported in this order.
@@ -59,6 +61,8 @@ pub enum DoneRule {
     HumanCriterionAccepted,
     /// The diff touches nothing outside the contract's allowed paths.
     PathsWithinAllowed,
+    /// The diff touches no path the team protects.
+    NoProtectedPathChanged,
     /// The assignee wrote a completion note.
     CompletionNotePresent,
     /// The reviewer wrote a review note.
@@ -90,11 +94,12 @@ pub fn requires_human_acceptance(contract: &TaskContract) -> bool {
 
 type Check = fn(&TaskContract, &DoneEvidence) -> Option<DoneFailure>;
 
-const CHECKS: [Check; 7] = [
+const CHECKS: [Check; 8] = [
     criterion_run_by_reviewer,
     criterion_passed,
     human_criterion_accepted,
     paths_within_allowed,
+    no_protected_path_changed,
     completion_note_present,
     review_note_present,
     human_accepted,
@@ -102,7 +107,8 @@ const CHECKS: [Check; 7] = [
 
 /// Checks a task against the Definition of Done (`docs/SPEC.md` section 5.4): every exit
 /// criterion run by the reviewer independently and passed, every `human` criterion accepted by
-/// the human, no change outside the contract's allowed paths, a completion note, a review note,
+/// the human, no change outside the contract's allowed paths, no change to a path the team
+/// protects, a completion note, a review note,
 /// and the human's acceptance where the risk or the kind requires it. Refuses with every rule the
 /// task fails.
 ///
@@ -246,6 +252,31 @@ fn paths_within_allowed(contract: &TaskContract, evidence: &DoneEvidence) -> Opt
     }
 }
 
+/// No change to a protected path (5.6), which the allowed paths alone do not rule out: an allowed
+/// `src/**` holds a protected `src/k.pem`, and the tools' own checks see only the names an agent
+/// gives them.
+fn no_protected_path_changed(_: &TaskContract, evidence: &DoneEvidence) -> Option<DoneFailure> {
+    match check_protected_paths(&evidence.changed_paths, &evidence.protected_paths) {
+        Ok(()) => None,
+        Err(PathRefusal::Violations(violations)) => Some(failure(
+            DoneRule::NoProtectedPathChanged,
+            format!(
+                "the diff changes {}, which the team's protected paths cover",
+                distinct(
+                    &violations
+                        .iter()
+                        .map(|violation| violation.path.clone())
+                        .collect::<Vec<String>>(),
+                )
+            ),
+        )),
+        Err(PathRefusal::Glob(GlobError::Invalid { pattern, detail })) => Some(failure(
+            DoneRule::NoProtectedPathChanged,
+            format!("the team's protected path {pattern} is not a valid glob: {detail}"),
+        )),
+    }
+}
+
 fn is_written(note: Option<&String>) -> bool {
     note.is_some_and(|text| !text.trim().is_empty())
 }
@@ -297,6 +328,7 @@ mod tests {
     use crate::generated::task_contract::FarikTaskContractKind as Kind;
     use crate::generated::task_contract::FarikTaskContractRisk as Risk;
     use crate::governor::readiness::fixtures::a_contract;
+    use crate::governor::team_rules::DEFAULT_PROTECTED_PATHS;
 
     fn named_criterion(from: &ExitCriterion, id: &str) -> ExitCriterion {
         let mut criterion = from.clone();
@@ -320,7 +352,30 @@ mod tests {
             completion_note: Some("The form takes an email and a password.".to_string()),
             review_note: Some("C1: cargo test, 11 passed.".to_string()),
             human_accepted: false,
+            protected_paths: DEFAULT_PROTECTED_PATHS.map(str::to_string).to_vec(),
         }
+    }
+
+    #[test]
+    fn refuses_a_diff_that_changes_a_protected_path_inside_the_allowed_ones() {
+        // `src/login/**` allows the key, and the team's `**/*.pem` protects it (5.6): no tool
+        // may write it, so no accepted diff may carry it either.
+        let mut evidence = an_evidence();
+        evidence.changed_paths.push("src/login/k.pem".to_string());
+        assert_eq!(
+            failed_rules(&a_contract(), &evidence),
+            [R::NoProtectedPathChanged]
+        );
+        assert_eq!(
+            message_of(&a_contract(), &evidence, R::NoProtectedPathChanged),
+            "the diff changes src/login/k.pem, which the team's protected paths cover"
+        );
+        evidence.protected_paths = vec!["src/[".to_string()];
+        evidence.changed_paths = vec!["src/login/form.rs".to_string()];
+        assert_eq!(
+            message_of(&a_contract(), &evidence, R::NoProtectedPathChanged),
+            "the team's protected path src/[ is not a valid glob: unclosed character class; missing ']'"
+        );
     }
 
     #[test]
@@ -615,7 +670,7 @@ mod tests {
 
     #[test]
     fn reports_every_failure_in_rule_order() {
-        // All seven at once, so that the order is one assertion rather than a chain of pairs, and
+        // All eight at once, so that the order is one assertion rather than a chain of pairs, and
         // every list is plural, so that the singular and the plural wording are both pinned.
         let mut contract = a_contract();
         contract.risk = Risk::High;
@@ -639,7 +694,12 @@ mod tests {
         };
         let mut evidence = an_evidence();
         evidence.results = vec![blank_and_failed("C1"), blank_and_failed("C2")];
-        evidence.changed_paths = vec!["README.md".to_string(), "Cargo.toml".to_string()];
+        evidence.changed_paths = vec![
+            "README.md".to_string(),
+            "Cargo.toml".to_string(),
+            ".env".to_string(),
+            "src/login/k.pem".to_string(),
+        ];
         evidence.completion_note = None;
         evidence.review_note = None;
         assert_eq!(
@@ -649,6 +709,7 @@ mod tests {
                 R::CriterionPassed,
                 R::HumanCriterionAccepted,
                 R::PathsWithinAllowed,
+                R::NoProtectedPathChanged,
                 R::CompletionNotePresent,
                 R::ReviewNotePresent,
                 R::HumanAccepted
@@ -668,7 +729,11 @@ mod tests {
         );
         assert_eq!(
             message_of(&contract, &evidence, R::PathsWithinAllowed),
-            "the diff changes README.md, Cargo.toml outside the contract's allowed paths src/login/**"
+            "the diff changes README.md, Cargo.toml, .env outside the contract's allowed paths src/login/**"
+        );
+        assert_eq!(
+            message_of(&contract, &evidence, R::NoProtectedPathChanged),
+            "the diff changes .env, src/login/k.pem, which the team's protected paths cover"
         );
     }
 

@@ -743,6 +743,7 @@ mod tests {
                 completion_note: Some("The form takes an email and a password.".to_string()),
                 review_note: Some("C1: cargo test, 11 passed.".to_string()),
                 human_accepted: false,
+                protected_paths: Vec::new(),
             },
             rejection: Some(Rejection {
                 failed_criterion_ids: vec!["C1".to_string()],
