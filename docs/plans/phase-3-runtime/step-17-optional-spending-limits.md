@@ -121,7 +121,7 @@ Consumes: nothing
 - `ships_a_table_that_matches_its_schema_and_prices_every_model_a_team_can_call` (changed): 13 rows, including `("claude-opus-5-5", 4.0, 20.0, 5.0, 0.2)`.
 - `computes_the_cost_of_opus_5_5` : one million input tokens and one million output tokens on `claude-opus-5-5` cost 24.0 dollars, within 1e-9.
 
-- [ ] `feat(core): price claude-opus-5-5`
+- [x] `feat(core): price claude-opus-5-5`
 
 ### Task 3: a cost no price table priced
 
