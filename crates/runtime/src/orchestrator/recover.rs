@@ -117,8 +117,11 @@ fn purpose(wire: SessionStartedBodyPurpose) -> SessionPurpose {
 mod tests {
     use std::sync::Arc;
 
-    use farik_protocol::event::{EventBody, EventKind, SessionEndedBodyReason};
+    use farik_protocol::event::{
+        CostRecordedBodyPurpose, EventBody, EventKind, FarikEvent, SessionEndedBodyReason,
+    };
     use farik_store::git::fixtures::git_output_in;
+    use serde_json::json;
 
     use crate::orchestrator::RecoveryReport;
     use crate::orchestrator::fixtures::{CountingSandboxFactory, Harness};
@@ -137,7 +140,7 @@ mod tests {
         let git = &harness.project.deps.git;
         git.commit(&worktree, "Add done.txt", &["done.txt".to_string()])
             .expect("committed");
-        harness.started_session("FRK-2", "dev-a", "session-killed");
+        harness.started_session("FRK-2", "dev-a", "session-killed", "implement");
         let sha = git_output_in(&harness.project.repo.path, &["rev-parse", "farik/FRK-2"]);
         (harness, sha)
     }
@@ -186,6 +189,84 @@ mod tests {
         }
         assert!(!harness.worktree("FRK-1").exists());
         assert!(harness.worktree("FRK-2").exists());
+    }
+
+    /// The events of `kind` about `session`.
+    fn of_session(harness: &Harness, kind: EventKind, session: &str) -> Vec<FarikEvent> {
+        harness
+            .events(&[kind])
+            .into_iter()
+            .filter(|event| event.envelope.ids.session_id.as_deref() == Some(session))
+            .collect()
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn records_each_interrupted_session_against_its_task_agent_and_purpose() {
+        let (harness, _) = a_killed_run("recover-attribution");
+        harness.started_session("FRK-2", "dev-b", "session-review", "verify");
+        // A session whose cost was recorded before the run stopped, and whose end was not.
+        harness.started_session("FRK-2", "dev-a", "session-costed", "implement");
+        harness.spent(Some("FRK-2"), "session-costed", 0.5);
+        let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
+
+        let report = orchestrator.recover().expect("recovery runs");
+
+        assert_eq!(report.sessions_interrupted, 3);
+        for (session, agent, purpose) in [
+            (
+                "session-killed",
+                "dev-a",
+                CostRecordedBodyPurpose::Implement,
+            ),
+            ("session-review", "dev-b", CostRecordedBodyPurpose::Verify),
+        ] {
+            let ended = of_session(&harness, EventKind::SessionEnded, session);
+            let costs = of_session(&harness, EventKind::CostRecorded, session);
+            assert_eq!(ended.len(), 1, "{session}: {ended:?}");
+            assert_eq!(costs.len(), 1, "{session}: {costs:?}");
+            for event in [&ended[0], &costs[0]] {
+                let ids = &event.envelope.ids;
+                assert_eq!(
+                    ids.task_id.as_ref().map(|task| task.as_str()),
+                    Some("FRK-2"),
+                    "{session}"
+                );
+                assert_eq!(ids.agent_id.as_deref(), Some(agent), "{session}");
+            }
+            match &costs[0].body {
+                EventBody::CostRecorded(body) => assert_eq!(body.purpose, purpose, "{session}"),
+                other => panic!("a cost.recorded, got {other:?}"),
+            }
+        }
+        assert_eq!(
+            of_session(&harness, EventKind::SessionEnded, "session-costed").len(),
+            1
+        );
+        // Its cost is not counted twice.
+        assert_eq!(
+            of_session(&harness, EventKind::CostRecorded, "session-costed").len(),
+            1
+        );
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn removes_the_worktree_of_a_cancelled_task() {
+        let harness = Harness::new("recover-cancelled", |_| {});
+        harness.in_progress("FRK-1", "dev-a", "dev-b");
+        harness.project.moved(
+            "FRK-1",
+            "in_progress",
+            "cancelled",
+            &json!({ "actor": "human", "requested_by": "human" }),
+        );
+        let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
+
+        let report = orchestrator.recover().expect("recovery runs");
+
+        assert_eq!(report.worktrees_removed, 1);
+        assert!(!harness.worktree("FRK-1").exists());
     }
 
     #[tokio::test]

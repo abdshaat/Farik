@@ -446,9 +446,9 @@ impl Harness {
         deps.projections.apply(&appended).expect("projects");
     }
 
-    /// A `session.started` of `agent`'s implement session `session` on `task`, on Opus 5 at high,
-    /// with nothing after it: a session a stopped run left behind.
-    pub(crate) fn started_session(&self, task: &str, agent: &str, session: &str) {
+    /// A `session.started` of `agent`'s session `session` for `purpose` on `task`, on Opus 5 at
+    /// high, with nothing after it: a session a stopped run left behind.
+    pub(crate) fn started_session(&self, task: &str, agent: &str, session: &str, purpose: &str) {
         let wire = json!({
             "seq": 1,
             "recorded_at": at().to_rfc3339(),
@@ -458,7 +458,7 @@ impl Harness {
             "agent_id": agent,
             "session_id": session,
             "kind": "session.started",
-            "body": { "purpose": "implement", "model": "claude-opus-5", "effort": "high" },
+            "body": { "purpose": purpose, "model": "claude-opus-5", "effort": "high" },
         });
         let event = event_from_value(&wire).expect("the fixture is schema-valid");
         let deps = &self.project.deps;
