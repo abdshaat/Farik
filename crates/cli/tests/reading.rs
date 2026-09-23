@@ -755,3 +755,29 @@ fn has_no_sprint_flag_until_sprints_exist() {
     let ran = run_in(&repository.path, &["metrics", "--sprint", "S1"]);
     assert_eq!(ran.code, 2, "{}{}", ran.out, ran.err);
 }
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn prints_the_control_characters_an_agent_wrote_escaped() {
+    use serde_json::json;
+
+    let repository = a_project_with_a_task("read-show-escaped");
+    project::record(
+        &repository,
+        "FRK-1",
+        "question.asked",
+        &json!({ "question": "Clear\u{1b}[2Jthe\u{7}screen?\tNo.", "asked_by": "pm" }),
+    );
+
+    let shown = run_in(&repository.path, &["task", "show", "FRK-1"]);
+
+    assert_eq!(shown.code, 0, "{}", shown.err);
+    assert!(!shown.out.contains(['\u{1b}', '\u{7}']), "{:?}", shown.out);
+    assert!(
+        shown
+            .out
+            .contains("from pm: Clear\\u001b[2Jthe\\u0007screen?\tNo."),
+        "{:?}",
+        shown.out
+    );
+}

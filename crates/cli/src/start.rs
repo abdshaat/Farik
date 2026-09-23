@@ -390,7 +390,11 @@ pub(crate) async fn start_holding(
     });
     // Every session reads the prices, so a table that cannot be read is refused here, once.
     for sentence in unpriced(project)? {
-        let _ = writeln!(io.stderr, "warning: {sentence}.");
+        let _ = writeln!(
+            io.stderr,
+            "warning: {}.",
+            crate::printable::printable(&sentence)
+        );
     }
     let tools = tool_deps(project, io)?;
     let daemon = Arc::new(DaemonState::new(Arc::clone(&tools)));

@@ -564,7 +564,7 @@ fn prompt(printer: &mut Printer<'_, '_>, text: &str) {
     } else {
         &mut printer.io.stdout
     };
-    let _ = write!(stream, "{text}");
+    let _ = write!(stream, "{}", crate::printable::printable(text));
     let _ = stream.flush();
 }
 

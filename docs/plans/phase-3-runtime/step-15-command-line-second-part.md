@@ -65,6 +65,7 @@ Changes in execution:
 Changes in the landing review:
 - Changed 2026-09-23 by the landing review: `farik contract new` takes the run lock and starts the driver (the credential, `claude` and its version, the prices, the daemon, recovery) before it files the request, and holds the lock until it ends; the request is then filed and sized on the driver's own orchestrator. A start that refuses files nothing, where it used to print `FRK-n filed…`, exit 1, and file a duplicate when run again. `start` is `start_holding` behind the lock.
 - Changed 2026-09-23 by the landing review: `--lock` takes the contract only when the log holds a `contract.written` for the task; otherwise it prints `not locked: the Product Manager has written no contract for FRK-<n> yet: run farik contract lock FRK-<n> once it has` and takes nothing.
+- Changed 2026-09-23 by the landing review: every line the command line prints goes through one helper, `printable` (`crates/cli/src/printable.rs`), which writes each control character but a line break and a tab as `\u` and four hex digits, so that an escape sequence in a question, reason, note, title, or diff is shown and not obeyed; the escape is JSON's own, so a `--json` line stays the same JSON.
 
 ## File map
 

@@ -30,6 +30,8 @@ pub mod init;
 pub mod log;
 /// The harness metrics.
 pub mod metrics;
+/// Text as a terminal may be given it.
+pub mod printable;
 /// The project a command runs against.
 pub mod project;
 /// The governor's refusals in words.
@@ -775,8 +777,9 @@ fn usage(error: &clap::Error, io: &mut CliIo<'_>) -> i32 {
     }
 }
 
-/// One line to a stream. A stream that cannot be written to is a pipe that was closed, which is not
-/// something to tell the person about on the stream that just closed.
+/// One line to a stream, its control characters escaped (`printable`), since much of what the
+/// command line prints an agent wrote. A stream that cannot be written to is a pipe that was
+/// closed, which is not something to tell the person about on the stream that just closed.
 fn say(stream: &mut Box<dyn Write + '_>, line: &str) {
-    let _ = writeln!(stream, "{line}");
+    let _ = writeln!(stream, "{}", printable::printable(line));
 }
