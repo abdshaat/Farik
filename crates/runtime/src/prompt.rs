@@ -205,19 +205,65 @@ fn cut(text: &str, cap_bytes: usize) -> String {
 }
 
 /// The role's `system.md`, then each skill's name, description, and body. Skills are written in
-/// rather than passed as a skills folder (ADR 0011).
+/// rather than passed as a skills folder (ADR 0011). The role's headings move two levels down and a
+/// skill's three, so that its title sits at `###` and a skill's below its `### Skill:` line, and no
+/// role file can write a heading at the level of Farik's own.
 fn role_section(role: &RoleDefinition) -> String {
-    std::iter::once(role.system_prompt.trim_end().to_string())
+    std::iter::once(demoted(role.system_prompt.trim_end(), 2))
         .chain(role.skills.iter().map(|skill| {
             format!(
                 "### Skill: {}\n\n{}\n\n{}",
                 skill.name,
                 skill.description.trim(),
-                skill.body.trim_end()
+                demoted(skill.body.trim_end(), 3)
             )
         }))
         .collect::<Vec<_>>()
         .join("\n\n")
+}
+
+/// The Markdown with every ATX heading outside a fenced code block moved `by` levels down, to
+/// `######` at most (Markdown has no seventh level).
+fn demoted(markdown: &str, by: usize) -> String {
+    let mut fence: Option<(char, usize)> = None;
+    markdown
+        .lines()
+        .map(|line| {
+            let indent = line.len() - line.trim_start_matches(' ').len();
+            let text = &line[indent..];
+            if indent > 3 {
+                return line.to_string();
+            }
+            if let Some((character, length)) = fence {
+                let run = text.len() - text.trim_start_matches(character).len();
+                if run >= length && text[run..].trim().is_empty() {
+                    fence = None;
+                }
+                return line.to_string();
+            }
+            for character in ['`', '~'] {
+                let run = text.len() - text.trim_start_matches(character).len();
+                if run >= 3 {
+                    fence = Some((character, run));
+                    return line.to_string();
+                }
+            }
+            let level = text.len() - text.trim_start_matches('#').len();
+            let heading = (1..=6).contains(&level)
+                && text[level..].chars().next().is_none_or(char::is_whitespace);
+            if heading {
+                format!(
+                    "{}{}{}",
+                    &line[..indent],
+                    "#".repeat((level + by).min(6)),
+                    &text[level..]
+                )
+            } else {
+                line.to_string()
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 /// The agent's name, then its persona as the user wrote it. A persona never grants anything; it is
@@ -331,7 +377,7 @@ mod tests {
     use farik_core::governor::team_rules::TeamRules;
     use farik_core::team::fixtures::an_agent_wire;
     use farik_core::team::{Agent, Effort};
-    use farik_roles::{RoleDefinition, Skill};
+    use farik_roles::{RoleDefinition, Skill, load_role};
     use farik_store::files::{contract_yaml, criteria_yaml, yaml_value};
     use serde_json::json;
 
@@ -527,15 +573,71 @@ mod tests {
         let inputs = a_product_manager();
         let prompt = assembled(&inputs.full(SessionPurpose::Refine));
         assert!(
-            prompt.starts_with("## Role\n\n# You are the role\n"),
+            prompt.starts_with("## Role\n\n### You are the role\n"),
             "{prompt}"
         );
         assert_eq!(
             section(&prompt, "Role"),
-            "# You are the role\n\nYou do the role's work.\n\n\
+            "### You are the role\n\nYou do the role's work.\n\n\
              ### Skill: writing-task-contracts\n\n\
              Use when writing a contract.\n\n\
-             # Writing task contracts\n\nStart with the intent."
+             #### Writing task contracts\n\nStart with the intent."
+        );
+    }
+
+    #[test]
+    fn keeps_farik_s_headings_the_only_top_level_ones_for_every_shipped_role() {
+        let roles = [
+            Role::ProductManager,
+            Role::SoftwareDeveloper,
+            Role::ScrumMaster,
+            Role::Architect,
+            Role::MarketingSpecialist,
+            Role::Human,
+        ];
+        let shipped: Vec<RoleDefinition> = roles
+            .into_iter()
+            .filter_map(|role| load_role(role).ok())
+            .collect();
+        assert!(
+            shipped.len() >= 2,
+            "the Product Manager and the Software Developer ship"
+        );
+        for role in shipped {
+            let wire = serde_json::to_value(role.id).expect("a role id is a string");
+            let mut inputs = Inputs::new(role.id, wire.as_str().expect("a role id is a string"));
+            inputs.role = role;
+            let prompt = assembled(&inputs.full(SessionPurpose::Implement));
+            assert_eq!(
+                prompt
+                    .lines()
+                    .filter(|line| line.starts_with("## "))
+                    .collect::<Vec<_>>(),
+                PROMPT_SECTIONS.map(|title| format!("## {title}")),
+                "{:?}: {prompt}",
+                inputs.role.id
+            );
+        }
+    }
+
+    #[test]
+    fn writes_the_role_s_headings_below_farik_s() {
+        let mut inputs = a_product_manager();
+        inputs.role.system_prompt = "# The role\n\n## Your tools\n\n#### Deep\n\n##### Deeper\n\n\
+                                     #hashtag\n\n  ## Indented\n\n\
+                                     ```\n## kept in a fence\n```\n\n~~~md\n# kept too\n~~~\n\n\
+                                     ## After the fences\n"
+            .to_string();
+        let prompt = assembled(&inputs.full(SessionPurpose::Refine));
+        assert_eq!(
+            section(&prompt, "Role"),
+            "### The role\n\n#### Your tools\n\n###### Deep\n\n###### Deeper\n\n\
+             #hashtag\n\n  #### Indented\n\n\
+             ```\n## kept in a fence\n```\n\n~~~md\n# kept too\n~~~\n\n\
+             #### After the fences\n\n\
+             ### Skill: writing-task-contracts\n\n\
+             Use when writing a contract.\n\n\
+             #### Writing task contracts\n\nStart with the intent."
         );
     }
 
@@ -797,10 +899,11 @@ mod tests {
     #[test]
     fn leaves_the_role_uncut() {
         let mut inputs = a_product_manager();
-        inputs.role.system_prompt = format!("# You are the role\n\n{}\n", "r".repeat(40 * 1024));
+        let body = "r".repeat(40 * 1024);
+        inputs.role.system_prompt = format!("# You are the role\n\n{body}\n");
         let prompt = assembled(&inputs.full(SessionPurpose::Implement));
         assert!(
-            section(&prompt, "Role").starts_with(inputs.role.system_prompt.trim_end()),
+            section(&prompt, "Role").starts_with(&format!("### You are the role\n\n{body}\n")),
             "the role is Farik's and is not cut"
         );
         assert!(!section(&prompt, "Role").contains("[cut at"));
