@@ -3,7 +3,7 @@
 
 use std::str::FromStr;
 
-use farik_core::contract::{Role, TaskContract, TaskId, TaskStatus};
+use farik_core::contract::{Role, TaskContract, TaskId, TaskStatus, wire_method};
 use farik_core::governor::gates::{Blocker, Rejection, check_product_doc_write};
 use farik_core::governor::transition::TransitionRequest;
 use farik_core::governor::transition_table::{TransitionActor, find_transitions};
@@ -212,7 +212,9 @@ pub(super) fn declare_blocked(
 }
 
 /// Records a criterion's result as the assignee's or the reviewer's run, by the caller's relation
-/// to the contract.
+/// to the contract. Nobody records a `human` criterion, which only the human answers; and the
+/// reviewer records only `review` criteria, since Farik runs the others for it and the latest
+/// result per runner is what the Definition of Done reads.
 pub(super) fn record_criterion(
     call: &Call<'_>,
     input: RecordCriterionInput,
@@ -231,12 +233,27 @@ pub(super) fn record_criterion(
         .into());
     };
     let criterion_id = input.criterion_id.trim().to_string();
-    if !contract
+    let Some(criterion) = contract
         .exit_criteria
         .iter()
-        .any(|criterion| criterion.id.as_str() == criterion_id)
-    {
+        .find(|criterion| criterion.id.as_str() == criterion_id)
+    else {
         return Err(Refusal::UnknownCriterion { criterion_id }.into());
+    };
+    match wire_method(&criterion.verification) {
+        Some("human") => {
+            return Err(Refusal::CriterionAnsweredByTheHuman { criterion_id }.into());
+        }
+        Some(method @ ("command" | "test" | "artifact"))
+            if run_by == CriterionRecordedBodyRunBy::Reviewer =>
+        {
+            return Err(Refusal::CriterionRunByFarik {
+                criterion_id,
+                method: method.to_string(),
+            }
+            .into());
+        }
+        _ => {}
     }
     let event = call.append(
         Some(task),
@@ -423,9 +440,27 @@ mod tests {
         }
     }
 
-    /// FRK-1 in progress, held by `dev-a` and reviewed by `dev-b`.
+    /// FRK-1 in progress, held by `dev-a` and reviewed by `dev-b`, with the fixture's `test`
+    /// criterion C1 and a `review` criterion C2.
     fn in_progress(project: &TestProject) {
-        project.filed("FRK-1", "assigned", "task", None);
+        in_progress_with(
+            project,
+            json!({
+                "id": "C2",
+                "text": "The form reads well.",
+                "verification": { "method": "review", "rubric": ["Are the labels clear?"] }
+            }),
+        );
+    }
+
+    /// FRK-1 in progress, held by `dev-a` and reviewed by `dev-b`, with `second` beside C1.
+    fn in_progress_with(project: &TestProject, second: Value) {
+        project.filed_with("FRK-1", "assigned", "task", None, |wire| {
+            let criteria = wire["exit_criteria"]
+                .as_array_mut()
+                .expect("a list of criteria");
+            criteria.push(second);
+        });
         project.moved(
             "FRK-1",
             "assigned",
@@ -452,12 +487,17 @@ mod tests {
             .expect("the context reads")
     }
 
-    fn record(project: &TestProject, agent: &str, passed: bool) -> Result<Value, ToolError> {
+    fn record(
+        project: &TestProject,
+        agent: &str,
+        criterion: &str,
+        passed: bool,
+    ) -> Result<Value, ToolError> {
         project.call(
             agent,
             Some("FRK-1"),
             "farik_record_criterion_result",
-            json!({ "criterion_id": "C1", "passed": passed, "evidence": "pnpm test login: 4 passed" }),
+            json!({ "criterion_id": criterion, "passed": passed, "evidence": "pnpm test login: 4 passed" }),
         )
     }
 
@@ -532,9 +572,9 @@ mod tests {
     fn records_a_criterion_result_as_its_runner() {
         let project = a_project("tools-criterion");
         in_progress(&project);
-        record(&project, "dev-b", false).expect("the reviewer records its own run");
-        record(&project, "dev-b", true).expect("and runs it again");
-        record(&project, "dev-a", true).expect("the assignee records its own");
+        record(&project, "dev-b", "C2", false).expect("the reviewer records its own answer");
+        record(&project, "dev-b", "C2", true).expect("and answers it again");
+        record(&project, "dev-a", "C1", true).expect("the assignee records its own");
         let recorded = project.events(&[EventKind::CriterionRecorded]);
         let EventBody::CriterionRecorded(body) = &recorded[0].body else {
             panic!("a criterion.recorded");
@@ -554,7 +594,7 @@ mod tests {
             "the latest run per criterion and runner"
         );
         assert!(reviewers[0].passed);
-        assert_eq!(reviewers[0].criterion_id, "C1");
+        assert_eq!(reviewers[0].criterion_id, "C2");
         assert!(
             context
                 .assignee_results
@@ -564,7 +604,7 @@ mod tests {
             context.assignee_results
         );
 
-        refused_with(record(&project, "pm", true), "not_the_runner");
+        refused_with(record(&project, "pm", "C1", true), "not_the_runner");
         let unknown = project.call(
             "dev-a",
             Some("FRK-1"),
@@ -572,6 +612,79 @@ mod tests {
             json!({ "criterion_id": "C9", "passed": true, "evidence": "it ran" }),
         );
         refused_with(unknown, "unknown_criterion");
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn refuses_the_reviewer_a_criterion_farik_runs() {
+        let project = a_project("tools-criterion-farik-runs");
+        in_progress_with(
+            &project,
+            json!({
+                "id": "C2",
+                "text": "done.txt exists.",
+                "verification": { "method": "command", "command": "test -f done.txt", "expect": { "exit_code": 0 } }
+            }),
+        );
+        let before = project.event_count();
+        let reason = refused_with(
+            record(&project, "dev-b", "C1", true),
+            "criterion_run_by_farik",
+        );
+        assert!(reason.contains("C1 is a test criterion"), "{reason}");
+        let reason = refused_with(
+            record(&project, "dev-b", "C2", true),
+            "criterion_run_by_farik",
+        );
+        assert!(reason.contains("C2 is a command criterion"), "{reason}");
+        assert_eq!(project.event_count(), before, "nothing is appended");
+
+        let project = a_project("tools-criterion-review");
+        in_progress(&project);
+        record(&project, "dev-b", "C2", true).expect("the reviewer answers a review criterion");
+        record(&project, "dev-a", "C1", true).expect("the assignee records a test criterion");
+        let recorded = project.events(&[EventKind::CriterionRecorded]);
+        let runs: Vec<(String, String)> = recorded
+            .iter()
+            .map(|event| match &event.body {
+                EventBody::CriterionRecorded(body) => {
+                    (body.criterion_id.clone(), body.run_by.to_string())
+                }
+                other => panic!("a criterion.recorded, got {other:?}"),
+            })
+            .collect();
+        assert_eq!(
+            runs,
+            vec![
+                ("C2".to_string(), "reviewer".to_string()),
+                ("C1".to_string(), "assignee".to_string()),
+            ]
+        );
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn refuses_anyone_a_human_criterion() {
+        let project = a_project("tools-criterion-human");
+        in_progress_with(
+            &project,
+            json!({
+                "id": "C2",
+                "text": "The founder has signed in.",
+                "verification": { "method": "human", "question": "Did you sign in?" }
+            }),
+        );
+        let before = project.event_count();
+        let reason = refused_with(
+            record(&project, "dev-b", "C2", false),
+            "criterion_answered_by_the_human",
+        );
+        assert!(reason.contains("C2 is a human criterion"), "{reason}");
+        refused_with(
+            record(&project, "dev-a", "C2", true),
+            "criterion_answered_by_the_human",
+        );
+        assert_eq!(project.event_count(), before, "nothing is appended");
     }
 
     #[test]
@@ -606,8 +719,8 @@ mod tests {
     fn forgets_an_iterations_evidence_after_a_rejection() {
         let project = a_project("tools-forget");
         in_progress(&project);
-        record(&project, "dev-a", true).expect("the assignee's run");
-        record(&project, "dev-b", false).expect("the reviewer's run");
+        record(&project, "dev-a", "C1", true).expect("the assignee's run");
+        record(&project, "dev-b", "C2", false).expect("the reviewer's answer");
         note(&project, "dev-a", "completion", "Done.").expect("a note");
         let people = json!({ "assignee": "dev-a", "reviewer": "dev-b" });
         project.moved("FRK-1", "in_progress", "verifying", &people);

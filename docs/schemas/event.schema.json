@@ -74,6 +74,7 @@
         "contract.evaluated",
         "criterion.recorded",
         "note.written",
+        "review.recorded",
         "question.asked",
         "product_doc.written",
         "tool.called",
@@ -104,6 +105,7 @@
         { "$ref": "#/$defs/contractEvaluatedBody" },
         { "$ref": "#/$defs/criterionRecordedBody" },
         { "$ref": "#/$defs/noteWrittenBody" },
+        { "$ref": "#/$defs/reviewRecordedBody" },
         { "$ref": "#/$defs/questionAskedBody" },
         { "$ref": "#/$defs/productDocWrittenBody" },
         { "$ref": "#/$defs/toolCalledBody" },
@@ -388,6 +390,18 @@
         "kind": { "type": "string", "enum": ["completion", "review", "progress"] },
         "text": { "type": "string" },
         "written_by": { "type": "string" }
+      }
+    },
+    "reviewRecordedBody": {
+      "title": "Review Recorded Body",
+      "description": "One verification of a contract summed up (docs/SPEC.md section 5.4), recorded once per verification when the reviewer's session ends and every criterion other than a human one has a reviewer result: criteria_run is how many criteria have one, and passed is whether each one's latest passed. reviewer names the reviewer the verification was about. Nothing gates on it; the metrics read it.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["reviewer", "criteria_run", "passed"],
+      "properties": {
+        "reviewer": { "type": "string" },
+        "criteria_run": { "type": "integer", "minimum": 0, "maximum": 4294967295 },
+        "passed": { "type": "boolean" }
       }
     },
     "questionAskedBody": {

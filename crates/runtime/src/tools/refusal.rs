@@ -54,6 +54,20 @@ pub(crate) enum Refusal {
     NotTheRunner { agent_id: String },
     /// The contract has no such criterion.
     UnknownCriterion { criterion_id: String },
+    /// The reviewer recorded a `command`, `test`, or `artifact` criterion, which Farik runs for
+    /// it, so that a reviewer cannot record a pass over Farik's failure.
+    CriterionRunByFarik {
+        criterion_id: String,
+        method: String,
+    },
+    /// Someone recorded a `human` criterion, which only the human answers.
+    CriterionAnsweredByTheHuman { criterion_id: String },
+    /// The tool acts on the work, and the caller is not the task's assignee.
+    NotTheNamedAgent {
+        agent_id: String,
+        task_id: String,
+        assignee: Option<String>,
+    },
     /// This note is another's to write.
     NotTheNotesWriter { agent_id: String, kind: String },
     /// `evaluate_command` refused.
@@ -130,6 +144,9 @@ impl Refusal {
                 "unknown_criterion",
                 format!("the contract has no criterion {criterion_id}"),
             ),
+            Self::CriterionRunByFarik { .. }
+            | Self::CriterionAnsweredByTheHuman { .. }
+            | Self::NotTheNamedAgent { .. } => self.reach(),
             Self::Command(refusal) => command(refusal),
             Self::OutsideWorkspace { cwd } => (
                 "outside_workspace",
@@ -148,6 +165,38 @@ impl Refusal {
             ),
         };
         format!("{kind}: {detail}")
+    }
+
+    /// The refusals that keep a reviewer's reach out of the work it grades, and anyone's out of a
+    /// criterion only the human answers.
+    fn reach(&self) -> (&'static str, String) {
+        match self {
+            Self::CriterionRunByFarik {
+                criterion_id,
+                method,
+            } => (
+                "criterion_run_by_farik",
+                format!(
+                    "{criterion_id} is a {method} criterion, which Farik runs for the reviewer"
+                ),
+            ),
+            Self::CriterionAnsweredByTheHuman { criterion_id } => (
+                "criterion_answered_by_the_human",
+                format!("{criterion_id} is a human criterion, which only the human answers"),
+            ),
+            Self::NotTheNamedAgent {
+                agent_id,
+                task_id,
+                assignee,
+            } => (
+                "not_the_named_agent",
+                format!(
+                    "{task_id}'s work is changed by its assignee, {}, and {agent_id} is not",
+                    assignee.as_deref().unwrap_or("nobody yet")
+                ),
+            ),
+            other => unreachable!("reach is asked only of the three refusals it names: {other:?}"),
+        }
     }
 }
 

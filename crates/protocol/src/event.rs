@@ -26,11 +26,11 @@ pub use crate::generated::event::{
     CriterionRecordedBodyRunBy, DriftDetectedBody, DriftDetectedBodyDrift, EscalationRaisedBody,
     EscalationRaisedBodyReason, EventKind, NoteWrittenBody, NoteWrittenBodyKind,
     ProductDocWrittenBody, ProjectScannedBody, QuestionAskedBody, RequestTriagedBody,
-    RequestTriagedBodySize, SessionEndedBody, SessionEndedBodyReason, SessionStartedBody,
-    SessionStartedBodyEffort, SessionStartedBodyModel, SessionStartedBodyPurpose, TaskCreatedBody,
-    TaskTransitionedBody, TaskTransitionedBodyEffectsItem, TeamUpdatedBody, TokenUsage,
-    ToolCalledBody, ToolDeniedBody, ToolReturnedBody, TransitionRefusedBody,
-    TransitionRefusedBodyRefusal,
+    RequestTriagedBodySize, ReviewRecordedBody, SessionEndedBody, SessionEndedBodyReason,
+    SessionStartedBody, SessionStartedBodyEffort, SessionStartedBodyModel,
+    SessionStartedBodyPurpose, TaskCreatedBody, TaskTransitionedBody,
+    TaskTransitionedBodyEffectsItem, TeamUpdatedBody, TokenUsage, ToolCalledBody, ToolDeniedBody,
+    ToolReturnedBody, TransitionRefusedBody, TransitionRefusedBodyRefusal,
 };
 
 use crate::generated::event::FarikEvent as EventWire;
@@ -55,7 +55,7 @@ static VALIDATOR: LazyLock<Validator> = LazyLock::new(|| {
 });
 
 /// One validator per kind, each holding that kind's body schema alone. The event schema types
-/// `body` as a choice of twenty-four shapes, so it can only say that a body matched none of them; these
+/// `body` as a choice of twenty-five shapes, so it can only say that a body matched none of them; these
 /// say what is wrong with the one shape the event's `kind` asked for.
 static BODY_VALIDATORS: LazyLock<Vec<Validator>> = LazyLock::new(|| {
     let schema: Value = serde_json::from_str(SCHEMA_JSON).expect(
@@ -105,6 +105,7 @@ fn body_def_name(kind: EventKind) -> &'static str {
         EventKind::ContractEvaluated => "contractEvaluatedBody",
         EventKind::CriterionRecorded => "criterionRecordedBody",
         EventKind::NoteWritten => "noteWrittenBody",
+        EventKind::ReviewRecorded => "reviewRecordedBody",
         EventKind::QuestionAsked => "questionAskedBody",
         EventKind::ProductDocWritten => "productDocWrittenBody",
         EventKind::ToolCalled => "toolCalledBody",
@@ -133,6 +134,7 @@ pub fn is_about_one_contract(kind: EventKind) -> bool {
             | EventKind::ContractEvaluated
             | EventKind::CriterionRecorded
             | EventKind::NoteWritten
+            | EventKind::ReviewRecorded
             | EventKind::ProductDocWritten
     )
 }
@@ -155,6 +157,7 @@ fn attribution(body: &mut EventBody) -> Option<(&'static str, &mut String)> {
         EventBody::TransitionRefused(body) => Some(("requested_by", &mut body.requested_by)),
         EventBody::CriterionRecorded(body) => Some(("recorded_by", &mut body.recorded_by)),
         EventBody::NoteWritten(body) => Some(("written_by", &mut body.written_by)),
+        EventBody::ReviewRecorded(body) => Some(("reviewer", &mut body.reviewer)),
         EventBody::QuestionAsked(body) => Some(("asked_by", &mut body.asked_by)),
         EventBody::ProductDocWritten(body) => Some(("written_by", &mut body.written_by)),
         EventBody::DriftDetected(_)
@@ -173,7 +176,7 @@ fn attribution(body: &mut EventBody) -> Option<(&'static str, &mut String)> {
 
 /// Every kind the log holds in this phase, in the order `docs/schemas/event.schema.json` lists
 /// them. The step that adds a kind adds it here.
-pub const EVERY_KIND: [EventKind; 24] = [
+pub const EVERY_KIND: [EventKind; 25] = [
     EventKind::TaskCreated,
     EventKind::RequestTriaged,
     EventKind::ContractWritten,
@@ -191,6 +194,7 @@ pub const EVERY_KIND: [EventKind; 24] = [
     EventKind::ContractEvaluated,
     EventKind::CriterionRecorded,
     EventKind::NoteWritten,
+    EventKind::ReviewRecorded,
     EventKind::QuestionAsked,
     EventKind::ProductDocWritten,
     EventKind::ToolCalled,
@@ -287,6 +291,9 @@ pub enum EventBody {
     /// An agent wrote a note about the work.
     #[serde(rename = "note.written")]
     NoteWritten(NoteWrittenBody),
+    /// A reviewer's verification of a contract was summed up.
+    #[serde(rename = "review.recorded")]
+    ReviewRecorded(ReviewRecordedBody),
     /// An agent asked the human a question.
     #[serde(rename = "question.asked")]
     QuestionAsked(QuestionAskedBody),
@@ -332,6 +339,7 @@ impl EventBody {
             Self::ContractEvaluated(_) => EventKind::ContractEvaluated,
             Self::CriterionRecorded(_) => EventKind::CriterionRecorded,
             Self::NoteWritten(_) => EventKind::NoteWritten,
+            Self::ReviewRecorded(_) => EventKind::ReviewRecorded,
             Self::QuestionAsked(_) => EventKind::QuestionAsked,
             Self::ProductDocWritten(_) => EventKind::ProductDocWritten,
             Self::ToolCalled(_) => EventKind::ToolCalled,
@@ -487,7 +495,7 @@ pub fn event_from_value(input: &Value) -> Result<FarikEvent, Vec<ValidationError
 }
 
 /// The schema's own failures. A failure inside `body` is reported by the schema once, at `/body`,
-/// because `body` there is a choice of twenty-four shapes and the schema can only say that none matched.
+/// because `body` there is a choice of twenty-five shapes and the schema can only say that none matched.
 /// The event's `kind` says which one it was meant to be, so such a failure is asked again of that
 /// shape alone and reported where it actually is.
 fn schema_errors(input: &Value) -> Vec<ValidationError> {
@@ -868,7 +876,7 @@ mod tests {
 
     #[test]
     fn reports_a_malformed_field_inside_a_body_at_its_own_path() {
-        // The schema types `body` as a choice of twenty-four shapes, so it reports a failure anywhere
+        // The schema types `body` as a choice of twenty-five shapes, so it reports a failure anywhere
         // inside one at `/body`, with the whole body echoed back. The kind says which shape the
         // body was meant to be, so the reader checks it again against that one alone.
         let mut input = an_event_wire(EventKind::ProjectScanned);
@@ -937,6 +945,7 @@ mod tests {
             (EventKind::TransitionRefused, "requested_by"),
             (EventKind::CriterionRecorded, "recorded_by"),
             (EventKind::NoteWritten, "written_by"),
+            (EventKind::ReviewRecorded, "reviewer"),
             (EventKind::QuestionAsked, "asked_by"),
             (EventKind::ProductDocWritten, "written_by"),
         ] {

@@ -8,6 +8,7 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json::{Value, json};
 
+use super::refusal::Refusal;
 use super::{Call, ToolError, failed};
 use crate::transitions::integration_branch;
 
@@ -43,21 +44,39 @@ pub(super) fn diff(call: &Call<'_>) -> Result<Value, ToolError> {
     Ok(json!({ "diff": diff }))
 }
 
-/// `farik_git_commit`: commits the named paths of the task's worktree on the task branch.
+/// `farik_git_commit`: commits the named paths of the task's worktree on the task branch, for the
+/// task's assignee alone.
 pub(super) fn commit(call: &Call<'_>, input: &CommitInput) -> Result<Value, ToolError> {
+    let task = assignees_task(call)?;
     let sha = call
         .deps()
         .git
-        .commit(&worktree(call, call.task()?), &input.message, &input.paths)
+        .commit(&worktree(call, task), &input.message, &input.paths)
         .map_err(failed)?;
     Ok(json!({ "sha": sha }))
 }
 
-/// `farik_git_push`: pushes the task branch to `origin`.
+/// `farik_git_push`: pushes the task branch to `origin`, for the task's assignee alone.
 pub(super) fn push(call: &Call<'_>) -> Result<Value, ToolError> {
-    let branch = branch(call.task()?);
+    let branch = branch(assignees_task(call)?);
     call.deps().git.push(REMOTE, &branch).map_err(failed)?;
     Ok(json!({ "remote": REMOTE, "branch": branch }))
+}
+
+/// The session's task when the caller is its assignee, or `not_the_named_agent`: nobody rewrites
+/// work they grade (5.1), so the reviewer, who works in the same worktree, cannot change it.
+fn assignees_task<'a>(call: &'a Call<'_>) -> Result<&'a TaskId, ToolError> {
+    let task = call.task()?;
+    let (contract, _) = call.contract(task)?;
+    if contract.assignee.as_deref() == Some(call.agent_id()) {
+        return Ok(task);
+    }
+    Err(Refusal::NotTheNamedAgent {
+        agent_id: call.agent_id().to_string(),
+        task_id: task.to_string(),
+        assignee: contract.assignee,
+    }
+    .into())
 }
 
 /// The task's worktree, `.farik/local/worktrees/<id>` (5.14).
@@ -129,6 +148,60 @@ mod tests {
                 .expect("a patch")
                 .contains("b/src/login/form.ts"),
             "{diff}"
+        );
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn refuses_a_commit_from_anyone_but_the_assignee() {
+        // `git_remote` for the reviewer too, so that its push is refused for who it is, not its
+        // tier.
+        let project = TestProject::new(
+            "tools-git-reviewer",
+            &a_team_of_three(|wire| wire["agents"][2]["grants"] = json!(["git_remote"])),
+        );
+        project.filed("FRK-1", "assigned", "task", None);
+        project.moved(
+            "FRK-1",
+            "assigned",
+            "in_progress",
+            &json!({ "assignee": "dev-a", "reviewer": "dev-b" }),
+        );
+        let worktree = project.repo.path.join(".farik/local/worktrees/FRK-1");
+        project
+            .deps
+            .git
+            .create_worktree(&worktree, "farik/FRK-1", "main")
+            .expect("the task's worktree is made");
+        std::fs::create_dir_all(worktree.join("src/login")).expect("a directory");
+        std::fs::write(worktree.join("src/login/form.ts"), "export {};\n").expect("a file");
+        let commit = json!({ "message": "add the login form", "paths": ["src/login/form.ts"] });
+
+        for (name, input) in [
+            ("farik_git_commit", commit.clone()),
+            ("farik_git_push", json!({})),
+        ] {
+            match project.call("dev-b", Some("FRK-1"), name, input) {
+                Err(ToolError::Refused { reason }) => {
+                    assert!(
+                        reason.starts_with("not_the_named_agent: "),
+                        "{name}: {reason}"
+                    );
+                }
+                other => panic!("{name}: expected a refusal, got {other:?}"),
+            }
+        }
+        let git = &project.deps.git;
+        assert_eq!(
+            git.commit_count("main", "farik/FRK-1").expect("git counts"),
+            0
+        );
+        project
+            .call("dev-a", Some("FRK-1"), "farik_git_commit", commit)
+            .expect("the assignee commits");
+        assert_eq!(
+            git.commit_count("main", "farik/FRK-1").expect("git counts"),
+            1
         );
     }
 

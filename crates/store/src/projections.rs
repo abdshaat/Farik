@@ -482,6 +482,7 @@ fn apply_to(transaction: &Transaction<'_>, event: &FarikEvent) -> Result<(), Sto
         | EventBody::ContractEvaluated(_)
         | EventBody::CriterionRecorded(_)
         | EventBody::NoteWritten(_)
+        | EventBody::ReviewRecorded(_)
         | EventBody::QuestionAsked(_)
         | EventBody::ProductDocWritten(_)
         | EventBody::ToolCalled(_)

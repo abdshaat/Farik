@@ -27,6 +27,7 @@ A task that asks for `verifying` is checked the way 5.4 says: Farik runs the con
 - `farik_record_criterion_result` also refuses a `human` criterion from any agent (`criterion_answered_by_the_human: <id> is a human criterion, which only the human answers`). Without this, a reviewer's failed H1 would send the task to `rejected` by rule 3 over a criterion only the human answers, and a passing H1 would be a result the Definition of Done ignores. The reviewer therefore records `review` criteria alone. Chose refusing every agent over refusing the reviewer alone: the assignee's result for a `human` criterion counts for nothing either, because `check_criteria_recorded` skips `human` criteria, and one rule with no role in it is the smaller one.
 - `review.recorded { reviewer, criteria_run, passed }` (8.5 already names it), once per verification: appended when a reviewer's session ends, no `review.recorded` exists since the last move into `verifying`, and every criterion other than a `human` one has a reviewer result; `criteria_run` the number of criteria with a reviewer result, `passed` true exactly when each one's latest passed. It is about one contract; `reviewer` is its attribution. Nothing reads it in phase 3 but the metrics (step 16), which is why it is a summary rather than a gate.
 - `OrchestratorError` gains `Criterion(CriterionError)`.
+- Changed 2026-09-23 in execution (Task 1): the contract schema holds an exit criterion's id to `C<n>`, so the `review` criterion the tests call R1 and the `human` criterion they call H1 are `C2` (or `C3` beside two commands) in the tests. The tools' fixture's C1 is a `test` criterion, so `refuses_the_reviewer_a_criterion_farik_runs` refuses the reviewer both it and a `command` C2. The two existing tool tests that had the reviewer record C1 now have it answer a `review` C2. The reviewer is refused `farik_git_push` as well as `farik_git_commit`, which the decision names and the test holds; `not_the_named_agent` is a tool refusal of its own, with the task's assignee in its words.
 
 ## File map
 
@@ -70,7 +71,7 @@ Files: the schema, `event.rs`, `event/fixtures.rs`, `tools/work.rs`, `tools/git.
 - `refuses_anyone_a_human_criterion` — FRK-1 with a `human` criterion H1: `dev-b` recording H1, failed, is `Refused` starting `criterion_answered_by_the_human`, and `dev-a` recording it passed is refused the same way; nothing is appended.
 - `refuses_a_commit_from_anyone_but_the_assignee` — `dev-b`'s `farik_git_commit` on FRK-1 is `Refused` starting `not_the_named_agent` and the branch has no new commit; `dev-a`'s commits.
 
-- [ ] `feat(runtime): keep a task's reviewer out of the work it reviews`
+- [x] `feat(runtime): keep a task's reviewer out of the work it reviews`
 
 ### Task 2: rejected and blocked
 

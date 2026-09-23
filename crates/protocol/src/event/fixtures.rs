@@ -134,6 +134,9 @@ pub fn a_body_wire(kind: EventKind) -> Value {
             "text": "The login page is done and its tests pass.",
             "written_by": "dev-a"
         }),
+        EventKind::ReviewRecorded => {
+            json!({ "reviewer": "dev-b", "criteria_run": 2, "passed": true })
+        }
         EventKind::QuestionAsked => json!({
             "question": "Should a login page remember the user?",
             "asked_by": "maya-chen"
