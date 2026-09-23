@@ -71,6 +71,57 @@ pub(super) fn refine_message(
     message
 }
 
+/// The breakdown's message for an epic in progress with no live task: file its tasks.
+pub(super) fn breakdown_message(contract: &TaskContract) -> String {
+    let epic = contract.id.as_str();
+    format!(
+        "Break the epic {epic} down: file each of its tasks with `farik_create_task`, `parent` \
+         {epic}, within its allowed paths ({paths}) and its remaining budget. Assign each once it \
+         is ready.",
+        paths = contract
+            .allowed_paths
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join(", ")
+    )
+}
+
+/// The close-out's message for an epic whose tasks are done: each task's id, title, and status,
+/// the titles being an agent's words, then the completion note and `verifying` to ask for, or new
+/// tasks when the human's message asks for more.
+pub(super) fn close_out_message(
+    contract: &TaskContract,
+    tasks: &[(String, String, String)],
+) -> String {
+    let listed = tasks
+        .iter()
+        .map(|(id, title, status)| format!("{id} ({status}): {title}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    format!(
+        "Every task under the epic {epic} is done: {tasks}\n\nWrite its completion note with \
+         `farik_write_note` of kind `completion` and request `verifying` with \
+         `farik_request_transition`; or, when the human's message asks for more, file the tasks \
+         it asks for with `farik_create_task` instead.",
+        epic = contract.id.as_str(),
+        tasks = untrusted_block("tasks", &listed, RESULTS_CAP_BYTES),
+    )
+}
+
+/// The Product Manager's `verify` session's message for an epic the human reviewed (ADR 0013):
+/// Farik's results on the integration branch as untrusted text, the human's acceptance, and
+/// `accepted` to ask for.
+pub(super) fn epic_accept_message(contract: &TaskContract, results: &[CriterionResult]) -> String {
+    format!(
+        "The human accepted the epic {epic}, after Farik ran its `command`, `test`, and \
+         `artifact` criteria on the integration branch: {results}\n\nRequest `accepted` for it \
+         with `farik_request_transition`.",
+        epic = contract.id.as_str(),
+        results = untrusted_block("results", &results_text(results), RESULTS_CAP_BYTES),
+    )
+}
+
 /// What the human said about a task since its last session started, for the next session's
 /// `From the human` section: each answer after its question, the question being the asking
 /// agent's words and so untrusted, each resolution's message, and each acceptance's words, in the

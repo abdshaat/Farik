@@ -89,7 +89,8 @@ pub trait SandboxFactory: Send + Sync {
     /// A second sandbox for `task_id` of `project_id`, rooted at `worktree` (the task's base
     /// branch, checked out on its own) with the network off, for running the task's new tests
     /// against the code they are meant to fail on (5.4). It must not collide with the task's own
-    /// sandbox, which the verify session holds while this one runs.
+    /// sandbox, which the verify session holds while this one runs. An epic's mechanical criteria
+    /// run in one too, on the integration branch's head checked out on its own (ADR 0013).
     ///
     /// # Errors
     ///

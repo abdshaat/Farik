@@ -5,7 +5,7 @@
 use std::sync::Arc;
 
 use farik_core::budget::{BudgetScope, SessionLedger, check_budgets};
-use farik_core::contract::{Role, TaskContract, TaskId, TaskKind, TaskStatus};
+use farik_core::contract::{Role, TaskContract, TaskId, TaskStatus};
 use farik_core::governor::transition::TransitionRequest;
 use farik_core::governor::transition_table::TransitionActor;
 use farik_core::team::{Agent, Team};
@@ -296,7 +296,8 @@ async fn in_progress(
 ) -> Result<Option<TickReport>, OrchestratorError> {
     let deps = &orchestrator.deps;
     if requests::is_epic(row) {
-        return Ok(None);
+        let board = deps.tools.projections.board()?;
+        return requests::in_progress_epic(deps, team, &board, row, day_spent).await;
     }
     let Some(assignee) = active(team, row.assignee_id.as_deref()) else {
         return Ok(None);
@@ -391,7 +392,7 @@ fn assigned(
     row: &TaskProjection,
 ) -> Result<Option<TickReport>, OrchestratorError> {
     if requests::is_epic(row) {
-        return Ok(None);
+        return requests::assigned_epic(deps, team, row);
     }
     let Some(assignee) = active(team, row.assignee_id.as_deref()) else {
         return Ok(None);
@@ -449,10 +450,15 @@ async fn ready(
     row: &TaskProjection,
     day_spent: &mut bool,
 ) -> Result<Option<TickReport>, OrchestratorError> {
-    if row.kind != TaskKind::Task || row.parent.is_some() {
-        return Ok(None);
+    if requests::is_epic(row) {
+        return requests::ready_epic(deps, team, board, row);
     }
-    let Some(assigner) = assigner(team) else {
+    // A task under an epic is assigned by the epic's assignee (5.16 item 3).
+    let assigner = match &row.parent {
+        Some(_) => requests::epic_assignee(team, board, row),
+        None => assigner(team),
+    };
+    let Some(assigner) = assigner else {
         return Ok(None);
     };
     let contract = deps.tools.files.read_contract(&row.task_id)?;
@@ -1981,6 +1987,35 @@ mod tests {
             sessions(&adapter),
             vec![("dev-b".to_string(), SessionPurpose::Verify)]
         );
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn accepts_a_high_risk_task_after_the_human() {
+        let harness = Harness::new("orch-verify-high-risk-accepted", |_| {});
+        harness.verifying_with("FRK-1", true, true, |wire| wire["risk"] = json!("high"));
+        let adapter = harness.recorded(vec![review_writes_note(), accept_frk_1()]);
+        let orchestrator = harness.orchestrator(adapter.clone());
+        orchestrator.tick().await.expect("the review runs");
+        orchestrator
+            .handle(farik_protocol::command::Command::HumanAccept {
+                task_id: "FRK-1".parse().expect("a task id"),
+                subject: farik_protocol::command::AcceptSubject::Result,
+                message: None,
+            })
+            .await
+            .expect("the human accepts the result");
+
+        orchestrator.tick().await.expect("the tick runs");
+
+        assert_eq!(
+            sessions(&adapter),
+            vec![
+                ("dev-b".to_string(), SessionPurpose::Verify),
+                ("pm".to_string(), SessionPurpose::Verify),
+            ]
+        );
+        assert_eq!(harness.row("FRK-1").status, TaskStatus::Accepted);
     }
 
     #[tokio::test]

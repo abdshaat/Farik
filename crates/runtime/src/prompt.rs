@@ -75,7 +75,9 @@ pub const CLOSING_INSTRUCTIONS: [(SessionPurpose, &str); 7] = [
         SessionPurpose::Plan,
         "This session plans work. File the tasks an approved epic breaks into with \
          `farik_create_task`, and assign each ready task, naming its reviewer, with \
-         `farik_assign_task`. End the session when there is nothing left to file or assign.",
+         `farik_assign_task`. When every task under the epic is done, write its completion note with \
+         `farik_write_note` of kind `completion` and request `verifying`. End the session when \
+         there is nothing left to file or assign.",
     ),
     (
         SessionPurpose::Implement,

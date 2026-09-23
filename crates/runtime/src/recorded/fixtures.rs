@@ -133,3 +133,24 @@ pub fn refine_writes_epic_frk_1() -> Transcript {
 pub fn refine_writes_task_frk_1() -> Transcript {
     Transcript::from_jsonl(include_str!("transcripts/refine_writes_task_frk_1.jsonl"))
 }
+
+/// The Product Manager's plan session breaking epic FRK-1 down: `farik_create_task` of one task
+/// under it, "Add done.txt", with the request's fields and a budget of 2 dollars. Hand-written.
+#[must_use]
+pub fn plan_breaks_down_frk_1() -> Transcript {
+    Transcript::from_jsonl(include_str!("transcripts/plan_breaks_down_frk_1.jsonl"))
+}
+
+/// The Product Manager's plan session assigning FRK-2 to `dev-a`, reviewed by `dev-b`, with
+/// `farik_assign_task`. Hand-written.
+#[must_use]
+pub fn plan_assigns_frk_2() -> Transcript {
+    Transcript::from_jsonl(include_str!("transcripts/plan_assigns_frk_2.jsonl"))
+}
+
+/// The Product Manager's plan session closing epic FRK-1 out: a completion note, "FRK-2 added
+/// done.txt; nothing left out.", and `verifying` asked for. Hand-written.
+#[must_use]
+pub fn plan_closes_epic_frk_1() -> Transcript {
+    Transcript::from_jsonl(include_str!("transcripts/plan_closes_epic_frk_1.jsonl"))
+}

@@ -106,22 +106,34 @@ impl Harness {
     /// whose one allowed path is `done.txt` and whose one criterion C1 runs `test -f done.txt`,
     /// with `change` applied to its wire last.
     pub(crate) fn file(&self, task: &str, status: &str, change: impl FnOnce(&mut Value)) {
-        self.project.filed_with(task, status, "task", None, |wire| {
-            wire["assignee_role"] = json!("software_developer");
-            wire["reviewer_role"] = json!("software_developer");
-            wire["allowed_paths"] = json!(["done.txt"]);
-            wire["exit_criteria"] = json!([{
-                "id": "C1",
-                "text": "done.txt exists.",
-                "satisfies": ["R1"],
-                "verification": {
-                    "method": "command",
-                    "command": "test -f done.txt",
-                    "expect": { "exit_code": 0 }
-                }
-            }]);
-            change(wire);
-        });
+        self.file_under(task, status, None, change);
+    }
+
+    /// `file`, the task under the epic `parent` when one is named.
+    pub(crate) fn file_under(
+        &self,
+        task: &str,
+        status: &str,
+        parent: Option<&str>,
+        change: impl FnOnce(&mut Value),
+    ) {
+        self.project
+            .filed_with(task, status, "task", parent, |wire| {
+                wire["assignee_role"] = json!("software_developer");
+                wire["reviewer_role"] = json!("software_developer");
+                wire["allowed_paths"] = json!(["done.txt"]);
+                wire["exit_criteria"] = json!([{
+                    "id": "C1",
+                    "text": "done.txt exists.",
+                    "satisfies": ["R1"],
+                    "verification": {
+                        "method": "command",
+                        "command": "test -f done.txt",
+                        "expect": { "exit_code": 0 }
+                    }
+                }]);
+                change(wire);
+            });
     }
 
     /// Files a request titled `title`, as the human does through `file_request`: step 11's FRK-1
@@ -540,10 +552,21 @@ impl RuntimeAdapter for ExecutorWitness {
 #[derive(Default)]
 pub(crate) struct CountingSandboxFactory {
     created: Mutex<BTreeMap<String, Vec<bool>>>,
+    based: Mutex<BTreeMap<String, u32>>,
     removed: Mutex<BTreeMap<String, u32>>,
 }
 
 impl CountingSandboxFactory {
+    /// How many times `create_base` was called for `task`.
+    pub(crate) fn based(&self, task: &str) -> u32 {
+        self.based
+            .lock()
+            .expect("no test panics holding it")
+            .get(task)
+            .copied()
+            .unwrap_or_default()
+    }
+
     /// How many times `remove` was called for `task`.
     pub(crate) fn removed(&self, task: &str) -> u32 {
         self.removed
@@ -593,6 +616,12 @@ impl SandboxFactory for CountingSandboxFactory {
         task_id: &TaskId,
         worktree: &Path,
     ) -> Result<Box<dyn Sandbox>, SandboxError> {
+        *self
+            .based
+            .lock()
+            .expect("no test panics holding it")
+            .entry(task_id.as_str().to_string())
+            .or_default() += 1;
         HostSandboxFactory.create_base(project_id, task_id, worktree)
     }
 

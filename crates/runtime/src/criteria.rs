@@ -406,7 +406,7 @@ fn run_on_base(
 
 /// Removes the base worktree at `worktree`, whether git has it registered or it is a directory a
 /// crash left behind that git no longer knows.
-fn remove_base_worktree(git: &Git, worktree: &Path) -> Result<(), CriterionError> {
+pub(crate) fn remove_base_worktree(git: &Git, worktree: &Path) -> Result<(), CriterionError> {
     match git.remove_worktree(worktree) {
         // ponytail: git's English words for a path it has no worktree at; a translated git
         // refuses here instead, and pinning the store's git to one locale is the upgrade.

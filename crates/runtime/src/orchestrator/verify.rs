@@ -20,6 +20,7 @@ use farik_protocol::event::{
 use farik_store::{EventQuery, Git, TaskProjection};
 
 use super::messages::{ReviewBrief, accept_message, review_message};
+use super::requests;
 use super::rules::{Room, acted, active, room};
 use super::session::{SessionAsk, run_session};
 use super::{Orchestrator, OrchestratorDeps, OrchestratorError, TickReport, worktree};
@@ -28,11 +29,12 @@ use crate::exec::ExecError;
 use crate::session::SessionPurpose;
 use crate::transitions::{
     TransitionAsk, TransitionError, TransitionOutcome, integration_branch, refusal_details,
+    reviewed_by_the_human,
 };
 
 /// Who records the criteria Farik runs for the reviewer: Farik ran them, as `requested_by:
 /// "governor"` names the governor's own moves.
-const GOVERNOR: &str = "governor";
+pub(super) const GOVERNOR: &str = "governor";
 
 /// Rule 5: a task `verifying`, with no refusal since it last moved there. In order: the criteria
 /// Farik runs that it has not run in this verification, one at a time, each recorded before the
@@ -54,10 +56,22 @@ pub(super) async fn verifying(
     }) {
         return Ok(None);
     }
+    let contract = deps.tools.files.read_contract(&row.task_id)?;
+    if reviewed_by_the_human(&contract, team) {
+        return requests::verifying_epic(
+            orchestrator,
+            team,
+            row,
+            &contract,
+            &history,
+            since,
+            day_spent,
+        )
+        .await;
+    }
     let Some(reviewer) = active(team, row.reviewer_id.as_deref()) else {
         return Ok(None);
     };
-    let contract = deps.tools.files.read_contract(&row.task_id)?;
     let ran = match run_what_farik_runs(orchestrator, team, &contract, &history, since).await? {
         FarikRan::Criteria(ran) => ran,
         FarikRan::Unrunnable(why) => return escalate(deps, team, row, &why),
@@ -99,9 +113,11 @@ pub(super) async fn verifying(
         )
         .await;
     }
-    // Only the human's acceptance satisfies a `high` risk task or a `human` criterion, and it
-    // arrives with step 14: a session now would ask for a move the Definition of Done refuses.
-    if requires_human_acceptance(&contract) || contract.exit_criteria.iter().any(is_human) {
+    // Only the human's acceptance satisfies a `high` risk task or a `human` criterion: until it is
+    // given, a session would ask for a move the Definition of Done refuses.
+    if (requires_human_acceptance(&contract) || contract.exit_criteria.iter().any(is_human))
+        && !context.done.human_accepted
+    {
         return Ok(ran_criteria(row, ran));
     }
     accept(
@@ -232,13 +248,13 @@ async fn run_what_farik_runs(
 /// Git, the base-branch sandbox, a file written into the base worktree, or a command that would not
 /// start are Farik's to fix, not the assignee's, so a failure would send the task back to someone
 /// who cannot fix it.
-fn fails_the_criterion(error: &CriterionError) -> bool {
+pub(super) fn fails_the_criterion(error: &CriterionError) -> bool {
     matches!(error, CriterionError::Exec(ExecError::ContainerGone))
 }
 
 /// Escalates the task as the governor, in the words of what Farik could not run; a refusal passes
 /// the task over, and rule 5 does not ask again until it moves.
-fn escalate(
+pub(super) fn escalate(
     deps: &OrchestratorDeps,
     team: &Team,
     row: &TaskProjection,
@@ -448,7 +464,7 @@ async fn accept(
 }
 
 /// A `verify` session of `agent` in `cwd`, with the read tier's built-ins and no executor.
-fn read_only<'a>(
+pub(super) fn read_only<'a>(
     contract: &'a TaskContract,
     agent: &'a Agent,
     cwd: PathBuf,
@@ -466,7 +482,7 @@ fn read_only<'a>(
 }
 
 /// What a tick that started no session says: that it ran criteria, when it did.
-fn ran_criteria(row: &TaskProjection, ran: usize) -> Option<TickReport> {
+pub(super) fn ran_criteria(row: &TaskProjection, ran: usize) -> Option<TickReport> {
     (ran > 0).then(|| TickReport::Acted {
         task_id: row.task_id.clone(),
         what: format!("ran {ran} of its criteria as its reviewer"),
@@ -555,7 +571,7 @@ pub(super) fn since_verifying(history: &[FarikEvent]) -> u64 {
 
 /// Appends one event about the task, stamped with the agent and session when there are any, and
 /// projects it.
-fn append(
+pub(super) fn append(
     deps: &OrchestratorDeps,
     task_id: &TaskId,
     agent_id: Option<String>,
