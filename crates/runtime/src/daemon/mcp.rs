@@ -182,7 +182,7 @@ mod tests {
     use tower::ServiceExt;
 
     use crate::daemon::fixtures::{DEV_SESSION, TestDaemon};
-    use crate::daemon::router;
+    use crate::daemon::{decide_pre_tool_use, router};
     use crate::tools::tool_descriptors;
 
     const TOKEN: &str = "a-token";
@@ -326,6 +326,58 @@ mod tests {
             Some(DEV_SESSION)
         );
         assert_eq!(asked[0].envelope.ids.agent_id.as_deref(), Some("dev-a"));
+        assert_eq!(
+            asked[0]
+                .envelope
+                .ids
+                .task_id
+                .as_ref()
+                .map(|id| id.to_string())
+                .as_deref(),
+            Some("FRK-1")
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn answers_a_tool_s_failure_as_an_error_result() {
+        let daemon = TestDaemon::new("mcp-error", |_| {});
+        let mut client = Client::new(&daemon, DEV_SESSION);
+        client.initialize().await;
+        let answer = client.call("farik_no_such_tool", json!({})).await;
+        assert_eq!(answer["result"]["isError"], json!(true), "{answer}");
+        assert!(text_of(&answer).contains("farik_no_such_tool"), "{answer}");
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn stops_answering_for_a_session_that_ended() {
+        let daemon = TestDaemon::new("mcp-ended", |_| {});
+        daemon.state.end_session(DEV_SESSION);
+        assert_eq!(daemon.state.tool_calls(DEV_SESSION), None);
+        let decision = decide_pre_tool_use(
+            &daemon.dev_call("Read", &json!({ "file_path": daemon.inside("src/a.rs") })),
+            &daemon.state,
+        );
+        assert!(!decision.allow, "{decision:?}");
+        assert!(
+            decision.reason.starts_with("unknown_session: "),
+            "{decision:?}"
+        );
+        let mut client = Client::new(&daemon, DEV_SESSION);
+        let (status, _) = client
+            .send(&json!({
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "initialize",
+                "params": {
+                    "protocolVersion": VERSION,
+                    "capabilities": {},
+                    "clientInfo": { "name": "claude-code", "version": "2.1.280" }
+                }
+            }))
+            .await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
     }
 
     #[tokio::test(flavor = "multi_thread")]
