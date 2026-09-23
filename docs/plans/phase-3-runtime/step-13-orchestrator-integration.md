@@ -99,7 +99,7 @@ Files: `team.schema.json`, `team.rs`, `team/fixtures.rs`, `init.rs`, `crates/cli
 - `refuses_the_old_local_merge_spelling` — a team with `integration: local_merge` is refused with a failure at `/policy/integration`.
 - `writes_a_starter_team_that_merges_on_its_own` (`crates/cli/tests/commands.rs`) — the team `farik init` writes reads back with `Integration::AutoMerge`, and the command's output contains `pushed to origin`.
 
-- [ ] `feat(core): make auto_merge the integration policy a new team starts with`
+- [x] `feat(core): make auto_merge the integration policy a new team starts with`
 
 ### Task 2: the events and the board
 

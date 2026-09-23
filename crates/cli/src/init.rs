@@ -119,6 +119,7 @@ pub fn init(cwd: &Path, now: DateTime<Utc>) -> Result<Report, String> {
                 .collect::<Vec<_>>()
                 .join(", ")
         ));
+        lines.push(AUTO_MERGE_NOTICE.to_string());
     } else {
         lines.push("kept the team already in .farik/team.yaml".to_string());
     }
@@ -141,6 +142,13 @@ pub fn init(cwd: &Path, now: DateTime<Utc>) -> Result<Report, String> {
         json_lines: None,
     })
 }
+
+/// What the report says when it writes the starter team, whose policy pushes to `origin` on the
+/// user's behalf: a default that reaches outside the machine is one the user is told of (5.6,
+/// ADR 0012).
+const AUTO_MERGE_NOTICE: &str = "Integration: auto_merge. Accepted work is merged into the \
+                                 integration branch and pushed to origin when there is one; \
+                                 policy.integration in .farik/team.yaml changes it.";
 
 /// What a file holds, nothing when there is no such file, and a refusal when there is one and it
 /// cannot be read.
@@ -212,7 +220,7 @@ fn starter_team(project: &str) -> Result<Team, String> {
             "wip_limit_per_agent": 1,
             "blocked_limit_hours": 24,
             "max_iterations": 3,
-            "integration": "manual"
+            "integration": "auto_merge"
         },
         "rules": {}
     });

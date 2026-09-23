@@ -9,6 +9,7 @@ use std::sync::Arc;
 use chrono::{DateTime, Utc};
 use farik::{CliIo, run_cli};
 use farik_core::contract::TaskId;
+use farik_core::team::Integration;
 use farik_protocol::clock::FixedClock;
 use farik_store::files::ProjectFiles;
 use farik_store::git::fixtures::TempRepo;
@@ -200,6 +201,20 @@ fn makes_a_project_out_of_a_repository() {
         repository.path.join(".farik/local/.gitignore").is_file(),
         "the log is local and not committed (D5)"
     );
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn writes_a_starter_team_that_merges_on_its_own() {
+    let repository = a_repository("cli-init-auto-merge");
+    let ran = run_in(&repository.path, &["init"]);
+
+    assert_eq!(ran.code, 0, "{}", ran.err);
+    let team = files_of(&repository)
+        .read_team()
+        .expect("a team was written");
+    assert_eq!(team.policy.integration, Integration::AutoMerge);
+    assert!(ran.out.contains("pushed to origin"), "{}", ran.out);
 }
 
 #[test]

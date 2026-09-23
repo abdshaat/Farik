@@ -350,6 +350,14 @@ mod tests {
                 .map(|branch| branch.to_string()),
             Some("trunk".to_string())
         );
+        assert_eq!(team.policy.integration, Integration::AutoMerge);
+    }
+
+    #[test]
+    fn refuses_the_old_local_merge_spelling() {
+        let mut wire = a_team_wire();
+        wire["policy"]["integration"] = json!("local_merge");
+        assert_eq!(paths(&wire), ["/policy/integration"]);
     }
 
     #[test]

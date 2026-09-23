@@ -246,7 +246,7 @@
           "type": "string",
           "enum": [
             "manual",
-            "local_merge",
+            "auto_merge",
             "pull_request"
           ],
           "description": "What happens to a task's branch after it is accepted (spec 5.14)."
