@@ -6,22 +6,27 @@
 use std::fmt;
 
 use chrono::{DateTime, Utc};
-use farik_core::contract::{TaskContract, TaskId};
+use farik_core::contract::{TaskContract, TaskId, TaskKind, TaskStatus};
 use farik_core::criteria::{CriteriaLibrary, TemplateVerification};
 use farik_core::governor::gates::{
-    FIELDS_FIXED_AT_CREATION, FIELDS_ONLY_THE_HUMAN_WRITES, FIELDS_THE_GOVERNOR_WRITES,
-    FIELDS_THE_STORE_OWNS,
+    ContractWriteActor, ContractWriteRefusal, FIELDS_FIXED_AT_CREATION,
+    FIELDS_ONLY_THE_HUMAN_WRITES, FIELDS_THE_GOVERNOR_WRITES, FIELDS_THE_STORE_OWNS,
+    check_contract_write, check_human_triage,
 };
 use farik_core::governor::team_rules::TeamRules;
-use farik_protocol::command::{Command, command_from_value};
+use farik_core::governor::transition_table::TransitionActor;
+use farik_protocol::command::{Command, RequestSize, command_from_value};
 use farik_protocol::event::{
-    ContractSummary, EventBody, EventIds, RequestTriagedBody, RequestTriagedBodySize,
-    TaskCreatedBody, new_event,
+    ContractLockedBody, ContractSummary, ContractUnlockedBody, EventBody, EventIds, FarikEvent,
+    RequestTriagedBody, RequestTriagedBodySize, TaskCreatedBody, new_event,
 };
 use serde_json::{Value, json};
 
 use crate::files::{FilesError, ProjectFiles};
-use crate::{EventLog, StoreError, TaskProjection};
+use crate::{EventLog, Projections, StoreError, TaskProjection};
+
+/// Who the human is in the log: the id every act of theirs is recorded under.
+const HUMAN: &str = "human";
 
 /// Why a request was not filed.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -177,6 +182,248 @@ pub fn file_request(
     Ok(*contract)
 }
 
+/// Records the human's size of a request, and the kind that follows from it: large makes it an
+/// epic and small one standalone task (`docs/SPEC.md` section 5.16). The human may record either
+/// while the request is a draft, so this is both the first triage and the overrule of one. The
+/// contract file is written with the kind, `request.triaged { triaged_by: human }` appended, and the
+/// board brought up to it.
+///
+/// # Errors
+///
+/// `Refused` when `reason` is blank (before anything is read), when the board does not hold the
+/// task, or with `check_human_triage`'s reasons; `Files` or `Store` when the contract or the event
+/// cannot be read or written.
+#[allow(clippy::too_many_arguments)]
+pub fn triage_by_human(
+    files: &ProjectFiles,
+    log: &EventLog,
+    projections: &Projections,
+    task_id: &TaskId,
+    size: RequestSize,
+    reason: &str,
+    now: DateTime<Utc>,
+    ids: &EventIds,
+) -> Result<FarikEvent, RequestError> {
+    // 5.16 says the triage records its decision with a reason, and the log is where a person reads
+    // it back months later. The command schema says `reason` is a string and nothing more, so this
+    // is the place that holds it to being written.
+    if reason.trim().is_empty() {
+        return Err(RequestError::Refused {
+            reason: "a triage is recorded with a reason, and the log is where somebody reads it \
+                     back: say why this is the size it is"
+                .to_string(),
+        });
+    }
+    let mut contract = files.read_contract(task_id)?;
+    check_human_triage(
+        status_on_board(projections, task_id)?,
+        contract.parent.is_some(),
+    )
+    .map_err(|reasons| RequestError::Refused {
+        reason: reasons.join("; "),
+    })?;
+
+    // The triage decides the kind, and its own tool is what changes it (5.11, 5.16 item 1). The
+    // file is written as well as the event, because the board takes the kind from the event and the
+    // file is what a person reads.
+    contract.kind = match size {
+        RequestSize::Large => TaskKind::Epic,
+        RequestSize::Small => TaskKind::Task,
+    };
+    contract.updated_at = Some(now);
+    files.write_contract(&contract)?;
+    record(
+        log,
+        projections,
+        EventBody::RequestTriaged(RequestTriagedBody {
+            reason: reason.to_string(),
+            size: match size {
+                RequestSize::Large => RequestTriagedBodySize::Large,
+                RequestSize::Small => RequestTriagedBodySize::Small,
+            },
+            triaged_by: HUMAN.to_string(),
+        }),
+        task_id,
+        now,
+        ids,
+    )
+}
+
+/// Takes a contract for the human (`held`), or gives it back to the team (`docs/SPEC.md` section
+/// 5.11): the file's `locked` is written, `contract.locked` or `contract.unlocked` appended, and the
+/// board brought up to it.
+///
+/// Whether the write is allowed is `check_contract_write`'s answer, asked with `locked` as the only
+/// field changing and the human as the actor, about the status the board holds (the log decides a
+/// status, 8.4) and the kind and the lock the file holds (the file decides a contract's content).
+/// The gate is asked before the contract is found to be held already, so that a task nothing can be
+/// written to says so rather than answering about the lock.
+///
+/// # Errors
+///
+/// `Refused` with the governor's refusal in words, when the board does not hold the task, or when
+/// the contract is already held (or already the team's); `Files` or `Store` when the contract or
+/// the event cannot be read or written.
+pub fn hold_contract(
+    files: &ProjectFiles,
+    log: &EventLog,
+    projections: &Projections,
+    task_id: &TaskId,
+    held: bool,
+    now: DateTime<Utc>,
+    ids: &EventIds,
+) -> Result<FarikEvent, RequestError> {
+    let contract = files.read_contract(task_id)?;
+    check_contract_write(
+        contract.kind,
+        status_on_board(projections, task_id)?,
+        contract.locked,
+        &ContractWriteActor {
+            kind: TransitionActor::Human,
+            agent_id: None,
+        },
+        &["locked".to_string()],
+    )
+    .map_err(|refusal| RequestError::Refused {
+        reason: contract_write(&refusal),
+    })?;
+    if contract.locked == held {
+        return Err(RequestError::Refused {
+            reason: format!(
+                "{} is already {}",
+                task_id.as_str(),
+                if held {
+                    "yours: farik contract unlock gives it back"
+                } else {
+                    "the team's"
+                }
+            ),
+        });
+    }
+
+    let mut written = contract;
+    written.locked = held;
+    written.updated_at = Some(now);
+    files.write_contract(&written)?;
+    let body = if held {
+        EventBody::ContractLocked(ContractLockedBody {
+            locked_by: HUMAN.to_string(),
+        })
+    } else {
+        EventBody::ContractUnlocked(ContractUnlockedBody {
+            unlocked_by: HUMAN.to_string(),
+        })
+    };
+    record(log, projections, body, task_id, now, ids)
+}
+
+/// The status the board says the task is at, which the log decides (`docs/SPEC.md` section 8.4).
+fn status_on_board(
+    projections: &Projections,
+    task_id: &TaskId,
+) -> Result<TaskStatus, RequestError> {
+    projections
+        .task(task_id)?
+        .map(|row| row.status)
+        .ok_or_else(|| RequestError::Refused {
+            reason: format!(
+                "the log has never heard of {}, so there is nothing of it to change: farik \
+                 doctor says where the files and the log disagree",
+                task_id.as_str()
+            ),
+        })
+}
+
+/// Appends one event about `task_id` and brings the board up to it.
+fn record(
+    log: &EventLog,
+    projections: &Projections,
+    body: EventBody,
+    task_id: &TaskId,
+    now: DateTime<Utc>,
+    ids: &EventIds,
+) -> Result<FarikEvent, RequestError> {
+    let ids = EventIds {
+        task_id: Some(task_id.clone()),
+        ..ids.clone()
+    };
+    let event = new_event(body, now, ids).map_err(|error| RequestError::Refused {
+        reason: format!("cannot be recorded: {error:?}"),
+    })?;
+    let recorded = log.append(&event)?;
+    projections.apply(&recorded)?;
+    Ok(recorded)
+}
+
+/// Why the governor would not let a contract be written, in the words a person reads (`docs/SPEC.md`
+/// sections 5.2, 5.11 and 5.16).
+#[must_use]
+pub fn contract_write(refusal: &ContractWriteRefusal) -> String {
+    match refusal {
+        ContractWriteRefusal::ContractLocked => {
+            "the contract is held by the human, and a contract's content is the holder's alone \
+             (5.11): farik contract unlock gives it back to the team"
+                .to_string()
+        }
+        ContractWriteRefusal::ContractFrozen { fields } => format!(
+            "the contract is frozen: once a task leaves refining only its status, assignee, \
+             reviewer, iteration, sprint and notes change (5.11), and this would change {}",
+            listed(fields)
+        ),
+        ContractWriteRefusal::TaskTerminal { status } => format!(
+            "the task is {status}, and nothing leaves that status (5.2): its notes are all that \
+             still change"
+        ),
+        ContractWriteRefusal::LifecycleFields { fields } => format!(
+            "{} {} the governor's, written when it applies a transition (5.2): ask for the \
+             transition instead",
+            listed(fields),
+            is_or_are(fields)
+        ),
+        ContractWriteRefusal::HumansFields { fields } => format!(
+            "{} {} the human's alone (5.11)",
+            listed(fields),
+            is_or_are(fields)
+        ),
+        ContractWriteRefusal::StoresFields { fields } => format!(
+            "{} {} the store's: Farik assigns the identifier and the stamps",
+            listed(fields),
+            is_or_are(fields)
+        ),
+        ContractWriteRefusal::CreationFields { fields } => format!(
+            "{} {} fixed when a contract is created (5.16): the triage decides the kind, and a \
+             task's epic is the epic that broke it down",
+            listed(fields),
+            is_or_are(fields)
+        ),
+        ContractWriteRefusal::ContentFields { fields } => format!(
+            "a contract's content is the Product Manager's and the human's, and an epic's tasks are \
+             its assignee's (5.16, 6.2): this actor does not write {}",
+            listed(fields)
+        ),
+        ContractWriteRefusal::UnknownFields { fields } => format!(
+            "{} {} not a field of a contract: every one is listed by name, so a field added to the \
+             schema is refused until somebody says who writes it",
+            listed(fields),
+            is_or_are(fields)
+        ),
+    }
+}
+
+/// A list in the words a person would read it out in.
+fn listed(fields: &[String]) -> String {
+    match fields {
+        [] => "nothing".to_string(),
+        [one] => one.clone(),
+        [rest @ .., last] => format!("{} and {last}", rest.join(", ")),
+    }
+}
+
+/// Whether the sentence about those fields takes a singular verb.
+fn is_or_are(fields: &[String]) -> &'static str {
+    if fields.len() == 1 { "is" } else { "are" }
+}
+
 /// The fields of the contract the board shows, taken from the contract itself so that the log can
 /// be replayed into projections without the files (`docs/SPEC.md` section 8.4).
 ///
@@ -290,9 +537,12 @@ mod tests {
     use farik_protocol::event::{EventBody, EventIds, EventKind, RequestTriagedBodySize};
     use serde_json::Value;
 
-    use super::{RequestError, file_request};
+    use farik_protocol::command::RequestSize;
+    use farik_protocol::event::{ContractLockedBody, event_from_value, fixtures::an_event_wire};
+
+    use super::{RequestError, file_request, hold_contract, triage_by_human};
     use crate::files::fixtures::{TempProject, a_team};
-    use crate::{EventLog, EventQuery, IN_MEMORY, open_event_log, open_projections};
+    use crate::{EventLog, EventQuery, IN_MEMORY, Projections, open_event_log, open_projections};
 
     fn at() -> DateTime<Utc> {
         Utc.with_ymd_and_hms(2026, 9, 22, 10, 0, 0)
@@ -399,6 +649,169 @@ mod tests {
         assert!(
             files.list_contracts().expect("a list").is_empty(),
             "nothing is filed"
+        );
+    }
+
+    /// A project with one request the human filed, FRK-1, and the board over its log.
+    fn a_filed_request(name: &str) -> (TempProject, Arc<EventLog>, Projections, TaskId) {
+        let (project, log) = a_project(name);
+        let request = file_request(
+            &project.files(),
+            &log,
+            a_request(),
+            "human",
+            None,
+            at(),
+            &ids(),
+        )
+        .expect("the request is filed");
+        let projections = open_projections(Arc::clone(&log)).expect("the projections open");
+        (project, log, projections, request.id)
+    }
+
+    /// Records FRK-1's move from `draft` to `to`, as the governor would.
+    fn moved(log: &EventLog, projections: &Projections, to: &str) {
+        let mut wire = an_event_wire(EventKind::TaskTransitioned);
+        wire["task_id"] = serde_json::json!("FRK-1");
+        wire["body"]["from"] = serde_json::json!("draft");
+        wire["body"]["to"] = serde_json::json!(to);
+        let event = event_from_value(&wire).expect("the fixture is schema-valid");
+        let recorded = log
+            .append(&farik_protocol::event::NewEvent {
+                recorded_at: event.envelope.recorded_at,
+                ids: event.envelope.ids,
+                body: event.body,
+            })
+            .expect("the move is recorded");
+        projections.apply(&recorded).expect("the board moves");
+    }
+
+    #[test]
+    fn records_the_humans_triage() {
+        let (project, log, projections, id) = a_filed_request("requests-human-triage");
+        let files = project.files();
+
+        let event = triage_by_human(
+            &files,
+            &log,
+            &projections,
+            &id,
+            RequestSize::Large,
+            "Three deliverables.",
+            at(),
+            &ids(),
+        )
+        .expect("the human may size a draft");
+
+        assert_eq!(
+            files.read_contract(&id).expect("a contract").kind,
+            TaskKind::Epic
+        );
+        let EventBody::RequestTriaged(body) = &event.body else {
+            panic!("the event is the triage: {event:?}");
+        };
+        assert_eq!(body.size, RequestTriagedBodySize::Large);
+        assert_eq!(body.triaged_by, "human");
+        assert_eq!(body.reason, "Three deliverables.");
+        assert_eq!(event.envelope.ids.task_id.as_ref(), Some(&id));
+        assert_eq!(
+            kinds(&log),
+            vec![EventKind::TaskCreated, EventKind::RequestTriaged]
+        );
+        let row = projections
+            .task(&id)
+            .expect("the board reads")
+            .expect("FRK-1 is on it");
+        assert_eq!(row.kind, TaskKind::Epic);
+        assert!(row.triaged);
+    }
+
+    #[test]
+    fn refuses_the_humans_triage_once_refining_started() {
+        let (project, log, projections, id) = a_filed_request("requests-human-triage-late");
+        let files = project.files();
+        moved(&log, &projections, "refining");
+        let before = kinds(&log).len();
+
+        let refused = triage_by_human(
+            &files,
+            &log,
+            &projections,
+            &id,
+            RequestSize::Large,
+            "Too late.",
+            at(),
+            &ids(),
+        )
+        .expect_err("refining has started");
+
+        let RequestError::Refused { reason } = refused else {
+            panic!("a refusal: {refused:?}");
+        };
+        assert!(
+            reason.contains("a triage is the first thing that happens"),
+            "{reason}"
+        );
+        assert_eq!(kinds(&log).len(), before, "nothing is appended");
+
+        let unknown = TaskId::try_from("FRK-9").expect("an id");
+        let blank = triage_by_human(
+            &files,
+            &log,
+            &projections,
+            &unknown,
+            RequestSize::Small,
+            "   ",
+            at(),
+            &ids(),
+        )
+        .expect_err("a blank reason is no reason");
+        let RequestError::Refused { reason } = blank else {
+            panic!("refused before FRK-9 is looked for: {blank:?}");
+        };
+        assert!(reason.contains("recorded with a reason"), "{reason}");
+    }
+
+    #[test]
+    fn locks_and_gives_back_a_contract() {
+        let (project, log, projections, id) = a_filed_request("requests-lock");
+        let files = project.files();
+
+        let locked = hold_contract(&files, &log, &projections, &id, true, at(), &ids())
+            .expect("the human may take a draft");
+        assert!(files.read_contract(&id).expect("a contract").locked);
+        assert_eq!(
+            locked.body,
+            EventBody::ContractLocked(ContractLockedBody {
+                locked_by: "human".to_string()
+            })
+        );
+        assert!(
+            projections
+                .task(&id)
+                .expect("the board reads")
+                .expect("on it")
+                .locked
+        );
+
+        let again = hold_contract(&files, &log, &projections, &id, true, at(), &ids())
+            .expect_err("it is held already");
+        let RequestError::Refused { reason } = again else {
+            panic!("a refusal: {again:?}");
+        };
+        assert!(reason.contains("already"), "{reason}");
+
+        let given = hold_contract(&files, &log, &projections, &id, false, at(), &ids())
+            .expect("the human may give it back");
+        assert_eq!(given.body.kind(), EventKind::ContractUnlocked);
+        assert!(!files.read_contract(&id).expect("a contract").locked);
+        assert_eq!(
+            kinds(&log),
+            vec![
+                EventKind::TaskCreated,
+                EventKind::ContractLocked,
+                EventKind::ContractUnlocked
+            ]
         );
     }
 }

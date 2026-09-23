@@ -142,7 +142,7 @@ Files: `requests.rs`, `crates/cli/src/contract.rs`, `crates/cli/src/triage.rs`
 - `locks_and_gives_back_a_contract` — `hold_contract(.., true)` sets `locked` and appends `contract.locked { locked_by: human }`; a second call is `Refused` containing `already`; `false` appends `contract.unlocked`.
 - The phase 2 tests of `farik triage` and `farik contract lock` pass unchanged.
 
-- [ ] `refactor(store): record the human's triage and lock for every caller`
+- [x] `refactor(store): record the human's triage and lock for every caller`
 
 ### Task 2: the commands, the events, and the board
 

@@ -5,62 +5,11 @@
 //! them; the daemon and the app will have their own, and every one of them points at the rule in
 //! `docs/SPEC.md` that decided it.
 
-use farik_core::governor::gates::ContractWriteRefusal;
 use farik_protocol::event::EventError;
 
-/// Why the governor would not let this write happen (`docs/SPEC.md` sections 5.2, 5.11 and 5.16).
-#[must_use]
-pub fn contract_write(refusal: &ContractWriteRefusal) -> String {
-    match refusal {
-        ContractWriteRefusal::ContractLocked => {
-            "the contract is held by the human, and a contract's content is the holder's alone \
-             (5.11): farik contract unlock gives it back to the team"
-                .to_string()
-        }
-        ContractWriteRefusal::ContractFrozen { fields } => format!(
-            "the contract is frozen: once a task leaves refining only its status, assignee, \
-             reviewer, iteration, sprint and notes change (5.11), and this would change {}",
-            listed(fields)
-        ),
-        ContractWriteRefusal::TaskTerminal { status } => format!(
-            "the task is {status}, and nothing leaves that status (5.2): its notes are all that \
-             still change"
-        ),
-        ContractWriteRefusal::LifecycleFields { fields } => format!(
-            "{} {} the governor's, written when it applies a transition (5.2): ask for the \
-             transition instead",
-            listed(fields),
-            is_or_are(fields)
-        ),
-        ContractWriteRefusal::HumansFields { fields } => format!(
-            "{} {} the human's alone (5.11)",
-            listed(fields),
-            is_or_are(fields)
-        ),
-        ContractWriteRefusal::StoresFields { fields } => format!(
-            "{} {} the store's: Farik assigns the identifier and the stamps",
-            listed(fields),
-            is_or_are(fields)
-        ),
-        ContractWriteRefusal::CreationFields { fields } => format!(
-            "{} {} fixed when a contract is created (5.16): the triage decides the kind, and a \
-             task's epic is the epic that broke it down",
-            listed(fields),
-            is_or_are(fields)
-        ),
-        ContractWriteRefusal::ContentFields { fields } => format!(
-            "a contract's content is the Product Manager's and the human's, and an epic's tasks are \
-             its assignee's (5.16, 6.2): this actor does not write {}",
-            listed(fields)
-        ),
-        ContractWriteRefusal::UnknownFields { fields } => format!(
-            "{} {} not a field of a contract: every one is listed by name, so a field added to the \
-             schema is refused until somebody says who writes it",
-            listed(fields),
-            is_or_are(fields)
-        ),
-    }
-}
+/// Why the governor would not let this write happen (`docs/SPEC.md` sections 5.2, 5.11 and 5.16):
+/// the store's sentence, which every caller of `hold_contract` reads.
+pub use farik_store::requests::contract_write;
 
 /// Why an event could not be built. Either is this program disagreeing with itself rather than
 /// anything the person did, so each says which field was missing.
@@ -78,20 +27,6 @@ pub fn event(error: &EventError) -> String {
              rather than anything you did"
         ),
     }
-}
-
-/// A list in the words a person would read it out in.
-fn listed(fields: &[String]) -> String {
-    match fields {
-        [] => "nothing".to_string(),
-        [one] => one.clone(),
-        [rest @ .., last] => format!("{} and {last}", rest.join(", ")),
-    }
-}
-
-/// Whether the sentence about those fields takes a singular verb.
-fn is_or_are(fields: &[String]) -> &'static str {
-    if fields.len() == 1 { "is" } else { "are" }
 }
 
 #[cfg(test)]
