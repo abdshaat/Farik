@@ -217,15 +217,31 @@ impl EventLog {
     /// `Sqlite` when the counter cannot be read or written; `TaskIdsExhausted` when the next number
     /// no longer fits the contract schema's pattern; `InvalidEvent` never.
     pub fn next_task_id(&self) -> Result<TaskId, StoreError> {
+        self.next_task_id_above(0)
+    }
+
+    /// The next task id past both the counter and `taken`, the highest number an id already in use
+    /// somewhere the log cannot see holds, with the counter moved past both.
+    ///
+    /// The log is machine-local and the contracts are committed (8.4), so a fresh clone has the
+    /// contracts and a counter at zero. The counter stays the authority for uniqueness across
+    /// processes: the id is still one increment of it, done in one statement.
+    ///
+    /// # Errors
+    ///
+    /// As `next_task_id`.
+    pub fn next_task_id_above(&self, taken: u64) -> Result<TaskId, StoreError> {
+        let taken =
+            i64::try_from(taken).map_err(|_| StoreError::TaskIdsExhausted { next: taken })?;
         let mut connection = self.connection();
         // `Immediate` takes the write lock before the counter is touched, so a connection waiting
         // for it waits out `busy_timeout` rather than being refused at once for having read first.
         let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let next: i64 = transaction.query_row(
-            "INSERT INTO task_counters (prefix, next) VALUES (?1, 1)
-             ON CONFLICT (prefix) DO UPDATE SET next = next + 1
+            "INSERT INTO task_counters (prefix, next) VALUES (?1, ?2 + 1)
+             ON CONFLICT (prefix) DO UPDATE SET next = max(next, ?2) + 1
              RETURNING next",
-            (TASK_ID_PREFIX,),
+            (TASK_ID_PREFIX, taken),
             |row| row.get(0),
         )?;
         transaction.commit()?;
@@ -841,6 +857,35 @@ mod tests {
             .map(|_| log.next_task_id().expect("an id").to_string())
             .collect();
         assert_eq!(ids, ["FRK-1", "FRK-2", "FRK-3"]);
+    }
+
+    #[test]
+    fn hands_out_an_id_past_one_already_taken_and_moves_the_counter_past_it() {
+        // A fresh clone has contracts and a counter at zero: the id has to be past both, and the
+        // counter has to remember that, so that the next caller in another process is past it too.
+        let log = a_log();
+        assert_eq!(
+            log.next_task_id_above(4).expect("an id").to_string(),
+            "FRK-5"
+        );
+        assert_eq!(log.next_task_id().expect("an id").to_string(), "FRK-6");
+        assert_eq!(
+            log.next_task_id_above(2).expect("an id").to_string(),
+            "FRK-7",
+            "and a counter already past what is taken keeps counting"
+        );
+    }
+
+    #[test]
+    fn moves_a_counter_that_already_counts_past_an_id_taken_since() {
+        // A pull brings in contracts the counter has not seen: the counter's row already exists,
+        // so this is the conflict branch, and it has to jump rather than count one on.
+        let log = a_log();
+        assert_eq!(log.next_task_id().expect("an id").to_string(), "FRK-1");
+        assert_eq!(
+            log.next_task_id_above(10).expect("an id").to_string(),
+            "FRK-11"
+        );
     }
 
     #[test]

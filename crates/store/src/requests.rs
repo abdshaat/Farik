@@ -85,7 +85,9 @@ pub fn fields_not_the_authors(wire: &Value) -> Vec<&'static str> {
         .collect()
 }
 
-/// Gives the request in `wire` the next id and files it as a `draft`: the contract is written and
+/// Gives the request in `wire` the next id, past the counter and every contract the repository
+/// already holds (`docs/SPEC.md` section 8.4), and files it as a `draft`: the contract is created,
+/// never written over a file already there, and
 /// `task.created` appended, stamped with `ids` (whose `task_id` is replaced by the new one). With a
 /// `parent`, it is a `task` of that epic, and since an epic's tasks are triaged by its breakdown
 /// (5.16 item 3) `request.triaged { size: small }` follows, by `created_by`. Whether a child may be
@@ -125,9 +127,11 @@ pub fn file_request(
         });
     };
 
-    let task_id = log.next_task_id()?;
+    // Held to the rules before an id is taken, so that a refused request does not use one up. The
+    // id is not the author's and a rule about it is not one the author can break, so the contract
+    // is checked under a stand-in and given its real id once it passes.
     let stamp = now.to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
-    object.insert("id".to_string(), json!(task_id.to_string()));
+    object.insert("id".to_string(), json!("FRK-0"));
     object.insert("status".to_string(), json!("draft"));
     object.insert("created_by".to_string(), json!(created_by));
     object.insert("created_at".to_string(), json!(stamp));
@@ -151,13 +155,23 @@ pub fn file_request(
                 .join("; ")
         ),
     })?;
-    let Command::TaskCreate { contract } = command else {
+    let Command::TaskCreate { mut contract } = command else {
         return Err(RequestError::Refused {
             reason: "was read back as a command other than the one built from it".to_string(),
         });
     };
 
-    files.write_contract(&contract)?;
+    // Past every contract the repository already holds as well as the counter: the log is
+    // machine-local and the contracts are committed (8.4), so on a fresh clone the counter alone
+    // would hand out FRK-1 again. `list_contracts` is in number order, so the last is the highest.
+    let taken = files
+        .list_contracts()?
+        .last()
+        .and_then(|id| id.as_str().trim_start_matches("FRK-").parse::<u64>().ok())
+        .unwrap_or(0);
+    contract.id = log.next_task_id_above(taken)?;
+
+    files.create_contract(&contract)?;
     let ids = EventIds {
         task_id: Some(contract.id.clone()),
         ..ids.clone()

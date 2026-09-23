@@ -495,6 +495,32 @@ fn writes_the_yaml_the_files_hold() {
 }
 
 #[test]
+fn creates_a_contract_only_where_there_is_none() {
+    // An update overwrites the file it names; a new contract must not, because the file already
+    // there is somebody's committed work and nothing else holds a copy of it.
+    let project = TempProject::new("contract-create");
+    let files = project.files();
+    let contract = a_contract("FRK-7");
+    files.create_contract(&contract).expect("it is created");
+    let mut other = a_contract("FRK-7");
+    other.title = "Another one".parse().expect("a title");
+
+    assert!(
+        matches!(
+            files.create_contract(&other),
+            Err(FilesError::Invalid { ref path, .. }) if path == ".farik/contracts/FRK-7.yaml"
+        ),
+        "a second create of one id is refused"
+    );
+    let id = TaskId::try_from("FRK-7").expect("an id");
+    assert_eq!(
+        files.read_contract(&id).expect("it reads back"),
+        contract,
+        "and the first is untouched"
+    );
+}
+
+#[test]
 fn refuses_a_contract_that_says_it_is_another() {
     // The file name and the id inside it are two claims about the same thing, and a board that
     // believed the file name would show a task that does not exist.

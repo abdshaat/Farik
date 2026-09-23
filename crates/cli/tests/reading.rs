@@ -16,8 +16,17 @@ use farik_protocol::clock::FixedClock;
 use farik_store::git::fixtures::TempRepo;
 use serde_json::Value;
 
+/// The moment every test runs at, fixed rather than read from the wall clock (code.md).
+const NOW: &str = "2026-09-22T12:00:00Z";
+
+/// When the project's own commit was made: earlier the same day as `NOW`.
+const COMMITTED: &str = "2026-09-22T09:00:00Z";
+
+/// `NOW`, as the clock the command line is handed.
 fn at() -> DateTime<Utc> {
-    Utc::now()
+    DateTime::parse_from_rfc3339(NOW)
+        .expect("a moment")
+        .with_timezone(&Utc)
 }
 
 struct Ran {
@@ -55,7 +64,7 @@ fn a_project_with_a_task(name: &str) -> TempRepo {
     repository.write("Cargo.lock", "version = 4\n");
     repository.write("Cargo.toml", "[package]\nname = \"one\"\n");
     repository.write("src/lib.rs", "pub fn one() -> u8 { 1 }\n");
-    repository.commit("a project");
+    repository.commit_at("a project", COMMITTED);
     let init = run_in(&repository.path, &["init"]);
     assert_eq!(init.code, 0, "{}", init.err);
     repository.write("request.yaml", &a_request("Show the board"));
@@ -119,7 +128,7 @@ fn says_when_the_board_is_empty() {
     let repository = TempRepo::new("read-board-empty");
     repository.write("Cargo.lock", "version = 4\n");
     repository.write("Cargo.toml", "[package]\nname = \"one\"\n");
-    repository.commit("a project");
+    repository.commit_at("a project", COMMITTED);
     run_in(&repository.path, &["init"]);
 
     let ran = run_in(&repository.path, &["board"]);
@@ -326,6 +335,50 @@ fn reports_a_team_rule_that_does_not_compile() {
         ran.out.contains("refuses every command"),
         "and what it costs, which is every command the team runs: {}",
         ran.out
+    );
+}
+
+/// Runs doctor on a project whose team rules are `rules`, and says it found `rule` and `pattern`.
+fn reports_a_glob_that_does_not_compile(name: &str, rules: &str, rule: &str, pattern: &str) {
+    let repository = a_project_with_a_task(name);
+    let team = std::fs::read_to_string(repository.path.join(".farik/team.yaml")).expect("read");
+    std::fs::write(
+        repository.path.join(".farik/team.yaml"),
+        team.replace("rules: {}", rules),
+    )
+    .expect("write");
+
+    let ran = run_in(&repository.path, &["doctor"]);
+
+    assert_eq!(ran.code, 1, "{}", ran.err);
+    assert!(
+        ran.out.contains(&format!(
+            "{rule} has a glob that does not compile, \"{pattern}\""
+        )),
+        "the report names the rule and the pattern: {}",
+        ran.out
+    );
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn reports_a_protected_path_that_does_not_compile() {
+    reports_a_glob_that_does_not_compile(
+        "read-doctor-protected",
+        "rules:\n  protected_paths:\n    - \"a/[\"\n",
+        "protected_paths",
+        "a/[",
+    );
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn reports_an_allowed_paths_ceiling_that_does_not_compile() {
+    reports_a_glob_that_does_not_compile(
+        "read-doctor-ceiling",
+        "rules:\n  allowed_paths_ceiling:\n    - \"b/[\"\n",
+        "allowed_paths_ceiling",
+        "b/[",
     );
 }
 

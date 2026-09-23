@@ -287,6 +287,19 @@ mod tests {
     }
 
     #[test]
+    fn starts_a_team_on_the_limits_the_spec_ships() {
+        let team = starter_team("notes").expect("a team");
+        assert_eq!(
+            team.policy.wip_limit_per_agent, 1,
+            "one unfinished task per agent (section 3)"
+        );
+        assert_eq!(
+            team.budgets.daily_usd, None,
+            "the starter team ships no daily dollar budget (ADR 0015)"
+        );
+    }
+
+    #[test]
     fn names_a_team_after_something_when_the_directory_name_is_nothing() {
         assert_eq!(
             starter_team("").expect("a team").name.as_str(),

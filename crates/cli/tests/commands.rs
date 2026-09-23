@@ -19,9 +19,18 @@ use farik_store::files::ProjectFiles;
 use farik_store::git::fixtures::TempRepo;
 use serde_json::{Value, json};
 
-/// The moment every test runs at, so that "last commit today" is an answer rather than a guess.
+/// The moment every test runs at, fixed rather than read from the wall clock (code.md), so that
+/// "last commit today" is an answer rather than a guess.
+const NOW: &str = "2026-09-22T12:00:00Z";
+
+/// When the project's own commit was made: earlier the same day as `NOW`.
+const COMMITTED: &str = "2026-09-22T09:00:00Z";
+
+/// `NOW`, as the clock the command line is handed.
 fn at() -> DateTime<Utc> {
-    Utc::now()
+    DateTime::parse_from_rfc3339(NOW)
+        .expect("a moment")
+        .with_timezone(&Utc)
 }
 
 /// What one run of the command line did.
@@ -61,7 +70,7 @@ fn a_repository(name: &str) -> TempRepo {
     repository.write("Cargo.lock", "version = 4\n");
     repository.write("Cargo.toml", "[package]\nname = \"one\"\n");
     repository.write("src/lib.rs", "pub fn one() -> u8 { 1 }\n");
-    repository.commit("a project");
+    repository.commit_at("a project", COMMITTED);
     repository
 }
 
@@ -218,6 +227,37 @@ fn writes_a_starter_team_that_merges_on_its_own() {
         .expect("a team was written");
     assert_eq!(team.policy.integration, Integration::AutoMerge);
     assert!(ran.out.contains("pushed to origin"), "{}", ran.out);
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn keeps_the_team_id_the_first_init_gave_after_the_team_is_renamed() {
+    // The ids are fixed by the log's first event, so renaming the team does not split one
+    // project's log in two (section 3).
+    let repository = a_project("cli-ids-fixed");
+    let mut team = files_of(&repository).read_team().expect("a team");
+    team.name = "Renamed".parse().expect("a team name");
+    files_of(&repository)
+        .write_team(&team)
+        .expect("the team is written");
+
+    let file = a_request_file(&repository, "request.yaml", "A board command");
+    let ran = run_in(
+        &repository.path,
+        &["task", "create", file.to_str().expect("a path")],
+    );
+    assert_eq!(ran.code, 0, "{}", ran.err);
+
+    let log = farik_store::open_event_log(&repository.path.join(".farik/local/farik.db"), at())
+        .expect("the log opens");
+    let events = log
+        .read(&farik_store::EventQuery::default())
+        .expect("the log reads");
+    let first = &events.first().expect("init recorded events").envelope.ids;
+    let last = &events.last().expect("and the create one").envelope.ids;
+    assert_ne!(first.team_id, "renamed", "the first id is the old name's");
+    assert_eq!(last.team_id, first.team_id);
+    assert_eq!(last.project_id, first.project_id);
 }
 
 #[test]
@@ -443,6 +483,93 @@ fn files_a_contract_as_a_draft_request() {
 
 #[test]
 #[ignore = "needs the git program: cargo xtask check --integration"]
+fn never_hands_out_an_id_a_committed_contract_already_has() {
+    // The log is machine-local and the contracts travel with the repository (8.4), so a fresh clone
+    // has the files and a counter at zero. Taking the id from the counter alone would file the next
+    // request as FRK-1 and write it over the contract a teammate committed.
+    let repository = a_project("cli-create-fresh-clone");
+    let first = a_request_file(&repository, "first.yaml", "The committed one");
+    let filed = run_in(
+        &repository.path,
+        &["task", "create", first.to_str().expect("a path")],
+    );
+    assert_eq!(filed.code, 0, "{}", filed.err);
+    std::fs::remove_dir_all(repository.path.join(".farik/local")).expect("a fresh clone");
+
+    let second = a_request_file(&repository, "second.yaml", "The new one");
+    let ran = run_in(
+        &repository.path,
+        &["task", "create", second.to_str().expect("a path")],
+    );
+
+    assert_eq!(ran.code, 0, "{}", ran.err);
+    assert!(ran.out.contains("FRK-2 filed"), "{}", ran.out);
+    assert_eq!(
+        files_of(&repository)
+            .read_contract(&TaskId::try_from("FRK-1").expect("a task id"))
+            .expect("the committed contract is still there")
+            .title
+            .as_str(),
+        "The committed one"
+    );
+}
+
+/// Writes a contract straight to its file, as a pull or a clone would bring one in, with no event.
+fn a_contract_file_at(repository: &TempRepo, id: &str) {
+    let mut wire = farik_core::contract::fixtures::a_contract_wire();
+    wire["id"] = json!(id);
+    let contract = farik_core::contract::validate_contract(&wire).expect("the fixture is one");
+    files_of(repository)
+        .write_contract(&contract)
+        .expect("the contract is written");
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn hands_out_an_id_past_contracts_a_pull_brought_in() {
+    // The log is kept, so its counter already stands at 1 and the id comes from moving it on, not
+    // from starting it: the counter has to jump past what arrived rather than count one on.
+    let repository = a_project("cli-create-pulled");
+    let first = a_request_file(&repository, "first.yaml", "The first one");
+    let created = run_in(
+        &repository.path,
+        &["task", "create", first.to_str().expect("a path")],
+    );
+    assert_eq!(created.code, 0, "{}", created.err);
+    for id in ["FRK-2", "FRK-3", "FRK-4", "FRK-5"] {
+        a_contract_file_at(&repository, id);
+    }
+
+    let second = a_request_file(&repository, "second.yaml", "The new one");
+    let ran = run_in(
+        &repository.path,
+        &["task", "create", second.to_str().expect("a path")],
+    );
+
+    assert_eq!(ran.code, 0, "{}", ran.err);
+    assert!(ran.out.contains("FRK-6 filed"), "{}", ran.out);
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn hands_out_an_id_past_the_highest_number_not_the_highest_spelling() {
+    // FRK-10 sorts before FRK-9 as text; the id has to be past the tenth.
+    let repository = a_project("cli-create-ten");
+    a_contract_file_at(&repository, "FRK-9");
+    a_contract_file_at(&repository, "FRK-10");
+
+    let file = a_request_file(&repository, "request.yaml", "The new one");
+    let ran = run_in(
+        &repository.path,
+        &["task", "create", file.to_str().expect("a path")],
+    );
+
+    assert_eq!(ran.code, 0, "{}", ran.err);
+    assert!(ran.out.contains("FRK-11 filed"), "{}", ran.out);
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
 fn reads_the_contract_from_where_the_command_was_run() {
     // The path is the person's, so it is relative to the directory they typed it in — not to the
     // repository root, which is where the project is, and not to whatever directory this process
@@ -512,6 +639,50 @@ fn refuses_a_request_that_sets_what_is_not_the_authors_to_set() {
     );
 }
 
+/// Files a request with one line added to it, and says that it was refused for that field and that
+/// nothing was filed.
+fn refused_for_one_field(name: &str, line: &str, field: &str) {
+    let repository = a_project(name);
+    let path = repository.path.join("request.yaml");
+    std::fs::write(&path, format!("{}{line}\n", a_request("A board command")))
+        .expect("the request is written");
+    let ran = run_in(
+        &repository.path,
+        &["task", "create", path.to_str().expect("a path")],
+    );
+
+    assert_eq!(ran.code, 1, "{}", ran.out);
+    assert!(
+        ran.err
+            .contains(&format!("sets {field}, which a request does not")),
+        "{}",
+        ran.err
+    );
+    assert!(
+        files_of(&repository)
+            .list_contracts()
+            .expect("a list")
+            .is_empty(),
+        "and nothing was filed"
+    );
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn refuses_a_request_that_sets_a_field_the_store_owns() {
+    refused_for_one_field(
+        "cli-create-store-field",
+        "created_at: 2026-01-01T00:00:00Z",
+        "created_at",
+    );
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn refuses_a_request_that_sets_a_field_fixed_at_creation() {
+    refused_for_one_field("cli-create-fixed-field", "kind: epic", "kind");
+}
+
 #[test]
 #[ignore = "needs the git program: cargo xtask check --integration"]
 fn refuses_a_request_the_contract_rules_refuse() {
@@ -539,6 +710,36 @@ fn refuses_a_request_the_contract_rules_refuse() {
             .expect("a list")
             .is_empty(),
         "and nothing was filed"
+    );
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn a_refused_request_does_not_use_up_an_id() {
+    let repository = a_project("cli-create-refused-id");
+    let path = repository.path.join("broken.yaml");
+    std::fs::write(
+        &path,
+        a_request("A board command").replace("  - id: C1", "  - id: R1"),
+    )
+    .expect("the request is written");
+    let refused = run_in(
+        &repository.path,
+        &["task", "create", path.to_str().expect("a path")],
+    );
+    assert_eq!(refused.code, 1, "{}", refused.out);
+
+    let file = a_request_file(&repository, "request.yaml", "A board command");
+    let ran = run_in(
+        &repository.path,
+        &["task", "create", file.to_str().expect("a path")],
+    );
+
+    assert_eq!(ran.code, 0, "{}", ran.err);
+    assert!(
+        ran.out.contains("FRK-1 filed"),
+        "the next id is the next one, not one past a refusal: {}",
+        ran.out
     );
 }
 
@@ -799,6 +1000,24 @@ fn refuses_to_take_a_contract_that_is_already_yours() {
 
 #[test]
 #[ignore = "needs the git program: cargo xtask check --integration"]
+fn refuses_to_give_back_a_contract_that_is_already_the_teams() {
+    let repository = a_project("cli-unlock-twice");
+    let file = a_request_file(&repository, "request.yaml", "A board command");
+    run_in(
+        &repository.path,
+        &["task", "create", file.to_str().expect("a path")],
+    );
+    let before = kinds_in(&repository);
+
+    let ran = run_in(&repository.path, &["contract", "unlock", "FRK-1"]);
+
+    assert_eq!(ran.code, 1, "{}", ran.out);
+    assert!(ran.err.contains("already the team's"), "{}", ran.err);
+    assert_eq!(kinds_in(&repository), before, "and nothing was recorded");
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
 fn refuses_to_take_a_contract_whose_task_is_finished() {
     let repository = a_project("cli-lock-accepted");
     let file = a_request_file(&repository, "request.yaml", "A board command");
@@ -834,6 +1053,93 @@ fn refuses_to_take_a_contract_whose_task_is_finished() {
         "not `already yours`: {}",
         again.err
     );
+}
+
+/// A project with FRK-1 filed and a second contract, FRK-7, written straight to its file, so that
+/// the log has never heard of it.
+fn a_project_with_a_contract_only_the_files_know(name: &str) -> TempRepo {
+    let repository = a_project(name);
+    let file = a_request_file(&repository, "request.yaml", "A board command");
+    let created = run_in(
+        &repository.path,
+        &["task", "create", file.to_str().expect("a path")],
+    );
+    assert_eq!(created.code, 0, "{}", created.err);
+    let files = files_of(&repository);
+    let mut contract = files
+        .read_contract(&TaskId::try_from("FRK-1").expect("a task id"))
+        .expect("a contract");
+    contract.id = TaskId::try_from("FRK-7").expect("a task id");
+    files
+        .write_contract(&contract)
+        .expect("the contract is written");
+    repository
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn shows_the_status_the_log_says_and_that_the_file_disagrees() {
+    let repository = a_project("cli-show-status");
+    let file = a_request_file(&repository, "request.yaml", "A board command");
+    run_in(
+        &repository.path,
+        &["task", "create", file.to_str().expect("a path")],
+    );
+    moved_to(&repository, "FRK-1", "refining");
+
+    let ran = run_in(&repository.path, &["task", "show", "FRK-1"]);
+
+    assert_eq!(ran.code, 0, "{}", ran.err);
+    assert_eq!(
+        ran.out.lines().nth(1),
+        Some("refining task, low risk"),
+        "the log decides a task's status (8.4): {}",
+        ran.out
+    );
+    assert!(
+        ran.out
+            .contains("the file says draft and the log says refining"),
+        "and a disagreement is said, not settled silently: {}",
+        ran.out
+    );
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn shows_a_task_the_log_has_never_heard_of_and_says_so() {
+    let repository = a_project_with_a_contract_only_the_files_know("cli-show-unheard");
+
+    let ran = run_in(&repository.path, &["task", "show", "FRK-7"]);
+
+    assert_eq!(ran.code, 0, "{}", ran.err);
+    assert!(
+        ran.out.contains("the log has never heard of this task"),
+        "{}",
+        ran.out
+    );
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn refuses_to_change_a_task_the_log_has_never_heard_of() {
+    // The log decides a task's status (8.4), so a contract it has no row for has no status for the
+    // governor to be asked about, and guessing `draft` would let a file nobody filed be triaged.
+    let repository = a_project_with_a_contract_only_the_files_know("cli-unheard");
+    let before = kinds_in(&repository);
+
+    for args in [
+        &["triage", "FRK-7", "small", "--reason", "one screen"][..],
+        &["contract", "lock", "FRK-7"][..],
+    ] {
+        let ran = run_in(&repository.path, args);
+        assert_eq!(ran.code, 1, "{args:?}: {}", ran.out);
+        assert!(
+            ran.err.contains("the log has never heard of FRK-7"),
+            "{args:?}: {}",
+            ran.err
+        );
+    }
+    assert_eq!(kinds_in(&repository), before, "and nothing was recorded");
 }
 
 #[test]

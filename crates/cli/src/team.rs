@@ -1,6 +1,5 @@
 //! `farik rules show` and `farik criteria list`: the two team files a person hand-edits (F15, F16).
 
-use farik_core::criteria::CriterionTemplate;
 use farik_store::requests::{criteria_json, criterion_how, criterion_method, rules_json};
 
 use crate::Report;
@@ -85,10 +84,4 @@ pub fn criteria(project: &Project) -> Result<Report, String> {
         json: criteria_json(&library),
         json_lines: None,
     })
-}
-
-/// Every criterion in the library, for a caller that wants the values rather than the words.
-#[must_use]
-pub fn named(criteria: &[CriterionTemplate]) -> Vec<String> {
-    criteria.iter().map(|one| one.name.to_string()).collect()
 }
