@@ -413,3 +413,44 @@ pub fn scratch(name: &str) -> PathBuf {
     std::fs::create_dir_all(&path).expect("a scratch directory");
     path
 }
+
+/// A directory holding a `claude` that prints `version` whatever it is asked, and the `PATH` that
+/// finds it first.
+pub fn a_claude_saying(name: &str, version: &str) -> (PathBuf, String) {
+    use std::os::unix::fs::PermissionsExt;
+
+    let directory = scratch(name);
+    let source = directory.join("claude.txt");
+    std::fs::write(&source, format!("#!/bin/sh\necho '{version}'\n")).expect("written");
+    // Copied rather than written in place: a file this process holds open for writing is
+    // inherited by whatever another test thread forks meanwhile, and running it then fails with
+    // "text file busy".
+    let program = directory.join("claude");
+    let copied = std::process::Command::new("cp")
+        .arg(&source)
+        .arg(&program)
+        .status()
+        .expect("cp runs");
+    assert!(copied.success());
+    std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o755)).expect("executable");
+    let path = format!(
+        "{}:{}",
+        directory.display(),
+        std::env::var("PATH").unwrap_or_default()
+    );
+    (directory, path)
+}
+
+/// Waits for `handle`'s thread to end, and fails the test rather than hang when it does not end
+/// within a minute.
+pub fn joined<T>(handle: std::thread::JoinHandle<T>, what: &str) -> T {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+    while !handle.is_finished() {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "{what} did not end in time"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    handle.join().unwrap_or_else(|_| panic!("{what} panicked"))
+}

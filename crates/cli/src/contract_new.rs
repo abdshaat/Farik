@@ -20,7 +20,7 @@ use crate::run::{
     Ended, INTERRUPTED, Printer, finish_quietly, print_waiting, report_error, ticks, waiting_now,
 };
 use crate::show::{body_lines, event_line};
-use crate::start::{Driver, on_path, runtime, send, start, try_lock};
+use crate::start::{Driver, on_path, runtime, send, start_holding, try_lock};
 use crate::waiting::Waiting;
 use crate::{CliIo, HUMAN};
 
@@ -122,19 +122,39 @@ fn title_of(brief: &str) -> String {
         .collect()
 }
 
-/// `farik contract new`: files the request, sizes it when asked, and, when no other process
-/// drives the project, drives it with the refining rules until the contract is written or the
-/// Product Manager waits on the person, answering its questions at the terminal. Answers the exit
-/// code: 0 when the loop ends, 1 on a refusal or a failed tick, 130 after an interrupt.
+/// `farik contract new`: builds the request and, when no other process drives the project, starts
+/// driving it first, so that a start that refuses files nothing; then files the request, sizes it
+/// when asked, and drives it with the refining rules until the contract is written or the Product
+/// Manager waits on the person, answering its questions at the terminal. When another process
+/// drives the project, files the request and hands it over. Answers the exit code: 0 when the
+/// loop ends, 1 on a refusal or a failed tick, 130 after an interrupt.
 pub(crate) fn contract_new(
     project: &Project,
     asked: &Asked<'_>,
     io: &mut CliIo<'_>,
     as_json: bool,
 ) -> i32 {
-    let filed = match file(project, asked, io, as_json) {
-        Ok(Filed::Here(task_id)) => task_id,
-        Ok(Filed::HandedOver) => return 0,
+    let request = title_and_brief(project, &asked.source, io).and_then(|(title, brief)| {
+        request_from_brief(
+            &title,
+            &brief,
+            placeholder_budget_usd(&project.team.rules()),
+        )
+    });
+    let request = match request {
+        Ok(request) => request,
+        Err(error) => return refuse(io, as_json, &error),
+    };
+    // Held from before the request is filed until the driver ends, so that no other process can
+    // start driving in between and leave this one with a request filed and no start.
+    let lock = match try_lock(&project.root) {
+        Ok(Some(lock)) => lock,
+        Ok(None) => {
+            return match hand_over(project, asked, request, io, as_json) {
+                Ok(()) => 0,
+                Err(error) => refuse(io, as_json, &error),
+            };
+        }
         Err(error) => return refuse(io, as_json, &error),
     };
     let runtime = match runtime() {
@@ -142,7 +162,7 @@ pub(crate) fn contract_new(
         Err(error) => return refuse(io, as_json, &error),
     };
     runtime.block_on(async {
-        let driver = match start(project, io).await {
+        let driver = match start_holding(project, io, lock).await {
             Ok(driver) => driver,
             Err(error) => return refuse(io, as_json, &error),
         };
@@ -151,6 +171,13 @@ pub(crate) fn contract_new(
             io,
             as_json,
             json_lines: false,
+        };
+        let filed = match file_here(project, asked, request, &driver, &mut printer).await {
+            Ok(task_id) => task_id,
+            Err(error) => {
+                report_error(&mut printer, &error);
+                return finish_quietly(driver, &mut printer, 1).await;
+            }
         };
         crate::run::started(&mut printer, &driver);
         with_the_product_manager(project, &filed, asked.lock, driver, stdin, &mut printer).await
@@ -189,7 +216,6 @@ fn sized_line(task_id: &TaskId, size: RequestSize) -> String {
     format!("{} sized {size} by you, so it is {kind}", task_id.as_str())
 }
 
-/// What filing did: the request is this process's to drive, or another process drives it.
 /// The budget a request is filed with: the team's cap on a task's budget when it has one, and
 /// otherwise `PLACEHOLDER_MAX_COST_USD`.
 pub(crate) fn placeholder_budget_usd(rules: &TeamRules) -> f64 {
@@ -198,43 +224,12 @@ pub(crate) fn placeholder_budget_usd(rules: &TeamRules) -> f64 {
         .unwrap_or(PLACEHOLDER_MAX_COST_USD)
 }
 
-enum Filed {
-    Here(TaskId),
-    HandedOver,
-}
-
-/// Builds the request, files it, and sizes it when asked; when another process drives the
-/// project, hands the request to it.
-fn file(
-    project: &Project,
-    asked: &Asked<'_>,
-    io: &mut CliIo<'_>,
-    as_json: bool,
-) -> Result<Filed, String> {
-    let (title, brief) = title_and_brief(project, &asked.source, io)?;
-    let wire = request_from_brief(
-        &title,
-        &brief,
-        placeholder_budget_usd(&project.team.rules()),
-    )?;
-    let driven_elsewhere = match try_lock(&project.root)? {
-        Some(lock) => {
-            drop(lock);
-            false
-        }
-        None => true,
-    };
-    if driven_elsewhere && asked.lock {
-        return Err(
-            "--lock waits for the Product Manager's contract, which the process driving \
-                    this project writes: run farik contract lock FRK-<n> once it has"
-                .to_string(),
-        );
-    }
+/// Files `request` as the human's, and answers its id and the line that says so.
+fn filed(project: &Project, request: Value, io: &CliIo<'_>) -> Result<(TaskId, String), String> {
     let contract = file_request(
         &project.files,
         &project.log,
-        wire,
+        request,
         HUMAN,
         None,
         io.clock.now(),
@@ -244,36 +239,75 @@ fn file(
         RequestError::Refused { reason } => format!("the request {reason}"),
         other => other.to_string(),
     })?;
-    let id = contract.id.clone();
+    let line = format!(
+        "{} filed as a draft request: {}",
+        contract.id.as_str(),
+        contract.title.as_str()
+    );
+    Ok((contract.id, line))
+}
+
+/// Files the request in the process that drives the project, and sizes it there when asked.
+async fn file_here(
+    project: &Project,
+    asked: &Asked<'_>,
+    request: Value,
+    driver: &Driver,
+    printer: &mut Printer<'_, '_>,
+) -> Result<TaskId, String> {
+    let (id, line) = filed(project, request, printer.io)?;
+    printer.line(&line, &Value::Null);
+    if let Some(size) = asked.size {
+        said(
+            driver
+                .orchestrator
+                .handle(Command::RequestTriage {
+                    task_id: id.clone(),
+                    size,
+                    reason: SIZED_BY.to_string(),
+                })
+                .await,
+        )?;
+        printer.line(&sized_line(&id, size), &Value::Null);
+    }
+    Ok(id)
+}
+
+/// Files the request, sizes it through the process driving the project when asked, and leaves it
+/// to that process. `--lock` is refused before anything is filed, because a lock taken now would
+/// refuse the Product Manager's writes.
+fn hand_over(
+    project: &Project,
+    asked: &Asked<'_>,
+    request: Value,
+    io: &mut CliIo<'_>,
+    as_json: bool,
+) -> Result<(), String> {
+    if asked.lock {
+        return Err(
+            "--lock waits for the Product Manager's contract, which the process driving \
+                    this project writes: run farik contract lock FRK-<n> once it has"
+                .to_string(),
+        );
+    }
+    let (id, line) = filed(project, request, io)?;
     let mut printer = Printer {
         io,
         as_json,
         json_lines: false,
     };
-    printer.line(
-        &format!(
-            "{} filed as a draft request: {}",
-            id.as_str(),
-            contract.title.as_str()
-        ),
-        &Value::Null,
-    );
+    printer.line(&line, &Value::Null);
     if let Some(size) = asked.size {
-        let command = Command::RequestTriage {
-            task_id: id.clone(),
-            size,
-            reason: SIZED_BY.to_string(),
-        };
-        let outcome = if driven_elsewhere {
-            send(&project.root, &command)
-        } else {
-            crate::start::command(project, command, "contract new", printer.io)
-        };
-        outcome.map_err(|error| refusal(&error))?;
+        send(
+            &project.root,
+            &Command::RequestTriage {
+                task_id: id.clone(),
+                size,
+                reason: SIZED_BY.to_string(),
+            },
+        )
+        .map_err(|error| refusal(&error))?;
         printer.line(&sized_line(&id, size), &Value::Null);
-    }
-    if !driven_elsewhere {
-        return Ok(Filed::Here(id));
     }
     let pid = crate::daemon_client::read_daemon_file(&project.root.join(crate::start::DAEMON_FILE))
         .ok()
@@ -288,7 +322,7 @@ fn file(
         &handed,
         &json!({ "task_id": id.as_str(), "status": "draft", "handed_to": handed }),
     );
-    Ok(Filed::HandedOver)
+    Ok(())
 }
 
 /// Ticks the task with the refining rules until nothing is left to do, asking each question the
@@ -329,7 +363,16 @@ async fn with_the_product_manager(
         print_waiting(printer, &waiting);
     }
     let mut locked = false;
-    if lock && readiness.is_some() {
+    if lock && readiness.is_some() && !contract_written(project, task_id) {
+        printer.line(
+            &format!(
+                "not locked: the Product Manager has written no contract for {id} yet: run farik \
+                 contract lock {id} once it has",
+                id = task_id.as_str()
+            ),
+            &Value::Null,
+        );
+    } else if lock && readiness.is_some() {
         match said(
             driver
                 .orchestrator
@@ -418,6 +461,19 @@ async fn converse(
             Err(error) => report_error(printer, &error),
         }
     }
+}
+
+/// Whether the Product Manager has written the task's contract: only then is there one for
+/// `--lock` to take.
+fn contract_written(project: &Project, task_id: &TaskId) -> bool {
+    project
+        .log
+        .read(&EventQuery {
+            task_id: Some(task_id.clone()),
+            kinds: vec![EventKind::ContractWritten],
+            ..EventQuery::default()
+        })
+        .is_ok_and(|written| !written.is_empty())
 }
 
 /// The task's status on the board.

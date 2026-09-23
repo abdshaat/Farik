@@ -26,8 +26,8 @@ use serde_json::{Value, json};
 
 use farik_core::team::fixtures::an_agent_wire;
 use project::{
-    a_bare_env, a_project, a_team, a_team_with, events, filed, hold_the_run_lock, moved,
-    no_sandbox, record, record_as, run, run_with, scratch, status_of,
+    a_bare_env, a_claude_saying, a_project, a_team, a_team_with, events, filed, hold_the_run_lock,
+    moved, no_sandbox, record, record_as, run, run_with, status_of,
 };
 
 /// An engine replaying `transcripts`, whose Farik tool calls the driving process's daemon answers.
@@ -48,33 +48,6 @@ fn given(adapter: &Arc<UsageThenWaitAdapter>) -> Engine {
         let adapter: Arc<dyn RuntimeAdapter> = adapter.clone();
         adapter
     }))
-}
-
-/// A directory holding a `claude` that prints `version` whatever it is asked, and the `PATH` that
-/// finds it first.
-fn a_claude_saying(name: &str, version: &str) -> (PathBuf, String) {
-    use std::os::unix::fs::PermissionsExt;
-
-    let directory = scratch(name);
-    let source = directory.join("claude.txt");
-    std::fs::write(&source, format!("#!/bin/sh\necho '{version}'\n")).expect("written");
-    // Copied rather than written in place: a file this process holds open for writing is
-    // inherited by whatever another test thread forks meanwhile, and running it then fails with
-    // "text file busy".
-    let program = directory.join("claude");
-    let copied = std::process::Command::new("cp")
-        .arg(&source)
-        .arg(&program)
-        .status()
-        .expect("cp runs");
-    assert!(copied.success());
-    std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o755)).expect("executable");
-    let path = format!(
-        "{}:{}",
-        directory.display(),
-        std::env::var("PATH").unwrap_or_default()
-    );
-    (directory, path)
 }
 
 fn daemon_file(repository: &TempRepo) -> PathBuf {

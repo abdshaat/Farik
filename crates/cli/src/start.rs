@@ -348,6 +348,19 @@ pub(crate) async fn start(project: &Project, io: &mut CliIo<'_>) -> Result<Drive
     let Some(lock) = try_lock(&project.root)? else {
         return Err(driven_elsewhere(&project.root));
     };
+    start_holding(project, io, lock).await
+}
+
+/// `start`, with the run lock already taken by the caller, which it gives back on a refusal.
+///
+/// # Errors
+///
+/// The sentence of the step that failed.
+pub(crate) async fn start_holding(
+    project: &Project,
+    io: &mut CliIo<'_>,
+    lock: RunLock,
+) -> Result<Driver, String> {
     let interrupts = listen(std::mem::replace(
         &mut io.interrupts,
         Interrupts::Channel(tokio::sync::mpsc::unbounded_channel().1),

@@ -9,6 +9,7 @@
 #[path = "shared/project.rs"]
 mod project;
 
+use std::collections::BTreeMap;
 use std::io::Write as _;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -25,7 +26,8 @@ use farik_store::git::fixtures::TempRepo;
 use serde_json::{Value, json};
 
 use project::{
-    LiveDriver, a_team, events, files_of, hold_the_run_lock, record_as, run_with, status_of,
+    LiveDriver, a_bare_env, a_claude_saying, a_team, events, files_of, hold_the_run_lock, record,
+    record_as, run_with, scratch, status_of,
 };
 
 const BRIEF: &str = "Add done.txt and a check that it exists.";
@@ -225,12 +227,10 @@ fn ends_at_the_prompt_on_an_interrupt() {
     let _ = writer.write_all(b"too late\n");
 }
 
-#[test]
-#[ignore = "needs the git program: cargo xtask check --integration"]
-fn says_why_it_stopped_before_a_contract() {
-    let repository = a_team("new-day-spent");
+/// Spends the team's day with one seeded `cost.recorded`, so that no session starts.
+fn a_spent_day(repository: &TempRepo) {
     record_as(
-        &repository,
+        repository,
         "",
         Some(("dev-a", "s-0")),
         "cost.recorded",
@@ -246,17 +246,118 @@ fn says_why_it_stopped_before_a_contract() {
             "cost_usd": 25.0
         }),
     );
+}
 
-    let ran = contract_new(&repository, &["--brief", BRIEF], Vec::new(), "");
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn says_why_it_stopped_before_a_contract() {
+    let repository = a_team("new-day-spent");
+    a_spent_day(&repository);
+    // A judgement from before FRK-1 last moved into refining, which says nothing of it now.
+    record(
+        &repository,
+        "FRK-1",
+        "contract.evaluated",
+        &json!({ "gate": "definition_of_ready", "passed": false, "failures": ["stale"] }),
+    );
+
+    let ran = contract_new(
+        &repository,
+        &["--brief", BRIEF, "--size", "small"],
+        Vec::new(),
+        "",
+    );
 
     assert_eq!(ran.code, 0, "{}\n{}", ran.out, ran.err);
+    assert_eq!(status_of(&repository, "FRK-1"), "refining");
     assert!(
         ran.out
             .contains("readiness: not judged yet (the team's daily budget is spent)"),
         "{}",
         ran.out
     );
+    assert!(!ran.out.contains("stale"), "{}", ran.out);
     assert!(events(&repository, &[EventKind::SessionStarted]).is_empty());
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn locks_only_a_contract_the_product_manager_wrote() {
+    let repository = a_team("new-lock-unwritten");
+    a_spent_day(&repository);
+
+    let ran = contract_new(
+        &repository,
+        &["--brief", BRIEF, "--size", "small", "--lock"],
+        Vec::new(),
+        "",
+    );
+
+    assert_eq!(ran.code, 0, "{}\n{}", ran.out, ran.err);
+    assert!(events(&repository, &[EventKind::ContractLocked]).is_empty());
+    let contract = files_of(&repository)
+        .read_contract(&"FRK-1".parse().expect("a task id"))
+        .expect("the contract reads");
+    assert!(!contract.locked);
+    assert!(
+        ran.out.contains(
+            "not locked: the Product Manager has written no contract for FRK-1 yet: run farik \
+             contract lock FRK-1 once it has"
+        ),
+        "{}",
+        ran.out
+    );
+}
+
+/// Nothing was filed and nothing is left running: the log as it was, no FRK-1, no daemon, and
+/// the run lock free.
+fn nothing_filed(repository: &TempRepo, before: usize) {
+    assert_eq!(events(repository, &[]).len(), before);
+    assert!(!repository.path.join(".farik/contracts/FRK-1.yaml").exists());
+    assert!(!repository.path.join(".farik/local/daemon.json").exists());
+    drop(hold_the_run_lock(repository));
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn files_nothing_when_the_start_refuses() {
+    let repository = a_team("new-start-refused");
+    let before = events(&repository, &[]).len();
+    let (_old, old_claude) = a_claude_saying("new-old-claude", "2.1.200 (Claude Code)");
+    let nowhere = scratch("new-no-claude");
+    let with_key = |path: String| {
+        BTreeMap::from([
+            ("PATH".to_string(), path),
+            ("ANTHROPIC_API_KEY".to_string(), "sk-test".to_string()),
+        ])
+    };
+    for (said, env) in [
+        ("CLAUDE_CODE_OAUTH_TOKEN", a_bare_env()),
+        (
+            "there is no claude on PATH",
+            with_key(nowhere.display().to_string()),
+        ),
+        ("2.1.272", with_key(old_claude)),
+    ] {
+        let ran = run_with(
+            &repository.path,
+            &["contract", "new", "--brief", BRIEF, "--size", "small"],
+            |io| io.env = env,
+        );
+        assert_eq!(ran.code, 1, "{}", ran.out);
+        assert!(ran.err.contains(said), "{said:?} in {}", ran.err);
+        nothing_filed(&repository, before);
+    }
+
+    std::fs::write(
+        repository.path.join(".farik/prices.json"),
+        "{\"version\": 2}",
+    )
+    .expect("the override is written");
+    let ran = contract_new(&repository, &["--brief", BRIEF], Vec::new(), "");
+    assert_eq!(ran.code, 1, "{}", ran.out);
+    assert!(ran.err.contains(".farik/prices.json"), "{}", ran.err);
+    nothing_filed(&repository, before);
 }
 
 #[test]
