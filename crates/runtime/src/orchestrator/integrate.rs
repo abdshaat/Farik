@@ -865,16 +865,18 @@ mod tests {
                 wire["policy"]["integration_branch"] = json!("main");
                 wire["policy"]["wip_limit_per_agent"] = json!(2);
             });
-            harness.accepted("FRK-1");
-            // FRK-2's branch gets a commit of its own: the fixtures' two `done.txt` commits, made
-            // in the same second on the same parent, would be one commit.
-            harness.accepted_with_worktree("FRK-2");
-            let worktree = harness.worktree("FRK-2");
-            std::fs::write(worktree.join("two.txt"), "two\n").expect("written");
-            let git = &harness.project.deps.git;
-            git.commit(&worktree, "Add two.txt", &["two.txt".to_string()])
-                .expect("committed");
-            git.remove_worktree(&worktree).expect("removed");
+            // Each branch gets a commit of its own: the fixtures' two `done.txt` commits, made in
+            // the same second on the same parent, are one commit, so either branch would hold the
+            // other's tip, and whichever merged second could find itself already merged.
+            for (task, file) in [("FRK-1", "one.txt"), ("FRK-2", "two.txt")] {
+                harness.accepted_with_worktree(task);
+                let worktree = harness.worktree(task);
+                std::fs::write(worktree.join(file), format!("{task}\n")).expect("written");
+                let git = &harness.project.deps.git;
+                git.commit(&worktree, &format!("Add {file}"), &[file.to_string()])
+                    .expect("committed");
+                git.remove_worktree(&worktree).expect("removed");
+            }
             git_in(&harness.project.repo.path, &["checkout", "-b", "work"]);
             let first = harness.orchestrator(harness.recorded(Vec::new()));
             let second = harness.orchestrator(harness.recorded(Vec::new()));
