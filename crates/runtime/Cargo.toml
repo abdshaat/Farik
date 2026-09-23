@@ -8,6 +8,7 @@ repository.workspace = true
 rust-version.workspace = true
 
 [dependencies]
+axum.workspace = true
 chrono.workspace = true
 farik-core.workspace = true
 farik-protocol.workspace = true
@@ -16,7 +17,10 @@ farik-store.workspace = true
 schemars.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-tokio = { workspace = true, features = ["sync", "rt"] }
+tokio = { workspace = true, features = ["macros", "net", "rt", "rt-multi-thread", "sync", "time"] }
+
+[dev-dependencies]
+tower.workspace = true
 
 [lints]
 workspace = true
