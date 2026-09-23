@@ -66,7 +66,7 @@ Produces: `contract_yaml`, `criteria_yaml`
 
 - `writes_the_yaml_the_files_hold` (store) — `contract_yaml(c)` equals the text `write_contract(c)` puts on disk, and the same for `criteria_yaml`.
 
-- [ ] `docs(decisions): record the order of a session prompt` (the ADR, SPEC 8.2, the project plan)
+- [x] `docs(decisions): record the order of a session prompt` (the ADR, SPEC 8.2, the project plan)
 - [ ] `feat(store): write contract and library yaml through one public helper` (the writers and their test)
 
 ### Task 2: the sections, in order
