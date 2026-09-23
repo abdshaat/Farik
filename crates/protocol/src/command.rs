@@ -8,7 +8,7 @@ use farik_core::contract::{TaskStatus, validate_contract};
 use farik_core::team::AgentStatus;
 use jsonschema::Validator;
 use serde::de::DeserializeOwned;
-use serde_json::Value;
+use serde_json::{Value, json};
 
 pub use farik_core::contract::{TaskContract, TaskId, ValidationError};
 
@@ -271,6 +271,217 @@ fn human_command(name: CommandName, body: &Value) -> Result<Command, Vec<Validat
     }
 }
 
+/// Writes a command as the wire `command_from_value` reads it back from: the inverse of the reader,
+/// so that a command built in one process reaches another's daemon exactly as it was built. A
+/// `human_accept` with no message is written without one.
+///
+/// # Panics
+///
+/// Never: a contract's `Serialize` is derived from its schema with string keys.
+#[must_use]
+pub fn command_to_value(command: &Command) -> Value {
+    let (name, body) = match command {
+        Command::TaskCreate { contract } => (
+            CommandName::TaskCreate,
+            json!({
+                "contract": serde_json::to_value(contract.as_ref()).expect(
+                    "a contract's Serialize is derived from its schema with string keys, so it \
+                     cannot fail"
+                )
+            }),
+        ),
+        Command::RequestTriage {
+            task_id,
+            size,
+            reason,
+        } => (
+            CommandName::RequestTriage,
+            json!({
+                "task_id": task_id.as_str(),
+                "size": match size {
+                    RequestSize::Large => "large",
+                    RequestSize::Small => "small",
+                },
+                "reason": reason,
+            }),
+        ),
+        Command::TaskTransition {
+            task_id,
+            to,
+            reason,
+        } => (
+            CommandName::TaskTransition,
+            json!({ "task_id": task_id.as_str(), "to": to.to_string(), "reason": reason }),
+        ),
+        Command::HumanAccept {
+            task_id,
+            subject,
+            message,
+        } => {
+            let mut body = json!({
+                "task_id": task_id.as_str(),
+                "subject": match subject {
+                    AcceptSubject::Contract => "contract",
+                    AcceptSubject::Result => "result",
+                },
+            });
+            if let Some(message) = message {
+                body["message"] = json!(message);
+            }
+            (CommandName::HumanAccept, body)
+        }
+        Command::EscalationResolve {
+            task_id,
+            to,
+            message,
+        } => (
+            CommandName::EscalationResolve,
+            json!({ "task_id": task_id.as_str(), "to": to.to_string(), "message": message }),
+        ),
+        Command::QuestionAnswer {
+            question_id,
+            answer,
+        } => (
+            CommandName::QuestionAnswer,
+            json!({ "question_id": question_id, "answer": answer }),
+        ),
+        Command::ContractLock { task_id } => (
+            CommandName::ContractLock,
+            json!({ "task_id": task_id.as_str() }),
+        ),
+        Command::ContractUnlock { task_id } => (
+            CommandName::ContractUnlock,
+            json!({ "task_id": task_id.as_str() }),
+        ),
+        Command::TaskIntegrate { task_id } => (
+            CommandName::TaskIntegrate,
+            json!({ "task_id": task_id.as_str() }),
+        ),
+        Command::AgentUpdate { agent_id, status } => (
+            CommandName::AgentUpdate,
+            json!({ "agent_id": agent_id, "status": status.to_string() }),
+        ),
+        Command::SessionStop { session_id } => (
+            CommandName::SessionStop,
+            json!({ "session_id": session_id }),
+        ),
+        Command::RunStop => (CommandName::RunStop, json!({})),
+    };
+    json!({ "command": name.to_string(), "body": body })
+}
+
+/// Why a command did nothing, as the reply names it (`$defs/commandReply`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReplyKind {
+    /// The command cannot be handled as given; a schema refusal is one.
+    Invalid,
+    /// It cannot be done to what it names as things stand.
+    Refused,
+    /// What it names is not there.
+    NotFound,
+    /// The store, a file, git, or the orchestrator failed.
+    Failed,
+}
+
+impl ReplyKind {
+    /// How the kind is spelled on the wire.
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Invalid => "invalid",
+            Self::Refused => "refused",
+            Self::NotFound => "not_found",
+            Self::Failed => "failed",
+        }
+    }
+}
+
+/// What the daemon answered a command with: what it did, or why it did nothing.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CommandReply {
+    /// The command was done.
+    Done {
+        /// One sentence saying what happened.
+        said: String,
+        /// The sequence numbers of the events it appended.
+        events: Vec<u64>,
+    },
+    /// The command did nothing.
+    Error {
+        /// Why, as a kind.
+        kind: ReplyKind,
+        /// Why, in words.
+        detail: String,
+    },
+}
+
+static REPLY_VALIDATOR: LazyLock<Validator> = LazyLock::new(|| {
+    let schema: Value = serde_json::from_str(SCHEMA_JSON).expect(
+        "the embedded command schema is valid JSON: it is the file in docs/schemas/ \
+         that typify generated this crate's types from at compile time",
+    );
+    let reply = json!({
+        "$schema": schema["$schema"],
+        "$ref": "#/$defs/commandReply",
+        "$defs": schema["$defs"],
+    });
+    jsonschema::options()
+        .should_validate_formats(true)
+        .build(&reply)
+        .expect(
+            "the reply definition compiles: it is the command schema's own $defs, which the \
+             command validator already compiled",
+        )
+});
+
+/// Writes a reply as the wire `$defs/commandReply` describes.
+#[must_use]
+pub fn reply_to_value(reply: &CommandReply) -> Value {
+    match reply {
+        CommandReply::Done { said, events } => json!({ "said": said, "events": events }),
+        CommandReply::Error { kind, detail } => {
+            json!({ "error": { "kind": kind.as_str(), "detail": detail } })
+        }
+    }
+}
+
+/// Checks a value against `$defs/commandReply` and, when it conforms, returns the reply.
+///
+/// # Errors
+///
+/// Every schema violation, as `command_from_value` reports them.
+pub fn reply_from_value(value: &Value) -> Result<CommandReply, Vec<ValidationError>> {
+    let errors: Vec<ValidationError> = REPLY_VALIDATOR
+        .iter_errors(value)
+        .map(|error| ValidationError {
+            path: pointer(&error.instance_path().to_string()),
+            message: error.to_string(),
+        })
+        .collect();
+    if !errors.is_empty() {
+        return Err(errors);
+    }
+    if let Some(error) = value.get("error") {
+        let kind = match error["kind"].as_str() {
+            Some("invalid") => ReplyKind::Invalid,
+            Some("refused") => ReplyKind::Refused,
+            Some("not_found") => ReplyKind::NotFound,
+            _ => ReplyKind::Failed,
+        };
+        return Ok(CommandReply::Error {
+            kind,
+            detail: error["detail"].as_str().unwrap_or_default().to_string(),
+        });
+    }
+    Ok(CommandReply::Done {
+        said: value["said"].as_str().unwrap_or_default().to_string(),
+        events: value["events"]
+            .as_array()
+            .map(|events| events.iter().filter_map(Value::as_u64).collect())
+            .unwrap_or_default(),
+    })
+}
+
 /// A task id the schema's pattern passed, as the contract's own type.
 fn task_id_of(task_id: &str) -> Result<TaskId, Vec<ValidationError>> {
     TaskId::from_str(task_id).map_err(|error| {
@@ -324,13 +535,16 @@ fn pointer(path: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use farik_core::contract::fixtures::a_contract_wire;
+    use farik_core::contract::fixtures::{a_contract_wire, a_full_contract_wire};
     use serde_json::{Value, json};
 
     use farik_core::contract::TaskStatus;
     use farik_core::team::AgentStatus;
 
-    use super::{AcceptSubject, Command, RequestSize, ValidationError, command_from_value};
+    use super::{
+        AcceptSubject, Command, CommandReply, ReplyKind, RequestSize, ValidationError,
+        command_from_value, command_to_value, reply_from_value, reply_to_value,
+    };
 
     fn a_task_create_wire() -> Value {
         json!({ "command": "task_create", "body": { "contract": a_contract_wire() } })
@@ -550,5 +764,59 @@ mod tests {
         }));
         assert_eq!(errors.len(), 1, "{errors:?}");
         assert_eq!(errors[0].path, "/body");
+    }
+
+    #[test]
+    fn writes_every_command_back_as_the_wire_it_was_read_from() {
+        // The reader fills a contract's defaults, so the task_create wire is one with every
+        // default written, which is what a contract read and written back looks like.
+        let wires = [
+            json!({ "command": "task_create", "body": { "contract": a_full_contract_wire() } }),
+            a_request_triage_wire(),
+            json!({ "command": "task_transition",
+                    "body": { "task_id": "FRK-3", "to": "blocked", "reason": "Key missing." } }),
+            json!({ "command": "human_accept",
+                    "body": { "task_id": "FRK-3", "subject": "result", "message": "Looks right." } }),
+            json!({ "command": "human_accept", "body": { "task_id": "FRK-3", "subject": "contract" } }),
+            json!({ "command": "escalation_resolve",
+                    "body": { "task_id": "FRK-3", "to": "refining", "message": "Split it by page." } }),
+            json!({ "command": "question_answer", "body": { "question_id": 12, "answer": "Yes." } }),
+            json!({ "command": "contract_lock", "body": { "task_id": "FRK-3" } }),
+            json!({ "command": "contract_unlock", "body": { "task_id": "FRK-3" } }),
+            json!({ "command": "task_integrate", "body": { "task_id": "FRK-3" } }),
+            json!({ "command": "agent_update", "body": { "agent_id": "dev-a", "status": "paused" } }),
+            json!({ "command": "session_stop", "body": { "session_id": "session-7" } }),
+            json!({ "command": "run_stop", "body": {} }),
+        ];
+        for wire in wires {
+            let command = command_from_value(&wire).expect("the wire reads");
+            assert_eq!(command_to_value(&command), wire);
+        }
+    }
+
+    #[test]
+    fn reads_a_reply_either_way_and_refuses_one_that_is_neither() {
+        let done = json!({ "said": "x", "events": [3, 4] });
+        assert_eq!(
+            reply_from_value(&done),
+            Ok(CommandReply::Done {
+                said: "x".to_string(),
+                events: vec![3, 4]
+            })
+        );
+        let error = json!({ "error": { "kind": "not_found", "detail": "question 9" } });
+        assert_eq!(
+            reply_from_value(&error),
+            Ok(CommandReply::Error {
+                kind: ReplyKind::NotFound,
+                detail: "question 9".to_string()
+            })
+        );
+        for wire in [done, error] {
+            let reply = reply_from_value(&wire).expect("the reply reads");
+            assert_eq!(reply_to_value(&reply), wire);
+        }
+        assert!(reply_from_value(&json!({ "said": "x" })).is_err());
+        assert!(reply_from_value(&json!({ "error": { "kind": "lost", "detail": "" } })).is_err());
     }
 }

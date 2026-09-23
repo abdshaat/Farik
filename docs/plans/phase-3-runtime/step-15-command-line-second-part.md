@@ -125,7 +125,7 @@ Files: `command.schema.json`, `command.rs`
 - `writes_every_command_back_as_the_wire_it_was_read_from` — for the two phase 2 wires and step 14's ten, `command_to_value(command_from_value(w))` equals `w`; `human_accept` read without `message` is written without it.
 - `reads_a_reply_either_way_and_refuses_one_that_is_neither` — `{said: "x", events: [3, 4]}` is `Done`; `{error: {kind: "not_found", detail: "question 9"}}` is `Error { NotFound, .. }`; each goes back through `reply_to_value` unchanged; `{said: "x"}` and `{error: {kind: "lost", detail: ""}}` are `Err`.
 
-- [ ] `feat(protocol): write a command as its wire and read a command's reply`
+- [x] `feat(protocol): write a command as its wire and read a command's reply`
 
 ### Task 2: the daemon takes commands, and a tick takes a scope
 

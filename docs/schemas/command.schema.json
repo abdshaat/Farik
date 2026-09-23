@@ -152,6 +152,48 @@
       "additionalProperties": false,
       "properties": {}
     },
+    "commandReply": {
+      "title": "Command Reply",
+      "description": "What the daemon's POST /command answers once the token passes (docs/SPEC.md section 8.2): what the command did, as one sentence and the sequence numbers of the events it appended, or why it did nothing. A reply is what leaves a process, so it has a schema as a command does; farik_protocol::command::reply_from_value reads it against this definition.",
+      "oneOf": [
+        { "$ref": "#/$defs/commandDone" },
+        { "$ref": "#/$defs/commandRefusal" }
+      ]
+    },
+    "commandDone": {
+      "title": "Command Done",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["said", "events"],
+      "properties": {
+        "said": { "type": "string" },
+        "events": {
+          "type": "array",
+          "items": { "type": "integer", "minimum": 1, "maximum": 18446744073709551615 }
+        }
+      }
+    },
+    "commandRefusal": {
+      "title": "Command Refusal",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["error"],
+      "properties": {
+        "error": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "detail"],
+          "properties": {
+            "kind": {
+              "description": "invalid: the command cannot be handled as given, a schema refusal among them; refused: it cannot be done to what it names as things stand; not_found: what it names is not there; failed: the store, a file, git, or the orchestrator failed.",
+              "type": "string",
+              "enum": ["invalid", "refused", "not_found", "failed"]
+            },
+            "detail": { "type": "string" }
+          }
+        }
+      }
+    },
     "taskStatus": {
       "title": "Task Status",
       "description": "Where a contract is in the lifecycle of docs/SPEC.md section 5.2, the contract schema's own list.",
