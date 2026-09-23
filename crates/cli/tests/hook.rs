@@ -47,22 +47,22 @@ fn hook(which: &str, daemon_file: &Path, input: &str) -> Ran {
         which,
         &daemon_file.display().to_string(),
         std::env::temp_dir(),
-        Box::new(input.as_bytes()),
+        Box::new(std::io::Cursor::new(input.to_string())),
     )
 }
 
 /// Runs `farik hook <which> --daemon <daemon>` in `cwd`, reading `stdin`.
-fn hook_with(which: &str, daemon: &str, cwd: PathBuf, stdin: Box<dyn Read + '_>) -> Ran {
+fn hook_with(which: &str, daemon: &str, cwd: PathBuf, stdin: Box<dyn Read + Send>) -> Ran {
     let mut out = Vec::new();
     let mut err = Vec::new();
     let code = {
-        let mut io = CliIo {
-            stdin,
-            stdout: Box::new(&mut out),
-            stderr: Box::new(&mut err),
+        let mut io = CliIo::new(
             cwd,
-            clock: Box::new(FixedClock::new(at())),
-        };
+            Box::new(&mut out),
+            Box::new(&mut err),
+            Arc::new(FixedClock::new(at())),
+        );
+        io.stdin = stdin;
         let arguments: Vec<String> = ["farik", "hook", which, "--daemon", daemon]
             .map(ToString::to_string)
             .to_vec();

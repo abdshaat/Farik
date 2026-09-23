@@ -29,29 +29,11 @@ pub fn triage(
     reason: &str,
     now: DateTime<Utc>,
 ) -> Result<Report, String> {
-    // The id is parsed here rather than left to the schema: a person who typed it wrongly should read
-    // what is wrong with what they typed, not the `oneOf` sentence a schema refuses a whole body
-    // with. The command is still built and validated, so a triage from a terminal is held to exactly
-    // the rules one arriving from an agent is.
-    let named: TaskId = task_id
-        .parse()
-        .map_err(|error| format!("{task_id} is not a task id: {error}"))?;
-    let command = command_from_value(&json!({
-        "command": "request_triage",
-        "body": { "task_id": named.as_str(), "size": wire_size(size), "reason": reason }
-    }))
-    .map_err(|errors| {
-        errors
-            .iter()
-            .map(|error| format!("{} {}", error.path, error.message))
-            .collect::<Vec<_>>()
-            .join("; ")
-    })?;
     let Command::RequestTriage {
         task_id,
         size,
         reason,
-    } = command
+    } = command_of(task_id, size, reason)?
     else {
         return Err("the command line built a command the reader did not read back".to_string());
     };
@@ -91,6 +73,36 @@ pub fn triage(
             "events": [seq],
         }),
         json_lines: None,
+    })
+}
+
+/// The `request_triage` command a person typed, read back through `command_from_value`.
+///
+/// # Errors
+///
+/// A sentence saying the id is not one, or every rule the command breaks.
+pub(crate) fn command_of(
+    task_id: &str,
+    size: RequestSize,
+    reason: &str,
+) -> Result<Command, String> {
+    // The id is parsed here rather than left to the schema: a person who typed it wrongly should read
+    // what is wrong with what they typed, not the `oneOf` sentence a schema refuses a whole body
+    // with. The command is still built and validated, so a triage from a terminal is held to exactly
+    // the rules one arriving from an agent is.
+    let named: TaskId = task_id
+        .parse()
+        .map_err(|error| format!("{task_id} is not a task id: {error}"))?;
+    command_from_value(&json!({
+        "command": "request_triage",
+        "body": { "task_id": named.as_str(), "size": wire_size(size), "reason": reason }
+    }))
+    .map_err(|errors| {
+        errors
+            .iter()
+            .map(|error| format!("{} {}", error.path, error.message))
+            .collect::<Vec<_>>()
+            .join("; ")
     })
 }
 

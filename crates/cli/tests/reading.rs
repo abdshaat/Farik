@@ -4,6 +4,7 @@
 //! `cargo xtask check --integration`, as the rest of this crate's do.
 
 use std::path::Path;
+use std::sync::Arc;
 
 use chrono::{DateTime, Utc};
 use farik::{CliIo, run_cli};
@@ -25,13 +26,12 @@ fn run_in(cwd: &Path, args: &[&str]) -> Ran {
     let mut out = Vec::new();
     let mut err = Vec::new();
     let code = {
-        let mut io = CliIo {
-            stdin: Box::new(std::io::empty()),
-            stdout: Box::new(&mut out),
-            stderr: Box::new(&mut err),
-            cwd: cwd.to_path_buf(),
-            clock: Box::new(FixedClock::new(at())),
-        };
+        let mut io = CliIo::new(
+            cwd.to_path_buf(),
+            Box::new(&mut out),
+            Box::new(&mut err),
+            Arc::new(FixedClock::new(at())),
+        );
         let arguments: Vec<String> = std::iter::once("farik")
             .chain(args.iter().copied())
             .map(ToString::to_string)

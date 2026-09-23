@@ -9,7 +9,6 @@
 //! Claude Code's own sixty seconds, because a hook that times out does not block the call.
 
 use std::io::{Read, Write};
-use std::net::{Ipv4Addr, SocketAddr, TcpStream};
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::path::Path;
 use std::time::Duration;
@@ -17,6 +16,13 @@ use std::time::Duration;
 use serde_json::{Value, json};
 
 use crate::CliIo;
+use crate::daemon_client::exchange as ask;
+
+/// Posts `body` to `route` on the daemon, as a hook's exchange: no daemon is a reason to deny,
+/// as every other failure is.
+fn exchange(daemon_file: &Path, route: &str, body: &str) -> Result<String, String> {
+    ask(daemon_file, route, body, EXCHANGE_TIMEOUT).map_err(|error| error.to_string())
+}
 
 /// How long connecting, sending, and waiting for the answer may each take.
 const EXCHANGE_TIMEOUT: Duration = Duration::from_secs(10);
@@ -88,92 +94,6 @@ fn decision_in(answer: &str) -> Result<Value, String> {
     } else {
         Err(format!("the daemon's answer is not a decision: {value}"))
     }
-}
-
-/// Posts `body` to `route` on the daemon `daemon_file` names, with its token, and answers with
-/// the body of a 200. One plain HTTP/1.1 exchange, because the peer is always the daemon on this
-/// machine and an HTTP client would be a dependency for forty lines.
-fn exchange(daemon_file: &Path, route: &str, body: &str) -> Result<String, String> {
-    let text = std::fs::read_to_string(daemon_file).map_err(|error| {
-        format!(
-            "the daemon file {} cannot be read, so no daemon can be asked: {error}",
-            daemon_file.display()
-        )
-    })?;
-    let info: Value = serde_json::from_str(&text).map_err(|error| {
-        format!(
-            "the daemon file {} is not JSON: {error}",
-            daemon_file.display()
-        )
-    })?;
-    let (Some(port), Some(token)) = (
-        info["port"]
-            .as_u64()
-            .and_then(|port| u16::try_from(port).ok()),
-        info["token"].as_str(),
-    ) else {
-        return Err(format!(
-            "the daemon file {} names no port and token",
-            daemon_file.display()
-        ));
-    };
-    let address = SocketAddr::from((Ipv4Addr::LOCALHOST, port));
-    let mut stream = TcpStream::connect_timeout(&address, EXCHANGE_TIMEOUT)
-        .map_err(|error| format!("the daemon at {address} cannot be reached: {error}"))?;
-    stream
-        .set_read_timeout(Some(EXCHANGE_TIMEOUT))
-        .and_then(|()| stream.set_write_timeout(Some(EXCHANGE_TIMEOUT)))
-        .map_err(|error| format!("the connection cannot be timed: {error}"))?;
-    let request = format!(
-        "POST {route} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nAuthorization: Bearer {token}\r\n\
-         Content-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
-        body.len()
-    );
-    stream
-        .write_all(request.as_bytes())
-        .map_err(|error| format!("the daemon at {address} cannot be written to: {error}"))?;
-    let mut answer = Vec::new();
-    stream
-        .read_to_end(&mut answer)
-        .map_err(|error| format!("the daemon at {address} did not answer: {error}"))?;
-    body_of(&String::from_utf8_lossy(&answer))
-}
-
-/// The body of an HTTP/1.1 response, when its status is 200.
-fn body_of(response: &str) -> Result<String, String> {
-    let (head, body) = response
-        .split_once("\r\n\r\n")
-        .ok_or_else(|| format!("the daemon did not answer with HTTP: {response}"))?;
-    let status = head.lines().next().unwrap_or_default();
-    if status.split_whitespace().nth(1) != Some("200") {
-        return Err(format!("the daemon answered {status}: {body}"));
-    }
-    let chunked = head.lines().any(|line| {
-        line.split_once(':').is_some_and(|(name, value)| {
-            name.eq_ignore_ascii_case("transfer-encoding") && value.trim() == "chunked"
-        })
-    });
-    Ok(if chunked {
-        unchunked(body)
-    } else {
-        body.to_string()
-    })
-}
-
-/// A chunked body put back together.
-fn unchunked(mut body: &str) -> String {
-    let mut whole = String::new();
-    while let Some((size, rest)) = body.split_once("\r\n") {
-        let Ok(size) = usize::from_str_radix(size.trim(), 16) else {
-            break;
-        };
-        if size == 0 || rest.len() < size {
-            break;
-        }
-        whole.push_str(&rest[..size]);
-        body = rest[size..].trim_start_matches("\r\n");
-    }
-    whole
 }
 
 /// What a panic said, when it said it with a string.

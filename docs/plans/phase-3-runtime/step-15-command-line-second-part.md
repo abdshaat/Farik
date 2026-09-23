@@ -54,6 +54,11 @@ The human's commands:
 - `--diff`, printed last: `Git::diff(<integration branch>, farik/<id>)` before integration; after, base `<sha>^1` of the last `task.integrated` when that sha is a merge commit; when it is not (a hand merge `integrate` recorded), `Git::diff(<integration branch>, farik/<id>)`, an empty result printing `farik/<id> is wholly in <into>; its merge is not a commit farik can diff against`. An epic refuses "FRK-1 is an epic and has no branch: farik task show <task> --diff shows each of its tasks'"; no branch: "FRK-1 has no branch yet: its work starts at assignment". JSON gains `cost` (`usd`, `sessions`, `input_tokens`, `output_tokens`), `children` (`board_row_json`), `diff`.
 - `task create <file> --parent <epic>`: the parent is an epic on the board (else "<id> is not an epic: a task is filed under an epic") and `check_child_creation` passes with the human as actor (for whom it asks only `in_progress`), its reasons the refusal; then `file_request(.., HUMAN, Some(parent), ..)`, which triages it small, printing `FRK-2 filed as a task of FRK-1: <title>` and `farik run judges it against the Definition of Ready, and FRK-1's assignee assigns it`.
 
+Changes in execution:
+- Changed 2026-09-23 in execution (Task 1): `writes_every_command_back_as_the_wire_it_was_read_from` reads `task_create` from `a_full_contract_wire()`, because the reader fills a contract's defaults and only a contract with every default written comes back as it went in. The reply's two shapes are `$defs/commandDone` and `$defs/commandRefusal` under `commandReply`'s `oneOf`, and `reply_from_value` validates against `commandReply` with the schema's own `$defs`.
+- Changed 2026-09-23 in execution (Task 2): the route runs the handler on a `tokio` task of its own, so that a client that goes away does not cut a command off half done. A body that is not JSON at all is refused by the JSON extractor before the route, as the hooks' bodies are; a JSON body that is not a command is the `invalid` reply. `lists_every_registered_session` uses a daemon state of its own, since the fixture's already answers for a session. `plans_without_running_criteria_or_merging` sets the WIP limit to 3, so that FRK-4 has an assignee with room beside FRK-1 and FRK-3.
+- Changed 2026-09-23 in execution (Task 3): the three new command line test files share `crates/cli/tests/shared/project.rs`, included with `#[path]` (a subdirectory of `tests/` is not a test crate of its own, and `code.md` allows no `mod.rs`). `daemon_client.rs` also reads a `daemon.json` alone (`read_daemon_file`, `DaemonAddress` with the pid). The orchestrator a command runs on in this process has host sandboxes, because `handle` makes and removes none. A routed failure (no daemon, unreachable, not a reply) is printed as `CommandError::Failed`'s detail. `stop` takes the run lock only to learn that it is free, and gives it back before refusing.
+
 ## File map
 
 ```
@@ -154,7 +159,7 @@ Files: `Cargo.toml`, `crates/cli/Cargo.toml`, `lib.rs`, `main.rs`, `ids.rs`, `da
 - `stops_only_a_driving_process` — lock free: `farik stop` exits 1, "no farik process is driving this project"; a live driver and `session.started` for FRK-1 in `s-1` with no end: `farik stop` sends `RunStop`, `farik stop FRK-1` `SessionStop { s-1 }`, `farik stop s-9` `SessionStop { s-9 }`, `farik stop FRK-2` exits 1, "FRK-2 has no session running".
 - `refuses_while_the_lock_holder_serves_no_daemon` — lock held, no `daemon.json`: exit 1, "serves no daemon yet".
 
-- [ ] `feat(cli): send the human's commands to the driving process, or handle them here`
+- [x] `feat(cli): send the human's commands to the driving process, or handle them here`
 
 ### Task 4: farik run and farik plan
 
