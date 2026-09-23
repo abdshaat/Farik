@@ -90,7 +90,7 @@ Produces: the three columns and fields
 - The existing assertion on `known_versions()` gains 7.
 - Steps 13's `reads_an_older_accepted_task_as_awaiting` and 14's `reads_an_older_log_into_the_new_columns` build a version-4 or version-5 database with projection rows and then open it with `open_event_log`. That now runs 0007, which empties `task_projections`, so both would fail. Each is changed to test its own migration at its own version: it builds the older database as before, applies `apply_through(.., 5, ..)` (step 13) or `apply_through(.., 6, ..)` (step 14) on the same connection, and asserts on the column with a SQL query before any full open. Chose that over inserting the events each row came from: after 0007 a replay rebuilds those columns through `apply_to`, which the two steps' other tests already cover, and what these two tests exist for is the backfill SQL an older database still runs on its way to 0007. Neither test is skipped or deleted (rule 9).
 
-- [ ] `feat(store): count each task's verifications, rejections, and interventions`
+- [x] `feat(store): count each task's verifications, rejections, and interventions`
 
 ### Task 2: the five metrics
 
