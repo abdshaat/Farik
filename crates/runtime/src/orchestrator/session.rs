@@ -239,6 +239,8 @@ struct Running<'a> {
 
 /// Reads the started session's events until it ends, costing each usage report, recording the
 /// budgets it exhausts, and aborting the session when one of them is not the task's sessions.
+/// The session is also aborted, once, as soon as the daemon has been asked to stop it: by the
+/// human's `SessionStop` or pause, or by a hook that found its agent no longer active (5.2, F1).
 /// `costed` says whether a usage report was costed.
 async fn read_to_end(
     running: &Running<'_>,
@@ -268,8 +270,22 @@ async fn read_to_end(
         )
     };
     let mut ledger = SessionLedger::default();
+    let mut stopped = false;
     loop {
-        match handle.events().recv().await {
+        // Taken before the stop is read, so that a stop requested between the two still wakes
+        // the wait below.
+        let notified = deps.daemon.stops().notified();
+        tokio::pin!(notified);
+        notified.as_mut().enable();
+        if !stopped && deps.daemon.stop_reason(&spec.session_id).is_some() {
+            stopped = true;
+            handle.abort()?;
+        }
+        let event = tokio::select! {
+            event = handle.events().recv() => event,
+            () = &mut notified, if !stopped => continue,
+        };
+        match event {
             Some(SessionEvent::UsageReported(usage)) => {
                 let before = state(&ledger)?;
                 let cost_usd = cost(&usage)?;

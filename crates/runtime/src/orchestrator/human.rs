@@ -4,12 +4,13 @@
 
 use farik_core::contract::{TaskContract, TaskId, TaskStatus, wire_method};
 use farik_core::governor::done::requires_human_acceptance;
+use farik_core::governor::gates::Blocker;
 use farik_core::governor::transition::TransitionRequest;
 use farik_core::governor::transition_table::TransitionActor;
-use farik_core::team::Team;
+use farik_core::team::{AgentStatus, Team};
 use farik_protocol::command::{AcceptSubject, Command, RequestSize};
 use farik_protocol::event::{
-    EscalationResolvedBody, EventBody, EventIds, EventKind, HumanAcceptedBody,
+    AgentUpdatedBody, EscalationResolvedBody, EventBody, EventIds, EventKind, HumanAcceptedBody,
     HumanAcceptedBodySubject, QuestionAnsweredBody, TaskStatusWire, new_event,
 };
 use farik_store::requests::{RequestError, hold_contract, triage_by_human};
@@ -24,6 +25,14 @@ use crate::transitions::{
 
 /// Who the human is in the log.
 const HUMAN: &str = "human";
+/// The blocker of a task whose assignee the human paused, and a paused session's stop.
+const PAUSED: &str = "agent paused by the user";
+/// The blocker of a task whose assignee the human retired, and a retired agent's session's stop.
+const RETIRED: &str = "agent retired by the user";
+/// What resolves a block a pause made, when the agent is active again.
+const RESUMED: &str = "agent resumed by the user";
+/// Why the human stopped a session.
+const STOPPED: &str = "stopped by the human";
 
 /// Handles one command the human gave, after bringing this process's board up to the log, so that
 /// a command another process handled is seen.
@@ -71,12 +80,8 @@ pub(super) async fn handle(
             reason,
         } => transition(tools, &task_id, to, &reason),
         Command::TaskIntegrate { task_id } => integrate(orchestrator, &task_id).await,
-        Command::AgentUpdate { agent_id, .. } => Err(CommandError::Invalid {
-            detail: format!("agent_update of {agent_id} is not taken in this build"),
-        }),
-        Command::SessionStop { session_id } => Err(CommandError::Invalid {
-            detail: format!("session_stop of {session_id} is not taken in this build"),
-        }),
+        Command::AgentUpdate { agent_id, status } => update_agent(orchestrator, &agent_id, status),
+        Command::SessionStop { session_id } => stop_session(orchestrator, &session_id),
         Command::RunStop => {
             orchestrator.stop();
             Ok(CommandReport {
@@ -508,6 +513,197 @@ async fn integrate(
     })
 }
 
+/// Changes an agent's status in the team file and records `agent.updated` (F1). A pause or a
+/// retirement stops the agent's registered sessions at once and its sessions elsewhere at their
+/// next tool call, and blocks each of its `in_progress` tasks on its behalf; a return to `active`
+/// takes each task a pause blocked back to `in_progress`, as the human.
+fn update_agent(
+    orchestrator: &Orchestrator,
+    agent_id: &str,
+    status: AgentStatus,
+) -> Result<CommandReport, CommandError> {
+    let tools = &orchestrator.deps.tools;
+    let mut team = tools.files.read_team().map_err(failed)?;
+    let Some(agent) = team
+        .agents
+        .iter_mut()
+        .find(|agent| agent.id.as_str() == agent_id)
+    else {
+        return Err(CommandError::NotFound {
+            what: format!("agent {agent_id}"),
+        });
+    };
+    if agent.status == status {
+        return Err(CommandError::Refused {
+            reason: format!("same_status: {agent_id} is already {status}"),
+        });
+    }
+    agent.status = status;
+    tools.files.write_team(&team).map_err(failed)?;
+    let mut events = vec![append(
+        tools,
+        None,
+        EventBody::AgentUpdated(AgentUpdatedBody {
+            agent_id: agent_id.to_string(),
+            status: status
+                .to_string()
+                .parse()
+                .map_err(|_| CommandError::Failed {
+                    detail: format!("the event vocabulary has no agent status {status}"),
+                })?,
+            updated_by: HUMAN.to_string(),
+        }),
+    )?];
+    let board = tools.projections.board().map_err(failed)?;
+    let held = board
+        .iter()
+        .filter(|row| row.assignee_id.as_deref() == Some(agent_id));
+    match status {
+        AgentStatus::Paused | AgentStatus::Retired => {
+            let (words, needed) = if status == AgentStatus::Paused {
+                (PAUSED, format!("the human resumes {agent_id}"))
+            } else {
+                (RETIRED, "the human reassigns the task".to_string())
+            };
+            for session_id in orchestrator.deps.daemon.sessions_of(agent_id) {
+                orchestrator.deps.daemon.request_stop(&session_id, words);
+            }
+            for row in held.filter(|row| row.status == TaskStatus::InProgress) {
+                events.extend(moved_for(
+                    tools,
+                    &team,
+                    &TransitionRequest {
+                        task_id: row.task_id.clone(),
+                        to: TaskStatus::Blocked,
+                        actor: TransitionActor::Assignee,
+                        agent_id: Some(agent_id.to_string()),
+                    },
+                    &TransitionAsk {
+                        blocker: Some(Blocker {
+                            description: words.to_string(),
+                            needed: needed.clone(),
+                        }),
+                        ..TransitionAsk::default()
+                    },
+                )?);
+            }
+        }
+        AgentStatus::Active => {
+            for row in held.filter(|row| row.status == TaskStatus::Blocked) {
+                if last_blocker(tools, &row.task_id)?.as_deref() != Some(PAUSED) {
+                    continue;
+                }
+                events.extend(moved_for(
+                    tools,
+                    &team,
+                    &TransitionRequest {
+                        task_id: row.task_id.clone(),
+                        to: TaskStatus::InProgress,
+                        actor: TransitionActor::Human,
+                        agent_id: None,
+                    },
+                    &TransitionAsk {
+                        blocker_resolution: Some(RESUMED.to_string()),
+                        ..TransitionAsk::default()
+                    },
+                )?);
+            }
+        }
+    }
+    Ok(CommandReport {
+        said: format!("{agent_id} is {status}"),
+        events,
+    })
+}
+
+/// Stops a session registered in this process, and escalates its task as the human unless the
+/// task is finished or escalated already (5.2: a user's stop takes the human's row).
+fn stop_session(
+    orchestrator: &Orchestrator,
+    session_id: &str,
+) -> Result<CommandReport, CommandError> {
+    let daemon = &orchestrator.deps.daemon;
+    let task_id = daemon
+        .tool_context(session_id)
+        .and_then(|context| context.task_id);
+    if !daemon.request_stop(session_id, STOPPED) {
+        return Err(CommandError::NotFound {
+            what: format!("session {session_id} running in this process"),
+        });
+    }
+    let tools = &orchestrator.deps.tools;
+    let mut events = Vec::new();
+    if let Some(task_id) = task_id {
+        let row = row_of(tools, &task_id)?;
+        if !matches!(
+            row.status,
+            TaskStatus::Accepted | TaskStatus::Cancelled | TaskStatus::Escalated
+        ) {
+            let team = tools.files.read_team().map_err(failed)?;
+            events = moved_for(
+                tools,
+                &team,
+                &TransitionRequest {
+                    task_id,
+                    to: TaskStatus::Escalated,
+                    actor: TransitionActor::Human,
+                    agent_id: None,
+                },
+                &TransitionAsk {
+                    reason: Some(STOPPED.to_string()),
+                    ..TransitionAsk::default()
+                },
+            )?;
+        }
+    }
+    Ok(CommandReport {
+        said: format!("session {session_id} is stopped"),
+        events,
+    })
+}
+
+/// The description of the task's last blocker, as its last move into `blocked` recorded it.
+fn last_blocker(tools: &ToolDeps, task_id: &TaskId) -> Result<Option<String>, CommandError> {
+    Ok(tools
+        .log
+        .read(&EventQuery {
+            task_id: Some(task_id.clone()),
+            kinds: vec![EventKind::TaskTransitioned],
+            ..EventQuery::default()
+        })
+        .map_err(failed)?
+        .iter()
+        .rev()
+        .find_map(|event| match &event.body {
+            EventBody::TaskTransitioned(body) if body.to.to_string() == "blocked" => Some(
+                body.blocker
+                    .as_ref()
+                    .map(|blocker| blocker.description.clone()),
+            ),
+            _ => None,
+        })
+        .flatten())
+}
+
+/// Asks for a move on an actor's behalf, and answers the events it appended; a refusal is left
+/// in the log, as every refusal is, and answers none.
+fn moved_for(
+    tools: &ToolDeps,
+    team: &Team,
+    request: &TransitionRequest,
+    ask: &TransitionAsk,
+) -> Result<Vec<u64>, CommandError> {
+    let before = last_seq(tools, &request.task_id)?;
+    match tools
+        .transitions
+        .request(request, ask, team)
+        .map_err(failed)?
+    {
+        TransitionOutcome::Moved(_) => seqs_since(tools, &request.task_id, before),
+        TransitionOutcome::Refused(_) => Ok(Vec::new()),
+    }
+}
+
 /// Asks the governor to move the task to `to` as the human, and answers the events it appended;
 /// a refusal is `transition_refused` with the governor's details, the `transition.refused` left in
 /// the log.
@@ -625,12 +821,20 @@ fn failed(error: impl std::fmt::Display) -> CommandError {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+    use std::time::Duration;
+
     use farik_core::contract::TaskStatus;
+    use farik_core::pricing::Usage;
+    use farik_core::team::AgentStatus;
     use farik_protocol::command::{AcceptSubject, Command, RequestSize};
-    use farik_protocol::event::{EventBody, EventKind, FarikEvent, HumanAcceptedBodySubject};
+    use farik_protocol::event::{
+        EscalationRaisedBodyReason, EventBody, EventKind, FarikEvent, HumanAcceptedBodySubject,
+        SessionEndedBodyReason,
+    };
     use serde_json::{Value, json};
 
-    use crate::orchestrator::fixtures::Harness;
+    use crate::orchestrator::fixtures::{Harness, UsageThenWaitAdapter};
     use crate::orchestrator::{CommandError, CommandReport, Orchestrator};
 
     fn task(id: &str) -> farik_core::contract::TaskId {
@@ -1111,5 +1315,204 @@ mod tests {
             .await
             .expect("a stopped run ends at once");
         assert!(adapter.started().is_empty(), "no tick ran");
+    }
+
+    /// Ticks `orchestrator` while `command` is handled from a spawned task once the adapter has
+    /// started a session, and answers both; a session nobody stops waits for ever, so both are
+    /// bounded at ten seconds.
+    async fn handled_mid_session(
+        orchestrator: &std::sync::Arc<Orchestrator>,
+        adapter: &UsageThenWaitAdapter,
+        command: Command,
+    ) -> (
+        Result<crate::orchestrator::TickReport, crate::orchestrator::OrchestratorError>,
+        Result<CommandReport, CommandError>,
+    ) {
+        let handling = {
+            let orchestrator = std::sync::Arc::clone(orchestrator);
+            let started = adapter.started_count();
+            tokio::spawn(async move {
+                while started.load(std::sync::atomic::Ordering::SeqCst) == 0 {
+                    tokio::time::sleep(Duration::from_millis(5)).await;
+                }
+                orchestrator.handle(command).await
+            })
+        };
+        tokio::time::timeout(Duration::from_secs(10), async {
+            let ticked = orchestrator.tick().await;
+            let handled = handling.await.expect("the command's task ends");
+            (ticked, handled)
+        })
+        .await
+        .expect("the session was stopped")
+    }
+
+    fn a_pause(agent: &str, status: AgentStatus) -> Command {
+        Command::AgentUpdate {
+            agent_id: agent.to_string(),
+            status,
+        }
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn aborts_the_session_of_an_agent_paused_mid_session() {
+        let harness = Harness::new("human-pause-mid-session", |_| {});
+        harness.in_progress("FRK-1", "dev-a", "dev-b");
+        let adapter = Arc::new(UsageThenWaitAdapter::waiting(Usage::default()));
+        let orchestrator = Arc::new(harness.orchestrator(adapter.clone()));
+
+        let (ticked, handled) = handled_mid_session(
+            &orchestrator,
+            &adapter,
+            a_pause("dev-a", AgentStatus::Paused),
+        )
+        .await;
+        ticked.expect("the tick ends with its session");
+        handled.expect("the pause is handled");
+
+        assert_eq!(adapter.aborts(), 1);
+        let updated = last(&harness, EventKind::AgentUpdated).expect("the update");
+        let EventBody::AgentUpdated(body) = &updated.body else {
+            panic!("an agent.updated");
+        };
+        assert_eq!(
+            (
+                body.agent_id.as_str(),
+                body.status.to_string(),
+                body.updated_by.as_str()
+            ),
+            ("dev-a", "paused".to_string(), "human")
+        );
+        let ended = last(&harness, EventKind::SessionEnded).expect("the end");
+        assert!(matches!(
+            &ended.body,
+            EventBody::SessionEnded(body) if body.reason == SessionEndedBodyReason::Aborted
+        ));
+        let moved = last(&harness, EventKind::TaskTransitioned).expect("a move");
+        let EventBody::TaskTransitioned(body) = &moved.body else {
+            panic!("a move");
+        };
+        assert_eq!(
+            (body.from.to_string(), body.to.to_string()),
+            ("in_progress".to_string(), "blocked".to_string())
+        );
+        assert_eq!(
+            body.blocker
+                .as_ref()
+                .map(|blocker| blocker.description.as_str()),
+            Some("agent paused by the user")
+        );
+        assert!(harness.events(&[EventKind::TeamUpdated]).is_empty());
+        let team = harness
+            .project
+            .deps
+            .files
+            .read_team()
+            .expect("the team reads");
+        assert_eq!(
+            team.agents
+                .iter()
+                .find(|agent| agent.id.as_str() == "dev-a")
+                .map(|agent| agent.status),
+            Some(AgentStatus::Paused)
+        );
+        assert!(matches!(
+            orchestrator.tick().await.expect("the tick runs"),
+            crate::orchestrator::TickReport::Idle { .. }
+        ));
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn resumes_what_the_pause_blocked() {
+        let harness = Harness::new("human-resume", |wire| {
+            wire["policy"]["wip_limit_per_agent"] = json!(2);
+        });
+        harness.in_progress("FRK-1", "dev-a", "dev-b");
+        harness.blocked("FRK-2", "dev-a", "dev-b");
+        let orchestrator = an_orchestrator(&harness);
+        handled(&orchestrator, a_pause("dev-a", AgentStatus::Paused)).await;
+        assert_eq!(harness.row("FRK-1").status, TaskStatus::Blocked);
+
+        handled(&orchestrator, a_pause("dev-a", AgentStatus::Active)).await;
+        let moved = last(&harness, EventKind::TaskTransitioned).expect("a move");
+        let EventBody::TaskTransitioned(body) = &moved.body else {
+            panic!("a move");
+        };
+        assert_eq!(moved.envelope.ids.task_id, Some(task("FRK-1")));
+        assert_eq!(
+            (
+                body.from.to_string(),
+                body.to.to_string(),
+                body.actor.to_string()
+            ),
+            (
+                "blocked".to_string(),
+                "in_progress".to_string(),
+                "human".to_string()
+            )
+        );
+        assert_eq!(
+            body.blocker_resolution.as_deref(),
+            Some("agent resumed by the user")
+        );
+        assert_eq!(harness.row("FRK-2").status, TaskStatus::Blocked);
+
+        let same = refused(&orchestrator, a_pause("dev-a", AgentStatus::Active)).await;
+        assert!(same.starts_with("same_status"), "{same}");
+        assert!(matches!(
+            orchestrator
+                .handle(a_pause("nobody", AgentStatus::Paused))
+                .await,
+            Err(CommandError::NotFound { .. })
+        ));
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn stops_a_running_session_and_escalates_its_task() {
+        let harness = Harness::new("human-session-stop", |_| {});
+        harness.in_progress("FRK-1", "dev-a", "dev-b");
+        let adapter = Arc::new(UsageThenWaitAdapter::waiting(Usage::default()));
+        let orchestrator = Arc::new(harness.orchestrator(adapter.clone()));
+
+        let (ticked, handled) = handled_mid_session(
+            &orchestrator,
+            &adapter,
+            Command::SessionStop {
+                session_id: "session-1".to_string(),
+            },
+        )
+        .await;
+        ticked.expect("the tick ends with its session");
+        handled.expect("the stop is handled");
+
+        assert_eq!(adapter.started()[0].session_id, "session-1");
+        assert_eq!(adapter.aborts(), 1);
+        let ended = last(&harness, EventKind::SessionEnded).expect("the end");
+        assert!(matches!(
+            &ended.body,
+            EventBody::SessionEnded(body) if body.reason == SessionEndedBodyReason::Aborted
+        ));
+        assert_eq!(harness.row("FRK-1").status, TaskStatus::Escalated);
+        let escalation = last(&harness, EventKind::EscalationRaised).expect("the escalation");
+        let EventBody::EscalationRaised(body) = &escalation.body else {
+            panic!("an escalation");
+        };
+        assert_eq!(body.reason, EscalationRaisedBodyReason::ExplicitRequest);
+        assert!(
+            body.detail.ends_with("stopped by the human"),
+            "{}",
+            body.detail
+        );
+        assert!(matches!(
+            orchestrator
+                .handle(Command::SessionStop {
+                    session_id: "session-9".to_string(),
+                })
+                .await,
+            Err(CommandError::NotFound { .. })
+        ));
     }
 }

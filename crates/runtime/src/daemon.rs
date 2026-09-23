@@ -82,16 +82,20 @@ pub struct SessionRegistration {
     pub limits: SessionLimits,
 }
 
-/// A registration, and the tool calls the hook has allowed it.
+/// A registration, the tool calls the hook has allowed it, and why it was told to stop, once it
+/// was.
 pub(crate) struct Session {
     pub(crate) registration: SessionRegistration,
     pub(crate) tool_calls: u32,
+    pub(crate) stop_reason: Option<String>,
 }
 
-/// What the daemon holds: the project's tools, and the sessions it answers for.
+/// What the daemon holds: the project's tools, the sessions it answers for, and the notice a
+/// session's loop waits on for a stop.
 pub struct DaemonState {
     deps: Arc<ToolDeps>,
     sessions: Mutex<BTreeMap<String, Session>>,
+    stops: tokio::sync::Notify,
 }
 
 impl DaemonState {
@@ -101,6 +105,7 @@ impl DaemonState {
         DaemonState {
             deps,
             sessions: Mutex::new(BTreeMap::new()),
+            stops: tokio::sync::Notify::new(),
         }
     }
 
@@ -112,8 +117,52 @@ impl DaemonState {
             Session {
                 registration,
                 tool_calls: 0,
+                stop_reason: None,
             },
         );
+    }
+
+    /// Tells a registered session to stop, for `reason`: every later hook of it is denied
+    /// `session_stopped: <reason>`, and the loop reading it, woken now, aborts it (5.2, F1). The
+    /// first reason given is the one kept. Answers whether the daemon answers for the session.
+    pub fn request_stop(&self, session_id: &str, reason: &str) -> bool {
+        let known = match self.sessions().get_mut(session_id) {
+            Some(session) => {
+                session
+                    .stop_reason
+                    .get_or_insert_with(|| reason.to_string());
+                true
+            }
+            None => false,
+        };
+        if known {
+            self.stops.notify_waiters();
+        }
+        known
+    }
+
+    /// Why a session was told to stop, or `None` when it was not, or is not registered.
+    #[must_use]
+    pub fn stop_reason(&self, session_id: &str) -> Option<String> {
+        self.sessions()
+            .get(session_id)
+            .and_then(|session| session.stop_reason.clone())
+    }
+
+    /// The ids of the registered sessions of `agent_id`, in order.
+    #[must_use]
+    pub fn sessions_of(&self, agent_id: &str) -> Vec<String> {
+        self.sessions()
+            .values()
+            .filter(|session| session.registration.agent_id == agent_id)
+            .map(|session| session.registration.session_id.clone())
+            .collect()
+    }
+
+    /// The notice every `request_stop` wakes: a loop takes `notified()` from it before it reads
+    /// `stop_reason`, so that no stop falls between the two.
+    pub(crate) fn stops(&self) -> &tokio::sync::Notify {
+        &self.stops
     }
 
     /// Stops answering for a session: every later hook of it is `unknown_session`.

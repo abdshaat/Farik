@@ -197,7 +197,7 @@ Files: `daemon.rs`, `daemon/hooks.rs`, `orchestrator/session.rs`, `orchestrator/
 - `resumes_what_the_pause_blocked` — then `AgentUpdate { dev-a, active }`: FRK-1 goes `blocked → in_progress` with `actor: human` and `blocker_resolution: "agent resumed by the user"`, while FRK-2, blocked by `dev-a` for another reason, stays `blocked`. The same update again is `same_status`, and an unknown agent is `NotFound`.
 - `stops_a_running_session_and_escalates_its_task` — `SessionStop` of the waiting session: `abort` is called once, the log holds `session.ended { aborted }`, and FRK-1 is `escalated` with an `escalation.raised { explicit_request }` whose detail ends "stopped by the human". An unknown id is `NotFound`.
 
-- [ ] `feat(runtime): stop a session and pause an agent at the next hook`
+- [x] `feat(runtime): stop a session and pause an agent at the next hook`
 
 ### Task 6: triage and refining
 

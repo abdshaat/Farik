@@ -653,6 +653,7 @@ pub(crate) struct UsageThenWaitAdapter {
     completes: bool,
     abort_fails: bool,
     started: Mutex<Vec<SessionSpec>>,
+    starts: Arc<AtomicU32>,
     aborts: Arc<AtomicU32>,
 }
 
@@ -678,8 +679,14 @@ impl UsageThenWaitAdapter {
             completes,
             abort_fails,
             started: Mutex::new(Vec::new()),
+            starts: Arc::new(AtomicU32::new(0)),
             aborts: Arc::new(AtomicU32::new(0)),
         }
+    }
+
+    /// How many sessions this adapter has started, as a counter another task can watch.
+    pub(crate) fn started_count(&self) -> Arc<AtomicU32> {
+        Arc::clone(&self.starts)
     }
 
     /// Every spec a session was started with, in order.
@@ -724,6 +731,7 @@ impl RuntimeAdapter for UsageThenWaitAdapter {
             .lock()
             .expect("no test panics holding it")
             .push(spec);
+        self.starts.fetch_add(1, Ordering::SeqCst);
         Ok(Box::new(handle))
     }
 

@@ -8,7 +8,7 @@ use farik_core::governor::permissions::{
     AgentGrants, PermissionTier, ToolCallContext, ToolCallRequest, ToolDescriptor,
     evaluate_tool_call,
 };
-use farik_core::team::AgentStatus;
+use farik_core::team::{Agent, AgentStatus, Team};
 use farik_protocol::event::{
     EventBody, EventIds, ToolCalledBody, ToolDeniedBody, ToolReturnedBody, new_event,
 };
@@ -82,6 +82,8 @@ const FARIK_PREFIX: &str = "mcp__farik__";
 const JSON_SAFE_INTEGER: u64 = 9_007_199_254_740_991;
 /// Why an allowed call was allowed.
 const ALLOWED: &str = "allowed by the governor";
+/// The kind of the denial of every call of a session told to stop.
+const SESSION_STOPPED: &str = "session_stopped";
 
 /// The tier a Claude Code built-in tool needs, or `None` for one no session may call: `Bash`
 /// above all, because a session's shell is `farik_exec` (ADR 0004).
@@ -119,12 +121,35 @@ pub fn decide_pre_tool_use(request: &HookRequest, state: &DaemonState) -> HookDe
         };
         return record_decision(deps, ids, request, Err(reason));
     };
-    let verdict = judge(request, &session.registration, session.tool_calls, deps);
+    let verdict = match &session.stop_reason {
+        Some(reason) => Err(Denial::from(format!("{SESSION_STOPPED}: {reason}"))),
+        None => judge(request, &session.registration, session.tool_calls, deps),
+    };
+    let verdict = verdict.map_err(|denial| {
+        if let Some(stop) = denial.stop {
+            session.stop_reason.get_or_insert_with(|| stop.to_string());
+            state.stops().notify_waiters();
+        }
+        denial.reason
+    });
     let decision = record_decision(deps, ids_of(deps, &session.registration), request, verdict);
     if decision.allow {
         session.tool_calls += 1;
     }
     decision
+}
+
+/// Why a call is denied, and the stop the denial asks of the session when it asks one: an agent
+/// the human paused or retired stops at its next tool call (F1).
+struct Denial {
+    reason: String,
+    stop: Option<&'static str>,
+}
+
+impl From<String> for Denial {
+    fn from(reason: String) -> Self {
+        Self { reason, stop: None }
+    }
 }
 
 /// Records one `PostToolUse` hook as `tool.returned`, its output cut at 4 KiB.
@@ -161,13 +186,13 @@ pub fn record_post_tool_use(request: &HookRequest, state: &DaemonState) -> Resul
     .map_err(|detail| DaemonError::Io { detail })
 }
 
-/// Whether the call may go ahead, or the reason it may not.
+/// Whether the call may go ahead, or why it may not.
 fn judge(
     request: &HookRequest,
     registration: &SessionRegistration,
     tool_calls: u32,
     deps: &ToolDeps,
-) -> Result<(), String> {
+) -> Result<(), Denial> {
     let team = deps
         .files
         .read_team()
@@ -179,13 +204,33 @@ fn judge(
     {
         Some(agent) if agent.status == AgentStatus::Active => agent,
         found => {
-            return Err(Refusal::AgentNotActive {
-                agent_id: registration.agent_id.clone(),
-                status: found.map(|agent| agent.status),
-            }
-            .reason());
+            let status = found.map(|agent| agent.status);
+            return Err(Denial {
+                reason: Refusal::AgentNotActive {
+                    agent_id: registration.agent_id.clone(),
+                    status,
+                }
+                .reason(),
+                stop: Some(if status == Some(AgentStatus::Paused) {
+                    "agent paused by the user"
+                } else {
+                    "agent retired by the user"
+                }),
+            });
         }
     };
+    judge_call(request, registration, tool_calls, deps, &team, agent).map_err(Denial::from)
+}
+
+/// Whether an active agent's call may go ahead, or the reason it may not.
+fn judge_call(
+    request: &HookRequest,
+    registration: &SessionRegistration,
+    tool_calls: u32,
+    deps: &ToolDeps,
+    team: &Team,
+    agent: &Agent,
+) -> Result<(), String> {
     if tool_calls >= registration.limits.max_tool_calls {
         return Err(format!(
             "tool_call_limit: the session has made the {} tool calls it may make",
@@ -737,6 +782,49 @@ mod tests {
             .expect("the team is written");
         let paused = decide_pre_tool_use(&daemon.dev_call("Read", &read), &daemon.state);
         denied_for(&paused, "agent_not_active");
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn denies_every_call_of_a_stopped_session() {
+        let daemon = TestDaemon::new("hook-stopped", |_| {});
+        assert!(
+            daemon
+                .state
+                .request_stop(DEV_SESSION, "stopped by the human")
+        );
+        assert_eq!(
+            daemon.state.stop_reason(DEV_SESSION).as_deref(),
+            Some("stopped by the human")
+        );
+        let read = json!({ "file_path": daemon.inside("src/a.rs") });
+        let decision = decide_pre_tool_use(&daemon.dev_call("Read", &read), &daemon.state);
+        assert!(!decision.allow, "{decision:?}");
+        assert_eq!(decision.reason, "session_stopped: stopped by the human");
+        assert!(!daemon.state.request_stop("nobody", "stopped by the human"));
+        assert_eq!(daemon.state.stop_reason("nobody"), None);
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn stops_the_session_of_an_agent_paused_in_the_team_file() {
+        let daemon = TestDaemon::new("hook-paused-stops", |_| {});
+        assert_eq!(daemon.state.sessions_of("dev-a"), vec![DEV_SESSION]);
+        daemon
+            .project
+            .deps
+            .files
+            .write_team(&a_team_of_three(|wire| {
+                wire["agents"][1]["status"] = json!("paused");
+            }))
+            .expect("the team is written");
+        let read = json!({ "file_path": daemon.inside("src/a.rs") });
+        let paused = decide_pre_tool_use(&daemon.dev_call("Read", &read), &daemon.state);
+        denied_for(&paused, "agent_not_active");
+        assert_eq!(
+            daemon.state.stop_reason(DEV_SESSION).as_deref(),
+            Some("agent paused by the user")
+        );
     }
 
     #[test]
