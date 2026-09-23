@@ -41,8 +41,9 @@ pub(super) enum Room {
 pub(super) async fn tick(orchestrator: &Orchestrator) -> Result<TickReport, OrchestratorError> {
     let deps = &orchestrator.deps;
     let team = deps.tools.files.read_team()?;
-    let mut board = deps.tools.projections.board()?;
-    board.sort_by_key(|row| task_number(row.task_id.as_str()));
+    // The store gives the board in the order of the number in each task id, which is how ties
+    // are broken.
+    let board = deps.tools.projections.board()?;
     let mut day_spent = false;
     for row in board
         .iter()
@@ -535,14 +536,6 @@ pub(super) fn acted(
             end.detail
         ),
     }
-}
-
-/// The number in a task id, `FRK-<n>`, by which ties are broken; an id without one goes last.
-fn task_number(task: &str) -> u64 {
-    task.rsplit('-')
-        .next()
-        .and_then(|number| number.parse().ok())
-        .unwrap_or(u64::MAX)
 }
 
 #[cfg(test)]
