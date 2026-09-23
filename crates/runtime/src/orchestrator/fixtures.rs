@@ -697,6 +697,58 @@ impl SandboxFactory for BrokenSandboxFactory {
     }
 }
 
+/// A host sandbox factory whose first `failures` removals fail as they do while docker is down;
+/// it counts, as `CountingSandboxFactory` does, what it was asked.
+pub(crate) struct UnremovableSandboxFactory {
+    failures: AtomicU32,
+    pub(crate) counting: CountingSandboxFactory,
+}
+
+impl UnremovableSandboxFactory {
+    /// A factory whose first `failures` removals fail.
+    pub(crate) fn new(failures: u32) -> Self {
+        Self {
+            failures: AtomicU32::new(failures),
+            counting: CountingSandboxFactory::default(),
+        }
+    }
+}
+
+impl SandboxFactory for UnremovableSandboxFactory {
+    fn create(
+        &self,
+        project_id: &str,
+        task_id: &TaskId,
+        worktree: &Path,
+        network: bool,
+    ) -> Result<Box<dyn Sandbox>, SandboxError> {
+        self.counting.create(project_id, task_id, worktree, network)
+    }
+
+    fn create_base(
+        &self,
+        project_id: &str,
+        task_id: &TaskId,
+        worktree: &Path,
+    ) -> Result<Box<dyn Sandbox>, SandboxError> {
+        self.counting.create_base(project_id, task_id, worktree)
+    }
+
+    fn remove(&self, project_id: &str, task_id: &TaskId) -> Result<(), SandboxError> {
+        self.counting.remove(project_id, task_id)?;
+        let fails = self
+            .failures
+            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |left| {
+                left.checked_sub(1)
+            })
+            .is_ok();
+        if fails {
+            return Err(SandboxError::DockerUnavailable);
+        }
+        Ok(())
+    }
+}
+
 /// A sandbox that answers every command with its error.
 struct BrokenSandbox(ExecError);
 

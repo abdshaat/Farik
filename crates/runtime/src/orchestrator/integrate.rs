@@ -553,9 +553,13 @@ pub(super) fn cleanup(
 }
 
 /// Removes a finished task's sandbox and worktrees when either worktree is still there, and says
-/// whether there was anything to remove. The containers go by name, since after a restart no
-/// handle reaches them; then the base worktree; then the task's own worktree last, so that a run
-/// stopped in between leaves it, which is what brings this back.
+/// whether it removed them. The containers go by name, since after a restart no handle reaches
+/// them; then the base worktree; then the task's own worktree last, so that a run stopped in
+/// between leaves it, which is what brings this back.
+///
+/// Containers that cannot be removed (docker is down) leave the worktrees as they are, so that
+/// the task is taken up again on a later tick, and answer `false`, so that a docker outage holds
+/// up no other rule.
 pub(super) fn remove_workspace(
     orchestrator: &Orchestrator,
     task_id: &TaskId,
@@ -567,7 +571,14 @@ pub(super) fn remove_workspace(
         return Ok(false);
     }
     orchestrator.forget_sandbox(task_id);
-    deps.sandboxes.remove(&deps.tools.ids.project_id, task_id)?;
+    if deps
+        .sandboxes
+        .remove(&deps.tools.ids.project_id, task_id)
+        .is_err()
+    {
+        // ponytail: nothing reports the failure; the board shows the task's worktree kept.
+        return Ok(false);
+    }
     remove_worktree(&deps.tools.git, &base)?;
     remove_worktree(&deps.tools.git, &own)?;
     Ok(true)

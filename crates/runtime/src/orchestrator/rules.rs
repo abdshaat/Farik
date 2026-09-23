@@ -603,7 +603,7 @@ mod tests {
     use crate::exec::ExecError;
     use crate::orchestrator::fixtures::{
         BrokenSandboxFactory, CountingSandboxFactory, ExecutorWitness, Harness,
-        UsageThenWaitAdapter,
+        UnremovableSandboxFactory, UsageThenWaitAdapter,
     };
     use crate::orchestrator::{Orchestrator, OrchestratorError, TickReport};
     use crate::recorded::fixtures::{
@@ -887,6 +887,101 @@ mod tests {
             "farik/FRK-1"
         );
         assert!(!orchestrator.holds_sandbox(&"FRK-1".parse().expect("a task id")));
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn cleans_up_a_task_once_it_is_cancelled() {
+        let harness = Harness::new("orch-cleanup-cancelled", |_| {});
+        harness.in_progress("FRK-1", "dev-a", "dev-b");
+        harness.project.moved(
+            "FRK-1",
+            "in_progress",
+            "cancelled",
+            &json!({ "actor": "human", "requested_by": "human" }),
+        );
+        let sandboxes = Arc::new(CountingSandboxFactory::default());
+        let orchestrator =
+            harness.orchestrator_with(harness.recorded(Vec::new()), sandboxes.clone());
+
+        let report = orchestrator.tick().await.expect("the tick runs");
+
+        assert_eq!(acted_on(&report), Some("FRK-1"), "{report:?}");
+        assert_eq!(sandboxes.removed("FRK-1"), 1);
+        assert!(!harness.worktree("FRK-1").exists());
+        assert_eq!(
+            git_output_in(
+                &harness.project.repo.path,
+                &["branch", "--list", "farik/FRK-1"]
+            )
+            .trim(),
+            "farik/FRK-1"
+        );
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn cleans_up_a_base_worktree_left_on_its_own() {
+        let harness = Harness::new("orch-cleanup-base", |_| {});
+        harness.accepted("FRK-1");
+        let base = harness.worktree("FRK-1-base");
+        harness
+            .project
+            .deps
+            .git
+            .create_detached_worktree(&base, "main")
+            .expect("the base worktree is made");
+        let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
+
+        let report = orchestrator.tick().await.expect("the tick runs");
+
+        assert_eq!(acted_on(&report), Some("FRK-1"), "{report:?}");
+        assert!(!base.exists());
+        let listed = worktrees_listed(&harness);
+        assert!(!listed.contains("FRK-1-base"), "{listed}");
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn removes_the_tasks_own_worktree_last() {
+        let harness = Harness::new("orch-cleanup-order", |_| {});
+        harness.accepted_with_worktree("FRK-1");
+        // A file where the base worktree would be, which cannot be removed as a directory.
+        std::fs::write(harness.worktree("FRK-1-base"), "").expect("written");
+        let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
+
+        let ticked = orchestrator.tick().await;
+
+        assert!(ticked.is_err(), "{ticked:?}");
+        // What brings the rule back next time is still there.
+        assert!(harness.worktree("FRK-1").exists());
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn goes_on_with_the_board_while_a_container_cannot_be_removed() {
+        let harness = Harness::new("orch-cleanup-docker-down", |_| {});
+        harness.accepted_with_worktree("FRK-1");
+        harness.ready("FRK-2");
+        let adapter = harness.recorded(vec![reads_a_file()]);
+        let sandboxes = Arc::new(UnremovableSandboxFactory::new(1));
+        let orchestrator = harness.orchestrator_with(adapter.clone(), sandboxes.clone());
+
+        let report = orchestrator.tick().await.expect("the tick runs");
+
+        assert_eq!(acted_on(&report), Some("FRK-2"), "{report:?}");
+        let started = adapter.started();
+        assert_eq!(started.len(), 1);
+        assert_eq!(started[0].purpose, SessionPurpose::Plan);
+        assert_eq!(sandboxes.counting.removed("FRK-1"), 1);
+        // Left for a later tick, which removes it once docker answers.
+        assert!(harness.worktree("FRK-1").exists());
+
+        let report = orchestrator.tick().await.expect("the tick runs");
+
+        assert_eq!(acted_on(&report), Some("FRK-1"), "{report:?}");
+        assert_eq!(sandboxes.counting.removed("FRK-1"), 2);
+        assert!(!harness.worktree("FRK-1").exists());
     }
 
     #[tokio::test]
