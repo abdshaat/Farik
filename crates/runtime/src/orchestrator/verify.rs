@@ -503,10 +503,15 @@ fn reviewer_results(context: &TransitionContext) -> Vec<CriterionResult> {
         .collect()
 }
 
-/// The results Farik recorded as the governor since `since`, the latest per criterion.
+/// The results Farik recorded as the governor since `since`, the latest per criterion. Farik's own
+/// carry no agent on their envelope; `recorded_by` alone would trust an agent the team named
+/// `governor`.
 fn governor_results(history: &[FarikEvent], since: u64) -> Vec<CriterionResult> {
     let mut results: Vec<CriterionResult> = Vec::new();
-    for event in history.iter().filter(|event| event.envelope.seq > since) {
+    for event in history
+        .iter()
+        .filter(|event| event.envelope.seq > since && event.envelope.ids.agent_id.is_none())
+    {
         if let EventBody::CriterionRecorded(body) = &event.body
             && body.recorded_by == GOVERNOR
         {

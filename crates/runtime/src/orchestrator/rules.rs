@@ -553,6 +553,7 @@ mod tests {
         EventBody, EventKind, NoteWrittenBodyKind, ReviewRecordedBody, SessionEndedBodyReason,
         SessionStartedBodyPurpose, TransitionActorWire,
     };
+    use farik_protocol::event::{NewEvent, event_from_value};
     use farik_roles::RoleError;
     use farik_store::git::fixtures::git_output_in;
     use serde_json::json;
@@ -1236,11 +1237,13 @@ mod tests {
         assert!(adapter.started().is_empty());
     }
 
-    /// The `criterion.recorded` events Farik recorded as the governor, as (id, passed).
+    /// The `criterion.recorded` events Farik recorded as the governor, with no agent on their
+    /// envelope, as (id, passed).
     fn governor_runs(harness: &Harness) -> Vec<(String, bool)> {
         harness
             .events(&[EventKind::CriterionRecorded])
             .iter()
+            .filter(|event| event.envelope.ids.agent_id.is_none())
             .filter_map(|event| match &event.body {
                 EventBody::CriterionRecorded(body) if body.recorded_by == "governor" => {
                     assert_eq!(body.run_by, CriterionRecordedBodyRunBy::Reviewer);
@@ -1431,6 +1434,46 @@ mod tests {
             governor_runs(&harness),
             vec![("C1".to_string(), true), ("C2".to_string(), true)]
         );
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn runs_a_criterion_whose_result_an_agent_recorded_as_the_governor() {
+        // An agent may be called `governor`; what it records carries its id on the envelope.
+        let harness = Harness::new("orch-verify-named-governor", |_| {});
+        harness.verifying("FRK-1");
+        let wire = json!({
+            "seq": 1,
+            "recorded_at": at().to_rfc3339(),
+            "team_id": "farik",
+            "project_id": "farik",
+            "task_id": "FRK-1",
+            "agent_id": "dev-b",
+            "kind": "criterion.recorded",
+            "body": {
+                "criterion_id": "C1",
+                "passed": true,
+                "evidence": "$ test -f done.txt\nexit 0",
+                "run_by": "reviewer",
+                "recorded_by": "governor"
+            },
+        });
+        let event = event_from_value(&wire).expect("the fixture is schema-valid");
+        let deps = &harness.project.deps;
+        let appended = deps
+            .log
+            .append(&NewEvent {
+                recorded_at: event.envelope.recorded_at,
+                ids: event.envelope.ids,
+                body: event.body,
+            })
+            .expect("appends");
+        deps.projections.apply(&appended).expect("projects");
+        let orchestrator = harness.orchestrator(harness.recorded(vec![review_writes_note()]));
+
+        orchestrator.tick().await.expect("the tick runs");
+
+        assert_eq!(governor_runs(&harness), vec![("C1".to_string(), true)]);
     }
 
     #[tokio::test]
