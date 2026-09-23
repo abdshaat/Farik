@@ -307,7 +307,7 @@ impl Git {
     /// `CommandFailed` when the remote or the branch is unknown, or the remote refuses the push.
     pub fn push(&self, remote: &str, branch: &str) -> Result<(), GitError> {
         self.require_repository()?;
-        self.at_root(&["push", remote, branch])?;
+        run_git_reaching_remote(&self.root, &["push", remote, branch])?;
         Ok(())
     }
 
@@ -340,30 +340,34 @@ impl Git {
         // A detached root has no branch checked out, which is not this one.
         let checked_out = self.current_branch().ok();
         if checked_out.as_deref() == Some(branch) {
-            self.at_root(&["fetch", remote, &reference])?;
+            run_git_reaching_remote(&self.root, &["fetch", remote, &reference])?;
             self.at_root(&["merge", "--ff-only", "FETCH_HEAD"])?;
         } else {
-            self.at_root(&["fetch", remote, &format!("{reference}:{reference}")])?;
+            let refspec = format!("{reference}:{reference}");
+            run_git_reaching_remote(&self.root, &["fetch", remote, &refspec])?;
         }
         Ok(())
     }
 
     /// Refuses a name git would not take for a branch, such as `main:other` or `-f`, so that
-    /// nothing a team file says reaches a refspec or an option.
+    /// nothing a team file says reaches a refspec or an option. A name git takes but reads as
+    /// another is refused too: `@` is `HEAD`, and git prints the branch `@{-1}` stands for rather
+    /// than the name, so the name must be what git prints for it.
     ///
     /// # Errors
     ///
-    /// `CommandFailed` naming it when git refuses it; `NotInstalled` when git cannot be run.
+    /// `CommandFailed` naming it when git refuses it or reads it as another; `NotInstalled` when
+    /// git cannot be run.
     pub fn check_branch_name(&self, name: &str) -> Result<(), GitError> {
-        self.at_root(&["check-ref-format", "--branch", name])
-            .map(|_| ())
-            .map_err(|error| match error {
-                GitError::CommandFailed { command, .. } => GitError::CommandFailed {
-                    command,
-                    stderr: format!("{name} is not a name git takes for a branch"),
-                },
-                other => other,
-            })
+        let refused = || GitError::CommandFailed {
+            command: format!("check-ref-format --branch {name}"),
+            stderr: format!("{name} is not a name git takes for a branch"),
+        };
+        match self.at_root(&["check-ref-format", "--branch", name]) {
+            Ok(printed) if name != "@" && printed == name => Ok(()),
+            Ok(_) | Err(GitError::CommandFailed { .. }) => Err(refused()),
+            Err(other) => Err(other),
+        }
     }
 
     /// How many commits `head` has that `base` does not.
@@ -557,6 +561,21 @@ fn run_git(directory: &Path, arguments: &[&str]) -> Result<String, GitError> {
 
 /// Runs git in `directory` and hands back what it said on standard output, exactly.
 fn run_git_untrimmed(directory: &Path, arguments: &[&str]) -> Result<String, GitError> {
+    run_git_with(directory, arguments, false)
+}
+
+/// Runs git in `directory`, as one that may reach a remote: ssh is run in batch mode unless the
+/// user chose how to run it.
+fn run_git_reaching_remote(directory: &Path, arguments: &[&str]) -> Result<String, GitError> {
+    let batch_ssh = wants_batch_ssh(directory, |name| std::env::var_os(name).is_some());
+    Ok(run_git_with(directory, arguments, batch_ssh)?
+        .trim_end()
+        .to_string())
+}
+
+/// Runs git in `directory` with `git_environment(batch_ssh)`, and hands back its standard output
+/// exactly.
+fn run_git_with(directory: &Path, arguments: &[&str], batch_ssh: bool) -> Result<String, GitError> {
     if !directory.is_dir() {
         // Said here, because the operating system answers a missing working directory with the same
         // "not found" it answers a missing program with, and "git could not be run" is the wrong
@@ -566,15 +585,10 @@ fn run_git_untrimmed(directory: &Path, arguments: &[&str]) -> Result<String, Git
             stderr: format!("there is no directory at {}", directory.display()),
         });
     }
-    // No git Farik runs has a person at a terminal to answer it: a push or fetch that wants a
-    // credential fails with git's words instead of waiting on a prompt nobody sees. The empty
-    // `GIT_ASKPASS` stops git asking an askpass program instead (an editor's terminal sets one,
-    // and `core.askPass` or `SSH_ASKPASS` may name another); a credential helper still answers.
     let output = Command::new("git")
         .args(arguments)
         .current_dir(directory)
-        .env("GIT_TERMINAL_PROMPT", "0")
-        .env("GIT_ASKPASS", "")
+        .envs(git_environment(batch_ssh))
         .output()
         .map_err(|error| GitError::NotInstalled {
             detail: error.to_string(),
@@ -586,6 +600,32 @@ fn run_git_untrimmed(directory: &Path, arguments: &[&str]) -> Result<String, Git
         });
     }
     Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+}
+
+/// What every git Farik runs is given in its environment. No git Farik runs has a person at a
+/// terminal to answer it: a push or fetch that wants a credential fails with git's words instead of
+/// waiting on a prompt nobody sees. The empty `GIT_ASKPASS` stops git asking an askpass program
+/// instead (an editor's terminal sets one, and `core.askPass` or `SSH_ASKPASS` may name another); a
+/// credential helper still answers. Neither stops ssh, which asks on the terminal itself for a host
+/// key or a passphrase, so a git that may reach a remote over ssh gets `batch_ssh`: ssh in batch
+/// mode, which fails instead of asking.
+fn git_environment(batch_ssh: bool) -> Vec<(&'static str, &'static str)> {
+    let mut environment = vec![("GIT_TERMINAL_PROMPT", "0"), ("GIT_ASKPASS", "")];
+    if batch_ssh {
+        environment.push(("GIT_SSH_COMMAND", "ssh -o BatchMode=yes"));
+    }
+    environment
+}
+
+/// Whether a git in `directory` that may reach a remote should run ssh in batch mode: only when the
+/// user chose no ssh command of their own, in the environment (`GIT_SSH_COMMAND`, or `GIT_SSH`,
+/// which `GIT_SSH_COMMAND` would take the place of) or in git's configuration (`core.sshCommand`).
+/// `is_set` says whether an environment variable is set.
+fn wants_batch_ssh(directory: &Path, is_set: impl Fn(&str) -> bool) -> bool {
+    !is_set("GIT_SSH_COMMAND")
+        && !is_set("GIT_SSH")
+        // `--get` exits 1 when the key is not set.
+        && run_git(directory, &["config", "--get", "core.sshCommand"]).is_err()
 }
 
 /// One `git log` line as a summary, or nothing when it is not one.
@@ -638,8 +678,10 @@ mod tests {
     use std::path::{Path, PathBuf};
 
     use super::{
-        Git, GitError, HeadSummary, default_branch_of, head_summary_of, path_argument, paths_of,
+        Git, GitError, HeadSummary, default_branch_of, git_environment, head_summary_of,
+        path_argument, paths_of, wants_batch_ssh,
     };
+    use crate::git::fixtures::TempRepo;
 
     /// What `git log --format=%H%x1f%cI%x1f%s` prints for one commit.
     fn a_log_line(subject: &str) -> String {
@@ -755,6 +797,39 @@ mod tests {
                  exists",
             ]
         );
+    }
+
+    #[test]
+    fn runs_git_with_nobody_to_answer_a_prompt() {
+        assert_eq!(
+            git_environment(false),
+            [("GIT_TERMINAL_PROMPT", "0"), ("GIT_ASKPASS", "")]
+        );
+        // BatchMode makes ssh fail rather than ask for a host key or a passphrase.
+        assert_eq!(
+            git_environment(true),
+            [
+                ("GIT_TERMINAL_PROMPT", "0"),
+                ("GIT_ASKPASS", ""),
+                ("GIT_SSH_COMMAND", "ssh -o BatchMode=yes"),
+            ]
+        );
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn leaves_ssh_to_a_user_who_chose_how_to_run_it() {
+        let repository = TempRepo::new("batch-ssh");
+        let nothing_set = |_: &str| false;
+        assert!(wants_batch_ssh(&repository.path, nothing_set));
+        for chosen in ["GIT_SSH_COMMAND", "GIT_SSH"] {
+            assert!(
+                !wants_batch_ssh(&repository.path, |name: &str| name == chosen),
+                "{chosen}"
+            );
+        }
+        repository.git(&["config", "core.sshCommand", "ssh -i ~/.ssh/farik"]);
+        assert!(!wants_batch_ssh(&repository.path, nothing_set));
     }
 
     #[test]

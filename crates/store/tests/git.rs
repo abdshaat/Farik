@@ -671,6 +671,9 @@ fn with_origin(repository: &TempRepo) -> std::path::PathBuf {
 fn knows_whether_a_remote_exists() {
     let repository = TempRepo::new("has-remote");
     assert_eq!(repository.adapter().has_remote("origin"), Ok(false));
+    // A remote whose name begins with `origin` is not `origin`.
+    repository.git(&["remote", "add", "origin-mirror", "/nowhere"]);
+    assert_eq!(repository.adapter().has_remote("origin"), Ok(false));
     let origin = with_origin(&repository);
     assert_eq!(repository.adapter().has_remote("origin"), Ok(true));
     assert_eq!(repository.adapter().has_remote("upstream"), Ok(false));
@@ -705,6 +708,11 @@ fn fast_forwards_a_branch_to_its_remote() {
         git_in(&other, &["commit", "-m", branch]);
         git_in(&other, &["push", "origin", branch]);
     }
+    // A tag on `origin` named as each branch, at the commit the branch was at: a refspec that did
+    // not spell `refs/heads/` would fetch the tag.
+    for branch in ["main", "develop"] {
+        git_in(&origin, &["tag", branch, &format!("{branch}~1")]);
+    }
     let adapter = repository.adapter();
 
     adapter
@@ -715,9 +723,10 @@ fn fast_forwards_a_branch_to_its_remote() {
         .expect("a branch not checked out fast-forwards");
 
     for branch in ["main", "develop"] {
+        let reference = format!("refs/heads/{branch}");
         assert_eq!(
-            repository.git_output(&["rev-parse", branch]),
-            git_output_in(&origin, &["rev-parse", branch])
+            repository.git_output(&["rev-parse", &reference]),
+            git_output_in(&origin, &["rev-parse", &reference])
         );
     }
     assert!(
@@ -735,15 +744,16 @@ fn fast_forwards_a_branch_to_its_remote() {
     }
     repository.write("local.txt", "local\n");
     repository.commit("a local commit");
-    repository.git(&["branch", "-f", "develop", "main"]);
+    repository.git(&["branch", "-f", "develop", "refs/heads/main"]);
     for branch in ["main", "develop"] {
-        let before = repository.git_output(&["rev-parse", branch]);
+        let reference = format!("refs/heads/{branch}");
+        let before = repository.git_output(&["rev-parse", &reference]);
         let refused = adapter.fetch_fast_forward("origin", branch);
         assert!(
             matches!(refused, Err(GitError::CommandFailed { .. })),
             "{branch}: {refused:?}"
         );
-        assert_eq!(repository.git_output(&["rev-parse", branch]), before);
+        assert_eq!(repository.git_output(&["rev-parse", &reference]), before);
     }
     let _ = std::fs::remove_dir_all(&origin);
     let _ = std::fs::remove_dir_all(&other);
@@ -795,4 +805,25 @@ fn pushes_and_fetches_without_a_prompt() {
         }
     }
     assert!(started.elapsed() < std::time::Duration::from_secs(30));
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn refuses_a_branch_name_git_would_read_as_another() {
+    let repository = TempRepo::new("branch-name");
+    repository.git(&["checkout", "-b", "other"]);
+    repository.git(&["checkout", "main"]);
+    let adapter = repository.adapter();
+    // `@` is HEAD, and `@{-1}` the branch checked out before: git prints `other` for it.
+    for name in ["@", "@{-1}", "main:other", "-f"] {
+        match adapter.check_branch_name(name) {
+            Err(GitError::CommandFailed { stderr, .. }) => {
+                assert!(stderr.contains(name), "{name}: {stderr}");
+            }
+            other => panic!("{name}: expected a refusal, got {other:?}"),
+        }
+    }
+    for name in ["main", "release/1.0"] {
+        assert_eq!(adapter.check_branch_name(name), Ok(()), "{name}");
+    }
 }
