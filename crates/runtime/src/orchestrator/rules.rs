@@ -1413,6 +1413,14 @@ mod tests {
                     }
                 }),
             );
+            push_criterion(
+                wire,
+                json!({
+                    "id": "C3",
+                    "text": "done.txt can be read.",
+                    "verification": { "method": "artifact", "path": "done.txt" }
+                }),
+            );
         });
         harness.project.record(
             "FRK-1",
@@ -1432,8 +1440,98 @@ mod tests {
 
         assert_eq!(
             governor_runs(&harness),
-            vec![("C1".to_string(), true), ("C2".to_string(), true)]
+            vec![
+                ("C1".to_string(), true),
+                ("C2".to_string(), true),
+                ("C3".to_string(), true)
+            ]
         );
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn checks_that_a_tasks_new_tests_fail_on_the_integration_branch() {
+        let harness = Harness::new("orch-verify-new-tests", |_| {});
+        harness.verifying_with("FRK-1", true, true, |wire| {
+            wire["exit_criteria"] = json!([
+                {
+                    "id": "C1",
+                    "text": "A new test needs done.txt.",
+                    "verification": {
+                        "method": "test",
+                        "command": "sh tests/done_test.sh",
+                        "new_tests_required": true
+                    }
+                },
+                {
+                    "id": "C2",
+                    "text": "A new test passes.",
+                    "verification": {
+                        "method": "test",
+                        "command": "sh tests/always_test.sh",
+                        "new_tests_required": true
+                    }
+                }
+            ]);
+        });
+        let worktree = harness.worktree("FRK-1");
+        std::fs::create_dir_all(worktree.join("tests")).expect("a directory");
+        std::fs::write(worktree.join("tests/done_test.sh"), "test -f done.txt\n").expect("a test");
+        std::fs::write(worktree.join("tests/always_test.sh"), "exit 0\n").expect("a test");
+        harness
+            .project
+            .deps
+            .git
+            .commit(
+                &worktree,
+                "Add the tests",
+                &[
+                    "tests/done_test.sh".to_string(),
+                    "tests/always_test.sh".to_string(),
+                ],
+            )
+            .expect("the tests are committed");
+        let orchestrator = harness.orchestrator(harness.recorded(vec![review_writes_note()]));
+
+        orchestrator.tick().await.expect("the tick runs");
+
+        // C2's test passes on main as well, so it proves nothing about the change.
+        assert_eq!(
+            governor_runs(&harness),
+            vec![("C1".to_string(), true), ("C2".to_string(), false)]
+        );
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn runs_the_criteria_of_a_task_out_of_sessions() {
+        let harness = Harness::new("orch-verify-no-sessions", |_| {});
+        harness.verifying_with("FRK-1", true, true, |wire| {
+            wire["budget"]["max_sessions"] = json!(1);
+        });
+        harness.spent(Some("FRK-1"), "s-0", 0.01);
+        let adapter = harness.recorded(vec![review_writes_note()]);
+        let orchestrator = harness.orchestrator(adapter.clone());
+
+        let report = orchestrator.tick().await.expect("the tick runs");
+
+        assert_eq!(
+            report,
+            TickReport::Acted {
+                task_id: "FRK-1".parse().expect("an id"),
+                what: "ran 1 of its criteria as its reviewer".to_string()
+            }
+        );
+        assert_eq!(governor_runs(&harness), vec![("C1".to_string(), true)]);
+        assert!(adapter.started().is_empty());
+        let report = orchestrator.tick().await.expect("the tick runs");
+        assert_eq!(
+            report,
+            TickReport::Idle {
+                why: NOTHING_TO_DO.to_string()
+            }
+        );
+        assert!(adapter.started().is_empty());
     }
 
     #[tokio::test]
@@ -1486,6 +1584,20 @@ mod tests {
 
         orchestrator.tick().await.expect("the review runs");
         assert_eq!(governor_runs(&harness), vec![("C1".to_string(), false)]);
+        assert_eq!(
+            reviews(&harness),
+            vec![ReviewRecordedBody {
+                reviewer: "dev-b".to_string(),
+                criteria_run: 1,
+                passed: false
+            }]
+        );
+        let prompt = &adapter.started()[0].initial_prompt;
+        assert!(block(prompt, "results").contains("C1: failed"), "{prompt}");
+        assert!(
+            block(prompt, "title").contains("Add a login page"),
+            "{prompt}"
+        );
         orchestrator.tick().await.expect("the rejection is filed");
 
         let notes = harness.events(&[EventKind::NoteWritten]);
@@ -1534,9 +1646,16 @@ mod tests {
         let orchestrator = harness.orchestrator(adapter.clone());
 
         orchestrator.tick().await.expect("the first review runs");
+        // C2 is unanswered, so the review is not complete.
+        assert!(reviews(&harness).is_empty());
         orchestrator.tick().await.expect("the second review runs");
 
         let started = adapter.started();
+        assert!(
+            block(&started[0].initial_prompt, "rubric").contains("Is done.txt at the root?"),
+            "{}",
+            started[0].initial_prompt
+        );
         assert_eq!(
             sessions(&adapter),
             vec![
