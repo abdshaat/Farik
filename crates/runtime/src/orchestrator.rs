@@ -443,9 +443,15 @@ mod tests {
 
     use farik_store::git::fixtures::git_output_in;
 
+    use farik_core::contract::{TaskId, TaskKind};
+    use farik_protocol::command::{AcceptSubject, Command};
+    use farik_protocol::event::EscalationRaisedBodyReason;
+
     use crate::orchestrator::fixtures::Harness;
     use crate::recorded::fixtures::{
-        accept_frk_1, implement_finishes_frk_1, plan_assigns_frk_1, review_writes_note,
+        accept_frk_1, implement_finishes_frk_1, plan_assigns_frk_1, plan_assigns_frk_2,
+        plan_breaks_down_frk_1, plan_closes_epic_frk_1, refine_asks_frk_1,
+        refine_writes_epic_frk_1, review_writes_note, triage_frk_1_large,
     };
 
     /// Each session started, as its purpose and its agent, in order.
@@ -607,5 +613,195 @@ mod tests {
             .trim(),
             "farik/FRK-1"
         );
+    }
+
+    /// The events that mark a request's way to an accepted epic, each in a few words, in order.
+    fn milestones(harness: &Harness) -> Vec<String> {
+        harness
+            .events(&[])
+            .iter()
+            .filter_map(|event| {
+                let task = event
+                    .envelope
+                    .ids
+                    .task_id
+                    .as_ref()
+                    .map(|task| task.as_str().to_string())
+                    .unwrap_or_default();
+                Some(match &event.body {
+                    EventBody::RequestTriaged(_) if task == "FRK-1" => {
+                        "request.triaged".to_string()
+                    }
+                    EventBody::QuestionAsked(_) => "question.asked".to_string(),
+                    EventBody::QuestionAnswered(_) => "question.answered".to_string(),
+                    EventBody::EscalationRaised(body)
+                        if body.reason == EscalationRaisedBodyReason::Approval =>
+                    {
+                        "escalation.raised approval".to_string()
+                    }
+                    EventBody::HumanAccepted(body) => format!("human.accepted {}", body.subject),
+                    EventBody::TaskTransitioned(body) if task == "FRK-1" => {
+                        format!("FRK-1 {} -> {}", body.from, body.to)
+                    }
+                    EventBody::TaskCreated(_) if task == "FRK-2" => "FRK-2 created".to_string(),
+                    EventBody::TaskIntegrated(_) => format!("{task} integrated"),
+                    EventBody::CriterionRecorded(body)
+                        if task == "FRK-1" && body.recorded_by == "governor" =>
+                    {
+                        format!("FRK-1 {} run by the governor", body.criterion_id)
+                    }
+                    _ => return None,
+                })
+            })
+            .collect()
+    }
+
+    /// Each session started, as its purpose, its agent, and its task, in order.
+    fn sessions_with_tasks(harness: &Harness) -> Vec<(SessionStartedBodyPurpose, String, String)> {
+        harness
+            .events(&[EventKind::SessionStarted])
+            .iter()
+            .map(|event| match &event.body {
+                EventBody::SessionStarted(body) => (
+                    body.purpose,
+                    event.envelope.ids.agent_id.clone().unwrap_or_default(),
+                    event
+                        .envelope
+                        .ids
+                        .task_id
+                        .as_ref()
+                        .map(|task| task.as_str().to_string())
+                        .unwrap_or_default(),
+                ),
+                other => panic!("a session.started, got {other:?}"),
+            })
+            .collect()
+    }
+
+    /// Runs until idle, answers the one question, runs, approves the epic, runs, accepts its
+    /// result with the human's words, and runs again, as the human at a terminal would.
+    async fn drive_one_request(
+        harness: &Harness,
+        orchestrator: &super::Orchestrator,
+        epic: &TaskId,
+    ) {
+        orchestrator.run_until_idle().await.expect("the run idles");
+        let question = harness.events(&[EventKind::QuestionAsked]);
+        assert_eq!(question.len(), 1, "one question is asked");
+        orchestrator
+            .handle(Command::QuestionAnswer {
+                question_id: question[0].envelope.seq,
+                answer: "No, one line.".to_string(),
+            })
+            .await
+            .expect("the human answers");
+        orchestrator.run_until_idle().await.expect("the run idles");
+        orchestrator
+            .handle(Command::HumanAccept {
+                task_id: epic.clone(),
+                subject: AcceptSubject::Contract,
+                message: None,
+            })
+            .await
+            .expect("the human approves the epic");
+        orchestrator.run_until_idle().await.expect("the run idles");
+        orchestrator
+            .handle(Command::HumanAccept {
+                task_id: epic.clone(),
+                subject: AcceptSubject::Result,
+                message: Some("done.txt is on main.".to_string()),
+            })
+            .await
+            .expect("the human accepts the epic");
+        orchestrator.run_until_idle().await.expect("the run idles");
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn takes_one_request_to_an_accepted_epic() {
+        let harness = Harness::new("orch-one-epic", |wire| {
+            wire["policy"]["integration"] = serde_json::json!("auto_merge");
+        });
+        harness.a_request("Add done.txt and its check");
+        let adapter = harness.recorded(vec![
+            triage_frk_1_large(),
+            refine_asks_frk_1(),
+            refine_writes_epic_frk_1(),
+            plan_breaks_down_frk_1(),
+            plan_assigns_frk_2(),
+            implement_finishes_frk_1(),
+            review_writes_note(),
+            accept_frk_1(),
+            plan_closes_epic_frk_1(),
+            accept_frk_1(),
+        ]);
+        let orchestrator = harness.orchestrator(adapter.clone());
+        let epic: TaskId = "FRK-1".parse().expect("a task id");
+
+        drive_one_request(&harness, &orchestrator, &epic).await;
+
+        let frk_1 = harness.row("FRK-1");
+        assert_eq!(
+            (frk_1.kind, frk_1.status),
+            (TaskKind::Epic, TaskStatus::Accepted)
+        );
+        let frk_2 = harness.row("FRK-2");
+        assert_eq!(frk_2.parent, Some(epic.clone()));
+        assert_eq!(frk_2.status, TaskStatus::Accepted);
+        assert!(!frk_2.awaiting_integration);
+        assert!(
+            git_output_in(
+                &harness.project.repo.path,
+                &["ls-tree", "--name-only", "main"]
+            )
+            .lines()
+            .any(|path| path == "done.txt"),
+            "main holds done.txt"
+        );
+        let started = sessions_with_tasks(&harness);
+        let expected: Vec<(SessionStartedBodyPurpose, String, String)> = [
+            (SessionStartedBodyPurpose::Triage, "pm", "FRK-1"),
+            (SessionStartedBodyPurpose::Refine, "pm", "FRK-1"),
+            (SessionStartedBodyPurpose::Refine, "pm", "FRK-1"),
+            (SessionStartedBodyPurpose::Plan, "pm", "FRK-1"),
+            (SessionStartedBodyPurpose::Plan, "pm", "FRK-2"),
+            (SessionStartedBodyPurpose::Implement, "dev-a", "FRK-2"),
+            (SessionStartedBodyPurpose::Verify, "dev-b", "FRK-2"),
+            (SessionStartedBodyPurpose::Verify, "pm", "FRK-2"),
+            (SessionStartedBodyPurpose::Plan, "pm", "FRK-1"),
+            (SessionStartedBodyPurpose::Verify, "pm", "FRK-1"),
+        ]
+        .into_iter()
+        .map(|(purpose, agent, task)| (purpose, agent.to_string(), task.to_string()))
+        .collect();
+        assert_eq!(started, expected);
+        assert_eq!(
+            milestones(&harness),
+            [
+                "request.triaged",
+                "FRK-1 draft -> refining",
+                "question.asked",
+                "question.answered",
+                "FRK-1 refining -> escalated",
+                "escalation.raised approval",
+                "FRK-1 escalated -> ready",
+                "human.accepted contract",
+                "FRK-1 ready -> assigned",
+                "FRK-1 assigned -> in_progress",
+                "FRK-2 created",
+                "FRK-2 integrated",
+                "FRK-1 in_progress -> verifying",
+                "FRK-1 C1 run by the governor",
+                "human.accepted result",
+                "FRK-1 verifying -> accepted",
+            ]
+        );
+        assert!(
+            harness.events(&[EventKind::ContractEvaluated]).iter().all(
+                |event| matches!(&event.body, EventBody::ContractEvaluated(body) if body.passed)
+            ),
+            "no contract failed the Definition of Ready"
+        );
+        assert_eq!(adapter.transcripts_left(), 0);
     }
 }
