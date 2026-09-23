@@ -68,6 +68,9 @@ pub struct TransitionAsk {
     pub permission_denied: bool,
     /// The session the request came from, when it came from one.
     pub session_id: Option<String>,
+    /// Why Farik could not run one of the task's criteria for its reviewer, for a reason that is
+    /// not the work's: the words of the governor's escalation (5.4).
+    pub criterion_unrunnable: Option<String>,
 }
 
 /// The governor's answer, which is recorded either way.
@@ -291,8 +294,9 @@ impl Transitions {
     }
 
     /// The gate that opened an escalation, and the words it was about when there are any: the
-    /// rejection's reasons, or the blocker's description, which for `blocked -> escalated` (asked
-    /// by the governor with an empty ask) is read from the task's last move into `blocked`.
+    /// rejection's reasons, the blocker's description, which for `blocked -> escalated` (asked by
+    /// the governor with an empty ask) is read from the task's last move into `blocked`, or why
+    /// Farik could not run a criterion.
     fn escalation_detail(
         &self,
         request: &TransitionRequest,
@@ -308,7 +312,8 @@ impl Transitions {
                 ask.blocker
                     .as_ref()
                     .map(|blocker| blocker.description.clone())
-            });
+            })
+            .or_else(|| ask.criterion_unrunnable.clone());
         if words.is_none() && decision.from == TaskStatus::Blocked {
             let history = self.log.read(&EventQuery {
                 task_id: Some(request.task_id.clone()),
@@ -467,6 +472,7 @@ impl Transitions {
             rejection: ask.rejection.clone(),
             budget,
             permission_denied: ask.permission_denied,
+            criterion_unrunnable: ask.criterion_unrunnable.is_some(),
             contract,
         })
     }
@@ -2019,6 +2025,54 @@ mod tests {
         };
         assert_eq!(escalation.reason, EscalationRaisedBodyReason::BlockerAge);
         assert_eq!(escalation.detail, "blocked_age: no key");
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn escalates_a_task_whose_criterion_farik_could_not_run() {
+        let project = Project::new("unrunnable-escalation", a_team(|_| {}), at(9));
+        project.file("FRK-1", |_| {});
+        project.created("FRK-1", "assigned");
+        project.moved(
+            "FRK-1",
+            "assigned",
+            "in_progress",
+            &json!({ "assignee": "dev-a", "reviewer": "dev-b" }),
+            at(9),
+        );
+        let escalating = a_request(
+            "FRK-1",
+            TaskStatus::Escalated,
+            TransitionActor::Governor,
+            None,
+        );
+        let outcome = project.ask(&escalating, &TransitionAsk::default());
+        assert!(
+            matches!(outcome, TransitionOutcome::Refused(_)),
+            "nothing to escalate: {outcome:?}"
+        );
+        let outcome = project.ask(
+            &escalating,
+            &TransitionAsk {
+                criterion_unrunnable: Some("C1: git could not read the diff".to_string()),
+                ..TransitionAsk::default()
+            },
+        );
+        assert!(
+            matches!(outcome, TransitionOutcome::Moved(_)),
+            "{outcome:?}"
+        );
+
+        let escalations = project.events("FRK-1", &[EventKind::EscalationRaised]);
+        let escalation = escalation_body(&escalations[0]);
+        assert_eq!(
+            escalation.reason,
+            EscalationRaisedBodyReason::ExplicitRequest
+        );
+        assert_eq!(
+            escalation.detail,
+            "governor_escalation: C1: git could not read the diff"
+        );
     }
 
     #[test]

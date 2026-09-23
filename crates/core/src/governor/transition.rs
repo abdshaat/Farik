@@ -108,6 +108,9 @@ pub struct TransitionContext {
     pub budget: BudgetState,
     /// Whether a permission was denied on an action the task requires.
     pub permission_denied: bool,
+    /// Whether Farik could not run one of the task's criteria for its reviewer, for a reason that
+    /// is not the work's (5.4): the task goes to the human rather than back to its assignee.
+    pub criterion_unrunnable: bool,
 }
 
 /// What the runtime must record along with the move.
@@ -390,7 +393,7 @@ fn check_gate(gate: GateId, actor: TransitionActor, context: &TransitionContext)
         ),
         GateId::GovernorEscalation => {
             open_or(governor_escalation_reason(context).is_some(), || {
-                "no budget whose consequence is escalation is exhausted and no permission was denied, so the governor has nothing to escalate"
+                "no budget whose consequence is escalation is exhausted, no permission was denied, and Farik ran every criterion it tried, so the governor has nothing to escalate"
                     .to_string()
             })
         }
@@ -541,8 +544,10 @@ fn rejection_outcome(contract: &TaskContract) -> RejectionOutcome {
 }
 
 /// Why the governor's own `any -> escalated` row is open, or `None` when it is not. The task's
-/// sessions are their own reason (5.7); every other exhausted budget is `budget`. A user's `stop`
-/// reaches the table as the human's own row instead, which needs no gate.
+/// sessions are their own reason (5.7); every other exhausted budget is `budget`; then a denied
+/// permission; then a criterion Farik could not run for the reviewer, which asks the human and so
+/// is `explicit_request`. A user's `stop` reaches the table as the human's own row instead, which
+/// needs no gate.
 fn governor_escalation_reason(context: &TransitionContext) -> Option<EscalationReason> {
     for exhausted in check_budgets(&context.budget) {
         if exhausted.consequence != BudgetConsequence::EscalateTask {
@@ -564,6 +569,9 @@ fn governor_escalation_reason(context: &TransitionContext) -> Option<EscalationR
     }
     if context.permission_denied {
         return Some(EscalationReason::Permission);
+    }
+    if context.criterion_unrunnable {
+        return Some(EscalationReason::ExplicitRequest);
     }
     None
 }
@@ -745,6 +753,7 @@ mod tests {
             }),
             budget: a_budget(),
             permission_denied: false,
+            criterion_unrunnable: false,
         }
     }
 
@@ -1520,7 +1529,7 @@ mod tests {
         let mut context = a_context();
         let request = ask(TaskStatus::Escalated, A::Governor, None);
         let nothing_to_escalate =
-            "no budget whose consequence is escalation is exhausted and no permission was denied, so the governor has nothing to escalate"
+            "no budget whose consequence is escalation is exhausted, no permission was denied, and Farik ran every criterion it tried, so the governor has nothing to escalate"
                 .to_string();
         assert_eq!(
             one_gate(&request, &context),
@@ -1587,6 +1596,19 @@ mod tests {
         assert_eq!(
             effects(&request, &context),
             [TransitionEffect::RaiseEscalation(Why::Permission)]
+        );
+        // A permission is read before a criterion Farik could not run.
+        context.criterion_unrunnable = true;
+        assert_eq!(
+            effects(&request, &context),
+            [TransitionEffect::RaiseEscalation(Why::Permission)]
+        );
+        // And a criterion Farik could not run for the reviewer, for a reason that is not the
+        // work's (5.4): Farik asks the human, which is an explicit request.
+        context.permission_denied = false;
+        assert_eq!(
+            effects(&request, &context),
+            [TransitionEffect::RaiseEscalation(Why::ExplicitRequest)]
         );
     }
 
