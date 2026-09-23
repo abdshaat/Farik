@@ -28,6 +28,7 @@ use crate::transitions::TransitionError;
 pub(crate) mod fixtures;
 mod integrate;
 mod messages;
+mod recover;
 mod rules;
 mod session;
 mod verify;
@@ -201,6 +202,17 @@ pub enum IntegrationOutcome {
     },
 }
 
+/// What `recover` found and did.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RecoveryReport {
+    /// Sessions the log shows started and never ended, now recorded as ended `aborted`.
+    pub sessions_interrupted: u32,
+    /// Finished tasks whose worktrees and sandboxes were removed.
+    pub worktrees_removed: u32,
+    /// Tasks `in_progress`, which the next ticks resume.
+    pub tasks_resumed: u32,
+}
+
 /// Farik running a project's team. ponytail: one session at a time, a session pool when a team
 /// outgrows a WIP limit of one.
 pub struct Orchestrator {
@@ -265,6 +277,20 @@ impl Orchestrator {
         task_id: &TaskId,
     ) -> Result<IntegrationOutcome, OrchestratorError> {
         integrate::integrate(self, task_id).await
+    }
+
+    /// Picks up a run that was killed (5.15), before the first tick: every session the log shows
+    /// started and not ended is recorded as ended `aborted`, "interrupted", and, when it has no
+    /// cost, as costing nothing, so that it counts against its task's sessions; every accepted or
+    /// cancelled task's worktrees and sandboxes left behind are removed. Tasks in progress are
+    /// left to the tick, which resumes each in a sandbox made afresh. Synchronous, because it runs
+    /// git and Docker: a caller on an async runtime runs it under `spawn_blocking`.
+    ///
+    /// # Errors
+    ///
+    /// When the log, the files, git, a sandbox, or a cost cannot be read or recorded.
+    pub fn recover(&self) -> Result<RecoveryReport, OrchestratorError> {
+        recover::recover(self)
     }
 
     /// Stops `run_until_idle` before its next tick. A session already running runs to its end.
