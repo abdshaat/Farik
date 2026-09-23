@@ -7,6 +7,8 @@ pub mod cost;
 pub mod criteria;
 /// Commands run on an agent's behalf, and what came of them.
 pub mod exec;
+/// A session's system prompt, assembled in one fixed order.
+pub mod prompt;
 /// Sessions replayed from recorded transcripts.
 pub mod recorded;
 /// Where a task's commands run: a container per task, or the host in no-sandbox mode.

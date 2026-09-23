@@ -85,7 +85,7 @@ Consumes: Task 1's writers; `RoleDefinition`, `FarikTool`
 - `closes_with_the_purposes_instruction` — `This session` for `implement` names `farik_request_transition` and `farik_declare_blocked`; for `triage`, `farik_triage_request`; for `verify`, `rejected` and `accepted` and the words `only if a criterion failed`; every purpose has an entry.
 - `writes_the_contract_as_the_files_write_it` — the contract section's body, its `<untrusted>` wrapper stripped (the fixture holds no `</untrusted`), read with `yaml_value` and `validate_contract`, is the same contract.
 
-- [ ] `feat(runtime): assemble a session's system prompt in a fixed order`
+- [x] `feat(runtime): assemble a session's system prompt in a fixed order`
 
 ### Task 3: untrusted content and caps
 
