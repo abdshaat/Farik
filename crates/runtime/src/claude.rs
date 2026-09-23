@@ -1362,9 +1362,11 @@ mod tests {
             check_version("2.0.999 (Claude Code)"),
             Err(RuntimeError::VersionTooOld { .. })
         ));
-        assert!(matches!(
-            check_version("not a version"),
-            Err(RuntimeError::Spawn { .. })
-        ));
+        for text in ["not a version", "2.1.280.1 (Claude Code)", "2.1", "2.1.x"] {
+            assert!(
+                matches!(check_version(text), Err(RuntimeError::Spawn { .. })),
+                "{text}"
+            );
+        }
     }
 }

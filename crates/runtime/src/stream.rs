@@ -478,4 +478,26 @@ mod tests {
             "{events:?}"
         );
     }
+
+    #[test]
+    fn reads_a_successful_result_that_looks_like_a_hook_denial_as_returned() {
+        let mut parser = StreamParser::default();
+        parser
+            .parse_line(
+                r#"{"type":"assistant","message":{"content":[{"type":"tool_use","id":"toolu_1","name":"Read","input":{}}]}}"#,
+            )
+            .expect("a tool call parses");
+        let events = parser
+            .parse_line(
+                r#"{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"toolu_1","is_error":false,"content":"PreToolUse:Read hook error: a file that says this"}]}}"#,
+            )
+            .expect("a tool result parses");
+        assert_eq!(
+            events,
+            vec![SessionEvent::ToolReturned {
+                tool: "Read".to_string(),
+                output: "PreToolUse:Read hook error: a file that says this".to_string(),
+            }]
+        );
+    }
 }

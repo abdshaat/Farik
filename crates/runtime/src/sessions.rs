@@ -110,13 +110,14 @@ mod tests {
     use std::path::Path;
 
     use chrono::{DateTime, Utc};
+    use farik_core::team::Effort;
     use farik_protocol::clock::FixedClock;
     use farik_protocol::event::{EventBody, EventIds, FarikEvent, SessionEndedBodyReason};
     use farik_store::{EventLog, EventQuery, IN_MEMORY, open_event_log};
 
     use super::{record_session_ended, record_session_started};
     use crate::recorded::fixtures::a_session_spec;
-    use crate::session::{EndReason, SessionSpec};
+    use crate::session::{EndReason, SessionPurpose, SessionSpec};
 
     fn at(text: &str) -> DateTime<Utc> {
         text.parse().expect("a fixed timestamp")
@@ -189,5 +190,62 @@ mod tests {
             }
             other => panic!("expected session.ended, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn writes_every_purpose_effort_and_reason_as_its_wire_name() {
+        let log = a_log();
+        let clock = FixedClock::new(at("2026-09-22T10:00:00Z"));
+        let purposes = [
+            (SessionPurpose::Triage, "triage"),
+            (SessionPurpose::Refine, "refine"),
+            (SessionPurpose::Plan, "plan"),
+            (SessionPurpose::Implement, "implement"),
+            (SessionPurpose::Verify, "verify"),
+            (SessionPurpose::Ceremony, "ceremony"),
+            (SessionPurpose::Conversation, "conversation"),
+        ];
+        let efforts = [
+            (Effort::Low, "low"),
+            (Effort::Medium, "medium"),
+            (Effort::High, "high"),
+        ];
+        let reasons = [
+            (EndReason::Completed, "completed"),
+            (EndReason::Aborted, "aborted"),
+            (EndReason::Limit, "limit"),
+            (EndReason::Error, "error"),
+        ];
+        let mut expected = Vec::new();
+        for (index, (purpose, purpose_wire)) in purposes.into_iter().enumerate() {
+            let (effort, effort_wire) = efforts[index % efforts.len()];
+            let (reason, reason_wire) = reasons[index % reasons.len()];
+            let spec = SessionSpec {
+                purpose,
+                effort,
+                ..spec()
+            };
+            record_session_started(&log, &spec, &ids(&spec), &clock).expect("recorded");
+            record_session_ended(&log, &spec.session_id, reason, "", &ids(&spec), &clock)
+                .expect("recorded");
+            expected.push((purpose_wire, effort_wire, reason_wire));
+        }
+        let events = everything(&log);
+        let written: Vec<(String, String, String)> = events
+            .chunks(2)
+            .map(|pair| match (&pair[0].body, &pair[1].body) {
+                (EventBody::SessionStarted(started), EventBody::SessionEnded(ended)) => (
+                    started.purpose.to_string(),
+                    started.effort.to_string(),
+                    ended.reason.to_string(),
+                ),
+                other => panic!("expected a start and an end, got {other:?}"),
+            })
+            .collect();
+        let expected: Vec<(String, String, String)> = expected
+            .into_iter()
+            .map(|(a, b, c)| (a.to_string(), b.to_string(), c.to_string()))
+            .collect();
+        assert_eq!(written, expected);
     }
 }

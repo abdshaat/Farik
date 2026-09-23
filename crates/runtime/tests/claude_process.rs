@@ -568,3 +568,118 @@ async fn gives_a_subscription_session_no_api_key_from_its_base() {
     assert!(env.contains("CLAUDE_CODE_OAUTH_TOKEN=the-token"), "{env}");
     assert!(!env.contains("ANTHROPIC_API_KEY"), "{env}");
 }
+
+const A_RESULT: &str = r#"{"type":"result","subtype":"success","result":"done","usage":{"input_tokens":1,"output_tokens":1,"cache_read_input_tokens":0,"cache_creation_input_tokens":0}}"#;
+
+#[tokio::test]
+async fn ends_with_an_error_and_kills_the_group_on_a_line_it_cannot_read() {
+    let fake = Fake::new(
+        "unreadable-line",
+        "sleep 60 &\necho $! > \"$dir/sleep\"\necho 'not json'\nwait",
+    );
+    let mut handle = fake
+        .adapter()
+        .start_session(fake.spec())
+        .expect("the session starts");
+    let sleep = fake.wait_for("sleep").await;
+    match next_within(handle.as_mut(), Duration::from_secs(5)).await {
+        Some(SessionEvent::Ended {
+            reason: EndReason::Error,
+            detail,
+        }) => assert!(detail.contains("not JSON"), "{detail}"),
+        other => panic!("expected an error end, got {other:?}"),
+    }
+    assert!(gone_within(&sleep, Duration::from_secs(2)).await);
+}
+
+#[tokio::test]
+async fn aborts_a_session_whose_handle_is_dropped() {
+    let fake = Fake::new("dropped", "sleep 60 &\necho $! > \"$dir/sleep\"\nwait");
+    let handle = fake
+        .adapter()
+        .start_session(fake.spec())
+        .expect("the session starts");
+    let sleep = fake.wait_for("sleep").await;
+    drop(handle);
+    assert!(gone_within(&sleep, Duration::from_secs(2)).await);
+}
+
+#[tokio::test]
+async fn kills_a_program_that_does_not_exit_within_its_grace_after_its_result() {
+    let fake = Fake::new("lingers", &format!("echo '{A_RESULT}'\nsleep 30"));
+    let mut handle = fake
+        .adapter()
+        .start_session(fake.spec())
+        .expect("the session starts");
+    let pid = fake.wait_for("pid").await;
+    let events = tokio::time::timeout(Duration::from_secs(8), drain(handle.as_mut()))
+        .await
+        .expect("the channel closes once the grace is over");
+    assert!(
+        matches!(
+            events.last(),
+            Some(SessionEvent::Ended {
+                reason: EndReason::Completed,
+                ..
+            })
+        ),
+        "{events:?}"
+    );
+    assert!(gone_within(&pid, Duration::from_secs(1)).await);
+}
+
+#[tokio::test]
+async fn kills_what_the_program_left_behind_after_its_result() {
+    let fake = Fake::new(
+        "leaves-a-child",
+        &format!("sleep 30 >/dev/null 2>&1 &\necho $! > \"$dir/sleep\"\necho '{A_RESULT}'\nexit 0"),
+    );
+    let mut handle = fake
+        .adapter()
+        .start_session(fake.spec())
+        .expect("the session starts");
+    tokio::time::timeout(Duration::from_secs(4), drain(handle.as_mut()))
+        .await
+        .expect("the session ends");
+    let sleep = fake.wait_for("sleep").await;
+    assert!(
+        gone_within(&sleep, Duration::from_secs(1)).await,
+        "the program's child outlived its session"
+    );
+}
+
+#[tokio::test]
+async fn keeps_the_last_four_kib_of_standard_error() {
+    let fake = Fake::new(
+        "stderr-tail",
+        "printf HEAD >&2\nhead -c 8192 /dev/zero | tr '\\0' x >&2\nprintf TAIL >&2\nexit 1",
+    );
+    let mut handle = fake
+        .adapter()
+        .start_session(fake.spec())
+        .expect("the session starts");
+    let events = tokio::time::timeout(Duration::from_secs(5), drain(handle.as_mut()))
+        .await
+        .expect("the session ends");
+    match events.last() {
+        Some(SessionEvent::Ended {
+            reason: EndReason::Error,
+            detail,
+        }) => {
+            assert!(detail.ends_with("TAIL"), "{detail}");
+            assert!(!detail.contains("HEAD"), "{detail}");
+            let kept = detail.chars().rev().take_while(|c| *c != ' ').count();
+            assert_eq!(kept, 4_096, "{detail}");
+        }
+        other => panic!("expected an error end, got {other:?}"),
+    }
+}
+
+#[test]
+fn refuses_to_start_a_session_outside_a_tokio_runtime() {
+    let fake = Fake::new("no-runtime", "exit 0");
+    match fake.adapter().start_session(fake.spec()) {
+        Err(RuntimeError::Spawn { detail }) => assert!(detail.contains("tokio"), "{detail}"),
+        other => panic!("expected a refusal, got {:?}", other.map(|_| ())),
+    }
+}
