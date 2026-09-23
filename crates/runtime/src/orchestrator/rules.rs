@@ -558,8 +558,10 @@ mod tests {
     use serde_json::json;
 
     use crate::claude::allowed_builtins;
+    use crate::exec::ExecError;
     use crate::orchestrator::fixtures::{
-        CountingSandboxFactory, ExecutorWitness, Harness, UsageThenWaitAdapter,
+        BrokenSandboxFactory, CountingSandboxFactory, ExecutorWitness, Harness,
+        UsageThenWaitAdapter,
     };
     use crate::orchestrator::{Orchestrator, OrchestratorError, TickReport};
     use crate::recorded::fixtures::{
@@ -1684,6 +1686,134 @@ mod tests {
             ]
         );
         assert_eq!(reviews(&harness).len(), 1);
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn runs_the_criteria_in_a_fresh_sandbox() {
+        let harness = Harness::new("orch-verify-fresh-sandbox", |_| {});
+        harness.assigned("FRK-1", "dev-a", "dev-b");
+        let adapter = harness.recorded(vec![
+            implement_finishes_frk_1(),
+            review_writes_note(),
+            accept_frk_1(),
+        ]);
+        let sandboxes = Arc::new(CountingSandboxFactory::default());
+        let orchestrator = harness.orchestrator_with(adapter.clone(), sandboxes.clone());
+
+        orchestrator.tick().await.expect("the task starts");
+        orchestrator
+            .tick()
+            .await
+            .expect("the implement session runs");
+        assert_eq!(sandboxes.created("FRK-1"), 1);
+        orchestrator.tick().await.expect("the review runs");
+        // Not the assignee's: whatever its commands left outside the worktree is gone.
+        assert_eq!(sandboxes.created("FRK-1"), 2);
+        orchestrator
+            .tick()
+            .await
+            .expect("the Product Manager's session runs");
+
+        assert_eq!(sandboxes.created("FRK-1"), 2);
+        assert_eq!(harness.row("FRK-1").status, TaskStatus::Accepted);
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn records_a_criterion_whose_container_went_as_failed() {
+        let harness = Harness::new("orch-verify-container-gone", |_| {});
+        harness.verifying_with("FRK-1", true, true, |wire| {
+            push_criterion(
+                wire,
+                json!({
+                    "id": "C2",
+                    "text": "done.txt is still there.",
+                    "verification": {
+                        "method": "command",
+                        "command": "test -f done.txt",
+                        "expect": { "exit_code": 0 }
+                    }
+                }),
+            );
+        });
+        let adapter = harness.recorded(vec![review_writes_note()]);
+        let sandboxes = Arc::new(BrokenSandboxFactory::new(ExecError::ContainerGone, 1));
+        let orchestrator = harness.orchestrator_with(adapter.clone(), sandboxes.clone());
+
+        let report = orchestrator.tick().await.expect("the tick runs");
+
+        assert_eq!(acted_on(&report), Some("FRK-1"), "{report:?}");
+        assert_eq!(
+            governor_runs(&harness),
+            vec![("C1".to_string(), false), ("C2".to_string(), true)]
+        );
+        let evidence: Vec<String> = harness
+            .events(&[EventKind::CriterionRecorded])
+            .iter()
+            .filter_map(|event| match &event.body {
+                EventBody::CriterionRecorded(body) if body.criterion_id == "C1" => {
+                    Some(body.evidence.clone())
+                }
+                _ => None,
+            })
+            .collect();
+        assert!(
+            evidence[0].contains("the task's container is no longer running"),
+            "{evidence:?}"
+        );
+        // C2 ran in a sandbox made after C1's went.
+        assert_eq!(sandboxes.created("FRK-1"), 2);
+        assert_eq!(
+            sessions(&adapter),
+            vec![("dev-b".to_string(), SessionPurpose::Verify)]
+        );
+        orchestrator.tick().await.expect("the rejection is filed");
+        assert_eq!(harness.row("FRK-1").status, TaskStatus::Rejected);
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn escalates_a_task_whose_criterion_farik_could_not_run() {
+        let harness = Harness::new("orch-verify-unrunnable", |wire| {
+            wire["policy"]["wip_limit_per_agent"] = json!(2);
+        });
+        harness.file("FRK-1", "ready", |wire| {
+            wire["budget"]["max_sessions"] = json!(1);
+        });
+        harness.verifying("FRK-2");
+        let adapter = harness.recorded(vec![plan_assigns_frk_1()]);
+        let sandboxes = Arc::new(BrokenSandboxFactory::new(
+            ExecError::SpawnFailed {
+                detail: "no shell".to_string(),
+            },
+            u32::MAX,
+        ));
+        let orchestrator = harness.orchestrator_with(adapter.clone(), sandboxes);
+
+        run_until_idle_within_ten_seconds(orchestrator).expect("the run is idle");
+
+        assert_eq!(harness.row("FRK-2").status, TaskStatus::Escalated);
+        assert_eq!(
+            escalation_reasons(&harness),
+            vec![EscalationRaisedBodyReason::ExplicitRequest]
+        );
+        let escalations = harness.events(&[EventKind::EscalationRaised]);
+        let EventBody::EscalationRaised(escalation) = &escalations[0].body else {
+            panic!("an escalation.raised");
+        };
+        assert!(escalation.detail.contains("C1"), "{}", escalation.detail);
+        assert!(
+            escalation.detail.contains("no shell"),
+            "{}",
+            escalation.detail
+        );
+        assert!(governor_runs(&harness).is_empty());
+        // The run went on to the ready task.
+        assert_eq!(
+            sessions(&adapter),
+            vec![("pm".to_string(), SessionPurpose::Plan)]
+        );
     }
 
     /// Usage past a session's 100 input tokens and under every dollar budget.

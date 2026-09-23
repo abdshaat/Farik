@@ -23,7 +23,8 @@ use super::messages::{ReviewBrief, accept_message, review_message};
 use super::rules::{Room, acted, active, room};
 use super::session::{SessionAsk, run_session};
 use super::{Orchestrator, OrchestratorDeps, OrchestratorError, TickReport, worktree};
-use crate::criteria::{CriterionOutcome, NewTestsInput, run_criteria};
+use crate::criteria::{CriterionError, CriterionOutcome, NewTestsInput, run_criteria};
+use crate::exec::ExecError;
 use crate::session::SessionPurpose;
 use crate::transitions::{
     TransitionAsk, TransitionError, TransitionOutcome, integration_branch, refusal_details,
@@ -57,7 +58,10 @@ pub(super) async fn verifying(
         return Ok(None);
     };
     let contract = deps.tools.files.read_contract(&row.task_id)?;
-    let ran = run_what_farik_runs(orchestrator, team, &contract, &history, since).await?;
+    let ran = match run_what_farik_runs(orchestrator, team, &contract, &history, since).await? {
+        FarikRan::Criteria(ran) => ran,
+        FarikRan::Unrunnable(why) => return escalate(deps, team, row, &why),
+    };
     let context = context(deps, team, &row.task_id)?;
     let answers = reviewer_results(&context);
     let Some(review_note) = context.done.review_note.clone() else {
@@ -112,17 +116,28 @@ pub(super) async fn verifying(
     .await
 }
 
+/// What Farik's runs for the reviewer came to.
+enum FarikRan {
+    /// This many criteria were run and recorded.
+    Criteria(usize),
+    /// One could not be run, for a reason that is not the work's, in these words.
+    Unrunnable(String),
+}
+
 /// Runs, one at a time, each `command`, `test`, or `artifact` criterion with no governor's result
-/// since the task last moved into `verifying`, in the task's sandbox with the base-branch check,
-/// and records each result as the reviewer's run before the next one runs, so that a run killed
-/// half way is taken up at the first criterion it did not record. Says how many it ran.
+/// since the task last moved into `verifying`, with the base-branch check, and records each result
+/// as the reviewer's run before the next one runs, so that a run killed half way is taken up at the
+/// first criterion it did not record. The first runs in a sandbox made for them rather than the
+/// assignee's, so that nothing the assignee's commands left outside the worktree reaches them (5.4
+/// item 1). A criterion whose container went is recorded failed, with the error as its evidence,
+/// and the next runs in a new sandbox; any other error stops the runs, to be escalated.
 async fn run_what_farik_runs(
     orchestrator: &Orchestrator,
     team: &Team,
     contract: &TaskContract,
     history: &[FarikEvent],
     since: u64,
-) -> Result<usize, OrchestratorError> {
+) -> Result<FarikRan, OrchestratorError> {
     let deps = &orchestrator.deps;
     let pending: Vec<&ExitCriterion> = contract
         .exit_criteria
@@ -140,14 +155,14 @@ async fn run_what_farik_runs(
         })
         .collect();
     if pending.is_empty() {
-        return Ok(0);
+        return Ok(FarikRan::Criteria(0));
     }
-    let sandbox = orchestrator.sandbox_for(&contract.id, team)?;
+    orchestrator.forget_sandbox(&contract.id);
     let base = integration_branch(team, &deps.tools.git)?;
     for criterion in &pending {
         let mut alone = contract.clone();
         alone.exit_criteria = vec![(*criterion).clone()];
-        let sandbox = Arc::clone(&sandbox);
+        let sandbox = orchestrator.sandbox_for(&contract.id, team)?;
         let factory = Arc::clone(&deps.sandboxes);
         let root = deps.tools.git.root().to_path_buf();
         let project_id = deps.tools.ids.project_id.clone();
@@ -166,26 +181,89 @@ async fn run_what_farik_runs(
             run_criteria(&alone, sandbox.as_ref(), RunBy::Reviewer, Some(&input))
         })
         .await
-        .unwrap_or_else(|error| std::panic::resume_unwind(error.into_panic()))?;
-        for outcome in outcomes {
-            if let CriterionOutcome::Result(result) = outcome {
-                append(
-                    deps,
-                    &contract.id,
-                    None,
-                    None,
-                    EventBody::CriterionRecorded(CriterionRecordedBody {
-                        criterion_id: result.criterion_id,
-                        passed: result.passed,
-                        evidence: result.evidence,
-                        run_by: CriterionRecordedBodyRunBy::Reviewer,
-                        recorded_by: GOVERNOR.to_string(),
-                    }),
-                )?;
+        .unwrap_or_else(|error| std::panic::resume_unwind(error.into_panic()));
+        let results = match outcomes {
+            Ok(outcomes) => outcomes
+                .into_iter()
+                .filter_map(|outcome| match outcome {
+                    CriterionOutcome::Result(result) => Some(result),
+                    CriterionOutcome::NeedsReview { .. } | CriterionOutcome::NeedsHuman { .. } => {
+                        None
+                    }
+                })
+                .collect(),
+            Err(error) if fails_the_criterion(&error) => {
+                orchestrator.forget_sandbox(&contract.id);
+                vec![CriterionResult {
+                    criterion_id: criterion.id.to_string(),
+                    passed: false,
+                    evidence: error.to_string(),
+                    run_by: RunBy::Reviewer,
+                }]
             }
+            Err(error) => {
+                return Ok(FarikRan::Unrunnable(format!(
+                    "Farik could not run {} for the reviewer: {error}",
+                    criterion.id.as_str()
+                )));
+            }
+        };
+        for result in results {
+            append(
+                deps,
+                &contract.id,
+                None,
+                None,
+                EventBody::CriterionRecorded(CriterionRecordedBody {
+                    criterion_id: result.criterion_id,
+                    passed: result.passed,
+                    evidence: result.evidence,
+                    run_by: CriterionRecordedBodyRunBy::Reviewer,
+                    recorded_by: GOVERNOR.to_string(),
+                }),
+            )?;
         }
     }
-    Ok(pending.len())
+    Ok(FarikRan::Criteria(pending.len()))
+}
+
+/// Whether a criterion Farik could not run is recorded failed rather than escalated: only when the
+/// task's container went, which the work's own commands can cause and a new sandbox answers.
+/// Git, the base-branch sandbox, a file written into the base worktree, or a command that would not
+/// start are Farik's to fix, not the assignee's, so a failure would send the task back to someone
+/// who cannot fix it.
+fn fails_the_criterion(error: &CriterionError) -> bool {
+    matches!(error, CriterionError::Exec(ExecError::ContainerGone))
+}
+
+/// Escalates the task as the governor, in the words of what Farik could not run; a refusal passes
+/// the task over, and rule 5 does not ask again until it moves.
+fn escalate(
+    deps: &OrchestratorDeps,
+    team: &Team,
+    row: &TaskProjection,
+    why: &str,
+) -> Result<Option<TickReport>, OrchestratorError> {
+    let outcome = deps.tools.transitions.request(
+        &TransitionRequest {
+            task_id: row.task_id.clone(),
+            to: TaskStatus::Escalated,
+            actor: TransitionActor::Governor,
+            agent_id: None,
+        },
+        &TransitionAsk {
+            criterion_unrunnable: Some(why.to_string()),
+            ..TransitionAsk::default()
+        },
+        team,
+    )?;
+    Ok(match outcome {
+        TransitionOutcome::Moved(_) => Some(TickReport::Acted {
+            task_id: row.task_id.clone(),
+            what: format!("escalated it: {why}"),
+        }),
+        TransitionOutcome::Refused(_) => None,
+    })
 }
 
 /// The reviewer's `verify` session, in the task's worktree with the read tier's built-ins and no
@@ -494,4 +572,37 @@ fn append(
     let appended = tools.log.append(&event)?;
     tools.projections.apply(&appended)?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use farik_store::GitError;
+
+    use super::fails_the_criterion;
+    use crate::criteria::CriterionError;
+    use crate::exec::ExecError;
+    use crate::sandbox::SandboxError;
+
+    #[test]
+    fn fails_a_criterion_only_when_its_container_went() {
+        assert!(fails_the_criterion(&CriterionError::Exec(
+            ExecError::ContainerGone
+        )));
+        for escalated in [
+            CriterionError::Exec(ExecError::SpawnFailed {
+                detail: "no shell".to_string(),
+            }),
+            CriterionError::Exec(ExecError::OutsideWorkspace {
+                cwd: "/".to_string(),
+            }),
+            CriterionError::Git(GitError::NotARepository),
+            CriterionError::Sandbox(SandboxError::DockerUnavailable),
+            CriterionError::Io {
+                path: "tests/a_test.sh".to_string(),
+                detail: "denied".to_string(),
+            },
+        ] {
+            assert!(!fails_the_criterion(&escalated), "{escalated:?}");
+        }
+    }
 }

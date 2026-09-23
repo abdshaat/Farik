@@ -7,6 +7,7 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use farik_core::contract::TaskId;
 use farik_core::pricing::Usage;
@@ -18,6 +19,7 @@ use tokio::sync::mpsc::{Receiver, Sender, channel};
 
 use super::{Orchestrator, OrchestratorDeps};
 use crate::daemon::{DaemonState, HookRequest, decide_pre_tool_use};
+use crate::exec::{ExecError, ExecResult, Executor};
 use crate::recorded::{RecordedAdapter, ToolRunner, Transcript};
 use crate::sandbox::host::HostSandboxFactory;
 use crate::sandbox::{Sandbox, SandboxError, SandboxFactory};
@@ -371,6 +373,84 @@ impl SandboxFactory for CountingSandboxFactory {
         worktree: &Path,
     ) -> Result<Box<dyn Sandbox>, SandboxError> {
         HostSandboxFactory.create_base(project_id, task_id, worktree)
+    }
+}
+
+/// A sandbox factory whose first `broken` sandboxes answer every command with `error`, and whose
+/// others are host sandboxes; it counts, as `CountingSandboxFactory` does, what it made.
+pub(crate) struct BrokenSandboxFactory {
+    error: ExecError,
+    broken: AtomicU32,
+    counting: CountingSandboxFactory,
+}
+
+impl BrokenSandboxFactory {
+    /// A factory whose first `broken` sandboxes fail every command with `error`.
+    pub(crate) fn new(error: ExecError, broken: u32) -> Self {
+        Self {
+            error,
+            broken: AtomicU32::new(broken),
+            counting: CountingSandboxFactory::default(),
+        }
+    }
+
+    /// How many sandboxes `create` made for `task`.
+    pub(crate) fn created(&self, task: &str) -> u32 {
+        self.counting.created(task)
+    }
+}
+
+impl SandboxFactory for BrokenSandboxFactory {
+    fn create(
+        &self,
+        project_id: &str,
+        task_id: &TaskId,
+        worktree: &Path,
+        network: bool,
+    ) -> Result<Box<dyn Sandbox>, SandboxError> {
+        let sandbox = self
+            .counting
+            .create(project_id, task_id, worktree, network)?;
+        let broken = self
+            .broken
+            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |left| {
+                left.checked_sub(1)
+            })
+            .is_ok();
+        if broken {
+            return Ok(Box::new(BrokenSandbox(self.error.clone())));
+        }
+        Ok(sandbox)
+    }
+
+    fn create_base(
+        &self,
+        project_id: &str,
+        task_id: &TaskId,
+        worktree: &Path,
+    ) -> Result<Box<dyn Sandbox>, SandboxError> {
+        HostSandboxFactory.create_base(project_id, task_id, worktree)
+    }
+}
+
+/// A sandbox that answers every command with its error.
+struct BrokenSandbox(ExecError);
+
+impl Executor for BrokenSandbox {
+    fn run(
+        &self,
+        _command: &str,
+        _cwd: &str,
+        _timeout: Duration,
+        _env: &BTreeMap<String, String>,
+    ) -> Result<ExecResult, ExecError> {
+        Err(self.0.clone())
+    }
+}
+
+impl Sandbox for BrokenSandbox {
+    fn discard(self: Box<Self>) -> Result<(), SandboxError> {
+        Ok(())
     }
 }
 
