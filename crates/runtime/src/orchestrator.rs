@@ -253,3 +253,157 @@ fn worktree(deps: &OrchestratorDeps, task_id: &TaskId) -> PathBuf {
         .join(".farik/local/worktrees")
         .join(task_id.as_str())
 }
+
+#[cfg(test)]
+mod tests {
+    use farik_core::contract::TaskStatus;
+    use farik_protocol::event::{
+        CriterionRecordedBodyRunBy, EventBody, EventKind, NoteWrittenBodyKind,
+        SessionStartedBodyPurpose,
+    };
+
+    use crate::orchestrator::fixtures::Harness;
+    use crate::recorded::fixtures::{
+        accept_frk_1, implement_finishes_frk_1, plan_assigns_frk_1, review_writes_note,
+    };
+
+    /// Each session started, as its purpose and its agent, in order.
+    fn sessions(harness: &Harness) -> Vec<(SessionStartedBodyPurpose, String)> {
+        harness
+            .events(&[EventKind::SessionStarted])
+            .iter()
+            .map(|event| match &event.body {
+                EventBody::SessionStarted(body) => (
+                    body.purpose,
+                    event.envelope.ids.agent_id.clone().unwrap_or_default(),
+                ),
+                other => panic!("a session.started, got {other:?}"),
+            })
+            .collect()
+    }
+
+    /// Each move, as `from -> to`, in order.
+    fn moves(harness: &Harness) -> Vec<String> {
+        harness
+            .events(&[EventKind::TaskTransitioned])
+            .iter()
+            .map(|event| match &event.body {
+                EventBody::TaskTransitioned(body) => format!("{} -> {}", body.from, body.to),
+                other => panic!("a task.transitioned, got {other:?}"),
+            })
+            .collect()
+    }
+
+    /// Each criterion result, as its id, its runner, and who recorded it, in order.
+    fn runs(harness: &Harness) -> Vec<(String, CriterionRecordedBodyRunBy, String)> {
+        harness
+            .events(&[EventKind::CriterionRecorded])
+            .iter()
+            .map(|event| match &event.body {
+                EventBody::CriterionRecorded(body) => (
+                    body.criterion_id.clone(),
+                    body.run_by,
+                    body.recorded_by.clone(),
+                ),
+                other => panic!("a criterion.recorded, got {other:?}"),
+            })
+            .collect()
+    }
+
+    /// Each note's kind, in order.
+    fn notes(harness: &Harness) -> Vec<NoteWrittenBodyKind> {
+        harness
+            .events(&[EventKind::NoteWritten])
+            .iter()
+            .map(|event| match &event.body {
+                EventBody::NoteWritten(body) => body.kind,
+                other => panic!("a note.written, got {other:?}"),
+            })
+            .collect()
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn takes_one_task_from_ready_to_accepted() {
+        let harness = Harness::new("orch-one-task", |_| {});
+        harness.ready("FRK-1");
+        let adapter = harness.recorded(vec![
+            plan_assigns_frk_1(),
+            implement_finishes_frk_1(),
+            review_writes_note(),
+            accept_frk_1(),
+        ]);
+        let orchestrator = harness.orchestrator(adapter.clone());
+
+        orchestrator
+            .run_until_idle()
+            .await
+            .expect("the run ends idle");
+
+        assert_eq!(harness.row("FRK-1").status, TaskStatus::Accepted);
+        let git = &harness.project.deps.git;
+        assert_eq!(
+            git.commit_count("main", "farik/FRK-1").expect("git counts"),
+            1
+        );
+        assert_eq!(
+            git.changed_paths("main", "farik/FRK-1").expect("git lists"),
+            vec!["done.txt".to_string()]
+        );
+        assert_eq!(
+            sessions(&harness),
+            vec![
+                (SessionStartedBodyPurpose::Plan, "pm".to_string()),
+                (SessionStartedBodyPurpose::Implement, "dev-a".to_string()),
+                (SessionStartedBodyPurpose::Verify, "dev-b".to_string()),
+                (SessionStartedBodyPurpose::Verify, "pm".to_string()),
+            ]
+        );
+        assert_eq!(
+            moves(&harness),
+            [
+                "ready -> assigned",
+                "assigned -> in_progress",
+                "in_progress -> verifying",
+                "verifying -> accepted",
+            ]
+        );
+        assert_eq!(
+            runs(&harness),
+            vec![
+                (
+                    "C1".to_string(),
+                    CriterionRecordedBodyRunBy::Assignee,
+                    "dev-a".to_string()
+                ),
+                (
+                    "C1".to_string(),
+                    CriterionRecordedBodyRunBy::Reviewer,
+                    "governor".to_string()
+                ),
+            ]
+        );
+        assert_eq!(
+            notes(&harness),
+            vec![NoteWrittenBodyKind::Completion, NoteWrittenBodyKind::Review]
+        );
+        let reviews = harness.events(&[EventKind::ReviewRecorded]);
+        assert!(
+            matches!(
+                &reviews[..],
+                [review] if matches!(&review.body, EventBody::ReviewRecorded(body) if body.passed)
+            ),
+            "{reviews:?}"
+        );
+        let costs = harness.events(&[EventKind::CostRecorded]);
+        assert_eq!(costs.len(), 4, "{costs:?}");
+        for cost in &costs {
+            assert_eq!(
+                cost.envelope.ids.task_id.as_ref().map(|task| task.as_str()),
+                Some("FRK-1")
+            );
+        }
+        assert_eq!(adapter.started().len(), 4);
+        assert_eq!(adapter.transcripts_left(), 0);
+    }
+}

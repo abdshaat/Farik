@@ -100,6 +100,12 @@ impl RecordedAdapter {
         locked(&self.started).clone()
     }
 
+    /// How many transcripts are still to be played.
+    #[must_use]
+    pub fn transcripts_left(&self) -> usize {
+        locked(&self.transcripts).len()
+    }
+
     /// Every text sent to a session, including the prompt of each resume, in order.
     #[must_use]
     pub fn sent(&self) -> Vec<String> {
@@ -318,6 +324,16 @@ mod tests {
             adapter.start_session(a_session_spec()),
             Err(RuntimeError::Spawn { .. })
         ));
+    }
+
+    #[test]
+    fn counts_the_transcripts_left_to_play() {
+        let adapter = RecordedAdapter::new(vec![reads_a_file(), write_denied()]);
+        assert_eq!(adapter.transcripts_left(), 2);
+        adapter
+            .start_session(a_session_spec())
+            .expect("a transcript is left");
+        assert_eq!(adapter.transcripts_left(), 1);
     }
 
     #[test]
