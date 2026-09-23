@@ -4,6 +4,7 @@
 //! and run by `cargo xtask check --integration`; the ones that find no daemon need only a
 //! temporary directory.
 
+use std::io::{Read, Write};
 use std::net::TcpListener;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -42,25 +43,29 @@ struct Ran {
 
 /// Runs `farik hook <which> --daemon <daemon_file>` with `input` on its standard input.
 fn hook(which: &str, daemon_file: &Path, input: &str) -> Ran {
+    hook_with(
+        which,
+        &daemon_file.display().to_string(),
+        std::env::temp_dir(),
+        Box::new(input.as_bytes()),
+    )
+}
+
+/// Runs `farik hook <which> --daemon <daemon>` in `cwd`, reading `stdin`.
+fn hook_with(which: &str, daemon: &str, cwd: PathBuf, stdin: Box<dyn Read + '_>) -> Ran {
     let mut out = Vec::new();
     let mut err = Vec::new();
     let code = {
         let mut io = CliIo {
-            stdin: Box::new(input.as_bytes()),
+            stdin,
             stdout: Box::new(&mut out),
             stderr: Box::new(&mut err),
-            cwd: std::env::temp_dir(),
+            cwd,
             clock: Box::new(FixedClock::new(at())),
         };
-        let arguments: Vec<String> = [
-            "farik",
-            "hook",
-            which,
-            "--daemon",
-            &daemon_file.display().to_string(),
-        ]
-        .map(ToString::to_string)
-        .to_vec();
+        let arguments: Vec<String> = ["farik", "hook", which, "--daemon", daemon]
+            .map(ToString::to_string)
+            .to_vec();
         run_cli(&arguments, &mut io)
     };
     Ran {
@@ -276,4 +281,132 @@ fn says_nothing_after_a_post_tool_use() {
         returned[0].envelope.ids.session_id.as_deref(),
         Some(SESSION)
     );
+}
+
+/// A listener on this machine that reads one request whole and answers it with `status` and
+/// `body`, and the thread that serves it, which panics if no request comes within ten seconds, so
+/// that a hook that never asks fails the test rather than hanging it.
+fn answering(status: &'static str, body: &'static str) -> (u16, std::thread::JoinHandle<()>) {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("a port");
+    let port = listener.local_addr().expect("an address").port();
+    listener.set_nonblocking(true).expect("the listener polls");
+    let server = std::thread::spawn(move || {
+        let deadline = Instant::now() + Duration::from_secs(10);
+        let mut stream = loop {
+            match listener.accept() {
+                Ok((stream, _)) => break stream,
+                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                    assert!(Instant::now() < deadline, "no request came");
+                    std::thread::sleep(Duration::from_millis(10));
+                }
+                Err(error) => panic!("the listener failed: {error}"),
+            }
+        };
+        stream.set_nonblocking(false).expect("the stream blocks");
+        let mut seen = Vec::new();
+        let mut buffer = [0_u8; 4096];
+        loop {
+            let text = String::from_utf8_lossy(&seen).to_string();
+            if let Some((head, rest)) = text.split_once("\r\n\r\n") {
+                let length = head
+                    .lines()
+                    .find_map(|line| {
+                        let (name, value) = line.split_once(':')?;
+                        name.eq_ignore_ascii_case("content-length")
+                            .then(|| value.trim().parse::<usize>().ok())?
+                    })
+                    .unwrap_or(0);
+                if rest.len() >= length {
+                    break;
+                }
+            }
+            let read = stream.read(&mut buffer).expect("the request reads");
+            if read == 0 {
+                break;
+            }
+            seen.extend_from_slice(&buffer[..read]);
+        }
+        let answer = format!(
+            "HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\
+             Connection: close\r\n\r\n{body}",
+            body.len()
+        );
+        stream
+            .write_all(answer.as_bytes())
+            .expect("the answer is written");
+    });
+    (port, server)
+}
+
+/// An allow, in Claude Code's shape.
+const AN_ALLOW: &str = r#"{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"allow","permissionDecisionReason":"allowed by the governor"}}"#;
+
+#[test]
+fn fails_closed_on_an_answer_that_is_not_a_decision() {
+    let directory = scratch("not-a-decision");
+    let (port, server) = answering("200 OK", "{}");
+    let ran = hook("pre-tool-use", &daemon_file_for(&directory, port), PRE_READ);
+    server.join().expect("the listener answered");
+    assert_eq!(ran.code, 0, "{}", ran.err);
+    let reason = denied_reason(&ran.out);
+    assert!(reason.starts_with("hook_failed: "), "{reason}");
+    assert!(reason.contains("not a decision"), "{reason}");
+    let _ = std::fs::remove_dir_all(&directory);
+}
+
+#[test]
+fn fails_closed_on_an_answer_that_is_not_a_200() {
+    let directory = scratch("not-a-200");
+    // The body is an allow, so that only the status can make this a deny.
+    let (port, server) = answering("500 Internal Server Error", AN_ALLOW);
+    let ran = hook("pre-tool-use", &daemon_file_for(&directory, port), PRE_READ);
+    server.join().expect("the listener answered");
+    assert_eq!(ran.code, 0, "{}", ran.err);
+    let reason = denied_reason(&ran.out);
+    assert!(reason.starts_with("hook_failed: "), "{reason}");
+    assert!(reason.contains("500"), "{reason}");
+    let _ = std::fs::remove_dir_all(&directory);
+}
+
+#[test]
+fn reads_a_relative_daemon_path_from_the_directory_it_runs_in() {
+    let directory = scratch("relative");
+    let (port, server) = answering("200 OK", AN_ALLOW);
+    daemon_file_for(&directory, port);
+    let ran = hook_with(
+        "pre-tool-use",
+        "daemon.json",
+        directory.clone(),
+        Box::new(PRE_READ.as_bytes()),
+    );
+    server.join().expect("the listener answered");
+    assert_eq!(ran.code, 0, "{}", ran.err);
+    let answer: Value = serde_json::from_str(ran.out.trim()).expect("JSON");
+    assert_eq!(
+        answer["hookSpecificOutput"]["permissionDecision"], "allow",
+        "{answer}"
+    );
+    let _ = std::fs::remove_dir_all(&directory);
+}
+
+/// A standard input that panics when it is read.
+struct Panicking;
+
+impl Read for Panicking {
+    fn read(&mut self, _buffer: &mut [u8]) -> std::io::Result<usize> {
+        panic!("the input broke");
+    }
+}
+
+#[test]
+fn exits_2_with_the_reason_when_the_hook_panics() {
+    let ran = hook_with(
+        "pre-tool-use",
+        "daemon.json",
+        std::env::temp_dir(),
+        Box::new(Panicking),
+    );
+    assert_eq!(ran.code, 2, "{}", ran.out);
+    assert_eq!(ran.out, "");
+    assert!(ran.err.contains("the input broke"), "{}", ran.err);
 }
