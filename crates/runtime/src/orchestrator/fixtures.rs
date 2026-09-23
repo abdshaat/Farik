@@ -20,6 +20,7 @@ use tokio::sync::mpsc::{Receiver, Sender, channel};
 use super::{Orchestrator, OrchestratorDeps};
 use crate::daemon::{DaemonState, HookRequest, decide_pre_tool_use};
 use crate::exec::{ExecError, ExecResult, Executor};
+use crate::forge::Forge;
 use crate::recorded::{RecordedAdapter, ToolRunner, Transcript};
 use crate::sandbox::host::HostSandboxFactory;
 use crate::sandbox::{Sandbox, SandboxError, SandboxFactory};
@@ -669,4 +670,96 @@ pub(crate) fn tool_runner(daemon: Arc<DaemonState>) -> ToolRunner {
             }
         })
     })
+}
+
+/// A fake `gh`: a shell script in a temporary directory of its own. For its second argument
+/// (`list`, `create`, `view`) it prints the standard output and error the test gave for that
+/// subcommand and exits with the code given, 0 when none was; it appends its arguments,
+/// NUL-separated, one call per line, to `calls` beside it, and keeps its standard input.
+pub(crate) struct FakeGh {
+    dir: PathBuf,
+}
+
+impl FakeGh {
+    /// A fake that answers nothing until told, in a directory named after `name`.
+    pub(crate) fn new(name: &str) -> Self {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = std::env::temp_dir().join(format!(
+            "farik-fake-gh-{name}-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("the fake's directory is made");
+        let script = format!(
+            "#!/bin/sh\n\
+             dir='{dir}'\n\
+             sub=\"$2\"\n\
+             for arg in \"$@\"; do printf '%s\\0' \"$arg\"; done >> \"$dir/calls\"\n\
+             printf '\\n' >> \"$dir/calls\"\n\
+             cat > \"$dir/$sub.stdin\"\n\
+             if [ -f \"$dir/$sub.out\" ]; then cat \"$dir/$sub.out\"; fi\n\
+             if [ -f \"$dir/$sub.err\" ]; then cat \"$dir/$sub.err\" >&2; fi\n\
+             code=0\n\
+             if [ -f \"$dir/$sub.code\" ]; then code=$(cat \"$dir/$sub.code\"); fi\n\
+             exit \"$code\"\n",
+            dir = dir.display()
+        );
+        // Written by `cp` rather than by this process: a file this process holds open for writing
+        // is inherited by whatever another test thread forks meanwhile, and running it then fails
+        // with "text file busy" (as `claude_process.rs` does).
+        let source = dir.join("gh.txt");
+        std::fs::write(&source, script).expect("the script is written");
+        let program = dir.join("gh");
+        let copied = std::process::Command::new("cp")
+            .arg(&source)
+            .arg(&program)
+            .status()
+            .expect("cp runs");
+        assert!(copied.success(), "the script is copied");
+        std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o755))
+            .expect("the script is executable");
+        Self { dir }
+    }
+
+    /// Makes `sub` print `stdout` and `stderr` and exit with `code`.
+    pub(crate) fn answers(&self, sub: &str, stdout: &str, stderr: &str, code: i32) -> &Self {
+        std::fs::write(self.dir.join(format!("{sub}.out")), stdout).expect("written");
+        std::fs::write(self.dir.join(format!("{sub}.err")), stderr).expect("written");
+        std::fs::write(self.dir.join(format!("{sub}.code")), code.to_string()).expect("written");
+        self
+    }
+
+    /// The fake's path.
+    pub(crate) fn program(&self) -> PathBuf {
+        self.dir.join("gh")
+    }
+
+    /// A forge driving this fake in `root`.
+    pub(crate) fn forge(&self, root: &Path) -> Forge {
+        Forge {
+            program: self.program(),
+            root: root.to_path_buf(),
+        }
+    }
+
+    /// Every call's arguments, oldest first.
+    pub(crate) fn calls(&self) -> Vec<Vec<String>> {
+        std::fs::read_to_string(self.dir.join("calls"))
+            .unwrap_or_default()
+            .lines()
+            .map(|line| {
+                line.split('\0')
+                    .filter(|argument| !argument.is_empty())
+                    .map(str::to_string)
+                    .collect()
+            })
+            .collect()
+    }
+
+    /// What the last call of `sub` was given on its standard input.
+    pub(crate) fn stdin_of(&self, sub: &str) -> String {
+        std::fs::read_to_string(self.dir.join(format!("{sub}.stdin"))).unwrap_or_default()
+    }
 }

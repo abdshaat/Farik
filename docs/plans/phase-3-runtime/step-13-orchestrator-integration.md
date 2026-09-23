@@ -133,7 +133,7 @@ Files: `forge.rs`, `lib.rs`, `orchestrator/fixtures.rs` (`FakeGh`)
 - `says_when_gh_is_missing` — a program path that does not exist: `Missing` naming it.
 - `reports_what_gh_said_when_it_fails` — exit 1 with stderr `not logged in`: `Failed` whose detail contains it; `view` printing `nonsense`: `Failed` naming the output; `create` printing `nonsense` after `list` answered `[]`: `Failed` naming the output.
 
-- [ ] `feat(runtime): drive pull requests through the gh program`
+- [x] `feat(runtime): drive pull requests through the gh program`
 
 ### Task 5: auto_merge and manual
 

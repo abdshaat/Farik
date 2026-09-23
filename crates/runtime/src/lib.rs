@@ -13,6 +13,8 @@ pub mod criteria;
 pub mod daemon;
 /// Commands run on an agent's behalf, and what came of them.
 pub mod exec;
+/// The forge pull requests live on, driven through the `gh` program.
+pub mod forge;
 /// Farik running its team: the board read, the next thing on it done, one session at a time.
 #[cfg(unix)]
 pub mod orchestrator;

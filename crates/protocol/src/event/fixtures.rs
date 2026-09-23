@@ -149,14 +149,16 @@ pub fn a_body_wire(kind: EventKind) -> Value {
         EventKind::ToolDenied => a_tool_body_wire("reason", "tool_not_allowed: Bash has no tier"),
         EventKind::ToolReturned => a_tool_body_wire("output", "{\"type\":\"text\"}"),
         EventKind::SessionStarted | EventKind::SessionEnded => a_session_body_wire(kind),
-        EventKind::TaskIntegrated => {
-            json!({ "sha": "4b825dc642cb6eb9a060e54bf8d69288fbee4904", "into": "main", "integrated_by": "governor" })
-        }
-        EventKind::PullRequestOpened => json!({
-            "url": "https://github.com/o/r/pull/7",
-            "number": 7,
-            "branch": "farik/FRK-1"
-        }),
+        EventKind::TaskIntegrated | EventKind::PullRequestOpened => an_integration_body_wire(kind),
+    }
+}
+
+/// An integration body: FRK-1 merged into `main` by the governor, or its pull request 7 opened.
+fn an_integration_body_wire(kind: EventKind) -> Value {
+    if kind == EventKind::TaskIntegrated {
+        json!({ "sha": "4b825dc642cb6eb9a060e54bf8d69288fbee4904", "into": "main", "integrated_by": "governor" })
+    } else {
+        json!({ "url": "https://github.com/o/r/pull/7", "number": 7, "branch": "farik/FRK-1" })
     }
 }
 
