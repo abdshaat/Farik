@@ -340,11 +340,23 @@ async fn require_token(State(expected): State<Arc<str>>, request: Request, next:
         .headers()
         .get(header::AUTHORIZATION)
         .and_then(|value| value.to_str().ok());
-    if given == Some(&*expected) {
+    if given.is_some_and(|given| same_token(given.as_bytes(), expected.as_bytes())) {
         next.run(request).await
     } else {
         StatusCode::UNAUTHORIZED.into_response()
     }
+}
+
+/// Whether `given` is `expected`, in a time that depends on their lengths alone, so that how long
+/// a refusal takes says nothing about how much of a guess was right. The length is no secret: every
+/// token is sixty-four hex digits.
+fn same_token(given: &[u8], expected: &[u8]) -> bool {
+    given.len() == expected.len()
+        && given
+            .iter()
+            .zip(expected)
+            .fold(0_u8, |differ, (a, b)| differ | (a ^ b))
+            == 0
 }
 
 async fn pre_tool_use(
@@ -546,6 +558,15 @@ mod tests {
         handle.shutdown().await.expect("the daemon stops");
     }
 
+    #[test]
+    fn compares_a_token_whole() {
+        let expected = b"Bearer 0123456789abcdef";
+        assert!(super::same_token(b"Bearer 0123456789abcdef", expected));
+        assert!(!super::same_token(b"Bearer 0123456789abcdee", expected));
+        assert!(!super::same_token(b"Bearer 0123456789abcde", expected));
+        assert!(!super::same_token(b"Bearer 0123456789abcdef0", expected));
+        assert!(!super::same_token(b"", expected));
+    }
     /// Sends one raw HTTP/1.1 request and reads until `until` appears in what came back.
     async fn exchange(stream: &mut tokio::net::TcpStream, request: &str, until: &str) -> String {
         use tokio::io::{AsyncReadExt, AsyncWriteExt};
