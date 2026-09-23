@@ -85,14 +85,16 @@ fn a_session_id() -> String {
 }
 
 /// A `claude` that is the real one with its standard output also kept in `copy`, so the test
-/// can read the `init` line the adapter's parser passes over.
-fn a_recording_claude(directory: &Path, real: &Path, copy: &Path) -> PathBuf {
+/// can read the `init` line the adapter's parser passes over, and its debug log in `debug`, so a
+/// failure can say what happened between it and Farik's MCP server.
+fn a_recording_claude(directory: &Path, real: &Path, copy: &Path, debug: &Path) -> PathBuf {
     let path = directory.join("claude");
     std::fs::write(
         &path,
         format!(
-            "#!/bin/sh\n'{}' \"$@\" | tee -a '{}'\n",
+            "#!/bin/sh\n'{}' --debug-file '{}' \"$@\" | tee -a '{}'\n",
             real.display(),
+            debug.display(),
             copy.display()
         ),
     )
@@ -102,9 +104,14 @@ fn a_recording_claude(directory: &Path, real: &Path, copy: &Path) -> PathBuf {
     path
 }
 
+/// The Farik tool the session is given, and calls.
+const FARIK_TOOL: &str = "farik_read_board";
+/// What Claude Code calls it.
+const FARIK_TOOL_IN_CLAUDE: &str = "mcp__farik__farik_read_board";
+
 /// A repository with a note and a protected `.env`, a team with `dev-a`, and a daemon serving
-/// `dev-a`'s session in the repository itself, with no task: every write is outside its allowed
-/// paths.
+/// `dev-a`'s session in the repository itself, with no task and `farik_read_board`: every write
+/// is outside its allowed paths.
 struct Project {
     repo: TempRepo,
     log: Arc<EventLog>,
@@ -168,7 +175,7 @@ impl Project {
             cwd: repo.path.clone(),
             executor: None,
             limits: DEFAULT_SESSION_LIMITS,
-            farik_tools: Vec::new(),
+            farik_tools: vec![FARIK_TOOL.to_string()],
         });
         Project {
             repo,
@@ -190,7 +197,7 @@ impl Project {
                 .to_string(),
             model: "claude-haiku-4-5-20251001".to_string(),
             effort: Effort::Low,
-            farik_tools: Vec::new(),
+            farik_tools: vec![FARIK_TOOL.to_string()],
             builtin_tools: allowed_builtins(&self.tiers),
             mcp_servers: Vec::new(),
             cwd: self.repo.path.clone(),
@@ -198,21 +205,52 @@ impl Project {
             initial_prompt: format!(
                 "First, use the Read tool to read note.txt. Second, use the Write tool to create \
                  out.txt containing the word yes. Third, use the Grep tool to search this \
-                 directory for the text {SECRET}. Then reply with what note.txt says, whether \
-                 the write worked, and what the search found."
+                 directory for the text {SECRET}. Fourth, call the {FARIK_TOOL} tool. Then \
+                 reply with what note.txt says, whether the write worked, what the search \
+                 found, and what the board holds."
             ),
         }
     }
 }
 
-/// Runs one session of `spec` against a served daemon, and answers what it reported and the
-/// program's own copy of its output.
+/// What one session reported, the program's own copy of its output, and its debug log.
+struct Run {
+    events: Vec<SessionEvent>,
+    stream: String,
+    debug: String,
+}
+
+impl Run {
+    /// What the debug log says of Farik's MCP server and of listing tools, with anything shaped like a credential
+    /// cut out.
+    fn farik_mcp_lines(&self) -> String {
+        self.debug
+            .lines()
+            .filter(|line| line.contains("MCP server \"farik\"") || line.contains("tools/list"))
+            .map(|line| {
+                line.split_whitespace()
+                    .map(|word| {
+                        if word.contains("sk-ant-") {
+                            "[redacted]"
+                        } else {
+                            word
+                        }
+                    })
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+}
+
+/// Runs one session of `spec` against a served daemon.
 fn run(
     project: &Project,
     spec: SessionSpec,
     credential: ClaudeCredential,
     env: &BTreeMap<String, String>,
-) -> (Vec<SessionEvent>, String) {
+) -> Run {
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()
@@ -229,8 +267,9 @@ fn run(
         ))
         .expect("the daemon is up");
     let stdout_copy = local.join("stdout.jsonl");
+    let debug_log = local.join("claude-debug.log");
     let config = ClaudeConfig {
-        claude_path: a_recording_claude(&local, &find_claude(), &stdout_copy),
+        claude_path: a_recording_claude(&local, &find_claude(), &stdout_copy, &debug_log),
         hook_command: PathBuf::from(env!("CARGO_BIN_EXE_farik")),
         daemon_file,
         daemon: handle.info.clone(),
@@ -259,11 +298,14 @@ fn run(
         events
     });
     let _ = runtime.block_on(handle.shutdown());
-    let copy = std::fs::read_to_string(&stdout_copy).expect("the stream was kept");
-    (events, copy)
+    Run {
+        events,
+        stream: std::fs::read_to_string(&stdout_copy).expect("the stream was kept"),
+        debug: std::fs::read_to_string(&debug_log).unwrap_or_default(),
+    }
 }
 
-/// The built-in tools the program's `init` line says the session has.
+/// The tools the program's `init` line says the session has, built-in and MCP.
 fn init_tools(stream: &str) -> Vec<String> {
     let init: Value = stream
         .lines()
@@ -275,7 +317,6 @@ fn init_tools(stream: &str) -> Vec<String> {
         .expect("the init line lists tools")
         .iter()
         .filter_map(Value::as_str)
-        .filter(|tool| !tool.starts_with("mcp__"))
         .map(str::to_string)
         .collect();
     tools.sort();
@@ -294,7 +335,14 @@ fn live_session_reads_is_denied_and_completes() {
     let project = Project::new();
     let spec = project.spec();
     let builtin_tools = spec.builtin_tools.clone();
-    let (events, stream) = run(&project, spec, credential, &env);
+    let run = run(&project, spec, credential, &env);
+    let events = &run.events;
+    let init = init_tools(&run.stream);
+    assert!(
+        init.iter().any(|tool| tool == FARIK_TOOL_IN_CLAUDE),
+        "the session has no {FARIK_TOOL_IN_CLAUDE}: {init:?}\n{}",
+        run.farik_mcp_lines()
+    );
 
     match events.last() {
         Some(SessionEvent::Ended {
@@ -330,15 +378,33 @@ fn live_session_reads_is_denied_and_completes() {
         ),
         "the secret reached the session: {events:?}"
     );
+    assert!(
+        has(
+            &|event| matches!(event, SessionEvent::ToolReturned { tool, output }
+            if tool == FARIK_TOOL_IN_CLAUDE && output.contains("\"tasks\""))
+        ),
+        "{events:?}"
+    );
     assert!(!project.repo.path.join("out.txt").exists());
-    let kinds: Vec<EventKind> = project
+    let logged = project
         .log
         .read(&EventQuery::default())
-        .expect("the log reads")
-        .iter()
-        .map(|event| event.body.kind())
-        .collect();
+        .expect("the log reads");
+    let kinds: Vec<EventKind> = logged.iter().map(|event| event.body.kind()).collect();
     assert!(kinds.contains(&EventKind::ToolCalled), "{kinds:?}");
     assert!(kinds.contains(&EventKind::ToolDenied), "{kinds:?}");
-    assert_eq!(init_tools(&stream), builtin_tools);
+    let farik_tool_logged = |kind: EventKind| {
+        logged.iter().any(|event| {
+            event.body.kind() == kind
+                && serde_json::to_value(&event.body)
+                    .is_ok_and(|body| body.to_string().contains(FARIK_TOOL_IN_CLAUDE))
+        })
+    };
+    assert!(farik_tool_logged(EventKind::ToolCalled), "{kinds:?}");
+    assert!(farik_tool_logged(EventKind::ToolReturned), "{kinds:?}");
+    let builtins: Vec<String> = init
+        .into_iter()
+        .filter(|tool| !tool.starts_with("mcp__"))
+        .collect();
+    assert_eq!(builtins, builtin_tools);
 }
