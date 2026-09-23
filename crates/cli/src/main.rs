@@ -19,6 +19,7 @@ impl Clock for SystemClock {
 fn main() -> std::process::ExitCode {
     let arguments: Vec<String> = std::env::args().collect();
     let mut io = CliIo {
+        stdin: Box::new(std::io::stdin()),
         stdout: Box::new(std::io::stdout()),
         stderr: Box::new(std::io::stderr()),
         cwd: std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),

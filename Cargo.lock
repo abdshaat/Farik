@@ -435,8 +435,10 @@ dependencies = [
  "clap",
  "farik-core",
  "farik-protocol",
+ "farik-runtime",
  "farik-store",
  "serde_json",
+ "tokio",
 ]
 
 [[package]]

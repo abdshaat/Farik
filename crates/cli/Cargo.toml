@@ -22,5 +22,9 @@ farik-protocol.workspace = true
 farik-store.workspace = true
 serde_json.workspace = true
 
+[dev-dependencies]
+farik-runtime.workspace = true
+tokio = { workspace = true, features = ["rt-multi-thread"] }
+
 [lints]
 workspace = true

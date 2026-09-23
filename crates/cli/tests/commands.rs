@@ -32,6 +32,7 @@ fn run_in(cwd: &Path, args: &[&str]) -> Ran {
     let mut err = Vec::new();
     let code = {
         let mut io = CliIo {
+            stdin: Box::new(std::io::empty()),
             stdout: Box::new(&mut out),
             stderr: Box::new(&mut err),
             cwd: cwd.to_path_buf(),

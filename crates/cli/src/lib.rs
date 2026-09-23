@@ -12,6 +12,8 @@ pub mod board;
 pub mod contract;
 /// Everything this project disagrees with itself about.
 pub mod doctor;
+/// The hooks Claude Code runs around a tool call, carried to the daemon and back.
+pub mod hook;
 /// Making a repository a Farik project.
 pub mod init;
 /// The event log, filtered and exported.
@@ -29,7 +31,7 @@ pub mod team;
 /// Sizing a request.
 pub mod triage;
 
-use std::io::Write;
+use std::io::{Read, Write};
 use std::path::PathBuf;
 
 use clap::{Parser, Subcommand, ValueEnum};
@@ -46,6 +48,8 @@ pub use project::{Project, open_project};
 /// `Vec<u8>`; the clock is injected for the same reason an event's `recorded_at` is (`docs/SPEC.md`
 /// section 8.4).
 pub struct CliIo<'a> {
+    /// What a command reads: the hook commands' JSON from Claude Code, and nothing for the rest.
+    pub stdin: Box<dyn Read + 'a>,
     /// What a person or a script asked for.
     pub stdout: Box<dyn Write + 'a>,
     /// Why Farik would not do something, and nothing else.
@@ -148,6 +152,28 @@ enum Commands {
         #[command(subcommand)]
         command: CriteriaCommands,
     },
+    /// Carry a Claude Code hook's JSON to the daemon and its answer back (8.2).
+    Hook {
+        #[command(subcommand)]
+        command: HookCommands,
+    },
+}
+
+#[derive(Subcommand)]
+enum HookCommands {
+    /// Ask the daemon whether a tool call may go ahead, and print its answer. Denies when it
+    /// cannot ask.
+    PreToolUse {
+        /// The daemon's `daemon.json`.
+        #[arg(long)]
+        daemon: PathBuf,
+    },
+    /// Tell the daemon what a tool call returned. Prints nothing.
+    PostToolUse {
+        /// The daemon's `daemon.json`.
+        #[arg(long)]
+        daemon: PathBuf,
+    },
 }
 
 #[derive(Subcommand)]
@@ -218,6 +244,12 @@ pub fn run_cli(args: &[String], io: &mut CliIo<'_>) -> i32 {
         Ok(parsed) => parsed,
         Err(error) => return usage(&error, io),
     };
+    if let Commands::Hook { command } = &parsed.command {
+        return match command {
+            HookCommands::PreToolUse { daemon } => hook::pre_tool_use(&io.cwd.join(daemon), io),
+            HookCommands::PostToolUse { daemon } => hook::post_tool_use(&io.cwd.join(daemon), io),
+        };
+    }
     let now = io.clock.now();
     let outcome = match &parsed.command {
         Commands::Init => init::init(&io.cwd, now),
@@ -263,6 +295,7 @@ pub fn run_cli(args: &[String], io: &mut CliIo<'_>) -> i32 {
         Commands::Criteria {
             command: CriteriaCommands::List,
         } => open_project(&io.cwd, now).and_then(|project| team::criteria(&project)),
+        Commands::Hook { .. } => unreachable!("a hook command returned above"),
     };
     report(outcome, parsed.json, io)
 }
