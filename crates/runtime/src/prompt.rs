@@ -150,8 +150,17 @@ pub fn assemble_system_prompt(input: &PromptInput<'_>) -> Result<String, FilesEr
 /// Text an agent or a repository wrote, marked as data (8.6, ADR 0011): wrapped in
 /// `<untrusted source="<source>">` and `</untrusted>`, with the `<` of every closing `untrusted` tag
 /// inside it written `&lt;` so that the text cannot end its block early, then cut to `cap_bytes`.
+/// `source` is Farik's own name for the text, lowercase letters and underscores only, so that it
+/// cannot close its attribute; anything else is a bug in the caller, which a debug build panics on.
 #[must_use]
 pub fn untrusted_block(source: &str, text: &str, cap_bytes: usize) -> String {
+    debug_assert!(
+        !source.is_empty()
+            && source
+                .bytes()
+                .all(|byte| byte.is_ascii_lowercase() || byte == b'_'),
+        "an untrusted block's source is lowercase letters and underscores: {source:?}"
+    );
     format!(
         "<untrusted source=\"{source}\">\n{}\n</untrusted>",
         cut(&escaped(text), cap_bytes)
@@ -192,15 +201,19 @@ fn untrusted(source: &str, text: &str, cap_bytes: usize) -> Option<String> {
 }
 
 /// The text, or as much of it as fits in `cap_bytes` without splitting a character, with a line
-/// saying where it was cut.
+/// saying where it was cut: in KiB when the cap is a whole number of them, in bytes otherwise.
 fn cut(text: &str, cap_bytes: usize) -> String {
     if text.len() <= cap_bytes {
         return text.to_string();
     }
+    let at = if cap_bytes.is_multiple_of(KIB) {
+        format!("{} KiB", cap_bytes / KIB)
+    } else {
+        format!("{cap_bytes} bytes")
+    };
     format!(
-        "{}\n[cut at {} KiB]",
-        &text[..text.floor_char_boundary(cap_bytes)],
-        cap_bytes / KIB
+        "{}\n[cut at {at}]",
+        &text[..text.floor_char_boundary(cap_bytes)]
     )
 }
 
@@ -354,11 +367,16 @@ fn tools_section(input: &PromptInput<'_>) -> String {
 }
 
 /// A tier's name as the wire spells it.
-fn tier_name(tier: PermissionTier) -> String {
-    serde_json::to_value(tier)
-        .ok()
-        .and_then(|name| name.as_str().map(str::to_string))
-        .unwrap_or_default()
+fn tier_name(tier: PermissionTier) -> &'static str {
+    match tier {
+        PermissionTier::Read => "read",
+        PermissionTier::WriteWorkspace => "write_workspace",
+        PermissionTier::Execute => "execute",
+        PermissionTier::Network => "network",
+        PermissionTier::GitLocal => "git_local",
+        PermissionTier::GitRemote => "git_remote",
+        PermissionTier::ExternalEffect => "external_effect",
+    }
 }
 
 /// What the prompt says about everything that did not come from the user or from Farik (8.6).
@@ -373,7 +391,7 @@ mod tests {
     use farik_core::contract::{Role, TaskContract, validate_contract};
     use farik_core::criteria::fixtures::{a_criteria_library_wire, an_empty_criteria_library_wire};
     use farik_core::criteria::{CriteriaLibrary, validate_criteria};
-    use farik_core::governor::permissions::default_tiers;
+    use farik_core::governor::permissions::{PermissionTier, default_tiers};
     use farik_core::governor::team_rules::TeamRules;
     use farik_core::team::fixtures::an_agent_wire;
     use farik_core::team::{Agent, Effort};
@@ -382,7 +400,8 @@ mod tests {
     use serde_json::json;
 
     use super::{
-        CLOSING_INSTRUCTIONS, PROMPT_SECTIONS, PromptInput, assemble_system_prompt, untrusted_block,
+        CLOSING_INSTRUCTIONS, PROMPT_SECTIONS, PromptInput, assemble_system_prompt, tier_name,
+        untrusted_block,
     };
     use crate::session::SessionPurpose;
     use crate::tools::{FarikTool, tool_descriptors};
@@ -868,6 +887,66 @@ mod tests {
             ),
             "the text is escaped, then cut: the cap counts the escape"
         );
+    }
+
+    #[test]
+    fn says_exactly_where_a_cap_that_is_not_whole_kib_cut() {
+        assert_eq!(
+            untrusted_block("diff", &"x".repeat(20), 10),
+            format!(
+                "<untrusted source=\"diff\">\n{}\n[cut at 10 bytes]\n</untrusted>",
+                "x".repeat(10)
+            )
+        );
+        assert_eq!(
+            untrusted_block("diff", &"x".repeat(2048), 1536),
+            format!(
+                "<untrusted source=\"diff\">\n{}\n[cut at 1536 bytes]\n</untrusted>",
+                "x".repeat(1536)
+            )
+        );
+        assert_eq!(
+            untrusted_block("diff", &"x".repeat(3000), 2048),
+            format!(
+                "<untrusted source=\"diff\">\n{}\n[cut at 2 KiB]\n</untrusted>",
+                "x".repeat(2048)
+            )
+        );
+    }
+
+    #[test]
+    #[cfg(debug_assertions)]
+    fn refuses_a_source_that_could_break_out_of_its_attribute() {
+        for source in ["", "diff\">", "Diff", "review note", "a-b", "<x"] {
+            let refused = std::panic::catch_unwind(|| untrusted_block(source, "text", 1024));
+            assert!(refused.is_err(), "{source:?} is refused");
+        }
+        for source in ["diff", "review_note", "project_scan"] {
+            assert!(
+                untrusted_block(source, "text", 1024)
+                    .starts_with(&format!("<untrusted source=\"{source}\">\n")),
+                "{source}"
+            );
+        }
+    }
+
+    #[test]
+    fn names_every_tier_as_the_wire_spells_it() {
+        for tier in [
+            PermissionTier::Read,
+            PermissionTier::WriteWorkspace,
+            PermissionTier::Execute,
+            PermissionTier::Network,
+            PermissionTier::GitLocal,
+            PermissionTier::GitRemote,
+            PermissionTier::ExternalEffect,
+        ] {
+            assert_eq!(
+                serde_json::to_value(tier).expect("a tier is written"),
+                json!(tier_name(tier)),
+                "{tier:?}"
+            );
+        }
     }
 
     #[test]
