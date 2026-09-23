@@ -19,7 +19,7 @@ When an epic reviewed by the human is `verifying`, and none of its tasks is stil
 
 An epic's own checks run against the code that was actually integrated, not against any one task's branch, so a check that only the combined work passes, or that one task broke for another, is caught before the human is asked. The run waits until every accepted task under the epic is integrated. Under the `manual` and `pull_request` policies, that means the epic waits on the human's merges before it can be accepted.
 
-It costs one more sandbox per epic verification and one more worktree, which the step 13 cleanup removes with the epic's own. A `test` criterion that sets `new_tests_required` cannot be checked against a base branch for an epic, because an epic has no branch to compare. Its run records only whether the tests pass, and the new-tests check stays with the epic's tasks.
+It costs one more sandbox per epic verification and one detached worktree (an epic has no worktree of its own), which step 14 removes after the run, and step 13's cleanup removes if a run was killed and the epic is then accepted or cancelled. A `test` criterion that sets `new_tests_required` cannot be checked against a base branch for an epic, because an epic has no branch to compare: the copy of the criterion Farik runs has the flag cleared, so its run records only whether the tests pass, and the new-tests check stays with the epic's tasks. The epic's run has the network off, as the base-branch run does, so a criterion that needs the network belongs on a task.
 
 When a mechanical criterion fails, the epic cannot be accepted. The human's way on is to escalate it and send it back to `in_progress` with a message, and the Product Manager then files the work that is missing.
 
