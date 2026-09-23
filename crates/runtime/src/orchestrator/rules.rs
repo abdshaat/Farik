@@ -735,6 +735,69 @@ mod tests {
 
     #[tokio::test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn waits_for_an_accepted_dependency_until_it_is_integrated() {
+        let harness = Harness::new("orch-plan-dependency-integrated", |_| {});
+        harness.verifying("FRK-1");
+        harness.project.moved(
+            "FRK-1",
+            "verifying",
+            "accepted",
+            &json!({ "assignee": "dev-a", "reviewer": "dev-b" }),
+        );
+        harness
+            .project
+            .deps
+            .git
+            .remove_worktree(&harness.worktree("FRK-1"))
+            .expect("the worktree goes");
+        harness.file("FRK-2", "ready", |wire| {
+            wire["dependencies"] = json!(["FRK-1"]);
+        });
+        let adapter = harness.recorded(vec![reads_a_file()]);
+        let orchestrator = harness.orchestrator(adapter.clone());
+
+        let report = orchestrator.tick().await.expect("the tick runs");
+        assert_eq!(
+            report,
+            TickReport::Idle {
+                why: NOTHING_TO_DO.to_string()
+            }
+        );
+        assert!(adapter.started().is_empty());
+
+        harness.project.record(
+            "FRK-1",
+            "task.integrated",
+            &json!({ "sha": "abc", "into": "main", "integrated_by": "human" }),
+        );
+        let report = orchestrator.tick().await.expect("the tick runs");
+        assert_eq!(acted_on(&report), Some("FRK-2"), "{report:?}");
+        assert_eq!(adapter.started().len(), 1);
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn waits_for_a_dependency_the_board_does_not_hold() {
+        let harness = Harness::new("orch-plan-dependency-missing", |_| {});
+        harness.file("FRK-2", "ready", |wire| {
+            wire["dependencies"] = json!(["FRK-1"]);
+        });
+        let adapter = harness.recorded(vec![reads_a_file()]);
+        let orchestrator = harness.orchestrator(adapter.clone());
+
+        let report = orchestrator.tick().await.expect("the tick runs");
+
+        assert_eq!(
+            report,
+            TickReport::Idle {
+                why: NOTHING_TO_DO.to_string()
+            }
+        );
+        assert!(adapter.started().is_empty());
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn fails_the_tick_when_a_session_cannot_start() {
         let harness = Harness::new("orch-plan-no-start", |_| {});
         harness.ready("FRK-1");

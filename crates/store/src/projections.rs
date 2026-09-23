@@ -48,6 +48,10 @@ pub struct TaskProjection {
     /// How many times the task has been returned to work after a rejection, as the last
     /// `task.transitioned` said; `0` before any.
     pub iteration: u32,
+    /// Whether the task is `accepted` and its branch has not reached the integration branch yet:
+    /// set by its move into `accepted`, cleared by `task.integrated` (5.14). Never set for an
+    /// epic, whose children carry the branches.
+    pub awaiting_integration: bool,
 }
 
 /// A key that costs are summed by (`docs/SPEC.md` 5.5).
@@ -308,7 +312,7 @@ const SELECT_PROJECTION: &str = "SELECT task_id, kind, parent, title, status, ri
                                  locked, updated_seq, \
                                  (SELECT COALESCE(SUM(cost_usd), 0.0) FROM cost_records \
                                   WHERE cost_records.task_id = task_projections.task_id), \
-                                 assignee_id, reviewer_id, iteration \
+                                 assignee_id, reviewer_id, iteration, awaiting_integration \
                                  FROM task_projections";
 
 /// The board is ordered by the number in the task id, not by the id itself: `FRK-10` sorts before
@@ -343,6 +347,7 @@ type ProjectedRow = (
     Option<String>,
     Option<String>,
     i64,
+    bool,
 );
 
 fn projected_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ProjectedRow> {
@@ -360,6 +365,7 @@ fn projected_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ProjectedRow> {
         row.get(10)?,
         row.get(11)?,
         row.get(12)?,
+        row.get(13)?,
     ))
 }
 
@@ -384,6 +390,7 @@ fn projection_of_row(row: ProjectedRow) -> Result<TaskProjection, StoreError> {
         assignee_id,
         reviewer_id,
         iteration,
+        awaiting_integration,
     ) = row;
     let refuse = |what: &str, value: &str| StoreError::InvalidEvent {
         detail: format!("the projection of {task_id} holds {value:?} as its {what}"),
@@ -407,6 +414,7 @@ fn projection_of_row(row: ProjectedRow) -> Result<TaskProjection, StoreError> {
         reviewer_id,
         iteration: u32::try_from(iteration)
             .map_err(|_| refuse("iteration", &iteration.to_string()))?,
+        awaiting_integration,
     })
 }
 
@@ -457,9 +465,13 @@ fn apply_to(transaction: &Transaction<'_>, event: &FarikEvent) -> Result<(), Sto
             })?;
             update(
                 transaction,
+                // Nothing leaves `accepted` (5.2), so only a move into it touches the flag; the
+                // row's kind says whether there is a branch to integrate.
                 "UPDATE task_projections
                  SET status = ?2, assignee_id = ?3, reviewer_id = ?4, iteration = ?5,
-                     updated_seq = ?6
+                     updated_seq = ?6,
+                     awaiting_integration = CASE WHEN ?2 = 'accepted' THEN kind = 'task'
+                                                 ELSE awaiting_integration END
                  WHERE task_id = ?1",
                 (
                     &id,
@@ -471,7 +483,14 @@ fn apply_to(transaction: &Transaction<'_>, event: &FarikEvent) -> Result<(), Sto
                 ),
             )
         }
+        EventBody::TaskIntegrated(_) => update(
+            transaction,
+            "UPDATE task_projections SET awaiting_integration = 0, updated_seq = ?2
+             WHERE task_id = ?1",
+            (&id, seq),
+        ),
         EventBody::DriftDetected(_)
+        | EventBody::PullRequestOpened(_)
         | EventBody::ProjectScanned(_)
         | EventBody::TeamUpdated(_)
         | EventBody::CriteriaUpdated(_)
@@ -742,6 +761,7 @@ mod tests {
                 assignee_id: None,
                 reviewer_id: None,
                 iteration: 0,
+                awaiting_integration: false,
             }]
         );
         assert_eq!(projections.cursor().expect("the cursor reads"), 1);
@@ -781,6 +801,7 @@ mod tests {
                 assignee_id: None,
                 reviewer_id: None,
                 iteration: 0,
+                awaiting_integration: false,
             }
         );
     }
@@ -979,7 +1000,7 @@ mod tests {
             log.applied_migrations().expect("the ledger reads"),
             migrations::known_versions()
         );
-        assert_eq!(migrations::known_versions(), vec![1, 2, 3, 4]);
+        assert_eq!(migrations::known_versions(), vec![1, 2, 3, 4, 5]);
     }
 
     #[test]
@@ -1163,6 +1184,102 @@ mod tests {
         assert_eq!(board[0].title, "Add a login page");
         assert_eq!(board[0].status, TaskStatus::Draft);
         assert_eq!(projections.cursor().expect("the cursor reads"), 1);
+    }
+
+    /// A `task.transitioned` of `task_id` from `from` into `to`, otherwise the fixture's move.
+    fn moved(task_id: &str, from: &str, to: &str) -> NewEvent {
+        let mut wire = an_event_wire(EventKind::TaskTransitioned);
+        wire["task_id"] = json!(task_id);
+        wire["body"]["from"] = json!(from);
+        wire["body"]["to"] = json!(to);
+        let event = event_from_value(&wire).expect("the fixture is schema-valid");
+        NewEvent {
+            recorded_at: event.envelope.recorded_at,
+            ids: event.envelope.ids,
+            body: event.body,
+        }
+    }
+
+    fn awaiting(projections: &Projections, task_id: &str) -> bool {
+        projections
+            .task(&task_id.parse().expect("a task id"))
+            .expect("the read works")
+            .expect("on the board")
+            .awaiting_integration
+    }
+
+    #[test]
+    fn awaits_integration_from_acceptance_until_integrated() {
+        let (log, projections) = a_board();
+        record(&log, &projections, &about(EventKind::TaskCreated, "FRK-1"));
+        record(&log, &projections, &moved("FRK-1", "ready", "verifying"));
+        assert!(!awaiting(&projections, "FRK-1"));
+        record(&log, &projections, &moved("FRK-1", "verifying", "accepted"));
+        assert!(awaiting(&projections, "FRK-1"));
+        let integrated = record(
+            &log,
+            &projections,
+            &about(EventKind::TaskIntegrated, "FRK-1"),
+        );
+        assert!(!awaiting(&projections, "FRK-1"));
+        let row = projections
+            .task(&"FRK-1".parse().expect("a task id"))
+            .expect("the read works")
+            .expect("on the board");
+        assert_eq!(row.status, TaskStatus::Accepted);
+        assert_eq!(row.updated_seq, integrated.envelope.seq);
+
+        record(&log, &projections, &about(EventKind::TaskCreated, "FRK-2"));
+        let mut large = an_event_wire(EventKind::RequestTriaged);
+        large["task_id"] = json!("FRK-2");
+        large["body"]["size"] = json!("large");
+        let large = event_from_value(&large).expect("the fixture is schema-valid");
+        record(
+            &log,
+            &projections,
+            &NewEvent {
+                recorded_at: large.envelope.recorded_at,
+                ids: large.envelope.ids,
+                body: large.body,
+            },
+        );
+        record(&log, &projections, &moved("FRK-2", "verifying", "accepted"));
+        assert!(
+            !awaiting(&projections, "FRK-2"),
+            "an epic has no branch of its own"
+        );
+    }
+
+    #[test]
+    fn reads_an_older_accepted_task_as_awaiting() {
+        let directory = std::env::temp_dir().join(format!(
+            "farik-older-accepted-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        let _ = std::fs::remove_dir_all(&directory);
+        std::fs::create_dir_all(&directory).expect("a directory under the temporary directory");
+        let path = directory.join("farik.db");
+        {
+            let mut connection = rusqlite::Connection::open(&path).expect("the database opens");
+            migrations::apply_through(&mut connection, 4, at(9)).expect("version 4 applies");
+            connection
+                .execute_batch(
+                    "INSERT INTO task_projections
+                         (task_id, kind, parent, title, status, risk, triaged, locked, updated_seq)
+                     VALUES ('FRK-1', 'task', NULL, 'a task', 'accepted', 'low', 1, 0, 1),
+                            ('FRK-2', 'epic', NULL, 'an epic', 'accepted', 'low', 1, 0, 2),
+                            ('FRK-3', 'task', NULL, 'a task', 'verifying', 'low', 1, 0, 3);",
+                )
+                .expect("the older rows are written");
+        }
+        let log = Arc::new(open_event_log(&path, at(10)).expect("the log opens"));
+        let projections = Projections { log };
+
+        assert!(awaiting(&projections, "FRK-1"));
+        assert!(!awaiting(&projections, "FRK-2"));
+        assert!(!awaiting(&projections, "FRK-3"));
+        let _ = std::fs::remove_dir_all(&directory);
     }
 
     /// A `cost.recorded` for `task_id` (or no task), by `agent` in `session`, recorded at ten on

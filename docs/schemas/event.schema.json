@@ -81,7 +81,9 @@
         "tool.denied",
         "tool.returned",
         "session.started",
-        "session.ended"
+        "session.ended",
+        "task.integrated",
+        "pull_request.opened"
       ]
     },
     "eventBodyWire": {
@@ -112,7 +114,9 @@
         { "$ref": "#/$defs/toolDeniedBody" },
         { "$ref": "#/$defs/toolReturnedBody" },
         { "$ref": "#/$defs/sessionStartedBody" },
-        { "$ref": "#/$defs/sessionEndedBody" }
+        { "$ref": "#/$defs/sessionEndedBody" },
+        { "$ref": "#/$defs/taskIntegratedBody" },
+        { "$ref": "#/$defs/pullRequestOpenedBody" }
       ]
     },
     "contractSummary": {
@@ -345,7 +349,7 @@
     },
     "escalationRaisedBody": {
       "title": "Escalation Raised Body",
-      "description": "A move sent a contract to the human (docs/SPEC.md section 5.7). detail names the gate that opened the move and, when there are any, the words it was about.",
+      "description": "A move sent a contract to the human (docs/SPEC.md section 5.7), or an accepted contract's integration could not land (5.14), which moves nothing: the contract stays accepted. detail names the gate that opened the move and, when there are any, the words it was about; for reason integration, what failed in git's or gh's words.",
       "type": "object",
       "additionalProperties": false,
       "required": ["reason", "detail"],
@@ -402,6 +406,30 @@
         "reviewer": { "type": "string" },
         "criteria_run": { "type": "integer", "minimum": 0, "maximum": 4294967295 },
         "passed": { "type": "boolean" }
+      }
+    },
+    "taskIntegratedBody": {
+      "title": "Task Integrated Body",
+      "description": "An accepted task's branch reached the integration branch (docs/SPEC.md section 5.14): sha is the integration branch's commit that holds it, into is that branch, and integrated_by is governor for Farik's own merge and human for the human's integrate or a pull request the human merged on the forge.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sha", "into", "integrated_by"],
+      "properties": {
+        "sha": { "type": "string" },
+        "into": { "type": "string" },
+        "integrated_by": { "type": "string", "enum": ["governor", "human"] }
+      }
+    },
+    "pullRequestOpenedBody": {
+      "title": "Pull Request Opened Body",
+      "description": "Farik pushed an accepted task's branch and opened a pull request for it under the pull_request policy (docs/SPEC.md section 5.14): its url, its number on the forge, and the branch it merges.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["url", "number", "branch"],
+      "properties": {
+        "url": { "type": "string" },
+        "number": { "type": "integer", "minimum": 0, "maximum": 18446744073709551615 },
+        "branch": { "type": "string" }
       }
     },
     "questionAskedBody": {

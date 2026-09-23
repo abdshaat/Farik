@@ -14,7 +14,7 @@ struct Migration {
 /// Every migration, in the order they apply. A migration is never edited once it has shipped; a
 /// change to the shape is a new one, so that a database written by an older Farik reaches the same
 /// shape as one made today.
-const MIGRATIONS: [Migration; 4] = [
+const MIGRATIONS: [Migration; 5] = [
     Migration {
         version: 1,
         sql: include_str!("migrations/0001_event_log.sql"),
@@ -31,6 +31,10 @@ const MIGRATIONS: [Migration; 4] = [
         version: 4,
         sql: include_str!("migrations/0004_transitions.sql"),
     },
+    Migration {
+        version: 5,
+        sql: include_str!("migrations/0005_integration.sql"),
+    },
 ];
 
 /// Brings the database to the shape this version expects, and records what it applied. Applying to
@@ -45,13 +49,31 @@ const MIGRATIONS: [Migration; 4] = [
 ///
 /// `Sqlite` when a migration or its record fails.
 pub(crate) fn apply(connection: &mut Connection, now: DateTime<Utc>) -> Result<(), StoreError> {
+    let last = MIGRATIONS.last().map_or(0, |migration| migration.version);
+    apply_through(connection, last, now)
+}
+
+/// `apply`, stopping after the migration numbered `last_version`: the shape an older Farik left,
+/// which is what a test of a later migration starts from.
+///
+/// # Errors
+///
+/// As `apply`.
+pub(crate) fn apply_through(
+    connection: &mut Connection,
+    last_version: i64,
+    now: DateTime<Utc>,
+) -> Result<(), StoreError> {
     connection.execute_batch(
         "CREATE TABLE IF NOT EXISTS schema_migrations (
             version    INTEGER PRIMARY KEY,
             applied_at TEXT NOT NULL
         ) STRICT;",
     )?;
-    for migration in &MIGRATIONS {
+    for migration in MIGRATIONS
+        .iter()
+        .take_while(|migration| migration.version <= last_version)
+    {
         // `Immediate` takes the write lock before the ledger is read rather than after. A
         // transaction that reads first and then finds it needs to write cannot wait for the lock,
         // because another reader may be waiting to write the same rows, so SQLite refuses it at

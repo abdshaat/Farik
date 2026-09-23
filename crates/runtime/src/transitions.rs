@@ -421,15 +421,20 @@ impl Transitions {
 
         let (work, changed_paths) = self.work(id, team)?;
 
+        // A dependency is integrated once it is accepted and no longer awaiting integration
+        // (5.14): an accepted epic never awaits, its children carrying the branches.
         let dependencies = contract
             .dependencies
             .iter()
             .filter_map(|dependency| {
-                status_on(&board, dependency.as_str()).map(|status| DependencyState {
-                    task_id: dependency.to_string(),
-                    status,
-                    integrated: false,
-                })
+                board
+                    .iter()
+                    .find(|row| row.task_id.as_str() == dependency.as_str())
+                    .map(|row| DependencyState {
+                        task_id: dependency.to_string(),
+                        status: row.status,
+                        integrated: row.status == TaskStatus::Accepted && !row.awaiting_integration,
+                    })
             })
             .collect();
         let assignment = assignment(ask, team, &board, day_left, dependencies);
@@ -1644,6 +1649,52 @@ mod tests {
             at(11),
         );
         assert!(project.context(&request, &TransitionAsk::default()).triaged);
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn reads_a_dependency_as_integrated_once_merged() {
+        let project = Project::new("dependency-integrated", a_team(|_| {}), at(12));
+        project.file("FRK-2", |wire| wire["dependencies"] = json!(["FRK-1"]));
+        project.created("FRK-1", "verifying");
+        project.created("FRK-2", "ready");
+        project.moved("FRK-1", "verifying", "accepted", &json!({}), at(10));
+        let request = a_request(
+            "FRK-2",
+            TaskStatus::Assigned,
+            TransitionActor::ProductManager,
+            Some("maya"),
+        );
+        let dependencies = |project: &Project| {
+            project
+                .context(&request, &assigning("dev-a", "dev-b"))
+                .assignment
+                .expect("an assignment")
+                .dependencies
+        };
+        assert_eq!(
+            dependencies(&project),
+            vec![DependencyState {
+                task_id: "FRK-1".to_string(),
+                status: TaskStatus::Accepted,
+                integrated: false,
+            }]
+        );
+
+        project.record(
+            "FRK-1",
+            "task.integrated",
+            &json!({ "sha": "abc", "into": "main", "integrated_by": "governor" }),
+            at(11),
+        );
+        assert_eq!(
+            dependencies(&project),
+            vec![DependencyState {
+                task_id: "FRK-1".to_string(),
+                status: TaskStatus::Accepted,
+                integrated: true,
+            }]
+        );
     }
 
     #[test]
