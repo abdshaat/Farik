@@ -103,3 +103,33 @@ pub fn review_answers_nothing() -> Transcript {
 pub fn accept_frk_1() -> Transcript {
     Transcript::from_jsonl(include_str!("transcripts/accept_frk_1.jsonl"))
 }
+
+/// The Product Manager's triage of FRK-1: `farik_triage_request` of size `large`, "A file and the
+/// check that it exists.". Hand-written.
+#[must_use]
+pub fn triage_frk_1_large() -> Transcript {
+    Transcript::from_jsonl(include_str!("transcripts/triage_frk_1_large.jsonl"))
+}
+
+/// The Product Manager's refine session of FRK-1 that asks the human "Should done.txt be empty?"
+/// with `farik_ask_human`, and nothing else. Hand-written.
+#[must_use]
+pub fn refine_asks_frk_1() -> Transcript {
+    Transcript::from_jsonl(include_str!("transcripts/refine_asks_frk_1.jsonl"))
+}
+
+/// The Product Manager's refine session of FRK-1 as an epic: `farik_write_contract` with its intent,
+/// `product_manager` as assignee role and the human as reviewer, `done.txt` its one allowed path,
+/// C1 (`command`, `test -f done.txt`) and C2 (`review`), one item out of scope, risk `low`, and a
+/// budget of 5 dollars and 10 sessions. Hand-written.
+#[must_use]
+pub fn refine_writes_epic_frk_1() -> Transcript {
+    Transcript::from_jsonl(include_str!("transcripts/refine_writes_epic_frk_1.jsonl"))
+}
+
+/// The Product Manager's refine session of FRK-1 as a task: `farik_write_contract` restating the
+/// request's fields. Hand-written.
+#[must_use]
+pub fn refine_writes_task_frk_1() -> Transcript {
+    Transcript::from_jsonl(include_str!("transcripts/refine_writes_task_frk_1.jsonl"))
+}

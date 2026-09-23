@@ -14,6 +14,7 @@ use farik_store::{EventQuery, Git, TaskProjection};
 
 use super::integrate::{awaiting, cleanup};
 use super::messages::{Resume, implement_message, plan_message};
+use super::requests;
 use super::session::{SessionAsk, SessionEnd, run_session};
 use super::verify::verifying;
 use super::{Orchestrator, OrchestratorDeps, OrchestratorError, TickReport, worktree};
@@ -41,6 +42,8 @@ pub(super) enum Room {
 /// One tick: the first rule that acts, or `Idle`.
 pub(super) async fn tick(orchestrator: &Orchestrator) -> Result<TickReport, OrchestratorError> {
     let deps = &orchestrator.deps;
+    // A command another process handled is on this process's board before anything is read.
+    deps.tools.projections.catch_up()?;
     let team = deps.tools.files.read_team()?;
     // The store gives the board in the order of the number in each task id, which is how ties
     // are broken.
@@ -62,51 +65,60 @@ pub(super) async fn tick(orchestrator: &Orchestrator) -> Result<TickReport, Orch
             return Ok(report);
         }
     }
-    for row in board
-        .iter()
-        .filter(|row| row.status == TaskStatus::Rejected)
-    {
+    for row in waiting_on_nobody(&board, TaskStatus::Rejected) {
         if let Some(report) = rejected(deps, &team, row)? {
             return Ok(report);
         }
     }
-    for row in board.iter().filter(|row| row.status == TaskStatus::Blocked) {
+    for row in waiting_on_nobody(&board, TaskStatus::Blocked) {
         if let Some(report) = blocked(deps, &team, row)? {
             return Ok(report);
         }
     }
-    for row in board
-        .iter()
-        .filter(|row| row.status == TaskStatus::Verifying)
-    {
+    for row in waiting_on_nobody(&board, TaskStatus::Verifying) {
         if let Some(report) = verifying(orchestrator, &team, row, &mut day_spent).await? {
             return Ok(report);
         }
     }
-    for row in board
-        .iter()
-        .filter(|row| row.status == TaskStatus::InProgress)
-    {
+    for row in waiting_on_nobody(&board, TaskStatus::InProgress) {
         if let Some(report) = in_progress(orchestrator, &team, row, &mut day_spent).await? {
             return Ok(report);
         }
     }
-    for row in board
-        .iter()
-        .filter(|row| row.status == TaskStatus::Assigned)
-    {
+    for row in waiting_on_nobody(&board, TaskStatus::Assigned) {
         if let Some(report) = assigned(deps, &team, row)? {
             return Ok(report);
         }
     }
-    for row in board.iter().filter(|row| row.status == TaskStatus::Ready) {
+    for row in waiting_on_nobody(&board, TaskStatus::Ready) {
         if let Some(report) = ready(deps, &team, &board, row, &mut day_spent).await? {
+            return Ok(report);
+        }
+    }
+    for row in waiting_on_nobody(&board, TaskStatus::Refining) {
+        if let Some(report) = requests::refining(deps, &team, row, &mut day_spent).await? {
+            return Ok(report);
+        }
+    }
+    for row in waiting_on_nobody(&board, TaskStatus::Draft) {
+        if let Some(report) = requests::draft(deps, &team, row, &mut day_spent).await? {
             return Ok(report);
         }
     }
     Ok(TickReport::Idle {
         why: if day_spent { DAY_SPENT } else { NOTHING_TO_DO }.to_string(),
     })
+}
+
+/// The tasks in `status`, in the board's order, but those waiting on the human's answer to a
+/// question, which rules 3 to 10 pass over.
+fn waiting_on_nobody(
+    board: &[TaskProjection],
+    status: TaskStatus,
+) -> impl Iterator<Item = &TaskProjection> {
+    board
+        .iter()
+        .filter(move |row| row.status == status && !row.waiting_on_human)
 }
 
 /// Rule 3: a task `rejected` goes back to `in_progress` for its next iteration, or, when the
@@ -215,7 +227,7 @@ fn last_move_into(
 /// Whether the task's move from `from` to `to` was refused since the task last moved into `from`.
 /// Such a move is not asked again until the task moves: nothing but a move changes what the
 /// governor would answer, and the refusal is on the board for the human.
-fn refused_since_entering(
+pub(super) fn refused_since_entering(
     deps: &OrchestratorDeps,
     task_id: &TaskId,
     from: TaskStatus,
@@ -283,6 +295,9 @@ async fn in_progress(
     day_spent: &mut bool,
 ) -> Result<Option<TickReport>, OrchestratorError> {
     let deps = &orchestrator.deps;
+    if requests::is_epic(row) {
+        return Ok(None);
+    }
     let Some(assignee) = active(team, row.assignee_id.as_deref()) else {
         return Ok(None);
     };
@@ -375,6 +390,9 @@ fn assigned(
     team: &Team,
     row: &TaskProjection,
 ) -> Result<Option<TickReport>, OrchestratorError> {
+    if requests::is_epic(row) {
+        return Ok(None);
+    }
     let Some(assignee) = active(team, row.assignee_id.as_deref()) else {
         return Ok(None);
     };

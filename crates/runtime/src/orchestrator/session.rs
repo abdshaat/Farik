@@ -9,11 +9,13 @@ use farik_core::budget::{BudgetScope, SessionLedger, add_usage};
 use farik_core::contract::{Role, TaskContract};
 use farik_core::governor::permissions::PermissionTier;
 use farik_core::pricing::Usage;
-use farik_core::team::{Agent, Team};
+use farik_core::team::{Agent, Effort, Team};
 use farik_protocol::event::EventIds;
 use farik_roles::load_role;
+use farik_store::EventQuery;
 
-use super::{OrchestratorDeps, OrchestratorError};
+use super::messages::human_message;
+use super::{OrchestratorDeps, OrchestratorError, TRIAGE_MODEL};
 use crate::claude::allowed_builtins;
 use crate::cost::{CostError, CostSource, budget_state, record_exhaustion, record_session_cost};
 use crate::daemon::SessionRegistration;
@@ -22,6 +24,9 @@ use crate::prompt::{PromptInput, assemble_system_prompt};
 use crate::session::{EndReason, SessionEvent, SessionHandle, SessionPurpose, SessionSpec};
 use crate::sessions::{record_session_ended, record_session_started};
 use crate::tools::tool_descriptors;
+
+/// The one tool a triage session is given.
+const TRIAGE_TOOL: &str = "farik_triage_request";
 
 /// What a rule asks a session for.
 pub(super) struct SessionAsk<'a> {
@@ -79,7 +84,9 @@ pub(super) async fn run_session(
     })
 }
 
-/// The spec of the session `ask` describes, its prompt assembled from the files as they are now.
+/// The spec of the session `ask` describes, its prompt assembled from the files as they are now,
+/// with what the human said about its task since its last session started. A triage session runs
+/// on `TRIAGE_MODEL` at low effort with `farik_triage_request` alone and no built-in tool.
 fn session_spec(
     deps: &OrchestratorDeps,
     team: &Team,
@@ -88,7 +95,10 @@ fn session_spec(
     let files = &deps.tools.files;
     let role_id = Role::from(ask.agent.role);
     let role = load_role(role_id)?;
+    // 5.16 runs triage on the cheaper model, whatever the agent's own, with its one tool.
+    let triage = ask.purpose == SessionPurpose::Triage;
     let (model, effort) = match &ask.agent.model {
+        _ if triage => (TRIAGE_MODEL.to_string(), Effort::Low),
         Some(model) => (model.id.to_string(), model.effort.unwrap_or(role.effort)),
         None => (role.model.clone(), role.effort),
     };
@@ -97,17 +107,28 @@ fn session_spec(
     let memory = files.read_memory(&ask.agent.id)?;
     let criteria = files.read_criteria()?;
     let tiers: BTreeSet<PermissionTier> = ask.agent.tiers().into_iter().collect();
-    let builtin_tools = if ask.read_only {
+    let builtin_tools = if triage {
+        Vec::new()
+    } else if ask.read_only {
         allowed_builtins(&BTreeSet::from([PermissionTier::Read]))
     } else {
         allowed_builtins(&tiers)
     };
     let tools = tool_descriptors();
-    let farik_tools = tools
-        .iter()
-        .filter(|tool| tiers.contains(&tool.tier))
-        .map(|tool| tool.name.to_string())
-        .collect();
+    let farik_tools = if triage {
+        vec![TRIAGE_TOOL.to_string()]
+    } else {
+        tools
+            .iter()
+            .filter(|tool| tiers.contains(&tool.tier))
+            .map(|tool| tool.name.to_string())
+            .collect()
+    };
+    let history = deps.tools.log.read(&EventQuery {
+        task_id: Some(ask.contract.id.clone()),
+        ..EventQuery::default()
+    })?;
+    let human = human_message(&history);
     let rules = team.rules();
     let system_prompt = assemble_system_prompt(&PromptInput {
         role: &role,
@@ -120,7 +141,7 @@ fn session_spec(
         tools: &tools,
         builtin_tools: &builtin_tools,
         purpose: ask.purpose,
-        human_message: None,
+        human_message: human.as_deref(),
     })?;
     let limits = budget_state(
         &deps.tools.projections,

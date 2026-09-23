@@ -15,6 +15,7 @@ use farik_protocol::clock::SequentialIds;
 use farik_protocol::event::{EventKind, FarikEvent, NewEvent, event_from_value};
 use farik_store::TaskProjection;
 use farik_store::git::fixtures::{git_in, git_output_in};
+use farik_store::requests::file_request;
 use serde_json::{Value, json};
 use tokio::sync::mpsc::{Receiver, Sender, channel};
 
@@ -121,6 +122,49 @@ impl Harness {
             }]);
             change(wire);
         });
+    }
+
+    /// Files a request titled `title`, as the human does through `file_request`: step 11's FRK-1
+    /// contract with no kind, an untriaged draft whose one allowed path is `done.txt`, whose one
+    /// criterion C1 runs `test -f done.txt`, with one item out of scope, risk `low`, and 5 dollars.
+    pub(crate) fn a_request(&self, title: &str) {
+        let deps = &self.project.deps;
+        file_request(
+            &deps.files,
+            &deps.log,
+            Self::request_fields(title),
+            "human",
+            None,
+            at(),
+            &deps.ids,
+        )
+        .expect("the request is filed");
+        deps.projections.catch_up().expect("the board catches up");
+    }
+
+    /// The fields of `a_request`, titled `title`, as a request's author writes them.
+    pub(crate) fn request_fields(title: &str) -> Value {
+        json!({
+            "title": title,
+            "intent": "The repository has a done.txt at its root, so that a run can be checked for it.",
+            "scope": { "in_scope": ["done.txt"], "out_of_scope": ["what done.txt says"] },
+            "requirements": [{ "id": "R1", "text": "done.txt is at the root." }],
+            "exit_criteria": [{
+                "id": "C1",
+                "text": "done.txt exists.",
+                "satisfies": ["R1"],
+                "verification": {
+                    "method": "command",
+                    "command": "test -f done.txt",
+                    "expect": { "exit_code": 0 }
+                }
+            }],
+            "assignee_role": "software_developer",
+            "reviewer_role": "software_developer",
+            "risk": "low",
+            "budget": { "max_cost_usd": 5 },
+            "allowed_paths": ["done.txt"]
+        })
     }
 
     /// Files `task` `ready`, as `file` does.

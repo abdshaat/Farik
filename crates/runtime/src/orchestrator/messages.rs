@@ -1,8 +1,9 @@
 //! The first user message of each kind of session: what it is about, in words the agent reads
 //! before anything else.
 
-use farik_core::contract::{TaskContract, Verification};
+use farik_core::contract::{TaskContract, TaskKind, Verification};
 use farik_core::governor::done::CriterionResult;
+use farik_protocol::event::{EventBody, FarikEvent, HumanAcceptedBodySubject};
 use farik_store::git::HeadSummary;
 
 use crate::prompt::untrusted_block;
@@ -13,6 +14,8 @@ const NOTE_CAP_BYTES: usize = 16 * 1024;
 const RESULTS_CAP_BYTES: usize = 32 * 1024;
 /// How much of a diff a reviewer's first message carries.
 const DIFF_CAP_BYTES: usize = 64 * 1024;
+/// How much of a question the human's message repeats.
+const QUESTION_CAP_BYTES: usize = 4 * 1024;
 
 /// Where an implement session picks up: the branch's last commit past its base, and the last note
 /// written since the task last moved into `in_progress`, as its kind and text.
@@ -24,6 +27,99 @@ pub(super) struct Resume {
     /// The failed criterion ids and the reasons of the rejection this iteration answers, when it
     /// answers one.
     pub(super) rejection: Option<(Vec<String>, String)>,
+}
+
+/// The triage session's message: size the request.
+pub(super) fn triage_message(contract: &TaskContract) -> String {
+    format!(
+        "Size the request {task}, whose contract is above: large if it is an epic that breaks into \
+         several tasks, small if it is one task. Record the size and your reason with \
+         `farik_triage_request`.",
+        task = contract.id.as_str()
+    )
+}
+
+/// The refine session's message: the task and its kind; for an epic whose questions were not yet
+/// asked, to ask them first; and, when the last judgement of the contract failed, its failures one
+/// per line, which are Farik's words.
+pub(super) fn refine_message(
+    contract: &TaskContract,
+    ask_first: bool,
+    failures: &[String],
+) -> String {
+    let task = contract.id.as_str();
+    let kind = match contract.kind {
+        TaskKind::Epic => "an epic",
+        TaskKind::Task => "a task",
+    };
+    let first = if ask_first && contract.kind == TaskKind::Epic {
+        "This is an epic: ask the user every question you need with `farik_ask_human` before you \
+         write it; if you have none, say so in the intent.\n\n"
+    } else {
+        ""
+    };
+    let mut message = format!(
+        "{first}Write the contract of {task}, {kind}, with `farik_write_contract` until it meets \
+         the Definition of Ready."
+    );
+    if !failures.is_empty() {
+        message = format!(
+            "{message}\n\nThe governor judged the last one and it failed:\n{}",
+            failures.join("\n")
+        );
+    }
+    message
+}
+
+/// What the human said about a task since its last session started, for the next session's
+/// `From the human` section: each answer after its question, the question being the asking
+/// agent's words and so untrusted, each resolution's message, and each acceptance's words, in the
+/// order they were given, one blank line apart. The human's own words are never wrapped (ADR 0011).
+/// `None` when the human said nothing.
+pub(super) fn human_message(history: &[FarikEvent]) -> Option<String> {
+    let since = history
+        .iter()
+        .rev()
+        .find(|event| matches!(event.body, EventBody::SessionStarted(_)))
+        .map_or(0, |event| event.envelope.seq);
+    let blocks: Vec<String> = history
+        .iter()
+        .filter(|event| event.envelope.seq > since)
+        .filter_map(|event| match &event.body {
+            EventBody::QuestionAnswered(body) => {
+                let id = body.question_id.get();
+                let question = history
+                    .iter()
+                    .find(|asked| asked.envelope.seq == id)
+                    .and_then(|asked| match &asked.body {
+                        EventBody::QuestionAsked(asked) => Some(asked.question.clone()),
+                        _ => None,
+                    })
+                    .unwrap_or_default();
+                Some(format!(
+                    "Question {id}:\n{}\nAnswer: {}",
+                    untrusted_block("question", &question, QUESTION_CAP_BYTES),
+                    body.answer
+                ))
+            }
+            EventBody::EscalationResolved(body) => Some(format!(
+                "The human, moving this to {}: {}",
+                body.to, body.message
+            )),
+            EventBody::HumanAccepted(body) => {
+                body.message.as_ref().map(|message| match body.subject {
+                    HumanAcceptedBodySubject::Result => {
+                        format!("The human, accepting the result: {message}")
+                    }
+                    HumanAcceptedBodySubject::Contract => {
+                        format!("The human, approving the contract: {message}")
+                    }
+                })
+            }
+            _ => None,
+        })
+        .collect();
+    (!blocks.is_empty()).then(|| blocks.join("\n\n"))
 }
 
 /// The plan session's message for a ready task: assign it, with the agents that could do it and
