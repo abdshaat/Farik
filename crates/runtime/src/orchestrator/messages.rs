@@ -205,7 +205,7 @@ mod tests {
     use farik_core::contract::{TaskContract, validate_contract};
     use farik_store::git::HeadSummary;
 
-    use super::{Resume, implement_message};
+    use super::{Resume, ReviewBrief, implement_message, review_message};
 
     fn contract() -> TaskContract {
         validate_contract(&a_contract_wire()).expect("the fixture is a contract")
@@ -256,5 +256,24 @@ mod tests {
         let message = implement_message(&contract(), &resume(false, None));
 
         assert!(!message.contains("Resuming"), "{message}");
+    }
+
+    #[test]
+    fn cuts_the_reviewers_diff_at_64_kib() {
+        let contract = contract();
+        let diff = "+".repeat(100 * 1024);
+        let message = review_message(&ReviewBrief {
+            contract: &contract,
+            results: &[],
+            completion_note: None,
+            diff: &diff,
+            unanswered: &[],
+        });
+
+        let kept = message.matches('+').count();
+        assert!(
+            (60 * 1024..=64 * 1024).contains(&kept),
+            "{kept} bytes of the diff kept"
+        );
     }
 }
