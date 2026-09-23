@@ -323,21 +323,27 @@ impl RuntimeAdapter for ExecutorWitness {
     }
 }
 
-/// A host sandbox factory that counts the sandboxes it made for each task.
+/// A host sandbox factory that records, for each task, whether each sandbox it made for it had
+/// the network on.
 #[derive(Default)]
 pub(crate) struct CountingSandboxFactory {
-    created: Mutex<BTreeMap<String, u32>>,
+    created: Mutex<BTreeMap<String, Vec<bool>>>,
 }
 
 impl CountingSandboxFactory {
     /// How many sandboxes `create` made for `task`.
     pub(crate) fn created(&self, task: &str) -> u32 {
+        u32::try_from(self.networks(task).len()).expect("a test makes few sandboxes")
+    }
+
+    /// For each sandbox `create` made for `task`, in order, whether its network was on.
+    pub(crate) fn networks(&self, task: &str) -> Vec<bool> {
         self.created
             .lock()
             .expect("no test panics holding it")
             .get(task)
-            .copied()
-            .unwrap_or(0)
+            .cloned()
+            .unwrap_or_default()
     }
 }
 
@@ -349,12 +355,12 @@ impl SandboxFactory for CountingSandboxFactory {
         worktree: &Path,
         network: bool,
     ) -> Result<Box<dyn Sandbox>, SandboxError> {
-        *self
-            .created
+        self.created
             .lock()
             .expect("no test panics holding it")
             .entry(task_id.as_str().to_string())
-            .or_insert(0) += 1;
+            .or_default()
+            .push(network);
         HostSandboxFactory.create(project_id, task_id, worktree, network)
     }
 
