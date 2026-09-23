@@ -983,7 +983,7 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn returns_a_rejected_task_to_its_assignee() {
         let harness = Harness::new("orch-rejected", |_| {});
-        harness.rejected("FRK-1", 0, "C1: done.txt missing");
+        harness.rejected("FRK-1", 0, "done.txt is missing");
         let adapter = harness.recorded(vec![implement_stops_early()]);
         let orchestrator = harness.orchestrator(adapter.clone());
 
@@ -1006,11 +1006,45 @@ mod tests {
         assert_eq!(started.len(), 1);
         assert_eq!(started[0].purpose, SessionPurpose::Implement);
         let prompt = &started[0].initial_prompt;
-        assert!(prompt.contains("C1: done.txt missing"), "{prompt}");
-        assert!(
-            prompt.contains("<untrusted source=\"rejection\">"),
-            "{prompt}"
-        );
+        let rejection = block(prompt, "rejection");
+        assert!(rejection.contains("failed criteria: C1"), "{prompt}");
+        assert!(rejection.contains("done.txt is missing"), "{prompt}");
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn forgets_a_rejection_once_the_task_has_moved_on() {
+        // Returned after its rejection, then blocked and resumed: the resumed session answers
+        // no rejection.
+        let harness = Harness::new("orch-rejection-forgotten", |_| {});
+        harness.rejected("FRK-1", 0, "done.txt is missing");
+        let people = json!({ "assignee": "dev-a", "reviewer": "dev-b", "iteration": 1 });
+        harness
+            .project
+            .moved("FRK-1", "rejected", "in_progress", &people);
+        let mut blocking = people.clone();
+        blocking["blocker"] = json!({ "description": "the API is down", "needed": "the API" });
+        harness
+            .project
+            .moved("FRK-1", "in_progress", "blocked", &blocking);
+        let mut resuming = people;
+        resuming["actor"] = json!("human");
+        resuming["requested_by"] = json!("human");
+        harness
+            .project
+            .moved("FRK-1", "blocked", "in_progress", &resuming);
+        let adapter = harness.recorded(vec![implement_stops_early()]);
+        let orchestrator = harness.orchestrator(adapter.clone());
+
+        orchestrator
+            .tick()
+            .await
+            .expect("the implement session runs");
+
+        let started = adapter.started();
+        assert_eq!(started.len(), 1);
+        let prompt = &started[0].initial_prompt;
+        assert!(!prompt.contains("rejected"), "{prompt}");
     }
 
     #[tokio::test]
@@ -1047,6 +1081,15 @@ mod tests {
             escalation_reasons(&harness),
             vec![EscalationRaisedBodyReason::BlockerAge]
         );
+
+        // Exactly the limit is old enough.
+        let harness = Harness::new("orch-blocked-at-limit", |_| {});
+        harness.blocked_hours_ago("FRK-1", "dev-a", "dev-b", 24);
+        let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
+
+        orchestrator.tick().await.expect("the tick runs");
+
+        assert_eq!(harness.row("FRK-1").status, TaskStatus::Escalated);
 
         let harness = Harness::new("orch-blocked-young", |_| {});
         harness.blocked_hours_ago("FRK-1", "dev-a", "dev-b", 1);
@@ -1235,6 +1278,39 @@ mod tests {
 
         assert_eq!(acted_on(&report), Some("FRK-2"), "{report:?}");
         assert!(adapter.started().is_empty());
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn picks_a_rejected_task_before_a_verifying_one() {
+        let harness = Harness::new("orch-order-rejected-verifying", |_| {});
+        harness.verifying("FRK-1");
+        harness.rejected("FRK-2", 0, "done.txt is missing");
+        let adapter = harness.recorded(vec![review_writes_note()]);
+        let orchestrator = harness.orchestrator(adapter.clone());
+
+        let report = orchestrator.tick().await.expect("the tick runs");
+
+        assert_eq!(acted_on(&report), Some("FRK-2"), "{report:?}");
+        assert!(adapter.started().is_empty());
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn picks_a_verifying_task_before_one_in_progress() {
+        let harness = Harness::new("orch-order-verifying-in-progress", |_| {});
+        harness.in_progress("FRK-1", "dev-a", "dev-b");
+        harness.verifying("FRK-2");
+        let adapter = harness.recorded(vec![review_writes_note()]);
+        let orchestrator = harness.orchestrator(adapter.clone());
+
+        let report = orchestrator.tick().await.expect("the tick runs");
+
+        assert_eq!(acted_on(&report), Some("FRK-2"), "{report:?}");
+        assert_eq!(
+            sessions(&adapter),
+            vec![("dev-b".to_string(), SessionPurpose::Verify)]
+        );
     }
 
     /// The `criterion.recorded` events Farik recorded as the governor, with no agent on their
