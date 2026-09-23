@@ -676,8 +676,11 @@ mod tests {
     use farik_store::git::fixtures::git_output_in;
     use serde_json::{Value, json};
 
+    use crate::exec::ExecError;
     use crate::orchestrator::TRIAGE_MODEL;
-    use crate::orchestrator::fixtures::{CountingSandboxFactory, ExecutorWitness, Harness};
+    use crate::orchestrator::fixtures::{
+        BrokenSandboxFactory, CountingSandboxFactory, ExecutorWitness, Harness,
+    };
     use crate::orchestrator::{CommandError, Orchestrator, TickReport};
     use crate::recorded::fixtures::{
         accept_frk_1, implement_finishes_frk_1, plan_assigns_frk_1, plan_assigns_frk_2,
@@ -922,6 +925,9 @@ mod tests {
             question < wrapped && wrapped < asked && asked < answer,
             "{prompt}"
         );
+        // Its questions asked, the epic's refine session is not told to ask first again.
+        let first = &adapter.started()[1].initial_prompt;
+        assert!(!first.contains("ask the user every question"), "{first}");
 
         orchestrator.tick().await.expect("the tick runs");
         let prompt = adapter.started()[2].system_prompt.clone();
@@ -985,6 +991,12 @@ mod tests {
             body.failures
         );
         assert!(adapter.started().is_empty());
+        // A later judgement of another gate is not the contract's readiness.
+        harness.project.record(
+            "FRK-1",
+            "contract.evaluated",
+            &json!({ "gate": "definition_of_done", "passed": false, "failures": ["not done"] }),
+        );
 
         orchestrator.tick().await.expect("the tick runs");
         let started = adapter.started();
@@ -997,6 +1009,114 @@ mod tests {
             "{}",
             started[0].initial_prompt
         );
+        assert!(
+            !started[0].initial_prompt.contains("not done"),
+            "{}",
+            started[0].initial_prompt
+        );
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn judges_a_contract_written_again_after_a_failure() {
+        let harness = Harness::new("req-judges-again", |_| {});
+        let adapter = harness.recorded(Vec::new());
+        let orchestrator = harness.orchestrator(adapter.clone());
+        refining(&harness, &orchestrator, RequestSize::Small).await;
+        write_over_the_cap(&harness).await;
+        orchestrator
+            .tick()
+            .await
+            .expect("the first write is judged");
+        write_over_the_cap(&harness).await;
+
+        orchestrator.tick().await.expect("the tick runs");
+
+        let judged = harness
+            .events(&[EventKind::ContractEvaluated])
+            .iter()
+            .filter(
+                |event| matches!(&event.body, EventBody::ContractEvaluated(body) if !body.passed),
+            )
+            .count();
+        assert_eq!(judged, 2);
+        assert!(adapter.started().is_empty());
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn judges_a_write_whose_later_refusal_was_not_the_governors() {
+        let harness = Harness::new("req-judges-others-refusal", |_| {});
+        let adapter = harness.recorded(Vec::new());
+        let orchestrator = harness.orchestrator(adapter.clone());
+        refining(&harness, &orchestrator, RequestSize::Small).await;
+        write_over_the_cap(&harness).await;
+        harness.project.record(
+            "FRK-1",
+            "transition.refused",
+            &json!({
+                "from": "refining",
+                "to": "ready",
+                "actor": "product_manager",
+                "requested_by": "pm",
+                "refusal": "gate_failed",
+                "details": ["the gate did not open"]
+            }),
+        );
+
+        orchestrator.tick().await.expect("the tick runs");
+
+        assert!(last(&harness, EventKind::ContractEvaluated).is_some());
+        assert!(adapter.started().is_empty());
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn judges_a_contract_the_human_holds_without_a_session() {
+        let harness = Harness::new("req-judges-locked", |_| {});
+        let adapter = harness.recorded(Vec::new());
+        let orchestrator = harness.orchestrator(adapter.clone());
+        a_sized_request(&harness, &orchestrator, RequestSize::Small).await;
+        orchestrator
+            .handle(Command::ContractLock {
+                task_id: task("FRK-1"),
+            })
+            .await
+            .expect("the human takes the contract");
+        orchestrator.tick().await.expect("refining starts");
+        assert_eq!(harness.row("FRK-1").status, TaskStatus::Refining);
+
+        orchestrator.tick().await.expect("the tick runs");
+
+        assert!(last(&harness, EventKind::ContractEvaluated).is_some());
+        assert!(adapter.started().is_empty());
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn passes_over_a_draft_whose_move_to_refining_was_refused() {
+        let harness = Harness::new("req-draft-refused", |_| {});
+        let adapter = harness.recorded(Vec::new());
+        let orchestrator = harness.orchestrator(adapter.clone());
+        a_sized_request(&harness, &orchestrator, RequestSize::Small).await;
+        harness.project.record(
+            "FRK-1",
+            "transition.refused",
+            &json!({
+                "from": "draft",
+                "to": "refining",
+                "actor": "product_manager",
+                "requested_by": "pm",
+                "refusal": "gate_failed",
+                "details": ["the gate did not open"]
+            }),
+        );
+
+        let report = orchestrator.tick().await.expect("the tick runs");
+
+        assert!(is_idle(&report), "{report:?}");
+        assert_eq!(harness.row("FRK-1").status, TaskStatus::Draft);
+        assert!(adapter.started().is_empty());
     }
 
     #[tokio::test]
@@ -1480,8 +1600,14 @@ mod tests {
 
         let spec = &adapter.started()[0];
         assert_eq!(spec.task_id, Some(task("FRK-1")));
+        // The breakdown's message, not the close-out's, which names `farik_create_task` too.
         assert!(
-            spec.initial_prompt.contains("farik_create_task"),
+            spec.initial_prompt.starts_with("Break the epic FRK-1 down"),
+            "{}",
+            spec.initial_prompt
+        );
+        assert!(
+            !spec.initial_prompt.contains("Every task under the epic"),
             "{}",
             spec.initial_prompt
         );
@@ -1675,5 +1801,139 @@ mod tests {
             "{}",
             spec.system_prompt
         );
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn passes_over_an_epic_whose_assignee_is_paused() {
+        let harness = Harness::new("epic-assignee-paused", |wire| {
+            wire["agents"][0]["status"] = json!("paused");
+            wire["agents"]
+                .as_array_mut()
+                .expect("a list of agents")
+                .push(json!({
+                    "id": "pm-2",
+                    "display_name": "pm-2",
+                    "role": "product_manager",
+                    "status": "active"
+                }));
+        });
+        an_epic_in_progress(&harness, |_| {});
+        let adapter = harness.recorded(Vec::new());
+        let orchestrator = harness.orchestrator(adapter.clone());
+
+        let report = orchestrator.tick().await.expect("the tick runs");
+
+        assert!(is_idle(&report), "{report:?}");
+        assert!(adapter.started().is_empty());
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn leaves_an_epic_open_while_a_task_under_it_is_escalated() {
+        let harness = Harness::new("epic-escalated-child", |wire| {
+            wire["policy"]["wip_limit_per_agent"] = json!(2);
+        });
+        an_epic_in_progress(&harness, |_| {});
+        a_child(&harness, "accepted");
+        integrated(&harness, true);
+        harness.file_under("FRK-3", "ready", Some("FRK-1"), |_| {});
+        harness
+            .project
+            .moved("FRK-3", "ready", "escalated", &json!({}));
+        let adapter = harness.recorded(Vec::new());
+        let orchestrator = harness.orchestrator(adapter.clone());
+
+        let report = orchestrator.tick().await.expect("the tick runs");
+
+        assert!(is_idle(&report), "{report:?}");
+        assert!(adapter.started().is_empty());
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn assigns_an_epic_beside_work_the_product_manager_finished() {
+        let harness = Harness::new("epic-wip-finished", |_| {});
+        let people = json!({ "actor": "product_manager", "requested_by": "pm", "assignee": "pm" });
+        for (id, last) in [("FRK-2", "accepted"), ("FRK-3", "cancelled")] {
+            an_epic(&harness, id, "ready", |_| {});
+            harness.project.moved(id, "ready", "assigned", &people);
+            harness
+                .project
+                .moved(id, "assigned", "in_progress", &people);
+            harness.project.moved(id, "in_progress", last, &people);
+        }
+        an_epic(&harness, "FRK-4", "ready", |_| {});
+        let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
+
+        orchestrator.tick().await.expect("the tick runs");
+
+        assert_eq!(moves_of(&harness, "FRK-4"), ["ready -> assigned"]);
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn escalates_an_epic_whose_criterion_farik_could_not_run() {
+        let harness = Harness::new("epic-unrunnable", |_| {});
+        an_epic_verifying(&harness, |_| {});
+        integrated(&harness, true);
+        let sandboxes = Arc::new(BrokenSandboxFactory::for_base(ExecError::SpawnFailed {
+            detail: "no shell".to_string(),
+        }));
+        let orchestrator = harness.orchestrator_with(harness.recorded(Vec::new()), sandboxes);
+
+        orchestrator.tick().await.expect("the tick runs");
+
+        assert_eq!(harness.row("FRK-1").status, TaskStatus::Escalated);
+        let escalation = last(&harness, EventKind::EscalationRaised).expect("the escalation");
+        let EventBody::EscalationRaised(body) = &escalation.body else {
+            panic!("an escalation");
+        };
+        assert!(body.detail.contains("C1"), "{}", body.detail);
+        assert!(body.detail.contains("no shell"), "{}", body.detail);
+        assert!(governor_runs(&harness, "FRK-1").is_empty());
+        assert!(!harness.worktree("FRK-1-base").exists());
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn records_an_epics_review_once_with_its_human_criterion() {
+        let harness = Harness::new("epic-review-once", |_| {});
+        an_epic_verifying(&harness, |wire| {
+            wire["exit_criteria"]
+                .as_array_mut()
+                .expect("a list of criteria")
+                .push(json!({
+                    "id": "C3",
+                    "text": "The founder read it.",
+                    "satisfies": ["R1"],
+                    "verification": { "method": "human", "question": "Is it right?" }
+                }));
+        });
+        integrated(&harness, true);
+        let adapter =
+            harness.recorded(vec![replays_farik_read_board(), replays_farik_read_board()]);
+        let orchestrator = harness.orchestrator(adapter.clone());
+        orchestrator.tick().await.expect("Farik runs C1");
+        orchestrator
+            .handle(Command::HumanAccept {
+                task_id: task("FRK-1"),
+                subject: AcceptSubject::Result,
+                message: Some("All three hold.".to_string()),
+            })
+            .await
+            .expect("the human accepts the epic");
+
+        // Two verify sessions that do not ask for `accepted`: the review is recorded once.
+        orchestrator.tick().await.expect("the tick runs");
+        orchestrator.tick().await.expect("the tick runs");
+
+        assert_eq!(adapter.started().len(), 2);
+        let reviews = harness.events(&[EventKind::ReviewRecorded]);
+        assert_eq!(reviews.len(), 1, "{reviews:?}");
+        assert!(matches!(
+            &reviews[0].body,
+            EventBody::ReviewRecorded(body) if body.criteria_run == 3 && body.passed
+        ));
     }
 }

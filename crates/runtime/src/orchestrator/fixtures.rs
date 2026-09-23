@@ -646,10 +646,12 @@ impl SandboxFactory for CountingSandboxFactory {
 }
 
 /// A sandbox factory whose first `broken` sandboxes answer every command with `error`, and whose
-/// others are host sandboxes; it counts, as `CountingSandboxFactory` does, what it made.
+/// others are host sandboxes; it counts, as `CountingSandboxFactory` does, what it made. Its base
+/// sandboxes are host sandboxes too, unless it was made `for_base`.
 pub(crate) struct BrokenSandboxFactory {
     error: ExecError,
     broken: AtomicU32,
+    breaks_base: bool,
     counting: CountingSandboxFactory,
 }
 
@@ -659,7 +661,17 @@ impl BrokenSandboxFactory {
         Self {
             error,
             broken: AtomicU32::new(broken),
+            breaks_base: false,
             counting: CountingSandboxFactory::default(),
+        }
+    }
+
+    /// A factory whose every base sandbox fails every command with `error`, and whose other
+    /// sandboxes are host sandboxes.
+    pub(crate) fn for_base(error: ExecError) -> Self {
+        Self {
+            breaks_base: true,
+            ..Self::new(error, 0)
         }
     }
 
@@ -698,7 +710,11 @@ impl SandboxFactory for BrokenSandboxFactory {
         task_id: &TaskId,
         worktree: &Path,
     ) -> Result<Box<dyn Sandbox>, SandboxError> {
-        HostSandboxFactory.create_base(project_id, task_id, worktree)
+        let sandbox = HostSandboxFactory.create_base(project_id, task_id, worktree)?;
+        if self.breaks_base {
+            return Ok(Box::new(BrokenSandbox(self.error.clone())));
+        }
+        Ok(sandbox)
     }
 
     fn remove(&self, project_id: &str, task_id: &TaskId) -> Result<(), SandboxError> {
