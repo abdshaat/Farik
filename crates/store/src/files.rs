@@ -193,9 +193,7 @@ impl ProjectFiles {
     /// `Invalid` when the library is not one `validate_criteria` accepts, `Io` when it cannot be
     /// written.
     pub fn write_criteria(&self, library: &CriteriaLibrary) -> Result<(), FilesError> {
-        let value = as_wire(CRITERIA, library)?;
-        validate_criteria(&value).map_err(|errors| refused(CRITERIA, &errors))?;
-        self.write_yaml(CRITERIA, &value)
+        self.write_text(CRITERIA, &criteria_yaml(library)?)
     }
 
     /// One task's contract, held to the rules a contract on the wire is held to.
@@ -229,10 +227,7 @@ impl ProjectFiles {
     /// `Invalid` when the contract is not one `validate_contract` accepts, `Io` when it cannot be
     /// written.
     pub fn write_contract(&self, contract: &TaskContract) -> Result<(), FilesError> {
-        let path = contract_path(&contract.id);
-        let value = as_wire(&path, contract)?;
-        validate_contract(&value).map_err(|errors| refused(&path, &errors))?;
-        self.write_yaml(&path, &value)
+        self.write_text(&contract_path(&contract.id), &contract_yaml(contract)?)
     }
 
     /// Every contract there is, by id, in the order a board shows them: by the number in the id, so
@@ -455,6 +450,40 @@ pub fn yaml_value(text: &str, named: &str) -> Result<Value, FilesError> {
     })
 }
 
+/// A contract as the YAML its file holds, after holding it to the rules a contract on the wire is
+/// held to. `write_contract` writes this text, and a session's prompt shows it, so the dialect is
+/// decided here once.
+///
+/// # Errors
+///
+/// `Invalid` when the contract is not one `validate_contract` accepts or cannot be written as YAML.
+pub fn contract_yaml(contract: &TaskContract) -> Result<String, FilesError> {
+    let path = contract_path(&contract.id);
+    let value = as_wire(&path, contract)?;
+    validate_contract(&value).map_err(|errors| refused(&path, &errors))?;
+    yaml_text(&path, &value)
+}
+
+/// The criterion library as the YAML its file holds, after holding it to the same rules.
+/// `write_criteria` writes this text, and a session's prompt shows it.
+///
+/// # Errors
+///
+/// `Invalid` when the library is not one `validate_criteria` accepts or cannot be written as YAML.
+pub fn criteria_yaml(library: &CriteriaLibrary) -> Result<String, FilesError> {
+    let value = as_wire(CRITERIA, library)?;
+    validate_criteria(&value).map_err(|errors| refused(CRITERIA, &errors))?;
+    yaml_text(CRITERIA, &value)
+}
+
+/// A wire value as the YAML a person reads and edits.
+fn yaml_text(relative: &str, value: &Value) -> Result<String, FilesError> {
+    serde_saphyr::to_string(value).map_err(|error| FilesError::Invalid {
+        path: ProjectFiles::named(relative),
+        detail: error.to_string(),
+    })
+}
+
 /// The file a contract lives in: the one its own id names.
 fn contract_path(id: &TaskId) -> String {
     format!("contracts/{}.yaml", id.as_str())
@@ -671,11 +700,7 @@ impl ProjectFiles {
 
     /// Writes a wire value as the YAML a person reads and edits.
     fn write_yaml(&self, relative: &str, value: &Value) -> Result<(), FilesError> {
-        let text = serde_saphyr::to_string(value).map_err(|error| FilesError::Invalid {
-            path: Self::named(relative),
-            detail: error.to_string(),
-        })?;
-        self.write_text(relative, &text)
+        self.write_text(relative, &yaml_text(relative, value)?)
     }
 }
 

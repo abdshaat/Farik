@@ -7,7 +7,7 @@ use farik_core::contract::{TaskId, validate_contract};
 use farik_core::criteria::{fixtures::a_criteria_library_wire, validate_criteria};
 use farik_core::team::AgentId;
 use farik_store::files::fixtures::{TempProject, a_team};
-use farik_store::files::{FilesError, LocalSettings, Sandbox};
+use farik_store::files::{FilesError, LocalSettings, Sandbox, contract_yaml, criteria_yaml};
 
 /// Holds a refusal to `docs/standards/code.md`: it is read by the person who edited the file, so it
 /// names the file, quotes the line, and says nothing about the API that would have accepted it.
@@ -470,6 +470,28 @@ fn writes_a_contract_to_the_file_its_own_id_names() {
     assert!(project.root.join(".farik/contracts/FRK-7.yaml").is_file());
     let id = TaskId::try_from("FRK-7").expect("an id");
     assert_eq!(files.read_contract(&id).expect("it reads back"), contract);
+}
+
+#[test]
+fn writes_the_yaml_the_files_hold() {
+    // A session's prompt shows the contract and the library as this text, so that the model reads
+    // what a person reads in .farik/ and what the governor judges; a second writer would drift.
+    let project = TempProject::new("yaml-text");
+    let files = project.files();
+    let contract = a_contract("FRK-7");
+    let library = validate_criteria(&a_criteria_library_wire()).expect("the fixture is a library");
+    files.write_contract(&contract).expect("it is written");
+    files.write_criteria(&library).expect("it is written");
+
+    let on_disk = |path: &str| std::fs::read_to_string(project.root.join(path)).expect("the file");
+    assert_eq!(
+        contract_yaml(&contract).expect("the text"),
+        on_disk(".farik/contracts/FRK-7.yaml")
+    );
+    assert_eq!(
+        criteria_yaml(&library).expect("the text"),
+        on_disk(".farik/team/criteria.yaml")
+    );
 }
 
 #[test]
