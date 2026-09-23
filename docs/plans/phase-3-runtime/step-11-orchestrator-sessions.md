@@ -79,7 +79,7 @@ Files: `recorded.rs`, `recorded/fixtures.rs`, `daemon.rs`, `daemon/mcp.rs`
 - `replays_without_tools_as_before` — `RecordedAdapter::new` gives step 01's events unchanged (the existing tests pass).
 - `builds_the_tool_context_of_a_registered_session` — after `register_session`, `tool_context` has its agent, task, session id, and executor; after `end_session`, `None`. Step 07's MCP tests pass unchanged.
 
-- [ ] `feat(runtime): let recorded sessions call farik's tools`
+- [x] `feat(runtime): let recorded sessions call farik's tools`
 
 ### Task 2: one session, start to end
 

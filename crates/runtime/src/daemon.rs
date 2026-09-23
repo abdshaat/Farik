@@ -29,7 +29,7 @@ use tokio_util::sync::CancellationToken;
 use self::mcp::FarikMcp;
 
 use crate::exec::Executor;
-use crate::tools::ToolDeps;
+use crate::tools::{ToolContext, ToolDeps};
 
 #[cfg(test)]
 pub(crate) mod fixtures;
@@ -128,6 +128,20 @@ impl DaemonState {
         self.sessions()
             .get(session_id)
             .map(|session| session.tool_calls)
+    }
+
+    /// What a Farik tool called from a session is called with: the registration's agent, task,
+    /// session, and executor as they stand now, and the project's tools; `None` for a session the
+    /// daemon does not answer for. The MCP server and a replayed session both take this path.
+    #[must_use]
+    pub fn tool_context(&self, session_id: &str) -> Option<ToolContext> {
+        self.sessions().get(session_id).map(|session| ToolContext {
+            agent_id: session.registration.agent_id.clone(),
+            task_id: session.registration.task_id.clone(),
+            session_id: session.registration.session_id.clone(),
+            executor: session.registration.executor.clone(),
+            deps: Arc::clone(&self.deps),
+        })
     }
 
     pub(crate) fn deps(&self) -> &Arc<ToolDeps> {
@@ -311,9 +325,8 @@ fn random_token() -> Result<String, DaemonError> {
 /// shutdown would otherwise wait on forever.
 pub(crate) fn router(state: Arc<DaemonState>, token: &str, cancel: CancellationToken) -> Router {
     let expected: Arc<str> = Arc::from(format!("Bearer {token}"));
-    let deps = Arc::clone(state.deps());
     let server = StreamableHttpService::new(
-        move || Ok(FarikMcp::new(Arc::clone(&deps))),
+        || Ok(FarikMcp),
         Arc::new(LocalSessionManager::default()),
         // The stateful sessions Claude Code opens with `initialize` are the default.
         StreamableHttpServerConfig::default()
@@ -383,15 +396,19 @@ async fn post_tool_use(
 #[cfg(test)]
 mod tests {
     use std::os::unix::fs::PermissionsExt;
+    use std::sync::Arc;
 
     use axum::body::{Body, to_bytes};
     use axum::http::{Request, StatusCode};
+    use farik_core::budget::DEFAULT_SESSION_LIMITS;
     use serde_json::Value;
     use tokio_util::sync::CancellationToken;
     use tower::ServiceExt;
 
     use super::fixtures::{PRE_READ, TestDaemon};
-    use super::{DaemonConfig, DaemonInfo, router, serve};
+    use super::{DaemonConfig, DaemonInfo, SessionRegistration, router, serve};
+    use crate::exec::Executor;
+    use crate::sandbox::host::HostSandbox;
 
     const TOKEN: &str = "a-token";
 
@@ -556,6 +573,40 @@ mod tests {
             "{table}"
         );
         handle.shutdown().await.expect("the daemon stops");
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn builds_the_tool_context_of_a_registered_session() {
+        let daemon = TestDaemon::new("daemon-tool-context", |_| {});
+        let executor: Arc<dyn Executor> = Arc::new(HostSandbox::new(daemon.worktree.clone()));
+        daemon.state.register_session(SessionRegistration {
+            session_id: "s-exec".to_string(),
+            agent_id: "dev-a".to_string(),
+            task_id: Some("FRK-1".parse().expect("a task id")),
+            cwd: daemon.worktree.clone(),
+            executor: Some(Arc::clone(&executor)),
+            limits: DEFAULT_SESSION_LIMITS,
+        });
+        let context = daemon
+            .state
+            .tool_context("s-exec")
+            .expect("a registered session has a context");
+        assert_eq!(context.agent_id, "dev-a");
+        assert_eq!(
+            context.task_id.as_ref().map(|task| task.as_str()),
+            Some("FRK-1")
+        );
+        assert_eq!(context.session_id, "s-exec");
+        assert!(
+            context
+                .executor
+                .as_ref()
+                .is_some_and(|given| Arc::ptr_eq(given, &executor))
+        );
+        assert!(Arc::ptr_eq(&context.deps, &daemon.project.deps));
+        daemon.state.end_session("s-exec");
+        assert!(daemon.state.tool_context("s-exec").is_none());
     }
 
     #[test]

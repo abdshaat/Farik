@@ -54,3 +54,10 @@ pub fn hits_the_turn_limit() -> Transcript {
 pub fn hook_denies_a_write() -> Transcript {
     Transcript::from_jsonl(include_str!("transcripts/hook_denies_a_write.jsonl"))
 }
+
+/// A call of `mcp__farik__farik_read_board` with no input, its answer, and a successful end.
+/// Hand-written in the shapes above; with `RecordedAdapter::with_tools` the answer is the runner's.
+#[must_use]
+pub fn replays_farik_read_board() -> Transcript {
+    Transcript::from_jsonl(include_str!("transcripts/replays_farik_read_board.jsonl"))
+}

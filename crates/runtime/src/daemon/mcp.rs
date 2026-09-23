@@ -19,8 +19,7 @@ use rmcp::{ErrorData, RoleServer, ServerHandler};
 use serde_json::{Value, json};
 
 use super::DaemonState;
-use crate::exec::Executor;
-use crate::tools::{ToolContext, ToolDeps, call_tool, tool_descriptors};
+use crate::tools::{ToolContext, call_tool, tool_descriptors};
 
 /// The header naming the Farik session a request to `/mcp` comes from.
 pub(crate) const SESSION_HEADER: &str = "x-farik-session";
@@ -30,15 +29,10 @@ const PERMISSION_TOOL: &str = "permission";
 const PERMISSION_MESSAGE: &str =
     "farik decides tool calls in its PreToolUse hook; this one was not allowed there";
 
-/// The session a request comes from, as its registration says, put in the request's extensions
-/// by `require_session`.
+/// What the tools of the session a request comes from are called with, as
+/// `DaemonState::tool_context` built it, put in the request's extensions by `require_session`.
 #[derive(Clone)]
-pub(crate) struct CallingSession {
-    session_id: String,
-    agent_id: String,
-    task_id: Option<farik_core::contract::TaskId>,
-    executor: Option<Arc<dyn Executor>>,
-}
+pub(crate) struct CallingSession(Arc<ToolContext>);
 
 /// Answers 403 for a request whose `X-Farik-Session` names no registered session, and passes
 /// the registration on otherwise.
@@ -52,17 +46,9 @@ pub(crate) async fn require_session(
         .get(SESSION_HEADER)
         .and_then(|value| value.to_str().ok())
         .map(str::to_string);
-    let calling = named.and_then(|session_id| {
-        state
-            .sessions()
-            .get(&session_id)
-            .map(|session| CallingSession {
-                session_id,
-                agent_id: session.registration.agent_id.clone(),
-                task_id: session.registration.task_id.clone(),
-                executor: session.registration.executor.clone(),
-            })
-    });
+    let calling = named
+        .and_then(|session_id| state.tool_context(&session_id))
+        .map(|context| CallingSession(Arc::new(context)));
     match calling {
         Some(calling) => {
             request.extensions_mut().insert(calling);
@@ -77,17 +63,10 @@ pub(crate) async fn require_session(
 }
 
 /// Farik's MCP server: `list_tools` and `call_tool` over `tool_descriptors` and `call_tool`,
-/// and the permission-prompt tool.
+/// and the permission-prompt tool. The session a call comes from, and the project it works on,
+/// are the request's.
 #[derive(Clone)]
-pub(crate) struct FarikMcp {
-    deps: Arc<ToolDeps>,
-}
-
-impl FarikMcp {
-    pub(crate) fn new(deps: Arc<ToolDeps>) -> Self {
-        Self { deps }
-    }
-}
+pub(crate) struct FarikMcp;
 
 impl ServerHandler for FarikMcp {
     fn get_info(&self) -> InitializeResult {
@@ -123,15 +102,8 @@ impl ServerHandler for FarikMcp {
             .ok_or_else(|| {
                 ErrorData::invalid_request("the request names no session Farik answers for", None)
             })?;
-        let tool_context = ToolContext {
-            agent_id: calling.agent_id,
-            task_id: calling.task_id,
-            session_id: calling.session_id,
-            executor: calling.executor,
-            deps: Arc::clone(&self.deps),
-        };
         let input = request.arguments.map_or_else(|| json!({}), Value::Object);
-        let result = match call_tool(&tool_context, &request.name, input).await {
+        let result = match call_tool(&calling.0, &request.name, input).await {
             Ok(value) => CallToolResult::success(vec![ContentBlock::text(value.to_string())]),
             Err(error) => CallToolResult::error(vec![ContentBlock::text(error.to_string())]),
         };
