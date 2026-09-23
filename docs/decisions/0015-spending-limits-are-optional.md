@@ -33,7 +33,7 @@ A usage report for a model that no price table prices is recorded with its token
 
 A new project runs with no dollar ceiling, so a user who wants one has to set it. The setup screen (phase 5) offers the daily budget as an optional field rather than a required one. Section 10's first-day figure of twenty dollars becomes a property of the shipped models, not a cap.
 
-Existing team files keep the numbers they already hold, and those numbers stay enforced. The Milestone 0 run's team sets its own.
+Existing team files keep the numbers they already hold, and those numbers stay enforced. The Milestone 0 run's team sets no dollar limit (the founder, 2026-09-23).
 
 Readiness and assignment stop failing late in the day for a team with no daily budget, because the stand-in for the sprint is then unbounded. A team that sets a daily budget keeps phase 3's behaviour until phase 4 step 02 replaces the stand-in with the sprint's own remainder.
 
