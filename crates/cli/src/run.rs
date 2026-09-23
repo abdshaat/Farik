@@ -21,13 +21,18 @@ const INTERRUPTED_BY: &str = "interrupted by Ctrl-C";
 pub(crate) struct Printer<'p, 'a> {
     pub(crate) io: &'p mut CliIo<'a>,
     pub(crate) as_json: bool,
+    /// Whether `--json` prints a line per thing, as `run` does, or nothing until the end, as
+    /// `contract new` does.
+    pub(crate) json_lines: bool,
 }
 
 impl Printer<'_, '_> {
     /// One line: `text` for a person, `value` for a script, on standard output.
     pub(crate) fn line(&mut self, text: &str, value: &Value) {
         if self.as_json {
-            say(&mut self.io.stdout, &value.to_string());
+            if self.json_lines {
+                say(&mut self.io.stdout, &value.to_string());
+            }
         } else {
             say(&mut self.io.stdout, text);
         }
@@ -41,8 +46,8 @@ impl Printer<'_, '_> {
 
 /// How a loop of ticks ended.
 pub(crate) enum Ended {
-    /// A tick was idle.
-    Idle,
+    /// A tick was idle, for this reason.
+    Idle(String),
     /// The run was stopped.
     Stopped,
     /// A tick failed, in these words.
@@ -61,7 +66,11 @@ pub(crate) fn drive(project: &Project, rules: TickRules, io: &mut CliIo<'_>, as_
             Ok(driver) => driver,
             Err(error) => return refuse(io, as_json, &error),
         };
-        let mut printer = Printer { io, as_json };
+        let mut printer = Printer {
+            io,
+            as_json,
+            json_lines: true,
+        };
         started(&mut printer, &driver);
         let scope = TickScope {
             task_id: None,
@@ -146,7 +155,7 @@ pub(crate) async fn ticks(
         match report {
             Ok(TickReport::Idle { why }) => {
                 printer.line(&format!("idle: {why}"), &json!({ "idle": why }));
-                return Ended::Idle;
+                return Ended::Idle(why);
             }
             Ok(TickReport::Acted { task_id, what }) => {
                 printer.line(
@@ -199,7 +208,7 @@ pub(crate) async fn finish(
             report_error(printer, error);
             1
         }
-        Ended::Idle | Ended::Stopped => 0,
+        Ended::Idle(_) | Ended::Stopped => 0,
     };
     match waiting_now(project) {
         Ok(waiting) => print_waiting(printer, &waiting),
@@ -213,6 +222,21 @@ pub(crate) async fn finish(
         code = 1;
     }
     if presses > 0 { INTERRUPTED } else { code }
+}
+
+/// Shuts the driver down, and answers `code`, or 1 when the shutdown failed.
+pub(crate) async fn finish_quietly(
+    driver: Driver,
+    printer: &mut Printer<'_, '_>,
+    code: i32,
+) -> i32 {
+    match driver.finish().await {
+        Ok(()) => code,
+        Err(error) => {
+            report_error(printer, &error);
+            1
+        }
+    }
 }
 
 /// What waits on the human now, read from the project's board.
@@ -242,7 +266,7 @@ pub(crate) fn print_waiting(printer: &mut Printer<'_, '_>, waiting: &[Waiting]) 
 }
 
 /// A failure, as every refusal is written.
-fn report_error(printer: &mut Printer<'_, '_>, error: &str) {
+pub(crate) fn report_error(printer: &mut Printer<'_, '_>, error: &str) {
     if printer.as_json {
         printer.note(&json!({ "error": error }).to_string());
     } else {
@@ -252,7 +276,11 @@ fn report_error(printer: &mut Printer<'_, '_>, error: &str) {
 
 /// A start that refused.
 pub(crate) fn refuse(io: &mut CliIo<'_>, as_json: bool, error: &str) -> i32 {
-    let mut printer = Printer { io, as_json };
+    let mut printer = Printer {
+        io,
+        as_json,
+        json_lines: true,
+    };
     report_error(&mut printer, error);
     1
 }

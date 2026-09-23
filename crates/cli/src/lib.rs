@@ -10,6 +10,9 @@
 pub mod board;
 /// Taking a contract from the team, and giving it back.
 pub mod contract;
+/// Writing a contract with the Product Manager at the terminal.
+#[cfg(unix)]
+mod contract_new;
 /// One exchange with the daemon a `daemon.json` names.
 pub mod daemon_client;
 /// Everything this project disagrees with itself about.
@@ -392,6 +395,23 @@ enum ContractCommands {
         /// The task whose contract it is.
         task_id: String,
     },
+    /// File a request from a brief or an issue and write its contract with the Product Manager,
+    /// answering its questions here (5.13).
+    #[command(group(clap::ArgGroup::new("source").required(true).args(["brief", "from"])))]
+    New {
+        /// What you want, in your words: its first line is the title, the whole the intent.
+        #[arg(long)]
+        brief: Option<String>,
+        /// An issue on the forge to file instead, read with gh.
+        #[arg(long)]
+        from: Option<String>,
+        /// Size it now: large becomes an epic, small a standalone task (5.16).
+        #[arg(long)]
+        size: Option<SizeArgument>,
+        /// Take the contract once the Product Manager has written it (5.11).
+        #[arg(long)]
+        lock: bool,
+    },
 }
 
 /// How big triage found a request, as a person types it.
@@ -429,7 +449,12 @@ pub fn run_cli(args: &[String], io: &mut CliIo<'_>) -> i32 {
         };
     }
     let now = io.clock.now();
-    if let Commands::Run | Commands::Plan = &parsed.command {
+    if let Commands::Run
+    | Commands::Plan
+    | Commands::Contract {
+        command: ContractCommands::New { .. },
+    } = &parsed.command
+    {
         return drive(&parsed.command, parsed.json, io);
     }
     let outcome = match &parsed.command {
@@ -438,43 +463,11 @@ pub fn run_cli(args: &[String], io: &mut CliIo<'_>) -> i32 {
             command: TaskCommands::Create { file, parent },
         } => open_project(&io.cwd, now)
             .and_then(|project| task::create(&project, &io.cwd, file, parent.as_deref(), now)),
-        Commands::Triage {
-            task_id,
-            size,
-            reason,
-        } => open_project(&io.cwd, now).and_then(|project| {
-            here_or_sent(
-                &project,
-                || triage::triage(&project, task_id, (*size).into(), reason, now),
-                || triage::command_of(task_id, (*size).into(), reason),
-            )
-        }),
-        Commands::Contract {
-            command: ContractCommands::Lock { task_id },
-        } => open_project(&io.cwd, now).and_then(|project| {
-            here_or_sent(
-                &project,
-                || contract::hold(&project, task_id, true, now),
-                || {
-                    Ok(Command::ContractLock {
-                        task_id: task(task_id)?,
-                    })
-                },
-            )
-        }),
-        Commands::Contract {
-            command: ContractCommands::Unlock { task_id },
-        } => open_project(&io.cwd, now).and_then(|project| {
-            here_or_sent(
-                &project,
-                || contract::hold(&project, task_id, false, now),
-                || {
-                    Ok(Command::ContractUnlock {
-                        task_id: task(task_id)?,
-                    })
-                },
-            )
-        }),
+        Commands::Triage { .. }
+        | Commands::Contract {
+            command: ContractCommands::Lock { .. } | ContractCommands::Unlock { .. },
+        } => open_project(&io.cwd, now)
+            .and_then(|project| phase_two_write(&parsed.command, &project, now)),
         Commands::Approve { .. }
         | Commands::Accept { .. }
         | Commands::Answer { .. }
@@ -511,11 +504,56 @@ pub fn run_cli(args: &[String], io: &mut CliIo<'_>) -> i32 {
         Commands::Criteria {
             command: CriteriaCommands::List,
         } => open_project(&io.cwd, now).and_then(|project| team::criteria(&project)),
-        Commands::Hook { .. } | Commands::Run | Commands::Plan => {
-            unreachable!("a hook, run, or plan command returned above")
-        }
+        Commands::Hook { .. }
+        | Commands::Run
+        | Commands::Plan
+        | Commands::Contract {
+            command: ContractCommands::New { .. },
+        } => unreachable!("a hook, run, plan, or contract new command returned above"),
     };
     report(outcome, parsed.json, io)
+}
+
+/// One of phase 2's writes, which reach the process driving the project when one does.
+fn phase_two_write(
+    command: &Commands,
+    project: &Project,
+    now: chrono::DateTime<chrono::Utc>,
+) -> Result<Report, String> {
+    match command {
+        Commands::Triage {
+            task_id,
+            size,
+            reason,
+        } => here_or_sent(
+            project,
+            || triage::triage(project, task_id, (*size).into(), reason, now),
+            || triage::command_of(task_id, (*size).into(), reason),
+        ),
+        Commands::Contract {
+            command: ContractCommands::Lock { task_id },
+        } => here_or_sent(
+            project,
+            || contract::hold(project, task_id, true, now),
+            || {
+                Ok(Command::ContractLock {
+                    task_id: task(task_id)?,
+                })
+            },
+        ),
+        Commands::Contract {
+            command: ContractCommands::Unlock { task_id },
+        } => here_or_sent(
+            project,
+            || contract::hold(project, task_id, false, now),
+            || {
+                Ok(Command::ContractUnlock {
+                    task_id: task(task_id)?,
+                })
+            },
+        ),
+        _ => Err("this is not one of phase 2's writes".to_string()),
+    }
 }
 
 /// A task id a person typed.
@@ -624,7 +662,8 @@ fn human_command(
     ))
 }
 
-/// `farik run` or `farik plan`, which write as they go and answer their own exit code.
+/// `farik run`, `farik plan`, or `farik contract new`, which drive the project, write as they go,
+/// and answer their own exit code.
 #[cfg(unix)]
 fn drive(command: &Commands, as_json: bool, io: &mut CliIo<'_>) -> i32 {
     use farik_runtime::orchestrator::TickRules;
@@ -633,11 +672,37 @@ fn drive(command: &Commands, as_json: bool, io: &mut CliIo<'_>) -> i32 {
         Ok(project) => project,
         Err(error) => return run::refuse(io, as_json, &error),
     };
-    let rules = match command {
-        Commands::Plan => TickRules::Planning,
-        _ => TickRules::All,
-    };
-    run::drive(&project, rules, io, as_json)
+    match command {
+        Commands::Contract {
+            command:
+                ContractCommands::New {
+                    brief,
+                    from,
+                    size,
+                    lock,
+                },
+        } => {
+            let source = match (brief, from) {
+                (Some(brief), _) => contract_new::Source::Brief(brief),
+                (None, Some(url)) => contract_new::Source::Issue(url),
+                (None, None) => {
+                    return run::refuse(io, as_json, "give --brief or --from");
+                }
+            };
+            contract_new::contract_new(
+                &project,
+                &contract_new::Asked {
+                    source,
+                    size: size.map(Into::into),
+                    lock: *lock,
+                },
+                io,
+                as_json,
+            )
+        }
+        Commands::Plan => run::drive(&project, TickRules::Planning, io, as_json),
+        _ => run::drive(&project, TickRules::All, io, as_json),
+    }
 }
 
 #[cfg(not(unix))]
