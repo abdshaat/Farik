@@ -475,10 +475,77 @@ mod tests {
         assert_eq!(mode & 0o777, 0o600);
         let port = written.port;
         assert!(std::net::TcpStream::connect(("127.0.0.1", port)).is_ok());
+        // `shutdown` answers only once the server's task has finished, so the port is closed by
+        // then. Connecting to it afterwards to prove that raced: another test could bind the
+        // freed port in between.
         handle.shutdown().await.expect("the daemon stops");
         assert!(!daemon_file.exists());
-        assert!(std::net::TcpStream::connect(("127.0.0.1", port)).is_err());
     }
+
+    #[tokio::test(flavor = "multi_thread")]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn replaces_a_daemon_file_a_crashed_daemon_left() {
+        let daemon = TestDaemon::new("daemon-stale", |_| {});
+        let daemon_file = daemon.project.repo.path.join(".farik/local/daemon.json");
+        std::fs::write(&daemon_file, r#"{"port":1,"token":"old","pid":1}"#).expect("written");
+        std::fs::set_permissions(&daemon_file, std::fs::Permissions::from_mode(0o644))
+            .expect("the mode is set");
+        let handle = serve(
+            DaemonConfig {
+                port: None,
+                daemon_file: daemon_file.clone(),
+            },
+            daemon.state.clone(),
+        )
+        .await
+        .expect("the daemon is up over a stale file");
+        let written: DaemonInfo = serde_json::from_str(
+            &std::fs::read_to_string(&daemon_file).expect("the file is there"),
+        )
+        .expect("the file is the daemon's info");
+        assert_eq!(written, handle.info);
+        let mode = std::fs::metadata(&daemon_file)
+            .expect("metadata")
+            .permissions()
+            .mode();
+        assert_eq!(mode & 0o777, 0o600);
+        handle.shutdown().await.expect("the daemon stops");
+    }
+
+    #[cfg(target_os = "linux")]
+    #[tokio::test(flavor = "multi_thread")]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn listens_on_the_loopback_address_only() {
+        let daemon = TestDaemon::new("daemon-loopback", |_| {});
+        let handle = serve(
+            DaemonConfig {
+                port: None,
+                daemon_file: daemon.project.repo.path.join(".farik/local/daemon.json"),
+            },
+            daemon.state.clone(),
+        )
+        .await
+        .expect("the daemon is up");
+        // The kernel's table of IPv4 sockets: the local address is the address in hex, in the
+        // host's byte order, then the port; state 0A is a listening socket.
+        let table = std::fs::read_to_string("/proc/net/tcp").expect("the socket table reads");
+        let suffix = format!(":{:04X}", handle.info.port);
+        let listening: Vec<&str> = table
+            .lines()
+            .skip(1)
+            .filter_map(|line| {
+                let fields: Vec<&str> = line.split_whitespace().collect();
+                (fields.get(3) == Some(&"0A") && fields[1].ends_with(&suffix)).then_some(fields[1])
+            })
+            .collect();
+        assert_eq!(
+            listening,
+            vec![format!("0100007F{suffix}").as_str()],
+            "{table}"
+        );
+        handle.shutdown().await.expect("the daemon stops");
+    }
+
     /// Sends one raw HTTP/1.1 request and reads until `until` appears in what came back.
     async fn exchange(stream: &mut tokio::net::TcpStream, request: &str, until: &str) -> String {
         use tokio::io::{AsyncReadExt, AsyncWriteExt};
