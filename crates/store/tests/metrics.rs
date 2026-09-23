@@ -116,6 +116,17 @@ impl Recorded {
     /// A `cost.recorded` of `usd` for `purpose`, about `task` when there is one, in a session of
     /// its own, at ten UTC on `day`.
     fn cost(&self, task: Option<&str>, purpose: &str, usd: f64, day: &str) {
+        self.append(&self.cost_wire(task, purpose, usd, day));
+    }
+
+    /// A `cost.recorded` for a model no price table prices: no dollars, and `unpriced`.
+    fn unpriced_cost(&self, task: Option<&str>, purpose: &str, day: &str) {
+        let mut wire = self.cost_wire(task, purpose, 0.0, day);
+        wire["body"]["unpriced"] = json!(true);
+        self.append(&wire);
+    }
+
+    fn cost_wire(&self, task: Option<&str>, purpose: &str, usd: f64, day: &str) -> Value {
         let mut wire = an_event_wire(EventKind::CostRecorded);
         if let Some(task) = task {
             wire["task_id"] = json!(task);
@@ -130,7 +141,7 @@ impl Recorded {
         wire["recorded_at"] = json!(format!("{day}T10:00:00Z"));
         wire["body"]["purpose"] = json!(purpose);
         wire["body"]["cost_usd"] = json!(usd);
-        self.append(&wire);
+        wire
     }
 
     /// Writes `task`'s contract: the fixture's, with one exit criterion per method in `methods`,
@@ -308,6 +319,27 @@ fn measures_cost_per_accepted_task_by_purpose() {
             (CostRecordedBodyPurpose::Conversation, 0.0625),
         ]
     );
+}
+
+#[test]
+fn counts_an_unpriced_report_as_a_session_at_no_cost() {
+    let recorded = Recorded::new("unpriced");
+    recorded.contract("FRK-1", &["command"]);
+    recorded.created("FRK-1", "task", None);
+    verified_once(&recorded, "FRK-1");
+    recorded.cost(Some("FRK-1"), "implement", 2.0, "2026-09-22");
+    recorded.unpriced_cost(Some("FRK-1"), "verify", "2026-09-22");
+
+    let metrics = metrics_of(&recorded);
+    let split = metrics
+        .cost_per_accepted_task_usd
+        .expect("a task was accepted");
+    assert!((split.total - 2.0).abs() < f64::EPSILON, "{}", split.total);
+    assert_eq!(
+        split.by_purpose.get(&CostRecordedBodyPurpose::Verify),
+        Some(&0.0)
+    );
+    assert_eq!(metrics.active_weeks, 1);
 }
 
 #[test]

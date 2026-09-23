@@ -111,6 +111,7 @@ pub fn record_session_cost(
             cache_write_tokens: tokens(usage.cache_write_tokens)?,
         },
         cost_usd,
+        unpriced: false,
     };
     let event = stamp(EventBody::CostRecorded(body), clock, &source.ids)?;
     // Checked on what `new_event` settled, so that a blank id counts as none.

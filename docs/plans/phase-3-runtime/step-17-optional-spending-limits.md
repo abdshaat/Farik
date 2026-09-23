@@ -33,6 +33,7 @@ A new Farik project spends without any dollar ceiling unless its user sets one. 
 - `farik init`'s starter team writes `budgets: {}` and `rules: {}`, so it has no dollar limit. A rescan keeps a team file that is already there (section 3), so existing projects keep the limits they hold, which stay enforced.
 - The Product Manager's skill changes in two places, both of which speak of the sprint. At line 53, the rule becomes "A task's budget is within the team's maximum when the team sets one, what is left of the sprint when it has a budget, and, under an epic, what is left of the epic." At line 82, the checklist line becomes "the budget is set and fits the sprint when it has a budget, the team's maximum when there is one, and, under an epic, the epic;".
 - Changed 2026-09-23 in execution (Task 1): one test outside the file map relied on the shipped five-dollar cap, `returns_a_failing_contract_with_its_failures` (`crates/runtime/src/orchestrator/requests.rs`), which reads the cap's refusal; its team sets `max_task_budget_usd: 5` and its assertions are unchanged. `reads_no_days_remainder_without_a_daily_budget` and `starts_sessions_whatever_the_day_cost_without_a_daily_budget` passed once `budget_state` read an unset day as infinite, since they were written after it; each was seen to fail with `unwrap_or(0.0)` put in its place. 5.5's opening line keeps "the others with role-based defaults" after "the three dollar ones optional", since the session limits still have them.
+- Changed 2026-09-23 in execution (Task 3): the new required field broke the one place that builds a `CostRecordedBody`, `record_session_cost`, so this task sets `unpriced: false` there and Task 4 gives it its meaning. `reads_a_cost_without_unpriced_as_priced` could not fail at run time before the field existed (the old wire already had no `unpriced`); it failed to compile, and it holds the default from here on.
 
 ## File map
 
@@ -134,7 +135,7 @@ Consumes: nothing from this plan
 - `keeps_an_unpriced_cost` (`event.rs`): the fixture with `"unpriced": true` and `"cost_usd": 0` validates, parses with `unpriced == true`, and serialises back with `"unpriced": true`.
 - `counts_an_unpriced_report_as_a_session_at_no_cost` (`metrics.rs`): one accepted task with a priced `cost.recorded` of 2.0 on its implement session and an unpriced one on its verify session. Cost per accepted task is 2.0 in total, with `verify` at 0.0, and `active_weeks` is 1. It fails first because the schema refuses `unpriced` as a property it does not know.
 
-- [ ] `feat(protocol): mark a cost that no price table priced`
+- [x] `feat(protocol): mark a cost that no price table priced`
 
 ### Task 4: record usage of a model no table prices
 

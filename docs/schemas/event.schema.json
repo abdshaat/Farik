@@ -249,7 +249,8 @@
         "purpose": { "type": "string", "enum": ["triage", "refine", "plan", "implement", "verify", "ceremony", "conversation"] },
         "model_id": { "type": "string", "minLength": 1 },
         "usage": { "$ref": "#/$defs/tokenUsage" },
-        "cost_usd": { "type": "number", "minimum": 0 }
+        "cost_usd": { "type": "number", "minimum": 0 },
+        "unpriced": { "type": "boolean", "default": false, "description": "True when no price table in use priced the model: the tokens are recorded, the cost is zero, and no dollar limit counts it (ADR 0015). Left out, as an older log leaves it, the cost was priced." }
       }
     },
     "tokenUsage": {

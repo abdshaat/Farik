@@ -1068,6 +1068,33 @@ mod tests {
     }
 
     #[test]
+    fn reads_a_cost_without_unpriced_as_priced() {
+        let mut input = an_event_wire(EventKind::CostRecorded);
+        input["body"]
+            .as_object_mut()
+            .expect("the body is an object")
+            .remove("unpriced");
+        let event = event_from_value(&input).expect("an older log's cost reads");
+        let EventBody::CostRecorded(body) = &event.body else {
+            panic!("a cost.recorded, not {:?}", event.body.kind());
+        };
+        assert!(!body.unpriced);
+    }
+
+    #[test]
+    fn keeps_an_unpriced_cost() {
+        let mut input = an_event_wire(EventKind::CostRecorded);
+        input["body"]["unpriced"] = json!(true);
+        input["body"]["cost_usd"] = json!(0);
+        let event = event_from_value(&input).expect("an unpriced cost is valid");
+        let EventBody::CostRecorded(body) = &event.body else {
+            panic!("a cost.recorded, not {:?}", event.body.kind());
+        };
+        assert!(body.unpriced);
+        assert_eq!(event_to_value(&event)["body"]["unpriced"], json!(true));
+    }
+
+    #[test]
     fn refuses_a_cost_with_a_negative_amount() {
         let mut input = an_event_wire(EventKind::CostRecorded);
         input["body"]["cost_usd"] = json!(-0.01);

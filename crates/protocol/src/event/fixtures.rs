@@ -91,7 +91,8 @@ pub fn a_body_wire(kind: EventKind) -> Value {
                 "cache_read_tokens": 0,
                 "cache_write_tokens": 0
             },
-            "cost_usd": 0.5
+            "cost_usd": 0.5,
+            "unpriced": false
         }),
         EventKind::BudgetExhausted => json!({ "scope": "day_usd", "consequence": "pause_team" }),
         EventKind::TaskTransitioned => json!({
