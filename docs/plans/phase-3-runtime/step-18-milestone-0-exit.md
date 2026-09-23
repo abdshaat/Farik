@@ -1,4 +1,4 @@
-# Phase 3, step 17: Milestone 0 exit
+# Phase 3, step 18: Milestone 0 exit
 
 Status: draft (readiness review pending)
 Branch: `phase/3-runtime`
@@ -31,7 +31,7 @@ Milestone 0's exit test, run once for real and recorded. On a copy of Farik's ow
 ```
 docs/milestones/m0-exit.md               creates: the record (Task 1), the founder's review and verdict (Task 2)
 docs/milestones/m0-exit.events.jsonl     creates: the event log export (Task 1)
-docs/plans/phase-3-runtime/step-17-milestone-0-exit.md   modifies: checkboxes
+docs/plans/phase-3-runtime/step-18-milestone-0-exit.md   modifies: checkboxes
 ```
 
 ## The team

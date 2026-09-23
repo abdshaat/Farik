@@ -10,7 +10,7 @@ Signatures, not bodies; test names and what each asserts, not test code; around 
 
 ## Goal
 
-`farik metrics` prints the five numbers F17 and `docs/PRODUCT_ANALYSIS.md` say to track from Milestone 0: how often a task is accepted on its first verification, how often the human had to step in per accepted task, what an accepted task cost and on which kind of session, how much of the verification was mechanical, and in how many weeks the team worked. Each is defined exactly, over the whole project, from the projections of the log and, for the criteria, the contracts. Step 17 prints them for the Milestone 0 exit. Out of scope: metrics per sprint (phase 4 step 02, which adds the sprints), the app's panel (phase 6 step 04), and any history or trend of a metric over time.
+`farik metrics` prints the five numbers F17 and `docs/PRODUCT_ANALYSIS.md` say to track from Milestone 0: how often a task is accepted on its first verification, how often the human had to step in per accepted task, what an accepted task cost and on which kind of session, how much of the verification was mechanical, and in how many weeks the team worked. Each is defined exactly, over the whole project, from the projections of the log and, for the criteria, the contracts. Step 18 prints them for the Milestone 0 exit. Out of scope: metrics per sprint (phase 4 step 02, which adds the sprints), the app's panel (phase 6 step 04), and any history or trend of a metric over time.
 
 ## Decisions
 
@@ -29,7 +29,7 @@ Signatures, not bodies; test names and what each asserts, not test code; around 
 - `farik metrics` has no `--sprint` in this phase. Sprints do not exist until phase 4, so a flag that could only refuse would be the placeholder that stage 2 forbids. Phase 4 step 02 adds it together with the sprints. clap refuses it now (exit 2). The project plan's step 16 line and phase 4 step 02 row are changed to match.
 - Output. The lines are exactly those in Task 3's test. Rates are printed as a percentage with one decimal, the interventions with two decimals, and dollars as `$` with two decimals. A `None` prints as `none yet, no task has been accepted`. With `--json` the output is one object: `accepted_tasks`, `first_pass_acceptance_rate`, `interventions_per_accepted_task`, `cost_per_accepted_task_usd` (`{ total, by_purpose: { <purpose>: <usd> } }`), `mechanically_verified_criteria_share`, `active_weeks`, with `null` for `None`. The JSON is built in `crates/cli/src/metrics.rs`, the command line's one mapping layer for it, as `farik board` builds its own. `HarnessMetrics` derives no serde. `accepted_tasks` is added to `HarnessMetrics` because it is the denominator every rate shares, and a rate means little without it.
 - `MetricsError { Store(StoreError), Files(FilesError) }` has a hand-written `Display` (ADR 0006): the store's or the file's own sentence.
-- No ADR. The definitions are recorded in SPEC F17, which the metrics serve, and nothing but this step and step 17's report reads them.
+- No ADR. The definitions are recorded in SPEC F17, which the metrics serve, and nothing but this step and step 18's report reads them.
 
 ## File map
 
