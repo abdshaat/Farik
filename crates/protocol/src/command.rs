@@ -819,4 +819,22 @@ mod tests {
         assert!(reply_from_value(&json!({ "said": "x" })).is_err());
         assert!(reply_from_value(&json!({ "error": { "kind": "lost", "detail": "" } })).is_err());
     }
+
+    #[test]
+    fn reads_every_kind_of_refusal_back_as_it_was_written() {
+        for kind in [
+            ReplyKind::Invalid,
+            ReplyKind::Refused,
+            ReplyKind::NotFound,
+            ReplyKind::Failed,
+        ] {
+            let reply = CommandReply::Error {
+                kind,
+                detail: "why".to_string(),
+            };
+            let wire = reply_to_value(&reply);
+            assert_eq!(wire["error"]["kind"], kind.as_str());
+            assert_eq!(reply_from_value(&wire), Ok(reply));
+        }
+    }
 }
