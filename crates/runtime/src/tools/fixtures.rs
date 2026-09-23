@@ -196,6 +196,18 @@ impl TestProject {
     /// A `task.transitioned` of `task` from `from` into `to`, by the governor, with `extra`
     /// merged over it (`assignee`, `reviewer`, and so on).
     pub(crate) fn moved(&self, task: &str, from: &str, to: &str, extra: &Value) -> FarikEvent {
+        self.moved_at(at(), task, from, to, extra)
+    }
+
+    /// `moved`, recorded at `recorded_at`.
+    pub(crate) fn moved_at(
+        &self,
+        recorded_at: DateTime<Utc>,
+        task: &str,
+        from: &str,
+        to: &str,
+        extra: &Value,
+    ) -> FarikEvent {
         let mut body = json!({
             "from": from,
             "to": to,
@@ -210,14 +222,25 @@ impl TestProject {
                 body.insert(key.clone(), value.clone());
             }
         }
-        self.record(task, "task.transitioned", &body)
+        self.record_at(recorded_at, task, "task.transitioned", &body)
     }
 
     /// Appends one event about `task` (or none) and projects it, as a command does.
     pub(crate) fn record(&self, task: &str, kind: &str, body: &Value) -> FarikEvent {
+        self.record_at(at(), task, kind, body)
+    }
+
+    /// `record`, recorded at `recorded_at`.
+    pub(crate) fn record_at(
+        &self,
+        recorded_at: DateTime<Utc>,
+        task: &str,
+        kind: &str,
+        body: &Value,
+    ) -> FarikEvent {
         let mut wire = json!({
             "seq": 1,
-            "recorded_at": at().to_rfc3339(),
+            "recorded_at": recorded_at.to_rfc3339(),
             "team_id": "farik",
             "project_id": "farik",
             "kind": kind,

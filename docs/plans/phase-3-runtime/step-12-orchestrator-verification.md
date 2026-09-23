@@ -28,6 +28,7 @@ A task that asks for `verifying` is checked the way 5.4 says: Farik runs the con
 - `review.recorded { reviewer, criteria_run, passed }` (8.5 already names it), once per verification: appended when a reviewer's session ends, no `review.recorded` exists since the last move into `verifying`, and every criterion other than a `human` one has a reviewer result; `criteria_run` the number of criteria with a reviewer result, `passed` true exactly when each one's latest passed. It is about one contract; `reviewer` is its attribution. Nothing reads it in phase 3 but the metrics (step 16), which is why it is a summary rather than a gate.
 - `OrchestratorError` gains `Criterion(CriterionError)`.
 - Changed 2026-09-23 in execution (Task 1): the contract schema holds an exit criterion's id to `C<n>`, so the `review` criterion the tests call R1 and the `human` criterion they call H1 are `C2` (or `C3` beside two commands) in the tests. The tools' fixture's C1 is a `test` criterion, so `refuses_the_reviewer_a_criterion_farik_runs` refuses the reviewer both it and a `command` C2. The two existing tool tests that had the reviewer record C1 now have it answer a `review` C2. The reviewer is refused `farik_git_push` as well as `farik_git_commit`, which the decision names and the test holds; `not_the_named_agent` is a tool refusal of its own, with the task's assignee in its words.
+- Changed 2026-09-23 in execution (Task 2): decided where the plan was silent: the rejection an implement session is told of is the last move into `rejected`'s, given while the task's last move into `in_progress` came from `rejected` (so a resumed session of the same iteration is told it too), inside `untrusted_block("rejection", .., 16 KiB)` holding the failed criterion ids and the reasons. A rejected task the governor would neither return nor escalate is reported as `Acted` with its reasons, as rule 7 reports a refused start; the two gates are complementary, so one of them opens. The tools' fixture gained `moved_at` and `record_at`, and the orchestrator's `blocked_hours_ago` and `rejected`, to age a block and to file a rejection.
 
 ## File map
 
@@ -82,7 +83,7 @@ Files: `rules.rs`, `messages.rs`
 - `escalates_a_block_past_its_limit` — blocked 25 hours before the clock with the default 24: `escalated` with `reason: blocker_age`; blocked 1 hour before: the tick is `Idle`.
 - `picks_a_rejected_task_before_a_ready_one` — FRK-1 `ready`, FRK-2 `rejected`: the tick acts on FRK-2.
 
-- [ ] `feat(runtime): return rejected tasks and escalate old blocks`
+- [x] `feat(runtime): return rejected tasks and escalate old blocks`
 
 ### Task 3: verifying
 

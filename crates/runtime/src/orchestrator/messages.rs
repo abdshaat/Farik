@@ -16,6 +16,9 @@ pub(super) struct Resume {
     pub(super) last_commit: Option<HeadSummary>,
     /// The last note, when there is one.
     pub(super) last_note: Option<(String, String)>,
+    /// The failed criterion ids and the reasons of the rejection this iteration answers, when it
+    /// answers one.
+    pub(super) rejection: Option<(Vec<String>, String)>,
 }
 
 /// The plan session's message for a ready task: assign it, with the agents that could do it and
@@ -37,14 +40,21 @@ pub(super) fn plan_message(
     )
 }
 
-/// The implement session's message: the task, and where the work stands when an earlier session
-/// left something: `Resuming: last commit <sha> <subject>; last note (<kind>): <text>`, the note as
+/// The implement session's message: the task, the rejection this iteration answers as untrusted
+/// text when there is one, and where the work stands when an earlier session left something: `Resuming: last commit <sha> <subject>; last note (<kind>): <text>`, the note as
 /// untrusted text.
 pub(super) fn implement_message(contract: &TaskContract, resume: &Resume) -> String {
     let task = contract.id.as_str();
-    let message = format!(
+    let mut message = format!(
         "Do the work of {task} under its contract, in this worktree, on the branch farik/{task}."
     );
+    if let Some((failed, reasons)) = &resume.rejection {
+        let words = format!("failed criteria: {}\nreasons: {reasons}", listed(failed));
+        message = format!(
+            "{message}\n\nThe reviewer rejected the last iteration. Fix what failed: {}",
+            untrusted_block("rejection", &words, NOTE_CAP_BYTES)
+        );
+    }
     if resume.last_commit.is_none() && resume.last_note.is_none() {
         return message;
     }

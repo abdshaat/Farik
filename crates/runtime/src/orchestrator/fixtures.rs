@@ -136,12 +136,37 @@ impl Harness {
 
     /// Files `task` and moves it through `in_progress` to `blocked`, held by `assignee`.
     pub(crate) fn blocked(&self, task: &str, assignee: &str, reviewer: &str) {
+        self.blocked_hours_ago(task, assignee, reviewer, 0);
+    }
+
+    /// `blocked`, the block recorded `hours` before the clock's now.
+    pub(crate) fn blocked_hours_ago(&self, task: &str, assignee: &str, reviewer: &str, hours: i64) {
         self.assigned(task, assignee, reviewer);
         let people = json!({ "assignee": assignee, "reviewer": reviewer });
         self.project.moved(task, "assigned", "in_progress", &people);
         let mut body = people;
         body["blocker"] = json!({ "description": "the API is down", "needed": "the API" });
-        self.project.moved(task, "in_progress", "blocked", &body);
+        self.project.moved_at(
+            at() - chrono::Duration::hours(hours),
+            task,
+            "in_progress",
+            "blocked",
+            &body,
+        );
+    }
+
+    /// Files `task` and moves it through `in_progress` and `verifying` to `rejected` at
+    /// `iteration`, held by `dev-a` and reviewed by `dev-b`, C1 failed for `reasons`.
+    pub(crate) fn rejected(&self, task: &str, iteration: u32, reasons: &str) {
+        self.in_progress(task, "dev-a", "dev-b");
+        let people = json!({ "assignee": "dev-a", "reviewer": "dev-b", "iteration": iteration });
+        self.project
+            .moved(task, "in_progress", "verifying", &people);
+        let mut body = people;
+        body["actor"] = json!("reviewer");
+        body["requested_by"] = json!("dev-b");
+        body["rejection"] = json!({ "failed_criterion_ids": ["C1"], "reasons": reasons });
+        self.project.moved(task, "verifying", "rejected", &body);
     }
 
     /// A `cost.recorded` of `usd` dollars by `dev-a` in session `session`, against `task` when one

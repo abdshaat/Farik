@@ -9,7 +9,7 @@ use farik_core::contract::{Role, TaskContract, TaskId, TaskKind, TaskStatus};
 use farik_core::governor::transition::TransitionRequest;
 use farik_core::governor::transition_table::TransitionActor;
 use farik_core::team::{Agent, Team};
-use farik_protocol::event::{EventBody, EventKind};
+use farik_protocol::event::{EventBody, EventKind, FarikEvent};
 use farik_store::{EventQuery, Git, TaskProjection};
 
 use super::messages::{Resume, implement_message, plan_message};
@@ -43,6 +43,14 @@ pub(super) async fn tick(orchestrator: &Orchestrator) -> Result<TickReport, Orch
     let mut board = deps.tools.projections.board()?;
     board.sort_by_key(|row| task_number(row.task_id.as_str()));
     let mut day_spent = false;
+    if let Some(row) = board.iter().find(|row| row.status == TaskStatus::Rejected) {
+        return rejected(deps, &team, row);
+    }
+    for row in board.iter().filter(|row| row.status == TaskStatus::Blocked) {
+        if let Some(report) = blocked(deps, &team, row)? {
+            return Ok(report);
+        }
+    }
     for row in board
         .iter()
         .filter(|row| row.status == TaskStatus::InProgress)
@@ -67,6 +75,98 @@ pub(super) async fn tick(orchestrator: &Orchestrator) -> Result<TickReport, Orch
     Ok(TickReport::Idle {
         why: if day_spent { DAY_SPENT } else { NOTHING_TO_DO }.to_string(),
     })
+}
+
+/// Rule 3: a task `rejected` goes back to `in_progress` for its next iteration, or, when the
+/// governor refuses that at the iteration limit, to `escalated`; both asked as the governor, whose
+/// effects count the iteration and raise the escalation.
+fn rejected(
+    deps: &OrchestratorDeps,
+    team: &Team,
+    row: &TaskProjection,
+) -> Result<TickReport, OrchestratorError> {
+    let what = match governor_moves(deps, team, row, TaskStatus::InProgress)? {
+        TransitionOutcome::Moved(_) => "returned it to its assignee for another iteration".into(),
+        TransitionOutcome::Refused(_) => {
+            match governor_moves(deps, team, row, TaskStatus::Escalated)? {
+                TransitionOutcome::Moved(_) => {
+                    "escalated it: it was rejected as often as it may be".to_string()
+                }
+                TransitionOutcome::Refused(refusal) => format!(
+                    "the governor would neither return nor escalate it: {}",
+                    refusal_details(&refusal).join("; ")
+                ),
+            }
+        }
+    };
+    Ok(TickReport::Acted {
+        task_id: row.task_id.clone(),
+        what,
+    })
+}
+
+/// Rule 4: a task `blocked` for at least the team's `blocked_limit_hours` is escalated as the
+/// governor, whose `BlockedAge` gate decides; a younger block has no rule.
+fn blocked(
+    deps: &OrchestratorDeps,
+    team: &Team,
+    row: &TaskProjection,
+) -> Result<Option<TickReport>, OrchestratorError> {
+    let Some(blocked_at) = last_move_into(deps, &row.task_id, TaskStatus::Blocked)?
+        .map(|event| event.envelope.recorded_at)
+    else {
+        return Ok(None);
+    };
+    let hours = i64::try_from(team.policy.blocked_limit_hours.get()).unwrap_or(i64::MAX);
+    if deps.tools.clock.now() - blocked_at < chrono::Duration::hours(hours) {
+        return Ok(None);
+    }
+    let what = match governor_moves(deps, team, row, TaskStatus::Escalated)? {
+        TransitionOutcome::Moved(_) => format!("escalated it: blocked for {hours} hours or more"),
+        TransitionOutcome::Refused(refusal) => format!(
+            "the governor would not escalate it: {}",
+            refusal_details(&refusal).join("; ")
+        ),
+    };
+    Ok(Some(TickReport::Acted {
+        task_id: row.task_id.clone(),
+        what,
+    }))
+}
+
+/// Asks the governor, as itself, to move the task to `to`.
+fn governor_moves(
+    deps: &OrchestratorDeps,
+    team: &Team,
+    row: &TaskProjection,
+    to: TaskStatus,
+) -> Result<TransitionOutcome, OrchestratorError> {
+    Ok(deps.tools.transitions.request(
+        &TransitionRequest {
+            task_id: row.task_id.clone(),
+            to,
+            actor: TransitionActor::Governor,
+            agent_id: None,
+        },
+        &TransitionAsk::default(),
+        team,
+    )?)
+}
+
+/// The task's last `task.transitioned` into `status`.
+fn last_move_into(
+    deps: &OrchestratorDeps,
+    task_id: &TaskId,
+    status: TaskStatus,
+) -> Result<Option<FarikEvent>, OrchestratorError> {
+    let moves = deps.tools.log.read(&EventQuery {
+        task_id: Some(task_id.clone()),
+        kinds: vec![EventKind::TaskTransitioned],
+        ..EventQuery::default()
+    })?;
+    Ok(moves.into_iter().rev().find(|event| {
+        matches!(&event.body, EventBody::TaskTransitioned(body) if body.to.to_string() == status.to_string())
+    }))
 }
 
 /// Whether the budgets leave room for a session about `contract`, read with an empty session
@@ -140,7 +240,8 @@ async fn in_progress(
 }
 
 /// Where the task's work stands: its branch's tip when the branch has a commit past the
-/// integration branch, and the last note written since it last moved into `in_progress`.
+/// integration branch, the last note written since it last moved into `in_progress`, and, when that
+/// move came from `rejected`, the rejection that sent it back.
 fn resume(
     deps: &OrchestratorDeps,
     team: &Team,
@@ -164,10 +265,22 @@ fn resume(
         ..EventQuery::default()
     })?;
     let mut last_note = None;
+    let mut rejection = None;
     for event in &history {
         match &event.body {
+            EventBody::TaskTransitioned(body) if body.to.to_string() == "rejected" => {
+                rejection = body.rejection.as_ref().map(|rejection| {
+                    (
+                        rejection.failed_criterion_ids.clone(),
+                        rejection.reasons.clone(),
+                    )
+                });
+            }
             EventBody::TaskTransitioned(body) if body.to.to_string() == "in_progress" => {
                 last_note = None;
+                if body.from.to_string() != "rejected" {
+                    rejection = None;
+                }
             }
             EventBody::NoteWritten(body) => {
                 last_note = Some((body.kind.to_string(), body.text.clone()));
@@ -178,6 +291,7 @@ fn resume(
     Ok(Resume {
         last_commit,
         last_note,
+        rejection,
     })
 }
 
@@ -378,9 +492,9 @@ mod tests {
     use farik_core::contract::{Role, TaskStatus};
     use farik_core::pricing::Usage;
     use farik_protocol::event::{
-        BudgetExhaustedBodyScope, CriterionRecordedBodyRunBy, EventBody, EventKind,
-        NoteWrittenBodyKind, SessionEndedBodyReason, SessionStartedBodyPurpose,
-        TransitionActorWire,
+        BudgetExhaustedBodyScope, CriterionRecordedBodyRunBy, EscalationRaisedBodyReason,
+        EventBody, EventKind, NoteWrittenBodyKind, SessionEndedBodyReason,
+        SessionStartedBodyPurpose, TransitionActorWire,
     };
     use farik_roles::RoleError;
     use farik_store::git::fixtures::git_output_in;
@@ -775,6 +889,128 @@ mod tests {
 
         assert!(adapter.started().is_empty());
         assert_eq!(harness.row("FRK-1").status, TaskStatus::Ready);
+    }
+
+    fn last_move(harness: &Harness) -> farik_protocol::event::TaskTransitionedBody {
+        match &harness
+            .events(&[EventKind::TaskTransitioned])
+            .last()
+            .expect("a move")
+            .body
+        {
+            EventBody::TaskTransitioned(body) => body.clone(),
+            other => panic!("expected a move, got {other:?}"),
+        }
+    }
+
+    fn escalation_reasons(harness: &Harness) -> Vec<EscalationRaisedBodyReason> {
+        harness
+            .events(&[EventKind::EscalationRaised])
+            .iter()
+            .filter_map(|event| match &event.body {
+                EventBody::EscalationRaised(body) => Some(body.reason),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn returns_a_rejected_task_to_its_assignee() {
+        let harness = Harness::new("orch-rejected", |_| {});
+        harness.rejected("FRK-1", 0, "C1: done.txt missing");
+        let adapter = harness.recorded(vec![implement_stops_early()]);
+        let orchestrator = harness.orchestrator(adapter.clone());
+
+        let report = orchestrator.tick().await.expect("the tick runs");
+
+        assert_eq!(acted_on(&report), Some("FRK-1"), "{report:?}");
+        assert!(adapter.started().is_empty());
+        let moved = last_move(&harness);
+        assert_eq!(moved.from.to_string(), "rejected");
+        assert_eq!(moved.to.to_string(), "in_progress");
+        assert_eq!(moved.requested_by, "governor");
+        assert_eq!(moved.iteration, 1);
+        assert_eq!(harness.row("FRK-1").iteration, 1);
+
+        orchestrator
+            .tick()
+            .await
+            .expect("the implement session runs");
+        let started = adapter.started();
+        assert_eq!(started.len(), 1);
+        assert_eq!(started[0].purpose, SessionPurpose::Implement);
+        let prompt = &started[0].initial_prompt;
+        assert!(prompt.contains("C1: done.txt missing"), "{prompt}");
+        assert!(
+            prompt.contains("<untrusted source=\"rejection\">"),
+            "{prompt}"
+        );
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn escalates_a_task_rejected_too_often() {
+        let harness = Harness::new("orch-rejected-too-often", |_| {});
+        harness.rejected("FRK-1", 3, "C1: done.txt missing");
+        let adapter = harness.recorded(Vec::new());
+        let orchestrator = harness.orchestrator(adapter.clone());
+
+        let report = orchestrator.tick().await.expect("the tick runs");
+
+        assert_eq!(acted_on(&report), Some("FRK-1"), "{report:?}");
+        assert_eq!(harness.row("FRK-1").status, TaskStatus::Escalated);
+        assert_eq!(
+            escalation_reasons(&harness),
+            vec![EscalationRaisedBodyReason::Iterations]
+        );
+        assert!(adapter.started().is_empty());
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn escalates_a_block_past_its_limit() {
+        let harness = Harness::new("orch-blocked-old", |_| {});
+        harness.blocked_hours_ago("FRK-1", "dev-a", "dev-b", 25);
+        let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
+
+        let report = orchestrator.tick().await.expect("the tick runs");
+
+        assert_eq!(acted_on(&report), Some("FRK-1"), "{report:?}");
+        assert_eq!(harness.row("FRK-1").status, TaskStatus::Escalated);
+        assert_eq!(
+            escalation_reasons(&harness),
+            vec![EscalationRaisedBodyReason::BlockerAge]
+        );
+
+        let harness = Harness::new("orch-blocked-young", |_| {});
+        harness.blocked_hours_ago("FRK-1", "dev-a", "dev-b", 1);
+        let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
+
+        let report = orchestrator.tick().await.expect("the tick runs");
+
+        assert_eq!(
+            report,
+            TickReport::Idle {
+                why: NOTHING_TO_DO.to_string()
+            }
+        );
+        assert_eq!(harness.row("FRK-1").status, TaskStatus::Blocked);
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn picks_a_rejected_task_before_a_ready_one() {
+        let harness = Harness::new("orch-order-rejected", |_| {});
+        harness.ready("FRK-1");
+        harness.rejected("FRK-2", 0, "C1: done.txt missing");
+        let adapter = harness.recorded(vec![plan_assigns_frk_1()]);
+        let orchestrator = harness.orchestrator(adapter.clone());
+
+        let report = orchestrator.tick().await.expect("the tick runs");
+
+        assert_eq!(acted_on(&report), Some("FRK-2"), "{report:?}");
+        assert!(adapter.started().is_empty());
     }
 
     /// Usage past a session's 100 input tokens and under every dollar budget.
