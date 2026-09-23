@@ -25,6 +25,7 @@ use crate::transitions::TransitionError;
 
 #[cfg(test)]
 pub(crate) mod fixtures;
+mod integrate;
 mod messages;
 mod rules;
 mod session;
@@ -242,6 +243,15 @@ impl Orchestrator {
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .remove(task_id);
+    }
+
+    /// Whether this process holds a sandbox for the task.
+    #[cfg(test)]
+    fn holds_sandbox(&self, task_id: &TaskId) -> bool {
+        self.sandboxes
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .contains_key(task_id)
     }
 }
 

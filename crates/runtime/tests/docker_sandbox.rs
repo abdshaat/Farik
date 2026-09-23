@@ -299,3 +299,32 @@ fn runs_in_a_subdirectory_of_the_workspace() {
         .discard()
         .expect("the container is removed");
 }
+
+#[test]
+#[ignore = "needs docker"]
+fn removes_a_container_by_name() {
+    let factory = DockerSandboxFactory {
+        image: IMAGE.to_owned(),
+    };
+    let project = project("remove");
+    let _own = factory
+        .create(&project, &task(), &worktree("remove-own"), false)
+        .unwrap_or_else(|error| panic!("the task's sandbox could not be made: {error}"));
+    let _base = factory
+        .create_base(&project, &task(), &worktree("remove-base"))
+        .unwrap_or_else(|error| panic!("the base sandbox could not be made: {error}"));
+    let own_name = format!("farik-{project}-frk-1");
+    let base_name = format!("{own_name}-base");
+    assert_eq!(containers_named(&own_name), 1);
+    assert_eq!(containers_named(&base_name), 1);
+
+    factory
+        .remove(&project, &task())
+        .expect("both containers are removed");
+
+    assert_eq!(containers_named(&own_name), 0);
+    assert_eq!(containers_named(&base_name), 0);
+    factory
+        .remove(&project, &task())
+        .expect("removing what is gone is no error");
+}

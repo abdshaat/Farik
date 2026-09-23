@@ -105,6 +105,11 @@ impl SandboxFactory for HostSandboxFactory {
     ) -> Result<Box<dyn Sandbox>, SandboxError> {
         Ok(Box::new(HostSandbox::new(worktree.to_path_buf())))
     }
+
+    /// A host sandbox holds nothing to end.
+    fn remove(&self, _project_id: &str, _task_id: &TaskId) -> Result<(), SandboxError> {
+        Ok(())
+    }
 }
 
 #[cfg(test)]

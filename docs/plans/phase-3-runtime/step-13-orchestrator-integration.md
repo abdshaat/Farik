@@ -121,7 +121,7 @@ Files: `sandbox.rs`, `sandbox/docker.rs`, `sandbox/host.rs`, `orchestrator/integ
 - `cleans_up_a_task_once_it_is_accepted` — FRK-1 `accepted` with its worktree, a detached `FRK-1-base` worktree, and a sandbox in the map: one tick calls `CountingSandboxFactory::remove` once for FRK-1, `.farik/local/worktrees/FRK-1` and `FRK-1-base` are gone, `git worktree list` names neither, `farik/FRK-1` still exists, and the map holds no FRK-1.
 - `cleans_up_a_worktree_git_no_longer_knows` — a plain directory at that path with no registration: the tick removes it.
 
-- [ ] `feat(runtime): remove a finished task's worktree and container`
+- [x] `feat(runtime): remove a finished task's worktree and container`
 
 ### Task 4: the forge
 

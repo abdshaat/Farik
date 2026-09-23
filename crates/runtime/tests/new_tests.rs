@@ -89,6 +89,10 @@ impl SandboxFactory for Counting {
         self.bases.fetch_add(1, Ordering::SeqCst);
         HostSandboxFactory.create_base(project_id, task_id, worktree)
     }
+
+    fn remove(&self, project_id: &str, task_id: &TaskId) -> Result<(), SandboxError> {
+        HostSandboxFactory.remove(project_id, task_id)
+    }
 }
 
 /// A factory on a machine with no Docker.
@@ -111,6 +115,10 @@ impl SandboxFactory for NoDocker {
         _task_id: &TaskId,
         _worktree: &Path,
     ) -> Result<Box<dyn Sandbox>, SandboxError> {
+        Err(SandboxError::DockerUnavailable)
+    }
+
+    fn remove(&self, _project_id: &str, _task_id: &TaskId) -> Result<(), SandboxError> {
         Err(SandboxError::DockerUnavailable)
     }
 }

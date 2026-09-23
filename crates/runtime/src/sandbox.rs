@@ -100,4 +100,13 @@ pub trait SandboxFactory: Send + Sync {
         task_id: &TaskId,
         worktree: &Path,
     ) -> Result<Box<dyn Sandbox>, SandboxError>;
+
+    /// Ends whatever `create` and `create_base` made for `task_id` of `project_id`, by name, so
+    /// that a sandbox left by a run that stopped, which no handle reaches, ends too. One already
+    /// gone counts as ended. A call still running in one of them gets `ContainerGone`.
+    ///
+    /// # Errors
+    ///
+    /// `DockerUnavailable` or `ContainerFailed`, for a container sandbox.
+    fn remove(&self, project_id: &str, task_id: &TaskId) -> Result<(), SandboxError>;
 }

@@ -211,6 +211,19 @@ impl SandboxFactory for DockerSandboxFactory {
         )?;
         Ok(Box::new(sandbox))
     }
+
+    fn remove(&self, project_id: &str, task_id: &TaskId) -> Result<(), SandboxError> {
+        removed(&docker(&[
+            "rm",
+            "-f",
+            &container_name(project_id, task_id),
+        ])?)?;
+        removed(&docker(&[
+            "rm",
+            "-f",
+            &base_container_name(project_id, task_id),
+        ])?)
+    }
 }
 
 /// `farik-<project>-<task_id>-base`: the task's own name with a suffix, so the base run never

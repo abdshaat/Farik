@@ -12,6 +12,7 @@ use farik_core::team::{Agent, Team};
 use farik_protocol::event::{EventBody, EventKind, FarikEvent};
 use farik_store::{EventQuery, Git, TaskProjection};
 
+use super::integrate::cleanup;
 use super::messages::{Resume, implement_message, plan_message};
 use super::session::{SessionAsk, SessionEnd, run_session};
 use super::verify::verifying;
@@ -45,6 +46,14 @@ pub(super) async fn tick(orchestrator: &Orchestrator) -> Result<TickReport, Orch
     // are broken.
     let board = deps.tools.projections.board()?;
     let mut day_spent = false;
+    for row in board
+        .iter()
+        .filter(|row| matches!(row.status, TaskStatus::Accepted | TaskStatus::Cancelled))
+    {
+        if let Some(report) = cleanup(orchestrator, row)? {
+            return Ok(report);
+        }
+    }
     for row in board
         .iter()
         .filter(|row| row.status == TaskStatus::Rejected)
@@ -794,6 +803,80 @@ mod tests {
             }
         );
         assert!(adapter.started().is_empty());
+    }
+
+    /// The paths `git worktree list` names.
+    fn worktrees_listed(harness: &Harness) -> String {
+        git_output_in(
+            &harness.project.repo.path,
+            &["worktree", "list", "--porcelain"],
+        )
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn cleans_up_a_task_once_it_is_accepted() {
+        let harness = Harness::new("orch-cleanup", |_| {});
+        harness.accepted_with_worktree("FRK-1");
+        let base = harness.worktree("FRK-1-base");
+        harness
+            .project
+            .deps
+            .git
+            .create_detached_worktree(&base, "main")
+            .expect("the base worktree is made");
+        let adapter = harness.recorded(Vec::new());
+        let sandboxes = Arc::new(CountingSandboxFactory::default());
+        let orchestrator = harness.orchestrator_with(adapter, sandboxes.clone());
+        let team = harness
+            .project
+            .deps
+            .files
+            .read_team()
+            .expect("the team reads");
+        orchestrator
+            .sandbox_for(&"FRK-1".parse().expect("a task id"), &team)
+            .expect("a sandbox is made");
+
+        let report = orchestrator.tick().await.expect("the tick runs");
+
+        assert_eq!(acted_on(&report), Some("FRK-1"), "{report:?}");
+        assert_eq!(sandboxes.removed("FRK-1"), 1);
+        assert!(!harness.worktree("FRK-1").exists());
+        assert!(!base.exists());
+        let listed = worktrees_listed(&harness);
+        assert!(!listed.contains("FRK-1"), "{listed}");
+        assert_eq!(
+            git_output_in(
+                &harness.project.repo.path,
+                &["branch", "--list", "farik/FRK-1"]
+            )
+            .trim(),
+            "farik/FRK-1"
+        );
+        assert!(!orchestrator.holds_sandbox(&"FRK-1".parse().expect("a task id")));
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn cleans_up_a_worktree_git_no_longer_knows() {
+        let harness = Harness::new("orch-cleanup-unknown", |_| {});
+        harness.accepted("FRK-1");
+        std::fs::create_dir_all(harness.worktree("FRK-1").join("left"))
+            .expect("a directory is left behind");
+        let adapter = harness.recorded(Vec::new());
+        let orchestrator = harness.orchestrator(adapter);
+
+        let report = orchestrator.tick().await.expect("the tick runs");
+
+        assert_eq!(acted_on(&report), Some("FRK-1"), "{report:?}");
+        assert!(!harness.worktree("FRK-1").exists());
+        assert_eq!(
+            orchestrator.tick().await.expect("the tick runs"),
+            TickReport::Idle {
+                why: NOTHING_TO_DO.to_string()
+            }
+        );
     }
 
     #[tokio::test]

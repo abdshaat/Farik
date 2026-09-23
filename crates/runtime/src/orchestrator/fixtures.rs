@@ -177,6 +177,27 @@ impl Harness {
         self.verifying_with(task, true, true, |_| {});
     }
 
+    /// `verifying`, then moved to `accepted` by the Product Manager, its worktree left in place.
+    pub(crate) fn accepted_with_worktree(&self, task: &str) {
+        self.verifying(task);
+        self.project.moved(
+            task,
+            "verifying",
+            "accepted",
+            &json!({ "actor": "product_manager", "requested_by": "pm", "assignee": "dev-a", "reviewer": "dev-b" }),
+        );
+    }
+
+    /// `accepted_with_worktree`, with the worktree removed, so that no cleanup is left to do.
+    pub(crate) fn accepted(&self, task: &str) {
+        self.accepted_with_worktree(task);
+        self.project
+            .deps
+            .git
+            .remove_worktree(&self.worktree(task))
+            .expect("the task's worktree is removed");
+    }
+
     /// Files `task` and moves it through `in_progress` to `blocked`, held by `assignee`.
     pub(crate) fn blocked(&self, task: &str, assignee: &str, reviewer: &str) {
         self.blocked_hours_ago(task, assignee, reviewer, 0);
@@ -326,13 +347,24 @@ impl RuntimeAdapter for ExecutorWitness {
 }
 
 /// A host sandbox factory that records, for each task, whether each sandbox it made for it had
-/// the network on.
+/// the network on, and how many times its sandboxes were removed.
 #[derive(Default)]
 pub(crate) struct CountingSandboxFactory {
     created: Mutex<BTreeMap<String, Vec<bool>>>,
+    removed: Mutex<BTreeMap<String, u32>>,
 }
 
 impl CountingSandboxFactory {
+    /// How many times `remove` was called for `task`.
+    pub(crate) fn removed(&self, task: &str) -> u32 {
+        self.removed
+            .lock()
+            .expect("no test panics holding it")
+            .get(task)
+            .copied()
+            .unwrap_or_default()
+    }
+
     /// How many sandboxes `create` made for `task`.
     pub(crate) fn created(&self, task: &str) -> u32 {
         u32::try_from(self.networks(task).len()).expect("a test makes few sandboxes")
@@ -373,6 +405,16 @@ impl SandboxFactory for CountingSandboxFactory {
         worktree: &Path,
     ) -> Result<Box<dyn Sandbox>, SandboxError> {
         HostSandboxFactory.create_base(project_id, task_id, worktree)
+    }
+
+    fn remove(&self, project_id: &str, task_id: &TaskId) -> Result<(), SandboxError> {
+        *self
+            .removed
+            .lock()
+            .expect("no test panics holding it")
+            .entry(task_id.as_str().to_string())
+            .or_default() += 1;
+        HostSandboxFactory.remove(project_id, task_id)
     }
 }
 
@@ -430,6 +472,10 @@ impl SandboxFactory for BrokenSandboxFactory {
         worktree: &Path,
     ) -> Result<Box<dyn Sandbox>, SandboxError> {
         HostSandboxFactory.create_base(project_id, task_id, worktree)
+    }
+
+    fn remove(&self, project_id: &str, task_id: &TaskId) -> Result<(), SandboxError> {
+        self.counting.remove(project_id, task_id)
     }
 }
 
