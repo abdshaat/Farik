@@ -10,30 +10,24 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use farik_core::contract::TaskId;
-use farik_core::pricing::Usage;
 use farik_protocol::clock::SequentialIds;
 use farik_protocol::event::{EventKind, FarikEvent, NewEvent, event_from_value};
 use farik_store::TaskProjection;
 use farik_store::git::fixtures::{git_in, git_output_in};
 use farik_store::requests::file_request;
 use serde_json::{Value, json};
-use tokio::sync::mpsc::{Receiver, Sender, channel};
 
 use super::{Orchestrator, OrchestratorDeps};
-use crate::daemon::{DaemonState, HookRequest, decide_pre_tool_use};
+use crate::daemon::DaemonState;
 use crate::exec::{ExecError, ExecResult, Executor};
 use crate::forge::Forge;
-use crate::recorded::{RecordedAdapter, ToolRunner, Transcript};
+use crate::recorded::{RecordedAdapter, Transcript};
 use crate::sandbox::host::HostSandboxFactory;
 use crate::sandbox::{Sandbox, SandboxError, SandboxFactory};
-use crate::session::{
-    EndReason, RuntimeAdapter, RuntimeError, SessionEvent, SessionHandle, SessionSpec,
-};
-use crate::tools::call_tool;
+use crate::session::{RuntimeAdapter, RuntimeError, SessionHandle, SessionSpec};
 use crate::tools::fixtures::{TestProject, a_team_of_three, at};
 
-/// The prefix Claude Code gives the tools of Farik's own MCP server.
-const FARIK_PREFIX: &str = "mcp__farik__";
+pub(crate) use crate::recorded::fixtures::{UsageThenWaitAdapter, tool_runner};
 
 /// A project the orchestrator runs on, and the daemon its sessions register with.
 pub(crate) struct Harness {
@@ -768,185 +762,6 @@ impl Sandbox for BrokenSandbox {
     fn discard(self: Box<Self>) -> Result<(), SandboxError> {
         Ok(())
     }
-}
-
-/// An adapter whose every session reports `usage` at once and then either ends `completed` at
-/// once or waits for `abort` and ends `aborted`, or, when its abort fails, waits for ever: the
-/// shapes a recorded transcript, which reports usage only on its last line, cannot show.
-pub(crate) struct UsageThenWaitAdapter {
-    usage: Usage,
-    completes: bool,
-    abort_fails: bool,
-    started: Mutex<Vec<SessionSpec>>,
-    starts: Arc<AtomicU32>,
-    aborts: Arc<AtomicU32>,
-}
-
-impl UsageThenWaitAdapter {
-    /// Sessions that report `usage` and wait to be aborted.
-    pub(crate) fn waiting(usage: Usage) -> Self {
-        Self::new(usage, false, false)
-    }
-
-    /// Sessions that report `usage` and end `completed`.
-    pub(crate) fn completing(usage: Usage) -> Self {
-        Self::new(usage, true, false)
-    }
-
-    /// Sessions that report `usage` and wait, and whose every abort is counted and fails.
-    pub(crate) fn failing_to_abort(usage: Usage) -> Self {
-        Self::new(usage, false, true)
-    }
-
-    fn new(usage: Usage, completes: bool, abort_fails: bool) -> Self {
-        Self {
-            usage,
-            completes,
-            abort_fails,
-            started: Mutex::new(Vec::new()),
-            starts: Arc::new(AtomicU32::new(0)),
-            aborts: Arc::new(AtomicU32::new(0)),
-        }
-    }
-
-    /// How many sessions this adapter has started, as a counter another task can watch.
-    pub(crate) fn started_count(&self) -> Arc<AtomicU32> {
-        Arc::clone(&self.starts)
-    }
-
-    /// Every spec a session was started with, in order.
-    pub(crate) fn started(&self) -> Vec<SessionSpec> {
-        self.started
-            .lock()
-            .expect("no test panics holding it")
-            .clone()
-    }
-
-    /// How many times a session of this adapter was aborted.
-    pub(crate) fn aborts(&self) -> u32 {
-        self.aborts.load(Ordering::SeqCst)
-    }
-}
-
-impl RuntimeAdapter for UsageThenWaitAdapter {
-    fn start_session(&self, spec: SessionSpec) -> Result<Box<dyn SessionHandle>, RuntimeError> {
-        let (sender, receiver) = channel(4);
-        sender
-            .try_send(SessionEvent::UsageReported(self.usage))
-            .expect("the channel has room");
-        let sender = if self.completes {
-            sender
-                .try_send(SessionEvent::Ended {
-                    reason: EndReason::Completed,
-                    detail: "done".to_string(),
-                })
-                .expect("the channel has room");
-            None
-        } else {
-            Some(sender)
-        };
-        let handle = WaitingSession {
-            session_id: spec.session_id.clone(),
-            receiver,
-            sender: Mutex::new(sender),
-            aborts: Arc::clone(&self.aborts),
-            abort_fails: self.abort_fails,
-        };
-        self.started
-            .lock()
-            .expect("no test panics holding it")
-            .push(spec);
-        self.starts.fetch_add(1, Ordering::SeqCst);
-        Ok(Box::new(handle))
-    }
-
-    fn resume(
-        &self,
-        _session_id: &str,
-        _prompt: &str,
-    ) -> Result<Box<dyn SessionHandle>, RuntimeError> {
-        Err(RuntimeError::Spawn {
-            detail: "this adapter does not resume".to_string(),
-        })
-    }
-}
-
-/// A session of `UsageThenWaitAdapter`.
-struct WaitingSession {
-    session_id: String,
-    receiver: Receiver<SessionEvent>,
-    sender: Mutex<Option<Sender<SessionEvent>>>,
-    aborts: Arc<AtomicU32>,
-    abort_fails: bool,
-}
-
-impl SessionHandle for WaitingSession {
-    fn session_id(&self) -> &str {
-        &self.session_id
-    }
-
-    fn events(&mut self) -> &mut Receiver<SessionEvent> {
-        &mut self.receiver
-    }
-
-    fn send(&self, _text: &str) -> Result<(), RuntimeError> {
-        Ok(())
-    }
-
-    fn abort(&self) -> Result<(), RuntimeError> {
-        self.aborts.fetch_add(1, Ordering::SeqCst);
-        if self.abort_fails {
-            return Err(RuntimeError::Spawn {
-                detail: "the session would not stop".to_string(),
-            });
-        }
-        if let Some(sender) = self
-            .sender
-            .lock()
-            .expect("no test panics holding it")
-            .take()
-        {
-            let _ = sender.try_send(SessionEvent::Ended {
-                reason: EndReason::Aborted,
-                detail: "aborted".to_string(),
-            });
-        }
-        Ok(())
-    }
-}
-
-/// Answers a replayed Farik tool call as a real session's would be: the `PreToolUse` decision
-/// first, a deny answered `{"error": "<reason>"}`; then the tool, called with the session's tool
-/// context as the daemon has it at that moment, an error answered `{"error": "<its words>"}`. No
-/// `PostToolUse` is recorded.
-pub(crate) fn tool_runner(daemon: Arc<DaemonState>) -> ToolRunner {
-    Arc::new(move |session_id, tool, input| {
-        let daemon = Arc::clone(&daemon);
-        Box::pin(async move {
-            let request = HookRequest {
-                session_id: session_id.clone(),
-                cwd: PathBuf::new(),
-                hook_event_name: "PreToolUse".to_string(),
-                tool_name: tool.clone(),
-                tool_input: input.clone(),
-                tool_use_id: None,
-                tool_response: None,
-                duration_ms: None,
-            };
-            let decision = decide_pre_tool_use(&request, &daemon);
-            if !decision.allow {
-                return json!({ "error": decision.reason });
-            }
-            let Some(context) = daemon.tool_context(&session_id) else {
-                return json!({ "error": format!("the daemon answers for no session {session_id}") });
-            };
-            let name = tool.strip_prefix(FARIK_PREFIX).unwrap_or(&tool);
-            match call_tool(&context, name, input).await {
-                Ok(answer) => answer,
-                Err(error) => json!({ "error": error.to_string() }),
-            }
-        })
-    })
 }
 
 /// A fake `gh`: a shell script in a temporary directory of its own. For its second argument

@@ -29,6 +29,9 @@ pub mod log;
 pub mod project;
 /// The governor's refusals in words.
 pub mod refusal;
+/// `farik run` and `farik plan`.
+#[cfg(unix)]
+mod run;
 /// One contract, and what happened to it.
 pub mod show;
 /// Who drives a project, and how a command reaches it.
@@ -40,6 +43,9 @@ pub mod task;
 pub mod team;
 /// Sizing a request.
 pub mod triage;
+/// What waits on the human.
+#[cfg(unix)]
+mod waiting;
 
 use std::collections::BTreeMap;
 use std::io::{Read, Write};
@@ -235,6 +241,10 @@ enum Commands {
         #[command(subcommand)]
         command: HookCommands,
     },
+    /// Drive the team until nothing needs doing, a stop, or Ctrl-C (8.2).
+    Run,
+    /// Plan without doing: triage, contracts, breakdowns, and assignments, and no work (8.2).
+    Plan,
     /// Approve a contract that awaits your approval (5.16).
     Approve {
         /// The task whose contract it is.
@@ -413,6 +423,9 @@ pub fn run_cli(args: &[String], io: &mut CliIo<'_>) -> i32 {
         };
     }
     let now = io.clock.now();
+    if let Commands::Run | Commands::Plan = &parsed.command {
+        return drive(&parsed.command, parsed.json, io);
+    }
     let outcome = match &parsed.command {
         Commands::Init => init::init(&io.cwd, now),
         Commands::Task {
@@ -492,7 +505,9 @@ pub fn run_cli(args: &[String], io: &mut CliIo<'_>) -> i32 {
         Commands::Criteria {
             command: CriteriaCommands::List,
         } => open_project(&io.cwd, now).and_then(|project| team::criteria(&project)),
-        Commands::Hook { .. } => unreachable!("a hook command returned above"),
+        Commands::Hook { .. } | Commands::Run | Commands::Plan => {
+            unreachable!("a hook, run, or plan command returned above")
+        }
     };
     report(outcome, parsed.json, io)
 }
@@ -601,6 +616,31 @@ fn human_command(
     Err(format!(
         "farik {name} needs the daemon, which runs on Linux and macOS"
     ))
+}
+
+/// `farik run` or `farik plan`, which write as they go and answer their own exit code.
+#[cfg(unix)]
+fn drive(command: &Commands, as_json: bool, io: &mut CliIo<'_>) -> i32 {
+    use farik_runtime::orchestrator::TickRules;
+
+    let project = match open_project(&io.cwd, io.clock.now()) {
+        Ok(project) => project,
+        Err(error) => return run::refuse(io, as_json, &error),
+    };
+    let rules = match command {
+        Commands::Plan => TickRules::Planning,
+        _ => TickRules::All,
+    };
+    run::drive(&project, rules, io, as_json)
+}
+
+#[cfg(not(unix))]
+fn drive(_command: &Commands, as_json: bool, io: &mut CliIo<'_>) -> i32 {
+    report(
+        Err("farik run needs the daemon, which runs on Linux and macOS".to_string()),
+        as_json,
+        io,
+    )
 }
 
 #[cfg(unix)]

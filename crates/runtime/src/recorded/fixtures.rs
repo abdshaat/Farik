@@ -4,12 +4,24 @@
 //! project a test builds. For tests, in this crate and in others.
 
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::{Arc, Mutex};
 
 use farik_core::budget::DEFAULT_SESSION_LIMITS;
+use farik_core::pricing::Usage;
 use farik_core::team::Effort;
+use serde_json::json;
+use tokio::sync::mpsc::{Receiver, Sender, channel};
 
-use super::Transcript;
-use crate::session::{SessionPurpose, SessionSpec};
+use super::{FARIK_PREFIX, ToolRunner, Transcript};
+#[cfg(unix)]
+use crate::daemon::{DaemonState, HookRequest, decide_pre_tool_use};
+use crate::session::{
+    EndReason, RuntimeAdapter, RuntimeError, SessionEvent, SessionHandle, SessionPurpose,
+    SessionSpec,
+};
+#[cfg(unix)]
+use crate::tools::call_tool;
 
 /// An implement session for `maya-chen` in `/workspace`, with the team's default limits.
 #[must_use]
@@ -153,4 +165,219 @@ pub fn plan_assigns_frk_2() -> Transcript {
 #[must_use]
 pub fn plan_closes_epic_frk_1() -> Transcript {
     Transcript::from_jsonl(include_str!("transcripts/plan_closes_epic_frk_1.jsonl"))
+}
+
+/// An adapter whose every session reports `usage` at once and then either ends `completed` at
+/// once or waits for `abort` and ends `aborted`, or, when its abort fails, waits for ever: the
+/// shapes a recorded transcript, which reports usage only on its last line, cannot show.
+pub struct UsageThenWaitAdapter {
+    usage: Usage,
+    completes: bool,
+    abort_fails: bool,
+    started: Mutex<Vec<SessionSpec>>,
+    starts: Arc<AtomicU32>,
+    aborts: Arc<AtomicU32>,
+    waiting: Mutex<Vec<Sender<SessionEvent>>>,
+}
+
+impl UsageThenWaitAdapter {
+    /// Sessions that report `usage` and wait to be aborted.
+    #[must_use]
+    pub fn waiting(usage: Usage) -> Self {
+        Self::new(usage, false, false)
+    }
+
+    /// Sessions that report `usage` and end `completed`.
+    #[must_use]
+    pub fn completing(usage: Usage) -> Self {
+        Self::new(usage, true, false)
+    }
+
+    /// Sessions that report `usage` and wait, and whose every abort is counted and fails.
+    #[must_use]
+    pub fn failing_to_abort(usage: Usage) -> Self {
+        Self::new(usage, false, true)
+    }
+
+    fn new(usage: Usage, completes: bool, abort_fails: bool) -> Self {
+        Self {
+            usage,
+            completes,
+            abort_fails,
+            started: Mutex::new(Vec::new()),
+            starts: Arc::new(AtomicU32::new(0)),
+            aborts: Arc::new(AtomicU32::new(0)),
+            waiting: Mutex::new(Vec::new()),
+        }
+    }
+
+    /// Ends every session still waiting `completed`, as if each had finished its work.
+    ///
+    /// # Panics
+    ///
+    /// When a test panicked while holding the list.
+    pub fn complete(&self) {
+        for sender in self
+            .waiting
+            .lock()
+            .expect("no test panics holding it")
+            .drain(..)
+        {
+            let _ = sender.try_send(SessionEvent::Ended {
+                reason: EndReason::Completed,
+                detail: "done".to_string(),
+            });
+        }
+    }
+
+    /// How many sessions this adapter has started, as a counter another task can watch.
+    #[must_use]
+    pub fn started_count(&self) -> Arc<AtomicU32> {
+        Arc::clone(&self.starts)
+    }
+
+    /// Every spec a session was started with, in order.
+    ///
+    /// # Panics
+    ///
+    /// When a test panicked while holding the list.
+    #[must_use]
+    pub fn started(&self) -> Vec<SessionSpec> {
+        self.started
+            .lock()
+            .expect("no test panics holding it")
+            .clone()
+    }
+
+    /// How many times a session of this adapter was aborted.
+    #[must_use]
+    pub fn aborts(&self) -> u32 {
+        self.aborts.load(Ordering::SeqCst)
+    }
+}
+
+impl RuntimeAdapter for UsageThenWaitAdapter {
+    fn start_session(&self, spec: SessionSpec) -> Result<Box<dyn SessionHandle>, RuntimeError> {
+        let (sender, receiver) = channel(4);
+        sender
+            .try_send(SessionEvent::UsageReported(self.usage))
+            .expect("the channel has room");
+        let sender = if self.completes {
+            sender
+                .try_send(SessionEvent::Ended {
+                    reason: EndReason::Completed,
+                    detail: "done".to_string(),
+                })
+                .expect("the channel has room");
+            None
+        } else {
+            self.waiting
+                .lock()
+                .expect("no test panics holding it")
+                .push(sender.clone());
+            Some(sender)
+        };
+        let handle = WaitingSession {
+            session_id: spec.session_id.clone(),
+            receiver,
+            sender: Mutex::new(sender),
+            aborts: Arc::clone(&self.aborts),
+            abort_fails: self.abort_fails,
+        };
+        self.started
+            .lock()
+            .expect("no test panics holding it")
+            .push(spec);
+        self.starts.fetch_add(1, Ordering::SeqCst);
+        Ok(Box::new(handle))
+    }
+
+    fn resume(
+        &self,
+        _session_id: &str,
+        _prompt: &str,
+    ) -> Result<Box<dyn SessionHandle>, RuntimeError> {
+        Err(RuntimeError::Spawn {
+            detail: "this adapter does not resume".to_string(),
+        })
+    }
+}
+
+/// A session of `UsageThenWaitAdapter`.
+struct WaitingSession {
+    session_id: String,
+    receiver: Receiver<SessionEvent>,
+    sender: Mutex<Option<Sender<SessionEvent>>>,
+    aborts: Arc<AtomicU32>,
+    abort_fails: bool,
+}
+
+impl SessionHandle for WaitingSession {
+    fn session_id(&self) -> &str {
+        &self.session_id
+    }
+
+    fn events(&mut self) -> &mut Receiver<SessionEvent> {
+        &mut self.receiver
+    }
+
+    fn send(&self, _text: &str) -> Result<(), RuntimeError> {
+        Ok(())
+    }
+
+    fn abort(&self) -> Result<(), RuntimeError> {
+        self.aborts.fetch_add(1, Ordering::SeqCst);
+        if self.abort_fails {
+            return Err(RuntimeError::Spawn {
+                detail: "the session would not stop".to_string(),
+            });
+        }
+        if let Some(sender) = self
+            .sender
+            .lock()
+            .expect("no test panics holding it")
+            .take()
+        {
+            let _ = sender.try_send(SessionEvent::Ended {
+                reason: EndReason::Aborted,
+                detail: "aborted".to_string(),
+            });
+        }
+        Ok(())
+    }
+}
+
+/// Answers a replayed Farik tool call as a real session's would be: the `PreToolUse` decision
+/// first, a deny answered `{"error": "<reason>"}`; then the tool, called with the session's tool
+/// context as the daemon has it at that moment, an error answered `{"error": "<its words>"}`. No
+/// `PostToolUse` is recorded.
+#[cfg(unix)]
+pub fn tool_runner(daemon: Arc<DaemonState>) -> ToolRunner {
+    Arc::new(move |session_id, tool, input| {
+        let daemon = Arc::clone(&daemon);
+        Box::pin(async move {
+            let request = HookRequest {
+                session_id: session_id.clone(),
+                cwd: PathBuf::new(),
+                hook_event_name: "PreToolUse".to_string(),
+                tool_name: tool.clone(),
+                tool_input: input.clone(),
+                tool_use_id: None,
+                tool_response: None,
+                duration_ms: None,
+            };
+            let decision = decide_pre_tool_use(&request, &daemon);
+            if !decision.allow {
+                return json!({ "error": decision.reason });
+            }
+            let Some(context) = daemon.tool_context(&session_id) else {
+                return json!({ "error": format!("the daemon answers for no session {session_id}") });
+            };
+            let name = tool.strip_prefix(FARIK_PREFIX).unwrap_or(&tool);
+            match call_tool(&context, name, input).await {
+                Ok(answer) => answer,
+                Err(error) => json!({ "error": error.to_string() }),
+            }
+        })
+    })
 }

@@ -3,27 +3,33 @@
 //! or handled here, under the lock, when nothing drives.
 
 use std::fs::{File, TryLockError};
+use std::io::Write as _;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
 use farik_protocol::command::{Command, command_to_value, reply_from_value};
-use farik_runtime::daemon::DaemonState;
+use farik_runtime::claude::{ClaudeAdapter, ClaudeConfig, ClaudeCredential, credential_from_env};
+use farik_runtime::daemon::{DaemonConfig, DaemonHandle, DaemonState, serve};
 use farik_runtime::forge::Forge;
 use farik_runtime::orchestrator::{
-    CommandError, CommandReport, Orchestrator, OrchestratorDeps, result_of,
+    CommandError, CommandReport, Orchestrator, OrchestratorDeps, RecoveryReport, command_handler,
+    result_of,
 };
 use farik_runtime::transitions::Transitions;
 use farik_runtime::{
-    HostSandboxFactory, RuntimeAdapter, RuntimeError, SessionHandle, SessionSpec, ToolDeps,
+    DockerSandboxFactory, HostSandboxFactory, RuntimeAdapter, RuntimeError, SANDBOX_IMAGE,
+    SandboxFactory, SessionHandle, SessionSpec, ToolDeps,
 };
-use farik_store::files::ProjectFiles;
+use farik_store::files::{ProjectFiles, Sandbox};
 use farik_store::{Git, open_projections};
 use serde_json::Value;
+use tokio::signal::unix::{SignalKind, signal};
+use tokio::sync::mpsc::UnboundedReceiver;
 
-use crate::CliIo;
-use crate::daemon_client::{ClientError, exchange};
+use crate::daemon_client::{ClientError, DaemonAddress, exchange, read_daemon_file};
 use crate::project::Project;
+use crate::{CliIo, Engine, Interrupts};
 
 /// The lock the process driving a project holds, under the gitignored `.farik/local/`.
 pub(crate) const RUN_LOCK: &str = ".farik/local/run.lock";
@@ -272,5 +278,213 @@ impl RuntimeAdapter for NoSessions {
         _prompt: &str,
     ) -> Result<Box<dyn SessionHandle>, RuntimeError> {
         Err(self.refusal())
+    }
+}
+
+/// Why a second process cannot drive the project at `root`.
+pub(crate) fn driven_elsewhere(root: &Path) -> String {
+    match read_daemon_file(&root.join(DAEMON_FILE)) {
+        Ok(DaemonAddress { pid: Some(pid), .. }) => {
+            format!("another farik process is driving this project (pid {pid} in {DAEMON_FILE})")
+        }
+        _ => {
+            "another farik process is driving this project, and it serves no daemon yet".to_string()
+        }
+    }
+}
+
+/// What every start in no-sandbox mode says on standard error (`docs/SPEC.md` 8.3).
+pub(crate) const NO_SANDBOX_WARNING: &str = "warning: no-sandbox mode (.farik/local/settings.json \
+    says sandbox: none). Agents' commands run on this machine as you, with your HOME: they can \
+    read your credential files (~/.git-credentials, ~/.ssh, ~/.claude/.credentials.json, the gh \
+    configuration) and push with a git hidden in a script, which farik_exec's check does not see. \
+    The governor still checks every path and permission it is asked about.";
+
+/// The variables of the environment a Claude Code session is given besides its credential.
+const SESSION_ENV: [&str; 6] = ["PATH", "HOME", "USER", "LANG", "TERM", "TMPDIR"];
+
+/// A process driving the project: its lock, its served daemon, its orchestrator, and where it
+/// hears Ctrl-C.
+pub(crate) struct Driver {
+    /// The orchestrator driving the project.
+    pub(crate) orchestrator: Arc<Orchestrator>,
+    /// Its daemon's state.
+    pub(crate) daemon: Arc<DaemonState>,
+    /// One `()` per interrupt.
+    pub(crate) interrupts: UnboundedReceiver<()>,
+    /// The credential variable it chose, when the engine is Claude Code.
+    pub(crate) credential: Option<&'static str>,
+    /// Whether it runs in no-sandbox mode.
+    pub(crate) sandbox: Sandbox,
+    /// What recovery found and did.
+    pub(crate) recovered: RecoveryReport,
+    handle: DaemonHandle,
+    _lock: RunLock,
+}
+
+impl Driver {
+    /// Shuts the daemon down, removing `daemon.json`, then gives the lock back.
+    ///
+    /// # Errors
+    ///
+    /// A sentence saying the daemon could not be shut down.
+    pub(crate) async fn finish(self) -> Result<(), String> {
+        let Driver { handle, _lock, .. } = self;
+        handle.shutdown().await.map_err(|error| error.to_string())
+    }
+}
+
+/// Starts a process driving the project, in order: the lock, the interrupt listener, the
+/// settings (warning on standard error in no-sandbox mode), the credential and `claude` for the
+/// Claude Code engine, the daemon, the adapter, the orchestrator and its command handler, and
+/// recovery (5.15). A step that fails refuses with the lock given back and nothing left running.
+///
+/// # Errors
+///
+/// The sentence of the step that failed.
+pub(crate) async fn start(project: &Project, io: &mut CliIo<'_>) -> Result<Driver, String> {
+    let Some(lock) = try_lock(&project.root)? else {
+        return Err(driven_elsewhere(&project.root));
+    };
+    let interrupts = listen(std::mem::replace(
+        &mut io.interrupts,
+        Interrupts::Channel(tokio::sync::mpsc::unbounded_channel().1),
+    ))?;
+    let settings = project
+        .files
+        .read_settings()
+        .map_err(|error| error.to_string())?;
+    if settings.sandbox == Sandbox::None {
+        let _ = writeln!(io.stderr, "{NO_SANDBOX_WARNING}");
+    }
+    let claude = match &io.engine {
+        Engine::Claude => {
+            let credential = credential_from_env(&io.env).ok_or(
+                "no credential for Claude Code: set ANTHROPIC_API_KEY to an API key, or \
+                 CLAUDE_CODE_OAUTH_TOKEN to the token claude setup-token prints",
+            )?;
+            let path = on_path("claude", io)
+                .ok_or("Claude Code is not installed: there is no claude on PATH")?;
+            Some((credential, path))
+        }
+        Engine::Given(_) => None,
+    };
+    let credential = claude.as_ref().map(|(credential, _)| match credential {
+        ClaudeCredential::ApiKey(_) => "ANTHROPIC_API_KEY",
+        ClaudeCredential::OauthToken(_) => "CLAUDE_CODE_OAUTH_TOKEN",
+    });
+    let tools = tool_deps(project, io)?;
+    let daemon = Arc::new(DaemonState::new(Arc::clone(&tools)));
+    let handle = serve(
+        DaemonConfig {
+            port: None,
+            daemon_file: project.root.join(DAEMON_FILE),
+        },
+        Arc::clone(&daemon),
+    )
+    .await
+    .map_err(|error| error.to_string())?;
+    let adapter = match adapter(project, io, claude, &daemon, &handle) {
+        Ok(adapter) => adapter,
+        Err(error) => {
+            let _ = handle.shutdown().await;
+            return Err(error);
+        }
+    };
+    let sandboxes: Arc<dyn SandboxFactory> = match settings.sandbox {
+        Sandbox::Docker => Arc::new(DockerSandboxFactory {
+            image: SANDBOX_IMAGE.to_string(),
+        }),
+        Sandbox::None => Arc::new(HostSandboxFactory),
+    };
+    let orchestrator = Arc::new(Orchestrator::new(OrchestratorDeps {
+        tools,
+        daemon: Arc::clone(&daemon),
+        adapter,
+        sandboxes,
+        session_ids: Arc::clone(&io.session_ids),
+        forge: Arc::new(forge(&project.root, io)),
+    }));
+    daemon.set_command_handler(command_handler(Arc::clone(&orchestrator)));
+    let recovering = Arc::clone(&orchestrator);
+    let recovered = match tokio::task::spawn_blocking(move || recovering.recover()).await {
+        Ok(Ok(recovered)) => recovered,
+        Ok(Err(error)) => {
+            let _ = handle.shutdown().await;
+            return Err(error.to_string());
+        }
+        Err(error) => {
+            let _ = handle.shutdown().await;
+            return Err(format!("recovery failed: {error}"));
+        }
+    };
+    Ok(Driver {
+        orchestrator,
+        daemon,
+        interrupts,
+        credential,
+        sandbox: settings.sandbox,
+        recovered,
+        handle,
+        _lock: lock,
+    })
+}
+
+/// The adapter sessions start through: the engine's factory's, or Claude Code's once its version
+/// passes.
+fn adapter(
+    project: &Project,
+    io: &CliIo<'_>,
+    claude: Option<(ClaudeCredential, PathBuf)>,
+    daemon: &Arc<DaemonState>,
+    handle: &DaemonHandle,
+) -> Result<Arc<dyn RuntimeAdapter>, String> {
+    match (&io.engine, claude) {
+        (Engine::Given(factory), _) => Ok(factory(Arc::clone(daemon))),
+        (Engine::Claude, Some((credential, claude_path))) => {
+            let config = ClaudeConfig {
+                claude_path,
+                hook_command: std::env::current_exe().unwrap_or_else(|_| PathBuf::from("farik")),
+                daemon_file: project.root.join(DAEMON_FILE),
+                daemon: handle.info.clone(),
+                sessions_dir: project.root.join(".farik/local/sessions"),
+                team_file: project.root.join(".farik/team.yaml"),
+                env: SESSION_ENV
+                    .iter()
+                    .filter_map(|name| {
+                        io.env
+                            .get(*name)
+                            .map(|value| ((*name).to_string(), value.clone()))
+                    })
+                    .collect(),
+            };
+            let adapter =
+                ClaudeAdapter::new(credential, config).map_err(|error| error.to_string())?;
+            Ok(Arc::new(adapter))
+        }
+        (Engine::Claude, None) => {
+            Err("the Claude Code engine was chosen with no credential".to_string())
+        }
+    }
+}
+
+/// Where the process hears the person's interrupts: Ctrl-C, listened for from now on, or the
+/// test's channel.
+fn listen(interrupts: Interrupts) -> Result<UnboundedReceiver<()>, String> {
+    match interrupts {
+        Interrupts::Channel(receiver) => Ok(receiver),
+        Interrupts::CtrlC => {
+            let mut signal = signal(SignalKind::interrupt())
+                .map_err(|error| format!("Ctrl-C cannot be listened for: {error}"))?;
+            let (sender, receiver) = tokio::sync::mpsc::unbounded_channel();
+            tokio::spawn(async move {
+                while signal.recv().await.is_some() {
+                    if sender.send(()).is_err() {
+                        break;
+                    }
+                }
+            });
+            Ok(receiver)
+        }
     }
 }
