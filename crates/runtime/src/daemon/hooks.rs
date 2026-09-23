@@ -397,7 +397,7 @@ mod tests {
     use farik_protocol::event::{EventBody, EventKind};
     use serde_json::{Value, json};
 
-    use super::{HookDecision, HookRequest, decide_pre_tool_use, record_post_tool_use};
+    use super::{HookDecision, HookRequest, cut, decide_pre_tool_use, record_post_tool_use};
     use crate::daemon::fixtures::{DEV_SESSION, POST_READ, PRE_READ, PRE_WRITE, TestDaemon};
     use crate::tools::fixtures::a_team_of_three;
 
@@ -480,6 +480,94 @@ mod tests {
         };
         assert_eq!(body.reason, decision.reason);
         assert!(daemon.events(EventKind::ToolCalled).is_empty());
+        for (tool, input) in [
+            ("Grep", json!({ "pattern": "root", "path": "/etc" })),
+            ("LS", json!({ "path": "/etc" })),
+            (
+                "MultiEdit",
+                json!({ "file_path": "/etc/passwd", "edits": [{ "old_string": "a", "new_string": "b" }] }),
+            ),
+            (
+                "NotebookEdit",
+                json!({ "notebook_path": "/etc/n.ipynb", "new_source": "" }),
+            ),
+        ] {
+            let decision = decide_pre_tool_use(&daemon.dev_call(tool, &input), &daemon.state);
+            assert!(!decision.allow, "{tool}: {decision:?}");
+            denied_for(&decision, "path_outside_workspace");
+        }
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn denies_a_read_and_a_write_of_a_protected_path() {
+        let daemon = TestDaemon::new("hook-protected", |_| {});
+        for (tool, input) in [
+            ("Read", json!({ "file_path": daemon.inside(".env") })),
+            (
+                "Write",
+                json!({ "file_path": daemon.inside(".env"), "content": "KEY=1" }),
+            ),
+            (
+                "Write",
+                json!({ "file_path": daemon.inside("src/server.pem"), "content": "" }),
+            ),
+        ] {
+            let decision = decide_pre_tool_use(&daemon.dev_call(tool, &input), &daemon.state);
+            assert!(!decision.allow, "{tool} {input}: {decision:?}");
+            denied_for(&decision, "path_protected");
+        }
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn records_a_tool_call_s_input_cut_at_four_kib() {
+        let daemon = TestDaemon::new("hook-input", |_| {});
+        let decision = decide_pre_tool_use(
+            &daemon.dev_call(
+                "Write",
+                &json!({ "file_path": daemon.inside("src/a.rs"), "content": "x".repeat(10_000) }),
+            ),
+            &daemon.state,
+        );
+        assert!(decision.allow, "{decision:?}");
+        let called = daemon.events(EventKind::ToolCalled);
+        assert_eq!(called.len(), 1);
+        let EventBody::ToolCalled(body) = &called[0].body else {
+            panic!("a tool.called event carries a tool.called body");
+        };
+        assert!(body.input.len() <= 4_096, "{}", body.input.len());
+        assert!(body.input.ends_with("[cut at 4 KiB]"), "{}", body.input);
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn records_the_return_of_a_session_it_no_longer_answers_for() {
+        let daemon = TestDaemon::new("hook-ended", |_| {});
+        daemon.state.end_session(DEV_SESSION);
+        let request: HookRequest =
+            serde_json::from_value(daemon.recorded(POST_READ)).expect("reads");
+        record_post_tool_use(&request, &daemon.state).expect("recorded");
+        let returned = daemon.events(EventKind::ToolReturned);
+        assert_eq!(returned.len(), 1);
+        let ids = &returned[0].envelope.ids;
+        assert_eq!(ids.session_id.as_deref(), Some(DEV_SESSION));
+        assert_eq!(ids.agent_id, None);
+        assert_eq!(ids.task_id, None);
+    }
+
+    #[test]
+    fn cuts_a_value_at_a_character_boundary_and_keeps_one_that_fits() {
+        let fits = "a".repeat(4_096);
+        assert_eq!(cut(fits.clone()), fits);
+        // The cut would fall at byte 4,082, inside an `é`, since every `é` starts at an odd byte.
+        let wide = format!("a{}", "é".repeat(3_000));
+        assert!(!wide.is_char_boundary(4_096 - "[cut at 4 KiB]".len()));
+        let kept = cut(wide);
+        assert_eq!(kept.len(), 4_081 + "[cut at 4 KiB]".len());
+        assert!(kept.ends_with("é[cut at 4 KiB]"), "{kept}");
+        let over = "a".repeat(4_097);
+        assert_eq!(cut(over).len(), 4_096);
     }
 
     #[test]
@@ -697,6 +785,7 @@ mod tests {
         assert!(body.output.len() > 4_000, "{}", body.output.len());
         assert!(body.output.ends_with("[cut at 4 KiB]"), "{}", body.output);
         assert_eq!(body.tool, "Read");
+        assert_eq!(body.duration_ms, Some(8));
         assert_eq!(
             body.tool_use_id.as_deref(),
             Some("toolu_01AGrQNrawzN2RTTvmfBahB4")
