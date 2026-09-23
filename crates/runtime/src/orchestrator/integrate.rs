@@ -2,7 +2,7 @@
 //! branch integrated the way the team's policy says, one task at a time even across processes,
 //! and a finished task's worktrees and containers removed, its branch kept.
 
-use std::fs::File;
+use std::fs::{File, OpenOptions};
 use std::path::Path;
 use std::sync::Arc;
 
@@ -24,12 +24,16 @@ use crate::transitions::{TransitionError, integration_branch};
 /// Where the integration lock lives, under the project root.
 const LOCK: &str = ".farik/local/integration.lock";
 
-/// Rule 2: an accepted task awaiting integration under `auto_merge` is merged and pushed, and
-/// under `pull_request` has its pull request opened, then its state read on each tick until it is
-/// merged or closed; an open one is not an action, and the tick goes on. None of it once an
-/// integration escalation was raised since the task was accepted: that one is the human's,
-/// through `integrate`, and is not tried again on every tick. ponytail: one gh call per open pull
-/// request per tick; a slower poll when a board holds many.
+/// Who asked for an integration: the tick, on the team's policy, or the human.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Asker {
+    Tick,
+    Human,
+}
+
+/// Rule 2: an accepted task awaiting integration is integrated the way the team's policy says,
+/// unless an integration escalation was raised since it was accepted: that one is the human's to
+/// settle through `integrate`, and is not tried again on every tick. `manual` has no rule.
 pub(super) async fn awaiting(
     orchestrator: &Orchestrator,
     team: &Team,
@@ -38,261 +42,293 @@ pub(super) async fn awaiting(
     if row.kind != TaskKind::Task
         || !row.awaiting_integration
         || team.policy.integration == Integration::Manual
-        || escalated_since_accepted(&orchestrator.deps.tools, &row.task_id)?
     {
         return Ok(None);
     }
-    let outcome = match attempt(orchestrator, team, &row.task_id, false).await {
-        Err(OrchestratorError::Refused { .. }) | Ok(IntegrationOutcome::AwaitingForge) => {
-            return Ok(None);
+    let Some(outcome) = attempt(orchestrator, team, &row.task_id, Asker::Tick).await? else {
+        return Ok(None);
+    };
+    let what = match outcome {
+        IntegrationOutcome::Merged { sha } => format!("integrated at {sha}"),
+        IntegrationOutcome::PullRequestOpened { url } => format!("opened the pull request {url}"),
+        IntegrationOutcome::Escalated { detail } => {
+            format!("escalated its integration to the human: {detail}")
         }
-        other => other?,
+        IntegrationOutcome::AwaitingForge => return Ok(None),
     };
     Ok(Some(TickReport::Acted {
         task_id: row.task_id.clone(),
-        what: match outcome {
-            IntegrationOutcome::Merged { sha } => format!("integrated it at {sha}"),
-            IntegrationOutcome::PullRequestOpened { url } => format!("opened {url}"),
-            IntegrationOutcome::AwaitingForge => "its pull request is open".to_string(),
-            IntegrationOutcome::Escalated { detail } => {
-                format!("could not integrate it, and told the human: {detail}")
-            }
-        },
+        what,
     }))
 }
 
-/// `Orchestrator::integrate`: the human's integration of an accepted task, now.
+/// The human's integration of an accepted task, whatever escalations it carries.
 pub(super) async fn integrate(
     orchestrator: &Orchestrator,
     task_id: &TaskId,
 ) -> Result<IntegrationOutcome, OrchestratorError> {
+    let Some(row) = orchestrator.deps.tools.projections.task(task_id)? else {
+        return Err(refused(format!("no_such_task: {}", task_id.as_str())));
+    };
+    refuse_unless_integrable(&row)?;
     let team = orchestrator.deps.tools.files.read_team()?;
-    attempt(orchestrator, &team, task_id, true).await
+    attempt(orchestrator, &team, task_id, Asker::Human)
+        .await?
+        .ok_or_else(|| refused(format!("nothing_to_do: {}", task_id.as_str())))
 }
 
-/// One integration, under the lock and off the async threads, because it runs git.
+/// `Refused` for a row that is not an accepted task.
+fn refuse_unless_integrable(row: &TaskProjection) -> Result<(), OrchestratorError> {
+    if row.status != TaskStatus::Accepted {
+        return Err(refused(format!(
+            "not_accepted: {} is {}",
+            row.task_id.as_str(),
+            row.status
+        )));
+    }
+    if row.kind != TaskKind::Task {
+        return Err(refused(format!(
+            "an_epic: {} has no branch of its own to integrate",
+            row.task_id.as_str()
+        )));
+    }
+    Ok(())
+}
+
+fn refused(reason: String) -> OrchestratorError {
+    OrchestratorError::Refused { reason }
+}
+
+/// One integration, under the lock and off the async threads, because it runs git; `None` when
+/// the tick finds nothing to do once it holds the lock.
 async fn attempt(
     orchestrator: &Orchestrator,
     team: &Team,
     task_id: &TaskId,
-    by_human: bool,
-) -> Result<IntegrationOutcome, OrchestratorError> {
+    asker: Asker,
+) -> Result<Option<IntegrationOutcome>, OrchestratorError> {
     let tools = Arc::clone(&orchestrator.deps.tools);
     let forge = Arc::clone(&orchestrator.deps.forge);
     let team = team.clone();
     let task_id = task_id.clone();
-    tokio::task::spawn_blocking(move || integrate_locked(&tools, &forge, &team, &task_id, by_human))
-        .await
-        .unwrap_or_else(|error| std::panic::resume_unwind(error.into_panic()))
+    let finished = tokio::task::spawn_blocking(move || {
+        let _lock = lock(tools.files.root())?;
+        integrate_locked(&tools, &forge, &team, &task_id, asker)
+    })
+    .await;
+    match finished {
+        Ok(outcome) => outcome,
+        Err(error) if error.is_panic() => std::panic::resume_unwind(error.into_panic()),
+        Err(error) => Err(OrchestratorError::Lock {
+            detail: format!("the integration was cancelled: {error}"),
+        }),
+    }
 }
 
-/// Takes the lock, brings the board up to what other processes appended, and integrates the task
-/// by the policy in force, unless it is no longer awaiting integration.
+/// What the policy does for the task, with the lock held: the board is brought up to what other
+/// processes appended first, so that a task another one integrated is answered, not merged again.
 fn integrate_locked(
     tools: &ToolDeps,
     forge: &Forge,
     team: &Team,
     task_id: &TaskId,
-    by_human: bool,
-) -> Result<IntegrationOutcome, OrchestratorError> {
-    let _held = lock(tools.files.root())?;
+    asker: Asker,
+) -> Result<Option<IntegrationOutcome>, OrchestratorError> {
     tools.projections.catch_up()?;
-    let row = tools
-        .projections
-        .task(task_id)?
-        .ok_or_else(|| OrchestratorError::Refused {
-            reason: format!(
-                "no_such_task: the log has nothing about {}",
-                task_id.as_str()
-            ),
-        })?;
-    if row.status != TaskStatus::Accepted {
-        return Err(OrchestratorError::Refused {
-            reason: format!(
-                "not_accepted: {} is {}, and only accepted work integrates",
-                task_id.as_str(),
-                row.status
-            ),
-        });
-    }
-    if row.kind != TaskKind::Task {
-        return Err(OrchestratorError::Refused {
-            reason: format!(
-                "an_epic: {} is an epic, whose children carry the branches",
-                task_id.as_str()
-            ),
-        });
-    }
+    let Some(row) = tools.projections.task(task_id)? else {
+        return Err(refused(format!("no_such_task: {}", task_id.as_str())));
+    };
+    refuse_unless_integrable(&row)?;
     if !row.awaiting_integration {
-        return Ok(IntegrationOutcome::Merged {
-            sha: last_integrated_sha(tools, task_id)?.unwrap_or_default(),
-        });
+        return match last_integrated_sha(tools, task_id)? {
+            Some(sha) => Ok(Some(IntegrationOutcome::Merged { sha })),
+            None if asker == Asker::Tick => Ok(None),
+            None => Err(refused(format!(
+                "never_integrated: {} is not awaiting integration and was never integrated",
+                task_id.as_str()
+            ))),
+        };
     }
-    match team.policy.integration {
-        Integration::AutoMerge => merge(tools, team, &row, by_human, true),
-        Integration::Manual => merge(tools, team, &row, by_human, false),
-        Integration::PullRequest => through_the_forge(tools, forge, team, &row, by_human),
+    if asker == Asker::Tick && escalated_since_accepted(tools, task_id)? {
+        return Ok(None);
     }
+    let into = match integration_branch(team, &tools.git) {
+        Ok(into) => into,
+        Err(error) => return escalate(tools, task_id, git_words(&error)).map(Some),
+    };
+    let integrated_by = match asker {
+        Asker::Tick => TaskIntegratedBodyIntegratedBy::Governor,
+        Asker::Human => TaskIntegratedBodyIntegratedBy::Human,
+    };
+    let outcome = match team.policy.integration {
+        Integration::Manual => Some(merge(tools, &row, &into, integrated_by, false)?),
+        Integration::AutoMerge => Some(merge(tools, &row, &into, integrated_by, true)?),
+        Integration::PullRequest => through_the_forge(tools, forge, &row, &into, asker)?,
+    };
+    Ok(outcome)
 }
 
-/// Under `pull_request`: opens the task's pull request when none was opened since it was
-/// accepted, pushing its branch first; otherwise reads the one opened. Merged on the forge, the
-/// local integration branch is brought up to it and the task recorded as the human's
-/// integration. Closed, the human's own `integrate` asks whether the branch is in the integration
-/// branch all the same (merged by hand, or through another pull request); the tick only says so.
+/// Under `pull_request`: with no pull request opened since acceptance, the branch pushed to
+/// `origin` and one opened; with one, its state read. A merge on the forge is recorded as the
+/// human's and the local integration branch brought up to it; a closed one is escalated, unless
+/// the human asks and the branch is in the integration branch all the same.
 fn through_the_forge(
     tools: &ToolDeps,
     forge: &Forge,
-    team: &Team,
     row: &TaskProjection,
-    by_human: bool,
-) -> Result<IntegrationOutcome, OrchestratorError> {
-    let git = &tools.git;
-    let id = row.task_id.as_str();
-    let branch = format!("farik/{id}");
-    let into = match integration_branch(team, git) {
-        Ok(into) => into,
-        Err(error) => return escalate(tools, &row.task_id, format!("{error}")),
+    into: &str,
+    asker: Asker,
+) -> Result<Option<IntegrationOutcome>, OrchestratorError> {
+    let task_id = &row.task_id;
+    let branch = format!("farik/{}", task_id.as_str());
+    let opened = since_accepted(tools, task_id, &[EventKind::PullRequestOpened])?
+        .into_iter()
+        .rev()
+        .find_map(|event| match event.body {
+            EventBody::PullRequestOpened(body) => Some(body),
+            _ => None,
+        });
+    let Some(opened) = opened else {
+        return open(tools, forge, row, into, &branch).map(Some);
     };
-    let Some(url) = opened_since_accepted(tools, &row.task_id)? else {
-        return open(tools, forge, row, &branch, &into);
-    };
+    let url = opened.url;
     let state = match forge.pull_request_state(&url) {
         Ok(state) => state,
         Err(error) => {
-            return escalate(
-                tools,
-                &row.task_id,
-                format!("the state of {url} could not be read: {error}"),
-            );
+            let detail = format!("reading the pull request {url} failed: {error}");
+            return escalate(tools, task_id, detail).map(Some);
         }
     };
     match state {
-        PullRequestState::Open => Ok(IntegrationOutcome::AwaitingForge),
+        PullRequestState::Open => Ok(Some(IntegrationOutcome::AwaitingForge)),
         PullRequestState::Merged { sha } => {
-            let fetched = git.fetch_fast_forward("origin", &into);
-            record_integrated(tools, &row.task_id, &sha, &into, true)?;
-            if let Err(error) = fetched {
-                return escalate(
-                    tools,
-                    &row.task_id,
-                    format!(
-                        "{url} was merged as {sha}, but the local {into} could not be brought up \
-                         to it: {}; run git pull origin {into} in the repository",
-                        git_words(&error)
-                    ),
+            record_integrated(
+                tools,
+                task_id,
+                &sha,
+                into,
+                TaskIntegratedBodyIntegratedBy::Human,
+            )?;
+            if let Err(error) = tools.git.fetch_fast_forward("origin", into) {
+                let detail = format!(
+                    "the pull request {url} was merged as {sha}, but the local {into} could not be \
+                     brought up to it: {}",
+                    git_words(&error)
                 );
+                return escalate(tools, task_id, detail).map(Some);
             }
-            Ok(IntegrationOutcome::Merged { sha })
+            Ok(Some(IntegrationOutcome::Merged { sha }))
         }
-        PullRequestState::Closed if !by_human => escalate(
-            tools,
-            &row.task_id,
-            format!(
-                "the pull request {url} was closed without merging; reopen it on the forge or \
-                 merge {branch}, then run farik integrate {id}"
-            ),
-        ),
+        PullRequestState::Closed if asker == Asker::Tick => {
+            let detail = format!("the pull request {url} was closed without merging");
+            escalate(tools, task_id, detail).map(Some)
+        }
         PullRequestState::Closed => {
-            let merged = git
-                .fetch_fast_forward("origin", &into)
-                .and_then(|()| git.commit_count(&into, &branch));
-            match merged {
-                Ok(0) => {
-                    // A branch's merge base with itself is its head: the commit of `into` that
-                    // holds the task's branch.
-                    let sha = git.merge_base(&into, &into)?;
-                    record_integrated(tools, &row.task_id, &sha, &into, true)?;
-                    Ok(IntegrationOutcome::Merged { sha })
-                }
-                Ok(_) => escalate(
-                    tools,
-                    &row.task_id,
-                    format!(
-                        "the pull request {url} was closed without merging, and {branch} is not \
-                         in {into}: reopen it on the forge or merge the branch, then run farik \
-                         integrate {id}"
-                    ),
-                ),
-                Err(error) => escalate(
-                    tools,
-                    &row.task_id,
-                    format!(
-                        "the pull request {url} was closed without merging, and whether {branch} \
-                         is in {into} could not be read: {}",
-                        git_words(&error)
-                    ),
-                ),
-            }
+            closed_for_the_human(tools, task_id, &url, into, &branch).map(Some)
         }
     }
 }
 
-/// Pushes `branch` to `origin` and opens its pull request into `into`, recording it; each failure,
-/// no `origin` among them, is an integration escalation with its words.
+/// A closed pull request the human asks about: the task is integrated when its branch is in the
+/// integration branch as the forge has it, merged by hand or through another pull request.
+fn closed_for_the_human(
+    tools: &ToolDeps,
+    task_id: &TaskId,
+    url: &str,
+    into: &str,
+    branch: &str,
+) -> Result<IntegrationOutcome, OrchestratorError> {
+    let merged = tools
+        .git
+        .fetch_fast_forward("origin", into)
+        .and_then(|()| tools.git.commit_count(into, branch));
+    match merged {
+        Ok(0) => {
+            let head = tools.git.merge_base(into, into)?;
+            record_integrated(
+                tools,
+                task_id,
+                &head,
+                into,
+                TaskIntegratedBodyIntegratedBy::Human,
+            )?;
+            Ok(IntegrationOutcome::Merged { sha: head })
+        }
+        Ok(_) => {
+            let detail = format!(
+                "the pull request {url} was closed without merging, and {branch} is not in \
+                 {into}: reopen it on the forge or merge the branch, then run farik integrate"
+            );
+            escalate(tools, task_id, detail)
+        }
+        Err(error) => {
+            let detail = format!(
+                "the pull request {url} was closed without merging, and whether {branch} is in \
+                 {into} could not be read: {}",
+                git_words(&error)
+            );
+            escalate(tools, task_id, detail)
+        }
+    }
+}
+
+/// Pushes the branch to `origin` and opens its pull request, recording it.
 fn open(
     tools: &ToolDeps,
     forge: &Forge,
     row: &TaskProjection,
-    branch: &str,
     into: &str,
+    branch: &str,
 ) -> Result<IntegrationOutcome, OrchestratorError> {
-    let git = &tools.git;
-    match git.has_remote("origin") {
+    let task_id = &row.task_id;
+    match tools.git.has_remote("origin") {
         Ok(true) => {}
         Ok(false) => {
-            return escalate(
-                tools,
-                &row.task_id,
-                format!(
-                    "there is no origin to push {branch} to and open its pull request on; add \
-                     one, or choose another policy.integration"
-                ),
+            let detail = format!(
+                "the pull_request policy pushes {branch} to origin, and there is no remote named \
+                 origin"
             );
+            return escalate(tools, task_id, detail);
         }
-        Err(error) => return escalate(tools, &row.task_id, git_words(&error)),
+        Err(error) => return escalate(tools, task_id, git_words(&error)),
     }
-    if let Err(error) = git.push("origin", &format!("refs/heads/{branch}")) {
-        return escalate(
-            tools,
-            &row.task_id,
-            format!("pushing {branch} to origin failed: {}", git_words(&error)),
-        );
+    if let Err(error) = tools.git.push("origin", &format!("refs/heads/{branch}")) {
+        let detail = format!("pushing {branch} to origin failed: {}", git_words(&error));
+        return escalate(tools, task_id, detail);
     }
-    let body = pull_request_body(tools, &row.task_id)?;
-    let title = format!("{}: {}", row.task_id.as_str(), row.title);
-    let opened = match forge.open_pull_request(into, branch, &title, &body) {
-        Ok(opened) => opened,
+    let title = format!("{}: {}", task_id.as_str(), row.title);
+    let body = pull_request_body(tools, task_id)?;
+    let pull_request = match forge.open_pull_request(into, branch, &title, &body) {
+        Ok(pull_request) => pull_request,
         Err(error) => {
-            return escalate(
-                tools,
-                &row.task_id,
-                format!("the pull request for {branch} could not be opened: {error}"),
-            );
+            let detail = format!("opening a pull request for {branch} failed: {error}");
+            return escalate(tools, task_id, detail);
         }
     };
     append(
         tools,
-        &row.task_id,
+        task_id,
         EventBody::PullRequestOpened(PullRequestOpenedBody {
-            url: opened.url.clone(),
-            number: opened.number,
+            url: pull_request.url.clone(),
+            number: pull_request.number,
             branch: branch.to_string(),
         }),
     )?;
-    Ok(IntegrationOutcome::PullRequestOpened { url: opened.url })
+    Ok(IntegrationOutcome::PullRequestOpened {
+        url: pull_request.url,
+    })
 }
 
-/// The pull request's body: the contract's intent, the completion note, and the review note, each
-/// under its own heading; a note never written is said to be missing.
+/// The pull request's body: the contract's intent, then the last completion and review notes.
 fn pull_request_body(tools: &ToolDeps, task_id: &TaskId) -> Result<String, OrchestratorError> {
     let contract = tools.files.read_contract(task_id)?;
+    let intent = contract.intent.as_str();
     let notes = tools.log.read(&EventQuery {
         task_id: Some(task_id.clone()),
         kinds: vec![EventKind::NoteWritten],
         ..EventQuery::default()
     })?;
-    let last = |kind: NoteWrittenBodyKind| {
+    let last_note = |kind: NoteWrittenBodyKind| {
         notes
             .iter()
             .rev()
@@ -303,103 +339,69 @@ fn pull_request_body(tools: &ToolDeps, task_id: &TaskId) -> Result<String, Orche
             .unwrap_or_else(|| "(none was written)".to_string())
     };
     Ok(format!(
-        "## Intent\n\n{}\n\n## Completion note\n\n{}\n\n## Review note\n\n{}\n",
-        contract.intent.as_str(),
-        last(NoteWrittenBodyKind::Completion),
-        last(NoteWrittenBodyKind::Review)
+        "## Intent\n\n{intent}\n\n## Completion note\n\n{}\n\n## Review note\n\n{}\n",
+        last_note(NoteWrittenBodyKind::Completion),
+        last_note(NoteWrittenBodyKind::Review)
     ))
 }
 
-/// The url of the task's `pull_request.opened` since it last moved into `accepted`.
-fn opened_since_accepted(
-    tools: &ToolDeps,
-    task_id: &TaskId,
-) -> Result<Option<String>, OrchestratorError> {
-    let history = tools.log.read(&EventQuery {
-        task_id: Some(task_id.clone()),
-        kinds: vec![EventKind::TaskTransitioned, EventKind::PullRequestOpened],
-        ..EventQuery::default()
-    })?;
-    Ok(history
-        .iter()
-        .rev()
-        .take_while(|event| !is_move_into_accepted(event))
-        .find_map(|event| match &event.body {
-            EventBody::PullRequestOpened(body) => Some(body.url.clone()),
-            _ => None,
-        }))
-}
-
-/// Merges `farik/<id>` into the integration branch and records it; then, when `pushes` and the
-/// repository has an `origin`, pushes the integration branch there. A conflict, git refusing the
-/// merge, or a failed push is an integration escalation; a failed push leaves the merge, because
-/// the local integration branch is what dependents start from.
+/// Merges the task's branch into `into`, records it, and, when `push` and there is an `origin`,
+/// pushes `into` there. A conflict, a git failure, or a failed push is an escalation; the merge
+/// stays when only the push failed, since the local integration branch is what dependents start
+/// from.
 fn merge(
     tools: &ToolDeps,
-    team: &Team,
     row: &TaskProjection,
-    by_human: bool,
-    pushes: bool,
+    into: &str,
+    integrated_by: TaskIntegratedBodyIntegratedBy,
+    push: bool,
 ) -> Result<IntegrationOutcome, OrchestratorError> {
-    let git = &tools.git;
     let id = row.task_id.as_str();
     let branch = format!("farik/{id}");
-    let into = match integration_branch(team, git) {
-        Ok(into) => into,
-        Err(error) => return escalate(tools, &row.task_id, format!("{error}")),
-    };
-    let sha = match git.merge(&into, &branch, &format!("Merge {id}: {}", row.title)) {
+    let message = format!("Merge {id}: {}", row.title);
+    let sha = match tools.git.merge(into, &branch, &message) {
         Ok(MergeOutcome::Merged { sha }) => sha,
         Ok(MergeOutcome::Conflicts(paths)) => {
-            return escalate(
-                tools,
-                &row.task_id,
-                format!(
-                    "merging {branch} into {into} conflicts in {}; resolve it on {into} or on \
-                     {branch}, then run farik integrate {id}",
-                    paths.join(", ")
-                ),
+            let detail = format!(
+                "merging {branch} into {into} conflicts in {}: resolve them on {into}, then run \
+                 farik integrate {id}",
+                paths.join(", ")
             );
+            return escalate(tools, &row.task_id, detail);
         }
         Err(error) => {
-            return escalate(
-                tools,
-                &row.task_id,
-                format!("merging {branch} into {into} failed: {error}"),
-            );
+            let detail = format!("merging {branch} into {into} failed: {}", git_words(&error));
+            return escalate(tools, &row.task_id, detail);
         }
     };
-    record_integrated(tools, &row.task_id, &sha, &into, by_human)?;
-    if pushes {
-        let push = git.has_remote("origin").and_then(|has| {
+    record_integrated(tools, &row.task_id, &sha, into, integrated_by)?;
+    if push {
+        let pushed = tools.git.has_remote("origin").and_then(|has| {
             if has {
-                git.push("origin", &format!("refs/heads/{into}"))
+                tools.git.push("origin", &format!("refs/heads/{into}"))
             } else {
                 Ok(())
             }
         });
-        if let Err(error) = push {
-            return escalate(
-                tools,
-                &row.task_id,
-                format!(
-                    "merged locally as {sha}; pushing {into} to origin failed: {}; run git push \
-                     origin {into} once it can be pushed",
-                    git_words(&error)
-                ),
+        if let Err(error) = pushed {
+            let detail = format!(
+                "merged locally as {sha}; pushing {into} to origin failed: {}; run git push origin \
+                 {into} once it can be pushed",
+                git_words(&error)
             );
+            return escalate(tools, &row.task_id, detail);
         }
     }
     Ok(IntegrationOutcome::Merged { sha })
 }
 
-/// Records the task's branch as in `into` at `sha`, by the human or by Farik.
+/// Appends `task.integrated`.
 fn record_integrated(
     tools: &ToolDeps,
     task_id: &TaskId,
     sha: &str,
     into: &str,
-    by_human: bool,
+    integrated_by: TaskIntegratedBodyIntegratedBy,
 ) -> Result<(), OrchestratorError> {
     append(
         tools,
@@ -407,30 +409,12 @@ fn record_integrated(
         EventBody::TaskIntegrated(TaskIntegratedBody {
             sha: sha.to_string(),
             into: into.to_string(),
-            integrated_by: if by_human {
-                TaskIntegratedBodyIntegratedBy::Human
-            } else {
-                TaskIntegratedBodyIntegratedBy::Governor
-            },
+            integrated_by,
         }),
     )
 }
 
-/// Whether the event is a move into `accepted`.
-fn is_move_into_accepted(event: &FarikEvent) -> bool {
-    matches!(&event.body, EventBody::TaskTransitioned(body) if body.to.to_string() == "accepted")
-}
-
-/// What git said, without the adapter's framing.
-fn git_words(error: &GitError) -> String {
-    match error {
-        GitError::CommandFailed { stderr, .. } => stderr.clone(),
-        other => other.to_string(),
-    }
-}
-
-/// Raises an integration escalation with `detail`, which moves nothing: the task stays accepted
-/// and awaiting (5.2, 5.14), and answers `Escalated` with the same words.
+/// Appends an integration escalation, which moves nothing, and answers it.
 fn escalate(
     tools: &ToolDeps,
     task_id: &TaskId,
@@ -447,12 +431,18 @@ fn escalate(
     Ok(IntegrationOutcome::Escalated { detail })
 }
 
-/// Appends one event about the task, stamped with no agent and no session, and projects it.
+/// Git's own words for a failure.
+fn git_words(error: &GitError) -> String {
+    match error {
+        GitError::CommandFailed { stderr, .. } => stderr.clone(),
+        other => other.to_string(),
+    }
+}
+
+/// Appends one event about the task, Farik's own, and projects it.
 fn append(tools: &ToolDeps, task_id: &TaskId, body: EventBody) -> Result<(), OrchestratorError> {
     let ids = EventIds {
         task_id: Some(task_id.clone()),
-        agent_id: None,
-        session_id: None,
         ..tools.ids.clone()
     };
     let event = new_event(body, tools.clock.now(), ids).map_err(|error| {
@@ -465,7 +455,47 @@ fn append(tools: &ToolDeps, task_id: &TaskId, body: EventBody) -> Result<(), Orc
     Ok(())
 }
 
-/// The sha of the task's last `task.integrated`.
+/// The task's events of `kinds` since its last move into `accepted`.
+fn since_accepted(
+    tools: &ToolDeps,
+    task_id: &TaskId,
+    kinds: &[EventKind],
+) -> Result<Vec<FarikEvent>, OrchestratorError> {
+    let mut asked = vec![EventKind::TaskTransitioned];
+    asked.extend_from_slice(kinds);
+    let history = tools.log.read(&EventQuery {
+        task_id: Some(task_id.clone()),
+        kinds: asked,
+        ..EventQuery::default()
+    })?;
+    let start = history
+        .iter()
+        .rposition(is_move_into_accepted)
+        .map_or(0, |at| at + 1);
+    Ok(history
+        .into_iter()
+        .skip(start)
+        .filter(|event| kinds.contains(&event.body.kind()))
+        .collect())
+}
+
+fn is_move_into_accepted(event: &FarikEvent) -> bool {
+    matches!(&event.body, EventBody::TaskTransitioned(body) if body.to.to_string() == TaskStatus::Accepted.to_string())
+}
+
+/// Whether an integration escalation was raised since the task was accepted.
+fn escalated_since_accepted(tools: &ToolDeps, task_id: &TaskId) -> Result<bool, OrchestratorError> {
+    Ok(
+        since_accepted(tools, task_id, &[EventKind::EscalationRaised])?
+            .iter()
+            .any(|event| {
+                matches!(&event.body, EventBody::EscalationRaised(body)
+                if body.reason == EscalationRaisedBodyReason::Integration)
+            }),
+    )
+}
+
+/// The commit the task was last integrated at.
 fn last_integrated_sha(
     tools: &ToolDeps,
     task_id: &TaskId,
@@ -484,37 +514,17 @@ fn last_integrated_sha(
         }))
 }
 
-/// Whether an integration escalation was raised about the task since it last moved into
-/// `accepted`.
-fn escalated_since_accepted(tools: &ToolDeps, task_id: &TaskId) -> Result<bool, OrchestratorError> {
-    let history = tools.log.read(&EventQuery {
-        task_id: Some(task_id.clone()),
-        kinds: vec![EventKind::TaskTransitioned, EventKind::EscalationRaised],
-        ..EventQuery::default()
-    })?;
-    Ok(history
-        .iter()
-        .rev()
-        .take_while(|event| !is_move_into_accepted(event))
-        .any(|event| {
-            matches!(&event.body, EventBody::EscalationRaised(body)
-                if body.reason == EscalationRaisedBodyReason::Integration)
-        }))
-}
-
-/// The integration lock: an exclusive lock on `.farik/local/integration.lock`, held until the
-/// file is dropped. A file lock rather than an in-process one, because `farik integrate` runs in
-/// its own process beside `farik run`; two opens in one process conflict too, so one lock serves
-/// both (5.14).
+/// Takes the integration lock, waiting for whoever holds it, process or thread; it is let go when
+/// the file is dropped.
 fn lock(root: &Path) -> Result<File, OrchestratorError> {
     let path = root.join(LOCK);
     let failed = |error: std::io::Error| OrchestratorError::Lock {
         detail: format!("{}: {error}", path.display()),
     };
-    if let Some(directory) = path.parent() {
-        std::fs::create_dir_all(directory).map_err(failed)?;
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(failed)?;
     }
-    let file = File::options()
+    let file = OpenOptions::new()
         .create(true)
         .truncate(false)
         .write(true)

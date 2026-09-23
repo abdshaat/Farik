@@ -6,9 +6,9 @@
 use std::fmt;
 use std::io::Write;
 use std::path::PathBuf;
-use std::process::{Command, Output, Stdio};
+use std::process::{Command, Stdio};
 
-use serde_json::Value;
+use serde::Deserialize;
 
 /// The `gh` program, and the repository it acts for.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -60,16 +60,34 @@ pub enum ForgeError {
 impl fmt::Display for ForgeError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Missing { program } => write!(
-                formatter,
-                "{program} could not be run: install gh and sign in with gh auth login"
-            ),
-            Self::Failed { detail } => write!(formatter, "gh failed: {detail}"),
+            Self::Missing { program } => write!(formatter, "{program} could not be run"),
+            Self::Failed { detail } => write!(formatter, "{detail}"),
         }
     }
 }
 
 impl std::error::Error for ForgeError {}
+
+/// One row of `gh pr list --json url,number`.
+#[derive(Deserialize)]
+struct Listed {
+    url: String,
+    number: u64,
+}
+
+/// What `gh pr view --json state,mergeCommit` answers.
+#[derive(Deserialize)]
+struct Viewed {
+    state: String,
+    #[serde(rename = "mergeCommit")]
+    merge_commit: Option<MergeCommit>,
+}
+
+/// A merged pull request's commit, `null` until the merge.
+#[derive(Deserialize)]
+struct MergeCommit {
+    oid: String,
+}
 
 impl Forge {
     /// The open pull request from `head` into `base`, reused when there is one, so that a run
@@ -104,20 +122,16 @@ impl Forge {
             ],
             None,
         )?;
-        let open = serde_json::from_str::<Value>(&listed)
-            .ok()
-            .and_then(|value| value.as_array().cloned())
-            .ok_or_else(|| unreadable("gh pr list", &listed))?;
-        if let Some(first) = open.first() {
-            let url = first.get("url").and_then(Value::as_str);
-            let number = first.get("number").and_then(Value::as_u64);
-            return match (url, number) {
-                (Some(url), Some(number)) => Ok(PullRequest {
-                    url: url.to_string(),
-                    number,
-                }),
-                _ => Err(unreadable("gh pr list", &listed)),
-            };
+        let open: Vec<PullRequest> = serde_json::from_str::<Vec<Listed>>(&listed)
+            .map_err(|_| unreadable("gh pr list", &listed))?
+            .into_iter()
+            .map(|listed| PullRequest {
+                url: listed.url,
+                number: listed.number,
+            })
+            .collect();
+        if let Some(found) = open.into_iter().next() {
+            return Ok(found);
         }
         let created = self.run(
             &[
@@ -136,81 +150,63 @@ impl Forge {
         )?;
         let url = created
             .lines()
-            .map(str::trim)
-            .rfind(|line| !line.is_empty())
-            .unwrap_or_default();
+            .last()
+            .unwrap_or_default()
+            .trim()
+            .to_string();
         let number = url
             .rsplit('/')
             .next()
-            .and_then(|segment| segment.parse::<u64>().ok())
+            .and_then(|segment| segment.parse().ok())
             .ok_or_else(|| unreadable("gh pr create", &created))?;
-        Ok(PullRequest {
-            url: url.to_string(),
-            number,
-        })
+        Ok(PullRequest { url, number })
     }
 
-    /// Whether the pull request at `url` is open, merged (and as which commit), or closed.
+    /// Where the pull request at `url` stands.
     ///
     /// # Errors
     ///
     /// As `open_pull_request`.
     pub fn pull_request_state(&self, url: &str) -> Result<PullRequestState, ForgeError> {
         let viewed = self.run(&["pr", "view", url, "--json", "state,mergeCommit"], None)?;
-        let value: Value =
+        let read: Viewed =
             serde_json::from_str(&viewed).map_err(|_| unreadable("gh pr view", &viewed))?;
-        match value.get("state").and_then(Value::as_str) {
-            Some("OPEN") => Ok(PullRequestState::Open),
-            Some("CLOSED") => Ok(PullRequestState::Closed),
-            Some("MERGED") => value
-                .get("mergeCommit")
-                .and_then(|commit| commit.get("oid"))
-                .and_then(Value::as_str)
-                .map(|sha| PullRequestState::Merged {
-                    sha: sha.to_string(),
-                })
-                .ok_or_else(|| unreadable("gh pr view", &viewed)),
+        match (read.state.as_str(), read.merge_commit) {
+            ("OPEN", _) => Ok(PullRequestState::Open),
+            ("CLOSED", _) => Ok(PullRequestState::Closed),
+            ("MERGED", Some(commit)) => Ok(PullRequestState::Merged { sha: commit.oid }),
             _ => Err(unreadable("gh pr view", &viewed)),
         }
     }
 
-    /// Runs the program with `arguments` in the root, `stdin` on its standard input when given,
-    /// and answers its standard output. ponytail: no timeout on gh, as there is none on git; a
-    /// `try_wait` loop as step 02's when one hangs.
+    /// Runs the program in the root with `arguments`, giving it `stdin` (or nothing), and answers
+    /// its standard output.
     fn run(&self, arguments: &[&str], stdin: Option<&str>) -> Result<String, ForgeError> {
-        let missing = || ForgeError::Missing {
-            program: self.program.display().to_string(),
-        };
-        let mut command = Command::new(&self.program);
-        command
+        let mut child = Command::new(&self.program)
             .args(arguments)
             .current_dir(&self.root)
+            .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
-            .stdin(if stdin.is_some() {
-                Stdio::piped()
-            } else {
-                Stdio::null()
-            });
-        let mut child = command.spawn().map_err(|_| missing())?;
-        if let (Some(text), Some(mut pipe)) = (stdin, child.stdin.take()) {
-            pipe.write_all(text.as_bytes())
-                .map_err(|error| ForgeError::Failed {
-                    detail: format!("its standard input could not be written: {error}"),
-                })?;
+            .spawn()
+            .map_err(|_| ForgeError::Missing {
+                program: self.program.display().to_string(),
+            })?;
+        if let Some(mut input) = child.stdin.take() {
+            // A program that exits without reading its input is answered by its exit, below.
+            let _ = input.write_all(stdin.unwrap_or_default().as_bytes());
         }
-        let output: Output = child
+        let output = child
             .wait_with_output()
             .map_err(|error| ForgeError::Failed {
-                detail: format!("it could not be waited for: {error}"),
+                detail: error.to_string(),
             })?;
         if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
             return Err(ForgeError::Failed {
                 detail: format!(
-                    "gh {} exited with {}: {stderr}",
-                    arguments[..2].join(" "),
-                    output.status
+                    "gh {} failed: {}",
+                    arguments.first().copied().unwrap_or_default(),
+                    String::from_utf8_lossy(&output.stderr).trim()
                 ),
             });
         }
@@ -218,10 +214,13 @@ impl Forge {
     }
 }
 
-/// `what` answered `output`, which is not what it answers.
-fn unreadable(what: &str, output: &str) -> ForgeError {
+/// `Failed`, naming what `command` answered that could not be read.
+fn unreadable(command: &str, output: &str) -> ForgeError {
     ForgeError::Failed {
-        detail: format!("{what} answered what cannot be read: {:?}", output.trim()),
+        detail: format!(
+            "{command} answered what could not be read: {}",
+            output.trim()
+        ),
     }
 }
 

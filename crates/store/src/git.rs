@@ -337,7 +337,9 @@ impl Git {
     pub fn fetch_fast_forward(&self, remote: &str, branch: &str) -> Result<(), GitError> {
         self.require_repository()?;
         let reference = format!("refs/heads/{branch}");
-        if self.current_branch().ok().as_deref() == Some(branch) {
+        // A detached root has no branch checked out, which is not this one.
+        let checked_out = self.current_branch().ok();
+        if checked_out.as_deref() == Some(branch) {
             self.at_root(&["fetch", remote, &reference])?;
             self.at_root(&["merge", "--ff-only", "FETCH_HEAD"])?;
         } else {
@@ -353,16 +355,15 @@ impl Git {
     ///
     /// `CommandFailed` naming it when git refuses it; `NotInstalled` when git cannot be run.
     pub fn check_branch_name(&self, name: &str) -> Result<(), GitError> {
-        run_git(&self.root, &["check-ref-format", "--branch", name]).map_err(
-            |error| match error {
-                GitError::CommandFailed { command, stderr } => GitError::CommandFailed {
+        self.at_root(&["check-ref-format", "--branch", name])
+            .map(|_| ())
+            .map_err(|error| match error {
+                GitError::CommandFailed { command, .. } => GitError::CommandFailed {
                     command,
-                    stderr: format!("{name:?} is not a name git takes for a branch: {stderr}"),
+                    stderr: format!("{name} is not a name git takes for a branch"),
                 },
                 other => other,
-            },
-        )?;
-        Ok(())
+            })
     }
 
     /// How many commits `head` has that `base` does not.
@@ -565,11 +566,10 @@ fn run_git_untrimmed(directory: &Path, arguments: &[&str]) -> Result<String, Git
             stderr: format!("there is no directory at {}", directory.display()),
         });
     }
-    // No git Farik runs has a person at a terminal to answer it, so a push or fetch that wants a
-    // credential fails with git's words rather than waiting on a prompt nobody sees. An empty
-    // `GIT_ASKPASS` is what stops git reaching for an askpass program too (an editor's, say, set
-    // in the environment Farik was started from, or `core.askPass`, or `SSH_ASKPASS`), which is a
-    // prompt by another name; a credential helper still answers.
+    // No git Farik runs has a person at a terminal to answer it: a push or fetch that wants a
+    // credential fails with git's words instead of waiting on a prompt nobody sees. The empty
+    // `GIT_ASKPASS` stops git asking an askpass program instead (an editor's terminal sets one,
+    // and `core.askPass` or `SSH_ASKPASS` may name another); a credential helper still answers.
     let output = Command::new("git")
         .args(arguments)
         .current_dir(directory)
