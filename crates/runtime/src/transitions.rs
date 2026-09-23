@@ -1063,7 +1063,7 @@ fn wire_status(status: TaskStatusWire) -> Option<TaskStatus> {
 /// `CommandFailed` naming the team's branch when git would not take it for a branch name
 /// (`Git::check_branch_name`); what `Git::default_branch` refuses, asked only when the team names
 /// no branch.
-pub(crate) fn integration_branch(team: &Team, git: &Git) -> Result<String, GitError> {
+pub fn integration_branch(team: &Team, git: &Git) -> Result<String, GitError> {
     match &team.policy.integration_branch {
         Some(branch) => {
             // The team file's word reaches refspecs and options, so git judges it first.

@@ -362,15 +362,21 @@ enum CriteriaCommands {
 
 #[derive(Subcommand)]
 enum TaskCommands {
-    /// File a contract as a draft request.
+    /// File a contract as a draft request, or as a task of an epic in progress.
     Create {
         /// The YAML contract to file. Farik assigns the id.
         file: PathBuf,
+        /// The epic the task is filed under (5.16).
+        #[arg(long)]
+        parent: Option<String>,
     },
     /// Show one contract and what happened to it.
     Show {
         /// The task to show.
         task_id: String,
+        /// Also show its branch's diff.
+        #[arg(long)]
+        diff: bool,
     },
 }
 
@@ -429,9 +435,9 @@ pub fn run_cli(args: &[String], io: &mut CliIo<'_>) -> i32 {
     let outcome = match &parsed.command {
         Commands::Init => init::init(&io.cwd, now),
         Commands::Task {
-            command: TaskCommands::Create { file },
+            command: TaskCommands::Create { file, parent },
         } => open_project(&io.cwd, now)
-            .and_then(|project| task::create(&project, &io.cwd, file, now)),
+            .and_then(|project| task::create(&project, &io.cwd, file, parent.as_deref(), now)),
         Commands::Triage {
             task_id,
             size,
@@ -482,8 +488,8 @@ pub fn run_cli(args: &[String], io: &mut CliIo<'_>) -> i32 {
             open_project(&io.cwd, now).and_then(|project| stop(&project, target.as_deref()))
         }
         Commands::Task {
-            command: TaskCommands::Show { task_id },
-        } => open_project(&io.cwd, now).and_then(|project| show::show(&project, task_id)),
+            command: TaskCommands::Show { task_id, diff },
+        } => open_project(&io.cwd, now).and_then(|project| show::show(&project, task_id, *diff)),
         Commands::Board => open_project(&io.cwd, now).and_then(|project| board::board(&project)),
         Commands::Log { task, kind, limit } => open_project(&io.cwd, now)
             .and_then(|project| log::log(&project, task.as_ref(), kind.as_ref(), *limit)),

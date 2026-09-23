@@ -3,6 +3,10 @@
 //! Every test here needs the `git` program, so every one is `#[ignore]`d and run by
 //! `cargo xtask check --integration`, as the rest of this crate's do.
 
+#[cfg(unix)]
+#[path = "shared/project.rs"]
+mod project;
+
 use std::path::Path;
 use std::sync::Arc;
 
@@ -385,6 +389,162 @@ fn reports_a_team_file_that_cannot_be_read() {
     assert_eq!(ran.code, 1);
     assert!(
         ran.err.contains("team.yaml") || ran.out.contains("team.yaml"),
+        "{}",
+        ran.err
+    );
+}
+
+/// Walks `task` from `draft` through `path`, as the governor's moves.
+#[cfg(unix)]
+fn walked(repository: &TempRepo, task: &str, path: &[&str]) {
+    let mut from = "draft";
+    for to in path {
+        project::moved(repository, task, from, to, &serde_json::json!({}));
+        from = to;
+    }
+}
+
+#[cfg(unix)]
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn shows_a_tasks_events_cost_and_children() {
+    use farik_protocol::event::EventIds;
+    use farik_store::requests::file_request;
+    use serde_json::json;
+
+    let repository = a_project_with_a_task("read-show-story");
+    let sized = run_in(
+        &repository.path,
+        &["triage", "FRK-1", "large", "--reason", "Three screens."],
+    );
+    assert_eq!(sized.code, 0, "{}", sized.err);
+    walked(
+        &repository,
+        "FRK-1",
+        &["refining", "ready", "assigned", "in_progress"],
+    );
+    let log = project::log_of(&repository);
+    let first = project::events(&repository, &[]);
+    let ids = EventIds {
+        task_id: None,
+        agent_id: None,
+        session_id: None,
+        ..first[0].envelope.ids.clone()
+    };
+    file_request(
+        &project::files_of(&repository),
+        &log,
+        farik_store::files::yaml_value(&a_request("Show one row"), "child.yaml")
+            .expect("the child is YAML"),
+        "human",
+        Some(&"FRK-1".parse().expect("a task id")),
+        at(),
+        &ids,
+    )
+    .expect("the child is filed");
+    project::record_as(
+        &repository,
+        "FRK-1",
+        Some(("pm", "s-1")),
+        "cost.recorded",
+        &json!({
+            "purpose": "plan",
+            "model_id": "claude-opus-5",
+            "usage": {
+                "input_tokens": 1000,
+                "output_tokens": 100,
+                "cache_read_tokens": 0,
+                "cache_write_tokens": 0
+            },
+            "cost_usd": 0.5
+        }),
+    );
+
+    let ran = run_in(&repository.path, &["task", "show", "FRK-1"]);
+
+    assert_eq!(ran.code, 0, "{}", ran.err);
+    for expected in [
+        "request.triaged — large by human: ",
+        "cost: $0.50 of $5.00; sessions: 1;",
+        "children",
+        "  FRK-2 draft ",
+    ] {
+        assert!(ran.out.contains(expected), "{expected:?} in {}", ran.out);
+    }
+    let ran = run_in(&repository.path, &["--json", "task", "show", "FRK-1"]);
+    assert_eq!(ran.code, 0, "{}", ran.err);
+    let shown: Value = serde_json::from_str(ran.out.trim()).expect("JSON");
+    assert_eq!(shown["cost"]["usd"], 0.5, "{shown}");
+    assert_eq!(shown["children"][0]["task_id"], "FRK-2", "{shown}");
+}
+
+#[cfg(unix)]
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn shows_a_tasks_diff_before_and_after_integration() {
+    use serde_json::json;
+
+    let repository = a_project_with_a_task("read-show-diff");
+    let ran = run_in(&repository.path, &["task", "show", "FRK-1", "--diff"]);
+    assert_eq!(ran.code, 1, "{}", ran.out);
+    assert!(ran.err.contains("has no branch yet"), "{}", ran.err);
+
+    let branch_with = |task: &str, file: &str| {
+        repository.git(&["checkout", "-q", "-b", &format!("farik/{task}")]);
+        repository.write(file, "done\n");
+        repository.git(&["add", "--", file]);
+        repository.git(&["commit", "-q", "-m", &format!("Add {file}")]);
+        repository.git(&["checkout", "-q", "main"]);
+    };
+    branch_with("FRK-1", "done.txt");
+    let ran = run_in(&repository.path, &["task", "show", "FRK-1", "--diff"]);
+    assert_eq!(ran.code, 0, "{}", ran.err);
+    assert!(ran.out.contains("+++ b/done.txt"), "{}", ran.out);
+
+    repository.git(&["merge", "-q", "--no-ff", "-m", "Merge FRK-1", "farik/FRK-1"]);
+    let sha = repository.git_output(&["rev-parse", "HEAD"]);
+    project::record(
+        &repository,
+        "FRK-1",
+        "task.integrated",
+        &json!({ "sha": sha, "into": "main", "integrated_by": "human" }),
+    );
+    let ran = run_in(&repository.path, &["task", "show", "FRK-1", "--diff"]);
+    assert_eq!(ran.code, 0, "{}", ran.err);
+    assert!(ran.out.contains("+++ b/done.txt"), "{}", ran.out);
+
+    repository.write("second.yaml", &a_request("Show a second board"));
+    let filed = run_in(&repository.path, &["task", "create", "second.yaml"]);
+    assert_eq!(filed.code, 0, "{}", filed.err);
+    branch_with("FRK-2", "b.txt");
+    repository.git(&["merge", "-q", "--ff-only", "farik/FRK-2"]);
+    let head = repository.git_output(&["rev-parse", "HEAD"]);
+    project::record(
+        &repository,
+        "FRK-2",
+        "task.integrated",
+        &json!({ "sha": head, "into": "main", "integrated_by": "human" }),
+    );
+    let ran = run_in(&repository.path, &["task", "show", "FRK-2", "--diff"]);
+    assert_eq!(ran.code, 0, "{}", ran.err);
+    assert!(
+        ran.out.contains("farik/FRK-2 is wholly in main"),
+        "{}",
+        ran.out
+    );
+
+    repository.write("third.yaml", &a_request("Show a third board"));
+    let filed = run_in(&repository.path, &["task", "create", "third.yaml"]);
+    assert_eq!(filed.code, 0, "{}", filed.err);
+    let sized = run_in(
+        &repository.path,
+        &["triage", "FRK-3", "large", "--reason", "Many boards."],
+    );
+    assert_eq!(sized.code, 0, "{}", sized.err);
+    let ran = run_in(&repository.path, &["task", "show", "FRK-3", "--diff"]);
+    assert_eq!(ran.code, 1, "{}", ran.out);
+    assert!(
+        ran.err.contains("is an epic and has no branch"),
         "{}",
         ran.err
     );
