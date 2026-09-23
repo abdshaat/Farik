@@ -160,6 +160,18 @@ pub fn record_as(
     kind: &str,
     body: &Value,
 ) -> FarikEvent {
+    record_on(repository, task, session, kind, body, at())
+}
+
+/// `record_as`, stamped `recorded_at` rather than now.
+pub fn record_on(
+    repository: &TempRepo,
+    task: &str,
+    session: Option<(&str, &str)>,
+    kind: &str,
+    body: &Value,
+    recorded_at: DateTime<Utc>,
+) -> FarikEvent {
     let log = log_of(repository);
     let first = log
         .read(&EventQuery {
@@ -170,7 +182,7 @@ pub fn record_as(
     let ids = &first.first().expect("init recorded something").envelope.ids;
     let mut wire = json!({
         "seq": 1,
-        "recorded_at": at().to_rfc3339(),
+        "recorded_at": recorded_at.to_rfc3339(),
         "team_id": ids.team_id,
         "project_id": ids.project_id,
         "kind": kind,

@@ -622,44 +622,119 @@ fn shows_a_tasks_diff_before_and_after_integration() {
     );
 }
 
-/// `a_project_with_a_task` with FRK-1 verified once and accepted, and one implement session's
-/// cost of half a dollar.
+/// `a_project_with_a_task` and a second request, both accepted, with every metric a different
+/// number so that no line or field can be printed from another's value:
+///
+/// - FRK-1 (one `test` criterion) is verified twice, the human unblocking it once and one
+///   escalation raised; FRK-2 (a `command` and a `review` criterion) is verified once and accepted
+///   first time, and escalated once after. So two accepted tasks, 50% first pass, 1.50
+///   interventions each, and two criteria of three run by Farik.
+/// - Three sessions cost $0.50 of implement, $1.00 of verify, and $0.50 of triage, each in an ISO
+///   week of its own: $1.00 per accepted task, of which the largest purpose is $0.50, over three
+///   active weeks.
 #[cfg(unix)]
 fn accepted_project(name: &str) -> TempRepo {
+    use chrono::TimeZone;
     use serde_json::json;
 
     let repository = a_project_with_a_task(name);
-    project::moved(
+    repository.write(
+        "second.yaml",
+        &a_request("Show one task").replace(
+            r"  - id: C1
+    text: Every test in the workspace passes.
+    satisfies:
+      - R1
+    verification:
+      method: test
+      command: cargo test --workspace
+      new_tests_required: true
+",
+            r"  - id: C1
+    text: The board command exits cleanly.
+    satisfies:
+      - R1
+    verification:
+      method: command
+      command: farik board
+      expect:
+        exit_code: 0
+  - id: C2
+    text: The board reads well.
+    satisfies:
+      - R1
+    verification:
+      method: review
+      rubric:
+        - Is each line one task?
+",
+        ),
+    );
+    let filed = run_in(&repository.path, &["task", "create", "second.yaml"]);
+    assert_eq!(filed.code, 0, "{}", filed.err);
+    assert!(filed.out.starts_with("FRK-2 "), "{}", filed.out);
+
+    let by = |actor: &str| json!({ "actor": actor, "requested_by": actor });
+    for (from, to, actor) in [
+        ("in_progress", "blocked", "assignee"),
+        ("blocked", "in_progress", "human"),
+        ("in_progress", "verifying", "assignee"),
+        ("verifying", "escalated", "governor"),
+    ] {
+        project::moved(&repository, "FRK-1", from, to, &by(actor));
+    }
+    project::record(
         &repository,
         "FRK-1",
-        "in_progress",
-        "verifying",
-        &json!({ "actor": "assignee", "requested_by": "dev-a" }),
+        "escalation.raised",
+        &json!({ "reason": "iterations", "detail": "Two tries." }),
     );
-    project::moved(
+    for (from, to, actor) in [
+        ("escalated", "in_progress", "human"),
+        ("in_progress", "verifying", "assignee"),
+        ("verifying", "accepted", "product_manager"),
+    ] {
+        project::moved(&repository, "FRK-1", from, to, &by(actor));
+    }
+    for (from, to, actor) in [
+        ("in_progress", "verifying", "assignee"),
+        ("verifying", "accepted", "product_manager"),
+    ] {
+        project::moved(&repository, "FRK-2", from, to, &by(actor));
+    }
+    project::record(
         &repository,
-        "FRK-1",
-        "verifying",
-        "accepted",
-        &json!({ "actor": "product_manager", "requested_by": "pm" }),
+        "FRK-2",
+        "escalation.raised",
+        &json!({ "reason": "integration", "detail": "A conflict." }),
     );
-    project::record_as(
-        &repository,
-        "FRK-1",
-        Some(("dev-a", "s1")),
-        "cost.recorded",
-        &json!({
-            "purpose": "implement",
-            "model_id": "claude-sonnet-4-5",
-            "usage": {
-                "input_tokens": 1000,
-                "output_tokens": 100,
-                "cache_read_tokens": 0,
-                "cache_write_tokens": 0
-            },
-            "cost_usd": 0.5
-        }),
-    );
+
+    for (task, session, purpose, usd, day) in [
+        ("FRK-1", "s1", "implement", 0.5, 7),
+        ("FRK-1", "s2", "verify", 1.0, 14),
+        ("FRK-2", "s3", "triage", 0.5, 21),
+    ] {
+        project::record_on(
+            &repository,
+            task,
+            Some(("dev-a", session)),
+            "cost.recorded",
+            &json!({
+                "purpose": purpose,
+                "model_id": "claude-sonnet-4-5",
+                "usage": {
+                    "input_tokens": 1000,
+                    "output_tokens": 100,
+                    "cache_read_tokens": 0,
+                    "cache_write_tokens": 0
+                },
+                "cost_usd": usd
+            }),
+            Utc.with_ymd_and_hms(2026, 9, day, 10, 0, 0)
+                .single()
+                .expect("a real hour"),
+        );
+    }
     repository
 }
 
@@ -674,19 +749,19 @@ fn prints_the_harness_metrics() {
     assert_eq!(
         ran.out.lines().collect::<Vec<_>>(),
         [
-            "accepted tasks: 1",
-            "first-pass acceptance: 100.0%",
-            "human interventions per accepted task: 0.00",
-            "cost per accepted task: $0.50",
-            "  triage: $0.00",
+            "accepted tasks: 2",
+            "first-pass acceptance: 50.0%",
+            "human interventions per accepted task: 1.50",
+            "cost per accepted task: $1.00",
+            "  triage: $0.25",
             "  refine: $0.00",
             "  plan: $0.00",
-            "  implement: $0.50",
-            "  verify: $0.00",
+            "  implement: $0.25",
+            "  verify: $0.50",
             "  ceremony: $0.00",
             "  conversation: $0.00",
-            "criteria verified by command, test, or artifact: 100.0%",
-            "active weeks: 1",
+            "criteria verified by command, test, or artifact: 66.7%",
+            "active weeks: 3",
         ]
     );
 }
@@ -720,18 +795,28 @@ fn prints_the_harness_metrics_as_json() {
     let ran = run_in(&repository.path, &["metrics", "--json"]);
     assert_eq!(ran.code, 0, "{}", ran.err);
     let metrics: Value = serde_json::from_str(ran.out.trim()).expect("one JSON object");
-    assert_eq!(metrics["accepted_tasks"], 1);
-    assert_eq!(metrics["first_pass_acceptance_rate"], 1.0);
-    assert_eq!(metrics["interventions_per_accepted_task"], 0.0);
-    assert_eq!(metrics["cost_per_accepted_task_usd"]["total"], 0.5);
-    let by_purpose = metrics["cost_per_accepted_task_usd"]["by_purpose"]
-        .as_object()
-        .expect("the split is an object");
-    assert_eq!(by_purpose.len(), 7, "{by_purpose:?}");
-    assert_eq!(by_purpose["implement"], 0.5);
-    assert_eq!(by_purpose["triage"], 0.0);
-    assert_eq!(metrics["mechanically_verified_criteria_share"], 1.0);
-    assert_eq!(metrics["active_weeks"], 1);
+    assert_eq!(
+        metrics,
+        serde_json::json!({
+            "accepted_tasks": 2,
+            "first_pass_acceptance_rate": 0.5,
+            "interventions_per_accepted_task": 1.5,
+            "cost_per_accepted_task_usd": {
+                "total": 1.0,
+                "by_purpose": {
+                    "triage": 0.25,
+                    "refine": 0.0,
+                    "plan": 0.0,
+                    "implement": 0.25,
+                    "verify": 0.5,
+                    "ceremony": 0.0,
+                    "conversation": 0.0
+                }
+            },
+            "mechanically_verified_criteria_share": 2.0 / 3.0,
+            "active_weeks": 3
+        })
+    );
 
     let repository = a_project_with_a_task("read-metrics-json-none");
     let ran = run_in(&repository.path, &["metrics", "--json"]);
