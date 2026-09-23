@@ -570,7 +570,7 @@ mod tests {
         };
         assert_eq!(contract.id.to_string(), "FRK-1");
         // The validator applied the schema's defaults, which is the proof it was the one used.
-        assert_eq!(contract.budget.max_sessions.get(), 5);
+        assert_eq!(contract.budget.max_sessions.get(), 12);
     }
 
     #[test]

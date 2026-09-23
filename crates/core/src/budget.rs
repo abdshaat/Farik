@@ -231,7 +231,7 @@ mod tests {
             task_spent_usd: 1.0,
             task_max_usd: 5.0,
             task_sessions: 1,
-            task_max_sessions: 5,
+            task_max_sessions: 12,
             sprint_spent_usd: 3.0,
             sprint_max_usd: 15.0,
             day_spent_usd: 4.0,
@@ -365,7 +365,7 @@ mod tests {
     #[test]
     fn escalates_the_task_when_its_sessions_run_out() {
         let mut state = a_state();
-        state.task_sessions = 5;
+        state.task_sessions = 12;
         assert_eq!(
             check_budgets(&state),
             [exhausted(B::TaskSessions, C::EscalateTask)]

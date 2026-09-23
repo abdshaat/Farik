@@ -700,7 +700,7 @@ mod tests {
             task_spent_usd: 1.0,
             task_max_usd: 5.0,
             task_sessions: 1,
-            task_max_sessions: 5,
+            task_max_sessions: 12,
             sprint_spent_usd: 3.0,
             sprint_max_usd: 15.0,
             day_spent_usd: 4.0,

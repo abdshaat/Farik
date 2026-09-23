@@ -166,7 +166,7 @@
         "max_sessions": {
           "type": "integer",
           "minimum": 1,
-          "default": 5
+          "default": 12
         },
         "max_iterations": {
           "type": "integer",

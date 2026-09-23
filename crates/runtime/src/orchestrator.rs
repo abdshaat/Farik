@@ -544,7 +544,7 @@ mod tests {
     use crate::recorded::fixtures::{
         accept_frk_1, implement_finishes_frk_1, plan_assigns_frk_1, plan_assigns_frk_2,
         plan_breaks_down_frk_1, plan_closes_epic_frk_1, refine_asks_frk_1,
-        refine_writes_epic_frk_1, review_writes_note, triage_frk_1_large,
+        refine_writes_epic_frk_1, refine_writes_task_frk_1, review_writes_note, triage_frk_1_large,
     };
 
     /// Each session started, as its purpose and its agent, in order.
@@ -715,6 +715,69 @@ mod tests {
             )
             .trim(),
             "farik/FRK-1"
+        );
+    }
+
+    /// The Product Manager's triage of FRK-1 as `small`, a task: `triage_frk_1_large` with its
+    /// size changed, since the size is the only thing a replayed triage decides.
+    fn triage_frk_1_small() -> crate::recorded::Transcript {
+        let large = triage_frk_1_large().lines().collect::<Vec<_>>().join("\n");
+        assert!(
+            large.contains(r#""size":"large""#),
+            "the triage names a size"
+        );
+        crate::recorded::Transcript::from_jsonl(
+            &large.replace(r#""size":"large""#, r#""size":"small""#),
+        )
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn takes_one_request_to_an_accepted_task_on_the_default_budget() {
+        let harness = Harness::new("orch-one-request-task", |_| {});
+        harness.a_request("Add done.txt and its check");
+        let adapter = harness.recorded(vec![
+            triage_frk_1_small(),
+            refine_writes_task_frk_1(),
+            plan_assigns_frk_1(),
+            implement_finishes_frk_1(),
+            review_writes_note(),
+            accept_frk_1(),
+        ]);
+        let orchestrator = harness.orchestrator(adapter.clone());
+
+        orchestrator
+            .run_until_idle()
+            .await
+            .expect("the run ends idle");
+
+        assert_eq!(
+            sessions(&harness),
+            vec![
+                (SessionStartedBodyPurpose::Triage, "pm".to_string()),
+                (SessionStartedBodyPurpose::Refine, "pm".to_string()),
+                (SessionStartedBodyPurpose::Plan, "pm".to_string()),
+                (SessionStartedBodyPurpose::Implement, "dev-a".to_string()),
+                (SessionStartedBodyPurpose::Verify, "dev-b".to_string()),
+                (SessionStartedBodyPurpose::Verify, "pm".to_string()),
+            ]
+        );
+        assert_eq!(harness.row("FRK-1").status, TaskStatus::Accepted);
+        assert!(
+            harness.events(&[EventKind::BudgetExhausted]).is_empty(),
+            "no budget ran out"
+        );
+        assert_eq!(adapter.transcripts_left(), 0);
+        let contract = harness
+            .project
+            .deps
+            .files
+            .read_contract(&"FRK-1".parse().expect("a task id"))
+            .expect("the contract reads");
+        assert_eq!(
+            contract.budget.max_sessions.get(),
+            12,
+            "the contract takes the schema's default"
         );
     }
 

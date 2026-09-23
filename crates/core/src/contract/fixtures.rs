@@ -46,7 +46,7 @@ pub fn a_full_contract_wire() -> Value {
     contract["constraints"] = json!(["Use the existing session store."]);
     contract["dependencies"] = json!(["FRK-2"]);
     contract["references"] = json!(["https://github.com/abdshaat/farik/issues/1"]);
-    contract["budget"] = json!({ "max_cost_usd": 5.0, "max_sessions": 5, "max_iterations": 3 });
+    contract["budget"] = json!({ "max_cost_usd": 5.0, "max_sessions": 12, "max_iterations": 3 });
     contract["locked"] = json!(true);
     contract["sprint"] = json!("S1");
     contract["assignee"] = json!("maya-chen");
