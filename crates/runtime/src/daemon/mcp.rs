@@ -168,6 +168,23 @@ fn listed(calling: &CallingSession) -> ListToolsResult {
         .with_cache_scope(CacheScope::Private)
 }
 
+/// The names `tools/list` answers the session `session_id` with, as its client sees them, or
+/// `None` for a session the daemon does not know: `require_session` and `listed` without HTTP.
+#[cfg(test)]
+pub(crate) fn listed_names(state: &DaemonState, session_id: &str) -> Option<Vec<String>> {
+    let calling = CallingSession {
+        context: Arc::new(state.tool_context(session_id)?),
+        farik_tools: Arc::new(state.farik_tools(session_id)?),
+    };
+    Some(
+        listed(&calling)
+            .tools
+            .iter()
+            .map(|tool| tool.name.to_string())
+            .collect(),
+    )
+}
+
 /// A schema as the object MCP carries it in; a schema that is not an object is carried empty.
 fn object(schema: Value) -> Arc<JsonObject> {
     Arc::new(match schema {

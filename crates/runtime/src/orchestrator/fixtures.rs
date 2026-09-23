@@ -494,12 +494,14 @@ impl Harness {
 }
 
 /// An adapter that says, for each session it starts, whether the daemon registered it with an
-/// executor and which Farik tools it registered it with, and starts it with the adapter it wraps.
+/// executor, which Farik tools it registered it with, and which its MCP server lists to it, and
+/// starts it with the adapter it wraps.
 pub(crate) struct ExecutorWitness {
     inner: Arc<dyn RuntimeAdapter>,
     daemon: Arc<DaemonState>,
     seen: Mutex<Vec<bool>>,
     tools: Mutex<Vec<Vec<String>>>,
+    listed: Mutex<Vec<Vec<String>>>,
 }
 
 impl ExecutorWitness {
@@ -510,7 +512,16 @@ impl ExecutorWitness {
             daemon,
             seen: Mutex::new(Vec::new()),
             tools: Mutex::new(Vec::new()),
+            listed: Mutex::new(Vec::new()),
         }
+    }
+
+    /// For each session started, in order, the tools `tools/list` answered it with.
+    pub(crate) fn listed_tools(&self) -> Vec<Vec<String>> {
+        self.listed
+            .lock()
+            .expect("no test panics holding it")
+            .clone()
     }
 
     /// For each session started, in order, the Farik tools its registration was given.
@@ -542,6 +553,10 @@ impl RuntimeAdapter for ExecutorWitness {
         self.tools.lock().expect("no test panics holding it").push(
             self.daemon
                 .farik_tools(&spec.session_id)
+                .expect("the session is registered before it starts"),
+        );
+        self.listed.lock().expect("no test panics holding it").push(
+            crate::daemon::listed_names(&self.daemon, &spec.session_id)
                 .expect("the session is registered before it starts"),
         );
         self.inner.start_session(spec)

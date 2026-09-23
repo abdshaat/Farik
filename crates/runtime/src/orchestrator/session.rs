@@ -25,7 +25,7 @@ use crate::session::{
     EndReason, SessionEvent, SessionHandle, SessionPurpose, SessionSpec, session_model,
 };
 use crate::sessions::{record_session_ended, record_session_started};
-use crate::tools::tool_descriptors;
+use crate::tools::{FarikTool, tool_descriptors};
 
 /// The one tool a triage session is given.
 const TRIAGE_TOOL: &str = "farik_triage_request";
@@ -42,8 +42,9 @@ pub(super) struct SessionAsk<'a> {
     pub(super) cwd: PathBuf,
     /// Where its commands run, when it runs any.
     pub(super) executor: Option<Arc<dyn Executor>>,
-    /// Whether it gets the read tier's built-ins alone, whatever the agent's tiers: a verify
-    /// session reads the work and does not change it.
+    /// Whether it gets the read tier's built-ins alone, whatever the agent's tiers, and no Farik
+    /// tool that runs a command or writes to git: a verify session reads the work and does not
+    /// change it.
     pub(super) read_only: bool,
     /// Its first message.
     pub(super) initial_prompt: String,
@@ -87,6 +88,10 @@ pub(super) async fn run_session(
     })
 }
 
+/// The Farik tools a read-only session is not offered: the command runner, which has no
+/// executor there, and the git writes, which only the assignee may make.
+const NOT_FOR_READ_ONLY: [&str; 3] = ["farik_exec", "farik_git_commit", "farik_git_push"];
+
 /// The spec of the session `ask` describes, its prompt assembled from the files as they are now,
 /// with what the human said about its task since its last session started. A triage session runs
 /// on `TRIAGE_MODEL` at low effort with `farik_triage_request` alone and no built-in tool.
@@ -117,7 +122,12 @@ fn session_spec(
     } else {
         allowed_builtins(&tiers)
     };
-    let tools = tool_descriptors();
+    // A verify session judges the work and does not change it (step 12): it has no executor, and
+    // the git writes are refused to all but the assignee, so it is not offered them.
+    let tools: Vec<FarikTool> = tool_descriptors()
+        .into_iter()
+        .filter(|tool| !(ask.read_only && NOT_FOR_READ_ONLY.contains(&tool.name)))
+        .collect();
     let farik_tools = if triage {
         vec![TRIAGE_TOOL.to_string()]
     } else {

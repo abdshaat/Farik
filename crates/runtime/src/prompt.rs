@@ -322,8 +322,8 @@ fn rules_section(rules: &TeamRules) -> String {
     .join("\n")
 }
 
-/// The Farik tools the agent's tiers allow, the built-ins it may use, and, for an agent that runs
-/// commands or git, where its shell and git are (ADR 0004).
+/// The Farik tools the agent's tiers allow of those it is offered, the built-ins it may use, and,
+/// for a session offered a tool that runs commands or git, where its shell and git are (ADR 0004).
 fn tools_section(input: &PromptInput<'_>) -> String {
     let tiers = input.agent.tiers();
     let farik = std::iter::once(
@@ -355,12 +355,24 @@ fn tools_section(input: &PromptInput<'_>) -> String {
             input.builtin_tools.join(", ")
         }
     );
-    let shell = (tiers.contains(&PermissionTier::Execute)
-        || tiers.contains(&PermissionTier::GitLocal))
-    .then_some(
-        "The shell is `farik_exec`, and git is the `farik_git_*` tools: the program's own shell \
-         tool is never enabled, and `farik_exec` refuses a command that runs git.",
-    );
+    let offered = |name: &str| {
+        input
+            .tools
+            .iter()
+            .any(|tool| tool.name == name && tiers.contains(&tool.tier))
+    };
+    // A verify session is offered neither `farik_exec` nor `farik_git_commit` (step 12), and so
+    // is told of the shell only if it may read git.
+    let shell = if offered("farik_exec") || offered("farik_git_commit") {
+        Some(
+            "The shell is `farik_exec`, and git is the `farik_git_*` tools: the program's own \
+             shell tool is never enabled, and `farik_exec` refuses a command that runs git.",
+        )
+    } else if offered("farik_git_diff") {
+        Some("Git is the `farik_git_*` tools: the program's own shell tool is never enabled.")
+    } else {
+        None
+    };
     [Some(farik.as_str()), Some(builtins.as_str()), shell]
         .into_iter()
         .flatten()
@@ -718,6 +730,35 @@ mod tests {
         );
         assert!(!tools.contains("farik_exec ("), "{tools}");
         assert!(tools.ends_with(shell), "git_local alone: {tools}");
+    }
+
+    #[test]
+    fn names_only_git_for_a_session_not_offered_the_shell_or_the_git_writes() {
+        let mut inputs = Inputs::new(Role::SoftwareDeveloper, "software_developer");
+        inputs.tools.retain(|tool| {
+            !["farik_exec", "farik_git_commit", "farik_git_push"].contains(&tool.name)
+        });
+        let prompt = assembled(&inputs.full(SessionPurpose::Verify));
+        let tools = section(&prompt, "Your tools");
+        assert!(
+            tools.contains("\n- farik_git_diff (git_local): "),
+            "{tools}"
+        );
+        assert!(!tools.contains("farik_exec"), "{tools}");
+        assert!(
+            tools.ends_with(
+                "Git is the `farik_git_*` tools: the program's own shell tool is never enabled."
+            ),
+            "{tools}"
+        );
+
+        inputs
+            .tools
+            .retain(|tool| !tool.name.starts_with("farik_git_"));
+        let prompt = assembled(&inputs.full(SessionPurpose::Verify));
+        let tools = section(&prompt, "Your tools");
+        assert!(!tools.contains("Git is"), "{tools}");
+        assert!(!tools.contains("The shell is"), "{tools}");
     }
 
     #[test]

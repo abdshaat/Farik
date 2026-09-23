@@ -43,6 +43,9 @@ pub(crate) mod fixtures;
 mod hooks;
 mod mcp;
 
+#[cfg(test)]
+pub(crate) use mcp::listed_names;
+
 pub use hooks::{
     HookDecision, HookRequest, builtin_tool_tier, decide_pre_tool_use, record_post_tool_use,
 };

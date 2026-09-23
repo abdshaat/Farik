@@ -3242,6 +3242,72 @@ mod tests {
 
     #[tokio::test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn offers_a_verify_session_no_tool_that_runs_or_writes() {
+        const WITHHELD: [&str; 3] = ["farik_exec", "farik_git_commit", "farik_git_push"];
+        let harness = Harness::new("orch-verify-tools", |_| {});
+        harness.verifying("FRK-1");
+        let recorded = harness.recorded(vec![review_writes_note(), accept_frk_1()]);
+        let witness = Arc::new(ExecutorWitness::new(
+            recorded.clone(),
+            Arc::clone(&harness.daemon),
+        ));
+        let orchestrator = harness.orchestrator(witness.clone());
+
+        orchestrator
+            .run_until_idle()
+            .await
+            .expect("the run ends idle");
+
+        assert_eq!(harness.row("FRK-1").status, TaskStatus::Accepted);
+        let started = recorded.started();
+        let agents: Vec<&str> = started.iter().map(|spec| spec.agent_id.as_str()).collect();
+        assert_eq!(agents, ["dev-b", "pm"]);
+        let listed = witness.listed_tools();
+        let given = witness.given_tools();
+        for (index, spec) in started.iter().enumerate() {
+            assert_eq!(spec.purpose, SessionPurpose::Verify);
+            assert_eq!(
+                given[index], spec.farik_tools,
+                "the daemon was given the spec's"
+            );
+            for name in WITHHELD {
+                assert!(
+                    !spec.farik_tools.iter().any(|tool| tool == name),
+                    "{}'s spec offers {name}: {:?}",
+                    spec.agent_id,
+                    spec.farik_tools
+                );
+                assert!(
+                    !listed[index].iter().any(|tool| tool == name),
+                    "{}'s tools/list shows {name}: {:?}",
+                    spec.agent_id,
+                    listed[index]
+                );
+                assert!(
+                    !spec.system_prompt.contains(&format!("- {name} (")),
+                    "{}'s prompt lists {name}",
+                    spec.agent_id
+                );
+            }
+            assert!(
+                !spec.system_prompt.contains("The shell is `farik_exec`"),
+                "{}'s prompt names a shell it does not have",
+                spec.agent_id
+            );
+        }
+        // The reviewer, a developer holding `git_local`, still reads the work through git.
+        for name in ["farik_git_status", "farik_git_diff"] {
+            assert!(
+                started[0].farik_tools.iter().any(|tool| tool == name),
+                "{:?}",
+                started[0].farik_tools
+            );
+            assert!(listed[0].iter().any(|tool| tool == name), "{:?}", listed[0]);
+        }
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn counts_the_daemons_tool_calls_against_the_session() {
         let harness = Harness::new("orch-session-tool-calls", |wire| {
             wire["budgets"]["session"] = json!({ "max_tool_calls": 1 });
