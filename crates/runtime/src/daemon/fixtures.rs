@@ -14,8 +14,8 @@ use farik_store::open_event_log;
 use serde_json::{Value, json};
 
 use super::{DaemonState, HookRequest, SessionRegistration};
-use crate::tools::ToolDeps;
 use crate::tools::fixtures::{TestProject, a_team_of_three, at};
+use crate::tools::{ToolDeps, tool_descriptors};
 
 /// The session of `dev-a`, on FRK-1.
 pub(crate) const DEV_SESSION: &str = "3f1c2a9e-8b7d-4e6f-9a01-2b3c4d5e6f70";
@@ -26,6 +26,11 @@ pub(crate) const PRE_READ: &str = include_str!("fixtures/pre_tool_use_read.json"
 pub(crate) const PRE_WRITE: &str = include_str!("fixtures/pre_tool_use_write.json");
 /// The recorded `PostToolUse` input of a `Read`.
 pub(crate) const POST_READ: &str = include_str!("fixtures/post_tool_use_read.json");
+
+/// The name of every Farik tool.
+pub(crate) fn every_farik_tool() -> Vec<&'static str> {
+    tool_descriptors().iter().map(|tool| tool.name).collect()
+}
 
 /// A project, the worktree of its task FRK-1, and a daemon with `dev-a`'s session on it.
 pub(crate) struct TestDaemon {
@@ -59,13 +64,27 @@ impl TestDaemon {
         daemon
     }
 
-    /// Registers a session of `agent` in the worktree.
+    /// Registers a session of `agent` in the worktree, given every Farik tool, so that its tiers
+    /// alone decide which it may call.
     pub(crate) fn register(
         &self,
         session_id: &str,
         agent: &str,
         task: Option<&str>,
         limits: SessionLimits,
+    ) {
+        self.register_with_tools(session_id, agent, task, limits, &every_farik_tool());
+    }
+
+    /// Registers a session of `agent` in the worktree, given only the Farik tools `farik_tools`
+    /// names.
+    pub(crate) fn register_with_tools(
+        &self,
+        session_id: &str,
+        agent: &str,
+        task: Option<&str>,
+        limits: SessionLimits,
+        farik_tools: &[&str],
     ) {
         self.state.register_session(SessionRegistration {
             session_id: session_id.to_string(),
@@ -74,6 +93,7 @@ impl TestDaemon {
             cwd: self.worktree.clone(),
             executor: None,
             limits,
+            farik_tools: farik_tools.iter().map(ToString::to_string).collect(),
         });
     }
 
@@ -127,6 +147,7 @@ impl TestDaemon {
             cwd: self.worktree.clone(),
             executor: None,
             limits: DEFAULT_SESSION_LIMITS,
+            farik_tools: every_farik_tool().iter().map(ToString::to_string).collect(),
         });
         state
     }

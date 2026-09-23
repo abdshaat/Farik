@@ -87,6 +87,10 @@ pub struct SessionRegistration {
     pub executor: Option<Arc<dyn Executor>>,
     /// Its limits, of which the daemon holds `max_tool_calls`.
     pub limits: SessionLimits,
+    /// The Farik tools it was given (`SessionSpec::farik_tools`), by name without the
+    /// `mcp__farik__` prefix: the hook denies every other Farik tool (`tool_not_in_session`), and
+    /// the MCP server neither lists nor calls one.
+    pub farik_tools: Vec<String>,
 }
 
 /// A registration, the tool calls the hook has allowed it, and why it was told to stop, once it
@@ -222,6 +226,14 @@ impl DaemonState {
             executor: session.registration.executor.clone(),
             deps: Arc::clone(&self.deps),
         })
+    }
+
+    /// The Farik tools a registered session was given, or `None` for one the daemon does not
+    /// answer for.
+    pub(crate) fn farik_tools(&self, session_id: &str) -> Option<Vec<String>> {
+        self.sessions()
+            .get(session_id)
+            .map(|session| session.registration.farik_tools.clone())
     }
 
     pub(crate) fn deps(&self) -> &Arc<ToolDeps> {
@@ -704,6 +716,7 @@ mod tests {
             cwd: daemon.worktree.clone(),
             executor: Some(Arc::clone(&executor)),
             limits: DEFAULT_SESSION_LIMITS,
+            farik_tools: Vec::new(),
         });
         let context = daemon
             .state
@@ -820,6 +833,7 @@ mod tests {
                 cwd: daemon.worktree.clone(),
                 executor: None,
                 limits: DEFAULT_SESSION_LIMITS,
+                farik_tools: Vec::new(),
             });
         }
         assert_eq!(state.session_ids(), ["s-1", "s-2"]);

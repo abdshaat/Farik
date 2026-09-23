@@ -128,6 +128,7 @@ impl Served {
             cwd: repo.path.clone(),
             executor: None,
             limits: DEFAULT_SESSION_LIMITS,
+            farik_tools: Vec::new(),
         });
         let runtime = tokio::runtime::Builder::new_multi_thread()
             .enable_all()

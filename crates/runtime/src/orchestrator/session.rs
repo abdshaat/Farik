@@ -73,6 +73,7 @@ pub(super) async fn run_session(
         cwd: spec.cwd.clone(),
         executor: ask.executor,
         limits: spec.limits,
+        farik_tools: spec.farik_tools.clone(),
     });
     let ended = drive(deps, team, role, ask.contract, &spec).await;
     deps.daemon.end_session(&spec.session_id);

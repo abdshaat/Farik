@@ -168,6 +168,7 @@ impl Project {
             cwd: repo.path.clone(),
             executor: None,
             limits: DEFAULT_SESSION_LIMITS,
+            farik_tools: Vec::new(),
         });
         Project {
             repo,

@@ -768,9 +768,18 @@ mod tests {
         let harness = Harness::new("req-triage", |_| {});
         harness.a_request("Add done.txt and its check");
         let adapter = harness.recorded(vec![triage_frk_1_large()]);
-        let orchestrator = harness.orchestrator(adapter.clone());
+        let witness = Arc::new(ExecutorWitness::new(
+            adapter.clone(),
+            Arc::clone(&harness.daemon),
+        ));
+        let orchestrator = harness.orchestrator(witness.clone());
 
         orchestrator.tick().await.expect("the tick runs");
+        // The daemon holds the session to its one tool, whatever the agent's tiers allow.
+        assert_eq!(
+            witness.given_tools(),
+            vec![vec!["farik_triage_request".to_string()]]
+        );
 
         let started = adapter.started();
         assert_eq!(started.len(), 1);

@@ -19,6 +19,7 @@ use rmcp::{ErrorData, RoleServer, ServerHandler};
 use serde_json::{Value, json};
 
 use super::DaemonState;
+use crate::tools::refusal::Refusal;
 use crate::tools::{ToolContext, call_tool, tool_descriptors};
 
 /// The header naming the Farik session a request to `/mcp` comes from.
@@ -30,9 +31,20 @@ const PERMISSION_MESSAGE: &str =
     "farik decides tool calls in its PreToolUse hook; this one was not allowed there";
 
 /// What the tools of the session a request comes from are called with, as
-/// `DaemonState::tool_context` built it, put in the request's extensions by `require_session`.
+/// `DaemonState::tool_context` built it, and the Farik tools the session was given, put in the
+/// request's extensions by `require_session`.
 #[derive(Clone)]
-pub(crate) struct CallingSession(Arc<ToolContext>);
+pub(crate) struct CallingSession {
+    context: Arc<ToolContext>,
+    farik_tools: Arc<Vec<String>>,
+}
+
+impl CallingSession {
+    /// Whether the session was given the Farik tool `name`.
+    fn was_given(&self, name: &str) -> bool {
+        self.farik_tools.iter().any(|given| given == name)
+    }
+}
 
 /// Answers 403 for a request whose `X-Farik-Session` names no registered session, and passes
 /// the registration on otherwise.
@@ -46,9 +58,12 @@ pub(crate) async fn require_session(
         .get(SESSION_HEADER)
         .and_then(|value| value.to_str().ok())
         .map(str::to_string);
-    let calling = named
-        .and_then(|session_id| state.tool_context(&session_id))
-        .map(|context| CallingSession(Arc::new(context)));
+    let calling = named.and_then(|session_id| {
+        Some(CallingSession {
+            context: Arc::new(state.tool_context(&session_id)?),
+            farik_tools: Arc::new(state.farik_tools(&session_id)?),
+        })
+    });
     match calling {
         Some(calling) => {
             request.extensions_mut().insert(calling);
@@ -62,9 +77,9 @@ pub(crate) async fn require_session(
     }
 }
 
-/// Farik's MCP server: `list_tools` and `call_tool` over `tool_descriptors` and `call_tool`,
-/// and the permission-prompt tool. The session a call comes from, and the project it works on,
-/// are the request's.
+/// Farik's MCP server: `list_tools` and `call_tool` over the session's own tools of
+/// `tool_descriptors` and `call_tool`, and the permission-prompt tool. The session a call comes
+/// from, and the project it works on, are the request's.
 #[derive(Clone)]
 pub(crate) struct FarikMcp;
 
@@ -78,9 +93,9 @@ impl ServerHandler for FarikMcp {
     fn list_tools(
         &self,
         _request: Option<PaginatedRequestParams>,
-        _context: RequestContext<RoleServer>,
+        context: RequestContext<RoleServer>,
     ) -> impl Future<Output = Result<ListToolsResult, ErrorData>> + Send + '_ {
-        std::future::ready(Ok(listed()))
+        std::future::ready(calling_session(&context).map(|calling| listed(&calling)))
     }
 
     async fn call_tool(
@@ -94,16 +109,15 @@ impl ServerHandler for FarikMcp {
                 CallToolResult::success(vec![ContentBlock::text(answer.to_string())]).into(),
             );
         }
-        let calling = context
-            .extensions
-            .get::<Parts>()
-            .and_then(|parts| parts.extensions.get::<CallingSession>())
-            .cloned()
-            .ok_or_else(|| {
-                ErrorData::invalid_request("the request names no session Farik answers for", None)
-            })?;
+        let calling = calling_session(&context)?;
+        if !calling.was_given(&request.name) {
+            let refusal = Refusal::ToolNotInSession {
+                tool: request.name.to_string(),
+            };
+            return Ok(CallToolResult::error(vec![ContentBlock::text(refusal.reason())]).into());
+        }
         let input = request.arguments.map_or_else(|| json!({}), Value::Object);
-        let result = match call_tool(&calling.0, &request.name, input).await {
+        let result = match call_tool(&calling.context, &request.name, input).await {
             Ok(value) => CallToolResult::success(vec![ContentBlock::text(value.to_string())]),
             Err(error) => CallToolResult::error(vec![ContentBlock::text(error.to_string())]),
         };
@@ -111,10 +125,23 @@ impl ServerHandler for FarikMcp {
     }
 }
 
-/// Every Farik tool, and the permission-prompt tool.
-fn listed() -> ListToolsResult {
+/// The session a request comes from, which `require_session` put in its extensions.
+fn calling_session(context: &RequestContext<RoleServer>) -> Result<CallingSession, ErrorData> {
+    context
+        .extensions
+        .get::<Parts>()
+        .and_then(|parts| parts.extensions.get::<CallingSession>())
+        .cloned()
+        .ok_or_else(|| {
+            ErrorData::invalid_request("the request names no session Farik answers for", None)
+        })
+}
+
+/// The Farik tools the session was given, and the permission-prompt tool.
+fn listed(calling: &CallingSession) -> ListToolsResult {
     let mut tools: Vec<Tool> = tool_descriptors()
         .into_iter()
+        .filter(|tool| calling.was_given(tool.name))
         .map(|tool| Tool::new(tool.name, tool.description, object(tool.input_schema)))
         .collect();
     tools.push(Tool::new(
@@ -152,6 +179,8 @@ mod tests {
     use serde_json::{Value, json};
     use tokio_util::sync::CancellationToken;
     use tower::ServiceExt;
+
+    use farik_core::budget::DEFAULT_SESSION_LIMITS;
 
     use crate::daemon::fixtures::{DEV_SESSION, TestDaemon};
     use crate::daemon::{decide_pre_tool_use, router};
@@ -372,6 +401,41 @@ mod tests {
         for tool in answer["result"]["tools"].as_array().expect("a list") {
             assert_eq!(tool["inputSchema"]["type"], "object", "{tool}");
         }
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn serves_a_session_only_the_tools_it_was_given() {
+        let daemon = TestDaemon::new("mcp-session-tools", |_| {});
+        daemon.register_with_tools(
+            "session-triage",
+            "pm",
+            Some("FRK-1"),
+            DEFAULT_SESSION_LIMITS,
+            &["farik_triage_request"],
+        );
+        let mut client = Client::new(&daemon, "session-triage");
+        client.initialize().await;
+        let answer = client.request("tools/list", json!({})).await;
+        let names: Vec<&str> = answer["result"]["tools"]
+            .as_array()
+            .expect("a list of tools")
+            .iter()
+            .filter_map(|tool| tool["name"].as_str())
+            .collect();
+        assert_eq!(names, ["farik_triage_request", "permission"]);
+        let refused = client
+            .call(
+                "farik_write_contract",
+                json!({ "fields": { "intent": "More." } }),
+            )
+            .await;
+        assert_eq!(refused["result"]["isError"], json!(true), "{refused}");
+        assert!(
+            text_of(&refused).starts_with("tool_not_in_session: farik_write_contract"),
+            "{refused}"
+        );
+        assert!(daemon.events(EventKind::ContractWritten).is_empty());
     }
 
     #[tokio::test(flavor = "multi_thread")]

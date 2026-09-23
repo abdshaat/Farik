@@ -21,6 +21,9 @@ pub(crate) enum Refusal {
     NoSuchTask { task_id: String },
     /// The tier or path check of 5.6 refused.
     Tool(ToolRefusal),
+    /// The Farik tool is not one the session was given: a triage session has
+    /// `farik_triage_request` alone (5.16), whatever its agent's tiers allow.
+    ToolNotInSession { tool: String },
     /// The tool acts on the session's task and the session has none.
     NoTask,
     /// A triage was asked with no reason.
@@ -91,6 +94,10 @@ impl Refusal {
             ),
             Self::NoSuchTask { task_id } => ("no_such_task", format!("the board has no {task_id}")),
             Self::Tool(refusal) => tool(refusal),
+            Self::ToolNotInSession { tool } => (
+                "tool_not_in_session",
+                format!("{tool} is not one of the tools this session was given"),
+            ),
             Self::NoTask => (
                 "no_task",
                 "this tool acts on the session's task, and this session has none".to_string(),

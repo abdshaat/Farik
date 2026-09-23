@@ -101,7 +101,8 @@ pub fn builtin_tool_tier(tool: &str) -> Option<PermissionTier> {
 /// Decides one `PreToolUse` hook and records the decision, `tool.called` or `tool.denied`. It
 /// refuses, in this order: a session the daemon does not know (`unknown_session`); an agent that
 /// is not active (`agent_not_active`); a session at its `max_tool_calls` (`tool_call_limit`); a
-/// tool that is neither Farik's nor a built-in with a tier (`tool_not_allowed`); a built-in's path
+/// tool that is neither Farik's nor a built-in with a tier (`tool_not_allowed`); a Farik tool the
+/// session was not given (`tool_not_in_session`); a built-in's path
 /// outside the session's worktree (`path_outside_workspace`); and whatever `evaluate_tool_call`
 /// refuses. A decision the log cannot record is a deny (`record_failed`). Only an allowed call
 /// counts towards the limit, and the count is checked and raised under one lock, because Claude
@@ -240,6 +241,12 @@ fn judge_call(
     let (tier, paths) = match request.tool_name.strip_prefix(FARIK_PREFIX) {
         // A Farik tool is asked with no paths here: `call_tool` asks again with its real ones.
         Some(name) => match tool_descriptors().iter().find(|tool| tool.name == name) {
+            Some(_) if !registration.farik_tools.iter().any(|given| given == name) => {
+                return Err(Refusal::ToolNotInSession {
+                    tool: name.to_string(),
+                }
+                .reason());
+            }
             Some(tool) => (tool.tier, Vec::new()),
             None => return Err(not_allowed(&request.tool_name)),
         },
@@ -763,6 +770,57 @@ mod tests {
             &daemon.state,
         );
         assert!(read.allow, "{read:?}");
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn denies_a_farik_tool_the_session_was_not_given() {
+        let daemon = TestDaemon::new("hook-session-tools", |_| {});
+        daemon.register_with_tools(
+            "session-triage",
+            "pm",
+            Some("FRK-1"),
+            DEFAULT_SESSION_LIMITS,
+            &["farik_triage_request"],
+        );
+        let write = decide_pre_tool_use(
+            &daemon.call(
+                "session-triage",
+                "mcp__farik__farik_write_contract",
+                &json!({ "fields": { "intent": "More." } }),
+            ),
+            &daemon.state,
+        );
+        denied_for(&write, "tool_not_in_session");
+        assert!(write.reason.contains("farik_write_contract"), "{write:?}");
+        let triage = decide_pre_tool_use(
+            &daemon.call(
+                "session-triage",
+                "mcp__farik__farik_triage_request",
+                &json!({ "size": "small", "reason": "One file." }),
+            ),
+            &daemon.state,
+        );
+        assert!(triage.allow, "{triage:?}");
+        // Whatever the purpose: a session given only the board may not write a note.
+        daemon.register_with_tools(
+            "session-board",
+            "dev-a",
+            Some("FRK-1"),
+            DEFAULT_SESSION_LIMITS,
+            &["farik_read_board"],
+        );
+        let note = decide_pre_tool_use(
+            &daemon.call(
+                "session-board",
+                "mcp__farik__farik_write_note",
+                &json!({ "kind": "progress", "text": "Half done." }),
+            ),
+            &daemon.state,
+        );
+        denied_for(&note, "tool_not_in_session");
+        let denied = daemon.events(EventKind::ToolDenied);
+        assert_eq!(denied.len(), 2);
     }
 
     #[test]
