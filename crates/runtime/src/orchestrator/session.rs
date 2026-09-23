@@ -21,7 +21,9 @@ use crate::cost::{CostError, CostSource, budget_state, record_exhaustion, record
 use crate::daemon::SessionRegistration;
 use crate::exec::Executor;
 use crate::prompt::{PromptInput, assemble_system_prompt};
-use crate::session::{EndReason, SessionEvent, SessionHandle, SessionPurpose, SessionSpec};
+use crate::session::{
+    EndReason, SessionEvent, SessionHandle, SessionPurpose, SessionSpec, session_model,
+};
 use crate::sessions::{record_session_ended, record_session_started};
 use crate::tools::tool_descriptors;
 
@@ -98,10 +100,10 @@ fn session_spec(
     let role = load_role(role_id)?;
     // 5.16 runs triage on the cheaper model, whatever the agent's own, with its one tool.
     let triage = ask.purpose == SessionPurpose::Triage;
-    let (model, effort) = match &ask.agent.model {
-        _ if triage => (TRIAGE_MODEL.to_string(), Effort::Low),
-        Some(model) => (model.id.to_string(), model.effort.unwrap_or(role.effort)),
-        None => (role.model.clone(), role.effort),
+    let (model, effort) = if triage {
+        (TRIAGE_MODEL.to_string(), Effort::Low)
+    } else {
+        session_model(ask.agent, &role)
     };
     // A project that was never scanned, or whose scan cannot be read, is given none.
     let project_scan = files.read_project_scan().ok();

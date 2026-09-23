@@ -36,9 +36,7 @@ mod rules;
 mod session;
 mod verify;
 
-/// The model a triage session runs on, whatever the agent's own: 5.16 runs triage on the cheaper
-/// model, and 8.2 names it.
-pub const TRIAGE_MODEL: &str = "claude-sonnet-5";
+pub use crate::session::TRIAGE_MODEL;
 
 /// What the orchestrator works with.
 pub struct OrchestratorDeps {

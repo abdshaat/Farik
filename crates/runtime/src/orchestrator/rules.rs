@@ -651,6 +651,7 @@ mod tests {
     use serde_json::json;
 
     use crate::claude::allowed_builtins;
+    use crate::cost::CostError;
     use crate::exec::ExecError;
     use crate::orchestrator::fixtures::{
         BrokenSandboxFactory, CountingSandboxFactory, ExecutorWitness, Harness,
@@ -2706,8 +2707,8 @@ mod tests {
         ));
     }
 
-    /// A `.farik/prices.json` that prices a model no agent of the harness runs, so that costing any
-    /// of their sessions fails.
+    /// A `.farik/prices.json` that prices a model no agent of the harness runs, so that every one
+    /// of their sessions is recorded unpriced.
     fn prices_without_the_teams_models(harness: &Harness) {
         let prices = json!({
             "version": 1,
@@ -2772,10 +2773,14 @@ mod tests {
     #[tokio::test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn ends_a_session_whose_usage_cannot_be_costed() {
+        // A model no table prices is recorded, not refused (ADR 0015), so the cost that fails is
+        // one the log cannot hold: more tokens than its integer counts.
         let harness = Harness::new("orch-session-uncosted", |_| {});
-        prices_without_the_teams_models(&harness);
         harness.in_progress("FRK-1", "dev-a", "dev-b");
-        let adapter = Arc::new(UsageThenWaitAdapter::waiting(a_thousand_tokens()));
+        let adapter = Arc::new(UsageThenWaitAdapter::waiting(Usage {
+            input_tokens: u64::MAX,
+            ..a_thousand_tokens()
+        }));
         let orchestrator = harness.orchestrator(adapter.clone());
 
         // A session left running waits for ever.
@@ -2784,7 +2789,10 @@ mod tests {
             .expect("the tick ends");
 
         assert!(
-            matches!(ticked, Err(OrchestratorError::Cost(_))),
+            matches!(
+                ticked,
+                Err(OrchestratorError::Cost(CostError::Event { .. }))
+            ),
             "{ticked:?}"
         );
         assert_eq!(adapter.aborts(), 1);
@@ -2793,8 +2801,8 @@ mod tests {
 
     #[tokio::test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
-    async fn ends_a_session_that_cannot_start_when_its_cost_fails() {
-        let harness = Harness::new("orch-session-no-start-no-cost", |_| {});
+    async fn ends_a_session_that_cannot_start_on_a_model_no_table_prices() {
+        let harness = Harness::new("orch-session-no-start-unpriced", |_| {});
         prices_without_the_teams_models(&harness);
         harness.ready("FRK-1");
         let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
@@ -2806,6 +2814,11 @@ mod tests {
             "{ticked:?}"
         );
         assert_eq!(end_reasons(&harness), vec![SessionEndedBodyReason::Error]);
+        let costs = harness.events(&[EventKind::CostRecorded]);
+        assert!(
+            matches!(&costs[..], [cost] if matches!(&cost.body, EventBody::CostRecorded(body) if body.unpriced)),
+            "{costs:?}"
+        );
     }
 
     #[tokio::test]
@@ -3055,6 +3068,49 @@ mod tests {
         let spec = &adapter.started()[0];
         assert_eq!(spec.model, "claude-sonnet-5");
         assert_eq!(spec.effort, Effort::Low);
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn runs_a_session_on_a_model_no_table_prices() {
+        let harness = Harness::new("orch-session-unpriced", |wire| {
+            wire["agents"][1]["model"] = json!({ "id": "claude-unknown-9" });
+        });
+        harness.in_progress("FRK-1", "dev-a", "dev-b");
+        let adapter = harness.recorded(vec![implement_stops_early()]);
+        let orchestrator = harness.orchestrator(adapter.clone());
+
+        orchestrator.tick().await.expect("the session runs");
+
+        let events = harness.events(&[
+            EventKind::SessionStarted,
+            EventKind::CostRecorded,
+            EventKind::SessionEnded,
+        ]);
+        let kinds: Vec<EventKind> = events.iter().map(|event| event.body.kind()).collect();
+        assert_eq!(
+            kinds,
+            [
+                EventKind::SessionStarted,
+                EventKind::CostRecorded,
+                EventKind::SessionEnded
+            ]
+        );
+        assert!(matches!(
+            &events[1].body,
+            EventBody::CostRecorded(body) if body.unpriced && body.cost_usd.abs() < f64::EPSILON
+        ));
+        let costs = harness
+            .project
+            .deps
+            .projections
+            .costs(farik_store::CostScope::Task)
+            .expect("the costs read");
+        let frk_1 = costs
+            .iter()
+            .find(|row| row.key == "FRK-1")
+            .expect("FRK-1's cost");
+        assert_eq!(frk_1.sessions, 1);
     }
 
     #[tokio::test]

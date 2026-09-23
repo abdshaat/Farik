@@ -1,6 +1,7 @@
 //! What a session consumed, as money in the log, and what each budget of `docs/SPEC.md` 5.5 has
 //! left.
 
+use std::collections::BTreeMap;
 use std::fmt;
 use std::time::Duration;
 
@@ -10,7 +11,7 @@ use farik_core::budget::{
     default_session_limits,
 };
 use farik_core::contract::{Role, TaskContract};
-use farik_core::pricing::{PriceTable, Usage, compute_cost_usd};
+use farik_core::pricing::{PriceTable, PricingError, Usage, compute_cost_usd};
 use farik_core::team::Team;
 use farik_protocol::clock::Clock;
 use farik_protocol::event::{
@@ -18,9 +19,10 @@ use farik_protocol::event::{
     CostRecordedBody, CostRecordedBodyModelId, CostRecordedBodyPurpose, EventBody, EventIds,
     TokenUsage, new_event,
 };
+use farik_roles::{RoleError, load_role};
 use farik_store::{CostProjection, CostScope, EventLog, Projections, StoreError};
 
-use crate::session::SessionPurpose;
+use crate::session::{SessionPurpose, TRIAGE_MODEL, session_model};
 
 /// Why a cost or an exhausted budget was not recorded, or a budget could not be read.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -28,11 +30,6 @@ pub enum CostError {
     /// The log or its projections refused.
     Store {
         /// What the store said.
-        detail: String,
-    },
-    /// The usage could not be priced: the table has no row for its model.
-    Pricing {
-        /// Which model, and why.
         detail: String,
     },
     /// The event could not be stamped: a blank id, or a cost that names no session or no agent.
@@ -46,7 +43,6 @@ impl fmt::Display for CostError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Store { detail } => write!(formatter, "the store refused: {detail}"),
-            Self::Pricing { detail } => write!(formatter, "the usage cannot be priced: {detail}"),
             Self::Event { detail } => write!(formatter, "the event cannot be recorded: {detail}"),
         }
     }
@@ -76,14 +72,14 @@ pub struct CostSource<'a> {
 
 /// Prices one usage report, appends it to the log as a `cost.recorded`, and projects it. Returns
 /// the dollars charged, which the event carries so that a later change to the prices does not
-/// rewrite what was charged.
+/// rewrite what was charged. A model the table has no row for is recorded with its tokens, a cost
+/// of zero, and `unpriced`, and no dollar limit counts it (ADR 0015).
 ///
 /// # Errors
 ///
 /// `Event` when the source names no session or no agent, since every sum by agent and every count
-/// of sessions would lose the cost, or when `new_event` refuses a blank id; `Pricing` when the
-/// table has no row for the model, because a cost of zero would under-report spend; `Store` when
-/// the append or the projection fails. Nothing is recorded on any of them.
+/// of sessions would lose the cost, or when `new_event` refuses a blank id; `Store` when the append
+/// or the projection fails. Nothing is recorded on any of them.
 pub fn record_session_cost(
     log: &EventLog,
     projections: &Projections,
@@ -92,10 +88,12 @@ pub fn record_session_cost(
     prices: &PriceTable,
     clock: &dyn Clock,
 ) -> Result<f64, CostError> {
-    let cost_usd =
-        compute_cost_usd(usage, source.model_id, prices).map_err(|_| CostError::Pricing {
-            detail: format!("the price table has no row for {}", source.model_id),
-        })?;
+    // The one refusal is a model the table has no row for, which is recorded at no cost rather
+    // than refused, so that an agent may run on any model (ADR 0015).
+    let (cost_usd, unpriced) = match compute_cost_usd(usage, source.model_id, prices) {
+        Ok(cost_usd) => (cost_usd, false),
+        Err(PricingError::UnknownModel { .. }) => (0.0, true),
+    };
     let body = CostRecordedBody {
         purpose: purpose_wire(source.purpose),
         model_id: source
@@ -111,7 +109,7 @@ pub fn record_session_cost(
             cache_write_tokens: tokens(usage.cache_write_tokens)?,
         },
         cost_usd,
-        unpriced: false,
+        unpriced,
     };
     let event = stamp(EventBody::CostRecorded(body), clock, &source.ids)?;
     // Checked on what `new_event` settled, so that a blank id counts as none.
@@ -128,6 +126,51 @@ pub fn record_session_cost(
     let appended = log.append(&event)?;
     projections.apply(&appended)?;
     Ok(cost_usd)
+}
+
+/// Each model an active agent's sessions run on that `prices` has no row for, with the ids of the
+/// active agents that use it, in team order and without repeats.
+///
+/// An agent's model is its own `model.id` when it has one and otherwise its role's default
+/// (`session_model`); an active Product Manager also uses `TRIAGE_MODEL`, which its triage
+/// sessions run on (5.16). An agent with no model of its own whose role Farik does not ship is
+/// passed over, since nothing could load its role to start a session of it.
+///
+/// # Errors
+///
+/// `RoleError::Invalid` when a shipped role's files do not describe a role.
+pub fn unpriced_models(
+    team: &Team,
+    prices: &PriceTable,
+) -> Result<BTreeMap<String, Vec<String>>, RoleError> {
+    let mut unpriced: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    for agent in team.active_agents() {
+        let role = Role::from(agent.role);
+        let mut models = Vec::new();
+        match &agent.model {
+            Some(model) => models.push(model.id.to_string()),
+            None => match load_role(role) {
+                Ok(definition) => models.push(session_model(agent, &definition).0),
+                // Nothing could start a session of a role Farik does not ship.
+                Err(RoleError::NotFound { .. }) => {}
+                Err(error) => return Err(error),
+            },
+        }
+        if role == Role::ProductManager {
+            models.push(TRIAGE_MODEL.to_string());
+        }
+        for model in models {
+            if prices.prices.contains_key(model.as_str()) {
+                continue;
+            }
+            let ids = unpriced.entry(model).or_default();
+            let id = agent.id.to_string();
+            if !ids.contains(&id) {
+                ids.push(id);
+            }
+        }
+    }
+    Ok(unpriced)
 }
 
 /// Everything `check_budgets` needs for one session, read from the projections at `now`.
@@ -290,6 +333,7 @@ fn consequence_wire(consequence: BudgetConsequence) -> BudgetExhaustedBodyConseq
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeMap;
     use std::sync::Arc;
     use std::time::Duration;
 
@@ -300,8 +344,9 @@ mod tests {
     };
     use farik_core::contract::fixtures::a_contract_wire;
     use farik_core::contract::{Role, TaskContract, validate_contract};
+    use farik_core::pricing::prices::PRICE_TABLE;
     use farik_core::pricing::{PriceTable, Usage, validate_price_table};
-    use farik_core::team::fixtures::a_team_wire;
+    use farik_core::team::fixtures::{a_team_wire, an_agent_wire};
     use farik_core::team::{Team, validate_team};
     use farik_protocol::clock::FixedClock;
     use farik_protocol::event::fixtures::a_new_event;
@@ -310,13 +355,13 @@ mod tests {
         EventBody, EventIds, EventKind, FarikEvent,
     };
     use farik_store::{
-        EventLog, EventQuery, IN_MEMORY, Projections, open_event_log, open_projections,
+        CostScope, EventLog, EventQuery, IN_MEMORY, Projections, open_event_log, open_projections,
     };
     use serde_json::json;
 
     use super::{
         CostError, CostSource, budget_state, consequence_wire, purpose_wire, record_exhaustion,
-        record_session_cost, scope_wire,
+        record_session_cost, scope_wire, unpriced_models,
     };
     use crate::session::SessionPurpose;
 
@@ -429,6 +474,7 @@ mod tests {
         assert_eq!(body.usage.cache_read_tokens, 2_000_000);
         assert_eq!(body.usage.cache_write_tokens, 4_000_000);
         assert_eq!(body.purpose, CostRecordedBodyPurpose::Implement);
+        assert!(!body.unpriced);
         assert_eq!(recorded.envelope.ids, ids(Some("FRK-1"), "s1"));
         let task = projections
             .task(&"FRK-1".parse().expect("a task id"))
@@ -516,26 +562,103 @@ mod tests {
     }
 
     #[test]
-    fn refuses_a_model_the_table_does_not_price() {
-        // A cost of zero for an unknown model would under-report spend, which is what 5.5 exists
-        // to prevent.
+    fn records_a_model_no_table_prices_at_no_cost_and_says_so() {
+        // An agent may run on any model (ADR 0015): its usage is recorded, at no cost, and marked.
         let (log, projections) = a_board();
-        let refused = record_session_cost(
+        filed(&log, &projections, "FRK-1");
+        let charged = record_session_cost(
             &log,
             &projections,
             &CostSource {
                 model_id: "claude-unknown-9",
-                ..source(ids(None, "s1"))
+                ..source(ids(Some("FRK-1"), "s1"))
             },
-            &usage(1, 1),
+            &usage(1000, 0),
             &prices(),
             &clock(),
-        );
-        let Err(CostError::Pricing { detail }) = refused else {
-            panic!("expected a pricing refusal, got {refused:?}");
+        )
+        .expect("recorded");
+        assert!(close(charged, 0.0), "{charged}");
+        let events = everything(&log);
+        assert_eq!(events.len(), 2);
+        let EventBody::CostRecorded(body) = &events[1].body else {
+            panic!("a cost.recorded, not {:?}", events[1].body.kind());
         };
-        assert!(detail.contains("claude-unknown-9"), "{detail}");
-        assert_eq!(everything(&log).len(), 0);
+        assert_eq!(body.model_id.as_str(), "claude-unknown-9");
+        assert!(close(body.cost_usd, 0.0));
+        assert!(body.unpriced);
+        assert_eq!(body.usage.input_tokens, 1000);
+        let task = projections
+            .costs(CostScope::Task)
+            .expect("the costs read")
+            .into_iter()
+            .find(|row| row.key == "FRK-1")
+            .expect("the task's cost");
+        assert_eq!(task.sessions, 1);
+        assert!(close(task.usd, 0.0));
+    }
+
+    #[test]
+    fn names_each_unpriced_model_with_the_agents_that_use_it() {
+        let on = |id: &str, role: &str, model: Option<&str>| {
+            let mut agent = an_agent_wire(id, role);
+            if let Some(model) = model {
+                agent["model"] = json!({ "id": model });
+            }
+            agent
+        };
+        let mut paused = on("dev-c", "software_developer", Some("claude-other-1"));
+        paused["status"] = json!("paused");
+        let mut wire = a_team_wire();
+        wire["agents"] = json!([
+            on("pm", "product_manager", None),
+            on("dev-a", "software_developer", Some("claude-unknown-9")),
+            on("dev-b", "software_developer", Some("claude-unknown-9")),
+            paused,
+            on("arch", "architect", None),
+            on("arch-2", "architect", Some("claude-other-2")),
+        ]);
+        let team = validate_team(&wire).expect("a team");
+        let only_opus_5 = validate_price_table(&json!({
+            "version": 1,
+            "source_url": "https://example.com/prices",
+            "retrieved_at": "2026-09-23",
+            "prices": {
+                "claude-opus-5": {
+                    "input_usd_per_mtok": 5.0,
+                    "output_usd_per_mtok": 25.0,
+                    "cache_read_usd_per_mtok": 0.5,
+                    "cache_write_usd_per_mtok": 6.25
+                }
+            }
+        }))
+        .expect("a price table");
+        let named = |pairs: &[(&str, &[&str])]| -> BTreeMap<String, Vec<String>> {
+            pairs
+                .iter()
+                .map(|(model, ids)| {
+                    (
+                        (*model).to_string(),
+                        ids.iter().map(|id| (*id).to_string()).collect(),
+                    )
+                })
+                .collect()
+        };
+        assert_eq!(
+            unpriced_models(&team, &only_opus_5).expect("an Architect with no model is skipped"),
+            named(&[
+                ("claude-other-2", &["arch-2"]),
+                ("claude-sonnet-5", &["pm"]),
+                ("claude-unknown-9", &["dev-a", "dev-b"]),
+            ])
+        );
+        assert_eq!(
+            unpriced_models(&team, &PRICE_TABLE).expect("the shipped table"),
+            named(&[
+                ("claude-other-2", &["arch-2"]),
+                ("claude-unknown-9", &["dev-a", "dev-b"]),
+            ])
+        );
     }
 
     fn a_team(session: Option<serde_json::Value>) -> Team {

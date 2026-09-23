@@ -8,7 +8,8 @@ use std::path::PathBuf;
 use farik_core::budget::SessionLimits;
 use farik_core::contract::TaskId;
 use farik_core::pricing::Usage;
-use farik_core::team::Effort;
+use farik_core::team::{Agent, Effort};
+use farik_roles::RoleDefinition;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tokio::sync::mpsc::Receiver;
@@ -231,9 +232,65 @@ pub trait RuntimeAdapter: Send + Sync {
     ) -> Result<Box<dyn SessionHandle>, RuntimeError>;
 }
 
+/// The model a triage session runs on, whatever the agent's own: 5.16 runs triage on the cheaper
+/// model, and 8.2 names it. It lives here rather than in the orchestrator, which re-exports it, so
+/// that `cost::unpriced_models` can name it where the orchestrator is not built.
+pub const TRIAGE_MODEL: &str = "claude-sonnet-5";
+
+/// The model and effort an agent's sessions run on: its own `model.id` when it has one, with its
+/// own effort or else its role's, and otherwise its role's model and effort. A triage session
+/// runs on the orchestrator's `TRIAGE_MODEL` instead (5.16), which is the orchestrator's choice
+/// rather than this one.
+#[must_use]
+pub fn session_model(agent: &Agent, role: &RoleDefinition) -> (String, Effort) {
+    match &agent.model {
+        Some(model) => (model.id.to_string(), model.effort.unwrap_or(role.effort)),
+        None => (role.model.clone(), role.effort),
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{RuntimeError, SessionPurpose};
+    use farik_core::contract::Role;
+    use farik_core::team::fixtures::an_agent_wire;
+    use farik_core::team::{Agent, Effort};
+    use farik_roles::load_role;
+    use serde_json::json;
+
+    use super::{RuntimeError, SessionPurpose, session_model};
+
+    fn an_agent(model: Option<serde_json::Value>) -> Agent {
+        let mut wire = an_agent_wire("dev-a", "software_developer");
+        if let Some(model) = model {
+            wire["model"] = model;
+        }
+        serde_json::from_value(wire).expect("the fixture is an agent")
+    }
+
+    #[test]
+    fn takes_the_agents_model_and_else_the_roles() {
+        let role = load_role(Role::SoftwareDeveloper).expect("Farik ships the role");
+        assert_ne!(
+            role.effort,
+            Effort::Low,
+            "the test needs the role's effort to differ"
+        );
+        assert_eq!(
+            session_model(
+                &an_agent(Some(json!({ "id": "claude-sonnet-5", "effort": "low" }))),
+                &role
+            ),
+            ("claude-sonnet-5".to_string(), Effort::Low)
+        );
+        assert_eq!(
+            session_model(&an_agent(Some(json!({ "id": "claude-sonnet-5" }))), &role),
+            ("claude-sonnet-5".to_string(), role.effort)
+        );
+        assert_eq!(
+            session_model(&an_agent(None), &role),
+            (role.model.clone(), role.effort)
+        );
+    }
 
     #[test]
     fn displays_a_version_too_old_error_with_both_versions() {
