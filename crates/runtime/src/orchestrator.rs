@@ -1030,7 +1030,7 @@ mod tests {
             .expect("the contract reads");
         assert_eq!(
             contract.budget.max_sessions.get(),
-            12,
+            14,
             "the contract takes the schema's default"
         );
     }

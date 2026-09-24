@@ -3408,6 +3408,35 @@ mod tests {
 
     #[tokio::test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn accepts_a_task_that_passes_on_its_last_iteration_within_the_default_sessions() {
+        // The default `max_sessions` covers a task's whole path (5.5): triage, refinement, the
+        // Scrum Master's judgment, the plan, three rejected passes of an implementation and a
+        // review, the last implementation, and one session a provider's limit cut short are
+        // twelve; the last review and the acceptance still start.
+        let harness = Harness::new("orch-budget-last-iteration", with_a_scrum_master);
+        harness.verifying_with("FRK-1", true, true, |wire| wire["iteration"] = json!(3));
+        for session in 0..12 {
+            harness.spent(Some("FRK-1"), &format!("s-{session}"), 0.01);
+        }
+        let adapter = harness.recorded(vec![review_writes_note(), accept_frk_1()]);
+        let orchestrator = harness.orchestrator(adapter.clone());
+
+        orchestrator.tick().await.expect("the review runs");
+        orchestrator.tick().await.expect("the acceptance runs");
+
+        assert_eq!(escalation_reasons(&harness), Vec::new());
+        assert_eq!(
+            sessions(&adapter),
+            vec![
+                ("dev-b".to_string(), SessionPurpose::Verify),
+                ("pm".to_string(), SessionPurpose::Verify),
+            ]
+        );
+        assert_eq!(harness.row("FRK-1").status, TaskStatus::Accepted);
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn asks_the_escalation_once() {
         let harness = Harness::new("orch-budget-once", |_| {});
         in_progress_with_sessions(&harness, 1, 1);
