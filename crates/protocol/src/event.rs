@@ -13,20 +13,20 @@ pub use farik_core::contract::{TaskId, ValidationError};
 
 pub use crate::generated::event::{
     AgentUpdatedBody, AgentUpdatedBodyStatus, BudgetExhaustedBody, BudgetExhaustedBodyConsequence,
-    BudgetExhaustedBodyScope, ContractEvaluatedBody, ContractEvaluatedBodyGate, ContractLockedBody,
-    ContractSummary, ContractSummaryKind, ContractSummaryParent, ContractSummaryRisk,
-    ContractSummaryStatus, ContractUnlockedBody, ContractWrittenBody, CostRecordedBody,
-    CostRecordedBodyModelId, CostRecordedBodyPurpose, CriteriaUpdatedBody, CriterionRecordedBody,
-    CriterionRecordedBodyRunBy, DriftDetectedBody, DriftDetectedBodyDrift, EscalationRaisedBody,
-    EscalationRaisedBodyReason, EscalationResolvedBody, EventKind, HumanAcceptedBody,
-    HumanAcceptedBodySubject, NoteWrittenBody, NoteWrittenBodyKind, ProductDocWrittenBody,
-    ProjectScannedBody, PullRequestOpenedBody, QuestionAnsweredBody, QuestionAskedBody,
-    RequestTriagedBody, RequestTriagedBodySize, ReviewRecordedBody, SessionEndedBody,
-    SessionEndedBodyReason, SessionStartedBody, SessionStartedBodyEffort, SessionStartedBodyModel,
-    SessionStartedBodyPurpose, TaskCreatedBody, TaskIntegratedBody, TaskIntegratedBodyIntegratedBy,
-    TaskTransitionedBody, TaskTransitionedBodyEffectsItem, TeamUpdatedBody, TokenUsage,
-    ToolCalledBody, ToolDeniedBody, ToolReturnedBody, TransitionRefusedBody,
-    TransitionRefusedBodyRefusal,
+    BudgetExhaustedBodyScope, ContractEvaluatedBody, ContractEvaluatedBodyGate, ContractJudgedBody,
+    ContractLockedBody, ContractSummary, ContractSummaryKind, ContractSummaryParent,
+    ContractSummaryRisk, ContractSummaryStatus, ContractUnlockedBody, ContractWrittenBody,
+    CostRecordedBody, CostRecordedBodyModelId, CostRecordedBodyPurpose, CriteriaUpdatedBody,
+    CriterionRecordedBody, CriterionRecordedBodyRunBy, DriftDetectedBody, DriftDetectedBodyDrift,
+    EscalationRaisedBody, EscalationRaisedBodyReason, EscalationResolvedBody, EventKind,
+    HumanAcceptedBody, HumanAcceptedBodySubject, NoteWrittenBody, NoteWrittenBodyKind,
+    ProductDocWrittenBody, ProjectScannedBody, PullRequestOpenedBody, QuestionAnsweredBody,
+    QuestionAskedBody, RequestTriagedBody, RequestTriagedBodySize, ReviewRecordedBody,
+    SessionEndedBody, SessionEndedBodyReason, SessionStartedBody, SessionStartedBodyEffort,
+    SessionStartedBodyModel, SessionStartedBodyPurpose, TaskCreatedBody, TaskIntegratedBody,
+    TaskIntegratedBodyIntegratedBy, TaskTransitionedBody, TaskTransitionedBodyEffectsItem,
+    TeamUpdatedBody, TokenUsage, ToolCalledBody, ToolDeniedBody, ToolReturnedBody,
+    TransitionRefusedBody, TransitionRefusedBodyRefusal,
 };
 /// The generated names of the vocabularies the governor's events repeat, renamed at the edge so
 /// that they cannot be mistaken for `farik-core`'s own types of the same name.
@@ -57,7 +57,7 @@ static VALIDATOR: LazyLock<Validator> = LazyLock::new(|| {
 });
 
 /// One validator per kind, each holding that kind's body schema alone. The event schema types
-/// `body` as a choice of thirty-one shapes, so it can only say that a body matched none of them; these
+/// `body` as a choice of thirty-two shapes, so it can only say that a body matched none of them; these
 /// say what is wrong with the one shape the event's `kind` asked for.
 static BODY_VALIDATORS: LazyLock<Vec<Validator>> = LazyLock::new(|| {
     let schema: Value = serde_json::from_str(SCHEMA_JSON).expect(
@@ -105,6 +105,7 @@ fn body_def_name(kind: EventKind) -> &'static str {
         EventKind::TransitionRefused => "transitionRefusedBody",
         EventKind::EscalationRaised => "escalationRaisedBody",
         EventKind::ContractEvaluated => "contractEvaluatedBody",
+        EventKind::ContractJudged => "contractJudgedBody",
         EventKind::CriterionRecorded => "criterionRecordedBody",
         EventKind::NoteWritten => "noteWrittenBody",
         EventKind::ReviewRecorded => "reviewRecordedBody",
@@ -140,6 +141,7 @@ pub fn is_about_one_contract(kind: EventKind) -> bool {
             | EventKind::TransitionRefused
             | EventKind::EscalationRaised
             | EventKind::ContractEvaluated
+            | EventKind::ContractJudged
             | EventKind::CriterionRecorded
             | EventKind::NoteWritten
             | EventKind::ReviewRecorded
@@ -168,6 +170,7 @@ fn attribution(body: &mut EventBody) -> Option<(&'static str, &mut String)> {
         EventBody::CriteriaUpdated(body) => Some(("updated_by", &mut body.updated_by)),
         EventBody::TaskTransitioned(body) => Some(("requested_by", &mut body.requested_by)),
         EventBody::TransitionRefused(body) => Some(("requested_by", &mut body.requested_by)),
+        EventBody::ContractJudged(body) => Some(("judged_by", &mut body.judged_by)),
         EventBody::CriterionRecorded(body) => Some(("recorded_by", &mut body.recorded_by)),
         EventBody::NoteWritten(body) => Some(("written_by", &mut body.written_by)),
         EventBody::ReviewRecorded(body) => Some(("reviewer", &mut body.reviewer)),
@@ -195,7 +198,7 @@ fn attribution(body: &mut EventBody) -> Option<(&'static str, &mut String)> {
 
 /// Every kind the log holds in this phase, in the order `docs/schemas/event.schema.json` lists
 /// them. The step that adds a kind adds it here.
-pub const EVERY_KIND: [EventKind; 31] = [
+pub const EVERY_KIND: [EventKind; 32] = [
     EventKind::TaskCreated,
     EventKind::RequestTriaged,
     EventKind::ContractWritten,
@@ -211,6 +214,7 @@ pub const EVERY_KIND: [EventKind; 31] = [
     EventKind::TransitionRefused,
     EventKind::EscalationRaised,
     EventKind::ContractEvaluated,
+    EventKind::ContractJudged,
     EventKind::CriterionRecorded,
     EventKind::NoteWritten,
     EventKind::ReviewRecorded,
@@ -310,6 +314,9 @@ pub enum EventBody {
     /// A contract was held to the Definition of Ready or of Done.
     #[serde(rename = "contract.evaluated")]
     ContractEvaluated(ContractEvaluatedBody),
+    /// The Scrum Master judged a contract against the Definition of Ready's judgment rules.
+    #[serde(rename = "contract.judged")]
+    ContractJudged(ContractJudgedBody),
     /// An agent recorded an exit criterion's result.
     #[serde(rename = "criterion.recorded")]
     CriterionRecorded(CriterionRecordedBody),
@@ -380,6 +387,7 @@ impl EventBody {
             Self::TransitionRefused(_) => EventKind::TransitionRefused,
             Self::EscalationRaised(_) => EventKind::EscalationRaised,
             Self::ContractEvaluated(_) => EventKind::ContractEvaluated,
+            Self::ContractJudged(_) => EventKind::ContractJudged,
             Self::CriterionRecorded(_) => EventKind::CriterionRecorded,
             Self::NoteWritten(_) => EventKind::NoteWritten,
             Self::ReviewRecorded(_) => EventKind::ReviewRecorded,
@@ -544,7 +552,7 @@ pub fn event_from_value(input: &Value) -> Result<FarikEvent, Vec<ValidationError
 }
 
 /// The schema's own failures. A failure inside `body` is reported by the schema once, at `/body`,
-/// because `body` there is a choice of thirty-one shapes and the schema can only say that none matched.
+/// because `body` there is a choice of thirty-two shapes and the schema can only say that none matched.
 /// The event's `kind` says which one it was meant to be, so such a failure is asked again of that
 /// shape alone and reported where it actually is.
 fn schema_errors(input: &Value) -> Vec<ValidationError> {
@@ -939,7 +947,7 @@ mod tests {
 
     #[test]
     fn reports_a_malformed_field_inside_a_body_at_its_own_path() {
-        // The schema types `body` as a choice of thirty-one shapes, so it reports a failure anywhere
+        // The schema types `body` as a choice of thirty-two shapes, so it reports a failure anywhere
         // inside one at `/body`, with the whole body echoed back. The kind says which shape the
         // body was meant to be, so the reader checks it again against that one alone.
         let mut input = an_event_wire(EventKind::ProjectScanned);
@@ -1163,6 +1171,21 @@ mod tests {
             let error = new_event(body, at(), some_ids()).expect_err("expected a refusal");
             assert_eq!(error, EventError::NoContractNamed { kind }, "{kind}");
         }
+    }
+
+    #[test]
+    fn names_the_contract_a_judgment_is_about() {
+        assert!(super::is_about_one_contract(EventKind::ContractJudged));
+        let body = event_from_value(&an_event_wire(EventKind::ContractJudged))
+            .expect("valid")
+            .body;
+        let error = new_event(body, at(), some_ids()).expect_err("expected a refusal");
+        assert_eq!(
+            error,
+            EventError::NoContractNamed {
+                kind: EventKind::ContractJudged
+            }
+        );
     }
 
     #[test]

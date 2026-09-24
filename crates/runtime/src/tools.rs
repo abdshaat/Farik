@@ -165,6 +165,11 @@ static TOOLS: LazyLock<Vec<FarikTool>> = LazyLock::new(|| {
             Read,
             "Size this session's request as large (an epic) or small (a task), with a reason.",
         ),
+        tool::<contracts::RecordJudgmentInput>(
+            "farik_record_judgment",
+            Read,
+            "Record your judgment of this session's contract: whether the task fits its budget and whether its criteria would detect the failure its intent worries about, with the reason.",
+        ),
         tool::<contracts::WriteContractInput>(
             "farik_write_contract",
             Read,
@@ -297,6 +302,7 @@ pub async fn call_tool(
         "farik_read_rules" => nothing_in(input).map(|()| reading::read_rules(&call)),
         "farik_read_criteria" => nothing_in(input).and_then(|()| reading::read_criteria(&call)),
         "farik_triage_request" => contracts::triage(&call, &parse(input)?),
+        "farik_record_judgment" => contracts::record_judgment(&call, &parse(input)?),
         "farik_write_contract" => contracts::write_contract(&call, parse(input)?),
         "farik_create_task" => contracts::create_task(&call, parse(input)?),
         "farik_request_transition" => work::request_transition(&call, parse(input)?),
@@ -492,6 +498,7 @@ mod tests {
             "farik_read_rules",
             "farik_read_criteria",
             "farik_triage_request",
+            "farik_record_judgment",
             "farik_write_contract",
             "farik_create_task",
             "farik_request_transition",
@@ -519,7 +526,7 @@ mod tests {
         assert_eq!(tier("farik_git_diff"), Some(PermissionTier::GitLocal));
         assert_eq!(tier("farik_git_commit"), Some(PermissionTier::GitLocal));
         assert_eq!(tier("farik_git_push"), Some(PermissionTier::GitRemote));
-        for tool in &tools[..14] {
+        for tool in &tools[..15] {
             assert_eq!(tool.tier, PermissionTier::Read, "{}", tool.name);
         }
         for tool in &tools {

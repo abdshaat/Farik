@@ -128,7 +128,7 @@ Consumes: `Call`, `append` of the tools
 - `names_the_contract_a_judgment_is_about` — `is_about_one_contract(ContractJudged)` is true, and appending one with no task id is refused as the other contract kinds are.
 - `lists_every_kind_the_schema_lists` — unchanged, now 32.
 
-- [ ] `feat(runtime): record the scrum master's judgment of a contract`
+- [x] `feat(runtime): record the scrum master's judgment of a contract`
 
 ### Task 4: readiness reads the judgment
 

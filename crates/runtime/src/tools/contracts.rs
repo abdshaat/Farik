@@ -8,7 +8,8 @@ use farik_core::governor::gates::{
 };
 use farik_core::governor::transition_table::TransitionActor;
 use farik_protocol::event::{
-    ContractWrittenBody, EventBody, EventKind, RequestTriagedBody, RequestTriagedBodySize,
+    ContractJudgedBody, ContractWrittenBody, EventBody, EventKind, RequestTriagedBody,
+    RequestTriagedBodySize,
 };
 use farik_store::EventQuery;
 use farik_store::requests::{RequestError, file_request, summary_of};
@@ -37,6 +38,18 @@ pub(crate) struct TriageInput {
     size: Size,
     /// Why, in a sentence the log keeps.
     reason: String,
+}
+
+/// `farik_record_judgment`'s input.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct RecordJudgmentInput {
+    /// Whether the task fits its budget.
+    pub(crate) fits_budget: bool,
+    /// Whether its criteria would detect the failure its intent worries about.
+    pub(crate) criteria_detect_failure: bool,
+    /// Why, in a sentence the log keeps.
+    pub(crate) reason: String,
 }
 
 /// A criterion from the library, and the id it takes in the contract.
@@ -127,6 +140,37 @@ pub(super) fn triage(call: &Call<'_>, input: &TriageInput) -> Result<Value, Tool
     Ok(
         json!({ "task_id": task.as_str(), "kind": contract.kind.to_string(), "seq": event.envelope.seq }),
     )
+}
+
+/// Records the Scrum Master's Definition of Ready judgment of the session's contract (5.3):
+/// whether it fits its budget and whether its criteria would detect the failure its intent
+/// worries about, with the reason. Only the Scrum Master judges, and only a task `refining`.
+pub(super) fn record_judgment(
+    call: &Call<'_>,
+    input: &RecordJudgmentInput,
+) -> Result<Value, ToolError> {
+    let task = call.task()?;
+    if input.reason.trim().is_empty() {
+        return Err(Refusal::BlankReason.into());
+    }
+    let (_, row) = call.contract(task)?;
+    if call.role() != Role::ScrumMaster || row.status != TaskStatus::Refining {
+        return Err(Refusal::JudgmentNotAllowed {
+            role: call.role(),
+            status: row.status,
+        }
+        .into());
+    }
+    let event = call.append(
+        Some(task),
+        EventBody::ContractJudged(ContractJudgedBody {
+            judged_by: call.agent_id().to_string(),
+            fits_budget: input.fits_budget,
+            criteria_detect_failure: input.criteria_detect_failure,
+            reason: input.reason.trim().to_string(),
+        }),
+    )?;
+    Ok(json!({ "task_id": task.as_str(), "seq": event.envelope.seq }))
 }
 
 /// Writes fields of the session's contract and appends criteria from the library by name, as
@@ -464,6 +508,122 @@ mod tests {
         refused_with(
             project.call("pm", Some("FRK-2"), "farik_triage_request", triage("small")),
             "triage_not_allowed",
+        );
+        assert_eq!(project.event_count(), before);
+    }
+
+    /// `a_team_of_three`, with an active Scrum Master `sm` besides.
+    fn a_project_with_scrum_master(name: &str) -> TestProject {
+        TestProject::new(
+            name,
+            &a_team_of_three(|wire| {
+                wire["agents"].as_array_mut().expect("agents").push(
+                    farik_core::team::fixtures::an_agent_wire("sm", "scrum_master"),
+                );
+            }),
+        )
+    }
+
+    fn judgment(fits_budget: bool, criteria_detect_failure: bool, reason: &str) -> Value {
+        json!({
+            "fits_budget": fits_budget,
+            "criteria_detect_failure": criteria_detect_failure,
+            "reason": reason
+        })
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn records_a_judgment_by_the_scrum_master() {
+        let project = a_project_with_scrum_master("tools-judge-sm");
+        project.filed("FRK-1", "refining", "task", None);
+        let result = project
+            .call(
+                "sm",
+                Some("FRK-1"),
+                "farik_record_judgment",
+                judgment(
+                    true,
+                    false,
+                    "It fits the sprint, but the criteria only check the happy path.",
+                ),
+            )
+            .expect("the Scrum Master judges a refining task");
+        let judged = project.events(&[EventKind::ContractJudged]);
+        assert_eq!(judged.len(), 1);
+        let EventBody::ContractJudged(body) = &judged[0].body else {
+            panic!("a contract.judged");
+        };
+        assert_eq!(body.judged_by, "sm");
+        assert!(body.fits_budget);
+        assert!(!body.criteria_detect_failure);
+        assert_eq!(
+            body.reason,
+            "It fits the sprint, but the criteria only check the happy path."
+        );
+        assert_eq!(result["seq"], judged[0].envelope.seq);
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn refuses_a_judgment_by_anyone_else() {
+        let project = a_project_with_scrum_master("tools-judge-others");
+        project.filed("FRK-1", "refining", "task", None);
+        let before = project.event_count();
+        for agent in ["pm", "dev-a"] {
+            refused_with(
+                project.call(
+                    agent,
+                    Some("FRK-1"),
+                    "farik_record_judgment",
+                    judgment(
+                        true,
+                        true,
+                        "Fits the sprint and the criteria would catch it.",
+                    ),
+                ),
+                "judgment_not_allowed",
+            );
+        }
+        assert_eq!(project.event_count(), before);
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn refuses_a_judgment_outside_refining() {
+        let project = a_project_with_scrum_master("tools-judge-status");
+        project.filed("FRK-1", "ready", "task", None);
+        let before = project.event_count();
+        refused_with(
+            project.call(
+                "sm",
+                Some("FRK-1"),
+                "farik_record_judgment",
+                judgment(
+                    true,
+                    true,
+                    "Fits the sprint and the criteria would catch it.",
+                ),
+            ),
+            "judgment_not_allowed",
+        );
+        assert_eq!(project.event_count(), before);
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn refuses_a_blank_reason() {
+        let project = a_project_with_scrum_master("tools-judge-blank");
+        project.filed("FRK-1", "refining", "task", None);
+        let before = project.event_count();
+        refused_with(
+            project.call(
+                "sm",
+                Some("FRK-1"),
+                "farik_record_judgment",
+                judgment(true, true, "  "),
+            ),
+            "blank_reason",
         );
         assert_eq!(project.event_count(), before);
     }

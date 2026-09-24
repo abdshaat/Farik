@@ -72,6 +72,7 @@
         "transition.refused",
         "escalation.raised",
         "contract.evaluated",
+        "contract.judged",
         "criterion.recorded",
         "note.written",
         "review.recorded",
@@ -109,6 +110,7 @@
         { "$ref": "#/$defs/transitionRefusedBody" },
         { "$ref": "#/$defs/escalationRaisedBody" },
         { "$ref": "#/$defs/contractEvaluatedBody" },
+        { "$ref": "#/$defs/contractJudgedBody" },
         { "$ref": "#/$defs/criterionRecordedBody" },
         { "$ref": "#/$defs/noteWrittenBody" },
         { "$ref": "#/$defs/reviewRecordedBody" },
@@ -378,6 +380,19 @@
         "gate": { "type": "string", "enum": ["definition_of_ready", "definition_of_done"] },
         "passed": { "type": "boolean" },
         "failures": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "contractJudgedBody": {
+      "title": "Contract Judged Body",
+      "description": "The Scrum Master judged a contract against the Definition of Ready's judgment rules (docs/SPEC.md section 5.3): whether it fits its budget and whether its criteria would detect the failure its intent worries about, with the reason.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["judged_by", "fits_budget", "criteria_detect_failure", "reason"],
+      "properties": {
+        "judged_by": { "type": "string" },
+        "fits_budget": { "type": "boolean" },
+        "criteria_detect_failure": { "type": "boolean" },
+        "reason": { "type": "string" }
       }
     },
     "criterionRecordedBody": {

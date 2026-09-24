@@ -123,6 +123,7 @@ pub fn a_body_wire(kind: EventKind) -> Value {
             "passed": false,
             "failures": ["the contract has no exit criteria"]
         }),
+        EventKind::ContractJudged => a_judgment_body_wire(),
         EventKind::CriterionRecorded => json!({
             "criterion_id": "C1",
             "passed": true,
@@ -147,6 +148,16 @@ pub fn a_body_wire(kind: EventKind) -> Value {
         | EventKind::EscalationResolved
         | EventKind::AgentUpdated => a_human_body_wire(kind),
     }
+}
+
+/// The Scrum Master's judgment of a contract, passing both rules.
+fn a_judgment_body_wire() -> Value {
+    json!({
+        "judged_by": "sam-ortiz",
+        "fits_budget": true,
+        "criteria_detect_failure": true,
+        "reason": "One deliverable and a criterion that runs it."
+    })
 }
 
 /// A review summed up, or a product document written.

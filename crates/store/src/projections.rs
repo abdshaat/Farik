@@ -554,6 +554,7 @@ fn apply_to(transaction: &Transaction<'_>, event: &FarikEvent) -> Result<(), Sto
         | EventBody::BudgetExhausted(_)
         | EventBody::TransitionRefused(_)
         | EventBody::ContractEvaluated(_)
+        | EventBody::ContractJudged(_)
         | EventBody::CriterionRecorded(_)
         | EventBody::NoteWritten(_)
         | EventBody::ReviewRecorded(_)
