@@ -187,7 +187,7 @@ The header gains revision 0.10 naming each change: 5.3's judgment recorded by `f
 
 Also, on the founder's decision of 2026-09-24, specified now and built with the team editor (phase 5 step 07), not in this step: 5.3 gains the configurable judgment. A team policy `judgment` in `team.yaml` holds `required` (default on while the team has an active agent of the judging role), `questions` (the rubric, default the two of 5.3: the task fits its budget; the criteria would detect the failure the intent worries about), and `judge` (the role that judges, default the Scrum Master); the judge answers each question pass or fail with a reason, and any fail is a readiness failure. Until it is built, this release judges with the defaults, as this step implements them. Section 10 gains a requirement that configuring the harness is user-friendly and foolproof, and F1 and F15 say the team editor meets it: every setting has a safe default and a one-line plain-language explanation; a change that would leave the team unable to work (a judge role nobody active holds, an empty rubric with judgment on, a team without the two required roles) is refused before it is saved, in words that say what to change; each change shows its effect before it is saved; and every setting can be put back to its default. The judgment's record stays the `contract.judged` event in the log (the founder: the log is durable enough).
 
-- [ ] `docs(docs): record the scrum master's sessions and the new roles in the spec`
+- [x] `docs(docs): record the scrum master's sessions and the new roles in the spec`
 
 ## Verification
 
