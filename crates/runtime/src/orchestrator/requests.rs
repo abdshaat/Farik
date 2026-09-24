@@ -12,7 +12,7 @@ use farik_core::governor::transition_table::TransitionActor;
 use farik_core::team::{Agent, Team};
 use farik_protocol::event::{
     ContractEvaluatedBodyGate, CriterionRecordedBody, CriterionRecordedBodyRunBy, EventBody,
-    EventIds, EventKind, FarikEvent, ReviewRecordedBody, new_event,
+    EventKind, FarikEvent, ReviewRecordedBody,
 };
 use farik_store::files::FilesError;
 use farik_store::{EventQuery, TaskProjection};
@@ -30,8 +30,7 @@ use crate::criteria::{CriterionOutcome, remove_base_worktree, run_criteria};
 use crate::session::SessionPurpose;
 use crate::tools::ToolDeps;
 use crate::transitions::{
-    TransitionAsk, TransitionError, TransitionOutcome, integration_branch, refusal_details,
-    result_accepted,
+    TransitionAsk, TransitionOutcome, integration_branch, refusal_details, result_accepted,
 };
 
 /// The human, as the reviewer of an epic the Product Manager broke down (5.16 item 4).
@@ -584,11 +583,11 @@ fn record_governor_result(
     sha: &str,
     result: CriterionResult,
 ) -> Result<(), OrchestratorError> {
-    let ids = EventIds {
-        task_id: Some(task_id.clone()),
-        ..tools.ids.clone()
-    };
-    let event = new_event(
+    append(
+        tools,
+        task_id,
+        None,
+        None,
         EventBody::CriterionRecorded(CriterionRecordedBody {
             criterion_id: result.criterion_id,
             passed: result.passed,
@@ -596,17 +595,7 @@ fn record_governor_result(
             run_by: CriterionRecordedBodyRunBy::Reviewer,
             recorded_by: GOVERNOR.to_string(),
         }),
-        tools.clock.now(),
-        ids,
     )
-    .map_err(|error| {
-        OrchestratorError::Transition(TransitionError::Event {
-            detail: format!("{error:?}"),
-        })
-    })?;
-    let appended = tools.log.append(&event)?;
-    tools.projections.apply(&appended)?;
-    Ok(())
 }
 
 /// The epic's `review.recorded`, once per verification, with the human as reviewer: the criteria
@@ -649,7 +638,7 @@ fn record_epic_review(
         })
         .count();
     append(
-        deps,
+        &deps.tools,
         &contract.id,
         None,
         Some(session_id.to_string()),

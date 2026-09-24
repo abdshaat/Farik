@@ -9,17 +9,17 @@ use std::sync::Arc;
 use farik_core::contract::{TaskId, TaskKind, TaskStatus};
 use farik_core::team::{Integration, Team};
 use farik_protocol::event::{
-    EscalationRaisedBody, EscalationRaisedBodyReason, EventBody, EventIds, EventKind, FarikEvent,
+    EscalationRaisedBody, EscalationRaisedBodyReason, EventBody, EventKind, FarikEvent,
     NoteWrittenBodyKind, PullRequestOpenedBody, TaskIntegratedBody, TaskIntegratedBodyIntegratedBy,
-    new_event,
 };
 use farik_store::files::FilesError;
 use farik_store::{EventQuery, Git, GitError, MergeOutcome, TaskProjection};
 
+use super::verify::append;
 use super::{IntegrationOutcome, Orchestrator, OrchestratorError, TickReport, worktree};
 use crate::forge::{Forge, PullRequestState};
 use crate::tools::ToolDeps;
-use crate::transitions::{TransitionError, integration_branch};
+use crate::transitions::integration_branch;
 
 /// Where the integration lock lives, under the project root.
 const LOCK: &str = ".farik/local/integration.lock";
@@ -308,6 +308,8 @@ fn open(
     append(
         tools,
         task_id,
+        None,
+        None,
         EventBody::PullRequestOpened(PullRequestOpenedBody {
             url: pull_request.url.clone(),
             number: pull_request.number,
@@ -406,6 +408,8 @@ fn record_integrated(
     append(
         tools,
         task_id,
+        None,
+        None,
         EventBody::TaskIntegrated(TaskIntegratedBody {
             sha: sha.to_string(),
             into: into.to_string(),
@@ -423,6 +427,8 @@ fn escalate(
     append(
         tools,
         task_id,
+        None,
+        None,
         EventBody::EscalationRaised(EscalationRaisedBody {
             reason: EscalationRaisedBodyReason::Integration,
             detail: detail.clone(),
@@ -437,22 +443,6 @@ fn git_words(error: &GitError) -> String {
         GitError::CommandFailed { stderr, .. } => stderr.clone(),
         other => other.to_string(),
     }
-}
-
-/// Appends one event about the task, Farik's own, and projects it.
-fn append(tools: &ToolDeps, task_id: &TaskId, body: EventBody) -> Result<(), OrchestratorError> {
-    let ids = EventIds {
-        task_id: Some(task_id.clone()),
-        ..tools.ids.clone()
-    };
-    let event = new_event(body, tools.clock.now(), ids).map_err(|error| {
-        OrchestratorError::Transition(TransitionError::Event {
-            detail: format!("{error:?}"),
-        })
-    })?;
-    let appended = tools.log.append(&event)?;
-    tools.projections.apply(&appended)?;
-    Ok(())
 }
 
 /// The task's events of `kinds` since its last move into `accepted`.

@@ -27,6 +27,7 @@ use super::{Orchestrator, OrchestratorDeps, OrchestratorError, TickReport, workt
 use crate::criteria::{CriterionError, CriterionOutcome, NewTestsInput, run_criteria};
 use crate::exec::ExecError;
 use crate::session::SessionPurpose;
+use crate::tools::ToolDeps;
 use crate::transitions::{
     TransitionAsk, TransitionError, TransitionOutcome, integration_branch, refusal_details,
     reviewed_by_the_human,
@@ -226,7 +227,7 @@ async fn run_what_farik_runs(
         };
         for result in results {
             append(
-                deps,
+                &deps.tools,
                 &contract.id,
                 None,
                 None,
@@ -365,7 +366,7 @@ fn record_review(
         })
         .collect();
     append(
-        deps,
+        &deps.tools,
         &contract.id,
         Some(reviewer.id.to_string()),
         Some(session_id.to_string()),
@@ -572,13 +573,12 @@ pub(super) fn since_verifying(history: &[FarikEvent]) -> u64 {
 /// Appends one event about the task, stamped with the agent and session when there are any, and
 /// projects it.
 pub(super) fn append(
-    deps: &OrchestratorDeps,
+    tools: &ToolDeps,
     task_id: &TaskId,
     agent_id: Option<String>,
     session_id: Option<String>,
     body: EventBody,
 ) -> Result<(), OrchestratorError> {
-    let tools = &deps.tools;
     let ids = EventIds {
         task_id: Some(task_id.clone()),
         agent_id,
