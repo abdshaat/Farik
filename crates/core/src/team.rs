@@ -611,9 +611,10 @@ mod tests {
 
     #[test]
     fn refuses_a_number_outside_what_a_rule_allows() {
-        // Every bound here carries a spec number: 5.2's work-in-progress limit, 5.7's blocked age
-        // and iteration count, 5.5's daily budget, 5.12's task cap and its list of methods. A bound
-        // nothing tests is a bound the next person deletes to make something else compile.
+        // Every bound here carries a spec number: 5.2's work-in-progress limit, 5.7's blocked age,
+        // iteration count and escalation age, 5.5's daily budget, 5.12's task cap and its list of
+        // methods. A bound nothing tests is a bound the next person deletes to make something else
+        // compile.
         for (pointer, value) in [
             ("/policy/wip_limit_per_agent", json!(-1)),
             ("/policy/wip_limit_per_agent", json!(101)),
@@ -621,6 +622,8 @@ mod tests {
             ("/policy/blocked_limit_hours", json!(721)),
             ("/policy/max_iterations", json!(0)),
             ("/policy/max_iterations", json!(101)),
+            ("/policy/escalation_age_hours", json!(0)),
+            ("/policy/escalation_age_hours", json!(721)),
             ("/budgets/daily_usd", json!(0)),
             ("/rules/max_task_budget_usd", json!(0)),
             ("/rules/required_criteria", json!(["vibes"])),
