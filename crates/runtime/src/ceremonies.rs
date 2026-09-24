@@ -248,12 +248,15 @@ pub struct EndedSprint {
     pub ended_seq: u64,
     /// Whether its review has run, under the ceremonies' bound (`has_run`).
     pub reviewed: bool,
-    /// Whether its retro has run, under the same bound.
+    /// Whether its retro has run, under the same bound, or has appended, however its session
+    /// ended: a sprint gets one retro.
     pub retro_held: bool,
+    /// Whether a `retro.appended` has been recorded since its end.
+    pub retro_appended: bool,
 }
 
 /// The sprint of the log's last `sprint.ended`, when no `sprint.started` follows it, with whether
-/// its review and its retro have run since that end. A sprint followed at once by another has
+/// its review and its retro have run since that end, and whether its retro has appended. A sprint followed at once by another has
 /// none: the log keeps what happened.
 ///
 /// # Errors
@@ -266,6 +269,7 @@ pub fn ended_sprint(log: &EventLog) -> Result<Option<EndedSprint>, StoreError> {
             EventKind::SprintEnded,
             EventKind::SessionStarted,
             EventKind::SessionEnded,
+            EventKind::RetroAppended,
         ],
         ..EventQuery::default()
     })?;
@@ -293,12 +297,16 @@ pub fn ended_sprint(log: &EventLog) -> Result<Option<EndedSprint>, StoreError> {
         })
         .unwrap_or(0);
     let after = &events[last + 1..];
+    let retro_appended = after
+        .iter()
+        .any(|event| matches!(event.body, EventBody::RetroAppended(_)));
     Ok(Some(EndedSprint {
         sprint_id: ended.sprint_id.as_str().to_string(),
         started_seq,
         ended_seq: events[last].envelope.seq,
         reviewed: has_run(after, |event| in_thread(event, Thread::Review)),
-        retro_held: has_run(after, |event| in_thread(event, Thread::Retro)),
+        retro_held: retro_appended || has_run(after, |event| in_thread(event, Thread::Retro)),
+        retro_appended,
     }))
 }
 

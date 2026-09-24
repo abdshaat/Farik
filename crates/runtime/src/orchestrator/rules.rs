@@ -249,7 +249,7 @@ fn finished_sprint(
 /// those tasks while the sprint was open. The review is told each task's status, cost, and
 /// completion note, and the sprint's budget and spent; the retro the sprint's rejections,
 /// escalations, blocks, and iterations, and the last retros, and is offered `farik_append_retro`.
-/// Passed over with no runner or on a spent day.
+/// Passed over for a sprint whose file lists no task, with no runner, or on a spent day.
 async fn review_and_retro(
     deps: &OrchestratorDeps,
     scope: &TickScope,
@@ -267,6 +267,10 @@ async fn review_and_retro(
     if sprint.reviewed && sprint.retro_held {
         return Ok(None);
     }
+    let file = tools.files.read_sprint(&sprint.sprint_id)?;
+    if file.task_ids.is_empty() {
+        return Ok(None);
+    }
     let Some(runner) = assigner(team) else {
         return Ok(None);
     };
@@ -275,7 +279,6 @@ async fn review_and_retro(
     {
         return Ok(None);
     }
-    let file = tools.files.read_sprint(&sprint.sprint_id)?;
     let mut tasks = Vec::new();
     for row in board.iter().filter(|row| {
         file.task_ids
@@ -4380,6 +4383,20 @@ mod tests {
         );
     }
 
+    /// The Farik tools a session was given, in no order.
+    fn tools_of(spec: &crate::session::SessionSpec) -> BTreeSet<&str> {
+        spec.farik_tools.iter().map(String::as_str).collect()
+    }
+
+    /// The Farik tools the standup and the review are given.
+    const READ_AND_POST: [&str; 5] = [
+        "farik_read_task",
+        "farik_read_board",
+        "farik_read_rules",
+        "farik_read_criteria",
+        "farik_post_message",
+    ];
+
     #[tokio::test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn plans_the_sprint_in_a_ceremony() {
@@ -4425,17 +4442,17 @@ mod tests {
             panic!("a session's start");
         };
         assert_eq!(start.thread, Some(Thread::Planning));
-        for tool in [
-            "farik_plan_sprint",
-            "farik_post_message",
-            "farik_read_board",
-        ] {
-            assert!(
-                spec.farik_tools.iter().any(|given| given == tool),
-                "{tool}: {:?}",
-                spec.farik_tools
-            );
-        }
+        assert_eq!(
+            tools_of(spec),
+            BTreeSet::from([
+                "farik_read_task",
+                "farik_read_board",
+                "farik_read_rules",
+                "farik_read_criteria",
+                "farik_post_message",
+                "farik_plan_sprint",
+            ])
+        );
         // The candidates, the escalation the digest lists, the last retro, and the channel.
         for fact in [
             "FRK-1",
@@ -4492,6 +4509,24 @@ mod tests {
             }),
         );
         exhausted("sprint_usd", "stop_new_assignments");
+        // Neither another ceremony nor a task's plan session is the sprint's planning, and a
+        // task's budget is not the digest's.
+        harness.project.record(
+            "",
+            "session.started",
+            &json!({
+                "purpose": "ceremony",
+                "model": "claude-sonnet-5",
+                "effort": "medium",
+                "thread": "review"
+            }),
+        );
+        harness.project.record(
+            "FRK-1",
+            "session.started",
+            &json!({ "purpose": "plan", "model": "claude-opus-5", "effort": "high" }),
+        );
+        exhausted("task_usd", "escalate_task");
         harness.open_sprint("S1", &[]);
         let adapter = harness.recorded(vec![planning_ceremony_frk_1()]);
 
@@ -4502,7 +4537,11 @@ mod tests {
             .expect("the tick runs");
 
         let prompt = &adapter.started()[0].initial_prompt;
-        assert!(prompt.contains("the sprint's budget spent"), "{prompt}");
+        assert_eq!(
+            prompt.matches("the sprint's budget spent").count(),
+            1,
+            "{prompt}"
+        );
         assert!(!prompt.contains("the day's budget spent"), "{prompt}");
     }
 
@@ -4686,6 +4725,10 @@ mod tests {
             ]
         );
         assert_eq!(standups(&harness, &adapter).len(), 1);
+        assert_eq!(
+            tools_of(&adapter.started()[0]),
+            BTreeSet::from(READ_AND_POST)
+        );
     }
 
     #[tokio::test]
@@ -4774,6 +4817,62 @@ mod tests {
                 SessionEndedBodyReason::Completed
             ]
         );
+    }
+
+    /// The team's whole daily budget, $20, spent at `when`.
+    fn day_spent_at(harness: &Harness, when: chrono::DateTime<chrono::Utc>) {
+        harness.project.record_at(
+            when,
+            "",
+            "cost.recorded",
+            &json!({
+                "purpose": "implement",
+                "model_id": "claude-opus-5",
+                "usage": {
+                    "input_tokens": 1000,
+                    "output_tokens": 100,
+                    "cache_read_tokens": 0,
+                    "cache_write_tokens": 0
+                },
+                "cost_usd": 20.0
+            }),
+        );
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn holds_no_standup_on_a_spent_day() {
+        let harness = a_sprint_of_frk_1("orch-standup-day");
+        frk_1_started(&harness);
+        day_spent_at(&harness, on(1, 8, 0));
+        let adapter = harness.recorded(vec![standup()]);
+
+        let report = harness
+            .orchestrator_at(adapter.clone(), on(1, 12, 0))
+            .tick()
+            .await
+            .expect("the tick runs");
+
+        assert!(!matches!(report, TickReport::Sprint { .. }), "{report:?}");
+        assert!(adapter.started().is_empty(), "{:?}", adapter.started());
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn holds_no_standup_while_its_runner_sleeps() {
+        let harness = a_sprint_of_frk_1("orch-standup-asleep");
+        frk_1_started(&harness);
+        harness.asleep("sm", on(1, 13, 0));
+        let adapter = harness.recorded(vec![standup()]);
+
+        let report = harness
+            .orchestrator_at(adapter.clone(), on(1, 12, 0))
+            .tick()
+            .await
+            .expect("the tick runs");
+
+        assert!(!matches!(report, TickReport::Sprint { .. }), "{report:?}");
+        assert!(adapter.started().is_empty(), "{:?}", adapter.started());
     }
 
     #[tokio::test]
@@ -6082,14 +6181,7 @@ mod tests {
             "the note's first line alone: {}",
             spec.initial_prompt
         );
-        assert!(
-            !spec
-                .farik_tools
-                .iter()
-                .any(|tool| tool == "farik_append_retro"),
-            "{:?}",
-            spec.farik_tools
-        );
+        assert_eq!(tools_of(spec), BTreeSet::from(READ_AND_POST));
 
         let next = orchestrator.tick().await.expect("the tick runs");
 
@@ -6099,15 +6191,9 @@ mod tests {
             "{next:?}"
         );
         assert_eq!(ceremonies(&harness), vec![Thread::Review, Thread::Retro]);
-        let retro_spec = &adapter.started()[1];
-        assert!(
-            retro_spec
-                .farik_tools
-                .iter()
-                .any(|tool| tool == "farik_append_retro"),
-            "{:?}",
-            retro_spec.farik_tools
-        );
+        let mut retro_tools = BTreeSet::from(READ_AND_POST);
+        retro_tools.insert("farik_append_retro");
+        assert_eq!(tools_of(&adapter.started()[1]), retro_tools);
         let after = orchestrator.tick().await.expect("the tick runs");
         assert!(!matches!(after, TickReport::Sprint { .. }), "{after:?}");
     }
@@ -6241,6 +6327,130 @@ mod tests {
             vec![Thread::Review, Thread::Retro, Thread::Retro]
         );
         assert_eq!(harness.events(&[EventKind::RetroAppended]).len(), 1);
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn holds_no_second_retro_once_one_appended() {
+        let harness = a_finished_sprint("orch-retro-appended");
+        let until = at() + chrono::Duration::hours(2);
+        // The retro appends, then its provider refuses it at a limit before it ends.
+        let appends_then_sleeps = Transcript::from_jsonl(
+            &retro()
+                .lines()
+                .take(5)
+                .chain(refused_until(until).lines().skip(1))
+                .collect::<Vec<_>>()
+                .join("\n"),
+        );
+        let adapter = harness.recorded(vec![review(), appends_then_sleeps, retro()]);
+        let orchestrator = harness.orchestrator(adapter.clone());
+        for _ in 0..3 {
+            orchestrator.tick().await.expect("the tick runs");
+        }
+        assert_eq!(
+            end_reasons(&harness).last(),
+            Some(&SessionEndedBodyReason::ProviderLimit)
+        );
+        assert_eq!(harness.events(&[EventKind::RetroAppended]).len(), 1);
+
+        let report = harness
+            .orchestrator_at(adapter.clone(), until + chrono::Duration::minutes(1))
+            .tick()
+            .await
+            .expect("the tick runs");
+
+        assert!(!matches!(report, TickReport::Sprint { .. }), "{report:?}");
+        assert_eq!(ceremonies(&harness), vec![Thread::Review, Thread::Retro]);
+        assert_eq!(harness.events(&[EventKind::RetroAppended]).len(), 1);
+        let file = std::fs::read_to_string(harness.project.repo.path.join(".farik/team/retro.md"))
+            .expect("the retro reads");
+        assert_eq!(file.matches("## S1 ").count(), 1, "{file}");
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn holds_no_review_or_retro_on_a_spent_day() {
+        let harness = a_finished_sprint("orch-review-day");
+        let clock = Arc::new(MovableClock::new(at()));
+        let adapter = harness.recorded(vec![review(), retro()]);
+        let orchestrator = harness.orchestrator_on(adapter.clone(), Arc::clone(&clock));
+        orchestrator.tick().await.expect("the sprint ends");
+        day_spent_at(&harness, at());
+
+        let spent = orchestrator.tick().await.expect("the tick runs");
+
+        assert!(!matches!(spent, TickReport::Sprint { .. }), "{spent:?}");
+        assert!(
+            ceremonies(&harness).is_empty(),
+            "{:?}",
+            ceremonies(&harness)
+        );
+        let next_day = at() + chrono::Duration::days(1);
+        clock.set(next_day);
+        orchestrator.tick().await.expect("the review runs");
+        assert_eq!(ceremonies(&harness), vec![Thread::Review]);
+        day_spent_at(&harness, next_day);
+        let spent = orchestrator.tick().await.expect("the tick runs");
+        assert!(!matches!(spent, TickReport::Sprint { .. }), "{spent:?}");
+        assert_eq!(ceremonies(&harness), vec![Thread::Review]);
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn holds_no_review_or_retro_outside_a_full_tick() {
+        let harness = a_finished_sprint("orch-review-scoped");
+        let adapter = harness.recorded(vec![review(), retro()]);
+        let orchestrator = harness.orchestrator(adapter.clone());
+        orchestrator.tick().await.expect("the sprint ends");
+
+        // Before the review, then before the retro.
+        for held in [vec![], vec![Thread::Review]] {
+            for scope in [
+                TickScope {
+                    rules: TickRules::Planning,
+                    ..TickScope::default()
+                },
+                TickScope {
+                    rules: TickRules::Refining,
+                    ..TickScope::default()
+                },
+                TickScope {
+                    task_id: Some("FRK-1".parse().expect("a task id")),
+                    ..TickScope::default()
+                },
+            ] {
+                let report = orchestrator
+                    .tick_within(&scope)
+                    .await
+                    .expect("the tick runs");
+                assert!(!matches!(report, TickReport::Sprint { .. }), "{report:?}");
+            }
+            assert_eq!(ceremonies(&harness), held);
+            orchestrator.tick().await.expect("the tick runs");
+        }
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn holds_no_review_or_retro_of_a_sprint_that_held_no_task() {
+        let harness = Harness::new("orch-review-empty", with_a_scrum_master);
+        harness.open_sprint("S1", &[]);
+        harness.project.record(
+            "",
+            "sprint.ended",
+            &json!({ "sprint_id": "S1", "ended_by": "human", "left": [] }),
+        );
+        let adapter = harness.recorded(vec![review(), retro()]);
+
+        let report = harness
+            .orchestrator(adapter.clone())
+            .tick()
+            .await
+            .expect("the tick runs");
+
+        assert!(!matches!(report, TickReport::Sprint { .. }), "{report:?}");
+        assert!(adapter.started().is_empty(), "{:?}", adapter.started());
     }
 
     #[tokio::test]

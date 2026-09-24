@@ -1,8 +1,7 @@
 //! `farik_append_retro` (`docs/SPEC.md` 5.9): the retro ceremony records what the next planning
 //! should know, in `.farik/team/retro.md` and the log.
 
-use farik_protocol::event::{EventBody, EventKind, Thread};
-use farik_store::EventQuery;
+use farik_protocol::event::{EventBody, Thread};
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -23,7 +22,7 @@ pub(crate) struct AppendRetroInput {
 const RETRO_CHARS: usize = 4_000;
 
 /// Appends the retro of the latest ended sprint to `team/retro.md` and records `retro.appended`,
-/// once per session, in a retro ceremony session alone. Answers the sprint.
+/// once per sprint, whichever session asks, in a retro ceremony session alone. Answers the sprint.
 pub(super) fn append_retro(call: &Call<'_>, input: &AppendRetroInput) -> Result<Value, ToolError> {
     if call.context.thread != Some(Thread::Retro) {
         return Err(refused("only the retro ceremony writes team/retro.md"));
@@ -37,26 +36,12 @@ pub(super) fn append_retro(call: &Call<'_>, input: &AppendRetroInput) -> Result<
         )));
     }
     let deps = call.deps();
-    let session = Some(call.context.session_id.as_str());
-    let appended = deps
-        .log
-        .read(&EventQuery {
-            agent_id: Some(call.agent_id().to_string()),
-            kinds: vec![EventKind::RetroAppended],
-            ..EventQuery::default()
-        })
-        .map_err(failed)?;
-    if appended
-        .iter()
-        .any(|event| event.envelope.ids.session_id.as_deref() == session)
-    {
-        return Err(refused(
-            "this session has appended its retro, and appends once",
-        ));
-    }
     let sprint = ended_sprint(&deps.log)
         .map_err(failed)?
         .ok_or_else(|| refused("no sprint has ended since the last one started"))?;
+    if sprint.retro_appended {
+        return Err(refused(&format!("{}'s retro is written", sprint.sprint_id)));
+    }
     deps.files
         .append_retro(
             &sprint.sprint_id,
@@ -119,6 +104,44 @@ mod tests {
             project.deps.files.read_retro().expect("the file reads"),
             None
         );
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn refuses_a_second_retro_of_a_sprint() {
+        let project = TestProject::new("retro-second", &a_team_of_three(|_| {}));
+        project.open_sprint("S1", None, &[]);
+        project.record(
+            "",
+            "sprint.ended",
+            &json!({ "sprint_id": "S1", "ended_by": "human", "left": [] }),
+        );
+        let retro_session = |session_id: &str| {
+            let mut context = project.context("pm", None);
+            context.purpose = SessionPurpose::Ceremony;
+            context.thread = Some(Thread::Retro);
+            context.session_id = session_id.to_string();
+            context
+        };
+        let (first, second) = (retro_session("s-retro-1"), retro_session("s-retro-2"));
+        run(
+            &first,
+            "farik_append_retro",
+            json!({ "text": "Keep them small." }),
+        )
+        .expect("the sprint's retro");
+        let before = project.event_count();
+
+        let refused = run(&second, "farik_append_retro", json!({ "text": "Again." }))
+            .expect_err("a sprint gets one retro");
+
+        assert_eq!(
+            refused,
+            ToolError::Refused {
+                reason: "retro_refused: S1's retro is written".to_string()
+            }
+        );
+        assert_eq!(project.event_count(), before, "nothing is recorded");
     }
 
     #[test]
