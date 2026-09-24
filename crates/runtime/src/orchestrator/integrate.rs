@@ -258,17 +258,6 @@ fn rescan(tools: &ToolDeps, task_id: &TaskId) -> Result<ScanRefresh, String> {
         .files
         .write_project_scan(&project_document(&scan, &library))
         .map_err(|error| error.to_string())?;
-    append(
-        tools,
-        task_id,
-        None,
-        None,
-        EventBody::ProjectScanned(ProjectScannedBody {
-            detected_criteria: found,
-            read_back: scan.read_back.clone(),
-        }),
-    )
-    .map_err(words)?;
     if kept.as_ref() != Some(&library) {
         tools
             .files
@@ -286,6 +275,19 @@ fn rescan(tools: &ToolDeps, task_id: &TaskId) -> Result<ScanRefresh, String> {
         )
         .map_err(words)?;
     }
+    // Last, as the mark that the refresh finished: one that failed before it is compared against
+    // the scan before, and so is done again by the next integration.
+    append(
+        tools,
+        task_id,
+        None,
+        None,
+        EventBody::ProjectScanned(ProjectScannedBody {
+            detected_criteria: found,
+            read_back: scan.read_back.clone(),
+        }),
+    )
+    .map_err(words)?;
     Ok(ScanRefresh::Refreshed)
 }
 
@@ -1658,9 +1660,10 @@ mod tests {
             kinds,
             [
                 EventKind::TaskIntegrated,
-                EventKind::ProjectScanned,
-                EventKind::CriteriaUpdated
-            ]
+                EventKind::CriteriaUpdated,
+                EventKind::ProjectScanned
+            ],
+            "the scan is recorded last, once the refresh finished"
         );
         let scanned = harness.events(&[EventKind::ProjectScanned]);
         assert_eq!(
@@ -1707,6 +1710,47 @@ mod tests {
         assert!(what.starts_with("integrated at"), "{what}");
         assert!(!what.contains("project scan"), "{what}");
         assert_eq!(harness.events(&[EventKind::ProjectScanned]).len(), scanned);
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn retries_a_refresh_whose_library_was_not_written() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let harness = under("int-rescan-retry", "auto_merge");
+        accepted_adding(&harness, "FRK-1", PACKAGE);
+        let team = harness.project.repo.path.join(".farik/team");
+        let mode = |bits| {
+            std::fs::set_permissions(&team, std::fs::Permissions::from_mode(bits))
+                .expect("the team directory's mode");
+        };
+        // `project.md` is written, and then the library cannot be.
+        mode(0o555);
+        let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
+        let what = acted(&orchestrator).await;
+        mode(0o755);
+        assert!(
+            what.contains("; the project scan was not refreshed: "),
+            "{what}"
+        );
+
+        // The next integration changes nothing the scan reads, and finishes the refresh.
+        accepted_adding(&harness, "FRK-2", &[("README.md", "# Notes\n")]);
+        let what = acted(&orchestrator).await;
+
+        assert!(what.ends_with("; the project scan was refreshed"), "{what}");
+        assert!(
+            harness
+                .project
+                .deps
+                .files
+                .read_criteria()
+                .expect("the library")
+                .criteria
+                .iter()
+                .any(|one| one.name.as_str() == "the-tests-pass")
+        );
+        assert_eq!(harness.events(&[EventKind::ProjectScanned]).len(), 1);
     }
 
     #[tokio::test]
