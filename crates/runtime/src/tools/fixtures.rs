@@ -5,6 +5,7 @@ use std::path::Path;
 use std::sync::Arc;
 
 use chrono::{DateTime, TimeZone, Utc};
+use farik_core::branch::task_branch;
 use farik_core::contract::fixtures::a_contract_wire;
 use farik_core::contract::validate_contract;
 use farik_core::criteria::fixtures::a_criteria_library_wire;
@@ -147,6 +148,17 @@ impl TestProject {
                 .expect("the file reads"),
         )
         .expect("a contract serialises")
+    }
+
+    /// The branch of `task`, the one its contract's file names (5.14).
+    pub(crate) fn branch(&self, task: &str) -> String {
+        task_branch(
+            &self
+                .deps
+                .files
+                .read_contract(&task.parse().expect("a task id"))
+                .expect("the file reads"),
+        )
     }
 
     /// The fixture contract as `task`, a Software Developer's reviewed by another, written to its

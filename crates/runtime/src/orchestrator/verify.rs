@@ -7,6 +7,7 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use farik_core::branch::task_branch;
 use farik_core::contract::{ExitCriterion, TaskContract, TaskId, TaskStatus, wire_method};
 use farik_core::governor::done::{CriterionResult, RunBy, requires_human_acceptance};
 use farik_core::governor::gates::Rejection;
@@ -167,7 +168,7 @@ async fn run_what_farik_runs(
         let base = base.clone();
         let outcomes = tokio::task::spawn_blocking(move || {
             let git = Git::open(root);
-            let head = format!("farik/{}", alone.id.as_str());
+            let head = task_branch(&alone);
             let input = NewTestsInput {
                 git: &git,
                 base: &base,
@@ -299,10 +300,7 @@ async fn review(
     let since = since_verifying(&history);
     let context = context(deps, team, &row.task_id)?;
     let git = &deps.tools.git;
-    let diff = git.diff(
-        &integration_branch(team, git)?,
-        &format!("farik/{}", row.task_id.as_str()),
-    )?;
+    let diff = git.diff(&integration_branch(team, git)?, &task_branch(&contract))?;
     let initial_prompt = review_message(&ReviewBrief {
         contract: &contract,
         results: &governor_results(&history, since),

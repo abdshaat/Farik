@@ -4,6 +4,7 @@
 
 use std::sync::Arc;
 
+use farik_core::branch::task_branch;
 use farik_core::budget::{BudgetScope, SessionLedger, check_budgets};
 use farik_core::contract::{Role, TaskContract, TaskId, TaskStatus};
 use farik_core::governor::transition::TransitionRequest;
@@ -341,7 +342,7 @@ async fn in_progress(
         return Ok(None);
     }
     let sandbox = orchestrator.sandbox_for(&row.task_id, team)?;
-    let resume = resume(deps, team, &row.task_id)?;
+    let resume = resume(deps, team, &contract)?;
     let executor: Arc<dyn Executor> = sandbox;
     let end = run_session(
         deps,
@@ -367,13 +368,14 @@ async fn in_progress(
 fn resume(
     deps: &OrchestratorDeps,
     team: &Team,
-    task_id: &TaskId,
+    contract: &TaskContract,
 ) -> Result<Resume, OrchestratorError> {
+    let task_id = &contract.id;
     let worktree = worktree(deps, task_id);
     let last_commit = if worktree.is_dir() {
         let git = &deps.tools.git;
         let base = integration_branch(team, git)?;
-        if git.commit_count(&base, &format!("farik/{}", task_id.as_str()))? > 0 {
+        if git.commit_count(&base, &task_branch(contract))? > 0 {
             Git::open(worktree).head_summary()?
         } else {
             None
@@ -417,7 +419,7 @@ fn resume(
     })
 }
 
-/// Rule 7: a task `assigned` gets its worktree on `farik/<id>` from the integration branch,
+/// Rule 7: a task `assigned` gets its worktree on its branch (5.14) from the integration branch,
 /// reused when it is already there, and is moved to `in_progress` as its assignee asks. No session
 /// starts: the next tick's rule 6 starts it. A task whose assignee is not active is passed over, as
 /// is one whose start the governor refused, now or since it was assigned.
@@ -441,7 +443,7 @@ fn assigned(
         return Ok(None);
     }
     let worktree = worktree(deps, &row.task_id);
-    let branch = format!("farik/{}", row.task_id.as_str());
+    let branch = task_branch(&deps.tools.files.read_contract(&row.task_id)?);
     if !worktree.is_dir() {
         let git = &deps.tools.git;
         git.create_worktree(&worktree, &branch, &integration_branch(team, git)?)?;
@@ -1076,10 +1078,10 @@ mod tests {
         assert_eq!(
             git_output_in(
                 &harness.project.repo.path,
-                &["branch", "--list", "farik/FRK-1"]
+                &["branch", "--list", &harness.branch("FRK-1")]
             )
             .trim(),
-            "farik/FRK-1"
+            harness.branch("FRK-1")
         );
         assert!(!orchestrator.holds_sandbox(&"FRK-1".parse().expect("a task id")));
     }
@@ -1107,10 +1109,10 @@ mod tests {
         assert_eq!(
             git_output_in(
                 &harness.project.repo.path,
-                &["branch", "--list", "farik/FRK-1"]
+                &["branch", "--list", &harness.branch("FRK-1")]
             )
             .trim(),
-            "farik/FRK-1"
+            harness.branch("FRK-1")
         );
     }
 
@@ -1297,7 +1299,11 @@ mod tests {
         assert!(worktree.is_dir());
         assert_eq!(
             git_output_in(&worktree, &["rev-parse", "--abbrev-ref", "HEAD"]),
-            "farik/FRK-1"
+            "feature/FRK-1"
+        );
+        assert_eq!(
+            git_output_in(&harness.project.repo.path, &["branch", "--list", "farik/*"]),
+            ""
         );
         let moves = harness.events(&[EventKind::TaskTransitioned]);
         match &moves.last().expect("a move").body {
@@ -1310,6 +1316,44 @@ mod tests {
             other => panic!("expected a move, got {other:?}"),
         }
         assert!(adapter.started().is_empty());
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn starts_a_document_task_on_a_docs_branch() {
+        let harness = Harness::new("orch-start-docs", |wire| {
+            wire["agents"]
+                .as_array_mut()
+                .expect("a list of agents")
+                .push(json!({
+                    "id": "arch",
+                    "display_name": "arch",
+                    "role": "architect",
+                    "status": "active"
+                }));
+        });
+        harness.file("FRK-1", "ready", |wire| {
+            wire["assignee_role"] = json!("architect");
+            wire["allowed_paths"] = json!(["docs/adr/**"]);
+        });
+        harness.project.moved(
+            "FRK-1",
+            "ready",
+            "assigned",
+            &json!({ "actor": "product_manager", "requested_by": "pm", "assignee": "arch", "reviewer": "dev-b" }),
+        );
+        let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
+
+        let report = orchestrator.tick().await.expect("the tick runs");
+
+        assert_eq!(acted_on(&report), Some("FRK-1"), "{report:?}");
+        assert_eq!(
+            git_output_in(
+                &harness.worktree("FRK-1"),
+                &["rev-parse", "--abbrev-ref", "HEAD"]
+            ),
+            "docs/FRK-1"
+        );
     }
 
     #[tokio::test]
@@ -1333,11 +1377,13 @@ mod tests {
         assert_eq!(sandboxes.created("FRK-1"), 1);
         let git = &harness.project.deps.git;
         assert_eq!(
-            git.commit_count("main", "farik/FRK-1").expect("git counts"),
+            git.commit_count("main", &harness.branch("FRK-1"))
+                .expect("git counts"),
             1
         );
         assert_eq!(
-            git.changed_paths("main", "farik/FRK-1").expect("git lists"),
+            git.changed_paths("main", &harness.branch("FRK-1"))
+                .expect("git lists"),
             vec!["done.txt".to_string()]
         );
         assert_eq!(harness.row("FRK-1").status, TaskStatus::Verifying);
@@ -1376,7 +1422,10 @@ mod tests {
             "{}",
             started[0].initial_prompt
         );
-        let head = git_output_in(&harness.project.repo.path, &["rev-parse", "farik/FRK-1"]);
+        let head = git_output_in(
+            &harness.project.repo.path,
+            &["rev-parse", &harness.branch("FRK-1")],
+        );
         let prompt = &started[1].initial_prompt;
         assert!(
             prompt.contains(&format!("Resuming: last commit {head}")),
@@ -3034,7 +3083,7 @@ mod tests {
             .project
             .deps
             .git
-            .create_worktree(&harness.worktree("FRK-1"), "farik/FRK-1", "main")
+            .create_worktree(&harness.worktree("FRK-1"), &harness.branch("FRK-1"), "main")
             .expect("the worktree is made");
         let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
 

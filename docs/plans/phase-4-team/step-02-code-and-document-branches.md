@@ -127,7 +127,7 @@ Consumes: `task_branch` (Task 3)
 - `shows_a_tasks_diff_before_and_after_integration` (reading.rs, changed) — its Developer task's branch is `feature/FRK-<n>`.
 - Every other runtime and cli test that named `farik/FRK-<n>` names the branch its contract now gets; none is deleted or skipped.
 
-- [ ] `feat(runtime): work each task on the branch its contract names`
+- [x] `feat(runtime): work each task on the branch its contract names`
 
 ### Task 5: the spec
 

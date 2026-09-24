@@ -6,6 +6,7 @@ use std::fs::{File, OpenOptions};
 use std::path::Path;
 use std::sync::Arc;
 
+use farik_core::branch::task_branch;
 use farik_core::contract::{TaskId, TaskKind, TaskStatus};
 use farik_core::team::{Integration, Team};
 use farik_protocol::event::{
@@ -180,7 +181,7 @@ fn through_the_forge(
     asker: Asker,
 ) -> Result<Option<IntegrationOutcome>, OrchestratorError> {
     let task_id = &row.task_id;
-    let branch = format!("farik/{}", task_id.as_str());
+    let branch = task_branch(&tools.files.read_contract(task_id)?);
     let opened = since_accepted(tools, task_id, &[EventKind::PullRequestOpened])?
         .into_iter()
         .rev()
@@ -359,7 +360,7 @@ fn merge(
     push: bool,
 ) -> Result<IntegrationOutcome, OrchestratorError> {
     let id = row.task_id.as_str();
-    let branch = format!("farik/{id}");
+    let branch = task_branch(&tools.files.read_contract(&row.task_id)?);
     let message = format!("Merge {id}: {}", row.title);
     let sha = match tools.git.merge(into, &branch, &message) {
         Ok(MergeOutcome::Merged { sha }) => sha,
@@ -529,12 +530,19 @@ pub(super) fn cleanup(
     if !remove_workspace(orchestrator, &row.task_id)? {
         return Ok(None);
     }
+    // The removal already happened, so a contract that cannot be read only loses the name.
+    let branch = orchestrator
+        .deps
+        .tools
+        .files
+        .read_contract(&row.task_id)
+        .map_or_else(
+            |_| "its branch".to_string(),
+            |contract| task_branch(&contract),
+        );
     Ok(Some(TickReport::Acted {
         task_id: row.task_id.clone(),
-        what: format!(
-            "removed its worktree and its sandbox, and kept farik/{}",
-            row.task_id.as_str()
-        ),
+        what: format!("removed its worktree and its sandbox, and kept {branch}"),
     }))
 }
 
@@ -688,7 +696,7 @@ mod tests {
             &harness,
             &["rev-list", "--parents", "-n", "1", "refs/heads/main"],
         );
-        let branch = at_root(&harness, &["rev-parse", "farik/FRK-1"]);
+        let branch = at_root(&harness, &["rev-parse", &harness.branch("FRK-1")]);
         assert!(
             parents.split(' ').skip(1).any(|parent| parent == branch),
             "{parents}"
@@ -700,6 +708,50 @@ mod tests {
         );
         assert!(!harness.row("FRK-1").awaiting_integration);
         let _ = std::fs::remove_dir_all(&origin);
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn integrates_a_fix_branch() {
+        let harness = under("int-fix", "auto_merge");
+        harness.verifying_with("FRK-1", true, true, |wire| wire["change"] = json!("fix"));
+        harness.project.moved(
+            "FRK-1",
+            "verifying",
+            "accepted",
+            &json!({ "actor": "product_manager", "requested_by": "pm", "assignee": "dev-a", "reviewer": "dev-b" }),
+        );
+        let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
+
+        let mut said = Vec::new();
+        for _ in 0..2 {
+            if let TickReport::Acted { what, .. } =
+                orchestrator.tick().await.expect("the tick runs")
+            {
+                said.push(what);
+            }
+        }
+
+        assert!(
+            escalations(&harness).is_empty(),
+            "{:?}",
+            escalations(&harness)
+        );
+        assert_eq!(integrations(&harness).len(), 1, "{said:?}");
+        let parents = at_root(
+            &harness,
+            &["rev-list", "--parents", "-n", "1", "refs/heads/main"],
+        );
+        let branch = at_root(&harness, &["rev-parse", "fix/FRK-1"]);
+        assert_eq!(
+            parents.split(' ').nth(2),
+            Some(branch.as_str()),
+            "{parents}"
+        );
+        assert!(
+            said.iter().any(|what| what.ends_with("and kept fix/FRK-1")),
+            "{said:?}"
+        );
     }
 
     #[tokio::test]
@@ -979,9 +1031,10 @@ mod tests {
         assert_eq!(raised.len(), 1, "{raised:?}");
         assert_eq!(raised[0].reason, EscalationRaisedBodyReason::Integration);
         assert!(
-            raised[0]
-                .detail
-                .starts_with("merging farik/FRK-1 into main failed"),
+            raised[0].detail.starts_with(&format!(
+                "merging {} into main failed",
+                harness.branch("FRK-1")
+            )),
             "{}",
             raised[0].detail
         );
@@ -1075,10 +1128,10 @@ mod tests {
                 "work",
                 "{round}"
             );
-            for branch in ["farik/FRK-1", "farik/FRK-2"] {
+            for branch in [harness.branch("FRK-1"), harness.branch("FRK-2")] {
                 git_in(
                     &harness.project.repo.path,
-                    &["merge-base", "--is-ancestor", branch, "main"],
+                    &["merge-base", "--is-ancestor", &branch, "main"],
                 );
             }
             assert_eq!(
@@ -1107,7 +1160,7 @@ mod tests {
             harness.project.record(
                 "FRK-1",
                 "pull_request.opened",
-                &json!({ "url": PULL_URL, "number": 7, "branch": "farik/FRK-1" }),
+                &json!({ "url": PULL_URL, "number": 7, "branch": harness.branch("FRK-1") }),
             );
         }
         (harness, origin)
@@ -1151,13 +1204,13 @@ mod tests {
         orchestrator.tick().await.expect("the tick runs");
 
         assert_eq!(
-            git_output_in(&origin, &["rev-parse", "farik/FRK-1"]),
-            at_root(&harness, &["rev-parse", "farik/FRK-1"])
+            git_output_in(&origin, &["rev-parse", &harness.branch("FRK-1")]),
+            at_root(&harness, &["rev-parse", &harness.branch("FRK-1")])
         );
         let recorded = opened(&harness);
         assert_eq!(recorded.len(), 1, "{recorded:?}");
         assert_eq!(recorded[0].number, 7);
-        assert_eq!(recorded[0].branch, "farik/FRK-1");
+        assert_eq!(recorded[0].branch, harness.branch("FRK-1"));
         assert_eq!(recorded[0].url, PULL_URL);
         let body = harness.gh.stdin_of("create");
         let contract = harness

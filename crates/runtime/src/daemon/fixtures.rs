@@ -52,7 +52,7 @@ impl TestDaemon {
         project
             .repo
             .adapter()
-            .create_worktree(&worktree, "farik/FRK-1", "main")
+            .create_worktree(&worktree, &project.branch("FRK-1"), "main")
             .expect("the worktree is made");
         let state = Arc::new(DaemonState::new(Arc::clone(&project.deps)));
         let daemon = Self {

@@ -190,7 +190,7 @@ impl Harness {
     }
 
     /// Files `task` and moves it through `assigned` to `in_progress`, held by `assignee` and
-    /// reviewed by `reviewer`, with its worktree made on `farik/<task>` from `main`.
+    /// reviewed by `reviewer`, with its worktree made on its branch from `main`.
     pub(crate) fn in_progress(&self, task: &str, assignee: &str, reviewer: &str) {
         self.assigned(task, assignee, reviewer);
         self.project.moved(
@@ -202,7 +202,7 @@ impl Harness {
         self.project
             .deps
             .git
-            .create_worktree(&self.worktree(task), &format!("farik/{task}"), "main")
+            .create_worktree(&self.worktree(task), &self.branch(task), "main")
             .expect("the task's worktree is made");
     }
 
@@ -222,7 +222,7 @@ impl Harness {
         self.project.moved(task, "assigned", "in_progress", &people);
         let worktree = self.worktree(task);
         let git = &self.project.deps.git;
-        git.create_worktree(&worktree, &format!("farik/{task}"), "main")
+        git.create_worktree(&worktree, &self.branch(task), "main")
             .expect("the task's worktree is made");
         if commits_done {
             std::fs::write(worktree.join("done.txt"), "").expect("done.txt is written");
@@ -338,7 +338,7 @@ impl Harness {
         let root = self.project.repo.path.to_str().expect("a path").to_string();
         git_in(
             &clone,
-            &["fetch", &root, &format!("refs/heads/farik/{task}")],
+            &["fetch", &root, &format!("refs/heads/{}", self.branch(task))],
         );
         git_in(
             &clone,
@@ -474,6 +474,11 @@ impl Harness {
             .path
             .join(".farik/local/worktrees")
             .join(task)
+    }
+
+    /// The task's branch, the one its contract's file names (5.14).
+    pub(crate) fn branch(&self, task: &str) -> String {
+        self.project.branch(task)
     }
 
     /// The task's row on the board.

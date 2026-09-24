@@ -1,6 +1,7 @@
 //! The first user message of each kind of session: what it is about, in words the agent reads
 //! before anything else.
 
+use farik_core::branch::task_branch;
 use farik_core::contract::{TaskContract, TaskKind, Verification};
 use farik_core::governor::done::CriterionResult;
 use farik_protocol::event::{EventBody, FarikEvent, HumanAcceptedBodySubject};
@@ -225,7 +226,8 @@ pub(super) fn plan_message(
 pub(super) fn implement_message(contract: &TaskContract, resume: &Resume) -> String {
     let task = contract.id.as_str();
     let mut message = format!(
-        "Do the work of {task} under its contract, in this worktree, on the branch farik/{task}."
+        "Do the work of {task} under its contract, in this worktree, on the branch {}.",
+        task_branch(contract)
     );
     if let Some((failed, reasons)) = &resume.rejection {
         let words = format!("failed criteria: {}\nreasons: {reasons}", listed(failed));
@@ -288,9 +290,10 @@ pub(super) fn review_message(brief: &ReviewBrief<'_>) -> String {
     format!(
         "{message}\n\nFarik ran its `command`, `test`, and `artifact` criteria in the task's \
          sandbox, as its reviewer: {results}\n\n{rubrics}\n\nThe assignee's completion note: \
-         {note}\n\nThe diff from the integration branch to farik/{task}: {diff}\n\nWrite the \
+         {note}\n\nThe diff from the integration branch to {branch}: {diff}\n\nWrite the \
          review note with `farik_write_note` of kind `review`, mapping each criterion to its \
          evidence.",
+        branch = task_branch(contract),
         results = untrusted_block("results", &results_text(brief.results), RESULTS_CAP_BYTES),
         rubrics = rubrics(contract),
         note = untrusted_block(
@@ -432,7 +435,7 @@ fn listed(ids: &[String]) -> String {
 #[cfg(test)]
 mod tests {
     use farik_core::contract::fixtures::a_contract_wire;
-    use farik_core::contract::{TaskContract, TaskKind, validate_contract};
+    use farik_core::contract::{Role, TaskContract, TaskKind, validate_contract};
     use farik_protocol::event::{FarikEvent, event_from_value};
     use farik_store::git::HeadSummary;
     use serde_json::{Value, json};
@@ -516,6 +519,31 @@ mod tests {
         // The note cannot close its own block early.
         assert_eq!(message.matches("</untrusted>").count(), 1, "{message}");
         assert!(message.ends_with("</untrusted>"), "{message}");
+    }
+
+    #[test]
+    fn names_the_branch_in_the_implement_message() {
+        let contract = TaskContract {
+            assignee_role: Role::Architect,
+            ..contract()
+        };
+
+        let message = implement_message(&contract, &resume(false, None));
+        assert!(
+            message.ends_with("in this worktree, on the branch docs/FRK-1."),
+            "{message}"
+        );
+        let message = review_message(&ReviewBrief {
+            contract: &contract,
+            results: &[],
+            completion_note: None,
+            diff: "",
+            unanswered: &[],
+        });
+        assert!(
+            message.contains("The diff from the integration branch to docs/FRK-1: "),
+            "{message}"
+        );
     }
 
     #[test]

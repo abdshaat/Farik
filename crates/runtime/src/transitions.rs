@@ -8,6 +8,7 @@ use std::str::FromStr;
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 
+use farik_core::branch::task_branch;
 use farik_core::budget::SessionLedger;
 use farik_core::contract::{Role, TaskContract, TaskId, TaskKind, TaskStatus, wire_method};
 use farik_core::governor::done::{CriterionResult, DoneEvidence, RunBy};
@@ -424,7 +425,7 @@ impl Transitions {
             judgment_review: judgment_since_written(&history),
         };
 
-        let (work, changed_paths) = self.work(id, team)?;
+        let (work, changed_paths) = self.work(&contract, team)?;
 
         let assignment = assignment(
             ask,
@@ -487,17 +488,21 @@ impl Transitions {
     /// `.farik/local/worktrees/<id>` exists; otherwise no commits, not clean, and no paths, which
     /// refuses `verifying` truthfully. The integration branch is resolved only then, so that no git
     /// error can arise for a task with no worktree.
-    fn work(&self, id: &TaskId, team: &Team) -> Result<(WorkState, Vec<String>), TransitionError> {
+    fn work(
+        &self,
+        contract: &TaskContract,
+        team: &Team,
+    ) -> Result<(WorkState, Vec<String>), TransitionError> {
         let worktree = self
             .files
             .root()
             .join(".farik/local/worktrees")
-            .join(id.as_str());
+            .join(contract.id.as_str());
         if !worktree.is_dir() {
             return Ok((WorkState::default(), Vec::new()));
         }
         let base = integration_branch(team, &self.git)?;
-        let branch = format!("farik/{}", id.as_str());
+        let branch = task_branch(contract);
         let work = WorkState {
             commits: self.git.commit_count(&base, &branch)?,
             worktree_clean: self.git.is_clean(&worktree)?,
@@ -1119,6 +1124,7 @@ mod tests {
     use std::time::Duration;
 
     use chrono::{DateTime, TimeZone, Utc};
+    use farik_core::branch::task_branch;
     use farik_core::budget::default_session_limits;
     use farik_core::contract::fixtures::a_contract_wire;
     use farik_core::contract::{Role, TaskStatus, validate_contract};
@@ -1327,6 +1333,16 @@ mod tests {
 
         /// The fixture contract as `task`, a Software Developer's reviewed by another, written to its
         /// file in `draft` with `change` applied.
+        /// The branch of `task`, the one its contract's file names (5.14).
+        fn branch(&self, task: &str) -> String {
+            task_branch(
+                &self
+                    .files
+                    .read_contract(&task.parse().expect("a task id"))
+                    .expect("the file reads"),
+            )
+        }
+
         fn file(&self, task: &str, change: impl FnOnce(&mut Value)) {
             let mut wire = a_contract_wire();
             wire["id"] = json!(task);
@@ -1589,7 +1605,7 @@ mod tests {
         project
             .repo
             .adapter()
-            .create_worktree(&worktree, "farik/FRK-1", "main")
+            .create_worktree(&worktree, &project.branch("FRK-1"), "main")
             .expect("the worktree is made");
         std::fs::create_dir_all(worktree.join("src/login")).expect("a directory");
         std::fs::write(worktree.join("src/login/form.rs"), "fn form() {}\n").expect("written");
@@ -1910,12 +1926,15 @@ mod tests {
         project
             .repo
             .adapter()
-            .create_worktree(&worktree, "farik/FRK-1", "main")
+            .create_worktree(&worktree, &project.branch("FRK-1"), "main")
             .expect("the worktree is made");
         std::fs::write(worktree.join("form.rs"), "fn form() {}\n").expect("written");
         git_in(&worktree, &["add", "-A"]);
         git_in(&worktree, &["commit", "-m", "the form"]);
-        git_in(&project.repo.path, &["branch", "develop", "farik/FRK-1"]);
+        git_in(
+            &project.repo.path,
+            &["branch", "develop", &project.branch("FRK-1")],
+        );
         // With no remote and a detached head, git can name no default branch.
         git_in(&project.repo.path, &["checkout", "--detach"]);
         let verifying = |task| {

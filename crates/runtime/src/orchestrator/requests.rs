@@ -1735,7 +1735,7 @@ mod tests {
                     .project
                     .deps
                     .git
-                    .create_worktree(&harness.worktree("FRK-2"), "farik/FRK-2", "main")
+                    .create_worktree(&harness.worktree("FRK-2"), &harness.branch("FRK-2"), "main")
                     .expect("the child's worktree is made");
             }
         }

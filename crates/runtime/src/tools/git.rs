@@ -3,6 +3,7 @@
 
 use std::path::PathBuf;
 
+use farik_core::branch::task_branch;
 use farik_core::contract::TaskId;
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -40,7 +41,7 @@ pub(super) fn diff(call: &Call<'_>) -> Result<Value, ToolError> {
     let task = call.task()?;
     let git = &call.deps().git;
     let base = integration_branch(&call.team, git).map_err(failed)?;
-    let diff = git.diff(&base, &branch(task)).map_err(failed)?;
+    let diff = git.diff(&base, &branch(call, task)?).map_err(failed)?;
     Ok(json!({ "diff": diff }))
 }
 
@@ -64,7 +65,7 @@ pub(super) fn commit(call: &Call<'_>, input: &CommitInput) -> Result<Value, Tool
 
 /// `farik_git_push`: pushes the task branch to `origin`, for the task's assignee alone.
 pub(super) fn push(call: &Call<'_>) -> Result<Value, ToolError> {
-    let branch = branch(assignees_task(call)?);
+    let branch = branch(call, assignees_task(call)?)?;
     call.deps().git.push(REMOTE, &branch).map_err(failed)?;
     Ok(json!({ "remote": REMOTE, "branch": branch }))
 }
@@ -94,9 +95,10 @@ fn worktree(call: &Call<'_>, task: &TaskId) -> PathBuf {
         .join(task.as_str())
 }
 
-/// The task's branch, `farik/<id>`.
-fn branch(task: &TaskId) -> String {
-    format!("farik/{}", task.as_str())
+/// The task's branch, the one its contract names (5.14).
+fn branch(call: &Call<'_>, task: &TaskId) -> Result<String, ToolError> {
+    let (contract, _) = call.contract(task)?;
+    Ok(task_branch(&contract))
 }
 
 #[cfg(test)]
@@ -121,7 +123,7 @@ mod tests {
         project
             .deps
             .git
-            .create_worktree(&worktree, "farik/FRK-1", "main")
+            .create_worktree(&worktree, &project.branch("FRK-1"), "main")
             .expect("the task's worktree is made");
         std::fs::create_dir_all(worktree.join("src/login")).expect("a directory");
         std::fs::write(worktree.join("src/login/form.ts"), "export {};\n").expect("a file");
@@ -159,6 +161,49 @@ mod tests {
 
     #[test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn diffs_the_tasks_branch_through_the_tool() {
+        // A fix works on `fix/<id>` (5.14), so the diff is of that branch.
+        let project = TestProject::new("tools-git-diff-fix", &a_team_of_three(|_| {}));
+        project.filed_with("FRK-1", "assigned", "task", None, |wire| {
+            wire["change"] = json!("fix");
+        });
+        project.moved(
+            "FRK-1",
+            "assigned",
+            "in_progress",
+            &json!({ "assignee": "dev-a", "reviewer": "dev-b" }),
+        );
+        let worktree = project.repo.path.join(".farik/local/worktrees/FRK-1");
+        project
+            .deps
+            .git
+            .create_worktree(&worktree, "fix/FRK-1", "main")
+            .expect("the task's worktree is made");
+        std::fs::create_dir_all(worktree.join("src/login")).expect("a directory");
+        std::fs::write(worktree.join("src/login/form.ts"), "export {};\n").expect("a file");
+        project
+            .call(
+                "dev-a",
+                Some("FRK-1"),
+                "farik_git_commit",
+                json!({ "message": "fix the login form", "paths": ["src/login/form.ts"] }),
+            )
+            .expect("the assignee commits");
+
+        let diff = project
+            .call("dev-a", Some("FRK-1"), "farik_git_diff", json!({}))
+            .expect("the diff reads");
+        assert!(
+            diff["diff"]
+                .as_str()
+                .expect("a patch")
+                .contains("b/src/login/form.ts"),
+            "{diff}"
+        );
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
     fn refuses_to_commit_a_directory_that_holds_a_protected_file() {
         // `src/login/**` is allowed and `**/*.pem` protected (5.12's default), so the directory
         // passes both path checks while git would stage the key under it.
@@ -174,7 +219,7 @@ mod tests {
         project
             .deps
             .git
-            .create_worktree(&worktree, "farik/FRK-1", "main")
+            .create_worktree(&worktree, &project.branch("FRK-1"), "main")
             .expect("the task's worktree is made");
         std::fs::create_dir_all(worktree.join("src/login")).expect("a directory");
         std::fs::write(worktree.join("src/login/form.ts"), "export {};\n").expect("a file");
@@ -196,7 +241,8 @@ mod tests {
         }
         let git = &project.deps.git;
         assert_eq!(
-            git.commit_count("main", "farik/FRK-1").expect("git counts"),
+            git.commit_count("main", &project.branch("FRK-1"))
+                .expect("git counts"),
             0
         );
         project
@@ -208,7 +254,7 @@ mod tests {
             )
             .expect("the file itself is committed");
         assert_eq!(
-            git.changed_paths("main", "farik/FRK-1")
+            git.changed_paths("main", &project.branch("FRK-1"))
                 .expect("git lists the paths"),
             ["src/login/form.ts"]
         );
@@ -238,7 +284,7 @@ mod tests {
         project
             .deps
             .git
-            .create_worktree(&worktree, "farik/FRK-1", "main")
+            .create_worktree(&worktree, &project.branch("FRK-1"), "main")
             .expect("the task's worktree is made");
         std::fs::create_dir_all(worktree.join("src/login")).expect("a directory");
         std::fs::write(worktree.join("src/login/form.ts"), "export {};\n").expect("a file");
@@ -262,14 +308,16 @@ mod tests {
         }
         let git = &project.deps.git;
         assert_eq!(
-            git.commit_count("main", "farik/FRK-1").expect("git counts"),
+            git.commit_count("main", &project.branch("FRK-1"))
+                .expect("git counts"),
             0
         );
         project
             .call("dev-a", Some("FRK-1"), "farik_git_commit", commit)
             .expect("the assignee commits");
         assert_eq!(
-            git.commit_count("main", "farik/FRK-1").expect("git counts"),
+            git.commit_count("main", &project.branch("FRK-1"))
+                .expect("git counts"),
             1
         );
     }

@@ -645,8 +645,9 @@ fn shows_a_tasks_diff_before_and_after_integration() {
     assert_eq!(ran.code, 1, "{}", ran.out);
     assert!(ran.err.contains("has no branch yet"), "{}", ran.err);
 
+    // A Software Developer's task with no `change` works on `feature/<id>` (5.14).
     let branch_with = |task: &str, file: &str| {
-        repository.git(&["checkout", "-q", "-b", &format!("farik/{task}")]);
+        repository.git(&["checkout", "-q", "-b", &format!("feature/{task}")]);
         repository.write(file, "done\n");
         repository.git(&["add", "--", file]);
         repository.git(&["commit", "-q", "-m", &format!("Add {file}")]);
@@ -657,7 +658,14 @@ fn shows_a_tasks_diff_before_and_after_integration() {
     assert_eq!(ran.code, 0, "{}", ran.err);
     assert!(ran.out.contains("+++ b/done.txt"), "{}", ran.out);
 
-    repository.git(&["merge", "-q", "--no-ff", "-m", "Merge FRK-1", "farik/FRK-1"]);
+    repository.git(&[
+        "merge",
+        "-q",
+        "--no-ff",
+        "-m",
+        "Merge FRK-1",
+        "feature/FRK-1",
+    ]);
     let sha = repository.git_output(&["rev-parse", "HEAD"]);
     project::record(
         &repository,
@@ -673,7 +681,7 @@ fn shows_a_tasks_diff_before_and_after_integration() {
     let filed = run_in(&repository.path, &["task", "create", "second.yaml"]);
     assert_eq!(filed.code, 0, "{}", filed.err);
     branch_with("FRK-2", "b.txt");
-    repository.git(&["merge", "-q", "--ff-only", "farik/FRK-2"]);
+    repository.git(&["merge", "-q", "--ff-only", "feature/FRK-2"]);
     let head = repository.git_output(&["rev-parse", "HEAD"]);
     project::record(
         &repository,
@@ -684,7 +692,7 @@ fn shows_a_tasks_diff_before_and_after_integration() {
     let ran = run_in(&repository.path, &["task", "show", "FRK-2", "--diff"]);
     assert_eq!(ran.code, 0, "{}", ran.err);
     assert!(
-        ran.out.contains("farik/FRK-2 is wholly in main"),
+        ran.out.contains("feature/FRK-2 is wholly in main"),
         "{}",
         ran.out
     );

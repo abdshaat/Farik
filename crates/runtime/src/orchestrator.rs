@@ -635,12 +635,10 @@ mod tests {
 
         assert_eq!(harness.row("FRK-1").status, TaskStatus::Accepted);
         let git = &harness.project.deps.git;
+        let branch = harness.branch("FRK-1");
+        assert_eq!(git.commit_count(&base, &branch).expect("git counts"), 1);
         assert_eq!(
-            git.commit_count(&base, "farik/FRK-1").expect("git counts"),
-            1
-        );
-        assert_eq!(
-            git.changed_paths(&base, "farik/FRK-1").expect("git lists"),
+            git.changed_paths(&base, &branch).expect("git lists"),
             vec!["done.txt".to_string()]
         );
         assert_eq!(
@@ -709,12 +707,8 @@ mod tests {
         );
         assert!(!harness.worktree("FRK-1").exists());
         assert_eq!(
-            git_output_in(
-                &harness.project.repo.path,
-                &["branch", "--list", "farik/FRK-1"]
-            )
-            .trim(),
-            "farik/FRK-1"
+            git_output_in(&harness.project.repo.path, &["branch", "--list", &branch]).trim(),
+            branch
         );
     }
 
