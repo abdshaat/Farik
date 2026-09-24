@@ -1,6 +1,8 @@
 //! The team's channel (`docs/SPEC.md` 5.9): what somebody said, kept in the log as
 //! `message.posted` and nowhere else.
 
+use std::num::NonZeroU64;
+
 use farik_core::contract::TaskId;
 use farik_core::team::Team;
 use farik_protocol::clock::Clock;
@@ -105,8 +107,10 @@ impl From<FilesError> for ChannelError {
 }
 
 /// The messages that mention `agent_id` and that it has not been given a conversation about:
-/// those after its last `conversation` session started, oldest first. A reply's mentions and a
-/// system line's start nothing, so that replies are one deep.
+/// those after the latest message its last `conversation` session was shown (that session's
+/// `in_reply_to`, or its start in a log recorded before it carried one), oldest first. A message
+/// posted while that session was starting is after it, so it stays pending. A reply's mentions and
+/// a system line's start nothing, so that replies are one deep.
 ///
 /// # Errors
 ///
@@ -120,11 +124,14 @@ pub fn pending_mentions(log: &EventLog, agent_id: &str) -> Result<Vec<FarikEvent
         })?
         .iter()
         .rev()
-        .find(|event| {
-            matches!(&event.body, EventBody::SessionStarted(body)
-                if body.purpose == SessionStartedBodyPurpose::Conversation)
-        })
-        .map(|event| event.envelope.seq);
+        .find_map(|event| match &event.body {
+            EventBody::SessionStarted(body)
+                if body.purpose == SessionStartedBodyPurpose::Conversation =>
+            {
+                Some(body.in_reply_to.map_or(event.envelope.seq, NonZeroU64::get))
+            }
+            _ => None,
+        });
     Ok(log
         .read(&EventQuery {
             after_seq: since,
@@ -224,7 +231,7 @@ pub fn post(
         text,
         mentions: message.mentions,
         thread: message.thread,
-        in_reply_to: message.in_reply_to,
+        in_reply_to: message.in_reply_to.and_then(NonZeroU64::new),
     });
     let event = new_event(body, clock.now(), ids).map_err(|error| ChannelError::Refused {
         reason: format!("the message cannot be recorded: {error:?}"),
@@ -281,9 +288,12 @@ mod tests {
 
     use farik_protocol::clock::FixedClock;
     use farik_protocol::event::{EventBody, EventIds, MessageKind};
-    use farik_store::{EventQuery, IN_MEMORY, open_event_log};
+    use farik_store::{EventLog, EventQuery, IN_MEMORY, open_event_log};
 
-    use super::{NewMessage, mentions_in, post};
+    use super::{NewMessage, mentions_in, pending_mentions, post};
+    use crate::recorded::fixtures::a_session_spec;
+    use crate::session::{SessionPurpose, SessionSpec};
+    use crate::sessions::record_session_started;
     use crate::tools::fixtures::at;
 
     #[test]
@@ -338,5 +348,64 @@ mod tests {
             panic!("a message");
         };
         assert_eq!(body.text, "one two three four");
+    }
+
+    fn farik_ids() -> EventIds {
+        EventIds {
+            team_id: "farik".to_string(),
+            project_id: "farik".to_string(),
+            ..EventIds::default()
+        }
+    }
+
+    /// The human's message mentioning dev-a, and its seq.
+    fn mention(log: &EventLog, text: &str) -> u64 {
+        post(
+            log,
+            &FixedClock::new(at()),
+            &farik_ids(),
+            NewMessage {
+                author: "human".to_string(),
+                agent_id: None,
+                kind: MessageKind::Human,
+                text: text.to_string(),
+                mentions: vec!["dev-a".to_string()],
+                task_id: None,
+                thread: None,
+                in_reply_to: None,
+                session_id: None,
+            },
+        )
+        .expect("posted")
+    }
+
+    #[test]
+    fn keeps_a_mention_posted_while_its_conversation_starts() {
+        // The channel rule reads the pending mentions, and the human's second message lands
+        // before the conversation's `session.started` does.
+        let log = open_event_log(Path::new(IN_MEMORY), at()).expect("the log opens");
+        let shown = mention(&log, "@dev-a status?");
+        let pending = pending_mentions(&log, "dev-a").expect("the log reads");
+        assert_eq!(pending.len(), 1);
+        let late = mention(&log, "@dev-a and the tests?");
+        let spec = SessionSpec {
+            agent_id: "dev-a".to_string(),
+            purpose: SessionPurpose::Conversation,
+            ..a_session_spec()
+        };
+        let ids = EventIds {
+            agent_id: Some("dev-a".to_string()),
+            ..farik_ids()
+        };
+        record_session_started(&log, &spec, Some(shown), &ids, &FixedClock::new(at()))
+            .expect("recorded");
+
+        let seqs: Vec<u64> = pending_mentions(&log, "dev-a")
+            .expect("the log reads")
+            .iter()
+            .map(|event| event.envelope.seq)
+            .collect();
+
+        assert_eq!(seqs, [late], "the conversation was shown {shown} alone");
     }
 }

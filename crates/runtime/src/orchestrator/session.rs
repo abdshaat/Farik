@@ -68,7 +68,8 @@ pub(super) struct SessionAsk<'a> {
     /// The Farik tools it is offered, when it is offered a list of them rather than every tool:
     /// each still only when the agent's tiers allow it.
     pub(super) tools: Option<&'static [&'static str]>,
-    /// The seq of the message a conversation session answers, which its reply names.
+    /// The seq of the message a conversation session answers, which its reply names and its
+    /// `session.started` records, so that a mention posted after it stays pending.
     pub(super) in_reply_to: Option<u64>,
     /// Its first message.
     pub(super) initial_prompt: String,
@@ -108,7 +109,7 @@ pub(super) async fn run_session(
         limits: spec.limits,
         farik_tools: spec.farik_tools.clone(),
     });
-    let ended = drive(deps, team, role, ask.contract, &spec).await;
+    let ended = drive(deps, team, role, ask.contract, ask.in_reply_to, &spec).await;
     deps.daemon.end_session(&spec.session_id);
     let end = ended?;
     // The sleep first: an agent not put to sleep is started again into its provider's refusal.
@@ -370,6 +371,7 @@ async fn drive(
     team: &Team,
     role: Role,
     contract: Option<&TaskContract>,
+    in_reply_to: Option<u64>,
     spec: &SessionSpec,
 ) -> Result<SessionEnd, OrchestratorError> {
     let tools = &deps.tools;
@@ -396,7 +398,7 @@ async fn drive(
             clock,
         )
     };
-    record_session_started(&tools.log, spec, &tools.ids, clock)?;
+    record_session_started(&tools.log, spec, in_reply_to, &tools.ids, clock)?;
     let mut costed = false;
     let mut crossed = Vec::new();
     let read = match deps.adapter.start_session(spec.clone()) {

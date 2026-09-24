@@ -976,6 +976,7 @@ fn ran(agent: &Agent, purpose: &str, end: &SessionEnd) -> String {
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeSet;
+    use std::num::NonZeroU64;
     use std::sync::Arc;
     use std::time::Duration;
 
@@ -4802,7 +4803,13 @@ mod tests {
         assert_eq!(said.len(), 2, "{said:?}");
         assert_eq!(said[1].author, "dev-a");
         assert_eq!(said[1].kind, MessageKind::Reply);
-        assert_eq!(said[1].in_reply_to, Some(seq));
+        assert_eq!(said[1].in_reply_to.map(NonZeroU64::get), Some(seq));
+        // Its start records what it was shown, which answers the mentions up to it.
+        let starts = harness.events(&[EventKind::SessionStarted]);
+        let EventBody::SessionStarted(start) = &starts[0].body else {
+            panic!("a session's start");
+        };
+        assert_eq!(start.in_reply_to.map(NonZeroU64::get), Some(seq));
     }
 
     #[tokio::test]

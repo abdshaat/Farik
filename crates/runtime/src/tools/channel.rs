@@ -135,6 +135,8 @@ fn kind_of(call: &Call<'_>) -> Result<MessageKind, ToolError> {
 
 #[cfg(test)]
 mod tests {
+    use std::num::NonZeroU64;
+
     use chrono::Duration;
     use farik_protocol::clock::FixedClock;
     use farik_protocol::event::{EventBody, EventKind, FarikEvent, MessageKind};
@@ -349,6 +351,6 @@ mod tests {
         let EventBody::MessagePosted(reply) = &posted[0].body else {
             panic!("a message");
         };
-        assert_eq!(reply.in_reply_to, Some(7));
+        assert_eq!(reply.in_reply_to.map(NonZeroU64::get), Some(7));
     }
 }
