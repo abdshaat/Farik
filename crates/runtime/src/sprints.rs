@@ -203,6 +203,18 @@ pub fn plan_sprint(
     task_ids: &[TaskId],
     planned_by: &PlannedBy,
 ) -> Result<Sprint, SprintError> {
+    plan_sprint_racing(deps, task_ids, planned_by, || {})
+}
+
+/// `plan_sprint`, with `before_final_write` run after the contracts are written and right before
+/// the sprint file is re-read and re-checked for the write below: a seam for a test to make an end
+/// finish there, the way one racing this plan's own write could.
+fn plan_sprint_racing(
+    deps: &ToolDeps,
+    task_ids: &[TaskId],
+    planned_by: &PlannedBy,
+    before_final_write: impl FnOnce(),
+) -> Result<Sprint, SprintError> {
     let open = deps
         .projections
         .open_sprint()?
@@ -270,6 +282,14 @@ pub fn plan_sprint(
         let mut contract = deps.files.read_contract(task_id)?;
         contract.sprint = Some(open.sprint_id.clone());
         deps.files.write_contract(&contract)?;
+    }
+    before_final_write();
+    // Read the file again, right here, next to the write it guards: an end that finished after
+    // the check above, while the contracts were being written, must not have this plan write its
+    // ended file back as open (n1). The contracts may already name the sprint; `farik doctor`
+    // reports that mismatch (m1).
+    if deps.files.read_sprint(&open.sprint_id)?.status != SprintStatus::Open {
+        return Err(plan_refused(&format!("{} has ended", open.sprint_id)));
     }
     deps.files.write_sprint(&sprint)?;
     record(
@@ -466,4 +486,47 @@ fn record(deps: &ToolDeps, body: EventBody) -> Result<(), SprintError> {
     let appended = deps.log.append(&event)?;
     deps.projections.apply(&appended)?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        EndedBy, PlannedBy, SprintStatus, end_sprint, plan_refused, plan_sprint_racing,
+        start_sprint,
+    };
+    use crate::tools::fixtures::{TestProject, a_team_of_three};
+    use farik_core::contract::TaskId;
+
+    fn task(id: &str) -> TaskId {
+        id.parse().expect("a task id")
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn refuses_a_plan_that_lost_the_race_to_an_end() {
+        let project = TestProject::new("sprints-plan-race", &a_team_of_three(|_| {}));
+        project.filed("FRK-1", "ready", "task", None);
+        let deps = &project.deps;
+        start_sprint(deps, None, "human").expect("S1 starts");
+
+        // The plan's earlier checks pass while S1 is still open; then, before its own write, an
+        // end finishes: both its file and its event.
+        let refused = plan_sprint_racing(
+            deps,
+            &[task("FRK-1")],
+            &PlannedBy::Assigner("pm".to_string()),
+            || {
+                end_sprint(deps, EndedBy::Human).expect("S1 ends, winning the race");
+            },
+        )
+        .expect_err("a plan does not write an ended sprint's file back as open");
+
+        assert_eq!(refused, plan_refused("S1 has ended"));
+        let file = deps.files.read_sprint("S1").expect("S1 reads");
+        assert_eq!(file.status, SprintStatus::Ended);
+        assert!(
+            file.task_ids.is_empty(),
+            "the plan wrote nothing into the ended file"
+        );
+    }
 }
