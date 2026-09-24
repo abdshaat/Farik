@@ -35,6 +35,7 @@ use farik_protocol::event::{
 use farik_store::files::{FilesError, ProjectFiles};
 use farik_store::{EventLog, EventQuery, Git, GitError, Projections, StoreError, TaskProjection};
 
+use crate::channel::{ChannelError, post_system};
 use crate::cost::{CostError, budget_state};
 
 /// The governor's door: everything a transition is judged on and recorded in.
@@ -75,6 +76,9 @@ pub struct TransitionAsk {
     /// The human's words for a move they asked for, recorded on the move; into `escalated` they
     /// are also the escalation's.
     pub reason: Option<String>,
+    /// Whether Farik files this move in the named agent's name, as it files a reviewer's rejection
+    /// from the note of a session that has ended (5.4); such a move is said in the channel.
+    pub filed_by_farik: bool,
 }
 
 /// The governor's answer, which is recorded either way.
@@ -148,6 +152,15 @@ impl From<GitError> for TransitionError {
     fn from(error: GitError) -> Self {
         Self::Git {
             detail: error.to_string(),
+        }
+    }
+}
+
+impl From<ChannelError> for TransitionError {
+    fn from(error: ChannelError) -> Self {
+        match error {
+            ChannelError::Store(error) => error.into(),
+            ChannelError::Refused { reason } => Self::Event { detail: reason },
         }
     }
 }
@@ -282,6 +295,7 @@ impl Transitions {
             reason: ask.reason.clone(),
         };
         self.append(request, ask, EventBody::TaskTransitioned(body))?;
+        let mut escalation = None;
         for effect in &decision.effects {
             if let TransitionEffect::RaiseEscalation(reason) = effect {
                 let detail = self.escalation_detail(request, ask, decision)?;
@@ -290,10 +304,31 @@ impl Transitions {
                     ask,
                     EventBody::EscalationRaised(EscalationRaisedBody {
                         reason: reason_wire(*reason),
-                        detail,
+                        detail: detail.clone(),
                     }),
                 )?;
+                escalation = Some(detail);
             }
+        }
+        // A move the governor or the human made has no session to say it, and a rejection Farik
+        // files is said nowhere else (5.9); the moves Farik makes on an agent's behalf are not news.
+        if ask.filed_by_farik
+            || matches!(
+                request.actor,
+                TransitionActor::Governor | TransitionActor::Human
+            )
+        {
+            let ids = EventIds {
+                session_id: ask.session_id.clone(),
+                ..self.ids.clone()
+            };
+            post_system(
+                &self.log,
+                self.clock.as_ref(),
+                &ids,
+                Some(request.task_id.clone()),
+                &move_line(request, ask, decision, escalation),
+            )?;
         }
         Ok(())
     }
@@ -558,6 +593,51 @@ impl Transitions {
             remaining_budget_usd: remaining,
         }))
     }
+}
+
+/// Farik's line about a move: `<id> <from> → <to> (by <who>)`, then `: <reason>` when the move
+/// carries one, the escalation it raised coming first.
+fn move_line(
+    request: &TransitionRequest,
+    ask: &TransitionAsk,
+    decision: &TransitionDecision,
+    escalation: Option<String>,
+) -> String {
+    let mut line = format!(
+        "{} {} → {} (by {})",
+        request.task_id.as_str(),
+        decision.from,
+        decision.to,
+        match request.actor {
+            TransitionActor::Governor => "the governor".to_string(),
+            TransitionActor::Human => "the human".to_string(),
+            _ => requested_by(request),
+        }
+    );
+    let reason = escalation.or_else(|| {
+        ask.rejection
+            .as_ref()
+            .map(|rejection| {
+                format!(
+                    "{} failed: {}",
+                    rejection.failed_criterion_ids.join(", "),
+                    rejection.reasons
+                )
+            })
+            .or_else(|| {
+                ask.blocker
+                    .as_ref()
+                    .map(|blocker| blocker.description.clone())
+            })
+            .or_else(|| ask.blocker_resolution.clone())
+            .or_else(|| ask.reason.clone())
+            .or_else(|| ask.criterion_unrunnable.clone())
+    });
+    if let Some(reason) = reason.as_deref().map(str::trim).filter(|r| !r.is_empty()) {
+        line.push_str(": ");
+        line.push_str(reason);
+    }
+    line
 }
 
 /// The ask with its agent ids trimmed and a blank one taken as none, so that the check before the
@@ -1158,8 +1238,8 @@ mod tests {
     use farik_protocol::clock::{Clock, MovableClock};
     use farik_protocol::event::{
         ContractEvaluatedBodyGate, EscalationRaisedBodyReason, EventBody, EventIds, EventKind,
-        FarikEvent, GateWire, NewEvent, TaskStatusWire, TaskTransitionedBodyEffectsItem,
-        TransitionRefusedBodyRefusal, event_from_value,
+        FarikEvent, GateWire, MessageKind, NewEvent, TaskStatusWire,
+        TaskTransitionedBodyEffectsItem, TransitionRefusedBodyRefusal, event_from_value,
     };
     use farik_store::EventQuery;
     use farik_store::files::ProjectFiles;
@@ -3332,5 +3412,152 @@ mod tests {
             "{}",
             escalation.detail
         );
+    }
+
+    /// The one system line about `task`, and the seq of its last move.
+    fn system_line(project: &Project, task: &str) -> (FarikEvent, u64) {
+        let events = project.events(
+            task,
+            &[EventKind::TaskTransitioned, EventKind::MessagePosted],
+        );
+        let lines: Vec<&FarikEvent> = events
+            .iter()
+            .filter(|event| event.body.kind() == EventKind::MessagePosted)
+            .collect();
+        assert_eq!(lines.len(), 1, "{events:?}");
+        let moved = events
+            .iter()
+            .rev()
+            .find(|event| event.body.kind() == EventKind::TaskTransitioned)
+            .expect("a move");
+        (lines[0].clone(), moved.envelope.seq)
+    }
+
+    fn posted_body(event: &FarikEvent) -> &farik_protocol::event::MessagePostedBody {
+        match &event.body {
+            EventBody::MessagePosted(body) => body,
+            other => panic!("expected a message.posted, got {other:?}"),
+        }
+    }
+
+    /// The human moves `FRK-1` from `escalated` to `in_progress`, saying `reason`.
+    fn resumed_by_the_human(name: &str, reason: &str) -> Project {
+        let project = Project::new(name, a_team(|_| {}), at(12));
+        project.file("FRK-1", |_| {});
+        project.created("FRK-1", "in_progress");
+        let people = json!({ "assignee": "dev-a", "reviewer": "dev-b" });
+        project.moved("FRK-1", "in_progress", "escalated", &people, at(10));
+        let outcome = project.ask(
+            &a_request(
+                "FRK-1",
+                TaskStatus::InProgress,
+                TransitionActor::Human,
+                None,
+            ),
+            &TransitionAsk {
+                reason: Some(reason.to_string()),
+                ..TransitionAsk::default()
+            },
+        );
+        assert!(
+            matches!(outcome, TransitionOutcome::Moved(_)),
+            "{outcome:?}"
+        );
+        project
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn posts_a_line_for_the_governors_move() {
+        let project = Project::new("system-governor", a_team(|_| {}), at(12));
+        project.file("FRK-1", |_| {});
+        project.created("FRK-1", "refining");
+        written(&project, "FRK-1");
+        let outcome = readying(&project, "FRK-1");
+        assert!(
+            matches!(outcome, TransitionOutcome::Moved(_)),
+            "{outcome:?}"
+        );
+
+        let (line, moved) = system_line(&project, "FRK-1");
+        assert!(line.envelope.seq > moved);
+        let body = posted_body(&line);
+        assert_eq!(body.author, "farik");
+        assert_eq!(body.kind, MessageKind::System);
+        assert_eq!(body.text, "FRK-1 refining → ready (by the governor)");
+        assert_eq!(line.envelope.ids.agent_id, None);
+        assert_eq!(
+            line.envelope.ids.task_id,
+            Some("FRK-1".parse().expect("a task id"))
+        );
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn posts_the_humans_reason() {
+        let project = resumed_by_the_human("system-human", "go on");
+
+        let (line, _) = system_line(&project, "FRK-1");
+        assert_eq!(
+            posted_body(&line).text,
+            "FRK-1 escalated → in_progress (by the human): go on"
+        );
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn posts_no_line_for_a_bookkeeping_move() {
+        let project = Project::new("system-bookkeeping", a_team(|_| {}), at(12));
+        project.file("FRK-1", |_| {});
+        project.created("FRK-1", "draft");
+        project.record(
+            "FRK-1",
+            "request.triaged",
+            &json!({ "size": "small", "reason": "One file.", "triaged_by": "maya" }),
+            at(11),
+        );
+        let outcome = project.ask(
+            &a_request(
+                "FRK-1",
+                TaskStatus::Refining,
+                TransitionActor::ProductManager,
+                Some("maya"),
+            ),
+            &TransitionAsk::default(),
+        );
+        assert!(
+            matches!(outcome, TransitionOutcome::Moved(_)),
+            "{outcome:?}"
+        );
+
+        assert!(
+            project
+                .events("FRK-1", &[EventKind::MessagePosted])
+                .is_empty()
+        );
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn cuts_a_long_line() {
+        let project = resumed_by_the_human("system-long", &"a".repeat(3_000));
+
+        let (line, _) = system_line(&project, "FRK-1");
+        let text = &posted_body(&line).text;
+        assert_eq!(text.chars().count(), 2_000);
+        assert!(text.ends_with('…'), "{text}");
+        assert_eq!(
+            project.projections.board().expect("the board")[0].status,
+            TaskStatus::InProgress
+        );
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn mentions_nobody_in_a_system_line() {
+        let project = resumed_by_the_human("system-mentions", "go on @dev-a");
+
+        let (line, _) = system_line(&project, "FRK-1");
+        assert!(posted_body(&line).mentions.is_empty());
     }
 }

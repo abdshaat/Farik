@@ -907,7 +907,7 @@ mod tests {
         EventBody, EventKind, NoteWrittenBodyKind, ReviewRecordedBody, SessionEndedBodyReason,
         SessionStartedBodyPurpose, TransitionActorWire,
     };
-    use farik_protocol::event::{NewEvent, event_from_value};
+    use farik_protocol::event::{MessageKind, NewEvent, event_from_value};
     use farik_store::event_log::fixtures::refuse_appends_of;
     use farik_store::git::fixtures::git_output_in;
     use serde_json::json;
@@ -2489,6 +2489,32 @@ mod tests {
         assert_eq!(
             sessions(&adapter),
             vec![("dev-b".to_string(), SessionPurpose::Verify)]
+        );
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn posts_a_line_for_a_rejection_farik_filed() {
+        let harness = Harness::new("orch-verify-rejects-line", |_| {});
+        harness.verifying_with("FRK-1", false, true, |_| {});
+        let adapter = harness.recorded(vec![review_writes_note()]);
+        let orchestrator = harness.orchestrator(adapter);
+        orchestrator.tick().await.expect("the review runs");
+        let before = harness.events(&[EventKind::MessagePosted]).len();
+
+        orchestrator.tick().await.expect("the rejection is filed");
+
+        let lines = harness.events(&[EventKind::MessagePosted]);
+        assert_eq!(lines.len(), before + 1, "{lines:?}");
+        let EventBody::MessagePosted(line) = &lines[before].body else {
+            panic!("a message");
+        };
+        assert_eq!(line.kind, MessageKind::System);
+        assert!(
+            line.text
+                .starts_with("FRK-1 verifying → rejected (by dev-b): C1"),
+            "{}",
+            line.text
         );
     }
 

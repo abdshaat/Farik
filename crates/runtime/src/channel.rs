@@ -140,6 +140,45 @@ pub fn post(
     Ok(log.append(&event)?.envelope.seq)
 }
 
+/// Posts one of Farik's own lines (`author: farik, kind: system`) about `task_id`, cut to the
+/// channel's limit ending with `…`, so that a line never fails what it reports. It names nobody,
+/// and no agent is on its envelope.
+///
+/// # Errors
+///
+/// What `post` answers, for a blank `text` or a failing log.
+pub fn post_system(
+    log: &EventLog,
+    clock: &dyn Clock,
+    ids: &EventIds,
+    task_id: Option<TaskId>,
+    text: &str,
+) -> Result<u64, ChannelError> {
+    let text = if text.chars().count() > TEXT_LIMIT {
+        let mut cut: String = text.chars().take(TEXT_LIMIT - 1).collect();
+        cut.push('…');
+        cut
+    } else {
+        text.to_string()
+    };
+    post(
+        log,
+        clock,
+        ids,
+        NewMessage {
+            author: "farik".to_string(),
+            agent_id: None,
+            kind: MessageKind::System,
+            text,
+            mentions: Vec::new(),
+            task_id,
+            thread: None,
+            in_reply_to: None,
+            session_id: ids.session_id.clone(),
+        },
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use farik_core::team::fixtures::{a_team_wire, an_agent_wire};

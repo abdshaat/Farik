@@ -386,6 +386,7 @@ pub(super) fn reject(
                 reasons: review_note,
             }),
             session_id,
+            filed_by_farik: true,
             ..TransitionAsk::default()
         },
         team,

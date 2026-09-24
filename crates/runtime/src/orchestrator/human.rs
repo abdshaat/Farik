@@ -1166,7 +1166,10 @@ mod tests {
         };
         assert_eq!(body.subject, HumanAcceptedBodySubject::Contract);
         assert_eq!(report.events.first(), Some(&accepted.envelope.seq));
-        assert_eq!(report.events.last(), Some(&moved.envelope.seq));
+        // Farik's line in the channel says what the human did, after the move.
+        let line = last(&harness, EventKind::MessagePosted).expect("a system line");
+        assert_eq!(line.envelope.seq, moved.envelope.seq + 1);
+        assert_eq!(report.events.last(), Some(&line.envelope.seq));
         let row = harness.row("FRK-1");
         assert_eq!(row.status, TaskStatus::Ready);
         assert!(!row.awaiting_approval);

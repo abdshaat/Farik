@@ -119,7 +119,7 @@ Files: `transitions.rs`, `cost.rs`, `orchestrator/session.rs`
 - `posts_a_line_when_the_day_is_spent` — a cost crossing the daily budget: a system line naming the daily budget; the same for a sprint's budget.
 - `posts_a_line_when_an_agent_sleeps` — `agent.slept` recorded: a system line naming the agent and the time.
 
-- [ ] `feat(runtime): post what the governor and the human did in the channel`
+- [x] `feat(runtime): post what the governor and the human did in the channel`
 
 ### Task 4: mentions
 

@@ -20,6 +20,7 @@ use farik_store::EventQuery;
 use super::messages::human_message;
 use super::verify::{append, append_stamped};
 use super::{OrchestratorDeps, OrchestratorError, TRIAGE_MODEL};
+use crate::channel::{ChannelError, post_system};
 use crate::claude::allowed_builtins;
 use crate::cost::{CostError, CostSource, budget_state, record_exhaustion, record_session_cost};
 use crate::daemon::SessionRegistration;
@@ -146,7 +147,27 @@ fn sleep(
             until,
             detail: end.detail.clone(),
         }),
+    )?;
+    // A sleeping agent says nothing, so Farik says why it is quiet (5.9).
+    post_system(
+        &tools.log,
+        tools.clock.as_ref(),
+        &EventIds {
+            session_id: Some(end.session_id.clone()),
+            ..tools.ids.clone()
+        },
+        None,
+        &format!(
+            "{} sleeps until {} at its model provider's usage limit",
+            agent.id.as_str(),
+            until.format("%Y-%m-%d %H:%M UTC")
+        ),
     )
+    .map_err(|error| match error {
+        ChannelError::Store(error) => OrchestratorError::Store(error),
+        ChannelError::Refused { reason } => OrchestratorError::Refused { reason },
+    })?;
+    Ok(())
 }
 
 /// Who writes the note a session that stopped at its own limit leaves.
@@ -524,8 +545,11 @@ mod tests {
     use crate::orchestrator::fixtures::Harness;
     use crate::session::SessionPurpose;
 
-    use super::{SPRINT_PLAN_TOOL, SessionAsk, TRIAGE_TOOL, session_spec};
+    use farik_protocol::event::{EventBody, EventKind, MessageKind};
+
+    use super::{SPRINT_PLAN_TOOL, SessionAsk, SessionEnd, TRIAGE_TOOL, session_spec, sleep};
     use crate::prompt::SPRINT_PLAN_INSTRUCTION;
+    use crate::session::EndReason;
 
     #[test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
@@ -651,5 +675,48 @@ mod tests {
         );
         assert_eq!(spec.task_id, None);
         assert_eq!(spec.farik_tools, vec![SPRINT_PLAN_TOOL.to_string()]);
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn posts_a_line_when_an_agent_sleeps() {
+        let harness = Harness::new("session-sleep-line", |_| {});
+        let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
+        let deps = &orchestrator.deps;
+        let team = deps.tools.files.read_team().expect("the team");
+        let agent = team
+            .agents
+            .iter()
+            .find(|agent| agent.id.as_str() == "dev-a")
+            .expect("dev-a");
+        let until = deps.tools.clock.now() + chrono::Duration::hours(2);
+
+        sleep(
+            deps,
+            agent,
+            &SessionEnd {
+                session_id: "s-1".to_string(),
+                reason: EndReason::ProviderLimit,
+                detail: "usage limit".to_string(),
+                resets_at: Some(until),
+                crossed: Vec::new(),
+            },
+        )
+        .expect("the agent sleeps");
+
+        let lines = harness.events(&[EventKind::MessagePosted]);
+        assert_eq!(lines.len(), 1, "{lines:?}");
+        let EventBody::MessagePosted(line) = &lines[0].body else {
+            panic!("a message");
+        };
+        assert_eq!(line.kind, MessageKind::System);
+        assert_eq!(lines[0].envelope.ids.agent_id, None);
+        assert!(line.text.contains("dev-a"), "{}", line.text);
+        assert!(
+            line.text
+                .contains(&until.format("%Y-%m-%d %H:%M UTC").to_string()),
+            "{}",
+            line.text
+        );
     }
 }

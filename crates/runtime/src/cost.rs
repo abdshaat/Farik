@@ -22,6 +22,7 @@ use farik_protocol::event::{
 use farik_roles::{RoleError, load_role};
 use farik_store::{CostProjection, CostScope, EventLog, Projections, StoreError};
 
+use crate::channel::{ChannelError, post_system};
 use crate::session::{SessionPurpose, TRIAGE_MODEL, session_model};
 
 /// Why a cost or an exhausted budget was not recorded, or a budget could not be read.
@@ -49,6 +50,15 @@ impl fmt::Display for CostError {
 }
 
 impl std::error::Error for CostError {}
+
+impl From<ChannelError> for CostError {
+    fn from(error: ChannelError) -> Self {
+        match error {
+            ChannelError::Store(error) => error.into(),
+            ChannelError::Refused { reason } => Self::Event { detail: reason },
+        }
+    }
+}
 
 impl From<StoreError> for CostError {
     fn from(error: StoreError) -> Self {
@@ -269,6 +279,19 @@ pub fn record_exhaustion(
         };
         let appended = log.append(&stamp(EventBody::BudgetExhausted(body), clock, ids)?)?;
         projections.apply(&appended)?;
+        // The team's budgets stop everyone, so the channel is told (5.9).
+        let line = match exhausted.scope {
+            BudgetScope::DayUsd => format!(
+                "the daily budget is spent (${:.2} of ${:.2}): the team pauses until tomorrow (UTC)",
+                after.day_spent_usd, after.day_max_usd
+            ),
+            BudgetScope::SprintUsd => format!(
+                "the sprint's budget is spent (${:.2} of ${:.2}): no new work is assigned",
+                after.sprint_spent_usd, after.sprint_max_usd
+            ),
+            _ => continue,
+        };
+        post_system(log, clock, ids, ids.task_id.clone(), &line)?;
     }
     Ok(crossed)
 }
@@ -358,7 +381,7 @@ mod tests {
     use farik_protocol::event::fixtures::{a_new_event, an_event_wire};
     use farik_protocol::event::{
         BudgetExhaustedBodyConsequence, BudgetExhaustedBodyScope, CostRecordedBodyPurpose,
-        EventBody, EventIds, EventKind, FarikEvent, NewEvent, event_from_value,
+        EventBody, EventIds, EventKind, FarikEvent, MessageKind, NewEvent, event_from_value,
     };
     use farik_store::{
         CostScope, EventLog, EventQuery, IN_MEMORY, Projections, open_event_log, open_projections,
@@ -907,7 +930,8 @@ mod tests {
             }]
         );
         let events = everything(&log);
-        assert_eq!(events.len(), 1);
+        // The exhaustion, and Farik's line in the channel about it.
+        assert_eq!(events.len(), 2);
         let EventBody::BudgetExhausted(body) = &events[0].body else {
             panic!("a budget.exhausted, not {:?}", events[0].body.kind());
         };
@@ -922,6 +946,65 @@ mod tests {
         let again = record_exhaustion(&log, &projections, &after, &still, &crossed, &clock())
             .expect("nothing to record");
         assert_eq!(again, Vec::new());
-        assert_eq!(everything(&log).len(), 1);
+        assert_eq!(everything(&log).len(), 2);
+    }
+
+    #[test]
+    fn posts_a_line_when_the_day_is_spent() {
+        let (log, projections) = a_board();
+        let team = a_team(None);
+        let before = BudgetState {
+            day_spent_usd: 19.0,
+            sprint_spent_usd: 9.0,
+            sprint_max_usd: 10.0,
+            ..state(&projections, &team, Role::SoftwareDeveloper, None)
+        };
+        let day = BudgetState {
+            day_spent_usd: 21.0,
+            ..before
+        };
+        let sprint = BudgetState {
+            sprint_spent_usd: 11.0,
+            ..day
+        };
+
+        record_exhaustion(
+            &log,
+            &projections,
+            &before,
+            &day,
+            &ids(None, "s1"),
+            &clock(),
+        )
+        .expect("recorded");
+        record_exhaustion(
+            &log,
+            &projections,
+            &day,
+            &sprint,
+            &ids(None, "s1"),
+            &clock(),
+        )
+        .expect("recorded");
+
+        let lines: Vec<FarikEvent> = everything(&log)
+            .into_iter()
+            .filter(|event| event.body.kind() == EventKind::MessagePosted)
+            .collect();
+        let texts: Vec<String> = lines
+            .iter()
+            .map(|event| match &event.body {
+                EventBody::MessagePosted(body) => {
+                    assert_eq!(body.author, "farik");
+                    assert_eq!(body.kind, MessageKind::System);
+                    assert_eq!(event.envelope.ids.agent_id, None);
+                    body.text.clone()
+                }
+                other => panic!("a message, not {other:?}"),
+            })
+            .collect();
+        assert_eq!(texts.len(), 2, "{texts:?}");
+        assert!(texts[0].contains("daily budget"), "{texts:?}");
+        assert!(texts[1].contains("sprint's budget"), "{texts:?}");
     }
 }
