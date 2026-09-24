@@ -116,6 +116,10 @@ impl From<FilesError> for ChannelError {
 ///
 /// `StoreError` when the log cannot be read.
 pub fn pending_mentions(log: &EventLog, agent_id: &str) -> Result<Vec<FarikEvent>, StoreError> {
+    // ponytail: each tick reads, for every active agent, its session starts and then every message
+    // since its last conversation (every message ever for one never mentioned): linear in the log,
+    // fine at a team's size. Upgrade: a projection holding each agent's last answered seq and its
+    // pending mentions.
     let since = log
         .read(&EventQuery {
             agent_id: Some(agent_id.to_string()),
@@ -164,6 +168,8 @@ fn tokens(characters: usize) -> usize {
 ///
 /// `Store` when the log cannot be read, `Files` when the summary cannot be written.
 pub fn channel_summary(log: &EventLog, files: &ProjectFiles) -> Result<String, ChannelError> {
+    // ponytail: reads every message ever to keep the latest 2,000 tokens, linear in the channel.
+    // Upgrade: a channel projection read newest first with a limit.
     let messages = log.read(&EventQuery {
         kinds: vec![EventKind::MessagePosted],
         ..EventQuery::default()

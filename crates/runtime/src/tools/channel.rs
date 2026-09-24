@@ -57,6 +57,8 @@ pub(super) fn post_message(call: &Call<'_>, input: PostMessageInput) -> Result<V
 /// when no sprint is open.
 fn kind_of(call: &Call<'_>) -> Result<MessageKind, ToolError> {
     let deps = call.deps();
+    // ponytail: every post reads all of the agent's messages ever, linear in its history. Upgrade:
+    // a projection counting each agent's ambient messages per sprint and per day.
     let posted = deps
         .log
         .read(&EventQuery {
