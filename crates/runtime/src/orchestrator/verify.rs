@@ -339,15 +339,7 @@ pub(super) fn record_review(
         event.envelope.seq > since && matches!(event.body, EventBody::ReviewRecorded(_))
     });
     let answers = reviewer_results(&context(deps, team, &contract.id)?);
-    let complete = contract
-        .exit_criteria
-        .iter()
-        .filter(|criterion| !is_human(criterion))
-        .all(|criterion| {
-            answers
-                .iter()
-                .any(|result| result.criterion_id == criterion.id.as_str())
-        });
+    let complete = unanswered(contract, &answers).is_empty();
     if recorded || !complete {
         return Ok(());
     }
