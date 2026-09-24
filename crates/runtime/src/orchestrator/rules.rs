@@ -14,9 +14,9 @@ use farik_protocol::event::{EventBody, EventKind, FarikEvent};
 use farik_store::{EventQuery, Git, TaskProjection};
 
 use super::integrate::{awaiting, cleanup};
-use super::messages::{Resume, implement_message, plan_message};
+use super::messages::{Resume, implement_message, plan_message, sprint_plan_message};
 use super::requests;
-use super::session::{SessionAsk, SessionEnd, run_session};
+use super::session::{SPRINT_PLAN_TOOL, SessionAsk, SessionEnd, run_session};
 use super::verify::verifying;
 use super::{
     Orchestrator, OrchestratorDeps, OrchestratorError, TickReport, TickRules, TickScope, worktree,
@@ -24,7 +24,7 @@ use super::{
 use crate::cost::budget_state;
 use crate::exec::Executor;
 use crate::session::{EndReason, SessionPurpose};
-use crate::sprints::{EndedBy, end_sprint};
+use crate::sprints::{EndedBy, end_sprint, planning_session_spent};
 use crate::transitions::{self, TransitionAsk, TransitionOutcome, integration_branch};
 
 /// What a tick says when no rule matched.
@@ -49,6 +49,9 @@ pub(super) async fn tick(
     let runs = |rule: u8| rule_runs(scope.rules, rule);
     let mut day_spent = false;
     if let Some(report) = finished_sprint(deps, scope, &board)? {
+        return Ok(report);
+    }
+    if let Some(report) = sprint_planning(deps, scope, &team, &board, &mut day_spent).await? {
         return Ok(report);
     }
     if runs(1) {
@@ -158,7 +161,7 @@ fn finished_sprint(
     scope: &TickScope,
     board: &[TaskProjection],
 ) -> Result<Option<TickReport>, OrchestratorError> {
-    if scope.task_id.is_some() || scope.rules == TickRules::Refining {
+    if !sprint_rules_run(scope) {
         return Ok(None);
     }
     let Some(open) = deps.tools.projections.open_sprint()? else {
@@ -178,6 +181,96 @@ fn finished_sprint(
         sprint_id: sprint.id.as_str().to_string(),
         what: "ended it: every task in it is accepted or cancelled".to_string(),
     }))
+}
+
+/// Whether the sprint rules run in `scope`: they are about no one task, so only in a tick scoped
+/// to none, under `All` or `Planning`.
+fn sprint_rules_run(scope: &TickScope) -> bool {
+    scope.task_id.is_none() && scope.rules != TickRules::Refining
+}
+
+/// The open sprint's planning (5.5): while it holds no task and has had no planning session, the
+/// assigner gets one `plan` session about no task, given `farik_plan_sprint` alone and offered the
+/// candidates, the rows `ready` with no parent and in no sprint. Passed over with no candidate, no
+/// assigner, or on a spent day; a planning session that plans nothing is not asked again, and the
+/// empty sprint waits for the human to end it.
+async fn sprint_planning(
+    deps: &OrchestratorDeps,
+    scope: &TickScope,
+    team: &Team,
+    board: &[TaskProjection],
+    day_spent: &mut bool,
+) -> Result<Option<TickReport>, OrchestratorError> {
+    if !sprint_rules_run(scope) {
+        return Ok(None);
+    }
+    let Some(open) = deps.tools.projections.open_sprint()? else {
+        return Ok(None);
+    };
+    let candidates: Vec<&TaskProjection> = board
+        .iter()
+        .filter(|row| {
+            row.status == TaskStatus::Ready && row.parent.is_none() && row.sprint.is_none()
+        })
+        .collect();
+    let Some(assigner) = assigner(team) else {
+        return Ok(None);
+    };
+    if candidates.is_empty()
+        || board
+            .iter()
+            .any(|row| row.sprint.as_deref() == Some(open.sprint_id.as_str()))
+        || planning_session_spent(&deps.tools.log, &open.sprint_id)?
+        || day_is_spent(deps, team, Role::from(assigner.role), day_spent)?
+    {
+        return Ok(None);
+    }
+    let contracts = candidates
+        .iter()
+        .map(|row| deps.tools.files.read_contract(&row.task_id))
+        .collect::<Result<Vec<_>, _>>()?;
+    let end = run_session(
+        deps,
+        team,
+        SessionAsk {
+            agent: assigner,
+            contract: None,
+            purpose: SessionPurpose::Plan,
+            cwd: deps.tools.files.root().to_path_buf(),
+            executor: None,
+            read_only: false,
+            only_tool: Some(SPRINT_PLAN_TOOL),
+            initial_prompt: sprint_plan_message(&open.sprint_id, &contracts, open.budget_usd),
+        },
+    )
+    .await?;
+    Ok(Some(TickReport::Sprint {
+        sprint_id: open.sprint_id,
+        what: ran(assigner, "plan", &end),
+    }))
+}
+
+/// Whether the day's dollars stop a session about no task from starting; `day_spent` is set when
+/// they do, as `spent` sets it.
+fn day_is_spent(
+    deps: &OrchestratorDeps,
+    team: &Team,
+    role: Role,
+    day_spent: &mut bool,
+) -> Result<bool, OrchestratorError> {
+    let state = budget_state(
+        &deps.tools.projections,
+        team,
+        role,
+        None,
+        &SessionLedger::default(),
+        deps.tools.clock.now(),
+    )?;
+    let spent = check_budgets(&state)
+        .iter()
+        .any(|exhausted| exhausted.scope == BudgetScope::DayUsd);
+    *day_spent |= spent;
+    Ok(spent)
 }
 
 /// Whether `rules` runs rule `rule` (1 to 10, in the order of work) for every task. `Planning`
@@ -388,7 +481,7 @@ async fn in_progress(
         team,
         SessionAsk {
             agent: assignee,
-            contract: &contract,
+            contract: Some(&contract),
             purpose: SessionPurpose::Implement,
             cwd: worktree(deps, &row.task_id),
             executor: Some(executor),
@@ -563,7 +656,7 @@ async fn ready(
         team,
         SessionAsk {
             agent: assigner,
-            contract: &contract,
+            contract: Some(&contract),
             purpose: SessionPurpose::Plan,
             cwd: deps.tools.files.root().to_path_buf(),
             executor: None,
@@ -635,20 +728,25 @@ pub(super) fn acted(
     purpose: &str,
     end: &SessionEnd,
 ) -> TickReport {
+    TickReport::Acted {
+        task_id: row.task_id.clone(),
+        what: ran(agent, purpose, end),
+    }
+}
+
+/// What a tick says of the session it ran: whose, for what, how it ended, and its last words.
+fn ran(agent: &Agent, purpose: &str, end: &SessionEnd) -> String {
     let how = match end.reason {
         EndReason::Completed => "completed",
         EndReason::Aborted => "was aborted",
         EndReason::Limit => "reached a limit",
         EndReason::Error => "failed",
     };
-    TickReport::Acted {
-        task_id: row.task_id.clone(),
-        what: format!(
-            "ran {}'s {purpose} session, which {how}: {}",
-            agent.id.as_str(),
-            end.detail
-        ),
-    }
+    format!(
+        "ran {}'s {purpose} session, which {how}: {}",
+        agent.id.as_str(),
+        end.detail
+    )
 }
 
 #[cfg(test)]
@@ -683,7 +781,8 @@ mod tests {
     use crate::orchestrator::{Orchestrator, OrchestratorError, TickReport, TickRules, TickScope};
     use crate::recorded::fixtures::{
         accept_frk_1, implement_finishes_frk_1, implement_stops_early, plan_assigns_frk_1,
-        reads_a_file, replays_farik_read_board, review_answers_nothing, review_writes_note,
+        plan_sprint_frk_1, reads_a_file, replays_farik_read_board, review_answers_nothing,
+        review_writes_note,
     };
     use crate::recorded::{RecordedAdapter, Transcript};
     use crate::session::SessionPurpose;
@@ -3444,5 +3543,94 @@ mod tests {
 
         assert!(matches!(report, TickReport::Idle { .. }), "{report:?}");
         assert!(harness.events(&[EventKind::SprintEnded]).is_empty());
+    }
+
+    /// The harness's team with an active Scrum Master `sm` besides.
+    fn with_a_scrum_master(wire: &mut serde_json::Value) {
+        wire["agents"]
+            .as_array_mut()
+            .expect("a list of agents")
+            .push(farik_core::team::fixtures::an_agent_wire(
+                "sm",
+                "scrum_master",
+            ));
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn asks_the_assigner_to_plan_an_empty_sprint() {
+        let harness = Harness::new("orch-sprint-plan", with_a_scrum_master);
+        harness.ready("FRK-1");
+        harness.open_sprint("S1", &[]);
+        let adapter = harness.recorded(vec![plan_sprint_frk_1()]);
+        let orchestrator = harness.orchestrator(adapter.clone());
+
+        let report = orchestrator.tick().await.expect("the tick runs");
+
+        assert!(
+            matches!(&report, TickReport::Sprint { sprint_id, what }
+                if sprint_id == "S1" && what.contains("S1 holds FRK-1")),
+            "{report:?}"
+        );
+        let started = adapter.started();
+        assert_eq!(started.len(), 1);
+        let spec = &started[0];
+        assert_eq!(
+            (spec.agent_id.as_str(), spec.purpose, spec.task_id.as_ref()),
+            ("sm", SessionPurpose::Plan, None)
+        );
+        assert_eq!(spec.farik_tools, vec!["farik_plan_sprint".to_string()]);
+        assert!(
+            spec.initial_prompt.contains("FRK-1") && spec.initial_prompt.contains("$5.00"),
+            "{}",
+            spec.initial_prompt
+        );
+        assert_eq!(harness.row("FRK-1").sprint.as_deref(), Some("S1"));
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn asks_no_plan_of_a_sprint_that_holds_a_task() {
+        let harness = Harness::new("orch-sprint-held", with_a_scrum_master);
+        harness.ready("FRK-1");
+        harness.ready("FRK-2");
+        harness.open_sprint("S1", &["FRK-1"]);
+        let adapter = harness.recorded(vec![plan_assigns_frk_1()]);
+        let orchestrator = harness.orchestrator(adapter.clone());
+
+        orchestrator.tick().await.expect("the tick runs");
+
+        assert!(
+            adapter.started().iter().all(|spec| spec.task_id.is_some()),
+            "{:?}",
+            adapter.started()
+        );
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn plans_a_sprint_once() {
+        let harness = Harness::new("orch-sprint-once", with_a_scrum_master);
+        harness.ready("FRK-1");
+        harness.open_sprint("S1", &[]);
+        let adapter = harness.recorded(vec![reads_a_file(), plan_assigns_frk_1()]);
+        let orchestrator = harness.orchestrator(adapter.clone());
+        let first = orchestrator.tick().await.expect("the tick runs");
+        assert!(matches!(&first, TickReport::Sprint { .. }), "{first:?}");
+        assert_eq!(
+            harness.row("FRK-1").sprint,
+            None,
+            "the session planned nothing"
+        );
+
+        let second = orchestrator.tick().await.expect("the tick runs");
+
+        assert!(!matches!(&second, TickReport::Sprint { .. }), "{second:?}");
+        let planning = adapter
+            .started()
+            .iter()
+            .filter(|spec| spec.task_id.is_none())
+            .count();
+        assert_eq!(planning, 1);
     }
 }

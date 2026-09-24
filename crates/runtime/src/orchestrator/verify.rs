@@ -455,7 +455,7 @@ pub(super) fn read_only<'a>(
 ) -> SessionAsk<'a> {
     SessionAsk {
         agent,
-        contract,
+        contract: Some(contract),
         purpose: SessionPurpose::Verify,
         cwd,
         executor: None,

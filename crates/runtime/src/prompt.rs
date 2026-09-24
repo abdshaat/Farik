@@ -119,6 +119,13 @@ pub const JUDGMENT_INSTRUCTION: &str = "This session judges the contract above, 
      `farik_record_judgment` with both answers and your reason, which the Product Manager \
      rewrites from when either answer is no.";
 
+/// The `This session` section of a sprint's planning session (5.5), a `plan` session about no task
+/// given `farik_plan_sprint` alone.
+pub const SPRINT_PLAN_INSTRUCTION: &str = "This session plans the open sprint. Choose, from the \
+     candidates in the first message, the tasks the team should finish in this sprint, keeping \
+     their `max_cost_usd` together within the sprint's budget when it has one; an epic brings its \
+     tasks with it. Plan them in one call of `farik_plan_sprint`, then end the session.";
+
 /// The system prompt of one session: the sections of `PROMPT_SECTIONS`, in that order.
 ///
 /// # Errors

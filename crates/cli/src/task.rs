@@ -11,17 +11,19 @@ use farik_store::EventQuery;
 use farik_store::requests::{RequestError, fields_not_the_authors, file_request};
 use serde_json::json;
 
-use crate::project::Project;
-use crate::{HUMAN, Report};
+use farik_runtime::sprints::join_epics_sprint;
+
+use crate::project::{Project, tool_deps};
+use crate::{CliIo, HUMAN, Report};
 
 /// Reads the contract in `file` and files it as a `draft` request through `file_request`, which
-/// gives it the next id.
+/// gives it the next id. A task filed under an epic in the open sprint joins that sprint.
 ///
 /// The contract goes through `command_from_value` rather than through `validate_contract` alone, so
 /// that a contract filed from a terminal is held to exactly the rules one arriving from an agent is.
 ///
-/// `file` is taken as the person typed it: absolute as it is, relative to `cwd`, which is where the
-/// command was run.
+/// `file` is taken as the person typed it: absolute as it is, relative to `io.cwd`, which is where
+/// the command was run.
 ///
 /// # Errors
 ///
@@ -29,7 +31,7 @@ use crate::{HUMAN, Report};
 /// not the author's to write, every rule the contract breaks, or what could not be written.
 pub fn create(
     project: &Project,
-    cwd: &Path,
+    io: &CliIo<'_>,
     file: &Path,
     parent: Option<&str>,
     now: DateTime<Utc>,
@@ -44,7 +46,7 @@ pub fn create(
     let file = if file.is_absolute() {
         file.to_path_buf()
     } else {
-        cwd.join(file)
+        io.cwd.join(file)
     };
     let text = std::fs::read_to_string(&file)
         .map_err(|error| format!("{} could not be read: {error}", file.display()))?;
@@ -77,6 +79,11 @@ pub fn create(
         }
         other => other.to_string(),
     })?;
+    // A task filed under an epic in the open sprint joins it (5.5).
+    if parent.is_some() {
+        join_epics_sprint(&*tool_deps(project, io)?, &contract.id)
+            .map_err(|error| error.to_string())?;
+    }
     let seqs: Vec<u64> = project
         .log
         .read(&EventQuery {

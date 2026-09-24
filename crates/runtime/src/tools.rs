@@ -190,6 +190,11 @@ static TOOLS: LazyLock<Vec<FarikTool>> = LazyLock::new(|| {
             Read,
             "Assign a ready task to an agent, with the agent that reviews it.",
         ),
+        tool::<contracts::PlanSprintInput>(
+            "farik_plan_sprint",
+            Read,
+            "Plan the open sprint: put ready tasks and approved epics in it, within its budget.",
+        ),
         tool::<work::DeclareBlockedInput>(
             "farik_declare_blocked",
             Read,
@@ -307,6 +312,7 @@ pub async fn call_tool(
         "farik_create_task" => contracts::create_task(&call, parse(input)?),
         "farik_request_transition" => work::request_transition(&call, parse(input)?),
         "farik_assign_task" => work::assign_task(&call, parse(input)?),
+        "farik_plan_sprint" => contracts::plan_sprint(&call, &parse(input)?),
         "farik_declare_blocked" => work::declare_blocked(&call, parse(input)?),
         "farik_record_criterion_result" => work::record_criterion(&call, parse(input)?),
         "farik_write_note" => work::write_note(&call, parse(input)?),
@@ -503,6 +509,7 @@ mod tests {
             "farik_create_task",
             "farik_request_transition",
             "farik_assign_task",
+            "farik_plan_sprint",
             "farik_declare_blocked",
             "farik_record_criterion_result",
             "farik_write_note",
@@ -526,7 +533,7 @@ mod tests {
         assert_eq!(tier("farik_git_diff"), Some(PermissionTier::GitLocal));
         assert_eq!(tier("farik_git_commit"), Some(PermissionTier::GitLocal));
         assert_eq!(tier("farik_git_push"), Some(PermissionTier::GitRemote));
-        for tool in &tools[..15] {
+        for tool in &tools[..16] {
             assert_eq!(tool.tier, PermissionTier::Read, "{}", tool.name);
         }
         for tool in &tools {

@@ -20,7 +20,9 @@ use crate::claude::allowed_builtins;
 use crate::cost::{CostError, CostSource, budget_state, record_exhaustion, record_session_cost};
 use crate::daemon::SessionRegistration;
 use crate::exec::Executor;
-use crate::prompt::{JUDGMENT_INSTRUCTION, PromptInput, assemble_system_prompt};
+use crate::prompt::{
+    JUDGMENT_INSTRUCTION, PromptInput, SPRINT_PLAN_INSTRUCTION, assemble_system_prompt,
+};
 use crate::session::{
     EndReason, SessionEvent, SessionHandle, SessionPurpose, SessionSpec, session_model,
 };
@@ -34,12 +36,16 @@ pub(super) const TRIAGE_TOOL: &str = "farik_triage_request";
 /// with `JUDGMENT_INSTRUCTION`.
 pub(super) const JUDGMENT_TOOL: &str = "farik_record_judgment";
 
+/// The one tool a sprint's planning session is given; a session given it alone closes with
+/// `SPRINT_PLAN_INSTRUCTION`.
+pub(super) const SPRINT_PLAN_TOOL: &str = "farik_plan_sprint";
+
 /// What a rule asks a session for.
 pub(super) struct SessionAsk<'a> {
     /// The agent the session is.
     pub(super) agent: &'a Agent,
-    /// The task it is about.
-    pub(super) contract: &'a TaskContract,
+    /// The task it is about, when it is about one: a sprint's planning session is about none.
+    pub(super) contract: Option<&'a TaskContract>,
     /// Why it runs.
     pub(super) purpose: SessionPurpose,
     /// Where it works.
@@ -51,7 +57,8 @@ pub(super) struct SessionAsk<'a> {
     /// change it.
     pub(super) read_only: bool,
     /// The one Farik tool it is given, when it is given one alone and no built-in tool: triage's
-    /// `farik_triage_request`, the judgment's `farik_record_judgment`.
+    /// `farik_triage_request`, the judgment's `farik_record_judgment`, a sprint's planning
+    /// `farik_plan_sprint`.
     pub(super) only_tool: Option<&'static str>,
     /// Its first message.
     pub(super) initial_prompt: String,
@@ -142,11 +149,14 @@ fn session_spec(
         .filter(|tool| ask.only_tool.is_some() || tiers.contains(&tool.tier))
         .map(|tool| tool.name.to_string())
         .collect();
-    let history = deps.tools.log.read(&EventQuery {
-        task_id: Some(ask.contract.id.clone()),
-        ..EventQuery::default()
-    })?;
-    let human = human_message(&history);
+    // A session about no task has no human message, and the whole log is not read for one.
+    let human = match ask.contract {
+        Some(contract) => human_message(&deps.tools.log.read(&EventQuery {
+            task_id: Some(contract.id.clone()),
+            ..EventQuery::default()
+        })?),
+        None => None,
+    };
     let rules = team.rules();
     let system_prompt = assemble_system_prompt(&PromptInput {
         role: &role,
@@ -155,18 +165,22 @@ fn session_spec(
         memory: &memory,
         rules: &rules,
         criteria: &criteria,
-        contract: Some(ask.contract),
+        contract: ask.contract,
         tools: &tools,
         builtin_tools: &builtin_tools,
         purpose: ask.purpose,
         human_message: human.as_deref(),
-        closing: (ask.only_tool == Some(JUDGMENT_TOOL)).then_some(JUDGMENT_INSTRUCTION),
+        closing: match ask.only_tool {
+            Some(JUDGMENT_TOOL) => Some(JUDGMENT_INSTRUCTION),
+            Some(SPRINT_PLAN_TOOL) => Some(SPRINT_PLAN_INSTRUCTION),
+            _ => None,
+        },
     })?;
     let limits = budget_state(
         &deps.tools.projections,
         team,
         role_id,
-        Some(ask.contract),
+        ask.contract,
         &SessionLedger::default(),
         deps.tools.clock.now(),
     )?
@@ -174,7 +188,7 @@ fn session_spec(
     Ok(SessionSpec {
         session_id: deps.session_ids.session_id(),
         agent_id: ask.agent.id.to_string(),
-        task_id: Some(ask.contract.id.clone()),
+        task_id: ask.contract.map(|contract| contract.id.clone()),
         purpose: ask.purpose,
         system_prompt,
         model,
@@ -200,7 +214,7 @@ async fn drive(
     deps: &OrchestratorDeps,
     team: &Team,
     role: Role,
-    contract: &TaskContract,
+    contract: Option<&TaskContract>,
     spec: &SessionSpec,
 ) -> Result<(EndReason, String), OrchestratorError> {
     let tools = &deps.tools;
@@ -272,7 +286,7 @@ struct Running<'a> {
     deps: &'a OrchestratorDeps,
     team: &'a Team,
     role: Role,
-    contract: &'a TaskContract,
+    contract: Option<&'a TaskContract>,
     spec: &'a SessionSpec,
     ids: &'a EventIds,
 }
@@ -304,7 +318,7 @@ async fn read_to_end(
             &tools.projections,
             team,
             role,
-            Some(contract),
+            contract,
             ledger,
             clock.now(),
         )
@@ -365,7 +379,8 @@ mod tests {
     use crate::orchestrator::fixtures::Harness;
     use crate::session::SessionPurpose;
 
-    use super::{SessionAsk, session_spec};
+    use super::{SPRINT_PLAN_TOOL, SessionAsk, session_spec};
+    use crate::prompt::SPRINT_PLAN_INSTRUCTION;
 
     #[test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
@@ -387,7 +402,7 @@ mod tests {
             &team,
             &SessionAsk {
                 agent: pm,
-                contract: &contract,
+                contract: Some(&contract),
                 purpose: SessionPurpose::Refine,
                 cwd: deps.tools.files.root().to_path_buf(),
                 executor: None,
@@ -400,5 +415,50 @@ mod tests {
 
         assert_eq!(spec.farik_tools, vec!["farik_record_judgment".to_string()]);
         assert!(spec.builtin_tools.is_empty(), "{:?}", spec.builtin_tools);
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn closes_a_sprint_planning_session_with_its_own_instruction() {
+        let harness = Harness::new("session-sprint-plan", |_| {});
+        let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
+        let deps = &orchestrator.deps;
+        let team = deps.tools.files.read_team().expect("the team");
+        let pm = team.active_agents().next().expect("an agent");
+
+        let spec = session_spec(
+            deps,
+            &team,
+            &SessionAsk {
+                agent: pm,
+                contract: None,
+                purpose: SessionPurpose::Plan,
+                cwd: deps.tools.files.root().to_path_buf(),
+                executor: None,
+                read_only: false,
+                only_tool: Some(SPRINT_PLAN_TOOL),
+                initial_prompt: String::new(),
+            },
+        )
+        .expect("the spec");
+
+        assert!(
+            spec.system_prompt
+                .trim_end()
+                .ends_with(SPRINT_PLAN_INSTRUCTION),
+            "{}",
+            spec.system_prompt
+        );
+        // The role's own words may name it; the tools and the instruction do not.
+        let from_the_tools = &spec.system_prompt[spec
+            .system_prompt
+            .find("## Your tools")
+            .expect("a tools section")..];
+        assert!(
+            !from_the_tools.contains("farik_assign_task"),
+            "{from_the_tools}"
+        );
+        assert_eq!(spec.task_id, None);
+        assert_eq!(spec.farik_tools, vec![SPRINT_PLAN_TOOL.to_string()]);
     }
 }

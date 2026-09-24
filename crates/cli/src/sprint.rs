@@ -1,6 +1,7 @@
 //! `farik sprint show`: one sprint and how it went (`docs/SPEC.md` sections 3 and 5.5).
 
 use farik_core::sprint::{Sprint, SprintStatus};
+use farik_runtime::sprints::planning_session_spent;
 use farik_store::CostScope;
 use serde_json::{Value, json};
 
@@ -67,8 +68,16 @@ pub fn show(project: &Project, sprint_id: Option<&str>) -> Result<Report, String
             );
         tasks.push((task_id.as_str().to_string(), status));
     }
+    // An empty sprint whose planning session planned nothing stays open until the human ends it.
+    let waits_for_its_end = sprint.status == SprintStatus::Open
+        && tasks.is_empty()
+        && planning_session_spent(&project.log, id).map_err(|error| error.to_string())?;
+    let mut lines = lines(&sprint, spent, &tasks);
+    if waits_for_its_end {
+        lines.push("empty: end it with farik sprint end".to_string());
+    }
     Ok(Report {
-        lines: lines(&sprint, spent, &tasks),
+        lines,
         json: sprint_json(&sprint, spent, &tasks),
         json_lines: None,
     })

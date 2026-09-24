@@ -492,7 +492,7 @@ pub fn run_cli(args: &[String], io: &mut CliIo<'_>) -> i32 {
         Commands::Task {
             command: TaskCommands::Create { file, parent },
         } => open_project(&io.cwd, now)
-            .and_then(|project| task::create(&project, &io.cwd, file, parent.as_deref(), now)),
+            .and_then(|project| task::create(&project, io, file, parent.as_deref(), now)),
         Commands::Triage { .. }
         | Commands::Contract {
             command: ContractCommands::Lock { .. } | ContractCommands::Unlock { .. },

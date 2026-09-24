@@ -10,8 +10,6 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use farik_core::contract::TaskId;
-use farik_core::sprint::fixtures::an_open_sprint_wire;
-use farik_core::sprint::validate_sprint;
 use farik_protocol::clock::SequentialIds;
 use farik_protocol::event::{EventKind, FarikEvent, NewEvent, event_from_value};
 use farik_store::TaskProjection;
@@ -487,33 +485,7 @@ impl Harness {
     /// leave it: its file, each task's contract naming it, `sprint.started` by the human, and
     /// `sprint.planned` by the Product Manager when it holds a task.
     pub(crate) fn open_sprint(&self, sprint: &str, tasks: &[&str]) {
-        let files = &self.project.deps.files;
-        let mut wire = an_open_sprint_wire();
-        wire["id"] = json!(sprint);
-        wire["task_ids"] = json!(tasks);
-        files
-            .write_sprint(&validate_sprint(&wire).expect("the fixture is a sprint"))
-            .expect("the sprint is written");
-        for task in tasks {
-            let id: TaskId = task.parse().expect("a task id");
-            let mut contract = files.read_contract(&id).expect("the contract reads");
-            contract.sprint = Some(sprint.to_string());
-            files
-                .write_contract(&contract)
-                .expect("the contract is written");
-        }
-        self.project.record(
-            "",
-            "sprint.started",
-            &json!({ "sprint_id": sprint, "budget_usd": null, "started_by": "human" }),
-        );
-        if !tasks.is_empty() {
-            self.project.record(
-                "",
-                "sprint.planned",
-                &json!({ "sprint_id": sprint, "task_ids": tasks, "planned_by": "pm" }),
-            );
-        }
+        self.project.open_sprint(sprint, None, tasks);
     }
 
     /// The task's row on the board.

@@ -82,7 +82,7 @@ pub(super) async fn draft(
             team,
             SessionAsk {
                 agent: triager,
-                contract: &contract,
+                contract: Some(&contract),
                 purpose: SessionPurpose::Triage,
                 cwd: deps.tools.files.root().to_path_buf(),
                 executor: None,
@@ -148,7 +148,7 @@ pub(super) async fn refining(
             team,
             SessionAsk {
                 agent: sm,
-                contract: &contract,
+                contract: Some(&contract),
                 purpose: SessionPurpose::Refine,
                 cwd: deps.tools.files.root().to_path_buf(),
                 executor: None,
@@ -172,7 +172,7 @@ pub(super) async fn refining(
         team,
         SessionAsk {
             agent: pm,
-            contract: &contract,
+            contract: Some(&contract),
             purpose: SessionPurpose::Refine,
             cwd: deps.tools.files.root().to_path_buf(),
             executor: None,
@@ -436,7 +436,7 @@ pub(super) async fn in_progress_epic(
         team,
         SessionAsk {
             agent: assignee,
-            contract: &contract,
+            contract: Some(&contract),
             purpose: SessionPurpose::Plan,
             cwd: deps.tools.files.root().to_path_buf(),
             executor: None,

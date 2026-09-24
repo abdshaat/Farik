@@ -219,6 +219,34 @@ pub(super) fn plan_message(
     )
 }
 
+/// The sprint's planning session's message: the sprint, its budget left or "no budget", and each
+/// candidate's id, kind, most it may cost, and title, the titles being an agent's words.
+pub(super) fn sprint_plan_message(
+    sprint_id: &str,
+    candidates: &[TaskContract],
+    budget_left: Option<f64>,
+) -> String {
+    let listed = candidates
+        .iter()
+        .map(|contract| {
+            format!(
+                "{} ({}, ${:.2}): {}",
+                contract.id.as_str(),
+                contract.kind,
+                contract.budget.max_cost_usd,
+                contract.title.as_str()
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    format!(
+        "Plan {sprint_id} with `farik_plan_sprint`, naming the tasks the team should finish in it. \
+         Its budget: {budget}. The candidates, each ready and in no sprint: {candidates}",
+        budget = budget_left.map_or_else(|| "no budget".to_string(), |usd| format!("${usd:.2}")),
+        candidates = untrusted_block("candidates", &listed, RESULTS_CAP_BYTES),
+    )
+}
+
 /// The implement session's message: the task, the rejection this iteration answers as untrusted
 /// text when there is one, and where the work stands when an earlier session left something:
 /// `Resuming: last commit <sha> <subject>; last note (<kind>): <text>`, the commit's subject and

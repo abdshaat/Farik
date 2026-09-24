@@ -18,7 +18,7 @@ use farik_core::pricing::Usage;
 use farik_protocol::event::{EventBody, EventKind, SessionEndedBodyReason};
 use farik_runtime::recorded::fixtures::{
     UsageThenWaitAdapter, accept_frk_1, implement_finishes_frk_1, plan_assigns_frk_1,
-    refine_writes_task_frk_1, review_writes_note, tool_runner,
+    plan_sprint_frk_1, refine_writes_task_frk_1, review_writes_note, tool_runner,
 };
 use farik_runtime::{RecordedAdapter, RuntimeAdapter, Transcript};
 use farik_store::git::fixtures::TempRepo;
@@ -560,6 +560,29 @@ fn plans_without_starting_work() {
             .exists()
     );
     assert_eq!(purposes(&repository), ["plan"]);
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn prints_a_sprint_line_for_a_planning_session() {
+    let repository = a_team("plan-sprint");
+    let task = a_small_request(&repository);
+    walked(&repository, &task, &["refining", "ready"]);
+    let started = run(&repository.path, &["sprint", "start"]);
+    assert_eq!(started.code, 0, "{}", started.err);
+
+    let ran = run_with(&repository.path, &["plan"], |io| {
+        io.engine = recorded(vec![plan_sprint_frk_1(), plan_assigns_frk_1()]);
+    });
+
+    assert_eq!(ran.code, 0, "{}\n{}", ran.out, ran.err);
+    assert!(
+        ran.out
+            .lines()
+            .any(|line| line.starts_with("S1: ") && line.contains("S1 holds FRK-1")),
+        "{}",
+        ran.out
+    );
 }
 
 #[test]

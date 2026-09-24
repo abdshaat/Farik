@@ -18,12 +18,13 @@ use farik_protocol::command::{Command, RequestSize};
 use farik_protocol::event::{EventBody, EventKind, HumanAcceptedBodySubject};
 use farik_runtime::orchestrator::CommandError;
 use farik_runtime::recorded::fixtures::tool_runner;
+use farik_runtime::sprints::{PlannedBy, plan_sprint};
 use farik_runtime::{RecordedAdapter, RuntimeAdapter};
 use serde_json::{Value, json};
 
 use project::{
-    LiveDriver, a_high_risk_task_verifying, a_project, a_team, events, filed, hold_the_run_lock,
-    joined, moved, record, record_as, run, run_with, status_of,
+    LiveDriver, a_high_risk_task_verifying, a_project, a_team, events, filed, files_of,
+    hold_the_run_lock, joined, moved, record, record_as, run, run_with, status_of, tool_deps,
 };
 
 /// Records a question from `pm` on `task`, and answers its sequence number.
@@ -435,4 +436,82 @@ fn starts_and_shows_a_sprint_from_the_command_line() {
         "{}",
         shown.out
     );
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn says_an_empty_sprint_whose_planning_is_spent_waits_for_its_end() {
+    let repository = a_team("human-sprint-empty");
+    let started = run(&repository.path, &["sprint", "start"]);
+    assert_eq!(started.code, 0, "{}", started.err);
+    let empty = "empty: end it with farik sprint end";
+    let shown = run(&repository.path, &["sprint", "show"]);
+    assert!(!shown.out.contains(empty), "{}", shown.out);
+
+    record_as(
+        &repository,
+        "",
+        Some(("pm", "session-1")),
+        "session.started",
+        &json!({ "purpose": "plan", "model": "claude-opus-5", "effort": "high" }),
+    );
+    let shown = run(&repository.path, &["sprint", "show"]);
+
+    assert_eq!(shown.code, 0, "{}", shown.err);
+    assert!(shown.out.contains(empty), "{}", shown.out);
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn joins_a_task_the_human_files_under_a_sprints_epic() {
+    let repository = a_team("human-sprint-child");
+    let epic = filed(&repository, "A whole board");
+    let ran = run(
+        &repository.path,
+        &["triage", &epic, "large", "--reason", "Two parts."],
+    );
+    assert_eq!(ran.code, 0, "{}", ran.err);
+    moved(&repository, &epic, "draft", "refining", &json!({}));
+    moved(&repository, &epic, "refining", "ready", &json!({}));
+    moved(
+        &repository,
+        &epic,
+        "ready",
+        "assigned",
+        &json!({ "assignee": "pm" }),
+    );
+    moved(
+        &repository,
+        &epic,
+        "assigned",
+        "in_progress",
+        &json!({ "assignee": "pm" }),
+    );
+    let started = run(&repository.path, &["sprint", "start"]);
+    assert_eq!(started.code, 0, "{}", started.err);
+    plan_sprint(
+        &tool_deps(&repository),
+        &[epic.parse().expect("a task id")],
+        &PlannedBy::Governor,
+    )
+    .expect("the epic is planned");
+    let child = repository.path.join("child.yaml");
+    std::fs::write(&child, project::a_request("One row of the board")).expect("written");
+
+    let ran = run(
+        &repository.path,
+        &[
+            "task",
+            "create",
+            child.to_str().expect("a path"),
+            "--parent",
+            &epic,
+        ],
+    );
+
+    assert_eq!(ran.code, 0, "{}", ran.err);
+    let contract = files_of(&repository)
+        .read_contract(&"FRK-2".parse().expect("a task id"))
+        .expect("the child is written");
+    assert_eq!(contract.sprint.as_deref(), Some("S1"));
 }

@@ -1,13 +1,13 @@
-//! Starting and ending a sprint (`docs/SPEC.md` sections 3 and 5.5): the files first, then the
-//! event, the order `Transitions::record_move` uses.
+//! Starting, planning, and ending a sprint (`docs/SPEC.md` sections 3 and 5.5): the files first,
+//! then the event, the order `Transitions::record_move` uses.
 
 use std::fmt;
 
-use farik_core::contract::{TaskId, TaskStatus};
+use farik_core::contract::{Role, TaskId, TaskStatus};
 use farik_core::sprint::{Sprint, validate_sprint};
 use farik_protocol::event::{EventBody, EventKind, new_event};
 use farik_store::files::FilesError;
-use farik_store::{EventQuery, StoreError};
+use farik_store::{EventLog, EventQuery, SprintProjection, StoreError, TaskProjection};
 use serde::de::DeserializeOwned;
 use serde_json::{Value, json};
 
@@ -22,7 +22,16 @@ pub enum EndedBy {
     Human,
 }
 
-/// Why a sprint was not started or ended.
+/// Who plans tasks into a sprint, as `sprint.planned` records it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PlannedBy {
+    /// The assigner, with `farik_plan_sprint`: every rule of a plan holds.
+    Assigner(String),
+    /// Farik, putting a breakdown's task in its epic's sprint.
+    Governor,
+}
+
+/// Why a sprint was not started, planned, or ended.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SprintError {
     /// A sprint is already open: one at a time.
@@ -165,6 +174,217 @@ pub fn end_sprint(deps: &ToolDeps, ended_by: EndedBy) -> Result<Sprint, SprintEr
         }))?),
     )?;
     Ok(sprint)
+}
+
+/// Plans `task_ids` into the open sprint: each contract's `sprint` field written, then the sprint
+/// file's `task_ids`, then `sprint.planned` by the planner. The assigner (the active Scrum Master,
+/// else the active Product Manager) plans once, into a sprint that holds no task yet, only `ready`
+/// tasks and approved epics with no parent and in no sprint, and within the sprint's budget, an
+/// epic counting once and bringing every task already under it. The governor plans a breakdown's
+/// task into its epic's sprint, which checks only that a sprint is open and the task is in none:
+/// the epic's budget already counts it.
+///
+/// # Errors
+///
+/// `Refused`, starting `sprint_plan_refused: `, naming what breaks a rule; `Files` and `Store` as
+/// `start_sprint`.
+pub fn plan_sprint(
+    deps: &ToolDeps,
+    task_ids: &[TaskId],
+    planned_by: &PlannedBy,
+) -> Result<Sprint, SprintError> {
+    let open = deps
+        .projections
+        .open_sprint()?
+        .ok_or_else(|| plan_refused("no sprint is open"))?;
+    let assigner = match planned_by {
+        PlannedBy::Assigner(agent_id) => Some(agent_id.as_str()),
+        PlannedBy::Governor => None,
+    };
+    if let Some(agent_id) = assigner {
+        may_plan(deps, agent_id)?;
+        if task_ids.is_empty() {
+            return Err(plan_refused("name at least one task to plan"));
+        }
+    }
+    let board = deps.projections.board()?;
+    let mut planned: Vec<TaskId> = Vec::new();
+    for task_id in task_ids {
+        let id = task_id.as_str();
+        let row = board
+            .iter()
+            .find(|row| &row.task_id == task_id)
+            .ok_or_else(|| plan_refused(&format!("the board has no {id}")))?;
+        if let Some(sprint_id) = &row.sprint {
+            return Err(plan_refused(&format!("{id} is already in {sprint_id}")));
+        }
+        planned.push(task_id.clone());
+        if assigner.is_none() {
+            continue;
+        }
+        if let Some(parent) = &row.parent {
+            return Err(plan_refused(&format!(
+                "{id} is under {}, and joins a sprint with its epic",
+                parent.as_str()
+            )));
+        }
+        if row.status != TaskStatus::Ready {
+            return Err(plan_refused(&format!(
+                "{id} is {}, and only a ready task or an approved epic is planned",
+                row.status
+            )));
+        }
+        planned.extend(
+            board
+                .iter()
+                .filter(|child| child.parent.as_ref() == Some(task_id) && child.sprint.is_none())
+                .map(|child| child.task_id.clone()),
+        );
+    }
+    if assigner.is_some() {
+        fits(deps, &open, &board, task_ids)?;
+    }
+    let mut wire = as_wire(&deps.files.read_sprint(&open.sprint_id)?)?;
+    let ids: Vec<&str> = planned.iter().map(|id| id.as_str()).collect();
+    if let Some(listed) = wire["task_ids"].as_array_mut() {
+        listed.extend(ids.iter().map(|id| json!(id)));
+    }
+    let sprint = held(&wire)?;
+    for task_id in &planned {
+        let mut contract = deps.files.read_contract(task_id)?;
+        contract.sprint = Some(open.sprint_id.clone());
+        deps.files.write_contract(&contract)?;
+    }
+    deps.files.write_sprint(&sprint)?;
+    record(
+        deps,
+        EventBody::SprintPlanned(typed(json!({
+            "sprint_id": open.sprint_id,
+            "task_ids": ids,
+            "planned_by": match planned_by {
+                PlannedBy::Assigner(agent_id) => agent_id.as_str(),
+                PlannedBy::Governor => "governor",
+            },
+        }))?),
+    )?;
+    Ok(sprint)
+}
+
+/// Refuses a plan by anyone but the assigner: the active Scrum Master, or the active Product
+/// Manager on a team without one.
+fn may_plan(deps: &ToolDeps, agent_id: &str) -> Result<(), SprintError> {
+    let team = deps.files.read_team()?;
+    let role = team
+        .active_agents()
+        .find(|agent| agent.id.as_str() == agent_id)
+        .map(|agent| Role::from(agent.role));
+    let plans = match role {
+        Some(Role::ScrumMaster) => true,
+        Some(Role::ProductManager) => !team.has_active(Role::ScrumMaster),
+        _ => false,
+    };
+    if plans {
+        Ok(())
+    } else {
+        Err(plan_refused(&format!(
+            "{agent_id} is not the assigner: the Scrum Master plans the sprint, or the Product \
+             Manager on a team without one"
+        )))
+    }
+}
+
+/// Refuses the assigner's plan of `task_ids` past the open sprint's budget, counting the tasks
+/// already in it, and a second plan of a sprint that already holds a task. An epic's budget covers
+/// its tasks, so a task under one adds nothing.
+fn fits(
+    deps: &ToolDeps,
+    open: &SprintProjection,
+    board: &[TaskProjection],
+    task_ids: &[TaskId],
+) -> Result<(), SprintError> {
+    let in_sprint: Vec<&TaskId> = board
+        .iter()
+        .filter(|row| row.sprint.as_deref() == Some(open.sprint_id.as_str()))
+        .map(|row| &row.task_id)
+        .collect();
+    if let Some(budget_usd) = open.budget_usd {
+        let mut total = 0.0;
+        for task_id in task_ids.iter().chain(in_sprint.iter().copied()) {
+            if board
+                .iter()
+                .any(|row| &row.task_id == task_id && row.parent.is_none())
+            {
+                total += deps.files.read_contract(task_id)?.budget.max_cost_usd;
+            }
+        }
+        if total > budget_usd {
+            return Err(plan_refused(&format!(
+                "the tasks would cost up to ${total:.2}, past {}'s budget of ${budget_usd:.2}",
+                open.sprint_id
+            )));
+        }
+    }
+    if in_sprint.is_empty() {
+        Ok(())
+    } else {
+        Err(plan_refused(&format!(
+            "{} is planned already, and a sprint is planned once",
+            open.sprint_id
+        )))
+    }
+}
+
+/// Puts `task`, filed under an epic, in its epic's sprint when that is the open one, planned by the
+/// governor; a task under no epic, or under one in no open sprint, is left as it is.
+///
+/// # Errors
+///
+/// As `plan_sprint`.
+pub fn join_epics_sprint(deps: &ToolDeps, task: &TaskId) -> Result<Option<Sprint>, SprintError> {
+    let Some(parent) = deps.projections.task(task)?.and_then(|row| row.parent) else {
+        return Ok(None);
+    };
+    let epics = deps.projections.task(&parent)?.and_then(|row| row.sprint);
+    let open = deps.projections.open_sprint()?.map(|open| open.sprint_id);
+    if epics.is_none() || epics != open {
+        return Ok(None);
+    }
+    plan_sprint(deps, std::slice::from_ref(task), &PlannedBy::Governor).map(Some)
+}
+
+/// Whether sprint `sprint_id` has had its planning session: a `session.started` of purpose `plan`
+/// about no task, recorded after the sprint's `sprint.started`.
+///
+/// # Errors
+///
+/// When the log cannot be read.
+pub fn planning_session_spent(log: &EventLog, sprint_id: &str) -> Result<bool, StoreError> {
+    let events = log.read(&EventQuery {
+        kinds: vec![EventKind::SprintStarted, EventKind::SessionStarted],
+        ..EventQuery::default()
+    })?;
+    let mut started = false;
+    for event in &events {
+        match &event.body {
+            EventBody::SprintStarted(body) => started = body.sprint_id.as_str() == sprint_id,
+            EventBody::SessionStarted(body)
+                if started
+                    && event.envelope.ids.task_id.is_none()
+                    && body.purpose.to_string() == "plan" =>
+            {
+                return Ok(true);
+            }
+            _ => {}
+        }
+    }
+    Ok(false)
+}
+
+/// A refusal of a plan, in the words `farik_plan_sprint` answers.
+fn plan_refused(why: &str) -> SprintError {
+    SprintError::Refused {
+        reason: format!("sprint_plan_refused: {why}"),
+    }
 }
 
 /// The highest sprint number the files or the log's `sprint.started` events hold, or 0.

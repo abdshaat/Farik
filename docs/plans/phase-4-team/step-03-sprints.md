@@ -134,7 +134,7 @@ Files: `tools.rs`, `tools/contracts.rs`, `tools/refusal.rs`, `daemon/mcp.rs`, `s
 - `prints_a_sprint_line_for_a_planning_session` (cli, `farik plan` with the recorded adapter) — the output holds `S1: ` and the session's words.
 - `puts_an_epics_new_task_in_its_sprint` — epic FRK-1 in S1, its assignee files FRK-2 under it: FRK-2's `sprint` is S1, `sprint.planned` by `governor`.
 
-- [ ] `feat(runtime): plan a sprint from the ready backlog`
+- [x] `feat(runtime): plan a sprint from the ready backlog`
 
 ### Task 5: assignment within a sprint and its budget
 
