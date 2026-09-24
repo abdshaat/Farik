@@ -73,14 +73,8 @@ impl Sandbox for HostSandbox {
     }
 }
 
-/// Kills the process group `child` leads, through the shell's `kill` builtin: no `unsafe`, so no
-/// `libc`, and `/bin/kill` may be absent. `-s KILL` because dash reads `-KILL --` as a number. A
-/// group that is already empty is not an error.
 fn kill_group(child: &Child) {
-    let _ = Command::new("sh")
-        .arg("-c")
-        .arg(format!("kill -s KILL -- -{} 2>/dev/null", child.id()))
-        .status();
+    crate::exec::kill_group(child.id());
 }
 
 /// Makes host sandboxes: no-sandbox mode.

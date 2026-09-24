@@ -35,6 +35,32 @@ pub mod tools;
 /// Transition requests, judged by the governor on the store's facts and recorded either way.
 pub mod transitions;
 
+/// A poisoned lock only means a task panicked while holding it; what it guards is still whole.
+pub(crate) fn locked<Value>(mutex: &std::sync::Mutex<Value>) -> std::sync::MutexGuard<'_, Value> {
+    mutex
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+/// Writes `bytes` to `path` readable by its owner alone, replacing whatever was there. The file is
+/// removed first, because a mode is only given to a file as it is created, and a file left
+/// behind may be readable by others.
+#[cfg(unix)]
+pub(crate) fn write_private(path: &std::path::Path, bytes: &[u8]) -> std::io::Result<()> {
+    use std::io::Write as _;
+    use std::os::unix::fs::OpenOptionsExt as _;
+    match std::fs::remove_file(path) {
+        Err(error) if error.kind() != std::io::ErrorKind::NotFound => return Err(error),
+        _ => {}
+    }
+    std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .open(path)?
+        .write_all(bytes)
+}
+
 pub use exec::{ExecError, ExecResult, Executor, OUTPUT_LIMIT_BYTES};
 pub use recorded::{RecordedAdapter, Transcript};
 #[cfg(unix)]

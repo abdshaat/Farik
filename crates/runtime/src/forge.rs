@@ -19,8 +19,8 @@ pub struct Forge {
     pub root: PathBuf,
 }
 
-/// A pull request on the forge.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// A pull request on the forge, as `gh pr list --json url,number` spells one.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 pub struct PullRequest {
     /// Its address.
     pub url: String,
@@ -79,13 +79,6 @@ impl fmt::Display for ForgeError {
 
 impl std::error::Error for ForgeError {}
 
-/// One row of `gh pr list --json url,number`.
-#[derive(Deserialize)]
-struct Listed {
-    url: String,
-    number: u64,
-}
-
 /// What `gh pr view --json state,mergeCommit` answers.
 #[derive(Deserialize)]
 struct Viewed {
@@ -133,14 +126,8 @@ impl Forge {
             ],
             None,
         )?;
-        let open: Vec<PullRequest> = serde_json::from_str::<Vec<Listed>>(&listed)
-            .map_err(|_| unreadable("gh pr list", &listed))?
-            .into_iter()
-            .map(|listed| PullRequest {
-                url: listed.url,
-                number: listed.number,
-            })
-            .collect();
+        let open: Vec<PullRequest> =
+            serde_json::from_str(&listed).map_err(|_| unreadable("gh pr list", &listed))?;
         if let Some(found) = open.into_iter().next() {
             return Ok(found);
         }
