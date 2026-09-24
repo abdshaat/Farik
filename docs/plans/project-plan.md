@@ -167,7 +167,7 @@ Decisions for this phase:
     team/criteria.yaml         the criterion library                          schema: criteria.schema.json
     product/roadmap.md         the product roadmap, written only through farik_write_product_doc (phase 3)
     product/spec.md, product/requirements/   product documents, same rule
-    decisions/                 (written from phase 4 step 06)
+    decisions/                 (written from phase 4 step 07)
     sprints/S<n>.yaml          (written from phase 4 step 03)
     local/                     gitignored on init
       farik.db                 event log and projections
@@ -300,7 +300,7 @@ Ends with: from the command line, a team of five runs a full sprint on Farik's r
 
 Decisions for this phase (revision 11, 2026-09-24: the founder approved the phase design and closed the open budget question the same day):
 
-- Made (D11): the conversational register is kept minimal. The ambient allowance is one message per agent per sprint (spec 5.9); reactions are posted only for transitions on the agent's own tasks and for mentions; the style guide asks for one or two sentences. Step 03 still counts reaction, ambient, and ceremony messages and their cost.
+- Made (D11): the conversational register is kept minimal. The ambient allowance is one message per agent per sprint (spec 5.9); reactions are posted only for transitions on the agent's own tasks and for mentions; the style guide asks for one or two sentences. Step 05 still counts reaction, ambient, and ceremony messages and their cost.
 - Made: channel and mention sessions use Claude Sonnet 5; task work uses the role's configured model (spec 8.2). One-shot completions go through the Claude Code program too (`claude -p --output-format json`), so there is one engine.
 - Made: the channel is stored as `message.posted` events only. What an agent is shown of it, `.farik/local/channel-summary.md`, is derived with no model: the most recent messages that fit 2,000 tokens (counted as `ceil(characters / 4)`), oldest first, rebuilt from the log when missing. It reaches a channel or ceremony session in its first message, inside an `untrusted` block, so the eleven prompt sections of ADR 0011 do not change.
 - Made (founder, 2026-09-24): reactions are posted from the session that made the move. Every session but the one-tool sessions (triage, and the Scrum Master's judgment) carries `farik_post_message`, and the closing instruction of a session that asks for a transition asks for a one- or two-sentence post about it; a move the governor or the human makes, which has no session, is posted by Farik as a plain system line (author `farik`) with no model call. A session's first post is its reaction; any further post from a task session counts against the agent's ambient allowance (`policy.ambient_messages_per_sprint`, default 1; with no sprint open, per UTC day), and the tool refuses past it. Farik starts no session to be ambient.
@@ -326,21 +326,23 @@ Steps:
 |---|---|---|---|
 | 01 | Remaining roles | 5.3, 5.6, 5.16, 6.2, 6.3, 6.5 | `scrum_master`, `architect`, `marketing_specialist` with prompts and skills; the tier changes; triage by the Scrum Master; its assignment sessions; the Definition of Ready judgment session, `farik_record_judgment`, `contract.judged` |
 | 02 | Code and document branches | 5.3, 5.12, 5.14, 6 | The team rule `document_paths` and its readiness check on non-Developer tasks, the contract field `change`, branches `feature/`, `fix/`, and `docs/FRK-<n>` in place of `farik/FRK-<n>` |
-| 03 | Sprints and budgets | 3, 5.5, 5.11, 6.2, F17 | `sprint.schema.json` and `.farik/sprints/`, `sprint.started`/`planned`/`ended`, `farik_plan_sprint`, assignment only within an open sprint, the sprint budget in `budget_state` and readiness, `farik sprint start`/`end`/`show`, `farik metrics --sprint`; the budget consequences above: the limit note, task escalation on dollars and sessions, provider-limit sleep with `agent.slept` |
-| 04 | Channel | 5.7, 5.9, F7 | `message.posted`, `farik_post_message` with the reaction and ambient rules, system lines, mentions and `conversation` sessions, the derived summary, `farik channel`, `farik say` |
-| 05 | Ceremonies and escalation hygiene | 5.7, 5.9, 6.2 | Planning, standup, review, and retro sessions; the escalation digest; `escalation.aged`; `farik_append_retro` |
-| 06 | Memory | 5.8 | `farik_write_memory` with the cap, `memory.written`, `team/retro.md` in planning sessions, `farik_write_decision` and `decision.written`, the scan refresh after integration |
-| 07 | Milestone 1 team exit | 11 | A recorded sprint on Farik's repository with five roles, in `docs/milestones/m1-team-exit.md`; the founder at the keyboard, as for Milestone 0 |
+| 03 | Sprints | 3, 5.3, 5.5, 5.11, 6.2, F17 | `sprint.schema.json` and `.farik/sprints/`, `sprint.started`/`planned`/`ended`, the assigner's sprint-planning session and `farik_plan_sprint`, assignment only within an open sprint, a breakdown's tasks joining their epic's sprint, the sprint budget in `budget_state`, readiness, and assignment, `farik sprint start`/`end`/`show`, `farik metrics --sprint` |
+| 04 | Budget consequences | 5.2, 5.5, F1 | The limit note in place of a block, task escalation on its dollars and sessions, a provider's usage limit read from the session and the agent's sleep with `agent.slept` |
+| 05 | Channel | 5.7, 5.9, F7 | `message.posted`, `farik_post_message` with the reaction and ambient rules, system lines, mentions and `conversation` sessions, the derived summary, `farik channel`, `farik say` |
+| 06 | Ceremonies and escalation hygiene | 5.7, 5.9, 6.2 | Planning, standup, review, and retro sessions; the escalation digest; `escalation.aged`; `farik_append_retro` |
+| 07 | Memory | 5.8 | `farik_write_memory` with the cap, `memory.written`, `team/retro.md` in planning sessions, `farik_write_decision` and `decision.written`, the scan refresh after integration |
+| 08 | Milestone 1 team exit | 11 | A recorded sprint on Farik's repository with five roles, in `docs/milestones/m1-team-exit.md`; the founder at the keyboard, as for Milestone 0 |
 
 Interfaces this phase adds (names are decided here; each step plan writes them as exact signatures and updates its line):
 
 - Step 01 (as landed, 2026-09-24): role files `crates/roles/roles/{scrum_master,architect,marketing_specialist}/` (`role.yaml`, `system.md`, and one skill each: `keeping-work-flowing`, `reviewing-for-design`, `marketing-what-ships`), every role but the Developer forbidding `write application code`; `load_role` loads all five, `NotFound` for `Human` alone; `default_tiers(Architect)` is `read, write_workspace, execute, network, git_local` and `default_tiers(MarketingSpecialist)` `read, network, write_workspace, git_local`; event kind `contract.judged { judged_by, fits_budget, criteria_detect_failure, reason }` (`ContractJudgedBody`), about one contract, attributed to `judged_by`, `EVERY_KIND: [EventKind; 32]`; Farik tool `farik_record_judgment` (`RecordJudgmentInput { fits_budget, criteria_detect_failure, reason }`, fields `pub(crate)`; tier `read`; refuses all but the Scrum Master and a task not `refining` with `judgment_not_allowed`, a blank reason with `blank_reason`, whose message no longer says "a triage"), which makes the MCP server's tool count twenty; `farik-core`'s `evaluate_readiness` evaluates the judgment rules only when every other rule passes; `transitions::judgment_since_written(history) -> Option<JudgmentReview>`, the last `contract.judged` after both the last `contract.written` and `refining_began`, which the readiness context's `judgment_review` now reads; `prompt::{JUDGMENT_INSTRUCTION, PromptInput::closing}`; in the orchestrator, `SessionAsk::only_tool` (the session's one Farik tool, no built-in tool, its prompt listing that tool alone; the judgment's `closing` is chosen from `only_tool`), `triager`, `judgment_message`, `epic_review_message(contract, results, tasks: &[(TaskProjection, Option<String>)])`, `close_out_message(contract, tasks, rejection: Option<(&[String], &str)>)`, and `verify::reject` made `pub(super)`; an approved epic assigned to an active Scrum Master with the Product Manager as reviewer; every `verifying` epic routed to `verifying_epic`; `accept_result` requiring Farik's passed runs and a message for every epic; recorded transcripts `triage_by_sm_frk_1`, `judge_frk_1_passes`, `judge_frk_1_fails`, `review_epic_frk_1`, `review_epic_fails_frk_1`.
 - Step 02: team rule `document_paths` in `team.schema.json` (`RulesWire`, `TeamRules`); readiness rule `DocumentPathsOnly`; contract field `change` (`feature | fix`) in `task-contract.schema.json`; `task_branch(contract) -> String` in `farik-core`, used wherever `farik/FRK-<n>` is built today.
-- Step 03: `docs/schemas/sprint.schema.json` owned by `farik-core`; `ProjectFiles::{read_sprint, write_sprint, list_sprints}`; event kinds `sprint.started { sprint_id, budget_usd }`, `sprint.planned { sprint_id, task_ids }`, `sprint.ended { sprint_id, ended_by }`, `agent.slept { until, detail }`; `TaskProjection::sprint`; `CostScope::Sprint`; commands `SprintStart`, `SprintEnd`; Farik tool `farik_plan_sprint`; `farik sprint start|end|show`; `farik metrics --sprint <id>`; the session end reason for a provider limit.
-- Step 04: event kind `message.posted { author, text, mentions, task_id, thread }`; command `MessagePost`; Farik tool `farik_post_message`; team policy `ambient_messages_per_sprint`; `Projections::channel`; `farik channel`, `farik say`.
-- Step 05: event kind `escalation.aged { raised_seq }`; team policy `escalation_age_hours`; Farik tool `farik_append_retro`; `ProjectFiles::{read_retro, append_retro}`; the ceremony rules of the orchestrator.
-- Step 06: event kinds `memory.written { text }`, `decision.written { number, slug, path }`; Farik tools `farik_write_memory`, `farik_write_decision`; `ProjectFiles::{write_decision, list_decisions}`.
-- Step 07: no code interfaces; `docs/milestones/m1-team-exit.md` and its event log export.
+- Step 03: `docs/schemas/sprint.schema.json` owned by `farik-core`; `ProjectFiles::{read_sprint, write_sprint, list_sprints}`; event kinds `sprint.started { sprint_id, budget_usd }`, `sprint.planned { sprint_id, task_ids }`, `sprint.ended { sprint_id, ended_by, left }`; `TaskProjection::sprint`; `CostScope::Sprint`; commands `SprintStart`, `SprintEnd`; Farik tool `farik_plan_sprint`; `farik sprint start|end|show`; `farik metrics --sprint <id>`.
+- Step 04: event kind `agent.slept { until, detail }`; `EndReason::ProviderLimit` and `session.ended`'s `provider_limit`; `BudgetConsequence::EndSessionAndBlockTask` renamed for the note it now leaves; `run_session` passing over a sleeping agent.
+- Step 05: event kind `message.posted { author, text, mentions, task_id, thread }`; command `MessagePost`; Farik tool `farik_post_message`; team policy `ambient_messages_per_sprint`; `Projections::channel`; `farik channel`, `farik say`.
+- Step 06: event kind `escalation.aged { raised_seq }`; team policy `escalation_age_hours`; Farik tool `farik_append_retro`; `ProjectFiles::{read_retro, append_retro}`; the ceremony rules of the orchestrator.
+- Step 07: event kinds `memory.written { text }`, `decision.written { number, slug, path }`; Farik tools `farik_write_memory`, `farik_write_decision`; `ProjectFiles::{write_decision, list_decisions}`.
+- Step 08: no code interfaces; `docs/milestones/m1-team-exit.md` and its event log export.
 
 ## Phase 5: Desktop
 
@@ -417,24 +419,24 @@ Every functional requirement in `docs/SPEC.md` section 7 and every rule in secti
 | 5.2 lifecycle and table | 1.01, 1.09; applied by 3.04 and 3.11 |
 | 5.3 Definition of Ready | 1.02; judgment sessions in 4.01; the configurable judgment in 5.07 |
 | 5.4 Definition of Done | 1.03, 1.07; reviewer sessions in 3.11 |
-| 5.5 budgets | 1.05, 3.03, 3.17; sprint budget in 4.03 |
+| 5.5 budgets | 1.05, 3.03, 3.17; sprint budget in 4.03, its consequences in 4.04 |
 | 5.6 permissions | 1.04, 3.07, 3.08; MCP tagging in 6.01 |
-| 5.7 escalation and questions | 1.06, 3.04, 3.05, 3.12; digest and age in 4.05; notifications in 6.05 |
-| 5.8 memory | 2.05 (files), 3.10 (in prompts), 4.06 (cap, retro, decisions, refresh) |
-| 5.9 channel | 4.04, 4.05; view in 5.06 |
+| 5.7 escalation and questions | 1.06, 3.04, 3.05, 3.12; digest and age in 4.06; notifications in 6.05 |
+| 5.8 memory | 2.05 (files), 3.10 (in prompts), 4.07 (cap, retro, decisions, refresh) |
+| 5.9 channel | 4.05, 4.06; view in 5.06 |
 | 5.11 contract ownership | 0.03 (fields), 1.08 (gate), 2.06 (lock, unlock), 3.05 (enforced on writes), 5.05 (editor) |
 | 5.12 team rules | 1.02, 1.03, 1.04, 2.05, 3.05, 3.10, 3.17, 4.02 (`document_paths`); editor in 5.07 |
 | 5.13 authoring and criterion library | 2.05, 2.06, 3.06, 3.13, 5.05, 5.07 |
 | 5.14 integration and worktrees | 1.08 (assignment), 2.04, 3.11, 3.13, 4.02 (branch names), 5.04 |
 | 5.15 recovery | 3.11 |
-| 5.16 requests, triage, epics, and tasks | 0.03 (fields), 1.01 (`Triaged` gate), 1.02, 1.08, 2.01, 2.03, 2.05, 2.06 (human triage), 3.05, 3.12, 3.13, 4.01, 4.04, 5.04, 5.05, 5.09, 6.03 |
+| 5.16 requests, triage, epics, and tasks | 0.03 (fields), 1.01 (`Triaged` gate), 1.02, 1.08, 2.01, 2.03, 2.05, 2.06 (human triage), 3.05, 3.12, 3.13, 4.01, 4.05, 5.04, 5.05, 5.09, 6.03 |
 | F1 team builder | 2.05 (model), 5.07, 5.09 |
 | F2 projects | 2.04, 2.05, 2.06; presets in 3.06; first run in 5.09 |
 | F3 board | 2.06 (text), 5.04 |
 | F4 contracts | 0.03 (validation), 5.05 (editor) |
 | F5 governor | phase 1 |
 | F6 runtime | 3.01, 3.03, 3.07, 3.08, 3.11; stream in 5.01 |
-| F7 channel | 4.04, 5.06 |
+| F7 channel | 4.05, 5.06 |
 | F8 one-on-one | 6.03 |
 | F9 MCP and skills | 6.01, 6.02 |
 | F10 pixel office | 5.08, 6.07 |
