@@ -89,7 +89,7 @@ Files: the schema, `crates/core/src/sprint.rs`, `lib.rs`, `generated/mod.rs`, `c
 - `lists_sprints_by_number` (store) — S2, S10, S1 written: `list_sprints` answers S1, S2, S10.
 - `refuses_a_sprint_file_that_breaks_its_schema` (store) — a hand-written file with `status: closed`: `read_sprint` fails naming `status`.
 
-- [ ] `feat(core): hold a sprint to its schema and keep it in .farik/sprints`
+- [x] `feat(core): hold a sprint to its schema and keep it in .farik/sprints`
 
 ### Task 2: the events and the projections
 

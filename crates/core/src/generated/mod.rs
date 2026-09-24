@@ -25,6 +25,15 @@ pub mod prices {
 }
 
 #[allow(clippy::all, clippy::pedantic, missing_docs)]
+pub mod sprint {
+    typify::import_types!(
+        schema = "../../docs/schemas/sprint.schema.json",
+        struct_builder = false,
+        derives = [PartialEq],
+    );
+}
+
+#[allow(clippy::all, clippy::pedantic, missing_docs)]
 pub mod task_contract {
     typify::import_types!(
         schema = "../../docs/schemas/task-contract.schema.json",

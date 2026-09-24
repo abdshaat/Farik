@@ -5,6 +5,7 @@
 
 use farik_core::contract::{TaskId, validate_contract};
 use farik_core::criteria::{fixtures::a_criteria_library_wire, validate_criteria};
+use farik_core::sprint::{Sprint, validate_sprint};
 use farik_core::team::AgentId;
 use farik_store::files::fixtures::{TempProject, a_team};
 use farik_store::files::{FilesError, LocalSettings, Sandbox, contract_yaml, criteria_yaml};
@@ -29,6 +30,13 @@ fn a_contract(id: &str) -> farik_core::contract::TaskContract {
     let mut wire = farik_core::contract::fixtures::a_contract_wire();
     wire["id"] = serde_json::json!(id);
     validate_contract(&wire).expect("the fixture is a contract")
+}
+
+/// The sprint `farik-core`'s own fixture describes, with the id a test asks for.
+fn a_sprint(id: &str) -> Sprint {
+    let mut wire = farik_core::sprint::fixtures::an_open_sprint_wire();
+    wire["id"] = serde_json::json!(id);
+    validate_sprint(&wire).expect("the fixture is a sprint")
 }
 
 #[test]
@@ -934,4 +942,62 @@ fn prices_with_the_override_as_a_whole() {
         ["claude-opus-5"]
     );
     assert!(!prices.prices.contains_key("claude-fable-5"));
+}
+
+#[test]
+fn writes_and_reads_a_sprint() {
+    let project = TempProject::new("round-trip-sprint");
+    let files = project.files();
+    assert!(
+        !project.root.join(".farik/sprints").exists(),
+        "the directory did not exist before the first write"
+    );
+
+    let sprint = a_sprint("S1");
+    files.write_sprint(&sprint).expect("the sprint is written");
+
+    assert!(
+        project.root.join(".farik/sprints").is_dir(),
+        "made on the first write"
+    );
+    assert_eq!(files.read_sprint("S1").expect("it reads back"), sprint);
+}
+
+#[test]
+fn lists_sprints_by_number() {
+    let project = TempProject::new("list-sprints");
+    let files = project.files();
+    for id in ["S2", "S10", "S1"] {
+        files.write_sprint(&a_sprint(id)).expect("written");
+    }
+    // A person's own notes in the same directory are not sprints and are not a problem either.
+    std::fs::write(project.root.join(".farik/sprints/notes.md"), "mine\n").expect("a note");
+
+    assert_eq!(
+        files
+            .list_sprints()
+            .expect("they list")
+            .iter()
+            .map(|sprint| sprint.id.as_str().to_string())
+            .collect::<Vec<_>>(),
+        ["S1", "S2", "S10"],
+        "by the number in the id, so the tenth does not come before the second"
+    );
+}
+
+#[test]
+fn refuses_a_sprint_file_that_breaks_its_schema() {
+    let project = TempProject::new("broken-sprint");
+    let files = project.files();
+    files.write_sprint(&a_sprint("S1")).expect("written");
+    std::fs::write(
+        project.root.join(".farik/sprints/S1.yaml"),
+        "id: S1\nstarted_at: 2026-09-24T00:00:00Z\ntask_ids: []\nstatus: closed\n",
+    )
+    .expect("a person edits it");
+    let Err(FilesError::Invalid { path, detail }) = files.read_sprint("S1") else {
+        panic!("closed is not a status a sprint takes");
+    };
+    assert_eq!(path, ".farik/sprints/S1.yaml");
+    assert!(detail.contains("status"), "{detail}");
 }
