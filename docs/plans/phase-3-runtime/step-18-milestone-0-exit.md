@@ -1,6 +1,6 @@
 # Phase 3, step 18: Milestone 0 exit
 
-Status: ready, not yet run. The founder made a one-time exception to hard rule 11 on 2026-09-23: phase 3's pull request is marked ready for review without this run, because every check passes. The rule itself is unchanged. Stage 1 is prepared under `~/farik-m0` at cb420e2, and the run and the founder's review (Tasks 2 and 3) remain to do.
+Status: not run; to be closed by the live run at the web UI phase's exit (the founder, 2026-09-24: one live run closes Milestones 0 and 1, and all live testing is done in the web UI; ADR 0016). The founder's one-time exception to hard rule 11 of 2026-09-23, which let phase 3 merge without this run, stands as recorded.
 Branch: `phase/3-runtime`
 Spec: `docs/SPEC.md` section 11 (Milestone 0), F17; the flow it exercises is 5.2, 5.4, 5.5, 5.7, 5.11, 5.14, 5.16
 Depends on: steps 01 to 17 of this phase, a start gate: stage 1 does not begin until step 17's last commit is on this branch and `cargo xtask check --integration` passes on it; ADR 0015 (no dollar limit ships, an unpriced model is recorded at no cost)

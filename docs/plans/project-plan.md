@@ -298,7 +298,7 @@ Interfaces this phase adds:
 
 ## Phase 4: The team
 
-Ends with: from the command line, a team of five runs a full sprint on Farik's repository: requests triaged by the Scrum Master, epics written by the Product Manager and approved by the human, a sprint the human starts and the Scrum Master plans from the ready backlog, the work broken down, assigned, implemented, reviewed by the Architect, and accepted by the Product Manager, a standup summary each day the sprint moved, a review and a retro when it ends, reactions and mentions in the channel, with memory and decisions written to `.farik/`.
+Ends with: from the command line, a team of five can run a full sprint on a repository: requests triaged by the Scrum Master, epics written by the Product Manager and approved by the human, broken down and assigned by the Scrum Master in planning, implemented, reviewed by the Architect, accepted by the Product Manager, a standup summary at each boundary, a review and a retro at the end, with memory and decisions written to `.farik/`. Every rule is built and landing-reviewed; the recorded live sprint moved to the web UI phase's exit (step 08 below).
 
 Decisions for this phase (revision 11, 2026-09-24: the founder approved the phase design and closed the open budget question the same day):
 
@@ -333,7 +333,7 @@ Steps:
 | 05 | Channel | 5.7, 5.9, F7 | `message.posted`, `farik_post_message` with the reaction and ambient rules, system lines, mentions and `conversation` sessions, the derived summary, `farik channel`, `farik say` |
 | 06 | Ceremonies and escalation hygiene | 5.7, 5.8, 5.9, 6.2 | Planning, standup, review, and retro sessions; the escalation digest; `escalation.aged`; `farik_append_retro` and `team/retro.md` in planning (moved from step 07, 2026-09-24) |
 | 07 | Memory | 5.8, 5.9, 6.1, 6.3, 8.2, 8.5 | `farik_write_memory` within the team policy `memory_cap_tokens`, `memory.written`, and the prompt's line saying how full the notebook is; `farik_write_decision` for the Architect and the Product Manager, `decision.written`, and `farik_read_decisions`; the project scan refreshed after an integration (`team/retro.md` is step 06's) |
-| 08 | Milestone 1 team exit | 11 | A recorded sprint on Farik's repository with five roles, in `docs/milestones/m1-team-exit.md`; the founder at the keyboard, as for Milestone 0 |
+| 08 | Milestone 1 team exit | 11 | Moved out of this phase (the founder, 2026-09-24): all live testing is done in the web UI once the product side is built, so the recorded team sprint, which also closes Milestone 0, is run at the web UI phase's exit (ADR 0016). The runbook, `docs/plans/phase-4-team/step-08-milestone-1-exit.md`, is kept as that exit's starting point |
 
 Interfaces this phase adds (names are decided here; each step plan writes them as exact signatures and updates its line):
 
