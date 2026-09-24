@@ -31,6 +31,7 @@ mod exec;
 #[cfg(test)]
 pub(crate) mod fixtures;
 mod git;
+mod memory;
 mod reading;
 pub(crate) mod refusal;
 mod retro;
@@ -239,6 +240,11 @@ static TOOLS: LazyLock<Vec<FarikTool>> = LazyLock::new(|| {
             Read,
             "Record in team/retro.md what the next sprint's planning should know from this retro.",
         ),
+        tool::<memory::WriteMemoryInput>(
+            "farik_write_memory",
+            Read,
+            "Replace your notebook, which every session of yours is shown, with this text. Keep it within your cap; prune it rather than append to it.",
+        ),
         tool::<exec::ExecInput>(
             "farik_exec",
             Execute,
@@ -339,6 +345,7 @@ pub async fn call_tool(
         "farik_write_product_doc" => work::write_product_doc(&call, parse(input)?),
         "farik_post_message" => channel::post_message(&call, parse(input)?),
         "farik_append_retro" => retro::append_retro(&call, &parse(input)?),
+        "farik_write_memory" => memory::write_memory(&call, &parse(input)?),
         "farik_exec" => exec::exec(&call, parse(input)?).await,
         "farik_git_status" => nothing_in(input).and_then(|()| git::status(&call)),
         "farik_git_diff" => nothing_in(input).and_then(|()| git::diff(&call)),
@@ -538,6 +545,7 @@ mod tests {
             "farik_write_product_doc",
             "farik_post_message",
             "farik_append_retro",
+            "farik_write_memory",
             "farik_exec",
             "farik_git_status",
             "farik_git_diff",
@@ -556,7 +564,7 @@ mod tests {
         assert_eq!(tier("farik_git_diff"), Some(PermissionTier::GitLocal));
         assert_eq!(tier("farik_git_commit"), Some(PermissionTier::GitLocal));
         assert_eq!(tier("farik_git_push"), Some(PermissionTier::GitRemote));
-        for tool in &tools[..18] {
+        for tool in &tools[..19] {
             assert_eq!(tool.tier, PermissionTier::Read, "{}", tool.name);
         }
         for tool in &tools {

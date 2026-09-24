@@ -84,6 +84,8 @@ pub(crate) enum Refusal {
     ChannelLimit { detail: String },
     /// Only the retro ceremony appends to the retro, once per session (5.9).
     RetroRefused { detail: String },
+    /// A notebook write past the team's `memory_cap_tokens` (5.8).
+    MemoryRefused { detail: String },
     /// A commit named a directory, which git would stage whole, files the path checks never saw
     /// among it.
     PathIsADirectory { path: String },
@@ -173,6 +175,7 @@ impl Refusal {
             ),
             Self::ChannelLimit { detail } => ("channel_limit", detail.clone()),
             Self::RetroRefused { detail } => ("retro_refused", detail.clone()),
+            Self::MemoryRefused { detail } => ("memory_refused", detail.clone()),
             Self::OutsideWorkspace { cwd } => (
                 "outside_workspace",
                 format!("{cwd} is not a directory inside the task's workspace"),

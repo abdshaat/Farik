@@ -346,6 +346,7 @@ const RETRO_TOOLS: &[&str] = &[
     "farik_read_criteria",
     "farik_post_message",
     "farik_append_retro",
+    "farik_write_memory",
 ];
 
 /// Whether the sprint rules run in `scope`: they are about no one task, so only in a tick scoped
@@ -442,7 +443,8 @@ async fn sprint_planning(
     }))
 }
 
-/// The Farik tools the planning ceremony is offered: the reading tools, the channel, and the plan.
+/// The Farik tools the planning ceremony is offered: the reading tools, the channel, the plan, and
+/// the notebook.
 const PLANNING_TOOLS: &[&str] = &[
     "farik_read_task",
     "farik_read_board",
@@ -450,6 +452,7 @@ const PLANNING_TOOLS: &[&str] = &[
     "farik_read_criteria",
     "farik_post_message",
     "farik_plan_sprint",
+    "farik_write_memory",
 ];
 
 /// The open sprint's standup (5.9), under `All` alone in a tick scoped to no task: once a UTC day,
@@ -533,13 +536,15 @@ async fn standup(
     }))
 }
 
-/// The Farik tools the standup and the review are offered: the reading tools and the channel.
+/// The Farik tools the standup and the review are offered: the reading tools, the channel, and the
+/// notebook.
 const CEREMONY_TOOLS: &[&str] = &[
     "farik_read_task",
     "farik_read_board",
     "farik_read_rules",
     "farik_read_criteria",
     "farik_post_message",
+    "farik_write_memory",
 ];
 
 /// Whether the day's dollars stop a session about no task from starting; `day_spent` is set when
@@ -565,8 +570,8 @@ fn day_is_spent(
     Ok(spent)
 }
 
-/// The Farik tools a conversation session is offered (5.9): the reading tools, its one post, and
-/// a request filed without a parent.
+/// The Farik tools a conversation session is offered (5.9): the reading tools, its one post, a
+/// request filed without a parent, and the notebook (5.8).
 const CONVERSATION_TOOLS: &[&str] = &[
     "farik_read_task",
     "farik_read_board",
@@ -574,6 +579,7 @@ const CONVERSATION_TOOLS: &[&str] = &[
     "farik_read_criteria",
     "farik_post_message",
     "farik_create_task",
+    "farik_write_memory",
 ];
 
 /// The channel rule, between the budget rule and rule 3 (5.9): the first active agent in team
@@ -4389,12 +4395,13 @@ mod tests {
     }
 
     /// The Farik tools the standup and the review are given.
-    const READ_AND_POST: [&str; 5] = [
+    const READ_AND_POST: [&str; 6] = [
         "farik_read_task",
         "farik_read_board",
         "farik_read_rules",
         "farik_read_criteria",
         "farik_post_message",
+        "farik_write_memory",
     ];
 
     #[tokio::test]
@@ -4451,6 +4458,7 @@ mod tests {
                 "farik_read_criteria",
                 "farik_post_message",
                 "farik_plan_sprint",
+                "farik_write_memory",
             ])
         );
         // The candidates, the escalation the digest lists, the last retro, and the channel.
@@ -5588,6 +5596,7 @@ mod tests {
                 "farik_read_criteria",
                 "farik_create_task",
                 "farik_post_message",
+                "farik_write_memory",
             ]
         );
         assert_eq!(

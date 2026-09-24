@@ -113,6 +113,7 @@ pub fn a_body_wire(kind: EventKind) -> Value {
             "detail": "blocked_age: no key"
         }),
         EventKind::EscalationAged => json!({ "raised_seq": 1, "hours": 25 }),
+        EventKind::MemoryWritten => json!({ "text": "Use pnpm.", "written_by": "maya-chen" }),
         EventKind::ContractEvaluated => json!({
             "gate": "definition_of_ready",
             "passed": false,

@@ -19,5 +19,5 @@ pub mod pricing;
 pub mod sprint;
 /// The team, its rules, and its validator.
 pub mod team;
-/// Small shared pieces of English used in refusal messages.
-mod text;
+/// Small shared pieces of English used in refusal messages, and how a text is counted in tokens.
+pub mod text;

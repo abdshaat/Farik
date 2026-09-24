@@ -89,7 +89,7 @@ Files: team schema, `team.rs`, `crates/core/src/text.rs`, event schema (`memory.
 - `offers_no_memory_to_a_one_tool_session` (guard) — a triage session's tools do not include it.
 - `defaults_the_memory_cap` (core) — a team file without it: 8000.
 
-- [ ] `feat(runtime): let an agent keep its notebook within a cap`
+- [x] `feat(runtime): let an agent keep its notebook within a cap`
 
 ### Task 2: how full the notebook is
 

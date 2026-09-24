@@ -267,6 +267,13 @@
           "maximum": 720,
           "default": 24,
           "description": "How long an open escalation may wait on the human before the aged rule ages it and says so in the channel (spec 5.7). Left out, a day."
+        },
+        "memory_cap_tokens": {
+          "type": "integer",
+          "minimum": 500,
+          "maximum": 16000,
+          "default": 8000,
+          "description": "How long each agent's notebook, .farik/agents/<id>/memory.md, may be, in tokens counted as a quarter of its characters; a longer write is refused (spec 5.8). Left out, 8000."
         }
       }
     },

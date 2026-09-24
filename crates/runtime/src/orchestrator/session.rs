@@ -623,6 +623,62 @@ mod tests {
 
     #[test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn offers_no_memory_to_a_one_tool_session() {
+        let harness = Harness::new("session-no-memory", |_| {});
+        harness.file("FRK-1", "draft", |_| {});
+        let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
+        let deps = &orchestrator.deps;
+        let team = deps.tools.files.read_team().expect("the team");
+        let contract = deps
+            .tools
+            .files
+            .read_contract(&"FRK-1".parse().expect("a task id"))
+            .expect("the contract");
+        let pm = team.active_agents().next().expect("an agent");
+        let spec = |purpose, only_tool| {
+            session_spec(
+                deps,
+                &team,
+                &SessionAsk {
+                    agent: pm,
+                    contract: Some(&contract),
+                    purpose,
+                    cwd: deps.tools.files.root().to_path_buf(),
+                    executor: None,
+                    read_only: false,
+                    only_tool,
+                    tools: None,
+                    in_reply_to: None,
+                    thread: None,
+                    initial_prompt: String::new(),
+                },
+            )
+            .expect("the spec")
+        };
+
+        let triage = spec(SessionPurpose::Triage, Some(TRIAGE_TOOL));
+        let refine = spec(SessionPurpose::Refine, None);
+
+        assert!(
+            !triage
+                .farik_tools
+                .iter()
+                .any(|tool| tool == "farik_write_memory"),
+            "{:?}",
+            triage.farik_tools
+        );
+        assert!(
+            refine
+                .farik_tools
+                .iter()
+                .any(|tool| tool == "farik_write_memory"),
+            "{:?}",
+            refine.farik_tools
+        );
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
     fn gives_a_one_tool_session_that_tool_alone() {
         let harness = Harness::new("session-one-tool", |_| {});
         harness.file("FRK-1", "refining", |_| {});

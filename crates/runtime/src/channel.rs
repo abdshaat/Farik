@@ -6,6 +6,7 @@ use std::num::NonZeroU64;
 
 use farik_core::contract::TaskId;
 use farik_core::team::Team;
+use farik_core::text::tokens;
 use farik_protocol::clock::Clock;
 use farik_protocol::event::{
     EventBody, EventIds, EventKind, FarikEvent, MessageKind, MessagePostedBody,
@@ -171,12 +172,6 @@ pub fn pending_mentions(log: &EventLog, agent_id: &str) -> Result<Vec<FarikEvent
 /// The most tokens the channel's summary holds.
 const SUMMARY_TOKENS: usize = 2_000;
 
-/// The tokens of a text of `characters` characters, as the channel counts them: a quarter of
-/// them, rounded up.
-fn tokens(characters: usize) -> usize {
-    characters.div_ceil(4)
-}
-
 /// The channel as an agent is shown it, derived with no model: the latest messages that fit
 /// `SUMMARY_TOKENS`, oldest first, one line each (`<author> [<thread>]: <text>`). It is written to
 /// `.farik/local/channel-summary.md` each time, so that the human can read what the agents saw.
@@ -191,8 +186,7 @@ pub fn channel_summary(log: &EventLog, files: &ProjectFiles) -> Result<String, C
         kinds: vec![EventKind::MessagePosted],
         ..EventQuery::default()
     })?;
-    let mut lines: Vec<String> = Vec::new();
-    let mut characters = 0;
+    let mut summary = String::new();
     for event in messages.iter().rev() {
         let EventBody::MessagePosted(body) = &event.body else {
             continue;
@@ -201,16 +195,17 @@ pub fn channel_summary(log: &EventLog, files: &ProjectFiles) -> Result<String, C
             .thread
             .map_or_else(String::new, |thread| format!(" [{thread}]"));
         let line = format!("{}{thread}: {}", body.author, body.text);
-        // The line, and the line break that joins it to those already held.
-        let with_it = characters + line.chars().count() + usize::from(!lines.is_empty());
-        if tokens(with_it) > SUMMARY_TOKENS {
+        // The line, and the line break that joins it to the newer ones already held.
+        let with_it = if summary.is_empty() {
+            line
+        } else {
+            format!("{line}\n{summary}")
+        };
+        if tokens(&with_it) > SUMMARY_TOKENS {
             break;
         }
-        characters = with_it;
-        lines.push(line);
+        summary = with_it;
     }
-    lines.reverse();
-    let summary = lines.join("\n");
     files.write_channel_summary(&summary)?;
     Ok(summary)
 }
