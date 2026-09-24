@@ -670,18 +670,15 @@ fn apply_waiting(
 
 /// The sprints table and each task's sprint (5.5): a start opens a sprint, a plan puts each of its
 /// tasks in it, and an end closes it and takes out each task it left.
+///
+/// The log's order settles a plan racing an end, whichever process wrote each: a plan into a sprint
+/// that has ended, or never started, puts nothing in it, and an end takes out every task the board
+/// holds in it that is neither accepted nor cancelled, whether or not its `left` names the task.
 fn apply_sprint(
     transaction: &Transaction<'_>,
     body: &EventBody,
     seq: i64,
 ) -> Result<(), StoreError> {
-    let set_sprint = |task_id: &str, sprint: Option<&str>| {
-        update(
-            transaction,
-            "UPDATE task_projections SET sprint = ?2, updated_seq = ?3 WHERE task_id = ?1",
-            (task_id, sprint, seq),
-        )
-    };
     match body {
         EventBody::SprintStarted(body) => update(
             transaction,
@@ -691,7 +688,13 @@ fn apply_sprint(
         ),
         EventBody::SprintPlanned(body) => {
             for task_id in &body.task_ids {
-                set_sprint(task_id.as_str(), Some(body.sprint_id.as_str()))?;
+                update(
+                    transaction,
+                    "UPDATE task_projections SET sprint = ?2, updated_seq = ?3
+                     WHERE task_id = ?1
+                       AND EXISTS (SELECT 1 FROM sprints WHERE sprint_id = ?2 AND open = 1)",
+                    (task_id.as_str(), body.sprint_id.as_str(), seq),
+                )?;
             }
             Ok(())
         }
@@ -701,10 +704,12 @@ fn apply_sprint(
                 "UPDATE sprints SET open = 0 WHERE sprint_id = ?1",
                 (body.sprint_id.as_str(),),
             )?;
-            for task_id in &body.left {
-                set_sprint(task_id.as_str(), None)?;
-            }
-            Ok(())
+            update(
+                transaction,
+                "UPDATE task_projections SET sprint = NULL, updated_seq = ?2
+                 WHERE sprint = ?1 AND status NOT IN ('accepted', 'cancelled')",
+                (body.sprint_id.as_str(), seq),
+            )
         }
         _ => Ok(()),
     }
@@ -1212,7 +1217,10 @@ mod tests {
             log.applied_migrations().expect("the ledger reads"),
             migrations::known_versions()
         );
-        assert_eq!(migrations::known_versions(), vec![1, 2, 3, 4, 5, 6, 7, 8]);
+        assert_eq!(
+            migrations::known_versions(),
+            vec![1, 2, 3, 4, 5, 6, 7, 8, 9]
+        );
     }
 
     #[test]
@@ -2155,8 +2163,46 @@ mod tests {
         record(&log, &projections, &started("S1", None));
         record(&log, &projections, &planned("S1", &["FRK-1", "FRK-2"]));
         assert_eq!(sprint_of(&projections, "FRK-2").as_deref(), Some("S1"));
+        record(&log, &projections, &moved("FRK-1", "verifying", "accepted"));
         record(&log, &projections, &ended("S1", &["FRK-2"]));
         assert_eq!(sprint_of(&projections, "FRK-1").as_deref(), Some("S1"));
+        assert_eq!(sprint_of(&projections, "FRK-2"), None);
+    }
+
+    #[test]
+    fn takes_every_unfinished_task_out_of_an_ended_sprint() {
+        let (log, projections) = a_board();
+        for task_id in ["FRK-1", "FRK-2", "FRK-3"] {
+            record(&log, &projections, &about(EventKind::TaskCreated, task_id));
+        }
+        record(&log, &projections, &started("S1", None));
+        record(
+            &log,
+            &projections,
+            &planned("S1", &["FRK-1", "FRK-2", "FRK-3"]),
+        );
+        record(&log, &projections, &moved("FRK-2", "verifying", "accepted"));
+        record(&log, &projections, &moved("FRK-3", "ready", "cancelled"));
+        // An end whose `left` misses FRK-1: its sprint file lost it, or it joined after the end
+        // read the board.
+        record(&log, &projections, &ended("S1", &[]));
+        assert_eq!(sprint_of(&projections, "FRK-1"), None);
+        assert_eq!(sprint_of(&projections, "FRK-2").as_deref(), Some("S1"));
+        assert_eq!(sprint_of(&projections, "FRK-3").as_deref(), Some("S1"));
+    }
+
+    #[test]
+    fn plans_nothing_into_a_sprint_that_is_not_open() {
+        let (log, projections) = a_board();
+        for task_id in ["FRK-1", "FRK-2"] {
+            record(&log, &projections, &about(EventKind::TaskCreated, task_id));
+        }
+        record(&log, &projections, &started("S1", None));
+        record(&log, &projections, &ended("S1", &[]));
+        // A plan that raced the end and lost, and one into a sprint the log never started.
+        record(&log, &projections, &planned("S1", &["FRK-1"]));
+        record(&log, &projections, &planned("S9", &["FRK-2"]));
+        assert_eq!(sprint_of(&projections, "FRK-1"), None);
         assert_eq!(sprint_of(&projections, "FRK-2"), None);
     }
 
@@ -2295,6 +2341,52 @@ mod tests {
         );
         projections.rebuild().expect("the board is built again");
         assert_eq!(sprint_view(&projections), migrated);
+        let _ = std::fs::remove_dir_all(&directory);
+    }
+
+    #[test]
+    fn frees_a_task_left_in_an_ended_sprint_by_the_migration() {
+        let directory = std::env::temp_dir().join(format!(
+            "farik-stranded-sprint-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        let _ = std::fs::remove_dir_all(&directory);
+        std::fs::create_dir_all(&directory).expect("a directory under the temporary directory");
+        let path = directory.join("farik.db");
+        {
+            let mut connection = rusqlite::Connection::open(&path).expect("the database opens");
+            migrations::apply_through(&mut connection, 8, at(9)).expect("version 8 applies");
+        }
+        {
+            // A plan and an end whose `left` missed FRK-1, as version 8 projected them: FRK-1
+            // stuck in S1 after S1 ended.
+            let log = Arc::new(open_event_log(&path, at(9)).expect("the log opens"));
+            for event in [
+                about(EventKind::TaskCreated, "FRK-1"),
+                started("S1", None),
+                planned("S1", &["FRK-1"]),
+                ended("S1", &[]),
+            ] {
+                log.append(&event).expect("appends");
+            }
+            log.connection()
+                .execute_batch(
+                    "DELETE FROM schema_migrations WHERE version > 8;
+                     INSERT INTO task_projections
+                         (task_id, kind, parent, title, status, risk, triaged, locked, updated_seq,
+                          sprint)
+                     VALUES ('FRK-1', 'task', NULL, 'Add a login page', 'draft', 'low', 0, 0, 3,
+                             'S1');
+                     INSERT INTO sprints (sprint_id, budget_usd, open) VALUES ('S1', NULL, 0);
+                     INSERT INTO projection_cursor (id, seq) VALUES (1, 4)
+                         ON CONFLICT (id) DO UPDATE SET seq = 4;",
+                )
+                .expect("the stranded rows are written");
+        }
+        let log = Arc::new(open_event_log(&path, at(10)).expect("the log opens"));
+        let projections = open_projections(log).expect("the projections open");
+        assert_eq!(sprint_of(&projections, "FRK-1"), None);
         let _ = std::fs::remove_dir_all(&directory);
     }
 }
