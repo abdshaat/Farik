@@ -112,7 +112,7 @@ Produces: `task_branch`
 - `names_a_developers_fix_branch` — `change: fix`: `fix/FRK-7`.
 - `names_every_other_roles_branch_docs` — `architect`, `marketing_specialist`, `product_manager`, `scrum_master`, each with `change: fix`: `docs/FRK-7`.
 
-- [ ] `feat(core): name a task's branch after what it changes`
+- [x] `feat(core): name a task's branch after what it changes`
 
 ### Task 4: every branch through `task_branch`
 
