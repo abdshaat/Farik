@@ -475,9 +475,11 @@ fn measures_one_sprint() {
     recorded.moved("FRK-1", "in_progress", "verifying", "assignee");
     recorded.moved("FRK-1", "verifying", "accepted", "product_manager");
     recorded.cost(Some("FRK-1"), "implement", 1.0, "2026-09-22");
+    // Spent during S1 by no task: the day's, not the sprint's.
+    recorded.cost(None, "conversation", 5.0, "2026-09-22");
     recorded.sprint_ended("S1", &[]);
 
-    recorded.contract("FRK-2", &["command"]);
+    recorded.contract("FRK-2", &["human"]);
     recorded.created("FRK-2", "task", None);
     recorded.walked("FRK-2", &TO_WORK);
     recorded.sprint_started("S2", None);
@@ -487,7 +489,8 @@ fn measures_one_sprint() {
     recorded.moved("FRK-2", "rejected", "in_progress", "governor");
     recorded.moved("FRK-2", "in_progress", "verifying", "assignee");
     recorded.moved("FRK-2", "verifying", "accepted", "product_manager");
-    recorded.cost(Some("FRK-2"), "implement", 2.0, "2026-09-23");
+    // In the ISO week after S1's.
+    recorded.cost(Some("FRK-2"), "implement", 2.0, "2026-09-29");
     recorded.sprint_ended("S2", &[]);
 
     let s1 = recorded
@@ -501,6 +504,8 @@ fn measures_one_sprint() {
             .map(|split| split.total),
         Some(1.0)
     );
+    assert_eq!(s1.mechanically_verified_criteria_share, Some(1.0));
+    assert_eq!(s1.active_weeks, 1);
 
     let s2 = recorded
         .metrics_for_sprint("S2")
@@ -513,6 +518,8 @@ fn measures_one_sprint() {
             .map(|split| split.total),
         Some(2.0)
     );
+    assert_eq!(s2.mechanically_verified_criteria_share, Some(0.0));
+    assert_eq!(s2.active_weeks, 1);
 }
 
 #[test]
