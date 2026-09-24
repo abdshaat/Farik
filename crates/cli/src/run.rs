@@ -136,6 +136,9 @@ pub(crate) async fn ticks(
     presses: &mut u32,
     mut after: impl FnMut(&mut Printer<'_, '_>),
 ) -> Ended {
+    // The last wait printed, so a wait capped and rechecked (`Orchestrator::wait_until`) prints
+    // its line once, not once per recheck; printed again only when the agent or the time changes.
+    let mut last_wait: Option<(String, chrono::DateTime<chrono::Utc>)> = None;
     loop {
         if driver.orchestrator.is_stopped() {
             printer.line("stopped", &json!({ "stopped": true }));
@@ -158,10 +161,13 @@ pub(crate) async fn ticks(
                 why,
                 until: Some(until),
             }) => {
-                printer.line(
-                    &why,
-                    &json!({ "waiting": why, "until": until.to_rfc3339() }),
-                );
+                if last_wait.as_ref() != Some(&(why.clone(), until)) {
+                    printer.line(
+                        &why,
+                        &json!({ "waiting": why, "until": until.to_rfc3339() }),
+                    );
+                    last_wait = Some((why.clone(), until));
+                }
                 let wait = orchestrator.wait_until(until);
                 tokio::pin!(wait);
                 loop {

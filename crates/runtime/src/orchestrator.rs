@@ -215,13 +215,20 @@ pub enum TickReport {
 /// How a wait for a sleeping agent ended.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Waited {
-    /// It is the time waited for.
+    /// It is the time waited for, or the minute the wait is capped at (`RECHECK`) passed first,
+    /// so that work filed straight into the store, not through a command `handle` sees, is
+    /// picked up within a minute (`docs/SPEC.md` 8.2).
     Reached,
     /// `stop` was called first.
     Stopped,
     /// A command the human gave was handled first, which may have made work for an agent awake.
     Woken,
 }
+
+/// The longest `wait_until` sleeps before the board is ticked again: work filed straight into the
+/// store while a run waits, such as `farik task create` writing the store directly, does not
+/// notify `commands` and would otherwise sit until the sleeping agent wakes.
+const RECHECK: chrono::Duration = chrono::Duration::seconds(60);
 
 /// Which of the rules a tick runs (`docs/SPEC.md` 8.2): every one, the planning ones, or the
 /// refining ones.
@@ -405,8 +412,9 @@ impl Orchestrator {
         Ok(())
     }
 
-    /// Waits until `until`, until `stop` is called, or until a command the human gave records
-    /// something, whichever comes first; at once when `stop` was called before.
+    /// Waits until `until`, `RECHECK` from now, `stop` is called, or a command the human gave
+    /// records something, whichever comes first; at once when `stop` was called before. Capped at
+    /// `RECHECK` so the caller ticks again at least that often, whatever `until` is.
     pub async fn wait_until(&self, until: DateTime<Utc>) -> Waited {
         // Taken before the stop is read, so that a stop between the two still ends the wait.
         let stopped = self.stops.notified();
@@ -415,8 +423,9 @@ impl Orchestrator {
         if self.is_stopped() {
             return Waited::Stopped;
         }
+        let capped = until.min(self.deps.tools.clock.now() + RECHECK);
         tokio::select! {
-            () = self.deps.sleeper.sleep_until(until) => Waited::Reached,
+            () = self.deps.sleeper.sleep_until(capped) => Waited::Reached,
             () = stopped => Waited::Stopped,
             () = self.commands.notified() => Waited::Woken,
         }
@@ -787,6 +796,22 @@ mod tests {
         let ended = waited(&orchestrator, at() + chrono::Duration::hours(1)).await;
 
         assert_eq!(ended, super::Waited::Stopped);
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn caps_a_wait_at_a_minute_so_the_board_is_rechecked() {
+        let harness = Harness::new("orch-wait-cap", |_| {});
+        let orchestrator = harness.orchestrator_at(harness.recorded(Vec::new()), at());
+
+        let ended = waited(&orchestrator, at() + chrono::Duration::hours(1)).await;
+
+        assert_eq!(ended, super::Waited::Reached);
+        assert_eq!(
+            orchestrator.deps.tools.clock.now(),
+            at() + chrono::Duration::seconds(60),
+            "a wait an hour away is capped at a minute, not run to the end"
+        );
     }
 
     #[tokio::test]

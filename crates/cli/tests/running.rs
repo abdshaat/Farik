@@ -605,6 +605,18 @@ fn prints_the_wait() {
         "{}",
         ran.out
     );
+    // The wait for dev-a is capped at a minute so the board is rechecked (docs/SPEC.md 8.2),
+    // which ticks `until - at()` (an hour) worth of minutes before dev-a wakes; the waiting line
+    // still prints once, not once per recheck.
+    assert_eq!(
+        lines
+            .iter()
+            .filter(|line| line.starts_with("waiting for dev-a, asleep until "))
+            .count(),
+        1,
+        "{}",
+        ran.out
+    );
     assert_eq!(
         purposes(&repository),
         ["plan", "implement", "verify", "verify"]
