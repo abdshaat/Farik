@@ -825,7 +825,7 @@ mod tests {
     use std::sync::Arc;
 
     use farik_core::contract::{TaskKind, TaskStatus};
-    use farik_core::team::Effort;
+    use farik_core::team::{AgentStatus, Effort};
     use farik_protocol::command::{AcceptSubject, Command, RequestSize};
     use farik_protocol::event::{
         CriterionRecordedBodyRunBy, EscalationRaisedBodyReason, EventBody, EventKind, FarikEvent,
@@ -968,7 +968,6 @@ mod tests {
         assert_eq!(harness.row("FRK-1").kind, TaskKind::Epic);
     }
 
-    /// Adds the active Scrum Master `sam` to the team's wire.
     /// The Farik tools the prompt's `Your tools` section lists, in order.
     fn listed_tools(prompt: &str) -> Vec<&str> {
         let start = prompt.find("## Your tools\n").expect("a tools section");
@@ -982,6 +981,7 @@ mod tests {
             .collect()
     }
 
+    /// Adds the active Scrum Master `sam` to the team's wire.
     fn with_a_scrum_master(wire: &mut Value) {
         wire["agents"]
             .as_array_mut()
@@ -2650,6 +2650,83 @@ mod tests {
             "{}",
             started[0].initial_prompt
         );
+        let reviews = harness.events(&[EventKind::ReviewRecorded]);
+        assert!(
+            matches!(&reviews[..], [review] if matches!(&review.body,
+                EventBody::ReviewRecorded(body) if body.reviewer == "pm")),
+            "{reviews:?}"
+        );
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn keeps_a_human_reviewed_epic_with_the_human_once_a_scrum_master_activates() {
+        // The epic was assigned with no active Scrum Master, so the human reviews it; `sam`
+        // joins the team paused, and is activated only once the human has accepted the epic.
+        let harness = Harness::new("epic-human-sm-later", |wire| {
+            wire["agents"]
+                .as_array_mut()
+                .expect("a list of agents")
+                .push(json!({
+                    "id": "sam",
+                    "display_name": "sam",
+                    "role": "scrum_master",
+                    "status": "paused"
+                }));
+        });
+        an_epic_verifying(&harness, |_| {});
+        integrated(&harness, true);
+        let adapter = harness.recorded(vec![accept_frk_1()]);
+        let orchestrator = harness.orchestrator(adapter.clone());
+        orchestrator.tick().await.expect("Farik runs C1");
+        orchestrator
+            .handle(Command::HumanAccept {
+                task_id: task("FRK-1"),
+                subject: AcceptSubject::Result,
+                message: Some("Looks right.".to_string()),
+            })
+            .await
+            .expect("the human accepts the epic");
+
+        orchestrator
+            .handle(Command::AgentUpdate {
+                agent_id: "sam".to_string(),
+                status: AgentStatus::Active,
+            })
+            .await
+            .expect("sam activates");
+        orchestrator.tick().await.expect("the tick runs");
+
+        let started = adapter.started();
+        assert_eq!(
+            started.len(),
+            1,
+            "the human's own accepted epic still gets its Product Manager verify session"
+        );
+        assert_eq!(
+            (started[0].purpose, started[0].agent_id.as_str()),
+            (SessionPurpose::Verify, "pm")
+        );
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn records_the_epics_review_once_the_reasked_criterion_is_answered() {
+        let harness = Harness::new("epic-sm-reasked-recorded", with_a_scrum_master);
+        a_scrum_masters_epic_verifying(&harness);
+        integrated(&harness, true);
+        // The Product Manager's review note, with no result yet for the `review` criterion C2.
+        harness.project.record(
+            "FRK-1",
+            "note.written",
+            &json!({ "kind": "review", "text": "It reads right.", "written_by": "pm" }),
+        );
+        let adapter = harness.recorded(vec![review_epic_frk_1()]);
+        let orchestrator = harness.orchestrator(adapter.clone());
+        orchestrator.tick().await.expect("Farik runs C1");
+
+        orchestrator.tick().await.expect("the re-ask answers C2");
+
         let reviews = harness.events(&[EventKind::ReviewRecorded]);
         assert!(
             matches!(&reviews[..], [review] if matches!(&review.body,
