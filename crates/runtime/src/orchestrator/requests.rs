@@ -187,7 +187,7 @@ pub(super) async fn refining(
 
 /// Whether the contract's Definition of Ready, evaluated on the context the governor's
 /// `refining -> ready` would use, fails on the Scrum Master's missing judgment alone. It records
-/// nothing.
+/// nothing: a structurally broken contract goes back to the Product Manager without a judgment.
 fn awaits_judgment(
     deps: &OrchestratorDeps,
     team: &Team,
@@ -203,10 +203,9 @@ fn awaits_judgment(
         .tools
         .transitions
         .context(&request, &TransitionAsk::default(), team)?;
+    let failures = evaluate_readiness(&context.contract, &context.readiness).err();
     Ok(matches!(
-        evaluate_readiness(&context.contract, &context.readiness)
-            .err()
-            .as_deref(),
+        failures.as_deref(),
         Some([only]) if only.rule == ReadinessRule::JudgmentRecorded
     ))
 }

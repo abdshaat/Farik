@@ -40,11 +40,11 @@ pub(super) fn triage_message(contract: &TaskContract) -> String {
     )
 }
 
-/// The judgment session's message: judge the contract on the two questions and record both
-/// answers.
+/// The judgment session's message: judge the contract on the Definition of Ready's two
+/// questions and record both answers.
 pub(super) fn judgment_message(contract: &TaskContract) -> String {
     format!(
-        "Judge the contract of {task}, which is above: does it fit its budget, and would its \
+        "Judge the contract of {task}, which is above: does the task fit its budget, and would its \
          criteria detect the failure its intent worries about? Record both answers and your reason \
          with `farik_record_judgment`.",
         task = contract.id.as_str()

@@ -136,14 +136,12 @@ fn session_spec(
         .filter(|tool| !(ask.read_only && NOT_FOR_READ_ONLY.contains(&tool.name)))
         .filter(|tool| ask.only_tool.is_none_or(|only| tool.name == only))
         .collect();
-    let farik_tools = match ask.only_tool {
-        Some(only) => vec![only.to_string()],
-        None => tools
-            .iter()
-            .filter(|tool| tiers.contains(&tool.tier))
-            .map(|tool| tool.name.to_string())
-            .collect(),
-    };
+    // A session given one tool has it whatever the agent's tiers.
+    let farik_tools = tools
+        .iter()
+        .filter(|tool| ask.only_tool.is_some() || tiers.contains(&tool.tier))
+        .map(|tool| tool.name.to_string())
+        .collect();
     let history = deps.tools.log.read(&EventQuery {
         task_id: Some(ask.contract.id.clone()),
         ..EventQuery::default()
