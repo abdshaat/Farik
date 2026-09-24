@@ -470,6 +470,25 @@ impl Harness {
         );
     }
 
+    /// Files `task` and moves it straight to `escalated`, its `escalation.raised` of `reason`
+    /// recorded `hours` before the clock's now; answers that event's seq, the escalation's
+    /// `raised_seq`.
+    pub(crate) fn escalated_hours_ago(&self, task: &str, reason: &str, hours: i64) -> u64 {
+        let raised_at = at() - chrono::Duration::hours(hours);
+        self.project.filed(task, "rejected", "task", None);
+        self.project
+            .moved_at(raised_at, task, "rejected", "escalated", &json!({}));
+        self.project
+            .record_at(
+                raised_at,
+                task,
+                "escalation.raised",
+                &json!({ "reason": reason, "detail": format!("{task} waits") }),
+            )
+            .envelope
+            .seq
+    }
+
     /// Files `task` and moves it through `in_progress` and `verifying` to `rejected` at
     /// `iteration`, held by `dev-a` and reviewed by `dev-b`, C1 failed for `reasons`.
     pub(crate) fn rejected(&self, task: &str, iteration: u32, reasons: &str) {

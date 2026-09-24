@@ -13,7 +13,9 @@ use farik_core::governor::task_status::is_terminal;
 use farik_core::governor::transition::TransitionRequest;
 use farik_core::governor::transition_table::TransitionActor;
 use farik_core::team::{Agent, Team};
-use farik_protocol::event::{EventBody, EventKind, FarikEvent, Thread};
+use farik_protocol::event::{
+    EscalationAgedBody, EventBody, EventIds, EventKind, FarikEvent, Thread, new_event,
+};
 use farik_store::{CostScope, EventQuery, Git, TaskProjection};
 
 use super::integrate::{awaiting, cleanup};
@@ -621,6 +623,78 @@ async fn conversation(
     Ok(None)
 }
 
+/// The aged rule, after the channel rule (5.7, 5.9): the oldest open escalation past the team's
+/// `escalation_age_hours` that has no `escalation.aged` of its own yet is aged once, recorded
+/// about its task with no attribution, and said in the channel as a system line naming the
+/// escalation's reason. It is about no one task, so it runs only under `All` in a tick scoped to
+/// none.
+fn aged(
+    deps: &OrchestratorDeps,
+    scope: &TickScope,
+    team: &Team,
+) -> Result<Option<TickReport>, OrchestratorError> {
+    if scope.rules != TickRules::All || scope.task_id.is_some() {
+        return Ok(None);
+    }
+    let already_aged: Vec<u64> = deps
+        .tools
+        .log
+        .read(&EventQuery {
+            kinds: vec![EventKind::EscalationAged],
+            ..EventQuery::default()
+        })?
+        .iter()
+        .filter_map(|event| match &event.body {
+            EventBody::EscalationAged(body) => Some(body.raised_seq),
+            _ => None,
+        })
+        .collect();
+    let limit = i64::try_from(team.policy.escalation_age_hours.get()).unwrap_or(i64::MAX);
+    let now = deps.tools.clock.now();
+    let Some(open) = open_escalations(&deps.tools.log, &deps.tools.projections)?
+        .into_iter()
+        .find(|open| {
+            !already_aged.contains(&open.raised_seq)
+                && now - open.raised_at >= chrono::Duration::hours(limit)
+        })
+    else {
+        return Ok(None);
+    };
+    let hours = (now - open.raised_at).num_hours();
+    let ids = EventIds {
+        task_id: Some(open.task_id.clone()),
+        ..deps.tools.ids.clone()
+    };
+    let event = new_event(
+        EventBody::EscalationAged(EscalationAgedBody {
+            raised_seq: open.raised_seq,
+            hours,
+        }),
+        now,
+        ids,
+    )
+    .map_err(|error| OrchestratorError::Refused {
+        reason: format!("the aged escalation cannot be stamped: {error:?}"),
+    })?;
+    let appended = deps.tools.log.append(&event)?;
+    deps.tools.projections.apply(&appended)?;
+    crate::channel::post_system(
+        &deps.tools.log,
+        deps.tools.clock.as_ref(),
+        &deps.tools.ids,
+        Some(open.task_id.clone()),
+        &format!(
+            "{} has waited {hours} hours on the human: {}",
+            open.task_id.as_str(),
+            open.reason
+        ),
+    )?;
+    Ok(Some(TickReport::Acted {
+        task_id: open.task_id,
+        what: format!("aged its escalation: waited {hours} hours"),
+    }))
+}
+
 /// Whether `rules` runs rule `rule` (1 to 10, in the order of work) for every task. `Planning`
 /// runs rule 6 for epics alone, which the tick decides.
 fn rule_runs(rules: TickRules, rule: u8) -> bool {
@@ -710,7 +784,7 @@ fn blocked(
     }
 }
 
-/// The rules between rules 2 and 3: the budget rule, then the channel rule.
+/// The rules between rules 2 and 3: the budget rule, the channel rule, then the aged rule.
 async fn budget_and_channel(
     deps: &OrchestratorDeps,
     scope: &TickScope,
@@ -721,7 +795,10 @@ async fn budget_and_channel(
     if let Some(report) = budget(deps, scope, team, board)? {
         return Ok(Some(report));
     }
-    conversation(deps, scope, team, waiting).await
+    if let Some(report) = conversation(deps, scope, team, waiting).await? {
+        return Ok(Some(report));
+    }
+    aged(deps, scope, team)
 }
 
 /// The budget rule, between rules 2 and 3: a task whose dollars or sessions are spent is escalated
@@ -5799,6 +5876,141 @@ mod tests {
         assert!(written.chars().count() <= 8_000, "{}", written.len());
         assert!(written.ends_with("human: @dev-a status?"), "{written}");
         assert!(!written.contains("human: 0 "), "the oldest is left out");
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn ages_an_escalation_past_its_limit() {
+        let harness = Harness::new("orch-aged-past-limit", |_| {});
+        let raised_seq = harness.escalated_hours_ago("FRK-1", "iterations", 25);
+        let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
+
+        let report = orchestrator.tick().await.expect("the tick runs");
+
+        assert_eq!(acted_on(&report), Some("FRK-1"), "{report:?}");
+        let aged = harness.events(&[EventKind::EscalationAged]);
+        assert_eq!(aged.len(), 1, "{aged:?}");
+        assert_eq!(
+            aged[0].envelope.ids.task_id.as_ref().map(|id| id.as_str()),
+            Some("FRK-1")
+        );
+        let EventBody::EscalationAged(body) = &aged[0].body else {
+            panic!("an aged escalation");
+        };
+        assert_eq!((body.raised_seq, body.hours), (raised_seq, 25));
+        let lines = messages(&harness);
+        assert_eq!(lines.len(), 1, "{lines:?}");
+        assert_eq!(lines[0].kind, MessageKind::System);
+        assert!(
+            lines[0].text.contains("waited 25 hours"),
+            "{}",
+            lines[0].text
+        );
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn ages_an_escalation_once() {
+        let harness = Harness::new("orch-aged-once", |_| {});
+        harness.escalated_hours_ago("FRK-1", "iterations", 25);
+        let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
+        orchestrator.tick().await.expect("the first tick runs");
+
+        let report = orchestrator.tick().await.expect("the second tick runs");
+
+        assert_eq!(
+            report,
+            TickReport::Idle {
+                why: NOTHING_TO_DO.to_string(),
+                until: None,
+            }
+        );
+        assert_eq!(harness.events(&[EventKind::EscalationAged]).len(), 1);
+        assert_eq!(messages(&harness).len(), 1);
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn ages_one_escalation_per_tick() {
+        let harness = Harness::new("orch-aged-two", |_| {});
+        let older = harness.escalated_hours_ago("FRK-1", "iterations", 30);
+        let newer = harness.escalated_hours_ago("FRK-2", "iterations", 26);
+        let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
+
+        let first = orchestrator.tick().await.expect("the first tick runs");
+        assert_eq!(acted_on(&first), Some("FRK-1"), "{first:?}");
+        let second = orchestrator.tick().await.expect("the second tick runs");
+        assert_eq!(acted_on(&second), Some("FRK-2"), "{second:?}");
+
+        let aged = harness.events(&[EventKind::EscalationAged]);
+        assert_eq!(aged.len(), 2, "{aged:?}");
+        let raised_seqs: Vec<u64> = aged
+            .iter()
+            .map(|event| match &event.body {
+                EventBody::EscalationAged(body) => body.raised_seq,
+                _ => panic!("an aged escalation"),
+            })
+            .collect();
+        assert_eq!(raised_seqs, vec![older, newer]);
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn ages_a_new_escalation_of_the_same_task_again() {
+        let harness = Harness::new("orch-aged-again", |_| {});
+        harness.escalated_hours_ago("FRK-1", "iterations", 50);
+        let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
+        orchestrator.tick().await.expect("the first tick runs");
+
+        harness.project.moved(
+            "FRK-1",
+            "escalated",
+            "refining",
+            &json!({ "actor": "human", "requested_by": "human" }),
+        );
+        let raised_at = at() - chrono::Duration::hours(25);
+        harness
+            .project
+            .moved_at(raised_at, "FRK-1", "refining", "escalated", &json!({}));
+        let second_seq = harness
+            .project
+            .record_at(
+                raised_at,
+                "FRK-1",
+                "escalation.raised",
+                &json!({ "reason": "iterations", "detail": "FRK-1 waits" }),
+            )
+            .envelope
+            .seq;
+
+        let report = orchestrator.tick().await.expect("the second tick runs");
+
+        assert_eq!(acted_on(&report), Some("FRK-1"), "{report:?}");
+        let aged = harness.events(&[EventKind::EscalationAged]);
+        assert_eq!(aged.len(), 2, "{aged:?}");
+        let EventBody::EscalationAged(body) = &aged[1].body else {
+            panic!("an aged escalation");
+        };
+        assert_eq!(body.raised_seq, second_seq);
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn leaves_a_young_escalation() {
+        let harness = Harness::new("orch-aged-young", |_| {});
+        harness.escalated_hours_ago("FRK-1", "iterations", 23);
+        let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
+
+        let report = orchestrator.tick().await.expect("the tick runs");
+
+        assert_eq!(
+            report,
+            TickReport::Idle {
+                why: NOTHING_TO_DO.to_string(),
+                until: None,
+            }
+        );
+        assert_eq!(harness.events(&[EventKind::EscalationAged]).len(), 0);
     }
 
     /// The Scrum Master, and S1 holding FRK-1, accepted, its completion note written and $1.25

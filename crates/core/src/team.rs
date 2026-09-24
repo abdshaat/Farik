@@ -603,6 +603,13 @@ mod tests {
     }
 
     #[test]
+    fn defaults_the_escalation_age() {
+        // 5.7: an open escalation waits a day on the human before the aged rule ages it, unless
+        // the team says otherwise.
+        assert_eq!(team(&a_team_wire()).policy.escalation_age_hours.get(), 24);
+    }
+
+    #[test]
     fn refuses_a_number_outside_what_a_rule_allows() {
         // Every bound here carries a spec number: 5.2's work-in-progress limit, 5.7's blocked age
         // and iteration count, 5.5's daily budget, 5.12's task cap and its list of methods. A bound

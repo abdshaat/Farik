@@ -18,17 +18,18 @@ pub use crate::generated::event::{
     ContractSummaryKind, ContractSummaryParent, ContractSummaryRisk, ContractSummaryStatus,
     ContractUnlockedBody, ContractWrittenBody, CostRecordedBody, CostRecordedBodyModelId,
     CostRecordedBodyPurpose, CriteriaUpdatedBody, CriterionRecordedBody,
-    CriterionRecordedBodyRunBy, DriftDetectedBody, DriftDetectedBodyDrift, EscalationRaisedBody,
-    EscalationRaisedBodyReason, EscalationResolvedBody, EventKind, HumanAcceptedBody,
-    HumanAcceptedBodySubject, MessagePostedBody, NoteWrittenBody, NoteWrittenBodyKind,
-    ProductDocWrittenBody, ProjectScannedBody, PullRequestOpenedBody, QuestionAnsweredBody,
-    QuestionAskedBody, RequestTriagedBody, RequestTriagedBodySize, RetroAppendedBody,
-    ReviewRecordedBody, SessionEndedBody, SessionEndedBodyReason, SessionStartedBody,
-    SessionStartedBodyEffort, SessionStartedBodyModel, SessionStartedBodyPurpose, SprintEndedBody,
-    SprintEndedBodyEndedBy, SprintPlannedBody, SprintStartedBody, TaskCreatedBody,
-    TaskIntegratedBody, TaskIntegratedBodyIntegratedBy, TaskTransitionedBody,
-    TaskTransitionedBodyEffectsItem, TeamUpdatedBody, TokenUsage, ToolCalledBody, ToolDeniedBody,
-    ToolReturnedBody, TransitionRefusedBody, TransitionRefusedBodyRefusal,
+    CriterionRecordedBodyRunBy, DriftDetectedBody, DriftDetectedBodyDrift, EscalationAgedBody,
+    EscalationRaisedBody, EscalationRaisedBodyReason, EscalationResolvedBody, EventKind,
+    HumanAcceptedBody, HumanAcceptedBodySubject, MessagePostedBody, NoteWrittenBody,
+    NoteWrittenBodyKind, ProductDocWrittenBody, ProjectScannedBody, PullRequestOpenedBody,
+    QuestionAnsweredBody, QuestionAskedBody, RequestTriagedBody, RequestTriagedBodySize,
+    RetroAppendedBody, ReviewRecordedBody, SessionEndedBody, SessionEndedBodyReason,
+    SessionStartedBody, SessionStartedBodyEffort, SessionStartedBodyModel,
+    SessionStartedBodyPurpose, SprintEndedBody, SprintEndedBodyEndedBy, SprintPlannedBody,
+    SprintStartedBody, TaskCreatedBody, TaskIntegratedBody, TaskIntegratedBodyIntegratedBy,
+    TaskTransitionedBody, TaskTransitionedBodyEffectsItem, TeamUpdatedBody, TokenUsage,
+    ToolCalledBody, ToolDeniedBody, ToolReturnedBody, TransitionRefusedBody,
+    TransitionRefusedBodyRefusal,
 };
 /// The generated names of the vocabularies the governor's events repeat, renamed at the edge so
 /// that they cannot be mistaken for `farik-core`'s own types of the same name.
@@ -61,7 +62,7 @@ static VALIDATOR: LazyLock<Validator> = LazyLock::new(|| {
 });
 
 /// One validator per kind, each holding that kind's body schema alone. The event schema types
-/// `body` as a choice of thirty-eight shapes, so it can only say that a body matched none of them; these
+/// `body` as a choice of thirty-nine shapes, so it can only say that a body matched none of them; these
 /// say what is wrong with the one shape the event's `kind` asked for.
 static BODY_VALIDATORS: LazyLock<Vec<Validator>> = LazyLock::new(|| {
     let schema: Value = serde_json::from_str(SCHEMA_JSON).expect(
@@ -132,6 +133,7 @@ fn body_def_name(kind: EventKind) -> &'static str {
         EventKind::AgentSlept => "agentSleptBody",
         EventKind::MessagePosted => "messagePostedBody",
         EventKind::RetroAppended => "retroAppendedBody",
+        EventKind::EscalationAged => "escalationAgedBody",
     }
 }
 
@@ -160,6 +162,7 @@ pub fn is_about_one_contract(kind: EventKind) -> bool {
             | EventKind::PullRequestOpened
             | EventKind::HumanAccepted
             | EventKind::EscalationResolved
+            | EventKind::EscalationAged
     )
 }
 
@@ -170,6 +173,7 @@ pub fn is_about_one_contract(kind: EventKind) -> bool {
 /// `sprint.ended` name who acted in a closed vocabulary, `governor` or `human`, which cannot be
 /// blank. Nor for the three `tool.` kinds, the two `session.` kinds, and `agent.slept`, whose
 /// envelope names the agent and the session; Farik observed the sleep, and nobody asked for it.
+/// Nor for `escalation.aged`: the human left it waiting, and nobody acted.
 fn attribution(body: &mut EventBody) -> Option<(&'static str, &mut String)> {
     match body {
         EventBody::TaskCreated(body) => Some(("created_by", &mut body.created_by)),
@@ -209,13 +213,14 @@ fn attribution(body: &mut EventBody) -> Option<(&'static str, &mut String)> {
         | EventBody::TaskIntegrated(_)
         | EventBody::SprintEnded(_)
         | EventBody::AgentSlept(_)
-        | EventBody::PullRequestOpened(_) => None,
+        | EventBody::PullRequestOpened(_)
+        | EventBody::EscalationAged(_) => None,
     }
 }
 
 /// Every kind the log holds in this phase, in the order `docs/schemas/event.schema.json` lists
 /// them. The step that adds a kind adds it here.
-pub const EVERY_KIND: [EventKind; 38] = [
+pub const EVERY_KIND: [EventKind; 39] = [
     EventKind::TaskCreated,
     EventKind::RequestTriaged,
     EventKind::ContractWritten,
@@ -254,6 +259,7 @@ pub const EVERY_KIND: [EventKind; 38] = [
     EventKind::AgentSlept,
     EventKind::MessagePosted,
     EventKind::RetroAppended,
+    EventKind::EscalationAged,
 ];
 
 /// The ids an event is stamped with: which team and project it belongs to, and the contract, agent
@@ -406,6 +412,10 @@ pub enum EventBody {
     /// The retro ceremony recorded what the next planning should know.
     #[serde(rename = "retro.appended")]
     RetroAppended(RetroAppendedBody),
+    /// The aged rule found an open escalation that has waited past the team's
+    /// `escalation_age_hours` on the human.
+    #[serde(rename = "escalation.aged")]
+    EscalationAged(EscalationAgedBody),
 }
 
 impl EventBody {
@@ -451,6 +461,7 @@ impl EventBody {
             Self::AgentSlept(_) => EventKind::AgentSlept,
             Self::MessagePosted(_) => EventKind::MessagePosted,
             Self::RetroAppended(_) => EventKind::RetroAppended,
+            Self::EscalationAged(_) => EventKind::EscalationAged,
         }
     }
 }
@@ -599,7 +610,7 @@ pub fn event_from_value(input: &Value) -> Result<FarikEvent, Vec<ValidationError
 }
 
 /// The schema's own failures. A failure inside `body` is reported by the schema once, at `/body`,
-/// because `body` there is a choice of thirty-eight shapes and the schema can only say that none matched.
+/// because `body` there is a choice of thirty-nine shapes and the schema can only say that none matched.
 /// The event's `kind` says which one it was meant to be, so such a failure is asked again of that
 /// shape alone and reported where it actually is.
 fn schema_errors(input: &Value) -> Vec<ValidationError> {
@@ -994,7 +1005,7 @@ mod tests {
 
     #[test]
     fn reports_a_malformed_field_inside_a_body_at_its_own_path() {
-        // The schema types `body` as a choice of thirty-eight shapes, so it reports a failure anywhere
+        // The schema types `body` as a choice of thirty-nine shapes, so it reports a failure anywhere
         // inside one at `/body`, with the whole body echoed back. The kind says which shape the
         // body was meant to be, so the reader checks it again against that one alone.
         let mut input = an_event_wire(EventKind::ProjectScanned);

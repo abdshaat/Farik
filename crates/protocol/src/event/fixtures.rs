@@ -112,6 +112,7 @@ pub fn a_body_wire(kind: EventKind) -> Value {
             "reason": "blocker_age",
             "detail": "blocked_age: no key"
         }),
+        EventKind::EscalationAged => json!({ "raised_seq": 1, "hours": 25 }),
         EventKind::ContractEvaluated => json!({
             "gate": "definition_of_ready",
             "passed": false,

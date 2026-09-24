@@ -260,6 +260,13 @@
           "maximum": 20,
           "default": 1,
           "description": "How many unprompted messages each agent may post in the channel per sprint, or per UTC day while no sprint is open (spec 5.9). Left out, one."
+        },
+        "escalation_age_hours": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 720,
+          "default": 24,
+          "description": "How long an open escalation may wait on the human before the aged rule ages it and says so in the channel (spec 5.7). Left out, a day."
         }
       }
     },

@@ -160,7 +160,7 @@ Files: team schema, `team.rs`, event schema (`escalation.aged`), protocol, `orch
 - `leaves_a_young_escalation` (guard) — 23 hours: nothing.
 - `defaults_the_escalation_age` (core) — a team file without it: 24.
 
-- [ ] `feat(runtime): say when an escalation has waited too long on the human`
+- [x] `feat(runtime): say when an escalation has waited too long on the human`
 
 ### Task 6: the spec
 
