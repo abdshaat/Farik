@@ -63,10 +63,15 @@ pub(super) fn commit(call: &Call<'_>, input: &CommitInput) -> Result<Value, Tool
     Ok(json!({ "sha": sha }))
 }
 
-/// `farik_git_push`: pushes the task branch to `origin`, for the task's assignee alone.
+/// `farik_git_push`: pushes the task branch to `origin`, for the task's assignee alone. It spells
+/// `refs/heads/<branch>`, as integration does, so that a tag of the same name cannot make the push
+/// ambiguous.
 pub(super) fn push(call: &Call<'_>) -> Result<Value, ToolError> {
     let branch = branch(call, assignees_task(call)?)?;
-    call.deps().git.push(REMOTE, &branch).map_err(failed)?;
+    call.deps()
+        .git
+        .push(REMOTE, &format!("refs/heads/{branch}"))
+        .map_err(failed)?;
     Ok(json!({ "remote": REMOTE, "branch": branch }))
 }
 
@@ -200,6 +205,66 @@ mod tests {
                 .contains("b/src/login/form.ts"),
             "{diff}"
         );
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn pushes_the_tasks_branch_through_the_tool() {
+        // A fix pushes `fix/<id>` (5.14). A tag of the same name makes a push that does not spell
+        // `refs/heads/` ambiguous, as integration found (integrate.rs).
+        use farik_store::git::fixtures::{git_in, git_output_in};
+        let project = TestProject::new(
+            "tools-git-push",
+            &a_team_of_three(|wire| wire["agents"][1]["grants"] = json!(["git_remote"])),
+        );
+        let root = &project.repo.path;
+        let origin = root.with_extension("origin.git");
+        let _ = std::fs::remove_dir_all(&origin);
+        std::fs::create_dir_all(&origin).expect("a directory for the remote");
+        git_in(&origin, &["init", "--bare", "-b", "main"]);
+        git_in(
+            root,
+            &["remote", "add", "origin", origin.to_str().expect("a path")],
+        );
+        project.filed_with("FRK-1", "assigned", "task", None, |wire| {
+            wire["change"] = json!("fix");
+        });
+        project.moved(
+            "FRK-1",
+            "assigned",
+            "in_progress",
+            &json!({ "assignee": "dev-a", "reviewer": "dev-b" }),
+        );
+        let worktree = root.join(".farik/local/worktrees/FRK-1");
+        project
+            .deps
+            .git
+            .create_worktree(&worktree, "fix/FRK-1", "main")
+            .expect("the task's worktree is made");
+        git_in(root, &["tag", "fix/FRK-1"]);
+        std::fs::create_dir_all(worktree.join("src/login")).expect("a directory");
+        std::fs::write(worktree.join("src/login/form.ts"), "export {};\n").expect("a file");
+        project
+            .call(
+                "dev-a",
+                Some("FRK-1"),
+                "farik_git_commit",
+                json!({ "message": "fix the login form", "paths": ["src/login/form.ts"] }),
+            )
+            .expect("the assignee commits");
+
+        let pushed = project
+            .call("dev-a", Some("FRK-1"), "farik_git_push", json!({}))
+            .expect("the assignee pushes");
+
+        assert_eq!(pushed, json!({ "remote": "origin", "branch": "fix/FRK-1" }));
+        let head = git_output_in(&worktree, &["rev-parse", "HEAD"]);
+        let heads = git_output_in(&origin, &["for-each-ref", "refs/heads"]);
+        assert!(
+            heads.contains(&format!("{head} commit\trefs/heads/fix/FRK-1")),
+            "{heads}"
+        );
+        assert!(!heads.contains("farik/FRK-1"), "{heads}");
     }
 
     #[test]
