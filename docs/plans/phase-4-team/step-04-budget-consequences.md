@@ -139,7 +139,7 @@ Files: `orchestrator/rules.rs`, tests
 - `leaves_the_budget_to_farik_plan` (guard) — under `TickRules::Planning`, a `refining` task out of sessions is not escalated.
 - `leaves_a_task_with_room_alone` (guard) — sessions left: no escalation.
 
-- [ ] `feat(runtime): escalate a task whose dollars or sessions are spent`
+- [x] `feat(runtime): escalate a task whose dollars or sessions are spent`
 
 ### Task 6: the spec
 

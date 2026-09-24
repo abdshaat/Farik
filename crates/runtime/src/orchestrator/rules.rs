@@ -9,6 +9,7 @@ use farik_core::branch::task_branch;
 use farik_core::budget::{BudgetScope, SessionLedger, check_budgets};
 use farik_core::contract::{Role, TaskContract, TaskId, TaskStatus};
 use farik_core::governor::gates::fits_the_open_sprint;
+use farik_core::governor::task_status::is_terminal;
 use farik_core::governor::transition::TransitionRequest;
 use farik_core::governor::transition_table::TransitionActor;
 use farik_core::team::{Agent, Team};
@@ -61,10 +62,7 @@ pub(super) async fn tick(
     let in_scope = in_scope(scope);
     let runs = |rule: u8| rule_runs(scope.rules, rule);
     let mut waiting = Waiting::default();
-    if let Some(report) = finished_sprint(deps, scope, &board)? {
-        return Ok(report);
-    }
-    if let Some(report) = sprint_planning(deps, scope, &team, &board, &mut waiting).await? {
+    if let Some(report) = sprint_rules(deps, scope, &team, &board, &mut waiting).await? {
         return Ok(report);
     }
     if runs(1) {
@@ -88,6 +86,9 @@ pub(super) async fn tick(
                 return Ok(report);
             }
         }
+    }
+    if let Some(report) = budget(deps, scope, &team, &board)? {
+        return Ok(report);
     }
     if runs(3) {
         for row in waiting_on_nobody(&board, TaskStatus::Rejected).filter(in_scope) {
@@ -179,6 +180,21 @@ fn in_scope(scope: &TickScope) -> impl Fn(&&TaskProjection) -> bool + Copy + '_ 
             .as_ref()
             .is_none_or(|task_id| &row.task_id == task_id)
     }
+}
+
+/// The sprint rules, which come before the numbered ones: the sprint that ends by itself, then the
+/// open sprint's planning.
+async fn sprint_rules(
+    deps: &OrchestratorDeps,
+    scope: &TickScope,
+    team: &Team,
+    board: &[TaskProjection],
+    waiting: &mut Waiting,
+) -> Result<Option<TickReport>, OrchestratorError> {
+    if let Some(report) = finished_sprint(deps, scope, board)? {
+        return Ok(Some(report));
+    }
+    sprint_planning(deps, scope, team, board, waiting).await
 }
 
 /// The sprint that ends by itself (5.5): the open sprint, once it holds a task and every task in it
@@ -393,6 +409,66 @@ fn blocked(
         TransitionOutcome::Moved(_) => Ok(Some(TickReport::Acted {
             task_id: row.task_id.clone(),
             what: format!("escalated it: blocked for {hours} hours or more"),
+        })),
+        TransitionOutcome::Refused(_) => Ok(None),
+    }
+}
+
+/// The budget rule, between rules 2 and 3: a task whose dollars or sessions are spent is escalated
+/// as the governor, whose `GovernorEscalation` gate names the reason (5.7). One whose escalation
+/// was refused since it entered its status is passed over; a task the human resumed without more
+/// room entered a new status, so it is escalated again, which is how Farik says it is still spent.
+/// It governs work in progress, so it runs only in a tick of every rule scoped to no task; it
+/// passes over a terminal or escalated task and one waiting on the human.
+fn budget(
+    deps: &OrchestratorDeps,
+    scope: &TickScope,
+    team: &Team,
+    board: &[TaskProjection],
+) -> Result<Option<TickReport>, OrchestratorError> {
+    if scope.rules != TickRules::All || scope.task_id.is_some() {
+        return Ok(None);
+    }
+    for row in board.iter().filter(|row| {
+        !is_terminal(row.status) && row.status != TaskStatus::Escalated && !row.waiting_on_human
+    }) {
+        if let Some(report) = escalate_if_spent(deps, team, row)? {
+            return Ok(Some(report));
+        }
+    }
+    Ok(None)
+}
+
+/// The budget rule for one task: escalated when its dollars or sessions are spent and that move
+/// was not refused since it entered its status.
+fn escalate_if_spent(
+    deps: &OrchestratorDeps,
+    team: &Team,
+    row: &TaskProjection,
+) -> Result<Option<TickReport>, OrchestratorError> {
+    let contract = deps.tools.files.read_contract(&row.task_id)?;
+    let state = budget_state(
+        &deps.tools.projections,
+        team,
+        contract.assignee_role,
+        Some(&contract),
+        &SessionLedger::default(),
+        deps.tools.clock.now(),
+    )?;
+    let task_spent = check_budgets(&state).iter().any(|exhausted| {
+        matches!(
+            exhausted.scope,
+            BudgetScope::TaskUsd | BudgetScope::TaskSessions
+        )
+    });
+    if !task_spent || refused_since_entering(deps, &row.task_id, row.status, TaskStatus::Escalated)?
+    {
+        return Ok(None);
+    }
+    match governor_moves(deps, team, row, TaskStatus::Escalated)? {
+        TransitionOutcome::Moved(_) => Ok(Some(TickReport::Acted {
+            task_id: row.task_id.clone(),
+            what: "escalated it: its dollars or sessions are spent".to_string(),
         })),
         TransitionOutcome::Refused(_) => Ok(None),
     }
@@ -1992,7 +2068,7 @@ mod tests {
         run_until_idle_within_ten_seconds(orchestrator).expect("the run is idle");
 
         assert_eq!(adapter.started().len(), 1);
-        assert_eq!(harness.row("FRK-1").status, TaskStatus::InProgress);
+        assert_eq!(harness.row("FRK-1").status, TaskStatus::Escalated);
     }
 
     #[tokio::test]
@@ -2310,7 +2386,7 @@ mod tests {
 
     #[tokio::test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
-    async fn runs_the_criteria_of_a_task_out_of_sessions() {
+    async fn escalates_a_task_out_of_sessions_before_running_its_criteria() {
         let harness = Harness::new("orch-verify-no-sessions", |_| {});
         harness.verifying_with("FRK-1", true, true, |wire| {
             wire["budget"]["max_sessions"] = json!(1);
@@ -2321,23 +2397,13 @@ mod tests {
 
         let report = orchestrator.tick().await.expect("the tick runs");
 
+        assert_eq!(acted_on(&report), Some("FRK-1"), "{report:?}");
+        assert_eq!(harness.row("FRK-1").status, TaskStatus::Escalated);
         assert_eq!(
-            report,
-            TickReport::Acted {
-                task_id: "FRK-1".parse().expect("an id"),
-                what: "ran 1 of its criteria as its reviewer".to_string()
-            }
+            escalation_reasons(&harness),
+            vec![EscalationRaisedBodyReason::Sessions]
         );
-        assert_eq!(governor_runs(&harness), vec![("C1".to_string(), true)]);
-        assert!(adapter.started().is_empty());
-        let report = orchestrator.tick().await.expect("the tick runs");
-        assert_eq!(
-            report,
-            TickReport::Idle {
-                why: NOTHING_TO_DO.to_string(),
-                until: None,
-            }
-        );
+        assert!(governor_runs(&harness).is_empty());
         assert!(adapter.started().is_empty());
     }
 
@@ -2797,7 +2863,10 @@ mod tests {
         assert_eq!(harness.row("FRK-2").status, TaskStatus::Escalated);
         assert_eq!(
             escalation_reasons(&harness),
-            vec![EscalationRaisedBodyReason::ExplicitRequest]
+            vec![
+                EscalationRaisedBodyReason::ExplicitRequest,
+                EscalationRaisedBodyReason::Sessions
+            ]
         );
         let escalations = harness.events(&[EventKind::EscalationRaised]);
         let EventBody::EscalationRaised(escalation) = &escalations[0].body else {
@@ -2838,49 +2907,47 @@ mod tests {
             .collect()
     }
 
-    #[tokio::test]
-    #[ignore = "needs the git program: cargo xtask check --integration"]
-    async fn passes_over_a_task_out_of_sessions() {
-        let harness = Harness::new("orch-budget-sessions", |_| {});
+    /// Files FRK-1 `in_progress` with dev-a and dev-b, allowed `max_sessions` sessions, `used` of
+    /// them spent.
+    fn in_progress_with_sessions(harness: &Harness, max_sessions: u64, used: u64) {
         harness.file("FRK-1", "ready", |wire| {
-            wire["budget"]["max_sessions"] = json!(1);
+            wire["budget"]["max_sessions"] = json!(max_sessions);
         });
-        harness.spent(Some("FRK-1"), "s-0", 0.01);
-        harness.ready("FRK-2");
-        let adapter = harness.recorded(vec![reads_a_file()]);
-        let orchestrator = harness.orchestrator(adapter.clone());
-
-        let report = orchestrator.tick().await.expect("the tick runs");
-
-        assert_eq!(acted_on(&report), Some("FRK-2"), "{report:?}");
-        let started = adapter.started();
-        assert_eq!(started.len(), 1);
-        assert_eq!(started[0].purpose, SessionPurpose::Plan);
-        assert_eq!(
-            started[0].task_id.as_ref().map(|task| task.as_str()),
-            Some("FRK-2")
-        );
-        harness.project.moved(
-            "FRK-2",
-            "ready",
-            "cancelled",
-            &json!({ "actor": "human", "requested_by": "human" }),
-        );
-        let report = orchestrator.tick().await.expect("the tick runs");
-        assert_eq!(
-            report,
-            TickReport::Idle {
-                why: NOTHING_TO_DO.to_string(),
-                until: None,
-            }
-        );
-        assert_eq!(harness.row("FRK-1").status, TaskStatus::Ready);
-        assert!(harness.events(&[EventKind::EscalationRaised]).is_empty());
+        let people = json!({ "assignee": "dev-a", "reviewer": "dev-b" });
+        harness.project.moved("FRK-1", "ready", "assigned", &people);
+        harness
+            .project
+            .moved("FRK-1", "assigned", "in_progress", &people);
+        for session in 0..used {
+            harness.spent(Some("FRK-1"), &format!("s-{session}"), 0.01);
+        }
     }
 
     #[tokio::test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
-    async fn passes_over_a_task_out_of_dollars() {
+    async fn escalates_a_task_out_of_sessions() {
+        let harness = Harness::new("orch-budget-sessions", |_| {});
+        in_progress_with_sessions(&harness, 1, 1);
+        let adapter = harness.recorded(vec![implement_stops_early()]);
+        let orchestrator = harness.orchestrator(adapter.clone());
+
+        let report = orchestrator.tick().await.expect("the tick runs");
+
+        assert_eq!(acted_on(&report), Some("FRK-1"), "{report:?}");
+        assert_eq!(harness.row("FRK-1").status, TaskStatus::Escalated);
+        let moved = last_move(&harness);
+        assert_eq!(moved.from.to_string(), "in_progress");
+        assert_eq!(moved.requested_by, "governor");
+        assert_eq!(
+            escalation_reasons(&harness),
+            vec![EscalationRaisedBodyReason::Sessions]
+        );
+        assert!(adapter.started().is_empty(), "{:?}", adapter.started());
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn escalates_a_task_out_of_dollars() {
         let harness = Harness::new("orch-budget-dollars", |_| {});
         harness.in_progress("FRK-1", "dev-a", "dev-b");
         harness.spent(Some("FRK-1"), "s-0", 3.0);
@@ -2891,6 +2958,134 @@ mod tests {
         orchestrator.tick().await.expect("the tick runs");
 
         assert!(adapter.started().is_empty(), "{:?}", adapter.started());
+        assert_eq!(harness.row("FRK-1").status, TaskStatus::Escalated);
+        assert_eq!(last_move(&harness).requested_by, "governor");
+        assert_eq!(
+            escalation_reasons(&harness),
+            vec![EscalationRaisedBodyReason::Budget]
+        );
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn escalates_a_refining_contract_out_of_sessions() {
+        let harness = Harness::new("orch-budget-refining", |_| {});
+        harness.file("FRK-1", "refining", |wire| {
+            wire["budget"]["max_sessions"] = json!(1);
+        });
+        harness.spent(Some("FRK-1"), "s-0", 0.01);
+        let adapter = harness.recorded(Vec::new());
+        let orchestrator = harness.orchestrator(adapter.clone());
+
+        orchestrator.tick().await.expect("the tick runs");
+
+        assert_eq!(harness.row("FRK-1").status, TaskStatus::Escalated);
+        assert_eq!(
+            escalation_reasons(&harness),
+            vec![EscalationRaisedBodyReason::Sessions]
+        );
+        assert!(adapter.started().is_empty());
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn asks_the_escalation_once() {
+        let harness = Harness::new("orch-budget-once", |_| {});
+        in_progress_with_sessions(&harness, 1, 1);
+        refused(
+            &harness,
+            "FRK-1",
+            "in_progress",
+            "escalated",
+            "governor",
+            "governor",
+        );
+        let adapter = harness.recorded(vec![implement_stops_early()]);
+        let orchestrator = harness.orchestrator(adapter.clone());
+
+        let report = orchestrator.tick().await.expect("the tick runs");
+
+        assert_eq!(
+            report,
+            TickReport::Idle {
+                why: NOTHING_TO_DO.to_string(),
+                until: None,
+            }
+        );
+        assert_eq!(harness.row("FRK-1").status, TaskStatus::InProgress);
+        assert_eq!(harness.events(&[EventKind::TransitionRefused]).len(), 1);
+        assert!(adapter.started().is_empty());
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn escalates_again_a_task_resumed_without_room() {
+        let harness = Harness::new("orch-budget-resumed", |_| {});
+        in_progress_with_sessions(&harness, 1, 1);
+        let adapter = harness.recorded(vec![implement_stops_early()]);
+        let orchestrator = harness.orchestrator(adapter.clone());
+        orchestrator.tick().await.expect("the tick escalates it");
+        assert_eq!(harness.row("FRK-1").status, TaskStatus::Escalated);
+        orchestrator
+            .handle(farik_protocol::command::Command::EscalationResolve {
+                task_id: "FRK-1".parse().expect("a task id"),
+                to: TaskStatus::InProgress,
+                message: "Carry on.".to_string(),
+            })
+            .await
+            .expect("the human resolves the escalation");
+        assert_eq!(harness.row("FRK-1").status, TaskStatus::InProgress);
+
+        orchestrator.tick().await.expect("the tick runs");
+
+        assert_eq!(harness.row("FRK-1").status, TaskStatus::Escalated);
+        assert_eq!(
+            escalation_reasons(&harness),
+            vec![
+                EscalationRaisedBodyReason::Sessions,
+                EscalationRaisedBodyReason::Sessions
+            ]
+        );
+        assert!(adapter.started().is_empty());
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn leaves_the_budget_to_farik_plan() {
+        let harness = Harness::new("orch-budget-planning", |_| {});
+        harness.file("FRK-1", "refining", |wire| {
+            wire["budget"]["max_sessions"] = json!(1);
+        });
+        harness.spent(Some("FRK-1"), "s-0", 0.01);
+        let adapter = harness.recorded(Vec::new());
+        let orchestrator = harness.orchestrator(adapter.clone());
+
+        orchestrator
+            .tick_within(&TickScope {
+                task_id: None,
+                rules: TickRules::Planning,
+            })
+            .await
+            .expect("the tick runs");
+
+        assert_eq!(harness.row("FRK-1").status, TaskStatus::Refining);
+        assert!(harness.events(&[EventKind::EscalationRaised]).is_empty());
+        assert!(adapter.started().is_empty());
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn leaves_a_task_with_room_alone() {
+        let harness = Harness::new("orch-budget-room", |_| {});
+        harness.in_progress("FRK-1", "dev-a", "dev-b");
+        harness.spent(Some("FRK-1"), "s-0", 0.01);
+        let adapter = harness.recorded(vec![implement_stops_early()]);
+        let orchestrator = harness.orchestrator(adapter.clone());
+
+        orchestrator.tick().await.expect("the tick runs");
+
+        assert!(harness.events(&[EventKind::EscalationRaised]).is_empty());
+        assert_eq!(adapter.started()[0].purpose, SessionPurpose::Implement);
     }
 
     #[tokio::test]
@@ -3086,12 +3281,11 @@ mod tests {
             vec![BudgetExhaustedBodyScope::TaskSessions]
         );
         let report = orchestrator.tick().await.expect("the tick runs");
+        assert_eq!(acted_on(&report), Some("FRK-1"), "{report:?}");
+        assert_eq!(harness.row("FRK-1").status, TaskStatus::Escalated);
         assert_eq!(
-            report,
-            TickReport::Idle {
-                why: NOTHING_TO_DO.to_string(),
-                until: None,
-            }
+            escalation_reasons(&harness),
+            vec![EscalationRaisedBodyReason::Sessions]
         );
         assert_eq!(adapter.started().len(), 1);
     }
