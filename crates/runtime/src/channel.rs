@@ -430,4 +430,30 @@ mod tests {
 
         assert_eq!(seqs, [late], "the conversation was shown {shown} alone");
     }
+
+    #[test]
+    fn reads_an_older_conversation_start_as_answering_up_to_itself() {
+        // A log recorded before `session.started` carried `in_reply_to`.
+        let log = open_event_log(Path::new(IN_MEMORY), at()).expect("the log opens");
+        mention(&log, "@dev-a status?");
+        let spec = SessionSpec {
+            agent_id: "dev-a".to_string(),
+            purpose: SessionPurpose::Conversation,
+            ..a_session_spec()
+        };
+        let ids = EventIds {
+            agent_id: Some("dev-a".to_string()),
+            ..farik_ids()
+        };
+        record_session_started(&log, &spec, None, &ids, &FixedClock::new(at())).expect("recorded");
+        let later = mention(&log, "@dev-a and the tests?");
+
+        let seqs: Vec<u64> = pending_mentions(&log, "dev-a")
+            .expect("the log reads")
+            .iter()
+            .map(|event| event.envelope.seq)
+            .collect();
+
+        assert_eq!(seqs, [later]);
+    }
 }
