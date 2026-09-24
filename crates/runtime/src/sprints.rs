@@ -5,7 +5,7 @@ use std::fmt;
 
 use farik_core::contract::{Role, TaskId, TaskStatus};
 use farik_core::sprint::{Sprint, SprintStatus, validate_sprint};
-use farik_protocol::event::{EventBody, EventKind, new_event};
+use farik_protocol::event::{EventBody, EventKind, SessionEndedBodyReason, new_event};
 use farik_store::files::FilesError;
 use farik_store::{EventLog, EventQuery, SprintProjection, StoreError, TaskProjection};
 use serde::de::DeserializeOwned;
@@ -389,24 +389,43 @@ pub fn join_epics_sprint(deps: &ToolDeps, task: &TaskId) -> Result<Option<Sprint
 }
 
 /// Whether sprint `sprint_id` has had its planning session: a `session.started` of purpose `plan`
-/// about no task, recorded after the sprint's `sprint.started`.
+/// about no task, recorded after the sprint's `sprint.started`, whose `session.ended` says it
+/// completed, was aborted, or failed. One that stopped at a limit or at its model provider's limit
+/// is asked again.
 ///
 /// # Errors
 ///
 /// When the log cannot be read.
 pub fn planning_session_spent(log: &EventLog, sprint_id: &str) -> Result<bool, StoreError> {
     let events = log.read(&EventQuery {
-        kinds: vec![EventKind::SprintStarted, EventKind::SessionStarted],
+        kinds: vec![
+            EventKind::SprintStarted,
+            EventKind::SessionStarted,
+            EventKind::SessionEnded,
+        ],
         ..EventQuery::default()
     })?;
     let mut started = false;
+    let mut planning: Vec<Option<&str>> = Vec::new();
     for event in &events {
+        let session_id = event.envelope.ids.session_id.as_deref();
         match &event.body {
             EventBody::SprintStarted(body) => started = body.sprint_id.as_str() == sprint_id,
             EventBody::SessionStarted(body)
                 if started
                     && event.envelope.ids.task_id.is_none()
                     && body.purpose.to_string() == "plan" =>
+            {
+                planning.push(session_id);
+            }
+            EventBody::SessionEnded(body)
+                if planning.contains(&session_id)
+                    && matches!(
+                        body.reason,
+                        SessionEndedBodyReason::Completed
+                            | SessionEndedBodyReason::Aborted
+                            | SessionEndedBodyReason::Error
+                    ) =>
             {
                 return Ok(true);
             }

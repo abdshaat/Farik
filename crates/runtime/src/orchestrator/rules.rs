@@ -4,6 +4,7 @@
 
 use std::sync::Arc;
 
+use chrono::{DateTime, Utc};
 use farik_core::branch::task_branch;
 use farik_core::budget::{BudgetScope, SessionLedger, check_budgets};
 use farik_core::contract::{Role, TaskContract, TaskId, TaskStatus};
@@ -25,6 +26,7 @@ use super::{
 use crate::cost::budget_state;
 use crate::exec::Executor;
 use crate::session::{EndReason, SessionPurpose};
+use crate::sleep::asleep_until;
 use crate::sprints::{EndedBy, end_sprint, planning_session_spent};
 use crate::transitions::{self, TransitionAsk, TransitionOutcome, integration_branch};
 
@@ -32,6 +34,15 @@ use crate::transitions::{self, TransitionAsk, TransitionOutcome, integration_bra
 const NOTHING_TO_DO: &str = "nothing on the board needs doing";
 /// What a tick says when the only rules that matched would have started a session on a spent day.
 const DAY_SPENT: &str = "the team's daily budget is spent";
+
+/// What kept the rules of one tick from starting a session, gathered as they pass work over.
+#[derive(Debug, Default)]
+pub(super) struct Waiting {
+    /// Whether the team's daily budget stopped one (`spent`).
+    pub(super) day_spent: bool,
+    /// The earliest time a sleeping agent whose session was not started wakes (`asleep`).
+    pub(super) slept: Option<DateTime<Utc>>,
+}
 
 /// One tick within `scope`: the first rule of the scope's set that acts on a task in scope, or
 /// `Idle`. A rule outside the set passes its tasks over, as a spent budget does.
@@ -48,11 +59,11 @@ pub(super) async fn tick(
     let board = deps.tools.projections.board()?;
     let in_scope = in_scope(scope);
     let runs = |rule: u8| rule_runs(scope.rules, rule);
-    let mut day_spent = false;
+    let mut waiting = Waiting::default();
     if let Some(report) = finished_sprint(deps, scope, &board)? {
         return Ok(report);
     }
-    if let Some(report) = sprint_planning(deps, scope, &team, &board, &mut day_spent).await? {
+    if let Some(report) = sprint_planning(deps, scope, &team, &board, &mut waiting).await? {
         return Ok(report);
     }
     if runs(1) {
@@ -93,7 +104,7 @@ pub(super) async fn tick(
     }
     if runs(5) {
         for row in waiting_on_nobody(&board, TaskStatus::Verifying).filter(in_scope) {
-            if let Some(report) = verifying(orchestrator, &team, row, &mut day_spent).await? {
+            if let Some(report) = verifying(orchestrator, &team, row, &mut waiting).await? {
                 return Ok(report);
             }
         }
@@ -106,7 +117,7 @@ pub(super) async fn tick(
             .filter(in_scope)
             .filter(|row| !epics_only || requests::is_epic(row))
         {
-            if let Some(report) = in_progress(orchestrator, &team, row, &mut day_spent).await? {
+            if let Some(report) = in_progress(orchestrator, &team, row, &mut waiting).await? {
                 return Ok(report);
             }
         }
@@ -120,28 +131,38 @@ pub(super) async fn tick(
     }
     if runs(8) {
         for row in waiting_on_nobody(&board, TaskStatus::Ready).filter(in_scope) {
-            if let Some(report) = ready(deps, &team, &board, row, &mut day_spent).await? {
+            if let Some(report) = ready(deps, &team, &board, row, &mut waiting).await? {
                 return Ok(report);
             }
         }
     }
     if runs(9) {
         for row in waiting_on_nobody(&board, TaskStatus::Refining).filter(in_scope) {
-            if let Some(report) = requests::refining(deps, &team, row, &mut day_spent).await? {
+            if let Some(report) = requests::refining(deps, &team, row, &mut waiting).await? {
                 return Ok(report);
             }
         }
     }
     if runs(10) {
         for row in waiting_on_nobody(&board, TaskStatus::Draft).filter(in_scope) {
-            if let Some(report) = requests::draft(deps, &team, row, &mut day_spent).await? {
+            if let Some(report) = requests::draft(deps, &team, row, &mut waiting).await? {
                 return Ok(report);
             }
         }
     }
     Ok(TickReport::Idle {
-        why: if day_spent { DAY_SPENT } else { NOTHING_TO_DO }.to_string(),
+        why: why_idle(&waiting),
     })
+}
+
+/// What an idle tick says, from what kept its rules from starting a session.
+fn why_idle(waiting: &Waiting) -> String {
+    if waiting.day_spent {
+        DAY_SPENT
+    } else {
+        NOTHING_TO_DO
+    }
+    .to_string()
 }
 
 /// Whether `scope` takes in a row: every row, or the one task it names.
@@ -200,7 +221,7 @@ async fn sprint_planning(
     scope: &TickScope,
     team: &Team,
     board: &[TaskProjection],
-    day_spent: &mut bool,
+    waiting: &mut Waiting,
 ) -> Result<Option<TickReport>, OrchestratorError> {
     if !sprint_rules_run(scope) {
         return Ok(None);
@@ -222,7 +243,15 @@ async fn sprint_planning(
             .iter()
             .any(|row| row.sprint.as_deref() == Some(open.sprint_id.as_str()))
         || planning_session_spent(&deps.tools.log, &open.sprint_id)?
-        || day_is_spent(deps, team, Role::from(assigner.role), day_spent)?
+    {
+        return Ok(None);
+    }
+    if day_is_spent(
+        deps,
+        team,
+        Role::from(assigner.role),
+        &mut waiting.day_spent,
+    )? | asleep(deps, assigner, &mut waiting.slept)?
     {
         return Ok(None);
     }
@@ -453,6 +482,23 @@ pub(super) fn spent(
         .any(|scope| matches!(scope, BudgetScope::TaskUsd | BudgetScope::TaskSessions)))
 }
 
+/// Whether `agent` is asleep until its model provider's limit resets (5.5): no session of its
+/// starts, and no sandbox is made for it. The earliest `until` of the tick is kept in `slept`, as
+/// `spent` keeps a spent day in `day_spent`. A rule asks it with `|` beside `spent`, not `||`, so
+/// that both are kept whichever stops the session.
+pub(super) fn asleep(
+    deps: &OrchestratorDeps,
+    agent: &Agent,
+    slept: &mut Option<DateTime<Utc>>,
+) -> Result<bool, OrchestratorError> {
+    let Some(until) = asleep_until(&deps.tools.log, agent.id.as_str(), deps.tools.clock.now())?
+    else {
+        return Ok(false);
+    };
+    *slept = Some(slept.map_or(until, |earlier| earlier.min(until)));
+    Ok(true)
+}
+
 /// Rule 6: a task `in_progress` gets its assignee's implement session, in its worktree, with its
 /// sandbox, told where an earlier session left the work. A task whose assignee is not active is
 /// passed over: every tool call of its session would be refused.
@@ -460,18 +506,20 @@ async fn in_progress(
     orchestrator: &Orchestrator,
     team: &Team,
     row: &TaskProjection,
-    day_spent: &mut bool,
+    waiting: &mut Waiting,
 ) -> Result<Option<TickReport>, OrchestratorError> {
     let deps = &orchestrator.deps;
     if requests::is_epic(row) {
         let board = deps.tools.projections.board()?;
-        return requests::in_progress_epic(deps, team, &board, row, day_spent).await;
+        return requests::in_progress_epic(deps, team, &board, row, waiting).await;
     }
     let Some(assignee) = active(team, row.assignee_id.as_deref()) else {
         return Ok(None);
     };
     let contract = deps.tools.files.read_contract(&row.task_id)?;
-    if spent(deps, team, &contract, day_spent)? {
+    if spent(deps, team, &contract, &mut waiting.day_spent)?
+        | asleep(deps, assignee, &mut waiting.slept)?
+    {
         return Ok(None);
     }
     let sandbox = orchestrator.sandbox_for(&row.task_id, team)?;
@@ -618,7 +666,7 @@ async fn ready(
     team: &Team,
     board: &[TaskProjection],
     row: &TaskProjection,
-    day_spent: &mut bool,
+    waiting: &mut Waiting,
 ) -> Result<Option<TickReport>, OrchestratorError> {
     if requests::is_epic(row) {
         return requests::ready_epic(deps, team, board, row);
@@ -632,7 +680,10 @@ async fn ready(
         return Ok(None);
     };
     let contract = deps.tools.files.read_contract(&row.task_id)?;
-    if spent(deps, team, &contract, day_spent)? {
+    // A sleeping agent is still offered as an assignee below; only its own sessions wait.
+    if spent(deps, team, &contract, &mut waiting.day_spent)?
+        | asleep(deps, assigner, &mut waiting.slept)?
+    {
         return Ok(None);
     }
     let assignees: Vec<String> = team
@@ -787,8 +838,8 @@ mod tests {
     use crate::orchestrator::{Orchestrator, OrchestratorError, TickReport, TickRules, TickScope};
     use crate::recorded::fixtures::{
         accept_frk_1, hits_the_turn_limit, implement_finishes_frk_1, implement_stops_early,
-        plan_assigns_frk_1, plan_sprint_frk_1, reads_a_file, replays_farik_read_board,
-        review_answers_nothing, review_writes_note,
+        plan_assigns_frk_1, plan_sprint_frk_1, provider_limit_429, provider_limit_rejected,
+        reads_a_file, replays_farik_read_board, review_answers_nothing, review_writes_note,
     };
     use crate::recorded::{RecordedAdapter, Transcript};
     use crate::session::SessionPurpose;
@@ -3931,5 +3982,244 @@ mod tests {
             &ended.last().expect("an end").body,
             EventBody::SessionEnded(body) if body.reason == SessionEndedBodyReason::Completed
         ));
+    }
+
+    /// A session its model provider refused at a limit it said resets at `until`.
+    fn refused_until(until: chrono::DateTime<chrono::Utc>) -> Transcript {
+        rewritten(
+            &provider_limit_rejected(),
+            "1790119200",
+            &until.timestamp().to_string(),
+        )
+    }
+
+    /// Each `agent.slept`: the agent on its envelope and its `until`, in order.
+    fn sleeps(harness: &Harness) -> Vec<(Option<String>, chrono::DateTime<chrono::Utc>)> {
+        harness
+            .events(&[EventKind::AgentSlept])
+            .iter()
+            .map(|event| match &event.body {
+                EventBody::AgentSlept(body) => (event.envelope.ids.agent_id.clone(), body.until),
+                other => panic!("not a sleep: {other:?}"),
+            })
+            .collect()
+    }
+
+    /// Records that `agent` sleeps until `until`, as the end of its refused session would.
+    fn asleep(harness: &Harness, agent: &str, until: chrono::DateTime<chrono::Utc>) {
+        let deps = &harness.project.deps;
+        let appended = deps
+            .log
+            .append(&NewEvent {
+                recorded_at: at(),
+                ids: farik_protocol::event::EventIds {
+                    agent_id: Some(agent.to_string()),
+                    ..deps.ids.clone()
+                },
+                body: EventBody::AgentSlept(farik_protocol::event::AgentSleptBody {
+                    until,
+                    detail: "Claude AI usage limit reached".to_string(),
+                }),
+            })
+            .expect("appends");
+        deps.projections.apply(&appended).expect("projects");
+    }
+
+    /// The team file as it is on disk.
+    fn team_file(harness: &Harness) -> String {
+        std::fs::read_to_string(harness.project.repo.path.join(".farik/team.yaml"))
+            .expect("the team file reads")
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn puts_an_agent_to_sleep_at_its_providers_limit() {
+        let harness = Harness::new("orch-sleep", |_| {});
+        harness.in_progress("FRK-1", "dev-a", "dev-b");
+        let team = team_file(&harness);
+        let until = at() + chrono::Duration::hours(2);
+        let orchestrator = harness.orchestrator(harness.recorded(vec![refused_until(until)]));
+
+        orchestrator.tick().await.expect("the tick runs");
+
+        let notes = farik_notes(&harness);
+        assert_eq!(notes.len(), 1, "{notes:?}");
+        assert!(
+            notes[0].contains("its model provider's usage limit"),
+            "{}",
+            notes[0]
+        );
+        assert_eq!(sleeps(&harness), vec![(Some("dev-a".to_string()), until)]);
+        assert_eq!(harness.row("FRK-1").status, TaskStatus::InProgress);
+        assert_eq!(team_file(&harness), team);
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn sleeps_an_hour_without_a_reset_time() {
+        let harness = Harness::new("orch-sleep-hour", |_| {});
+        harness.in_progress("FRK-1", "dev-a", "dev-b");
+        let orchestrator = harness.orchestrator(harness.recorded(vec![provider_limit_429()]));
+
+        orchestrator.tick().await.expect("the tick runs");
+
+        assert_eq!(
+            sleeps(&harness),
+            vec![(Some("dev-a".to_string()), at() + chrono::Duration::hours(1))]
+        );
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn ignores_a_reset_time_in_the_past() {
+        let harness = Harness::new("orch-sleep-past", |_| {});
+        harness.in_progress("FRK-1", "dev-a", "dev-b");
+        let refused = refused_until(at() - chrono::Duration::hours(1));
+        let orchestrator = harness.orchestrator(harness.recorded(vec![refused]));
+
+        orchestrator.tick().await.expect("the tick runs");
+
+        assert_eq!(
+            sleeps(&harness),
+            vec![(Some("dev-a".to_string()), at() + chrono::Duration::hours(1))]
+        );
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn makes_no_sandbox_for_a_sleeping_agent() {
+        let harness = Harness::new("orch-sleep-sandbox", |_| {});
+        harness.in_progress("FRK-1", "dev-a", "dev-b");
+        asleep(&harness, "dev-a", at() + chrono::Duration::hours(1));
+        let sandboxes = Arc::new(CountingSandboxFactory::default());
+        let adapter = harness.recorded(vec![reads_a_file()]);
+        let orchestrator = harness.orchestrator_with(adapter.clone(), sandboxes.clone());
+
+        orchestrator.tick().await.expect("the tick runs");
+
+        assert_eq!(sandboxes.created("FRK-1"), 0);
+        assert!(adapter.started().is_empty(), "{:?}", adapter.started());
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn plans_a_sprint_again_after_its_planner_slept() {
+        let harness = Harness::new("orch-sleep-sprint", with_a_scrum_master);
+        harness.ready("FRK-1");
+        harness.open_sprint("S1", &[]);
+        let until = at() + chrono::Duration::hours(2);
+        let adapter = harness.recorded(vec![refused_until(until), plan_sprint_frk_1()]);
+        let first = harness
+            .orchestrator(adapter.clone())
+            .tick()
+            .await
+            .expect("the tick runs");
+        assert!(matches!(&first, TickReport::Sprint { .. }), "{first:?}");
+
+        let report = harness
+            .orchestrator_at(adapter.clone(), until + chrono::Duration::minutes(1))
+            .tick()
+            .await
+            .expect("the tick runs");
+
+        assert!(
+            matches!(&report, TickReport::Sprint { sprint_id, what }
+                if sprint_id == "S1" && what.contains("S1 holds FRK-1")),
+            "{report:?}"
+        );
+        let planning = adapter
+            .started()
+            .iter()
+            .filter(|spec| spec.task_id.is_none() && spec.agent_id == "sm")
+            .count();
+        assert_eq!(planning, 2);
+        assert_eq!(harness.row("FRK-1").sprint.as_deref(), Some("S1"));
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn starts_no_session_for_a_sleeping_agent() {
+        let harness = Harness::new("orch-sleep-other", |_| {});
+        harness.in_progress("FRK-1", "dev-a", "dev-b");
+        harness.in_progress("FRK-2", "dev-b", "dev-a");
+        asleep(&harness, "dev-a", at() + chrono::Duration::hours(1));
+        let adapter = harness.recorded(vec![reads_a_file(), reads_a_file()]);
+        let orchestrator = harness.orchestrator(adapter.clone());
+
+        let first = orchestrator.tick().await.expect("the tick runs");
+        orchestrator.tick().await.expect("the tick runs");
+
+        assert_eq!(acted_on(&first), Some("FRK-2"), "{first:?}");
+        let agents: Vec<String> = adapter
+            .started()
+            .iter()
+            .map(|spec| spec.agent_id.clone())
+            .collect();
+        assert_eq!(agents, vec!["dev-b".to_string(), "dev-b".to_string()]);
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn wakes_an_agent_when_its_sleep_ends() {
+        let harness = Harness::new("orch-sleep-wake", |_| {});
+        harness.in_progress("FRK-1", "dev-a", "dev-b");
+        let until = at() + chrono::Duration::hours(2);
+        let adapter = harness.recorded(vec![refused_until(until), reads_a_file()]);
+        let orchestrator = harness.orchestrator(adapter.clone());
+        orchestrator.tick().await.expect("the tick runs");
+        orchestrator.tick().await.expect("the tick runs");
+        assert_eq!(adapter.started().len(), 1, "no session while dev-a sleeps");
+
+        harness
+            .orchestrator_at(adapter.clone(), until + chrono::Duration::minutes(1))
+            .tick()
+            .await
+            .expect("the tick runs");
+
+        let started = adapter.started();
+        assert_eq!(started.len(), 2);
+        assert_eq!(
+            (started[1].agent_id.as_str(), started[1].purpose),
+            ("dev-a", SessionPurpose::Implement)
+        );
+        let notes = farik_notes(&harness);
+        assert_eq!(notes.len(), 1, "{notes:?}");
+        assert!(
+            notes[0].contains("its model provider's usage limit"),
+            "{}",
+            notes[0]
+        );
+        assert!(
+            started[1].initial_prompt.contains(&notes[0]),
+            "{}",
+            started[1].initial_prompt
+        );
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn still_assigns_work_to_a_sleeping_agent() {
+        let harness = Harness::new("orch-sleep-assign", with_a_scrum_master);
+        harness.blocked("FRK-2", "dev-b", "dev-a");
+        harness.ready("FRK-3");
+        asleep(&harness, "dev-a", at() + chrono::Duration::hours(1));
+        let adapter = harness.recorded(vec![reads_a_file()]);
+        let orchestrator = harness.orchestrator(adapter.clone());
+
+        let report = orchestrator.tick().await.expect("the tick runs");
+
+        assert_eq!(acted_on(&report), Some("FRK-3"), "{report:?}");
+        let started = adapter.started();
+        assert_eq!(
+            (started[0].agent_id.as_str(), started[0].purpose),
+            ("sm", SessionPurpose::Plan)
+        );
+        assert!(
+            started[0]
+                .initial_prompt
+                .contains("with room for it: dev-a."),
+            "{}",
+            started[0].initial_prompt
+        );
     }
 }

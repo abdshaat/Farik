@@ -145,8 +145,8 @@ pub fn a_body_wire(kind: EventKind) -> Value {
         EventKind::QuestionAsked
         | EventKind::QuestionAnswered
         | EventKind::HumanAccepted
-        | EventKind::EscalationResolved
-        | EventKind::AgentUpdated => a_human_body_wire(kind),
+        | EventKind::EscalationResolved => a_human_body_wire(kind),
+        EventKind::AgentUpdated | EventKind::AgentSlept => an_agent_body_wire(kind),
         EventKind::SprintStarted | EventKind::SprintPlanned | EventKind::SprintEnded => {
             a_sprint_body_wire(kind)
         }
@@ -173,8 +173,7 @@ fn a_record_body_wire(kind: EventKind) -> Value {
 }
 
 /// A body of a question to the human or of the human's own acts: a question, an answer to question
-/// 3, an acceptance of a result with its words, a resolution back to `refining`, and a pause of
-/// `dev-a`.
+/// 3, an acceptance of a result with its words, and a resolution back to `refining`.
 fn a_human_body_wire(kind: EventKind) -> Value {
     match kind {
         EventKind::QuestionAsked => json!({
@@ -187,10 +186,17 @@ fn a_human_body_wire(kind: EventKind) -> Value {
         EventKind::HumanAccepted => {
             json!({ "subject": "result", "accepted_by": "human", "message": "Both look right." })
         }
-        EventKind::EscalationResolved => {
-            json!({ "to": "refining", "message": "Split it by page.", "resolved_by": "human" })
-        }
-        _ => json!({ "agent_id": "dev-a", "status": "paused", "updated_by": "human" }),
+        _ => json!({ "to": "refining", "message": "Split it by page.", "resolved_by": "human" }),
+    }
+}
+
+/// An agent's body: `dev-a` paused by the human, or asleep until three that afternoon at its
+/// model provider's limit.
+fn an_agent_body_wire(kind: EventKind) -> Value {
+    if kind == EventKind::AgentUpdated {
+        json!({ "agent_id": "dev-a", "status": "paused", "updated_by": "human" })
+    } else {
+        json!({ "until": "2026-09-17T15:00:00Z", "detail": "Claude AI usage limit reached" })
     }
 }
 

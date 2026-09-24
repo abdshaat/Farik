@@ -7,7 +7,7 @@ use farik_core::contract::{Risk, TaskId, TaskKind, TaskStatus};
 use farik_protocol::event::{
     ContractSummary, ContractSummaryKind, ContractSummaryRisk, ContractSummaryStatus,
     CostRecordedBody, EscalationRaisedBodyReason, EventBody, FarikEvent, RequestTriagedBodySize,
-    TaskStatusWire, TransitionActorWire,
+    TaskStatusWire, TaskTransitionedBody, TransitionActorWire,
 };
 use rusqlite::{Connection, OptionalExtension, Transaction, TransactionBehavior};
 
@@ -550,44 +550,7 @@ fn apply_to(transaction: &Transaction<'_>, event: &FarikEvent) -> Result<(), Sto
         }
         EventBody::ContractLocked(_) => set_locked(transaction, &id, true, seq),
         EventBody::ContractUnlocked(_) => set_locked(transaction, &id, false, seq),
-        EventBody::TaskTransitioned(body) => {
-            // The wire's status is the contract schema's own list, which a test in
-            // `farik-protocol` holds to it, so every value it can carry reads here.
-            let to = TaskStatus::from_str(&body.to.to_string()).map_err(|_| {
-                StoreError::InvalidEvent {
-                    detail: format!("event {seq} moves {id} to {}, which is no status", body.to),
-                }
-            })?;
-            // A move the human asked for is an intervention (F17) unless it answers an
-            // escalation, which was counted when it was raised, or makes one, which its
-            // `explicit_request` escalation counts.
-            let is_intervention = body.actor == TransitionActorWire::Human
-                && body.from != TaskStatusWire::Escalated
-                && body.to != TaskStatusWire::Escalated;
-            update(
-                transaction,
-                // Nothing leaves `accepted` (5.2), so only a move into it touches the flag; the
-                // row's kind says whether there is a branch to integrate.
-                "UPDATE task_projections
-                 SET status = ?2, assignee_id = ?3, reviewer_id = ?4, iteration = ?5,
-                     updated_seq = ?6, awaiting_approval = 0,
-                     awaiting_integration = CASE WHEN ?2 = 'accepted' THEN kind = 'task'
-                                                 ELSE awaiting_integration END,
-                     verifications = verifications + (?2 = 'verifying'),
-                     rejections = rejections + (?2 = 'rejected'),
-                     interventions = interventions + ?7
-                 WHERE task_id = ?1",
-                (
-                    &id,
-                    to.to_string(),
-                    body.assignee.as_ref(),
-                    body.reviewer.as_ref(),
-                    body.iteration,
-                    seq,
-                    i64::from(is_intervention),
-                ),
-            )
-        }
+        EventBody::TaskTransitioned(body) => apply_move(transaction, &id, body, seq),
         EventBody::TaskIntegrated(_) => update(
             transaction,
             "UPDATE task_projections SET awaiting_integration = 0, updated_seq = ?2
@@ -621,8 +584,54 @@ fn apply_to(transaction: &Transaction<'_>, event: &FarikEvent) -> Result<(), Sto
         | EventBody::AgentUpdated(_)
         | EventBody::SprintStarted(_)
         | EventBody::SprintPlanned(_)
-        | EventBody::SprintEnded(_) => Ok(()),
+        | EventBody::SprintEnded(_)
+        | EventBody::AgentSlept(_) => Ok(()),
     }
+}
+
+/// A move of the task's status, and what it changes on the board: its assignee, reviewer, and
+/// iteration, the flags a move clears or sets, and the counts of verifications, rejections, and
+/// the human's interventions.
+fn apply_move(
+    transaction: &Transaction<'_>,
+    id: &str,
+    body: &TaskTransitionedBody,
+    seq: i64,
+) -> Result<(), StoreError> {
+    // The wire's status is the contract schema's own list, which a test in
+    // `farik-protocol` holds to it, so every value it can carry reads here.
+    let to = TaskStatus::from_str(&body.to.to_string()).map_err(|_| StoreError::InvalidEvent {
+        detail: format!("event {seq} moves {id} to {}, which is no status", body.to),
+    })?;
+    // A move the human asked for is an intervention (F17) unless it answers an
+    // escalation, which was counted when it was raised, or makes one, which its
+    // `explicit_request` escalation counts.
+    let is_intervention = body.actor == TransitionActorWire::Human
+        && body.from != TaskStatusWire::Escalated
+        && body.to != TaskStatusWire::Escalated;
+    update(
+        transaction,
+        // Nothing leaves `accepted` (5.2), so only a move into it touches the flag; the
+        // row's kind says whether there is a branch to integrate.
+        "UPDATE task_projections
+         SET status = ?2, assignee_id = ?3, reviewer_id = ?4, iteration = ?5,
+             updated_seq = ?6, awaiting_approval = 0,
+             awaiting_integration = CASE WHEN ?2 = 'accepted' THEN kind = 'task'
+                                         ELSE awaiting_integration END,
+             verifications = verifications + (?2 = 'verifying'),
+             rejections = rejections + (?2 = 'rejected'),
+             interventions = interventions + ?7
+         WHERE task_id = ?1",
+        (
+            id,
+            to.to_string(),
+            body.assignee.as_ref(),
+            body.reviewer.as_ref(),
+            body.iteration,
+            seq,
+            i64::from(is_intervention),
+        ),
+    )
 }
 
 /// The two columns that say what the board waits on the human for: an open question (5.7) and an

@@ -9,8 +9,9 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use chrono::{DateTime, Utc};
 use farik_core::contract::TaskId;
-use farik_protocol::clock::SequentialIds;
+use farik_protocol::clock::{FixedClock, IdSource, SequentialIds};
 use farik_protocol::event::{EventKind, FarikEvent, NewEvent, event_from_value};
 use farik_store::TaskProjection;
 use farik_store::git::fixtures::{git_in, git_output_in};
@@ -25,6 +26,7 @@ use crate::recorded::{RecordedAdapter, Transcript};
 use crate::sandbox::host::HostSandboxFactory;
 use crate::sandbox::{Sandbox, SandboxError, SandboxFactory};
 use crate::session::{RuntimeAdapter, RuntimeError, SessionHandle, SessionSpec};
+use crate::tools::ToolDeps;
 use crate::tools::fixtures::{TestProject, a_team_of_three, at};
 
 pub(crate) use crate::recorded::fixtures::{UsageThenWaitAdapter, tool_runner};
@@ -93,6 +95,34 @@ impl Harness {
             sandboxes,
             session_ids: Arc::new(SequentialIds::new()),
             forge: Arc::new(forge),
+        })
+    }
+
+    /// An orchestrator over this project with `adapter` and host sandboxes, whose tools read the
+    /// time as `now`, and whose session ids are `later-session-1` and so on, so that they are not
+    /// those of an orchestrator made before it. The governor's door keeps the project's clock.
+    pub(crate) fn orchestrator_at(
+        &self,
+        adapter: Arc<dyn RuntimeAdapter>,
+        now: DateTime<Utc>,
+    ) -> Orchestrator {
+        let deps = &self.project.deps;
+        let tools = Arc::new(ToolDeps {
+            log: Arc::clone(&deps.log),
+            projections: Arc::clone(&deps.projections),
+            files: Arc::clone(&deps.files),
+            transitions: Arc::clone(&deps.transitions),
+            git: self.project.repo.adapter(),
+            clock: Arc::new(FixedClock::new(now)),
+            ids: deps.ids.clone(),
+        });
+        Orchestrator::new(OrchestratorDeps {
+            tools,
+            daemon: Arc::clone(&self.daemon),
+            adapter,
+            sandboxes: Arc::new(HostSandboxFactory),
+            session_ids: Arc::new(LaterIds(SequentialIds::new())),
+            forge: Arc::new(self.gh.forge(&self.project.repo.path)),
         })
     }
 
@@ -502,6 +532,15 @@ impl Harness {
     /// Every event of these kinds, oldest first; every event when `kinds` is empty.
     pub(crate) fn events(&self, kinds: &[EventKind]) -> Vec<FarikEvent> {
         self.project.events(kinds)
+    }
+}
+
+/// Session ids `later-session-1`, `later-session-2`, and so on.
+struct LaterIds(SequentialIds);
+
+impl IdSource for LaterIds {
+    fn session_id(&self) -> String {
+        format!("later-{}", self.0.session_id())
     }
 }
 

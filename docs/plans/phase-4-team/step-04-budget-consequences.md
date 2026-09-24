@@ -113,7 +113,7 @@ Files: the event schema, protocol, `projections.rs`, `sleep.rs`, `orchestrator/s
 - `still_assigns_work_to_a_sleeping_agent` — dev-a asleep and the only Developer with room, FRK-3 `ready`: the Scrum Master's plan session offers dev-a as an assignee.
 - `answers_asleep_until_from_the_last_sleep` (store-backed unit) — two `agent.slept` for one agent: the later's `until`; none for another agent.
 
-- [ ] `feat(runtime): put an agent to sleep until its provider's limit resets`
+- [x] `feat(runtime): put an agent to sleep until its provider's limit resets`
 
 ### Task 4: waiting for a sleeping agent
 

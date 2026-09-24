@@ -11,12 +11,14 @@ use farik_core::contract::{Role, TaskContract};
 use farik_core::governor::permissions::PermissionTier;
 use farik_core::pricing::Usage;
 use farik_core::team::{Agent, Effort, Team};
-use farik_protocol::event::{EventBody, EventIds, EventKind, NoteWrittenBody, NoteWrittenBodyKind};
+use farik_protocol::event::{
+    AgentSleptBody, EventBody, EventIds, EventKind, NoteWrittenBody, NoteWrittenBodyKind,
+};
 use farik_roles::load_role;
 use farik_store::EventQuery;
 
 use super::messages::human_message;
-use super::verify::append;
+use super::verify::{append, append_stamped};
 use super::{OrchestratorDeps, OrchestratorError, TRIAGE_MODEL};
 use crate::claude::allowed_builtins;
 use crate::cost::{CostError, CostSource, budget_state, record_exhaustion, record_session_cost};
@@ -75,10 +77,6 @@ pub(super) struct SessionEnd {
     /// What the program said.
     pub(super) detail: String,
     /// When the model provider said its limit resets, for a session that ended at it.
-    #[expect(
-        dead_code,
-        reason = "the agent's sleep at its provider's limit reads it, in this step's next task"
-    )]
     pub(super) resets_at: Option<DateTime<Utc>>,
     /// The budgets the session's reported usage crossed, in the order it crossed them.
     pub(super) crossed: Vec<BudgetScope>,
@@ -110,7 +108,43 @@ pub(super) async fn run_session(
     {
         leave_note(deps, contract, ask.agent, &end)?;
     }
+    if end.reason == EndReason::ProviderLimit {
+        sleep(deps, ask.agent, &end)?;
+    }
     Ok(end)
+}
+
+/// How long an agent sleeps when its model provider said no time its limit resets, or a time
+/// already past.
+const SLEEP_WITHOUT_A_RESET: chrono::Duration = chrono::Duration::hours(1);
+
+/// Puts the agent of a session its model provider refused to sleep (5.5): `agent.slept` with the
+/// agent on its envelope, until the time the provider said its limit resets when that is later
+/// than now, else `SLEEP_WITHOUT_A_RESET` from now. The team file is not written: sleep is not a
+/// status.
+fn sleep(
+    deps: &OrchestratorDeps,
+    agent: &Agent,
+    end: &SessionEnd,
+) -> Result<(), OrchestratorError> {
+    let tools = &deps.tools;
+    let now = tools.clock.now();
+    let until = end
+        .resets_at
+        .filter(|resets_at| *resets_at > now)
+        .unwrap_or(now + SLEEP_WITHOUT_A_RESET);
+    append_stamped(
+        tools,
+        EventIds {
+            agent_id: Some(agent.id.to_string()),
+            session_id: Some(end.session_id.clone()),
+            ..tools.ids.clone()
+        },
+        EventBody::AgentSlept(AgentSleptBody {
+            until,
+            detail: end.detail.clone(),
+        }),
+    )
 }
 
 /// Who writes the note a session that stopped at its own limit leaves.

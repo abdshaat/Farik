@@ -22,7 +22,7 @@ use farik_store::{EventQuery, Git, TaskProjection};
 
 use super::messages::{ReviewBrief, accept_message, review_message};
 use super::requests;
-use super::rules::{acted, active, spent};
+use super::rules::{Waiting, acted, active, asleep, spent};
 use super::session::{SessionAsk, run_session};
 use super::{Orchestrator, OrchestratorDeps, OrchestratorError, TickReport, worktree};
 use crate::criteria::{CriterionError, CriterionOutcome, NewTestsInput, run_criteria};
@@ -49,7 +49,7 @@ pub(super) async fn verifying(
     orchestrator: &Orchestrator,
     team: &Team,
     row: &TaskProjection,
-    day_spent: &mut bool,
+    waiting: &mut Waiting,
 ) -> Result<Option<TickReport>, OrchestratorError> {
     let deps = &orchestrator.deps;
     let history = history(deps, &row.task_id)?;
@@ -68,7 +68,7 @@ pub(super) async fn verifying(
             &contract,
             &history,
             since,
-            day_spent,
+            waiting,
         )
         .await;
     }
@@ -82,7 +82,7 @@ pub(super) async fn verifying(
     let context = context(deps, team, &row.task_id)?;
     let answers = reviewer_results(&context);
     let Some(review_note) = context.done.review_note.clone() else {
-        return review(orchestrator, team, row, reviewer, &[], day_spent, ran).await;
+        return review(orchestrator, team, row, reviewer, &[], waiting, ran).await;
     };
     let failed = failed(&contract, &answers);
     if !failed.is_empty() {
@@ -90,16 +90,7 @@ pub(super) async fn verifying(
     }
     let unanswered = unanswered(&contract, &answers);
     if !unanswered.is_empty() {
-        return review(
-            orchestrator,
-            team,
-            row,
-            reviewer,
-            &unanswered,
-            day_spent,
-            ran,
-        )
-        .await;
+        return review(orchestrator, team, row, reviewer, &unanswered, waiting, ran).await;
     }
     // Only the human's acceptance satisfies a `high` risk task or a `human` criterion: until it is
     // given, a session would ask for a move the Definition of Done refuses.
@@ -114,7 +105,7 @@ pub(super) async fn verifying(
         row,
         &review_note,
         &answers,
-        day_spent,
+        waiting,
         ran,
     )
     .await
@@ -288,12 +279,14 @@ async fn review(
     row: &TaskProjection,
     reviewer: &Agent,
     unanswered: &[String],
-    day_spent: &mut bool,
+    waiting: &mut Waiting,
     ran: usize,
 ) -> Result<Option<TickReport>, OrchestratorError> {
     let deps = &orchestrator.deps;
     let contract = deps.tools.files.read_contract(&row.task_id)?;
-    if spent(deps, team, &contract, day_spent)? {
+    if spent(deps, team, &contract, &mut waiting.day_spent)?
+        | asleep(deps, reviewer, &mut waiting.slept)?
+    {
         return Ok(ran_criteria(row, ran));
     }
     let history = history(deps, &row.task_id)?;
@@ -420,7 +413,7 @@ async fn accept(
     row: &TaskProjection,
     review_note: &str,
     answers: &[CriterionResult],
-    day_spent: &mut bool,
+    waiting: &mut Waiting,
     ran: usize,
 ) -> Result<Option<TickReport>, OrchestratorError> {
     let deps = &orchestrator.deps;
@@ -428,7 +421,9 @@ async fn accept(
         return Ok(ran_criteria(row, ran));
     };
     let contract = deps.tools.files.read_contract(&row.task_id)?;
-    if spent(deps, team, &contract, day_spent)? {
+    if spent(deps, team, &contract, &mut waiting.day_spent)?
+        | asleep(deps, product_manager, &mut waiting.slept)?
+    {
         return Ok(ran_criteria(row, ran));
     }
     let initial_prompt = accept_message(&contract, review_note, answers);
@@ -581,6 +576,15 @@ pub(super) fn append(
         session_id,
         ..tools.ids.clone()
     };
+    append_stamped(tools, ids, body)
+}
+
+/// Appends one event stamped with `ids`, and projects it.
+pub(super) fn append_stamped(
+    tools: &ToolDeps,
+    ids: EventIds,
+    body: EventBody,
+) -> Result<(), OrchestratorError> {
     let event = new_event(body, tools.clock.now(), ids).map_err(|error| {
         OrchestratorError::Transition(TransitionError::Event {
             detail: format!("{error:?}"),

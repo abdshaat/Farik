@@ -455,6 +455,14 @@ fn says_an_empty_sprint_whose_planning_is_spent_waits_for_its_end() {
         "session.started",
         &json!({ "purpose": "plan", "model": "claude-opus-5", "effort": "high" }),
     );
+    // A planning session is spent once it ends other than at a limit.
+    record_as(
+        &repository,
+        "",
+        Some(("pm", "session-1")),
+        "session.ended",
+        &json!({ "reason": "completed", "detail": "done" }),
+    );
     let shown = run(&repository.path, &["sprint", "show"]);
 
     assert_eq!(shown.code, 0, "{}", shown.err);

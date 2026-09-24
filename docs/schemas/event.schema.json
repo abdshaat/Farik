@@ -91,7 +91,8 @@
         "agent.updated",
         "sprint.started",
         "sprint.planned",
-        "sprint.ended"
+        "sprint.ended",
+        "agent.slept"
       ]
     },
     "eventBodyWire": {
@@ -132,7 +133,8 @@
         { "$ref": "#/$defs/agentUpdatedBody" },
         { "$ref": "#/$defs/sprintStartedBody" },
         { "$ref": "#/$defs/sprintPlannedBody" },
-        { "$ref": "#/$defs/sprintEndedBody" }
+        { "$ref": "#/$defs/sprintEndedBody" },
+        { "$ref": "#/$defs/agentSleptBody" }
       ]
     },
     "contractSummary": {
@@ -555,6 +557,17 @@
           "uniqueItems": true,
           "items": { "type": "string", "pattern": "^FRK-[0-9]{1,6}$" }
         }
+      }
+    },
+    "agentSleptBody": {
+      "title": "Agent Slept Body",
+      "description": "An agent's model provider refused it for a usage or rate limit, so no session of its starts before until (docs/SPEC.md 5.5): the time the provider said the limit resets, or an hour after the refusal when it said none or a time already past. detail is what the session's end said. The sleeping agent is on the envelope; sleep is not a status, and the team file is not written.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["until", "detail"],
+      "properties": {
+        "until": { "type": "string", "format": "date-time" },
+        "detail": { "type": "string" }
       }
     },
     "questionAskedBody": {

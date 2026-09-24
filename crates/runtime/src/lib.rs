@@ -28,6 +28,8 @@ pub mod sandbox;
 pub mod session;
 /// When each session started and how it ended, in the log.
 pub mod sessions;
+/// An agent asleep until its model provider's limit resets.
+pub mod sleep;
 /// Starting and ending a sprint.
 pub mod sprints;
 /// The Claude Code program's `stream-json` lines, read as session events.

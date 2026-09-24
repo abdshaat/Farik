@@ -23,7 +23,7 @@ use super::messages::{
     breakdown_message, close_out_message, epic_accept_message, epic_review_message,
     judgment_message, refine_message, triage_message,
 };
-use super::rules::{acted, active, has_room, refused_since_entering, spent};
+use super::rules::{Waiting, acted, active, asleep, has_room, refused_since_entering, spent};
 use super::session::{JUDGMENT_TOOL, SessionAsk, TRIAGE_TOOL, run_session};
 use super::verify::{
     GOVERNOR, append, context, escalate, failed, fails_the_criterion, governor_results, history,
@@ -67,7 +67,7 @@ pub(super) async fn draft(
     deps: &OrchestratorDeps,
     team: &Team,
     row: &TaskProjection,
-    day_spent: &mut bool,
+    waiting: &mut Waiting,
 ) -> Result<Option<TickReport>, OrchestratorError> {
     let Some(pm) = product_manager(team) else {
         return Ok(None);
@@ -75,7 +75,9 @@ pub(super) async fn draft(
     if !row.triaged {
         let triager = triager(team).unwrap_or(pm);
         let contract = deps.tools.files.read_contract(&row.task_id)?;
-        if spent(deps, team, &contract, day_spent)? {
+        if spent(deps, team, &contract, &mut waiting.day_spent)?
+            | asleep(deps, triager, &mut waiting.slept)?
+        {
             return Ok(None);
         }
         let end = run_session(
@@ -128,7 +130,7 @@ pub(super) async fn refining(
     deps: &OrchestratorDeps,
     team: &Team,
     row: &TaskProjection,
-    day_spent: &mut bool,
+    waiting: &mut Waiting,
 ) -> Result<Option<TickReport>, OrchestratorError> {
     let Some(pm) = product_manager(team) else {
         return Ok(None);
@@ -141,7 +143,9 @@ pub(super) async fn refining(
             Some(sm) if awaits_judgment(deps, team, row)? => sm,
             _ => return judge(deps, team, row).map(Some),
         };
-        if spent(deps, team, &contract, day_spent)? {
+        if spent(deps, team, &contract, &mut waiting.day_spent)?
+            | asleep(deps, sm, &mut waiting.slept)?
+        {
             return Ok(None);
         }
         let end = run_session(
@@ -161,7 +165,8 @@ pub(super) async fn refining(
         .await?;
         return Ok(Some(acted(row, sm, "judgment", &end)));
     }
-    if spent(deps, team, &contract, day_spent)? {
+    if spent(deps, team, &contract, &mut waiting.day_spent)? | asleep(deps, pm, &mut waiting.slept)?
+    {
         return Ok(None);
     }
     let asked = history
@@ -392,7 +397,7 @@ pub(super) async fn in_progress_epic(
     team: &Team,
     board: &[TaskProjection],
     row: &TaskProjection,
-    day_spent: &mut bool,
+    waiting: &mut Waiting,
 ) -> Result<Option<TickReport>, OrchestratorError> {
     let Some(assignee) = active(team, row.assignee_id.as_deref()) else {
         return Ok(None);
@@ -436,7 +441,9 @@ pub(super) async fn in_progress_epic(
     } else {
         return Ok(None);
     };
-    if spent(deps, team, &contract, day_spent)? {
+    if spent(deps, team, &contract, &mut waiting.day_spent)?
+        | asleep(deps, assignee, &mut waiting.slept)?
+    {
         return Ok(None);
     }
     let end = run_session(
@@ -511,7 +518,7 @@ pub(super) async fn verifying_epic(
     contract: &TaskContract,
     history: &[FarikEvent],
     since: u64,
-    day_spent: &mut bool,
+    waiting: &mut Waiting,
 ) -> Result<Option<TickReport>, OrchestratorError> {
     let deps = &orchestrator.deps;
     let board = deps.tools.projections.board()?;
@@ -540,7 +547,7 @@ pub(super) async fn verifying_epic(
     }
     if !the_human_reviews_the_epic(contract.kind, row.reviewer_id.as_deref()) {
         return reviewed_by_the_product_manager(
-            deps, team, &board, row, contract, history, day_spent,
+            deps, team, &board, row, contract, history, waiting,
         )
         .await;
     }
@@ -550,7 +557,8 @@ pub(super) async fn verifying_epic(
     let Some(pm) = product_manager(team) else {
         return Ok(None);
     };
-    if spent(deps, team, contract, day_spent)? {
+    if spent(deps, team, contract, &mut waiting.day_spent)? | asleep(deps, pm, &mut waiting.slept)?
+    {
         return Ok(None);
     }
     let end = run_session(
@@ -581,7 +589,7 @@ async fn reviewed_by_the_product_manager(
     row: &TaskProjection,
     contract: &TaskContract,
     history: &[FarikEvent],
-    day_spent: &mut bool,
+    waiting: &mut Waiting,
 ) -> Result<Option<TickReport>, OrchestratorError> {
     let Some(pm) = active(team, row.reviewer_id.as_deref()) else {
         return Ok(None);
@@ -604,7 +612,8 @@ async fn reviewed_by_the_product_manager(
             (!unanswered.is_empty()).then_some(unanswered)
         }
     };
-    if spent(deps, team, contract, day_spent)? {
+    if spent(deps, team, contract, &mut waiting.day_spent)? | asleep(deps, pm, &mut waiting.slept)?
+    {
         return Ok(None);
     }
     let since = since_verifying(history);
