@@ -26,8 +26,8 @@ use farik_store::git::fixtures::TempRepo;
 use serde_json::{Value, json};
 
 use project::{
-    LiveDriver, a_bare_env, a_claude_saying, a_team, events, filed, files_of, hold_the_run_lock,
-    joined, record, record_as, run_with, scratch, status_of,
+    LiveDriver, a_bare_env, a_claude_saying, a_team, events, filed, files_of, joined, record,
+    record_as, run_with, scratch, status_of, the_run_lock_frees,
 };
 
 const BRIEF: &str = "Add done.txt and a check that it exists.";
@@ -260,7 +260,7 @@ fn ends_at_the_prompt_on_an_interrupt() {
         ran.out
     );
     assert!(events(&repository, &[EventKind::QuestionAnswered]).is_empty());
-    drop(hold_the_run_lock(&repository));
+    the_run_lock_frees(&repository);
     let mut writer = writer;
     let _ = writer.write_all(b"too late\n");
 }
@@ -353,7 +353,7 @@ fn nothing_filed(repository: &TempRepo, before: usize) {
     assert_eq!(events(repository, &[]).len(), before);
     assert!(!repository.path.join(".farik/contracts/FRK-1.yaml").exists());
     assert!(!repository.path.join(".farik/local/daemon.json").exists());
-    drop(hold_the_run_lock(repository));
+    the_run_lock_frees(repository);
 }
 
 #[test]

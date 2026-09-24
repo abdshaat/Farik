@@ -32,7 +32,7 @@ use farik_core::team::fixtures::an_agent_wire;
 use project::{
     LiveDriver, a_bare_env, a_claude_saying, a_high_risk_task_verifying, a_project, a_team,
     a_team_with, at, events, filed, hold_the_run_lock, joined, no_sandbox, record, record_as, run,
-    run_with, scratch, status_of, walked,
+    run_with, scratch, status_of, the_run_lock_frees, walked,
 };
 
 /// An engine replaying `transcripts`, whose Farik tool calls the driving process's daemon answers.
@@ -111,7 +111,7 @@ fn warned(err: &str) -> bool {
 }
 
 fn lock_is_free(repository: &TempRepo) {
-    drop(hold_the_run_lock(repository));
+    the_run_lock_frees(repository);
 }
 
 #[test]
