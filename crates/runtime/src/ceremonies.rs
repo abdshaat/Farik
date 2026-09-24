@@ -236,9 +236,101 @@ pub fn standup_moves(
         .collect())
 }
 
+/// The sprint a review and a retro are about (5.9): the latest that ended, while no newer one has
+/// started.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EndedSprint {
+    /// Its id.
+    pub sprint_id: String,
+    /// The seq of its `sprint.started`: its events come after it.
+    pub started_seq: u64,
+    /// The seq of its `sprint.ended`: its events come before it, and its ceremonies after.
+    pub ended_seq: u64,
+    /// Whether its review has run, under the ceremonies' bound (`has_run`).
+    pub reviewed: bool,
+    /// Whether its retro has run, under the same bound.
+    pub retro_held: bool,
+}
+
+/// The sprint of the log's last `sprint.ended`, when no `sprint.started` follows it, with whether
+/// its review and its retro have run since that end. A sprint followed at once by another has
+/// none: the log keeps what happened.
+///
+/// # Errors
+///
+/// When the log cannot be read.
+pub fn ended_sprint(log: &EventLog) -> Result<Option<EndedSprint>, StoreError> {
+    let events = log.read(&EventQuery {
+        kinds: vec![
+            EventKind::SprintStarted,
+            EventKind::SprintEnded,
+            EventKind::SessionStarted,
+            EventKind::SessionEnded,
+        ],
+        ..EventQuery::default()
+    })?;
+    let Some(last) = events.iter().rposition(|event| {
+        matches!(
+            event.body,
+            EventBody::SprintStarted(_) | EventBody::SprintEnded(_)
+        )
+    }) else {
+        return Ok(None);
+    };
+    let EventBody::SprintEnded(ended) = &events[last].body else {
+        return Ok(None);
+    };
+    let started_seq = events[..last]
+        .iter()
+        .rev()
+        .find_map(|event| match &event.body {
+            EventBody::SprintStarted(body)
+                if body.sprint_id.as_str() == ended.sprint_id.as_str() =>
+            {
+                Some(event.envelope.seq)
+            }
+            _ => None,
+        })
+        .unwrap_or(0);
+    let after = &events[last + 1..];
+    Ok(Some(EndedSprint {
+        sprint_id: ended.sprint_id.as_str().to_string(),
+        started_seq,
+        ended_seq: events[last].envelope.seq,
+        reviewed: has_run(after, |event| in_thread(event, Thread::Review)),
+        retro_held: has_run(after, |event| in_thread(event, Thread::Retro)),
+    }))
+}
+
+/// Each event about `task_id` recorded while `sprint` was open, oldest first.
+///
+/// # Errors
+///
+/// When the log cannot be read.
+pub fn sprint_events(
+    log: &EventLog,
+    sprint: &EndedSprint,
+    task_id: &TaskId,
+) -> Result<Vec<FarikEvent>, StoreError> {
+    Ok(log
+        .read(&EventQuery {
+            task_id: Some(task_id.clone()),
+            after_seq: Some(sprint.started_seq),
+            ..EventQuery::default()
+        })?
+        .into_iter()
+        .take_while(|event| event.envelope.seq < sprint.ended_seq)
+        .collect())
+}
+
+/// Whether `event` is the start of a ceremony session in `thread`.
+fn in_thread(event: &FarikEvent, thread: Thread) -> bool {
+    matches!(&event.body, EventBody::SessionStarted(body) if body.thread == Some(thread))
+}
+
 /// Whether `event` is the start of a standup: a `session.started` in the `standup` thread.
 fn is_standup(event: &FarikEvent) -> bool {
-    matches!(&event.body, EventBody::SessionStarted(body) if body.thread == Some(Thread::Standup))
+    in_thread(event, Thread::Standup)
 }
 
 /// The start of `at`'s UTC day.

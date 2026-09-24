@@ -93,7 +93,8 @@
         "sprint.planned",
         "sprint.ended",
         "agent.slept",
-        "message.posted"
+        "message.posted",
+        "retro.appended"
       ]
     },
     "eventBodyWire": {
@@ -136,7 +137,8 @@
         { "$ref": "#/$defs/sprintPlannedBody" },
         { "$ref": "#/$defs/sprintEndedBody" },
         { "$ref": "#/$defs/agentSleptBody" },
-        { "$ref": "#/$defs/messagePostedBody" }
+        { "$ref": "#/$defs/messagePostedBody" },
+        { "$ref": "#/$defs/retroAppendedBody" }
       ]
     },
     "contractSummary": {
@@ -599,6 +601,18 @@
         },
         "thread": { "$ref": "#/$defs/thread" },
         "in_reply_to": { "type": "integer", "minimum": 1, "maximum": 18446744073709551615 }
+      }
+    },
+    "retroAppendedBody": {
+      "title": "Retro Appended Body",
+      "description": "The retro ceremony of sprint sprint_id, the latest ended, recorded what the next planning should know (docs/SPEC.md 5.9): text, appended to .farik/team/retro.md under the sprint's section, by appended_by. One per retro session. It is about no one contract.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sprint_id", "text", "appended_by"],
+      "properties": {
+        "sprint_id": { "type": "string", "pattern": "^S[1-9][0-9]{0,5}$" },
+        "text": { "type": "string" },
+        "appended_by": { "type": "string" }
       }
     },
     "questionAskedBody": {

@@ -52,17 +52,12 @@ pub fn a_full_event_wire(kind: EventKind) -> Value {
 #[must_use]
 pub fn a_body_wire(kind: EventKind) -> Value {
     match kind {
-        EventKind::TaskCreated => {
-            json!({ "summary": a_contract_summary_wire(), "created_by": "human" })
-        }
+        EventKind::TaskCreated | EventKind::ContractWritten => a_summary_body_wire(kind),
         EventKind::RequestTriaged => json!({
             "size": "small",
             "reason": "One deliverable and one reviewer.",
             "triaged_by": "sam-ortiz"
         }),
-        EventKind::ContractWritten => {
-            json!({ "summary": a_contract_summary_wire(), "written_by": "maya-chen" })
-        }
         EventKind::ContractLocked | EventKind::ContractUnlocked => a_hold_body_wire(kind),
         EventKind::DriftDetected => json!({
             "drift": "contract_without_events",
@@ -147,9 +142,20 @@ pub fn a_body_wire(kind: EventKind) -> Value {
         | EventKind::EscalationResolved
         | EventKind::MessagePosted => a_human_body_wire(kind),
         EventKind::AgentUpdated | EventKind::AgentSlept => an_agent_body_wire(kind),
-        EventKind::SprintStarted | EventKind::SprintPlanned | EventKind::SprintEnded => {
-            a_sprint_body_wire(kind)
-        }
+        EventKind::SprintStarted
+        | EventKind::SprintPlanned
+        | EventKind::SprintEnded
+        | EventKind::RetroAppended => a_sprint_body_wire(kind),
+    }
+}
+
+/// A body that writes a contract's summary: its creation by the human, or a write by
+/// `maya-chen`.
+fn a_summary_body_wire(kind: EventKind) -> Value {
+    if kind == EventKind::TaskCreated {
+        json!({ "summary": a_contract_summary_wire(), "created_by": "human" })
+    } else {
+        json!({ "summary": a_contract_summary_wire(), "written_by": "maya-chen" })
     }
 }
 
@@ -216,8 +222,8 @@ fn an_agent_body_wire(kind: EventKind) -> Value {
     }
 }
 
-/// A `sprint.` body: S1 started by the human with 20 dollars, FRK-1 planned into it by the Scrum
-/// Master, or S1 ended by the governor with nothing left.
+/// A sprint's body: S1 started by the human with 20 dollars, FRK-1 planned into it by the Scrum
+/// Master, S1 ended by the governor with nothing left, or S1's retro appended by the Scrum Master.
 fn a_sprint_body_wire(kind: EventKind) -> Value {
     match kind {
         EventKind::SprintStarted => {
@@ -225,6 +231,9 @@ fn a_sprint_body_wire(kind: EventKind) -> Value {
         }
         EventKind::SprintPlanned => {
             json!({ "sprint_id": "S1", "task_ids": ["FRK-1"], "planned_by": "sam-ortiz" })
+        }
+        EventKind::RetroAppended => {
+            json!({ "sprint_id": "S1", "text": "Keep the tasks small.", "appended_by": "sam-ortiz" })
         }
         _ => json!({ "sprint_id": "S1", "ended_by": "governor", "left": [] }),
     }

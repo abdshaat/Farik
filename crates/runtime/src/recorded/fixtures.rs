@@ -259,6 +259,21 @@ pub fn standup() -> Transcript {
     Transcript::from_jsonl(include_str!("transcripts/standup.jsonl"))
 }
 
+/// The Scrum Master's review of S1: one post, "Review of S1: FRK-1, the login page, was
+/// delivered, …", then "The review is posted.". Hand-written.
+#[must_use]
+pub fn review() -> Transcript {
+    Transcript::from_jsonl(include_str!("transcripts/review.jsonl"))
+}
+
+/// The Scrum Master's retro of S1: one post, then `farik_append_retro` of "Keep the tasks small:
+/// FRK-1 passed its review the first time.", then a second `farik_append_retro`, then "The retro
+/// is recorded.". Hand-written.
+#[must_use]
+pub fn retro() -> Transcript {
+    Transcript::from_jsonl(include_str!("transcripts/retro.jsonl"))
+}
+
 /// An adapter whose every session reports `usage` at once and then either ends `completed` at
 /// once or waits for `abort` and ends `aborted`, or, when its abort fails, waits for ever: the
 /// shapes a recorded transcript, which reports usage only on its last line, cannot show.

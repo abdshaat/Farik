@@ -14,12 +14,12 @@ use farik_core::governor::transition::TransitionRequest;
 use farik_core::governor::transition_table::TransitionActor;
 use farik_core::team::{Agent, Team};
 use farik_protocol::event::{EventBody, EventKind, FarikEvent, Thread};
-use farik_store::{EventQuery, Git, TaskProjection};
+use farik_store::{CostScope, EventQuery, Git, TaskProjection};
 
 use super::integrate::{awaiting, cleanup};
 use super::messages::{
-    Digest, Resume, ceremony_message, implement_message, mention_message, plan_message,
-    planning_message, standup_message,
+    Digest, Resume, SprintTask, ceremony_message, implement_message, mention_message, plan_message,
+    planning_message, retro_message, sprint_review_message, standup_message,
 };
 use super::requests;
 use super::session::{SessionAsk, SessionEnd, run_session};
@@ -27,7 +27,9 @@ use super::verify::verifying;
 use super::{
     Orchestrator, OrchestratorDeps, OrchestratorError, TickReport, TickRules, TickScope, worktree,
 };
-use crate::ceremonies::{budgets_spent_since_planning, open_escalations, standup_moves};
+use crate::ceremonies::{
+    budgets_spent_since_planning, ended_sprint, open_escalations, sprint_events, standup_moves,
+};
 use crate::channel::{channel_summary, pending_mentions};
 use crate::cost::budget_state;
 use crate::exec::Executor;
@@ -187,8 +189,8 @@ fn in_scope(scope: &TickScope) -> impl Fn(&&TaskProjection) -> bool + Copy + '_ 
     }
 }
 
-/// The sprint rules, which come before the numbered ones: the sprint that ends by itself, then the
-/// open sprint's planning.
+/// The sprint rules, which come before the numbered ones: the sprint that ends by itself, the
+/// ended sprint's review and retro, then the open sprint's planning and its standup.
 async fn sprint_rules(
     deps: &OrchestratorDeps,
     scope: &TickScope,
@@ -197,6 +199,9 @@ async fn sprint_rules(
     waiting: &mut Waiting,
 ) -> Result<Option<TickReport>, OrchestratorError> {
     if let Some(report) = finished_sprint(deps, scope, board)? {
+        return Ok(Some(report));
+    }
+    if let Some(report) = review_and_retro(deps, scope, team, board, waiting).await? {
         return Ok(Some(report));
     }
     if let Some(report) = sprint_planning(deps, scope, team, board, waiting).await? {
@@ -235,6 +240,109 @@ fn finished_sprint(
     }))
 }
 
+/// The latest ended sprint's review, then its retro (5.9), under `All` alone in a tick scoped to no
+/// task, while no newer sprint has started (`ended_sprint`): the ceremony runner gets one
+/// `ceremony` session in the `review` thread until the review has run, then one in the `retro`
+/// thread until the retro has. Their tasks are the sprint file's, and their facts the events about
+/// those tasks while the sprint was open. The review is told each task's status, cost, and
+/// completion note, and the sprint's budget and spent; the retro the sprint's rejections,
+/// escalations, blocks, and iterations, and the last retros, and is offered `farik_append_retro`.
+/// Passed over with no runner or on a spent day.
+async fn review_and_retro(
+    deps: &OrchestratorDeps,
+    scope: &TickScope,
+    team: &Team,
+    board: &[TaskProjection],
+    waiting: &mut Waiting,
+) -> Result<Option<TickReport>, OrchestratorError> {
+    if scope.task_id.is_some() || scope.rules != TickRules::All {
+        return Ok(None);
+    }
+    let tools = &deps.tools;
+    let Some(sprint) = ended_sprint(&tools.log)? else {
+        return Ok(None);
+    };
+    if sprint.reviewed && sprint.retro_held {
+        return Ok(None);
+    }
+    let Some(runner) = assigner(team) else {
+        return Ok(None);
+    };
+    if day_is_spent(deps, team, Role::from(runner.role), &mut waiting.day_spent)?
+        | asleep(deps, runner, &mut waiting.slept)?
+    {
+        return Ok(None);
+    }
+    let file = tools.files.read_sprint(&sprint.sprint_id)?;
+    let mut tasks = Vec::new();
+    for row in board.iter().filter(|row| {
+        file.task_ids
+            .iter()
+            .any(|id| id.as_str() == row.task_id.as_str())
+    }) {
+        tasks.push(SprintTask {
+            task_id: row.task_id.clone(),
+            status: row.status,
+            iteration: row.iteration,
+            events: sprint_events(&tools.log, &sprint, &row.task_id)?,
+        });
+    }
+    let (thread, facts, offered, name) = if sprint.reviewed {
+        let retro = tools.files.read_retro()?;
+        (
+            Thread::Retro,
+            retro_message(&sprint.sprint_id, &tasks, retro.as_deref()),
+            RETRO_TOOLS,
+            "retro ceremony",
+        )
+    } else {
+        let spent = tools
+            .projections
+            .costs(CostScope::Sprint)?
+            .into_iter()
+            .find(|cost| cost.key == sprint.sprint_id)
+            .map_or(0.0, |cost| cost.usd);
+        (
+            Thread::Review,
+            sprint_review_message(&sprint.sprint_id, &tasks, file.budget_usd, spent),
+            CEREMONY_TOOLS,
+            "review ceremony",
+        )
+    };
+    let end = run_session(
+        deps,
+        team,
+        SessionAsk {
+            agent: runner,
+            contract: None,
+            purpose: SessionPurpose::Ceremony,
+            cwd: tools.files.root().to_path_buf(),
+            executor: None,
+            read_only: true,
+            only_tool: None,
+            tools: Some(offered),
+            in_reply_to: None,
+            thread: Some(thread),
+            initial_prompt: ceremony_message(&facts, &channel_summary(&tools.log, &tools.files)?),
+        },
+    )
+    .await?;
+    Ok(Some(TickReport::Sprint {
+        sprint_id: sprint.sprint_id,
+        what: ran(runner, name, &end),
+    }))
+}
+
+/// The Farik tools the retro is offered: the standup's and the review's, and the retro's append.
+const RETRO_TOOLS: &[&str] = &[
+    "farik_read_task",
+    "farik_read_board",
+    "farik_read_rules",
+    "farik_read_criteria",
+    "farik_post_message",
+    "farik_append_retro",
+];
+
 /// Whether the sprint rules run in `scope`: they are about no one task, so only in a tick scoped
 /// to none, under `All` or `Planning`.
 fn sprint_rules_run(scope: &TickScope) -> bool {
@@ -245,9 +353,9 @@ fn sprint_rules_run(scope: &TickScope) -> bool {
 /// run, the assigner (the ceremony runner) gets one `ceremony` session in the `planning` thread,
 /// about no task, given the reading tools, `farik_post_message`, and `farik_plan_sprint`, and
 /// offered the candidates, the rows `ready` with no parent and in no sprint, the digest of the
-/// open escalations and the budgets spent since the previous planning, and the channel. Passed
-/// over with no candidate, no assigner, or on a spent day; a planning that plans nothing is not
-/// asked again, and the empty sprint waits for the human to end it.
+/// open escalations and the budgets spent since the previous planning, the last retros, and the
+/// channel. Passed over with no candidate, no assigner, or on a spent day; a planning that plans
+/// nothing is not asked again, and the empty sprint waits for the human to end it.
 async fn sprint_planning(
     deps: &OrchestratorDeps,
     scope: &TickScope,
@@ -297,7 +405,14 @@ async fn sprint_planning(
         spent: budgets_spent_since_planning(&tools.log, &open.sprint_id)?,
         now: tools.clock.now(),
     };
-    let facts = planning_message(&open.sprint_id, &contracts, open.budget_usd, &digest, None);
+    let retro = tools.files.read_retro()?;
+    let facts = planning_message(
+        &open.sprint_id,
+        &contracts,
+        open.budget_usd,
+        &digest,
+        retro.as_deref(),
+    );
     let end = run_session(
         deps,
         team,
@@ -400,7 +515,7 @@ async fn standup(
             executor: None,
             read_only: true,
             only_tool: None,
-            tools: Some(STANDUP_TOOLS),
+            tools: Some(CEREMONY_TOOLS),
             in_reply_to: None,
             thread: Some(Thread::Standup),
             initial_prompt: ceremony_message(&facts, &channel_summary(&tools.log, &tools.files)?),
@@ -413,8 +528,8 @@ async fn standup(
     }))
 }
 
-/// The Farik tools the standup is offered: the reading tools and the channel.
-const STANDUP_TOOLS: &[&str] = &[
+/// The Farik tools the standup and the review are offered: the reading tools and the channel.
+const CEREMONY_TOOLS: &[&str] = &[
     "farik_read_task",
     "farik_read_board",
     "farik_read_rules",
@@ -1127,8 +1242,8 @@ mod tests {
     use crate::recorded::fixtures::{
         accept_frk_1, hits_the_turn_limit, implement_finishes_frk_1, implement_stops_early,
         plan_assigns_frk_1, planning_ceremony_frk_1, provider_limit_429, provider_limit_rejected,
-        reads_a_file, replays_farik_read_board, reply_to_a_mention, review_answers_nothing,
-        review_writes_note, standup,
+        reads_a_file, replays_farik_read_board, reply_to_a_mention, retro, review,
+        review_answers_nothing, review_writes_note, standup,
     };
     use crate::recorded::{RecordedAdapter, Transcript};
     use crate::session::SessionPurpose;
@@ -4205,6 +4320,12 @@ mod tests {
                 "mentions": []
             }),
         );
+        harness
+            .project
+            .deps
+            .files
+            .append_retro("S1", at().date_naive(), "Ask the human sooner.")
+            .expect("the last retro is written");
         let adapter = harness.recorded(vec![planning_ceremony_frk_1()]);
         let orchestrator = harness.orchestrator(adapter.clone());
 
@@ -4238,14 +4359,14 @@ mod tests {
                 spec.farik_tools
             );
         }
-        // The candidates, the escalation the digest lists, and the channel; the retro's text is
-        // step 06's Task 4, which gives the files `team/retro.md`.
+        // The candidates, the escalation the digest lists, the last retro, and the channel.
         for fact in [
             "FRK-1",
             "$5.00",
             "FRK-2",
             "iterations",
             "three rejections",
+            "Ask the human sooner.",
             "the login page comes first",
         ] {
             assert!(
@@ -5678,5 +5799,258 @@ mod tests {
         assert!(written.chars().count() <= 8_000, "{}", written.len());
         assert!(written.ends_with("human: @dev-a status?"), "{written}");
         assert!(!written.contains("human: 0 "), "the oldest is left out");
+    }
+
+    /// The Scrum Master, and S1 holding FRK-1, accepted, its completion note written and $1.25
+    /// spent on it while the sprint was open: the sprint the first tick ends.
+    fn a_finished_sprint(name: &str) -> Harness {
+        let harness = Harness::new(name, with_a_scrum_master);
+        harness.accepted("FRK-1");
+        harness.open_sprint("S1", &["FRK-1"]);
+        harness.project.record(
+            "FRK-1",
+            "note.written",
+            &json!({
+                "kind": "completion",
+                "text": "The login page is done.\nIts tests pass on every browser.",
+                "written_by": "dev-a"
+            }),
+        );
+        harness.spent(Some("FRK-1"), "s-1", 1.25);
+        harness
+    }
+
+    /// The thread of each ceremony session started, oldest first.
+    fn ceremonies(harness: &Harness) -> Vec<Thread> {
+        harness
+            .events(&[EventKind::SessionStarted])
+            .into_iter()
+            .filter_map(|event| match event.body {
+                EventBody::SessionStarted(body) => body.thread,
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn reviews_an_ended_sprint() {
+        let harness = a_finished_sprint("orch-review");
+        let adapter = harness.recorded(vec![review(), retro()]);
+        let orchestrator = harness.orchestrator(adapter.clone());
+        let ended = orchestrator.tick().await.expect("the tick runs");
+        assert!(
+            matches!(&ended, TickReport::Sprint { what, .. } if what.contains("ended it")),
+            "{ended:?}"
+        );
+
+        let report = orchestrator.tick().await.expect("the tick runs");
+
+        assert!(
+            matches!(&report, TickReport::Sprint { sprint_id, what }
+                if sprint_id == "S1" && what.contains("review")),
+            "{report:?}"
+        );
+        assert_eq!(ceremonies(&harness), vec![Thread::Review]);
+        let started = adapter.started();
+        let spec = &started[0];
+        assert_eq!(
+            (spec.agent_id.as_str(), spec.purpose, spec.task_id.as_ref()),
+            ("sm", SessionPurpose::Ceremony, None)
+        );
+        for fact in ["FRK-1", "accepted", "The login page is done.", "$1.25"] {
+            assert!(
+                spec.initial_prompt.contains(fact),
+                "{fact}: {}",
+                spec.initial_prompt
+            );
+        }
+        assert!(
+            !spec.initial_prompt.contains("every browser"),
+            "the note's first line alone: {}",
+            spec.initial_prompt
+        );
+        assert!(
+            !spec
+                .farik_tools
+                .iter()
+                .any(|tool| tool == "farik_append_retro"),
+            "{:?}",
+            spec.farik_tools
+        );
+
+        let next = orchestrator.tick().await.expect("the tick runs");
+
+        assert!(
+            matches!(&next, TickReport::Sprint { sprint_id, what }
+                if sprint_id == "S1" && what.contains("retro")),
+            "{next:?}"
+        );
+        assert_eq!(ceremonies(&harness), vec![Thread::Review, Thread::Retro]);
+        let retro_spec = &adapter.started()[1];
+        assert!(
+            retro_spec
+                .farik_tools
+                .iter()
+                .any(|tool| tool == "farik_append_retro"),
+            "{:?}",
+            retro_spec.farik_tools
+        );
+        let after = orchestrator.tick().await.expect("the tick runs");
+        assert!(!matches!(after, TickReport::Sprint { .. }), "{after:?}");
+    }
+
+    /// Every answer a replay's Farik tool calls were given: the tool's full name and the answer.
+    type Answers = Arc<std::sync::Mutex<Vec<(String, serde_json::Value)>>>;
+
+    /// A recorded adapter playing `transcripts` as `recorded` does, and the answers its Farik tool
+    /// calls were given.
+    fn answered(
+        harness: &Harness,
+        transcripts: Vec<Transcript>,
+    ) -> (Arc<RecordedAdapter>, Answers) {
+        let answers = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let seen = Arc::clone(&answers);
+        let inner = crate::recorded::fixtures::tool_runner(Arc::clone(&harness.daemon));
+        let runner: crate::recorded::ToolRunner = Arc::new(move |session_id, tool, input| {
+            let inner = Arc::clone(&inner);
+            let seen = Arc::clone(&seen);
+            Box::pin(async move {
+                let answer = inner(session_id, tool.clone(), input).await;
+                seen.lock()
+                    .expect("no test panics holding it")
+                    .push((tool, answer.clone()));
+                answer
+            })
+        });
+        (
+            Arc::new(RecordedAdapter::with_tools(transcripts, runner)),
+            answers,
+        )
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn appends_the_retro() {
+        let harness = a_finished_sprint("orch-retro");
+        harness.project.record(
+            "FRK-1",
+            "escalation.raised",
+            &json!({ "reason": "iterations", "detail": "three rejections" }),
+        );
+        let retro_file = harness.project.repo.path.join(".farik/team/retro.md");
+        std::fs::write(
+            &retro_file,
+            "# Retro\n\n## S0 (2026-09-01)\n\nAsk the human sooner.\n",
+        )
+        .expect("the last retro is written");
+        let (adapter, answers) = answered(&harness, vec![review(), retro()]);
+        let orchestrator = harness.orchestrator(adapter.clone());
+        for _ in 0..2 {
+            orchestrator.tick().await.expect("the tick runs");
+        }
+
+        let report = orchestrator.tick().await.expect("the tick runs");
+
+        assert!(
+            matches!(&report, TickReport::Sprint { what, .. } if what.contains("retro")),
+            "{report:?}"
+        );
+        let prompt = &adapter.started()[1].initial_prompt;
+        for fact in ["FRK-1 escalated: iterations", "Ask the human sooner."] {
+            assert!(prompt.contains(fact), "{fact}: {prompt}");
+        }
+        assert_eq!(
+            std::fs::read_to_string(&retro_file).expect("the retro reads"),
+            "# Retro\n\n## S0 (2026-09-01)\n\nAsk the human sooner.\n\n## S1 (2026-09-22)\n\n\
+             Keep the tasks small: FRK-1 passed its review the first time.\n"
+        );
+        let appended = harness.events(&[EventKind::RetroAppended]);
+        assert_eq!(appended.len(), 1, "{appended:?}");
+        let EventBody::RetroAppended(body) = &appended[0].body else {
+            panic!("a retro");
+        };
+        assert_eq!(
+            (
+                body.sprint_id.as_str(),
+                body.text.as_str(),
+                body.appended_by.as_str()
+            ),
+            (
+                "S1",
+                "Keep the tasks small: FRK-1 passed its review the first time.",
+                "sm"
+            )
+        );
+        assert_eq!(appended[0].envelope.ids.task_id, None);
+        let retros: Vec<serde_json::Value> = answers
+            .lock()
+            .expect("no test panics holding it")
+            .iter()
+            .filter(|(tool, _)| tool == "mcp__farik__farik_append_retro")
+            .map(|(_, answer)| answer.clone())
+            .collect();
+        assert_eq!(retros.len(), 2, "{retros:?}");
+        assert_eq!(retros[0]["sprint_id"], "S1", "{retros:?}");
+        assert!(
+            retros[1]["error"]
+                .as_str()
+                .is_some_and(|error| error.contains("retro_refused: ")),
+            "{retros:?}"
+        );
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn retries_a_retro_that_hit_a_limit() {
+        let harness = a_finished_sprint("orch-retro-limit");
+        let until = at() + chrono::Duration::hours(2);
+        let adapter = harness.recorded(vec![review(), refused_until(until), retro()]);
+        let orchestrator = harness.orchestrator(adapter.clone());
+        for _ in 0..3 {
+            orchestrator.tick().await.expect("the tick runs");
+        }
+        assert_eq!(ceremonies(&harness), vec![Thread::Review, Thread::Retro]);
+        let asleep = orchestrator.tick().await.expect("the tick runs");
+        assert!(!matches!(asleep, TickReport::Sprint { .. }), "{asleep:?}");
+
+        let report = harness
+            .orchestrator_at(adapter.clone(), until + chrono::Duration::minutes(1))
+            .tick()
+            .await
+            .expect("the tick runs");
+
+        assert!(
+            matches!(&report, TickReport::Sprint { what, .. } if what.contains("retro")),
+            "{report:?}"
+        );
+        assert_eq!(
+            ceremonies(&harness),
+            vec![Thread::Review, Thread::Retro, Thread::Retro]
+        );
+        assert_eq!(harness.events(&[EventKind::RetroAppended]).len(), 1);
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn holds_no_review_once_a_new_sprint_started() {
+        let harness = a_finished_sprint("orch-review-next-sprint");
+        let adapter = harness.recorded(vec![review(), retro()]);
+        let orchestrator = harness.orchestrator(adapter.clone());
+        orchestrator.tick().await.expect("the sprint ends");
+        harness.project.record(
+            "",
+            "sprint.started",
+            &json!({ "sprint_id": "S2", "budget_usd": null, "started_by": "human" }),
+        );
+
+        let report = orchestrator.tick().await.expect("the tick runs");
+
+        assert!(!matches!(report, TickReport::Sprint { .. }), "{report:?}");
+        assert!(
+            ceremonies(&harness).is_empty(),
+            "{:?}",
+            ceremonies(&harness)
+        );
     }
 }

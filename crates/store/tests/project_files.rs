@@ -652,6 +652,34 @@ fn reads_back_the_project_scan_and_says_when_there_is_none() {
 }
 
 #[test]
+fn appends_to_the_retro_file() {
+    // The retro is what the next planning is told the team learned (5.9): each sprint's section
+    // added below the last, the file made with its title by the first.
+    let project = TempProject::new("retro");
+    let files = project.files();
+    assert_eq!(files.read_retro().expect("no retro yet"), None);
+    let day = |day: u32| chrono::NaiveDate::from_ymd_opt(2026, 9, day).expect("a real date");
+
+    files
+        .append_retro("S1", day(22), "Keep the tasks small.")
+        .expect("the first section");
+    files
+        .append_retro("S2", day(29), "Ask the human sooner.")
+        .expect("the second section");
+
+    let expected = "# Retro\n\n## S1 (2026-09-22)\n\nKeep the tasks small.\n\n\
+                    ## S2 (2026-09-29)\n\nAsk the human sooner.\n";
+    assert_eq!(
+        std::fs::read_to_string(project.root.join(".farik/team/retro.md")).expect("the file"),
+        expected
+    );
+    assert_eq!(
+        files.read_retro().expect("it reads back").as_deref(),
+        Some(expected)
+    );
+}
+
+#[test]
 fn writes_a_product_document_and_refuses_one_that_climbs_out() {
     let project = TempProject::new("product");
     let files = project.files();

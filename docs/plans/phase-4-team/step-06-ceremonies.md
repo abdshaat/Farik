@@ -148,7 +148,7 @@ Files: `files.rs`, event schema (`retro.appended`), protocol, `tools/retro.rs`, 
 - `refuses_a_retro_outside_a_retro_ceremony` — `farik_append_retro` in an implement session: refused.
 - `holds_no_review_once_a_new_sprint_started` (guard) — S1 ended and S2 started: no review of S1.
 
-- [ ] `feat(runtime): review and look back on a sprint when it ends`
+- [x] `feat(runtime): review and look back on a sprint when it ends`
 
 ### Task 5: aged escalations
 

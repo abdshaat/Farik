@@ -9,6 +9,7 @@ use std::fmt;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
+use chrono::NaiveDate;
 use farik_core::contract::{TaskContract, TaskId, ValidationError, validate_contract};
 use farik_core::criteria::{CriteriaLibrary, validate_criteria};
 use farik_core::governor::paths::normalise;
@@ -449,6 +450,45 @@ impl ProjectFiles {
         self.write_text(CHANNEL_SUMMARY, text)
     }
 
+    /// What the team's retros learned, which the next planning is told (5.9), or nothing before
+    /// the first retro.
+    ///
+    /// # Errors
+    ///
+    /// `Io` when the file is there and cannot be read.
+    pub fn read_retro(&self) -> Result<Option<String>, FilesError> {
+        match self.read_text(RETRO) {
+            Err(FilesError::NotFound { .. }) => Ok(None),
+            other => other.map(Some),
+        }
+    }
+
+    /// Appends sprint `sprint_id`'s retro, written on `date`, to `team/retro.md`: a section
+    /// `## <sprint id> (<date>)` and the text, below what is there, or below a `# Retro` title in
+    /// a file made for it.
+    ///
+    /// # Errors
+    ///
+    /// `Io` when the file cannot be read or written.
+    pub fn append_retro(
+        &self,
+        sprint_id: &str,
+        date: NaiveDate,
+        text: &str,
+    ) -> Result<(), FilesError> {
+        let before = self
+            .read_retro()?
+            .unwrap_or_else(|| "# Retro\n".to_string());
+        // A file edited by hand may not end its last line.
+        let end = if before.ends_with('\n') { "" } else { "\n" };
+        let retro = format!(
+            "{before}{end}\n## {sprint_id} ({})\n\n{}\n",
+            date.format("%Y-%m-%d"),
+            text.trim_end()
+        );
+        self.write_text(RETRO, &retro)
+    }
+
     /// A product document, by its path under `product/`.
     ///
     /// # Errors
@@ -532,6 +572,7 @@ impl ProjectFiles {
 /// the whole layout at once and a change to it is one line.
 const TEAM: &str = "team.yaml";
 const CRITERIA: &str = "team/criteria.yaml";
+const RETRO: &str = "team/retro.md";
 const SPRINTS: &str = "sprints";
 const PROJECT_SCAN: &str = "project.md";
 const PRICES: &str = "prices.json";

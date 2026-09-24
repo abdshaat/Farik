@@ -22,13 +22,13 @@ pub use crate::generated::event::{
     EscalationRaisedBodyReason, EscalationResolvedBody, EventKind, HumanAcceptedBody,
     HumanAcceptedBodySubject, MessagePostedBody, NoteWrittenBody, NoteWrittenBodyKind,
     ProductDocWrittenBody, ProjectScannedBody, PullRequestOpenedBody, QuestionAnsweredBody,
-    QuestionAskedBody, RequestTriagedBody, RequestTriagedBodySize, ReviewRecordedBody,
-    SessionEndedBody, SessionEndedBodyReason, SessionStartedBody, SessionStartedBodyEffort,
-    SessionStartedBodyModel, SessionStartedBodyPurpose, SprintEndedBody, SprintEndedBodyEndedBy,
-    SprintPlannedBody, SprintStartedBody, TaskCreatedBody, TaskIntegratedBody,
-    TaskIntegratedBodyIntegratedBy, TaskTransitionedBody, TaskTransitionedBodyEffectsItem,
-    TeamUpdatedBody, TokenUsage, ToolCalledBody, ToolDeniedBody, ToolReturnedBody,
-    TransitionRefusedBody, TransitionRefusedBodyRefusal,
+    QuestionAskedBody, RequestTriagedBody, RequestTriagedBodySize, RetroAppendedBody,
+    ReviewRecordedBody, SessionEndedBody, SessionEndedBodyReason, SessionStartedBody,
+    SessionStartedBodyEffort, SessionStartedBodyModel, SessionStartedBodyPurpose, SprintEndedBody,
+    SprintEndedBodyEndedBy, SprintPlannedBody, SprintStartedBody, TaskCreatedBody,
+    TaskIntegratedBody, TaskIntegratedBodyIntegratedBy, TaskTransitionedBody,
+    TaskTransitionedBodyEffectsItem, TeamUpdatedBody, TokenUsage, ToolCalledBody, ToolDeniedBody,
+    ToolReturnedBody, TransitionRefusedBody, TransitionRefusedBodyRefusal,
 };
 /// The generated names of the vocabularies the governor's events repeat, renamed at the edge so
 /// that they cannot be mistaken for `farik-core`'s own types of the same name.
@@ -61,7 +61,7 @@ static VALIDATOR: LazyLock<Validator> = LazyLock::new(|| {
 });
 
 /// One validator per kind, each holding that kind's body schema alone. The event schema types
-/// `body` as a choice of thirty-seven shapes, so it can only say that a body matched none of them; these
+/// `body` as a choice of thirty-eight shapes, so it can only say that a body matched none of them; these
 /// say what is wrong with the one shape the event's `kind` asked for.
 static BODY_VALIDATORS: LazyLock<Vec<Validator>> = LazyLock::new(|| {
     let schema: Value = serde_json::from_str(SCHEMA_JSON).expect(
@@ -131,6 +131,7 @@ fn body_def_name(kind: EventKind) -> &'static str {
         EventKind::SprintEnded => "sprintEndedBody",
         EventKind::AgentSlept => "agentSleptBody",
         EventKind::MessagePosted => "messagePostedBody",
+        EventKind::RetroAppended => "retroAppendedBody",
     }
 }
 
@@ -193,6 +194,7 @@ fn attribution(body: &mut EventBody) -> Option<(&'static str, &mut String)> {
         EventBody::SprintStarted(body) => Some(("started_by", &mut body.started_by)),
         EventBody::SprintPlanned(body) => Some(("planned_by", &mut body.planned_by)),
         EventBody::MessagePosted(body) => Some(("author", &mut body.author)),
+        EventBody::RetroAppended(body) => Some(("appended_by", &mut body.appended_by)),
         EventBody::DriftDetected(_)
         | EventBody::ProjectScanned(_)
         | EventBody::CostRecorded(_)
@@ -213,7 +215,7 @@ fn attribution(body: &mut EventBody) -> Option<(&'static str, &mut String)> {
 
 /// Every kind the log holds in this phase, in the order `docs/schemas/event.schema.json` lists
 /// them. The step that adds a kind adds it here.
-pub const EVERY_KIND: [EventKind; 37] = [
+pub const EVERY_KIND: [EventKind; 38] = [
     EventKind::TaskCreated,
     EventKind::RequestTriaged,
     EventKind::ContractWritten,
@@ -251,6 +253,7 @@ pub const EVERY_KIND: [EventKind; 37] = [
     EventKind::SprintEnded,
     EventKind::AgentSlept,
     EventKind::MessagePosted,
+    EventKind::RetroAppended,
 ];
 
 /// The ids an event is stamped with: which team and project it belongs to, and the contract, agent
@@ -400,6 +403,9 @@ pub enum EventBody {
     /// Somebody said something in the team's channel.
     #[serde(rename = "message.posted")]
     MessagePosted(MessagePostedBody),
+    /// The retro ceremony recorded what the next planning should know.
+    #[serde(rename = "retro.appended")]
+    RetroAppended(RetroAppendedBody),
 }
 
 impl EventBody {
@@ -444,6 +450,7 @@ impl EventBody {
             Self::SprintEnded(_) => EventKind::SprintEnded,
             Self::AgentSlept(_) => EventKind::AgentSlept,
             Self::MessagePosted(_) => EventKind::MessagePosted,
+            Self::RetroAppended(_) => EventKind::RetroAppended,
         }
     }
 }
@@ -592,7 +599,7 @@ pub fn event_from_value(input: &Value) -> Result<FarikEvent, Vec<ValidationError
 }
 
 /// The schema's own failures. A failure inside `body` is reported by the schema once, at `/body`,
-/// because `body` there is a choice of thirty-seven shapes and the schema can only say that none matched.
+/// because `body` there is a choice of thirty-eight shapes and the schema can only say that none matched.
 /// The event's `kind` says which one it was meant to be, so such a failure is asked again of that
 /// shape alone and reported where it actually is.
 fn schema_errors(input: &Value) -> Vec<ValidationError> {
@@ -987,7 +994,7 @@ mod tests {
 
     #[test]
     fn reports_a_malformed_field_inside_a_body_at_its_own_path() {
-        // The schema types `body` as a choice of thirty-seven shapes, so it reports a failure anywhere
+        // The schema types `body` as a choice of thirty-eight shapes, so it reports a failure anywhere
         // inside one at `/body`, with the whole body echoed back. The kind says which shape the
         // body was meant to be, so the reader checks it again against that one alone.
         let mut input = an_event_wire(EventKind::ProjectScanned);

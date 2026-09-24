@@ -586,7 +586,8 @@ fn apply_to(transaction: &Transaction<'_>, event: &FarikEvent) -> Result<(), Sto
         | EventBody::SprintPlanned(_)
         | EventBody::SprintEnded(_)
         | EventBody::AgentSlept(_)
-        | EventBody::MessagePosted(_) => Ok(()),
+        | EventBody::MessagePosted(_)
+        | EventBody::RetroAppended(_) => Ok(()),
     }
 }
 

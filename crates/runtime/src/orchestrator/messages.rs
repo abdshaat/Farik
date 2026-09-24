@@ -3,11 +3,12 @@
 
 use chrono::{DateTime, Utc};
 use farik_core::branch::task_branch;
-use farik_core::contract::{TaskContract, TaskId, TaskKind, Verification};
+use farik_core::contract::{TaskContract, TaskId, TaskKind, TaskStatus, Verification};
 use farik_core::governor::done::CriterionResult;
 use farik_core::team::Agent;
 use farik_protocol::event::{
     BlockerWire, BudgetExhaustedBodyScope, EventBody, FarikEvent, HumanAcceptedBodySubject,
+    NoteWrittenBodyKind,
 };
 use farik_store::TaskProjection;
 use farik_store::git::HeadSummary;
@@ -351,6 +352,109 @@ pub(super) fn standup_message(
          (task: from -> to, by whom), each task of the sprint that is blocked with its blocker, and \
          each open escalation: {}",
         untrusted_block("standup", &facts, NOTE_CAP_BYTES)
+    )
+}
+
+/// A task of an ended sprint, as its review and retro are told it.
+pub(super) struct SprintTask {
+    /// The task.
+    pub(super) task_id: TaskId,
+    /// Where it is on the board now.
+    pub(super) status: TaskStatus,
+    /// How many times it went back to work after a rejection.
+    pub(super) iteration: u32,
+    /// Each event about it recorded while the sprint was open, oldest first.
+    pub(super) events: Vec<FarikEvent>,
+}
+
+/// The review's facts (5.9): each task of the sprint with its status, its cost in the sprint, and
+/// the first line of its last completion note in the sprint; then the sprint's budget and what it
+/// spent. The notes are an agent's words, untrusted, cut at 16 KiB.
+pub(super) fn sprint_review_message(
+    sprint_id: &str,
+    tasks: &[SprintTask],
+    budget_usd: Option<f64>,
+    spent_usd: f64,
+) -> String {
+    let listed = tasks
+        .iter()
+        .map(|task| {
+            let cost: f64 = task
+                .events
+                .iter()
+                .filter_map(|event| match &event.body {
+                    EventBody::CostRecorded(body) => Some(body.cost_usd),
+                    _ => None,
+                })
+                .sum();
+            let note = task
+                .events
+                .iter()
+                .rev()
+                .find_map(|event| match &event.body {
+                    EventBody::NoteWritten(body)
+                        if body.kind == NoteWrittenBodyKind::Completion =>
+                    {
+                        Some(body.text.lines().next().unwrap_or_default())
+                    }
+                    _ => None,
+                })
+                .unwrap_or("no completion note");
+            format!(
+                "{} ({}), ${cost:.2} in the sprint: {note}",
+                task.task_id.as_str(),
+                task.status
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    format!(
+        "The review of {sprint_id}, which has ended: each task in it (status, cost in the sprint: \
+         the first line of its completion note): {}\nIts budget: {budget}; it spent ${spent_usd:.2}.",
+        untrusted_block("review", &listed, NOTE_CAP_BYTES),
+        budget = budget_usd.map_or_else(|| "no budget".to_string(), |usd| format!("${usd:.2}")),
+    )
+}
+
+/// The retro's facts (5.9): each rejection of a task of the sprint with its failed criteria, each
+/// escalation with its reason, each block with its blocker, each task's iterations; and the last
+/// retros, their latest 16 KiB. What an agent wrote is untrusted text, each block cut at 16 KiB.
+pub(super) fn retro_message(sprint_id: &str, tasks: &[SprintTask], retro: Option<&str>) -> String {
+    let mut facts = Vec::new();
+    for task in tasks {
+        let id = task.task_id.as_str();
+        for event in &task.events {
+            match &event.body {
+                EventBody::TaskTransitioned(body) => {
+                    if let Some(rejection) = &body.rejection {
+                        facts.push(format!(
+                            "{id} rejected, failing {}",
+                            rejection.failed_criterion_ids.join(", ")
+                        ));
+                    }
+                    if let Some(blocker) = &body.blocker {
+                        facts.push(format!(
+                            "{id} blocked: {}; needed: {}",
+                            blocker.description, blocker.needed
+                        ));
+                    }
+                }
+                EventBody::EscalationRaised(body) => {
+                    facts.push(format!("{id} escalated: {}", body.reason));
+                }
+                _ => {}
+            }
+        }
+        facts.push(format!("{id}: {} iteration(s)", task.iteration));
+    }
+    format!(
+        "The retro of {sprint_id}, which has ended: its rejections, escalations, blocks, and each \
+         task's iterations: {}{retro}",
+        untrusted_block("retro_facts", &facts.join("\n"), NOTE_CAP_BYTES),
+        retro = retro.map_or_else(String::new, |text| format!(
+            "\nWhat the last retros learned, their latest part: {}",
+            untrusted_block("retro", last_bytes(text, NOTE_CAP_BYTES), NOTE_CAP_BYTES)
+        )),
     )
 }
 
