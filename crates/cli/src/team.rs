@@ -36,6 +36,7 @@ pub fn rules(project: &Project) -> Result<Report, String> {
             None => "most a contract may cost: no cap".to_string(),
         },
         listed("forbidden commands", &rules.forbidden_commands),
+        listed("document paths", &rules.document_paths),
     ];
     Ok(Report {
         lines,

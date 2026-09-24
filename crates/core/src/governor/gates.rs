@@ -30,7 +30,8 @@ fn is_written(text: &str) -> bool {
 
 /// Whether a cost fits what is left. A figure that cannot be compared does not fit, as a spend
 /// that is not a number counts as exhausted in `budget` (`docs/SPEC.md` section 5.5).
-fn fits_within(cost: f64, remaining: f64) -> bool {
+#[must_use]
+pub fn fits_within(cost: f64, remaining: f64) -> bool {
     matches!(
         cost.partial_cmp(&remaining),
         Some(Ordering::Less | Ordering::Equal)
@@ -81,10 +82,41 @@ pub struct AssignmentInput {
     pub assignee_open_tasks: u32,
     /// The team's limit on work in progress per agent.
     pub wip_limit: u32,
-    /// What is left of the sprint's budget, in dollars.
+    /// What is left of the open sprint's budget, in dollars: infinite with no sprint open or one
+    /// with no budget (ADR 0015).
     pub remaining_sprint_budget_usd: f64,
+    /// The sprint that is open, if one is (`docs/SPEC.md` section 5.5).
+    pub open_sprint: Option<String>,
+    /// The sprint the task is in, if it is in one.
+    pub task_sprint: Option<String>,
+    /// The sprint the task's epic is in, when the task has an epic: `Some(None)` for an epic in
+    /// no sprint.
+    pub parent_sprint: Option<Option<String>>,
     /// The state of every dependency the contract lists, in any order.
     pub dependencies: Vec<DependencyState>,
+}
+
+/// Whether the open sprint lets the task be assigned (`docs/SPEC.md` section 5.5): with none open,
+/// any task; with one open, a task in it, or one under an epic in no sprint, whose work began
+/// before any sprint.
+#[must_use]
+pub fn in_the_open_sprint(input: &AssignmentInput) -> bool {
+    let Some(open) = &input.open_sprint else {
+        return true;
+    };
+    input.task_sprint.as_ref() == Some(open) || input.parent_sprint == Some(None)
+}
+
+/// Whether the open sprint would let the task be assigned, by the two rules of the assignment gate
+/// that are the sprint's: its membership and its budget. The orchestrator passes over a task that
+/// fails them rather than asking for a move the gate refuses.
+#[must_use]
+pub fn fits_the_open_sprint(contract: &TaskContract, input: &AssignmentInput) -> bool {
+    in_the_open_sprint(input)
+        && fits_within(
+            contract.budget.max_cost_usd,
+            input.remaining_sprint_budget_usd,
+        )
 }
 
 /// The `Assignment` gate of `ready -> assigned` (`docs/SPEC.md` sections 5.2, 5.14, 5.16): who may
@@ -170,6 +202,13 @@ pub fn check_assignment(contract: &TaskContract, input: &AssignmentInput) -> Gat
                 input.wip_limit
             )
         });
+    }
+    if !in_the_open_sprint(input) {
+        let open = input.open_sprint.as_deref().unwrap_or_default();
+        reasons.push(format!(
+            "this task is in {} and {open} is open; only {open}'s tasks are assigned until it ends",
+            input.task_sprint.as_deref().unwrap_or("no sprint")
+        ));
     }
     if !fits_within(
         contract.budget.max_cost_usd,
@@ -713,7 +752,7 @@ pub const FIELDS_FIXED_AT_CREATION: [&str; 2] = ["kind", "parent"];
 /// assignee writing the tasks under it, and by the human. Written out rather than left as
 /// whatever is not in the other sets, so that a field added to the schema is refused until
 /// somebody says who writes it.
-pub const FIELDS_OF_THE_CONTENT: [&str; 13] = [
+pub const FIELDS_OF_THE_CONTENT: [&str; 14] = [
     "title",
     "intent",
     "scope",
@@ -725,6 +764,7 @@ pub const FIELDS_OF_THE_CONTENT: [&str; 13] = [
     "assignee_role",
     "reviewer_role",
     "risk",
+    "change",
     "budget",
     "allowed_paths",
 ];
@@ -915,6 +955,9 @@ mod tests {
             assignee_open_tasks: 0,
             wip_limit: 2,
             remaining_sprint_budget_usd: 15.0,
+            open_sprint: None,
+            task_sprint: None,
+            parent_sprint: None,
             dependencies: Vec::new(),
         }
     }
@@ -1165,6 +1208,34 @@ mod tests {
         );
         input.remaining_sprint_budget_usd = f64::NAN;
         assert_eq!(reasons(check_assignment(&a_contract(), &input)).len(), 1);
+    }
+
+    #[test]
+    fn refuses_an_assignment_outside_the_open_sprint() {
+        let mut input = an_assignment();
+        input.open_sprint = Some("S1".to_string());
+        assert_eq!(
+            reasons(check_assignment(&a_contract(), &input)),
+            [
+                "this task is in no sprint and S1 is open; only S1's tasks are assigned until it ends"
+            ]
+        );
+        input.task_sprint = Some("S0".to_string());
+        assert_eq!(
+            reasons(check_assignment(&a_contract(), &input)),
+            ["this task is in S0 and S1 is open; only S1's tasks are assigned until it ends"]
+        );
+        input.task_sprint = Some("S1".to_string());
+        assert_eq!(check_assignment(&a_contract(), &input), Ok(()));
+        // Work under an epic that began before any sprint goes on.
+        input.task_sprint = None;
+        input.parent_sprint = Some(None);
+        assert_eq!(check_assignment(&a_contract(), &input), Ok(()));
+        input.parent_sprint = Some(Some("S0".to_string()));
+        assert_eq!(reasons(check_assignment(&a_contract(), &input)).len(), 1);
+        // With no sprint open, the board flows as in phase 3.
+        input.open_sprint = None;
+        assert_eq!(check_assignment(&a_contract(), &input), Ok(()));
     }
 
     #[test]
@@ -1913,6 +1984,42 @@ mod tests {
                 "{status}"
             );
         }
+    }
+
+    #[test]
+    fn lets_the_product_manager_write_the_change() {
+        let product_manager = ContractWriteActor {
+            kind: TransitionActor::ProductManager,
+            agent_id: Some("pm-1".to_string()),
+        };
+        assert_eq!(
+            check_contract_write(
+                Kind::Task,
+                TaskStatus::Refining,
+                false,
+                &product_manager,
+                &["change".to_string()]
+            ),
+            Ok(ContractWriteOutcome::Allowed)
+        );
+        // A Developer is the assignee, not one of the roles that write content: refused as
+        // `change` is content, exactly as `risk` is.
+        let developer = ContractWriteActor {
+            kind: TransitionActor::Assignee,
+            agent_id: Some("dev-1".to_string()),
+        };
+        assert_eq!(
+            check_contract_write(
+                Kind::Task,
+                TaskStatus::Refining,
+                false,
+                &developer,
+                &["change".to_string()]
+            ),
+            Err(ContractWriteRefusal::ContentFields {
+                fields: vec!["change".to_string()]
+            })
+        );
     }
 
     #[test]

@@ -105,9 +105,9 @@ pub enum BudgetScope {
 /// What happens when a budget is exhausted (`docs/SPEC.md` section 5.5).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BudgetConsequence {
-    /// The session ends and the task goes to `blocked` with a note; the next session resumes
-    /// from the note.
-    EndSessionAndBlockTask,
+    /// The session ends and Farik leaves a note on the task saying where it stopped; the next
+    /// session resumes from the note.
+    EndSessionWithNote,
     /// The task goes to `escalated`.
     EscalateTask,
     /// No new assignments; tasks in progress may finish.
@@ -165,18 +165,18 @@ pub fn check_budgets(state: &BudgetState) -> Vec<Exhausted> {
     let checks = [
         (
             BudgetScope::SessionTokens,
-            BudgetConsequence::EndSessionAndBlockTask,
+            BudgetConsequence::EndSessionWithNote,
             session.usage.input_tokens >= limits.max_input_tokens
                 || session.usage.output_tokens >= limits.max_output_tokens,
         ),
         (
             BudgetScope::SessionWallClock,
-            BudgetConsequence::EndSessionAndBlockTask,
+            BudgetConsequence::EndSessionWithNote,
             session.wall_clock >= limits.max_wall_clock,
         ),
         (
             BudgetScope::SessionToolCalls,
-            BudgetConsequence::EndSessionAndBlockTask,
+            BudgetConsequence::EndSessionWithNote,
             session.tool_calls >= limits.max_tool_calls,
         ),
         (
@@ -312,12 +312,12 @@ mod tests {
     }
 
     #[test]
-    fn ends_the_session_and_blocks_the_task_when_its_tokens_run_out() {
+    fn ends_the_session_with_a_note_when_its_tokens_run_out() {
         let mut state = a_state();
         state.session.usage.input_tokens = 400_000;
         assert_eq!(
             check_budgets(&state),
-            [exhausted(B::SessionTokens, C::EndSessionAndBlockTask)]
+            [exhausted(B::SessionTokens, C::EndSessionWithNote)]
         );
         let mut state = a_state();
         state.session.usage.input_tokens = 399_999;
@@ -326,29 +326,29 @@ mod tests {
         state.session.usage.output_tokens = 40_000;
         assert_eq!(
             check_budgets(&state),
-            [exhausted(B::SessionTokens, C::EndSessionAndBlockTask)]
+            [exhausted(B::SessionTokens, C::EndSessionWithNote)]
         );
         state.session.usage.output_tokens = 39_999;
         assert_eq!(check_budgets(&state), []);
     }
 
     #[test]
-    fn ends_the_session_and_blocks_the_task_when_its_wall_clock_runs_out() {
+    fn ends_the_session_with_a_note_when_its_wall_clock_runs_out() {
         let mut state = a_state();
         state.session.wall_clock = Duration::from_mins(30);
         assert_eq!(
             check_budgets(&state),
-            [exhausted(B::SessionWallClock, C::EndSessionAndBlockTask)]
+            [exhausted(B::SessionWallClock, C::EndSessionWithNote)]
         );
     }
 
     #[test]
-    fn ends_the_session_and_blocks_the_task_when_its_tool_calls_run_out() {
+    fn ends_the_session_with_a_note_when_its_tool_calls_run_out() {
         let mut state = a_state();
         state.session.tool_calls = 200;
         assert_eq!(
             check_budgets(&state),
-            [exhausted(B::SessionToolCalls, C::EndSessionAndBlockTask)]
+            [exhausted(B::SessionToolCalls, C::EndSessionWithNote)]
         );
     }
 
@@ -414,6 +414,22 @@ mod tests {
     }
 
     #[test]
+    fn names_the_session_consequence_after_its_note() {
+        let mut state = a_state();
+        state.session.usage.input_tokens = 400_000;
+        state.session.wall_clock = Duration::from_mins(30);
+        state.session.tool_calls = 200;
+        assert_eq!(
+            check_budgets(&state),
+            [
+                exhausted(B::SessionTokens, C::EndSessionWithNote),
+                exhausted(B::SessionWallClock, C::EndSessionWithNote),
+                exhausted(B::SessionToolCalls, C::EndSessionWithNote),
+            ]
+        );
+    }
+
+    #[test]
     fn reports_every_exhausted_budget_in_scope_order() {
         let mut state = a_state();
         state.session.tool_calls = 200;
@@ -423,7 +439,7 @@ mod tests {
         assert_eq!(
             check_budgets(&state),
             [
-                exhausted(B::SessionToolCalls, C::EndSessionAndBlockTask),
+                exhausted(B::SessionToolCalls, C::EndSessionWithNote),
                 exhausted(B::TaskUsd, C::EscalateTask),
                 exhausted(B::SprintUsd, C::StopNewAssignments),
                 exhausted(B::DayUsd, C::PauseTeam),

@@ -2,17 +2,27 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
+use chrono::{DateTime, Utc};
 use farik_core::pricing::Usage;
 use serde_json::Value;
 
 use crate::session::{EndReason, RuntimeError, SessionEvent};
 
 /// Reads a session's `stream-json` lines in order. It keeps what a later line needs from an
-/// earlier one: a tool's name by its call id, and which calls were denied.
+/// earlier one: a tool's name by its call id, which calls were denied, and the last rate limit.
 #[derive(Debug, Default)]
 pub struct StreamParser {
     tools_by_id: BTreeMap<String, String>,
     denied_ids: BTreeSet<String>,
+    rate_limit: Option<RateLimit>,
+}
+
+/// The last `rate_limit_event`'s `rate_limit_info`: its status, when it has one, and when it said
+/// it resets.
+#[derive(Debug)]
+struct RateLimit {
+    status: Option<String>,
+    resets_at: Option<DateTime<Utc>>,
 }
 
 impl StreamParser {
@@ -30,7 +40,11 @@ impl StreamParser {
             Some("assistant") => self.assistant(&value),
             Some("user") => self.user(&value),
             Some("system") => self.system(&value),
-            Some("result") => result(&value),
+            Some("rate_limit_event") => {
+                self.rate_limit_event(&value);
+                Ok(Vec::new())
+            }
+            Some("result") => result(&value, self.rate_limit.as_ref()),
             // The program adds line types between minor versions; a new one must not end a session.
             _ => Ok(Vec::new()),
         }
@@ -104,6 +118,22 @@ impl StreamParser {
         Ok(events)
     }
 
+    fn rate_limit_event(&mut self, value: &Value) {
+        // An event without its info says nothing, and must not end a session.
+        if let Some(info) = value.get("rate_limit_info") {
+            self.rate_limit = Some(RateLimit {
+                status: info
+                    .get("status")
+                    .and_then(Value::as_str)
+                    .map(str::to_string),
+                resets_at: info
+                    .get("resetsAt")
+                    .and_then(Value::as_i64)
+                    .and_then(|seconds| DateTime::from_timestamp(seconds, 0)),
+            });
+        }
+    }
+
     fn system(&mut self, value: &Value) -> Result<Vec<SessionEvent>, RuntimeError> {
         if value.get("subtype").and_then(Value::as_str) != Some("permission_denied") {
             return Ok(Vec::new());
@@ -119,7 +149,10 @@ impl StreamParser {
     }
 }
 
-fn result(value: &Value) -> Result<Vec<SessionEvent>, RuntimeError> {
+fn result(
+    value: &Value,
+    rate_limit: Option<&RateLimit>,
+) -> Result<Vec<SessionEvent>, RuntimeError> {
     let usage = value.get("usage").ok_or_else(|| RuntimeError::Protocol {
         detail: "a result line has no usage".to_string(),
     })?;
@@ -137,8 +170,10 @@ fn result(value: &Value) -> Result<Vec<SessionEvent>, RuntimeError> {
         cache_read_tokens: tokens("cache_read_input_tokens")?,
         cache_write_tokens: tokens("cache_creation_input_tokens")?,
     };
+    let is_error = value.get("is_error").and_then(Value::as_bool) == Some(true);
     let reason = match string_field(value, "subtype", "a result line")? {
-        "success" => EndReason::Completed,
+        // The program reports an API's refusal as a `success` that is an error.
+        "success" if !is_error => EndReason::Completed,
         "error_max_turns" => EndReason::Limit,
         _ => EndReason::Error,
     };
@@ -156,9 +191,31 @@ fn result(value: &Value) -> Result<Vec<SessionEvent>, RuntimeError> {
     } else {
         errors.join("; ")
     };
+    // No capture of a refused session exists yet, so each of the three forms counts.
+    let lowered = detail.to_ascii_lowercase();
+    let is_provider_limit = reason == EndReason::Error
+        // A missing status says nothing, so it is not a limit.
+        && (rate_limit
+            .and_then(|limit| limit.status.as_deref())
+            .is_some_and(|status| !status.starts_with("allowed"))
+            || value.get("api_error_status").and_then(Value::as_u64) == Some(429)
+            || lowered.contains("usage limit")
+            || lowered.contains("rate limit"));
+    let (reason, resets_at) = if is_provider_limit {
+        (
+            EndReason::ProviderLimit,
+            rate_limit.and_then(|limit| limit.resets_at),
+        )
+    } else {
+        (reason, None)
+    };
     Ok(vec![
         SessionEvent::UsageReported(usage),
-        SessionEvent::Ended { reason, detail },
+        SessionEvent::Ended {
+            reason,
+            detail,
+            resets_at,
+        },
     ])
 }
 
@@ -195,13 +252,15 @@ fn tool_output(content: Option<&Value>) -> String {
 
 #[cfg(test)]
 mod tests {
+    use chrono::DateTime;
     use farik_core::pricing::Usage;
     use serde_json::json;
 
     use super::StreamParser;
     use crate::recorded::Transcript;
     use crate::recorded::fixtures::{
-        hits_the_turn_limit, hook_denies_a_write, reads_a_file, write_denied,
+        hits_the_turn_limit, hook_denies_a_write, provider_limit_429, provider_limit_rejected,
+        provider_limit_text, reads_a_file, success_with_is_error, write_denied,
     };
     use crate::session::{EndReason, RuntimeError, SessionEvent};
 
@@ -302,6 +361,7 @@ mod tests {
             Some(&SessionEvent::Ended {
                 reason: EndReason::Limit,
                 detail: "Reached maximum number of turns (1)".to_string(),
+                resets_at: None,
             })
         );
     }
@@ -317,6 +377,7 @@ mod tests {
             Some(&SessionEvent::Ended {
                 reason: EndReason::Error,
                 detail: "boom".to_string(),
+                resets_at: None,
             })
         );
     }
@@ -398,6 +459,7 @@ mod tests {
             Some(&SessionEvent::Ended {
                 reason: EndReason::Error,
                 detail: "a; b".to_string(),
+                resets_at: None,
             })
         );
         assert_eq!(
@@ -405,6 +467,7 @@ mod tests {
             Some(&SessionEvent::Ended {
                 reason: EndReason::Completed,
                 detail: "hello fixture".to_string(),
+                resets_at: None,
             })
         );
     }
@@ -498,6 +561,98 @@ mod tests {
                 tool: "Read".to_string(),
                 output: "PreToolUse:Read hook error: a file that says this".to_string(),
             }]
+        );
+    }
+
+    fn end_of(events: &[SessionEvent]) -> (EndReason, Option<String>) {
+        match events.last() {
+            Some(SessionEvent::Ended {
+                reason, resets_at, ..
+            }) => (*reason, resets_at.map(|at| at.to_rfc3339())),
+            other => panic!("expected an end, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn ends_a_successful_result_with_an_error_as_an_error() {
+        assert_eq!(
+            end_of(&events_of(&success_with_is_error())),
+            (EndReason::Error, None)
+        );
+    }
+
+    #[test]
+    fn reads_a_rejected_rate_limit_as_the_providers_limit() {
+        let resets_at = DateTime::from_timestamp(1_790_119_200, 0).expect("a time");
+        assert_eq!(
+            end_of(&events_of(&provider_limit_rejected())),
+            (EndReason::ProviderLimit, Some(resets_at.to_rfc3339()))
+        );
+    }
+
+    #[test]
+    fn reads_a_429_as_the_providers_limit() {
+        assert_eq!(
+            end_of(&events_of(&provider_limit_429())),
+            (EndReason::ProviderLimit, None)
+        );
+    }
+
+    #[test]
+    fn reads_a_usage_limit_in_the_words() {
+        assert_eq!(
+            end_of(&events_of(&provider_limit_text())),
+            (EndReason::ProviderLimit, None)
+        );
+        let rate_limited = one_line(
+            r#"{"type":"result","subtype":"error_during_execution","is_error":true,"errors":["API Error: Rate Limit exceeded"],"usage":{"input_tokens":0,"output_tokens":0,"cache_read_input_tokens":0,"cache_creation_input_tokens":0}}"#,
+        )
+        .expect("a result line parses");
+        assert_eq!(end_of(&rate_limited), (EndReason::ProviderLimit, None));
+    }
+
+    fn after_a_rate_limit(status: &str, result: &str) -> Vec<SessionEvent> {
+        let mut parser = StreamParser::default();
+        let event = format!(
+            r#"{{"type":"rate_limit_event","rate_limit_info":{{"status":"{status}","resetsAt":1790119200}}}}"#
+        );
+        assert_eq!(parser.parse_line(&event), Ok(Vec::new()));
+        parser.parse_line(result).expect("a result line parses")
+    }
+
+    const AN_ERROR: &str = r#"{"type":"result","subtype":"error_during_execution","is_error":true,"api_error_status":500,"errors":["the server fell over"],"usage":{"input_tokens":0,"output_tokens":0,"cache_read_input_tokens":0,"cache_creation_input_tokens":0}}"#;
+
+    #[test]
+    fn keeps_an_ordinary_error_an_error() {
+        assert_eq!(
+            end_of(&after_a_rate_limit("allowed", AN_ERROR)),
+            (EndReason::Error, None)
+        );
+    }
+
+    #[test]
+    fn keeps_a_warning_an_ordinary_error() {
+        assert_eq!(
+            end_of(&after_a_rate_limit("allowed_warning", AN_ERROR)),
+            (EndReason::Error, None)
+        );
+    }
+
+    #[test]
+    fn ignores_a_rate_limit_event_without_a_status() {
+        let mut parser = StreamParser::default();
+        let event = r#"{"type":"rate_limit_event","rate_limit_info":{"resetsAt":1790119200}}"#;
+        assert_eq!(parser.parse_line(event), Ok(Vec::new()));
+        let events = parser.parse_line(AN_ERROR).expect("a result line parses");
+        assert_eq!(end_of(&events), (EndReason::Error, None));
+    }
+
+    #[test]
+    fn passes_no_reset_time_without_a_limit() {
+        let success = r#"{"type":"result","subtype":"success","is_error":false,"result":"done","usage":{"input_tokens":0,"output_tokens":0,"cache_read_input_tokens":0,"cache_creation_input_tokens":0}}"#;
+        assert_eq!(
+            end_of(&after_a_rate_limit("allowed", success)),
+            (EndReason::Completed, None)
         );
     }
 }

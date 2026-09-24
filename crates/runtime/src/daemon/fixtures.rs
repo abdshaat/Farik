@@ -14,6 +14,7 @@ use farik_store::open_event_log;
 use serde_json::{Value, json};
 
 use super::{DaemonState, HookRequest, SessionRegistration};
+use crate::session::SessionPurpose;
 use crate::tools::fixtures::{TestProject, a_team_of_three, at};
 use crate::tools::{ToolDeps, tool_descriptors};
 
@@ -52,7 +53,7 @@ impl TestDaemon {
         project
             .repo
             .adapter()
-            .create_worktree(&worktree, "farik/FRK-1", "main")
+            .create_worktree(&worktree, &project.branch("FRK-1"), "main")
             .expect("the worktree is made");
         let state = Arc::new(DaemonState::new(Arc::clone(&project.deps)));
         let daemon = Self {
@@ -94,6 +95,9 @@ impl TestDaemon {
             executor: None,
             limits,
             farik_tools: farik_tools.iter().map(ToString::to_string).collect(),
+            purpose: SessionPurpose::Implement,
+            in_reply_to: None,
+            thread: None,
         });
     }
 
@@ -148,6 +152,9 @@ impl TestDaemon {
             executor: None,
             limits: DEFAULT_SESSION_LIMITS,
             farik_tools: every_farik_tool().iter().map(ToString::to_string).collect(),
+            purpose: SessionPurpose::Implement,
+            in_reply_to: None,
+            thread: None,
         });
         state
     }

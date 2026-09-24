@@ -126,7 +126,8 @@ pub(crate) fn started(printer: &mut Printer<'_, '_>, driver: &Driver) {
     }
 }
 
-/// Ticks within `scope` until a tick is idle, the run is stopped, or a tick fails, printing each;
+/// Ticks within `scope` until a tick is idle with no agent to wait for, the run is stopped, or a
+/// tick fails, printing each; a tick idle while an agent sleeps is waited out, and says so.
 /// Ctrl-C is heard between and during ticks. `after` is called after each tick that acted.
 pub(crate) async fn ticks(
     driver: &mut Driver,
@@ -135,6 +136,9 @@ pub(crate) async fn ticks(
     presses: &mut u32,
     mut after: impl FnMut(&mut Printer<'_, '_>),
 ) -> Ended {
+    // The last wait printed, so a wait capped and rechecked (`Orchestrator::wait_until`) prints
+    // its line once, not once per recheck; printed again only when the agent or the time changes.
+    let mut last_wait: Option<(String, chrono::DateTime<chrono::Utc>)> = None;
     loop {
         if driver.orchestrator.is_stopped() {
             printer.line("stopped", &json!({ "stopped": true }));
@@ -153,7 +157,30 @@ pub(crate) async fn ticks(
             }
         };
         match report {
-            Ok(TickReport::Idle { why }) => {
+            Ok(TickReport::Idle {
+                why,
+                until: Some(until),
+            }) => {
+                if last_wait.as_ref() != Some(&(why.clone(), until)) {
+                    printer.line(
+                        &why,
+                        &json!({ "waiting": why, "until": until.to_rfc3339() }),
+                    );
+                    last_wait = Some((why.clone(), until));
+                }
+                let wait = orchestrator.wait_until(until);
+                tokio::pin!(wait);
+                loop {
+                    tokio::select! {
+                        _ = &mut wait => break,
+                        Some(()) = driver.interrupts.recv() => {
+                            *presses += 1;
+                            interrupted(driver, printer, *presses);
+                        }
+                    }
+                }
+            }
+            Ok(TickReport::Idle { why, until: None }) => {
                 printer.line(&format!("idle: {why}"), &json!({ "idle": why }));
                 return Ended::Idle(why);
             }
@@ -161,6 +188,20 @@ pub(crate) async fn ticks(
                 printer.line(
                     &format!("{}: {what}", task_id.as_str()),
                     &json!({ "task_id": task_id.as_str(), "what": what }),
+                );
+                after(printer);
+            }
+            Ok(TickReport::Sprint { sprint_id, what }) => {
+                printer.line(
+                    &format!("{sprint_id}: {what}"),
+                    &json!({ "sprint_id": sprint_id, "what": what }),
+                );
+                after(printer);
+            }
+            Ok(TickReport::Conversation { agent_id, what }) => {
+                printer.line(
+                    &format!("{agent_id}: {what}"),
+                    &json!({ "agent_id": agent_id, "what": what }),
                 );
                 after(printer);
             }

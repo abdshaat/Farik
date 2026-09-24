@@ -15,8 +15,9 @@ pub use farik_core::contract::{TaskContract, TaskId, ValidationError};
 pub use crate::generated::command::CommandName;
 use crate::generated::command::{
     AgentUpdateBody, EmptyBody, EscalationResolveBody, FarikCommand as CommandWire,
-    HumanAcceptBody, HumanAcceptBodySubject, QuestionAnswerBody, RequestTriageBody,
-    RequestTriageBodySize, SessionStopBody, TaskCreateBody, TaskIdBody, TaskTransitionBody,
+    HumanAcceptBody, HumanAcceptBodySubject, MessagePostBody, QuestionAnswerBody,
+    RequestTriageBody, RequestTriageBodySize, SessionStopBody, SprintStartBody, TaskCreateBody,
+    TaskIdBody, TaskTransitionBody,
 };
 
 const SCHEMA_JSON: &str = include_str!("../../../docs/schemas/command.schema.json");
@@ -156,6 +157,18 @@ pub enum Command {
     },
     /// Stop the run between ticks.
     RunStop,
+    /// Start a sprint.
+    SprintStart {
+        /// What it may spend, or nothing for no budget of its own.
+        budget_usd: Option<f64>,
+    },
+    /// End the open sprint.
+    SprintEnd,
+    /// Say something in the team's channel.
+    MessagePost {
+        /// What the human says.
+        text: String,
+    },
 }
 
 /// Checks a value against `docs/schemas/command.schema.json` and, when it conforms, returns the
@@ -276,9 +289,23 @@ fn human_command(name: CommandName, body: &Value) -> Result<Command, Vec<Validat
                 session_id: body.session_id.to_string(),
             })
         }
-        CommandName::RunStop => {
+        CommandName::RunStop | CommandName::SprintEnd => {
             let _: EmptyBody = read_body(body, name)?;
-            Ok(Command::RunStop)
+            Ok(if name == CommandName::RunStop {
+                Command::RunStop
+            } else {
+                Command::SprintEnd
+            })
+        }
+        CommandName::SprintStart => {
+            let body: SprintStartBody = read_body(body, name)?;
+            Ok(Command::SprintStart {
+                budget_usd: body.budget_usd,
+            })
+        }
+        CommandName::MessagePost => {
+            let body: MessagePostBody = read_body(body, name)?;
+            Ok(Command::MessagePost { text: body.text })
         }
     }
 }
@@ -378,6 +405,12 @@ pub fn command_to_value(command: &Command) -> Value {
             json!({ "session_id": session_id }),
         ),
         Command::RunStop => (CommandName::RunStop, json!({})),
+        Command::SprintStart { budget_usd } => (
+            CommandName::SprintStart,
+            json!({ "budget_usd": budget_usd }),
+        ),
+        Command::SprintEnd => (CommandName::SprintEnd, json!({})),
+        Command::MessagePost { text } => (CommandName::MessagePost, json!({ "text": text })),
     };
     json!({ "command": name.to_string(), "body": body })
 }
@@ -570,7 +603,7 @@ mod tests {
         };
         assert_eq!(contract.id.to_string(), "FRK-1");
         // The validator applied the schema's defaults, which is the proof it was the one used.
-        assert_eq!(contract.budget.max_sessions.get(), 12);
+        assert_eq!(contract.budget.max_sessions.get(), 14);
     }
 
     #[test]
@@ -740,6 +773,23 @@ mod tests {
             }
         );
         assert_eq!(read("run_stop", &json!({})), Command::RunStop);
+        assert_eq!(
+            read("sprint_start", &json!({ "budget_usd": 20.0 })),
+            Command::SprintStart {
+                budget_usd: Some(20.0)
+            }
+        );
+        assert_eq!(
+            read("sprint_start", &json!({ "budget_usd": null })),
+            Command::SprintStart { budget_usd: None }
+        );
+        assert_eq!(read("sprint_end", &json!({})), Command::SprintEnd);
+        assert_eq!(
+            read("message_post", &json!({ "text": "@dev-a how is FRK-1?" })),
+            Command::MessagePost {
+                text: "@dev-a how is FRK-1?".to_string()
+            }
+        );
     }
 
     #[test]
@@ -787,6 +837,10 @@ mod tests {
             json!({ "command": "agent_update", "body": { "agent_id": "dev-a", "status": "paused" } }),
             json!({ "command": "session_stop", "body": { "session_id": "session-7" } }),
             json!({ "command": "run_stop", "body": {} }),
+            json!({ "command": "sprint_start", "body": { "budget_usd": 20.0 } }),
+            json!({ "command": "sprint_start", "body": { "budget_usd": null } }),
+            json!({ "command": "sprint_end", "body": {} }),
+            json!({ "command": "message_post", "body": { "text": "hello @dev-a" } }),
         ];
         for wire in wires {
             let command = command_from_value(&wire).expect("the wire reads");

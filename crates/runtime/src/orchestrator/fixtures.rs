@@ -9,15 +9,16 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use chrono::{DateTime, Utc};
 use farik_core::contract::TaskId;
-use farik_protocol::clock::SequentialIds;
+use farik_protocol::clock::{Clock, IdSource, MovableClock, SequentialIds};
 use farik_protocol::event::{EventKind, FarikEvent, NewEvent, event_from_value};
 use farik_store::TaskProjection;
 use farik_store::git::fixtures::{git_in, git_output_in};
 use farik_store::requests::file_request;
 use serde_json::{Value, json};
 
-use super::{Orchestrator, OrchestratorDeps};
+use super::{Orchestrator, OrchestratorDeps, OrchestratorError, TickReport};
 use crate::daemon::DaemonState;
 use crate::exec::{ExecError, ExecResult, Executor};
 use crate::forge::Forge;
@@ -25,7 +26,10 @@ use crate::recorded::{RecordedAdapter, Transcript};
 use crate::sandbox::host::HostSandboxFactory;
 use crate::sandbox::{Sandbox, SandboxError, SandboxFactory};
 use crate::session::{RuntimeAdapter, RuntimeError, SessionHandle, SessionSpec};
+use crate::sleep::Sleeper;
+use crate::tools::ToolDeps;
 use crate::tools::fixtures::{TestProject, a_team_of_three, at};
+use crate::transitions::Transitions;
 
 pub(crate) use crate::recorded::fixtures::{UsageThenWaitAdapter, tool_runner};
 
@@ -86,14 +90,93 @@ impl Harness {
         sandboxes: Arc<dyn SandboxFactory>,
         forge: Forge,
     ) -> Orchestrator {
+        self.orchestrator_with_ids(adapter, sandboxes, forge, Arc::new(SequentialIds::new()))
+    }
+
+    /// An orchestrator over this project with `adapter`, `sandboxes`, `forge`, and `session_ids`.
+    pub(crate) fn orchestrator_with_ids(
+        &self,
+        adapter: Arc<dyn RuntimeAdapter>,
+        sandboxes: Arc<dyn SandboxFactory>,
+        forge: Forge,
+        session_ids: Arc<dyn IdSource + Send + Sync>,
+    ) -> Orchestrator {
         Orchestrator::new(OrchestratorDeps {
             tools: Arc::clone(&self.project.deps),
             daemon: Arc::clone(&self.daemon),
             adapter,
             sandboxes,
-            session_ids: Arc::new(SequentialIds::new()),
+            session_ids,
             forge: Arc::new(forge),
+            sleeper: Arc::new(NeverWakes),
         })
+    }
+
+    /// An orchestrator over this project with `adapter` and host sandboxes, whose tools, governor's
+    /// door, and sleeper share one clock at `now`, which a wait moves, and whose session ids are
+    /// `later-session-1` and so on, so that they are not those of an orchestrator made before it.
+    pub(crate) fn orchestrator_at(
+        &self,
+        adapter: Arc<dyn RuntimeAdapter>,
+        now: DateTime<Utc>,
+    ) -> Orchestrator {
+        self.orchestrator_on(adapter, Arc::new(MovableClock::new(now)))
+    }
+
+    /// `orchestrator_at`, on `clock`, which the test moves as well.
+    pub(crate) fn orchestrator_on(
+        &self,
+        adapter: Arc<dyn RuntimeAdapter>,
+        clock: Arc<MovableClock>,
+    ) -> Orchestrator {
+        let deps = &self.project.deps;
+        let tools = Arc::new(ToolDeps {
+            log: Arc::clone(&deps.log),
+            projections: Arc::clone(&deps.projections),
+            files: Arc::clone(&deps.files),
+            transitions: Arc::new(Transitions::new(
+                Arc::clone(&deps.log),
+                Arc::clone(&deps.projections),
+                Arc::clone(&deps.files),
+                self.project.repo.adapter(),
+                Arc::clone(&clock) as Arc<dyn Clock + Send + Sync>,
+                deps.ids.clone(),
+            )),
+            git: self.project.repo.adapter(),
+            clock: Arc::clone(&clock) as Arc<dyn Clock + Send + Sync>,
+            ids: deps.ids.clone(),
+        });
+        Orchestrator::new(OrchestratorDeps {
+            tools,
+            daemon: Arc::clone(&self.daemon),
+            adapter,
+            sandboxes: Arc::new(HostSandboxFactory),
+            session_ids: Arc::new(LaterIds(SequentialIds::new())),
+            forge: Arc::new(self.gh.forge(&self.project.repo.path)),
+            sleeper: Arc::new(MovingSleeper(clock)),
+        })
+    }
+
+    /// Records that `agent` sleeps until `until`, as the end of its refused session would.
+    pub(crate) fn asleep(&self, agent: &str, until: DateTime<Utc>) {
+        let deps = &self.project.deps;
+        let appended = deps
+            .log
+            .append(&NewEvent {
+                recorded_at: at(),
+                ids: farik_protocol::event::EventIds {
+                    agent_id: Some(agent.to_string()),
+                    ..deps.ids.clone()
+                },
+                body: farik_protocol::event::EventBody::AgentSlept(
+                    farik_protocol::event::AgentSleptBody {
+                        until,
+                        detail: "Claude AI usage limit reached".to_string(),
+                    },
+                ),
+            })
+            .expect("appends");
+        deps.projections.apply(&appended).expect("projects");
     }
 
     /// Files `task` in `status`: a standalone task of a Software Developer's, reviewed by another,
@@ -190,7 +273,7 @@ impl Harness {
     }
 
     /// Files `task` and moves it through `assigned` to `in_progress`, held by `assignee` and
-    /// reviewed by `reviewer`, with its worktree made on `farik/<task>` from `main`.
+    /// reviewed by `reviewer`, with its worktree made on its branch from `main`.
     pub(crate) fn in_progress(&self, task: &str, assignee: &str, reviewer: &str) {
         self.assigned(task, assignee, reviewer);
         self.project.moved(
@@ -202,7 +285,7 @@ impl Harness {
         self.project
             .deps
             .git
-            .create_worktree(&self.worktree(task), &format!("farik/{task}"), "main")
+            .create_worktree(&self.worktree(task), &self.branch(task), "main")
             .expect("the task's worktree is made");
     }
 
@@ -222,7 +305,7 @@ impl Harness {
         self.project.moved(task, "assigned", "in_progress", &people);
         let worktree = self.worktree(task);
         let git = &self.project.deps.git;
-        git.create_worktree(&worktree, &format!("farik/{task}"), "main")
+        git.create_worktree(&worktree, &self.branch(task), "main")
             .expect("the task's worktree is made");
         if commits_done {
             std::fs::write(worktree.join("done.txt"), "").expect("done.txt is written");
@@ -338,7 +421,7 @@ impl Harness {
         let root = self.project.repo.path.to_str().expect("a path").to_string();
         git_in(
             &clone,
-            &["fetch", &root, &format!("refs/heads/farik/{task}")],
+            &["fetch", &root, &format!("refs/heads/{}", self.branch(task))],
         );
         git_in(
             &clone,
@@ -385,6 +468,25 @@ impl Harness {
             "blocked",
             &body,
         );
+    }
+
+    /// Files `task` and moves it straight to `escalated`, its `escalation.raised` of `reason`
+    /// recorded `hours` before the clock's now; answers that event's seq, the escalation's
+    /// `raised_seq`.
+    pub(crate) fn escalated_hours_ago(&self, task: &str, reason: &str, hours: i64) -> u64 {
+        let raised_at = at() - chrono::Duration::hours(hours);
+        self.project.filed(task, "rejected", "task", None);
+        self.project
+            .moved_at(raised_at, task, "rejected", "escalated", &json!({}));
+        self.project
+            .record_at(
+                raised_at,
+                task,
+                "escalation.raised",
+                &json!({ "reason": reason, "detail": format!("{task} waits") }),
+            )
+            .envelope
+            .seq
     }
 
     /// Files `task` and moves it through `in_progress` and `verifying` to `rejected` at
@@ -476,6 +578,18 @@ impl Harness {
             .join(task)
     }
 
+    /// The task's branch, the one its contract's file names (5.14).
+    pub(crate) fn branch(&self, task: &str) -> String {
+        self.project.branch(task)
+    }
+
+    /// Sprint `sprint` open with no budget and holding `tasks`, as starting and planning it would
+    /// leave it: its file, each task's contract naming it, `sprint.started` by the human, and
+    /// `sprint.planned` by the Product Manager when it holds a task.
+    pub(crate) fn open_sprint(&self, sprint: &str, tasks: &[&str]) {
+        self.project.open_sprint(sprint, None, tasks);
+    }
+
     /// The task's row on the board.
     pub(crate) fn row(&self, task: &str) -> TaskProjection {
         let id: TaskId = task.parse().expect("a task id");
@@ -490,6 +604,78 @@ impl Harness {
     /// Every event of these kinds, oldest first; every event when `kinds` is empty.
     pub(crate) fn events(&self, kinds: &[EventKind]) -> Vec<FarikEvent> {
         self.project.events(kinds)
+    }
+}
+
+/// `run_until_idle` on a thread of its own, which is left behind if the run does not end
+/// within ten seconds: a run that does not stop at an idle tick ticks for ever without
+/// yielding, so no timer on its own runtime could stop it.
+pub(crate) fn run_until_idle_within_ten_seconds(
+    orchestrator: Arc<Orchestrator>,
+) -> Result<(), OrchestratorError> {
+    let (sender, receiver) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("a runtime is built");
+        let _ = sender.send(runtime.block_on(orchestrator.run_until_idle()));
+    });
+    receiver
+        .recv_timeout(Duration::from_secs(10))
+        .expect("the run ends")
+}
+
+/// Ticks `orchestrator` until a tick does not act, at most three times, and asserts that the
+/// last is idle, waiting for `agent` until `until`. A session a tick starts on an adapter with no
+/// transcript left fails the tick, and so the test.
+pub(crate) async fn waits_for(orchestrator: &Orchestrator, agent: &str, until: DateTime<Utc>) {
+    for _ in 0..3 {
+        let report = orchestrator.tick().await.expect("the tick runs");
+        if let TickReport::Idle { why, until: woken } = &report {
+            assert_eq!(*woken, Some(until), "{report:?}");
+            assert!(
+                why.starts_with(&format!("waiting for {agent}, asleep until ")),
+                "{why}"
+            );
+            return;
+        }
+    }
+    panic!("no idle tick in three");
+}
+
+/// Session ids `later-session-1`, `later-session-2`, and so on.
+struct LaterIds(SequentialIds);
+
+/// A sleeper that moves its clock to the time waited for and returns at once.
+pub(crate) struct MovingSleeper(pub(crate) Arc<MovableClock>);
+
+impl Sleeper for MovingSleeper {
+    fn sleep_until(
+        &self,
+        until: DateTime<Utc>,
+    ) -> std::pin::Pin<Box<dyn Future<Output = ()> + Send + '_>> {
+        self.0.set(until);
+        Box::pin(std::future::ready(()))
+    }
+}
+
+/// A sleeper that never returns: an orchestrator whose clock no wait moves waits for ever, or until
+/// it is stopped.
+pub(crate) struct NeverWakes;
+
+impl Sleeper for NeverWakes {
+    fn sleep_until(
+        &self,
+        _until: DateTime<Utc>,
+    ) -> std::pin::Pin<Box<dyn Future<Output = ()> + Send + '_>> {
+        Box::pin(std::future::pending())
+    }
+}
+
+impl IdSource for LaterIds {
+    fn session_id(&self) -> String {
+        format!("later-{}", self.0.session_id())
     }
 }
 

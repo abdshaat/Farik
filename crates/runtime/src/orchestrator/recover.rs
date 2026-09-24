@@ -137,7 +137,10 @@ mod tests {
         git.commit(&worktree, "Add done.txt", &["done.txt".to_string()])
             .expect("committed");
         harness.started_session("FRK-2", "dev-a", "session-killed", "implement");
-        let sha = git_output_in(&harness.project.repo.path, &["rev-parse", "farik/FRK-2"]);
+        let sha = git_output_in(
+            &harness.project.repo.path,
+            &["rev-parse", &harness.branch("FRK-2")],
+        );
         (harness, sha)
     }
 

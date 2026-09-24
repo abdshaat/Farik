@@ -5,10 +5,13 @@ use std::path::Path;
 use std::sync::Arc;
 
 use chrono::{DateTime, TimeZone, Utc};
+use farik_core::branch::task_branch;
 use farik_core::contract::fixtures::a_contract_wire;
-use farik_core::contract::validate_contract;
+use farik_core::contract::{TaskId, validate_contract};
 use farik_core::criteria::fixtures::a_criteria_library_wire;
 use farik_core::criteria::validate_criteria;
+use farik_core::sprint::fixtures::an_open_sprint_wire;
+use farik_core::sprint::validate_sprint;
 use farik_core::team::fixtures::{a_team_wire, an_agent_wire};
 use farik_core::team::{Team, validate_team};
 use farik_protocol::clock::{Clock, FixedClock};
@@ -20,6 +23,7 @@ use serde_json::{Value, json};
 
 use super::{ToolContext, ToolDeps, ToolError, call_tool};
 use crate::exec::Executor;
+use crate::session::SessionPurpose;
 use crate::transitions::Transitions;
 
 /// The time every fixture event and every tool call is stamped with.
@@ -92,6 +96,9 @@ impl TestProject {
             agent_id: agent.to_string(),
             task_id: task.map(|task| task.parse().expect("a task id")),
             session_id: "session-1".to_string(),
+            purpose: SessionPurpose::Implement,
+            in_reply_to: None,
+            thread: None,
             executor: None,
             deps: Arc::clone(&self.deps),
         }
@@ -149,6 +156,17 @@ impl TestProject {
         .expect("a contract serialises")
     }
 
+    /// The branch of `task`, the one its contract's file names (5.14).
+    pub(crate) fn branch(&self, task: &str) -> String {
+        task_branch(
+            &self
+                .deps
+                .files
+                .read_contract(&task.parse().expect("a task id"))
+                .expect("the file reads"),
+        )
+    }
+
     /// The fixture contract as `task`, a Software Developer's reviewed by another, written to its
     /// file with `change` applied, and put on the board by a `task.created` in `status`.
     pub(crate) fn filed_with(
@@ -191,6 +209,42 @@ impl TestProject {
     /// `filed_with` and no change.
     pub(crate) fn filed(&self, task: &str, status: &str, kind: &str, parent: Option<&str>) {
         self.filed_with(task, status, kind, parent, |_| {});
+    }
+
+    /// Sprint `sprint` open with `budget_usd` and holding `tasks`, as starting and planning it
+    /// would leave it: its file, each task's contract naming it, `sprint.started` by the human, and
+    /// `sprint.planned` by the Product Manager when it holds a task.
+    pub(crate) fn open_sprint(&self, sprint: &str, budget_usd: Option<f64>, tasks: &[&str]) {
+        let files = &self.deps.files;
+        let mut wire = an_open_sprint_wire();
+        wire["id"] = json!(sprint);
+        wire["task_ids"] = json!(tasks);
+        if let Some(usd) = budget_usd {
+            wire["budget_usd"] = json!(usd);
+        }
+        files
+            .write_sprint(&validate_sprint(&wire).expect("the fixture is a sprint"))
+            .expect("the sprint is written");
+        for task in tasks {
+            let id: TaskId = task.parse().expect("a task id");
+            let mut contract = files.read_contract(&id).expect("the contract reads");
+            contract.sprint = Some(sprint.to_string());
+            files
+                .write_contract(&contract)
+                .expect("the contract is written");
+        }
+        self.record(
+            "",
+            "sprint.started",
+            &json!({ "sprint_id": sprint, "budget_usd": budget_usd, "started_by": "human" }),
+        );
+        if !tasks.is_empty() {
+            self.record(
+                "",
+                "sprint.planned",
+                &json!({ "sprint_id": sprint, "task_ids": tasks, "planned_by": "pm" }),
+            );
+        }
     }
 
     /// A `task.transitioned` of `task` from `from` into `to`, by the governor, with `extra`
@@ -265,7 +319,7 @@ impl TestProject {
 }
 
 /// Runs one call to the end on a runtime of its own.
-fn run(context: &ToolContext, name: &str, input: Value) -> Result<Value, ToolError> {
+pub(crate) fn run(context: &ToolContext, name: &str, input: Value) -> Result<Value, ToolError> {
     tokio::runtime::Builder::new_current_thread()
         .build()
         .expect("a runtime is made")

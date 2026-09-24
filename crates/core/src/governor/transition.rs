@@ -680,6 +680,9 @@ mod tests {
             assignee_open_tasks: 0,
             wip_limit: 2,
             remaining_sprint_budget_usd: 15.0,
+            open_sprint: None,
+            task_sprint: None,
+            parent_sprint: None,
             dependencies: Vec::new(),
         }
     }

@@ -21,6 +21,9 @@ use serde_json::json;
 
 const COMMAND: &str = "sh run_tests.sh";
 
+/// The branch of FRK-1, a Software Developer's feature (5.14).
+const BRANCH: &str = "feature/FRK-1";
+
 /// `main` with the code and a runner for `tests/*.sh`, and the task's branch checked out from it.
 fn fixture(name: &str) -> TempRepo {
     let repository = TempRepo::new(name);
@@ -30,7 +33,7 @@ fn fixture(name: &str) -> TempRepo {
         "for t in tests/*.sh; do [ -e \"$t\" ] || continue; sh \"$t\" || exit 1; done\n",
     );
     repository.commit("the code and its runner");
-    repository.git(&["checkout", "-b", "farik/FRK-1"]);
+    repository.git(&["checkout", "-b", BRANCH]);
     repository
 }
 
@@ -46,7 +49,7 @@ fn input<'a>(
     NewTestsInput {
         git,
         base: "main",
-        head: "farik/FRK-1",
+        head: BRANCH,
         sandboxes,
         project_id: "p",
         task_id,

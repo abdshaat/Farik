@@ -183,6 +183,17 @@ fn makes_a_project_out_of_a_repository() {
     let files = files_of(&repository);
     let team = files.read_team().expect("a team was written");
     assert_eq!(team.agents.len(), 2);
+    // Written out rather than left to the read's default, so the person sees them (section 3).
+    let written = std::fs::read_to_string(repository.path.join(".farik/team.yaml"))
+        .expect("the team file reads");
+    let document_paths = written
+        .split_once("document_paths:")
+        .map(|(_, rest)| rest.lines().skip(1).take(3).collect::<Vec<_>>().join("\n"))
+        .unwrap_or_default();
+    assert_eq!(
+        document_paths, "  - docs/**\n  - \"**/*.md\"\n  - CHANGELOG.md",
+        "{written}"
+    );
     assert!(
         files
             .read_project_scan()

@@ -7,8 +7,12 @@ use std::sync::Arc;
 use chrono::{DateTime, Utc};
 use farik_core::team::Team;
 use farik_protocol::event::{EventBody, EventIds, NewEvent, new_event};
+use farik_runtime::ToolDeps;
+use farik_runtime::transitions::Transitions;
 use farik_store::files::ProjectFiles;
-use farik_store::{EventLog, EventQuery, Git, open_event_log};
+use farik_store::{EventLog, EventQuery, Git, open_event_log, open_projections};
+
+use crate::CliIo;
 
 /// Where the event log lives, under the gitignored `.farik/local/` (D5).
 pub(crate) const DATABASE: &str = ".farik/local/farik.db";
@@ -189,6 +193,35 @@ pub(crate) fn slug(name: &str) -> String {
     } else {
         slug
     }
+}
+
+/// The project's tools, over this process's own board of the project's log.
+///
+/// # Errors
+///
+/// A sentence saying what the store refused.
+pub(crate) fn tool_deps(project: &Project, io: &CliIo<'_>) -> Result<Arc<ToolDeps>, String> {
+    let projections =
+        Arc::new(open_projections(Arc::clone(&project.log)).map_err(|error| error.to_string())?);
+    let files = Arc::new(ProjectFiles::open(project.root.clone()));
+    let ids = crate::contract::event_ids(project);
+    let transitions = Arc::new(Transitions::new(
+        Arc::clone(&project.log),
+        Arc::clone(&projections),
+        Arc::clone(&files),
+        Git::open(project.root.clone()),
+        Arc::clone(&io.clock),
+        ids.clone(),
+    ));
+    Ok(Arc::new(ToolDeps {
+        log: Arc::clone(&project.log),
+        projections,
+        files,
+        transitions,
+        git: Git::open(project.root.clone()),
+        clock: Arc::clone(&io.clock),
+        ids,
+    }))
 }
 
 #[cfg(test)]

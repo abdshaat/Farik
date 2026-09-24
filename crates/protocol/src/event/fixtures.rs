@@ -52,19 +52,13 @@ pub fn a_full_event_wire(kind: EventKind) -> Value {
 #[must_use]
 pub fn a_body_wire(kind: EventKind) -> Value {
     match kind {
-        EventKind::TaskCreated => {
-            json!({ "summary": a_contract_summary_wire(), "created_by": "human" })
-        }
+        EventKind::TaskCreated | EventKind::ContractWritten => a_summary_body_wire(kind),
         EventKind::RequestTriaged => json!({
             "size": "small",
             "reason": "One deliverable and one reviewer.",
             "triaged_by": "sam-ortiz"
         }),
-        EventKind::ContractWritten => {
-            json!({ "summary": a_contract_summary_wire(), "written_by": "maya-chen" })
-        }
-        EventKind::ContractLocked => json!({ "locked_by": "human" }),
-        EventKind::ContractUnlocked => json!({ "unlocked_by": "human" }),
+        EventKind::ContractLocked | EventKind::ContractUnlocked => a_hold_body_wire(kind),
         EventKind::DriftDetected => json!({
             "drift": "contract_without_events",
             "detail": "FRK-1 has a contract file and no events."
@@ -118,11 +112,14 @@ pub fn a_body_wire(kind: EventKind) -> Value {
             "reason": "blocker_age",
             "detail": "blocked_age: no key"
         }),
+        EventKind::EscalationAged => json!({ "raised_seq": 1, "hours": 25 }),
+        EventKind::MemoryWritten | EventKind::DecisionWritten => a_kept_body_wire(kind),
         EventKind::ContractEvaluated => json!({
             "gate": "definition_of_ready",
             "passed": false,
             "failures": ["the contract has no exit criteria"]
         }),
+        EventKind::ContractJudged => a_judgment_body_wire(),
         EventKind::CriterionRecorded => json!({
             "criterion_id": "C1",
             "passed": true,
@@ -145,8 +142,56 @@ pub fn a_body_wire(kind: EventKind) -> Value {
         | EventKind::QuestionAnswered
         | EventKind::HumanAccepted
         | EventKind::EscalationResolved
-        | EventKind::AgentUpdated => a_human_body_wire(kind),
+        | EventKind::MessagePosted => a_human_body_wire(kind),
+        EventKind::AgentUpdated | EventKind::AgentSlept => an_agent_body_wire(kind),
+        EventKind::SprintStarted
+        | EventKind::SprintPlanned
+        | EventKind::SprintEnded
+        | EventKind::RetroAppended => a_sprint_body_wire(kind),
     }
+}
+
+/// A body that writes a contract's summary: its creation by the human, or a write by
+/// `maya-chen`.
+fn a_summary_body_wire(kind: EventKind) -> Value {
+    if kind == EventKind::TaskCreated {
+        json!({ "summary": a_contract_summary_wire(), "created_by": "human" })
+    } else {
+        json!({ "summary": a_contract_summary_wire(), "written_by": "maya-chen" })
+    }
+}
+
+/// A record an agent keeps: its notebook, or a decision, by `maya-chen`.
+fn a_kept_body_wire(kind: EventKind) -> Value {
+    if kind == EventKind::MemoryWritten {
+        json!({ "text": "Use pnpm.", "written_by": "maya-chen" })
+    } else {
+        json!({
+            "number": 1,
+            "slug": "use-sqlite-for-the-log",
+            "title": "Use SQLite for the log",
+            "written_by": "maya-chen"
+        })
+    }
+}
+
+/// A lock or an unlock of a contract, by the human.
+fn a_hold_body_wire(kind: EventKind) -> Value {
+    if kind == EventKind::ContractLocked {
+        json!({ "locked_by": "human" })
+    } else {
+        json!({ "unlocked_by": "human" })
+    }
+}
+
+/// The Scrum Master's judgment of a contract, passing both rules.
+fn a_judgment_body_wire() -> Value {
+    json!({
+        "judged_by": "sam-ortiz",
+        "fits_budget": true,
+        "criteria_detect_failure": true,
+        "reason": "One deliverable and a criterion that runs it."
+    })
 }
 
 /// A review summed up, or a product document written.
@@ -159,8 +204,8 @@ fn a_record_body_wire(kind: EventKind) -> Value {
 }
 
 /// A body of a question to the human or of the human's own acts: a question, an answer to question
-/// 3, an acceptance of a result with its words, a resolution back to `refining`, and a pause of
-/// `dev-a`.
+/// 3, an acceptance of a result with its words, a resolution back to `refining`, and a message
+/// in the channel mentioning `dev-a`.
 fn a_human_body_wire(kind: EventKind) -> Value {
     match kind {
         EventKind::QuestionAsked => json!({
@@ -173,10 +218,40 @@ fn a_human_body_wire(kind: EventKind) -> Value {
         EventKind::HumanAccepted => {
             json!({ "subject": "result", "accepted_by": "human", "message": "Both look right." })
         }
-        EventKind::EscalationResolved => {
-            json!({ "to": "refining", "message": "Split it by page.", "resolved_by": "human" })
+        EventKind::MessagePosted => json!({
+            "author": "human",
+            "kind": "human",
+            "text": "@dev-a how is FRK-1?",
+            "mentions": ["dev-a"]
+        }),
+        _ => json!({ "to": "refining", "message": "Split it by page.", "resolved_by": "human" }),
+    }
+}
+
+/// An agent's body: `dev-a` paused by the human, or asleep until three that afternoon at its
+/// model provider's limit.
+fn an_agent_body_wire(kind: EventKind) -> Value {
+    if kind == EventKind::AgentUpdated {
+        json!({ "agent_id": "dev-a", "status": "paused", "updated_by": "human" })
+    } else {
+        json!({ "until": "2026-09-17T15:00:00Z", "detail": "Claude AI usage limit reached" })
+    }
+}
+
+/// A sprint's body: S1 started by the human with 20 dollars, FRK-1 planned into it by the Scrum
+/// Master, S1 ended by the governor with nothing left, or S1's retro appended by the Scrum Master.
+fn a_sprint_body_wire(kind: EventKind) -> Value {
+    match kind {
+        EventKind::SprintStarted => {
+            json!({ "sprint_id": "S1", "budget_usd": 20.0, "started_by": "human" })
         }
-        _ => json!({ "agent_id": "dev-a", "status": "paused", "updated_by": "human" }),
+        EventKind::SprintPlanned => {
+            json!({ "sprint_id": "S1", "task_ids": ["FRK-1"], "planned_by": "sam-ortiz" })
+        }
+        EventKind::RetroAppended => {
+            json!({ "sprint_id": "S1", "text": "Keep the tasks small.", "appended_by": "sam-ortiz" })
+        }
+        _ => json!({ "sprint_id": "S1", "ended_by": "governor", "left": [] }),
     }
 }
 

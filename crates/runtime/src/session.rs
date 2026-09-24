@@ -5,6 +5,7 @@ use std::collections::BTreeMap;
 use std::fmt;
 use std::path::PathBuf;
 
+use chrono::{DateTime, Utc};
 use farik_core::budget::SessionLimits;
 use farik_core::contract::TaskId;
 use farik_core::pricing::Usage;
@@ -108,6 +109,8 @@ pub enum EndReason {
     Limit,
     /// The program reported an error.
     Error,
+    /// The model provider refused it for a usage or rate limit.
+    ProviderLimit,
 }
 
 /// One thing a session reported.
@@ -144,6 +147,8 @@ pub enum SessionEvent {
         reason: EndReason,
         /// What the program said about it.
         detail: String,
+        /// When the provider said its limit resets, as it said it; set only for `ProviderLimit`.
+        resets_at: Option<DateTime<Utc>>,
     },
 }
 

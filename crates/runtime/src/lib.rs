@@ -1,6 +1,10 @@
 //! Farik's agent runtime: a session is started, read, talked to, and stopped through one trait
 //! (`docs/SPEC.md` section 8.2), whatever program or recording is behind it.
 
+/// The team's ceremonies: the facts each is given.
+pub mod ceremonies;
+/// The team's channel: messages, and whom they mention.
+pub mod channel;
 /// The Claude Code program as a runtime: its command line, credential, and version.
 #[cfg(unix)]
 pub mod claude;
@@ -28,6 +32,10 @@ pub mod sandbox;
 pub mod session;
 /// When each session started and how it ended, in the log.
 pub mod sessions;
+/// An agent asleep until its model provider's limit resets.
+pub mod sleep;
+/// Starting and ending a sprint.
+pub mod sprints;
 /// The Claude Code program's `stream-json` lines, read as session events.
 pub mod stream;
 /// Farik's own tools, each checked against the agent's tier and the rule that owns it.

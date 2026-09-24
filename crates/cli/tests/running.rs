@@ -13,13 +13,17 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use chrono::{DateTime, Utc};
 use farik::{Engine, Interrupts};
 use farik_core::pricing::Usage;
+use farik_protocol::clock::MovableClock;
 use farik_protocol::event::{EventBody, EventKind, SessionEndedBodyReason};
 use farik_runtime::recorded::fixtures::{
     UsageThenWaitAdapter, accept_frk_1, implement_finishes_frk_1, plan_assigns_frk_1,
-    refine_writes_task_frk_1, review_writes_note, tool_runner,
+    planning_ceremony_frk_1, refine_writes_task_frk_1, reply_to_a_mention, review_writes_note,
+    tool_runner,
 };
+use farik_runtime::sleep::Sleeper;
 use farik_runtime::{RecordedAdapter, RuntimeAdapter, Transcript};
 use farik_store::git::fixtures::TempRepo;
 use serde_json::{Value, json};
@@ -27,8 +31,8 @@ use serde_json::{Value, json};
 use farik_core::team::fixtures::an_agent_wire;
 use project::{
     LiveDriver, a_bare_env, a_claude_saying, a_high_risk_task_verifying, a_project, a_team,
-    a_team_with, events, filed, hold_the_run_lock, joined, no_sandbox, record, record_as, run,
-    run_with, scratch, status_of, walked,
+    a_team_with, at, events, filed, hold_the_run_lock, joined, no_sandbox, record, record_as, run,
+    run_with, scratch, status_of, the_run_lock_frees, walked,
 };
 
 /// An engine replaying `transcripts`, whose Farik tool calls the driving process's daemon answers.
@@ -49,6 +53,19 @@ fn given(adapter: &Arc<UsageThenWaitAdapter>) -> Engine {
         let adapter: Arc<dyn RuntimeAdapter> = adapter.clone();
         adapter
     }))
+}
+
+/// A sleeper that moves its clock to the time waited for and returns at once.
+struct MovingSleeper(Arc<MovableClock>);
+
+impl Sleeper for MovingSleeper {
+    fn sleep_until(
+        &self,
+        until: DateTime<Utc>,
+    ) -> std::pin::Pin<Box<dyn Future<Output = ()> + Send + '_>> {
+        self.0.set(until);
+        Box::pin(std::future::ready(()))
+    }
 }
 
 fn daemon_file(repository: &TempRepo) -> PathBuf {
@@ -94,7 +111,7 @@ fn warned(err: &str) -> bool {
 }
 
 fn lock_is_free(repository: &TempRepo) {
-    drop(hold_the_run_lock(repository));
+    the_run_lock_frees(repository);
 }
 
 #[test]
@@ -542,6 +559,73 @@ fn stops_a_plan_through_farik_stop() {
 
 #[test]
 #[ignore = "needs the git program: cargo xtask check --integration"]
+fn prints_the_wait() {
+    let repository = a_team("run-wait");
+    let task = a_small_request(&repository);
+    walked(&repository, &task, &["refining", "ready"]);
+    let until = at() + chrono::Duration::hours(1);
+    record_as(
+        &repository,
+        "",
+        Some(("dev-a", "s-0")),
+        "agent.slept",
+        &json!({ "until": until.to_rfc3339(), "detail": "Claude AI usage limit reached" }),
+    );
+    let clock = Arc::new(MovableClock::new(at()));
+    let path = repository.path.clone();
+    // On a thread of its own, left behind if the run does not end in time: a run whose sleeper
+    // is lost waits a real hour.
+    let (sender, receiver) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let _ = sender.send(run_with(&path, &["run"], |io| {
+            io.clock = clock.clone();
+            io.sleeper = Some(Arc::new(MovingSleeper(Arc::clone(&clock))));
+            io.engine = recorded(vec![
+                plan_assigns_frk_1(),
+                implement_finishes_frk_1(),
+                review_writes_note(),
+                accept_frk_1(),
+            ]);
+        }));
+    });
+
+    let ran = receiver
+        .recv_timeout(Duration::from_secs(60))
+        .expect("the run ends within a minute");
+
+    assert_eq!(ran.code, 0, "{}\n{}", ran.out, ran.err);
+    let lines: Vec<&str> = ran.out.lines().collect();
+    let waiting = lines
+        .iter()
+        .position(|line| line.starts_with("waiting for dev-a, asleep until "))
+        .unwrap_or_else(|| panic!("no wait in {}", ran.out));
+    assert!(
+        lines[waiting..]
+            .iter()
+            .any(|line| line.starts_with(&format!("{task}: "))),
+        "{}",
+        ran.out
+    );
+    // The wait for dev-a is capped at a minute so the board is rechecked (docs/SPEC.md 8.2),
+    // which ticks `until - at()` (an hour) worth of minutes before dev-a wakes; the waiting line
+    // still prints once, not once per recheck.
+    assert_eq!(
+        lines
+            .iter()
+            .filter(|line| line.starts_with("waiting for dev-a, asleep until "))
+            .count(),
+        1,
+        "{}",
+        ran.out
+    );
+    assert_eq!(
+        purposes(&repository),
+        ["plan", "implement", "verify", "verify"]
+    );
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
 fn plans_without_starting_work() {
     let repository = a_team("plan-no-work");
     let task = a_small_request(&repository);
@@ -560,6 +644,50 @@ fn plans_without_starting_work() {
             .exists()
     );
     assert_eq!(purposes(&repository), ["plan"]);
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn prints_a_sprint_line_for_a_planning_session() {
+    let repository = a_team("plan-sprint");
+    let task = a_small_request(&repository);
+    walked(&repository, &task, &["refining", "ready"]);
+    let started = run(&repository.path, &["sprint", "start"]);
+    assert_eq!(started.code, 0, "{}", started.err);
+
+    let ran = run_with(&repository.path, &["plan"], |io| {
+        io.engine = recorded(vec![planning_ceremony_frk_1(), plan_assigns_frk_1()]);
+    });
+
+    assert_eq!(ran.code, 0, "{}\n{}", ran.out, ran.err);
+    assert!(
+        ran.out
+            .lines()
+            .any(|line| line.starts_with("S1: ") && line.contains("S1 holds FRK-1")),
+        "{}",
+        ran.out
+    );
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn prints_a_conversation_line() {
+    let repository = a_team("run-conversation");
+    let said = run(&repository.path, &["say", "@dev-a status?"]);
+    assert_eq!(said.code, 0, "{}", said.err);
+
+    let ran = run_with(&repository.path, &["run"], |io| {
+        io.engine = recorded(vec![reply_to_a_mention()]);
+    });
+
+    assert_eq!(ran.code, 0, "{}\n{}", ran.out, ran.err);
+    assert!(
+        ran.out
+            .lines()
+            .any(|line| line.starts_with("dev-a: ") && line.contains("conversation")),
+        "{}",
+        ran.out
+    );
 }
 
 #[test]

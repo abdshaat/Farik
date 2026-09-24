@@ -1,6 +1,7 @@
 //! Time and identifiers, injected rather than read from the machine, so that a test decides both
 //! and two runs over the same input produce the same events.
 
+use std::sync::Mutex;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use chrono::{DateTime, Utc};
@@ -36,6 +37,36 @@ impl FixedClock {
 impl Clock for FixedClock {
     fn now(&self) -> DateTime<Utc> {
         self.at
+    }
+}
+
+/// A clock a test moves by hand, for a block that has to age or a sleep that has to end. For
+/// tests, in this crate and in every other.
+#[derive(Debug)]
+pub struct MovableClock(Mutex<DateTime<Utc>>);
+
+impl MovableClock {
+    /// A clock at `at` until it is moved.
+    #[must_use]
+    pub fn new(at: DateTime<Utc>) -> Self {
+        Self(Mutex::new(at))
+    }
+
+    /// Moves the clock to `at`.
+    pub fn set(&self, at: DateTime<Utc>) {
+        *self
+            .0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = at;
+    }
+}
+
+impl Clock for MovableClock {
+    fn now(&self) -> DateTime<Utc> {
+        *self
+            .0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 }
 

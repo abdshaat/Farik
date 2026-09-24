@@ -18,12 +18,13 @@ use farik_protocol::command::{Command, RequestSize};
 use farik_protocol::event::{EventBody, EventKind, HumanAcceptedBodySubject};
 use farik_runtime::orchestrator::CommandError;
 use farik_runtime::recorded::fixtures::tool_runner;
+use farik_runtime::sprints::{PlannedBy, plan_sprint};
 use farik_runtime::{RecordedAdapter, RuntimeAdapter};
 use serde_json::{Value, json};
 
 use project::{
-    LiveDriver, a_high_risk_task_verifying, a_project, a_team, events, filed, hold_the_run_lock,
-    joined, moved, record, record_as, run, run_with, status_of,
+    LiveDriver, a_high_risk_task_verifying, a_project, a_team, events, filed, files_of,
+    hold_the_run_lock, joined, moved, record, record_as, run, run_with, status_of, tool_deps,
 };
 
 /// Records a question from `pm` on `task`, and answers its sequence number.
@@ -307,22 +308,27 @@ fn accepts_a_result_with_the_humans_review() {
 #[test]
 #[ignore = "needs the git program: cargo xtask check --integration"]
 fn prints_the_refusal_the_driving_process_answered() {
-    let repository = a_project("human-routed-refusals");
-    let task = filed(&repository, "Add done.txt");
-    for (answer, said) in [
+    // A project per answer: dropping a driver does not free its run lock at once, because a child
+    // another test thread is forking meanwhile holds a copy of the lock's descriptor until it
+    // execs, so a second driver on the same project could find the lock still held.
+    for (name, answer, said) in [
         (
+            "human-routed-not-found",
             CommandError::NotFound {
                 what: "FRK-9".to_string(),
             },
             "farik: FRK-9 is not in this project",
         ),
         (
+            "human-routed-refused",
             CommandError::Refused {
                 reason: "not_awaiting_approval: FRK-1 is a draft".to_string(),
             },
             "farik: not_awaiting_approval: FRK-1 is a draft",
         ),
     ] {
+        let repository = a_project(name);
+        let task = filed(&repository, "Add done.txt");
         let driver = LiveDriver::answering(&repository, Err(answer));
 
         let ran = run(&repository.path, &["approve", &task]);
@@ -411,4 +417,199 @@ fn holds_the_run_lock_while_it_handles_a_command_here() {
         );
         assert_eq!(ran.code, 0, "{args:?}: {}", ran.err);
     }
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn starts_and_shows_a_sprint_from_the_command_line() {
+    let repository = a_team("human-sprint");
+
+    let started = run(&repository.path, &["sprint", "start", "--budget", "20"]);
+    assert_eq!(started.code, 0, "{}", started.err);
+    let shown = run(&repository.path, &["sprint", "show"]);
+    assert_eq!(shown.code, 0, "{}", shown.err);
+    for said in ["S1", "open", "budget $20", "spent $0"] {
+        assert!(shown.out.contains(said), "{said} in {}", shown.out);
+    }
+
+    let ended = run(&repository.path, &["sprint", "end"]);
+    assert_eq!(ended.code, 0, "{}", ended.err);
+    let shown = run(&repository.path, &["sprint", "show"]);
+    assert_eq!(shown.code, 0, "{}", shown.err);
+    assert!(
+        shown.out.contains("S1") && shown.out.contains("ended"),
+        "{}",
+        shown.out
+    );
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn says_an_empty_sprint_whose_planning_is_spent_waits_for_its_end() {
+    let repository = a_team("human-sprint-empty");
+    let started = run(&repository.path, &["sprint", "start"]);
+    assert_eq!(started.code, 0, "{}", started.err);
+    let empty = "empty: end it with farik sprint end";
+    let shown = run(&repository.path, &["sprint", "show"]);
+    assert!(!shown.out.contains(empty), "{}", shown.out);
+
+    record_as(
+        &repository,
+        "",
+        Some(("pm", "session-1")),
+        "session.started",
+        &json!({ "purpose": "plan", "model": "claude-opus-5", "effort": "high" }),
+    );
+    // A planning session is spent once it ends other than at a limit.
+    record_as(
+        &repository,
+        "",
+        Some(("pm", "session-1")),
+        "session.ended",
+        &json!({ "reason": "completed", "detail": "done" }),
+    );
+    let shown = run(&repository.path, &["sprint", "show"]);
+
+    assert_eq!(shown.code, 0, "{}", shown.err);
+    assert!(shown.out.contains(empty), "{}", shown.out);
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn joins_a_task_the_human_files_under_a_sprints_epic() {
+    let repository = a_team("human-sprint-child");
+    let epic = an_epic_in_the_open_sprint(&repository);
+
+    let ran = file_under(&repository, &epic);
+
+    assert_eq!(ran.code, 0, "{}", ran.err);
+    let contract = files_of(&repository)
+        .read_contract(&"FRK-2".parse().expect("a task id"))
+        .expect("the child is written");
+    assert_eq!(contract.sprint.as_deref(), Some("S1"));
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn files_a_task_whose_join_fails_and_says_so() {
+    let repository = a_team("human-sprint-child-ending");
+    let epic = an_epic_in_the_open_sprint(&repository);
+    // The human's end has written S1's file and not yet recorded `sprint.ended`.
+    let path = repository.path.join(".farik/sprints/S1.yaml");
+    let text = std::fs::read_to_string(&path).expect("S1 reads");
+    let ending = text.replace(
+        "status: open",
+        "status: ended\nended_at: 2026-09-24T01:00:00Z",
+    );
+    assert_ne!(ending, text, "{text}");
+    std::fs::write(&path, ending).expect("S1 is written");
+
+    let ran = file_under(&repository, &epic);
+
+    assert_eq!(ran.code, 0, "{}", ran.err);
+    assert!(ran.out.contains("FRK-2 filed"), "{}", ran.out);
+    assert!(ran.out.contains("S1 has ended"), "{}", ran.out);
+    let contract = files_of(&repository)
+        .read_contract(&"FRK-2".parse().expect("a task id"))
+        .expect("the child is written");
+    assert_eq!(contract.sprint, None);
+}
+
+/// An epic, in progress with the Product Manager, planned into S1, which is open.
+fn an_epic_in_the_open_sprint(repository: &farik_store::git::fixtures::TempRepo) -> String {
+    let epic = filed(repository, "A whole board");
+    let ran = run(
+        &repository.path,
+        &["triage", &epic, "large", "--reason", "Two parts."],
+    );
+    assert_eq!(ran.code, 0, "{}", ran.err);
+    moved(repository, &epic, "draft", "refining", &json!({}));
+    moved(repository, &epic, "refining", "ready", &json!({}));
+    moved(
+        repository,
+        &epic,
+        "ready",
+        "assigned",
+        &json!({ "assignee": "pm" }),
+    );
+    moved(
+        repository,
+        &epic,
+        "assigned",
+        "in_progress",
+        &json!({ "assignee": "pm" }),
+    );
+    let started = run(&repository.path, &["sprint", "start"]);
+    assert_eq!(started.code, 0, "{}", started.err);
+    plan_sprint(
+        &tool_deps(repository),
+        &[epic.parse().expect("a task id")],
+        &PlannedBy::Governor,
+    )
+    .expect("the epic is planned");
+    epic
+}
+
+/// `farik task create` of a request under `epic`.
+fn file_under(repository: &farik_store::git::fixtures::TempRepo, epic: &str) -> project::Ran {
+    let child = repository.path.join("child.yaml");
+    std::fs::write(&child, project::a_request("One row of the board")).expect("written");
+    run(
+        &repository.path,
+        &[
+            "task",
+            "create",
+            child.to_str().expect("a path"),
+            "--parent",
+            epic,
+        ],
+    )
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn says_and_shows_the_channel() {
+    let repository = a_team("human-say");
+
+    let said = run(&repository.path, &["say", "hello @dev-a"]);
+    assert_eq!(said.code, 0, "{}", said.err);
+    assert!(said.out.contains("posted in the channel"), "{}", said.out);
+
+    let shown = run(&repository.path, &["channel"]);
+    assert_eq!(shown.code, 0, "{}", shown.err);
+    assert!(
+        shown
+            .out
+            .lines()
+            .any(|line| line.contains("human") && line.contains("hello @dev-a")),
+        "{}",
+        shown.out
+    );
+    let listed = run(&repository.path, &["--json", "channel"]);
+    assert_eq!(listed.code, 0, "{}", listed.err);
+    let first: Value = serde_json::from_str(listed.out.lines().next().expect("a line"))
+        .expect("one JSON object per line");
+    assert_eq!(first["kind"], "human");
+    assert_eq!(first["author"], "human");
+    assert_eq!(first["mentions"], json!(["dev-a"]));
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn shows_the_last_messages_of_the_channel() {
+    let repository = a_team("human-channel-last");
+    for text in ["one", "two", "three"] {
+        let said = run(&repository.path, &["say", text]);
+        assert_eq!(said.code, 0, "{}", said.err);
+    }
+
+    let shown = run(&repository.path, &["channel", "--last", "2"]);
+
+    assert_eq!(shown.code, 0, "{}", shown.err);
+    let texts: Vec<&str> = shown
+        .out
+        .lines()
+        .filter_map(|line| line.rsplit(' ').next())
+        .collect();
+    assert_eq!(texts, ["two", "three"], "{}", shown.out);
 }

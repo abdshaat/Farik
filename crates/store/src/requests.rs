@@ -495,6 +495,7 @@ pub fn rules_json(rules: &TeamRules) -> Value {
         "require_new_tests": rules.require_new_tests,
         "max_task_budget_usd": rules.max_task_budget_usd,
         "forbidden_commands": rules.forbidden_commands,
+        "document_paths": rules.document_paths,
     })
 }
 

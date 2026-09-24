@@ -1,17 +1,21 @@
 //! When each session started and how it ended, in the log (`docs/SPEC.md` section 8.5).
 
+use std::num::NonZeroU64;
+
 use farik_core::team::Effort;
 use farik_protocol::clock::Clock;
 use farik_protocol::event::{
     EventBody, EventIds, SessionEndedBody, SessionEndedBodyReason, SessionStartedBody,
-    SessionStartedBodyEffort, SessionStartedBodyPurpose, new_event,
+    SessionStartedBodyEffort, SessionStartedBodyPurpose, Thread, new_event,
 };
 use farik_store::{EventLog, StoreError};
 
 use crate::session::{EndReason, SessionPurpose, SessionSpec};
 
 /// Records `session.started` for `spec`: its purpose, model, and effort, on an envelope naming
-/// the spec's session, agent, and task, and `ids`' team and project.
+/// the spec's session, agent, and task, and `ids`' team and project. `in_reply_to` is, for a
+/// conversation, the seq of the latest message it was shown, which answers the mentions up to it;
+/// `thread` is a ceremony's, which says which ceremony it was.
 ///
 /// # Errors
 ///
@@ -20,6 +24,8 @@ use crate::session::{EndReason, SessionPurpose, SessionSpec};
 pub fn record_session_started(
     log: &EventLog,
     spec: &SessionSpec,
+    in_reply_to: Option<u64>,
+    thread: Option<Thread>,
     ids: &EventIds,
     clock: &dyn Clock,
 ) -> Result<(), StoreError> {
@@ -32,6 +38,8 @@ pub fn record_session_started(
                 detail: format!("session.started names no model: {error}"),
             })?,
         effort: effort_wire(spec.effort),
+        in_reply_to: in_reply_to.and_then(NonZeroU64::new),
+        thread,
     };
     let ids = EventIds {
         task_id: spec.task_id.clone(),
@@ -63,6 +71,7 @@ pub fn record_session_ended(
             EndReason::Aborted => SessionEndedBodyReason::Aborted,
             EndReason::Limit => SessionEndedBodyReason::Limit,
             EndReason::Error => SessionEndedBodyReason::Error,
+            EndReason::ProviderLimit => SessionEndedBodyReason::ProviderLimit,
         },
         detail: detail.to_string(),
     };
@@ -154,7 +163,7 @@ mod tests {
         let log = a_log();
         let spec = spec();
         let clock = FixedClock::new(at("2026-09-22T10:00:00Z"));
-        record_session_started(&log, &spec, &ids(&spec), &clock).expect("recorded");
+        record_session_started(&log, &spec, None, None, &ids(&spec), &clock).expect("recorded");
         record_session_ended(
             &log,
             &spec.session_id,
@@ -225,7 +234,7 @@ mod tests {
                 effort,
                 ..spec()
             };
-            record_session_started(&log, &spec, &ids(&spec), &clock).expect("recorded");
+            record_session_started(&log, &spec, None, None, &ids(&spec), &clock).expect("recorded");
             record_session_ended(&log, &spec.session_id, reason, "", &ids(&spec), &clock)
                 .expect("recorded");
             expected.push((purpose_wire, effort_wire, reason_wire));
@@ -247,5 +256,30 @@ mod tests {
             .map(|(a, b, c)| (a.to_string(), b.to_string(), c.to_string()))
             .collect();
         assert_eq!(written, expected);
+    }
+
+    #[test]
+    fn records_the_providers_limit_as_the_sessions_end() {
+        let log = a_log();
+        let spec = spec();
+        let clock = FixedClock::new(at("2026-09-22T10:00:00Z"));
+        record_session_ended(
+            &log,
+            &spec.session_id,
+            EndReason::ProviderLimit,
+            "Claude AI usage limit reached",
+            &ids(&spec),
+            &clock,
+        )
+        .expect("recorded");
+        match &everything(&log)[..] {
+            [event] => match &event.body {
+                EventBody::SessionEnded(body) => {
+                    assert_eq!(body.reason.to_string(), "provider_limit");
+                }
+                other => panic!("expected session.ended, got {other:?}"),
+            },
+            other => panic!("expected one event, got {other:?}"),
+        }
     }
 }

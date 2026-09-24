@@ -72,6 +72,7 @@
         "transition.refused",
         "escalation.raised",
         "contract.evaluated",
+        "contract.judged",
         "criterion.recorded",
         "note.written",
         "review.recorded",
@@ -87,7 +88,16 @@
         "question.answered",
         "human.accepted",
         "escalation.resolved",
-        "agent.updated"
+        "agent.updated",
+        "sprint.started",
+        "sprint.planned",
+        "sprint.ended",
+        "agent.slept",
+        "message.posted",
+        "retro.appended",
+        "escalation.aged",
+        "memory.written",
+        "decision.written"
       ]
     },
     "eventBodyWire": {
@@ -109,6 +119,7 @@
         { "$ref": "#/$defs/transitionRefusedBody" },
         { "$ref": "#/$defs/escalationRaisedBody" },
         { "$ref": "#/$defs/contractEvaluatedBody" },
+        { "$ref": "#/$defs/contractJudgedBody" },
         { "$ref": "#/$defs/criterionRecordedBody" },
         { "$ref": "#/$defs/noteWrittenBody" },
         { "$ref": "#/$defs/reviewRecordedBody" },
@@ -124,7 +135,16 @@
         { "$ref": "#/$defs/questionAnsweredBody" },
         { "$ref": "#/$defs/humanAcceptedBody" },
         { "$ref": "#/$defs/escalationResolvedBody" },
-        { "$ref": "#/$defs/agentUpdatedBody" }
+        { "$ref": "#/$defs/agentUpdatedBody" },
+        { "$ref": "#/$defs/sprintStartedBody" },
+        { "$ref": "#/$defs/sprintPlannedBody" },
+        { "$ref": "#/$defs/sprintEndedBody" },
+        { "$ref": "#/$defs/agentSleptBody" },
+        { "$ref": "#/$defs/messagePostedBody" },
+        { "$ref": "#/$defs/retroAppendedBody" },
+        { "$ref": "#/$defs/escalationAgedBody" },
+        { "$ref": "#/$defs/memoryWrittenBody" },
+        { "$ref": "#/$defs/decisionWrittenBody" }
       ]
     },
     "contractSummary": {
@@ -201,7 +221,7 @@
       "additionalProperties": false,
       "required": ["drift", "detail"],
       "properties": {
-        "drift": { "type": "string", "enum": ["contract_without_events", "events_without_contract", "status_mismatch", "lock_mismatch", "contract_unreadable"] },
+        "drift": { "type": "string", "enum": ["contract_without_events", "events_without_contract", "status_mismatch", "lock_mismatch", "sprint_mismatch", "contract_unreadable"] },
         "detail": { "type": "string" }
       }
     },
@@ -268,13 +288,13 @@
     },
     "budgetExhaustedBody": {
       "title": "Budget Exhausted Body",
-      "description": "A budget of docs/SPEC.md section 5.5 ran out, recorded once when it crossed from having room to none. The envelope is the session's that crossed it.",
+      "description": "A budget of docs/SPEC.md section 5.5 ran out, recorded once when it crossed from having room to none. The envelope is the session's that crossed it. `end_session_and_block_task` is what logs recorded before `end_session_with_note` replaced it, and names the same consequence.",
       "type": "object",
       "additionalProperties": false,
       "required": ["scope", "consequence"],
       "properties": {
         "scope": { "type": "string", "enum": ["session_tokens", "session_wall_clock", "session_tool_calls", "task_usd", "task_sessions", "sprint_usd", "day_usd"] },
-        "consequence": { "type": "string", "enum": ["end_session_and_block_task", "escalate_task", "stop_new_assignments", "pause_team"] }
+        "consequence": { "type": "string", "enum": ["end_session_with_note", "end_session_and_block_task", "escalate_task", "stop_new_assignments", "pause_team"] }
       }
     },
     "taskStatus": {
@@ -282,6 +302,12 @@
       "description": "Where a contract is in the lifecycle of docs/SPEC.md section 5.2, the contract schema's own list.",
       "type": "string",
       "enum": ["draft", "refining", "ready", "assigned", "in_progress", "blocked", "verifying", "rejected", "accepted", "escalated", "cancelled"]
+    },
+    "thread": {
+      "title": "Thread",
+      "description": "A ceremony's thread in the team's channel (docs/SPEC.md 5.9): the thread a ceremony session posts in, and that its session.started names.",
+      "type": "string",
+      "enum": ["planning", "standup", "review", "retro"]
     },
     "transitionActor": {
       "title": "Transition Actor",
@@ -378,6 +404,19 @@
         "gate": { "type": "string", "enum": ["definition_of_ready", "definition_of_done"] },
         "passed": { "type": "boolean" },
         "failures": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "contractJudgedBody": {
+      "title": "Contract Judged Body",
+      "description": "The Scrum Master judged a contract against the Definition of Ready's judgment rules (docs/SPEC.md section 5.3): whether it fits its budget and whether its criteria would detect the failure its intent worries about, with the reason.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["judged_by", "fits_budget", "criteria_detect_failure", "reason"],
+      "properties": {
+        "judged_by": { "type": "string" },
+        "fits_budget": { "type": "boolean" },
+        "criteria_detect_failure": { "type": "boolean" },
+        "reason": { "type": "string" }
       }
     },
     "criterionRecordedBody": {
@@ -490,6 +529,133 @@
         "updated_by": { "type": "string" }
       }
     },
+    "sprintStartedBody": {
+      "title": "Sprint Started Body",
+      "description": "The human started a sprint (docs/SPEC.md sections 3 and 5.5): its id, what it may spend, null for no budget of its own (ADR 0015), and who started it.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sprint_id", "budget_usd", "started_by"],
+      "properties": {
+        "sprint_id": { "type": "string", "pattern": "^S[1-9][0-9]{0,5}$" },
+        "budget_usd": { "type": ["number", "null"], "exclusiveMinimum": 0 },
+        "started_by": { "type": "string" }
+      }
+    },
+    "sprintPlannedBody": {
+      "title": "Sprint Planned Body",
+      "description": "Tasks were planned into the open sprint (docs/SPEC.md 5.11): by the assigner in its planning session, or by the governor when a task filed under an epic in the sprint joins it.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sprint_id", "task_ids", "planned_by"],
+      "properties": {
+        "sprint_id": { "type": "string", "pattern": "^S[1-9][0-9]{0,5}$" },
+        "task_ids": {
+          "type": "array",
+          "maxItems": 1000,
+          "uniqueItems": true,
+          "items": { "type": "string", "pattern": "^FRK-[0-9]{1,6}$" }
+        },
+        "planned_by": { "type": "string" }
+      }
+    },
+    "sprintEndedBody": {
+      "title": "Sprint Ended Body",
+      "description": "A sprint ended (docs/SPEC.md 5.5): by the governor when every task in it was accepted or cancelled, or by the human. left is the tasks that were in it and were neither, which leave it.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sprint_id", "ended_by", "left"],
+      "properties": {
+        "sprint_id": { "type": "string", "pattern": "^S[1-9][0-9]{0,5}$" },
+        "ended_by": { "type": "string", "enum": ["governor", "human"] },
+        "left": {
+          "type": "array",
+          "maxItems": 1000,
+          "uniqueItems": true,
+          "items": { "type": "string", "pattern": "^FRK-[0-9]{1,6}$" }
+        }
+      }
+    },
+    "agentSleptBody": {
+      "title": "Agent Slept Body",
+      "description": "An agent's model provider refused it for a usage or rate limit, so no session of its starts before until (docs/SPEC.md 5.5): the time the provider said the limit resets, or an hour after the refusal when it said none or a time already past. detail is what the session's end said. The sleeping agent is on the envelope; sleep is not a status, and the team file is not written.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["until", "detail"],
+      "properties": {
+        "until": { "type": "string", "format": "date-time" },
+        "detail": { "type": "string" }
+      }
+    },
+    "messagePostedBody": {
+      "title": "Message Posted Body",
+      "description": "A message in the team's channel, which is where the channel is kept (docs/SPEC.md 5.9). author is an agent id, human, or farik, and is who said it; the envelope names the agent for an agent's message and none for human or farik, and the task when the message is about one. text is one line, not blank, and at most 2,000 characters: Farik turns each line break into a space and refuses the rest when the message is posted, so that reading the log never fails on an old message. mentions are the agents Farik found named as @<id> in text, never what the author said they were. thread names a ceremony's thread, and in_reply_to the seq of the message a reply answers.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["author", "kind", "text", "mentions"],
+      "properties": {
+        "author": { "type": "string" },
+        "kind": {
+          "type": "string",
+          "enum": ["reaction", "ambient", "reply", "ceremony", "system", "human"]
+        },
+        "text": { "type": "string" },
+        "mentions": {
+          "type": "array",
+          "maxItems": 7,
+          "uniqueItems": true,
+          "items": { "type": "string" }
+        },
+        "thread": { "$ref": "#/$defs/thread" },
+        "in_reply_to": { "type": "integer", "minimum": 1, "maximum": 18446744073709551615 }
+      }
+    },
+    "retroAppendedBody": {
+      "title": "Retro Appended Body",
+      "description": "The retro ceremony of sprint sprint_id, the latest ended, recorded what the next planning should know (docs/SPEC.md 5.9): text, appended to .farik/team/retro.md under the sprint's section, by appended_by. One per sprint, whichever retro session appends it. It is about no one contract.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sprint_id", "text", "appended_by"],
+      "properties": {
+        "sprint_id": { "type": "string", "pattern": "^S[1-9][0-9]{0,5}$" },
+        "text": { "type": "string" },
+        "appended_by": { "type": "string" }
+      }
+    },
+    "escalationAgedBody": {
+      "title": "Escalation Aged Body",
+      "description": "An open escalation has waited past policy.escalation_age_hours on the human (docs/SPEC.md section 5.7): raised_seq is the escalation.raised it ages, hours how long it has waited, rounded down. The aged rule ages one per tick, the oldest not yet aged. It is about the escalation's task and names who acted at nobody: the human left it waiting.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["raised_seq", "hours"],
+      "properties": {
+        "raised_seq": { "type": "integer", "minimum": 0, "maximum": 18446744073709551615 },
+        "hours": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 }
+      }
+    },
+    "memoryWrittenBody": {
+      "title": "Memory Written Body",
+      "description": "An agent replaced its notebook, .farik/agents/<id>/memory.md, with text through farik_write_memory (docs/SPEC.md 5.8), within policy.memory_cap_tokens; an empty text empties it. written_by is the agent. It is about no one contract.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["text", "written_by"],
+      "properties": {
+        "text": { "type": "string" },
+        "written_by": { "type": "string" }
+      }
+    },
+    "decisionWrittenBody": {
+      "title": "Decision Written Body",
+      "description": "The Architect or the Product Manager recorded a decision through farik_write_decision (docs/SPEC.md 5.8): .farik/decisions/<number, four digits>-<slug>.md, which is never written over. written_by is the agent. It is about no one contract.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["number", "slug", "title", "written_by"],
+      "properties": {
+        "number": { "type": "integer", "minimum": 1, "maximum": 9999 },
+        "slug": { "type": "string", "pattern": "^[a-z0-9-]+$" },
+        "title": { "type": "string", "minLength": 1 },
+        "written_by": { "type": "string" }
+      }
+    },
     "questionAskedBody": {
       "title": "Question Asked Body",
       "description": "An agent asked the human a question (docs/SPEC.md section 5.16). The event's sequence number is the question's id. A conversation with no task can ask one, so the envelope names a task only when there is one.",
@@ -551,14 +717,16 @@
     },
     "sessionStartedBody": {
       "title": "Session Started Body",
-      "description": "A Claude Code session started (docs/SPEC.md sections 8.2 and 8.5): why, on which model, and how hard it thinks. The envelope names the session, the agent, and the task when the session has one; the exact system prompt it was given is kept in .farik/local/sessions/<session_id>/system-prompt.md.",
+      "description": "A Claude Code session started (docs/SPEC.md sections 8.2 and 8.5): why, on which model, and how hard it thinks. The envelope names the session, the agent, and the task when the session has one; the exact system prompt it was given is kept in .farik/local/sessions/<session_id>/system-prompt.md. A conversation's in_reply_to is the seq of the latest message it was shown: the mentions up to it are answered, and one posted after it is still pending, even one posted before this event. A ceremony's thread says which ceremony it was.",
       "type": "object",
       "additionalProperties": false,
       "required": ["purpose", "model", "effort"],
       "properties": {
         "purpose": { "type": "string", "enum": ["triage", "refine", "plan", "implement", "verify", "ceremony", "conversation"] },
         "model": { "type": "string", "minLength": 1 },
-        "effort": { "type": "string", "enum": ["low", "medium", "high"] }
+        "effort": { "type": "string", "enum": ["low", "medium", "high"] },
+        "in_reply_to": { "type": "integer", "minimum": 1, "maximum": 18446744073709551615 },
+        "thread": { "$ref": "#/$defs/thread" }
       }
     },
     "sessionEndedBody": {
@@ -568,7 +736,7 @@
       "additionalProperties": false,
       "required": ["reason", "detail"],
       "properties": {
-        "reason": { "type": "string", "enum": ["completed", "aborted", "limit", "error"] },
+        "reason": { "type": "string", "enum": ["completed", "aborted", "limit", "error", "provider_limit"] },
         "detail": { "type": "string" }
       }
     }

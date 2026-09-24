@@ -176,6 +176,7 @@ impl SessionHandle for RecordedSession {
             self.receiver = filled(vec![SessionEvent::Ended {
                 reason: EndReason::Aborted,
                 detail: "aborted".to_string(),
+                resets_at: None,
             }]);
         }
         &mut self.receiver
@@ -341,6 +342,7 @@ mod tests {
             vec![SessionEvent::Ended {
                 reason: EndReason::Aborted,
                 detail: "aborted".to_string(),
+                resets_at: None,
             }]
         );
     }

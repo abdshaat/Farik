@@ -13,6 +13,7 @@ use std::sync::Arc;
 use chrono::{DateTime, Utc};
 use farik::{CliIo, run_cli};
 use farik_protocol::clock::FixedClock;
+use farik_runtime::sprints::{PlannedBy, plan_sprint};
 use farik_store::git::fixtures::TempRepo;
 use serde_json::Value;
 
@@ -255,6 +256,21 @@ fn shows_the_team_rules_and_the_criterion_library() {
         rules.out
     );
     assert!(rules.out.contains("new tests"), "{}", rules.out);
+    assert!(
+        rules
+            .out
+            .contains("document paths: docs/**, **/*.md, CHANGELOG.md"),
+        "the document paths the schema defaults to: {}",
+        rules.out
+    );
+    let json = run_in(&repository.path, &["--json", "rules", "show"]);
+    assert_eq!(json.code, 0, "{}", json.err);
+    let shown: Value = serde_json::from_str(json.out.trim()).expect("JSON");
+    assert_eq!(
+        shown["document_paths"],
+        serde_json::json!(["docs/**", "**/*.md", "CHANGELOG.md"]),
+        "{shown}"
+    );
 
     let criteria = run_in(&repository.path, &["criteria", "list"]);
     assert_eq!(criteria.code, 0, "{}", criteria.err);
@@ -313,15 +329,10 @@ fn reports_a_contract_the_log_has_never_heard_of() {
 #[ignore = "needs the git program: cargo xtask check --integration"]
 fn reports_a_team_rule_that_does_not_compile() {
     let repository = a_project_with_a_task("read-doctor-rules");
-    let team = std::fs::read_to_string(repository.path.join(".farik/team.yaml")).expect("read");
-    std::fs::write(
-        repository.path.join(".farik/team.yaml"),
-        team.replace(
-            "rules: {}",
-            "rules:\n  forbidden_commands:\n    - \"rm -rf (\"\n",
-        ),
-    )
-    .expect("write");
+    replace_the_rules(
+        &repository.path,
+        "rules:\n  forbidden_commands:\n    - \"rm -rf (\"\n",
+    );
 
     let ran = run_in(&repository.path, &["doctor"]);
 
@@ -338,15 +349,30 @@ fn reports_a_team_rule_that_does_not_compile() {
     );
 }
 
+/// Replaces the whole top-level `rules:` block of the project's team.yaml with `rules`, which is
+/// that block written out. `farik init` writes the rules a team starts with (the default document
+/// paths among them), so the block is whatever lines follow `rules:` up to the next top-level key.
+fn replace_the_rules(project: &Path, rules: &str) {
+    let path = project.join(".farik/team.yaml");
+    let team = std::fs::read_to_string(&path).expect("read");
+    let start = team
+        .find("\nrules:")
+        .map(|at| at + 1)
+        .or_else(|| team.starts_with("rules:").then_some(0))
+        .expect("the team has rules");
+    let block = &team[start..];
+    let end = block
+        .match_indices('\n')
+        .map(|(at, _)| at + 1)
+        .find(|&at| block[at..].starts_with(|c: char| !c.is_whitespace()))
+        .map_or(team.len(), |at| start + at);
+    std::fs::write(&path, format!("{}{rules}{}", &team[..start], &team[end..])).expect("write");
+}
+
 /// Runs doctor on a project whose team rules are `rules`, and says it found `rule` and `pattern`.
 fn reports_a_glob_that_does_not_compile(name: &str, rules: &str, rule: &str, pattern: &str) {
     let repository = a_project_with_a_task(name);
-    let team = std::fs::read_to_string(repository.path.join(".farik/team.yaml")).expect("read");
-    std::fs::write(
-        repository.path.join(".farik/team.yaml"),
-        team.replace("rules: {}", rules),
-    )
-    .expect("write");
+    replace_the_rules(&repository.path, rules);
 
     let ran = run_in(&repository.path, &["doctor"]);
 
@@ -379,6 +405,17 @@ fn reports_an_allowed_paths_ceiling_that_does_not_compile() {
         "rules:\n  allowed_paths_ceiling:\n    - \"b/[\"\n",
         "allowed_paths_ceiling",
         "b/[",
+    );
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn reports_a_document_path_that_does_not_compile() {
+    reports_a_glob_that_does_not_compile(
+        "read-doctor-documents",
+        "rules:\n  document_paths:\n    - \"c/[\"\n",
+        "document_paths",
+        "c/[",
     );
 }
 
@@ -609,8 +646,9 @@ fn shows_a_tasks_diff_before_and_after_integration() {
     assert_eq!(ran.code, 1, "{}", ran.out);
     assert!(ran.err.contains("has no branch yet"), "{}", ran.err);
 
+    // A Software Developer's task with no `change` works on `feature/<id>` (5.14).
     let branch_with = |task: &str, file: &str| {
-        repository.git(&["checkout", "-q", "-b", &format!("farik/{task}")]);
+        repository.git(&["checkout", "-q", "-b", &format!("feature/{task}")]);
         repository.write(file, "done\n");
         repository.git(&["add", "--", file]);
         repository.git(&["commit", "-q", "-m", &format!("Add {file}")]);
@@ -621,7 +659,14 @@ fn shows_a_tasks_diff_before_and_after_integration() {
     assert_eq!(ran.code, 0, "{}", ran.err);
     assert!(ran.out.contains("+++ b/done.txt"), "{}", ran.out);
 
-    repository.git(&["merge", "-q", "--no-ff", "-m", "Merge FRK-1", "farik/FRK-1"]);
+    repository.git(&[
+        "merge",
+        "-q",
+        "--no-ff",
+        "-m",
+        "Merge FRK-1",
+        "feature/FRK-1",
+    ]);
     let sha = repository.git_output(&["rev-parse", "HEAD"]);
     project::record(
         &repository,
@@ -637,7 +682,7 @@ fn shows_a_tasks_diff_before_and_after_integration() {
     let filed = run_in(&repository.path, &["task", "create", "second.yaml"]);
     assert_eq!(filed.code, 0, "{}", filed.err);
     branch_with("FRK-2", "b.txt");
-    repository.git(&["merge", "-q", "--ff-only", "farik/FRK-2"]);
+    repository.git(&["merge", "-q", "--ff-only", "feature/FRK-2"]);
     let head = repository.git_output(&["rev-parse", "HEAD"]);
     project::record(
         &repository,
@@ -648,7 +693,7 @@ fn shows_a_tasks_diff_before_and_after_integration() {
     let ran = run_in(&repository.path, &["task", "show", "FRK-2", "--diff"]);
     assert_eq!(ran.code, 0, "{}", ran.err);
     assert!(
-        ran.out.contains("farik/FRK-2 is wholly in main"),
+        ran.out.contains("feature/FRK-2 is wholly in main"),
         "{}",
         ran.out
     );
@@ -810,6 +855,7 @@ fn prints_the_harness_metrics() {
             "  conversation: $0.00",
             "criteria verified by command, test, or artifact: 66.7%",
             "active weeks: 3",
+            "messages: reaction 0, ambient 0, reply 0, ceremony 0, system 0, human 0",
         ]
     );
 }
@@ -831,6 +877,7 @@ fn prints_none_before_a_task_is_accepted() {
             format!("cost per accepted task: {none}"),
             format!("criteria verified by command, test, or artifact: {none}"),
             "active weeks: 0".to_string(),
+            "messages: reaction 0, ambient 0, reply 0, ceremony 0, system 0, human 0".to_string(),
         ]
     );
 }
@@ -862,7 +909,15 @@ fn prints_the_harness_metrics_as_json() {
                 }
             },
             "mechanically_verified_criteria_share": 2.0 / 3.0,
-            "active_weeks": 3
+            "active_weeks": 3,
+            "messages": {
+                "reaction": 0,
+                "ambient": 0,
+                "reply": 0,
+                "ceremony": 0,
+                "system": 0,
+                "human": 0
+            }
         })
     );
 
@@ -883,10 +938,145 @@ fn prints_the_harness_metrics_as_json() {
 
 #[test]
 #[ignore = "needs the git program: cargo xtask check --integration"]
-fn has_no_sprint_flag_until_sprints_exist() {
+fn prints_the_channel_counts() {
+    let repository = a_project_with_a_task("read-metrics-messages");
+    for text in ["one", "two"] {
+        let said = run_in(&repository.path, &["say", text]);
+        assert_eq!(said.code, 0, "{}", said.err);
+    }
+
+    let ran = run_in(&repository.path, &["metrics"]);
+    assert_eq!(ran.code, 0, "{}", ran.err);
+    assert_eq!(
+        ran.out.lines().last(),
+        Some("messages: reaction 0, ambient 0, reply 0, ceremony 0, system 0, human 2")
+    );
+
+    let as_json = run_in(&repository.path, &["metrics", "--json"]);
+    assert_eq!(as_json.code, 0, "{}", as_json.err);
+    let metrics: Value = serde_json::from_str(as_json.out.trim()).expect("one JSON object");
+    assert_eq!(
+        metrics["messages"],
+        serde_json::json!({
+            "reaction": 0,
+            "ambient": 0,
+            "reply": 0,
+            "ceremony": 0,
+            "system": 0,
+            "human": 2
+        })
+    );
+}
+
+#[cfg(unix)]
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn prints_the_metrics_of_a_sprint() {
+    use serde_json::json;
+
     let repository = a_project_with_a_task("read-metrics-sprint");
+    let started = run_in(&repository.path, &["sprint", "start"]);
+    assert_eq!(started.code, 0, "{}", started.err);
+    plan_sprint(
+        &project::tool_deps(&repository),
+        &["FRK-1".parse().expect("a task id")],
+        &PlannedBy::Governor,
+    )
+    .expect("FRK-1 is planned into S1");
+
+    let by = |actor: &str| json!({ "actor": actor, "requested_by": actor });
+    project::moved(
+        &repository,
+        "FRK-1",
+        "in_progress",
+        "verifying",
+        &by("assignee"),
+    );
+    project::moved(
+        &repository,
+        "FRK-1",
+        "verifying",
+        "accepted",
+        &by("product_manager"),
+    );
+    project::record_on(
+        &repository,
+        "FRK-1",
+        Some(("dev-a", "s1")),
+        "cost.recorded",
+        &json!({
+            "purpose": "implement",
+            "model_id": "claude-sonnet-4-5",
+            "usage": {
+                "input_tokens": 1000,
+                "output_tokens": 100,
+                "cache_read_tokens": 0,
+                "cache_write_tokens": 0
+            },
+            "cost_usd": 1.0
+        }),
+        at(),
+    );
+
     let ran = run_in(&repository.path, &["metrics", "--sprint", "S1"]);
-    assert_eq!(ran.code, 2, "{}{}", ran.out, ran.err);
+    assert_eq!(ran.code, 0, "{}", ran.err);
+    assert_eq!(
+        ran.out.lines().collect::<Vec<_>>(),
+        [
+            "accepted tasks: 1",
+            "first-pass acceptance: 100.0%",
+            "human interventions per accepted task: 0.00",
+            "cost per accepted task: $1.00",
+            "  triage: $0.00",
+            "  refine: $0.00",
+            "  plan: $0.00",
+            "  implement: $1.00",
+            "  verify: $0.00",
+            "  ceremony: $0.00",
+            "  conversation: $0.00",
+            "criteria verified by command, test, or artifact: 100.0%",
+            "active weeks: 1",
+            "messages: reaction 0, ambient 0, reply 0, ceremony 0, system 0, human 0",
+        ]
+    );
+
+    let as_json = run_in(&repository.path, &["metrics", "--sprint", "S1", "--json"]);
+    assert_eq!(as_json.code, 0, "{}", as_json.err);
+    let metrics: Value = serde_json::from_str(as_json.out.trim()).expect("one JSON object");
+    assert_eq!(
+        metrics,
+        json!({
+            "accepted_tasks": 1,
+            "first_pass_acceptance_rate": 1.0,
+            "interventions_per_accepted_task": 0.0,
+            "cost_per_accepted_task_usd": {
+                "total": 1.0,
+                "by_purpose": {
+                    "triage": 0.0,
+                    "refine": 0.0,
+                    "plan": 0.0,
+                    "implement": 1.0,
+                    "verify": 0.0,
+                    "ceremony": 0.0,
+                    "conversation": 0.0
+                }
+            },
+            "mechanically_verified_criteria_share": 1.0,
+            "active_weeks": 1,
+            "messages": {
+                "reaction": 0,
+                "ambient": 0,
+                "reply": 0,
+                "ceremony": 0,
+                "system": 0,
+                "human": 0
+            }
+        })
+    );
+
+    let unknown = run_in(&repository.path, &["metrics", "--sprint", "S9"]);
+    assert_eq!(unknown.code, 1, "{}{}", unknown.out, unknown.err);
+    assert!(unknown.err.contains("S9"), "{}", unknown.err);
 }
 
 #[test]
@@ -910,6 +1100,51 @@ fn prints_the_control_characters_an_agent_wrote_escaped() {
         shown
             .out
             .contains("from pm: Clear\\u001b[2Jthe\\u0007screen?\tNo."),
+        "{:?}",
+        shown.out
+    );
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn says_there_is_no_sprint_yet() {
+    let repository = TempRepo::new("read-sprint-none");
+    repository.write("Cargo.lock", "version = 4\n");
+    repository.write("Cargo.toml", "[package]\nname = \"one\"\n");
+    repository.commit_at("a project", COMMITTED);
+    run_in(&repository.path, &["init"]);
+
+    let ran = run_in(&repository.path, &["sprint", "show"]);
+
+    assert_eq!(ran.code, 0, "{}", ran.err);
+    assert!(ran.out.contains("no sprint yet"), "{}", ran.out);
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn escapes_what_an_agent_wrote_in_the_channel() {
+    use serde_json::json;
+
+    let repository = a_project_with_a_task("read-channel-escaped");
+    project::record_as(
+        &repository,
+        "FRK-1",
+        Some(("pm", "session-1")),
+        "message.posted",
+        &json!({
+            "author": "pm",
+            "kind": "reaction",
+            "text": "FRK-1 is \u{1b}[31mready",
+            "mentions": []
+        }),
+    );
+
+    let shown = run_in(&repository.path, &["channel"]);
+
+    assert_eq!(shown.code, 0, "{}", shown.err);
+    assert!(!shown.out.contains('\u{1b}'), "{:?}", shown.out);
+    assert!(
+        shown.out.contains("pm FRK-1 is \\u001b[31mready"),
         "{:?}",
         shown.out
     );

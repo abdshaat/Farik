@@ -1,6 +1,8 @@
 //! Farik's harness: schemas, the task state machine, the governor, and the cost model.
 //! This crate performs no I/O.
 
+/// The one place a task's branch name is made.
+pub mod branch;
 /// Budgets and limits: session limits, the session ledger, and the budget check.
 pub mod budget;
 /// The task contract and its validator.
@@ -13,7 +15,9 @@ pub mod generated;
 pub mod governor;
 /// The price table and the cost of model usage.
 pub mod pricing;
+/// The sprint and its validator.
+pub mod sprint;
 /// The team, its rules, and its validator.
 pub mod team;
-/// Small shared pieces of English used in refusal messages.
-mod text;
+/// Small shared pieces of English used in refusal messages, and how a text is counted in tokens.
+pub mod text;

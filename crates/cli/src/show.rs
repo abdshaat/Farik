@@ -1,5 +1,6 @@
 //! `farik task show`: one contract, and what happened to it (F3).
 
+use farik_core::branch::task_branch;
 use farik_core::contract::{TaskContract, TaskId, TaskKind};
 use farik_protocol::event::{FarikEvent, event_to_value};
 use farik_store::requests::board_row_json;
@@ -318,7 +319,7 @@ fn diff_of(
         ));
     }
     let git = Git::open(project.root.clone());
-    let branch = format!("farik/{id}");
+    let branch = task_branch(contract);
     // `merge-base x x` answers `x`'s commit, and refuses a name that names none.
     if git.merge_base(&branch, &branch).is_err() {
         return Err(format!(

@@ -4,6 +4,7 @@
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet};
 
+use super::paths::{GlobError, PathRefusal, check_allowed_paths, reaches_the_farik_directory};
 use super::team_rules::TeamRules;
 use crate::contract::{
     Role, TaskContract, TaskStatus, Verification, VerificationWire, wire_method,
@@ -40,6 +41,11 @@ pub enum ReadinessRule {
     NewTestsRequiredByRule,
     /// Every allowed path falls within the team's ceiling.
     AllowedPathsWithinCeiling,
+    /// A task not assigned to the Software Developer keeps every allowed path within the team's
+    /// document paths: only the Developer changes code.
+    DocumentPathsOnly,
+    /// No allowed path reaches under `.farik/`, whose files change only through Farik's tools.
+    NoFarikPaths,
     /// A task's budget does not exceed the team's cap on a task; an epic is bounded by the
     /// sprint budget instead.
     BudgetWithinTeamMax,
@@ -61,7 +67,7 @@ pub enum ReadinessRule {
 }
 
 /// The Scrum Master's judgment (`docs/SPEC.md` section 5.3), recorded by the runtime as a
-/// `review.recorded` event and passed in.
+/// `contract.judged` event and passed in.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct JudgmentReview {
     /// The task is small enough to finish within its budget.
@@ -114,7 +120,7 @@ pub struct ReadinessFailure {
 
 type Check = fn(&TaskContract, &ReadinessContext) -> Option<ReadinessFailure>;
 
-const CHECKS: [Check; 19] = [
+const CHECKS: [Check; 18] = [
     intent_present,
     criteria_present,
     criteria_methods_valid,
@@ -126,11 +132,18 @@ const CHECKS: [Check; 19] = [
     required_criteria_present,
     new_tests_required_by_rule,
     allowed_paths_within_ceiling,
+    document_paths_only,
+    no_farik_paths,
     budget_within_team_max,
     no_parent_for_epic,
     parent_in_progress,
     paths_within_parent,
     budget_within_parent,
+];
+
+/// The Scrum Master's judgment, asked of a contract only once every other rule passes, so that a
+/// contract going back for another rule is not also refused for a judgment nobody asked for yet.
+const JUDGMENT_CHECKS: [Check; 3] = [
     judgment_recorded,
     judgment_fits_budget,
     judgment_criteria_detect_failure,
@@ -138,7 +151,8 @@ const CHECKS: [Check; 19] = [
 
 /// Checks a contract against the Definition of Ready: the structural rules of `docs/SPEC.md`
 /// section 5.3, the team rules of 5.12, the parent rules of 5.16, and the Scrum Master's
-/// recorded judgment when the team has one. Refuses with every rule the contract fails.
+/// recorded judgment when the team has one, evaluated only when every other rule passes. Refuses
+/// with every rule the contract fails.
 ///
 /// # Errors
 ///
@@ -148,10 +162,16 @@ pub fn evaluate_readiness(
     contract: &TaskContract,
     context: &ReadinessContext,
 ) -> Result<(), Vec<ReadinessFailure>> {
-    let failures: Vec<ReadinessFailure> = CHECKS
-        .iter()
-        .filter_map(|check| check(contract, context))
-        .collect();
+    let failed = |checks: &[Check]| -> Vec<ReadinessFailure> {
+        checks
+            .iter()
+            .filter_map(|check| check(contract, context))
+            .collect()
+    };
+    let mut failures = failed(&CHECKS);
+    if failures.is_empty() {
+        failures = failed(&JUDGMENT_CHECKS);
+    }
     if failures.is_empty() {
         Ok(())
     } else {
@@ -431,13 +451,18 @@ fn split_glob(pattern: &str) -> (&str, &str) {
 }
 
 /// Whether a path glob stays under one of the ceiling globs. `**` admits everything. A ceiling
-/// that is a directory (`src`, `src/`, `src/**`) admits every path whose literal prefix is that
-/// directory or below it: `src/login/**` is within `src/**`, `src2/**` is not. Any other ceiling
+/// that is a directory (`src`, `src/`, `src/**`) admits a path without a wildcard that is that
+/// directory or below it, and a path whose literal prefix, cut at its first wildcard, is below
+/// it and so ends at a `/`: `src/login/**` is within `src/**`; `src2/**` is not, nor is
+/// `src*/**`, whose wildcard runs on into a sibling. Any other ceiling
 /// (`docs/**/*.md`, `src/*.rs`, an empty entry, `/`) admits only a path written exactly like it,
 /// so that a file filter is never widened and a stray entry never opens the ceiling. A path
-/// with a `..` segment is never within a directory. Paths are compared as written: `./src/**`
+/// with a `..` segment anywhere, before or after a wildcard, is within nothing. Paths are compared as written: `./src/**`
 /// is not `src/**`.
 fn is_within_any(path: &str, ceilings: &[String]) -> bool {
+    if path.split('/').any(|segment| segment == "..") {
+        return false;
+    }
     ceilings.iter().any(|ceiling| {
         if ceiling == "**" {
             return true;
@@ -447,11 +472,9 @@ fn is_within_any(path: &str, ceilings: &[String]) -> bool {
         if !matches!(rest, "" | "**") || directory.is_empty() {
             return path == ceiling;
         }
-        let path = split_glob(path).0.trim_end_matches('/');
-        if path.split('/').any(|segment| segment == "..") {
-            return false;
-        }
-        path == directory || path.starts_with(&format!("{directory}/"))
+        let (prefix, wildcard) = split_glob(path);
+        prefix.starts_with(&format!("{directory}/"))
+            || (wildcard.is_empty() && prefix.trim_end_matches('/') == directory)
     })
 }
 
@@ -485,6 +508,91 @@ fn allowed_paths_within_ceiling(
             context.rules.allowed_paths_ceiling.join(", ")
         ),
     ))
+}
+
+/// Whether an allowed path stays inside the document globs: within one by the ceiling's
+/// containment (`docs/adr/**` within `docs/**`), or, having no wildcard, matched by one as a path
+/// (`README.md` by `**/*.md`). A wildcard path within no directory glob could name code.
+fn is_a_document_path(path: &String, documents: &[String]) -> bool {
+    is_within_any(path, documents)
+        || (split_glob(path).1.is_empty()
+            && check_allowed_paths(std::slice::from_ref(path), documents).is_ok())
+}
+
+fn document_paths_only(
+    contract: &TaskContract,
+    context: &ReadinessContext,
+) -> Option<ReadinessFailure> {
+    if contract.kind != Kind::Task || contract.assignee_role == Role::SoftwareDeveloper {
+        return None;
+    }
+    let documents = &context.rules.document_paths;
+    // Fail closed (5.6): a document glob that does not compile puts every path outside.
+    if let Err(PathRefusal::Glob(GlobError::Invalid { pattern, detail })) =
+        check_allowed_paths(&[], documents)
+    {
+        return Some(failure(
+            ReadinessRule::DocumentPathsOnly,
+            format!(
+                "allowed paths {} cannot be checked: the document path {pattern} does not compile ({detail})",
+                contract.allowed_paths.join(", ")
+            ),
+        ));
+    }
+    let outside: Vec<&str> = contract
+        .allowed_paths
+        .iter()
+        .filter(|path| !is_a_document_path(path, documents))
+        .map(String::as_str)
+        .collect();
+    if outside.is_empty() {
+        return None;
+    }
+    Some(failure(
+        ReadinessRule::DocumentPathsOnly,
+        format!(
+            "allowed paths {} reach outside the team's document paths {}",
+            outside.join(", "),
+            context.rules.document_paths.join(", ")
+        ),
+    ))
+}
+
+/// No allowed path reaches under `.farik/` (5.3), whatever the role or kind: a contract, a
+/// decision, a notebook, or the retro changes only through Farik's tools, never through a commit.
+/// A path with a backslash is refused outright: the glob engine reads `\` as an escape, so a
+/// glob such as `.f\arik/**` reads its first segment as `.f`, missing the directory it in fact
+/// matches once escaped.
+fn no_farik_paths(contract: &TaskContract, _: &ReadinessContext) -> Option<ReadinessFailure> {
+    let backslashed: Vec<&str> = contract
+        .allowed_paths
+        .iter()
+        .map(String::as_str)
+        .filter(|path| path.contains('\\'))
+        .collect();
+    let reaching: Vec<&str> = contract
+        .allowed_paths
+        .iter()
+        .map(String::as_str)
+        .filter(|path| !path.contains('\\') && reaches_the_farik_directory(path))
+        .collect();
+    if backslashed.is_empty() && reaching.is_empty() {
+        return None;
+    }
+    let mut reasons = Vec::new();
+    if !backslashed.is_empty() {
+        reasons.push(format!(
+            "allowed paths {} contain a backslash: backslashes are not allowed in allowed paths",
+            backslashed.join(", ")
+        ));
+    }
+    if !reaching.is_empty() {
+        reasons.push(format!(
+            "allowed paths {} reach under .farik/, whose files change only through Farik's tools",
+            reaching.join(", ")
+        ));
+    }
+    Some(failure(ReadinessRule::NoFarikPaths, reasons.join("; ")))
 }
 
 fn budget_within_team_max(
@@ -924,6 +1032,74 @@ mod tests {
     }
 
     #[test]
+    fn refuses_a_parent_segment_after_the_first_wildcard() {
+        let mut contract = a_contract();
+        contract.allowed_paths = vec!["src/**/../../.env".to_string()];
+        let mut context = a_ready_context();
+        context.rules.allowed_paths_ceiling = vec!["src/**".to_string()];
+        assert_eq!(
+            failed_rules(&contract, &context),
+            [R::AllowedPathsWithinCeiling]
+        );
+    }
+
+    #[test]
+    fn refuses_allowed_paths_that_reach_under_the_farik_directory() {
+        // Each names a path under `.farik/` or could match one; every role and kind is held.
+        let reaching = [
+            ".farik/decisions/0001-x.md",
+            ".farik/**",
+            ".farik",
+            "./.farik/team.yaml",
+            ".FARIK/team/retro.md",
+            "**",
+            "**/*.md",
+            "*/memory.md",
+            ".f*/x",
+            "[.]farik/x",
+            "{src,.farik}/**",
+            ".f\\arik/**",
+            "a\\b",
+        ];
+        for path in reaching {
+            for role in [Role::SoftwareDeveloper, Role::Architect] {
+                let mut task = a_task_for(role, &["docs/x.md", path]);
+                assert!(
+                    failed_rules(&task, &a_ready_context()).contains(&R::NoFarikPaths),
+                    "{path} for {role:?}"
+                );
+                task.kind = Kind::Epic;
+                assert!(
+                    failed_rules(&task, &a_ready_context()).contains(&R::NoFarikPaths),
+                    "{path} for an epic"
+                );
+            }
+        }
+        let task = a_task_for(Role::Architect, &["**/*.md"]);
+        assert_eq!(failed_rules(&task, &a_ready_context()), [R::NoFarikPaths]);
+        assert!(
+            message_of(&task, &a_ready_context(), R::NoFarikPaths).contains("**/*.md"),
+            "the message names the path"
+        );
+        for path in [
+            "src/**",
+            "*.md",
+            "*",
+            "docs/**",
+            ".farikx/**",
+            ".github/**",
+            "src/.farik/x",
+        ] {
+            let task = a_task_for(Role::SoftwareDeveloper, &[path]);
+            assert_eq!(
+                evaluate_readiness(&task, &a_ready_context()),
+                Ok(()),
+                "{path}"
+            );
+        }
+    }
+
+    #[test]
     fn keeps_a_ceiling_with_a_file_filter_exact() {
         let mut contract = a_contract();
         contract.allowed_paths = vec!["docs/**".to_string()];
@@ -935,6 +1111,121 @@ mod tests {
         );
         contract.allowed_paths = vec!["docs/**/*.md".to_string()];
         assert_eq!(evaluate_readiness(&contract, &context), Ok(()));
+    }
+
+    #[test]
+    fn refuses_a_wildcard_that_runs_past_the_directory_name() {
+        // Each of these reaches `docsrc/` or `docs-site/`, siblings of `docs`, not inside it.
+        for path in ["docs*/**", "docs?/x", "docs{,rc}/**", "docs[x]/**"] {
+            let mut contract = a_contract();
+            contract.allowed_paths = vec![path.to_string()];
+            let mut context = a_ready_context();
+            context.rules.allowed_paths_ceiling = vec!["docs/**".to_string()];
+            assert_eq!(
+                failed_rules(&contract, &context),
+                [R::AllowedPathsWithinCeiling],
+                "{path} against the ceiling"
+            );
+            let task = a_task_for(Role::Architect, &[path]);
+            assert_eq!(
+                failed_rules(&task, &a_ready_context()),
+                [R::DocumentPathsOnly],
+                "{path} against the document paths"
+            );
+        }
+        for path in ["docs", "docs/**", "docs/*.md"] {
+            let task = a_task_for(Role::Architect, &[path]);
+            assert_eq!(
+                evaluate_readiness(&task, &a_ready_context()),
+                Ok(()),
+                "{path}"
+            );
+        }
+    }
+
+    /// A task for `role`, reviewed by the Product Manager so that any role may be the assignee,
+    /// allowed `paths`.
+    fn a_task_for(role: Role, paths: &[&str]) -> TaskContract {
+        let mut contract = a_contract();
+        contract.assignee_role = role;
+        contract.reviewer_role = Role::ProductManager;
+        contract.allowed_paths = paths.iter().map(|path| (*path).to_string()).collect();
+        contract
+    }
+
+    #[test]
+    fn keeps_an_architects_task_to_the_document_paths() {
+        let task = a_task_for(Role::Architect, &["src/**"]);
+        assert_eq!(
+            failed_rules(&task, &a_ready_context()),
+            [R::DocumentPathsOnly]
+        );
+        assert!(
+            message_of(&task, &a_ready_context(), R::DocumentPathsOnly).contains("src/**"),
+            "the message names the path outside"
+        );
+    }
+
+    #[test]
+    fn passes_an_architects_task_inside_them() {
+        // `docs/adr/**` is within `docs/**`; `README.md` and `notes/plan.md` have no wildcard and
+        // `**/*.md` matches each as a path.
+        let task = a_task_for(
+            Role::Architect,
+            &["docs/adr/**", "README.md", "notes/plan.md"],
+        );
+        assert_eq!(evaluate_readiness(&task, &a_ready_context()), Ok(()));
+    }
+
+    #[test]
+    fn refuses_a_wildcard_outside_a_document_directory() {
+        // `**/*.md` matches no wildcard path as a path, and `notes/*.md` is within no directory
+        // glob: a wildcard could name code.
+        let task = a_task_for(Role::Architect, &["notes/*.md"]);
+        assert_eq!(
+            failed_rules(&task, &a_ready_context()),
+            [R::DocumentPathsOnly]
+        );
+    }
+
+    #[test]
+    fn leaves_a_developers_task_to_the_ceiling_alone() {
+        let task = a_task_for(Role::SoftwareDeveloper, &["src/**"]);
+        assert_eq!(evaluate_readiness(&task, &a_ready_context()), Ok(()));
+    }
+
+    #[test]
+    fn does_not_hold_an_epic_to_the_document_paths() {
+        // An epic's tasks are held, each against its own assignee role.
+        let mut epic = a_task_for(Role::Architect, &["src/**"]);
+        epic.kind = Kind::Epic;
+        assert_eq!(evaluate_readiness(&epic, &a_ready_context()), Ok(()));
+    }
+
+    #[test]
+    fn refuses_a_document_task_when_a_document_glob_does_not_compile() {
+        // Fail closed (5.6): a glob that does not compile makes every path outside, even one a
+        // sound glob beside it would contain.
+        let task = a_task_for(Role::Architect, &["docs/adr/**"]);
+        for globs in [vec!["docs/[**"], vec!["docs/**", "docs/[**"]] {
+            let mut context = a_ready_context();
+            context.rules.document_paths = globs.iter().map(|glob| (*glob).to_string()).collect();
+            assert_eq!(
+                failed_rules(&task, &context),
+                [R::DocumentPathsOnly],
+                "{globs:?}"
+            );
+            let message = message_of(&task, &context, R::DocumentPathsOnly);
+            assert!(message.contains("docs/[** does not compile"), "{message}");
+        }
+    }
+
+    #[test]
+    fn refuses_every_document_task_with_an_empty_list() {
+        let task = a_task_for(Role::MarketingSpecialist, &["docs/marketing/**"]);
+        let mut context = a_ready_context();
+        context.rules.document_paths.clear();
+        assert_eq!(failed_rules(&task, &context), [R::DocumentPathsOnly]);
     }
 
     #[test]
@@ -1037,6 +1328,24 @@ mod tests {
     }
 
     #[test]
+    fn asks_no_judgment_of_a_contract_that_fails_another_rule() {
+        let mut contract = a_contract();
+        contract.scope.out_of_scope.clear();
+        let mut context = a_ready_context();
+        context.requires_judgment_review = true;
+        context.judgment_review = None;
+        assert_eq!(failed_rules(&contract, &context), [R::OutOfScopePresent]);
+    }
+
+    #[test]
+    fn asks_the_judgment_of_an_otherwise_ready_contract() {
+        let mut context = a_ready_context();
+        context.requires_judgment_review = true;
+        context.judgment_review = None;
+        assert_eq!(failed_rules(&a_contract(), &context), [R::JudgmentRecorded]);
+    }
+
+    #[test]
     fn reports_every_failure_in_rule_order() {
         let mut contract = a_contract();
         contract.exit_criteria.clear();
@@ -1050,7 +1359,6 @@ mod tests {
                 R::CriteriaPresent,
                 R::BudgetWithinSprint,
                 R::RequiredCriteriaPresent,
-                R::JudgmentRecorded
             ]
         );
     }

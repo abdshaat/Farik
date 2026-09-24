@@ -181,6 +181,12 @@ impl Team {
                 .iter()
                 .map(|pattern| pattern.to_string())
                 .collect(),
+            document_paths: self
+                .rules
+                .document_paths
+                .iter()
+                .map(|glob| glob.to_string())
+                .collect(),
         }
     }
 
@@ -277,7 +283,7 @@ mod tests {
         AgentStatus, HumanAcceptsContracts, Integration, PermissionTier, PermissionTierWire, Role,
         RoleWire, Team, validate_team,
     };
-    use crate::governor::team_rules::DEFAULT_PROTECTED_PATHS;
+    use crate::governor::team_rules::{DEFAULT_DOCUMENT_PATHS, DEFAULT_PROTECTED_PATHS};
 
     fn team(wire: &Value) -> Team {
         validate_team(wire).expect("the fixture is a team")
@@ -515,6 +521,21 @@ mod tests {
     }
 
     #[test]
+    fn defaults_the_document_paths_when_left_out() {
+        // The schema's default fills a key left out; an explicit `[]` is kept, which is how a
+        // team says that no task but a Developer's can be ready.
+        assert_eq!(
+            team(&a_team_wire()).rules().document_paths,
+            DEFAULT_DOCUMENT_PATHS.map(str::to_string)
+        );
+        let mut wire = a_team_wire();
+        wire["rules"]["document_paths"] = json!(["notes/**"]);
+        assert_eq!(team(&wire).rules().document_paths, ["notes/**"]);
+        wire["rules"]["document_paths"] = json!([]);
+        assert!(team(&wire).rules().document_paths.is_empty());
+    }
+
+    #[test]
     fn keeps_the_protected_paths_it_ships_and_adds_the_team_s() {
         // 5.12: rules only narrow what a tier allows. A team that could drop `.env` from the list
         // would be widening one, so the shipped paths are kept whatever the team writes.
@@ -576,10 +597,30 @@ mod tests {
     }
 
     #[test]
+    fn defaults_the_ambient_allowance() {
+        // 5.9: each agent has one unprompted message per sprint unless the team says otherwise.
+        assert_eq!(team(&a_team_wire()).policy.ambient_messages_per_sprint, 1);
+    }
+
+    #[test]
+    fn defaults_the_escalation_age() {
+        // 5.7: an open escalation waits a day on the human before the aged rule ages it, unless
+        // the team says otherwise.
+        assert_eq!(team(&a_team_wire()).policy.escalation_age_hours.get(), 24);
+    }
+
+    #[test]
+    fn defaults_the_memory_cap() {
+        // 5.8: an agent's notebook holds 8,000 tokens unless the team says otherwise.
+        assert_eq!(team(&a_team_wire()).policy.memory_cap_tokens, 8000);
+    }
+
+    #[test]
     fn refuses_a_number_outside_what_a_rule_allows() {
-        // Every bound here carries a spec number: 5.2's work-in-progress limit, 5.7's blocked age
-        // and iteration count, 5.5's daily budget, 5.12's task cap and its list of methods. A bound
-        // nothing tests is a bound the next person deletes to make something else compile.
+        // Every bound here carries a spec number: 5.2's work-in-progress limit, 5.7's blocked age,
+        // iteration count and escalation age, 5.8's notebook cap, 5.5's daily budget, 5.12's task
+        // cap and its list of methods. A bound nothing tests is a bound the next person deletes to
+        // make something else compile.
         for (pointer, value) in [
             ("/policy/wip_limit_per_agent", json!(-1)),
             ("/policy/wip_limit_per_agent", json!(101)),
@@ -587,6 +628,10 @@ mod tests {
             ("/policy/blocked_limit_hours", json!(721)),
             ("/policy/max_iterations", json!(0)),
             ("/policy/max_iterations", json!(101)),
+            ("/policy/escalation_age_hours", json!(0)),
+            ("/policy/escalation_age_hours", json!(721)),
+            ("/policy/memory_cap_tokens", json!(499)),
+            ("/policy/memory_cap_tokens", json!(16001)),
             ("/budgets/daily_usd", json!(0)),
             ("/rules/max_task_budget_usd", json!(0)),
             ("/rules/required_criteria", json!(["vibes"])),

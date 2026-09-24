@@ -14,7 +14,7 @@ use farik_core::governor::permissions::{
 };
 use farik_core::team::{Agent, AgentStatus, Team};
 use farik_protocol::clock::Clock;
-use farik_protocol::event::{EventBody, EventIds, FarikEvent, new_event};
+use farik_protocol::event::{EventBody, EventIds, FarikEvent, Thread, new_event};
 use farik_store::files::ProjectFiles;
 use farik_store::{EventLog, Git, Projections, TaskProjection};
 use schemars::JsonSchema;
@@ -22,15 +22,19 @@ use serde::de::DeserializeOwned;
 use serde_json::Value;
 
 use crate::exec::Executor;
+use crate::session::SessionPurpose;
 use crate::transitions::Transitions;
 
+mod channel;
 mod contracts;
 mod exec;
 #[cfg(test)]
 pub(crate) mod fixtures;
 mod git;
+mod memory;
 mod reading;
 pub(crate) mod refusal;
+mod retro;
 mod work;
 
 use refusal::Refusal;
@@ -97,6 +101,12 @@ pub struct ToolContext {
     pub task_id: Option<TaskId>,
     /// The session, stamped on every event a call appends.
     pub session_id: String,
+    /// Why the session runs, which decides what kind of message it posts.
+    pub purpose: SessionPurpose,
+    /// The seq of the message a conversation session answers, which its reply names.
+    pub in_reply_to: Option<u64>,
+    /// A ceremony's thread, which its posts are in.
+    pub thread: Option<Thread>,
     /// Where the task's commands run, when it has somewhere.
     pub executor: Option<Arc<dyn Executor>>,
     /// The project's store, files, and repository.
@@ -165,6 +175,11 @@ static TOOLS: LazyLock<Vec<FarikTool>> = LazyLock::new(|| {
             Read,
             "Size this session's request as large (an epic) or small (a task), with a reason.",
         ),
+        tool::<contracts::RecordJudgmentInput>(
+            "farik_record_judgment",
+            Read,
+            "Record your judgment of this session's contract: whether the task fits its budget and whether its criteria would detect the failure its intent worries about, with the reason.",
+        ),
         tool::<contracts::WriteContractInput>(
             "farik_write_contract",
             Read,
@@ -184,6 +199,11 @@ static TOOLS: LazyLock<Vec<FarikTool>> = LazyLock::new(|| {
             "farik_assign_task",
             Read,
             "Assign a ready task to an agent, with the agent that reviews it.",
+        ),
+        tool::<contracts::PlanSprintInput>(
+            "farik_plan_sprint",
+            Read,
+            "Plan the open sprint, in its planning ceremony: put ready tasks and approved epics in it, within its budget.",
         ),
         tool::<work::DeclareBlockedInput>(
             "farik_declare_blocked",
@@ -209,6 +229,31 @@ static TOOLS: LazyLock<Vec<FarikTool>> = LazyLock::new(|| {
             "farik_write_product_doc",
             Read,
             "Write a product document under .farik/product/ for the approved epic of this session.",
+        ),
+        tool::<channel::PostMessageInput>(
+            "farik_post_message",
+            Read,
+            "Say something in the team's channel. One or two sentences: what happened and what is next, with no instruction to anyone.",
+        ),
+        tool::<retro::AppendRetroInput>(
+            "farik_append_retro",
+            Read,
+            "Record in team/retro.md what the next sprint's planning should know from this retro.",
+        ),
+        tool::<memory::WriteMemoryInput>(
+            "farik_write_memory",
+            Read,
+            "Replace your notebook, which every session of yours is shown, with this text. Keep it within your cap; prune it rather than append to it.",
+        ),
+        tool::<memory::WriteDecisionInput>(
+            "farik_write_decision",
+            Read,
+            "Record a decision for the whole project, as the Architect or the Product Manager. A decision is never changed afterwards; a later one can supersede it.",
+        ),
+        tool::<memory::ReadDecisionsInput>(
+            "farik_read_decisions",
+            Read,
+            "List the project's decisions, oldest first, or read one whole by its number.",
         ),
         tool::<exec::ExecInput>(
             "farik_exec",
@@ -297,15 +342,22 @@ pub async fn call_tool(
         "farik_read_rules" => nothing_in(input).map(|()| reading::read_rules(&call)),
         "farik_read_criteria" => nothing_in(input).and_then(|()| reading::read_criteria(&call)),
         "farik_triage_request" => contracts::triage(&call, &parse(input)?),
+        "farik_record_judgment" => contracts::record_judgment(&call, &parse(input)?),
         "farik_write_contract" => contracts::write_contract(&call, parse(input)?),
         "farik_create_task" => contracts::create_task(&call, parse(input)?),
         "farik_request_transition" => work::request_transition(&call, parse(input)?),
         "farik_assign_task" => work::assign_task(&call, parse(input)?),
+        "farik_plan_sprint" => contracts::plan_sprint(&call, &parse(input)?),
         "farik_declare_blocked" => work::declare_blocked(&call, parse(input)?),
         "farik_record_criterion_result" => work::record_criterion(&call, parse(input)?),
         "farik_write_note" => work::write_note(&call, parse(input)?),
         "farik_ask_human" => work::ask_human(&call, parse(input)?),
         "farik_write_product_doc" => work::write_product_doc(&call, parse(input)?),
+        "farik_post_message" => channel::post_message(&call, parse(input)?),
+        "farik_append_retro" => retro::append_retro(&call, &parse(input)?),
+        "farik_write_memory" => memory::write_memory(&call, &parse(input)?),
+        "farik_write_decision" => memory::write_decision(&call, &parse(input)?),
+        "farik_read_decisions" => memory::read_decisions(&call, &parse(input)?),
         "farik_exec" => exec::exec(&call, parse(input)?).await,
         "farik_git_status" => nothing_in(input).and_then(|()| git::status(&call)),
         "farik_git_diff" => nothing_in(input).and_then(|()| git::diff(&call)),
@@ -492,15 +544,22 @@ mod tests {
             "farik_read_rules",
             "farik_read_criteria",
             "farik_triage_request",
+            "farik_record_judgment",
             "farik_write_contract",
             "farik_create_task",
             "farik_request_transition",
             "farik_assign_task",
+            "farik_plan_sprint",
             "farik_declare_blocked",
             "farik_record_criterion_result",
             "farik_write_note",
             "farik_ask_human",
             "farik_write_product_doc",
+            "farik_post_message",
+            "farik_append_retro",
+            "farik_write_memory",
+            "farik_write_decision",
+            "farik_read_decisions",
             "farik_exec",
             "farik_git_status",
             "farik_git_diff",
@@ -519,7 +578,7 @@ mod tests {
         assert_eq!(tier("farik_git_diff"), Some(PermissionTier::GitLocal));
         assert_eq!(tier("farik_git_commit"), Some(PermissionTier::GitLocal));
         assert_eq!(tier("farik_git_push"), Some(PermissionTier::GitRemote));
-        for tool in &tools[..14] {
+        for tool in &tools[..21] {
             assert_eq!(tool.tier, PermissionTier::Read, "{}", tool.name);
         }
         for tool in &tools {

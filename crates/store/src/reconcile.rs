@@ -6,8 +6,9 @@
 //! from a backup — and this says where, without picking a side. Nothing here writes anything: a
 //! person decides what to do about a disagreement, and `farik doctor` is where they are told of one.
 //!
-//! Only what the log is authoritative about is a disagreement. A contract's `status` and its `locked`
-//! flag are both moved by events (5.2, 5.11), so a file that says something else is a file to fix.
+//! Only what the log is authoritative about is a disagreement. A contract's `status`, its `locked`
+//! flag, and its `sprint` are all moved by events (5.2, 5.11), so a file that says something else is
+//! a file to fix.
 //! Its title, kind, risk and parent are the contract's own, and the board's copy of them is a cache
 //! of the last event that mentioned the task — one that has fallen behind is a projection to rebuild,
 //! not a disagreement about the project.
@@ -53,6 +54,14 @@ pub enum Drift {
         /// Both answers, the log's first.
         detail: String,
     },
+    /// The file and the log disagree about which sprint the task is in (5.11): a plan or an end
+    /// that stopped between the contract and its event, or a file restored or edited by hand.
+    SprintMismatch {
+        /// Which task.
+        task_id: TaskId,
+        /// Both answers, the log's first.
+        detail: String,
+    },
     /// A contract file with that id was listed and could not then be read as a contract: broken by
     /// hand, unreadable to this user, or — if it went away between the listing and the read — no
     /// longer there at all. Which of those it was is in `detail`, in the file adapter's own words,
@@ -78,7 +87,8 @@ impl Drift {
             | Self::EventsWithoutContract { task_id, .. }
             | Self::StatusMismatch { task_id, .. }
             | Self::LockMismatch { task_id, .. }
-            | Self::ContractUnreadable { task_id, .. } => task_id,
+            | Self::ContractUnreadable { task_id, .. }
+            | Self::SprintMismatch { task_id, .. } => task_id,
         }
     }
 
@@ -90,7 +100,8 @@ impl Drift {
             | Self::EventsWithoutContract { detail, .. }
             | Self::StatusMismatch { detail, .. }
             | Self::LockMismatch { detail, .. }
-            | Self::ContractUnreadable { detail, .. } => detail,
+            | Self::ContractUnreadable { detail, .. }
+            | Self::SprintMismatch { detail, .. } => detail,
         }
     }
 }
@@ -229,6 +240,16 @@ pub fn reconcile(
                 ),
             });
         }
+        if contract.sprint != row.sprint {
+            found.push(Drift::SprintMismatch {
+                task_id: row.task_id.clone(),
+                detail: format!(
+                    "the log has it in {} and the file says in {}",
+                    in_sprint(row.sprint.as_deref()),
+                    in_sprint(contract.sprint.as_deref())
+                ),
+            });
+        }
     }
 
     // Stable, so what the loops above found about one task stays in the order they found it. There
@@ -249,6 +270,11 @@ fn held(locked: bool) -> &'static str {
     } else {
         "not held"
     }
+}
+
+/// The sprint a task is in, in words rather than as an option.
+fn in_sprint(sprint: Option<&str>) -> &str {
+    sprint.unwrap_or("no sprint")
 }
 
 /// The number in a task id, for ordering, so that the tenth task does not come before the ninth.

@@ -5,7 +5,9 @@
 use crate::contract::{ExitCriterion, TaskContract, wire_method};
 use crate::generated::task_contract::FarikTaskContractKind as Kind;
 use crate::generated::task_contract::FarikTaskContractRisk as Risk;
-use crate::governor::paths::{GlobError, PathRefusal, check_allowed_paths, check_protected_paths};
+use crate::governor::paths::{
+    GlobError, PathRefusal, check_allowed_paths, check_protected_paths, reaches_the_farik_directory,
+};
 use crate::text::{distinct, listed};
 
 /// Who ran a criterion.
@@ -63,6 +65,8 @@ pub enum DoneRule {
     PathsWithinAllowed,
     /// The diff touches no path the team protects.
     NoProtectedPathChanged,
+    /// The diff touches nothing under `.farik/`, whose files change only through Farik's tools.
+    NoFarikPathChanged,
     /// The assignee wrote a completion note.
     CompletionNotePresent,
     /// The reviewer wrote a review note.
@@ -94,12 +98,13 @@ pub fn requires_human_acceptance(contract: &TaskContract) -> bool {
 
 type Check = fn(&TaskContract, &DoneEvidence) -> Option<DoneFailure>;
 
-const CHECKS: [Check; 8] = [
+const CHECKS: [Check; 9] = [
     criterion_run_by_reviewer,
     criterion_passed,
     human_criterion_accepted,
     paths_within_allowed,
     no_protected_path_changed,
+    no_farik_path_changed,
     completion_note_present,
     review_note_present,
     human_accepted,
@@ -108,7 +113,7 @@ const CHECKS: [Check; 8] = [
 /// Checks a task against the Definition of Done (`docs/SPEC.md` section 5.4): every exit
 /// criterion run by the reviewer independently and passed, every `human` criterion accepted by
 /// the human, no change outside the contract's allowed paths, no change to a path the team
-/// protects, a completion note, a review note,
+/// protects or under `.farik/`, a completion note, a review note,
 /// and the human's acceptance where the risk or the kind requires it. Refuses with every rule the
 /// task fails.
 ///
@@ -277,6 +282,27 @@ fn no_protected_path_changed(_: &TaskContract, evidence: &DoneEvidence) -> Optio
     }
 }
 
+/// No change under `.farik/` (5.4, 5.8), whatever the allowed paths say: a decision, a notebook,
+/// the retro, or a contract changes only through Farik's tools, never through a task's commit.
+fn no_farik_path_changed(_: &TaskContract, evidence: &DoneEvidence) -> Option<DoneFailure> {
+    let changed: Vec<String> = evidence
+        .changed_paths
+        .iter()
+        .filter(|path| reaches_the_farik_directory(path))
+        .cloned()
+        .collect();
+    if changed.is_empty() {
+        return None;
+    }
+    Some(failure(
+        DoneRule::NoFarikPathChanged,
+        format!(
+            "the diff changes {} under .farik/, whose files change only through Farik's tools",
+            distinct(&changed)
+        ),
+    ))
+}
+
 fn is_written(note: Option<&String>) -> bool {
     note.is_some_and(|text| !text.trim().is_empty())
 }
@@ -324,7 +350,7 @@ mod tests {
         CriterionResult, DoneEvidence, DoneRule as R, RunBy, evaluate_done,
         requires_human_acceptance,
     };
-    use crate::contract::{ExitCriterion, TaskContract, VerificationWire};
+    use crate::contract::{ExitCriterion, Role, TaskContract, VerificationWire};
     use crate::generated::task_contract::FarikTaskContractKind as Kind;
     use crate::generated::task_contract::FarikTaskContractRisk as Risk;
     use crate::governor::readiness::fixtures::a_contract;
@@ -376,6 +402,32 @@ mod tests {
             message_of(&a_contract(), &evidence, R::NoProtectedPathChanged),
             "the team's protected path src/[ is not a valid glob: unclosed character class; missing ']'"
         );
+    }
+
+    #[test]
+    fn refuses_a_diff_that_changes_a_path_under_the_farik_directory() {
+        // A contract that allows everything still may not commit a decision, a notebook, or the
+        // retro: those change only through Farik's tools (5.8), whoever the assignee is.
+        for role in [Role::SoftwareDeveloper, Role::Architect] {
+            let mut contract = a_contract();
+            contract.assignee_role = role;
+            contract.allowed_paths = vec!["**".to_string()];
+            let mut evidence = an_evidence();
+            evidence.changed_paths = vec![
+                "src/login/form.rs".to_string(),
+                ".farik/decisions/0001-x.md".to_string(),
+                "./.FARIK/agents/dev-a/memory.md".to_string(),
+            ];
+            assert_eq!(
+                failed_rules(&contract, &evidence),
+                [R::NoFarikPathChanged],
+                "{role:?}"
+            );
+            assert_eq!(
+                message_of(&contract, &evidence, R::NoFarikPathChanged),
+                "the diff changes .farik/decisions/0001-x.md, ./.FARIK/agents/dev-a/memory.md under .farik/, whose files change only through Farik's tools"
+            );
+        }
     }
 
     #[test]
@@ -670,7 +722,7 @@ mod tests {
 
     #[test]
     fn reports_every_failure_in_rule_order() {
-        // All eight at once, so that the order is one assertion rather than a chain of pairs, and
+        // All nine at once, so that the order is one assertion rather than a chain of pairs, and
         // every list is plural, so that the singular and the plural wording are both pinned.
         let mut contract = a_contract();
         contract.risk = Risk::High;
@@ -699,6 +751,7 @@ mod tests {
             "Cargo.toml".to_string(),
             ".env".to_string(),
             "src/login/k.pem".to_string(),
+            ".farik/team.yaml".to_string(),
         ];
         evidence.completion_note = None;
         evidence.review_note = None;
@@ -710,6 +763,7 @@ mod tests {
                 R::HumanCriterionAccepted,
                 R::PathsWithinAllowed,
                 R::NoProtectedPathChanged,
+                R::NoFarikPathChanged,
                 R::CompletionNotePresent,
                 R::ReviewNotePresent,
                 R::HumanAccepted
@@ -729,7 +783,7 @@ mod tests {
         );
         assert_eq!(
             message_of(&contract, &evidence, R::PathsWithinAllowed),
-            "the diff changes README.md, Cargo.toml, .env outside the contract's allowed paths src/login/**"
+            "the diff changes README.md, Cargo.toml, .env, .farik/team.yaml outside the contract's allowed paths src/login/**"
         );
         assert_eq!(
             message_of(&contract, &evidence, R::NoProtectedPathChanged),

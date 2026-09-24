@@ -6,17 +6,24 @@ use std::fs::{File, OpenOptions};
 use std::path::Path;
 use std::sync::Arc;
 
+use farik_core::branch::task_branch;
 use farik_core::contract::{TaskId, TaskKind, TaskStatus};
 use farik_core::team::{Integration, Team};
 use farik_protocol::event::{
     EscalationRaisedBody, EscalationRaisedBodyReason, EventBody, EventKind, FarikEvent,
     NoteWrittenBodyKind, PullRequestOpenedBody, TaskIntegratedBody, TaskIntegratedBodyIntegratedBy,
 };
+use farik_protocol::generated::event::{CriteriaUpdatedBody, ProjectScannedBody};
 use farik_store::files::FilesError;
-use farik_store::{EventQuery, Git, GitError, MergeOutcome, TaskProjection};
+use farik_store::{
+    EventQuery, Git, GitError, MergeOutcome, TaskProjection, material, names_of, project_document,
+    scan_project, seeded_library,
+};
 
-use super::verify::append;
-use super::{IntegrationOutcome, Orchestrator, OrchestratorError, TickReport, worktree};
+use super::verify::{GOVERNOR, append};
+use super::{
+    IntegrationOutcome, Orchestrator, OrchestratorError, ScanRefresh, TickReport, worktree,
+};
 use crate::forge::{Forge, PullRequestState};
 use crate::tools::ToolDeps;
 use crate::transitions::{integration_branch, is_move_into};
@@ -49,11 +56,12 @@ pub(super) async fn awaiting(
         return Ok(None);
     };
     let what = match outcome {
-        IntegrationOutcome::Merged { sha } => format!("integrated at {sha}"),
+        IntegrationOutcome::Merged { sha, scan } => format!("integrated at {sha}{scan}"),
         IntegrationOutcome::PullRequestOpened { url } => format!("opened the pull request {url}"),
-        IntegrationOutcome::Escalated { detail } => {
-            format!("escalated its integration to the human: {detail}")
-        }
+        IntegrationOutcome::Escalated { detail, scan } => format!(
+            "escalated its integration to the human: {detail}{}",
+            scan.map(|scan| scan.to_string()).unwrap_or_default()
+        ),
         IntegrationOutcome::AwaitingForge => return Ok(None),
     };
     Ok(Some(TickReport::Acted {
@@ -141,7 +149,10 @@ fn integrate_locked(
     refuse_unless_integrable(&row)?;
     if !row.awaiting_integration {
         return match last_integrated_sha(tools, task_id)? {
-            Some(sha) => Ok(Some(IntegrationOutcome::Merged { sha })),
+            Some(sha) => Ok(Some(IntegrationOutcome::Merged {
+                sha,
+                scan: ScanRefresh::Unchanged,
+            })),
             None if asker == Asker::Tick => Ok(None),
             None => Err(refused(format!(
                 "never_integrated: {} is not awaiting integration and was never integrated",
@@ -160,12 +171,124 @@ fn integrate_locked(
         Asker::Tick => TaskIntegratedBodyIntegratedBy::Governor,
         Asker::Human => TaskIntegratedBodyIntegratedBy::Human,
     };
+    let integrated_before = integrations_of(tools, task_id)?;
     let outcome = match team.policy.integration {
         Integration::Manual => Some(merge(tools, &row, &into, integrated_by, false)?),
         Integration::AutoMerge => Some(merge(tools, &row, &into, integrated_by, true)?),
         Integration::PullRequest => through_the_forge(tools, forge, &row, &into, asker)?,
     };
-    Ok(outcome)
+    if integrations_of(tools, task_id)? == integrated_before {
+        return Ok(outcome);
+    }
+    let scan = refresh_the_scan(tools, task_id, &into);
+    Ok(outcome.map(|outcome| match outcome {
+        IntegrationOutcome::Merged { sha, .. } => IntegrationOutcome::Merged { sha, scan },
+        IntegrationOutcome::Escalated { detail, .. } => IntegrationOutcome::Escalated {
+            detail,
+            scan: Some(scan),
+        },
+        other => other,
+    }))
+}
+
+/// How many times the task was integrated, so that a caller can tell whether it just was.
+fn integrations_of(tools: &ToolDeps, task_id: &TaskId) -> Result<usize, OrchestratorError> {
+    Ok(tools
+        .log
+        .read(&EventQuery {
+            task_id: Some(task_id.clone()),
+            kinds: vec![EventKind::TaskIntegrated],
+            ..EventQuery::default()
+        })?
+        .len())
+}
+
+/// Scans the project again once work landed in it (5.8), and writes `project.md` and the
+/// criterion library when what the scan reads changed. It never fails the integration: whatever
+/// goes wrong is the answer's words, not an error.
+fn refresh_the_scan(tools: &ToolDeps, task_id: &TaskId, into: &str) -> ScanRefresh {
+    // `scan_project` reads the working tree at the root, which holds what landed only when it is
+    // the integration branch that is checked out there.
+    match tools.git.current_branch() {
+        Ok(branch) if branch == into => {}
+        Ok(branch) => {
+            return ScanRefresh::Skipped {
+                why: format!("the checkout is on {branch}, not {into}"),
+            };
+        }
+        Err(_) => {
+            return ScanRefresh::Skipped {
+                why: "the checkout is not on a branch".to_string(),
+            };
+        }
+    }
+    rescan(tools, task_id).unwrap_or_else(|error| ScanRefresh::Failed { error })
+}
+
+/// The refresh itself, once the checkout is known to hold what landed.
+fn rescan(tools: &ToolDeps, task_id: &TaskId) -> Result<ScanRefresh, String> {
+    let scan = scan_project(&tools.git, tools.clock.now()).map_err(|error| error.to_string())?;
+    let found = names_of(&scan.detected_criteria);
+    let last = tools
+        .log
+        .read(&EventQuery {
+            kinds: vec![EventKind::ProjectScanned],
+            ..EventQuery::default()
+        })
+        .map_err(|error| error.to_string())?
+        .into_iter()
+        .rev()
+        .find_map(|event| match event.body {
+            EventBody::ProjectScanned(body) => Some(body),
+            _ => None,
+        });
+    if last.is_some_and(|last| {
+        material(&last.read_back, &last.detected_criteria) == material(&scan.read_back, &found)
+    }) {
+        return Ok(ScanRefresh::Unchanged);
+    }
+    let kept = match tools.files.read_criteria() {
+        Ok(library) => Some(library),
+        Err(FilesError::NotFound { .. }) => None,
+        Err(error) => return Err(error.to_string()),
+    };
+    let library = seeded_library(&scan.detected_criteria, kept.as_ref());
+    let words = |error: OrchestratorError| error.to_string();
+    tools
+        .files
+        .write_project_scan(&project_document(&scan, &library))
+        .map_err(|error| error.to_string())?;
+    if kept.as_ref() != Some(&library) {
+        tools
+            .files
+            .write_criteria(&library)
+            .map_err(|error| error.to_string())?;
+        append(
+            tools,
+            task_id,
+            None,
+            None,
+            EventBody::CriteriaUpdated(CriteriaUpdatedBody {
+                criterion_names: names_of(&library.criteria),
+                updated_by: GOVERNOR.to_string(),
+            }),
+        )
+        .map_err(words)?;
+    }
+    // Last, as the mark that the refresh finished: one that failed before it is compared against
+    // the scan before, and so is done again by the next integration.
+    append(
+        tools,
+        task_id,
+        None,
+        None,
+        EventBody::ProjectScanned(ProjectScannedBody {
+            detected_criteria: found,
+            read_back: scan.read_back.clone(),
+        }),
+    )
+    .map_err(words)?;
+    Ok(ScanRefresh::Refreshed)
 }
 
 /// Under `pull_request`: with no pull request opened since acceptance, the branch pushed to
@@ -180,7 +303,7 @@ fn through_the_forge(
     asker: Asker,
 ) -> Result<Option<IntegrationOutcome>, OrchestratorError> {
     let task_id = &row.task_id;
-    let branch = format!("farik/{}", task_id.as_str());
+    let branch = task_branch(&tools.files.read_contract(task_id)?);
     let opened = since_accepted(tools, task_id, &[EventKind::PullRequestOpened])?
         .into_iter()
         .rev()
@@ -217,7 +340,10 @@ fn through_the_forge(
                 );
                 return escalate(tools, task_id, detail).map(Some);
             }
-            Ok(Some(IntegrationOutcome::Merged { sha }))
+            Ok(Some(IntegrationOutcome::Merged {
+                sha,
+                scan: ScanRefresh::Unchanged,
+            }))
         }
         PullRequestState::Closed if asker == Asker::Tick => {
             let detail = format!("the pull request {url} was closed without merging");
@@ -252,7 +378,10 @@ fn closed_for_the_human(
                 into,
                 TaskIntegratedBodyIntegratedBy::Human,
             )?;
-            Ok(IntegrationOutcome::Merged { sha: head })
+            Ok(IntegrationOutcome::Merged {
+                sha: head,
+                scan: ScanRefresh::Unchanged,
+            })
         }
         Ok(_) => {
             let detail = format!(
@@ -359,7 +488,7 @@ fn merge(
     push: bool,
 ) -> Result<IntegrationOutcome, OrchestratorError> {
     let id = row.task_id.as_str();
-    let branch = format!("farik/{id}");
+    let branch = task_branch(&tools.files.read_contract(&row.task_id)?);
     let message = format!("Merge {id}: {}", row.title);
     let sha = match tools.git.merge(into, &branch, &message) {
         Ok(MergeOutcome::Merged { sha }) => sha,
@@ -394,7 +523,10 @@ fn merge(
             return escalate(tools, &row.task_id, detail);
         }
     }
-    Ok(IntegrationOutcome::Merged { sha })
+    Ok(IntegrationOutcome::Merged {
+        sha,
+        scan: ScanRefresh::Unchanged,
+    })
 }
 
 /// Appends `task.integrated`.
@@ -434,7 +566,7 @@ fn escalate(
             detail: detail.clone(),
         }),
     )?;
-    Ok(IntegrationOutcome::Escalated { detail })
+    Ok(IntegrationOutcome::Escalated { detail, scan: None })
 }
 
 /// Git's own words for a failure.
@@ -529,12 +661,19 @@ pub(super) fn cleanup(
     if !remove_workspace(orchestrator, &row.task_id)? {
         return Ok(None);
     }
+    // The removal already happened, so a contract that cannot be read only loses the name.
+    let branch = orchestrator
+        .deps
+        .tools
+        .files
+        .read_contract(&row.task_id)
+        .map_or_else(
+            |_| "its branch".to_string(),
+            |contract| task_branch(&contract),
+        );
     Ok(Some(TickReport::Acted {
         task_id: row.task_id.clone(),
-        what: format!(
-            "removed its worktree and its sandbox, and kept farik/{}",
-            row.task_id.as_str()
-        ),
+        what: format!("removed its worktree and its sandbox, and kept {branch}"),
     }))
 }
 
@@ -605,13 +744,14 @@ mod tests {
     use serde_json::json;
 
     use crate::orchestrator::fixtures::Harness;
-    use crate::orchestrator::{IntegrationOutcome, OrchestratorError, TickReport};
+    use crate::orchestrator::{IntegrationOutcome, OrchestratorError, ScanRefresh, TickReport};
 
     const NOTHING_TO_DO: &str = "nothing on the board needs doing";
 
     fn idle() -> TickReport {
         TickReport::Idle {
             why: NOTHING_TO_DO.to_string(),
+            until: None,
         }
     }
 
@@ -688,7 +828,7 @@ mod tests {
             &harness,
             &["rev-list", "--parents", "-n", "1", "refs/heads/main"],
         );
-        let branch = at_root(&harness, &["rev-parse", "farik/FRK-1"]);
+        let branch = at_root(&harness, &["rev-parse", &harness.branch("FRK-1")]);
         assert!(
             parents.split(' ').skip(1).any(|parent| parent == branch),
             "{parents}"
@@ -700,6 +840,50 @@ mod tests {
         );
         assert!(!harness.row("FRK-1").awaiting_integration);
         let _ = std::fs::remove_dir_all(&origin);
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn integrates_a_fix_branch() {
+        let harness = under("int-fix", "auto_merge");
+        harness.verifying_with("FRK-1", true, true, |wire| wire["change"] = json!("fix"));
+        harness.project.moved(
+            "FRK-1",
+            "verifying",
+            "accepted",
+            &json!({ "actor": "product_manager", "requested_by": "pm", "assignee": "dev-a", "reviewer": "dev-b" }),
+        );
+        let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
+
+        let mut said = Vec::new();
+        for _ in 0..2 {
+            if let TickReport::Acted { what, .. } =
+                orchestrator.tick().await.expect("the tick runs")
+            {
+                said.push(what);
+            }
+        }
+
+        assert!(
+            escalations(&harness).is_empty(),
+            "{:?}",
+            escalations(&harness)
+        );
+        assert_eq!(integrations(&harness).len(), 1, "{said:?}");
+        let parents = at_root(
+            &harness,
+            &["rev-list", "--parents", "-n", "1", "refs/heads/main"],
+        );
+        let branch = at_root(&harness, &["rev-parse", "fix/FRK-1"]);
+        assert_eq!(
+            parents.split(' ').nth(2),
+            Some(branch.as_str()),
+            "{parents}"
+        );
+        assert!(
+            said.iter().any(|what| what.ends_with("and kept fix/FRK-1")),
+            "{said:?}"
+        );
     }
 
     #[tokio::test]
@@ -748,7 +932,8 @@ mod tests {
         assert_eq!(
             orchestrator.integrate(&task("FRK-1")).await,
             Ok(IntegrationOutcome::Merged {
-                sha: integrated[0].sha.clone()
+                sha: integrated[0].sha.clone(),
+                scan: ScanRefresh::Unchanged,
             })
         );
         assert_eq!(harness.events(&[]).len(), before);
@@ -789,7 +974,7 @@ mod tests {
 
         let again = orchestrator.integrate(&task("FRK-1")).await;
         assert!(
-            matches!(&again, Ok(IntegrationOutcome::Escalated { detail }) if detail.contains("a.txt")),
+            matches!(&again, Ok(IntegrationOutcome::Escalated { detail, scan: None }) if detail.contains("a.txt")),
             "{again:?}"
         );
         assert_eq!(escalations(&harness).len(), 2);
@@ -797,7 +982,13 @@ mod tests {
         harness.resolve_the_conflict();
         let merged = orchestrator.integrate(&task("FRK-1")).await;
         let head = at_root(&harness, &["rev-parse", "main"]);
-        assert_eq!(merged, Ok(IntegrationOutcome::Merged { sha: head.clone() }));
+        assert_eq!(
+            merged,
+            Ok(IntegrationOutcome::Merged {
+                sha: head.clone(),
+                scan: ScanRefresh::Refreshed
+            })
+        );
         let integrated = integrations(&harness);
         assert_eq!(integrated.len(), 1);
         assert_eq!(integrated[0].sha, head);
@@ -818,7 +1009,10 @@ mod tests {
 
         assert_eq!(
             orchestrator.integrate(&task("FRK-1")).await,
-            Ok(IntegrationOutcome::Merged { sha: sha.clone() })
+            Ok(IntegrationOutcome::Merged {
+                sha: sha.clone(),
+                scan: ScanRefresh::Unchanged
+            })
         );
         assert_eq!(integrations(&harness).len(), 1);
         assert_eq!(at_root(&harness, &["rev-parse", "main"]), sha);
@@ -840,7 +1034,13 @@ mod tests {
         let merged = orchestrator.integrate(&task("FRK-1")).await;
         let head = at_root(&harness, &["rev-parse", "main"]);
         assert_ne!(head, pushed);
-        assert_eq!(merged, Ok(IntegrationOutcome::Merged { sha: head }));
+        assert_eq!(
+            merged,
+            Ok(IntegrationOutcome::Merged {
+                sha: head,
+                scan: ScanRefresh::Refreshed
+            })
+        );
         assert_eq!(git_output_in(&origin, &["rev-parse", "main"]), pushed);
         let _ = std::fs::remove_dir_all(&origin);
     }
@@ -930,7 +1130,10 @@ mod tests {
 
         assert_eq!(
             answered,
-            Ok(IntegrationOutcome::Merged { sha: head.clone() })
+            Ok(IntegrationOutcome::Merged {
+                sha: head.clone(),
+                scan: ScanRefresh::Unchanged
+            })
         );
         assert_eq!(integrations(&harness).len(), 1);
         assert_eq!(at_root(&harness, &["rev-parse", "main"]), head);
@@ -979,9 +1182,10 @@ mod tests {
         assert_eq!(raised.len(), 1, "{raised:?}");
         assert_eq!(raised[0].reason, EscalationRaisedBodyReason::Integration);
         assert!(
-            raised[0]
-                .detail
-                .starts_with("merging farik/FRK-1 into main failed"),
+            raised[0].detail.starts_with(&format!(
+                "merging {} into main failed",
+                harness.branch("FRK-1")
+            )),
             "{}",
             raised[0].detail
         );
@@ -1075,10 +1279,10 @@ mod tests {
                 "work",
                 "{round}"
             );
-            for branch in ["farik/FRK-1", "farik/FRK-2"] {
+            for branch in [harness.branch("FRK-1"), harness.branch("FRK-2")] {
                 git_in(
                     &harness.project.repo.path,
-                    &["merge-base", "--is-ancestor", branch, "main"],
+                    &["merge-base", "--is-ancestor", &branch, "main"],
                 );
             }
             assert_eq!(
@@ -1107,7 +1311,7 @@ mod tests {
             harness.project.record(
                 "FRK-1",
                 "pull_request.opened",
-                &json!({ "url": PULL_URL, "number": 7, "branch": "farik/FRK-1" }),
+                &json!({ "url": PULL_URL, "number": 7, "branch": harness.branch("FRK-1") }),
             );
         }
         (harness, origin)
@@ -1151,13 +1355,13 @@ mod tests {
         orchestrator.tick().await.expect("the tick runs");
 
         assert_eq!(
-            git_output_in(&origin, &["rev-parse", "farik/FRK-1"]),
-            at_root(&harness, &["rev-parse", "farik/FRK-1"])
+            git_output_in(&origin, &["rev-parse", &harness.branch("FRK-1")]),
+            at_root(&harness, &["rev-parse", &harness.branch("FRK-1")])
         );
         let recorded = opened(&harness);
         assert_eq!(recorded.len(), 1, "{recorded:?}");
         assert_eq!(recorded[0].number, 7);
-        assert_eq!(recorded[0].branch, "farik/FRK-1");
+        assert_eq!(recorded[0].branch, harness.branch("FRK-1"));
         assert_eq!(recorded[0].url, PULL_URL);
         let body = harness.gh.stdin_of("create");
         let contract = harness
@@ -1277,7 +1481,7 @@ mod tests {
 
         let again = orchestrator.integrate(&task("FRK-1")).await;
         assert!(
-            matches!(&again, Ok(IntegrationOutcome::Escalated { detail }) if detail.contains("reopen it")),
+            matches!(&again, Ok(IntegrationOutcome::Escalated { detail, scan: None }) if detail.contains("reopen it")),
             "{again:?}"
         );
         assert_eq!(escalations(&harness).len(), 2);
@@ -1285,7 +1489,10 @@ mod tests {
         let sha = harness.merge_on_the_forge(&origin, "FRK-1");
         assert_eq!(
             orchestrator.integrate(&task("FRK-1")).await,
-            Ok(IntegrationOutcome::Merged { sha: sha.clone() })
+            Ok(IntegrationOutcome::Merged {
+                sha: sha.clone(),
+                scan: ScanRefresh::Refreshed
+            })
         );
         let integrated = integrations(&harness);
         assert_eq!(integrated.len(), 1);
@@ -1376,5 +1583,225 @@ mod tests {
         );
         assert_eq!(at_root(&harness, &["rev-parse", "main"]), local);
         let _ = std::fs::remove_dir_all(&origin);
+    }
+
+    /// `task` accepted, its worktree gone, with each of `files` written and committed on its
+    /// branch.
+    fn accepted_adding(harness: &Harness, task: &str, files: &[(&str, &str)]) {
+        harness.verifying_with(task, false, true, |_| {});
+        let worktree = harness.worktree(task);
+        for (path, text) in files {
+            std::fs::write(worktree.join(path), text).expect("written");
+        }
+        harness
+            .project
+            .deps
+            .git
+            .commit(
+                &worktree,
+                "The task's change",
+                &files
+                    .iter()
+                    .map(|(path, _)| (*path).to_string())
+                    .collect::<Vec<_>>(),
+            )
+            .expect("committed");
+        harness.project.moved(
+            task,
+            "verifying",
+            "accepted",
+            &json!({ "actor": "product_manager", "requested_by": "pm", "assignee": "dev-a", "reviewer": "dev-b" }),
+        );
+        harness
+            .project
+            .deps
+            .git
+            .remove_worktree(&worktree)
+            .expect("the worktree is removed");
+    }
+
+    /// What the tick said it did, the first time it acted.
+    async fn acted(orchestrator: &crate::orchestrator::Orchestrator) -> String {
+        match orchestrator.tick().await.expect("the tick runs") {
+            TickReport::Acted { what, .. } => what,
+            other => panic!("the tick acted, got {other:?}"),
+        }
+    }
+
+    const PACKAGE: &[(&str, &str)] = &[
+        ("package.json", r#"{ "scripts": { "test": "vitest" } }"#),
+        ("package-lock.json", "{}"),
+    ];
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn rescans_after_an_integration_that_changed_the_project() {
+        let harness = under("int-rescan", "auto_merge");
+        accepted_adding(&harness, "FRK-1", PACKAGE);
+        let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
+
+        let what = acted(&orchestrator).await;
+
+        assert!(what.ends_with("; the project scan was refreshed"), "{what}");
+        let files = &harness.project.deps.files;
+        let document = files.read_project_scan().expect("project.md");
+        assert!(document.contains("npm"), "{document}");
+        assert!(document.contains("the-tests-pass"), "{document}");
+        let kinds: Vec<EventKind> = harness
+            .events(&[
+                EventKind::TaskIntegrated,
+                EventKind::ProjectScanned,
+                EventKind::CriteriaUpdated,
+            ])
+            .iter()
+            .map(|event| event.body.kind())
+            .collect();
+        assert_eq!(
+            kinds,
+            [
+                EventKind::TaskIntegrated,
+                EventKind::CriteriaUpdated,
+                EventKind::ProjectScanned
+            ],
+            "the scan is recorded last, once the refresh finished"
+        );
+        let scanned = harness.events(&[EventKind::ProjectScanned]);
+        assert_eq!(
+            scanned[0]
+                .envelope
+                .ids
+                .task_id
+                .as_ref()
+                .map(|id| id.as_str()),
+            Some("FRK-1")
+        );
+        match &harness.events(&[EventKind::CriteriaUpdated])[0].body {
+            EventBody::CriteriaUpdated(body) => {
+                assert_eq!(body.updated_by, "governor");
+                assert!(
+                    body.criterion_names.contains(&"the-tests-pass".to_string()),
+                    "{:?}",
+                    body.criterion_names
+                );
+            }
+            other => panic!("a criteria.updated, got {other:?}"),
+        }
+        let library = files.read_criteria().expect("the library");
+        assert!(
+            library
+                .criteria
+                .iter()
+                .any(|one| one.name.as_str() == "the-tests-pass")
+        );
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn writes_nothing_when_the_scan_is_the_same() {
+        let harness = under("int-rescan-same", "auto_merge");
+        accepted_adding(&harness, "FRK-1", PACKAGE);
+        let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
+        acted(&orchestrator).await;
+        accepted_adding(&harness, "FRK-2", &[("README.md", "# Notes\n")]);
+        let scanned = harness.events(&[EventKind::ProjectScanned]).len();
+
+        let what = acted(&orchestrator).await;
+
+        assert!(what.starts_with("integrated at"), "{what}");
+        assert!(!what.contains("project scan"), "{what}");
+        assert_eq!(harness.events(&[EventKind::ProjectScanned]).len(), scanned);
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn retries_a_refresh_whose_library_was_not_written() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let harness = under("int-rescan-retry", "auto_merge");
+        accepted_adding(&harness, "FRK-1", PACKAGE);
+        let team = harness.project.repo.path.join(".farik/team");
+        let mode = |bits| {
+            std::fs::set_permissions(&team, std::fs::Permissions::from_mode(bits))
+                .expect("the team directory's mode");
+        };
+        // `project.md` is written, and then the library cannot be.
+        mode(0o555);
+        let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
+        let what = acted(&orchestrator).await;
+        mode(0o755);
+        assert!(
+            what.contains("; the project scan was not refreshed: "),
+            "{what}"
+        );
+
+        // The next integration changes nothing the scan reads, and finishes the refresh.
+        accepted_adding(&harness, "FRK-2", &[("README.md", "# Notes\n")]);
+        let what = acted(&orchestrator).await;
+
+        assert!(what.ends_with("; the project scan was refreshed"), "{what}");
+        assert!(
+            harness
+                .project
+                .deps
+                .files
+                .read_criteria()
+                .expect("the library")
+                .criteria
+                .iter()
+                .any(|one| one.name.as_str() == "the-tests-pass")
+        );
+        assert_eq!(harness.events(&[EventKind::ProjectScanned]).len(), 1);
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn skips_the_scan_off_the_integration_branch() {
+        let harness = Harness::new("int-rescan-off", |wire| {
+            wire["policy"]["integration"] = json!("manual");
+            // Named, since with none the integration branch is whatever is checked out.
+            wire["policy"]["integration_branch"] = json!("main");
+        });
+        accepted_adding(&harness, "FRK-1", PACKAGE);
+        git_in(&harness.project.repo.path, &["checkout", "-b", "elsewhere"]);
+        let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
+
+        let reply = orchestrator
+            .handle(farik_protocol::command::Command::TaskIntegrate {
+                task_id: task("FRK-1"),
+            })
+            .await
+            .expect("integrated");
+
+        assert!(
+            reply.said.ends_with(
+                "; the project scan was not refreshed: the checkout is on elsewhere, not main"
+            ),
+            "{}",
+            reply.said
+        );
+        assert_eq!(integrations(&harness).len(), 1);
+        assert!(harness.events(&[EventKind::ProjectScanned]).is_empty());
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn keeps_the_integration_when_the_scan_fails() {
+        let harness = under("int-rescan-fails", "auto_merge");
+        accepted_adding(&harness, "FRK-1", PACKAGE);
+        let document = harness.project.repo.path.join(".farik/project.md");
+        let _ = std::fs::remove_file(&document);
+        std::fs::create_dir_all(&document).expect("project.md is a directory");
+        let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
+
+        let what = acted(&orchestrator).await;
+
+        assert_eq!(integrations(&harness).len(), 1);
+        assert!(!harness.row("FRK-1").awaiting_integration);
+        assert!(
+            what.contains("; the project scan was not refreshed: ") && what.contains("project.md"),
+            "{what}"
+        );
+        assert!(harness.events(&[EventKind::ProjectScanned]).is_empty());
+        assert!(harness.events(&[EventKind::CriteriaUpdated]).is_empty());
     }
 }

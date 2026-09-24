@@ -1,4 +1,5 @@
-//! Triage, contract writing, and filing tasks: the tools that decide what a task is.
+//! Triage, contract writing, filing tasks, and planning a sprint: the tools that decide what a task
+//! is and when it is worked on.
 
 use farik_core::contract::{Role, TaskContract, TaskId, TaskKind, TaskStatus, validate_contract};
 use farik_core::criteria::expand_criteria;
@@ -8,7 +9,8 @@ use farik_core::governor::gates::{
 };
 use farik_core::governor::transition_table::TransitionActor;
 use farik_protocol::event::{
-    ContractWrittenBody, EventBody, EventKind, RequestTriagedBody, RequestTriagedBodySize,
+    ContractJudgedBody, ContractWrittenBody, EventBody, EventKind, RequestTriagedBody,
+    RequestTriagedBodySize, Thread,
 };
 use farik_store::EventQuery;
 use farik_store::requests::{RequestError, file_request, summary_of};
@@ -18,6 +20,8 @@ use serde_json::{Map, Value, json};
 
 use super::refusal::Refusal;
 use super::{Call, ToolError, failed};
+use crate::session::SessionPurpose;
+use crate::sprints::{self, PlannedBy, SprintError};
 
 /// How big a request is (5.16).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, JsonSchema)]
@@ -37,6 +41,18 @@ pub(crate) struct TriageInput {
     size: Size,
     /// Why, in a sentence the log keeps.
     reason: String,
+}
+
+/// `farik_record_judgment`'s input.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct RecordJudgmentInput {
+    /// Whether the task fits its budget.
+    pub(crate) fits_budget: bool,
+    /// Whether its criteria would detect the failure its intent worries about.
+    pub(crate) criteria_detect_failure: bool,
+    /// Why, in a sentence the log keeps.
+    pub(crate) reason: String,
 }
 
 /// A criterion from the library, and the id it takes in the contract.
@@ -69,6 +85,14 @@ pub(crate) struct CreateTaskInput {
     contract: Map<String, Value>,
     /// The epic this is a task of, when it is one.
     parent: Option<String>,
+}
+
+/// `farik_plan_sprint`'s input.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct PlanSprintInput {
+    /// The ready tasks and approved epics to put in the open sprint.
+    task_ids: Vec<String>,
 }
 
 /// Sizes the session's request (5.16). The Scrum Master triages an untriaged `draft` without a
@@ -127,6 +151,39 @@ pub(super) fn triage(call: &Call<'_>, input: &TriageInput) -> Result<Value, Tool
     Ok(
         json!({ "task_id": task.as_str(), "kind": contract.kind.to_string(), "seq": event.envelope.seq }),
     )
+}
+
+/// Records the Scrum Master's judgment of the session's contract against the Definition of
+/// Ready's judgment rules (5.3): whether it fits its budget and whether its criteria would detect
+/// the failure its intent worries about, with the reason. Only the Scrum Master judges, and only
+/// a task `refining`.
+pub(super) fn record_judgment(
+    call: &Call<'_>,
+    input: &RecordJudgmentInput,
+) -> Result<Value, ToolError> {
+    let task = call.task()?;
+    let reason = input.reason.trim();
+    if reason.is_empty() {
+        return Err(Refusal::BlankReason.into());
+    }
+    let (_, row) = call.contract(task)?;
+    if call.role() != Role::ScrumMaster || row.status != TaskStatus::Refining {
+        return Err(Refusal::JudgmentNotAllowed {
+            role: call.role(),
+            status: row.status,
+        }
+        .into());
+    }
+    let event = call.append(
+        Some(task),
+        EventBody::ContractJudged(ContractJudgedBody {
+            judged_by: call.agent_id().to_string(),
+            fits_budget: input.fits_budget,
+            criteria_detect_failure: input.criteria_detect_failure,
+            reason: reason.to_string(),
+        }),
+    )?;
+    Ok(json!({ "task_id": task.as_str(), "seq": event.envelope.seq }))
 }
 
 /// Writes fields of the session's contract and appends criteria from the library by name, as
@@ -208,6 +265,14 @@ pub(super) fn write_contract(
 /// once `check_child_creation` allows the caller. A `reviewer_role` left out is filled with the
 /// role the team can staff, when there is one.
 pub(super) fn create_task(call: &Call<'_>, input: CreateTaskInput) -> Result<Value, ToolError> {
+    // Nothing said in the channel is work (5.9): a conversation files a request, which triage
+    // sizes, and never a task of an epic.
+    if input.parent.is_some() && call.context.purpose == SessionPurpose::Conversation {
+        return Err(Refusal::ChannelLimit {
+            detail: "a conversation files a request, without a parent".to_string(),
+        }
+        .into());
+    }
     let parent = match &input.parent {
         None => None,
         Some(parent) => {
@@ -257,7 +322,60 @@ pub(super) fn create_task(call: &Call<'_>, input: CreateTaskInput) -> Result<Val
         other => failed(other),
     })?;
     deps.projections.catch_up().map_err(failed)?;
-    Ok(json!({ "task_id": filed.id.as_str(), "status": "draft" }))
+    let mut answer = json!({ "task_id": filed.id.as_str(), "status": "draft" });
+    // The task is filed whatever the join says: an error here would have the agent file it again.
+    if parent.is_some()
+        && let Err(error) = sprints::join_epics_sprint(deps, &filed.id)
+    {
+        answer["warning"] = json!(format!(
+            "{} is filed and joined no sprint: {error}",
+            filed.id.as_str()
+        ));
+    }
+    Ok(answer)
+}
+
+/// Plans the open sprint as the assigner (5.5), through `sprints::plan_sprint`, in a planning
+/// ceremony session alone, where the digest and the retro are in front of it, and answers the
+/// sprint and every task now in it.
+pub(super) fn plan_sprint(call: &Call<'_>, input: &PlanSprintInput) -> Result<Value, ToolError> {
+    if call.context.thread != Some(Thread::Planning) {
+        return Err(ToolError::Refused {
+            reason: "sprint_plan_refused: only the planning ceremony plans a sprint".to_string(),
+        });
+    }
+    let task_ids = input
+        .task_ids
+        .iter()
+        .map(|id| {
+            id.parse::<TaskId>()
+                .map_err(|error| ToolError::InvalidInput {
+                    detail: format!("{id} is not a task id: {error}"),
+                })
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let sprint = sprints::plan_sprint(
+        call.deps(),
+        &task_ids,
+        &PlannedBy::Assigner(call.agent_id().to_string()),
+    )
+    .map_err(sprint_failed)?;
+    Ok(json!({
+        "sprint_id": sprint.id.as_str(),
+        "task_ids": sprint.task_ids.iter().map(|id| id.as_str()).collect::<Vec<_>>(),
+    }))
+}
+
+/// A sprint's refusal as the tool's, and its files' or store's failure as the tool's failure.
+fn sprint_failed(error: SprintError) -> ToolError {
+    match error {
+        SprintError::Files(error) => failed(error),
+        SprintError::Store(error) => failed(error),
+        SprintError::Refused { reason } => ToolError::Refused { reason },
+        other => ToolError::Refused {
+            reason: format!("sprint_plan_refused: {other}"),
+        },
+    }
 }
 
 /// Which actor a contract write is judged as: by role first, then by relation to the contract.
@@ -352,11 +470,12 @@ fn changed_fields(before: &Value, after: &Value) -> Vec<String> {
 
 #[cfg(test)]
 mod tests {
-    use farik_protocol::event::{EventBody, EventKind, FarikEvent};
+    use farik_protocol::event::{EventBody, EventKind, FarikEvent, Thread};
     use serde_json::{Value, json};
 
+    use crate::session::SessionPurpose;
     use crate::tools::ToolError;
-    use crate::tools::fixtures::{TestProject, a_team_of_three};
+    use crate::tools::fixtures::{TestProject, a_team_of_three, run};
 
     fn a_project(name: &str) -> TestProject {
         TestProject::new(name, &a_team_of_three(|_| {}))
@@ -464,6 +583,122 @@ mod tests {
         refused_with(
             project.call("pm", Some("FRK-2"), "farik_triage_request", triage("small")),
             "triage_not_allowed",
+        );
+        assert_eq!(project.event_count(), before);
+    }
+
+    /// `a_team_of_three`, with an active Scrum Master `sm` besides.
+    fn a_project_with_scrum_master(name: &str) -> TestProject {
+        TestProject::new(
+            name,
+            &a_team_of_three(|wire| {
+                wire["agents"].as_array_mut().expect("agents").push(
+                    farik_core::team::fixtures::an_agent_wire("sm", "scrum_master"),
+                );
+            }),
+        )
+    }
+
+    fn judgment(fits_budget: bool, criteria_detect_failure: bool, reason: &str) -> Value {
+        json!({
+            "fits_budget": fits_budget,
+            "criteria_detect_failure": criteria_detect_failure,
+            "reason": reason
+        })
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn records_a_judgment_by_the_scrum_master() {
+        let project = a_project_with_scrum_master("tools-judge-sm");
+        project.filed("FRK-1", "refining", "task", None);
+        let result = project
+            .call(
+                "sm",
+                Some("FRK-1"),
+                "farik_record_judgment",
+                judgment(
+                    true,
+                    false,
+                    "It fits the sprint, but the criteria only check the happy path.",
+                ),
+            )
+            .expect("the Scrum Master judges a refining task");
+        let judged = project.events(&[EventKind::ContractJudged]);
+        assert_eq!(judged.len(), 1);
+        let EventBody::ContractJudged(body) = &judged[0].body else {
+            panic!("a contract.judged");
+        };
+        assert_eq!(body.judged_by, "sm");
+        assert!(body.fits_budget);
+        assert!(!body.criteria_detect_failure);
+        assert_eq!(
+            body.reason,
+            "It fits the sprint, but the criteria only check the happy path."
+        );
+        assert_eq!(result["seq"], judged[0].envelope.seq);
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn refuses_a_judgment_by_anyone_else() {
+        let project = a_project_with_scrum_master("tools-judge-others");
+        project.filed("FRK-1", "refining", "task", None);
+        let before = project.event_count();
+        for agent in ["pm", "dev-a"] {
+            refused_with(
+                project.call(
+                    agent,
+                    Some("FRK-1"),
+                    "farik_record_judgment",
+                    judgment(
+                        true,
+                        true,
+                        "Fits the sprint and the criteria would catch it.",
+                    ),
+                ),
+                "judgment_not_allowed",
+            );
+        }
+        assert_eq!(project.event_count(), before);
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn refuses_a_judgment_outside_refining() {
+        let project = a_project_with_scrum_master("tools-judge-status");
+        project.filed("FRK-1", "ready", "task", None);
+        let before = project.event_count();
+        refused_with(
+            project.call(
+                "sm",
+                Some("FRK-1"),
+                "farik_record_judgment",
+                judgment(
+                    true,
+                    true,
+                    "Fits the sprint and the criteria would catch it.",
+                ),
+            ),
+            "judgment_not_allowed",
+        );
+        assert_eq!(project.event_count(), before);
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn refuses_a_blank_reason() {
+        let project = a_project_with_scrum_master("tools-judge-blank");
+        project.filed("FRK-1", "refining", "task", None);
+        let before = project.event_count();
+        refused_with(
+            project.call(
+                "sm",
+                Some("FRK-1"),
+                "farik_record_judgment",
+                judgment(true, true, "  "),
+            ),
+            "blank_reason",
         );
         assert_eq!(project.event_count(), before);
     }
@@ -681,6 +916,41 @@ mod tests {
 
     #[test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn files_a_request_from_the_channel() {
+        let project = a_project("tools-channel-request");
+        project.filed("FRK-1", "in_progress", "epic", None);
+        project.moved(
+            "FRK-1",
+            "assigned",
+            "in_progress",
+            &json!({ "assignee": "pm" }),
+        );
+        let mut context = project.context("pm", None);
+        context.purpose = SessionPurpose::Conversation;
+
+        let filed = run(
+            &context,
+            "farik_create_task",
+            json!({ "contract": a_request() }),
+        )
+        .expect("a request is filed from a conversation");
+        assert_eq!(filed["status"], "draft");
+        assert_eq!(project.file("FRK-2")["parent"], Value::Null);
+
+        let before = project.event_count();
+        refused_with(
+            run(
+                &context,
+                "farik_create_task",
+                json!({ "contract": a_request(), "parent": "FRK-1" }),
+            ),
+            "channel_limit",
+        );
+        assert_eq!(project.event_count(), before);
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
     fn files_a_child_of_an_epic_its_assignee_breaks_down() {
         let project = a_project("tools-child");
         project.filed("FRK-1", "in_progress", "epic", None);
@@ -716,6 +986,343 @@ mod tests {
             "gate_failed",
         );
         assert_eq!(project.event_count(), before);
+    }
+
+    /// `filed` in `status`, of `kind`, with a budget of `usd` dollars.
+    fn filed_at(project: &TestProject, task: &str, status: &str, kind: &str, usd: f64) {
+        project.filed_with(task, status, kind, None, |wire| {
+            wire["budget"]["max_cost_usd"] = json!(usd);
+        });
+    }
+
+    /// `agent` calls `farik_plan_sprint` of `tasks` from a planning ceremony session.
+    fn plan(project: &TestProject, agent: &str, tasks: &[&str]) -> Result<Value, ToolError> {
+        let mut context = project.context(agent, None);
+        context.purpose = SessionPurpose::Ceremony;
+        context.thread = Some(Thread::Planning);
+        run(&context, "farik_plan_sprint", json!({ "task_ids": tasks }))
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn refuses_a_plan_outside_the_planning_ceremony() {
+        let project = a_project_with_scrum_master("tools-plan-ceremony");
+        project.filed("FRK-1", "ready", "task", None);
+        project.open_sprint("S1", None, &[]);
+        let before = project.event_count();
+
+        for purpose in [SessionPurpose::Plan, SessionPurpose::Refine] {
+            let mut context = project.context("sm", None);
+            context.purpose = purpose;
+            let refused = run(
+                &context,
+                "farik_plan_sprint",
+                json!({ "task_ids": ["FRK-1"] }),
+            )
+            .expect_err("only the planning ceremony plans");
+            assert_eq!(
+                refused,
+                ToolError::Refused {
+                    reason: "sprint_plan_refused: only the planning ceremony plans a sprint"
+                        .to_string()
+                },
+                "{purpose:?}"
+            );
+        }
+
+        assert_eq!(project.event_count(), before, "nothing is recorded");
+        assert_eq!(sprint_of(&project, "FRK-1"), Value::Null);
+    }
+
+    /// The sprint the contract file of `task` names.
+    fn sprint_of(project: &TestProject, task: &str) -> Value {
+        project.file(task)["sprint"].clone()
+    }
+
+    /// Each `sprint.planned`, as its wire.
+    fn planned(project: &TestProject) -> Vec<Value> {
+        project
+            .events(&[EventKind::SprintPlanned])
+            .iter()
+            .map(|event| match &event.body {
+                EventBody::SprintPlanned(body) => serde_json::to_value(body).expect("a body"),
+                other => panic!("a sprint.planned, got {other:?}"),
+            })
+            .collect()
+    }
+
+    /// The task ids sprint `sprint`'s file lists.
+    fn held_by(project: &TestProject, sprint: &str) -> Vec<String> {
+        project
+            .deps
+            .files
+            .read_sprint(sprint)
+            .expect("the sprint reads")
+            .task_ids
+            .iter()
+            .map(|id| id.as_str().to_string())
+            .collect()
+    }
+
+    /// A refusal of `sprint_plan_refused` that says each of `words`, with nothing recorded.
+    fn plan_refused(project: &TestProject, agent: &str, tasks: &[&str], words: &[&str]) {
+        let before = project.event_count();
+        match plan(project, agent, tasks) {
+            Err(ToolError::Refused { reason }) => {
+                assert!(reason.starts_with("sprint_plan_refused: "), "{reason}");
+                for word in words {
+                    assert!(reason.contains(word), "{word} in {reason}");
+                }
+            }
+            other => panic!("expected a sprint_plan_refused, got {other:?}"),
+        }
+        assert_eq!(project.event_count(), before, "nothing is recorded");
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn plans_ready_tasks_into_the_sprint() {
+        let project = a_project_with_scrum_master("tools-plan");
+        project.filed("FRK-1", "ready", "task", None);
+        project.filed("FRK-2", "ready", "task", None);
+        project.open_sprint("S1", None, &[]);
+
+        let answer = plan(&project, "sm", &["FRK-1", "FRK-2"]).expect("the Scrum Master plans");
+
+        assert_eq!(
+            answer,
+            json!({ "sprint_id": "S1", "task_ids": ["FRK-1", "FRK-2"] })
+        );
+        assert_eq!(sprint_of(&project, "FRK-1"), "S1");
+        assert_eq!(sprint_of(&project, "FRK-2"), "S1");
+        assert_eq!(held_by(&project, "S1"), ["FRK-1", "FRK-2"]);
+        assert_eq!(
+            planned(&project),
+            [json!({ "sprint_id": "S1", "task_ids": ["FRK-1", "FRK-2"], "planned_by": "sm" })]
+        );
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn refuses_a_plan_past_the_sprint_budget() {
+        let project = a_project_with_scrum_master("tools-plan-budget");
+        filed_at(&project, "FRK-1", "ready", "task", 6.0);
+        filed_at(&project, "FRK-2", "ready", "task", 5.0);
+        project.open_sprint("S1", Some(10.0), &["FRK-1"]);
+
+        plan_refused(&project, "sm", &["FRK-2"], &["budget", "S1"]);
+
+        assert_eq!(sprint_of(&project, "FRK-2"), Value::Null);
+        assert_eq!(held_by(&project, "S1"), ["FRK-1"]);
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn refuses_a_task_that_is_not_ready() {
+        let project = a_project_with_scrum_master("tools-plan-not-ready");
+        project.filed("FRK-1", "refining", "task", None);
+        project.open_sprint("S1", None, &[]);
+
+        plan_refused(&project, "sm", &["FRK-1"], &["FRK-1", "refining"]);
+        assert_eq!(sprint_of(&project, "FRK-1"), Value::Null);
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn refuses_a_task_with_a_parent() {
+        let project = a_project_with_scrum_master("tools-plan-parent");
+        project.filed("FRK-1", "in_progress", "epic", None);
+        project.filed("FRK-2", "ready", "task", Some("FRK-1"));
+        project.open_sprint("S1", None, &[]);
+
+        plan_refused(&project, "sm", &["FRK-2"], &["FRK-2", "FRK-1"]);
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn refuses_a_task_already_in_a_sprint() {
+        let project = a_project_with_scrum_master("tools-plan-in-a-sprint");
+        project.filed("FRK-1", "ready", "task", None);
+        project.open_sprint("S1", None, &["FRK-1"]);
+
+        plan_refused(&project, "sm", &["FRK-1"], &["FRK-1", "already in S1"]);
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn refuses_a_plan_by_anyone_but_the_assigner() {
+        let project = a_project_with_scrum_master("tools-plan-assigner");
+        project.filed("FRK-1", "ready", "task", None);
+        project.open_sprint("S1", None, &[]);
+
+        plan_refused(&project, "dev-a", &["FRK-1"], &["dev-a"]);
+        plan_refused(&project, "pm", &["FRK-1"], &["pm", "Scrum Master"]);
+        assert_eq!(sprint_of(&project, "FRK-1"), Value::Null);
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn refuses_a_second_plan() {
+        let project = a_project_with_scrum_master("tools-plan-second");
+        project.filed("FRK-1", "ready", "task", None);
+        project.filed("FRK-2", "ready", "task", None);
+        project.open_sprint("S1", None, &["FRK-1"]);
+
+        plan_refused(&project, "sm", &["FRK-2"], &["S1"]);
+        assert_eq!(sprint_of(&project, "FRK-2"), Value::Null);
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn refuses_a_plan_into_a_sprint_that_is_ending() {
+        let project = a_project_with_scrum_master("tools-plan-ending");
+        project.filed("FRK-1", "ready", "task", None);
+        project.open_sprint("S1", None, &[]);
+        // An end has written S1's file and not yet recorded `sprint.ended`.
+        let mut ending = farik_core::sprint::fixtures::an_open_sprint_wire();
+        ending["id"] = json!("S1");
+        ending["status"] = json!("ended");
+        ending["ended_at"] = json!("2026-09-24T01:00:00Z");
+        project
+            .deps
+            .files
+            .write_sprint(&farik_core::sprint::validate_sprint(&ending).expect("a sprint"))
+            .expect("S1 is written");
+
+        plan_refused(&project, "sm", &["FRK-1"], &["S1", "ended"]);
+        assert_eq!(sprint_of(&project, "FRK-1"), Value::Null);
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn plans_an_epics_tasks_with_it() {
+        let project = a_project_with_scrum_master("tools-plan-epic");
+        project.filed("FRK-1", "ready", "epic", None);
+        project.filed("FRK-3", "in_progress", "epic", None);
+        project.moved(
+            "FRK-3",
+            "assigned",
+            "in_progress",
+            &json!({ "assignee": "sm", "reviewer": "pm" }),
+        );
+        project.filed("FRK-4", "ready", "task", Some("FRK-3"));
+        project.open_sprint("S1", None, &[]);
+
+        plan(&project, "sm", &["FRK-1"]).expect("an approved epic is planned");
+
+        assert_eq!(held_by(&project, "S1"), ["FRK-1"]);
+        assert_eq!(sprint_of(&project, "FRK-4"), Value::Null);
+        // Work under an epic that began before the sprint goes on.
+        project
+            .call(
+                "sm",
+                None,
+                "farik_assign_task",
+                json!({ "task_id": "FRK-4", "assignee_id": "dev-a", "reviewer_id": "dev-b" }),
+            )
+            .expect("FRK-4 is assigned while S1 is open");
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn plans_an_epic_with_the_tasks_already_under_it() {
+        let project = a_project_with_scrum_master("tools-plan-epic-children");
+        project.filed("FRK-1", "ready", "epic", None);
+        project.filed("FRK-2", "ready", "task", Some("FRK-1"));
+        project.open_sprint("S1", None, &[]);
+
+        let answer = plan(&project, "sm", &["FRK-1"]).expect("an approved epic is planned");
+
+        assert_eq!(
+            answer,
+            json!({ "sprint_id": "S1", "task_ids": ["FRK-1", "FRK-2"] })
+        );
+        assert_eq!(held_by(&project, "S1"), ["FRK-1", "FRK-2"]);
+        assert_eq!(sprint_of(&project, "FRK-2"), "S1");
+        let row = project
+            .deps
+            .projections
+            .task(&"FRK-2".parse().expect("a task id"))
+            .expect("the board reads")
+            .expect("a row");
+        assert_eq!(row.sprint.as_deref(), Some("S1"));
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn puts_an_epics_new_task_in_its_sprint() {
+        let project = a_project("tools-child-sprint");
+        project.filed("FRK-1", "in_progress", "epic", None);
+        project.moved(
+            "FRK-1",
+            "assigned",
+            "in_progress",
+            &json!({ "assignee": "pm" }),
+        );
+        project.open_sprint("S1", None, &["FRK-1"]);
+
+        project
+            .call(
+                "pm",
+                None,
+                "farik_create_task",
+                json!({ "contract": a_request(), "parent": "FRK-1" }),
+            )
+            .expect("the epic's assignee files its tasks");
+
+        assert_eq!(sprint_of(&project, "FRK-2"), "S1");
+        let row = project
+            .deps
+            .projections
+            .task(&"FRK-2".parse().expect("a task id"))
+            .expect("the board reads")
+            .expect("a row");
+        assert_eq!(row.sprint.as_deref(), Some("S1"));
+        assert_eq!(held_by(&project, "S1"), ["FRK-1", "FRK-2"]);
+        assert_eq!(
+            planned(&project).last(),
+            Some(&json!({ "sprint_id": "S1", "task_ids": ["FRK-2"], "planned_by": "governor" }))
+        );
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn files_a_task_whose_join_fails_and_says_so() {
+        let project = a_project("tools-child-sprint-ending");
+        project.filed("FRK-1", "in_progress", "epic", None);
+        project.moved(
+            "FRK-1",
+            "assigned",
+            "in_progress",
+            &json!({ "assignee": "pm" }),
+        );
+        project.open_sprint("S1", None, &["FRK-1"]);
+        // The human's end has written S1's file and not yet recorded `sprint.ended`.
+        let mut ending = farik_core::sprint::fixtures::an_open_sprint_wire();
+        ending["id"] = json!("S1");
+        ending["task_ids"] = json!(["FRK-1"]);
+        ending["status"] = json!("ended");
+        ending["ended_at"] = json!("2026-09-24T01:00:00Z");
+        project
+            .deps
+            .files
+            .write_sprint(&farik_core::sprint::validate_sprint(&ending).expect("a sprint"))
+            .expect("S1 is written");
+
+        let answer = project
+            .call(
+                "pm",
+                None,
+                "farik_create_task",
+                json!({ "contract": a_request(), "parent": "FRK-1" }),
+            )
+            .expect("the task is filed though it joins no sprint");
+
+        assert_eq!(answer["task_id"], "FRK-2");
+        let warning = answer["warning"].as_str().expect("a warning");
+        assert!(warning.contains("S1 has ended"), "{warning}");
+        assert_eq!(sprint_of(&project, "FRK-2"), Value::Null);
+        assert_eq!(planned(&project).len(), 1, "only the fixture's plan");
     }
 
     /// A request as its author writes it.

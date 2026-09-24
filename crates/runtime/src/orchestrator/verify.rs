@@ -7,6 +7,7 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use farik_core::branch::task_branch;
 use farik_core::contract::{ExitCriterion, TaskContract, TaskId, TaskStatus, wire_method};
 use farik_core::governor::done::{CriterionResult, RunBy, requires_human_acceptance};
 use farik_core::governor::gates::Rejection;
@@ -21,7 +22,7 @@ use farik_store::{EventQuery, Git, TaskProjection};
 
 use super::messages::{ReviewBrief, accept_message, review_message};
 use super::requests;
-use super::rules::{acted, active, spent};
+use super::rules::{Waiting, acted, active, asleep, spent};
 use super::session::{SessionAsk, run_session};
 use super::{Orchestrator, OrchestratorDeps, OrchestratorError, TickReport, worktree};
 use crate::criteria::{CriterionError, CriterionOutcome, NewTestsInput, run_criteria};
@@ -30,7 +31,7 @@ use crate::session::SessionPurpose;
 use crate::tools::ToolDeps;
 use crate::transitions::{
     TransitionAsk, TransitionError, TransitionOutcome, integration_branch, last_move_into,
-    refusal_details, reviewed_by_the_human,
+    refusal_details,
 };
 
 /// Who records the criteria Farik runs for the reviewer: Farik ran them, as `requested_by:
@@ -42,12 +43,13 @@ pub(super) const GOVERNOR: &str = "governor";
 /// next runs; then, judged on the governor's own context for `verifying -> accepted`, the
 /// reviewer's session when there is no review note, the rejection when the reviewer's results hold
 /// a failure, the reviewer's session again when a criterion is unanswered, and the Product
-/// Manager's session when every criterion passed and the human need not accept.
+/// Manager's session when every criterion passed and the human need not accept. An epic, which
+/// has no branch or worktree of its own, goes to `verifying_epic` whoever reviews it.
 pub(super) async fn verifying(
     orchestrator: &Orchestrator,
     team: &Team,
     row: &TaskProjection,
-    day_spent: &mut bool,
+    waiting: &mut Waiting,
 ) -> Result<Option<TickReport>, OrchestratorError> {
     let deps = &orchestrator.deps;
     let history = history(deps, &row.task_id)?;
@@ -58,7 +60,7 @@ pub(super) async fn verifying(
         return Ok(None);
     }
     let contract = deps.tools.files.read_contract(&row.task_id)?;
-    if reviewed_by_the_human(&contract, team) {
+    if requests::is_epic(row) {
         return requests::verifying_epic(
             orchestrator,
             team,
@@ -66,7 +68,7 @@ pub(super) async fn verifying(
             &contract,
             &history,
             since,
-            day_spent,
+            waiting,
         )
         .await;
     }
@@ -80,39 +82,15 @@ pub(super) async fn verifying(
     let context = context(deps, team, &row.task_id)?;
     let answers = reviewer_results(&context);
     let Some(review_note) = context.done.review_note.clone() else {
-        return review(orchestrator, team, row, reviewer, &[], day_spent, ran).await;
+        return review(orchestrator, team, row, reviewer, &[], waiting, ran).await;
     };
-    let failed: Vec<String> = contract
-        .exit_criteria
-        .iter()
-        .map(|criterion| criterion.id.to_string())
-        .filter(|id| {
-            answers
-                .iter()
-                .any(|result| result.criterion_id == *id && !result.passed)
-        })
-        .collect();
+    let failed = failed(&contract, &answers);
     if !failed.is_empty() {
         return reject(deps, team, row, reviewer, &failed, review_note).map(Some);
     }
-    let unanswered: Vec<String> = contract
-        .exit_criteria
-        .iter()
-        .filter(|criterion| !is_human(criterion))
-        .map(|criterion| criterion.id.to_string())
-        .filter(|id| !answers.iter().any(|result| result.criterion_id == *id))
-        .collect();
+    let unanswered = unanswered(&contract, &answers);
     if !unanswered.is_empty() {
-        return review(
-            orchestrator,
-            team,
-            row,
-            reviewer,
-            &unanswered,
-            day_spent,
-            ran,
-        )
-        .await;
+        return review(orchestrator, team, row, reviewer, &unanswered, waiting, ran).await;
     }
     // Only the human's acceptance satisfies a `high` risk task or a `human` criterion: until it is
     // given, a session would ask for a move the Definition of Done refuses.
@@ -127,7 +105,7 @@ pub(super) async fn verifying(
         row,
         &review_note,
         &answers,
-        day_spent,
+        waiting,
         ran,
     )
     .await
@@ -181,7 +159,7 @@ async fn run_what_farik_runs(
         let base = base.clone();
         let outcomes = tokio::task::spawn_blocking(move || {
             let git = Git::open(root);
-            let head = format!("farik/{}", alone.id.as_str());
+            let head = task_branch(&alone);
             let input = NewTestsInput {
                 git: &git,
                 base: &base,
@@ -239,6 +217,20 @@ async fn run_what_farik_runs(
     Ok(FarikRan::Criteria(pending.len()))
 }
 
+/// The contract's criteria, in its order, that one of `answers` failed.
+pub(super) fn failed(contract: &TaskContract, answers: &[CriterionResult]) -> Vec<String> {
+    contract
+        .exit_criteria
+        .iter()
+        .map(|criterion| criterion.id.to_string())
+        .filter(|id| {
+            answers
+                .iter()
+                .any(|result| result.criterion_id == *id && !result.passed)
+        })
+        .collect()
+}
+
 /// Whether a criterion Farik could not run is recorded failed rather than escalated: only when the
 /// task's container went, which the work's own commands can cause and a new sandbox answers.
 /// Git, the base-branch sandbox, a file written into the base worktree, or a command that would not
@@ -287,22 +279,21 @@ async fn review(
     row: &TaskProjection,
     reviewer: &Agent,
     unanswered: &[String],
-    day_spent: &mut bool,
+    waiting: &mut Waiting,
     ran: usize,
 ) -> Result<Option<TickReport>, OrchestratorError> {
     let deps = &orchestrator.deps;
     let contract = deps.tools.files.read_contract(&row.task_id)?;
-    if spent(deps, team, &contract, day_spent)? {
+    if spent(deps, team, &contract, &mut waiting.day_spent)?
+        | asleep(deps, reviewer, &mut waiting.slept)?
+    {
         return Ok(ran_criteria(row, ran));
     }
     let history = history(deps, &row.task_id)?;
     let since = since_verifying(&history);
     let context = context(deps, team, &row.task_id)?;
     let git = &deps.tools.git;
-    let diff = git.diff(
-        &integration_branch(team, git)?,
-        &format!("farik/{}", row.task_id.as_str()),
-    )?;
+    let diff = git.diff(&integration_branch(team, git)?, &task_branch(&contract))?;
     let initial_prompt = review_message(&ReviewBrief {
         contract: &contract,
         results: &governor_results(&history, since),
@@ -327,7 +318,7 @@ async fn review(
 
 /// `review.recorded`, once per verification: when none was recorded since the task last moved into
 /// `verifying` and every criterion but a `human` one has a reviewer's result.
-fn record_review(
+pub(super) fn record_review(
     deps: &OrchestratorDeps,
     team: &Team,
     contract: &TaskContract,
@@ -339,15 +330,7 @@ fn record_review(
         event.envelope.seq > since && matches!(event.body, EventBody::ReviewRecorded(_))
     });
     let answers = reviewer_results(&context(deps, team, &contract.id)?);
-    let complete = contract
-        .exit_criteria
-        .iter()
-        .filter(|criterion| !is_human(criterion))
-        .all(|criterion| {
-            answers
-                .iter()
-                .any(|result| result.criterion_id == criterion.id.as_str())
-        });
+    let complete = unanswered(contract, &answers).is_empty();
     if recorded || !complete {
         return Ok(());
     }
@@ -375,7 +358,7 @@ fn record_review(
 
 /// Files `verifying -> rejected` in the reviewer's name, with the failed criteria and the review
 /// note as the reasons, from the session that wrote the note (5.4: Farik files it).
-fn reject(
+pub(super) fn reject(
     deps: &OrchestratorDeps,
     team: &Team,
     row: &TaskProjection,
@@ -403,6 +386,7 @@ fn reject(
                 reasons: review_note,
             }),
             session_id,
+            filed_by_farik: true,
             ..TransitionAsk::default()
         },
         team,
@@ -430,7 +414,7 @@ async fn accept(
     row: &TaskProjection,
     review_note: &str,
     answers: &[CriterionResult],
-    day_spent: &mut bool,
+    waiting: &mut Waiting,
     ran: usize,
 ) -> Result<Option<TickReport>, OrchestratorError> {
     let deps = &orchestrator.deps;
@@ -438,7 +422,9 @@ async fn accept(
         return Ok(ran_criteria(row, ran));
     };
     let contract = deps.tools.files.read_contract(&row.task_id)?;
-    if spent(deps, team, &contract, day_spent)? {
+    if spent(deps, team, &contract, &mut waiting.day_spent)?
+        | asleep(deps, product_manager, &mut waiting.slept)?
+    {
         return Ok(ran_criteria(row, ran));
     }
     let initial_prompt = accept_message(&contract, review_note, answers);
@@ -465,11 +451,15 @@ pub(super) fn read_only<'a>(
 ) -> SessionAsk<'a> {
     SessionAsk {
         agent,
-        contract,
+        contract: Some(contract),
         purpose: SessionPurpose::Verify,
         cwd,
         executor: None,
         read_only: true,
+        only_tool: None,
+        tools: None,
+        in_reply_to: None,
+        thread: None,
         initial_prompt,
     }
 }
@@ -502,7 +492,7 @@ pub(super) fn context(
 }
 
 /// The reviewer's latest result per criterion in this iteration.
-fn reviewer_results(context: &TransitionContext) -> Vec<CriterionResult> {
+pub(super) fn reviewer_results(context: &TransitionContext) -> Vec<CriterionResult> {
     context
         .done
         .results
@@ -534,6 +524,17 @@ pub(super) fn governor_results(history: &[FarikEvent], since: u64) -> Vec<Criter
         }
     }
     results
+}
+
+/// The ids of the criteria, but `human` ones, that `answers` holds no reviewer's result for.
+pub(super) fn unanswered(contract: &TaskContract, answers: &[CriterionResult]) -> Vec<String> {
+    contract
+        .exit_criteria
+        .iter()
+        .filter(|criterion| !is_human(criterion))
+        .map(|criterion| criterion.id.to_string())
+        .filter(|id| !answers.iter().any(|result| result.criterion_id == *id))
+        .collect()
 }
 
 pub(super) fn is_human(criterion: &ExitCriterion) -> bool {
@@ -579,6 +580,15 @@ pub(super) fn append(
         session_id,
         ..tools.ids.clone()
     };
+    append_stamped(tools, ids, body)
+}
+
+/// Appends one event stamped with `ids`, and projects it.
+pub(super) fn append_stamped(
+    tools: &ToolDeps,
+    ids: EventIds,
+    body: EventBody,
+) -> Result<(), OrchestratorError> {
     let event = new_event(body, tools.clock.now(), ids).map_err(|error| {
         OrchestratorError::Transition(TransitionError::Event {
             detail: format!("{error:?}"),

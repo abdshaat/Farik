@@ -7,32 +7,36 @@ use farik_core::contract::{
     ExitCriterion, Role, TaskContract, TaskId, TaskKind, TaskStatus, VerificationWire,
 };
 use farik_core::governor::done::{CriterionResult, RunBy};
+use farik_core::governor::gates::fits_the_open_sprint;
+use farik_core::governor::readiness::{ReadinessRule, evaluate_readiness};
 use farik_core::governor::transition::TransitionRequest;
 use farik_core::governor::transition_table::TransitionActor;
 use farik_core::team::{Agent, Team};
 use farik_protocol::event::{
     ContractEvaluatedBodyGate, CriterionRecordedBody, CriterionRecordedBodyRunBy, EventBody,
-    EventKind, FarikEvent, ReviewRecordedBody,
+    EventKind, FarikEvent, NoteWrittenBodyKind, ReviewRecordedBody,
 };
 use farik_store::TaskProjection;
 use farik_store::files::FilesError;
 
 use super::messages::{
-    breakdown_message, close_out_message, epic_accept_message, refine_message, triage_message,
+    breakdown_message, close_out_message, epic_accept_message, epic_review_message,
+    judgment_message, refine_message, triage_message,
 };
-use super::rules::{acted, active, has_room, refused_since_entering, spent};
-use super::session::{SessionAsk, run_session};
+use super::rules::{Waiting, acted, active, asleep, has_room, refused_since_entering, spent};
+use super::session::{JUDGMENT_TOOL, SessionAsk, TRIAGE_TOOL, run_session};
 use super::verify::{
-    GOVERNOR, append, context, escalate, fails_the_criterion, governor_results, history,
-    is_mechanical, ran_criteria, read_only,
+    GOVERNOR, append, context, escalate, failed, fails_the_criterion, governor_results, history,
+    is_mechanical, ran_criteria, read_only, record_review, reject, reviewer_results,
+    since_verifying, unanswered,
 };
 use super::{Orchestrator, OrchestratorDeps, OrchestratorError, TickReport};
 use crate::criteria::{CriterionOutcome, remove_base_worktree, run_criteria};
 use crate::session::SessionPurpose;
 use crate::tools::ToolDeps;
 use crate::transitions::{
-    TransitionAsk, TransitionOutcome, integration_branch, refining_began, refusal_details,
-    result_accepted,
+    TransitionAsk, TransitionOutcome, integration_branch, last_move_into, refining_began,
+    refusal_details, result_accepted, the_human_reviews_the_epic,
 };
 
 /// The human, as the reviewer of an epic the Product Manager broke down (5.16 item 4).
@@ -44,38 +48,57 @@ pub(super) fn product_manager(team: &Team) -> Option<&Agent> {
         .find(|agent| Role::from(agent.role) == Role::ProductManager)
 }
 
-/// Rule 10: a `draft`. Untriaged, it gets the Product Manager's triage session; triaged, it is
-/// moved to `refining` on the Product Manager's behalf, with no session, unless that move was
-/// refused since the task became a draft.
+/// The Scrum Master: the first active agent of that role in team-file order.
+fn scrum_master(team: &Team) -> Option<&Agent> {
+    team.active_agents()
+        .find(|agent| Role::from(agent.role) == Role::ScrumMaster)
+}
+
+/// Who triages a request: the Scrum Master when the team has an active one, else the Product
+/// Manager (5.16).
+pub(super) fn triager(team: &Team) -> Option<&Agent> {
+    scrum_master(team).or_else(|| product_manager(team))
+}
+
+/// Rule 10: a `draft`. Untriaged, it gets the triager's triage session; triaged, it is moved to
+/// `refining` on the Product Manager's behalf, with no session, unless that move was refused since
+/// the task became a draft.
 pub(super) async fn draft(
     deps: &OrchestratorDeps,
     team: &Team,
     row: &TaskProjection,
-    day_spent: &mut bool,
+    waiting: &mut Waiting,
 ) -> Result<Option<TickReport>, OrchestratorError> {
     let Some(pm) = product_manager(team) else {
         return Ok(None);
     };
     if !row.triaged {
+        let triager = triager(team).unwrap_or(pm);
         let contract = deps.tools.files.read_contract(&row.task_id)?;
-        if spent(deps, team, &contract, day_spent)? {
+        if spent(deps, team, &contract, &mut waiting.day_spent)?
+            | asleep(deps, triager, &mut waiting.slept)?
+        {
             return Ok(None);
         }
         let end = run_session(
             deps,
             team,
             SessionAsk {
-                agent: pm,
-                contract: &contract,
+                agent: triager,
+                contract: Some(&contract),
                 purpose: SessionPurpose::Triage,
                 cwd: deps.tools.files.root().to_path_buf(),
                 executor: None,
                 read_only: false,
+                only_tool: Some(TRIAGE_TOOL),
+                tools: None,
+                in_reply_to: None,
+                thread: None,
                 initial_prompt: triage_message(&contract),
             },
         )
         .await?;
-        return Ok(Some(acted(row, pm, "triage", &end)));
+        return Ok(Some(acted(row, triager, "triage", &end)));
     }
     if refused_since_entering(deps, &row.task_id, TaskStatus::Draft, TaskStatus::Refining)? {
         return Ok(None);
@@ -102,13 +125,15 @@ pub(super) async fn draft(
 /// Rule 9: a contract `refining`. A contract written since refining began and not judged since,
 /// or one filed whole (a breakdown's child, or a contract the human holds) and not judged since
 /// refining began, is judged: `escalated` asked as the governor first, whose rows open on three
-/// readiness failures or on a passing contract the human must approve, then `ready`. Otherwise the
-/// Product Manager gets a refine session.
+/// readiness failures or on a passing contract the human must approve, then `ready`. One whose
+/// Definition of Ready fails on the Scrum Master's missing judgment alone gets the Scrum Master's
+/// judgment session first, so that the governor is not asked, and an attempt spent, on a contract
+/// nobody has judged. Otherwise the Product Manager gets a refine session.
 pub(super) async fn refining(
     deps: &OrchestratorDeps,
     team: &Team,
     row: &TaskProjection,
-    day_spent: &mut bool,
+    waiting: &mut Waiting,
 ) -> Result<Option<TickReport>, OrchestratorError> {
     let Some(pm) = product_manager(team) else {
         return Ok(None);
@@ -117,9 +142,37 @@ pub(super) async fn refining(
     let history = history(deps, &row.task_id)?;
     let began = refining_began(&history);
     if is_to_be_judged(&contract, &history, began) {
-        return judge(deps, team, row).map(Some);
+        let sm = match scrum_master(team) {
+            Some(sm) if awaits_judgment(deps, team, row)? => sm,
+            _ => return judge(deps, team, row).map(Some),
+        };
+        if spent(deps, team, &contract, &mut waiting.day_spent)?
+            | asleep(deps, sm, &mut waiting.slept)?
+        {
+            return Ok(None);
+        }
+        let end = run_session(
+            deps,
+            team,
+            SessionAsk {
+                agent: sm,
+                contract: Some(&contract),
+                purpose: SessionPurpose::Refine,
+                cwd: deps.tools.files.root().to_path_buf(),
+                executor: None,
+                read_only: false,
+                only_tool: Some(JUDGMENT_TOOL),
+                tools: None,
+                in_reply_to: None,
+                thread: None,
+                initial_prompt: judgment_message(&contract),
+            },
+        )
+        .await?;
+        return Ok(Some(acted(row, sm, "judgment", &end)));
     }
-    if spent(deps, team, &contract, day_spent)? {
+    if spent(deps, team, &contract, &mut waiting.day_spent)? | asleep(deps, pm, &mut waiting.slept)?
+    {
         return Ok(None);
     }
     let asked = history
@@ -131,16 +184,45 @@ pub(super) async fn refining(
         team,
         SessionAsk {
             agent: pm,
-            contract: &contract,
+            contract: Some(&contract),
             purpose: SessionPurpose::Refine,
             cwd: deps.tools.files.root().to_path_buf(),
             executor: None,
             read_only: false,
+            only_tool: None,
+            tools: None,
+            in_reply_to: None,
+            thread: None,
             initial_prompt: refine_message(&contract, !asked, &failures),
         },
     )
     .await?;
     Ok(Some(acted(row, pm, "refine", &end)))
+}
+
+/// Whether the contract's Definition of Ready, evaluated on the context the governor's
+/// `refining -> ready` would use, fails on the Scrum Master's missing judgment alone. It records
+/// nothing: a structurally broken contract goes back to the Product Manager without a judgment.
+fn awaits_judgment(
+    deps: &OrchestratorDeps,
+    team: &Team,
+    row: &TaskProjection,
+) -> Result<bool, OrchestratorError> {
+    let request = TransitionRequest {
+        task_id: row.task_id.clone(),
+        to: TaskStatus::Ready,
+        actor: TransitionActor::Governor,
+        agent_id: None,
+    };
+    let context = deps
+        .tools
+        .transitions
+        .context(&request, &TransitionAsk::default(), team)?;
+    let failures = evaluate_readiness(&context.contract, &context.readiness).err();
+    Ok(matches!(
+        failures.as_deref(),
+        Some([only]) if only.rule == ReadinessRule::JudgmentRecorded
+    ))
 }
 
 /// Asks the governor to judge a contract: `escalated` first, because asking for `ready` on a
@@ -226,10 +308,12 @@ pub(super) fn is_epic(row: &TaskProjection) -> bool {
     row.kind == TaskKind::Epic
 }
 
-/// Rule 8 for an epic `ready`: assigned to the Product Manager on its behalf, with no reviewer
-/// (the human reviews it) and no session, when it holds fewer open tasks than the WIP limit,
-/// counted as the assignment gate counts them; otherwise passed over, so that the run idles rather
-/// than being refused on every tick.
+/// Rule 8 for an epic `ready`: with an active Scrum Master, assigned to it on its behalf with the
+/// Product Manager as reviewer; without one, to the Product Manager on its behalf with no reviewer
+/// (the human reviews it). No session, and only when the assignee holds fewer open tasks than the
+/// WIP limit, counted as the assignment gate counts them, and the open sprint, if any, holds the
+/// epic and can pay for it, by the gate's own predicates; otherwise passed over, so that the run
+/// idles rather than being refused on every tick.
 pub(super) fn ready_epic(
     deps: &OrchestratorDeps,
     team: &Team,
@@ -239,28 +323,39 @@ pub(super) fn ready_epic(
     let Some(pm) = product_manager(team) else {
         return Ok(None);
     };
-    if !has_room(team, board, pm)
+    let (assignee, actor, reviewer) = match scrum_master(team) {
+        Some(sm) => (sm, TransitionActor::ScrumMaster, Some(pm.id.to_string())),
+        None => (pm, TransitionActor::ProductManager, None),
+    };
+    if !has_room(team, board, assignee)
         || refused_since_entering(deps, &row.task_id, TaskStatus::Ready, TaskStatus::Assigned)?
     {
         return Ok(None);
     }
-    let outcome = deps.tools.transitions.request(
-        &TransitionRequest {
-            task_id: row.task_id.clone(),
-            to: TaskStatus::Assigned,
-            actor: TransitionActor::ProductManager,
-            agent_id: Some(pm.id.to_string()),
-        },
-        &TransitionAsk {
-            assignee_id: Some(pm.id.to_string()),
-            ..TransitionAsk::default()
-        },
-        team,
-    )?;
+    let request = TransitionRequest {
+        task_id: row.task_id.clone(),
+        to: TaskStatus::Assigned,
+        actor,
+        agent_id: Some(assignee.id.to_string()),
+    };
+    let ask = TransitionAsk {
+        assignee_id: Some(assignee.id.to_string()),
+        reviewer_id: reviewer,
+        ..TransitionAsk::default()
+    };
+    let contract = deps.tools.files.read_contract(&row.task_id)?;
+    let context = deps.tools.transitions.context(&request, &ask, team)?;
+    if !context
+        .assignment
+        .is_some_and(|assignment| fits_the_open_sprint(&contract, &assignment))
+    {
+        return Ok(None);
+    }
+    let outcome = deps.tools.transitions.request(&request, &ask, team)?;
     Ok(match outcome {
         TransitionOutcome::Moved(_) => Some(TickReport::Acted {
             task_id: row.task_id.clone(),
-            what: format!("assigned the epic to {}", pm.id.as_str()),
+            what: format!("assigned the epic to {}", assignee.id.as_str()),
         }),
         TransitionOutcome::Refused(_) => None,
     })
@@ -311,7 +406,7 @@ pub(super) async fn in_progress_epic(
     team: &Team,
     board: &[TaskProjection],
     row: &TaskProjection,
-    day_spent: &mut bool,
+    waiting: &mut Waiting,
 ) -> Result<Option<TickReport>, OrchestratorError> {
     let Some(assignee) = active(team, row.assignee_id.as_deref()) else {
         return Ok(None);
@@ -339,7 +434,14 @@ pub(super) async fn in_progress_epic(
                 )
             })
             .collect();
-        close_out_message(&contract, &listed)
+        let rejection = last_rejection(deps, &row.task_id, &tasks)?;
+        close_out_message(
+            &contract,
+            &listed,
+            rejection
+                .as_ref()
+                .map(|(failed, reasons)| (failed.as_slice(), reasons.as_str())),
+        )
     } else if tasks
         .iter()
         .all(|other| other.status == TaskStatus::Cancelled)
@@ -348,7 +450,9 @@ pub(super) async fn in_progress_epic(
     } else {
         return Ok(None);
     };
-    if spent(deps, team, &contract, day_spent)? {
+    if spent(deps, team, &contract, &mut waiting.day_spent)?
+        | asleep(deps, assignee, &mut waiting.slept)?
+    {
         return Ok(None);
     }
     let end = run_session(
@@ -356,16 +460,50 @@ pub(super) async fn in_progress_epic(
         team,
         SessionAsk {
             agent: assignee,
-            contract: &contract,
+            contract: Some(&contract),
             purpose: SessionPurpose::Plan,
             cwd: deps.tools.files.root().to_path_buf(),
             executor: None,
             read_only: false,
+            only_tool: None,
+            tools: None,
+            in_reply_to: None,
+            thread: None,
             initial_prompt,
         },
     )
     .await?;
     Ok(Some(acted(row, assignee, "plan", &end)))
+}
+
+/// The failed criteria and the reasons, the review note among them, of the epic's last move into
+/// `rejected`, while none of `tasks`, the tasks under it, was created after that move: once the
+/// fixing tasks are filed, the rejection is answered.
+fn last_rejection(
+    deps: &OrchestratorDeps,
+    epic: &TaskId,
+    tasks: &[&TaskProjection],
+) -> Result<Option<(Vec<String>, String)>, OrchestratorError> {
+    let epic_history = history(deps, epic)?;
+    let Some(moved) = last_move_into(&epic_history, TaskStatus::Rejected) else {
+        return Ok(None);
+    };
+    for task in tasks {
+        if history(deps, &task.task_id)?.iter().any(|event| {
+            event.envelope.seq > moved.envelope.seq && event.body.kind() == EventKind::TaskCreated
+        }) {
+            return Ok(None);
+        }
+    }
+    Ok(match &moved.body {
+        EventBody::TaskTransitioned(body) => body.rejection.as_ref().map(|rejection| {
+            (
+                rejection.failed_criterion_ids.clone(),
+                rejection.reasons.clone(),
+            )
+        }),
+        _ => None,
+    })
 }
 
 /// The assigner of a task under an epic: the epic's assignee, when it is active.
@@ -379,10 +517,12 @@ pub(super) fn epic_assignee<'a>(
     active(team, epic.assignee_id.as_deref())
 }
 
-/// Rule 5 for an epic the human reviews (ADR 0013): nothing while a task under it awaits
-/// integration; then Farik runs each mechanical criterion it has not run in this verification, on
-/// the integration branch's head; then nothing until the human accepts; then the Product Manager's
-/// `verify` session, told the human accepted, after which the epic's review is recorded.
+/// Rule 5 for an epic (ADR 0013): nothing while a task under it awaits integration; then Farik
+/// runs each mechanical criterion it has not run in this verification, on the integration branch's
+/// head. Then, for an epic whose row names a reviewer (the Product Manager, fixed when the Scrum
+/// Master was assigned it, whatever the team is now), its review; for one the human reviews,
+/// nothing until the human accepts, then the Product Manager's `verify` session, told the human
+/// accepted, after which the epic's review is recorded.
 pub(super) async fn verifying_epic(
     orchestrator: &Orchestrator,
     team: &Team,
@@ -390,7 +530,7 @@ pub(super) async fn verifying_epic(
     contract: &TaskContract,
     history: &[FarikEvent],
     since: u64,
-    day_spent: &mut bool,
+    waiting: &mut Waiting,
 ) -> Result<Option<TickReport>, OrchestratorError> {
     let deps = &orchestrator.deps;
     let board = deps.tools.projections.board()?;
@@ -417,13 +557,20 @@ pub(super) async fn verifying_epic(
             EpicRan::Unrunnable(why) => escalate(deps, team, row, &why),
         };
     }
+    if !the_human_reviews_the_epic(contract.kind, row.reviewer_id.as_deref()) {
+        return reviewed_by_the_product_manager(
+            deps, team, &board, row, contract, history, waiting,
+        )
+        .await;
+    }
     if result_accepted(history).is_none() {
         return Ok(None);
     }
     let Some(pm) = product_manager(team) else {
         return Ok(None);
     };
-    if spent(deps, team, contract, day_spent)? {
+    if spent(deps, team, contract, &mut waiting.day_spent)? | asleep(deps, pm, &mut waiting.slept)?
+    {
         return Ok(None);
     }
     let end = run_session(
@@ -439,6 +586,97 @@ pub(super) async fn verifying_epic(
     .await?;
     record_epic_review(deps, team, contract, &end.session_id, since)?;
     Ok(Some(acted(row, pm, "verify", &end)))
+}
+
+/// Rule 5 for an epic the Product Manager reviews, once Farik's runs are recorded, judged on the
+/// governor's own context for `verifying -> accepted`: the Product Manager's read-only `verify`
+/// session in the project root while there is no review note, after which its review is recorded;
+/// the rejection in its name when its results hold a failure; its review session again, told
+/// which, while a criterion is unanswered; nothing until the human accepts; then its session
+/// again, told the human accepted.
+async fn reviewed_by_the_product_manager(
+    deps: &OrchestratorDeps,
+    team: &Team,
+    board: &[TaskProjection],
+    row: &TaskProjection,
+    contract: &TaskContract,
+    history: &[FarikEvent],
+    waiting: &mut Waiting,
+) -> Result<Option<TickReport>, OrchestratorError> {
+    let Some(pm) = active(team, row.reviewer_id.as_deref()) else {
+        return Ok(None);
+    };
+    let context = context(deps, team, &row.task_id)?;
+    let answers = reviewer_results(&context);
+    let review_note = context.done.review_note.clone();
+    // A review to run, naming what is still unanswered, or none when the review is complete.
+    let to_review = match &review_note {
+        None => Some(Vec::new()),
+        Some(review_note) => {
+            let failed = failed(contract, &answers);
+            if !failed.is_empty() {
+                return reject(deps, team, row, pm, &failed, review_note.clone()).map(Some);
+            }
+            let unanswered = unanswered(contract, &answers);
+            if unanswered.is_empty() && result_accepted(history).is_none() {
+                return Ok(None);
+            }
+            (!unanswered.is_empty()).then_some(unanswered)
+        }
+    };
+    if spent(deps, team, contract, &mut waiting.day_spent)? | asleep(deps, pm, &mut waiting.slept)?
+    {
+        return Ok(None);
+    }
+    let since = since_verifying(history);
+    let ran = governor_results(history, since);
+    let initial_prompt = match &to_review {
+        Some(unanswered) => {
+            epic_review_message(contract, &ran, &tasks_under(deps, board, row)?, unanswered)
+        }
+        None => epic_accept_message(contract, &ran),
+    };
+    let end = run_session(
+        deps,
+        team,
+        read_only(
+            contract,
+            pm,
+            deps.tools.files.root().to_path_buf(),
+            initial_prompt,
+        ),
+    )
+    .await?;
+    if to_review.is_some() {
+        record_review(deps, team, contract, pm, &end.session_id, since)?;
+    }
+    Ok(Some(acted(row, pm, "verify", &end)))
+}
+
+/// Each task under the epic, with its last completion note when it has one.
+fn tasks_under(
+    deps: &OrchestratorDeps,
+    board: &[TaskProjection],
+    row: &TaskProjection,
+) -> Result<Vec<(TaskProjection, Option<String>)>, OrchestratorError> {
+    board
+        .iter()
+        .filter(|other| other.parent.as_ref() == Some(&row.task_id))
+        .map(|other| {
+            let note = history(deps, &other.task_id)?
+                .iter()
+                .rev()
+                .find_map(|event| match &event.body {
+                    EventBody::NoteWritten(body)
+                        if body.kind == NoteWrittenBodyKind::Completion =>
+                    {
+                        Some(body.text.clone())
+                    }
+                    _ => None,
+                });
+            Ok((other.clone(), note))
+        })
+        .collect()
 }
 
 /// What Farik's runs of an epic's criteria came to.
@@ -477,7 +715,7 @@ async fn run_on_the_integration_branch(
             .join(format!("{}-base", contract.id.as_str()));
         let unrunnable = |id: &str, error: &dyn std::fmt::Display| {
             EpicRan::Unrunnable(format!(
-                "Farik could not run {id} on the integration branch for the human: {error}"
+                "Farik could not run {id} on the integration branch for its reviewer: {error}"
             ))
         };
         if let Err(error) = remove_base_worktree(git, &worktree).and_then(|()| {
@@ -616,7 +854,7 @@ mod tests {
     use std::sync::Arc;
 
     use farik_core::contract::{TaskKind, TaskStatus};
-    use farik_core::team::Effort;
+    use farik_core::team::{AgentStatus, Effort};
     use farik_protocol::command::{AcceptSubject, Command, RequestSize};
     use farik_protocol::event::{
         CriterionRecordedBodyRunBy, EscalationRaisedBodyReason, EventBody, EventKind, FarikEvent,
@@ -629,13 +867,15 @@ mod tests {
     use crate::exec::ExecError;
     use crate::orchestrator::TRIAGE_MODEL;
     use crate::orchestrator::fixtures::{
-        BrokenSandboxFactory, CountingSandboxFactory, ExecutorWitness, Harness,
+        BrokenSandboxFactory, CountingSandboxFactory, ExecutorWitness, Harness, waits_for,
     };
     use crate::orchestrator::{CommandError, Orchestrator, TickReport};
+    use crate::prompt::JUDGMENT_INSTRUCTION;
     use crate::recorded::fixtures::{
-        accept_frk_1, implement_finishes_frk_1, plan_assigns_frk_1, plan_assigns_frk_2,
-        plan_breaks_down_frk_1, plan_closes_epic_frk_1, refine_asks_frk_1,
-        refine_writes_epic_frk_1, refine_writes_task_frk_1, replays_farik_read_board,
+        accept_frk_1, implement_finishes_frk_1, judge_frk_1_fails, judge_frk_1_passes,
+        plan_assigns_frk_1, plan_assigns_frk_2, plan_breaks_down_frk_1, plan_closes_epic_frk_1,
+        refine_asks_frk_1, refine_writes_epic_frk_1, refine_writes_task_frk_1,
+        replays_farik_read_board, review_epic_fails_frk_1, review_epic_frk_1, triage_by_sm_frk_1,
         triage_frk_1_large,
     };
     use crate::session::SessionPurpose;
@@ -702,8 +942,8 @@ mod tests {
         crate::tools::call_tool(&harness.project.context(agent, task), tool, input).await
     }
 
-    /// The failing write the tests seed: a budget of 50 dollars, over the 20 the team's day has and
-    /// over a cap of 5 dollars where a test sets one.
+    /// The failing write the tests seed: a budget of 50 dollars, over a cap of 5 dollars where a
+    /// test sets one.
     async fn write_over_the_cap(harness: &Harness) {
         call(
             harness,
@@ -743,6 +983,10 @@ mod tests {
         assert_eq!(spec.model, TRIAGE_MODEL);
         assert_eq!(spec.effort, Effort::Low);
         assert_eq!(spec.farik_tools, vec!["farik_triage_request".to_string()]);
+        assert_eq!(
+            listed_tools(&spec.system_prompt),
+            vec!["farik_triage_request"]
+        );
         assert!(spec.builtin_tools.is_empty(), "{:?}", spec.builtin_tools);
         let triaged = last(&harness, EventKind::RequestTriaged).expect("the triage");
         let EventBody::RequestTriaged(body) = &triaged.body else {
@@ -751,6 +995,62 @@ mod tests {
         assert_eq!(body.size, RequestTriagedBodySize::Large);
         assert_eq!(body.triaged_by, "pm");
         assert_eq!(harness.row("FRK-1").kind, TaskKind::Epic);
+    }
+
+    /// The Farik tools the prompt's `Your tools` section lists, in order.
+    fn listed_tools(prompt: &str) -> Vec<&str> {
+        let start = prompt.find("## Your tools\n").expect("a tools section");
+        let section = &prompt[start + 1..];
+        let section = &section[..section.find("\n## ").unwrap_or(section.len())];
+        section
+            .lines()
+            .filter_map(|line| line.strip_prefix("- "))
+            .filter_map(|line| line.split(' ').next())
+            .filter(|name| name.starts_with("farik_"))
+            .collect()
+    }
+
+    /// Adds the active Scrum Master `sam` to the team's wire.
+    fn with_a_scrum_master(wire: &mut Value) {
+        wire["agents"]
+            .as_array_mut()
+            .expect("a list of agents")
+            .push(json!({
+                "id": "sam",
+                "display_name": "sam",
+                "role": "scrum_master",
+                "status": "active"
+            }));
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn triages_with_the_scrum_master_when_there_is_one() {
+        let harness = Harness::new("req-triage-sm", with_a_scrum_master);
+        harness.a_request("Add done.txt and its check");
+        let adapter = harness.recorded(vec![triage_by_sm_frk_1()]);
+        let orchestrator = harness.orchestrator(adapter.clone());
+
+        orchestrator.tick().await.expect("the tick runs");
+
+        let started = adapter.started();
+        assert_eq!(started.len(), 1);
+        let spec = &started[0];
+        assert_eq!(spec.purpose, SessionPurpose::Triage);
+        assert_eq!(spec.agent_id, "sam");
+        assert_eq!(spec.model, TRIAGE_MODEL);
+        assert_eq!(spec.farik_tools, vec!["farik_triage_request".to_string()]);
+        assert_eq!(
+            listed_tools(&spec.system_prompt),
+            vec!["farik_triage_request"]
+        );
+        assert!(spec.builtin_tools.is_empty(), "{:?}", spec.builtin_tools);
+        let triaged = last(&harness, EventKind::RequestTriaged).expect("the triage");
+        let EventBody::RequestTriaged(body) = &triaged.body else {
+            panic!("a triage");
+        };
+        assert_eq!(body.triaged_by, "sam");
+        assert_eq!(body.size, RequestTriagedBodySize::Small);
     }
 
     #[tokio::test]
@@ -921,6 +1221,156 @@ mod tests {
 
     #[tokio::test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn asks_the_scrum_master_to_judge_a_written_contract() {
+        let harness = Harness::new("req-sm-judges", with_a_scrum_master);
+        let adapter = harness.recorded(vec![refine_writes_task_frk_1(), judge_frk_1_passes()]);
+        let orchestrator = harness.orchestrator(adapter.clone());
+        refining(&harness, &orchestrator, RequestSize::Small).await;
+        orchestrator.tick().await.expect("the contract is written");
+        assert!(last(&harness, EventKind::ContractWritten).is_some());
+
+        orchestrator.tick().await.expect("the tick runs");
+
+        let started = adapter.started();
+        assert_eq!(started.len(), 2);
+        let spec = &started[1];
+        assert_eq!(spec.agent_id, "sam");
+        assert_eq!(spec.purpose, SessionPurpose::Refine);
+        assert_eq!(spec.farik_tools, vec!["farik_record_judgment".to_string()]);
+        assert_eq!(
+            listed_tools(&spec.system_prompt),
+            vec!["farik_record_judgment"]
+        );
+        assert!(spec.builtin_tools.is_empty(), "{:?}", spec.builtin_tools);
+        // The Scrum Master's own model and effort, not triage's.
+        assert_eq!(
+            (spec.model.as_str(), spec.effort),
+            ("claude-sonnet-5", Effort::Medium)
+        );
+        assert!(
+            spec.system_prompt.contains(JUDGMENT_INSTRUCTION),
+            "{}",
+            spec.system_prompt
+        );
+        assert!(last(&harness, EventKind::ContractJudged).is_some());
+        assert_eq!(harness.row("FRK-1").status, TaskStatus::Refining);
+
+        orchestrator.tick().await.expect("the tick runs");
+
+        assert_eq!(harness.row("FRK-1").status, TaskStatus::Ready);
+        assert_eq!(adapter.started().len(), 2);
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn judges_on_the_scrum_masters_own_model() {
+        let harness = Harness::new("req-sm-judges-model", |wire| {
+            with_a_scrum_master(wire);
+            wire["agents"]
+                .as_array_mut()
+                .expect("a list of agents")
+                .last_mut()
+                .expect("sam")["model"] = json!({ "id": "claude-opus-5", "effort": "high" });
+        });
+        let adapter = harness.recorded(vec![refine_writes_task_frk_1(), judge_frk_1_passes()]);
+        let orchestrator = harness.orchestrator(adapter.clone());
+        refining(&harness, &orchestrator, RequestSize::Small).await;
+        orchestrator.tick().await.expect("the contract is written");
+
+        orchestrator.tick().await.expect("the tick runs");
+
+        let spec = &adapter.started()[1];
+        assert_eq!(spec.agent_id, "sam");
+        assert_eq!(
+            (spec.model.as_str(), spec.effort),
+            ("claude-opus-5", Effort::High)
+        );
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn sends_a_badly_judged_contract_back_to_the_product_manager() {
+        let harness = Harness::new("req-sm-judges-badly", with_a_scrum_master);
+        let adapter = harness.recorded(vec![
+            refine_writes_task_frk_1(),
+            judge_frk_1_fails(),
+            replays_farik_read_board(),
+        ]);
+        let orchestrator = harness.orchestrator(adapter.clone());
+        refining(&harness, &orchestrator, RequestSize::Small).await;
+        orchestrator.tick().await.expect("the contract is written");
+        orchestrator.tick().await.expect("the contract is judged");
+        assert!(last(&harness, EventKind::ContractJudged).is_some());
+
+        orchestrator.tick().await.expect("the tick runs");
+        let evaluated = last(&harness, EventKind::ContractEvaluated).expect("the readiness");
+        let EventBody::ContractEvaluated(body) = &evaluated.body else {
+            panic!("a readiness");
+        };
+        assert!(!body.passed);
+        assert!(
+            body.failures
+                .iter()
+                .any(|failure| failure.contains("would not detect the failure")),
+            "{:?}",
+            body.failures
+        );
+        assert_eq!(adapter.started().len(), 2);
+
+        orchestrator.tick().await.expect("the tick runs");
+        let started = adapter.started();
+        assert_eq!(started.len(), 3);
+        assert_eq!(started[2].agent_id, "pm");
+        assert_eq!(started[2].purpose, SessionPurpose::Refine);
+        assert!(
+            started[2]
+                .initial_prompt
+                .contains("C1 checks that done.txt exists, not what it says."),
+            "{}",
+            started[2].initial_prompt
+        );
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn judges_a_structurally_broken_contract_without_the_scrum_master() {
+        let harness = Harness::new("req-sm-broken", with_a_scrum_master);
+        let adapter = harness.recorded(Vec::new());
+        let orchestrator = harness.orchestrator(adapter.clone());
+        refining(&harness, &orchestrator, RequestSize::Small).await;
+        call(
+            &harness,
+            "pm",
+            Some("FRK-1"),
+            "farik_write_contract",
+            json!({ "fields": { "scope": { "in_scope": ["done.txt"], "out_of_scope": [" "] } } }),
+        )
+        .await
+        .expect("the schema allows the write");
+
+        orchestrator.tick().await.expect("the tick runs");
+
+        assert!(adapter.started().is_empty());
+        let refused = last(&harness, EventKind::TransitionRefused).expect("the refusal");
+        let EventBody::TransitionRefused(body) = &refused.body else {
+            panic!("a refusal");
+        };
+        assert!(
+            body.details
+                .iter()
+                .any(|detail| detail.contains("out_of_scope")),
+            "{:?}",
+            body.details
+        );
+        assert!(
+            !body.details.iter().any(|detail| detail.contains("judg")),
+            "{:?}",
+            body.details
+        );
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn readies_a_written_contract_whatever_the_day_cost_without_a_daily_budget() {
         let harness = Harness::new("req-no-day", |wire| wire["budgets"] = json!({}));
         harness.spent(None, "s-0", 25.0);
@@ -932,6 +1382,34 @@ mod tests {
         orchestrator.tick().await.expect("the tick runs");
 
         assert_eq!(harness.row("FRK-1").status, TaskStatus::Ready);
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn refines_a_contract_larger_than_the_open_sprints_remainder_once() {
+        let harness = Harness::new("req-sprint-left", |_| {});
+        // S1 has one dollar and holds nothing; the contract refined meanwhile asks for five.
+        harness.project.open_sprint("S1", Some(1.0), &[]);
+        let adapter = harness.recorded(vec![refine_writes_task_frk_1()]);
+        let orchestrator = harness.orchestrator(adapter.clone());
+        refining(&harness, &orchestrator, RequestSize::Small).await;
+        orchestrator.tick().await.expect("the contract is written");
+
+        orchestrator.tick().await.expect("the tick runs");
+
+        assert_eq!(harness.row("FRK-1").status, TaskStatus::Ready);
+        let evaluated = last(&harness, EventKind::ContractEvaluated).expect("the judgement");
+        assert!(
+            matches!(&evaluated.body, EventBody::ContractEvaluated(body) if body.passed),
+            "{:?}",
+            evaluated.body
+        );
+        let refines = adapter
+            .started()
+            .iter()
+            .filter(|spec| spec.purpose == SessionPurpose::Refine)
+            .count();
+        assert_eq!(refines, 1);
     }
 
     #[tokio::test]
@@ -987,7 +1465,9 @@ mod tests {
     #[tokio::test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn judges_a_contract_written_again_after_a_failure() {
-        let harness = Harness::new("req-judges-again", |_| {});
+        let harness = Harness::new("req-judges-again", |wire| {
+            wire["rules"]["max_task_budget_usd"] = json!(5);
+        });
         let adapter = harness.recorded(Vec::new());
         let orchestrator = harness.orchestrator(adapter.clone());
         refining(&harness, &orchestrator, RequestSize::Small).await;
@@ -1014,7 +1494,9 @@ mod tests {
     #[tokio::test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn judges_a_write_whose_later_refusal_was_not_the_governors() {
-        let harness = Harness::new("req-judges-others-refusal", |_| {});
+        let harness = Harness::new("req-judges-others-refusal", |wire| {
+            wire["rules"]["max_task_budget_usd"] = json!(5);
+        });
         let adapter = harness.recorded(Vec::new());
         let orchestrator = harness.orchestrator(adapter.clone());
         refining(&harness, &orchestrator, RequestSize::Small).await;
@@ -1119,7 +1601,9 @@ mod tests {
     #[tokio::test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn escalates_a_contract_that_failed_three_times() {
-        let harness = Harness::new("req-three-failures", |_| {});
+        let harness = Harness::new("req-three-failures", |wire| {
+            wire["rules"]["max_task_budget_usd"] = json!(5);
+        });
         let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
         refining(&harness, &orchestrator, RequestSize::Small).await;
         for _ in 0..3 {
@@ -1314,7 +1798,7 @@ mod tests {
                     .project
                     .deps
                     .git
-                    .create_worktree(&harness.worktree("FRK-2"), "farik/FRK-2", "main")
+                    .create_worktree(&harness.worktree("FRK-2"), &harness.branch("FRK-2"), "main")
                     .expect("the child's worktree is made");
             }
         }
@@ -1409,6 +1893,32 @@ mod tests {
             Some("assigned -> in_progress")
         );
         assert!(!harness.worktree("FRK-1").exists());
+        assert!(adapter.started().is_empty());
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn passes_over_an_epic_outside_the_open_sprint() {
+        let harness = Harness::new("epic-outside-sprint", |_| {});
+        an_epic(&harness, "FRK-1", "ready", |_| {});
+        harness.open_sprint("S1", &[]);
+        let adapter = harness.recorded(Vec::new());
+        let orchestrator = harness.orchestrator(adapter.clone());
+        let scope = crate::orchestrator::TickScope {
+            task_id: Some(task("FRK-1")),
+            ..crate::orchestrator::TickScope::default()
+        };
+
+        for _ in 0..2 {
+            let report = orchestrator
+                .tick_within(&scope)
+                .await
+                .expect("the tick runs");
+            assert!(matches!(report, TickReport::Idle { .. }), "{report:?}");
+        }
+
+        assert!(harness.events(&[EventKind::TransitionRefused]).is_empty());
+        assert_eq!(harness.row("FRK-1").status, TaskStatus::Ready);
         assert!(adapter.started().is_empty());
     }
 
@@ -1903,5 +2413,559 @@ mod tests {
             &reviews[0].body,
             EventBody::ReviewRecorded(body) if body.criteria_run == 3 && body.passed
         ));
+    }
+
+    /// Epic FRK-1 filed `ready` on a team with the active Scrum Master `sam`, for the Scrum Master
+    /// to hold and the Product Manager to review.
+    fn a_scrum_masters_epic(harness: &Harness) {
+        an_epic(harness, "FRK-1", "ready", |wire| {
+            wire["assignee_role"] = json!("scrum_master");
+            wire["reviewer_role"] = json!("product_manager");
+        });
+    }
+
+    /// The moves of the Scrum Master's epic: asked by `sam`, held by `sam`, reviewed by `pm`.
+    fn the_scrum_masters() -> Value {
+        json!({ "actor": "scrum_master", "requested_by": "sam", "assignee": "sam", "reviewer": "pm" })
+    }
+
+    /// The Scrum Master's epic FRK-1 moved to `in_progress`.
+    fn a_scrum_masters_epic_in_progress(harness: &Harness) {
+        a_scrum_masters_epic(harness);
+        let people = the_scrum_masters();
+        harness.project.moved("FRK-1", "ready", "assigned", &people);
+        harness
+            .project
+            .moved("FRK-1", "assigned", "in_progress", &people);
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn assigns_an_approved_epic_to_the_scrum_master() {
+        let harness = Harness::new("epic-assigns-sm", with_a_scrum_master);
+        a_scrum_masters_epic(&harness);
+        let adapter = harness.recorded(Vec::new());
+        let orchestrator = harness.orchestrator(adapter.clone());
+
+        orchestrator.tick().await.expect("the tick runs");
+
+        let moved = last(&harness, EventKind::TaskTransitioned).expect("a move");
+        let EventBody::TaskTransitioned(body) = &moved.body else {
+            panic!("a move");
+        };
+        assert_eq!(
+            (body.from.to_string(), body.to.to_string()),
+            ("ready".to_string(), "assigned".to_string())
+        );
+        assert_eq!(body.actor, TransitionActorWire::ScrumMaster);
+        assert_eq!(body.requested_by, "sam");
+        assert_eq!(body.assignee.as_deref(), Some("sam"));
+        assert_eq!(body.reviewer.as_deref(), Some("pm"));
+        assert!(adapter.started().is_empty());
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn breaks_an_epic_down_with_its_scrum_master() {
+        let harness = Harness::new("epic-breakdown-sm", with_a_scrum_master);
+        a_scrum_masters_epic_in_progress(&harness);
+        let adapter = harness.recorded(vec![replays_farik_read_board()]);
+        let orchestrator = harness.orchestrator(adapter.clone());
+
+        orchestrator.tick().await.expect("the tick runs");
+
+        let spec = &adapter.started()[0];
+        assert_eq!(
+            (spec.purpose, spec.agent_id.as_str()),
+            (SessionPurpose::Plan, "sam")
+        );
+        assert_eq!(spec.task_id, Some(task("FRK-1")));
+        assert!(
+            spec.initial_prompt.starts_with("Break the epic FRK-1 down"),
+            "{}",
+            spec.initial_prompt
+        );
+    }
+
+    /// The Scrum Master's epic FRK-1 `verifying` after its child FRK-2 was accepted, each with its
+    /// completion note.
+    fn a_scrum_masters_epic_verifying(harness: &Harness) {
+        a_scrum_masters_epic_in_progress(harness);
+        a_child(harness, "accepted");
+        harness.project.record(
+            "FRK-2",
+            "note.written",
+            &json!({ "kind": "completion", "text": "Wrote done.txt at the root.", "written_by": "dev-a" }),
+        );
+        harness.project.record(
+            "FRK-1",
+            "note.written",
+            &json!({ "kind": "completion", "text": "FRK-2 added done.txt; nothing left out.", "written_by": "sam" }),
+        );
+        let mut people = the_scrum_masters();
+        people["actor"] = json!("assignee");
+        harness
+            .project
+            .moved("FRK-1", "in_progress", "verifying", &people);
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn refuses_the_humans_acceptance_of_an_epic_before_farik_ran_its_criteria() {
+        let harness = Harness::new("epic-sm-accept-early", with_a_scrum_master);
+        a_scrum_masters_epic_verifying(&harness);
+        integrated(&harness, true);
+        let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
+
+        let refused = orchestrator
+            .handle(Command::HumanAccept {
+                task_id: task("FRK-1"),
+                subject: AcceptSubject::Result,
+                message: Some("Looks right.".to_string()),
+            })
+            .await;
+
+        assert!(
+            matches!(&refused, Err(CommandError::Refused { reason })
+                if reason.starts_with("criteria_not_run") && reason.contains("C1")),
+            "{refused:?}"
+        );
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn has_the_product_manager_review_an_epic() {
+        let harness = Harness::new("epic-sm-review", with_a_scrum_master);
+        a_scrum_masters_epic_verifying(&harness);
+        integrated(&harness, true);
+        let adapter = harness.recorded(vec![review_epic_frk_1(), accept_frk_1()]);
+        let witness = Arc::new(ExecutorWitness::new(
+            adapter.clone(),
+            Arc::clone(&harness.daemon),
+        ));
+        let orchestrator = harness.orchestrator(witness.clone());
+
+        orchestrator.tick().await.expect("Farik runs C1");
+        let runs = governor_runs(&harness, "FRK-1");
+        assert_eq!(runs.len(), 1, "{runs:?}");
+        assert!(
+            runs[0]
+                .2
+                .starts_with(&format!("at {}", main_head(&harness)))
+        );
+        assert!(adapter.started().is_empty());
+
+        orchestrator.tick().await.expect("the tick runs");
+        let spec = &adapter.started()[0];
+        assert_eq!(
+            (spec.purpose, spec.agent_id.as_str()),
+            (SessionPurpose::Verify, "pm")
+        );
+        assert_eq!(spec.task_id, Some(task("FRK-1")));
+        assert_eq!(spec.cwd, harness.project.repo.path);
+        assert_eq!(witness.had_executor(), vec![false]);
+        for held in ["FRK-2", "accepted", "Wrote done.txt at the root."] {
+            assert!(
+                spec.initial_prompt.contains(held),
+                "{held}: {}",
+                spec.initial_prompt
+            );
+        }
+        assert!(
+            !spec.initial_prompt.contains("<untrusted source=\"diff\">"),
+            "{}",
+            spec.initial_prompt
+        );
+
+        // The review passed; the epic waits for the human.
+        let waiting = orchestrator.tick().await.expect("the tick runs");
+        assert!(is_idle(&waiting), "{waiting:?}");
+        assert_eq!(adapter.started().len(), 1);
+        orchestrator
+            .handle(Command::HumanAccept {
+                task_id: task("FRK-1"),
+                subject: AcceptSubject::Result,
+                message: Some("It reads right.".to_string()),
+            })
+            .await
+            .expect("the human accepts the epic");
+
+        orchestrator.tick().await.expect("the tick runs");
+
+        let started = adapter.started();
+        assert_eq!(started.len(), 2);
+        assert_eq!(
+            (started[1].purpose, started[1].agent_id.as_str()),
+            (SessionPurpose::Verify, "pm")
+        );
+        assert!(
+            started[1].initial_prompt.contains("Request `accepted`"),
+            "{}",
+            started[1].initial_prompt
+        );
+        assert_eq!(harness.row("FRK-1").status, TaskStatus::Accepted);
+        let reviews = harness.events(&[EventKind::ReviewRecorded]);
+        assert_eq!(reviews.len(), 1, "{reviews:?}");
+        assert!(matches!(
+            &reviews[0].body,
+            EventBody::ReviewRecorded(body)
+                if body.reviewer == "pm" && body.criteria_run == 2 && body.passed
+        ));
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn rejects_an_epic_whose_criterion_the_product_manager_failed() {
+        let harness = Harness::new("epic-sm-rejects", with_a_scrum_master);
+        a_scrum_masters_epic_verifying(&harness);
+        integrated(&harness, true);
+        let adapter = harness.recorded(vec![review_epic_fails_frk_1(), replays_farik_read_board()]);
+        let orchestrator = harness.orchestrator(adapter.clone());
+        orchestrator.tick().await.expect("Farik runs C1");
+        orchestrator
+            .tick()
+            .await
+            .expect("the Product Manager reviews");
+
+        orchestrator.tick().await.expect("the tick runs");
+
+        let moved = last(&harness, EventKind::TaskTransitioned).expect("a move");
+        let EventBody::TaskTransitioned(body) = &moved.body else {
+            panic!("a move");
+        };
+        assert_eq!(
+            (body.from.to_string(), body.to.to_string()),
+            ("verifying".to_string(), "rejected".to_string())
+        );
+        assert_eq!(body.actor, TransitionActorWire::Reviewer);
+        assert_eq!(body.requested_by, "pm");
+        let rejection = body.rejection.as_ref().expect("the rejection");
+        assert_eq!(rejection.failed_criterion_ids, vec!["C2".to_string()]);
+
+        orchestrator.tick().await.expect("the governor returns it");
+        assert_eq!(harness.row("FRK-1").status, TaskStatus::InProgress);
+        orchestrator.tick().await.expect("the tick runs");
+
+        let started = adapter.started();
+        assert_eq!(started.len(), 2);
+        let spec = &started[1];
+        assert_eq!(
+            (spec.purpose, spec.agent_id.as_str()),
+            (SessionPurpose::Plan, "sam")
+        );
+        for held in [
+            "C2",
+            "done.txt is empty, and the request asked it to say the run is done.",
+            "file the tasks that fix it",
+        ] {
+            assert!(
+                spec.initial_prompt.contains(held),
+                "{held}: {}",
+                spec.initial_prompt
+            );
+        }
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn asks_the_product_manager_again_for_an_unanswered_epic_criterion() {
+        let harness = Harness::new("epic-sm-unanswered", with_a_scrum_master);
+        a_scrum_masters_epic_verifying(&harness);
+        integrated(&harness, true);
+        // The Product Manager's review note, with no result for the `review` criterion C2.
+        harness.project.record(
+            "FRK-1",
+            "note.written",
+            &json!({ "kind": "review", "text": "It reads right.", "written_by": "pm" }),
+        );
+        let adapter = harness.recorded(vec![replays_farik_read_board()]);
+        let orchestrator = harness.orchestrator(adapter.clone());
+        orchestrator.tick().await.expect("Farik runs C1");
+
+        orchestrator.tick().await.expect("the tick runs");
+
+        let started = adapter.started();
+        assert_eq!(started.len(), 1);
+        let spec = &started[0];
+        assert_eq!(
+            (spec.purpose, spec.agent_id.as_str()),
+            (SessionPurpose::Verify, "pm")
+        );
+        assert!(
+            spec.initial_prompt.contains("Still unanswered: C2."),
+            "{}",
+            spec.initial_prompt
+        );
+        assert!(
+            !spec.initial_prompt.contains("Request `accepted`"),
+            "{}",
+            spec.initial_prompt
+        );
+        assert_eq!(harness.row("FRK-1").status, TaskStatus::Verifying);
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn keeps_an_epics_reviewer_when_the_scrum_master_is_paused() {
+        // The epic was assigned while `sam` was active; `sam` is paused since.
+        let harness = Harness::new("epic-sm-paused", |wire| {
+            with_a_scrum_master(wire);
+            wire["agents"]
+                .as_array_mut()
+                .expect("a list of agents")
+                .last_mut()
+                .expect("sam")["status"] = json!("paused");
+        });
+        a_scrum_masters_epic_verifying(&harness);
+        integrated(&harness, true);
+        let adapter = harness.recorded(vec![review_epic_frk_1()]);
+        let orchestrator = harness.orchestrator(adapter.clone());
+        orchestrator.tick().await.expect("Farik runs C1");
+
+        orchestrator.tick().await.expect("the tick runs");
+
+        let started = adapter.started();
+        assert_eq!(
+            started.len(),
+            1,
+            "the Product Manager reviews it, not the human"
+        );
+        assert_eq!(
+            (started[0].purpose, started[0].agent_id.as_str()),
+            (SessionPurpose::Verify, "pm")
+        );
+        assert!(
+            started[0].initial_prompt.contains("The tasks under it"),
+            "{}",
+            started[0].initial_prompt
+        );
+        let reviews = harness.events(&[EventKind::ReviewRecorded]);
+        assert!(
+            matches!(&reviews[..], [review] if matches!(&review.body,
+                EventBody::ReviewRecorded(body) if body.reviewer == "pm")),
+            "{reviews:?}"
+        );
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn keeps_a_human_reviewed_epic_with_the_human_once_a_scrum_master_activates() {
+        // The epic was assigned with no active Scrum Master, so the human reviews it; `sam`
+        // joins the team paused, and is activated only once the human has accepted the epic.
+        let harness = Harness::new("epic-human-sm-later", |wire| {
+            wire["agents"]
+                .as_array_mut()
+                .expect("a list of agents")
+                .push(json!({
+                    "id": "sam",
+                    "display_name": "sam",
+                    "role": "scrum_master",
+                    "status": "paused"
+                }));
+        });
+        an_epic_verifying(&harness, |_| {});
+        integrated(&harness, true);
+        let adapter = harness.recorded(vec![accept_frk_1()]);
+        let orchestrator = harness.orchestrator(adapter.clone());
+        orchestrator.tick().await.expect("Farik runs C1");
+        orchestrator
+            .handle(Command::HumanAccept {
+                task_id: task("FRK-1"),
+                subject: AcceptSubject::Result,
+                message: Some("Looks right.".to_string()),
+            })
+            .await
+            .expect("the human accepts the epic");
+
+        orchestrator
+            .handle(Command::AgentUpdate {
+                agent_id: "sam".to_string(),
+                status: AgentStatus::Active,
+            })
+            .await
+            .expect("sam activates");
+        orchestrator.tick().await.expect("the tick runs");
+
+        let started = adapter.started();
+        assert_eq!(
+            started.len(),
+            1,
+            "the human's own accepted epic still gets its Product Manager verify session"
+        );
+        assert_eq!(
+            (started[0].purpose, started[0].agent_id.as_str()),
+            (SessionPurpose::Verify, "pm")
+        );
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn records_the_epics_review_once_the_reasked_criterion_is_answered() {
+        let harness = Harness::new("epic-sm-reasked-recorded", with_a_scrum_master);
+        a_scrum_masters_epic_verifying(&harness);
+        integrated(&harness, true);
+        // The Product Manager's review note, with no result yet for the `review` criterion C2.
+        harness.project.record(
+            "FRK-1",
+            "note.written",
+            &json!({ "kind": "review", "text": "It reads right.", "written_by": "pm" }),
+        );
+        let adapter = harness.recorded(vec![review_epic_frk_1()]);
+        let orchestrator = harness.orchestrator(adapter.clone());
+        orchestrator.tick().await.expect("Farik runs C1");
+
+        orchestrator.tick().await.expect("the re-ask answers C2");
+
+        let reviews = harness.events(&[EventKind::ReviewRecorded]);
+        assert!(
+            matches!(&reviews[..], [review] if matches!(&review.body,
+                EventBody::ReviewRecorded(body) if body.reviewer == "pm")),
+            "{reviews:?}"
+        );
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn closes_out_plainly_once_the_fixing_tasks_are_filed() {
+        let harness = Harness::new("epic-sm-fixed", with_a_scrum_master);
+        a_scrum_masters_epic_in_progress(&harness);
+        a_child(&harness, "accepted");
+        integrated(&harness, true);
+        let people = the_scrum_masters();
+        harness
+            .project
+            .moved("FRK-1", "in_progress", "verifying", &people);
+        let mut rejected = people.clone();
+        rejected["actor"] = json!("reviewer");
+        rejected["requested_by"] = json!("pm");
+        rejected["rejection"] =
+            json!({ "failed_criterion_ids": ["C2"], "reasons": "done.txt is empty." });
+        harness
+            .project
+            .moved("FRK-1", "verifying", "rejected", &rejected);
+        let mut returned = people.clone();
+        returned["iteration"] = json!(1);
+        harness
+            .project
+            .moved("FRK-1", "rejected", "in_progress", &returned);
+        // The fixing task, filed after the rejection and accepted.
+        harness.file_under("FRK-3", "ready", Some("FRK-1"), |_| {});
+        let child = json!({ "assignee": "dev-a", "reviewer": "dev-b" });
+        for pair in ["ready", "assigned", "in_progress", "verifying", "accepted"].windows(2) {
+            harness.project.moved("FRK-3", pair[0], pair[1], &child);
+        }
+        harness.project.record(
+            "FRK-3",
+            "task.integrated",
+            &json!({ "sha": "abd", "into": "main", "integrated_by": "governor" }),
+        );
+        let adapter = harness.recorded(vec![replays_farik_read_board()]);
+        let orchestrator = harness.orchestrator(adapter.clone());
+
+        orchestrator.tick().await.expect("the tick runs");
+
+        let spec = &adapter.started()[0];
+        assert_eq!(
+            (spec.purpose, spec.agent_id.as_str()),
+            (SessionPurpose::Plan, "sam")
+        );
+        assert!(
+            spec.initial_prompt
+                .starts_with("Every task under the epic FRK-1 is done"),
+            "{}",
+            spec.initial_prompt
+        );
+        for gone in ["<untrusted source=\"rejection\">", "done.txt is empty."] {
+            assert!(
+                !spec.initial_prompt.contains(gone),
+                "{gone}: {}",
+                spec.initial_prompt
+            );
+        }
+    }
+
+    /// An hour after the fixtures' now.
+    fn in_an_hour() -> chrono::DateTime<chrono::Utc> {
+        crate::tools::fixtures::at() + chrono::Duration::hours(1)
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn waits_for_a_sleeping_triager() {
+        let harness = Harness::new("req-sleep-triage", |_| {});
+        harness.a_request("Add done.txt and its check");
+        harness.asleep("pm", in_an_hour());
+        let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
+
+        waits_for(&orchestrator, "pm", in_an_hour()).await;
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn waits_for_a_sleeping_product_manager_to_refine() {
+        let harness = Harness::new("req-sleep-refine", |_| {});
+        let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
+        refining(&harness, &orchestrator, RequestSize::Small).await;
+        harness.asleep("pm", in_an_hour());
+
+        waits_for(&orchestrator, "pm", in_an_hour()).await;
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn waits_for_a_sleeping_scrum_master_to_judge() {
+        let harness = Harness::new("req-sleep-judge", with_a_scrum_master);
+        let adapter = harness.recorded(vec![refine_writes_task_frk_1()]);
+        let orchestrator = harness.orchestrator(adapter);
+        refining(&harness, &orchestrator, RequestSize::Small).await;
+        orchestrator.tick().await.expect("the contract is written");
+        harness.asleep("sam", in_an_hour());
+
+        waits_for(&orchestrator, "sam", in_an_hour()).await;
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn waits_for_a_sleeping_epic_assignee() {
+        let harness = Harness::new("req-sleep-epic", |_| {});
+        an_epic_in_progress(&harness, |_| {});
+        harness.asleep("pm", in_an_hour());
+        let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
+
+        waits_for(&orchestrator, "pm", in_an_hour()).await;
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn waits_for_a_sleeping_product_manager_to_accept_an_epic() {
+        let harness = Harness::new("req-sleep-epic-accept", |_| {});
+        an_epic_verifying(&harness, |_| {});
+        integrated(&harness, true);
+        let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
+        orchestrator.tick().await.expect("Farik runs C1");
+        orchestrator
+            .handle(Command::HumanAccept {
+                task_id: task("FRK-1"),
+                subject: AcceptSubject::Result,
+                message: Some("Both look right.".to_string()),
+            })
+            .await
+            .expect("the human accepts the epic");
+        harness.asleep("pm", in_an_hour());
+
+        waits_for(&orchestrator, "pm", in_an_hour()).await;
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn waits_for_a_sleeping_product_manager_to_review_an_epic() {
+        let harness = Harness::new("req-sleep-epic-review", with_a_scrum_master);
+        a_scrum_masters_epic_verifying(&harness);
+        integrated(&harness, true);
+        let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
+        orchestrator.tick().await.expect("Farik runs C1");
+        harness.asleep("pm", in_an_hour());
+
+        waits_for(&orchestrator, "pm", in_an_hour()).await;
     }
 }

@@ -8,6 +8,8 @@
 
 /// The lifecycle, one line per task.
 pub mod board;
+/// The team's channel.
+pub mod channel;
 /// Taking a contract from the team, and giving it back.
 pub mod contract;
 /// Writing a contract with the Product Manager at the terminal.
@@ -41,6 +43,8 @@ pub mod refusal;
 mod run;
 /// One contract, and what happened to it.
 pub mod show;
+/// One sprint, and how it went.
+pub mod sprint;
 /// Who drives a project, and how a command reaches it.
 #[cfg(unix)]
 mod start;
@@ -67,6 +71,7 @@ use farik_protocol::command::{AcceptSubject, Command};
 use farik_runtime::RuntimeAdapter;
 #[cfg(unix)]
 use farik_runtime::daemon::DaemonState;
+use farik_runtime::sleep::Sleeper;
 use serde_json::{Value, json};
 
 pub use project::{Project, open_project};
@@ -122,12 +127,15 @@ pub struct CliIo<'a> {
     pub interrupts: Interrupts,
     /// Where session ids come from.
     pub session_ids: Arc<dyn IdSource + Send + Sync>,
+    /// What a driving process waits on while every agent with work is asleep: the machine's timer
+    /// over `clock` when `None`, a test's own otherwise.
+    pub sleeper: Option<Arc<dyn Sleeper>>,
 }
 
 impl<'a> CliIo<'a> {
     /// A harness writing to `stdout` and `stderr`, run in `cwd` at `clock`'s time, with nothing on
     /// standard input, an empty environment, the Claude Code engine, interrupts that never come,
-    /// and session ids `session-1`, `session-2`, and so on.
+    /// session ids `session-1`, `session-2`, and so on, and the machine's timer to wait on.
     #[must_use]
     pub fn new(
         cwd: PathBuf,
@@ -147,6 +155,7 @@ impl<'a> CliIo<'a> {
             engine: Engine::Claude,
             interrupts: Interrupts::Channel(never),
             session_ids: Arc::new(SequentialIds::new()),
+            sleeper: None,
         }
     }
 }
@@ -231,8 +240,12 @@ enum Commands {
         #[arg(long)]
         limit: Option<usize>,
     },
-    /// Show the harness metrics over the whole project (F17).
-    Metrics,
+    /// Show the harness metrics over the whole project, or one sprint's, (F17).
+    Metrics {
+        /// Only this sprint's rows and costs.
+        #[arg(long)]
+        sprint: Option<String>,
+    },
     /// Say where the files and the log disagree, and what else this project got wrong.
     Doctor,
     /// Show the team's rules (5.12).
@@ -298,6 +311,23 @@ enum Commands {
         #[arg(required = true, trailing_var_arg = true, allow_hyphen_values = true)]
         reason: Vec<String>,
     },
+    /// Start, end, or show a sprint (5.5).
+    Sprint {
+        #[command(subcommand)]
+        command: SprintCommands,
+    },
+    /// Say something in the team's channel; @<id> mentions an agent (5.9).
+    Say {
+        /// What you say.
+        #[arg(required = true, trailing_var_arg = true, allow_hyphen_values = true)]
+        text: Vec<String>,
+    },
+    /// Show the team's channel, oldest first (5.9).
+    Channel {
+        /// How many of the latest messages.
+        #[arg(long, default_value_t = 50)]
+        last: usize,
+    },
     /// Stop the process driving this project after its session, or stop one session now (5.2).
     Stop {
         /// A session id, or a task whose running session to stop.
@@ -354,6 +384,23 @@ enum HookCommands {
         /// The daemon's `daemon.json`.
         #[arg(long)]
         daemon: PathBuf,
+    },
+}
+
+#[derive(Subcommand)]
+enum SprintCommands {
+    /// Start a sprint, which the team plans from the ready backlog.
+    Start {
+        /// What it may spend, in dollars. Left out, it has no budget of its own.
+        #[arg(long)]
+        budget: Option<f64>,
+    },
+    /// End the open sprint; its unfinished tasks leave it and keep their status.
+    End,
+    /// Show the sprint named, else the open one, else the latest.
+    Show {
+        /// The sprint, as S<n>.
+        sprint_id: Option<String>,
     },
 }
 
@@ -468,7 +515,7 @@ pub fn run_cli(args: &[String], io: &mut CliIo<'_>) -> i32 {
         Commands::Task {
             command: TaskCommands::Create { file, parent },
         } => open_project(&io.cwd, now)
-            .and_then(|project| task::create(&project, &io.cwd, file, parent.as_deref(), now)),
+            .and_then(|project| task::create(&project, io, file, parent.as_deref(), now)),
         Commands::Triage { .. }
         | Commands::Contract {
             command: ContractCommands::Lock { .. } | ContractCommands::Unlock { .. },
@@ -479,7 +526,11 @@ pub fn run_cli(args: &[String], io: &mut CliIo<'_>) -> i32 {
         | Commands::Answer { .. }
         | Commands::Integrate { .. }
         | Commands::Resolve { .. }
-        | Commands::Cancel { .. } => open_project(&io.cwd, now).and_then(|project| {
+        | Commands::Cancel { .. }
+        | Commands::Say { .. }
+        | Commands::Sprint {
+            command: SprintCommands::Start { .. } | SprintCommands::End,
+        } => open_project(&io.cwd, now).and_then(|project| {
             let (name, command) = humans(&parsed.command)?;
             human_command(&project, command, name, io)
         }),
@@ -489,12 +540,18 @@ pub fn run_cli(args: &[String], io: &mut CliIo<'_>) -> i32 {
         Commands::Task {
             command: TaskCommands::Show { task_id, diff },
         } => open_project(&io.cwd, now).and_then(|project| show::show(&project, task_id, *diff)),
+        Commands::Sprint {
+            command: SprintCommands::Show { sprint_id },
+        } => open_project(&io.cwd, now)
+            .and_then(|project| sprint::show(&project, sprint_id.as_deref())),
+        Commands::Channel { last } => {
+            open_project(&io.cwd, now).and_then(|project| channel::channel(&project, *last))
+        }
         Commands::Board => open_project(&io.cwd, now).and_then(|project| board::board(&project)),
         Commands::Log { task, kind, limit } => open_project(&io.cwd, now)
             .and_then(|project| log::log(&project, task.as_ref(), kind.as_ref(), *limit)),
-        Commands::Metrics => {
-            open_project(&io.cwd, now).and_then(|project| metrics::metrics(&project))
-        }
+        Commands::Metrics { sprint } => open_project(&io.cwd, now)
+            .and_then(|project| metrics::metrics(&project, sprint.as_deref())),
         Commands::Doctor => {
             let found =
                 open_project(&io.cwd, now).and_then(|project| doctor::doctor(&project, now));
@@ -625,6 +682,23 @@ fn humans(command: &Commands) -> Result<(&'static str, Command), String> {
                 task_id: task(task_id)?,
                 to: TaskStatus::Cancelled,
                 reason: reason.join(" "),
+            },
+        ),
+        Commands::Sprint {
+            command: SprintCommands::Start { budget },
+        } => (
+            "sprint start",
+            Command::SprintStart {
+                budget_usd: *budget,
+            },
+        ),
+        Commands::Sprint {
+            command: SprintCommands::End,
+        } => ("sprint end", Command::SprintEnd),
+        Commands::Say { text } => (
+            "say",
+            Command::MessagePost {
+                text: text.join(" "),
             },
         ),
         _ => return Err("this is not one of the human's commands".to_string()),

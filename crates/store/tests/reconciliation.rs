@@ -186,6 +186,62 @@ fn says_when_the_file_and_the_log_disagree_about_who_holds_a_contract() {
 }
 
 #[test]
+fn says_when_the_file_and_the_log_disagree_about_a_tasks_sprint() {
+    // 5.11: the governor writes `sprint` and `sprint.planned` moves it. A plan that stopped between
+    // the contract and the event leaves the file naming a sprint the log never put the task in.
+    let project = TempProject::new("reconcile-sprint");
+    let files = project.files();
+    let (log, projections) = a_board();
+    for id in ["FRK-1", "FRK-2"] {
+        on_the_board(&log, &projections, id, "ready", false);
+    }
+    for (kind, body) in [
+        (
+            EventKind::SprintStarted,
+            json!({ "sprint_id": "S1", "budget_usd": null, "started_by": "human" }),
+        ),
+        (
+            EventKind::SprintPlanned,
+            json!({ "sprint_id": "S1", "task_ids": ["FRK-2"], "planned_by": "pm" }),
+        ),
+    ] {
+        let mut wire = an_event_wire(kind);
+        wire["body"] = body;
+        wire.as_object_mut().expect("an event").remove("task_id");
+        let event = event_from_value(&wire).expect("the fixture is schema-valid");
+        let new = NewEvent {
+            recorded_at: event.envelope.recorded_at,
+            ids: event.envelope.ids,
+            body: event.body,
+        };
+        projections
+            .apply(&log.append(&new).expect("appends"))
+            .expect("projects");
+    }
+    let mut in_s1 = a_contract("FRK-1", TaskStatus::Ready, false);
+    in_s1.sprint = Some("S1".to_string());
+    files.write_contract(&in_s1).expect("written");
+    files
+        .write_contract(&a_contract("FRK-2", TaskStatus::Ready, false))
+        .expect("written");
+
+    let found = drifts(&files, &projections);
+    assert_eq!(
+        found,
+        [
+            Drift::SprintMismatch {
+                task_id: an_id("FRK-1"),
+                detail: "the log has it in no sprint and the file says in S1".to_string(),
+            },
+            Drift::SprintMismatch {
+                task_id: an_id("FRK-2"),
+                detail: "the log has it in S1 and the file says in no sprint".to_string(),
+            },
+        ]
+    );
+}
+
+#[test]
 fn reports_a_contract_it_cannot_read_rather_than_stopping_at_it() {
     // One file a person broke must not hide every other disagreement, which is the whole use of
     // this: a person runs it to find out what is wrong, not to be told one thing at a time.
@@ -325,5 +381,6 @@ fn name_of(drift: &Drift) -> &'static str {
         Drift::StatusMismatch { .. } => "StatusMismatch",
         Drift::LockMismatch { .. } => "LockMismatch",
         Drift::ContractUnreadable { .. } => "ContractUnreadable",
+        Drift::SprintMismatch { .. } => "SprintMismatch",
     }
 }

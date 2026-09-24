@@ -336,6 +336,49 @@ pub fn hold_the_run_lock(repository: &TempRepo) -> File {
     file
 }
 
+/// How long `the_run_lock_frees` waits before it decides the lock is not coming free.
+const RUN_LOCK_FREES_DEADLINE: std::time::Duration = std::time::Duration::from_secs(10);
+
+/// Waits for this project's run lock to be free, then gives it back at once: proof that nothing
+/// is left holding it, without racing a holder that only just let go.
+///
+/// A `try_lock` right after the process driving the project dropped its hold can answer
+/// `WouldBlock` even though nothing means to hold the lock: a `flock` belongs to the open file
+/// description, and a child another test thread forks while that description is still open
+/// keeps a copy of it until it execs, which can outlast the real holder's own drop. Blocking
+/// waits out that cloexec'd duplicate instead of racing it.
+///
+/// The blocking wait itself runs on its own thread, so a lock a bug genuinely left held cannot
+/// hang this one forever: past `RUN_LOCK_FREES_DEADLINE` this panics, naming the lock as still
+/// held, instead of waiting on it past the point that means something is wrong. The other
+/// thread is left to block on the file it opened; it is never joined, so it costs nothing once
+/// this function has returned or panicked.
+pub fn the_run_lock_frees(repository: &TempRepo) {
+    let path = repository.path.join(".farik/local/run.lock");
+    let (locked, waits) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let taken = File::options()
+            .create(true)
+            .truncate(false)
+            .write(true)
+            .open(&path)
+            .map_err(|error| format!("{} cannot be opened: {error}", path.display()))
+            .and_then(|file| file.lock().map_err(|error| error.to_string()));
+        let _ = locked.send(taken);
+    });
+    match waits.recv_timeout(RUN_LOCK_FREES_DEADLINE) {
+        Ok(Ok(())) => {}
+        Ok(Err(detail)) => panic!("the run lock cannot be taken: {detail}"),
+        Err(std::sync::mpsc::RecvTimeoutError::Timeout) => panic!(
+            "the run lock is still held after {RUN_LOCK_FREES_DEADLINE:?}: something left \
+             `.farik/local/run.lock` locked"
+        ),
+        Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+            panic!("the thread taking the run lock panicked before it could say so")
+        }
+    }
+}
+
 /// The project's tools, as a process driving it holds them.
 pub fn tool_deps(repository: &TempRepo) -> Arc<ToolDeps> {
     let log = Arc::new(log_of(repository));

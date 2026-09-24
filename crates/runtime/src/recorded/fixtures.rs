@@ -69,6 +69,33 @@ pub fn hook_denies_a_write() -> Transcript {
     Transcript::from_jsonl(include_str!("transcripts/hook_denies_a_write.jsonl"))
 }
 
+// No capture of a refused session exists yet (2.1.280's show only `allowed`); the next four are
+// hand-written in the captured lines' shapes, one per way a provider's limit can be told.
+
+/// A rate-limit event `rejected` until 1790119200, then a result that is an error.
+#[must_use]
+pub fn provider_limit_rejected() -> Transcript {
+    Transcript::from_jsonl(include_str!("transcripts/provider_limit_rejected.jsonl"))
+}
+
+/// A result that is an error with `api_error_status` 429 and no rate-limit event.
+#[must_use]
+pub fn provider_limit_429() -> Transcript {
+    Transcript::from_jsonl(include_str!("transcripts/provider_limit_429.jsonl"))
+}
+
+/// A result that is an error saying `Claude AI usage limit reached`.
+#[must_use]
+pub fn provider_limit_text() -> Transcript {
+    Transcript::from_jsonl(include_str!("transcripts/provider_limit_text.jsonl"))
+}
+
+/// An `allowed` rate-limit event, then a `success` result that is an error: a 500.
+#[must_use]
+pub fn success_with_is_error() -> Transcript {
+    Transcript::from_jsonl(include_str!("transcripts/success_with_is_error.jsonl"))
+}
+
 /// A call of `mcp__farik__farik_read_board` with no input, its answer, and a successful end.
 /// Hand-written in the shapes above; with `RecordedAdapter::with_tools` the answer is the runner's.
 #[must_use]
@@ -97,6 +124,20 @@ pub fn implement_stops_early() -> Transcript {
     Transcript::from_jsonl(include_str!("transcripts/implement_stops_early.jsonl"))
 }
 
+/// `dev-a`'s implement session of FRK-1 saying so in the channel: one `farik_post_message`, and a
+/// successful end. Hand-written.
+#[must_use]
+pub fn implement_reacts_frk_1() -> Transcript {
+    Transcript::from_jsonl(include_str!("transcripts/implement_reacts_frk_1.jsonl"))
+}
+
+/// `dev-a`'s conversation session answering a mention: one `farik_post_message`, and a
+/// successful end. Hand-written.
+#[must_use]
+pub fn reply_to_a_mention() -> Transcript {
+    Transcript::from_jsonl(include_str!("transcripts/reply_to_a_mention.jsonl"))
+}
+
 /// `dev-b`'s verify session of FRK-1: a review note, and nothing else. Hand-written.
 #[must_use]
 pub fn review_writes_note() -> Transcript {
@@ -110,6 +151,20 @@ pub fn review_answers_nothing() -> Transcript {
     Transcript::from_jsonl(include_str!("transcripts/review_answers_nothing.jsonl"))
 }
 
+/// The Product Manager's review of the epic FRK-1: C2 recorded passed, then a review note.
+/// Hand-written.
+#[must_use]
+pub fn review_epic_frk_1() -> Transcript {
+    Transcript::from_jsonl(include_str!("transcripts/review_epic_frk_1.jsonl"))
+}
+
+/// The Product Manager's review of the epic FRK-1: C2 recorded failed, then a review note saying
+/// why. Hand-written.
+#[must_use]
+pub fn review_epic_fails_frk_1() -> Transcript {
+    Transcript::from_jsonl(include_str!("transcripts/review_epic_fails_frk_1.jsonl"))
+}
+
 /// The Product Manager's verify session of FRK-1: `accepted` asked for. Hand-written.
 #[must_use]
 pub fn accept_frk_1() -> Transcript {
@@ -121,6 +176,28 @@ pub fn accept_frk_1() -> Transcript {
 #[must_use]
 pub fn triage_frk_1_large() -> Transcript {
     Transcript::from_jsonl(include_str!("transcripts/triage_frk_1_large.jsonl"))
+}
+
+/// The Scrum Master's triage of FRK-1: `farik_triage_request` of size `small`, "One file and its
+/// check: a task.". Hand-written.
+#[must_use]
+pub fn triage_by_sm_frk_1() -> Transcript {
+    Transcript::from_jsonl(include_str!("transcripts/triage_by_sm_frk_1.jsonl"))
+}
+
+/// The Scrum Master's judgment of FRK-1: `farik_record_judgment` answering yes to both questions,
+/// "One file in five dollars, and C1 fails while done.txt is missing.". Hand-written.
+#[must_use]
+pub fn judge_frk_1_passes() -> Transcript {
+    Transcript::from_jsonl(include_str!("transcripts/judge_frk_1_passes.jsonl"))
+}
+
+/// The Scrum Master's judgment of FRK-1: `farik_record_judgment` answering that it fits its budget
+/// and that its criteria would not detect the failure, "C1 checks that done.txt exists, not what
+/// it says.". Hand-written.
+#[must_use]
+pub fn judge_frk_1_fails() -> Transcript {
+    Transcript::from_jsonl(include_str!("transcripts/judge_frk_1_fails.jsonl"))
 }
 
 /// The Product Manager's refine session of FRK-1 that asks the human "Should done.txt be empty?"
@@ -165,6 +242,36 @@ pub fn plan_assigns_frk_2() -> Transcript {
 #[must_use]
 pub fn plan_closes_epic_frk_1() -> Transcript {
     Transcript::from_jsonl(include_str!("transcripts/plan_closes_epic_frk_1.jsonl"))
+}
+
+/// The Scrum Master's planning ceremony of the open sprint: two posts, the plan and the
+/// escalation digest, then `farik_plan_sprint` of FRK-1, then "S1 holds FRK-1, within its
+/// budget.". Hand-written.
+#[must_use]
+pub fn planning_ceremony_frk_1() -> Transcript {
+    Transcript::from_jsonl(include_str!("transcripts/planning_ceremony_frk_1.jsonl"))
+}
+
+/// The Scrum Master's standup: one post, "Standup: FRK-1 moved from assigned to `in_progress`.
+/// …", then "The standup is posted.". Hand-written.
+#[must_use]
+pub fn standup() -> Transcript {
+    Transcript::from_jsonl(include_str!("transcripts/standup.jsonl"))
+}
+
+/// The Scrum Master's review of S1: one post, "Review of S1: FRK-1, the login page, was
+/// delivered, …", then "The review is posted.". Hand-written.
+#[must_use]
+pub fn review() -> Transcript {
+    Transcript::from_jsonl(include_str!("transcripts/review.jsonl"))
+}
+
+/// The Scrum Master's retro of S1: one post, then `farik_append_retro` of "Keep the tasks small:
+/// FRK-1 passed its review the first time.", then a second `farik_append_retro`, then "The retro
+/// is recorded.". Hand-written.
+#[must_use]
+pub fn retro() -> Transcript {
+    Transcript::from_jsonl(include_str!("transcripts/retro.jsonl"))
 }
 
 /// An adapter whose every session reports `usage` at once and then either ends `completed` at
@@ -226,6 +333,7 @@ impl UsageThenWaitAdapter {
             let _ = sender.try_send(SessionEvent::Ended {
                 reason: EndReason::Completed,
                 detail: "done".to_string(),
+                resets_at: None,
             });
         }
     }
@@ -267,6 +375,7 @@ impl RuntimeAdapter for UsageThenWaitAdapter {
                 .try_send(SessionEvent::Ended {
                     reason: EndReason::Completed,
                     detail: "done".to_string(),
+                    resets_at: None,
                 })
                 .expect("the channel has room");
             None
@@ -341,6 +450,7 @@ impl SessionHandle for WaitingSession {
             let _ = sender.try_send(SessionEvent::Ended {
                 reason: EndReason::Aborted,
                 detail: "aborted".to_string(),
+                resets_at: None,
             });
         }
         Ok(())

@@ -29,12 +29,14 @@ use tokio_util::sync::CancellationToken;
 use farik_protocol::command::{
     Command, CommandReply, ReplyKind, command_from_value, reply_to_value,
 };
+use farik_protocol::event::Thread;
 use serde_json::Value;
 
 use self::mcp::FarikMcp;
 
 use crate::exec::Executor;
 use crate::orchestrator::{CommandError, CommandReport, reply_of};
+use crate::session::SessionPurpose;
 use crate::tools::{ToolContext, ToolDeps};
 
 #[cfg(test)]
@@ -83,6 +85,12 @@ pub struct SessionRegistration {
     pub agent_id: String,
     /// The task it works on, when it works on one.
     pub task_id: Option<TaskId>,
+    /// Why it runs, which decides what kind of message it posts.
+    pub purpose: SessionPurpose,
+    /// The seq of the message a conversation session answers, which its reply names.
+    pub in_reply_to: Option<u64>,
+    /// A ceremony's thread, which its posts are in.
+    pub thread: Option<Thread>,
     /// Its working directory: the task's worktree. No tool call reaches outside it.
     pub cwd: PathBuf,
     /// Where the task's commands run, when it has somewhere.
@@ -225,6 +233,9 @@ impl DaemonState {
             agent_id: session.registration.agent_id.clone(),
             task_id: session.registration.task_id.clone(),
             session_id: session.registration.session_id.clone(),
+            purpose: session.registration.purpose,
+            in_reply_to: session.registration.in_reply_to,
+            thread: session.registration.thread,
             executor: session.registration.executor.clone(),
             deps: Arc::clone(&self.deps),
         })
@@ -523,7 +534,9 @@ mod tests {
     use serde_json::json;
 
     use super::fixtures::{PRE_READ, TestDaemon};
-    use super::{DaemonConfig, DaemonInfo, DaemonState, SessionRegistration, router, serve};
+    use super::{
+        DaemonConfig, DaemonInfo, DaemonState, SessionPurpose, SessionRegistration, router, serve,
+    };
     use crate::exec::Executor;
     use crate::orchestrator::command_handler;
     use crate::orchestrator::fixtures::Harness;
@@ -707,6 +720,9 @@ mod tests {
             executor: Some(Arc::clone(&executor)),
             limits: DEFAULT_SESSION_LIMITS,
             farik_tools: Vec::new(),
+            purpose: SessionPurpose::Implement,
+            in_reply_to: None,
+            thread: None,
         });
         let context = daemon
             .state
@@ -871,6 +887,9 @@ mod tests {
                 executor: None,
                 limits: DEFAULT_SESSION_LIMITS,
                 farik_tools: Vec::new(),
+                purpose: SessionPurpose::Implement,
+                in_reply_to: None,
+                thread: None,
             });
         }
         assert_eq!(state.session_ids(), ["s-1", "s-2"]);

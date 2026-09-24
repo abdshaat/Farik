@@ -16,20 +16,19 @@ use farik_runtime::orchestrator::{
     CommandError, CommandReport, Orchestrator, OrchestratorDeps, RecoveryReport, command_handler,
     result_of,
 };
-use farik_runtime::transitions::Transitions;
+use farik_runtime::sleep::{Sleeper, TokioSleeper};
 use farik_runtime::{
     DockerSandboxFactory, HostSandboxFactory, RuntimeAdapter, RuntimeError, SANDBOX_IMAGE,
-    SandboxFactory, SessionHandle, SessionSpec, ToolDeps,
+    SandboxFactory, SessionHandle, SessionSpec,
 };
-use farik_store::files::{ProjectFiles, Sandbox};
-use farik_store::{Git, open_projections};
+use farik_store::files::Sandbox;
 use serde_json::Value;
 use tokio::signal::unix::{SignalKind, signal};
 use tokio::sync::mpsc::UnboundedReceiver;
 
 use crate::daemon_client::{ClientError, DaemonAddress, exchange, read_daemon_file};
 use crate::doctor::unpriced;
-use crate::project::Project;
+use crate::project::{Project, tool_deps};
 use crate::{CliIo, Engine, Interrupts};
 
 /// The lock the process driving a project holds, under the gitignored `.farik/local/`.
@@ -200,36 +199,17 @@ pub(crate) fn command_orchestrator(
         sandboxes: Arc::new(HostSandboxFactory),
         session_ids: Arc::clone(&io.session_ids),
         forge: Arc::new(forge(&project.root, io)),
+        sleeper: sleeper(io),
     }))
 }
 
-/// The project's tools, over this process's own board of the project's log.
-///
-/// # Errors
-///
-/// A sentence saying what the store refused.
-pub(crate) fn tool_deps(project: &Project, io: &CliIo<'_>) -> Result<Arc<ToolDeps>, String> {
-    let projections =
-        Arc::new(open_projections(Arc::clone(&project.log)).map_err(|error| error.to_string())?);
-    let files = Arc::new(ProjectFiles::open(project.root.clone()));
-    let ids = crate::contract::event_ids(project);
-    let transitions = Arc::new(Transitions::new(
-        Arc::clone(&project.log),
-        Arc::clone(&projections),
-        Arc::clone(&files),
-        Git::open(project.root.clone()),
-        Arc::clone(&io.clock),
-        ids.clone(),
-    ));
-    Ok(Arc::new(ToolDeps {
-        log: Arc::clone(&project.log),
-        projections,
-        files,
-        transitions,
-        git: Git::open(project.root.clone()),
-        clock: Arc::clone(&io.clock),
-        ids,
-    }))
+/// What a driving process waits on: the test's sleeper, else the machine's timer over the clock.
+fn sleeper(io: &CliIo<'_>) -> Arc<dyn Sleeper> {
+    io.sleeper.clone().unwrap_or_else(|| {
+        Arc::new(TokioSleeper {
+            clock: Arc::clone(&io.clock),
+        })
+    })
 }
 
 /// The forge: the `gh` on the environment's `PATH`, else `gh`.
@@ -429,6 +409,7 @@ pub(crate) async fn start_holding(
         sandboxes,
         session_ids: Arc::clone(&io.session_ids),
         forge: Arc::new(forge(&project.root, io)),
+        sleeper: sleeper(io),
     }));
     daemon.set_command_handler(command_handler(Arc::clone(&orchestrator)));
     let recovering = Arc::clone(&orchestrator);

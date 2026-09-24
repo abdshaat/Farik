@@ -8,6 +8,7 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 
+use chrono::{DateTime, Utc};
 use farik_core::contract::TaskId;
 use farik_core::governor::permissions::PermissionTier;
 use farik_core::team::Team;
@@ -17,11 +18,14 @@ use farik_roles::RoleError;
 use farik_store::files::FilesError;
 use farik_store::{GitError, StoreError};
 
+use crate::channel::ChannelError;
 use crate::cost::CostError;
 use crate::daemon::{CommandHandler, DaemonState};
 use crate::forge::{Forge, ForgeError};
 use crate::sandbox::{Sandbox, SandboxError, SandboxFactory};
 use crate::session::{RuntimeAdapter, RuntimeError};
+use crate::sleep::Sleeper;
+use crate::sprints::SprintError;
 use crate::tools::ToolDeps;
 use crate::transitions::TransitionError;
 
@@ -52,6 +56,8 @@ pub struct OrchestratorDeps {
     pub session_ids: Arc<dyn IdSource + Send + Sync>,
     /// The forge pull requests are opened on, under the `pull_request` policy.
     pub forge: Arc<Forge>,
+    /// What a run waits on while every agent with work is asleep.
+    pub sleeper: Arc<dyn Sleeper>,
 }
 
 /// Why a tick could not finish. Something the governor refused is not one of these: it is an
@@ -162,6 +168,28 @@ impl From<ForgeError> for OrchestratorError {
     }
 }
 
+impl From<SprintError> for OrchestratorError {
+    fn from(error: SprintError) -> Self {
+        match error {
+            SprintError::Files(error) => Self::Files(error),
+            SprintError::Store(error) => Self::Store(error),
+            other => Self::Refused {
+                reason: other.to_string(),
+            },
+        }
+    }
+}
+
+impl From<ChannelError> for OrchestratorError {
+    fn from(error: ChannelError) -> Self {
+        match error {
+            ChannelError::Store(error) => Self::Store(error),
+            ChannelError::Files(error) => Self::Files(error),
+            ChannelError::Refused { reason } => Self::Refused { reason },
+        }
+    }
+}
+
 impl From<CostError> for OrchestratorError {
     fn from(error: CostError) -> Self {
         Self::Cost(error)
@@ -175,6 +203,9 @@ pub enum TickReport {
     Idle {
         /// Why not.
         why: String,
+        /// When the first sleeping agent the rules passed over wakes, when one was (5.5): a run
+        /// waits until then and ticks again.
+        until: Option<DateTime<Utc>>,
     },
     /// Something was done about a task.
     Acted {
@@ -183,7 +214,39 @@ pub enum TickReport {
         /// What was done.
         what: String,
     },
+    /// Something was done about the open sprint.
+    Sprint {
+        /// The sprint.
+        sprint_id: String,
+        /// What was done.
+        what: String,
+    },
+    /// An agent answered what it was asked in the channel.
+    Conversation {
+        /// The agent.
+        agent_id: String,
+        /// What was done.
+        what: String,
+    },
 }
+
+/// How a wait for a sleeping agent ended.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Waited {
+    /// It is the time waited for, or the minute the wait is capped at (`RECHECK`) passed first,
+    /// so that work filed straight into the store, not through a command `handle` sees, is
+    /// picked up within a minute (`docs/SPEC.md` 8.2).
+    Reached,
+    /// `stop` was called first.
+    Stopped,
+    /// A command the human gave was handled first, which may have made work for an agent awake.
+    Woken,
+}
+
+/// The longest `wait_until` sleeps before the board is ticked again: work filed straight into the
+/// store while a run waits, such as `farik task create` writing the store directly, does not
+/// notify `commands` and would otherwise sit until the sleeping agent wakes.
+const RECHECK: chrono::Duration = chrono::Duration::seconds(60);
 
 /// Which of the rules a tick runs (`docs/SPEC.md` 8.2): every one, the planning ones, or the
 /// refining ones.
@@ -217,6 +280,8 @@ pub enum IntegrationOutcome {
     Merged {
         /// The integration branch's commit holding it.
         sha: String,
+        /// What became of the project scan once it landed.
+        scan: ScanRefresh,
     },
     /// A pull request was opened for it, at this address.
     PullRequestOpened {
@@ -229,7 +294,43 @@ pub enum IntegrationOutcome {
     Escalated {
         /// The escalation's detail.
         detail: String,
+        /// What became of the project scan, when the escalation follows a merge (a failed push or
+        /// fast-forward).
+        scan: Option<ScanRefresh>,
     },
+}
+
+/// What became of the project scan after an integration (5.8): the scan every prompt carries is
+/// kept current as work lands.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ScanRefresh {
+    /// The project changed, and `project.md` and the criterion library say so now.
+    Refreshed,
+    /// Nothing the scan reads changed.
+    Unchanged,
+    /// The scan was not run, for this reason.
+    Skipped {
+        /// Why, in words.
+        why: String,
+    },
+    /// The scan or its writing failed, and nothing was changed.
+    Failed {
+        /// What failed, in words.
+        error: String,
+    },
+}
+
+impl fmt::Display for ScanRefresh {
+    /// What is said after the integration's own words: nothing when the scan is unchanged.
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Refreshed => write!(formatter, "; the project scan was refreshed"),
+            Self::Unchanged => Ok(()),
+            Self::Skipped { why: reason } | Self::Failed { error: reason } => {
+                write!(formatter, "; the project scan was not refreshed: {reason}")
+            }
+        }
+    }
 }
 
 /// What a command the human gave did, for the command line to print.
@@ -299,6 +400,12 @@ pub struct Orchestrator {
     sandboxes: Mutex<BTreeMap<TaskId, Arc<dyn Sandbox>>>,
     /// Read before each tick of `run_until_idle`.
     stopped: AtomicBool,
+    /// Notified by `stop`, so that a wait for a sleeping agent ends at once.
+    stops: tokio::sync::Notify,
+    /// Notified by a command that recorded something, so that a wait ends and the next tick sees
+    /// it. One permit is kept when nobody waits: a command handled during a tick ends the wait
+    /// after it at once, which costs one tick.
+    commands: tokio::sync::Notify,
 }
 
 impl Orchestrator {
@@ -309,6 +416,8 @@ impl Orchestrator {
             deps,
             sandboxes: Mutex::new(BTreeMap::new()),
             stopped: AtomicBool::new(false),
+            stops: tokio::sync::Notify::new(),
+            commands: tokio::sync::Notify::new(),
         }
     }
 
@@ -338,18 +447,46 @@ impl Orchestrator {
         self.stopped.load(Ordering::SeqCst)
     }
 
-    /// Ticks until a tick is idle or `stop` was called.
+    /// Ticks until a tick is idle with no agent to wait for, or `stop` was called. A tick idle
+    /// while an agent sleeps is waited out (`wait_until`), and the ticks go on.
     ///
     /// # Errors
     ///
     /// The first error a tick returns.
     pub async fn run_until_idle(&self) -> Result<(), OrchestratorError> {
         while !self.is_stopped() {
-            if let TickReport::Idle { .. } = self.tick().await? {
-                break;
+            match self.tick().await? {
+                TickReport::Idle {
+                    until: Some(until), ..
+                } => {
+                    self.wait_until(until).await;
+                }
+                TickReport::Idle { until: None, .. } => break,
+                TickReport::Acted { .. }
+                | TickReport::Sprint { .. }
+                | TickReport::Conversation { .. } => {}
             }
         }
         Ok(())
+    }
+
+    /// Waits until `until`, `RECHECK` from now, `stop` is called, or a command the human gave
+    /// records something, whichever comes first; at once when `stop` was called before. Capped at
+    /// `RECHECK` so the caller ticks again at least that often, whatever `until` is.
+    pub async fn wait_until(&self, until: DateTime<Utc>) -> Waited {
+        // Taken before the stop is read, so that a stop between the two still ends the wait.
+        let stopped = self.stops.notified();
+        tokio::pin!(stopped);
+        stopped.as_mut().enable();
+        if self.is_stopped() {
+            return Waited::Stopped;
+        }
+        let capped = until.min(self.deps.tools.clock.now() + RECHECK);
+        tokio::select! {
+            () = self.deps.sleeper.sleep_until(capped) => Waited::Reached,
+            () = stopped => Waited::Stopped,
+            () = self.commands.notified() => Waited::Woken,
+        }
     }
 
     /// Integrates an accepted task now, as the human asks (`farik integrate`), whatever
@@ -385,7 +522,14 @@ impl Orchestrator {
     /// own refusals as `transition_refused`; `NotFound` naming what is not there; `Failed` when
     /// the store, a file, git, or the orchestrator fails.
     pub async fn handle(&self, command: Command) -> Result<CommandReport, CommandError> {
-        human::handle(self, command).await
+        let handled = human::handle(self, command).await;
+        if handled
+            .as_ref()
+            .is_ok_and(|report| !report.events.is_empty())
+        {
+            self.commands.notify_one();
+        }
+        handled
     }
 
     /// Picks up a run that was killed (5.15), before the first tick: every session the log shows
@@ -402,9 +546,11 @@ impl Orchestrator {
         recover::recover(self)
     }
 
-    /// Stops `run_until_idle` before its next tick. A session already running runs to its end.
+    /// Stops `run_until_idle` before its next tick, and ends a wait at once. A session already
+    /// running runs to its end.
     pub fn stop(&self) {
         self.stopped.store(true, Ordering::SeqCst);
+        self.stops.notify_waiters();
     }
 
     /// The task's sandbox: the one made for it earlier in this process, or a new one rooted at
@@ -528,6 +674,7 @@ fn worktree(deps: &OrchestratorDeps, task_id: &TaskId) -> PathBuf {
 
 #[cfg(test)]
 mod tests {
+    use chrono::{DateTime, Utc};
     use farik_core::contract::TaskStatus;
     use farik_protocol::event::{
         CriterionRecordedBodyRunBy, EventBody, EventKind, NoteWrittenBodyKind,
@@ -537,15 +684,16 @@ mod tests {
     use farik_store::git::fixtures::git_output_in;
 
     use farik_core::contract::{TaskId, TaskKind};
-    use farik_protocol::command::{AcceptSubject, Command};
+    use farik_protocol::command::{AcceptSubject, Command, RequestSize};
     use farik_protocol::event::EscalationRaisedBodyReason;
 
-    use crate::orchestrator::fixtures::Harness;
+    use crate::orchestrator::fixtures::{Harness, run_until_idle_within_ten_seconds};
     use crate::recorded::fixtures::{
         accept_frk_1, implement_finishes_frk_1, plan_assigns_frk_1, plan_assigns_frk_2,
         plan_breaks_down_frk_1, plan_closes_epic_frk_1, refine_asks_frk_1,
         refine_writes_epic_frk_1, refine_writes_task_frk_1, review_writes_note, triage_frk_1_large,
     };
+    use crate::tools::fixtures::at;
 
     /// Each session started, as its purpose and its agent, in order.
     fn sessions(harness: &Harness) -> Vec<(SessionStartedBodyPurpose, String)> {
@@ -614,6 +762,118 @@ mod tests {
 
     #[tokio::test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn waits_for_a_sleeping_agent_then_goes_on() {
+        let harness = Harness::new("orch-wait", |_| {});
+        harness.ready("FRK-1");
+        let until = at() + chrono::Duration::hours(1);
+        harness.asleep("dev-a", until);
+        let adapter = harness.recorded(vec![
+            plan_assigns_frk_1(),
+            implement_finishes_frk_1(),
+            review_writes_note(),
+            accept_frk_1(),
+        ]);
+        let orchestrator = std::sync::Arc::new(harness.orchestrator_at(adapter.clone(), at()));
+
+        run_until_idle_within_ten_seconds(std::sync::Arc::clone(&orchestrator))
+            .expect("the run ends idle");
+
+        assert_eq!(orchestrator.deps.tools.clock.now(), until);
+        assert_eq!(
+            sessions(&harness),
+            vec![
+                (SessionStartedBodyPurpose::Plan, "pm".to_string()),
+                (SessionStartedBodyPurpose::Implement, "dev-a".to_string()),
+                (SessionStartedBodyPurpose::Verify, "dev-b".to_string()),
+                (SessionStartedBodyPurpose::Verify, "pm".to_string()),
+            ]
+        );
+        assert_eq!(harness.row("FRK-1").status, TaskStatus::Accepted);
+    }
+
+    /// Waits until `until` on `orchestrator`, failing the test rather than hanging when the wait
+    /// does not end within five seconds.
+    async fn waited(orchestrator: &super::Orchestrator, until: DateTime<Utc>) -> super::Waited {
+        tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            orchestrator.wait_until(until),
+        )
+        .await
+        .expect("the wait ends")
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn stops_a_wait() {
+        let harness = Harness::new("orch-wait-stop", |_| {});
+        let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
+
+        let (ended, ()) = tokio::join!(
+            waited(&orchestrator, at() + chrono::Duration::hours(1)),
+            async {
+                tokio::task::yield_now().await;
+                orchestrator.stop();
+            }
+        );
+
+        assert_eq!(ended, super::Waited::Stopped);
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn wakes_a_wait_on_a_human_command() {
+        let harness = Harness::new("orch-wait-command", |_| {});
+        harness.a_request("Add done.txt and its check");
+        let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
+
+        let (ended, ()) = tokio::join!(
+            waited(&orchestrator, at() + chrono::Duration::hours(1)),
+            async {
+                tokio::task::yield_now().await;
+                orchestrator
+                    .handle(Command::RequestTriage {
+                        task_id: "FRK-1".parse().expect("a task id"),
+                        size: RequestSize::Small,
+                        reason: "Sized by the human.".to_string(),
+                    })
+                    .await
+                    .expect("the human sizes the request");
+            }
+        );
+
+        assert_eq!(ended, super::Waited::Woken);
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn sees_a_stop_before_the_wait() {
+        let harness = Harness::new("orch-wait-stopped", |_| {});
+        let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
+        orchestrator.stop();
+
+        let ended = waited(&orchestrator, at() + chrono::Duration::hours(1)).await;
+
+        assert_eq!(ended, super::Waited::Stopped);
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn caps_a_wait_at_a_minute_so_the_board_is_rechecked() {
+        let harness = Harness::new("orch-wait-cap", |_| {});
+        let orchestrator = harness.orchestrator_at(harness.recorded(Vec::new()), at());
+
+        let ended = waited(&orchestrator, at() + chrono::Duration::hours(1)).await;
+
+        assert_eq!(ended, super::Waited::Reached);
+        assert_eq!(
+            orchestrator.deps.tools.clock.now(),
+            at() + chrono::Duration::seconds(60),
+            "a wait an hour away is capped at a minute, not run to the end"
+        );
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn takes_one_task_from_ready_to_accepted() {
         let harness = Harness::new("orch-one-task", |wire| {
             wire["policy"]["integration"] = serde_json::json!("auto_merge");
@@ -635,12 +895,10 @@ mod tests {
 
         assert_eq!(harness.row("FRK-1").status, TaskStatus::Accepted);
         let git = &harness.project.deps.git;
+        let branch = harness.branch("FRK-1");
+        assert_eq!(git.commit_count(&base, &branch).expect("git counts"), 1);
         assert_eq!(
-            git.commit_count(&base, "farik/FRK-1").expect("git counts"),
-            1
-        );
-        assert_eq!(
-            git.changed_paths(&base, "farik/FRK-1").expect("git lists"),
+            git.changed_paths(&base, &branch).expect("git lists"),
             vec!["done.txt".to_string()]
         );
         assert_eq!(
@@ -709,12 +967,8 @@ mod tests {
         );
         assert!(!harness.worktree("FRK-1").exists());
         assert_eq!(
-            git_output_in(
-                &harness.project.repo.path,
-                &["branch", "--list", "farik/FRK-1"]
-            )
-            .trim(),
-            "farik/FRK-1"
+            git_output_in(&harness.project.repo.path, &["branch", "--list", &branch]).trim(),
+            branch
         );
     }
 
@@ -776,7 +1030,7 @@ mod tests {
             .expect("the contract reads");
         assert_eq!(
             contract.budget.max_sessions.get(),
-            12,
+            14,
             "the contract takes the schema's default"
         );
     }

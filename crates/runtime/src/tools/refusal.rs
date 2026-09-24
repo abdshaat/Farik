@@ -35,6 +35,9 @@ pub(crate) enum Refusal {
         has_parent: bool,
         triaged: bool,
     },
+    /// This caller may not judge this contract now: only the Scrum Master does, on a task
+    /// `refining` (5.3).
+    JudgmentNotAllowed { role: Role, status: TaskStatus },
     /// The caller is neither a contract-writing role nor the task's assignee or reviewer.
     NotAContractWriter { agent_id: String, task_id: String },
     /// An epic's contract waits for the human's answer.
@@ -77,6 +80,16 @@ pub(crate) enum Refusal {
     Command(CommandRefusal),
     /// A command's directory is outside the workspace.
     OutsideWorkspace { cwd: String },
+    /// The session has said all the channel lets it say (5.9).
+    ChannelLimit { detail: String },
+    /// Only the retro ceremony appends to the retro, once per session (5.9).
+    RetroRefused { detail: String },
+    /// A notebook write past the team's `memory_cap_tokens` (5.8).
+    MemoryRefused { detail: String },
+    /// A decision the caller may not write, or one that cannot be written (5.8).
+    DecisionRefused { detail: String },
+    /// There is no decision with this number.
+    NoSuchDecision { number: u32 },
     /// A commit named a directory, which git would stage whole, files the path checks never saw
     /// among it.
     PathIsADirectory { path: String },
@@ -107,8 +120,7 @@ impl Refusal {
             ),
             Self::BlankReason => (
                 "blank_reason",
-                "a triage is recorded with a reason, and the log is where somebody reads it back"
-                    .to_string(),
+                "a reason is recorded, and the log is where somebody reads it back".to_string(),
             ),
             Self::TriageNotAllowed {
                 role,
@@ -119,6 +131,9 @@ impl Refusal {
                 "triage_not_allowed",
                 triage(*role, *status, *has_parent, *triaged),
             ),
+            Self::JudgmentNotAllowed { role, status } => {
+                ("judgment_not_allowed", judgment(*role, *status))
+            }
             Self::NotAContractWriter { agent_id, task_id } => (
                 "not_a_contract_writer",
                 format!(
@@ -158,14 +173,12 @@ impl Refusal {
             | Self::CriterionAnsweredByTheHuman { .. }
             | Self::NotTheNamedAgent { .. } => self.reach(),
             Self::Command(refusal) => command(refusal),
-            Self::PathIsADirectory { path } => (
-                "path_is_a_directory",
-                format!("{path} is a directory; name the files to commit"),
-            ),
-            Self::OutsideWorkspace { cwd } => (
-                "outside_workspace",
-                format!("{cwd} is not a directory inside the task's workspace"),
-            ),
+            Self::PathIsADirectory { .. } | Self::OutsideWorkspace { .. } => self.workspace(),
+            Self::ChannelLimit { detail } => ("channel_limit", detail.clone()),
+            Self::RetroRefused { detail } => ("retro_refused", detail.clone()),
+            Self::MemoryRefused { detail } => ("memory_refused", detail.clone()),
+            Self::DecisionRefused { detail } => ("decision_refused", detail.clone()),
+            Self::NoSuchDecision { number } => ("no_such_decision", number.to_string()),
             Self::NotTheNotesWriter { agent_id, kind } => (
                 "not_the_notes_writer",
                 format!(
@@ -210,6 +223,24 @@ impl Refusal {
                 ),
             ),
             other => unreachable!("reach is asked only of the three refusals it names: {other:?}"),
+        }
+    }
+
+    /// The refusals of a path in the task's workspace: a commit naming a directory, and a command
+    /// run outside the workspace.
+    fn workspace(&self) -> (&'static str, String) {
+        match self {
+            Self::PathIsADirectory { path } => (
+                "path_is_a_directory",
+                format!("{path} is a directory; name the files to commit"),
+            ),
+            Self::OutsideWorkspace { cwd } => (
+                "outside_workspace",
+                format!("{cwd} is not a directory inside the task's workspace"),
+            ),
+            other => {
+                unreachable!("workspace is asked only of the two refusals it names: {other:?}")
+            }
         }
     }
 }
@@ -270,6 +301,20 @@ fn triage(role: Role, status: TaskStatus, has_parent: bool, triaged: bool) -> St
             "role {role} does not triage: the Scrum Master does, or the Product Manager on a team \
              without one (5.16)"
         ),
+    }
+}
+
+fn judgment(role: Role, status: TaskStatus) -> String {
+    if role == Role::ScrumMaster {
+        format!(
+            "the task is {status}, and the Scrum Master judges a contract only while it is \
+             refining (5.3)"
+        )
+    } else {
+        format!(
+            "role {role} does not judge a contract: the Scrum Master does, on a task refining \
+             (5.3)"
+        )
     }
 }
 

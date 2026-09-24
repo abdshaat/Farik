@@ -306,6 +306,7 @@ async fn ends_with_the_stderr_tail_when_the_process_dies_without_a_result() {
         Some(SessionEvent::Ended {
             reason: EndReason::Error,
             detail,
+            ..
         }) => assert!(detail.contains("boom"), "{detail}"),
         other => panic!("expected an error end, got {other:?}"),
     }
@@ -459,6 +460,7 @@ async fn ends_at_once_when_the_program_exits_leaving_a_child_on_its_stderr() {
         Some(SessionEvent::Ended {
             reason: EndReason::Error,
             detail,
+            ..
         }) => assert!(detail.contains("boom"), "{detail}"),
         other => panic!("expected an error end, got {other:?}"),
     }
@@ -586,6 +588,7 @@ async fn ends_with_an_error_and_kills_the_group_on_a_line_it_cannot_read() {
         Some(SessionEvent::Ended {
             reason: EndReason::Error,
             detail,
+            ..
         }) => assert!(detail.contains("not JSON"), "{detail}"),
         other => panic!("expected an error end, got {other:?}"),
     }
@@ -665,6 +668,7 @@ async fn keeps_the_last_four_kib_of_standard_error() {
         Some(SessionEvent::Ended {
             reason: EndReason::Error,
             detail,
+            ..
         }) => {
             assert!(detail.ends_with("TAIL"), "{detail}");
             assert!(!detail.contains("HEAD"), "{detail}");

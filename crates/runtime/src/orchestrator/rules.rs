@@ -4,31 +4,56 @@
 
 use std::sync::Arc;
 
+use chrono::{DateTime, Utc};
+use farik_core::branch::task_branch;
 use farik_core::budget::{BudgetScope, SessionLedger, check_budgets};
 use farik_core::contract::{Role, TaskContract, TaskId, TaskStatus};
+use farik_core::governor::gates::fits_the_open_sprint;
+use farik_core::governor::task_status::is_terminal;
 use farik_core::governor::transition::TransitionRequest;
 use farik_core::governor::transition_table::TransitionActor;
 use farik_core::team::{Agent, Team};
-use farik_protocol::event::{EventBody, EventKind, FarikEvent};
-use farik_store::{EventQuery, Git, TaskProjection};
+use farik_protocol::event::{
+    EscalationAgedBody, EventBody, EventIds, EventKind, FarikEvent, Thread, new_event,
+};
+use farik_store::{CostScope, EventQuery, Git, TaskProjection};
 
 use super::integrate::{awaiting, cleanup};
-use super::messages::{Resume, implement_message, plan_message};
+use super::messages::{
+    Digest, Resume, SprintTask, ceremony_message, implement_message, mention_message, plan_message,
+    planning_message, retro_message, sprint_review_message, standup_message,
+};
 use super::requests;
 use super::session::{SessionAsk, SessionEnd, run_session};
 use super::verify::verifying;
 use super::{
     Orchestrator, OrchestratorDeps, OrchestratorError, TickReport, TickRules, TickScope, worktree,
 };
+use crate::ceremonies::{
+    budgets_spent_since_planning, ended_sprint, open_escalations, sprint_events, standup_moves,
+};
+use crate::channel::{channel_summary, pending_mentions};
 use crate::cost::budget_state;
 use crate::exec::Executor;
 use crate::session::{EndReason, SessionPurpose};
+use crate::sleep::asleep_until;
+use crate::sprints::{EndedBy, end_sprint, planning_session_spent};
 use crate::transitions::{self, TransitionAsk, TransitionOutcome, integration_branch};
 
 /// What a tick says when no rule matched.
 const NOTHING_TO_DO: &str = "nothing on the board needs doing";
 /// What a tick says when the only rules that matched would have started a session on a spent day.
 const DAY_SPENT: &str = "the team's daily budget is spent";
+
+/// What kept the rules of one tick from starting a session, gathered as they pass work over.
+#[derive(Debug, Default)]
+pub(super) struct Waiting {
+    /// Whether the team's daily budget stopped one (`spent`).
+    pub(super) day_spent: bool,
+    /// The earliest time a sleeping agent whose session was not started wakes, and that agent
+    /// (`asleep`).
+    pub(super) slept: Option<(DateTime<Utc>, String)>,
+}
 
 /// One tick within `scope`: the first rule of the scope's set that acts on a task in scope, or
 /// `Idle`. A rule outside the set passes its tasks over, as a spent budget does.
@@ -43,14 +68,12 @@ pub(super) async fn tick(
     // The store gives the board in the order of the number in each task id, which is how ties
     // are broken.
     let board = deps.tools.projections.board()?;
-    let in_scope = |row: &&TaskProjection| {
-        scope
-            .task_id
-            .as_ref()
-            .is_none_or(|task_id| &row.task_id == task_id)
-    };
+    let in_scope = in_scope(scope);
     let runs = |rule: u8| rule_runs(scope.rules, rule);
-    let mut day_spent = false;
+    let mut waiting = Waiting::default();
+    if let Some(report) = sprint_rules(deps, scope, &team, &board, &mut waiting).await? {
+        return Ok(report);
+    }
     if runs(1) {
         for row in board
             .iter()
@@ -73,6 +96,9 @@ pub(super) async fn tick(
             }
         }
     }
+    if let Some(report) = budget_and_channel(deps, scope, &team, &board, &mut waiting).await? {
+        return Ok(report);
+    }
     if runs(3) {
         for row in waiting_on_nobody(&board, TaskStatus::Rejected).filter(in_scope) {
             if let Some(report) = rejected(deps, &team, row)? {
@@ -89,7 +115,7 @@ pub(super) async fn tick(
     }
     if runs(5) {
         for row in waiting_on_nobody(&board, TaskStatus::Verifying).filter(in_scope) {
-            if let Some(report) = verifying(orchestrator, &team, row, &mut day_spent).await? {
+            if let Some(report) = verifying(orchestrator, &team, row, &mut waiting).await? {
                 return Ok(report);
             }
         }
@@ -102,7 +128,7 @@ pub(super) async fn tick(
             .filter(in_scope)
             .filter(|row| !epics_only || requests::is_epic(row))
         {
-            if let Some(report) = in_progress(orchestrator, &team, row, &mut day_spent).await? {
+            if let Some(report) = in_progress(orchestrator, &team, row, &mut waiting).await? {
                 return Ok(report);
             }
         }
@@ -116,28 +142,570 @@ pub(super) async fn tick(
     }
     if runs(8) {
         for row in waiting_on_nobody(&board, TaskStatus::Ready).filter(in_scope) {
-            if let Some(report) = ready(deps, &team, &board, row, &mut day_spent).await? {
+            if let Some(report) = ready(deps, &team, &board, row, &mut waiting).await? {
                 return Ok(report);
             }
         }
     }
     if runs(9) {
         for row in waiting_on_nobody(&board, TaskStatus::Refining).filter(in_scope) {
-            if let Some(report) = requests::refining(deps, &team, row, &mut day_spent).await? {
+            if let Some(report) = requests::refining(deps, &team, row, &mut waiting).await? {
                 return Ok(report);
             }
         }
     }
     if runs(10) {
         for row in waiting_on_nobody(&board, TaskStatus::Draft).filter(in_scope) {
-            if let Some(report) = requests::draft(deps, &team, row, &mut day_spent).await? {
+            if let Some(report) = requests::draft(deps, &team, row, &mut waiting).await? {
                 return Ok(report);
             }
         }
     }
-    Ok(TickReport::Idle {
-        why: if day_spent { DAY_SPENT } else { NOTHING_TO_DO }.to_string(),
-    })
+    Ok(idle(&waiting))
+}
+
+/// What an idle tick says, from what kept its rules from starting a session: a spent day before a
+/// sleeping agent, and the time the first sleeping agent wakes whichever it names.
+fn idle(waiting: &Waiting) -> TickReport {
+    let why = match &waiting.slept {
+        _ if waiting.day_spent => DAY_SPENT.to_string(),
+        Some((until, agent)) => format!(
+            "waiting for {agent}, asleep until {} (its model's usage limit)",
+            until.format("%Y-%m-%d %H:%M:%S UTC")
+        ),
+        None => NOTHING_TO_DO.to_string(),
+    };
+    TickReport::Idle {
+        why,
+        until: waiting.slept.as_ref().map(|(until, _)| *until),
+    }
+}
+
+/// Whether `scope` takes in a row: every row, or the one task it names.
+fn in_scope(scope: &TickScope) -> impl Fn(&&TaskProjection) -> bool + Copy + '_ {
+    move |row| {
+        scope
+            .task_id
+            .as_ref()
+            .is_none_or(|task_id| &row.task_id == task_id)
+    }
+}
+
+/// The sprint rules, which come before the numbered ones: the sprint that ends by itself, the
+/// ended sprint's review and retro, then the open sprint's planning and its standup.
+async fn sprint_rules(
+    deps: &OrchestratorDeps,
+    scope: &TickScope,
+    team: &Team,
+    board: &[TaskProjection],
+    waiting: &mut Waiting,
+) -> Result<Option<TickReport>, OrchestratorError> {
+    if let Some(report) = finished_sprint(deps, scope, board)? {
+        return Ok(Some(report));
+    }
+    if let Some(report) = review_and_retro(deps, scope, team, board, waiting).await? {
+        return Ok(Some(report));
+    }
+    if let Some(report) = sprint_planning(deps, scope, team, board, waiting).await? {
+        return Ok(Some(report));
+    }
+    standup(deps, scope, team, board, waiting).await
+}
+
+/// The sprint that ends by itself (5.5): the open sprint, once it holds a task and every task in it
+/// is accepted or cancelled, ended by the governor. A sprint rule is about no one task, so it runs
+/// only in a tick scoped to none, under `All` or `Planning`.
+fn finished_sprint(
+    deps: &OrchestratorDeps,
+    scope: &TickScope,
+    board: &[TaskProjection],
+) -> Result<Option<TickReport>, OrchestratorError> {
+    if !sprint_rules_run(scope) {
+        return Ok(None);
+    }
+    let Some(open) = deps.tools.projections.open_sprint()? else {
+        return Ok(None);
+    };
+    let mut held = board
+        .iter()
+        .filter(|row| row.sprint.as_deref() == Some(open.sprint_id.as_str()))
+        .peekable();
+    if held.peek().is_none()
+        || !held.all(|row| matches!(row.status, TaskStatus::Accepted | TaskStatus::Cancelled))
+    {
+        return Ok(None);
+    }
+    let sprint = end_sprint(&deps.tools, EndedBy::Governor)?;
+    Ok(Some(TickReport::Sprint {
+        sprint_id: sprint.id.as_str().to_string(),
+        what: "ended it: every task in it is accepted or cancelled".to_string(),
+    }))
+}
+
+/// The latest ended sprint's review, then its retro (5.9), under `All` alone in a tick scoped to no
+/// task, while no newer sprint has started (`ended_sprint`): the ceremony runner gets one
+/// `ceremony` session in the `review` thread until the review has run, then one in the `retro`
+/// thread until the retro has. Their tasks are the sprint file's, and their facts the events about
+/// those tasks while the sprint was open. The review is told each task's status, cost, and
+/// completion note, and the sprint's budget and spent; the retro the sprint's rejections,
+/// escalations, blocks, and iterations, and the last retros, and is offered `farik_append_retro`.
+/// Passed over for a sprint whose file lists no task, with no runner, or on a spent day.
+async fn review_and_retro(
+    deps: &OrchestratorDeps,
+    scope: &TickScope,
+    team: &Team,
+    board: &[TaskProjection],
+    waiting: &mut Waiting,
+) -> Result<Option<TickReport>, OrchestratorError> {
+    if scope.task_id.is_some() || scope.rules != TickRules::All {
+        return Ok(None);
+    }
+    let tools = &deps.tools;
+    let Some(sprint) = ended_sprint(&tools.log)? else {
+        return Ok(None);
+    };
+    if sprint.reviewed && sprint.retro_held {
+        return Ok(None);
+    }
+    let file = tools.files.read_sprint(&sprint.sprint_id)?;
+    if file.task_ids.is_empty() {
+        return Ok(None);
+    }
+    let Some(runner) = assigner(team) else {
+        return Ok(None);
+    };
+    if day_is_spent(deps, team, Role::from(runner.role), &mut waiting.day_spent)?
+        | asleep(deps, runner, &mut waiting.slept)?
+    {
+        return Ok(None);
+    }
+    let mut tasks = Vec::new();
+    for row in board.iter().filter(|row| {
+        file.task_ids
+            .iter()
+            .any(|id| id.as_str() == row.task_id.as_str())
+    }) {
+        tasks.push(SprintTask {
+            task_id: row.task_id.clone(),
+            status: row.status,
+            iteration: row.iteration,
+            events: sprint_events(&tools.log, &sprint, &row.task_id)?,
+        });
+    }
+    let (thread, facts, offered, name) = if sprint.reviewed {
+        let retro = tools.files.read_retro()?;
+        (
+            Thread::Retro,
+            retro_message(&sprint.sprint_id, &tasks, retro.as_deref()),
+            RETRO_TOOLS,
+            "retro ceremony",
+        )
+    } else {
+        let spent = tools
+            .projections
+            .costs(CostScope::Sprint)?
+            .into_iter()
+            .find(|cost| cost.key == sprint.sprint_id)
+            .map_or(0.0, |cost| cost.usd);
+        (
+            Thread::Review,
+            sprint_review_message(&sprint.sprint_id, &tasks, file.budget_usd, spent),
+            CEREMONY_TOOLS,
+            "review ceremony",
+        )
+    };
+    let end = run_session(
+        deps,
+        team,
+        SessionAsk {
+            agent: runner,
+            contract: None,
+            purpose: SessionPurpose::Ceremony,
+            cwd: tools.files.root().to_path_buf(),
+            executor: None,
+            read_only: true,
+            only_tool: None,
+            tools: Some(offered),
+            in_reply_to: None,
+            thread: Some(thread),
+            initial_prompt: ceremony_message(&facts, &channel_summary(&tools.log, &tools.files)?),
+        },
+    )
+    .await?;
+    Ok(Some(TickReport::Sprint {
+        sprint_id: sprint.sprint_id,
+        what: ran(runner, name, &end),
+    }))
+}
+
+/// The Farik tools the retro is offered: the standup's and the review's, and the retro's append.
+const RETRO_TOOLS: &[&str] = &[
+    "farik_read_task",
+    "farik_read_board",
+    "farik_read_rules",
+    "farik_read_criteria",
+    "farik_post_message",
+    "farik_append_retro",
+    "farik_write_memory",
+    "farik_read_decisions",
+];
+
+/// Whether the sprint rules run in `scope`: they are about no one task, so only in a tick scoped
+/// to none, under `All` or `Planning`.
+fn sprint_rules_run(scope: &TickScope) -> bool {
+    scope.task_id.is_none() && scope.rules != TickRules::Refining
+}
+
+/// The open sprint's planning ceremony (5.5, 5.9): while it holds no task and its planning has not
+/// run, the assigner (the ceremony runner) gets one `ceremony` session in the `planning` thread,
+/// about no task, given the reading tools, `farik_post_message`, and `farik_plan_sprint`, and
+/// offered the candidates, the rows `ready` with no parent and in no sprint, the digest of the
+/// open escalations and the budgets spent since the previous planning, the last retros, and the
+/// channel. Passed over with no candidate, no assigner, or on a spent day; a planning that plans
+/// nothing is not asked again, and the empty sprint waits for the human to end it.
+async fn sprint_planning(
+    deps: &OrchestratorDeps,
+    scope: &TickScope,
+    team: &Team,
+    board: &[TaskProjection],
+    waiting: &mut Waiting,
+) -> Result<Option<TickReport>, OrchestratorError> {
+    if !sprint_rules_run(scope) {
+        return Ok(None);
+    }
+    let Some(open) = deps.tools.projections.open_sprint()? else {
+        return Ok(None);
+    };
+    let candidates: Vec<&TaskProjection> = board
+        .iter()
+        .filter(|row| {
+            row.status == TaskStatus::Ready && row.parent.is_none() && row.sprint.is_none()
+        })
+        .collect();
+    let Some(assigner) = assigner(team) else {
+        return Ok(None);
+    };
+    if candidates.is_empty()
+        || board
+            .iter()
+            .any(|row| row.sprint.as_deref() == Some(open.sprint_id.as_str()))
+        || planning_session_spent(&deps.tools.log, &open.sprint_id)?
+    {
+        return Ok(None);
+    }
+    if day_is_spent(
+        deps,
+        team,
+        Role::from(assigner.role),
+        &mut waiting.day_spent,
+    )? | asleep(deps, assigner, &mut waiting.slept)?
+    {
+        return Ok(None);
+    }
+    let tools = &deps.tools;
+    let contracts = candidates
+        .iter()
+        .map(|row| tools.files.read_contract(&row.task_id))
+        .collect::<Result<Vec<_>, _>>()?;
+    let digest = Digest {
+        escalations: open_escalations(&tools.log, &tools.projections)?,
+        spent: budgets_spent_since_planning(&tools.log, &open.sprint_id)?,
+        now: tools.clock.now(),
+    };
+    let retro = tools.files.read_retro()?;
+    let facts = planning_message(
+        &open.sprint_id,
+        &contracts,
+        open.budget_usd,
+        &digest,
+        retro.as_deref(),
+    );
+    let end = run_session(
+        deps,
+        team,
+        SessionAsk {
+            agent: assigner,
+            contract: None,
+            purpose: SessionPurpose::Ceremony,
+            cwd: tools.files.root().to_path_buf(),
+            executor: None,
+            read_only: true,
+            only_tool: None,
+            tools: Some(PLANNING_TOOLS),
+            in_reply_to: None,
+            thread: Some(Thread::Planning),
+            initial_prompt: ceremony_message(&facts, &channel_summary(&tools.log, &tools.files)?),
+        },
+    )
+    .await?;
+    Ok(Some(TickReport::Sprint {
+        sprint_id: open.sprint_id,
+        what: ran(assigner, "planning ceremony", &end),
+    }))
+}
+
+/// The Farik tools the planning ceremony is offered: the reading tools, the channel, the plan, the
+/// notebook, and the decisions to read.
+const PLANNING_TOOLS: &[&str] = &[
+    "farik_read_task",
+    "farik_read_board",
+    "farik_read_rules",
+    "farik_read_criteria",
+    "farik_post_message",
+    "farik_plan_sprint",
+    "farik_write_memory",
+    "farik_read_decisions",
+];
+
+/// The open sprint's standup (5.9), under `All` alone in a tick scoped to no task: once a UTC day,
+/// when a task in the sprint moved in the standup's window (`standup_moves`), the ceremony runner
+/// gets one `ceremony` session in the `standup` thread, about no task, given the reading tools and
+/// `farik_post_message`, and told each such move, each blocked task of the sprint with its
+/// blocker, the open escalations, and the channel. Passed over with no runner or on a spent day.
+async fn standup(
+    deps: &OrchestratorDeps,
+    scope: &TickScope,
+    team: &Team,
+    board: &[TaskProjection],
+    waiting: &mut Waiting,
+) -> Result<Option<TickReport>, OrchestratorError> {
+    if scope.task_id.is_some() || scope.rules != TickRules::All {
+        return Ok(None);
+    }
+    let tools = &deps.tools;
+    let Some(open) = tools.projections.open_sprint()? else {
+        return Ok(None);
+    };
+    let Some(runner) = assigner(team) else {
+        return Ok(None);
+    };
+    let in_sprint: Vec<&TaskProjection> = board
+        .iter()
+        .filter(|row| row.sprint.as_deref() == Some(open.sprint_id.as_str()))
+        .collect();
+    let task_ids: Vec<TaskId> = in_sprint.iter().map(|row| row.task_id.clone()).collect();
+    let moves = standup_moves(&tools.log, &open.sprint_id, &task_ids, tools.clock.now())?;
+    if moves.is_empty() {
+        return Ok(None);
+    }
+    if day_is_spent(deps, team, Role::from(runner.role), &mut waiting.day_spent)?
+        | asleep(deps, runner, &mut waiting.slept)?
+    {
+        return Ok(None);
+    }
+    let mut blocked = Vec::new();
+    for row in in_sprint
+        .iter()
+        .filter(|row| row.status == TaskStatus::Blocked)
+    {
+        let wire =
+            last_move_into(deps, &row.task_id, TaskStatus::Blocked)?.and_then(|event| match event
+                .body
+            {
+                EventBody::TaskTransitioned(body) => body.blocker,
+                _ => None,
+            });
+        blocked.push((row.task_id.clone(), wire));
+    }
+    let facts = standup_message(
+        &open.sprint_id,
+        &moves,
+        &blocked,
+        &open_escalations(&tools.log, &tools.projections)?,
+        tools.clock.now(),
+    );
+    let end = run_session(
+        deps,
+        team,
+        SessionAsk {
+            agent: runner,
+            contract: None,
+            purpose: SessionPurpose::Ceremony,
+            cwd: tools.files.root().to_path_buf(),
+            executor: None,
+            read_only: true,
+            only_tool: None,
+            tools: Some(CEREMONY_TOOLS),
+            in_reply_to: None,
+            thread: Some(Thread::Standup),
+            initial_prompt: ceremony_message(&facts, &channel_summary(&tools.log, &tools.files)?),
+        },
+    )
+    .await?;
+    Ok(Some(TickReport::Sprint {
+        sprint_id: open.sprint_id,
+        what: ran(runner, "standup ceremony", &end),
+    }))
+}
+
+/// The Farik tools the standup and the review are offered: the reading tools, the channel, the
+/// notebook, and the decisions to read.
+const CEREMONY_TOOLS: &[&str] = &[
+    "farik_read_task",
+    "farik_read_board",
+    "farik_read_rules",
+    "farik_read_criteria",
+    "farik_post_message",
+    "farik_write_memory",
+    "farik_read_decisions",
+];
+
+/// Whether the day's dollars stop a session about no task from starting; `day_spent` is set when
+/// they do, as `spent` sets it.
+fn day_is_spent(
+    deps: &OrchestratorDeps,
+    team: &Team,
+    role: Role,
+    day_spent: &mut bool,
+) -> Result<bool, OrchestratorError> {
+    let state = budget_state(
+        &deps.tools.projections,
+        team,
+        role,
+        None,
+        &SessionLedger::default(),
+        deps.tools.clock.now(),
+    )?;
+    let spent = check_budgets(&state)
+        .iter()
+        .any(|exhausted| exhausted.scope == BudgetScope::DayUsd);
+    *day_spent |= spent;
+    Ok(spent)
+}
+
+/// The Farik tools a conversation session is offered (5.9): the reading tools, its one post, a
+/// request filed without a parent, the notebook, and the decisions to read (5.8).
+const CONVERSATION_TOOLS: &[&str] = &[
+    "farik_read_task",
+    "farik_read_board",
+    "farik_read_rules",
+    "farik_read_criteria",
+    "farik_post_message",
+    "farik_create_task",
+    "farik_write_memory",
+    "farik_read_decisions",
+];
+
+/// The channel rule, between the budget rule and rule 3 (5.9): the first active agent in team
+/// order with a pending mention, awake, on a day whose budget is not spent, gets one
+/// `conversation` session about no task, on the read tier's built-ins and `CONVERSATION_TOOLS`,
+/// to answer it. It is about no one task, so it runs only under `All` in a tick scoped to none.
+async fn conversation(
+    deps: &OrchestratorDeps,
+    scope: &TickScope,
+    team: &Team,
+    waiting: &mut Waiting,
+) -> Result<Option<TickReport>, OrchestratorError> {
+    if scope.rules != TickRules::All || scope.task_id.is_some() {
+        return Ok(None);
+    }
+    for agent in team.active_agents() {
+        let pending = pending_mentions(&deps.tools.log, agent.id.as_str())?;
+        let Some(latest) = pending.last() else {
+            continue;
+        };
+        if day_is_spent(deps, team, Role::from(agent.role), &mut waiting.day_spent)?
+            | asleep(deps, agent, &mut waiting.slept)?
+        {
+            continue;
+        }
+        let summary = channel_summary(&deps.tools.log, &deps.tools.files)?;
+        let end = run_session(
+            deps,
+            team,
+            SessionAsk {
+                agent,
+                contract: None,
+                purpose: SessionPurpose::Conversation,
+                cwd: deps.tools.files.root().to_path_buf(),
+                executor: None,
+                read_only: true,
+                only_tool: None,
+                tools: Some(CONVERSATION_TOOLS),
+                in_reply_to: Some(latest.envelope.seq),
+                thread: None,
+                initial_prompt: mention_message(agent, &pending, &summary),
+            },
+        )
+        .await?;
+        return Ok(Some(TickReport::Conversation {
+            agent_id: agent.id.to_string(),
+            what: ran(agent, "conversation", &end),
+        }));
+    }
+    Ok(None)
+}
+
+/// The aged rule, after the channel rule (5.7, 5.9): the oldest open escalation past the team's
+/// `escalation_age_hours` that has no `escalation.aged` of its own yet is aged once, recorded
+/// about its task with no attribution, and said in the channel as a system line naming the
+/// escalation's reason. It is about no one task, so it runs only under `All` in a tick scoped to
+/// none.
+fn aged(
+    deps: &OrchestratorDeps,
+    scope: &TickScope,
+    team: &Team,
+) -> Result<Option<TickReport>, OrchestratorError> {
+    if scope.rules != TickRules::All || scope.task_id.is_some() {
+        return Ok(None);
+    }
+    let already_aged: Vec<u64> = deps
+        .tools
+        .log
+        .read(&EventQuery {
+            kinds: vec![EventKind::EscalationAged],
+            ..EventQuery::default()
+        })?
+        .iter()
+        .filter_map(|event| match &event.body {
+            EventBody::EscalationAged(body) => Some(body.raised_seq),
+            _ => None,
+        })
+        .collect();
+    let limit = i64::try_from(team.policy.escalation_age_hours.get()).unwrap_or(i64::MAX);
+    let now = deps.tools.clock.now();
+    let Some(open) = open_escalations(&deps.tools.log, &deps.tools.projections)?
+        .into_iter()
+        .find(|open| {
+            !already_aged.contains(&open.raised_seq)
+                && now - open.raised_at >= chrono::Duration::hours(limit)
+        })
+    else {
+        return Ok(None);
+    };
+    let hours = (now - open.raised_at).num_hours();
+    let ids = EventIds {
+        task_id: Some(open.task_id.clone()),
+        ..deps.tools.ids.clone()
+    };
+    let event = new_event(
+        EventBody::EscalationAged(EscalationAgedBody {
+            raised_seq: open.raised_seq,
+            hours,
+        }),
+        now,
+        ids,
+    )
+    .map_err(|error| OrchestratorError::Refused {
+        reason: format!("the aged escalation cannot be stamped: {error:?}"),
+    })?;
+    let appended = deps.tools.log.append(&event)?;
+    deps.tools.projections.apply(&appended)?;
+    crate::channel::post_system(
+        &deps.tools.log,
+        deps.tools.clock.as_ref(),
+        &deps.tools.ids,
+        Some(open.task_id.clone()),
+        &format!(
+            "{} has waited {hours} hours on the human: {}",
+            open.task_id.as_str(),
+            open.reason
+        ),
+    )?;
+    Ok(Some(TickReport::Acted {
+        task_id: open.task_id,
+        what: format!("aged its escalation: waited {hours} hours"),
+    }))
 }
 
 /// Whether `rules` runs rule `rule` (1 to 10, in the order of work) for every task. `Planning`
@@ -224,6 +792,83 @@ fn blocked(
         TransitionOutcome::Moved(_) => Ok(Some(TickReport::Acted {
             task_id: row.task_id.clone(),
             what: format!("escalated it: blocked for {hours} hours or more"),
+        })),
+        TransitionOutcome::Refused(_) => Ok(None),
+    }
+}
+
+/// The rules between rules 2 and 3: the budget rule, the channel rule, then the aged rule.
+async fn budget_and_channel(
+    deps: &OrchestratorDeps,
+    scope: &TickScope,
+    team: &Team,
+    board: &[TaskProjection],
+    waiting: &mut Waiting,
+) -> Result<Option<TickReport>, OrchestratorError> {
+    if let Some(report) = budget(deps, scope, team, board)? {
+        return Ok(Some(report));
+    }
+    if let Some(report) = conversation(deps, scope, team, waiting).await? {
+        return Ok(Some(report));
+    }
+    aged(deps, scope, team)
+}
+
+/// The budget rule, between rules 2 and 3: a task whose dollars or sessions are spent is escalated
+/// as the governor, whose `GovernorEscalation` gate names the reason (5.7). One whose escalation
+/// was refused since it entered its status is passed over; a task the human resumed without more
+/// room entered a new status, so it is escalated again, which is how Farik says it is still spent.
+/// It governs work in progress, so it runs only in a tick of every rule scoped to no task; it
+/// passes over a terminal or escalated task and one waiting on the human.
+fn budget(
+    deps: &OrchestratorDeps,
+    scope: &TickScope,
+    team: &Team,
+    board: &[TaskProjection],
+) -> Result<Option<TickReport>, OrchestratorError> {
+    if scope.rules != TickRules::All || scope.task_id.is_some() {
+        return Ok(None);
+    }
+    for row in board.iter().filter(|row| {
+        !is_terminal(row.status) && row.status != TaskStatus::Escalated && !row.waiting_on_human
+    }) {
+        if let Some(report) = escalate_if_spent(deps, team, row)? {
+            return Ok(Some(report));
+        }
+    }
+    Ok(None)
+}
+
+/// The budget rule for one task: escalated when its dollars or sessions are spent and that move
+/// was not refused since it entered its status.
+fn escalate_if_spent(
+    deps: &OrchestratorDeps,
+    team: &Team,
+    row: &TaskProjection,
+) -> Result<Option<TickReport>, OrchestratorError> {
+    let contract = deps.tools.files.read_contract(&row.task_id)?;
+    let state = budget_state(
+        &deps.tools.projections,
+        team,
+        contract.assignee_role,
+        Some(&contract),
+        &SessionLedger::default(),
+        deps.tools.clock.now(),
+    )?;
+    let task_spent = check_budgets(&state).iter().any(|exhausted| {
+        matches!(
+            exhausted.scope,
+            BudgetScope::TaskUsd | BudgetScope::TaskSessions
+        )
+    });
+    if !task_spent || refused_since_entering(deps, &row.task_id, row.status, TaskStatus::Escalated)?
+    {
+        return Ok(None);
+    }
+    match governor_moves(deps, team, row, TaskStatus::Escalated)? {
+        TransitionOutcome::Moved(_) => Ok(Some(TickReport::Acted {
+            task_id: row.task_id.clone(),
+            what: "escalated it: its dollars or sessions are spent".to_string(),
         })),
         TransitionOutcome::Refused(_) => Ok(None),
     }
@@ -319,6 +964,25 @@ pub(super) fn spent(
         .any(|scope| matches!(scope, BudgetScope::TaskUsd | BudgetScope::TaskSessions)))
 }
 
+/// Whether `agent` is asleep until its model provider's limit resets (5.5): no session of its
+/// starts, and no sandbox is made for it. The earliest `until` of the tick and its agent are kept
+/// in `slept`, as `spent` keeps a spent day in `day_spent`. A rule asks it with `|` beside
+/// `spent`, not `||`, so that both are kept whichever stops the session.
+pub(super) fn asleep(
+    deps: &OrchestratorDeps,
+    agent: &Agent,
+    slept: &mut Option<(DateTime<Utc>, String)>,
+) -> Result<bool, OrchestratorError> {
+    let Some(until) = asleep_until(&deps.tools.log, agent.id.as_str(), deps.tools.clock.now())?
+    else {
+        return Ok(false);
+    };
+    if slept.as_ref().is_none_or(|(earlier, _)| until < *earlier) {
+        *slept = Some((until, agent.id.to_string()));
+    }
+    Ok(true)
+}
+
 /// Rule 6: a task `in_progress` gets its assignee's implement session, in its worktree, with its
 /// sandbox, told where an earlier session left the work. A task whose assignee is not active is
 /// passed over: every tool call of its session would be refused.
@@ -326,33 +990,39 @@ async fn in_progress(
     orchestrator: &Orchestrator,
     team: &Team,
     row: &TaskProjection,
-    day_spent: &mut bool,
+    waiting: &mut Waiting,
 ) -> Result<Option<TickReport>, OrchestratorError> {
     let deps = &orchestrator.deps;
     if requests::is_epic(row) {
         let board = deps.tools.projections.board()?;
-        return requests::in_progress_epic(deps, team, &board, row, day_spent).await;
+        return requests::in_progress_epic(deps, team, &board, row, waiting).await;
     }
     let Some(assignee) = active(team, row.assignee_id.as_deref()) else {
         return Ok(None);
     };
     let contract = deps.tools.files.read_contract(&row.task_id)?;
-    if spent(deps, team, &contract, day_spent)? {
+    if spent(deps, team, &contract, &mut waiting.day_spent)?
+        | asleep(deps, assignee, &mut waiting.slept)?
+    {
         return Ok(None);
     }
     let sandbox = orchestrator.sandbox_for(&row.task_id, team)?;
-    let resume = resume(deps, team, &row.task_id)?;
+    let resume = resume(deps, team, &contract)?;
     let executor: Arc<dyn Executor> = sandbox;
     let end = run_session(
         deps,
         team,
         SessionAsk {
             agent: assignee,
-            contract: &contract,
+            contract: Some(&contract),
             purpose: SessionPurpose::Implement,
             cwd: worktree(deps, &row.task_id),
             executor: Some(executor),
             read_only: false,
+            only_tool: None,
+            tools: None,
+            in_reply_to: None,
+            thread: None,
             initial_prompt: implement_message(&contract, &resume),
         },
     )
@@ -366,13 +1036,14 @@ async fn in_progress(
 fn resume(
     deps: &OrchestratorDeps,
     team: &Team,
-    task_id: &TaskId,
+    contract: &TaskContract,
 ) -> Result<Resume, OrchestratorError> {
+    let task_id = &contract.id;
     let worktree = worktree(deps, task_id);
     let last_commit = if worktree.is_dir() {
         let git = &deps.tools.git;
         let base = integration_branch(team, git)?;
-        if git.commit_count(&base, &format!("farik/{}", task_id.as_str()))? > 0 {
+        if git.commit_count(&base, &task_branch(contract))? > 0 {
             Git::open(worktree).head_summary()?
         } else {
             None
@@ -416,7 +1087,7 @@ fn resume(
     })
 }
 
-/// Rule 7: a task `assigned` gets its worktree on `farik/<id>` from the integration branch,
+/// Rule 7: a task `assigned` gets its worktree on its branch (5.14) from the integration branch,
 /// reused when it is already there, and is moved to `in_progress` as its assignee asks. No session
 /// starts: the next tick's rule 6 starts it. A task whose assignee is not active is passed over, as
 /// is one whose start the governor refused, now or since it was assigned.
@@ -440,7 +1111,7 @@ fn assigned(
         return Ok(None);
     }
     let worktree = worktree(deps, &row.task_id);
-    let branch = format!("farik/{}", row.task_id.as_str());
+    let branch = task_branch(&deps.tools.files.read_contract(&row.task_id)?);
     if !worktree.is_dir() {
         let git = &deps.tools.git;
         git.create_worktree(&worktree, &branch, &integration_branch(team, git)?)?;
@@ -475,14 +1146,14 @@ pub(super) fn active<'a>(team: &'a Team, agent_id: Option<&str>) -> Option<&'a A
 }
 
 /// Rule 8: a standalone task that is `ready` gets a plan session of its assigner (the active Scrum
-/// Master, else the Product Manager), when an agent of its assignee role has room for it and every
-/// dependency is accepted and integrated.
+/// Master, else the Product Manager), when an agent of its assignee role has room for it, the open
+/// sprint, if any, holds it and can pay for it, and every dependency is accepted and integrated.
 async fn ready(
     deps: &OrchestratorDeps,
     team: &Team,
     board: &[TaskProjection],
     row: &TaskProjection,
-    day_spent: &mut bool,
+    waiting: &mut Waiting,
 ) -> Result<Option<TickReport>, OrchestratorError> {
     if requests::is_epic(row) {
         return requests::ready_epic(deps, team, board, row);
@@ -496,7 +1167,10 @@ async fn ready(
         return Ok(None);
     };
     let contract = deps.tools.files.read_contract(&row.task_id)?;
-    if spent(deps, team, &contract, day_spent)? {
+    // A sleeping agent is still offered as an assignee below; only its own sessions wait.
+    if spent(deps, team, &contract, &mut waiting.day_spent)?
+        | asleep(deps, assigner, &mut waiting.slept)?
+    {
         return Ok(None);
     }
     let assignees: Vec<String> = team
@@ -508,7 +1182,7 @@ async fn ready(
     let Some(first) = assignees.first() else {
         return Ok(None);
     };
-    if !dependencies_integrated(deps, team, &contract, assigner, first)? {
+    if !assignable(deps, team, &contract, assigner, first)? {
         return Ok(None);
     }
     let reviewers: Vec<String> = team
@@ -521,11 +1195,15 @@ async fn ready(
         team,
         SessionAsk {
             agent: assigner,
-            contract: &contract,
+            contract: Some(&contract),
             purpose: SessionPurpose::Plan,
             cwd: deps.tools.files.root().to_path_buf(),
             executor: None,
             read_only: false,
+            only_tool: None,
+            tools: None,
+            in_reply_to: None,
+            thread: None,
             initial_prompt: plan_message(&contract, &assignees, &reviewers),
         },
     )
@@ -548,18 +1226,17 @@ pub(super) fn has_room(team: &Team, board: &[TaskProjection], agent: &Agent) -> 
         < u64::try_from(team.policy.wip_limit_per_agent).unwrap_or(0)
 }
 
-/// Whether every dependency of the task is accepted and integrated, as the governor's context for
-/// the assignment reads them.
-fn dependencies_integrated(
+/// Whether the governor would let `candidate` be assigned the task on the rules the orchestrator
+/// checks before asking, read from the governor's own context for the assignment: the open sprint's
+/// membership and budget, by the gate's own predicates, and every dependency accepted and
+/// integrated. A task that fails them is passed over, so that it is not asked about on every tick.
+fn assignable(
     deps: &OrchestratorDeps,
     team: &Team,
     contract: &TaskContract,
     assigner: &Agent,
     candidate: &str,
 ) -> Result<bool, OrchestratorError> {
-    if contract.dependencies.is_empty() {
-        return Ok(true);
-    }
     let request = TransitionRequest {
         task_id: contract.id.clone(),
         to: TaskStatus::Assigned,
@@ -574,12 +1251,17 @@ fn dependencies_integrated(
         assignee_id: Some(candidate.to_string()),
         ..TransitionAsk::default()
     };
-    let context = deps.tools.transitions.context(&request, &ask, team)?;
-    let states = context
+    let Some(assignment) = deps
+        .tools
+        .transitions
+        .context(&request, &ask, team)?
         .assignment
-        .map(|assignment| assignment.dependencies)
-        .unwrap_or_default();
-    Ok(states.len() == contract.dependencies.len()
+    else {
+        return Ok(false);
+    };
+    let states = &assignment.dependencies;
+    Ok(fits_the_open_sprint(contract, &assignment)
+        && states.len() == contract.dependencies.len()
         && states
             .iter()
             .all(|state| state.status == TaskStatus::Accepted && state.integrated))
@@ -592,39 +1274,48 @@ pub(super) fn acted(
     purpose: &str,
     end: &SessionEnd,
 ) -> TickReport {
+    TickReport::Acted {
+        task_id: row.task_id.clone(),
+        what: ran(agent, purpose, end),
+    }
+}
+
+/// What a tick says of the session it ran: whose, for what, how it ended, and its last words.
+fn ran(agent: &Agent, purpose: &str, end: &SessionEnd) -> String {
     let how = match end.reason {
         EndReason::Completed => "completed",
         EndReason::Aborted => "was aborted",
         EndReason::Limit => "reached a limit",
         EndReason::Error => "failed",
+        EndReason::ProviderLimit => "stopped at its model provider's limit",
     };
-    TickReport::Acted {
-        task_id: row.task_id.clone(),
-        what: format!(
-            "ran {}'s {purpose} session, which {how}: {}",
-            agent.id.as_str(),
-            end.detail
-        ),
-    }
+    format!(
+        "ran {}'s {purpose} session, which {how}: {}",
+        agent.id.as_str(),
+        end.detail
+    )
 }
 
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeSet;
+    use std::num::NonZeroU64;
     use std::sync::Arc;
     use std::time::Duration;
 
     use farik_core::contract::{Role, TaskStatus};
     use farik_core::governor::permissions::{PermissionTier, default_tiers};
     use farik_core::pricing::Usage;
+    use farik_core::sprint::SprintStatus;
     use farik_core::team::Effort;
+    use farik_protocol::clock::MovableClock;
+    use farik_protocol::event::SprintEndedBodyEndedBy;
     use farik_protocol::event::{
         BudgetExhaustedBodyScope, CriterionRecordedBodyRunBy, EscalationRaisedBodyReason,
         EventBody, EventKind, NoteWrittenBodyKind, ReviewRecordedBody, SessionEndedBodyReason,
         SessionStartedBodyPurpose, TransitionActorWire,
     };
-    use farik_protocol::event::{NewEvent, event_from_value};
-    use farik_roles::RoleError;
+    use farik_protocol::event::{MessageKind, NewEvent, Thread, event_from_value};
     use farik_store::event_log::fixtures::refuse_appends_of;
     use farik_store::git::fixtures::git_output_in;
     use serde_json::json;
@@ -634,12 +1325,15 @@ mod tests {
     use crate::exec::ExecError;
     use crate::orchestrator::fixtures::{
         BrokenSandboxFactory, CountingSandboxFactory, ExecutorWitness, Harness,
-        UnremovableSandboxFactory, UsageThenWaitAdapter,
+        UnremovableSandboxFactory, UsageThenWaitAdapter, run_until_idle_within_ten_seconds,
+        waits_for,
     };
-    use crate::orchestrator::{Orchestrator, OrchestratorError, TickReport, TickRules, TickScope};
+    use crate::orchestrator::{OrchestratorError, TickReport, TickRules, TickScope};
     use crate::recorded::fixtures::{
-        accept_frk_1, implement_finishes_frk_1, implement_stops_early, plan_assigns_frk_1,
-        reads_a_file, replays_farik_read_board, review_answers_nothing, review_writes_note,
+        accept_frk_1, hits_the_turn_limit, implement_finishes_frk_1, implement_stops_early,
+        plan_assigns_frk_1, planning_ceremony_frk_1, provider_limit_429, provider_limit_rejected,
+        reads_a_file, replays_farik_read_board, reply_to_a_mention, retro, review,
+        review_answers_nothing, review_writes_note, standup,
     };
     use crate::recorded::{RecordedAdapter, Transcript};
     use crate::session::SessionPurpose;
@@ -651,7 +1345,9 @@ mod tests {
     fn acted_on(report: &TickReport) -> Option<&str> {
         match report {
             TickReport::Acted { task_id, .. } => Some(task_id.as_str()),
-            TickReport::Idle { .. } => None,
+            TickReport::Idle { .. }
+            | TickReport::Sprint { .. }
+            | TickReport::Conversation { .. } => None,
         }
     }
 
@@ -936,7 +1632,8 @@ mod tests {
         assert_eq!(
             report,
             TickReport::Idle {
-                why: NOTHING_TO_DO.to_string()
+                why: NOTHING_TO_DO.to_string(),
+                until: None,
             }
         );
         assert!(adapter.started().is_empty());
@@ -995,7 +1692,8 @@ mod tests {
         assert_eq!(
             report,
             TickReport::Idle {
-                why: NOTHING_TO_DO.to_string()
+                why: NOTHING_TO_DO.to_string(),
+                until: None,
             }
         );
         assert!(adapter.started().is_empty());
@@ -1025,7 +1723,8 @@ mod tests {
         assert_eq!(
             report,
             TickReport::Idle {
-                why: NOTHING_TO_DO.to_string()
+                why: NOTHING_TO_DO.to_string(),
+                until: None,
             }
         );
         assert!(adapter.started().is_empty());
@@ -1075,10 +1774,10 @@ mod tests {
         assert_eq!(
             git_output_in(
                 &harness.project.repo.path,
-                &["branch", "--list", "farik/FRK-1"]
+                &["branch", "--list", &harness.branch("FRK-1")]
             )
             .trim(),
-            "farik/FRK-1"
+            harness.branch("FRK-1")
         );
         assert!(!orchestrator.holds_sandbox(&"FRK-1".parse().expect("a task id")));
     }
@@ -1106,10 +1805,10 @@ mod tests {
         assert_eq!(
             git_output_in(
                 &harness.project.repo.path,
-                &["branch", "--list", "farik/FRK-1"]
+                &["branch", "--list", &harness.branch("FRK-1")]
             )
             .trim(),
-            "farik/FRK-1"
+            harness.branch("FRK-1")
         );
     }
 
@@ -1195,7 +1894,8 @@ mod tests {
         assert_eq!(
             orchestrator.tick().await.expect("the tick runs"),
             TickReport::Idle {
-                why: NOTHING_TO_DO.to_string()
+                why: NOTHING_TO_DO.to_string(),
+                until: None,
             }
         );
     }
@@ -1253,8 +1953,8 @@ mod tests {
     #[tokio::test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn takes_the_scrum_master_as_assigner_when_there_is_one() {
-        // Farik ships no Scrum Master until phase 4, so its role does not load: the tick fails
-        // naming the role it chose, before any session starts.
+        // A ready standalone task on a team with an active Scrum Master starts the Scrum Master's
+        // plan session, not the Product Manager's, and no other session runs.
         let harness = Harness::new("orch-plan-scrum-master", |wire| {
             let agents = wire["agents"].as_array_mut().expect("a list of agents");
             agents.push(json!({
@@ -1268,15 +1968,17 @@ mod tests {
         let adapter = harness.recorded(vec![plan_assigns_frk_1()]);
         let orchestrator = harness.orchestrator(adapter.clone());
 
-        let ticked = orchestrator.tick().await;
+        let report = orchestrator.tick().await.expect("the tick runs");
 
-        assert_eq!(
-            ticked,
-            Err(OrchestratorError::Role(RoleError::NotFound {
-                role_id: Role::ScrumMaster.to_string()
-            }))
-        );
-        assert!(adapter.started().is_empty());
+        assert_eq!(acted_on(&report), Some("FRK-1"), "{report:?}");
+        let started = adapter.started();
+        assert_eq!(started.len(), 1);
+        assert_eq!(started[0].purpose, SessionPurpose::Plan);
+        assert_eq!(started[0].agent_id, "sam");
+        let row = harness.row("FRK-1");
+        assert_eq!(row.status, TaskStatus::Assigned);
+        assert_eq!(row.assignee_id.as_deref(), Some("dev-a"));
+        assert_eq!(row.reviewer_id.as_deref(), Some("dev-b"));
     }
 
     #[tokio::test]
@@ -1294,7 +1996,11 @@ mod tests {
         assert!(worktree.is_dir());
         assert_eq!(
             git_output_in(&worktree, &["rev-parse", "--abbrev-ref", "HEAD"]),
-            "farik/FRK-1"
+            "feature/FRK-1"
+        );
+        assert_eq!(
+            git_output_in(&harness.project.repo.path, &["branch", "--list", "farik/*"]),
+            ""
         );
         let moves = harness.events(&[EventKind::TaskTransitioned]);
         match &moves.last().expect("a move").body {
@@ -1307,6 +2013,44 @@ mod tests {
             other => panic!("expected a move, got {other:?}"),
         }
         assert!(adapter.started().is_empty());
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn starts_a_document_task_on_a_docs_branch() {
+        let harness = Harness::new("orch-start-docs", |wire| {
+            wire["agents"]
+                .as_array_mut()
+                .expect("a list of agents")
+                .push(json!({
+                    "id": "arch",
+                    "display_name": "arch",
+                    "role": "architect",
+                    "status": "active"
+                }));
+        });
+        harness.file("FRK-1", "ready", |wire| {
+            wire["assignee_role"] = json!("architect");
+            wire["allowed_paths"] = json!(["docs/adr/**"]);
+        });
+        harness.project.moved(
+            "FRK-1",
+            "ready",
+            "assigned",
+            &json!({ "actor": "product_manager", "requested_by": "pm", "assignee": "arch", "reviewer": "dev-b" }),
+        );
+        let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
+
+        let report = orchestrator.tick().await.expect("the tick runs");
+
+        assert_eq!(acted_on(&report), Some("FRK-1"), "{report:?}");
+        assert_eq!(
+            git_output_in(
+                &harness.worktree("FRK-1"),
+                &["rev-parse", "--abbrev-ref", "HEAD"]
+            ),
+            "docs/FRK-1"
+        );
     }
 
     #[tokio::test]
@@ -1330,11 +2074,13 @@ mod tests {
         assert_eq!(sandboxes.created("FRK-1"), 1);
         let git = &harness.project.deps.git;
         assert_eq!(
-            git.commit_count("main", "farik/FRK-1").expect("git counts"),
+            git.commit_count("main", &harness.branch("FRK-1"))
+                .expect("git counts"),
             1
         );
         assert_eq!(
-            git.changed_paths("main", "farik/FRK-1").expect("git lists"),
+            git.changed_paths("main", &harness.branch("FRK-1"))
+                .expect("git lists"),
             vec!["done.txt".to_string()]
         );
         assert_eq!(harness.row("FRK-1").status, TaskStatus::Verifying);
@@ -1373,7 +2119,10 @@ mod tests {
             "{}",
             started[0].initial_prompt
         );
-        let head = git_output_in(&harness.project.repo.path, &["rev-parse", "farik/FRK-1"]);
+        let head = git_output_in(
+            &harness.project.repo.path,
+            &["rev-parse", &harness.branch("FRK-1")],
+        );
         let prompt = &started[1].initial_prompt;
         assert!(
             prompt.contains(&format!("Resuming: last commit {head}")),
@@ -1567,7 +2316,8 @@ mod tests {
         assert_eq!(
             report,
             TickReport::Idle {
-                why: NOTHING_TO_DO.to_string()
+                why: NOTHING_TO_DO.to_string(),
+                until: None,
             }
         );
         assert_eq!(harness.row("FRK-1").status, TaskStatus::Blocked);
@@ -1629,7 +2379,8 @@ mod tests {
         assert_eq!(
             report,
             TickReport::Idle {
-                why: NOTHING_TO_DO.to_string()
+                why: NOTHING_TO_DO.to_string(),
+                until: None,
             }
         );
         assert_eq!(harness.events(&[EventKind::TransitionRefused]).len(), 3);
@@ -1691,25 +2442,6 @@ mod tests {
         assert_eq!(harness.row("FRK-1").status, TaskStatus::Escalated);
     }
 
-    /// `run_until_idle` on a thread of its own, which is left behind if the run does not end
-    /// within ten seconds: a run that does not stop at an idle tick ticks for ever without
-    /// yielding, so no timer on its own runtime could stop it.
-    fn run_until_idle_within_ten_seconds(
-        orchestrator: Orchestrator,
-    ) -> Result<(), OrchestratorError> {
-        let (sender, receiver) = std::sync::mpsc::channel();
-        std::thread::spawn(move || {
-            let runtime = tokio::runtime::Builder::new_current_thread()
-                .enable_all()
-                .build()
-                .expect("a runtime is built");
-            let _ = sender.send(runtime.block_on(orchestrator.run_until_idle()));
-        });
-        receiver
-            .recv_timeout(Duration::from_secs(10))
-            .expect("the run ends")
-    }
-
     #[test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
     fn runs_until_a_tick_is_idle() {
@@ -1726,10 +2458,10 @@ mod tests {
         let adapter = harness.recorded(vec![implement_stops_early()]);
         let orchestrator = harness.orchestrator(adapter.clone());
 
-        run_until_idle_within_ten_seconds(orchestrator).expect("the run is idle");
+        run_until_idle_within_ten_seconds(Arc::new(orchestrator)).expect("the run is idle");
 
         assert_eq!(adapter.started().len(), 1);
-        assert_eq!(harness.row("FRK-1").status, TaskStatus::InProgress);
+        assert_eq!(harness.row("FRK-1").status, TaskStatus::Escalated);
     }
 
     #[tokio::test]
@@ -2047,7 +2779,7 @@ mod tests {
 
     #[tokio::test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
-    async fn runs_the_criteria_of_a_task_out_of_sessions() {
+    async fn escalates_a_task_out_of_sessions_before_running_its_criteria() {
         let harness = Harness::new("orch-verify-no-sessions", |_| {});
         harness.verifying_with("FRK-1", true, true, |wire| {
             wire["budget"]["max_sessions"] = json!(1);
@@ -2058,22 +2790,13 @@ mod tests {
 
         let report = orchestrator.tick().await.expect("the tick runs");
 
+        assert_eq!(acted_on(&report), Some("FRK-1"), "{report:?}");
+        assert_eq!(harness.row("FRK-1").status, TaskStatus::Escalated);
         assert_eq!(
-            report,
-            TickReport::Acted {
-                task_id: "FRK-1".parse().expect("an id"),
-                what: "ran 1 of its criteria as its reviewer".to_string()
-            }
+            escalation_reasons(&harness),
+            vec![EscalationRaisedBodyReason::Sessions]
         );
-        assert_eq!(governor_runs(&harness), vec![("C1".to_string(), true)]);
-        assert!(adapter.started().is_empty());
-        let report = orchestrator.tick().await.expect("the tick runs");
-        assert_eq!(
-            report,
-            TickReport::Idle {
-                why: NOTHING_TO_DO.to_string()
-            }
-        );
+        assert!(governor_runs(&harness).is_empty());
         assert!(adapter.started().is_empty());
     }
 
@@ -2182,6 +2905,32 @@ mod tests {
 
     #[tokio::test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn posts_a_line_for_a_rejection_farik_filed() {
+        let harness = Harness::new("orch-verify-rejects-line", |_| {});
+        harness.verifying_with("FRK-1", false, true, |_| {});
+        let adapter = harness.recorded(vec![review_writes_note()]);
+        let orchestrator = harness.orchestrator(adapter);
+        orchestrator.tick().await.expect("the review runs");
+        let before = harness.events(&[EventKind::MessagePosted]).len();
+
+        orchestrator.tick().await.expect("the rejection is filed");
+
+        let lines = harness.events(&[EventKind::MessagePosted]);
+        assert_eq!(lines.len(), before + 1, "{lines:?}");
+        let EventBody::MessagePosted(line) = &lines[before].body else {
+            panic!("a message");
+        };
+        assert_eq!(line.kind, MessageKind::System);
+        assert!(
+            line.text
+                .starts_with("FRK-1 verifying → rejected (by dev-b): C1"),
+            "{}",
+            line.text
+        );
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn asks_the_reviewer_again_for_an_unanswered_criterion() {
         let harness = Harness::new("orch-verify-again", |_| {});
         harness.verifying_with("FRK-1", true, true, with_a_review_criterion);
@@ -2269,7 +3018,8 @@ mod tests {
         assert_eq!(
             report,
             TickReport::Idle {
-                why: NOTHING_TO_DO.to_string()
+                why: NOTHING_TO_DO.to_string(),
+                until: None,
             }
         );
         assert_eq!(
@@ -2342,7 +3092,8 @@ mod tests {
         assert_eq!(
             report,
             TickReport::Idle {
-                why: NOTHING_TO_DO.to_string()
+                why: NOTHING_TO_DO.to_string(),
+                until: None,
             }
         );
         assert_eq!(
@@ -2370,7 +3121,8 @@ mod tests {
         assert_eq!(
             report,
             TickReport::Idle {
-                why: NOTHING_TO_DO.to_string()
+                why: NOTHING_TO_DO.to_string(),
+                until: None,
             }
         );
         assert_eq!(adapter.started().len(), 2);
@@ -2385,7 +3137,7 @@ mod tests {
         let adapter = harness.recorded(vec![review_writes_note(), accept_frk_1(), accept_frk_1()]);
         let orchestrator = harness.orchestrator(adapter.clone());
 
-        run_until_idle_within_ten_seconds(orchestrator).expect("the run is idle");
+        run_until_idle_within_ten_seconds(Arc::new(orchestrator)).expect("the run is idle");
 
         assert_eq!(
             sessions(&adapter),
@@ -2525,12 +3277,15 @@ mod tests {
         ));
         let orchestrator = harness.orchestrator_with(adapter.clone(), sandboxes);
 
-        run_until_idle_within_ten_seconds(orchestrator).expect("the run is idle");
+        run_until_idle_within_ten_seconds(Arc::new(orchestrator)).expect("the run is idle");
 
         assert_eq!(harness.row("FRK-2").status, TaskStatus::Escalated);
         assert_eq!(
             escalation_reasons(&harness),
-            vec![EscalationRaisedBodyReason::ExplicitRequest]
+            vec![
+                EscalationRaisedBodyReason::ExplicitRequest,
+                EscalationRaisedBodyReason::Sessions
+            ]
         );
         let escalations = harness.events(&[EventKind::EscalationRaised]);
         let EventBody::EscalationRaised(escalation) = &escalations[0].body else {
@@ -2571,48 +3326,47 @@ mod tests {
             .collect()
     }
 
-    #[tokio::test]
-    #[ignore = "needs the git program: cargo xtask check --integration"]
-    async fn passes_over_a_task_out_of_sessions() {
-        let harness = Harness::new("orch-budget-sessions", |_| {});
+    /// Files FRK-1 `in_progress` with dev-a and dev-b, allowed `max_sessions` sessions, `used` of
+    /// them spent.
+    fn in_progress_with_sessions(harness: &Harness, max_sessions: u64, used: u64) {
         harness.file("FRK-1", "ready", |wire| {
-            wire["budget"]["max_sessions"] = json!(1);
+            wire["budget"]["max_sessions"] = json!(max_sessions);
         });
-        harness.spent(Some("FRK-1"), "s-0", 0.01);
-        harness.ready("FRK-2");
-        let adapter = harness.recorded(vec![reads_a_file()]);
-        let orchestrator = harness.orchestrator(adapter.clone());
-
-        let report = orchestrator.tick().await.expect("the tick runs");
-
-        assert_eq!(acted_on(&report), Some("FRK-2"), "{report:?}");
-        let started = adapter.started();
-        assert_eq!(started.len(), 1);
-        assert_eq!(started[0].purpose, SessionPurpose::Plan);
-        assert_eq!(
-            started[0].task_id.as_ref().map(|task| task.as_str()),
-            Some("FRK-2")
-        );
-        harness.project.moved(
-            "FRK-2",
-            "ready",
-            "cancelled",
-            &json!({ "actor": "human", "requested_by": "human" }),
-        );
-        let report = orchestrator.tick().await.expect("the tick runs");
-        assert_eq!(
-            report,
-            TickReport::Idle {
-                why: NOTHING_TO_DO.to_string()
-            }
-        );
-        assert_eq!(harness.row("FRK-1").status, TaskStatus::Ready);
-        assert!(harness.events(&[EventKind::EscalationRaised]).is_empty());
+        let people = json!({ "assignee": "dev-a", "reviewer": "dev-b" });
+        harness.project.moved("FRK-1", "ready", "assigned", &people);
+        harness
+            .project
+            .moved("FRK-1", "assigned", "in_progress", &people);
+        for session in 0..used {
+            harness.spent(Some("FRK-1"), &format!("s-{session}"), 0.01);
+        }
     }
 
     #[tokio::test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
-    async fn passes_over_a_task_out_of_dollars() {
+    async fn escalates_a_task_out_of_sessions() {
+        let harness = Harness::new("orch-budget-sessions", |_| {});
+        in_progress_with_sessions(&harness, 1, 1);
+        let adapter = harness.recorded(vec![implement_stops_early()]);
+        let orchestrator = harness.orchestrator(adapter.clone());
+
+        let report = orchestrator.tick().await.expect("the tick runs");
+
+        assert_eq!(acted_on(&report), Some("FRK-1"), "{report:?}");
+        assert_eq!(harness.row("FRK-1").status, TaskStatus::Escalated);
+        let moved = last_move(&harness);
+        assert_eq!(moved.from.to_string(), "in_progress");
+        assert_eq!(moved.requested_by, "governor");
+        assert_eq!(
+            escalation_reasons(&harness),
+            vec![EscalationRaisedBodyReason::Sessions]
+        );
+        assert!(adapter.started().is_empty(), "{:?}", adapter.started());
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn escalates_a_task_out_of_dollars() {
         let harness = Harness::new("orch-budget-dollars", |_| {});
         harness.in_progress("FRK-1", "dev-a", "dev-b");
         harness.spent(Some("FRK-1"), "s-0", 3.0);
@@ -2623,6 +3377,163 @@ mod tests {
         orchestrator.tick().await.expect("the tick runs");
 
         assert!(adapter.started().is_empty(), "{:?}", adapter.started());
+        assert_eq!(harness.row("FRK-1").status, TaskStatus::Escalated);
+        assert_eq!(last_move(&harness).requested_by, "governor");
+        assert_eq!(
+            escalation_reasons(&harness),
+            vec![EscalationRaisedBodyReason::Budget]
+        );
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn escalates_a_refining_contract_out_of_sessions() {
+        let harness = Harness::new("orch-budget-refining", |_| {});
+        harness.file("FRK-1", "refining", |wire| {
+            wire["budget"]["max_sessions"] = json!(1);
+        });
+        harness.spent(Some("FRK-1"), "s-0", 0.01);
+        let adapter = harness.recorded(Vec::new());
+        let orchestrator = harness.orchestrator(adapter.clone());
+
+        orchestrator.tick().await.expect("the tick runs");
+
+        assert_eq!(harness.row("FRK-1").status, TaskStatus::Escalated);
+        assert_eq!(
+            escalation_reasons(&harness),
+            vec![EscalationRaisedBodyReason::Sessions]
+        );
+        assert!(adapter.started().is_empty());
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn accepts_a_task_that_passes_on_its_last_iteration_within_the_default_sessions() {
+        // The default `max_sessions` covers a task's whole path (5.5): triage, refinement, the
+        // Scrum Master's judgment, the plan, three rejected passes of an implementation and a
+        // review, the last implementation, and one session a provider's limit cut short are
+        // twelve; the last review and the acceptance still start.
+        let harness = Harness::new("orch-budget-last-iteration", with_a_scrum_master);
+        harness.verifying_with("FRK-1", true, true, |wire| wire["iteration"] = json!(3));
+        for session in 0..12 {
+            harness.spent(Some("FRK-1"), &format!("s-{session}"), 0.01);
+        }
+        let adapter = harness.recorded(vec![review_writes_note(), accept_frk_1()]);
+        let orchestrator = harness.orchestrator(adapter.clone());
+
+        orchestrator.tick().await.expect("the review runs");
+        orchestrator.tick().await.expect("the acceptance runs");
+
+        assert_eq!(escalation_reasons(&harness), Vec::new());
+        assert_eq!(
+            sessions(&adapter),
+            vec![
+                ("dev-b".to_string(), SessionPurpose::Verify),
+                ("pm".to_string(), SessionPurpose::Verify),
+            ]
+        );
+        assert_eq!(harness.row("FRK-1").status, TaskStatus::Accepted);
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn asks_the_escalation_once() {
+        let harness = Harness::new("orch-budget-once", |_| {});
+        in_progress_with_sessions(&harness, 1, 1);
+        refused(
+            &harness,
+            "FRK-1",
+            "in_progress",
+            "escalated",
+            "governor",
+            "governor",
+        );
+        let adapter = harness.recorded(vec![implement_stops_early()]);
+        let orchestrator = harness.orchestrator(adapter.clone());
+
+        let report = orchestrator.tick().await.expect("the tick runs");
+
+        assert_eq!(
+            report,
+            TickReport::Idle {
+                why: NOTHING_TO_DO.to_string(),
+                until: None,
+            }
+        );
+        assert_eq!(harness.row("FRK-1").status, TaskStatus::InProgress);
+        assert_eq!(harness.events(&[EventKind::TransitionRefused]).len(), 1);
+        assert!(adapter.started().is_empty());
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn escalates_again_a_task_resumed_without_room() {
+        let harness = Harness::new("orch-budget-resumed", |_| {});
+        in_progress_with_sessions(&harness, 1, 1);
+        let adapter = harness.recorded(vec![implement_stops_early()]);
+        let orchestrator = harness.orchestrator(adapter.clone());
+        orchestrator.tick().await.expect("the tick escalates it");
+        assert_eq!(harness.row("FRK-1").status, TaskStatus::Escalated);
+        orchestrator
+            .handle(farik_protocol::command::Command::EscalationResolve {
+                task_id: "FRK-1".parse().expect("a task id"),
+                to: TaskStatus::InProgress,
+                message: "Carry on.".to_string(),
+            })
+            .await
+            .expect("the human resolves the escalation");
+        assert_eq!(harness.row("FRK-1").status, TaskStatus::InProgress);
+
+        orchestrator.tick().await.expect("the tick runs");
+
+        assert_eq!(harness.row("FRK-1").status, TaskStatus::Escalated);
+        assert_eq!(
+            escalation_reasons(&harness),
+            vec![
+                EscalationRaisedBodyReason::Sessions,
+                EscalationRaisedBodyReason::Sessions
+            ]
+        );
+        assert!(adapter.started().is_empty());
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn leaves_the_budget_to_farik_plan() {
+        let harness = Harness::new("orch-budget-planning", |_| {});
+        harness.file("FRK-1", "refining", |wire| {
+            wire["budget"]["max_sessions"] = json!(1);
+        });
+        harness.spent(Some("FRK-1"), "s-0", 0.01);
+        let adapter = harness.recorded(Vec::new());
+        let orchestrator = harness.orchestrator(adapter.clone());
+
+        orchestrator
+            .tick_within(&TickScope {
+                task_id: None,
+                rules: TickRules::Planning,
+            })
+            .await
+            .expect("the tick runs");
+
+        assert_eq!(harness.row("FRK-1").status, TaskStatus::Refining);
+        assert!(harness.events(&[EventKind::EscalationRaised]).is_empty());
+        assert!(adapter.started().is_empty());
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn leaves_a_task_with_room_alone() {
+        let harness = Harness::new("orch-budget-room", |_| {});
+        harness.in_progress("FRK-1", "dev-a", "dev-b");
+        harness.spent(Some("FRK-1"), "s-0", 0.01);
+        let adapter = harness.recorded(vec![implement_stops_early()]);
+        let orchestrator = harness.orchestrator(adapter.clone());
+
+        orchestrator.tick().await.expect("the tick runs");
+
+        assert!(harness.events(&[EventKind::EscalationRaised]).is_empty());
+        assert_eq!(adapter.started()[0].purpose, SessionPurpose::Implement);
     }
 
     #[tokio::test]
@@ -2654,7 +3565,137 @@ mod tests {
         ));
         assert_eq!(harness.row("FRK-1").status, TaskStatus::InProgress);
         assert!(harness.events(&[EventKind::EscalationRaised]).is_empty());
-        assert!(harness.events(&[EventKind::NoteWritten]).is_empty());
+        let notes = farik_notes(&harness);
+        assert_eq!(notes.len(), 1, "{notes:?}");
+        assert!(notes[0].contains("input or output tokens"), "{}", notes[0]);
+    }
+
+    /// What a session that ran past its wall clock is told when it ends.
+    const WALL_CLOCK: &str = "the session ran past its wall clock of 1800 s";
+
+    /// The progress notes Farik wrote, in order.
+    fn farik_notes(harness: &Harness) -> Vec<String> {
+        harness
+            .events(&[EventKind::NoteWritten])
+            .iter()
+            .filter_map(|event| match &event.body {
+                EventBody::NoteWritten(body) if body.written_by == "farik" => {
+                    assert_eq!(body.kind, NoteWrittenBodyKind::Progress);
+                    Some(body.text.clone())
+                }
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// A session that reads a file and ends at a limit, told `WALL_CLOCK`.
+    fn hits_its_wall_clock() -> Transcript {
+        rewritten(
+            &hits_the_turn_limit(),
+            "Reached maximum number of turns (1)",
+            WALL_CLOCK,
+        )
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn leaves_a_note_when_a_session_hits_its_wall_clock() {
+        let harness = Harness::new("orch-note-wall-clock", |_| {});
+        harness.in_progress("FRK-1", "dev-a", "dev-b");
+        let adapter = harness.recorded(vec![hits_its_wall_clock(), reads_a_file()]);
+        let orchestrator = harness.orchestrator(adapter.clone());
+
+        orchestrator.tick().await.expect("the tick runs");
+
+        let notes = farik_notes(&harness);
+        assert_eq!(notes.len(), 1, "{notes:?}");
+        assert!(notes[0].contains("a limit"), "{}", notes[0]);
+        assert!(notes[0].contains(WALL_CLOCK), "{}", notes[0]);
+        assert!(!notes[0].contains("Your last note"), "{}", notes[0]);
+        assert_eq!(harness.row("FRK-1").status, TaskStatus::InProgress);
+
+        orchestrator.tick().await.expect("the next session runs");
+        let started = adapter.started();
+        assert_eq!(started.len(), 2);
+        assert_eq!(started[1].purpose, SessionPurpose::Implement);
+        assert!(
+            started[1].initial_prompt.contains(&notes[0]),
+            "{}",
+            started[1].initial_prompt
+        );
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn leaves_a_note_when_a_session_crosses_its_tokens() {
+        let harness = Harness::new("orch-note-tokens", |wire| {
+            wire["budgets"]["session"] = json!({ "max_input_tokens": 100 });
+        });
+        harness.in_progress("FRK-1", "dev-a", "dev-b");
+        let adapter = Arc::new(UsageThenWaitAdapter::completing(a_thousand_tokens()));
+        let orchestrator = harness.orchestrator(adapter.clone());
+
+        orchestrator.tick().await.expect("the tick runs");
+
+        let ends = harness.events(&[EventKind::SessionEnded]);
+        assert!(
+            matches!(
+                &ends[..],
+                [end] if matches!(&end.body, EventBody::SessionEnded(body) if body.reason == SessionEndedBodyReason::Completed)
+            ),
+            "{ends:?}"
+        );
+        let notes = farik_notes(&harness);
+        assert_eq!(notes.len(), 1, "{notes:?}");
+        assert!(notes[0].contains("input or output tokens"), "{}", notes[0]);
+        assert!(!notes[0].contains("a limit"), "{}", notes[0]);
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn keeps_the_agents_own_note_in_farks_note() {
+        let harness = Harness::new("orch-note-quotes", |_| {});
+        harness.in_progress("FRK-1", "dev-a", "dev-b");
+        let limited = rewritten(
+            &implement_stops_early(),
+            r#""subtype":"success","is_error":false"#,
+            &format!(r#""subtype":"error_max_turns","is_error":true,"errors":["{WALL_CLOCK}"]"#),
+        );
+        let adapter = harness.recorded(vec![limited]);
+        let orchestrator = harness.orchestrator(adapter);
+
+        orchestrator.tick().await.expect("the tick runs");
+
+        let notes = farik_notes(&harness);
+        assert_eq!(notes.len(), 1, "{notes:?}");
+        assert!(notes[0].contains(WALL_CLOCK), "{}", notes[0]);
+        assert!(
+            notes[0].contains("Your last note in it: done.txt committed; C1 not run yet."),
+            "{}",
+            notes[0]
+        );
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn leaves_no_note_for_a_verify_session() {
+        let harness = Harness::new("orch-note-verify", |_| {});
+        harness.verifying("FRK-1");
+        let adapter = harness.recorded(vec![hits_its_wall_clock()]);
+        let orchestrator = harness.orchestrator(adapter.clone());
+
+        orchestrator.tick().await.expect("the tick runs");
+
+        assert_eq!(adapter.started()[0].purpose, SessionPurpose::Verify);
+        let ends = harness.events(&[EventKind::SessionEnded]);
+        assert!(
+            ends.iter().any(|end| matches!(
+                &end.body,
+                EventBody::SessionEnded(body) if body.reason == SessionEndedBodyReason::Limit
+            )),
+            "{ends:?}"
+        );
+        assert!(farik_notes(&harness).is_empty());
     }
 
     #[tokio::test]
@@ -2688,11 +3729,11 @@ mod tests {
             vec![BudgetExhaustedBodyScope::TaskSessions]
         );
         let report = orchestrator.tick().await.expect("the tick runs");
+        assert_eq!(acted_on(&report), Some("FRK-1"), "{report:?}");
+        assert_eq!(harness.row("FRK-1").status, TaskStatus::Escalated);
         assert_eq!(
-            report,
-            TickReport::Idle {
-                why: NOTHING_TO_DO.to_string()
-            }
+            escalation_reasons(&harness),
+            vec![EscalationRaisedBodyReason::Sessions]
         );
         assert_eq!(adapter.started().len(), 1);
     }
@@ -2926,7 +3967,8 @@ mod tests {
         assert_eq!(
             second,
             TickReport::Idle {
-                why: "the team's daily budget is spent".to_string()
+                why: "the team's daily budget is spent".to_string(),
+                until: None,
             }
         );
         assert!(adapter.started().is_empty());
@@ -2949,7 +3991,8 @@ mod tests {
         assert_ne!(
             second,
             TickReport::Idle {
-                why: "the team's daily budget is spent".to_string()
+                why: "the team's daily budget is spent".to_string(),
+                until: None,
             }
         );
         let started = adapter.started();
@@ -3031,7 +4074,7 @@ mod tests {
             .project
             .deps
             .git
-            .create_worktree(&harness.worktree("FRK-1"), "farik/FRK-1", "main")
+            .create_worktree(&harness.worktree("FRK-1"), &harness.branch("FRK-1"), "main")
             .expect("the worktree is made");
         let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
 
@@ -3057,7 +4100,8 @@ mod tests {
         assert_eq!(
             report,
             TickReport::Idle {
-                why: NOTHING_TO_DO.to_string()
+                why: NOTHING_TO_DO.to_string(),
+                until: None,
             }
         );
         assert!(adapter.started().is_empty());
@@ -3100,7 +4144,8 @@ mod tests {
         assert_eq!(
             report,
             TickReport::Idle {
-                why: NOTHING_TO_DO.to_string()
+                why: NOTHING_TO_DO.to_string(),
+                until: None,
             }
         );
         assert!(adapter.started().is_empty());
@@ -3298,6 +4343,2181 @@ mod tests {
         assert_eq!(
             scopes_exhausted(&harness),
             vec![BudgetExhaustedBodyScope::SessionToolCalls]
+        );
+    }
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn ends_a_finished_sprint_by_itself() {
+        let harness = Harness::new("orch-sprint-finished", |_| {});
+        harness.accepted("FRK-1");
+        harness.ready("FRK-2");
+        harness.project.moved(
+            "FRK-2",
+            "ready",
+            "cancelled",
+            &json!({ "actor": "human", "requested_by": "human" }),
+        );
+        harness.open_sprint("S1", &["FRK-1", "FRK-2"]);
+        let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
+
+        let report = orchestrator.tick().await.expect("the tick runs");
+
+        assert!(
+            matches!(&report, TickReport::Sprint { sprint_id, .. } if sprint_id == "S1"),
+            "{report:?}"
+        );
+        let ended = harness.events(&[EventKind::SprintEnded]);
+        assert_eq!(ended.len(), 1);
+        let EventBody::SprintEnded(body) = &ended[0].body else {
+            panic!("an end");
+        };
+        assert_eq!(body.ended_by, SprintEndedBodyEndedBy::Governor);
+        assert!(body.left.is_empty());
+        assert_eq!(
+            harness
+                .project
+                .deps
+                .files
+                .read_sprint("S1")
+                .expect("S1 reads")
+                .status,
+            SprintStatus::Ended
+        );
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn leaves_an_empty_sprint_open() {
+        let harness = Harness::new("orch-sprint-empty", |_| {});
+        harness.open_sprint("S1", &[]);
+        let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
+
+        let report = orchestrator.tick().await.expect("the tick runs");
+
+        assert!(matches!(report, TickReport::Idle { .. }), "{report:?}");
+        assert!(harness.events(&[EventKind::SprintEnded]).is_empty());
+    }
+
+    /// The harness's team with an active Scrum Master `sm` besides.
+    fn with_a_scrum_master(wire: &mut serde_json::Value) {
+        wire["agents"]
+            .as_array_mut()
+            .expect("a list of agents")
+            .push(farik_core::team::fixtures::an_agent_wire(
+                "sm",
+                "scrum_master",
+            ));
+    }
+
+    /// `task` escalated at its iterations, waiting on the human.
+    fn escalated(harness: &Harness, task: &str) {
+        harness.project.filed(task, "rejected", "task", None);
+        harness
+            .project
+            .moved(task, "rejected", "escalated", &json!({}));
+        harness.project.record(
+            task,
+            "escalation.raised",
+            &json!({ "reason": "iterations", "detail": "three rejections" }),
+        );
+    }
+
+    /// The Farik tools a session was given, in no order.
+    fn tools_of(spec: &crate::session::SessionSpec) -> BTreeSet<&str> {
+        spec.farik_tools.iter().map(String::as_str).collect()
+    }
+
+    /// The Farik tools the standup and the review are given.
+    const READ_AND_POST: [&str; 7] = [
+        "farik_read_task",
+        "farik_read_board",
+        "farik_read_rules",
+        "farik_read_criteria",
+        "farik_post_message",
+        "farik_write_memory",
+        "farik_read_decisions",
+    ];
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn plans_the_sprint_in_a_ceremony() {
+        let harness = Harness::new("orch-sprint-plan", with_a_scrum_master);
+        harness.ready("FRK-1");
+        escalated(&harness, "FRK-2");
+        harness.open_sprint("S1", &[]);
+        harness.project.record(
+            "",
+            "message.posted",
+            &json!({
+                "author": "human",
+                "kind": "human",
+                "text": "the login page comes first",
+                "mentions": []
+            }),
+        );
+        harness
+            .project
+            .deps
+            .files
+            .append_retro("S1", at().date_naive(), "Ask the human sooner.")
+            .expect("the last retro is written");
+        let adapter = harness.recorded(vec![planning_ceremony_frk_1()]);
+        let orchestrator = harness.orchestrator(adapter.clone());
+
+        let report = orchestrator.tick().await.expect("the tick runs");
+
+        assert!(
+            matches!(&report, TickReport::Sprint { sprint_id, what }
+                if sprint_id == "S1" && what.contains("S1 holds FRK-1")),
+            "{report:?}"
+        );
+        let started = adapter.started();
+        assert_eq!(started.len(), 1);
+        let spec = &started[0];
+        assert_eq!(
+            (spec.agent_id.as_str(), spec.purpose, spec.task_id.as_ref()),
+            ("sm", SessionPurpose::Ceremony, None)
+        );
+        let starts = harness.events(&[EventKind::SessionStarted]);
+        let EventBody::SessionStarted(start) = &starts[0].body else {
+            panic!("a session's start");
+        };
+        assert_eq!(start.thread, Some(Thread::Planning));
+        assert_eq!(
+            tools_of(spec),
+            BTreeSet::from([
+                "farik_read_task",
+                "farik_read_board",
+                "farik_read_rules",
+                "farik_read_criteria",
+                "farik_post_message",
+                "farik_plan_sprint",
+                "farik_write_memory",
+                "farik_read_decisions",
+            ])
+        );
+        // The candidates, the escalation the digest lists, the last retro, and the channel.
+        for fact in [
+            "FRK-1",
+            "$5.00",
+            "FRK-2",
+            "iterations",
+            "three rejections",
+            "Ask the human sooner.",
+            "the login page comes first",
+        ] {
+            assert!(
+                spec.initial_prompt.contains(fact),
+                "{fact}: {}",
+                spec.initial_prompt
+            );
+        }
+        let posted: Vec<_> = harness
+            .events(&[EventKind::MessagePosted])
+            .into_iter()
+            .filter_map(|event| match event.body {
+                EventBody::MessagePosted(body) => Some((body.kind, body.thread)),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            posted[1..],
+            vec![(MessageKind::Ceremony, Some(Thread::Planning)); 2]
+        );
+        assert_eq!(harness.row("FRK-1").sprint.as_deref(), Some("S1"));
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn lists_the_spent_budgets_in_the_digest() {
+        let harness = Harness::new("orch-sprint-spent-digest", with_a_scrum_master);
+        harness.ready("FRK-1");
+        let exhausted = |scope: &str, consequence: &str| {
+            harness.project.record(
+                "",
+                "budget.exhausted",
+                &json!({ "scope": scope, "consequence": consequence }),
+            );
+        };
+        // The day spent before the previous planning, the sprint's budget since.
+        exhausted("day_usd", "pause_team");
+        harness.project.record(
+            "",
+            "session.started",
+            &json!({
+                "purpose": "ceremony",
+                "model": "claude-sonnet-5",
+                "effort": "medium",
+                "thread": "planning"
+            }),
+        );
+        exhausted("sprint_usd", "stop_new_assignments");
+        // Neither another ceremony nor a task's plan session is the sprint's planning, and a
+        // task's budget is not the digest's.
+        harness.project.record(
+            "",
+            "session.started",
+            &json!({
+                "purpose": "ceremony",
+                "model": "claude-sonnet-5",
+                "effort": "medium",
+                "thread": "review"
+            }),
+        );
+        harness.project.record(
+            "FRK-1",
+            "session.started",
+            &json!({ "purpose": "plan", "model": "claude-opus-5", "effort": "high" }),
+        );
+        exhausted("task_usd", "escalate_task");
+        harness.open_sprint("S1", &[]);
+        let adapter = harness.recorded(vec![planning_ceremony_frk_1()]);
+
+        harness
+            .orchestrator(adapter.clone())
+            .tick()
+            .await
+            .expect("the tick runs");
+
+        let prompt = &adapter.started()[0].initial_prompt;
+        assert_eq!(
+            prompt.matches("the sprint's budget spent").count(),
+            1,
+            "{prompt}"
+        );
+        assert!(!prompt.contains("the day's budget spent"), "{prompt}");
+    }
+
+    /// `day` days after S1's first day, 22 September, at `hour`:`minute` UTC.
+    fn on(day: i64, hour: u32, minute: u32) -> chrono::DateTime<chrono::Utc> {
+        at().date_naive()
+            .and_hms_opt(hour, minute, 0)
+            .expect("a real time")
+            .and_utc()
+            + chrono::Duration::days(day)
+    }
+
+    /// The Scrum Master to run the standup, and FRK-1 assigned to `dev-a` (asleep for ten days, so
+    /// that no implement session starts) and reviewed by `dev-b`, before S1 opens holding it at
+    /// noon on its first day.
+    fn a_sprint_of_frk_1(name: &str) -> Harness {
+        let harness = Harness::new(name, with_a_scrum_master);
+        harness.assigned("FRK-1", "dev-a", "dev-b");
+        harness.asleep("dev-a", at() + chrono::Duration::days(10));
+        harness.open_sprint("S1", &["FRK-1"]);
+        harness
+    }
+
+    /// FRK-1 moved from `assigned` to `in_progress` by `dev-a` at 13:00 on S1's first day.
+    fn frk_1_started(harness: &Harness) {
+        harness.project.moved_at(
+            on(0, 13, 0),
+            "FRK-1",
+            "assigned",
+            "in_progress",
+            &json!({ "actor": "assignee", "requested_by": "dev-a", "assignee": "dev-a", "reviewer": "dev-b" }),
+        );
+    }
+
+    /// FRK-1 moved from `in_progress` to `escalated` by the governor at `when`.
+    fn frk_1_escalated(harness: &Harness, when: chrono::DateTime<chrono::Utc>) {
+        harness
+            .project
+            .moved_at(when, "FRK-1", "in_progress", "escalated", &json!({}));
+    }
+
+    /// The first message of each standup the adapter started, oldest first.
+    fn standups(harness: &Harness, adapter: &RecordedAdapter) -> Vec<String> {
+        let threads: Vec<Option<Thread>> = harness
+            .events(&[EventKind::SessionStarted])
+            .into_iter()
+            .map(|event| match event.body {
+                EventBody::SessionStarted(body) => body.thread,
+                _ => None,
+            })
+            .collect();
+        adapter
+            .started()
+            .into_iter()
+            .zip(threads)
+            .filter(|(_, thread)| *thread == Some(Thread::Standup))
+            .map(|(spec, _)| spec.initial_prompt)
+            .collect()
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn holds_a_standup_when_the_sprint_moved() {
+        let harness = Harness::new("orch-standup", with_a_scrum_master);
+        harness.assigned("FRK-1", "dev-a", "dev-b");
+        harness.asleep("dev-a", at() + chrono::Duration::days(10));
+        escalated(&harness, "FRK-2");
+        harness.project.filed("FRK-3", "in_progress", "task", None);
+        harness.open_sprint("S1", &["FRK-1", "FRK-2", "FRK-3"]);
+        frk_1_started(&harness);
+        harness.project.moved_at(
+            on(0, 23, 0),
+            "FRK-3",
+            "in_progress",
+            "blocked",
+            &json!({ "blocker": { "description": "the API is down", "needed": "an API key" } }),
+        );
+        // FRK-4, in no sprint, moved too.
+        harness.project.filed("FRK-4", "rejected", "task", None);
+        harness
+            .project
+            .moved_at(on(0, 14, 0), "FRK-4", "rejected", "escalated", &json!({}));
+        let clock = Arc::new(MovableClock::new(on(1, 12, 0)));
+        let adapter = harness.recorded(vec![standup(), standup()]);
+        let orchestrator = harness.orchestrator_on(adapter.clone(), Arc::clone(&clock));
+
+        // Only a tick of every rule, scoped to no task, holds it.
+        for scope in [
+            TickScope {
+                rules: TickRules::Planning,
+                ..TickScope::default()
+            },
+            TickScope {
+                task_id: Some("FRK-1".parse().expect("a task id")),
+                ..TickScope::default()
+            },
+        ] {
+            let report = orchestrator
+                .tick_within(&scope)
+                .await
+                .expect("the tick runs");
+            assert!(!matches!(&report, TickReport::Sprint { .. }), "{report:?}");
+        }
+        let report = orchestrator.tick().await.expect("the tick runs");
+
+        assert!(
+            matches!(&report, TickReport::Sprint { sprint_id, what }
+                if sprint_id == "S1" && what.contains("standup")),
+            "{report:?}"
+        );
+        let first = &standups(&harness, &adapter)[0];
+        for fact in [
+            "FRK-1: assigned -> in_progress, by dev-a",
+            "FRK-3: in_progress -> blocked, by governor",
+            "FRK-3 is blocked: the API is down; needed: an API key",
+            "FRK-2",
+            "three rejections",
+        ] {
+            assert!(first.contains(fact), "{fact}: {first}");
+        }
+        assert!(!first.contains("FRK-4"), "{first}");
+        let posted: Vec<_> = harness
+            .events(&[EventKind::MessagePosted])
+            .into_iter()
+            .filter_map(|event| match event.body {
+                EventBody::MessagePosted(body) => Some((body.kind, body.thread)),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(posted, vec![(MessageKind::Ceremony, Some(Thread::Standup))]);
+
+        // The same day holds no second standup, and a move made today waits for tomorrow's.
+        let again = orchestrator.tick().await.expect("the tick runs");
+        assert!(!matches!(again, TickReport::Sprint { .. }), "{again:?}");
+        frk_1_escalated(&harness, on(1, 13, 0));
+        clock.set(on(1, 14, 0));
+        let today = orchestrator.tick().await.expect("the tick runs");
+        assert!(!matches!(today, TickReport::Sprint { .. }), "{today:?}");
+        assert_eq!(standups(&harness, &adapter).len(), 1);
+        clock.set(on(2, 9, 0));
+        let tomorrow = orchestrator.tick().await.expect("the tick runs");
+        assert!(
+            matches!(&tomorrow, TickReport::Sprint { .. }),
+            "{tomorrow:?}"
+        );
+        let second = &standups(&harness, &adapter)[1];
+        assert!(
+            second.contains("FRK-1: in_progress -> escalated, by governor"),
+            "{second}"
+        );
+        assert!(!second.contains("assigned -> in_progress"), "{second}");
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn holds_the_standup_before_work() {
+        let harness = a_sprint_of_frk_1("orch-standup-first");
+        frk_1_started(&harness);
+        harness.in_progress("FRK-2", "dev-b", "dev-a");
+        let adapter = harness.recorded(vec![standup(), implement_stops_early()]);
+        let orchestrator = harness.orchestrator_at(adapter.clone(), on(1, 12, 0));
+
+        orchestrator.tick().await.expect("the tick runs");
+        orchestrator.tick().await.expect("the tick runs");
+
+        let started: Vec<_> = adapter
+            .started()
+            .iter()
+            .map(|spec| {
+                (
+                    spec.purpose,
+                    spec.task_id.as_ref().map(|task| task.as_str().to_string()),
+                )
+            })
+            .collect();
+        assert_eq!(
+            started,
+            vec![
+                (SessionPurpose::Ceremony, None),
+                (SessionPurpose::Implement, Some("FRK-2".to_string())),
+            ]
+        );
+        assert_eq!(standups(&harness, &adapter).len(), 1);
+        assert_eq!(
+            tools_of(&adapter.started()[0]),
+            BTreeSet::from(READ_AND_POST)
+        );
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn holds_no_standup_on_a_still_day() {
+        let harness = a_sprint_of_frk_1("orch-standup-still");
+        frk_1_started(&harness);
+        let clock = Arc::new(MovableClock::new(on(1, 9, 0)));
+        let adapter = harness.recorded(vec![standup(), standup()]);
+        let orchestrator = harness.orchestrator_on(adapter.clone(), Arc::clone(&clock));
+        orchestrator.tick().await.expect("the tick runs");
+
+        clock.set(on(2, 9, 0));
+        let report = orchestrator.tick().await.expect("the tick runs");
+
+        assert!(!matches!(report, TickReport::Sprint { .. }), "{report:?}");
+        assert_eq!(standups(&harness, &adapter).len(), 1);
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn holds_the_next_days_standup() {
+        let harness = a_sprint_of_frk_1("orch-standup-next-day");
+        frk_1_started(&harness);
+        let clock = Arc::new(MovableClock::new(on(1, 9, 0)));
+        let adapter = harness.recorded(vec![standup(), standup()]);
+        let orchestrator = harness.orchestrator_on(adapter.clone(), Arc::clone(&clock));
+        orchestrator.tick().await.expect("the tick runs");
+        frk_1_escalated(&harness, on(1, 10, 0));
+
+        clock.set(on(2, 9, 0));
+        let report = orchestrator.tick().await.expect("the tick runs");
+
+        assert!(matches!(&report, TickReport::Sprint { .. }), "{report:?}");
+        let held = standups(&harness, &adapter);
+        assert!(
+            held[1].contains("FRK-1: in_progress -> escalated, by governor"),
+            "{}",
+            held[1]
+        );
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn reports_a_move_made_before_the_days_standup() {
+        let harness = a_sprint_of_frk_1("orch-standup-early-move");
+        frk_1_started(&harness);
+        frk_1_escalated(&harness, on(1, 0, 2));
+        let clock = Arc::new(MovableClock::new(on(1, 0, 5)));
+        let adapter = harness.recorded(vec![standup(), standup()]);
+        let orchestrator = harness.orchestrator_on(adapter.clone(), Arc::clone(&clock));
+        orchestrator.tick().await.expect("the tick runs");
+
+        clock.set(on(2, 0, 10));
+        let report = orchestrator.tick().await.expect("the tick runs");
+
+        assert!(matches!(&report, TickReport::Sprint { .. }), "{report:?}");
+        let held = standups(&harness, &adapter);
+        assert!(!held[0].contains("in_progress -> escalated"), "{}", held[0]);
+        assert!(
+            held[1].contains("FRK-1: in_progress -> escalated, by governor"),
+            "{}",
+            held[1]
+        );
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn retries_a_standup_that_hit_its_limit() {
+        let harness = a_sprint_of_frk_1("orch-standup-limit");
+        frk_1_started(&harness);
+        let adapter = harness.recorded(vec![hits_the_turn_limit(), standup()]);
+        let orchestrator = harness.orchestrator_at(adapter.clone(), on(1, 12, 0));
+
+        orchestrator.tick().await.expect("the tick runs");
+        let report = orchestrator.tick().await.expect("the tick runs");
+
+        assert!(
+            matches!(&report, TickReport::Sprint { what, .. } if what.contains("standup")),
+            "{report:?}"
+        );
+        assert_eq!(
+            end_reasons(&harness),
+            vec![
+                SessionEndedBodyReason::Limit,
+                SessionEndedBodyReason::Completed
+            ]
+        );
+    }
+
+    /// The team's whole daily budget, $20, spent at `when`.
+    fn day_spent_at(harness: &Harness, when: chrono::DateTime<chrono::Utc>) {
+        harness.project.record_at(
+            when,
+            "",
+            "cost.recorded",
+            &json!({
+                "purpose": "implement",
+                "model_id": "claude-opus-5",
+                "usage": {
+                    "input_tokens": 1000,
+                    "output_tokens": 100,
+                    "cache_read_tokens": 0,
+                    "cache_write_tokens": 0
+                },
+                "cost_usd": 20.0
+            }),
+        );
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn holds_no_standup_on_a_spent_day() {
+        let harness = a_sprint_of_frk_1("orch-standup-day");
+        frk_1_started(&harness);
+        day_spent_at(&harness, on(1, 8, 0));
+        let adapter = harness.recorded(vec![standup()]);
+
+        let report = harness
+            .orchestrator_at(adapter.clone(), on(1, 12, 0))
+            .tick()
+            .await
+            .expect("the tick runs");
+
+        assert!(!matches!(report, TickReport::Sprint { .. }), "{report:?}");
+        assert!(adapter.started().is_empty(), "{:?}", adapter.started());
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn holds_no_standup_while_its_runner_sleeps() {
+        let harness = a_sprint_of_frk_1("orch-standup-asleep");
+        frk_1_started(&harness);
+        harness.asleep("sm", on(1, 13, 0));
+        let adapter = harness.recorded(vec![standup()]);
+
+        let report = harness
+            .orchestrator_at(adapter.clone(), on(1, 12, 0))
+            .tick()
+            .await
+            .expect("the tick runs");
+
+        assert!(!matches!(report, TickReport::Sprint { .. }), "{report:?}");
+        assert!(adapter.started().is_empty(), "{:?}", adapter.started());
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn holds_no_standup_without_a_sprint() {
+        let harness = Harness::new("orch-standup-no-sprint", with_a_scrum_master);
+        harness.assigned("FRK-1", "dev-a", "dev-b");
+        harness.asleep("dev-a", at() + chrono::Duration::days(10));
+        frk_1_started(&harness);
+        let adapter = harness.recorded(vec![standup()]);
+
+        let report = harness
+            .orchestrator_at(adapter.clone(), on(1, 12, 0))
+            .tick()
+            .await
+            .expect("the tick runs");
+
+        assert!(!matches!(report, TickReport::Sprint { .. }), "{report:?}");
+        assert!(adapter.started().is_empty(), "{:?}", adapter.started());
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn runs_no_sprint_rule_in_a_scoped_or_refining_tick() {
+        let harness = Harness::new("orch-sprint-scoped", with_a_scrum_master);
+        harness.ready("FRK-1");
+        harness.open_sprint("S1", &[]);
+        let adapter = harness.recorded(vec![planning_ceremony_frk_1()]);
+        let orchestrator = harness.orchestrator(adapter.clone());
+
+        for scope in [
+            TickScope {
+                task_id: Some("FRK-1".parse().expect("a task id")),
+                ..TickScope::default()
+            },
+            TickScope {
+                rules: TickRules::Refining,
+                ..TickScope::default()
+            },
+        ] {
+            let report = orchestrator
+                .tick_within(&scope)
+                .await
+                .expect("the tick runs");
+            assert!(!matches!(&report, TickReport::Sprint { .. }), "{report:?}");
+        }
+
+        assert!(adapter.started().is_empty(), "{:?}", adapter.started());
+        assert_eq!(harness.row("FRK-1").sprint, None);
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn asks_no_plan_on_a_spent_day() {
+        let harness = Harness::new("orch-sprint-day", with_a_scrum_master);
+        harness.spent(None, "s-0", 20.0);
+        harness.ready("FRK-1");
+        harness.open_sprint("S1", &[]);
+        let adapter = harness.recorded(vec![planning_ceremony_frk_1()]);
+        let orchestrator = harness.orchestrator(adapter.clone());
+
+        let report = orchestrator.tick().await.expect("the tick runs");
+
+        assert_eq!(
+            report,
+            TickReport::Idle {
+                why: "the team's daily budget is spent".to_string(),
+                until: None,
+            }
+        );
+        assert!(adapter.started().is_empty(), "{:?}", adapter.started());
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn asks_no_plan_of_a_sprint_that_holds_a_task() {
+        let harness = Harness::new("orch-sprint-held", with_a_scrum_master);
+        harness.ready("FRK-1");
+        harness.ready("FRK-2");
+        harness.open_sprint("S1", &["FRK-1"]);
+        let adapter = harness.recorded(vec![plan_assigns_frk_1()]);
+        let orchestrator = harness.orchestrator(adapter.clone());
+
+        orchestrator.tick().await.expect("the tick runs");
+
+        assert!(
+            adapter.started().iter().all(|spec| spec.task_id.is_some()),
+            "{:?}",
+            adapter.started()
+        );
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn plans_once_per_sprint_as_a_ceremony() {
+        let harness = Harness::new("orch-sprint-once", with_a_scrum_master);
+        harness.ready("FRK-1");
+        harness.open_sprint("S1", &[]);
+        let adapter = harness.recorded(vec![reads_a_file(), plan_assigns_frk_1()]);
+        let orchestrator = harness.orchestrator(adapter.clone());
+        let first = orchestrator.tick().await.expect("the tick runs");
+        assert!(matches!(&first, TickReport::Sprint { .. }), "{first:?}");
+        assert_eq!(
+            harness.row("FRK-1").sprint,
+            None,
+            "the session planned nothing"
+        );
+
+        let second = orchestrator.tick().await.expect("the tick runs");
+
+        assert!(!matches!(&second, TickReport::Sprint { .. }), "{second:?}");
+        let planning = adapter
+            .started()
+            .iter()
+            .filter(|spec| spec.purpose == SessionPurpose::Ceremony)
+            .count();
+        assert_eq!(planning, 1);
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn plans_a_sprint_at_most_three_times() {
+        let harness = Harness::new("orch-sprint-thrice", with_a_scrum_master);
+        harness.ready("FRK-1");
+        harness.open_sprint("S1", &[]);
+        let adapter = harness.recorded(vec![
+            hits_its_wall_clock(),
+            hits_its_wall_clock(),
+            hits_its_wall_clock(),
+            hits_its_wall_clock(),
+        ]);
+        let orchestrator = harness.orchestrator(adapter.clone());
+
+        for _ in 0..4 {
+            orchestrator.tick().await.expect("the tick runs");
+        }
+
+        let planning = adapter
+            .started()
+            .iter()
+            .filter(|spec| spec.purpose == SessionPurpose::Ceremony)
+            .count();
+        assert_eq!(planning, 3);
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn assigns_only_the_open_sprints_tasks() {
+        let harness = Harness::new("orch-sprint-assign", |_| {});
+        harness.ready("FRK-1");
+        harness.ready("FRK-2");
+        harness.open_sprint("S1", &["FRK-2"]);
+        let adapter = harness.recorded(vec![reads_a_file()]);
+        let orchestrator = harness.orchestrator(adapter.clone());
+
+        orchestrator.tick().await.expect("the tick runs");
+
+        let started = adapter.started();
+        assert_eq!(started.len(), 1, "{started:?}");
+        assert_eq!(
+            (
+                started[0].purpose,
+                started[0].task_id.as_ref().map(|task| task.as_str())
+            ),
+            (SessionPurpose::Plan, Some("FRK-2"))
+        );
+        assert!(
+            started[0].initial_prompt.contains("FRK-2")
+                && !started[0].initial_prompt.contains("FRK-1"),
+            "{}",
+            started[0].initial_prompt
+        );
+        assert!(harness.events(&[EventKind::TransitionRefused]).is_empty());
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn assigns_the_backlog_without_a_sprint() {
+        let harness = Harness::new("orch-sprint-none", |_| {});
+        harness.ready("FRK-1");
+        let adapter = harness.recorded(vec![reads_a_file()]);
+        let orchestrator = harness.orchestrator(adapter.clone());
+
+        orchestrator.tick().await.expect("the tick runs");
+
+        let started = adapter.started();
+        assert_eq!(started.len(), 1, "{started:?}");
+        assert_eq!(
+            (
+                started[0].purpose,
+                started[0].task_id.as_ref().map(|task| task.as_str())
+            ),
+            (SessionPurpose::Plan, Some("FRK-1"))
+        );
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn stops_assigning_once_the_sprint_budget_is_spent() {
+        let harness = Harness::new("orch-sprint-spent", |_| {});
+        harness.in_progress("FRK-1", "dev-a", "dev-b");
+        harness.ready("FRK-2");
+        harness.accepted("FRK-3");
+        harness
+            .project
+            .open_sprint("S1", Some(5.0), &["FRK-1", "FRK-2", "FRK-3"]);
+        // Spent in S1 by a task already accepted, so that neither FRK-1's nor FRK-2's own budget
+        // is what stops anything.
+        harness.spent(Some("FRK-3"), "s-0", 5.0);
+        let adapter = harness.recorded(vec![implement_stops_early()]);
+        let orchestrator = harness.orchestrator(adapter.clone());
+
+        let scoped = orchestrator
+            .tick_within(&TickScope {
+                task_id: Some("FRK-2".parse().expect("a task id")),
+                ..TickScope::default()
+            })
+            .await
+            .expect("the tick runs");
+        assert!(matches!(scoped, TickReport::Idle { .. }), "{scoped:?}");
+        assert!(adapter.started().is_empty(), "{:?}", adapter.started());
+        assert_eq!(harness.row("FRK-2").status, TaskStatus::Ready);
+        assert!(harness.events(&[EventKind::TransitionRefused]).is_empty());
+
+        let report = orchestrator.tick().await.expect("the tick runs");
+        assert_eq!(acted_on(&report), Some("FRK-1"), "{report:?}");
+        let started = adapter.started();
+        assert_eq!(started.len(), 1, "{started:?}");
+        assert_eq!(started[0].purpose, SessionPurpose::Implement);
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn lets_a_session_finish_past_the_sprint_budget() {
+        let harness = Harness::new("orch-sprint-finish", |_| {});
+        harness.in_progress("FRK-1", "dev-a", "dev-b");
+        harness.project.open_sprint("S1", Some(0.001), &["FRK-1"]);
+        let adapter = Arc::new(UsageThenWaitAdapter::completing(a_thousand_tokens()));
+        let orchestrator = harness.orchestrator(adapter.clone());
+
+        tokio::time::timeout(Duration::from_secs(10), orchestrator.tick())
+            .await
+            .expect("the session ends")
+            .expect("the tick runs");
+
+        assert_eq!(adapter.aborts(), 0);
+        assert_eq!(
+            scopes_exhausted(&harness),
+            vec![BudgetExhaustedBodyScope::SprintUsd]
+        );
+        let ended = harness.events(&[EventKind::SessionEnded]);
+        assert!(matches!(
+            &ended.last().expect("an end").body,
+            EventBody::SessionEnded(body) if body.reason == SessionEndedBodyReason::Completed
+        ));
+    }
+
+    /// A session its model provider refused at a limit it said resets at `until`.
+    fn refused_until(until: chrono::DateTime<chrono::Utc>) -> Transcript {
+        rewritten(
+            &provider_limit_rejected(),
+            "1790119200",
+            &until.timestamp().to_string(),
+        )
+    }
+
+    /// Each `agent.slept`: the agent on its envelope and its `until`, in order.
+    fn sleeps(harness: &Harness) -> Vec<(Option<String>, chrono::DateTime<chrono::Utc>)> {
+        harness
+            .events(&[EventKind::AgentSlept])
+            .iter()
+            .map(|event| match &event.body {
+                EventBody::AgentSlept(body) => (event.envelope.ids.agent_id.clone(), body.until),
+                other => panic!("not a sleep: {other:?}"),
+            })
+            .collect()
+    }
+
+    /// The team file as it is on disk.
+    fn team_file(harness: &Harness) -> String {
+        std::fs::read_to_string(harness.project.repo.path.join(".farik/team.yaml"))
+            .expect("the team file reads")
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn puts_an_agent_to_sleep_at_its_providers_limit() {
+        let harness = Harness::new("orch-sleep", |_| {});
+        harness.in_progress("FRK-1", "dev-a", "dev-b");
+        let team = team_file(&harness);
+        let until = at() + chrono::Duration::hours(2);
+        let orchestrator = harness.orchestrator(harness.recorded(vec![refused_until(until)]));
+
+        orchestrator.tick().await.expect("the tick runs");
+
+        let notes = farik_notes(&harness);
+        assert_eq!(notes.len(), 1, "{notes:?}");
+        assert!(
+            notes[0].contains("its model provider's usage limit"),
+            "{}",
+            notes[0]
+        );
+        assert_eq!(sleeps(&harness), vec![(Some("dev-a".to_string()), until)]);
+        assert_eq!(harness.row("FRK-1").status, TaskStatus::InProgress);
+        assert_eq!(team_file(&harness), team);
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn sleeps_an_hour_without_a_reset_time() {
+        let harness = Harness::new("orch-sleep-hour", |_| {});
+        harness.in_progress("FRK-1", "dev-a", "dev-b");
+        let orchestrator = harness.orchestrator(harness.recorded(vec![provider_limit_429()]));
+
+        orchestrator.tick().await.expect("the tick runs");
+
+        assert_eq!(
+            sleeps(&harness),
+            vec![(Some("dev-a".to_string()), at() + chrono::Duration::hours(1))]
+        );
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn ignores_a_reset_time_in_the_past() {
+        let harness = Harness::new("orch-sleep-past", |_| {});
+        harness.in_progress("FRK-1", "dev-a", "dev-b");
+        let refused = refused_until(at() - chrono::Duration::hours(1));
+        let orchestrator = harness.orchestrator(harness.recorded(vec![refused]));
+
+        orchestrator.tick().await.expect("the tick runs");
+
+        assert_eq!(
+            sleeps(&harness),
+            vec![(Some("dev-a".to_string()), at() + chrono::Duration::hours(1))]
+        );
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn makes_no_sandbox_for_a_sleeping_agent() {
+        let harness = Harness::new("orch-sleep-sandbox", |_| {});
+        harness.in_progress("FRK-1", "dev-a", "dev-b");
+        harness.asleep("dev-a", at() + chrono::Duration::hours(1));
+        let sandboxes = Arc::new(CountingSandboxFactory::default());
+        let adapter = harness.recorded(vec![reads_a_file()]);
+        let orchestrator = harness.orchestrator_with(adapter.clone(), sandboxes.clone());
+
+        orchestrator.tick().await.expect("the tick runs");
+
+        assert_eq!(sandboxes.created("FRK-1"), 0);
+        assert!(adapter.started().is_empty(), "{:?}", adapter.started());
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn plans_a_sprint_again_after_its_planner_slept() {
+        let harness = Harness::new("orch-sleep-sprint", with_a_scrum_master);
+        harness.ready("FRK-1");
+        harness.open_sprint("S1", &[]);
+        let until = at() + chrono::Duration::hours(2);
+        let adapter = harness.recorded(vec![refused_until(until), planning_ceremony_frk_1()]);
+        let first = harness
+            .orchestrator(adapter.clone())
+            .tick()
+            .await
+            .expect("the tick runs");
+        assert!(matches!(&first, TickReport::Sprint { .. }), "{first:?}");
+
+        let report = harness
+            .orchestrator_at(adapter.clone(), until + chrono::Duration::minutes(1))
+            .tick()
+            .await
+            .expect("the tick runs");
+
+        assert!(
+            matches!(&report, TickReport::Sprint { sprint_id, what }
+                if sprint_id == "S1" && what.contains("S1 holds FRK-1")),
+            "{report:?}"
+        );
+        let planning = adapter
+            .started()
+            .iter()
+            .filter(|spec| spec.purpose == SessionPurpose::Ceremony && spec.agent_id == "sm")
+            .count();
+        assert_eq!(planning, 2);
+        assert_eq!(harness.row("FRK-1").sprint.as_deref(), Some("S1"));
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn starts_no_session_for_a_sleeping_agent() {
+        let harness = Harness::new("orch-sleep-other", |_| {});
+        harness.in_progress("FRK-1", "dev-a", "dev-b");
+        harness.in_progress("FRK-2", "dev-b", "dev-a");
+        harness.asleep("dev-a", at() + chrono::Duration::hours(1));
+        let adapter = harness.recorded(vec![reads_a_file(), reads_a_file()]);
+        let orchestrator = harness.orchestrator(adapter.clone());
+
+        let first = orchestrator.tick().await.expect("the tick runs");
+        orchestrator.tick().await.expect("the tick runs");
+
+        assert_eq!(acted_on(&first), Some("FRK-2"), "{first:?}");
+        let agents: Vec<String> = adapter
+            .started()
+            .iter()
+            .map(|spec| spec.agent_id.clone())
+            .collect();
+        assert_eq!(agents, vec!["dev-b".to_string(), "dev-b".to_string()]);
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn idles_until_the_first_agent_wakes() {
+        let harness = Harness::new("orch-sleep-idle", |_| {});
+        harness.in_progress("FRK-1", "dev-a", "dev-b");
+        let until = at() + chrono::Duration::hours(1);
+        harness.asleep("dev-a", until);
+        let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
+
+        let report = orchestrator.tick().await.expect("the tick runs");
+
+        assert!(
+            matches!(&report, TickReport::Idle { why, until: Some(woken) }
+                if *woken == until && why.starts_with("waiting for dev-a, asleep until ")),
+            "{report:?}"
+        );
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn idles_without_a_time_when_nobody_sleeps() {
+        let harness = Harness::new("orch-sleep-nobody", |_| {});
+        let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
+
+        let report = orchestrator.tick().await.expect("the tick runs");
+
+        assert_eq!(
+            report,
+            TickReport::Idle {
+                why: NOTHING_TO_DO.to_string(),
+                until: None,
+            }
+        );
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn wakes_an_agent_when_its_sleep_ends() {
+        let harness = Harness::new("orch-sleep-wake", |_| {});
+        harness.in_progress("FRK-1", "dev-a", "dev-b");
+        let until = at() + chrono::Duration::hours(2);
+        let adapter = harness.recorded(vec![refused_until(until), reads_a_file()]);
+        let orchestrator = harness.orchestrator(adapter.clone());
+        orchestrator.tick().await.expect("the tick runs");
+        orchestrator.tick().await.expect("the tick runs");
+        assert_eq!(adapter.started().len(), 1, "no session while dev-a sleeps");
+
+        harness
+            .orchestrator_at(adapter.clone(), until + chrono::Duration::minutes(1))
+            .tick()
+            .await
+            .expect("the tick runs");
+
+        let started = adapter.started();
+        assert_eq!(started.len(), 2);
+        assert_eq!(
+            (started[1].agent_id.as_str(), started[1].purpose),
+            ("dev-a", SessionPurpose::Implement)
+        );
+        let notes = farik_notes(&harness);
+        assert_eq!(notes.len(), 1, "{notes:?}");
+        assert!(
+            notes[0].contains("its model provider's usage limit"),
+            "{}",
+            notes[0]
+        );
+        assert!(
+            started[1].initial_prompt.contains(&notes[0]),
+            "{}",
+            started[1].initial_prompt
+        );
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn still_assigns_work_to_a_sleeping_agent() {
+        let harness = Harness::new("orch-sleep-assign", with_a_scrum_master);
+        harness.blocked("FRK-2", "dev-b", "dev-a");
+        harness.ready("FRK-3");
+        harness.asleep("dev-a", at() + chrono::Duration::hours(1));
+        let adapter = harness.recorded(vec![reads_a_file()]);
+        let orchestrator = harness.orchestrator(adapter.clone());
+
+        let report = orchestrator.tick().await.expect("the tick runs");
+
+        assert_eq!(acted_on(&report), Some("FRK-3"), "{report:?}");
+        let started = adapter.started();
+        assert_eq!(
+            (started[0].agent_id.as_str(), started[0].purpose),
+            ("sm", SessionPurpose::Plan)
+        );
+        assert!(
+            started[0]
+                .initial_prompt
+                .contains("with room for it: dev-a."),
+            "{}",
+            started[0].initial_prompt
+        );
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn waits_for_a_sleeping_reviewer() {
+        let harness = Harness::new("orch-sleep-reviewer", |_| {});
+        harness.verifying("FRK-1");
+        let until = at() + chrono::Duration::hours(1);
+        harness.asleep("dev-b", until);
+        let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
+
+        waits_for(&orchestrator, "dev-b", until).await;
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn waits_for_a_sleeping_product_manager_to_accept() {
+        let harness = Harness::new("orch-sleep-accept", |_| {});
+        harness.verifying("FRK-1");
+        let orchestrator = harness.orchestrator(harness.recorded(vec![review_writes_note()]));
+        orchestrator.tick().await.expect("the review runs");
+        let until = at() + chrono::Duration::hours(1);
+        harness.asleep("pm", until);
+
+        waits_for(&orchestrator, "pm", until).await;
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn waits_for_a_sleeping_assigner() {
+        let harness = Harness::new("orch-sleep-assigner", |_| {});
+        harness.ready("FRK-1");
+        let until = at() + chrono::Duration::hours(1);
+        harness.asleep("pm", until);
+        let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
+
+        waits_for(&orchestrator, "pm", until).await;
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn waits_for_a_sleeping_sprint_planner() {
+        let harness = Harness::new("orch-sleep-planner", with_a_scrum_master);
+        harness.ready("FRK-1");
+        harness.open_sprint("S1", &[]);
+        let until = at() + chrono::Duration::hours(1);
+        harness.asleep("sm", until);
+        let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
+
+        waits_for(&orchestrator, "sm", until).await;
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn waits_for_the_agent_that_wakes_first() {
+        let harness = Harness::new("orch-sleep-earliest", |_| {});
+        harness.in_progress("FRK-1", "dev-a", "dev-b");
+        harness.in_progress("FRK-2", "dev-b", "dev-a");
+        harness.asleep("dev-a", at() + chrono::Duration::hours(2));
+        let until = at() + chrono::Duration::hours(1);
+        harness.asleep("dev-b", until);
+        let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
+
+        waits_for(&orchestrator, "dev-b", until).await;
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn leaves_a_spent_task_waiting_on_the_human_alone() {
+        let harness = Harness::new("orch-budget-question", |_| {});
+        in_progress_with_sessions(&harness, 1, 1);
+        harness.project.record(
+            "FRK-1",
+            "question.asked",
+            &json!({ "question": "Should done.txt be empty?", "asked_by": "dev-a" }),
+        );
+        let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
+
+        orchestrator.tick().await.expect("the tick runs");
+
+        assert_eq!(harness.row("FRK-1").status, TaskStatus::InProgress);
+        assert!(harness.events(&[EventKind::EscalationRaised]).is_empty());
+        assert!(harness.events(&[EventKind::TransitionRefused]).is_empty());
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn leaves_a_spent_task_already_escalated_alone() {
+        let harness = Harness::new("orch-budget-escalated", |_| {});
+        in_progress_with_sessions(&harness, 1, 1);
+        let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
+        orchestrator.tick().await.expect("the tick escalates it");
+        assert_eq!(harness.row("FRK-1").status, TaskStatus::Escalated);
+
+        orchestrator.tick().await.expect("the tick runs");
+
+        assert_eq!(harness.events(&[EventKind::TaskTransitioned]).len(), 3);
+        assert_eq!(
+            escalation_reasons(&harness),
+            vec![EscalationRaisedBodyReason::Sessions]
+        );
+        assert!(harness.events(&[EventKind::TransitionRefused]).is_empty());
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn quotes_no_note_from_an_earlier_session() {
+        let harness = Harness::new("orch-note-earlier", |_| {});
+        harness.in_progress("FRK-1", "dev-a", "dev-b");
+        harness.project.record(
+            "FRK-1",
+            "note.written",
+            &json!({ "kind": "progress", "text": "An earlier session's note.", "written_by": "dev-a" }),
+        );
+        let orchestrator = harness.orchestrator(harness.recorded(vec![hits_its_wall_clock()]));
+
+        orchestrator.tick().await.expect("the tick runs");
+
+        let notes = farik_notes(&harness);
+        assert_eq!(notes.len(), 1, "{notes:?}");
+        assert!(!notes[0].contains("Your last note"), "{}", notes[0]);
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn puts_an_agent_to_sleep_when_its_note_cannot_be_written() {
+        let harness = Harness::new("orch-sleep-no-note", |_| {});
+        harness.in_progress("FRK-1", "dev-a", "dev-b");
+        refuse_appends_of(&harness.project.deps.log, EventKind::NoteWritten);
+        let orchestrator = harness.orchestrator(harness.recorded(vec![provider_limit_429()]));
+
+        let ticked = orchestrator.tick().await;
+
+        assert!(ticked.is_err(), "{ticked:?}");
+        assert_eq!(
+            sleeps(&harness),
+            vec![(Some("dev-a".to_string()), at() + chrono::Duration::hours(1))]
+        );
+    }
+
+    /// Posts `text` in the channel as the human, its mentions parsed, and answers its seq.
+    fn said(harness: &Harness, author: &str, kind: MessageKind, text: &str) -> u64 {
+        let deps = &harness.project.deps;
+        let team = deps.files.read_team().expect("the team");
+        crate::channel::post(
+            &deps.log,
+            deps.clock.as_ref(),
+            &deps.ids,
+            crate::channel::NewMessage {
+                author: author.to_string(),
+                agent_id: (author != "human").then(|| author.to_string()),
+                kind,
+                text: text.to_string(),
+                mentions: crate::channel::mentions_in(text, &team, author),
+                task_id: None,
+                thread: None,
+                in_reply_to: None,
+                session_id: None,
+            },
+        )
+        .expect("posted")
+    }
+
+    /// Every message in the channel, oldest first.
+    fn messages(harness: &Harness) -> Vec<farik_protocol::event::MessagePostedBody> {
+        harness
+            .events(&[EventKind::MessagePosted])
+            .into_iter()
+            .filter_map(|event| match event.body {
+                EventBody::MessagePosted(body) => Some(body),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn answers_a_mention_in_a_conversation() {
+        let harness = Harness::new("orch-mention", |_| {});
+        let seq = said(&harness, "human", MessageKind::Human, "@dev-a status?");
+        let adapter = harness.recorded(vec![reply_to_a_mention()]);
+        let orchestrator = harness.orchestrator(adapter.clone());
+
+        let report = orchestrator.tick().await.expect("the tick runs");
+
+        assert!(
+            matches!(&report, TickReport::Conversation { agent_id, .. } if agent_id == "dev-a"),
+            "{report:?}"
+        );
+        let started = adapter.started();
+        assert_eq!(started.len(), 1, "{started:?}");
+        let spec = &started[0];
+        assert_eq!(spec.agent_id, "dev-a");
+        assert_eq!(spec.purpose, SessionPurpose::Conversation);
+        assert_eq!(spec.model, "claude-sonnet-5");
+        assert_eq!(spec.effort, Effort::Low);
+        assert_eq!(spec.task_id, None);
+        assert_eq!(
+            spec.farik_tools,
+            [
+                "farik_read_task",
+                "farik_read_board",
+                "farik_read_rules",
+                "farik_read_criteria",
+                "farik_create_task",
+                "farik_post_message",
+                "farik_write_memory",
+                "farik_read_decisions",
+            ]
+        );
+        assert_eq!(
+            spec.builtin_tools,
+            allowed_builtins(&BTreeSet::from([PermissionTier::Read]))
+        );
+        let mentions = block(&spec.initial_prompt, "mentions");
+        assert!(
+            mentions.contains("@dev-a status?"),
+            "{}",
+            spec.initial_prompt
+        );
+        assert!(
+            block(&spec.initial_prompt, "channel").contains("human: @dev-a status?"),
+            "{}",
+            spec.initial_prompt
+        );
+        let said = messages(&harness);
+        assert_eq!(said.len(), 2, "{said:?}");
+        assert_eq!(said[1].author, "dev-a");
+        assert_eq!(said[1].kind, MessageKind::Reply);
+        assert_eq!(said[1].in_reply_to.map(NonZeroU64::get), Some(seq));
+        // Its start records what it was shown, which answers the mentions up to it.
+        let starts = harness.events(&[EventKind::SessionStarted]);
+        let EventBody::SessionStarted(start) = &starts[0].body else {
+            panic!("a session's start");
+        };
+        assert_eq!(start.in_reply_to.map(NonZeroU64::get), Some(seq));
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn starts_no_conversation_for_a_ceremonys_mention() {
+        // The channel is read by all: a ceremony's words start no conversation.
+        let harness = Harness::new("orch-ceremony-mention", |_| {});
+        said(
+            &harness,
+            "pm",
+            MessageKind::Ceremony,
+            "@dev-a keep FRK-1 moving.",
+        );
+        let adapter = harness.recorded(vec![reply_to_a_mention()]);
+
+        harness
+            .orchestrator(adapter.clone())
+            .tick()
+            .await
+            .expect("the tick runs");
+
+        assert!(
+            !adapter
+                .started()
+                .iter()
+                .any(|spec| spec.purpose == SessionPurpose::Conversation),
+            "{:?}",
+            adapter.started()
+        );
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn answers_each_mention_once() {
+        let harness = Harness::new("orch-mention-once", |_| {});
+        said(&harness, "human", MessageKind::Human, "@dev-a status?");
+        let adapter = harness.recorded(vec![reply_to_a_mention(), reply_to_a_mention()]);
+        let orchestrator = harness.orchestrator(adapter.clone());
+
+        orchestrator.tick().await.expect("the tick runs");
+        let second = orchestrator.tick().await.expect("the tick runs");
+
+        assert!(matches!(&second, TickReport::Idle { .. }), "{second:?}");
+        assert_eq!(adapter.started().len(), 1, "{:?}", adapter.started());
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn answers_no_mention_on_a_spent_day() {
+        let harness = Harness::new("orch-mention-day", |_| {});
+        harness.spent(None, "s-0", 20.0);
+        said(&harness, "human", MessageKind::Human, "@dev-a status?");
+        let adapter = harness.recorded(vec![reply_to_a_mention()]);
+        let orchestrator = harness.orchestrator(adapter.clone());
+
+        let report = orchestrator.tick().await.expect("the tick runs");
+
+        assert_eq!(
+            report,
+            TickReport::Idle {
+                why: "the team's daily budget is spent".to_string(),
+                until: None,
+            }
+        );
+        assert!(adapter.started().is_empty(), "{:?}", adapter.started());
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn does_not_answer_a_reply() {
+        let harness = Harness::new("orch-mention-reply", |_| {});
+        said(
+            &harness,
+            "dev-a",
+            MessageKind::Reply,
+            "@dev-b can you look?",
+        );
+        let adapter = harness.recorded(vec![reply_to_a_mention()]);
+        let orchestrator = harness.orchestrator(adapter.clone());
+
+        let report = orchestrator.tick().await.expect("the tick runs");
+
+        assert!(matches!(&report, TickReport::Idle { .. }), "{report:?}");
+        assert!(adapter.started().is_empty(), "{:?}", adapter.started());
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn waits_for_a_sleeping_agent_to_answer() {
+        let harness = Harness::new("orch-mention-asleep", |_| {});
+        let until = at() + chrono::Duration::hours(1);
+        harness.asleep("dev-a", until);
+        said(&harness, "human", MessageKind::Human, "@dev-a status?");
+        let adapter = harness.recorded(vec![reply_to_a_mention()]);
+
+        let asleep = harness
+            .orchestrator(adapter.clone())
+            .tick()
+            .await
+            .expect("the tick runs");
+        assert!(
+            matches!(&asleep, TickReport::Idle { until: Some(woken), .. } if *woken == until),
+            "{asleep:?}"
+        );
+        assert!(adapter.started().is_empty(), "{:?}", adapter.started());
+
+        let awake = harness
+            .orchestrator_at(adapter.clone(), until + chrono::Duration::minutes(1))
+            .tick()
+            .await
+            .expect("the tick runs");
+        assert!(
+            matches!(&awake, TickReport::Conversation { agent_id, .. } if agent_id == "dev-a"),
+            "{awake:?}"
+        );
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn waits_for_a_paused_agent_to_answer() {
+        for status in ["paused", "retired"] {
+            let harness = Harness::new(&format!("orch-mention-{status}"), |wire| {
+                wire["agents"][1]["status"] = json!(status);
+            });
+            said(&harness, "human", MessageKind::Human, "@dev-a status?");
+            let adapter = harness.recorded(vec![reply_to_a_mention()]);
+            let orchestrator = harness.orchestrator(adapter.clone());
+
+            let away = orchestrator.tick().await.expect("the tick runs");
+            assert!(
+                matches!(&away, TickReport::Idle { .. }),
+                "{status}: {away:?}"
+            );
+            assert!(
+                adapter.started().is_empty(),
+                "{status}: {:?}",
+                adapter.started()
+            );
+
+            harness
+                .project
+                .deps
+                .files
+                .write_team(&crate::tools::fixtures::a_team_of_three(|wire| {
+                    wire["policy"]["wip_limit_per_agent"] = json!(1);
+                }))
+                .expect("the team is written");
+            let back = orchestrator.tick().await.expect("the tick runs");
+            assert!(
+                matches!(&back, TickReport::Conversation { agent_id, .. } if agent_id == "dev-a"),
+                "{status}: {back:?}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn answers_no_mention_outside_a_full_tick() {
+        let harness = Harness::new("orch-mention-scope", |_| {});
+        said(&harness, "human", MessageKind::Human, "@dev-a status?");
+        let adapter = harness.recorded(vec![reply_to_a_mention()]);
+        let orchestrator = harness.orchestrator(adapter.clone());
+
+        for scope in [
+            TickScope {
+                rules: TickRules::Planning,
+                ..TickScope::default()
+            },
+            TickScope {
+                rules: TickRules::Refining,
+                ..TickScope::default()
+            },
+            TickScope {
+                task_id: Some("FRK-1".parse().expect("a task id")),
+                ..TickScope::default()
+            },
+        ] {
+            let report = orchestrator
+                .tick_within(&scope)
+                .await
+                .expect("the tick runs");
+            assert!(
+                !matches!(&report, TickReport::Conversation { .. }),
+                "{scope:?}: {report:?}"
+            );
+        }
+        assert!(adapter.started().is_empty(), "{:?}", adapter.started());
+
+        let full = orchestrator.tick().await.expect("the tick runs");
+        assert!(matches!(&full, TickReport::Conversation { .. }), "{full:?}");
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn answers_a_mention_after_the_budget_rule_and_before_rule_3() {
+        // A task out of sessions is escalated before the mention is answered.
+        let harness = Harness::new("orch-mention-after-budget", |_| {});
+        in_progress_with_sessions(&harness, 1, 1);
+        said(&harness, "human", MessageKind::Human, "@dev-b status?");
+        let adapter = harness.recorded(vec![reply_to_a_mention()]);
+
+        let report = harness
+            .orchestrator(adapter.clone())
+            .tick()
+            .await
+            .expect("the tick runs");
+
+        assert_eq!(acted_on(&report), Some("FRK-1"), "{report:?}");
+        assert_eq!(harness.row("FRK-1").status, TaskStatus::Escalated);
+        assert!(adapter.started().is_empty(), "{:?}", adapter.started());
+
+        // The mention is answered before a rejected task goes back to its assignee.
+        let harness = Harness::new("orch-mention-before-rejected", |_| {});
+        harness.rejected("FRK-1", 0, "done.txt is missing");
+        said(&harness, "human", MessageKind::Human, "@dev-b status?");
+        let adapter = harness.recorded(vec![reply_to_a_mention()]);
+
+        let report = harness
+            .orchestrator(adapter.clone())
+            .tick()
+            .await
+            .expect("the tick runs");
+
+        assert!(
+            matches!(&report, TickReport::Conversation { agent_id, .. } if agent_id == "dev-b"),
+            "{report:?}"
+        );
+        assert_eq!(harness.row("FRK-1").status, TaskStatus::Rejected);
+    }
+
+    /// Session ids `session-1` and so on, the human posting `@dev-a and the tests?` each time
+    /// one is asked for: after the channel rule has read the pending mentions, before the
+    /// session's start is recorded.
+    struct PostsWhenAsked {
+        tools: Arc<crate::tools::ToolDeps>,
+        ids: farik_protocol::clock::SequentialIds,
+    }
+
+    impl farik_protocol::clock::IdSource for PostsWhenAsked {
+        fn session_id(&self) -> String {
+            crate::channel::post(
+                &self.tools.log,
+                self.tools.clock.as_ref(),
+                &self.tools.ids,
+                crate::channel::NewMessage {
+                    author: "human".to_string(),
+                    agent_id: None,
+                    kind: MessageKind::Human,
+                    text: "@dev-a and the tests?".to_string(),
+                    mentions: vec!["dev-a".to_string()],
+                    task_id: None,
+                    thread: None,
+                    in_reply_to: None,
+                    session_id: None,
+                },
+            )
+            .expect("posted");
+            self.ids.session_id()
+        }
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn keeps_a_mention_posted_while_its_conversation_starts_pending() {
+        let harness = Harness::new("orch-mention-race", |_| {});
+        let shown = said(&harness, "human", MessageKind::Human, "@dev-a status?");
+        let adapter = harness.recorded(vec![reply_to_a_mention()]);
+        let orchestrator = harness.orchestrator_with_ids(
+            adapter.clone(),
+            Arc::new(crate::sandbox::host::HostSandboxFactory),
+            harness.gh.forge(&harness.project.repo.path),
+            Arc::new(PostsWhenAsked {
+                tools: Arc::clone(&harness.project.deps),
+                ids: farik_protocol::clock::SequentialIds::new(),
+            }),
+        );
+
+        orchestrator.tick().await.expect("the tick runs");
+
+        let starts = harness.events(&[EventKind::SessionStarted]);
+        let EventBody::SessionStarted(start) = &starts[0].body else {
+            panic!("a session's start");
+        };
+        assert_eq!(start.in_reply_to.map(NonZeroU64::get), Some(shown));
+        let pending: Vec<String> =
+            crate::channel::pending_mentions(&harness.project.deps.log, "dev-a")
+                .expect("the log reads")
+                .into_iter()
+                .filter_map(|event| match event.body {
+                    EventBody::MessagePosted(body) => Some(body.text),
+                    _ => None,
+                })
+                .collect();
+        assert_eq!(pending, ["@dev-a and the tests?"]);
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn answers_a_mention_again_after_its_conversation_hits_the_provider_limit() {
+        let harness = Harness::new("orch-mention-limit", |_| {});
+        said(&harness, "human", MessageKind::Human, "@dev-a status?");
+        let adapter = harness.recorded(vec![provider_limit_429(), reply_to_a_mention()]);
+
+        let limited = harness
+            .orchestrator(adapter.clone())
+            .tick()
+            .await
+            .expect("the tick runs");
+        assert!(
+            matches!(&limited, TickReport::Conversation { agent_id, .. } if agent_id == "dev-a"),
+            "{limited:?}"
+        );
+        let until = at() + chrono::Duration::hours(1);
+        assert_eq!(sleeps(&harness), vec![(Some("dev-a".to_string()), until)]);
+
+        let awake = harness
+            .orchestrator_at(adapter.clone(), until + chrono::Duration::minutes(1))
+            .tick()
+            .await
+            .expect("the tick runs");
+        assert!(
+            matches!(&awake, TickReport::Conversation { agent_id, .. } if agent_id == "dev-a"),
+            "{awake:?}"
+        );
+        assert_eq!(adapter.started().len(), 2, "{:?}", adapter.started());
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn writes_the_summary_it_shows() {
+        let harness = Harness::new("orch-mention-summary", |_| {});
+        for number in 0..10 {
+            said(
+                &harness,
+                "human",
+                MessageKind::Human,
+                &format!("{number} {}", "word ".repeat(300)),
+            );
+        }
+        said(&harness, "human", MessageKind::Human, "@dev-a status?");
+        let adapter = harness.recorded(vec![reply_to_a_mention()]);
+        let orchestrator = harness.orchestrator(adapter.clone());
+
+        orchestrator.tick().await.expect("the tick runs");
+
+        let written = std::fs::read_to_string(
+            harness
+                .project
+                .repo
+                .path
+                .join(".farik/local/channel-summary.md"),
+        )
+        .expect("the summary is written");
+        let started = adapter.started();
+        let shown = block(&started[0].initial_prompt, "channel").trim_matches('\n');
+        assert_eq!(written, shown);
+        assert!(written.chars().count() <= 8_000, "{}", written.len());
+        assert!(written.ends_with("human: @dev-a status?"), "{written}");
+        assert!(!written.contains("human: 0 "), "the oldest is left out");
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn ages_an_escalation_past_its_limit() {
+        let harness = Harness::new("orch-aged-past-limit", |_| {});
+        let raised_seq = harness.escalated_hours_ago("FRK-1", "iterations", 25);
+        let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
+
+        let report = orchestrator.tick().await.expect("the tick runs");
+
+        assert_eq!(acted_on(&report), Some("FRK-1"), "{report:?}");
+        let aged = harness.events(&[EventKind::EscalationAged]);
+        assert_eq!(aged.len(), 1, "{aged:?}");
+        assert_eq!(
+            aged[0].envelope.ids.task_id.as_ref().map(|id| id.as_str()),
+            Some("FRK-1")
+        );
+        let EventBody::EscalationAged(body) = &aged[0].body else {
+            panic!("an aged escalation");
+        };
+        assert_eq!((body.raised_seq, body.hours), (raised_seq, 25));
+        let lines = messages(&harness);
+        assert_eq!(lines.len(), 1, "{lines:?}");
+        assert_eq!(lines[0].kind, MessageKind::System);
+        assert!(
+            lines[0].text.contains("waited 25 hours"),
+            "{}",
+            lines[0].text
+        );
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn ages_an_escalation_once() {
+        let harness = Harness::new("orch-aged-once", |_| {});
+        harness.escalated_hours_ago("FRK-1", "iterations", 25);
+        let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
+        orchestrator.tick().await.expect("the first tick runs");
+
+        let report = orchestrator.tick().await.expect("the second tick runs");
+
+        assert_eq!(
+            report,
+            TickReport::Idle {
+                why: NOTHING_TO_DO.to_string(),
+                until: None,
+            }
+        );
+        assert_eq!(harness.events(&[EventKind::EscalationAged]).len(), 1);
+        assert_eq!(messages(&harness).len(), 1);
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn ages_one_escalation_per_tick() {
+        let harness = Harness::new("orch-aged-two", |_| {});
+        let older = harness.escalated_hours_ago("FRK-1", "iterations", 30);
+        let newer = harness.escalated_hours_ago("FRK-2", "iterations", 26);
+        let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
+
+        let first = orchestrator.tick().await.expect("the first tick runs");
+        assert_eq!(acted_on(&first), Some("FRK-1"), "{first:?}");
+        let second = orchestrator.tick().await.expect("the second tick runs");
+        assert_eq!(acted_on(&second), Some("FRK-2"), "{second:?}");
+
+        let aged = harness.events(&[EventKind::EscalationAged]);
+        assert_eq!(aged.len(), 2, "{aged:?}");
+        let raised_seqs: Vec<u64> = aged
+            .iter()
+            .map(|event| match &event.body {
+                EventBody::EscalationAged(body) => body.raised_seq,
+                _ => panic!("an aged escalation"),
+            })
+            .collect();
+        assert_eq!(raised_seqs, vec![older, newer]);
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn ages_a_new_escalation_of_the_same_task_again() {
+        let harness = Harness::new("orch-aged-again", |_| {});
+        harness.escalated_hours_ago("FRK-1", "iterations", 50);
+        let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
+        orchestrator.tick().await.expect("the first tick runs");
+
+        harness.project.moved(
+            "FRK-1",
+            "escalated",
+            "refining",
+            &json!({ "actor": "human", "requested_by": "human" }),
+        );
+        let raised_at = at() - chrono::Duration::hours(25);
+        harness
+            .project
+            .moved_at(raised_at, "FRK-1", "refining", "escalated", &json!({}));
+        let second_seq = harness
+            .project
+            .record_at(
+                raised_at,
+                "FRK-1",
+                "escalation.raised",
+                &json!({ "reason": "iterations", "detail": "FRK-1 waits" }),
+            )
+            .envelope
+            .seq;
+
+        let report = orchestrator.tick().await.expect("the second tick runs");
+
+        assert_eq!(acted_on(&report), Some("FRK-1"), "{report:?}");
+        let aged = harness.events(&[EventKind::EscalationAged]);
+        assert_eq!(aged.len(), 2, "{aged:?}");
+        let EventBody::EscalationAged(body) = &aged[1].body else {
+            panic!("an aged escalation");
+        };
+        assert_eq!(body.raised_seq, second_seq);
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn leaves_a_young_escalation() {
+        let harness = Harness::new("orch-aged-young", |_| {});
+        harness.escalated_hours_ago("FRK-1", "iterations", 23);
+        let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
+
+        let report = orchestrator.tick().await.expect("the tick runs");
+
+        assert_eq!(
+            report,
+            TickReport::Idle {
+                why: NOTHING_TO_DO.to_string(),
+                until: None,
+            }
+        );
+        assert_eq!(harness.events(&[EventKind::EscalationAged]).len(), 0);
+    }
+
+    /// The Scrum Master, and S1 holding FRK-1, accepted, its completion note written and $1.25
+    /// spent on it while the sprint was open: the sprint the first tick ends.
+    fn a_finished_sprint(name: &str) -> Harness {
+        let harness = Harness::new(name, with_a_scrum_master);
+        harness.accepted("FRK-1");
+        harness.open_sprint("S1", &["FRK-1"]);
+        harness.project.record(
+            "FRK-1",
+            "note.written",
+            &json!({
+                "kind": "completion",
+                "text": "The login page is done.\nIts tests pass on every browser.",
+                "written_by": "dev-a"
+            }),
+        );
+        harness.spent(Some("FRK-1"), "s-1", 1.25);
+        harness
+    }
+
+    /// The thread of each ceremony session started, oldest first.
+    fn ceremonies(harness: &Harness) -> Vec<Thread> {
+        harness
+            .events(&[EventKind::SessionStarted])
+            .into_iter()
+            .filter_map(|event| match event.body {
+                EventBody::SessionStarted(body) => body.thread,
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn reviews_an_ended_sprint() {
+        let harness = a_finished_sprint("orch-review");
+        let adapter = harness.recorded(vec![review(), retro()]);
+        let orchestrator = harness.orchestrator(adapter.clone());
+        let ended = orchestrator.tick().await.expect("the tick runs");
+        assert!(
+            matches!(&ended, TickReport::Sprint { what, .. } if what.contains("ended it")),
+            "{ended:?}"
+        );
+
+        let report = orchestrator.tick().await.expect("the tick runs");
+
+        assert!(
+            matches!(&report, TickReport::Sprint { sprint_id, what }
+                if sprint_id == "S1" && what.contains("review")),
+            "{report:?}"
+        );
+        assert_eq!(ceremonies(&harness), vec![Thread::Review]);
+        let started = adapter.started();
+        let spec = &started[0];
+        assert_eq!(
+            (spec.agent_id.as_str(), spec.purpose, spec.task_id.as_ref()),
+            ("sm", SessionPurpose::Ceremony, None)
+        );
+        for fact in ["FRK-1", "accepted", "The login page is done.", "$1.25"] {
+            assert!(
+                spec.initial_prompt.contains(fact),
+                "{fact}: {}",
+                spec.initial_prompt
+            );
+        }
+        assert!(
+            !spec.initial_prompt.contains("every browser"),
+            "the note's first line alone: {}",
+            spec.initial_prompt
+        );
+        assert_eq!(tools_of(spec), BTreeSet::from(READ_AND_POST));
+
+        let next = orchestrator.tick().await.expect("the tick runs");
+
+        assert!(
+            matches!(&next, TickReport::Sprint { sprint_id, what }
+                if sprint_id == "S1" && what.contains("retro")),
+            "{next:?}"
+        );
+        assert_eq!(ceremonies(&harness), vec![Thread::Review, Thread::Retro]);
+        let mut retro_tools = BTreeSet::from(READ_AND_POST);
+        retro_tools.insert("farik_append_retro");
+        assert_eq!(tools_of(&adapter.started()[1]), retro_tools);
+        let after = orchestrator.tick().await.expect("the tick runs");
+        assert!(!matches!(after, TickReport::Sprint { .. }), "{after:?}");
+    }
+
+    /// Every answer a replay's Farik tool calls were given: the tool's full name and the answer.
+    type Answers = Arc<std::sync::Mutex<Vec<(String, serde_json::Value)>>>;
+
+    /// A recorded adapter playing `transcripts` as `recorded` does, and the answers its Farik tool
+    /// calls were given.
+    fn answered(
+        harness: &Harness,
+        transcripts: Vec<Transcript>,
+    ) -> (Arc<RecordedAdapter>, Answers) {
+        let answers = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let seen = Arc::clone(&answers);
+        let inner = crate::recorded::fixtures::tool_runner(Arc::clone(&harness.daemon));
+        let runner: crate::recorded::ToolRunner = Arc::new(move |session_id, tool, input| {
+            let inner = Arc::clone(&inner);
+            let seen = Arc::clone(&seen);
+            Box::pin(async move {
+                let answer = inner(session_id, tool.clone(), input).await;
+                seen.lock()
+                    .expect("no test panics holding it")
+                    .push((tool, answer.clone()));
+                answer
+            })
+        });
+        (
+            Arc::new(RecordedAdapter::with_tools(transcripts, runner)),
+            answers,
+        )
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn appends_the_retro() {
+        let harness = a_finished_sprint("orch-retro");
+        harness.project.record(
+            "FRK-1",
+            "escalation.raised",
+            &json!({ "reason": "iterations", "detail": "three rejections" }),
+        );
+        let retro_file = harness.project.repo.path.join(".farik/team/retro.md");
+        std::fs::write(
+            &retro_file,
+            "# Retro\n\n## S0 (2026-09-01)\n\nAsk the human sooner.\n",
+        )
+        .expect("the last retro is written");
+        let (adapter, answers) = answered(&harness, vec![review(), retro()]);
+        let orchestrator = harness.orchestrator(adapter.clone());
+        for _ in 0..2 {
+            orchestrator.tick().await.expect("the tick runs");
+        }
+
+        let report = orchestrator.tick().await.expect("the tick runs");
+
+        assert!(
+            matches!(&report, TickReport::Sprint { what, .. } if what.contains("retro")),
+            "{report:?}"
+        );
+        let prompt = &adapter.started()[1].initial_prompt;
+        for fact in ["FRK-1 escalated: iterations", "Ask the human sooner."] {
+            assert!(prompt.contains(fact), "{fact}: {prompt}");
+        }
+        assert_eq!(
+            std::fs::read_to_string(&retro_file).expect("the retro reads"),
+            "# Retro\n\n## S0 (2026-09-01)\n\nAsk the human sooner.\n\n## S1 (2026-09-22)\n\n\
+             Keep the tasks small: FRK-1 passed its review the first time.\n"
+        );
+        let appended = harness.events(&[EventKind::RetroAppended]);
+        assert_eq!(appended.len(), 1, "{appended:?}");
+        let EventBody::RetroAppended(body) = &appended[0].body else {
+            panic!("a retro");
+        };
+        assert_eq!(
+            (
+                body.sprint_id.as_str(),
+                body.text.as_str(),
+                body.appended_by.as_str()
+            ),
+            (
+                "S1",
+                "Keep the tasks small: FRK-1 passed its review the first time.",
+                "sm"
+            )
+        );
+        assert_eq!(appended[0].envelope.ids.task_id, None);
+        let retros: Vec<serde_json::Value> = answers
+            .lock()
+            .expect("no test panics holding it")
+            .iter()
+            .filter(|(tool, _)| tool == "mcp__farik__farik_append_retro")
+            .map(|(_, answer)| answer.clone())
+            .collect();
+        assert_eq!(retros.len(), 2, "{retros:?}");
+        assert_eq!(retros[0]["sprint_id"], "S1", "{retros:?}");
+        assert!(
+            retros[1]["error"]
+                .as_str()
+                .is_some_and(|error| error.contains("retro_refused: ")),
+            "{retros:?}"
+        );
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn retries_a_retro_that_hit_a_limit() {
+        let harness = a_finished_sprint("orch-retro-limit");
+        let until = at() + chrono::Duration::hours(2);
+        let adapter = harness.recorded(vec![review(), refused_until(until), retro()]);
+        let orchestrator = harness.orchestrator(adapter.clone());
+        for _ in 0..3 {
+            orchestrator.tick().await.expect("the tick runs");
+        }
+        assert_eq!(ceremonies(&harness), vec![Thread::Review, Thread::Retro]);
+        let asleep = orchestrator.tick().await.expect("the tick runs");
+        assert!(!matches!(asleep, TickReport::Sprint { .. }), "{asleep:?}");
+
+        let report = harness
+            .orchestrator_at(adapter.clone(), until + chrono::Duration::minutes(1))
+            .tick()
+            .await
+            .expect("the tick runs");
+
+        assert!(
+            matches!(&report, TickReport::Sprint { what, .. } if what.contains("retro")),
+            "{report:?}"
+        );
+        assert_eq!(
+            ceremonies(&harness),
+            vec![Thread::Review, Thread::Retro, Thread::Retro]
+        );
+        assert_eq!(harness.events(&[EventKind::RetroAppended]).len(), 1);
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn holds_no_second_retro_once_one_appended() {
+        let harness = a_finished_sprint("orch-retro-appended");
+        let until = at() + chrono::Duration::hours(2);
+        // The retro appends, then its provider refuses it at a limit before it ends.
+        let appends_then_sleeps = Transcript::from_jsonl(
+            &retro()
+                .lines()
+                .take(5)
+                .chain(refused_until(until).lines().skip(1))
+                .collect::<Vec<_>>()
+                .join("\n"),
+        );
+        let adapter = harness.recorded(vec![review(), appends_then_sleeps, retro()]);
+        let orchestrator = harness.orchestrator(adapter.clone());
+        for _ in 0..3 {
+            orchestrator.tick().await.expect("the tick runs");
+        }
+        assert_eq!(
+            end_reasons(&harness).last(),
+            Some(&SessionEndedBodyReason::ProviderLimit)
+        );
+        assert_eq!(harness.events(&[EventKind::RetroAppended]).len(), 1);
+
+        let report = harness
+            .orchestrator_at(adapter.clone(), until + chrono::Duration::minutes(1))
+            .tick()
+            .await
+            .expect("the tick runs");
+
+        assert!(!matches!(report, TickReport::Sprint { .. }), "{report:?}");
+        assert_eq!(ceremonies(&harness), vec![Thread::Review, Thread::Retro]);
+        assert_eq!(harness.events(&[EventKind::RetroAppended]).len(), 1);
+        let file = std::fs::read_to_string(harness.project.repo.path.join(".farik/team/retro.md"))
+            .expect("the retro reads");
+        assert_eq!(file.matches("## S1 ").count(), 1, "{file}");
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn holds_no_review_or_retro_on_a_spent_day() {
+        let harness = a_finished_sprint("orch-review-day");
+        let clock = Arc::new(MovableClock::new(at()));
+        let adapter = harness.recorded(vec![review(), retro()]);
+        let orchestrator = harness.orchestrator_on(adapter.clone(), Arc::clone(&clock));
+        orchestrator.tick().await.expect("the sprint ends");
+        day_spent_at(&harness, at());
+
+        let spent = orchestrator.tick().await.expect("the tick runs");
+
+        assert!(!matches!(spent, TickReport::Sprint { .. }), "{spent:?}");
+        assert!(
+            ceremonies(&harness).is_empty(),
+            "{:?}",
+            ceremonies(&harness)
+        );
+        let next_day = at() + chrono::Duration::days(1);
+        clock.set(next_day);
+        orchestrator.tick().await.expect("the review runs");
+        assert_eq!(ceremonies(&harness), vec![Thread::Review]);
+        day_spent_at(&harness, next_day);
+        let spent = orchestrator.tick().await.expect("the tick runs");
+        assert!(!matches!(spent, TickReport::Sprint { .. }), "{spent:?}");
+        assert_eq!(ceremonies(&harness), vec![Thread::Review]);
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn holds_no_review_or_retro_outside_a_full_tick() {
+        let harness = a_finished_sprint("orch-review-scoped");
+        let adapter = harness.recorded(vec![review(), retro()]);
+        let orchestrator = harness.orchestrator(adapter.clone());
+        orchestrator.tick().await.expect("the sprint ends");
+
+        // Before the review, then before the retro.
+        for held in [vec![], vec![Thread::Review]] {
+            for scope in [
+                TickScope {
+                    rules: TickRules::Planning,
+                    ..TickScope::default()
+                },
+                TickScope {
+                    rules: TickRules::Refining,
+                    ..TickScope::default()
+                },
+                TickScope {
+                    task_id: Some("FRK-1".parse().expect("a task id")),
+                    ..TickScope::default()
+                },
+            ] {
+                let report = orchestrator
+                    .tick_within(&scope)
+                    .await
+                    .expect("the tick runs");
+                assert!(!matches!(report, TickReport::Sprint { .. }), "{report:?}");
+            }
+            assert_eq!(ceremonies(&harness), held);
+            orchestrator.tick().await.expect("the tick runs");
+        }
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn holds_no_review_or_retro_of_a_sprint_that_held_no_task() {
+        let harness = Harness::new("orch-review-empty", with_a_scrum_master);
+        harness.open_sprint("S1", &[]);
+        harness.project.record(
+            "",
+            "sprint.ended",
+            &json!({ "sprint_id": "S1", "ended_by": "human", "left": [] }),
+        );
+        let adapter = harness.recorded(vec![review(), retro()]);
+
+        let report = harness
+            .orchestrator(adapter.clone())
+            .tick()
+            .await
+            .expect("the tick runs");
+
+        assert!(!matches!(report, TickReport::Sprint { .. }), "{report:?}");
+        assert!(adapter.started().is_empty(), "{:?}", adapter.started());
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn holds_no_review_once_a_new_sprint_started() {
+        let harness = a_finished_sprint("orch-review-next-sprint");
+        let adapter = harness.recorded(vec![review(), retro()]);
+        let orchestrator = harness.orchestrator(adapter.clone());
+        orchestrator.tick().await.expect("the sprint ends");
+        harness.project.record(
+            "",
+            "sprint.started",
+            &json!({ "sprint_id": "S2", "budget_usd": null, "started_by": "human" }),
+        );
+
+        let report = orchestrator.tick().await.expect("the tick runs");
+
+        assert!(!matches!(report, TickReport::Sprint { .. }), "{report:?}");
+        assert!(
+            ceremonies(&harness).is_empty(),
+            "{:?}",
+            ceremonies(&harness)
         );
     }
 }

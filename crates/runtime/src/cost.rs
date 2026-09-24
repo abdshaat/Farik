@@ -22,6 +22,7 @@ use farik_protocol::event::{
 use farik_roles::{RoleError, load_role};
 use farik_store::{CostProjection, CostScope, EventLog, Projections, StoreError};
 
+use crate::channel::{ChannelError, post_system};
 use crate::session::{SessionPurpose, TRIAGE_MODEL, session_model};
 
 /// Why a cost or an exhausted budget was not recorded, or a budget could not be read.
@@ -49,6 +50,19 @@ impl fmt::Display for CostError {
 }
 
 impl std::error::Error for CostError {}
+
+impl From<ChannelError> for CostError {
+    fn from(error: ChannelError) -> Self {
+        match error {
+            ChannelError::Store(error) => error.into(),
+            ChannelError::Refused { reason } => Self::Event { detail: reason },
+            // A post writes no file.
+            ChannelError::Files(error) => Self::Event {
+                detail: error.to_string(),
+            },
+        }
+    }
+}
 
 impl From<StoreError> for CostError {
     fn from(error: StoreError) -> Self {
@@ -132,9 +146,10 @@ pub fn record_session_cost(
 /// active agents that use it, in team order and without repeats.
 ///
 /// An agent's model is its own `model.id` when it has one and otherwise its role's default
-/// (`session_model`); an active Product Manager also uses `TRIAGE_MODEL`, which its triage
-/// sessions run on (5.16). An agent with no model of its own whose role Farik does not ship is
-/// passed over, since nothing could load its role to start a session of it.
+/// (`session_model`); every active agent also uses `TRIAGE_MODEL`, which its conversations, a
+/// Product Manager's triage, and the ceremony runner's ceremonies run on (5.9, 5.16). An agent
+/// with no model of its own whose role Farik does not ship is passed over, since nothing could
+/// load its role to start a session of it.
 ///
 /// # Errors
 ///
@@ -151,14 +166,13 @@ pub fn unpriced_models(
             Some(model) => models.push(model.id.to_string()),
             None => match load_role(role) {
                 Ok(definition) => models.push(session_model(agent, &definition).0),
-                // Nothing could start a session of a role Farik does not ship.
+                // Every role a team file can give an agent ships now; `NotFound` is `Human`
+                // alone, which no agent's role is, so this arm never fires on a real team.
                 Err(RoleError::NotFound { .. }) => {}
                 Err(error) => return Err(error),
             },
         }
-        if role == Role::ProductManager {
-            models.push(TRIAGE_MODEL.to_string());
-        }
+        models.push(TRIAGE_MODEL.to_string());
         for model in models {
             if prices.prices.contains_key(model.as_str()) {
                 continue;
@@ -178,7 +192,7 @@ pub fn unpriced_models(
 /// The session limits are the role's defaults with each field `team.budgets.session` sets put in
 /// its place. The task's come from its contract, and a session with no task is bounded by none. The
 /// day is the UTC date of `now`, and a team that sets no daily budget has an unbounded day (ADR
-/// 0015). The sprint's is unbounded until sprints exist.
+/// 0015). The sprint's is the open sprint's, and unbounded with none open or one with no budget.
 ///
 /// # Errors
 ///
@@ -219,6 +233,13 @@ pub fn budget_state(
         }
     };
     let day = spent_by(projections, CostScope::Day, &now.date_naive().to_string())?;
+    let (sprint_spent_usd, sprint_max_usd) = match projections.open_sprint()? {
+        None => (0.0, f64::INFINITY),
+        Some(open) => (
+            spent_by(projections, CostScope::Sprint, &open.sprint_id)?.map_or(0.0, |row| row.usd),
+            open.budget_usd.unwrap_or(f64::INFINITY),
+        ),
+    };
     Ok(BudgetState {
         session: *session,
         session_limits,
@@ -226,8 +247,8 @@ pub fn budget_state(
         task_max_usd,
         task_sessions,
         task_max_sessions,
-        sprint_spent_usd: 0.0,
-        sprint_max_usd: f64::INFINITY,
+        sprint_spent_usd,
+        sprint_max_usd,
         day_spent_usd: day.map_or(0.0, |row| row.usd),
         day_max_usd: team.budgets.daily_usd.unwrap_or(f64::INFINITY),
     })
@@ -261,6 +282,19 @@ pub fn record_exhaustion(
         };
         let appended = log.append(&stamp(EventBody::BudgetExhausted(body), clock, ids)?)?;
         projections.apply(&appended)?;
+        // The team's budgets stop everyone, so the channel is told (5.9).
+        let line = match exhausted.scope {
+            BudgetScope::DayUsd => format!(
+                "the daily budget is spent (${:.2} of ${:.2}): the team pauses until tomorrow (UTC)",
+                after.day_spent_usd, after.day_max_usd
+            ),
+            BudgetScope::SprintUsd => format!(
+                "the sprint's budget is spent (${:.2} of ${:.2}): no new work is assigned",
+                after.sprint_spent_usd, after.sprint_max_usd
+            ),
+            _ => continue,
+        };
+        post_system(log, clock, ids, ids.task_id.clone(), &line)?;
     }
     Ok(crossed)
 }
@@ -322,9 +356,7 @@ fn scope_wire(scope: BudgetScope) -> BudgetExhaustedBodyScope {
 
 fn consequence_wire(consequence: BudgetConsequence) -> BudgetExhaustedBodyConsequence {
     match consequence {
-        BudgetConsequence::EndSessionAndBlockTask => {
-            BudgetExhaustedBodyConsequence::EndSessionAndBlockTask
-        }
+        BudgetConsequence::EndSessionWithNote => BudgetExhaustedBodyConsequence::EndSessionWithNote,
         BudgetConsequence::EscalateTask => BudgetExhaustedBodyConsequence::EscalateTask,
         BudgetConsequence::StopNewAssignments => BudgetExhaustedBodyConsequence::StopNewAssignments,
         BudgetConsequence::PauseTeam => BudgetExhaustedBodyConsequence::PauseTeam,
@@ -349,10 +381,10 @@ mod tests {
     use farik_core::team::fixtures::{a_team_wire, an_agent_wire};
     use farik_core::team::{Team, validate_team};
     use farik_protocol::clock::FixedClock;
-    use farik_protocol::event::fixtures::a_new_event;
+    use farik_protocol::event::fixtures::{a_new_event, an_event_wire};
     use farik_protocol::event::{
         BudgetExhaustedBodyConsequence, BudgetExhaustedBodyScope, CostRecordedBodyPurpose,
-        EventBody, EventIds, EventKind, FarikEvent,
+        EventBody, EventIds, EventKind, FarikEvent, MessageKind, NewEvent, event_from_value,
     };
     use farik_store::{
         CostScope, EventLog, EventQuery, IN_MEMORY, Projections, open_event_log, open_projections,
@@ -515,8 +547,8 @@ mod tests {
         }
         for (consequence, wire) in [
             (
-                BudgetConsequence::EndSessionAndBlockTask,
-                "end_session_and_block_task",
+                BudgetConsequence::EndSessionWithNote,
+                "end_session_with_note",
             ),
             (BudgetConsequence::EscalateTask, "escalate_task"),
             (
@@ -646,10 +678,16 @@ mod tests {
                 .collect()
         };
         assert_eq!(
-            unpriced_models(&team, &only_opus_5).expect("an Architect with no model is skipped"),
+            unpriced_models(&team, &only_opus_5)
+                .expect("an Architect with no model uses its role's shipped model"),
+            // Every active agent's conversations, and the ceremony runner's ceremonies, run on
+            // Claude Sonnet 5 whatever its own model.
             named(&[
                 ("claude-other-2", &["arch-2"]),
-                ("claude-sonnet-5", &["pm"]),
+                (
+                    "claude-sonnet-5",
+                    &["pm", "dev-a", "dev-b", "arch", "arch-2"]
+                ),
                 ("claude-unknown-9", &["dev-a", "dev-b"]),
             ])
         );
@@ -731,6 +769,46 @@ mod tests {
         assert!(close(read.day_max_usd, 20.0));
         assert!(read.sprint_max_usd.is_infinite() && read.sprint_max_usd > 0.0);
         assert!(close(read.sprint_spent_usd, 0.0));
+    }
+
+    #[test]
+    fn fills_the_sprint_budget_from_the_open_sprint() {
+        let (log, projections) = a_board();
+        filed(&log, &projections, "FRK-1");
+        let team = a_team(None);
+        let none = state(&projections, &team, Role::SoftwareDeveloper, None);
+        assert!(none.sprint_max_usd.is_infinite() && none.sprint_max_usd > 0.0);
+        assert!(close(none.sprint_spent_usd, 0.0));
+
+        // S1 open with ten dollars, holding FRK-1.
+        let mut started = an_event_wire(EventKind::SprintStarted);
+        started["body"]["budget_usd"] = json!(10.0);
+        let started = event_from_value(&started).expect("the fixture is schema-valid");
+        let started = NewEvent {
+            recorded_at: started.envelope.recorded_at,
+            ids: started.envelope.ids,
+            body: started.body,
+        };
+        for event in [started, a_new_event(EventKind::SprintPlanned)] {
+            let appended = log.append(&event).expect("appends");
+            projections.apply(&appended).expect("projects");
+        }
+        record_session_cost(
+            &log,
+            &projections,
+            &source(ids(Some("FRK-1"), "a")),
+            &usage(4_000_000, 0),
+            &prices(),
+            &clock(),
+        )
+        .expect("recorded");
+        let read = state(&projections, &team, Role::SoftwareDeveloper, None);
+        assert!(close(read.sprint_max_usd, 10.0), "{}", read.sprint_max_usd);
+        assert!(
+            close(read.sprint_spent_usd, 4.0),
+            "{}",
+            read.sprint_spent_usd
+        );
     }
 
     #[test]
@@ -860,7 +938,8 @@ mod tests {
             }]
         );
         let events = everything(&log);
-        assert_eq!(events.len(), 1);
+        // The exhaustion, and Farik's line in the channel about it.
+        assert_eq!(events.len(), 2);
         let EventBody::BudgetExhausted(body) = &events[0].body else {
             panic!("a budget.exhausted, not {:?}", events[0].body.kind());
         };
@@ -875,6 +954,65 @@ mod tests {
         let again = record_exhaustion(&log, &projections, &after, &still, &crossed, &clock())
             .expect("nothing to record");
         assert_eq!(again, Vec::new());
-        assert_eq!(everything(&log).len(), 1);
+        assert_eq!(everything(&log).len(), 2);
+    }
+
+    #[test]
+    fn posts_a_line_when_the_day_is_spent() {
+        let (log, projections) = a_board();
+        let team = a_team(None);
+        let before = BudgetState {
+            day_spent_usd: 19.0,
+            sprint_spent_usd: 9.0,
+            sprint_max_usd: 10.0,
+            ..state(&projections, &team, Role::SoftwareDeveloper, None)
+        };
+        let day = BudgetState {
+            day_spent_usd: 21.0,
+            ..before
+        };
+        let sprint = BudgetState {
+            sprint_spent_usd: 11.0,
+            ..day
+        };
+
+        record_exhaustion(
+            &log,
+            &projections,
+            &before,
+            &day,
+            &ids(None, "s1"),
+            &clock(),
+        )
+        .expect("recorded");
+        record_exhaustion(
+            &log,
+            &projections,
+            &day,
+            &sprint,
+            &ids(None, "s1"),
+            &clock(),
+        )
+        .expect("recorded");
+
+        let lines: Vec<FarikEvent> = everything(&log)
+            .into_iter()
+            .filter(|event| event.body.kind() == EventKind::MessagePosted)
+            .collect();
+        let texts: Vec<String> = lines
+            .iter()
+            .map(|event| match &event.body {
+                EventBody::MessagePosted(body) => {
+                    assert_eq!(body.author, "farik");
+                    assert_eq!(body.kind, MessageKind::System);
+                    assert_eq!(event.envelope.ids.agent_id, None);
+                    body.text.clone()
+                }
+                other => panic!("a message, not {other:?}"),
+            })
+            .collect();
+        assert_eq!(texts.len(), 2, "{texts:?}");
+        assert!(texts[0].contains("daily budget"), "{texts:?}");
+        assert!(texts[1].contains("sprint's budget"), "{texts:?}");
     }
 }

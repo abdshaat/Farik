@@ -5,6 +5,7 @@
 
 use farik_core::contract::{TaskId, validate_contract};
 use farik_core::criteria::{fixtures::a_criteria_library_wire, validate_criteria};
+use farik_core::sprint::{Sprint, validate_sprint};
 use farik_core::team::AgentId;
 use farik_store::files::fixtures::{TempProject, a_team};
 use farik_store::files::{FilesError, LocalSettings, Sandbox, contract_yaml, criteria_yaml};
@@ -29,6 +30,13 @@ fn a_contract(id: &str) -> farik_core::contract::TaskContract {
     let mut wire = farik_core::contract::fixtures::a_contract_wire();
     wire["id"] = serde_json::json!(id);
     validate_contract(&wire).expect("the fixture is a contract")
+}
+
+/// The sprint `farik-core`'s own fixture describes, with the id a test asks for.
+fn a_sprint(id: &str) -> Sprint {
+    let mut wire = farik_core::sprint::fixtures::an_open_sprint_wire();
+    wire["id"] = serde_json::json!(id);
+    validate_sprint(&wire).expect("the fixture is a sprint")
 }
 
 #[test]
@@ -644,6 +652,34 @@ fn reads_back_the_project_scan_and_says_when_there_is_none() {
 }
 
 #[test]
+fn appends_to_the_retro_file() {
+    // The retro is what the next planning is told the team learned (5.9): each sprint's section
+    // added below the last, the file made with its title by the first.
+    let project = TempProject::new("retro");
+    let files = project.files();
+    assert_eq!(files.read_retro().expect("no retro yet"), None);
+    let day = |day: u32| chrono::NaiveDate::from_ymd_opt(2026, 9, day).expect("a real date");
+
+    files
+        .append_retro("S1", day(22), "Keep the tasks small.")
+        .expect("the first section");
+    files
+        .append_retro("S2", day(29), "Ask the human sooner.")
+        .expect("the second section");
+
+    let expected = "# Retro\n\n## S1 (2026-09-22)\n\nKeep the tasks small.\n\n\
+                    ## S2 (2026-09-29)\n\nAsk the human sooner.\n";
+    assert_eq!(
+        std::fs::read_to_string(project.root.join(".farik/team/retro.md")).expect("the file"),
+        expected
+    );
+    assert_eq!(
+        files.read_retro().expect("it reads back").as_deref(),
+        Some(expected)
+    );
+}
+
+#[test]
 fn writes_a_product_document_and_refuses_one_that_climbs_out() {
     let project = TempProject::new("product");
     let files = project.files();
@@ -934,4 +970,92 @@ fn prices_with_the_override_as_a_whole() {
         ["claude-opus-5"]
     );
     assert!(!prices.prices.contains_key("claude-fable-5"));
+}
+
+#[test]
+fn writes_and_reads_a_sprint() {
+    let project = TempProject::new("round-trip-sprint");
+    let files = project.files();
+    assert!(
+        !project.root.join(".farik/sprints").exists(),
+        "the directory did not exist before the first write"
+    );
+
+    let sprint = a_sprint("S1");
+    files.write_sprint(&sprint).expect("the sprint is written");
+
+    assert!(
+        project.root.join(".farik/sprints").is_dir(),
+        "made on the first write"
+    );
+    assert_eq!(files.read_sprint("S1").expect("it reads back"), sprint);
+}
+
+#[test]
+fn lists_sprints_by_number() {
+    let project = TempProject::new("list-sprints");
+    let files = project.files();
+    for id in ["S2", "S10", "S1"] {
+        files.write_sprint(&a_sprint(id)).expect("written");
+    }
+    // A person's own notes in the same directory are not sprints and are not a problem either.
+    std::fs::write(project.root.join(".farik/sprints/notes.md"), "mine\n").expect("a note");
+
+    assert_eq!(
+        files
+            .list_sprints()
+            .expect("they list")
+            .iter()
+            .map(|sprint| sprint.id.as_str().to_string())
+            .collect::<Vec<_>>(),
+        ["S1", "S2", "S10"],
+        "by the number in the id, so the tenth does not come before the second"
+    );
+}
+
+#[test]
+fn refuses_a_sprint_file_that_breaks_its_schema() {
+    let project = TempProject::new("broken-sprint");
+    let files = project.files();
+    files.write_sprint(&a_sprint("S1")).expect("written");
+    std::fs::write(
+        project.root.join(".farik/sprints/S1.yaml"),
+        "id: S1\nstarted_at: 2026-09-24T00:00:00Z\ntask_ids: []\nstatus: closed\n",
+    )
+    .expect("a person edits it");
+    let Err(FilesError::Invalid { path, detail }) = files.read_sprint("S1") else {
+        panic!("closed is not a status a sprint takes");
+    };
+    assert_eq!(path, ".farik/sprints/S1.yaml");
+    assert!(detail.contains("status"), "{detail}");
+}
+
+#[test]
+fn refuses_a_sprint_file_that_is_not_its_ids() {
+    let project = TempProject::new("misnamed-sprint");
+    let files = project.files();
+    files.init(&a_team()).expect("a project is made");
+    files.write_sprint(&a_sprint("S2")).expect("written");
+    std::fs::rename(
+        project.root.join(".farik/sprints/S2.yaml"),
+        project.root.join(".farik/sprints/S1.yaml"),
+    )
+    .expect("a person renames it");
+    let Err(FilesError::Invalid { path, detail }) = files.read_sprint("S1") else {
+        panic!("S1.yaml holds S2");
+    };
+    assert_eq!(path, ".farik/sprints/S1.yaml");
+    assert!(detail.contains("S2"), "{detail}");
+
+    // An id that is no sprint's names no file: S0 because nothing is there, and ../team because the
+    // id pattern refuses it before the path can reach .farik/team.yaml, which `init` wrote.
+    for id in ["../team", "S0"] {
+        assert_eq!(
+            files.read_sprint(id),
+            Err(FilesError::NotFound {
+                path: format!(".farik/sprints/{id}.yaml")
+            }),
+            "{id}"
+        );
+    }
 }

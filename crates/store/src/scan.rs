@@ -167,6 +167,43 @@ pub fn seeded_library(
     CriteriaLibrary { criteria }
 }
 
+/// What a scan says that matters to whether it changed: its read-back without the part about the
+/// last commit, and the names of the criteria it found.
+///
+/// Every commit changes how long ago the last one was, and a scan refreshed on every integration
+/// for that alone would rewrite `project.md` for nothing. A detected command that changes under the
+/// same name is not a change either; the criterion's name is what a contract refers to.
+#[must_use]
+pub fn material(read_back: &str, criterion_names: &[String]) -> String {
+    let (rest, last) = read_back.rsplit_once(", ").unwrap_or(("", read_back));
+    let kept = if last.starts_with("last commit ") || last == "no commits yet" {
+        rest
+    } else {
+        read_back
+    };
+    format!("{kept}\n{}", criterion_names.join(", "))
+}
+
+/// Every criterion's name, in the order they are held in.
+#[must_use]
+pub fn names_of(criteria: &[CriterionTemplate]) -> Vec<String> {
+    criteria.iter().map(|one| one.name.to_string()).collect()
+}
+
+/// What `.farik/project.md` holds: the line the scan read back, and the criteria it found.
+///
+/// This is the file every session is given (`docs/SPEC.md` section 5.8), so it says what the scan
+/// found and nothing it did not.
+#[must_use]
+pub fn project_document(scan: &ProjectScan, library: &CriteriaLibrary) -> String {
+    let mut parts = vec![format!("# The project\n\n{}", scan.read_back)];
+    let names = names_of(&library.criteria);
+    if !names.is_empty() {
+        parts.push(format!("Criteria: {}.", names.join(", ")));
+    }
+    format!("{}\n", parts.join("\n\n"))
+}
+
 /// The extension a file carries and the language it counts for. The language of a project is the one
 /// with the most tracked files; a tie goes to whichever comes first here.
 const LANGUAGES: &[(&str, &str)] = &[
@@ -695,8 +732,8 @@ mod tests {
     use serde_json::json;
 
     use super::{
-        Reading, ScanError, TOOLCHAINS, cargo_workspace, how_long_ago, language_of, packages_in,
-        scripts_in, seeded_library, tests_in,
+        Reading, ScanError, TOOLCHAINS, cargo_workspace, how_long_ago, language_of, material,
+        packages_in, scripts_in, seeded_library, tests_in,
     };
 
     fn at(text: &str) -> DateTime<Utc> {
@@ -1141,6 +1178,65 @@ mod tests {
             "and a package is not a workspace"
         );
         let _ = std::fs::remove_dir_all(&directory);
+    }
+
+    #[test]
+    fn measures_what_matters_in_a_scan() {
+        let head = |committed_at: &str| crate::git::HeadSummary {
+            sha: "a1b2c3".to_string(),
+            committed_at: committed_at.to_string(),
+            subject: "a commit".to_string(),
+        };
+        let now = at("2026-09-17T12:00:00Z");
+        let measured =
+            |reading: &Reading, tracked: &[&str], commit: Option<&crate::git::HeadSummary>| {
+                let names: Vec<String> = reading
+                    .criteria()
+                    .expect("criteria")
+                    .iter()
+                    .map(|one| one.name.to_string())
+                    .collect();
+                material(&reading.read_back(&strings(tracked), commit, now), &names)
+            };
+        let before = Reading {
+            language: Some("TypeScript"),
+            toolchain: None,
+            is_workspace: false,
+            packages: 0,
+            tests: None,
+            scripts: Vec::new(),
+        };
+        let tracked = ["index.ts"];
+        let first = measured(&before, &tracked, None);
+        assert_eq!(
+            first,
+            measured(&before, &tracked, Some(&head("2026-09-13T12:00:00+00:00"))),
+            "a first commit is not a change to the project"
+        );
+        assert_eq!(
+            measured(&before, &tracked, Some(&head("2026-09-13T12:00:00+00:00"))),
+            measured(&before, &tracked, Some(&head("2026-09-16T12:00:00+00:00"))),
+            "nor is a later one"
+        );
+        let after = Reading {
+            toolchain: Some(toolchain("npm")),
+            scripts: strings(&["test"]),
+            ..before
+        };
+        let second = measured(
+            &after,
+            &["index.ts", "package.json", "package-lock.json"],
+            Some(&head("2026-09-16T12:00:00+00:00")),
+        );
+        assert_ne!(first, second, "a new package.json is");
+        assert_ne!(
+            material("TypeScript, npm, no commits yet", &[]),
+            material(
+                "TypeScript, npm, no commits yet",
+                &strings(&["the-tests-pass"])
+            ),
+            "and so is a criterion found under a new name"
+        );
     }
 
     #[test]
