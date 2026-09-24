@@ -30,7 +30,7 @@ use crate::session::SessionPurpose;
 use crate::tools::ToolDeps;
 use crate::transitions::{
     TransitionAsk, TransitionError, TransitionOutcome, integration_branch, last_move_into,
-    refusal_details, reviewed_by_the_human,
+    refusal_details,
 };
 
 /// Who records the criteria Farik runs for the reviewer: Farik ran them, as `requested_by:
@@ -42,7 +42,8 @@ pub(super) const GOVERNOR: &str = "governor";
 /// next runs; then, judged on the governor's own context for `verifying -> accepted`, the
 /// reviewer's session when there is no review note, the rejection when the reviewer's results hold
 /// a failure, the reviewer's session again when a criterion is unanswered, and the Product
-/// Manager's session when every criterion passed and the human need not accept.
+/// Manager's session when every criterion passed and the human need not accept. An epic, which
+/// has no branch or worktree of its own, goes to `verifying_epic` whoever reviews it.
 pub(super) async fn verifying(
     orchestrator: &Orchestrator,
     team: &Team,
@@ -58,7 +59,7 @@ pub(super) async fn verifying(
         return Ok(None);
     }
     let contract = deps.tools.files.read_contract(&row.task_id)?;
-    if reviewed_by_the_human(&contract, team) {
+    if requests::is_epic(row) {
         return requests::verifying_epic(
             orchestrator,
             team,
@@ -82,16 +83,7 @@ pub(super) async fn verifying(
     let Some(review_note) = context.done.review_note.clone() else {
         return review(orchestrator, team, row, reviewer, &[], day_spent, ran).await;
     };
-    let failed: Vec<String> = contract
-        .exit_criteria
-        .iter()
-        .map(|criterion| criterion.id.to_string())
-        .filter(|id| {
-            answers
-                .iter()
-                .any(|result| result.criterion_id == *id && !result.passed)
-        })
-        .collect();
+    let failed = failed(&contract, &answers);
     if !failed.is_empty() {
         return reject(deps, team, row, reviewer, &failed, review_note).map(Some);
     }
@@ -239,6 +231,20 @@ async fn run_what_farik_runs(
     Ok(FarikRan::Criteria(pending.len()))
 }
 
+/// The contract's criteria, in its order, that one of `answers` failed.
+pub(super) fn failed(contract: &TaskContract, answers: &[CriterionResult]) -> Vec<String> {
+    contract
+        .exit_criteria
+        .iter()
+        .map(|criterion| criterion.id.to_string())
+        .filter(|id| {
+            answers
+                .iter()
+                .any(|result| result.criterion_id == *id && !result.passed)
+        })
+        .collect()
+}
+
 /// Whether a criterion Farik could not run is recorded failed rather than escalated: only when the
 /// task's container went, which the work's own commands can cause and a new sandbox answers.
 /// Git, the base-branch sandbox, a file written into the base worktree, or a command that would not
@@ -327,7 +333,7 @@ async fn review(
 
 /// `review.recorded`, once per verification: when none was recorded since the task last moved into
 /// `verifying` and every criterion but a `human` one has a reviewer's result.
-fn record_review(
+pub(super) fn record_review(
     deps: &OrchestratorDeps,
     team: &Team,
     contract: &TaskContract,
@@ -375,7 +381,7 @@ fn record_review(
 
 /// Files `verifying -> rejected` in the reviewer's name, with the failed criteria and the review
 /// note as the reasons, from the session that wrote the note (5.4: Farik files it).
-fn reject(
+pub(super) fn reject(
     deps: &OrchestratorDeps,
     team: &Team,
     row: &TaskProjection,
@@ -503,7 +509,7 @@ pub(super) fn context(
 }
 
 /// The reviewer's latest result per criterion in this iteration.
-fn reviewer_results(context: &TransitionContext) -> Vec<CriterionResult> {
+pub(super) fn reviewer_results(context: &TransitionContext) -> Vec<CriterionResult> {
     context
         .done
         .results

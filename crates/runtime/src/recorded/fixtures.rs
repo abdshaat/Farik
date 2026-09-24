@@ -110,6 +110,20 @@ pub fn review_answers_nothing() -> Transcript {
     Transcript::from_jsonl(include_str!("transcripts/review_answers_nothing.jsonl"))
 }
 
+/// The Product Manager's review of the epic FRK-1: C2 recorded passed, then a review note.
+/// Hand-written.
+#[must_use]
+pub fn review_epic_frk_1() -> Transcript {
+    Transcript::from_jsonl(include_str!("transcripts/review_epic_frk_1.jsonl"))
+}
+
+/// The Product Manager's review of the epic FRK-1: C2 recorded failed, then a review note saying
+/// why. Hand-written.
+#[must_use]
+pub fn review_epic_fails_frk_1() -> Transcript {
+    Transcript::from_jsonl(include_str!("transcripts/review_epic_fails_frk_1.jsonl"))
+}
+
 /// The Product Manager's verify session of FRK-1: `accepted` asked for. Hand-written.
 #[must_use]
 pub fn accept_frk_1() -> Transcript {

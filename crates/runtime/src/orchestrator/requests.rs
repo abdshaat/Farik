@@ -13,28 +13,29 @@ use farik_core::governor::transition_table::TransitionActor;
 use farik_core::team::{Agent, Team};
 use farik_protocol::event::{
     ContractEvaluatedBodyGate, CriterionRecordedBody, CriterionRecordedBodyRunBy, EventBody,
-    EventKind, FarikEvent, ReviewRecordedBody,
+    EventKind, FarikEvent, NoteWrittenBodyKind, ReviewRecordedBody,
 };
 use farik_store::TaskProjection;
 use farik_store::files::FilesError;
 
 use super::messages::{
-    breakdown_message, close_out_message, epic_accept_message, judgment_message, refine_message,
-    triage_message,
+    breakdown_message, close_out_message, epic_accept_message, epic_review_message,
+    judgment_message, refine_message, triage_message,
 };
 use super::rules::{acted, active, has_room, refused_since_entering, spent};
 use super::session::{JUDGMENT_TOOL, SessionAsk, TRIAGE_TOOL, run_session};
 use super::verify::{
-    GOVERNOR, append, context, escalate, fails_the_criterion, governor_results, history,
-    is_mechanical, ran_criteria, read_only,
+    GOVERNOR, append, context, escalate, failed, fails_the_criterion, governor_results, history,
+    is_mechanical, ran_criteria, read_only, record_review, reject, reviewer_results,
+    since_verifying,
 };
 use super::{Orchestrator, OrchestratorDeps, OrchestratorError, TickReport};
 use crate::criteria::{CriterionOutcome, remove_base_worktree, run_criteria};
 use crate::session::SessionPurpose;
 use crate::tools::ToolDeps;
 use crate::transitions::{
-    TransitionAsk, TransitionOutcome, integration_branch, refining_began, refusal_details,
-    result_accepted,
+    TransitionAsk, TransitionOutcome, integration_branch, last_move_into, refining_began,
+    refusal_details, result_accepted, reviewed_by_the_human,
 };
 
 /// The human, as the reviewer of an epic the Product Manager broke down (5.16 item 4).
@@ -293,10 +294,11 @@ pub(super) fn is_epic(row: &TaskProjection) -> bool {
     row.kind == TaskKind::Epic
 }
 
-/// Rule 8 for an epic `ready`: assigned to the Product Manager on its behalf, with no reviewer
-/// (the human reviews it) and no session, when it holds fewer open tasks than the WIP limit,
-/// counted as the assignment gate counts them; otherwise passed over, so that the run idles rather
-/// than being refused on every tick.
+/// Rule 8 for an epic `ready`: with an active Scrum Master, assigned to it on its behalf with the
+/// Product Manager as reviewer; without one, to the Product Manager on its behalf with no reviewer
+/// (the human reviews it). No session, and only when the assignee holds fewer open tasks than the
+/// WIP limit, counted as the assignment gate counts them; otherwise passed over, so that the run
+/// idles rather than being refused on every tick.
 pub(super) fn ready_epic(
     deps: &OrchestratorDeps,
     team: &Team,
@@ -306,7 +308,11 @@ pub(super) fn ready_epic(
     let Some(pm) = product_manager(team) else {
         return Ok(None);
     };
-    if !has_room(team, board, pm)
+    let (assignee, actor, reviewer) = match scrum_master(team) {
+        Some(sm) => (sm, TransitionActor::ScrumMaster, Some(pm.id.to_string())),
+        None => (pm, TransitionActor::ProductManager, None),
+    };
+    if !has_room(team, board, assignee)
         || refused_since_entering(deps, &row.task_id, TaskStatus::Ready, TaskStatus::Assigned)?
     {
         return Ok(None);
@@ -315,11 +321,12 @@ pub(super) fn ready_epic(
         &TransitionRequest {
             task_id: row.task_id.clone(),
             to: TaskStatus::Assigned,
-            actor: TransitionActor::ProductManager,
-            agent_id: Some(pm.id.to_string()),
+            actor,
+            agent_id: Some(assignee.id.to_string()),
         },
         &TransitionAsk {
-            assignee_id: Some(pm.id.to_string()),
+            assignee_id: Some(assignee.id.to_string()),
+            reviewer_id: reviewer,
             ..TransitionAsk::default()
         },
         team,
@@ -327,7 +334,7 @@ pub(super) fn ready_epic(
     Ok(match outcome {
         TransitionOutcome::Moved(_) => Some(TickReport::Acted {
             task_id: row.task_id.clone(),
-            what: format!("assigned the epic to {}", pm.id.as_str()),
+            what: format!("assigned the epic to {}", assignee.id.as_str()),
         }),
         TransitionOutcome::Refused(_) => None,
     })
@@ -406,7 +413,14 @@ pub(super) async fn in_progress_epic(
                 )
             })
             .collect();
-        close_out_message(&contract, &listed)
+        let rejection = last_rejection(deps, &row.task_id, &tasks)?;
+        close_out_message(
+            &contract,
+            &listed,
+            rejection
+                .as_ref()
+                .map(|(failed, reasons)| (failed.as_slice(), reasons.as_str())),
+        )
     } else if tasks
         .iter()
         .all(|other| other.status == TaskStatus::Cancelled)
@@ -436,6 +450,36 @@ pub(super) async fn in_progress_epic(
     Ok(Some(acted(row, assignee, "plan", &end)))
 }
 
+/// The failed criteria and the reasons, the review note among them, of the epic's last move into
+/// `rejected`, while none of `tasks`, the tasks under it, was created after that move: once the
+/// fixing tasks are filed, the rejection is answered.
+fn last_rejection(
+    deps: &OrchestratorDeps,
+    epic: &TaskId,
+    tasks: &[&TaskProjection],
+) -> Result<Option<(Vec<String>, String)>, OrchestratorError> {
+    let epic_history = history(deps, epic)?;
+    let Some(moved) = last_move_into(&epic_history, TaskStatus::Rejected) else {
+        return Ok(None);
+    };
+    for task in tasks {
+        if history(deps, &task.task_id)?.iter().any(|event| {
+            event.envelope.seq > moved.envelope.seq && event.body.kind() == EventKind::TaskCreated
+        }) {
+            return Ok(None);
+        }
+    }
+    Ok(match &moved.body {
+        EventBody::TaskTransitioned(body) => body.rejection.as_ref().map(|rejection| {
+            (
+                rejection.failed_criterion_ids.clone(),
+                rejection.reasons.clone(),
+            )
+        }),
+        _ => None,
+    })
+}
+
 /// The assigner of a task under an epic: the epic's assignee, when it is active.
 pub(super) fn epic_assignee<'a>(
     team: &'a Team,
@@ -447,10 +491,11 @@ pub(super) fn epic_assignee<'a>(
     active(team, epic.assignee_id.as_deref())
 }
 
-/// Rule 5 for an epic the human reviews (ADR 0013): nothing while a task under it awaits
-/// integration; then Farik runs each mechanical criterion it has not run in this verification, on
-/// the integration branch's head; then nothing until the human accepts; then the Product Manager's
-/// `verify` session, told the human accepted, after which the epic's review is recorded.
+/// Rule 5 for an epic (ADR 0013): nothing while a task under it awaits integration; then Farik
+/// runs each mechanical criterion it has not run in this verification, on the integration branch's
+/// head. Then, for an epic the Product Manager reviews, its review; for one the human reviews,
+/// nothing until the human accepts, then the Product Manager's `verify` session, told the human
+/// accepted, after which the epic's review is recorded.
 pub(super) async fn verifying_epic(
     orchestrator: &Orchestrator,
     team: &Team,
@@ -485,6 +530,12 @@ pub(super) async fn verifying_epic(
             EpicRan::Unrunnable(why) => escalate(deps, team, row, &why),
         };
     }
+    if !reviewed_by_the_human(contract, team) {
+        return reviewed_by_the_product_manager(
+            deps, team, &board, row, contract, history, day_spent,
+        )
+        .await;
+    }
     if result_accepted(history).is_none() {
         return Ok(None);
     }
@@ -507,6 +558,87 @@ pub(super) async fn verifying_epic(
     .await?;
     record_epic_review(deps, team, contract, &end.session_id, since)?;
     Ok(Some(acted(row, pm, "verify", &end)))
+}
+
+/// Rule 5 for an epic the Product Manager reviews, once Farik's runs are recorded, judged on the
+/// governor's own context for `verifying -> accepted`: the Product Manager's read-only `verify`
+/// session in the project root while there is no review note, after which its review is recorded;
+/// the rejection in its name when its results hold a failure; nothing until the human accepts;
+/// then its session again, told the human accepted.
+async fn reviewed_by_the_product_manager(
+    deps: &OrchestratorDeps,
+    team: &Team,
+    board: &[TaskProjection],
+    row: &TaskProjection,
+    contract: &TaskContract,
+    history: &[FarikEvent],
+    day_spent: &mut bool,
+) -> Result<Option<TickReport>, OrchestratorError> {
+    let Some(pm) = active(team, row.reviewer_id.as_deref()) else {
+        return Ok(None);
+    };
+    let context = context(deps, team, &row.task_id)?;
+    let review_note = context.done.review_note.clone();
+    if let Some(review_note) = &review_note {
+        let failed = failed(contract, &reviewer_results(&context));
+        if !failed.is_empty() {
+            return reject(deps, team, row, pm, &failed, review_note.clone()).map(Some);
+        }
+        if result_accepted(history).is_none() {
+            return Ok(None);
+        }
+    }
+    if spent(deps, team, contract, day_spent)? {
+        return Ok(None);
+    }
+    let since = since_verifying(history);
+    let ran = governor_results(history, since);
+    let initial_prompt = if review_note.is_some() {
+        epic_accept_message(contract, &ran)
+    } else {
+        epic_review_message(contract, &ran, &tasks_under(deps, board, row)?)
+    };
+    let end = run_session(
+        deps,
+        team,
+        read_only(
+            contract,
+            pm,
+            deps.tools.files.root().to_path_buf(),
+            initial_prompt,
+        ),
+    )
+    .await?;
+    if review_note.is_none() {
+        record_review(deps, team, contract, pm, &end.session_id, since)?;
+    }
+    Ok(Some(acted(row, pm, "verify", &end)))
+}
+
+/// Each task under the epic, with its last completion note when it has one.
+fn tasks_under(
+    deps: &OrchestratorDeps,
+    board: &[TaskProjection],
+    row: &TaskProjection,
+) -> Result<Vec<(TaskProjection, Option<String>)>, OrchestratorError> {
+    board
+        .iter()
+        .filter(|other| other.parent.as_ref() == Some(&row.task_id))
+        .map(|other| {
+            let note = history(deps, &other.task_id)?
+                .iter()
+                .rev()
+                .find_map(|event| match &event.body {
+                    EventBody::NoteWritten(body)
+                        if body.kind == NoteWrittenBodyKind::Completion =>
+                    {
+                        Some(body.text.clone())
+                    }
+                    _ => None,
+                });
+            Ok((other.clone(), note))
+        })
+        .collect()
 }
 
 /// What Farik's runs of an epic's criteria came to.
@@ -545,7 +677,7 @@ async fn run_on_the_integration_branch(
             .join(format!("{}-base", contract.id.as_str()));
         let unrunnable = |id: &str, error: &dyn std::fmt::Display| {
             EpicRan::Unrunnable(format!(
-                "Farik could not run {id} on the integration branch for the human: {error}"
+                "Farik could not run {id} on the integration branch for its reviewer: {error}"
             ))
         };
         if let Err(error) = remove_base_worktree(git, &worktree).and_then(|()| {
@@ -705,7 +837,8 @@ mod tests {
         accept_frk_1, implement_finishes_frk_1, judge_frk_1_fails, judge_frk_1_passes,
         plan_assigns_frk_1, plan_assigns_frk_2, plan_breaks_down_frk_1, plan_closes_epic_frk_1,
         refine_asks_frk_1, refine_writes_epic_frk_1, refine_writes_task_frk_1,
-        replays_farik_read_board, triage_by_sm_frk_1, triage_frk_1_large,
+        replays_farik_read_board, review_epic_fails_frk_1, review_epic_frk_1, triage_by_sm_frk_1,
+        triage_frk_1_large,
     };
     use crate::session::SessionPurpose;
     use crate::tools::fixtures::at;
@@ -2126,5 +2259,316 @@ mod tests {
             &reviews[0].body,
             EventBody::ReviewRecorded(body) if body.criteria_run == 3 && body.passed
         ));
+    }
+
+    /// Epic FRK-1 filed `ready` on a team with the active Scrum Master `sam`, for the Scrum Master
+    /// to hold and the Product Manager to review.
+    fn a_scrum_masters_epic(harness: &Harness) {
+        an_epic(harness, "FRK-1", "ready", |wire| {
+            wire["assignee_role"] = json!("scrum_master");
+            wire["reviewer_role"] = json!("product_manager");
+        });
+    }
+
+    /// The moves of the Scrum Master's epic: asked by `sam`, held by `sam`, reviewed by `pm`.
+    fn the_scrum_masters() -> Value {
+        json!({ "actor": "scrum_master", "requested_by": "sam", "assignee": "sam", "reviewer": "pm" })
+    }
+
+    /// The Scrum Master's epic FRK-1 moved to `in_progress`.
+    fn a_scrum_masters_epic_in_progress(harness: &Harness) {
+        a_scrum_masters_epic(harness);
+        let people = the_scrum_masters();
+        harness.project.moved("FRK-1", "ready", "assigned", &people);
+        harness
+            .project
+            .moved("FRK-1", "assigned", "in_progress", &people);
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn assigns_an_approved_epic_to_the_scrum_master() {
+        let harness = Harness::new("epic-assigns-sm", with_a_scrum_master);
+        a_scrum_masters_epic(&harness);
+        let adapter = harness.recorded(Vec::new());
+        let orchestrator = harness.orchestrator(adapter.clone());
+
+        orchestrator.tick().await.expect("the tick runs");
+
+        let moved = last(&harness, EventKind::TaskTransitioned).expect("a move");
+        let EventBody::TaskTransitioned(body) = &moved.body else {
+            panic!("a move");
+        };
+        assert_eq!(
+            (body.from.to_string(), body.to.to_string()),
+            ("ready".to_string(), "assigned".to_string())
+        );
+        assert_eq!(body.actor, TransitionActorWire::ScrumMaster);
+        assert_eq!(body.requested_by, "sam");
+        assert_eq!(body.assignee.as_deref(), Some("sam"));
+        assert_eq!(body.reviewer.as_deref(), Some("pm"));
+        assert!(adapter.started().is_empty());
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn breaks_an_epic_down_with_its_scrum_master() {
+        let harness = Harness::new("epic-breakdown-sm", with_a_scrum_master);
+        a_scrum_masters_epic_in_progress(&harness);
+        let adapter = harness.recorded(vec![replays_farik_read_board()]);
+        let orchestrator = harness.orchestrator(adapter.clone());
+
+        orchestrator.tick().await.expect("the tick runs");
+
+        let spec = &adapter.started()[0];
+        assert_eq!(
+            (spec.purpose, spec.agent_id.as_str()),
+            (SessionPurpose::Plan, "sam")
+        );
+        assert_eq!(spec.task_id, Some(task("FRK-1")));
+        assert!(
+            spec.initial_prompt.starts_with("Break the epic FRK-1 down"),
+            "{}",
+            spec.initial_prompt
+        );
+    }
+
+    /// The Scrum Master's epic FRK-1 `verifying` after its child FRK-2 was accepted, each with its
+    /// completion note.
+    fn a_scrum_masters_epic_verifying(harness: &Harness) {
+        a_scrum_masters_epic_in_progress(harness);
+        a_child(harness, "accepted");
+        harness.project.record(
+            "FRK-2",
+            "note.written",
+            &json!({ "kind": "completion", "text": "Wrote done.txt at the root.", "written_by": "dev-a" }),
+        );
+        harness.project.record(
+            "FRK-1",
+            "note.written",
+            &json!({ "kind": "completion", "text": "FRK-2 added done.txt; nothing left out.", "written_by": "sam" }),
+        );
+        let mut people = the_scrum_masters();
+        people["actor"] = json!("assignee");
+        harness
+            .project
+            .moved("FRK-1", "in_progress", "verifying", &people);
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn refuses_the_humans_acceptance_of_an_epic_before_farik_ran_its_criteria() {
+        let harness = Harness::new("epic-sm-accept-early", with_a_scrum_master);
+        a_scrum_masters_epic_verifying(&harness);
+        integrated(&harness, true);
+        let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
+
+        let refused = orchestrator
+            .handle(Command::HumanAccept {
+                task_id: task("FRK-1"),
+                subject: AcceptSubject::Result,
+                message: Some("Looks right.".to_string()),
+            })
+            .await;
+
+        assert!(
+            matches!(&refused, Err(CommandError::Refused { reason })
+                if reason.starts_with("criteria_not_run") && reason.contains("C1")),
+            "{refused:?}"
+        );
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn has_the_product_manager_review_an_epic() {
+        let harness = Harness::new("epic-sm-review", with_a_scrum_master);
+        a_scrum_masters_epic_verifying(&harness);
+        integrated(&harness, true);
+        let adapter = harness.recorded(vec![review_epic_frk_1(), accept_frk_1()]);
+        let witness = Arc::new(ExecutorWitness::new(
+            adapter.clone(),
+            Arc::clone(&harness.daemon),
+        ));
+        let orchestrator = harness.orchestrator(witness.clone());
+
+        orchestrator.tick().await.expect("Farik runs C1");
+        let runs = governor_runs(&harness, "FRK-1");
+        assert_eq!(runs.len(), 1, "{runs:?}");
+        assert!(
+            runs[0]
+                .2
+                .starts_with(&format!("at {}", main_head(&harness)))
+        );
+        assert!(adapter.started().is_empty());
+
+        orchestrator.tick().await.expect("the tick runs");
+        let spec = &adapter.started()[0];
+        assert_eq!(
+            (spec.purpose, spec.agent_id.as_str()),
+            (SessionPurpose::Verify, "pm")
+        );
+        assert_eq!(spec.task_id, Some(task("FRK-1")));
+        assert_eq!(spec.cwd, harness.project.repo.path);
+        assert_eq!(witness.had_executor(), vec![false]);
+        for held in ["FRK-2", "accepted", "Wrote done.txt at the root."] {
+            assert!(
+                spec.initial_prompt.contains(held),
+                "{held}: {}",
+                spec.initial_prompt
+            );
+        }
+        assert!(
+            !spec.initial_prompt.contains("<untrusted source=\"diff\">"),
+            "{}",
+            spec.initial_prompt
+        );
+
+        // The review passed; the epic waits for the human.
+        let waiting = orchestrator.tick().await.expect("the tick runs");
+        assert!(is_idle(&waiting), "{waiting:?}");
+        assert_eq!(adapter.started().len(), 1);
+        orchestrator
+            .handle(Command::HumanAccept {
+                task_id: task("FRK-1"),
+                subject: AcceptSubject::Result,
+                message: Some("It reads right.".to_string()),
+            })
+            .await
+            .expect("the human accepts the epic");
+
+        orchestrator.tick().await.expect("the tick runs");
+
+        let started = adapter.started();
+        assert_eq!(started.len(), 2);
+        assert_eq!(
+            (started[1].purpose, started[1].agent_id.as_str()),
+            (SessionPurpose::Verify, "pm")
+        );
+        assert!(
+            started[1].initial_prompt.contains("Request `accepted`"),
+            "{}",
+            started[1].initial_prompt
+        );
+        assert_eq!(harness.row("FRK-1").status, TaskStatus::Accepted);
+        let reviews = harness.events(&[EventKind::ReviewRecorded]);
+        assert_eq!(reviews.len(), 1, "{reviews:?}");
+        assert!(matches!(
+            &reviews[0].body,
+            EventBody::ReviewRecorded(body)
+                if body.reviewer == "pm" && body.criteria_run == 2 && body.passed
+        ));
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn rejects_an_epic_whose_criterion_the_product_manager_failed() {
+        let harness = Harness::new("epic-sm-rejects", with_a_scrum_master);
+        a_scrum_masters_epic_verifying(&harness);
+        integrated(&harness, true);
+        let adapter = harness.recorded(vec![review_epic_fails_frk_1(), replays_farik_read_board()]);
+        let orchestrator = harness.orchestrator(adapter.clone());
+        orchestrator.tick().await.expect("Farik runs C1");
+        orchestrator
+            .tick()
+            .await
+            .expect("the Product Manager reviews");
+
+        orchestrator.tick().await.expect("the tick runs");
+
+        let moved = last(&harness, EventKind::TaskTransitioned).expect("a move");
+        let EventBody::TaskTransitioned(body) = &moved.body else {
+            panic!("a move");
+        };
+        assert_eq!(
+            (body.from.to_string(), body.to.to_string()),
+            ("verifying".to_string(), "rejected".to_string())
+        );
+        assert_eq!(body.actor, TransitionActorWire::Reviewer);
+        assert_eq!(body.requested_by, "pm");
+        let rejection = body.rejection.as_ref().expect("the rejection");
+        assert_eq!(rejection.failed_criterion_ids, vec!["C2".to_string()]);
+
+        orchestrator.tick().await.expect("the governor returns it");
+        assert_eq!(harness.row("FRK-1").status, TaskStatus::InProgress);
+        orchestrator.tick().await.expect("the tick runs");
+
+        let started = adapter.started();
+        assert_eq!(started.len(), 2);
+        let spec = &started[1];
+        assert_eq!(
+            (spec.purpose, spec.agent_id.as_str()),
+            (SessionPurpose::Plan, "sam")
+        );
+        for held in [
+            "C2",
+            "done.txt is empty, and the request asked it to say the run is done.",
+            "file the tasks that fix it",
+        ] {
+            assert!(
+                spec.initial_prompt.contains(held),
+                "{held}: {}",
+                spec.initial_prompt
+            );
+        }
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn closes_out_plainly_once_the_fixing_tasks_are_filed() {
+        let harness = Harness::new("epic-sm-fixed", with_a_scrum_master);
+        a_scrum_masters_epic_in_progress(&harness);
+        a_child(&harness, "accepted");
+        integrated(&harness, true);
+        let people = the_scrum_masters();
+        harness
+            .project
+            .moved("FRK-1", "in_progress", "verifying", &people);
+        let mut rejected = people.clone();
+        rejected["actor"] = json!("reviewer");
+        rejected["requested_by"] = json!("pm");
+        rejected["rejection"] =
+            json!({ "failed_criterion_ids": ["C2"], "reasons": "done.txt is empty." });
+        harness
+            .project
+            .moved("FRK-1", "verifying", "rejected", &rejected);
+        let mut returned = people.clone();
+        returned["iteration"] = json!(1);
+        harness
+            .project
+            .moved("FRK-1", "rejected", "in_progress", &returned);
+        // The fixing task, filed after the rejection and accepted.
+        harness.file_under("FRK-3", "ready", Some("FRK-1"), |_| {});
+        let child = json!({ "assignee": "dev-a", "reviewer": "dev-b" });
+        for pair in ["ready", "assigned", "in_progress", "verifying", "accepted"].windows(2) {
+            harness.project.moved("FRK-3", pair[0], pair[1], &child);
+        }
+        harness.project.record(
+            "FRK-3",
+            "task.integrated",
+            &json!({ "sha": "abd", "into": "main", "integrated_by": "governor" }),
+        );
+        let adapter = harness.recorded(vec![replays_farik_read_board()]);
+        let orchestrator = harness.orchestrator(adapter.clone());
+
+        orchestrator.tick().await.expect("the tick runs");
+
+        let spec = &adapter.started()[0];
+        assert_eq!(
+            (spec.purpose, spec.agent_id.as_str()),
+            (SessionPurpose::Plan, "sam")
+        );
+        assert!(
+            spec.initial_prompt
+                .starts_with("Every task under the epic FRK-1 is done"),
+            "{}",
+            spec.initial_prompt
+        );
+        for gone in ["<untrusted source=\"rejection\">", "done.txt is empty."] {
+            assert!(
+                !spec.initial_prompt.contains(gone),
+                "{gone}: {}",
+                spec.initial_prompt
+            );
+        }
     }
 }

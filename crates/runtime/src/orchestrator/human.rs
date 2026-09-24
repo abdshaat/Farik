@@ -22,7 +22,7 @@ use super::{CommandError, CommandReport, IntegrationOutcome, Orchestrator, Orche
 use crate::tools::ToolDeps;
 use crate::transitions::{
     TransitionAsk, TransitionOutcome, contract_accepted, refusal_details, result_accepted,
-    reviewed_by_the_human, status_wire,
+    status_wire,
 };
 
 /// Who the human is in the log.
@@ -265,8 +265,8 @@ fn approve(
 }
 
 /// Accepts the result of a `verifying` task that waits for the human (5.4): one of risk `high`
-/// or with a `human` criterion, which moves nothing, or an epic the human reviews (ADR 0013), once
-/// Farik has run and passed each of its mechanical criteria and with the human's words.
+/// or with a `human` criterion, which moves nothing, or any epic, whoever reviews it (ADR 0013),
+/// once Farik has run and passed each of its mechanical criteria and with the human's words.
 fn accept_result(
     tools: &ToolDeps,
     task_id: &TaskId,
@@ -274,7 +274,6 @@ fn accept_result(
 ) -> Result<CommandReport, CommandError> {
     let row = row_of(tools, task_id)?;
     let contract = tools.files.read_contract(task_id).map_err(failed)?;
-    let team = tools.files.read_team().map_err(failed)?;
     if row.status != TaskStatus::Verifying {
         return Err(not_waiting(&row));
     }
@@ -288,11 +287,12 @@ fn accept_result(
         });
     }
     let message = message.filter(|text| !text.trim().is_empty());
-    if reviewed_by_the_human(&contract, &team) {
+    if contract.kind == TaskKind::Epic {
         mechanical_criteria_passed(&contract, &history)?;
         if message.is_none() {
             return Err(CommandError::Invalid {
-                detail: "an epic's acceptance is its review note: say what you checked".to_string(),
+                detail: "an epic's acceptance carries the human's words: say what you checked"
+                    .to_string(),
             });
         }
     } else if !requires_human_acceptance(&contract) && !has_human_criterion(&contract) {

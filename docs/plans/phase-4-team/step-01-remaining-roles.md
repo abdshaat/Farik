@@ -177,7 +177,7 @@ Consumes: `run_on_the_integration_branch`, `reject` (made `pub(super)`), `read_o
 - `refuses_the_humans_acceptance_of_an_epic_before_farik_ran_its_criteria` — a Scrum Master's epic `verifying` with no governor run recorded: the human's `HumanAccept` is refused, naming the criteria not run (as for a human-reviewed epic).
 - `takes_one_request_to_an_accepted_epic` (orchestrator.rs, the existing end-to-end test, no Scrum Master) passes unchanged.
 
-- [ ] `feat(runtime): run an epic with its scrum master and its product manager reviewer`
+- [x] `feat(runtime): run an epic with its scrum master and its product manager reviewer`
 
 ### Task 7: the spec
 
