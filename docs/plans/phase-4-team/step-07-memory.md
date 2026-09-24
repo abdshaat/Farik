@@ -130,7 +130,7 @@ Files: `crates/store/src/scan.rs`, `crates/cli/src/init.rs`, `orchestrator/integ
 
 Revision 0.16 in the header, naming each change: 5.8 ("immutable once accepted" becomes immutable once written; the tool, the cap policy and how it is counted, the prompt's line and the 80 percent prompt; decisions' numbering, format, immutability, who writes them, and how agents read them; the scan refreshed after an integration); 5.12's policy row for `memory_cap_tokens` if 5.12 lists policies (else 5.8 alone); 6.1 and 6.3 (the decision tool); 8.2 (the memory section's line); 8.5 (`memory.written`, `decision.written`). The project plan's step 07 line and interface line are written as landed, the retro named as step 06's.
 
-- [ ] `docs(docs): record memory and decisions in the spec`
+- [x] `docs(docs): record memory and decisions in the spec`
 
 ## Verification
 
