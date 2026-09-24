@@ -97,6 +97,55 @@ pub fn normalise(path: &str) -> Option<String> {
     Some(segments.join("/"))
 }
 
+/// The directory whose files change only through Farik's tools (`docs/SPEC.md` sections 5.3, 5.4,
+/// 5.8): contracts, decisions, notebooks, the retro, the team file.
+pub const FARIK_DIRECTORY: &str = ".farik";
+
+/// Whether a path, or a glob of paths, names or could match something under `.farik/`: its first
+/// segment, after `.` segments are dropped and each `{a,b}` is expanded, is `**` or matches
+/// `.farik` regardless of letter case, and the glob goes on below it or is that one name. `*` or
+/// `*.md` alone match only files at the root. A first segment that does not compile is taken to
+/// reach, so that the check fails closed.
+#[must_use]
+pub fn reaches_the_farik_directory(glob: &str) -> bool {
+    expand_braces(&glob.replace('\\', "/")).iter().any(|glob| {
+        let mut segments = glob
+            .split('/')
+            .filter(|segment| !segment.is_empty() && *segment != ".");
+        let Some(first) = segments.next() else {
+            return false;
+        };
+        if first.contains("**") {
+            return true;
+        }
+        let names_it = GlobBuilder::new(first)
+            .case_insensitive(true)
+            .build()
+            .map_or(true, |compiled| {
+                compiled.compile_matcher().is_match(FARIK_DIRECTORY)
+            });
+        let is_wildcard = first.contains(['*', '?', '[']);
+        names_it && (segments.next().is_some() || !is_wildcard)
+    })
+}
+
+/// A glob with each `{a,b}` group expanded into its alternatives, as the glob engine reads them
+/// (it nests none). An unclosed `{` is left as written.
+fn expand_braces(glob: &str) -> Vec<String> {
+    let Some(open) = glob.find('{') else {
+        return vec![glob.to_string()];
+    };
+    let Some(close) = glob[open..].find('}').map(|end| open + end) else {
+        return vec![glob.to_string()];
+    };
+    glob[open + 1..close]
+        .split(',')
+        .flat_map(|choice| {
+            expand_braces(&format!("{}{choice}{}", &glob[..open], &glob[close + 1..]))
+        })
+        .collect()
+}
+
 fn compile(globs: &[String], case_insensitive: bool) -> Result<GlobSet, PathRefusal> {
     let mut builder = GlobSetBuilder::new();
     for pattern in globs {

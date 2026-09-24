@@ -4,7 +4,7 @@
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet};
 
-use super::paths::{GlobError, PathRefusal, check_allowed_paths};
+use super::paths::{GlobError, PathRefusal, check_allowed_paths, reaches_the_farik_directory};
 use super::team_rules::TeamRules;
 use crate::contract::{
     Role, TaskContract, TaskStatus, Verification, VerificationWire, wire_method,
@@ -44,6 +44,8 @@ pub enum ReadinessRule {
     /// A task not assigned to the Software Developer keeps every allowed path within the team's
     /// document paths: only the Developer changes code.
     DocumentPathsOnly,
+    /// No allowed path reaches under `.farik/`, whose files change only through Farik's tools.
+    NoFarikPaths,
     /// A task's budget does not exceed the team's cap on a task; an epic is bounded by the
     /// sprint budget instead.
     BudgetWithinTeamMax,
@@ -118,7 +120,7 @@ pub struct ReadinessFailure {
 
 type Check = fn(&TaskContract, &ReadinessContext) -> Option<ReadinessFailure>;
 
-const CHECKS: [Check; 17] = [
+const CHECKS: [Check; 18] = [
     intent_present,
     criteria_present,
     criteria_methods_valid,
@@ -131,6 +133,7 @@ const CHECKS: [Check; 17] = [
     new_tests_required_by_rule,
     allowed_paths_within_ceiling,
     document_paths_only,
+    no_farik_paths,
     budget_within_team_max,
     no_parent_for_epic,
     parent_in_progress,
@@ -454,9 +457,12 @@ fn split_glob(pattern: &str) -> (&str, &str) {
 /// `src*/**`, whose wildcard runs on into a sibling. Any other ceiling
 /// (`docs/**/*.md`, `src/*.rs`, an empty entry, `/`) admits only a path written exactly like it,
 /// so that a file filter is never widened and a stray entry never opens the ceiling. A path
-/// with a `..` segment is never within a directory. Paths are compared as written: `./src/**`
+/// with a `..` segment anywhere, before or after a wildcard, is within nothing. Paths are compared as written: `./src/**`
 /// is not `src/**`.
 fn is_within_any(path: &str, ceilings: &[String]) -> bool {
+    if path.split('/').any(|segment| segment == "..") {
+        return false;
+    }
     ceilings.iter().any(|ceiling| {
         if ceiling == "**" {
             return true;
@@ -467,9 +473,6 @@ fn is_within_any(path: &str, ceilings: &[String]) -> bool {
             return path == ceiling;
         }
         let (prefix, wildcard) = split_glob(path);
-        if prefix.split('/').any(|segment| segment == "..") {
-            return false;
-        }
         prefix.starts_with(&format!("{directory}/"))
             || (wildcard.is_empty() && prefix.trim_end_matches('/') == directory)
     })
@@ -551,6 +554,27 @@ fn document_paths_only(
             "allowed paths {} reach outside the team's document paths {}",
             outside.join(", "),
             context.rules.document_paths.join(", ")
+        ),
+    ))
+}
+
+/// No allowed path reaches under `.farik/` (5.3), whatever the role or kind: a contract, a
+/// decision, a notebook, or the retro changes only through Farik's tools, never through a commit.
+fn no_farik_paths(contract: &TaskContract, _: &ReadinessContext) -> Option<ReadinessFailure> {
+    let reaching: Vec<&str> = contract
+        .allowed_paths
+        .iter()
+        .map(String::as_str)
+        .filter(|path| reaches_the_farik_directory(path))
+        .collect();
+    if reaching.is_empty() {
+        return None;
+    }
+    Some(failure(
+        ReadinessRule::NoFarikPaths,
+        format!(
+            "allowed paths {} reach under .farik/, whose files change only through Farik's tools",
+            reaching.join(", ")
         ),
     ))
 }
@@ -989,6 +1013,72 @@ mod tests {
             failed_rules(&contract, &context),
             [R::AllowedPathsWithinCeiling]
         );
+    }
+
+    #[test]
+    fn refuses_a_parent_segment_after_the_first_wildcard() {
+        let mut contract = a_contract();
+        contract.allowed_paths = vec!["src/**/../../.env".to_string()];
+        let mut context = a_ready_context();
+        context.rules.allowed_paths_ceiling = vec!["src/**".to_string()];
+        assert_eq!(
+            failed_rules(&contract, &context),
+            [R::AllowedPathsWithinCeiling]
+        );
+    }
+
+    #[test]
+    fn refuses_allowed_paths_that_reach_under_the_farik_directory() {
+        // Each names a path under `.farik/` or could match one; every role and kind is held.
+        let reaching = [
+            ".farik/decisions/0001-x.md",
+            ".farik/**",
+            ".farik",
+            "./.farik/team.yaml",
+            ".FARIK/team/retro.md",
+            "**",
+            "**/*.md",
+            "*/memory.md",
+            ".f*/x",
+            "[.]farik/x",
+            "{src,.farik}/**",
+        ];
+        for path in reaching {
+            for role in [Role::SoftwareDeveloper, Role::Architect] {
+                let mut task = a_task_for(role, &["docs/x.md", path]);
+                assert!(
+                    failed_rules(&task, &a_ready_context()).contains(&R::NoFarikPaths),
+                    "{path} for {role:?}"
+                );
+                task.kind = Kind::Epic;
+                assert!(
+                    failed_rules(&task, &a_ready_context()).contains(&R::NoFarikPaths),
+                    "{path} for an epic"
+                );
+            }
+        }
+        let task = a_task_for(Role::Architect, &["**/*.md"]);
+        assert_eq!(failed_rules(&task, &a_ready_context()), [R::NoFarikPaths]);
+        assert!(
+            message_of(&task, &a_ready_context(), R::NoFarikPaths).contains("**/*.md"),
+            "the message names the path"
+        );
+        for path in [
+            "src/**",
+            "*.md",
+            "*",
+            "docs/**",
+            ".farikx/**",
+            ".github/**",
+            "src/.farik/x",
+        ] {
+            let task = a_task_for(Role::SoftwareDeveloper, &[path]);
+            assert_eq!(
+                evaluate_readiness(&task, &a_ready_context()),
+                Ok(()),
+                "{path}"
+            );
+        }
     }
 
     #[test]
