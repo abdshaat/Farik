@@ -448,7 +448,13 @@ async fn supervise(
     };
     if let Some((reason, detail)) = last {
         *locked(&ended) = Some(reason);
-        let _ = sender.send(SessionEvent::Ended { reason, detail }).await;
+        let _ = sender
+            .send(SessionEvent::Ended {
+                reason,
+                detail,
+                resets_at: None,
+            })
+            .await;
     }
 }
 

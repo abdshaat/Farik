@@ -85,7 +85,7 @@ Files: `stream.rs`, `session.rs`, `sessions.rs`, `claude.rs`, `recorded.rs`, the
 - `passes_no_reset_time_without_a_limit` — an `allowed` event with a `resetsAt`, then a success: `resets_at: None`.
 - `records_the_providers_limit_as_the_sessions_end` — `session.ended` for such a session has reason `provider_limit`.
 
-- [ ] `feat(runtime): tell a model provider's usage limit from any other failed session`
+- [x] `feat(runtime): tell a model provider's usage limit from any other failed session`
 
 ### Task 2: the limit note
 

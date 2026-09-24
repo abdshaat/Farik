@@ -63,6 +63,7 @@ pub fn record_session_ended(
             EndReason::Aborted => SessionEndedBodyReason::Aborted,
             EndReason::Limit => SessionEndedBodyReason::Limit,
             EndReason::Error => SessionEndedBodyReason::Error,
+            EndReason::ProviderLimit => SessionEndedBodyReason::ProviderLimit,
         },
         detail: detail.to_string(),
     };
@@ -247,5 +248,30 @@ mod tests {
             .map(|(a, b, c)| (a.to_string(), b.to_string(), c.to_string()))
             .collect();
         assert_eq!(written, expected);
+    }
+
+    #[test]
+    fn records_the_providers_limit_as_the_sessions_end() {
+        let log = a_log();
+        let spec = spec();
+        let clock = FixedClock::new(at("2026-09-22T10:00:00Z"));
+        record_session_ended(
+            &log,
+            &spec.session_id,
+            EndReason::ProviderLimit,
+            "Claude AI usage limit reached",
+            &ids(&spec),
+            &clock,
+        )
+        .expect("recorded");
+        match &everything(&log)[..] {
+            [event] => match &event.body {
+                EventBody::SessionEnded(body) => {
+                    assert_eq!(body.reason.to_string(), "provider_limit");
+                }
+                other => panic!("expected session.ended, got {other:?}"),
+            },
+            other => panic!("expected one event, got {other:?}"),
+        }
     }
 }

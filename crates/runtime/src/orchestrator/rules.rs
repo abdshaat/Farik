@@ -746,6 +746,7 @@ fn ran(agent: &Agent, purpose: &str, end: &SessionEnd) -> String {
         EndReason::Aborted => "was aborted",
         EndReason::Limit => "reached a limit",
         EndReason::Error => "failed",
+        EndReason::ProviderLimit => "stopped at its model provider's limit",
     };
     format!(
         "ran {}'s {purpose} session, which {how}: {}",

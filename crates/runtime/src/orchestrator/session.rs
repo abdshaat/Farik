@@ -366,7 +366,7 @@ async fn read_to_end(
                     handle.abort()?;
                 }
             }
-            Some(SessionEvent::Ended { reason, detail }) => return Ok((reason, detail)),
+            Some(SessionEvent::Ended { reason, detail, .. }) => return Ok((reason, detail)),
             Some(_) => {}
             None => {
                 return Ok((

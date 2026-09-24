@@ -69,6 +69,33 @@ pub fn hook_denies_a_write() -> Transcript {
     Transcript::from_jsonl(include_str!("transcripts/hook_denies_a_write.jsonl"))
 }
 
+// No capture of a refused session exists yet (2.1.280's show only `allowed`); the next four are
+// hand-written in the captured lines' shapes, one per way a provider's limit can be told.
+
+/// A rate-limit event `rejected` until 1790119200, then a result that is an error.
+#[must_use]
+pub fn provider_limit_rejected() -> Transcript {
+    Transcript::from_jsonl(include_str!("transcripts/provider_limit_rejected.jsonl"))
+}
+
+/// A result that is an error with `api_error_status` 429 and no rate-limit event.
+#[must_use]
+pub fn provider_limit_429() -> Transcript {
+    Transcript::from_jsonl(include_str!("transcripts/provider_limit_429.jsonl"))
+}
+
+/// A result that is an error saying `Claude AI usage limit reached`.
+#[must_use]
+pub fn provider_limit_text() -> Transcript {
+    Transcript::from_jsonl(include_str!("transcripts/provider_limit_text.jsonl"))
+}
+
+/// An `allowed` rate-limit event, then a `success` result that is an error: a 500.
+#[must_use]
+pub fn success_with_is_error() -> Transcript {
+    Transcript::from_jsonl(include_str!("transcripts/success_with_is_error.jsonl"))
+}
+
 /// A call of `mcp__farik__farik_read_board` with no input, its answer, and a successful end.
 /// Hand-written in the shapes above; with `RecordedAdapter::with_tools` the answer is the runner's.
 #[must_use]
@@ -269,6 +296,7 @@ impl UsageThenWaitAdapter {
             let _ = sender.try_send(SessionEvent::Ended {
                 reason: EndReason::Completed,
                 detail: "done".to_string(),
+                resets_at: None,
             });
         }
     }
@@ -310,6 +338,7 @@ impl RuntimeAdapter for UsageThenWaitAdapter {
                 .try_send(SessionEvent::Ended {
                     reason: EndReason::Completed,
                     detail: "done".to_string(),
+                    resets_at: None,
                 })
                 .expect("the channel has room");
             None
@@ -384,6 +413,7 @@ impl SessionHandle for WaitingSession {
             let _ = sender.try_send(SessionEvent::Ended {
                 reason: EndReason::Aborted,
                 detail: "aborted".to_string(),
+                resets_at: None,
             });
         }
         Ok(())

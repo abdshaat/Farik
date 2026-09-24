@@ -635,7 +635,7 @@
       "additionalProperties": false,
       "required": ["reason", "detail"],
       "properties": {
-        "reason": { "type": "string", "enum": ["completed", "aborted", "limit", "error"] },
+        "reason": { "type": "string", "enum": ["completed", "aborted", "limit", "error", "provider_limit"] },
         "detail": { "type": "string" }
       }
     }
