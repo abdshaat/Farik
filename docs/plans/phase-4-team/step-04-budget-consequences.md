@@ -98,7 +98,7 @@ Files: `budget.rs`, `orchestrator/session.rs`, `rules.rs` (tests)
 - `aborts_a_session_whose_usage_crosses_a_budget` (changed) — now also asserts the note.
 - `names_the_session_consequence_after_its_note` (core) — `check_budgets` maps the three session scopes to `EndSessionWithNote`.
 
-- [ ] `feat(runtime): leave a note where a session stopped at its own limit`
+- [x] `feat(runtime): leave a note where a session stopped at its own limit`
 
 ### Task 3: sleep
 

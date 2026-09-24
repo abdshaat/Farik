@@ -330,9 +330,7 @@ fn scope_wire(scope: BudgetScope) -> BudgetExhaustedBodyScope {
 
 fn consequence_wire(consequence: BudgetConsequence) -> BudgetExhaustedBodyConsequence {
     match consequence {
-        BudgetConsequence::EndSessionAndBlockTask => {
-            BudgetExhaustedBodyConsequence::EndSessionAndBlockTask
-        }
+        BudgetConsequence::EndSessionWithNote => BudgetExhaustedBodyConsequence::EndSessionWithNote,
         BudgetConsequence::EscalateTask => BudgetExhaustedBodyConsequence::EscalateTask,
         BudgetConsequence::StopNewAssignments => BudgetExhaustedBodyConsequence::StopNewAssignments,
         BudgetConsequence::PauseTeam => BudgetExhaustedBodyConsequence::PauseTeam,
@@ -523,8 +521,8 @@ mod tests {
         }
         for (consequence, wire) in [
             (
-                BudgetConsequence::EndSessionAndBlockTask,
-                "end_session_and_block_task",
+                BudgetConsequence::EndSessionWithNote,
+                "end_session_with_note",
             ),
             (BudgetConsequence::EscalateTask, "escalate_task"),
             (

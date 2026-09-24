@@ -786,9 +786,9 @@ mod tests {
     };
     use crate::orchestrator::{Orchestrator, OrchestratorError, TickReport, TickRules, TickScope};
     use crate::recorded::fixtures::{
-        accept_frk_1, implement_finishes_frk_1, implement_stops_early, plan_assigns_frk_1,
-        plan_sprint_frk_1, reads_a_file, replays_farik_read_board, review_answers_nothing,
-        review_writes_note,
+        accept_frk_1, hits_the_turn_limit, implement_finishes_frk_1, implement_stops_early,
+        plan_assigns_frk_1, plan_sprint_frk_1, reads_a_file, replays_farik_read_board,
+        review_answers_nothing, review_writes_note,
     };
     use crate::recorded::{RecordedAdapter, Transcript};
     use crate::session::SessionPurpose;
@@ -2852,7 +2852,137 @@ mod tests {
         ));
         assert_eq!(harness.row("FRK-1").status, TaskStatus::InProgress);
         assert!(harness.events(&[EventKind::EscalationRaised]).is_empty());
-        assert!(harness.events(&[EventKind::NoteWritten]).is_empty());
+        let notes = farik_notes(&harness);
+        assert_eq!(notes.len(), 1, "{notes:?}");
+        assert!(notes[0].contains("input or output tokens"), "{}", notes[0]);
+    }
+
+    /// What a session that ran past its wall clock is told when it ends.
+    const WALL_CLOCK: &str = "the session ran past its wall clock of 1800 s";
+
+    /// The progress notes Farik wrote, in order.
+    fn farik_notes(harness: &Harness) -> Vec<String> {
+        harness
+            .events(&[EventKind::NoteWritten])
+            .iter()
+            .filter_map(|event| match &event.body {
+                EventBody::NoteWritten(body) if body.written_by == "farik" => {
+                    assert_eq!(body.kind, NoteWrittenBodyKind::Progress);
+                    Some(body.text.clone())
+                }
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// A session that reads a file and ends at a limit, told `WALL_CLOCK`.
+    fn hits_its_wall_clock() -> Transcript {
+        rewritten(
+            &hits_the_turn_limit(),
+            "Reached maximum number of turns (1)",
+            WALL_CLOCK,
+        )
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn leaves_a_note_when_a_session_hits_its_wall_clock() {
+        let harness = Harness::new("orch-note-wall-clock", |_| {});
+        harness.in_progress("FRK-1", "dev-a", "dev-b");
+        let adapter = harness.recorded(vec![hits_its_wall_clock(), reads_a_file()]);
+        let orchestrator = harness.orchestrator(adapter.clone());
+
+        orchestrator.tick().await.expect("the tick runs");
+
+        let notes = farik_notes(&harness);
+        assert_eq!(notes.len(), 1, "{notes:?}");
+        assert!(notes[0].contains("a limit"), "{}", notes[0]);
+        assert!(notes[0].contains(WALL_CLOCK), "{}", notes[0]);
+        assert!(!notes[0].contains("Your last note"), "{}", notes[0]);
+        assert_eq!(harness.row("FRK-1").status, TaskStatus::InProgress);
+
+        orchestrator.tick().await.expect("the next session runs");
+        let started = adapter.started();
+        assert_eq!(started.len(), 2);
+        assert_eq!(started[1].purpose, SessionPurpose::Implement);
+        assert!(
+            started[1].initial_prompt.contains(&notes[0]),
+            "{}",
+            started[1].initial_prompt
+        );
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn leaves_a_note_when_a_session_crosses_its_tokens() {
+        let harness = Harness::new("orch-note-tokens", |wire| {
+            wire["budgets"]["session"] = json!({ "max_input_tokens": 100 });
+        });
+        harness.in_progress("FRK-1", "dev-a", "dev-b");
+        let adapter = Arc::new(UsageThenWaitAdapter::completing(a_thousand_tokens()));
+        let orchestrator = harness.orchestrator(adapter.clone());
+
+        orchestrator.tick().await.expect("the tick runs");
+
+        let ends = harness.events(&[EventKind::SessionEnded]);
+        assert!(
+            matches!(
+                &ends[..],
+                [end] if matches!(&end.body, EventBody::SessionEnded(body) if body.reason == SessionEndedBodyReason::Completed)
+            ),
+            "{ends:?}"
+        );
+        let notes = farik_notes(&harness);
+        assert_eq!(notes.len(), 1, "{notes:?}");
+        assert!(notes[0].contains("input or output tokens"), "{}", notes[0]);
+        assert!(!notes[0].contains("a limit"), "{}", notes[0]);
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn keeps_the_agents_own_note_in_farks_note() {
+        let harness = Harness::new("orch-note-quotes", |_| {});
+        harness.in_progress("FRK-1", "dev-a", "dev-b");
+        let limited = rewritten(
+            &implement_stops_early(),
+            r#""subtype":"success","is_error":false"#,
+            &format!(r#""subtype":"error_max_turns","is_error":true,"errors":["{WALL_CLOCK}"]"#),
+        );
+        let adapter = harness.recorded(vec![limited]);
+        let orchestrator = harness.orchestrator(adapter);
+
+        orchestrator.tick().await.expect("the tick runs");
+
+        let notes = farik_notes(&harness);
+        assert_eq!(notes.len(), 1, "{notes:?}");
+        assert!(notes[0].contains(WALL_CLOCK), "{}", notes[0]);
+        assert!(
+            notes[0].contains("Your last note in it: done.txt committed; C1 not run yet."),
+            "{}",
+            notes[0]
+        );
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn leaves_no_note_for_a_verify_session() {
+        let harness = Harness::new("orch-note-verify", |_| {});
+        harness.verifying("FRK-1");
+        let adapter = harness.recorded(vec![hits_its_wall_clock()]);
+        let orchestrator = harness.orchestrator(adapter.clone());
+
+        orchestrator.tick().await.expect("the tick runs");
+
+        assert_eq!(adapter.started()[0].purpose, SessionPurpose::Verify);
+        let ends = harness.events(&[EventKind::SessionEnded]);
+        assert!(
+            ends.iter().any(|end| matches!(
+                &end.body,
+                EventBody::SessionEnded(body) if body.reason == SessionEndedBodyReason::Limit
+            )),
+            "{ends:?}"
+        );
+        assert!(farik_notes(&harness).is_empty());
     }
 
     #[tokio::test]

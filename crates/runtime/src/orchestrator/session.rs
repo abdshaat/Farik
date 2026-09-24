@@ -5,16 +5,18 @@ use std::collections::BTreeSet;
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use chrono::{DateTime, Utc};
 use farik_core::budget::{BudgetScope, SessionLedger, add_usage};
 use farik_core::contract::{Role, TaskContract};
 use farik_core::governor::permissions::PermissionTier;
 use farik_core::pricing::Usage;
 use farik_core::team::{Agent, Effort, Team};
-use farik_protocol::event::EventIds;
+use farik_protocol::event::{EventBody, EventIds, EventKind, NoteWrittenBody, NoteWrittenBodyKind};
 use farik_roles::load_role;
 use farik_store::EventQuery;
 
 use super::messages::human_message;
+use super::verify::append;
 use super::{OrchestratorDeps, OrchestratorError, TRIAGE_MODEL};
 use crate::claude::allowed_builtins;
 use crate::cost::{CostError, CostSource, budget_state, record_exhaustion, record_session_cost};
@@ -72,6 +74,14 @@ pub(super) struct SessionEnd {
     pub(super) reason: EndReason,
     /// What the program said.
     pub(super) detail: String,
+    /// When the model provider said its limit resets, for a session that ended at it.
+    #[expect(
+        dead_code,
+        reason = "the agent's sleep at its provider's limit reads it, in this step's next task"
+    )]
+    pub(super) resets_at: Option<DateTime<Utc>>,
+    /// The budgets the session's reported usage crossed, in the order it crossed them.
+    pub(super) crossed: Vec<BudgetScope>,
 }
 
 /// Runs one session to its end: registered with the daemon for as long as it runs, its start,
@@ -94,12 +104,93 @@ pub(super) async fn run_session(
     });
     let ended = drive(deps, team, role, ask.contract, &spec).await;
     deps.daemon.end_session(&spec.session_id);
-    let (reason, detail) = ended?;
-    Ok(SessionEnd {
-        session_id: spec.session_id,
-        reason,
-        detail,
-    })
+    let end = ended?;
+    if let Some(contract) = ask.contract
+        && ask.purpose == SessionPurpose::Implement
+    {
+        leave_note(deps, contract, ask.agent, &end)?;
+    }
+    Ok(end)
+}
+
+/// Who writes the note a session that stopped at its own limit leaves.
+const FARIK: &str = "farik";
+
+/// Leaves one progress note on the task of an implement session that ended at a limit, at its
+/// model provider's limit, or past one of its own budgets, naming each and quoting the agent's own
+/// last progress note of the session: the next implement session is shown the task's last note
+/// alone (`resume()`), which is this one, so the agent's words are kept in it. Other purposes are
+/// asked again from their own first message, and get none.
+fn leave_note(
+    deps: &OrchestratorDeps,
+    contract: &TaskContract,
+    agent: &Agent,
+    end: &SessionEnd,
+) -> Result<(), OrchestratorError> {
+    let mut causes: Vec<&str> = Vec::new();
+    match end.reason {
+        EndReason::Limit => causes.push("a limit"),
+        EndReason::ProviderLimit => causes.push("its model provider's usage limit"),
+        EndReason::Completed | EndReason::Aborted | EndReason::Error => {}
+    }
+    for scope in &end.crossed {
+        causes.push(match scope {
+            BudgetScope::SessionTokens => "the session's input or output tokens",
+            BudgetScope::SessionWallClock => "the session's wall clock",
+            BudgetScope::SessionToolCalls => "the session's tool calls",
+            BudgetScope::TaskUsd
+            | BudgetScope::TaskSessions
+            | BudgetScope::SprintUsd
+            | BudgetScope::DayUsd => continue,
+        });
+    }
+    if causes.is_empty() {
+        return Ok(());
+    }
+    let tools = &deps.tools;
+    let history = tools.log.read(&EventQuery {
+        task_id: Some(contract.id.clone()),
+        kinds: vec![EventKind::SessionStarted, EventKind::NoteWritten],
+        ..EventQuery::default()
+    })?;
+    let since = history
+        .iter()
+        .rposition(|event| {
+            matches!(event.body, EventBody::SessionStarted(_))
+                && event.envelope.ids.session_id.as_deref() == Some(end.session_id.as_str())
+        })
+        .map_or(history.len(), |at| at + 1);
+    let own = history[since..]
+        .iter()
+        .rev()
+        .find_map(|event| match &event.body {
+            EventBody::NoteWritten(body)
+                if body.kind == NoteWrittenBodyKind::Progress
+                    && body.written_by == agent.id.as_str() =>
+            {
+                Some(body.text.as_str())
+            }
+            _ => None,
+        });
+    let quoted = own.map_or_else(String::new, |text| {
+        format!(" Your last note in it: {}.", text.trim_end_matches('.'))
+    });
+    let text = format!(
+        "This session stopped at {}: {}.{quoted} Resume from the last commit and this note.",
+        causes.join(" and "),
+        end.detail.trim_end_matches('.')
+    );
+    append(
+        tools,
+        &contract.id,
+        None,
+        Some(end.session_id.clone()),
+        EventBody::NoteWritten(NoteWrittenBody {
+            kind: NoteWrittenBodyKind::Progress,
+            text,
+            written_by: FARIK.to_string(),
+        }),
+    )
 }
 
 /// The Farik tools a read-only session is not offered: the command runner, which has no
@@ -216,7 +307,7 @@ async fn drive(
     role: Role,
     contract: Option<&TaskContract>,
     spec: &SessionSpec,
-) -> Result<(EndReason, String), OrchestratorError> {
+) -> Result<SessionEnd, OrchestratorError> {
     let tools = &deps.tools;
     let clock = &*tools.clock;
     let ids = EventIds {
@@ -243,6 +334,7 @@ async fn drive(
     };
     record_session_started(&tools.log, spec, &tools.ids, clock)?;
     let mut costed = false;
+    let mut crossed = Vec::new();
     let read = match deps.adapter.start_session(spec.clone()) {
         Ok(mut handle) => {
             let running = Running {
@@ -253,7 +345,7 @@ async fn drive(
                 spec,
                 ids: &ids,
             };
-            let read = read_to_end(&running, &mut *handle, &cost, &mut costed).await;
+            let read = read_to_end(&running, &mut *handle, &cost, &mut costed, &mut crossed).await;
             if read.is_err() {
                 // The error is what the tick reports; an abort that fails too adds nothing to it.
                 let _ = handle.abort();
@@ -263,7 +355,7 @@ async fn drive(
         Err(error) => Err(error.into()),
     };
     let (reason, detail) = match &read {
-        Ok((reason, detail)) => (*reason, detail.clone()),
+        Ok((reason, detail, _)) => (*reason, detail.clone()),
         Err(error) => (EndReason::Error, error.to_string()),
     };
     let zero = if costed {
@@ -274,10 +366,16 @@ async fn drive(
     let ended = record_session_ended(&tools.log, &spec.session_id, reason, &detail, &ids, clock);
     // A session that failed is reported by what failed it; its zero cost and its end are
     // recorded as far as they can be, and their own failures would only hide the first.
-    let read = read?;
+    let (_, _, resets_at) = read?;
     zero?;
     ended?;
-    Ok(read)
+    Ok(SessionEnd {
+        session_id: spec.session_id.clone(),
+        reason,
+        detail,
+        resets_at,
+        crossed,
+    })
 }
 
 /// A started session, and what its budgets are read against.
@@ -295,13 +393,14 @@ struct Running<'a> {
 /// budgets it exhausts, and aborting the session when one of them is not the task's sessions.
 /// The session is also aborted, once, as soon as the daemon has been asked to stop it: by the
 /// human's `SessionStop` or pause, or by a hook that found its agent no longer active (5.2, F1).
-/// `costed` says whether a usage report was costed.
+/// `costed` says whether a usage report was costed, and `crossed` gathers the budgets crossed.
 async fn read_to_end(
     running: &Running<'_>,
     handle: &mut dyn SessionHandle,
     cost: &impl Fn(&Usage) -> Result<f64, CostError>,
     costed: &mut bool,
-) -> Result<(EndReason, String), OrchestratorError> {
+    crossed: &mut Vec<BudgetScope>,
+) -> Result<(EndReason, String, Option<DateTime<Utc>>), OrchestratorError> {
     let Running {
         deps,
         team,
@@ -353,11 +452,12 @@ async fn read_to_end(
                     ..add_usage(&ledger, &usage, cost_usd)
                 };
                 let after = state(&ledger)?;
-                let crossed =
+                let now =
                     record_exhaustion(&tools.log, &tools.projections, &before, &after, ids, clock)?;
+                crossed.extend(now.iter().map(|exhausted| exhausted.scope));
                 // A task's last session and in-progress work past the sprint's budget may finish
                 // (5.5): what those stop is the next session and the next assignment.
-                if crossed.iter().any(|exhausted| {
+                if now.iter().any(|exhausted| {
                     !matches!(
                         exhausted.scope,
                         BudgetScope::TaskSessions | BudgetScope::SprintUsd
@@ -366,12 +466,17 @@ async fn read_to_end(
                     handle.abort()?;
                 }
             }
-            Some(SessionEvent::Ended { reason, detail, .. }) => return Ok((reason, detail)),
+            Some(SessionEvent::Ended {
+                reason,
+                detail,
+                resets_at,
+            }) => return Ok((reason, detail, resets_at)),
             Some(_) => {}
             None => {
                 return Ok((
                     EndReason::Error,
                     "the session's events stopped without an end".to_string(),
+                    None,
                 ));
             }
         }

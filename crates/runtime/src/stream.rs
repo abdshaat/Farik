@@ -17,10 +17,11 @@ pub struct StreamParser {
     rate_limit: Option<RateLimit>,
 }
 
-/// The last `rate_limit_event`'s `rate_limit_info`: its status, and when it said it resets.
+/// The last `rate_limit_event`'s `rate_limit_info`: its status, when it has one, and when it said
+/// it resets.
 #[derive(Debug)]
 struct RateLimit {
-    status: String,
+    status: Option<String>,
     resets_at: Option<DateTime<Utc>>,
 }
 
@@ -124,8 +125,7 @@ impl StreamParser {
                 status: info
                     .get("status")
                     .and_then(Value::as_str)
-                    .unwrap_or_default()
-                    .to_string(),
+                    .map(str::to_string),
                 resets_at: info
                     .get("resetsAt")
                     .and_then(Value::as_i64)
@@ -194,7 +194,10 @@ fn result(
     // No capture of a refused session exists yet, so each of the three forms counts.
     let lowered = detail.to_ascii_lowercase();
     let is_provider_limit = reason == EndReason::Error
-        && (rate_limit.is_some_and(|limit| !limit.status.starts_with("allowed"))
+        // A missing status says nothing, so it is not a limit.
+        && (rate_limit
+            .and_then(|limit| limit.status.as_deref())
+            .is_some_and(|status| !status.starts_with("allowed"))
             || value.get("api_error_status").and_then(Value::as_u64) == Some(429)
             || lowered.contains("usage limit")
             || lowered.contains("rate limit"));
@@ -633,6 +636,15 @@ mod tests {
             end_of(&after_a_rate_limit("allowed_warning", AN_ERROR)),
             (EndReason::Error, None)
         );
+    }
+
+    #[test]
+    fn ignores_a_rate_limit_event_without_a_status() {
+        let mut parser = StreamParser::default();
+        let event = r#"{"type":"rate_limit_event","rate_limit_info":{"resetsAt":1790119200}}"#;
+        assert_eq!(parser.parse_line(event), Ok(Vec::new()));
+        let events = parser.parse_line(AN_ERROR).expect("a result line parses");
+        assert_eq!(end_of(&events), (EndReason::Error, None));
     }
 
     #[test]

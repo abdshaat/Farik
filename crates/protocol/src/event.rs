@@ -1127,6 +1127,21 @@ mod tests {
     }
 
     #[test]
+    fn records_the_new_consequence_and_reads_the_old() {
+        for consequence in ["end_session_with_note", "end_session_and_block_task"] {
+            let mut input = an_event_wire(EventKind::BudgetExhausted);
+            input["body"] = json!({ "scope": "session_wall_clock", "consequence": consequence });
+            let read = event_from_value(&input);
+            assert!(read.is_ok(), "{consequence}: {read:?}");
+            let event = read.expect("checked above");
+            assert_eq!(
+                event_to_value(&event)["body"]["consequence"],
+                json!(consequence)
+            );
+        }
+    }
+
+    #[test]
     fn refuses_a_cost_with_a_negative_amount() {
         let mut input = an_event_wire(EventKind::CostRecorded);
         input["body"]["cost_usd"] = json!(-0.01);

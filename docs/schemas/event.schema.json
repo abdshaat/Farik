@@ -276,13 +276,13 @@
     },
     "budgetExhaustedBody": {
       "title": "Budget Exhausted Body",
-      "description": "A budget of docs/SPEC.md section 5.5 ran out, recorded once when it crossed from having room to none. The envelope is the session's that crossed it.",
+      "description": "A budget of docs/SPEC.md section 5.5 ran out, recorded once when it crossed from having room to none. The envelope is the session's that crossed it. `end_session_and_block_task` is what logs recorded before `end_session_with_note` replaced it, and names the same consequence.",
       "type": "object",
       "additionalProperties": false,
       "required": ["scope", "consequence"],
       "properties": {
         "scope": { "type": "string", "enum": ["session_tokens", "session_wall_clock", "session_tool_calls", "task_usd", "task_sessions", "sprint_usd", "day_usd"] },
-        "consequence": { "type": "string", "enum": ["end_session_and_block_task", "escalate_task", "stop_new_assignments", "pause_team"] }
+        "consequence": { "type": "string", "enum": ["end_session_with_note", "end_session_and_block_task", "escalate_task", "stop_new_assignments", "pause_team"] }
       }
     },
     "taskStatus": {
