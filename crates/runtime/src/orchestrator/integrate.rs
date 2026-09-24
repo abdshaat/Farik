@@ -19,7 +19,7 @@ use super::verify::append;
 use super::{IntegrationOutcome, Orchestrator, OrchestratorError, TickReport, worktree};
 use crate::forge::{Forge, PullRequestState};
 use crate::tools::ToolDeps;
-use crate::transitions::integration_branch;
+use crate::transitions::{integration_branch, is_move_into};
 
 /// Where the integration lock lives, under the project root.
 const LOCK: &str = ".farik/local/integration.lock";
@@ -460,17 +460,13 @@ fn since_accepted(
     })?;
     let start = history
         .iter()
-        .rposition(is_move_into_accepted)
+        .rposition(|event| is_move_into(event, TaskStatus::Accepted))
         .map_or(0, |at| at + 1);
     Ok(history
         .into_iter()
         .skip(start)
         .filter(|event| kinds.contains(&event.body.kind()))
         .collect())
-}
-
-fn is_move_into_accepted(event: &FarikEvent) -> bool {
-    matches!(&event.body, EventBody::TaskTransitioned(body) if body.to.to_string() == TaskStatus::Accepted.to_string())
 }
 
 /// Whether an integration escalation was raised since the task was accepted.

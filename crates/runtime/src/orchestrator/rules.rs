@@ -23,7 +23,7 @@ use super::{
 use crate::cost::budget_state;
 use crate::exec::Executor;
 use crate::session::{EndReason, SessionPurpose};
-use crate::transitions::{TransitionAsk, TransitionOutcome, integration_branch};
+use crate::transitions::{self, TransitionAsk, TransitionOutcome, integration_branch};
 
 /// What a tick says when no rule matched.
 const NOTHING_TO_DO: &str = "nothing on the board needs doing";
@@ -270,9 +270,7 @@ fn last_move_into(
         kinds: vec![EventKind::TaskTransitioned],
         ..EventQuery::default()
     })?;
-    Ok(moves.into_iter().rev().find(|event| {
-        matches!(&event.body, EventBody::TaskTransitioned(body) if body.to.to_string() == status.to_string())
-    }))
+    Ok(transitions::last_move_into(&moves, status).cloned())
 }
 
 /// Whether the task's move from `from` to `to` was refused since the task last moved into `from`.

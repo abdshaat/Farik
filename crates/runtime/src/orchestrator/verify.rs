@@ -29,8 +29,8 @@ use crate::exec::ExecError;
 use crate::session::SessionPurpose;
 use crate::tools::ToolDeps;
 use crate::transitions::{
-    TransitionAsk, TransitionError, TransitionOutcome, integration_branch, refusal_details,
-    reviewed_by_the_human,
+    TransitionAsk, TransitionError, TransitionOutcome, integration_branch, last_move_into,
+    refusal_details, reviewed_by_the_human,
 };
 
 /// Who records the criteria Farik runs for the reviewer: Farik ran them, as `requested_by:
@@ -561,13 +561,7 @@ pub(super) fn history(
 
 /// The sequence number of the task's last move into `verifying`, or 0.
 pub(super) fn since_verifying(history: &[FarikEvent]) -> u64 {
-    history
-        .iter()
-        .rev()
-        .find(|event| {
-            matches!(&event.body, EventBody::TaskTransitioned(body) if body.to.to_string() == "verifying")
-        })
-        .map_or(0, |event| event.envelope.seq)
+    last_move_into(history, TaskStatus::Verifying).map_or(0, |event| event.envelope.seq)
 }
 
 /// Appends one event about the task, stamped with the agent and session when there are any, and

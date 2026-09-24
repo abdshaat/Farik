@@ -30,7 +30,8 @@ use crate::criteria::{CriterionOutcome, remove_base_worktree, run_criteria};
 use crate::session::SessionPurpose;
 use crate::tools::ToolDeps;
 use crate::transitions::{
-    TransitionAsk, TransitionOutcome, integration_branch, refusal_details, result_accepted,
+    TransitionAsk, TransitionOutcome, integration_branch, refining_began, refusal_details,
+    result_accepted,
 };
 
 /// The human, as the reviewer of an epic the Product Manager broke down (5.16 item 4).
@@ -177,21 +178,6 @@ fn judge(
         task_id: row.task_id.clone(),
         what,
     })
-}
-
-/// Where refining last began: the later of the task's last move into `refining` and its last
-/// triage, or 0.
-fn refining_began(history: &[FarikEvent]) -> u64 {
-    history
-        .iter()
-        .filter(|event| match &event.body {
-            EventBody::TaskTransitioned(body) => body.to.to_string() == "refining",
-            EventBody::RequestTriaged(_) => true,
-            _ => false,
-        })
-        .map(|event| event.envelope.seq)
-        .max()
-        .unwrap_or(0)
 }
 
 /// Whether the contract is judged now: written since refining began with no refusal by the
