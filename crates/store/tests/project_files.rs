@@ -1006,6 +1006,7 @@ fn refuses_a_sprint_file_that_breaks_its_schema() {
 fn refuses_a_sprint_file_that_is_not_its_ids() {
     let project = TempProject::new("misnamed-sprint");
     let files = project.files();
+    files.init(&a_team()).expect("a project is made");
     files.write_sprint(&a_sprint("S2")).expect("written");
     std::fs::rename(
         project.root.join(".farik/sprints/S2.yaml"),
@@ -1018,7 +1019,8 @@ fn refuses_a_sprint_file_that_is_not_its_ids() {
     assert_eq!(path, ".farik/sprints/S1.yaml");
     assert!(detail.contains("S2"), "{detail}");
 
-    // An id that is no sprint's names no file, whatever lies at the path it spells.
+    // An id that is no sprint's names no file: S0 because nothing is there, and ../team because the
+    // id pattern refuses it before the path can reach .farik/team.yaml, which `init` wrote.
     for id in ["../team", "S0"] {
         assert_eq!(
             files.read_sprint(id),

@@ -2360,13 +2360,17 @@ mod tests {
         }
         {
             // A plan and an end whose `left` missed FRK-1, as version 8 projected them: FRK-1
-            // stuck in S1 after S1 ended.
+            // stuck in S1 after S1 ended. A move into `verifying` and a cost are also already
+            // projected, in `task_projections` and `cost_records`, so a migration that failed to
+            // empty either table (M4c/N2, N4) would replay them a second time.
             let log = Arc::new(open_event_log(&path, at(9)).expect("the log opens"));
             for event in [
                 about(EventKind::TaskCreated, "FRK-1"),
                 started("S1", None),
                 planned("S1", &["FRK-1"]),
                 ended("S1", &[]),
+                moved("FRK-1", "draft", "verifying"),
+                cost(Some("FRK-1"), "dev-a", "s1", "2026-09-17", (0.5, 1000, 100)),
             ] {
                 log.append(&event).expect("appends");
             }
@@ -2375,18 +2379,33 @@ mod tests {
                     "DELETE FROM schema_migrations WHERE version > 8;
                      INSERT INTO task_projections
                          (task_id, kind, parent, title, status, risk, triaged, locked, updated_seq,
-                          sprint)
-                     VALUES ('FRK-1', 'task', NULL, 'Add a login page', 'draft', 'low', 0, 0, 3,
-                             'S1');
+                          sprint, verifications)
+                     VALUES ('FRK-1', 'task', NULL, 'Add a login page', 'verifying', 'low', 0, 0, 5,
+                             'S1', 1);
                      INSERT INTO sprints (sprint_id, budget_usd, open) VALUES ('S1', NULL, 0);
-                     INSERT INTO projection_cursor (id, seq) VALUES (1, 4)
-                         ON CONFLICT (id) DO UPDATE SET seq = 4;",
+                     INSERT INTO cost_records
+                         (seq, task_id, agent_id, session_id, day, purpose, model_id,
+                          input_tokens, output_tokens, cost_usd)
+                     VALUES (6, 'FRK-1', 'dev-a', 's1', '2026-09-17', 'implement',
+                             'claude-sonnet-4-5', 1000, 100, 0.5);
+                     INSERT INTO projection_cursor (id, seq) VALUES (1, 6)
+                         ON CONFLICT (id) DO UPDATE SET seq = 6;",
                 )
                 .expect("the stranded rows are written");
         }
         let log = Arc::new(open_event_log(&path, at(10)).expect("the log opens"));
         let projections = open_projections(log).expect("the projections open");
         assert_eq!(sprint_of(&projections, "FRK-1"), None);
+        assert_eq!(
+            row_of(&projections, "FRK-1").verifications,
+            1,
+            "a stale row left in task_projections would double it"
+        );
+        assert_eq!(
+            projections.costs(CostScope::Task).expect("the costs read"),
+            vec![row(CostScope::Task, "FRK-1", (0.5, 1000, 100, 1))],
+            "a stale row left in cost_records would collide with the replayed one"
+        );
         let _ = std::fs::remove_dir_all(&directory);
     }
 }
