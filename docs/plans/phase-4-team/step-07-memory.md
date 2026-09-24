@@ -124,7 +124,7 @@ Files: `crates/store/src/scan.rs`, `crates/cli/src/init.rs`, `orchestrator/integ
 - `keeps_the_integration_when_the_scan_fails` (`#[ignore]`, git) — `project.md` made a directory: the task is still integrated, and the words say the scan was not refreshed with the error.
 - `init_writes_the_same_document` (cli, existing init tests) — `farik init` still writes `project.md` as before, through the moved `project_document`.
 
-- [ ] `feat(runtime): refresh the project scan when work lands`
+- [x] `feat(runtime): refresh the project scan when work lands`
 
 ### Task 5: the spec
 

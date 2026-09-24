@@ -4,12 +4,13 @@ use std::path::Path;
 use std::sync::Arc;
 
 use chrono::{DateTime, Utc};
-use farik_core::criteria::{CriteriaLibrary, CriterionTemplate};
 use farik_core::team::{Team, validate_team};
 use farik_protocol::event::EventBody;
 use farik_protocol::generated::event::{CriteriaUpdatedBody, ProjectScannedBody, TeamUpdatedBody};
 use farik_store::files::{FilesError, ProjectFiles};
-use farik_store::{Git, ProjectScan, open_event_log, scan_project, seeded_library};
+use farik_store::{
+    Git, ProjectScan, names_of, open_event_log, project_document, scan_project, seeded_library,
+};
 use serde_json::json;
 
 use crate::project::{DATABASE, ProjectIds, directory_name, repository_root};
@@ -162,24 +163,6 @@ fn absent_or<T>(read: Result<T, FilesError>) -> Result<Option<T>, String> {
         Err(FilesError::NotFound { .. }) => Ok(None),
         Err(other) => Err(other.to_string()),
     }
-}
-
-/// Every criterion's name, in the order they are held in.
-fn names_of(criteria: &[CriterionTemplate]) -> Vec<String> {
-    criteria.iter().map(|one| one.name.to_string()).collect()
-}
-
-/// What `.farik/project.md` holds: the line the scan read back, and the criteria it found.
-///
-/// This is the file every session is given (`docs/SPEC.md` section 5.8), so it says what the scan
-/// found and nothing it did not.
-fn project_document(scan: &ProjectScan, library: &CriteriaLibrary) -> String {
-    let mut parts = vec![format!("# The project\n\n{}", scan.read_back)];
-    let names = names_of(&library.criteria);
-    if !names.is_empty() {
-        parts.push(format!("Criteria: {}.", names.join(", ")));
-    }
-    format!("{}\n", parts.join("\n\n"))
 }
 
 /// The team a project starts with: the two agents `validate_team` says a team cannot work without

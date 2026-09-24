@@ -280,6 +280,8 @@ pub enum IntegrationOutcome {
     Merged {
         /// The integration branch's commit holding it.
         sha: String,
+        /// What became of the project scan once it landed.
+        scan: ScanRefresh,
     },
     /// A pull request was opened for it, at this address.
     PullRequestOpened {
@@ -292,7 +294,43 @@ pub enum IntegrationOutcome {
     Escalated {
         /// The escalation's detail.
         detail: String,
+        /// What became of the project scan, when the escalation follows a merge (a failed push or
+        /// fast-forward).
+        scan: Option<ScanRefresh>,
     },
+}
+
+/// What became of the project scan after an integration (5.8): the scan every prompt carries is
+/// kept current as work lands.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ScanRefresh {
+    /// The project changed, and `project.md` and the criterion library say so now.
+    Refreshed,
+    /// Nothing the scan reads changed.
+    Unchanged,
+    /// The scan was not run, for this reason.
+    Skipped {
+        /// Why, in words.
+        why: String,
+    },
+    /// The scan or its writing failed, and nothing was changed.
+    Failed {
+        /// What failed, in words.
+        error: String,
+    },
+}
+
+impl fmt::Display for ScanRefresh {
+    /// What is said after the integration's own words: nothing when the scan is unchanged.
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Refreshed => write!(formatter, "; the project scan was refreshed"),
+            Self::Unchanged => Ok(()),
+            Self::Skipped { why: reason } | Self::Failed { error: reason } => {
+                write!(formatter, "; the project scan was not refreshed: {reason}")
+            }
+        }
+    }
 }
 
 /// What a command the human gave did, for the command line to print.

@@ -30,4 +30,6 @@ pub use projections::{
     CostProjection, CostScope, Projections, SprintProjection, TaskProjection, open_projections,
 };
 pub use reconcile::{Drift, ReconcileError, reconcile};
-pub use scan::{ProjectScan, ScanError, scan_project, seeded_library};
+pub use scan::{
+    ProjectScan, ScanError, material, names_of, project_document, scan_project, seeded_library,
+};

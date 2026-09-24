@@ -587,9 +587,9 @@ async fn integrate(
     row_of(&orchestrator.deps.tools, task_id)?;
     let before = last_seq(&orchestrator.deps.tools, task_id)?;
     let said = match orchestrator.integrate(task_id).await {
-        Ok(IntegrationOutcome::Merged { sha }) => {
+        Ok(IntegrationOutcome::Merged { sha, scan }) => {
             format!(
-                "{} merged into the integration branch at {sha}",
+                "{} merged into the integration branch at {sha}{scan}",
                 task_id.as_str()
             )
         }
@@ -600,9 +600,11 @@ async fn integrate(
             "{}'s pull request is open on the forge, waiting for its merge",
             task_id.as_str()
         ),
-        Ok(IntegrationOutcome::Escalated { detail }) => {
-            format!("{} could not be integrated: {detail}", task_id.as_str())
-        }
+        Ok(IntegrationOutcome::Escalated { detail, scan }) => format!(
+            "{} could not be integrated: {detail}{}",
+            task_id.as_str(),
+            scan.map(|scan| scan.to_string()).unwrap_or_default()
+        ),
         Err(OrchestratorError::Refused { reason }) => {
             return Err(CommandError::Refused { reason });
         }
