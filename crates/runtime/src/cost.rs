@@ -146,9 +146,10 @@ pub fn record_session_cost(
 /// active agents that use it, in team order and without repeats.
 ///
 /// An agent's model is its own `model.id` when it has one and otherwise its role's default
-/// (`session_model`); an active Product Manager also uses `TRIAGE_MODEL`, which its triage
-/// sessions run on (5.16). An agent with no model of its own whose role Farik does not ship is
-/// passed over, since nothing could load its role to start a session of it.
+/// (`session_model`); every active agent also uses `TRIAGE_MODEL`, which its conversations, a
+/// Product Manager's triage, and the ceremony runner's ceremonies run on (5.9, 5.16). An agent
+/// with no model of its own whose role Farik does not ship is passed over, since nothing could
+/// load its role to start a session of it.
 ///
 /// # Errors
 ///
@@ -171,9 +172,7 @@ pub fn unpriced_models(
                 Err(error) => return Err(error),
             },
         }
-        if role == Role::ProductManager {
-            models.push(TRIAGE_MODEL.to_string());
-        }
+        models.push(TRIAGE_MODEL.to_string());
         for model in models {
             if prices.prices.contains_key(model.as_str()) {
                 continue;
@@ -681,9 +680,14 @@ mod tests {
         assert_eq!(
             unpriced_models(&team, &only_opus_5)
                 .expect("an Architect with no model uses its role's shipped model"),
+            // Every active agent's conversations, and the ceremony runner's ceremonies, run on
+            // Claude Sonnet 5 whatever its own model.
             named(&[
                 ("claude-other-2", &["arch-2"]),
-                ("claude-sonnet-5", &["pm"]),
+                (
+                    "claude-sonnet-5",
+                    &["pm", "dev-a", "dev-b", "arch", "arch-2"]
+                ),
                 ("claude-unknown-9", &["dev-a", "dev-b"]),
             ])
         );
