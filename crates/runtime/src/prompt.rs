@@ -276,7 +276,14 @@ fn memory_section(input: &PromptInput<'_>) -> String {
     if used.saturating_mul(5) > cap.saturating_mul(4) && offers(input, "farik_write_memory") {
         line.push_str(" Prune it with farik_write_memory before it reaches the cap.");
     }
-    match untrusted("memory", input.memory, cap.saturating_mul(4)) {
+    // Cut in characters, as `farik_write_memory` measures, so that a notebook within its cap is
+    // never cut; the block's own byte cap then has nothing left to cut.
+    let chars = cap.saturating_mul(4);
+    let memory = match input.memory.char_indices().nth(chars) {
+        Some((at, _)) => format!("{}\n[cut at {chars} characters]", &input.memory[..at]),
+        None => input.memory.to_string(),
+    };
+    match untrusted("memory", &memory, usize::MAX) {
         Some(block) => format!("{line}\n\n{block}"),
         None => line,
     }
@@ -771,37 +778,29 @@ mod tests {
     #[test]
     fn cuts_the_memory_at_its_cap() {
         let inputs = a_product_manager();
-        let memory = "a".repeat(2_100);
-        let prompt = assembled(&PromptInput {
-            memory: &memory,
-            memory_cap_tokens: 500,
-            ..inputs.full(SessionPurpose::Implement)
-        });
-        let memory_section = section(&prompt, "Your memory");
-        let block = memory_section
-            .split_once("\n\n")
-            .expect("the count line precedes the block")
-            .1;
-        assert_eq!(
-            inside(block, "memory"),
-            format!("{}\n[cut at 2000 bytes]", "a".repeat(2_000))
-        );
+        // What the `memory` block holds for a notebook under a cap of 500 tokens, 2,000 characters.
+        let held = |memory: &str| {
+            let prompt = assembled(&PromptInput {
+                memory,
+                memory_cap_tokens: 500,
+                ..inputs.full(SessionPurpose::Implement)
+            });
+            let memory_section = section(&prompt, "Your memory");
+            let block = memory_section
+                .split_once("\n\n")
+                .expect("the count line precedes the block")
+                .1;
+            inside(block, "memory").to_string()
+        };
 
-        // A two-byte character straddling the cap is not split: the cut falls before it.
-        let memory = format!("{}é{}", "a".repeat(1_999), "a".repeat(100));
-        let prompt = assembled(&PromptInput {
-            memory: &memory,
-            memory_cap_tokens: 500,
-            ..inputs.full(SessionPurpose::Implement)
-        });
-        let memory_section = section(&prompt, "Your memory");
-        let block = memory_section
-            .split_once("\n\n")
-            .expect("the count line precedes the block")
-            .1;
+        // Characters, not bytes: 2,000 two-byte characters are within the cap and never cut.
+        let within = "é".repeat(2_000);
+        assert_eq!(held(&within), within);
+
+        // One character more is cut at the cap, and the character is not split.
         assert_eq!(
-            inside(block, "memory"),
-            format!("{}\n[cut at 2000 bytes]", "a".repeat(1_999))
+            held(&"é".repeat(2_001)),
+            format!("{}\n[cut at 2000 characters]", "é".repeat(2_000))
         );
     }
 

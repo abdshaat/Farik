@@ -221,6 +221,15 @@ mod tests {
             "memory-cap",
             &a_team_of_three(|wire| wire["policy"]["memory_cap_tokens"] = json!(500)),
         );
+        // 2,000 characters are 500 tokens, exactly the cap, which is within it.
+        project
+            .call(
+                "dev-a",
+                None,
+                "farik_write_memory",
+                json!({ "text": "a".repeat(2_000) }),
+            )
+            .expect("a notebook at its cap is written");
         project
             .call(
                 "dev-a",

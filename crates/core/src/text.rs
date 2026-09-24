@@ -46,5 +46,7 @@ mod tests {
         assert_eq!(tokens("é"), 1);
         assert_eq!(tokens("abcdefgh"), 2);
         assert_eq!(tokens("abcdefghé"), 3);
+        // Eight bytes, which counted as bytes would be two tokens.
+        assert_eq!(tokens("éééé"), 1);
     }
 }
