@@ -1,5 +1,6 @@
-//! `farik metrics`: the harness metrics of F17, over the whole project.
+//! `farik metrics`: the harness metrics of F17, over the whole project or one sprint.
 
+use farik_store::files::FilesError;
 use farik_store::metrics::{CostSplit, HarnessMetrics};
 use serde_json::{Map, Value, json};
 
@@ -9,16 +10,26 @@ use crate::project::Project;
 /// What a rate says while no task is accepted, since a rate with no denominator is not zero.
 const NONE_YET: &str = "none yet, no task has been accepted";
 
-/// The five harness metrics, as lines and as one JSON object.
+/// The five harness metrics, as lines and as one JSON object; over `sprint_id`'s rows and costs
+/// when there is one, the whole project otherwise.
 ///
 /// # Errors
 ///
-/// A sentence saying what the store refused, or which contract could not be read.
-pub fn metrics(project: &Project) -> Result<Report, String> {
-    let metrics = project
-        .projections()?
-        .metrics(&project.files)
-        .map_err(|error| error.to_string())?;
+/// A sentence naming a sprint that is not there, or saying what the store refused, or which
+/// contract could not be read.
+pub fn metrics(project: &Project, sprint_id: Option<&str>) -> Result<Report, String> {
+    let projections = project.projections()?;
+    let metrics = match sprint_id {
+        Some(id) => {
+            project.files.read_sprint(id).map_err(|error| match error {
+                FilesError::NotFound { .. } => format!("{id} is not in this project"),
+                other => other.to_string(),
+            })?;
+            projections.metrics_for_sprint(&project.files, id)
+        }
+        None => projections.metrics(&project.files),
+    }
+    .map_err(|error| error.to_string())?;
     Ok(Report {
         lines: lines(&metrics),
         json: metrics_json(&metrics),

@@ -13,6 +13,7 @@ use std::sync::Arc;
 use chrono::{DateTime, Utc};
 use farik::{CliIo, run_cli};
 use farik_protocol::clock::FixedClock;
+use farik_runtime::sprints::{PlannedBy, plan_sprint};
 use farik_store::git::fixtures::TempRepo;
 use serde_json::Value;
 
@@ -925,12 +926,106 @@ fn prints_the_harness_metrics_as_json() {
     assert_eq!(metrics["active_weeks"], 0);
 }
 
+#[cfg(unix)]
 #[test]
 #[ignore = "needs the git program: cargo xtask check --integration"]
-fn has_no_sprint_flag_until_sprints_exist() {
+fn prints_the_metrics_of_a_sprint() {
+    use serde_json::json;
+
     let repository = a_project_with_a_task("read-metrics-sprint");
+    let started = run_in(&repository.path, &["sprint", "start"]);
+    assert_eq!(started.code, 0, "{}", started.err);
+    plan_sprint(
+        &project::tool_deps(&repository),
+        &["FRK-1".parse().expect("a task id")],
+        &PlannedBy::Governor,
+    )
+    .expect("FRK-1 is planned into S1");
+
+    let by = |actor: &str| json!({ "actor": actor, "requested_by": actor });
+    project::moved(
+        &repository,
+        "FRK-1",
+        "in_progress",
+        "verifying",
+        &by("assignee"),
+    );
+    project::moved(
+        &repository,
+        "FRK-1",
+        "verifying",
+        "accepted",
+        &by("product_manager"),
+    );
+    project::record_on(
+        &repository,
+        "FRK-1",
+        Some(("dev-a", "s1")),
+        "cost.recorded",
+        &json!({
+            "purpose": "implement",
+            "model_id": "claude-sonnet-4-5",
+            "usage": {
+                "input_tokens": 1000,
+                "output_tokens": 100,
+                "cache_read_tokens": 0,
+                "cache_write_tokens": 0
+            },
+            "cost_usd": 1.0
+        }),
+        at(),
+    );
+
     let ran = run_in(&repository.path, &["metrics", "--sprint", "S1"]);
-    assert_eq!(ran.code, 2, "{}{}", ran.out, ran.err);
+    assert_eq!(ran.code, 0, "{}", ran.err);
+    assert_eq!(
+        ran.out.lines().collect::<Vec<_>>(),
+        [
+            "accepted tasks: 1",
+            "first-pass acceptance: 100.0%",
+            "human interventions per accepted task: 0.00",
+            "cost per accepted task: $1.00",
+            "  triage: $0.00",
+            "  refine: $0.00",
+            "  plan: $0.00",
+            "  implement: $1.00",
+            "  verify: $0.00",
+            "  ceremony: $0.00",
+            "  conversation: $0.00",
+            "criteria verified by command, test, or artifact: 100.0%",
+            "active weeks: 1",
+        ]
+    );
+
+    let as_json = run_in(&repository.path, &["metrics", "--sprint", "S1", "--json"]);
+    assert_eq!(as_json.code, 0, "{}", as_json.err);
+    let metrics: Value = serde_json::from_str(as_json.out.trim()).expect("one JSON object");
+    assert_eq!(
+        metrics,
+        json!({
+            "accepted_tasks": 1,
+            "first_pass_acceptance_rate": 1.0,
+            "interventions_per_accepted_task": 0.0,
+            "cost_per_accepted_task_usd": {
+                "total": 1.0,
+                "by_purpose": {
+                    "triage": 0.0,
+                    "refine": 0.0,
+                    "plan": 0.0,
+                    "implement": 1.0,
+                    "verify": 0.0,
+                    "ceremony": 0.0,
+                    "conversation": 0.0
+                }
+            },
+            "mechanically_verified_criteria_share": 1.0,
+            "active_weeks": 1
+        })
+    );
+
+    let unknown = run_in(&repository.path, &["metrics", "--sprint", "S9"]);
+    assert_eq!(unknown.code, 1, "{}{}", unknown.out, unknown.err);
+    assert!(unknown.err.contains("S9"), "{}", unknown.err);
 }
 
 #[test]

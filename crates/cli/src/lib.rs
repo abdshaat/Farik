@@ -233,8 +233,12 @@ enum Commands {
         #[arg(long)]
         limit: Option<usize>,
     },
-    /// Show the harness metrics over the whole project (F17).
-    Metrics,
+    /// Show the harness metrics over the whole project, or one sprint's, (F17).
+    Metrics {
+        /// Only this sprint's rows and costs.
+        #[arg(long)]
+        sprint: Option<String>,
+    },
     /// Say where the files and the log disagree, and what else this project got wrong.
     Doctor,
     /// Show the team's rules (5.12).
@@ -523,9 +527,8 @@ pub fn run_cli(args: &[String], io: &mut CliIo<'_>) -> i32 {
         Commands::Board => open_project(&io.cwd, now).and_then(|project| board::board(&project)),
         Commands::Log { task, kind, limit } => open_project(&io.cwd, now)
             .and_then(|project| log::log(&project, task.as_ref(), kind.as_ref(), *limit)),
-        Commands::Metrics => {
-            open_project(&io.cwd, now).and_then(|project| metrics::metrics(&project))
-        }
+        Commands::Metrics { sprint } => open_project(&io.cwd, now)
+            .and_then(|project| metrics::metrics(&project, sprint.as_deref())),
         Commands::Doctor => {
             let found =
                 open_project(&io.cwd, now).and_then(|project| doctor::doctor(&project, now));

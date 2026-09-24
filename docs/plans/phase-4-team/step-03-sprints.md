@@ -157,7 +157,7 @@ Files: `crates/store/src/metrics.rs`, `crates/cli/src/metrics.rs`, `crates/cli/s
 - `measures_one_sprint` (store) — S1 holding FRK-1 (accepted first pass) and S2 holding FRK-2 (accepted after a rejection): S1's first-pass rate 1.0 and S2's 0.0; each sprint's cost is its own.
 - `prints_the_metrics_of_a_sprint` (cli) — `farik metrics --sprint S1` prints the five metrics for S1; `--json` one object; `--sprint S9` exits 1 naming S9. Replaces `has_no_sprint_flag_until_sprints_exist`.
 
-- [ ] `feat(cli): print the harness metrics of one sprint`
+- [x] `feat(cli): print the harness metrics of one sprint`
 
 ### Task 7: the spec
 
