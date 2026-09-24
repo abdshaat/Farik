@@ -36,6 +36,25 @@ pub struct HarnessMetrics {
     pub mechanically_verified_criteria_share: Option<f64>,
     /// The ISO weeks in which at least one session recorded a cost.
     pub active_weeks: u32,
+    /// The channel's messages, by kind.
+    pub messages: MessageCounts,
+}
+
+/// How many `message.posted` events the log holds of each kind.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct MessageCounts {
+    /// An agent's line about a move its session made.
+    pub reaction: u32,
+    /// An agent's line out of its ambient allowance.
+    pub ambient: u32,
+    /// An agent's answer to a mention, or to a reply.
+    pub reply: u32,
+    /// A line of a ceremony's thread.
+    pub ceremony: u32,
+    /// Farik's line about a move by the governor or the human, or a refusal.
+    pub system: u32,
+    /// The human's line.
+    pub human: u32,
 }
 
 /// Why the metrics could not be computed.
@@ -160,6 +179,7 @@ impl Projections {
             mechanically_verified_criteria_share: (counts.accepted_tasks > 0 && criteria > 0)
                 .then(|| f64::from(mechanical) / f64::from(criteria)),
             active_weeks: active_weeks(&days)?,
+            messages: self.message_counts(sprint_id)?,
         })
     }
 
@@ -225,6 +245,45 @@ impl Projections {
             .query_map((sprint_id,), |row| row.get::<_, String>(0))?
             .collect::<Result<Vec<_>, _>>()?;
         Ok((spent, days))
+    }
+
+    /// The channel's messages by kind, read from the log's events, since messages are not
+    /// projected: every one, or only those after `sprint_id`'s `sprint.started` and, once it has
+    /// ended, before its `sprint.ended`. A sprint the log never started has none.
+    fn message_counts(&self, sprint_id: Option<&str>) -> Result<MessageCounts, MetricsError> {
+        let connection = self.connection();
+        let mut statement = connection.prepare(
+            "SELECT json_extract(body, '$.kind'), COUNT(*) FROM events
+             WHERE kind = 'message.posted'
+               AND (?1 IS NULL OR (
+                   seq > (SELECT MIN(seq) FROM events WHERE kind = 'sprint.started'
+                          AND json_extract(body, '$.sprint_id') = ?1)
+                   AND seq < COALESCE((SELECT MIN(seq) FROM events WHERE kind = 'sprint.ended'
+                                       AND json_extract(body, '$.sprint_id') = ?1),
+                                      seq + 1)))
+             GROUP BY 1",
+        )?;
+        let mut counts = MessageCounts::default();
+        for row in statement.query_map((sprint_id,), |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+        })? {
+            let (kind, number) = row?;
+            let slot = match kind.as_str() {
+                "reaction" => &mut counts.reaction,
+                "ambient" => &mut counts.ambient,
+                "reply" => &mut counts.reply,
+                "ceremony" => &mut counts.ceremony,
+                "system" => &mut counts.system,
+                "human" => &mut counts.human,
+                _ => {
+                    return Err(MetricsError::Store(StoreError::InvalidEvent {
+                        detail: format!("a message.posted holds {kind:?} as its kind"),
+                    }));
+                }
+            };
+            *slot = count(number, "messages")?;
+        }
+        Ok(counts)
     }
 }
 

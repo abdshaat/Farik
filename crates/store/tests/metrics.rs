@@ -11,7 +11,7 @@ use farik_protocol::event::fixtures::{a_contract_summary_wire, an_event_wire};
 use farik_protocol::event::{CostRecordedBodyPurpose, EventKind, NewEvent, event_from_value};
 use farik_store::files::FilesError;
 use farik_store::files::fixtures::TempProject;
-use farik_store::metrics::{HarnessMetrics, MetricsError};
+use farik_store::metrics::{HarnessMetrics, MessageCounts, MetricsError};
 use farik_store::{EventLog, Projections, open_event_log, open_projections};
 use serde_json::{Value, json};
 
@@ -204,6 +204,15 @@ impl Recorded {
             EventKind::SprintPlanned,
             None,
             json!({ "sprint_id": sprint_id, "task_ids": task_ids, "planned_by": "sam-ortiz" }),
+        );
+    }
+
+    /// A line of `kind` in the channel, by `author`.
+    fn posted(&self, author: &str, kind: &str) {
+        self.record(
+            EventKind::MessagePosted,
+            None,
+            json!({ "author": author, "kind": kind, "text": "A line.", "mentions": [] }),
         );
     }
 
@@ -407,6 +416,7 @@ fn says_none_for_every_rate_before_a_task_is_accepted() {
             cost_per_accepted_task_usd: None,
             mechanically_verified_criteria_share: None,
             active_weeks: 1,
+            messages: MessageCounts::default(),
         }
     );
 }
@@ -520,6 +530,57 @@ fn measures_one_sprint() {
     );
     assert_eq!(s2.mechanically_verified_criteria_share, Some(0.0));
     assert_eq!(s2.active_weeks, 1);
+}
+
+#[test]
+fn counts_messages_by_kind() {
+    let recorded = Recorded::new("messages");
+    recorded.posted("human", "human");
+    recorded.sprint_started("S1", None);
+    recorded.posted("dev-a", "reaction");
+    recorded.posted("dev-b", "reaction");
+    recorded.posted("dev-a", "ambient");
+    recorded.posted("farik", "system");
+    recorded.sprint_ended("S1", &[]);
+    recorded.posted("dev-a", "reply");
+    recorded.sprint_started("S2", None);
+    recorded.posted("dev-b", "reply");
+
+    let project = metrics_of(&recorded);
+    assert_eq!(
+        project.messages,
+        MessageCounts {
+            reaction: 2,
+            ambient: 1,
+            reply: 2,
+            system: 1,
+            human: 1,
+            ..MessageCounts::default()
+        }
+    );
+    let s1 = recorded
+        .metrics_for_sprint("S1")
+        .expect("S1's metrics compute");
+    assert_eq!(
+        s1.messages,
+        MessageCounts {
+            reaction: 2,
+            ambient: 1,
+            system: 1,
+            ..MessageCounts::default()
+        }
+    );
+    // An open sprint's messages run to the end of the log.
+    let s2 = recorded
+        .metrics_for_sprint("S2")
+        .expect("S2's metrics compute");
+    assert_eq!(
+        s2.messages,
+        MessageCounts {
+            reply: 1,
+            ..MessageCounts::default()
+        }
+    );
 }
 
 #[test]

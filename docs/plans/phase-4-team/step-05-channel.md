@@ -143,7 +143,7 @@ Files: `crates/store/src/metrics.rs`, `crates/cli/src/metrics.rs`, `crates/cli/t
 - `counts_messages_by_kind` (store) — two reactions, one ambient, one system: `MessageCounts { reaction: 2, ambient: 1, system: 1, .. }`, in the project's and a sprint's metrics.
 - `prints_the_channel_counts` (cli) — `farik metrics` prints a messages line; `--json` has `messages`.
 
-- [ ] `feat(store): count the channel's messages by kind`
+- [x] `feat(store): count the channel's messages by kind`
 
 ### Task 6: the spec
 

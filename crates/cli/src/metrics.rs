@@ -1,7 +1,7 @@
 //! `farik metrics`: the harness metrics of F17, over the whole project or one sprint.
 
 use farik_store::files::FilesError;
-use farik_store::metrics::{CostSplit, HarnessMetrics};
+use farik_store::metrics::{CostSplit, HarnessMetrics, MessageCounts};
 use serde_json::{Map, Value, json};
 
 use crate::Report;
@@ -10,7 +10,7 @@ use crate::project::Project;
 /// What a rate says while no task is accepted, since a rate with no denominator is not zero.
 const NONE_YET: &str = "none yet, no task has been accepted";
 
-/// The five harness metrics, as lines and as one JSON object; over `sprint_id`'s rows and costs
+/// The five harness metrics and the channel's counts, as lines and as one JSON object; over `sprint_id`'s rows and costs
 /// when there is one, the whole project otherwise.
 ///
 /// # Errors
@@ -76,6 +76,18 @@ fn lines(metrics: &HarnessMetrics) -> Vec<String> {
         or_none(percent(metrics.mechanically_verified_criteria_share))
     ));
     lines.push(format!("active weeks: {}", metrics.active_weeks));
+    let MessageCounts {
+        reaction,
+        ambient,
+        reply,
+        ceremony,
+        system,
+        human,
+    } = metrics.messages;
+    lines.push(format!(
+        "messages: reaction {reaction}, ambient {ambient}, reply {reply}, ceremony {ceremony}, \
+         system {system}, human {human}"
+    ));
     lines
 }
 
@@ -97,6 +109,18 @@ fn metrics_json(metrics: &HarnessMetrics) -> Value {
         "cost_per_accepted_task_usd": metrics.cost_per_accepted_task_usd.as_ref().map(split_json),
         "mechanically_verified_criteria_share": metrics.mechanically_verified_criteria_share,
         "active_weeks": metrics.active_weeks,
+        "messages": messages_json(metrics.messages),
+    })
+}
+
+fn messages_json(counts: MessageCounts) -> Value {
+    json!({
+        "reaction": counts.reaction,
+        "ambient": counts.ambient,
+        "reply": counts.reply,
+        "ceremony": counts.ceremony,
+        "system": counts.system,
+        "human": counts.human,
     })
 }
 

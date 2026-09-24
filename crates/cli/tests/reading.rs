@@ -855,6 +855,7 @@ fn prints_the_harness_metrics() {
             "  conversation: $0.00",
             "criteria verified by command, test, or artifact: 66.7%",
             "active weeks: 3",
+            "messages: reaction 0, ambient 0, reply 0, ceremony 0, system 0, human 0",
         ]
     );
 }
@@ -876,6 +877,7 @@ fn prints_none_before_a_task_is_accepted() {
             format!("cost per accepted task: {none}"),
             format!("criteria verified by command, test, or artifact: {none}"),
             "active weeks: 0".to_string(),
+            "messages: reaction 0, ambient 0, reply 0, ceremony 0, system 0, human 0".to_string(),
         ]
     );
 }
@@ -907,7 +909,15 @@ fn prints_the_harness_metrics_as_json() {
                 }
             },
             "mechanically_verified_criteria_share": 2.0 / 3.0,
-            "active_weeks": 3
+            "active_weeks": 3,
+            "messages": {
+                "reaction": 0,
+                "ambient": 0,
+                "reply": 0,
+                "ceremony": 0,
+                "system": 0,
+                "human": 0
+            }
         })
     );
 
@@ -924,6 +934,38 @@ fn prints_the_harness_metrics_as_json() {
         assert_eq!(metrics[field], Value::Null, "{field}: {metrics}");
     }
     assert_eq!(metrics["active_weeks"], 0);
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn prints_the_channel_counts() {
+    let repository = a_project_with_a_task("read-metrics-messages");
+    for text in ["one", "two"] {
+        let said = run_in(&repository.path, &["say", text]);
+        assert_eq!(said.code, 0, "{}", said.err);
+    }
+
+    let ran = run_in(&repository.path, &["metrics"]);
+    assert_eq!(ran.code, 0, "{}", ran.err);
+    assert_eq!(
+        ran.out.lines().last(),
+        Some("messages: reaction 0, ambient 0, reply 0, ceremony 0, system 0, human 2")
+    );
+
+    let as_json = run_in(&repository.path, &["metrics", "--json"]);
+    assert_eq!(as_json.code, 0, "{}", as_json.err);
+    let metrics: Value = serde_json::from_str(as_json.out.trim()).expect("one JSON object");
+    assert_eq!(
+        metrics["messages"],
+        serde_json::json!({
+            "reaction": 0,
+            "ambient": 0,
+            "reply": 0,
+            "ceremony": 0,
+            "system": 0,
+            "human": 2
+        })
+    );
 }
 
 #[cfg(unix)]
@@ -994,6 +1036,7 @@ fn prints_the_metrics_of_a_sprint() {
             "  conversation: $0.00",
             "criteria verified by command, test, or artifact: 100.0%",
             "active weeks: 1",
+            "messages: reaction 0, ambient 0, reply 0, ceremony 0, system 0, human 0",
         ]
     );
 
@@ -1019,7 +1062,15 @@ fn prints_the_metrics_of_a_sprint() {
                 }
             },
             "mechanically_verified_criteria_share": 1.0,
-            "active_weeks": 1
+            "active_weeks": 1,
+            "messages": {
+                "reaction": 0,
+                "ambient": 0,
+                "reply": 0,
+                "ceremony": 0,
+                "system": 0,
+                "human": 0
+            }
         })
     );
 
