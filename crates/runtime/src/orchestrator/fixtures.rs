@@ -18,7 +18,7 @@ use farik_store::git::fixtures::{git_in, git_output_in};
 use farik_store::requests::file_request;
 use serde_json::{Value, json};
 
-use super::{Orchestrator, OrchestratorDeps};
+use super::{Orchestrator, OrchestratorDeps, OrchestratorError, TickReport};
 use crate::daemon::DaemonState;
 use crate::exec::{ExecError, ExecResult, Executor};
 use crate::forge::Forge;
@@ -567,6 +567,43 @@ impl Harness {
     pub(crate) fn events(&self, kinds: &[EventKind]) -> Vec<FarikEvent> {
         self.project.events(kinds)
     }
+}
+
+/// `run_until_idle` on a thread of its own, which is left behind if the run does not end
+/// within ten seconds: a run that does not stop at an idle tick ticks for ever without
+/// yielding, so no timer on its own runtime could stop it.
+pub(crate) fn run_until_idle_within_ten_seconds(
+    orchestrator: Arc<Orchestrator>,
+) -> Result<(), OrchestratorError> {
+    let (sender, receiver) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("a runtime is built");
+        let _ = sender.send(runtime.block_on(orchestrator.run_until_idle()));
+    });
+    receiver
+        .recv_timeout(Duration::from_secs(10))
+        .expect("the run ends")
+}
+
+/// Ticks `orchestrator` until a tick does not act, at most three times, and asserts that the
+/// last is idle, waiting for `agent` until `until`. A session a tick starts on an adapter with no
+/// transcript left fails the tick, and so the test.
+pub(crate) async fn waits_for(orchestrator: &Orchestrator, agent: &str, until: DateTime<Utc>) {
+    for _ in 0..3 {
+        let report = orchestrator.tick().await.expect("the tick runs");
+        if let TickReport::Idle { why, until: woken } = &report {
+            assert_eq!(*woken, Some(until), "{report:?}");
+            assert!(
+                why.starts_with(&format!("waiting for {agent}, asleep until ")),
+                "{why}"
+            );
+            return;
+        }
+    }
+    panic!("no idle tick in three");
 }
 
 /// Session ids `later-session-1`, `later-session-2`, and so on.

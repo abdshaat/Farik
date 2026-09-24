@@ -605,7 +605,7 @@ mod tests {
     use farik_protocol::command::{AcceptSubject, Command};
     use farik_protocol::event::EscalationRaisedBodyReason;
 
-    use crate::orchestrator::fixtures::Harness;
+    use crate::orchestrator::fixtures::{Harness, run_until_idle_within_ten_seconds};
     use crate::recorded::fixtures::{
         accept_frk_1, implement_finishes_frk_1, plan_assigns_frk_1, plan_assigns_frk_2,
         plan_breaks_down_frk_1, plan_closes_epic_frk_1, refine_asks_frk_1,
@@ -691,11 +691,9 @@ mod tests {
             review_writes_note(),
             accept_frk_1(),
         ]);
-        let orchestrator = harness.orchestrator_at(adapter.clone(), at());
+        let orchestrator = std::sync::Arc::new(harness.orchestrator_at(adapter.clone(), at()));
 
-        orchestrator
-            .run_until_idle()
-            .await
+        run_until_idle_within_ten_seconds(std::sync::Arc::clone(&orchestrator))
             .expect("the run ends idle");
 
         assert_eq!(orchestrator.deps.tools.clock.now(), until);

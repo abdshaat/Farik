@@ -571,17 +571,26 @@ fn prints_the_wait() {
         &json!({ "until": until.to_rfc3339(), "detail": "Claude AI usage limit reached" }),
     );
     let clock = Arc::new(MovableClock::new(at()));
-
-    let ran = run_with(&repository.path, &["run"], |io| {
-        io.clock = clock.clone();
-        io.sleeper = Some(Arc::new(MovingSleeper(Arc::clone(&clock))));
-        io.engine = recorded(vec![
-            plan_assigns_frk_1(),
-            implement_finishes_frk_1(),
-            review_writes_note(),
-            accept_frk_1(),
-        ]);
+    let path = repository.path.clone();
+    // On a thread of its own, left behind if the run does not end in time: a run whose sleeper
+    // is lost waits a real hour.
+    let (sender, receiver) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let _ = sender.send(run_with(&path, &["run"], |io| {
+            io.clock = clock.clone();
+            io.sleeper = Some(Arc::new(MovingSleeper(Arc::clone(&clock))));
+            io.engine = recorded(vec![
+                plan_assigns_frk_1(),
+                implement_finishes_frk_1(),
+                review_writes_note(),
+                accept_frk_1(),
+            ]);
+        }));
     });
+
+    let ran = receiver
+        .recv_timeout(Duration::from_secs(60))
+        .expect("the run ends within a minute");
 
     assert_eq!(ran.code, 0, "{}\n{}", ran.out, ran.err);
     let lines: Vec<&str> = ran.out.lines().collect();

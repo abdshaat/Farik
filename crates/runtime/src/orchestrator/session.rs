@@ -103,13 +103,14 @@ pub(super) async fn run_session(
     let ended = drive(deps, team, role, ask.contract, &spec).await;
     deps.daemon.end_session(&spec.session_id);
     let end = ended?;
+    // The sleep first: an agent not put to sleep is started again into its provider's refusal.
+    if end.reason == EndReason::ProviderLimit {
+        sleep(deps, ask.agent, &end)?;
+    }
     if let Some(contract) = ask.contract
         && ask.purpose == SessionPurpose::Implement
     {
         leave_note(deps, contract, ask.agent, &end)?;
-    }
-    if end.reason == EndReason::ProviderLimit {
-        sleep(deps, ask.agent, &end)?;
     }
     Ok(end)
 }

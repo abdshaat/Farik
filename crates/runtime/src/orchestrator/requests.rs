@@ -855,7 +855,7 @@ mod tests {
     use crate::exec::ExecError;
     use crate::orchestrator::TRIAGE_MODEL;
     use crate::orchestrator::fixtures::{
-        BrokenSandboxFactory, CountingSandboxFactory, ExecutorWitness, Harness,
+        BrokenSandboxFactory, CountingSandboxFactory, ExecutorWitness, Harness, waits_for,
     };
     use crate::orchestrator::{CommandError, Orchestrator, TickReport};
     use crate::prompt::JUDGMENT_INSTRUCTION;
@@ -2870,5 +2870,90 @@ mod tests {
                 spec.initial_prompt
             );
         }
+    }
+
+    /// An hour after the fixtures' now.
+    fn in_an_hour() -> chrono::DateTime<chrono::Utc> {
+        crate::tools::fixtures::at() + chrono::Duration::hours(1)
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn waits_for_a_sleeping_triager() {
+        let harness = Harness::new("req-sleep-triage", |_| {});
+        harness.a_request("Add done.txt and its check");
+        harness.asleep("pm", in_an_hour());
+        let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
+
+        waits_for(&orchestrator, "pm", in_an_hour()).await;
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn waits_for_a_sleeping_product_manager_to_refine() {
+        let harness = Harness::new("req-sleep-refine", |_| {});
+        let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
+        refining(&harness, &orchestrator, RequestSize::Small).await;
+        harness.asleep("pm", in_an_hour());
+
+        waits_for(&orchestrator, "pm", in_an_hour()).await;
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn waits_for_a_sleeping_scrum_master_to_judge() {
+        let harness = Harness::new("req-sleep-judge", with_a_scrum_master);
+        let adapter = harness.recorded(vec![refine_writes_task_frk_1()]);
+        let orchestrator = harness.orchestrator(adapter);
+        refining(&harness, &orchestrator, RequestSize::Small).await;
+        orchestrator.tick().await.expect("the contract is written");
+        harness.asleep("sam", in_an_hour());
+
+        waits_for(&orchestrator, "sam", in_an_hour()).await;
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn waits_for_a_sleeping_epic_assignee() {
+        let harness = Harness::new("req-sleep-epic", |_| {});
+        an_epic_in_progress(&harness, |_| {});
+        harness.asleep("pm", in_an_hour());
+        let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
+
+        waits_for(&orchestrator, "pm", in_an_hour()).await;
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn waits_for_a_sleeping_product_manager_to_accept_an_epic() {
+        let harness = Harness::new("req-sleep-epic-accept", |_| {});
+        an_epic_verifying(&harness, |_| {});
+        integrated(&harness, true);
+        let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
+        orchestrator.tick().await.expect("Farik runs C1");
+        orchestrator
+            .handle(Command::HumanAccept {
+                task_id: task("FRK-1"),
+                subject: AcceptSubject::Result,
+                message: Some("Both look right.".to_string()),
+            })
+            .await
+            .expect("the human accepts the epic");
+        harness.asleep("pm", in_an_hour());
+
+        waits_for(&orchestrator, "pm", in_an_hour()).await;
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn waits_for_a_sleeping_product_manager_to_review_an_epic() {
+        let harness = Harness::new("req-sleep-epic-review", with_a_scrum_master);
+        a_scrum_masters_epic_verifying(&harness);
+        integrated(&harness, true);
+        let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
+        orchestrator.tick().await.expect("Farik runs C1");
+        harness.asleep("pm", in_an_hour());
+
+        waits_for(&orchestrator, "pm", in_an_hour()).await;
     }
 }

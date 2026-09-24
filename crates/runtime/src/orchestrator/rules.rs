@@ -917,9 +917,10 @@ mod tests {
     use crate::exec::ExecError;
     use crate::orchestrator::fixtures::{
         BrokenSandboxFactory, CountingSandboxFactory, ExecutorWitness, Harness,
-        UnremovableSandboxFactory, UsageThenWaitAdapter,
+        UnremovableSandboxFactory, UsageThenWaitAdapter, run_until_idle_within_ten_seconds,
+        waits_for,
     };
-    use crate::orchestrator::{Orchestrator, OrchestratorError, TickReport, TickRules, TickScope};
+    use crate::orchestrator::{OrchestratorError, TickReport, TickRules, TickScope};
     use crate::recorded::fixtures::{
         accept_frk_1, hits_the_turn_limit, implement_finishes_frk_1, implement_stops_early,
         plan_assigns_frk_1, plan_sprint_frk_1, provider_limit_429, provider_limit_rejected,
@@ -2030,25 +2031,6 @@ mod tests {
         assert_eq!(harness.row("FRK-1").status, TaskStatus::Escalated);
     }
 
-    /// `run_until_idle` on a thread of its own, which is left behind if the run does not end
-    /// within ten seconds: a run that does not stop at an idle tick ticks for ever without
-    /// yielding, so no timer on its own runtime could stop it.
-    fn run_until_idle_within_ten_seconds(
-        orchestrator: Orchestrator,
-    ) -> Result<(), OrchestratorError> {
-        let (sender, receiver) = std::sync::mpsc::channel();
-        std::thread::spawn(move || {
-            let runtime = tokio::runtime::Builder::new_current_thread()
-                .enable_all()
-                .build()
-                .expect("a runtime is built");
-            let _ = sender.send(runtime.block_on(orchestrator.run_until_idle()));
-        });
-        receiver
-            .recv_timeout(Duration::from_secs(10))
-            .expect("the run ends")
-    }
-
     #[test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
     fn runs_until_a_tick_is_idle() {
@@ -2065,7 +2047,7 @@ mod tests {
         let adapter = harness.recorded(vec![implement_stops_early()]);
         let orchestrator = harness.orchestrator(adapter.clone());
 
-        run_until_idle_within_ten_seconds(orchestrator).expect("the run is idle");
+        run_until_idle_within_ten_seconds(Arc::new(orchestrator)).expect("the run is idle");
 
         assert_eq!(adapter.started().len(), 1);
         assert_eq!(harness.row("FRK-1").status, TaskStatus::Escalated);
@@ -2718,7 +2700,7 @@ mod tests {
         let adapter = harness.recorded(vec![review_writes_note(), accept_frk_1(), accept_frk_1()]);
         let orchestrator = harness.orchestrator(adapter.clone());
 
-        run_until_idle_within_ten_seconds(orchestrator).expect("the run is idle");
+        run_until_idle_within_ten_seconds(Arc::new(orchestrator)).expect("the run is idle");
 
         assert_eq!(
             sessions(&adapter),
@@ -2858,7 +2840,7 @@ mod tests {
         ));
         let orchestrator = harness.orchestrator_with(adapter.clone(), sandboxes);
 
-        run_until_idle_within_ten_seconds(orchestrator).expect("the run is idle");
+        run_until_idle_within_ten_seconds(Arc::new(orchestrator)).expect("the run is idle");
 
         assert_eq!(harness.row("FRK-2").status, TaskStatus::Escalated);
         assert_eq!(
@@ -4480,6 +4462,144 @@ mod tests {
                 .contains("with room for it: dev-a."),
             "{}",
             started[0].initial_prompt
+        );
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn waits_for_a_sleeping_reviewer() {
+        let harness = Harness::new("orch-sleep-reviewer", |_| {});
+        harness.verifying("FRK-1");
+        let until = at() + chrono::Duration::hours(1);
+        harness.asleep("dev-b", until);
+        let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
+
+        waits_for(&orchestrator, "dev-b", until).await;
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn waits_for_a_sleeping_product_manager_to_accept() {
+        let harness = Harness::new("orch-sleep-accept", |_| {});
+        harness.verifying("FRK-1");
+        let orchestrator = harness.orchestrator(harness.recorded(vec![review_writes_note()]));
+        orchestrator.tick().await.expect("the review runs");
+        let until = at() + chrono::Duration::hours(1);
+        harness.asleep("pm", until);
+
+        waits_for(&orchestrator, "pm", until).await;
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn waits_for_a_sleeping_assigner() {
+        let harness = Harness::new("orch-sleep-assigner", |_| {});
+        harness.ready("FRK-1");
+        let until = at() + chrono::Duration::hours(1);
+        harness.asleep("pm", until);
+        let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
+
+        waits_for(&orchestrator, "pm", until).await;
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn waits_for_a_sleeping_sprint_planner() {
+        let harness = Harness::new("orch-sleep-planner", with_a_scrum_master);
+        harness.ready("FRK-1");
+        harness.open_sprint("S1", &[]);
+        let until = at() + chrono::Duration::hours(1);
+        harness.asleep("sm", until);
+        let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
+
+        waits_for(&orchestrator, "sm", until).await;
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn waits_for_the_agent_that_wakes_first() {
+        let harness = Harness::new("orch-sleep-earliest", |_| {});
+        harness.in_progress("FRK-1", "dev-a", "dev-b");
+        harness.in_progress("FRK-2", "dev-b", "dev-a");
+        harness.asleep("dev-a", at() + chrono::Duration::hours(2));
+        let until = at() + chrono::Duration::hours(1);
+        harness.asleep("dev-b", until);
+        let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
+
+        waits_for(&orchestrator, "dev-b", until).await;
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn leaves_a_spent_task_waiting_on_the_human_alone() {
+        let harness = Harness::new("orch-budget-question", |_| {});
+        in_progress_with_sessions(&harness, 1, 1);
+        harness.project.record(
+            "FRK-1",
+            "question.asked",
+            &json!({ "question": "Should done.txt be empty?", "asked_by": "dev-a" }),
+        );
+        let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
+
+        orchestrator.tick().await.expect("the tick runs");
+
+        assert_eq!(harness.row("FRK-1").status, TaskStatus::InProgress);
+        assert!(harness.events(&[EventKind::EscalationRaised]).is_empty());
+        assert!(harness.events(&[EventKind::TransitionRefused]).is_empty());
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn leaves_a_spent_task_already_escalated_alone() {
+        let harness = Harness::new("orch-budget-escalated", |_| {});
+        in_progress_with_sessions(&harness, 1, 1);
+        let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
+        orchestrator.tick().await.expect("the tick escalates it");
+        assert_eq!(harness.row("FRK-1").status, TaskStatus::Escalated);
+
+        orchestrator.tick().await.expect("the tick runs");
+
+        assert_eq!(harness.events(&[EventKind::TaskTransitioned]).len(), 3);
+        assert_eq!(
+            escalation_reasons(&harness),
+            vec![EscalationRaisedBodyReason::Sessions]
+        );
+        assert!(harness.events(&[EventKind::TransitionRefused]).is_empty());
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn quotes_no_note_from_an_earlier_session() {
+        let harness = Harness::new("orch-note-earlier", |_| {});
+        harness.in_progress("FRK-1", "dev-a", "dev-b");
+        harness.project.record(
+            "FRK-1",
+            "note.written",
+            &json!({ "kind": "progress", "text": "An earlier session's note.", "written_by": "dev-a" }),
+        );
+        let orchestrator = harness.orchestrator(harness.recorded(vec![hits_its_wall_clock()]));
+
+        orchestrator.tick().await.expect("the tick runs");
+
+        let notes = farik_notes(&harness);
+        assert_eq!(notes.len(), 1, "{notes:?}");
+        assert!(!notes[0].contains("Your last note"), "{}", notes[0]);
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn puts_an_agent_to_sleep_when_its_note_cannot_be_written() {
+        let harness = Harness::new("orch-sleep-no-note", |_| {});
+        harness.in_progress("FRK-1", "dev-a", "dev-b");
+        refuse_appends_of(&harness.project.deps.log, EventKind::NoteWritten);
+        let orchestrator = harness.orchestrator(harness.recorded(vec![provider_limit_429()]));
+
+        let ticked = orchestrator.tick().await;
+
+        assert!(ticked.is_err(), "{ticked:?}");
+        assert_eq!(
+            sleeps(&harness),
+            vec![(Some("dev-a".to_string()), at() + chrono::Duration::hours(1))]
         );
     }
 }
