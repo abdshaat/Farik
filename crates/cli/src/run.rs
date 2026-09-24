@@ -77,7 +77,7 @@ pub(crate) fn drive(project: &Project, rules: TickRules, io: &mut CliIo<'_>, as_
             rules,
         };
         let mut presses = 0;
-        let ended = ticks(&mut driver, &scope, &mut printer, &mut presses, |_, _| {}).await;
+        let ended = ticks(&mut driver, &scope, &mut printer, &mut presses, |_| {}).await;
         finish(project, driver, &mut printer, ended, presses).await
     })
 }
@@ -133,7 +133,7 @@ pub(crate) async fn ticks(
     scope: &TickScope,
     printer: &mut Printer<'_, '_>,
     presses: &mut u32,
-    mut after: impl FnMut(&mut Printer<'_, '_>, &TickReport),
+    mut after: impl FnMut(&mut Printer<'_, '_>),
 ) -> Ended {
     loop {
         if driver.orchestrator.is_stopped() {
@@ -162,13 +162,7 @@ pub(crate) async fn ticks(
                     &format!("{}: {what}", task_id.as_str()),
                     &json!({ "task_id": task_id.as_str(), "what": what }),
                 );
-                after(
-                    printer,
-                    &TickReport::Acted {
-                        task_id: task_id.clone(),
-                        what: what.clone(),
-                    },
-                );
+                after(printer);
             }
             Err(error) => return Ended::Failed(error.to_string()),
         }

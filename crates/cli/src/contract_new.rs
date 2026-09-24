@@ -17,7 +17,8 @@ use tokio::sync::mpsc::UnboundedReceiver;
 use crate::human::{refusal, said};
 use crate::project::Project;
 use crate::run::{
-    Ended, INTERRUPTED, Printer, finish_quietly, print_waiting, report_error, ticks, waiting_now,
+    Ended, INTERRUPTED, Printer, finish_quietly, print_waiting, refuse, report_error, ticks,
+    waiting_now,
 };
 use crate::show::{body_lines, event_line};
 use crate::start::{Driver, on_path, runtime, send, start_holding, try_lock};
@@ -428,7 +429,7 @@ async fn converse(
     let mut stdin = Some(stdin);
     let mut answers: Option<UnboundedReceiver<String>> = None;
     loop {
-        let ended = ticks(driver, &scope, printer, presses, |printer, _| {
+        let ended = ticks(driver, &scope, printer, presses, |printer| {
             print_new_events(project, task_id, &mut seen, printer);
         })
         .await;
@@ -689,11 +690,6 @@ fn readiness(project: &Project, task_id: &TaskId) -> (&'static str, Vec<String>)
     } else {
         ("not_judged", Vec::new())
     }
-}
-
-/// A refusal, before or at the start.
-fn refuse(io: &mut CliIo<'_>, as_json: bool, error: &str) -> i32 {
-    crate::run::refuse(io, as_json, error)
 }
 
 #[cfg(test)]

@@ -37,11 +37,7 @@ pub(super) fn recover(orchestrator: &Orchestrator) -> Result<RecoveryReport, Orc
     };
     let ended = session_of(EventKind::SessionEnded);
     let costed = session_of(EventKind::CostRecorded);
-    let mut report = RecoveryReport {
-        sessions_interrupted: 0,
-        worktrees_removed: 0,
-        tasks_resumed: 0,
-    };
+    let mut report = RecoveryReport::default();
     let mut prices = None;
     for event in &sessions {
         let (EventBody::SessionStarted(body), Some(session_id)) =

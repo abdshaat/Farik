@@ -2,7 +2,7 @@
 //! human gives the orchestrator, each judged and recorded through the store and the governor, so
 //! that any process may handle one.
 
-use farik_core::contract::{TaskContract, TaskId, TaskKind, TaskStatus, wire_method};
+use farik_core::contract::{TaskContract, TaskId, TaskKind, TaskStatus};
 use farik_core::governor::done::requires_human_acceptance;
 use farik_core::governor::gates::Blocker;
 use farik_core::governor::transition::TransitionRequest;
@@ -11,21 +11,21 @@ use farik_core::team::{AgentStatus, Team};
 use farik_protocol::command::{AcceptSubject, Command, RequestSize};
 use farik_protocol::event::{
     AgentUpdatedBody, EscalationResolvedBody, EventBody, EventIds, EventKind, HumanAcceptedBody,
-    HumanAcceptedBodySubject, QuestionAnsweredBody, TaskStatusWire, new_event,
+    HumanAcceptedBodySubject, QuestionAnsweredBody, new_event,
 };
 use farik_store::requests::{RequestError, hold_contract, triage_by_human};
 use farik_store::{EventQuery, TaskProjection};
 
-use super::verify::{governor_results, since_verifying};
+use super::requests::HUMAN;
+use super::verify::{governor_results, is_human, is_mechanical, since_verifying};
 use super::{CommandError, CommandReport, IntegrationOutcome, Orchestrator, OrchestratorError};
 use crate::tools::ToolDeps;
 use crate::transitions::{
     TransitionAsk, TransitionOutcome, contract_accepted, refusal_details, result_accepted,
-    reviewed_by_the_human,
+    reviewed_by_the_human, status_wire,
 };
 
 /// Who the human is in the log.
-const HUMAN: &str = "human";
 /// The blocker of a task whose assignee the human paused, and a paused session's stop.
 const PAUSED: &str = "agent paused by the user";
 /// The blocker of a task whose assignee the human retired, and a retired agent's session's stop.
@@ -338,10 +338,7 @@ fn not_waiting(row: &TaskProjection) -> CommandError {
 }
 
 fn has_human_criterion(contract: &TaskContract) -> bool {
-    contract
-        .exit_criteria
-        .iter()
-        .any(|criterion| wire_method(&criterion.verification) == Some("human"))
+    contract.exit_criteria.iter().any(is_human)
 }
 
 /// Every `command`, `test`, or `artifact` criterion of the epic has Farik's passing result since
@@ -354,12 +351,7 @@ fn mechanical_criteria_passed(
     let mechanical: Vec<String> = contract
         .exit_criteria
         .iter()
-        .filter(|criterion| {
-            matches!(
-                wire_method(&criterion.verification),
-                Some("command" | "test" | "artifact")
-            )
-        })
+        .filter(|criterion| is_mechanical(criterion))
         .map(|criterion| criterion.id.to_string())
         .collect();
     let not_run: Vec<&str> = mechanical
@@ -450,7 +442,7 @@ fn resolve(
         tools,
         Some(task_id.clone()),
         EventBody::EscalationResolved(EscalationResolvedBody {
-            to: status_wire(to)?,
+            to: status_wire(to).map_err(failed)?,
             message: message.to_string(),
             resolved_by: HUMAN.to_string(),
         }),
@@ -826,16 +818,6 @@ fn append(tools: &ToolDeps, task_id: Option<TaskId>, body: EventBody) -> Result<
     let appended = tools.log.append(&event).map_err(failed)?;
     tools.projections.apply(&appended).map_err(failed)?;
     Ok(appended.envelope.seq)
-}
-
-/// A status as the wire spells it; the two lists are one.
-fn status_wire(status: TaskStatus) -> Result<TaskStatusWire, CommandError> {
-    status
-        .to_string()
-        .parse()
-        .map_err(|_| CommandError::Failed {
-            detail: format!("the event vocabulary has no status {status}"),
-        })
 }
 
 fn failed(error: impl std::fmt::Display) -> CommandError {

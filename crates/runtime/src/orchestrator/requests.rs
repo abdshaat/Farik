@@ -4,7 +4,7 @@
 use std::sync::Arc;
 
 use farik_core::contract::{
-    ExitCriterion, Role, TaskContract, TaskId, TaskKind, TaskStatus, VerificationWire, wire_method,
+    ExitCriterion, Role, TaskContract, TaskId, TaskKind, TaskStatus, VerificationWire,
 };
 use farik_core::governor::done::{CriterionResult, RunBy};
 use farik_core::governor::transition::TransitionRequest;
@@ -12,30 +12,31 @@ use farik_core::governor::transition_table::TransitionActor;
 use farik_core::team::{Agent, Team};
 use farik_protocol::event::{
     ContractEvaluatedBodyGate, CriterionRecordedBody, CriterionRecordedBodyRunBy, EventBody,
-    EventIds, EventKind, FarikEvent, ReviewRecordedBody, new_event,
+    EventKind, FarikEvent, ReviewRecordedBody,
 };
+use farik_store::TaskProjection;
 use farik_store::files::FilesError;
-use farik_store::{EventQuery, TaskProjection};
 
 use super::messages::{
     breakdown_message, close_out_message, epic_accept_message, refine_message, triage_message,
 };
-use super::rules::{Room, acted, active, refused_since_entering, room};
+use super::rules::{acted, active, has_room, refused_since_entering, spent};
 use super::session::{SessionAsk, run_session};
 use super::verify::{
-    GOVERNOR, append, escalate, fails_the_criterion, governor_results, ran_criteria, read_only,
+    GOVERNOR, append, context, escalate, fails_the_criterion, governor_results, history,
+    is_mechanical, ran_criteria, read_only,
 };
 use super::{Orchestrator, OrchestratorDeps, OrchestratorError, TickReport};
 use crate::criteria::{CriterionOutcome, remove_base_worktree, run_criteria};
 use crate::session::SessionPurpose;
 use crate::tools::ToolDeps;
 use crate::transitions::{
-    TransitionAsk, TransitionError, TransitionOutcome, integration_branch, refusal_details,
+    TransitionAsk, TransitionOutcome, integration_branch, refining_began, refusal_details,
     result_accepted,
 };
 
 /// The human, as the reviewer of an epic the Product Manager broke down (5.16 item 4).
-const HUMAN: &str = "human";
+pub(super) const HUMAN: &str = "human";
 
 /// The Product Manager: the first active agent of that role in team-file order.
 pub(super) fn product_manager(team: &Team) -> Option<&Agent> {
@@ -57,7 +58,7 @@ pub(super) async fn draft(
     };
     if !row.triaged {
         let contract = deps.tools.files.read_contract(&row.task_id)?;
-        if room(deps, team, &contract, day_spent)? != Room::Free {
+        if spent(deps, team, &contract, day_spent)? {
             return Ok(None);
         }
         let end = run_session(
@@ -113,15 +114,12 @@ pub(super) async fn refining(
         return Ok(None);
     };
     let contract = deps.tools.files.read_contract(&row.task_id)?;
-    let history = deps.tools.log.read(&EventQuery {
-        task_id: Some(row.task_id.clone()),
-        ..EventQuery::default()
-    })?;
+    let history = history(deps, &row.task_id)?;
     let began = refining_began(&history);
     if is_to_be_judged(&contract, &history, began) {
         return judge(deps, team, row).map(Some);
     }
-    if room(deps, team, &contract, day_spent)? != Room::Free {
+    if spent(deps, team, &contract, day_spent)? {
         return Ok(None);
     }
     let asked = history
@@ -178,21 +176,6 @@ fn judge(
         task_id: row.task_id.clone(),
         what,
     })
-}
-
-/// Where refining last began: the later of the task's last move into `refining` and its last
-/// triage, or 0.
-fn refining_began(history: &[FarikEvent]) -> u64 {
-    history
-        .iter()
-        .filter(|event| match &event.body {
-            EventBody::TaskTransitioned(body) => body.to.to_string() == "refining",
-            EventBody::RequestTriaged(_) => true,
-            _ => false,
-        })
-        .map(|event| event.envelope.seq)
-        .max()
-        .unwrap_or(0)
 }
 
 /// Whether the contract is judged now: written since refining began with no refusal by the
@@ -256,13 +239,7 @@ pub(super) fn ready_epic(
     let Some(pm) = product_manager(team) else {
         return Ok(None);
     };
-    let held = board
-        .iter()
-        .filter(|other| other.assignee_id.as_deref() == Some(pm.id.as_str()))
-        .filter(|other| !matches!(other.status, TaskStatus::Accepted | TaskStatus::Cancelled))
-        .count();
-    if u64::try_from(held).unwrap_or(u64::MAX)
-        >= u64::try_from(team.policy.wip_limit_per_agent).unwrap_or(0)
+    if !has_room(team, board, pm)
         || refused_since_entering(deps, &row.task_id, TaskStatus::Ready, TaskStatus::Assigned)?
     {
         return Ok(None);
@@ -371,7 +348,7 @@ pub(super) async fn in_progress_epic(
     } else {
         return Ok(None);
     };
-    if room(deps, team, &contract, day_spent)? != Room::Free {
+    if spent(deps, team, &contract, day_spent)? {
         return Ok(None);
     }
     let end = run_session(
@@ -427,12 +404,7 @@ pub(super) async fn verifying_epic(
     let pending: Vec<ExitCriterion> = contract
         .exit_criteria
         .iter()
-        .filter(|criterion| {
-            matches!(
-                wire_method(&criterion.verification),
-                Some("command" | "test" | "artifact")
-            )
-        })
+        .filter(|criterion| is_mechanical(criterion))
         .filter(|criterion| {
             !ran.iter()
                 .any(|result| result.criterion_id == criterion.id.as_str())
@@ -451,7 +423,7 @@ pub(super) async fn verifying_epic(
     let Some(pm) = product_manager(team) else {
         return Ok(None);
     };
-    if room(deps, team, contract, day_spent)? != Room::Free {
+    if spent(deps, team, contract, day_spent)? {
         return Ok(None);
     }
     let end = run_session(
@@ -584,11 +556,11 @@ fn record_governor_result(
     sha: &str,
     result: CriterionResult,
 ) -> Result<(), OrchestratorError> {
-    let ids = EventIds {
-        task_id: Some(task_id.clone()),
-        ..tools.ids.clone()
-    };
-    let event = new_event(
+    append(
+        tools,
+        task_id,
+        None,
+        None,
         EventBody::CriterionRecorded(CriterionRecordedBody {
             criterion_id: result.criterion_id,
             passed: result.passed,
@@ -596,17 +568,7 @@ fn record_governor_result(
             run_by: CriterionRecordedBodyRunBy::Reviewer,
             recorded_by: GOVERNOR.to_string(),
         }),
-        tools.clock.now(),
-        ids,
     )
-    .map_err(|error| {
-        OrchestratorError::Transition(TransitionError::Event {
-            detail: format!("{error:?}"),
-        })
-    })?;
-    let appended = tools.log.append(&event)?;
-    tools.projections.apply(&appended)?;
-    Ok(())
 }
 
 /// The epic's `review.recorded`, once per verification, with the human as reviewer: the criteria
@@ -619,25 +581,13 @@ fn record_epic_review(
     session_id: &str,
     since: u64,
 ) -> Result<(), OrchestratorError> {
-    let history = deps.tools.log.read(&EventQuery {
-        task_id: Some(contract.id.clone()),
-        ..EventQuery::default()
-    })?;
+    let history = history(deps, &contract.id)?;
     if history.iter().any(|event| {
         event.envelope.seq > since && matches!(event.body, EventBody::ReviewRecorded(_))
     }) {
         return Ok(());
     }
-    let context = deps.tools.transitions.context(
-        &TransitionRequest {
-            task_id: contract.id.clone(),
-            to: TaskStatus::Accepted,
-            actor: TransitionActor::ProductManager,
-            agent_id: None,
-        },
-        &TransitionAsk::default(),
-        team,
-    )?;
+    let context = context(deps, team, &contract.id)?;
     let run = contract
         .exit_criteria
         .iter()
@@ -649,7 +599,7 @@ fn record_epic_review(
         })
         .count();
     append(
-        deps,
+        &deps.tools,
         &contract.id,
         None,
         Some(session_id.to_string()),

@@ -2,7 +2,6 @@
 
 use std::str::FromStr;
 
-use farik_core::contract::TaskId;
 use farik_protocol::event::{EVERY_KIND, EventKind, event_to_value};
 use farik_store::EventQuery;
 use serde_json::json;
@@ -25,9 +24,7 @@ pub fn log(
     limit: Option<usize>,
 ) -> Result<Report, String> {
     let task_id = match task_id {
-        Some(text) => Some(
-            TaskId::from_str(text).map_err(|error| format!("{text} is not a task id: {error}"))?,
-        ),
+        Some(text) => Some(crate::task(text)?),
         None => None,
     };
     let kinds = match kind {

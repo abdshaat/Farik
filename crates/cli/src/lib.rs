@@ -566,7 +566,7 @@ fn phase_two_write(
 }
 
 /// A task id a person typed.
-fn task(task_id: &str) -> Result<TaskId, String> {
+pub(crate) fn task(task_id: &str) -> Result<TaskId, String> {
     task_id
         .parse()
         .map_err(|error| format!("{task_id} is not a task id: {error}"))
@@ -656,7 +656,7 @@ fn human_command(
     name: &str,
     io: &CliIo<'_>,
 ) -> Result<Report, String> {
-    human::human(project, command, name, io)
+    human::said(start::command(project, command, name, io))
 }
 
 #[cfg(not(unix))]

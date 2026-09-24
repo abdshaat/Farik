@@ -3,12 +3,10 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
-use std::io::Write as _;
-use std::os::unix::fs::OpenOptionsExt;
 use std::os::unix::process::CommandExt as _;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
-use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use farik_core::governor::permissions::PermissionTier;
@@ -21,6 +19,8 @@ use tokio::sync::mpsc::{Receiver, Sender, channel};
 use tokio_util::sync::CancellationToken;
 
 use crate::daemon::{DaemonInfo, builtin_tool_tier};
+use crate::exec::kill_group;
+use crate::locked;
 use crate::session::{
     EndReason, McpTransport, RuntimeAdapter, RuntimeError, SessionEvent, SessionHandle, SessionSpec,
 };
@@ -367,24 +367,10 @@ struct GroupGuard {
     done: CancellationToken,
 }
 
-impl GroupGuard {
-    /// Kills the group `pid` leads without awaiting, which a drop cannot; the shell's `kill`
-    /// returns at once.
-    fn kill_now(pid: u32) {
-        let _ = std::process::Command::new("sh")
-            .arg("-c")
-            .arg(kill_line(pid))
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status();
-    }
-}
-
 impl Drop for GroupGuard {
     fn drop(&mut self) {
         if self.is_armed {
-            GroupGuard::kill_now(self.pid);
+            kill_group(self.pid);
         }
         self.done.cancel();
     }
@@ -432,7 +418,7 @@ async fn supervise(
     // The one kill: the program, if it still runs, and whatever it left behind in its group,
     // which may hold its standard error open. It comes before the leader is reaped, so the
     // group's id cannot yet name another group.
-    kill_group(pid).await;
+    kill_group(pid);
     guard.is_armed = false;
     let status = tokio::time::timeout(EXIT_GRACE, child.wait()).await;
     // The process is gone, so the session may be resumed.
@@ -549,35 +535,12 @@ fn collect_tail(
     })
 }
 
-/// Kills the process group `pid` leads through the shell's `kill` builtin, as the host sandbox
-/// does: no `unsafe`, and `/bin/kill` may be absent. A group already empty is not an error.
-async fn kill_group(pid: u32) {
-    let _ = tokio::process::Command::new("sh")
-        .arg("-c")
-        .arg(kill_line(pid))
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status()
-        .await;
-}
-
-/// The shell line that kills the process group `pid` leads.
-fn kill_line(pid: u32) -> String {
-    format!("kill -s KILL -- -{pid} 2>/dev/null")
-}
-
 /// The one `stream-json` user line a session is given.
 fn user_line(prompt: &str) -> String {
     format!(
         "{{\"type\":\"user\",\"message\":{{\"role\":\"user\",\"content\":{}}}}}\n",
         Value::String(prompt.to_string())
     )
-}
-
-/// A poisoned lock only means a task panicked while holding it; what it guards is still whole.
-fn locked<Value>(mutex: &Mutex<Value>) -> MutexGuard<'_, Value> {
-    mutex.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
 /// The built-in tools `tiers` grant, from `BUILTIN_TOOLS`, in name order. Never `Bash`, which
@@ -667,20 +630,11 @@ pub fn write_session_files(
     let prompt = session_dir.join(SYSTEM_PROMPT_FILE);
     std::fs::write(&prompt, &spec.system_prompt).map_err(|error| io(&prompt, error))?;
     let mcp = session_dir.join(MCP_CONFIG_FILE);
-    // Removed first, because a mode is only given to a file as it is created.
-    match std::fs::remove_file(&mcp) {
-        Err(error) if error.kind() != std::io::ErrorKind::NotFound => return Err(io(&mcp, error)),
-        _ => {}
-    }
-    std::fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .mode(0o600)
-        .open(&mcp)
-        .and_then(|mut file| {
-            file.write_all(mcp_config(spec, &config.daemon).to_string().as_bytes())
-        })
-        .map_err(|error| io(&mcp, error))
+    crate::write_private(
+        &mcp,
+        mcp_config(spec, &config.daemon).to_string().as_bytes(),
+    )
+    .map_err(|error| io(&mcp, error))
 }
 
 /// The program's whole environment: `base`, the credential's one variable, and `QUIET`.
@@ -727,7 +681,7 @@ fn version_output(config: &ClaudeConfig) -> Result<String, RuntimeError> {
                 std::thread::sleep(Duration::from_millis(20));
             }
             Ok(None) => {
-                GroupGuard::kill_now(child.id());
+                kill_group(child.id());
                 let _ = child.wait();
                 return Err(refused(format!(
                     "did not answer within {} s",

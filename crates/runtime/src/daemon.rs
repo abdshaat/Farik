@@ -5,9 +5,8 @@
 
 use std::collections::BTreeMap;
 use std::fmt::{self, Write as _};
-use std::io::{Read as _, Write as _};
+use std::io::Read as _;
 use std::net::Ipv4Addr;
-use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
 use std::pin::Pin;
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
@@ -381,22 +380,10 @@ fn write_daemon_file(path: &Path, info: &DaemonInfo) -> Result<(), DaemonError> 
     if let Some(directory) = path.parent() {
         std::fs::create_dir_all(directory).map_err(io)?;
     }
-    // Removed first, because a mode is only given to a file as it is created, and a file a
-    // crashed daemon left may be readable by others.
-    match std::fs::remove_file(path) {
-        Err(error) if error.kind() != std::io::ErrorKind::NotFound => return Err(io(error)),
-        _ => {}
-    }
-    let mut file = std::fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .mode(0o600)
-        .open(path)
-        .map_err(io)?;
     let text = serde_json::to_string(info).map_err(|error| DaemonError::Io {
         detail: error.to_string(),
     })?;
-    file.write_all(text.as_bytes()).map_err(io)
+    crate::write_private(path, text.as_bytes()).map_err(io)
 }
 
 /// Thirty-two bytes from the kernel's random source, hex-encoded.

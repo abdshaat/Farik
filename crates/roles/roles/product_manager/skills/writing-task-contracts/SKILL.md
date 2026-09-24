@@ -35,8 +35,10 @@ A standalone task may need questions too; ask them first in the same way.
 
 ## 3. Write the contract
 
-Read the board (`farik_read_board`), the team's rules (`farik_read_rules`) and the criterion
-library (`farik_read_criteria`) first. Then write, with `farik_write_contract`:
+The team's rules and the criterion library are in this prompt; call `farik_read_rules` or
+`farik_read_criteria` only if the prompt's copy says it was cut. Read the board
+(`farik_read_board`) when the contract depends on other tasks. Then write, with
+`farik_write_contract`:
 
 - **Intent**: the user-facing reason for the work, in the user's terms. Not what to change, but
   why it matters and to whom.
@@ -75,20 +77,7 @@ Include every method the team's rules require.
 
 ## 5. The Definition of Ready
 
-Before you ask for `ready`, check that:
-
-- the intent is non-empty and states the user-facing reason;
-- there is at least one exit criterion, each with a valid method, and every `command` and `test`
-  criterion has its command and its expected result;
-- the budget is set and fits the sprint when it has a budget, the team's maximum when there is
-  one, and, under an epic, the epic;
-- the team has a reviewer: one active agent of the reviewer role, or two when it is the
-  assignee's role;
-- risk is set and scope names at least one `out_of_scope` item;
-- every dependency exists and is at least `ready`;
-- the team's rules are met: required methods present, paths within the ceiling.
-
-Then request `ready` with `farik_request_transition`. If the governor refuses, every failed rule is
+A contract written as sections 3 and 4 say meets the Definition of Ready. Request `ready` with `farik_request_transition`. If the governor refuses, every failed rule is
 in the answer with what to change; fix them all and ask again. A contract that fails three times
 escalates to the user. When no agent can review, ask the user to add one, an Architect or a second
 Developer; do not change the reviewer role to one nobody on the team holds.

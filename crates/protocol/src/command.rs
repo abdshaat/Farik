@@ -21,11 +21,32 @@ use crate::generated::command::{
 
 const SCHEMA_JSON: &str = include_str!("../../../docs/schemas/command.schema.json");
 
-static VALIDATOR: LazyLock<Validator> = LazyLock::new(|| {
-    let schema: Value = serde_json::from_str(SCHEMA_JSON).expect(
+/// The embedded command schema, parsed.
+fn schema() -> Value {
+    serde_json::from_str(SCHEMA_JSON).expect(
         "the embedded command schema is valid JSON: it is the file in docs/schemas/ \
          that typify generated this crate's types from at compile time",
-    );
+    )
+}
+
+/// Every violation `validator` finds in `input`, at its path.
+fn check(validator: &Validator, input: &Value) -> Result<(), Vec<ValidationError>> {
+    let errors: Vec<ValidationError> = validator
+        .iter_errors(input)
+        .map(|error| ValidationError {
+            path: pointer(&error.instance_path().to_string()),
+            message: error.to_string(),
+        })
+        .collect();
+    if errors.is_empty() {
+        Ok(())
+    } else {
+        Err(errors)
+    }
+}
+
+static VALIDATOR: LazyLock<Validator> = LazyLock::new(|| {
+    let schema = schema();
     jsonschema::options()
         .should_validate_formats(true)
         .build(&schema)
@@ -149,16 +170,7 @@ pub enum Command {
 /// validator reports, at its path under `/body/contract`; or one error at the root when the schema
 /// passes but the typed command cannot be built.
 pub fn command_from_value(input: &Value) -> Result<Command, Vec<ValidationError>> {
-    let errors: Vec<ValidationError> = VALIDATOR
-        .iter_errors(input)
-        .map(|error| ValidationError {
-            path: pointer(&error.instance_path().to_string()),
-            message: error.to_string(),
-        })
-        .collect();
-    if !errors.is_empty() {
-        return Err(errors);
-    }
+    check(&VALIDATOR, input)?;
     let wire = serde_json::from_value::<CommandWire>(input.clone()).map_err(|error| {
         vec![ValidationError {
             path: "/".to_string(),
@@ -416,10 +428,7 @@ pub enum CommandReply {
 }
 
 static REPLY_VALIDATOR: LazyLock<Validator> = LazyLock::new(|| {
-    let schema: Value = serde_json::from_str(SCHEMA_JSON).expect(
-        "the embedded command schema is valid JSON: it is the file in docs/schemas/ \
-         that typify generated this crate's types from at compile time",
-    );
+    let schema = schema();
     let reply = json!({
         "$schema": schema["$schema"],
         "$ref": "#/$defs/commandReply",
@@ -451,16 +460,7 @@ pub fn reply_to_value(reply: &CommandReply) -> Value {
 ///
 /// Every schema violation, as `command_from_value` reports them.
 pub fn reply_from_value(value: &Value) -> Result<CommandReply, Vec<ValidationError>> {
-    let errors: Vec<ValidationError> = REPLY_VALIDATOR
-        .iter_errors(value)
-        .map(|error| ValidationError {
-            path: pointer(&error.instance_path().to_string()),
-            message: error.to_string(),
-        })
-        .collect();
-    if !errors.is_empty() {
-        return Err(errors);
-    }
+    check(&REPLY_VALIDATOR, value)?;
     if let Some(error) = value.get("error") {
         let kind = match error["kind"].as_str() {
             Some("invalid") => ReplyKind::Invalid,

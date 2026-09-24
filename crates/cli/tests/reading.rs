@@ -524,16 +524,6 @@ fn reports_a_price_table_it_cannot_read() {
     );
 }
 
-/// Walks `task` from `draft` through `path`, as the governor's moves.
-#[cfg(unix)]
-fn walked(repository: &TempRepo, task: &str, path: &[&str]) {
-    let mut from = "draft";
-    for to in path {
-        project::moved(repository, task, from, to, &serde_json::json!({}));
-        from = to;
-    }
-}
-
 #[cfg(unix)]
 #[test]
 #[ignore = "needs the git program: cargo xtask check --integration"]
@@ -548,7 +538,7 @@ fn shows_a_tasks_events_cost_and_children() {
         &["triage", "FRK-1", "large", "--reason", "Three screens."],
     );
     assert_eq!(sized.code, 0, "{}", sized.err);
-    walked(
+    project::walked(
         &repository,
         "FRK-1",
         &["refining", "ready", "assigned", "in_progress"],

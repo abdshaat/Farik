@@ -94,6 +94,21 @@ pub(crate) fn workspace_relative(cwd: &str) -> Result<Option<String>, ExecError>
 #[cfg(unix)]
 pub(crate) use supervise::{Finished, supervise};
 
+/// Kills the process group `pid` leads, through the shell's `kill` builtin: no `unsafe`, so no
+/// `libc`, and `/bin/kill` may be absent. `-s KILL` because dash reads `-KILL --` as a number. A
+/// group that is already empty is not an error. The shell's `kill` returns at once, so a drop or
+/// an async caller may call it.
+#[cfg(unix)]
+pub(crate) fn kill_group(pid: u32) {
+    let _ = std::process::Command::new("sh")
+        .arg("-c")
+        .arg(format!("kill -s KILL -- -{pid} 2>/dev/null"))
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status();
+}
+
 #[cfg(unix)]
 mod supervise {
     use std::io::Read;

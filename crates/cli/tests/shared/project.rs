@@ -226,6 +226,15 @@ pub fn moved(repository: &TempRepo, task: &str, from: &str, to: &str, extra: &Va
     record(repository, task, "task.transitioned", &body);
 }
 
+/// Walks `task` from `draft` through `path`, as the governor's moves.
+pub fn walked(repository: &TempRepo, task: &str, path: &[&str]) {
+    let mut from = "draft";
+    for to in path {
+        moved(repository, task, from, to, &json!({}));
+        from = to;
+    }
+}
+
 /// A contract a person would write, as YAML, for `done.txt`: C1 runs `test -f done.txt`.
 pub fn a_request(title: &str) -> String {
     format!(

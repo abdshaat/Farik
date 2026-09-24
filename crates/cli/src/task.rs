@@ -129,9 +129,7 @@ pub fn create(
 /// The epic `parent` names, when the board holds it as an epic under which the human may file a
 /// task now (`check_child_creation`, 5.16 item 3).
 fn epic_in_progress(project: &Project, parent: &str) -> Result<TaskId, String> {
-    let task_id: TaskId = parent
-        .parse()
-        .map_err(|error| format!("{parent} is not a task id: {error}"))?;
+    let task_id = crate::task(parent)?;
     let row = project
         .projections()?
         .task(&task_id)

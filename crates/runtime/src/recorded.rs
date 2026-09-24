@@ -7,11 +7,12 @@ use std::collections::VecDeque;
 use std::fmt;
 use std::pin::Pin;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+use std::sync::{Arc, Mutex};
 
 use serde_json::Value;
 use tokio::sync::mpsc::{Receiver, Sender, channel};
 
+use crate::locked;
 use crate::session::{
     EndReason, RuntimeAdapter, RuntimeError, SessionEvent, SessionHandle, SessionSpec,
 };
@@ -57,7 +58,6 @@ const FARIK_PREFIX: &str = "mcp__farik__";
 pub struct RecordedAdapter {
     transcripts: Mutex<VecDeque<Transcript>>,
     started: Mutex<Vec<SessionSpec>>,
-    sent: Arc<Mutex<Vec<String>>>,
     runner: Option<ToolRunner>,
 }
 
@@ -67,7 +67,6 @@ impl fmt::Debug for RecordedAdapter {
             .debug_struct("RecordedAdapter")
             .field("transcripts", &self.transcripts)
             .field("started", &self.started)
-            .field("sent", &self.sent)
             .field("runner", &self.runner.as_ref().map(|_| "a tool runner"))
             .finish()
     }
@@ -106,12 +105,6 @@ impl RecordedAdapter {
         locked(&self.transcripts).len()
     }
 
-    /// Every text sent to a session, including the prompt of each resume, in order.
-    #[must_use]
-    pub fn sent(&self) -> Vec<String> {
-        locked(&self.sent).clone()
-    }
-
     fn play(&self, session_id: &str) -> Result<Box<dyn SessionHandle>, RuntimeError> {
         let transcript =
             locked(&self.transcripts)
@@ -145,7 +138,6 @@ impl RecordedAdapter {
             session_id: session_id.to_string(),
             receiver,
             aborted: AtomicBool::new(false),
-            sent: Arc::clone(&self.sent),
         }))
     }
 }
@@ -160,11 +152,9 @@ impl RuntimeAdapter for RecordedAdapter {
     fn resume(
         &self,
         session_id: &str,
-        prompt: &str,
+        _prompt: &str,
     ) -> Result<Box<dyn SessionHandle>, RuntimeError> {
-        let handle = self.play(session_id)?;
-        locked(&self.sent).push(prompt.to_string());
-        Ok(handle)
+        self.play(session_id)
     }
 }
 
@@ -173,7 +163,6 @@ struct RecordedSession {
     session_id: String,
     receiver: Receiver<SessionEvent>,
     aborted: AtomicBool,
-    sent: Arc<Mutex<Vec<String>>>,
 }
 
 impl SessionHandle for RecordedSession {
@@ -192,8 +181,7 @@ impl SessionHandle for RecordedSession {
         &mut self.receiver
     }
 
-    fn send(&self, text: &str) -> Result<(), RuntimeError> {
-        locked(&self.sent).push(text.to_string());
+    fn send(&self, _text: &str) -> Result<(), RuntimeError> {
         Ok(())
     }
 
@@ -250,12 +238,6 @@ fn filled(events: Vec<SessionEvent>) -> Receiver<SessionEvent> {
         let _ = sender.try_send(event);
     }
     receiver
-}
-
-/// A poisoned lock here only means a test panicked while holding it; what it guards is still
-/// whole, because every write is a single push or pop.
-fn locked<Value>(mutex: &Mutex<Value>) -> MutexGuard<'_, Value> {
-    mutex.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
 #[cfg(test)]
@@ -337,7 +319,7 @@ mod tests {
     }
 
     #[test]
-    fn remembers_the_specs_it_started_and_the_texts_it_was_sent() {
+    fn remembers_the_specs_it_started() {
         let adapter = RecordedAdapter::new(vec![reads_a_file()]);
         let spec = a_session_spec();
         let handle = adapter
@@ -345,7 +327,6 @@ mod tests {
             .expect("a transcript is left");
         handle.send("go on").expect("a recorded session takes text");
         assert_eq!(adapter.started(), vec![spec]);
-        assert_eq!(adapter.sent(), vec!["go on".to_string()]);
     }
 
     #[test]
@@ -376,7 +357,6 @@ mod tests {
             .resume("s-9", "continue")
             .expect("a second transcript is left");
         assert_eq!(resumed.session_id(), "s-9");
-        assert_eq!(adapter.sent(), vec!["continue".to_string()]);
     }
 
     #[test]

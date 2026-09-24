@@ -733,7 +733,7 @@ pub(crate) fn refusal_wire(refusal: &TransitionRefusal) -> TransitionRefusedBody
 }
 
 /// A status as the wire spells it. The two lists are one, which a test in `farik-protocol` pins.
-fn status_wire(status: TaskStatus) -> Result<TaskStatusWire, TransitionError> {
+pub(crate) fn status_wire(status: TaskStatus) -> Result<TaskStatusWire, TransitionError> {
     TaskStatusWire::from_str(&status.to_string()).map_err(|_| TransitionError::Event {
         detail: format!("the event vocabulary has no status {status}"),
     })
@@ -884,7 +884,7 @@ fn role_in(team: &Team, agent_id: &str) -> Role {
 }
 
 /// The tasks an agent holds that are neither accepted nor cancelled (5.2).
-fn open_tasks(board: &[TaskProjection], agent_id: &str) -> u32 {
+pub(crate) fn open_tasks(board: &[TaskProjection], agent_id: &str) -> u32 {
     let held = board
         .iter()
         .filter(|row| {
@@ -899,15 +899,7 @@ fn open_tasks(board: &[TaskProjection], agent_id: &str) -> u32 {
 /// task's last move into `refining` and its last triage (a re-triage from `small` to `large` starts
 /// refining over), or its first event when there is neither.
 fn readiness_failed_attempts(history: &[FarikEvent]) -> u32 {
-    let since = history
-        .iter()
-        .filter(|event| {
-            event.body.kind() == EventKind::RequestTriaged
-                || is_move_into(event, TaskStatus::Refining)
-        })
-        .map(|event| event.envelope.seq)
-        .max()
-        .unwrap_or(0);
+    let since = refining_began(history);
     let failed = history
         .iter()
         .filter(|event| event.envelope.seq > since)
@@ -920,6 +912,20 @@ fn readiness_failed_attempts(history: &[FarikEvent]) -> u32 {
         })
         .count();
     u32::try_from(failed).unwrap_or(u32::MAX)
+}
+
+/// Where refining last began: the later of the task's last move into `refining` and its last
+/// triage, or 0.
+pub(crate) fn refining_began(history: &[FarikEvent]) -> u64 {
+    history
+        .iter()
+        .filter(|event| {
+            event.body.kind() == EventKind::RequestTriaged
+                || is_move_into(event, TaskStatus::Refining)
+        })
+        .map(|event| event.envelope.seq)
+        .max()
+        .unwrap_or(0)
 }
 
 /// Whether the human accepted the contract the task has now (5.16 item 2): a `human.accepted
@@ -1038,12 +1044,12 @@ fn evidence_since_work_began(
     (results, completion_note, review_note)
 }
 
-fn is_move_into(event: &FarikEvent, status: TaskStatus) -> bool {
+pub(crate) fn is_move_into(event: &FarikEvent, status: TaskStatus) -> bool {
     matches!(&event.body, EventBody::TaskTransitioned(body) if wire_status(body.to) == Some(status))
 }
 
 /// The task's last `task.transitioned` into `status`.
-fn last_move_into(history: &[FarikEvent], status: TaskStatus) -> Option<&FarikEvent> {
+pub(crate) fn last_move_into(history: &[FarikEvent], status: TaskStatus) -> Option<&FarikEvent> {
     history
         .iter()
         .rev()
