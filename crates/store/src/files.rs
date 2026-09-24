@@ -201,12 +201,30 @@ impl ProjectFiles {
     ///
     /// # Errors
     ///
-    /// `NotFound` when there is no sprint with that id, `Invalid` when the file is not YAML or
-    /// not a sprint, `Io` otherwise.
+    /// `NotFound` when there is no sprint with that id, or `id` is no sprint's (`S<n>`), so that
+    /// nothing outside `sprints/` is read; `Invalid` when the file is not YAML or not a sprint, or
+    /// holds a sprint with another id; `Io` otherwise.
     pub fn read_sprint(&self, id: &str) -> Result<Sprint, FilesError> {
         let path = sprint_path(id);
+        if !is_sprint_id(id) {
+            return Err(FilesError::NotFound {
+                path: Self::named(&path),
+            });
+        }
         let value = self.read_yaml(&path)?;
-        validate_sprint(&value).map_err(|errors| refused(&path, &errors))
+        let sprint = validate_sprint(&value).map_err(|errors| refused(&path, &errors))?;
+        if sprint.id.as_str() == id {
+            Ok(sprint)
+        } else {
+            Err(FilesError::Invalid {
+                path: Self::named(&path),
+                detail: format!(
+                    "the sprint in it says it is {}, and a sprint lives in the file its own id \
+                     names",
+                    sprint.id.as_str()
+                ),
+            })
+        }
     }
 
     /// Writes a sprint to the file its own id names, after holding it to the same rules.

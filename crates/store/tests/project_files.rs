@@ -1001,3 +1001,31 @@ fn refuses_a_sprint_file_that_breaks_its_schema() {
     assert_eq!(path, ".farik/sprints/S1.yaml");
     assert!(detail.contains("status"), "{detail}");
 }
+
+#[test]
+fn refuses_a_sprint_file_that_is_not_its_ids() {
+    let project = TempProject::new("misnamed-sprint");
+    let files = project.files();
+    files.write_sprint(&a_sprint("S2")).expect("written");
+    std::fs::rename(
+        project.root.join(".farik/sprints/S2.yaml"),
+        project.root.join(".farik/sprints/S1.yaml"),
+    )
+    .expect("a person renames it");
+    let Err(FilesError::Invalid { path, detail }) = files.read_sprint("S1") else {
+        panic!("S1.yaml holds S2");
+    };
+    assert_eq!(path, ".farik/sprints/S1.yaml");
+    assert!(detail.contains("S2"), "{detail}");
+
+    // An id that is no sprint's names no file, whatever lies at the path it spells.
+    for id in ["../team", "S0"] {
+        assert_eq!(
+            files.read_sprint(id),
+            Err(FilesError::NotFound {
+                path: format!(".farik/sprints/{id}.yaml")
+            }),
+            "{id}"
+        );
+    }
+}
