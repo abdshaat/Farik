@@ -1473,7 +1473,9 @@ mod tests {
     #[tokio::test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn judges_a_write_whose_later_refusal_was_not_the_governors() {
-        let harness = Harness::new("req-judges-others-refusal", |_| {});
+        let harness = Harness::new("req-judges-others-refusal", |wire| {
+            wire["rules"]["max_task_budget_usd"] = json!(5);
+        });
         let adapter = harness.recorded(Vec::new());
         let orchestrator = harness.orchestrator(adapter.clone());
         refining(&harness, &orchestrator, RequestSize::Small).await;
@@ -1870,6 +1872,32 @@ mod tests {
             Some("assigned -> in_progress")
         );
         assert!(!harness.worktree("FRK-1").exists());
+        assert!(adapter.started().is_empty());
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn passes_over_an_epic_outside_the_open_sprint() {
+        let harness = Harness::new("epic-outside-sprint", |_| {});
+        an_epic(&harness, "FRK-1", "ready", |_| {});
+        harness.open_sprint("S1", &[]);
+        let adapter = harness.recorded(Vec::new());
+        let orchestrator = harness.orchestrator(adapter.clone());
+        let scope = crate::orchestrator::TickScope {
+            task_id: Some(task("FRK-1")),
+            ..crate::orchestrator::TickScope::default()
+        };
+
+        for _ in 0..2 {
+            let report = orchestrator
+                .tick_within(&scope)
+                .await
+                .expect("the tick runs");
+            assert!(matches!(report, TickReport::Idle { .. }), "{report:?}");
+        }
+
+        assert!(harness.events(&[EventKind::TransitionRefused]).is_empty());
+        assert_eq!(harness.row("FRK-1").status, TaskStatus::Ready);
         assert!(adapter.started().is_empty());
     }
 

@@ -3595,6 +3595,57 @@ mod tests {
 
     #[tokio::test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn runs_no_sprint_rule_in_a_scoped_or_refining_tick() {
+        let harness = Harness::new("orch-sprint-scoped", with_a_scrum_master);
+        harness.ready("FRK-1");
+        harness.open_sprint("S1", &[]);
+        let adapter = harness.recorded(vec![plan_sprint_frk_1()]);
+        let orchestrator = harness.orchestrator(adapter.clone());
+
+        for scope in [
+            TickScope {
+                task_id: Some("FRK-1".parse().expect("a task id")),
+                ..TickScope::default()
+            },
+            TickScope {
+                rules: TickRules::Refining,
+                ..TickScope::default()
+            },
+        ] {
+            let report = orchestrator
+                .tick_within(&scope)
+                .await
+                .expect("the tick runs");
+            assert!(!matches!(&report, TickReport::Sprint { .. }), "{report:?}");
+        }
+
+        assert!(adapter.started().is_empty(), "{:?}", adapter.started());
+        assert_eq!(harness.row("FRK-1").sprint, None);
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn asks_no_plan_on_a_spent_day() {
+        let harness = Harness::new("orch-sprint-day", with_a_scrum_master);
+        harness.spent(None, "s-0", 20.0);
+        harness.ready("FRK-1");
+        harness.open_sprint("S1", &[]);
+        let adapter = harness.recorded(vec![plan_sprint_frk_1()]);
+        let orchestrator = harness.orchestrator(adapter.clone());
+
+        let report = orchestrator.tick().await.expect("the tick runs");
+
+        assert_eq!(
+            report,
+            TickReport::Idle {
+                why: "the team's daily budget is spent".to_string()
+            }
+        );
+        assert!(adapter.started().is_empty(), "{:?}", adapter.started());
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn asks_no_plan_of_a_sprint_that_holds_a_task() {
         let harness = Harness::new("orch-sprint-held", with_a_scrum_master);
         harness.ready("FRK-1");

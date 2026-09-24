@@ -1144,6 +1144,31 @@ mod tests {
 
     #[test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn plans_an_epic_with_the_tasks_already_under_it() {
+        let project = a_project_with_scrum_master("tools-plan-epic-children");
+        project.filed("FRK-1", "ready", "epic", None);
+        project.filed("FRK-2", "ready", "task", Some("FRK-1"));
+        project.open_sprint("S1", None, &[]);
+
+        let answer = plan(&project, "sm", &["FRK-1"]).expect("an approved epic is planned");
+
+        assert_eq!(
+            answer,
+            json!({ "sprint_id": "S1", "task_ids": ["FRK-1", "FRK-2"] })
+        );
+        assert_eq!(held_by(&project, "S1"), ["FRK-1", "FRK-2"]);
+        assert_eq!(sprint_of(&project, "FRK-2"), "S1");
+        let row = project
+            .deps
+            .projections
+            .task(&"FRK-2".parse().expect("a task id"))
+            .expect("the board reads")
+            .expect("a row");
+        assert_eq!(row.sprint.as_deref(), Some("S1"));
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
     fn puts_an_epics_new_task_in_its_sprint() {
         let project = a_project("tools-child-sprint");
         project.filed("FRK-1", "in_progress", "epic", None);
