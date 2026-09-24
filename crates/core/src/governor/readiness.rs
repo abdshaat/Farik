@@ -560,23 +560,39 @@ fn document_paths_only(
 
 /// No allowed path reaches under `.farik/` (5.3), whatever the role or kind: a contract, a
 /// decision, a notebook, or the retro changes only through Farik's tools, never through a commit.
+/// A path with a backslash is refused outright: the glob engine reads `\` as an escape, so a
+/// glob such as `.f\arik/**` reads its first segment as `.f`, missing the directory it in fact
+/// matches once escaped.
 fn no_farik_paths(contract: &TaskContract, _: &ReadinessContext) -> Option<ReadinessFailure> {
+    let backslashed: Vec<&str> = contract
+        .allowed_paths
+        .iter()
+        .map(String::as_str)
+        .filter(|path| path.contains('\\'))
+        .collect();
     let reaching: Vec<&str> = contract
         .allowed_paths
         .iter()
         .map(String::as_str)
-        .filter(|path| reaches_the_farik_directory(path))
+        .filter(|path| !path.contains('\\') && reaches_the_farik_directory(path))
         .collect();
-    if reaching.is_empty() {
+    if backslashed.is_empty() && reaching.is_empty() {
         return None;
     }
-    Some(failure(
-        ReadinessRule::NoFarikPaths,
-        format!(
+    let mut reasons = Vec::new();
+    if !backslashed.is_empty() {
+        reasons.push(format!(
+            "allowed paths {} contain a backslash: backslashes are not allowed in allowed paths",
+            backslashed.join(", ")
+        ));
+    }
+    if !reaching.is_empty() {
+        reasons.push(format!(
             "allowed paths {} reach under .farik/, whose files change only through Farik's tools",
             reaching.join(", ")
-        ),
-    ))
+        ));
+    }
+    Some(failure(ReadinessRule::NoFarikPaths, reasons.join("; ")))
 }
 
 fn budget_within_team_max(
@@ -1042,6 +1058,8 @@ mod tests {
             ".f*/x",
             "[.]farik/x",
             "{src,.farik}/**",
+            ".f\\arik/**",
+            "a\\b",
         ];
         for path in reaching {
             for role in [Role::SoftwareDeveloper, Role::Architect] {
