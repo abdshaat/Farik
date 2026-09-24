@@ -20,7 +20,7 @@ use farik_store::{EventQuery, TaskProjection};
 use super::messages::{
     breakdown_message, close_out_message, epic_accept_message, refine_message, triage_message,
 };
-use super::rules::{Room, acted, active, refused_since_entering, room};
+use super::rules::{acted, active, has_room, refused_since_entering, spent};
 use super::session::{SessionAsk, run_session};
 use super::verify::{
     GOVERNOR, append, escalate, fails_the_criterion, governor_results, ran_criteria, read_only,
@@ -57,7 +57,7 @@ pub(super) async fn draft(
     };
     if !row.triaged {
         let contract = deps.tools.files.read_contract(&row.task_id)?;
-        if room(deps, team, &contract, day_spent)? != Room::Free {
+        if spent(deps, team, &contract, day_spent)? {
             return Ok(None);
         }
         let end = run_session(
@@ -121,7 +121,7 @@ pub(super) async fn refining(
     if is_to_be_judged(&contract, &history, began) {
         return judge(deps, team, row).map(Some);
     }
-    if room(deps, team, &contract, day_spent)? != Room::Free {
+    if spent(deps, team, &contract, day_spent)? {
         return Ok(None);
     }
     let asked = history
@@ -241,13 +241,7 @@ pub(super) fn ready_epic(
     let Some(pm) = product_manager(team) else {
         return Ok(None);
     };
-    let held = board
-        .iter()
-        .filter(|other| other.assignee_id.as_deref() == Some(pm.id.as_str()))
-        .filter(|other| !matches!(other.status, TaskStatus::Accepted | TaskStatus::Cancelled))
-        .count();
-    if u64::try_from(held).unwrap_or(u64::MAX)
-        >= u64::try_from(team.policy.wip_limit_per_agent).unwrap_or(0)
+    if !has_room(team, board, pm)
         || refused_since_entering(deps, &row.task_id, TaskStatus::Ready, TaskStatus::Assigned)?
     {
         return Ok(None);
@@ -356,7 +350,7 @@ pub(super) async fn in_progress_epic(
     } else {
         return Ok(None);
     };
-    if room(deps, team, &contract, day_spent)? != Room::Free {
+    if spent(deps, team, &contract, day_spent)? {
         return Ok(None);
     }
     let end = run_session(
@@ -436,7 +430,7 @@ pub(super) async fn verifying_epic(
     let Some(pm) = product_manager(team) else {
         return Ok(None);
     };
-    if room(deps, team, contract, day_spent)? != Room::Free {
+    if spent(deps, team, contract, day_spent)? {
         return Ok(None);
     }
     let end = run_session(

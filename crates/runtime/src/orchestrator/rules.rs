@@ -30,17 +30,6 @@ const NOTHING_TO_DO: &str = "nothing on the board needs doing";
 /// What a tick says when the only rules that matched would have started a session on a spent day.
 const DAY_SPENT: &str = "the team's daily budget is spent";
 
-/// Whether a budget stops a session from starting for a task.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum Room {
-    /// Nothing stops it.
-    Free,
-    /// The task's dollars or sessions are spent: no session for this task.
-    TaskSpent,
-    /// The team's day is spent: no session at all.
-    DaySpent,
-}
-
 /// One tick within `scope`: the first rule of the scope's set that acts on a task in scope, or
 /// `Idle`. A rule outside the set passes its tasks over, as a spent budget does.
 pub(super) async fn tick(
@@ -300,15 +289,15 @@ pub(super) fn refused_since_entering(
         }))
 }
 
-/// Whether the budgets leave room for a session about `contract`, read with an empty session
+/// Whether a budget stops a session about `contract` from starting, read with an empty session
 /// ledger: the day's dollars, then the task's dollars and sessions. `day_spent` is set when the
 /// day is what stops it.
-pub(super) fn room(
+pub(super) fn spent(
     deps: &OrchestratorDeps,
     team: &Team,
     contract: &TaskContract,
     day_spent: &mut bool,
-) -> Result<Room, OrchestratorError> {
+) -> Result<bool, OrchestratorError> {
     let state = budget_state(
         &deps.tools.projections,
         team,
@@ -323,15 +312,11 @@ pub(super) fn room(
         .collect();
     if exhausted.contains(&BudgetScope::DayUsd) {
         *day_spent = true;
-        return Ok(Room::DaySpent);
+        return Ok(true);
     }
-    if exhausted
+    Ok(exhausted
         .iter()
-        .any(|scope| matches!(scope, BudgetScope::TaskUsd | BudgetScope::TaskSessions))
-    {
-        return Ok(Room::TaskSpent);
-    }
-    Ok(Room::Free)
+        .any(|scope| matches!(scope, BudgetScope::TaskUsd | BudgetScope::TaskSessions)))
 }
 
 /// Rule 6: a task `in_progress` gets its assignee's implement session, in its worktree, with its
@@ -352,7 +337,7 @@ async fn in_progress(
         return Ok(None);
     };
     let contract = deps.tools.files.read_contract(&row.task_id)?;
-    if room(deps, team, &contract, day_spent)? != Room::Free {
+    if spent(deps, team, &contract, day_spent)? {
         return Ok(None);
     }
     let sandbox = orchestrator.sandbox_for(&row.task_id, team)?;
@@ -511,7 +496,7 @@ async fn ready(
         return Ok(None);
     };
     let contract = deps.tools.files.read_contract(&row.task_id)?;
-    if room(deps, team, &contract, day_spent)? != Room::Free {
+    if spent(deps, team, &contract, day_spent)? {
         return Ok(None);
     }
     let assignees: Vec<String> = team
@@ -558,13 +543,8 @@ fn assigner(team: &Team) -> Option<&Agent> {
 }
 
 /// Whether `agent` holds fewer open tasks, neither accepted nor cancelled, than the WIP limit.
-fn has_room(team: &Team, board: &[TaskProjection], agent: &Agent) -> bool {
-    let held = board
-        .iter()
-        .filter(|row| row.assignee_id.as_deref() == Some(agent.id.as_str()))
-        .filter(|row| !matches!(row.status, TaskStatus::Accepted | TaskStatus::Cancelled))
-        .count();
-    u64::try_from(held).unwrap_or(u64::MAX)
+pub(super) fn has_room(team: &Team, board: &[TaskProjection], agent: &Agent) -> bool {
+    u64::from(transitions::open_tasks(board, agent.id.as_str()))
         < u64::try_from(team.policy.wip_limit_per_agent).unwrap_or(0)
 }
 

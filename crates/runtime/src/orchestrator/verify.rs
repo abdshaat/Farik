@@ -21,7 +21,7 @@ use farik_store::{EventQuery, Git, TaskProjection};
 
 use super::messages::{ReviewBrief, accept_message, review_message};
 use super::requests;
-use super::rules::{Room, acted, active, room};
+use super::rules::{acted, active, spent};
 use super::session::{SessionAsk, run_session};
 use super::{Orchestrator, OrchestratorDeps, OrchestratorError, TickReport, worktree};
 use crate::criteria::{CriterionError, CriterionOutcome, NewTestsInput, run_criteria};
@@ -297,7 +297,7 @@ async fn review(
 ) -> Result<Option<TickReport>, OrchestratorError> {
     let deps = &orchestrator.deps;
     let contract = deps.tools.files.read_contract(&row.task_id)?;
-    if room(deps, team, &contract, day_spent)? != Room::Free {
+    if spent(deps, team, &contract, day_spent)? {
         return Ok(ran_criteria(row, ran));
     }
     let history = history(deps, &row.task_id)?;
@@ -446,7 +446,7 @@ async fn accept(
         return Ok(ran_criteria(row, ran));
     };
     let contract = deps.tools.files.read_contract(&row.task_id)?;
-    if room(deps, team, &contract, day_spent)? != Room::Free {
+    if spent(deps, team, &contract, day_spent)? {
         return Ok(ran_criteria(row, ran));
     }
     let initial_prompt = accept_message(&contract, review_note, answers);

@@ -884,7 +884,7 @@ fn role_in(team: &Team, agent_id: &str) -> Role {
 }
 
 /// The tasks an agent holds that are neither accepted nor cancelled (5.2).
-fn open_tasks(board: &[TaskProjection], agent_id: &str) -> u32 {
+pub(crate) fn open_tasks(board: &[TaskProjection], agent_id: &str) -> u32 {
     let held = board
         .iter()
         .filter(|row| {
