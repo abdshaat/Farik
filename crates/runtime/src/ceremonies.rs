@@ -1,10 +1,11 @@
 //! What the team's ceremonies are told (`docs/SPEC.md` section 5.9): the facts each is given,
 //! read from the log and the board.
 
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, NaiveTime, Utc};
 use farik_core::contract::{TaskId, TaskStatus};
 use farik_protocol::event::{
-    BudgetExhaustedBodyScope, EscalationRaisedBodyReason, EventBody, EventKind,
+    BudgetExhaustedBodyScope, EscalationRaisedBodyReason, EventBody, EventKind, FarikEvent,
+    SessionEndedBodyReason, Thread,
 };
 use farik_store::{EventLog, EventQuery, Projections, StoreError};
 
@@ -135,6 +136,114 @@ pub fn budgets_spent_since_planning(
         }
     }
     Ok(spent)
+}
+
+/// How many sessions a ceremony is given at most, so that one that keeps stopping at a limit is
+/// not asked for ever.
+const CEREMONY_SESSIONS: usize = 3;
+
+/// Whether a ceremony has run among `events` (5.9): a `session.started` that `is_ceremony` matches
+/// whose `session.ended` says it completed, was aborted, or failed, or three such starts whatever
+/// their ends. One that stopped at a limit or at its model provider's limit is asked again, but not
+/// for ever.
+pub(crate) fn has_run(events: &[FarikEvent], is_ceremony: impl Fn(&FarikEvent) -> bool) -> bool {
+    let mut started: Vec<Option<&str>> = Vec::new();
+    for event in events {
+        let session_id = event.envelope.ids.session_id.as_deref();
+        match &event.body {
+            EventBody::SessionStarted(_) if is_ceremony(event) => {
+                started.push(session_id);
+                if started.len() >= CEREMONY_SESSIONS {
+                    return true;
+                }
+            }
+            EventBody::SessionEnded(body)
+                if started.contains(&session_id)
+                    && matches!(
+                        body.reason,
+                        SessionEndedBodyReason::Completed
+                            | SessionEndedBodyReason::Aborted
+                            | SessionEndedBodyReason::Error
+                    ) =>
+            {
+                return true;
+            }
+            _ => {}
+        }
+    }
+    false
+}
+
+/// The moves the standup of sprint `sprint_id` reports on `now`'s UTC day, oldest first: each
+/// `task.transitioned` of a task in `in_sprint` recorded after the sprint's `sprint.started`, from
+/// the start of the UTC day of the last standup that has run (else the sprint's start) up to the
+/// start of today. Empty when today's standup has run.
+///
+/// # Errors
+///
+/// When the log cannot be read.
+pub fn standup_moves(
+    log: &EventLog,
+    sprint_id: &str,
+    in_sprint: &[TaskId],
+    now: DateTime<Utc>,
+) -> Result<Vec<FarikEvent>, StoreError> {
+    let events = log.read(&EventQuery {
+        kinds: vec![
+            EventKind::SprintStarted,
+            EventKind::SessionStarted,
+            EventKind::SessionEnded,
+            EventKind::TaskTransitioned,
+        ],
+        ..EventQuery::default()
+    })?;
+    let Some(started) = events.iter().position(|event| {
+        matches!(&event.body, EventBody::SprintStarted(body) if body.sprint_id.as_str() == sprint_id)
+    }) else {
+        return Ok(Vec::new());
+    };
+    let events = &events[started + 1..];
+    let today = day_of(now);
+    let ran_on = |day: DateTime<Utc>| {
+        has_run(events, |event| {
+            is_standup(event) && day_of(event.envelope.recorded_at) == day
+        })
+    };
+    if ran_on(today) {
+        return Ok(Vec::new());
+    }
+    let from = events
+        .iter()
+        .filter(|event| is_standup(event))
+        .map(|event| day_of(event.envelope.recorded_at))
+        .filter(|day| *day < today && ran_on(*day))
+        .max();
+    Ok(events
+        .iter()
+        .filter(|event| {
+            let at = event.envelope.recorded_at;
+            matches!(event.body, EventBody::TaskTransitioned(_))
+                && at < today
+                && from.is_none_or(|from| at >= from)
+                && event
+                    .envelope
+                    .ids
+                    .task_id
+                    .as_ref()
+                    .is_some_and(|task| in_sprint.contains(task))
+        })
+        .cloned()
+        .collect())
+}
+
+/// Whether `event` is the start of a standup: a `session.started` in the `standup` thread.
+fn is_standup(event: &FarikEvent) -> bool {
+    matches!(&event.body, EventBody::SessionStarted(body) if body.thread == Some(Thread::Standup))
+}
+
+/// The start of `at`'s UTC day.
+fn day_of(at: DateTime<Utc>) -> DateTime<Utc> {
+    at.date_naive().and_time(NaiveTime::MIN).and_utc()
 }
 
 #[cfg(test)]

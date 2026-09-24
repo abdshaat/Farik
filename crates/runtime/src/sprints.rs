@@ -6,14 +6,14 @@ use std::fmt;
 use farik_core::contract::{Role, TaskId, TaskStatus};
 use farik_core::sprint::{Sprint, SprintStatus, validate_sprint};
 use farik_protocol::event::{
-    EventBody, EventKind, FarikEvent, SessionEndedBodyReason, SessionStartedBodyPurpose, Thread,
-    new_event,
+    EventBody, EventKind, FarikEvent, SessionStartedBodyPurpose, Thread, new_event,
 };
 use farik_store::files::FilesError;
 use farik_store::{EventLog, EventQuery, SprintProjection, StoreError, TaskProjection};
 use serde::de::DeserializeOwned;
 use serde_json::{Value, json};
 
+use crate::ceremonies::has_run;
 use crate::tools::ToolDeps;
 
 /// Who ended a sprint, as `sprint.ended` records it.
@@ -392,9 +392,9 @@ pub fn join_epics_sprint(deps: &ToolDeps, task: &TaskId) -> Result<Option<Sprint
 }
 
 /// Whether sprint `sprint_id` has had its planning ceremony: a planning session's start
-/// (`is_planning`), recorded after the sprint's `sprint.started`, whose `session.ended` says it
-/// completed, was aborted, or failed, or three such sessions whatever their ends. One that stopped
-/// at a limit or at its model provider's limit is asked again, but not for ever.
+/// (`is_planning`) recorded after the sprint's `sprint.started` and before the next sprint's,
+/// under the ceremonies' bound (`has_run`): one that stopped at a limit or at its model provider's
+/// limit is asked again, but not for ever.
 ///
 /// # Errors
 ///
@@ -408,33 +408,17 @@ pub fn planning_session_spent(log: &EventLog, sprint_id: &str) -> Result<bool, S
         ],
         ..EventQuery::default()
     })?;
-    let mut started = false;
-    let mut planning: Vec<Option<&str>> = Vec::new();
-    for event in &events {
-        let session_id = event.envelope.ids.session_id.as_deref();
-        match &event.body {
-            EventBody::SprintStarted(body) => started = body.sprint_id.as_str() == sprint_id,
-            EventBody::SessionStarted(_) if started && is_planning(event) => {
-                planning.push(session_id);
-                if planning.len() >= PLANNING_SESSIONS {
-                    return Ok(true);
-                }
-            }
-            EventBody::SessionEnded(body)
-                if planning.contains(&session_id)
-                    && matches!(
-                        body.reason,
-                        SessionEndedBodyReason::Completed
-                            | SessionEndedBodyReason::Aborted
-                            | SessionEndedBodyReason::Error
-                    ) =>
-            {
-                return Ok(true);
-            }
-            _ => {}
-        }
-    }
-    Ok(false)
+    let Some(started) = events.iter().position(|event| {
+        matches!(&event.body, EventBody::SprintStarted(body) if body.sprint_id.as_str() == sprint_id)
+    }) else {
+        return Ok(false);
+    };
+    let since = &events[started + 1..];
+    let until = since
+        .iter()
+        .position(|event| matches!(event.body, EventBody::SprintStarted(_)))
+        .unwrap_or(since.len());
+    Ok(has_run(&since[..until], is_planning))
 }
 
 /// Whether `event` is the start of a sprint's planning: a `session.started` in the `planning`
@@ -451,10 +435,6 @@ pub(crate) fn is_planning(event: &FarikEvent) -> bool {
         _ => false,
     }
 }
-
-/// How many planning sessions a sprint is given at most, so that one that keeps stopping at a limit
-/// is not asked for ever.
-const PLANNING_SESSIONS: usize = 3;
 
 /// A refusal of a plan, in the words `farik_plan_sprint` answers.
 fn plan_refused(why: &str) -> SprintError {

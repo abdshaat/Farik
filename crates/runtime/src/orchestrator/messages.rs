@@ -3,11 +3,11 @@
 
 use chrono::{DateTime, Utc};
 use farik_core::branch::task_branch;
-use farik_core::contract::{TaskContract, TaskKind, Verification};
+use farik_core::contract::{TaskContract, TaskId, TaskKind, Verification};
 use farik_core::governor::done::CriterionResult;
 use farik_core::team::Agent;
 use farik_protocol::event::{
-    BudgetExhaustedBodyScope, EventBody, FarikEvent, HumanAcceptedBodySubject,
+    BlockerWire, BudgetExhaustedBodyScope, EventBody, FarikEvent, HumanAcceptedBodySubject,
 };
 use farik_store::TaskProjection;
 use farik_store::git::HeadSummary;
@@ -259,16 +259,10 @@ pub(super) fn planning_message(
         })
         .collect::<Vec<_>>()
         .join("\n");
-    let escalations = digest.escalations.iter().map(|open| {
-        format!(
-            "{} ({}): {}, {}; waiting {} hours",
-            open.task_id.as_str(),
-            open.title,
-            open.reason,
-            open.detail,
-            (digest.now - open.raised_at).num_hours()
-        )
-    });
+    let escalations = digest
+        .escalations
+        .iter()
+        .map(|open| escalation_line(open, digest.now));
     let spent = digest.spent.iter().map(|(scope, at)| {
         let whose = match scope {
             BudgetExhaustedBodyScope::DayUsd => "the day's",
@@ -296,6 +290,67 @@ pub(super) fn planning_message(
             "\nWhat the last retros learned, their latest part: {}",
             untrusted_block("retro", last_bytes(text, NOTE_CAP_BYTES), NOTE_CAP_BYTES)
         )),
+    )
+}
+
+/// One open escalation, as a ceremony is told it: its task, title, reason, detail, and the hours
+/// it has waited until `now`.
+fn escalation_line(open: &OpenEscalation, now: DateTime<Utc>) -> String {
+    format!(
+        "{} ({}): {}, {}; waiting {} hours",
+        open.task_id.as_str(),
+        open.title,
+        open.reason,
+        open.detail,
+        (now - open.raised_at).num_hours()
+    )
+}
+
+/// The standup's facts (5.9): each move in its window, as task, from, to, and who asked for it;
+/// each blocked task of the sprint with its blocker; and each open escalation. What an agent wrote
+/// is untrusted text, cut at 16 KiB.
+pub(super) fn standup_message(
+    sprint_id: &str,
+    moves: &[FarikEvent],
+    blocked: &[(TaskId, Option<BlockerWire>)],
+    escalations: &[OpenEscalation],
+    now: DateTime<Utc>,
+) -> String {
+    let moves = moves.iter().filter_map(|event| match &event.body {
+        EventBody::TaskTransitioned(body) => Some(format!(
+            "{}: {} -> {}, by {}",
+            event
+                .envelope
+                .ids
+                .task_id
+                .as_ref()
+                .map_or("", |task| task.as_str()),
+            body.from,
+            body.to,
+            body.requested_by
+        )),
+        _ => None,
+    });
+    let blocked = blocked.iter().map(|(task_id, wire)| match wire {
+        Some(wire) => format!(
+            "{} is blocked: {}; needed: {}",
+            task_id.as_str(),
+            wire.description,
+            wire.needed
+        ),
+        None => format!("{} is blocked", task_id.as_str()),
+    });
+    let escalations = escalations.iter().map(|open| escalation_line(open, now));
+    let facts = moves
+        .chain(blocked)
+        .chain(escalations)
+        .collect::<Vec<_>>()
+        .join("\n");
+    format!(
+        "Today's standup of {sprint_id}: each move of a task in the sprint since the last standup \
+         (task: from -> to, by whom), each task of the sprint that is blocked with its blocker, and \
+         each open escalation: {}",
+        untrusted_block("standup", &facts, NOTE_CAP_BYTES)
     )
 }
 

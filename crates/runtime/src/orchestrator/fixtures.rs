@@ -120,8 +120,16 @@ impl Harness {
         adapter: Arc<dyn RuntimeAdapter>,
         now: DateTime<Utc>,
     ) -> Orchestrator {
+        self.orchestrator_on(adapter, Arc::new(MovableClock::new(now)))
+    }
+
+    /// `orchestrator_at`, on `clock`, which the test moves as well.
+    pub(crate) fn orchestrator_on(
+        &self,
+        adapter: Arc<dyn RuntimeAdapter>,
+        clock: Arc<MovableClock>,
+    ) -> Orchestrator {
         let deps = &self.project.deps;
-        let clock = Arc::new(MovableClock::new(now));
         let tools = Arc::new(ToolDeps {
             log: Arc::clone(&deps.log),
             projections: Arc::clone(&deps.projections),

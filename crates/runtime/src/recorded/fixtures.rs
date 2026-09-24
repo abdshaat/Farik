@@ -252,6 +252,13 @@ pub fn planning_ceremony_frk_1() -> Transcript {
     Transcript::from_jsonl(include_str!("transcripts/planning_ceremony_frk_1.jsonl"))
 }
 
+/// The Scrum Master's standup: one post, "Standup: FRK-1 moved from assigned to `in_progress`.
+/// …", then "The standup is posted.". Hand-written.
+#[must_use]
+pub fn standup() -> Transcript {
+    Transcript::from_jsonl(include_str!("transcripts/standup.jsonl"))
+}
+
 /// An adapter whose every session reports `usage` at once and then either ends `completed` at
 /// once or waits for `abort` and ends `aborted`, or, when its abort fails, waits for ever: the
 /// shapes a recorded transcript, which reports usage only on its last line, cannot show.

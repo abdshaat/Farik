@@ -19,7 +19,7 @@ use farik_store::{EventQuery, Git, TaskProjection};
 use super::integrate::{awaiting, cleanup};
 use super::messages::{
     Digest, Resume, ceremony_message, implement_message, mention_message, plan_message,
-    planning_message,
+    planning_message, standup_message,
 };
 use super::requests;
 use super::session::{SessionAsk, SessionEnd, run_session};
@@ -27,7 +27,7 @@ use super::verify::verifying;
 use super::{
     Orchestrator, OrchestratorDeps, OrchestratorError, TickReport, TickRules, TickScope, worktree,
 };
-use crate::ceremonies::{budgets_spent_since_planning, open_escalations};
+use crate::ceremonies::{budgets_spent_since_planning, open_escalations, standup_moves};
 use crate::channel::{channel_summary, pending_mentions};
 use crate::cost::budget_state;
 use crate::exec::Executor;
@@ -199,7 +199,10 @@ async fn sprint_rules(
     if let Some(report) = finished_sprint(deps, scope, board)? {
         return Ok(Some(report));
     }
-    sprint_planning(deps, scope, team, board, waiting).await
+    if let Some(report) = sprint_planning(deps, scope, team, board, waiting).await? {
+        return Ok(Some(report));
+    }
+    standup(deps, scope, team, board, waiting).await
 }
 
 /// The sprint that ends by itself (5.5): the open sprint, once it holds a task and every task in it
@@ -327,6 +330,96 @@ const PLANNING_TOOLS: &[&str] = &[
     "farik_read_criteria",
     "farik_post_message",
     "farik_plan_sprint",
+];
+
+/// The open sprint's standup (5.9), under `All` alone in a tick scoped to no task: once a UTC day,
+/// when a task in the sprint moved in the standup's window (`standup_moves`), the ceremony runner
+/// gets one `ceremony` session in the `standup` thread, about no task, given the reading tools and
+/// `farik_post_message`, and told each such move, each blocked task of the sprint with its
+/// blocker, the open escalations, and the channel. Passed over with no runner or on a spent day.
+async fn standup(
+    deps: &OrchestratorDeps,
+    scope: &TickScope,
+    team: &Team,
+    board: &[TaskProjection],
+    waiting: &mut Waiting,
+) -> Result<Option<TickReport>, OrchestratorError> {
+    if scope.task_id.is_some() || scope.rules != TickRules::All {
+        return Ok(None);
+    }
+    let tools = &deps.tools;
+    let Some(open) = tools.projections.open_sprint()? else {
+        return Ok(None);
+    };
+    let Some(runner) = assigner(team) else {
+        return Ok(None);
+    };
+    let in_sprint: Vec<&TaskProjection> = board
+        .iter()
+        .filter(|row| row.sprint.as_deref() == Some(open.sprint_id.as_str()))
+        .collect();
+    let task_ids: Vec<TaskId> = in_sprint.iter().map(|row| row.task_id.clone()).collect();
+    let moves = standup_moves(&tools.log, &open.sprint_id, &task_ids, tools.clock.now())?;
+    if moves.is_empty() {
+        return Ok(None);
+    }
+    if day_is_spent(deps, team, Role::from(runner.role), &mut waiting.day_spent)?
+        | asleep(deps, runner, &mut waiting.slept)?
+    {
+        return Ok(None);
+    }
+    let mut blocked = Vec::new();
+    for row in in_sprint
+        .iter()
+        .filter(|row| row.status == TaskStatus::Blocked)
+    {
+        let wire =
+            last_move_into(deps, &row.task_id, TaskStatus::Blocked)?.and_then(|event| match event
+                .body
+            {
+                EventBody::TaskTransitioned(body) => body.blocker,
+                _ => None,
+            });
+        blocked.push((row.task_id.clone(), wire));
+    }
+    let facts = standup_message(
+        &open.sprint_id,
+        &moves,
+        &blocked,
+        &open_escalations(&tools.log, &tools.projections)?,
+        tools.clock.now(),
+    );
+    let end = run_session(
+        deps,
+        team,
+        SessionAsk {
+            agent: runner,
+            contract: None,
+            purpose: SessionPurpose::Ceremony,
+            cwd: tools.files.root().to_path_buf(),
+            executor: None,
+            read_only: true,
+            only_tool: None,
+            tools: Some(STANDUP_TOOLS),
+            in_reply_to: None,
+            thread: Some(Thread::Standup),
+            initial_prompt: ceremony_message(&facts, &channel_summary(&tools.log, &tools.files)?),
+        },
+    )
+    .await?;
+    Ok(Some(TickReport::Sprint {
+        sprint_id: open.sprint_id,
+        what: ran(runner, "standup ceremony", &end),
+    }))
+}
+
+/// The Farik tools the standup is offered: the reading tools and the channel.
+const STANDUP_TOOLS: &[&str] = &[
+    "farik_read_task",
+    "farik_read_board",
+    "farik_read_rules",
+    "farik_read_criteria",
+    "farik_post_message",
 ];
 
 /// Whether the day's dollars stop a session about no task from starting; `day_spent` is set when
@@ -1010,6 +1103,7 @@ mod tests {
     use farik_core::pricing::Usage;
     use farik_core::sprint::SprintStatus;
     use farik_core::team::Effort;
+    use farik_protocol::clock::MovableClock;
     use farik_protocol::event::SprintEndedBodyEndedBy;
     use farik_protocol::event::{
         BudgetExhaustedBodyScope, CriterionRecordedBodyRunBy, EscalationRaisedBodyReason,
@@ -1034,7 +1128,7 @@ mod tests {
         accept_frk_1, hits_the_turn_limit, implement_finishes_frk_1, implement_stops_early,
         plan_assigns_frk_1, planning_ceremony_frk_1, provider_limit_429, provider_limit_rejected,
         reads_a_file, replays_farik_read_board, reply_to_a_mention, review_answers_nothing,
-        review_writes_note,
+        review_writes_note, standup,
     };
     use crate::recorded::{RecordedAdapter, Transcript};
     use crate::session::SessionPurpose;
@@ -4212,6 +4306,295 @@ mod tests {
         let prompt = &adapter.started()[0].initial_prompt;
         assert!(prompt.contains("the sprint's budget spent"), "{prompt}");
         assert!(!prompt.contains("the day's budget spent"), "{prompt}");
+    }
+
+    /// `day` days after S1's first day, 22 September, at `hour`:`minute` UTC.
+    fn on(day: i64, hour: u32, minute: u32) -> chrono::DateTime<chrono::Utc> {
+        at().date_naive()
+            .and_hms_opt(hour, minute, 0)
+            .expect("a real time")
+            .and_utc()
+            + chrono::Duration::days(day)
+    }
+
+    /// The Scrum Master to run the standup, and FRK-1 assigned to `dev-a` (asleep for ten days, so
+    /// that no implement session starts) and reviewed by `dev-b`, before S1 opens holding it at
+    /// noon on its first day.
+    fn a_sprint_of_frk_1(name: &str) -> Harness {
+        let harness = Harness::new(name, with_a_scrum_master);
+        harness.assigned("FRK-1", "dev-a", "dev-b");
+        harness.asleep("dev-a", at() + chrono::Duration::days(10));
+        harness.open_sprint("S1", &["FRK-1"]);
+        harness
+    }
+
+    /// FRK-1 moved from `assigned` to `in_progress` by `dev-a` at 13:00 on S1's first day.
+    fn frk_1_started(harness: &Harness) {
+        harness.project.moved_at(
+            on(0, 13, 0),
+            "FRK-1",
+            "assigned",
+            "in_progress",
+            &json!({ "actor": "assignee", "requested_by": "dev-a", "assignee": "dev-a", "reviewer": "dev-b" }),
+        );
+    }
+
+    /// FRK-1 moved from `in_progress` to `escalated` by the governor at `when`.
+    fn frk_1_escalated(harness: &Harness, when: chrono::DateTime<chrono::Utc>) {
+        harness
+            .project
+            .moved_at(when, "FRK-1", "in_progress", "escalated", &json!({}));
+    }
+
+    /// The first message of each standup the adapter started, oldest first.
+    fn standups(harness: &Harness, adapter: &RecordedAdapter) -> Vec<String> {
+        let threads: Vec<Option<Thread>> = harness
+            .events(&[EventKind::SessionStarted])
+            .into_iter()
+            .map(|event| match event.body {
+                EventBody::SessionStarted(body) => body.thread,
+                _ => None,
+            })
+            .collect();
+        adapter
+            .started()
+            .into_iter()
+            .zip(threads)
+            .filter(|(_, thread)| *thread == Some(Thread::Standup))
+            .map(|(spec, _)| spec.initial_prompt)
+            .collect()
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn holds_a_standup_when_the_sprint_moved() {
+        let harness = Harness::new("orch-standup", with_a_scrum_master);
+        harness.assigned("FRK-1", "dev-a", "dev-b");
+        harness.asleep("dev-a", at() + chrono::Duration::days(10));
+        escalated(&harness, "FRK-2");
+        harness.project.filed("FRK-3", "in_progress", "task", None);
+        harness.open_sprint("S1", &["FRK-1", "FRK-2", "FRK-3"]);
+        frk_1_started(&harness);
+        harness.project.moved_at(
+            on(0, 23, 0),
+            "FRK-3",
+            "in_progress",
+            "blocked",
+            &json!({ "blocker": { "description": "the API is down", "needed": "an API key" } }),
+        );
+        // FRK-4, in no sprint, moved too.
+        harness.project.filed("FRK-4", "rejected", "task", None);
+        harness
+            .project
+            .moved_at(on(0, 14, 0), "FRK-4", "rejected", "escalated", &json!({}));
+        let clock = Arc::new(MovableClock::new(on(1, 12, 0)));
+        let adapter = harness.recorded(vec![standup(), standup()]);
+        let orchestrator = harness.orchestrator_on(adapter.clone(), Arc::clone(&clock));
+
+        // Only a tick of every rule, scoped to no task, holds it.
+        for scope in [
+            TickScope {
+                rules: TickRules::Planning,
+                ..TickScope::default()
+            },
+            TickScope {
+                task_id: Some("FRK-1".parse().expect("a task id")),
+                ..TickScope::default()
+            },
+        ] {
+            let report = orchestrator
+                .tick_within(&scope)
+                .await
+                .expect("the tick runs");
+            assert!(!matches!(&report, TickReport::Sprint { .. }), "{report:?}");
+        }
+        let report = orchestrator.tick().await.expect("the tick runs");
+
+        assert!(
+            matches!(&report, TickReport::Sprint { sprint_id, what }
+                if sprint_id == "S1" && what.contains("standup")),
+            "{report:?}"
+        );
+        let first = &standups(&harness, &adapter)[0];
+        for fact in [
+            "FRK-1: assigned -> in_progress, by dev-a",
+            "FRK-3: in_progress -> blocked, by governor",
+            "FRK-3 is blocked: the API is down; needed: an API key",
+            "FRK-2",
+            "three rejections",
+        ] {
+            assert!(first.contains(fact), "{fact}: {first}");
+        }
+        assert!(!first.contains("FRK-4"), "{first}");
+        let posted: Vec<_> = harness
+            .events(&[EventKind::MessagePosted])
+            .into_iter()
+            .filter_map(|event| match event.body {
+                EventBody::MessagePosted(body) => Some((body.kind, body.thread)),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(posted, vec![(MessageKind::Ceremony, Some(Thread::Standup))]);
+
+        // The same day holds no second standup, and a move made today waits for tomorrow's.
+        let again = orchestrator.tick().await.expect("the tick runs");
+        assert!(!matches!(again, TickReport::Sprint { .. }), "{again:?}");
+        frk_1_escalated(&harness, on(1, 13, 0));
+        clock.set(on(1, 14, 0));
+        let today = orchestrator.tick().await.expect("the tick runs");
+        assert!(!matches!(today, TickReport::Sprint { .. }), "{today:?}");
+        assert_eq!(standups(&harness, &adapter).len(), 1);
+        clock.set(on(2, 9, 0));
+        let tomorrow = orchestrator.tick().await.expect("the tick runs");
+        assert!(
+            matches!(&tomorrow, TickReport::Sprint { .. }),
+            "{tomorrow:?}"
+        );
+        let second = &standups(&harness, &adapter)[1];
+        assert!(
+            second.contains("FRK-1: in_progress -> escalated, by governor"),
+            "{second}"
+        );
+        assert!(!second.contains("assigned -> in_progress"), "{second}");
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn holds_the_standup_before_work() {
+        let harness = a_sprint_of_frk_1("orch-standup-first");
+        frk_1_started(&harness);
+        harness.in_progress("FRK-2", "dev-b", "dev-a");
+        let adapter = harness.recorded(vec![standup(), implement_stops_early()]);
+        let orchestrator = harness.orchestrator_at(adapter.clone(), on(1, 12, 0));
+
+        orchestrator.tick().await.expect("the tick runs");
+        orchestrator.tick().await.expect("the tick runs");
+
+        let started: Vec<_> = adapter
+            .started()
+            .iter()
+            .map(|spec| {
+                (
+                    spec.purpose,
+                    spec.task_id.as_ref().map(|task| task.as_str().to_string()),
+                )
+            })
+            .collect();
+        assert_eq!(
+            started,
+            vec![
+                (SessionPurpose::Ceremony, None),
+                (SessionPurpose::Implement, Some("FRK-2".to_string())),
+            ]
+        );
+        assert_eq!(standups(&harness, &adapter).len(), 1);
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn holds_no_standup_on_a_still_day() {
+        let harness = a_sprint_of_frk_1("orch-standup-still");
+        frk_1_started(&harness);
+        let clock = Arc::new(MovableClock::new(on(1, 9, 0)));
+        let adapter = harness.recorded(vec![standup(), standup()]);
+        let orchestrator = harness.orchestrator_on(adapter.clone(), Arc::clone(&clock));
+        orchestrator.tick().await.expect("the tick runs");
+
+        clock.set(on(2, 9, 0));
+        let report = orchestrator.tick().await.expect("the tick runs");
+
+        assert!(!matches!(report, TickReport::Sprint { .. }), "{report:?}");
+        assert_eq!(standups(&harness, &adapter).len(), 1);
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn holds_the_next_days_standup() {
+        let harness = a_sprint_of_frk_1("orch-standup-next-day");
+        frk_1_started(&harness);
+        let clock = Arc::new(MovableClock::new(on(1, 9, 0)));
+        let adapter = harness.recorded(vec![standup(), standup()]);
+        let orchestrator = harness.orchestrator_on(adapter.clone(), Arc::clone(&clock));
+        orchestrator.tick().await.expect("the tick runs");
+        frk_1_escalated(&harness, on(1, 10, 0));
+
+        clock.set(on(2, 9, 0));
+        let report = orchestrator.tick().await.expect("the tick runs");
+
+        assert!(matches!(&report, TickReport::Sprint { .. }), "{report:?}");
+        let held = standups(&harness, &adapter);
+        assert!(
+            held[1].contains("FRK-1: in_progress -> escalated, by governor"),
+            "{}",
+            held[1]
+        );
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn reports_a_move_made_before_the_days_standup() {
+        let harness = a_sprint_of_frk_1("orch-standup-early-move");
+        frk_1_started(&harness);
+        frk_1_escalated(&harness, on(1, 0, 2));
+        let clock = Arc::new(MovableClock::new(on(1, 0, 5)));
+        let adapter = harness.recorded(vec![standup(), standup()]);
+        let orchestrator = harness.orchestrator_on(adapter.clone(), Arc::clone(&clock));
+        orchestrator.tick().await.expect("the tick runs");
+
+        clock.set(on(2, 0, 10));
+        let report = orchestrator.tick().await.expect("the tick runs");
+
+        assert!(matches!(&report, TickReport::Sprint { .. }), "{report:?}");
+        let held = standups(&harness, &adapter);
+        assert!(!held[0].contains("in_progress -> escalated"), "{}", held[0]);
+        assert!(
+            held[1].contains("FRK-1: in_progress -> escalated, by governor"),
+            "{}",
+            held[1]
+        );
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn retries_a_standup_that_hit_its_limit() {
+        let harness = a_sprint_of_frk_1("orch-standup-limit");
+        frk_1_started(&harness);
+        let adapter = harness.recorded(vec![hits_the_turn_limit(), standup()]);
+        let orchestrator = harness.orchestrator_at(adapter.clone(), on(1, 12, 0));
+
+        orchestrator.tick().await.expect("the tick runs");
+        let report = orchestrator.tick().await.expect("the tick runs");
+
+        assert!(
+            matches!(&report, TickReport::Sprint { what, .. } if what.contains("standup")),
+            "{report:?}"
+        );
+        assert_eq!(
+            end_reasons(&harness),
+            vec![
+                SessionEndedBodyReason::Limit,
+                SessionEndedBodyReason::Completed
+            ]
+        );
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn holds_no_standup_without_a_sprint() {
+        let harness = Harness::new("orch-standup-no-sprint", with_a_scrum_master);
+        harness.assigned("FRK-1", "dev-a", "dev-b");
+        harness.asleep("dev-a", at() + chrono::Duration::days(10));
+        frk_1_started(&harness);
+        let adapter = harness.recorded(vec![standup()]);
+
+        let report = harness
+            .orchestrator_at(adapter.clone(), on(1, 12, 0))
+            .tick()
+            .await
+            .expect("the tick runs");
+
+        assert!(!matches!(report, TickReport::Sprint { .. }), "{report:?}");
+        assert!(adapter.started().is_empty(), "{:?}", adapter.started());
     }
 
     #[tokio::test]

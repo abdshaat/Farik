@@ -136,7 +136,7 @@ Files: `orchestrator/rules.rs`, `orchestrator/messages.rs`, `ceremonies.rs`, the
 - `retries_a_standup_that_hit_its_limit` — today's standup ended `Limit`: the next tick holds another.
 - `holds_no_standup_without_a_sprint` (guard) — no sprint open, moves recorded: none.
 
-- [ ] `feat(runtime): hold a standup each day the sprint moved`
+- [x] `feat(runtime): hold a standup each day the sprint moved`
 
 ### Task 4: review and retro
 
