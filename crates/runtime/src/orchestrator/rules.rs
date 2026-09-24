@@ -4893,6 +4893,119 @@ mod tests {
 
     #[tokio::test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn waits_for_a_paused_agent_to_answer() {
+        for status in ["paused", "retired"] {
+            let harness = Harness::new(&format!("orch-mention-{status}"), |wire| {
+                wire["agents"][1]["status"] = json!(status);
+            });
+            said(&harness, "human", MessageKind::Human, "@dev-a status?");
+            let adapter = harness.recorded(vec![reply_to_a_mention()]);
+            let orchestrator = harness.orchestrator(adapter.clone());
+
+            let away = orchestrator.tick().await.expect("the tick runs");
+            assert!(
+                matches!(&away, TickReport::Idle { .. }),
+                "{status}: {away:?}"
+            );
+            assert!(
+                adapter.started().is_empty(),
+                "{status}: {:?}",
+                adapter.started()
+            );
+
+            harness
+                .project
+                .deps
+                .files
+                .write_team(&crate::tools::fixtures::a_team_of_three(|wire| {
+                    wire["policy"]["wip_limit_per_agent"] = json!(1);
+                }))
+                .expect("the team is written");
+            let back = orchestrator.tick().await.expect("the tick runs");
+            assert!(
+                matches!(&back, TickReport::Conversation { agent_id, .. } if agent_id == "dev-a"),
+                "{status}: {back:?}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn answers_no_mention_outside_a_full_tick() {
+        let harness = Harness::new("orch-mention-scope", |_| {});
+        said(&harness, "human", MessageKind::Human, "@dev-a status?");
+        let adapter = harness.recorded(vec![reply_to_a_mention()]);
+        let orchestrator = harness.orchestrator(adapter.clone());
+
+        for scope in [
+            TickScope {
+                rules: TickRules::Planning,
+                ..TickScope::default()
+            },
+            TickScope {
+                rules: TickRules::Refining,
+                ..TickScope::default()
+            },
+            TickScope {
+                task_id: Some("FRK-1".parse().expect("a task id")),
+                ..TickScope::default()
+            },
+        ] {
+            let report = orchestrator
+                .tick_within(&scope)
+                .await
+                .expect("the tick runs");
+            assert!(
+                !matches!(&report, TickReport::Conversation { .. }),
+                "{scope:?}: {report:?}"
+            );
+        }
+        assert!(adapter.started().is_empty(), "{:?}", adapter.started());
+
+        let full = orchestrator.tick().await.expect("the tick runs");
+        assert!(matches!(&full, TickReport::Conversation { .. }), "{full:?}");
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn answers_a_mention_after_the_budget_rule_and_before_rule_3() {
+        // A task out of sessions is escalated before the mention is answered.
+        let harness = Harness::new("orch-mention-after-budget", |_| {});
+        in_progress_with_sessions(&harness, 1, 1);
+        said(&harness, "human", MessageKind::Human, "@dev-b status?");
+        let adapter = harness.recorded(vec![reply_to_a_mention()]);
+
+        let report = harness
+            .orchestrator(adapter.clone())
+            .tick()
+            .await
+            .expect("the tick runs");
+
+        assert_eq!(acted_on(&report), Some("FRK-1"), "{report:?}");
+        assert_eq!(harness.row("FRK-1").status, TaskStatus::Escalated);
+        assert!(adapter.started().is_empty(), "{:?}", adapter.started());
+
+        // The mention is answered before a rejected task goes back to its assignee.
+        let harness = Harness::new("orch-mention-before-rejected", |_| {});
+        harness.rejected("FRK-1", 0, "done.txt is missing");
+        said(&harness, "human", MessageKind::Human, "@dev-b status?");
+        let adapter = harness.recorded(vec![reply_to_a_mention()]);
+
+        let report = harness
+            .orchestrator(adapter.clone())
+            .tick()
+            .await
+            .expect("the tick runs");
+
+        assert!(
+            matches!(&report, TickReport::Conversation { agent_id, .. } if agent_id == "dev-b"),
+            "{report:?}"
+        );
+        assert_eq!(harness.row("FRK-1").status, TaskStatus::Rejected);
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn writes_the_summary_it_shows() {
         let harness = Harness::new("orch-mention-summary", |_| {});
         for number in 0..10 {

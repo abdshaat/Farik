@@ -254,6 +254,58 @@ mod tests {
         );
     }
 
+    /// dev-a's ambient message `text`, posted at `when` from another session.
+    fn ambient_at(project: &TestProject, when: chrono::DateTime<chrono::Utc>, text: &str) {
+        post(
+            &project.deps.log,
+            &FixedClock::new(when),
+            &project.deps.ids,
+            NewMessage {
+                author: "dev-a".to_string(),
+                agent_id: Some("dev-a".to_string()),
+                kind: MessageKind::Ambient,
+                text: text.to_string(),
+                mentions: Vec::new(),
+                task_id: None,
+                thread: None,
+                in_reply_to: None,
+                session_id: Some("session-0".to_string()),
+            },
+        )
+        .expect("posted");
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn counts_the_allowance_per_sprint() {
+        // Yesterday's message, inside the open sprint, spends today's allowance too.
+        let project = TestProject::new("channel-sprint", &a_team_of_three(|_| {}));
+        project.filed("FRK-1", "in_progress", "task", None);
+        project.open_sprint("S1", None, &[]);
+        ambient_at(
+            &project,
+            at() - Duration::days(1),
+            "Yesterday's, in the sprint.",
+        );
+
+        say(&project, "FRK-1 is in review.").expect("the reaction");
+        let refused = say(&project, "Today's.").expect_err("the sprint's allowance is spent");
+
+        assert!(
+            matches!(&refused, ToolError::Refused { reason } if reason.starts_with("channel_limit: ")),
+            "{refused:?}"
+        );
+
+        // A message from before the sprint started, even today, spends nothing of it.
+        let project = TestProject::new("channel-sprint-before", &a_team_of_three(|_| {}));
+        project.filed("FRK-1", "in_progress", "task", None);
+        ambient_at(&project, at(), "Before the sprint.");
+        project.open_sprint("S1", None, &[]);
+
+        say(&project, "FRK-1 is in review.").expect("the reaction");
+        say(&project, "Today's.").expect("the sprint's allowance is whole");
+    }
+
     #[test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
     fn posts_one_reply_from_a_conversation() {
