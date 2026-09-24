@@ -135,7 +135,7 @@ Files: `docs/SPEC.md`, `docs/plans/project-plan.md`
 
 Revision 0.11 in the header, naming each change: 5.3 gains `DocumentPathsOnly`; 5.11 names `change` among the content; 5.12's table gains `document_paths`, and its "Defaults" sentence names its default and what `[]` means; 5.14's branch is `feature/`, `fix/`, or `docs/FRK-<n>` by the contract, with no migration of `farik/` branches and git's refusal where a branch `feature`, `fix`, or `docs` exists; 6.1 to 6.5 say that only the Software Developer writes application code and every other role's tasks are documents under `document_paths`. The step's interface line in the project plan is written as landed.
 
-- [ ] `docs(docs): record code and document branches in the spec`
+- [x] `docs(docs): record code and document branches in the spec`
 
 ## Verification
 
