@@ -9,15 +9,14 @@ use farik_protocol::event::{
     CostRecordedBody, EscalationRaisedBodyReason, EventBody, FarikEvent, RequestTriagedBodySize,
     TaskStatusWire, TransitionActorWire,
 };
-use rusqlite::{Connection, Transaction, TransactionBehavior};
+use rusqlite::{Connection, OptionalExtension, Transaction, TransactionBehavior};
 
 use crate::error::StoreError;
 use crate::event_log::{EventLog, EventQuery, TASK_ID_PREFIX};
 
 /// What a board shows about one contract, as the log left it.
 ///
-/// Every field comes from an event a command or the governor emits. The sprint arrives with phase
-/// 4, which has the sprints; a column nothing can write is a column no test can hold to anything.
+/// Every field comes from an event a command or the governor emits.
 // The flags are what a board shows, each a yes or no a row is filtered by; a state machine of them
 // would be a second copy of the lifecycle the status already holds.
 #[allow(clippy::struct_excessive_bools)]
@@ -70,6 +69,9 @@ pub struct TaskProjection {
     /// `escalation.raised` but an `approval` or a `risk_gate`, and every move the human asked for
     /// that neither leaves nor enters `escalated`.
     pub interventions: u32,
+    /// The sprint the task is in: set by `sprint.planned`, cleared by the `sprint.ended` that
+    /// leaves it (5.5).
+    pub sprint: Option<String>,
 }
 
 /// A key that costs are summed by (`docs/SPEC.md` 5.5).
@@ -83,6 +85,20 @@ pub enum CostScope {
     Session,
     /// By the UTC date the cost was recorded on, as `YYYY-MM-DD`.
     Day,
+    /// By the sprint the cost's task was in when the cost was recorded. A cost with no task, or of
+    /// a task in no sprint, is in no sprint's row.
+    Sprint,
+}
+
+/// A sprint, as its `sprint.started` and `sprint.ended` left it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SprintProjection {
+    /// The sprint's id, `S<n>`.
+    pub sprint_id: String,
+    /// What it may spend, or nothing when it has no budget of its own (ADR 0015).
+    pub budget_usd: Option<f64>,
+    /// Whether it is still open: started and not yet ended.
+    pub open: bool,
 }
 
 /// What one key of a scope has spent.
@@ -151,6 +167,7 @@ impl Projections {
                 connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
             transaction.execute("DELETE FROM task_projections", ())?;
             transaction.execute("DELETE FROM cost_records", ())?;
+            transaction.execute("DELETE FROM sprints", ())?;
             write_cursor(&transaction, 0)?;
             transaction.commit()?;
         }
@@ -244,6 +261,7 @@ impl Projections {
             CostScope::Agent => ("agent_id", "agent_id"),
             CostScope::Session => ("session_id", "session_id"),
             CostScope::Day => ("day", "day"),
+            CostScope::Sprint => ("sprint", "sprint"),
         };
         let connection = self.connection();
         let mut statement = connection.prepare(&format!(
@@ -284,6 +302,31 @@ impl Projections {
             });
         }
         Ok(costs)
+    }
+
+    /// The sprint that is open, or nothing when none is.
+    ///
+    /// # Errors
+    ///
+    /// `Sqlite` when the read fails.
+    pub fn open_sprint(&self) -> Result<Option<SprintProjection>, StoreError> {
+        let connection = self.connection();
+        // One is open at a time; were the log to hold two, the one started last is the open one.
+        let sprint = connection
+            .query_row(
+                "SELECT sprint_id, budget_usd FROM sprints WHERE open = 1
+                 ORDER BY rowid DESC LIMIT 1",
+                (),
+                |row| {
+                    Ok(SprintProjection {
+                        sprint_id: row.get(0)?,
+                        budget_usd: row.get(1)?,
+                        open: true,
+                    })
+                },
+            )
+            .optional()?;
+        Ok(sprint)
     }
 
     /// How far into the log the projections have read: the sequence number of the last event
@@ -332,7 +375,7 @@ const SELECT_PROJECTION: &str = "SELECT task_id, kind, parent, title, status, ri
                                   WHERE cost_records.task_id = task_projections.task_id), \
                                  assignee_id, reviewer_id, iteration, awaiting_integration, \
                                  open_questions > 0, awaiting_approval, verifications, \
-                                 rejections, interventions \
+                                 rejections, interventions, sprint \
                                  FROM task_projections";
 
 /// The board is ordered by the number in the task id, not by the id itself: `FRK-10` sorts before
@@ -373,6 +416,7 @@ type ProjectedRow = (
     i64,
     i64,
     i64,
+    Option<String>,
 );
 
 fn projected_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ProjectedRow> {
@@ -396,6 +440,7 @@ fn projected_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ProjectedRow> {
         row.get(16)?,
         row.get(17)?,
         row.get(18)?,
+        row.get(19)?,
     ))
 }
 
@@ -426,6 +471,7 @@ fn projection_of_row(row: ProjectedRow) -> Result<TaskProjection, StoreError> {
         verifications,
         rejections,
         interventions,
+        sprint,
     ) = row;
     let refuse = |what: &str, value: &str| StoreError::InvalidEvent {
         detail: format!("the projection of {task_id} holds {value:?} as its {what}"),
@@ -458,6 +504,7 @@ fn projection_of_row(row: ProjectedRow) -> Result<TaskProjection, StoreError> {
             .map_err(|_| refuse("rejections", &rejections.to_string()))?,
         interventions: u32::try_from(interventions)
             .map_err(|_| refuse("interventions", &interventions.to_string()))?,
+        sprint,
     })
 }
 
@@ -469,9 +516,14 @@ fn apply_to(transaction: &Transaction<'_>, event: &FarikEvent) -> Result<(), Sto
             event.envelope.seq
         ),
     })?;
-    if let EventBody::CostRecorded(body) = &event.body {
+    match &event.body {
         // Before the guard below: a cost with no task still costs its agent, session, and day.
-        write_cost(transaction, event, body, seq)?;
+        EventBody::CostRecorded(body) => write_cost(transaction, event, body, seq)?,
+        // About no one contract, so they name their tasks in the body rather than the envelope.
+        EventBody::SprintStarted(_) | EventBody::SprintPlanned(_) | EventBody::SprintEnded(_) => {
+            return apply_sprint(transaction, &event.body, seq);
+        }
+        _ => {}
     }
     let Some(task_id) = &event.envelope.ids.task_id else {
         // Only the kinds that are about one contract touch the board, and the protocol crate
@@ -566,7 +618,10 @@ fn apply_to(transaction: &Transaction<'_>, event: &FarikEvent) -> Result<(), Sto
         | EventBody::SessionEnded(_)
         | EventBody::HumanAccepted(_)
         | EventBody::EscalationResolved(_)
-        | EventBody::AgentUpdated(_) => Ok(()),
+        | EventBody::AgentUpdated(_)
+        | EventBody::SprintStarted(_)
+        | EventBody::SprintPlanned(_)
+        | EventBody::SprintEnded(_) => Ok(()),
     }
 }
 
@@ -613,7 +668,50 @@ fn apply_waiting(
     }
 }
 
-/// Keeps one `cost.recorded` as a row, dated by the UTC day it was recorded on.
+/// The sprints table and each task's sprint (5.5): a start opens a sprint, a plan puts each of its
+/// tasks in it, and an end closes it and takes out each task it left.
+fn apply_sprint(
+    transaction: &Transaction<'_>,
+    body: &EventBody,
+    seq: i64,
+) -> Result<(), StoreError> {
+    let set_sprint = |task_id: &str, sprint: Option<&str>| {
+        update(
+            transaction,
+            "UPDATE task_projections SET sprint = ?2, updated_seq = ?3 WHERE task_id = ?1",
+            (task_id, sprint, seq),
+        )
+    };
+    match body {
+        EventBody::SprintStarted(body) => update(
+            transaction,
+            "INSERT INTO sprints (sprint_id, budget_usd, open) VALUES (?1, ?2, 1)
+             ON CONFLICT (sprint_id) DO UPDATE SET budget_usd = ?2, open = 1",
+            (body.sprint_id.as_str(), body.budget_usd),
+        ),
+        EventBody::SprintPlanned(body) => {
+            for task_id in &body.task_ids {
+                set_sprint(task_id.as_str(), Some(body.sprint_id.as_str()))?;
+            }
+            Ok(())
+        }
+        EventBody::SprintEnded(body) => {
+            update(
+                transaction,
+                "UPDATE sprints SET open = 0 WHERE sprint_id = ?1",
+                (body.sprint_id.as_str(),),
+            )?;
+            for task_id in &body.left {
+                set_sprint(task_id.as_str(), None)?;
+            }
+            Ok(())
+        }
+        _ => Ok(()),
+    }
+}
+
+/// Keeps one `cost.recorded` as a row, dated by the UTC day it was recorded on, with the sprint its
+/// task is in now, so that the cost stays with that sprint after the task leaves it.
 fn write_cost(
     transaction: &Transaction<'_>,
     event: &FarikEvent,
@@ -623,8 +721,9 @@ fn write_cost(
     let ids = &event.envelope.ids;
     transaction.execute(
         "INSERT INTO cost_records (seq, task_id, agent_id, session_id, day, purpose, model_id,
-                                   input_tokens, output_tokens, cost_usd)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+                                   input_tokens, output_tokens, cost_usd, sprint)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10,
+                 (SELECT sprint FROM task_projections WHERE task_id = ?2))",
         (
             seq,
             ids.task_id.as_ref().map(|id| id.to_string()),
@@ -770,8 +869,8 @@ mod tests {
     use serde_json::json;
 
     use super::{
-        Arc, CostProjection, CostScope, EventLog, FarikEvent, Projections, TaskProjection,
-        open_projections,
+        Arc, CostProjection, CostScope, EventLog, FarikEvent, Projections, SprintProjection,
+        TaskProjection, open_projections,
     };
     use crate::error::StoreError;
     use crate::event_log::{IN_MEMORY, open_event_log};
@@ -868,6 +967,7 @@ mod tests {
                 verifications: 0,
                 rejections: 0,
                 interventions: 0,
+                sprint: None,
             }]
         );
         assert_eq!(projections.cursor().expect("the cursor reads"), 1);
@@ -913,6 +1013,7 @@ mod tests {
                 verifications: 0,
                 rejections: 0,
                 interventions: 0,
+                sprint: None,
             }
         );
     }
@@ -1111,7 +1212,7 @@ mod tests {
             log.applied_migrations().expect("the ledger reads"),
             migrations::known_versions()
         );
-        assert_eq!(migrations::known_versions(), vec![1, 2, 3, 4, 5, 6, 7]);
+        assert_eq!(migrations::known_versions(), vec![1, 2, 3, 4, 5, 6, 7, 8]);
     }
 
     #[test]
@@ -1989,6 +2090,211 @@ mod tests {
             None,
             "a row the log never created is not kept"
         );
+        let _ = std::fs::remove_dir_all(&directory);
+    }
+
+    /// The fixture `sprint.` event of `kind` with `body` in place of the fixture's.
+    fn sprint_event(kind: EventKind, body: serde_json::Value) -> NewEvent {
+        let mut wire = an_event_wire(kind);
+        wire["body"] = body;
+        let event = event_from_value(&wire).expect("the fixture is schema-valid");
+        NewEvent {
+            recorded_at: event.envelope.recorded_at,
+            ids: event.envelope.ids,
+            body: event.body,
+        }
+    }
+
+    fn started(sprint_id: &str, budget_usd: Option<f64>) -> NewEvent {
+        sprint_event(
+            EventKind::SprintStarted,
+            json!({ "sprint_id": sprint_id, "budget_usd": budget_usd, "started_by": "human" }),
+        )
+    }
+
+    fn planned(sprint_id: &str, task_ids: &[&str]) -> NewEvent {
+        sprint_event(
+            EventKind::SprintPlanned,
+            json!({ "sprint_id": sprint_id, "task_ids": task_ids, "planned_by": "sam-ortiz" }),
+        )
+    }
+
+    fn ended(sprint_id: &str, left: &[&str]) -> NewEvent {
+        sprint_event(
+            EventKind::SprintEnded,
+            json!({ "sprint_id": sprint_id, "ended_by": "human", "left": left }),
+        )
+    }
+
+    fn sprint_of(projections: &Projections, task_id: &str) -> Option<String> {
+        row_of(projections, task_id).sprint
+    }
+
+    #[test]
+    fn projects_the_open_sprint() {
+        let (log, projections) = a_board();
+        record(&log, &projections, &started("S1", Some(20.0)));
+        assert_eq!(
+            projections.open_sprint().expect("the sprint reads"),
+            Some(SprintProjection {
+                sprint_id: "S1".to_string(),
+                budget_usd: Some(20.0),
+                open: true,
+            })
+        );
+        record(&log, &projections, &ended("S1", &[]));
+        assert_eq!(projections.open_sprint().expect("the sprint reads"), None);
+    }
+
+    #[test]
+    fn puts_a_task_in_a_sprint_and_takes_it_out() {
+        let (log, projections) = a_board();
+        for task_id in ["FRK-1", "FRK-2"] {
+            record(&log, &projections, &about(EventKind::TaskCreated, task_id));
+        }
+        record(&log, &projections, &started("S1", None));
+        record(&log, &projections, &planned("S1", &["FRK-1", "FRK-2"]));
+        assert_eq!(sprint_of(&projections, "FRK-2").as_deref(), Some("S1"));
+        record(&log, &projections, &ended("S1", &["FRK-2"]));
+        assert_eq!(sprint_of(&projections, "FRK-1").as_deref(), Some("S1"));
+        assert_eq!(sprint_of(&projections, "FRK-2"), None);
+    }
+
+    /// FRK-1 spends a dollar in S1, leaves it when S1 ends, then spends two more; S2 opens.
+    fn a_sprint_that_ended_with_a_task_left(log: &EventLog, projections: &Projections) {
+        record(log, projections, &about(EventKind::TaskCreated, "FRK-1"));
+        record(log, projections, &started("S1", Some(20.0)));
+        record(log, projections, &planned("S1", &["FRK-1"]));
+        let first = cost(Some("FRK-1"), "a", "s1", "2026-09-22", (1.0, 100, 10));
+        record(log, projections, &first);
+        record(log, projections, &ended("S1", &["FRK-1"]));
+        let second = cost(Some("FRK-1"), "a", "s2", "2026-09-22", (2.0, 200, 20));
+        record(log, projections, &second);
+        record(log, projections, &started("S2", None));
+    }
+
+    #[test]
+    fn keeps_a_cost_with_the_sprint_it_was_spent_in() {
+        let (log, projections) = a_board();
+        a_sprint_that_ended_with_a_task_left(&log, &projections);
+        assert_eq!(
+            projections
+                .costs(CostScope::Sprint)
+                .expect("the costs read"),
+            vec![row(CostScope::Sprint, "S1", (1.0, 100, 10, 1))]
+        );
+    }
+
+    /// What the sprint projections say: the open sprint, each row's sprint, and each sprint's
+    /// costs.
+    type SprintView = (
+        Option<SprintProjection>,
+        Vec<(String, Option<String>)>,
+        Vec<CostProjection>,
+    );
+
+    fn sprint_view(projections: &Projections) -> SprintView {
+        (
+            projections.open_sprint().expect("the sprint reads"),
+            projections
+                .board()
+                .expect("the board reads")
+                .into_iter()
+                .map(|task| (task.task_id.to_string(), task.sprint))
+                .collect(),
+            projections
+                .costs(CostScope::Sprint)
+                .expect("the costs read"),
+        )
+    }
+
+    #[test]
+    fn rebuilds_the_sprints() {
+        let (log, projections) = a_board();
+        a_sprint_that_ended_with_a_task_left(&log, &projections);
+        record(&log, &projections, &planned("S2", &["FRK-1"]));
+        let before = sprint_view(&projections);
+        assert_eq!(
+            before.0.as_ref().map(|sprint| sprint.sprint_id.as_str()),
+            Some("S2")
+        );
+        assert_eq!(
+            before.1,
+            vec![("FRK-1".to_string(), Some("S2".to_string()))]
+        );
+        // A sprint the log never started, which only emptying the table takes away.
+        log.connection()
+            .execute(
+                "INSERT INTO sprints (sprint_id, budget_usd, open) VALUES ('S9', NULL, 1)",
+                (),
+            )
+            .expect("a stray sprint is written");
+        projections.rebuild().expect("the board is built again");
+        assert_eq!(sprint_view(&projections), before);
+    }
+
+    #[test]
+    fn replays_the_sprints_after_the_migration() {
+        use farik_protocol::event::fixtures::a_body_wire;
+
+        let directory = std::env::temp_dir().join(format!(
+            "farik-older-sprints-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        let _ = std::fs::remove_dir_all(&directory);
+        std::fs::create_dir_all(&directory).expect("a directory under the temporary directory");
+        let path = directory.join("farik.db");
+        {
+            let mut connection = rusqlite::Connection::open(&path).expect("the database opens");
+            migrations::apply_through(&mut connection, 7, at(9)).expect("version 7 applies");
+            let events = [
+                (Some("FRK-1"), EventKind::TaskCreated),
+                (None, EventKind::SprintStarted),
+                (None, EventKind::SprintPlanned),
+                (Some("FRK-1"), EventKind::CostRecorded),
+            ];
+            for (seq, (task_id, kind)) in (1_i64..).zip(events) {
+                connection
+                    .execute(
+                        "INSERT INTO events
+                             (seq, recorded_at, team_id, project_id, task_id, agent_id,
+                              session_id, kind, body)
+                         VALUES (?1, '2026-09-17T10:00:00Z', 'farik', 'farik', ?2, 'dev-a',
+                                 's1', ?3, ?4)",
+                        (
+                            seq,
+                            task_id,
+                            kind.to_string(),
+                            a_body_wire(kind).to_string(),
+                        ),
+                    )
+                    .expect("an older event is written");
+            }
+            // What a Farik that knew no sprints projected from those events.
+            connection
+                .execute_batch(
+                    "INSERT INTO task_projections
+                         (task_id, kind, parent, title, status, risk, triaged, locked, updated_seq)
+                     VALUES ('FRK-1', 'task', NULL, 'Add a login page', 'draft', 'low', 0, 0, 1);
+                     INSERT INTO cost_records
+                         (seq, task_id, agent_id, session_id, day, purpose, model_id,
+                          input_tokens, output_tokens, cost_usd)
+                     VALUES (4, 'FRK-1', 'dev-a', 's1', '2026-09-17', 'implement',
+                             'claude-sonnet-4-5', 1000, 100, 0.5);
+                     INSERT INTO projection_cursor (id, seq) VALUES (1, 4);",
+                )
+                .expect("the older rows are written");
+        }
+        let log = Arc::new(open_event_log(&path, at(10)).expect("the log opens"));
+        let projections = open_projections(log).expect("the projections open");
+        let migrated = sprint_view(&projections);
+        assert_eq!(
+            migrated.1,
+            vec![("FRK-1".to_string(), Some("S1".to_string()))]
+        );
+        projections.rebuild().expect("the board is built again");
+        assert_eq!(sprint_view(&projections), migrated);
         let _ = std::fs::remove_dir_all(&directory);
     }
 }

@@ -26,6 +26,8 @@ pub use error::StoreError;
 pub use event_log::{EventLog, EventQuery, IN_MEMORY, open_event_log};
 pub use git::{Git, GitError, HeadSummary, MergeOutcome};
 pub use metrics::{CostSplit, HarnessMetrics, MetricsError};
-pub use projections::{CostProjection, CostScope, Projections, TaskProjection, open_projections};
+pub use projections::{
+    CostProjection, CostScope, Projections, SprintProjection, TaskProjection, open_projections,
+};
 pub use reconcile::{Drift, ReconcileError, reconcile};
 pub use scan::{ProjectScan, ScanError, scan_project, seeded_library};

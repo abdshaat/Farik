@@ -147,6 +147,9 @@ pub fn a_body_wire(kind: EventKind) -> Value {
         | EventKind::HumanAccepted
         | EventKind::EscalationResolved
         | EventKind::AgentUpdated => a_human_body_wire(kind),
+        EventKind::SprintStarted | EventKind::SprintPlanned | EventKind::SprintEnded => {
+            a_sprint_body_wire(kind)
+        }
     }
 }
 
@@ -188,6 +191,20 @@ fn a_human_body_wire(kind: EventKind) -> Value {
             json!({ "to": "refining", "message": "Split it by page.", "resolved_by": "human" })
         }
         _ => json!({ "agent_id": "dev-a", "status": "paused", "updated_by": "human" }),
+    }
+}
+
+/// A `sprint.` body: S1 started by the human with 20 dollars, FRK-1 planned into it by the Scrum
+/// Master, or S1 ended by the governor with nothing left.
+fn a_sprint_body_wire(kind: EventKind) -> Value {
+    match kind {
+        EventKind::SprintStarted => {
+            json!({ "sprint_id": "S1", "budget_usd": 20.0, "started_by": "human" })
+        }
+        EventKind::SprintPlanned => {
+            json!({ "sprint_id": "S1", "task_ids": ["FRK-1"], "planned_by": "sam-ortiz" })
+        }
+        _ => json!({ "sprint_id": "S1", "ended_by": "governor", "left": [] }),
     }
 }
 

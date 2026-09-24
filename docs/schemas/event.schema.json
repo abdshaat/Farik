@@ -88,7 +88,10 @@
         "question.answered",
         "human.accepted",
         "escalation.resolved",
-        "agent.updated"
+        "agent.updated",
+        "sprint.started",
+        "sprint.planned",
+        "sprint.ended"
       ]
     },
     "eventBodyWire": {
@@ -126,7 +129,10 @@
         { "$ref": "#/$defs/questionAnsweredBody" },
         { "$ref": "#/$defs/humanAcceptedBody" },
         { "$ref": "#/$defs/escalationResolvedBody" },
-        { "$ref": "#/$defs/agentUpdatedBody" }
+        { "$ref": "#/$defs/agentUpdatedBody" },
+        { "$ref": "#/$defs/sprintStartedBody" },
+        { "$ref": "#/$defs/sprintPlannedBody" },
+        { "$ref": "#/$defs/sprintEndedBody" }
       ]
     },
     "contractSummary": {
@@ -503,6 +509,52 @@
         "agent_id": { "type": "string" },
         "status": { "type": "string", "enum": ["active", "paused", "retired"] },
         "updated_by": { "type": "string" }
+      }
+    },
+    "sprintStartedBody": {
+      "title": "Sprint Started Body",
+      "description": "The human started a sprint (docs/SPEC.md sections 3 and 5.5): its id, what it may spend, null for no budget of its own (ADR 0015), and who started it.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sprint_id", "budget_usd", "started_by"],
+      "properties": {
+        "sprint_id": { "type": "string", "pattern": "^S[1-9][0-9]{0,5}$" },
+        "budget_usd": { "type": ["number", "null"], "exclusiveMinimum": 0 },
+        "started_by": { "type": "string" }
+      }
+    },
+    "sprintPlannedBody": {
+      "title": "Sprint Planned Body",
+      "description": "Tasks were planned into the open sprint (docs/SPEC.md 5.11): by the assigner in its planning session, or by the governor when a task filed under an epic in the sprint joins it.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sprint_id", "task_ids", "planned_by"],
+      "properties": {
+        "sprint_id": { "type": "string", "pattern": "^S[1-9][0-9]{0,5}$" },
+        "task_ids": {
+          "type": "array",
+          "maxItems": 1000,
+          "uniqueItems": true,
+          "items": { "type": "string", "pattern": "^FRK-[0-9]{1,6}$" }
+        },
+        "planned_by": { "type": "string" }
+      }
+    },
+    "sprintEndedBody": {
+      "title": "Sprint Ended Body",
+      "description": "A sprint ended (docs/SPEC.md 5.5): by the governor when every task in it was accepted or cancelled, or by the human. left is the tasks that were in it and were neither, which leave it.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sprint_id", "ended_by", "left"],
+      "properties": {
+        "sprint_id": { "type": "string", "pattern": "^S[1-9][0-9]{0,5}$" },
+        "ended_by": { "type": "string", "enum": ["governor", "human"] },
+        "left": {
+          "type": "array",
+          "maxItems": 1000,
+          "uniqueItems": true,
+          "items": { "type": "string", "pattern": "^FRK-[0-9]{1,6}$" }
+        }
       }
     },
     "questionAskedBody": {

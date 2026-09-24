@@ -101,7 +101,7 @@ Files: the event schema, `event.rs`, `lib.rs`, `event/fixtures.rs` (protocol), `
 - `replays_the_sprints_after_the_migration` — a log holding sprint events, opened at migration 0007 then migrated: the projections equal a fresh replay.
 - `names_every_event_kind_as_an_entity_and_a_past_tense_verb` (protocol, existing) — passes with 35 kinds.
 
-- [ ] `feat(store): project sprints, a task's sprint, and what each sprint spent`
+- [x] `feat(store): project sprints, a task's sprint, and what each sprint spent`
 
 ### Task 3: starting and ending a sprint
 
