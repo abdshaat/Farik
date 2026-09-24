@@ -84,7 +84,7 @@ Produces: `TeamRules::document_paths`, `DEFAULT_DOCUMENT_PATHS`, `ReadinessRule:
 - `does_not_hold_an_epic_to_the_document_paths` — an epic with `["src/**"]`: no `DocumentPathsOnly` failure.
 - `refuses_a_document_task_when_a_document_glob_does_not_compile` — `document_paths: ["docs/[**"]`, an `architect` task with `["docs/adr/**"]`: refused on `DocumentPathsOnly`, the message naming `docs/[**`.
 - `refuses_every_document_task_with_an_empty_list` — `document_paths: []`, a `marketing_specialist` task with `["docs/marketing/**"]`: refused on `DocumentPathsOnly`.
-- `lists_every_rule` (prompt.rs, extended) — the `Team rules` section holds `- document_paths: docs/**, **/*.md, CHANGELOG.md`.
+- `writes_each_team_rule_on_its_own_line` (prompt.rs, extended) — the `Team rules` section holds `- document_paths: docs/**, **/*.md, CHANGELOG.md`.
 - `shows_the_team_rules_and_the_criterion_library` (reading.rs, extended) — `farik rules show` prints `document paths: docs/**, **/*.md, CHANGELOG.md`, and `--json` has `document_paths` with the three.
 - `reports_a_glob_that_does_not_compile` (reading.rs, existing parameterised test) — gains a `document_paths` case: `farik doctor` names `document_paths` and the pattern and exits 1.
 
