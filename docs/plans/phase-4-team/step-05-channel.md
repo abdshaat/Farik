@@ -135,7 +135,7 @@ Files: `orchestrator/{rules,messages,session}.rs`, `channel.rs`, `tools/contract
 - `limits_a_conversation_to_one_post` — a second post in it: refused `channel_limit`.
 - `writes_the_summary_it_shows` — `.farik/local/channel-summary.md` holds what the first message's summary held, and no more than 8,000 characters.
 
-- [ ] `feat(runtime): answer a mention in a short conversation session`
+- [x] `feat(runtime): answer a mention in a short conversation session`
 
 ### Task 5: counting the channel
 

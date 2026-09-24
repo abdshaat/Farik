@@ -131,6 +131,13 @@ pub fn implement_reacts_frk_1() -> Transcript {
     Transcript::from_jsonl(include_str!("transcripts/implement_reacts_frk_1.jsonl"))
 }
 
+/// `dev-a`'s conversation session answering a mention: one `farik_post_message`, and a
+/// successful end. Hand-written.
+#[must_use]
+pub fn reply_to_a_mention() -> Transcript {
+    Transcript::from_jsonl(include_str!("transcripts/reply_to_a_mention.jsonl"))
+}
+
 /// `dev-b`'s verify session of FRK-1: a review note, and nothing else. Hand-written.
 #[must_use]
 pub fn review_writes_note() -> Transcript {

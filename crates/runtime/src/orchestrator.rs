@@ -18,6 +18,7 @@ use farik_roles::RoleError;
 use farik_store::files::FilesError;
 use farik_store::{GitError, StoreError};
 
+use crate::channel::ChannelError;
 use crate::cost::CostError;
 use crate::daemon::{CommandHandler, DaemonState};
 use crate::forge::{Forge, ForgeError};
@@ -179,6 +180,16 @@ impl From<SprintError> for OrchestratorError {
     }
 }
 
+impl From<ChannelError> for OrchestratorError {
+    fn from(error: ChannelError) -> Self {
+        match error {
+            ChannelError::Store(error) => Self::Store(error),
+            ChannelError::Files(error) => Self::Files(error),
+            ChannelError::Refused { reason } => Self::Refused { reason },
+        }
+    }
+}
+
 impl From<CostError> for OrchestratorError {
     fn from(error: CostError) -> Self {
         Self::Cost(error)
@@ -207,6 +218,13 @@ pub enum TickReport {
     Sprint {
         /// The sprint.
         sprint_id: String,
+        /// What was done.
+        what: String,
+    },
+    /// An agent answered what it was asked in the channel.
+    Conversation {
+        /// The agent.
+        agent_id: String,
         /// What was done.
         what: String,
     },
@@ -406,7 +424,9 @@ impl Orchestrator {
                     self.wait_until(until).await;
                 }
                 TickReport::Idle { until: None, .. } => break,
-                TickReport::Acted { .. } | TickReport::Sprint { .. } => {}
+                TickReport::Acted { .. }
+                | TickReport::Sprint { .. }
+                | TickReport::Conversation { .. } => {}
             }
         }
         Ok(())

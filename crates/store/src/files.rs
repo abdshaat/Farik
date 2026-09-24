@@ -440,6 +440,15 @@ impl ProjectFiles {
         self.write_text(PROJECT_SCAN, text)
     }
 
+    /// Writes the channel's summary as the agents were last shown it, for the human to read.
+    ///
+    /// # Errors
+    ///
+    /// `Io` when the file cannot be written.
+    pub fn write_channel_summary(&self, text: &str) -> Result<(), FilesError> {
+        self.write_text(CHANNEL_SUMMARY, text)
+    }
+
     /// A product document, by its path under `product/`.
     ///
     /// # Errors
@@ -527,6 +536,7 @@ const SPRINTS: &str = "sprints";
 const PROJECT_SCAN: &str = "project.md";
 const PRICES: &str = "prices.json";
 const SETTINGS: &str = "local/settings.json";
+const CHANNEL_SUMMARY: &str = "local/channel-summary.md";
 
 /// How a file a person edits by hand is read.
 ///

@@ -101,6 +101,8 @@ pub struct ToolContext {
     pub session_id: String,
     /// Why the session runs, which decides what kind of message it posts.
     pub purpose: SessionPurpose,
+    /// The seq of the message a conversation session answers, which its reply names.
+    pub in_reply_to: Option<u64>,
     /// Where the task's commands run, when it has somewhere.
     pub executor: Option<Arc<dyn Executor>>,
     /// The project's store, files, and repository.

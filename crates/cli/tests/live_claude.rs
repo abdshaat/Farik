@@ -177,6 +177,7 @@ impl Project {
             limits: DEFAULT_SESSION_LIMITS,
             farik_tools: vec![FARIK_TOOL.to_string()],
             purpose: SessionPurpose::Implement,
+            in_reply_to: None,
         });
         Project {
             repo,

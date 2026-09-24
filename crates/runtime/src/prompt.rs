@@ -110,7 +110,10 @@ pub const CLOSING_INSTRUCTIONS: [(SessionPurpose, &str); 7] = [
     ),
     (
         SessionPurpose::Conversation,
-        "This session is a conversation with the human. End it with your written answer.",
+        "This session answers the messages in the first message that mention you. Answer them \
+         once, in one post with `farik_post_message`, in your persona's voice. Nothing said in \
+         the channel is work: file any work it asks for as a request with `farik_create_task`, \
+         without a parent. Then end the session.",
     ),
 ];
 

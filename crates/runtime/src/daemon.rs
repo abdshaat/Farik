@@ -86,6 +86,8 @@ pub struct SessionRegistration {
     pub task_id: Option<TaskId>,
     /// Why it runs, which decides what kind of message it posts.
     pub purpose: SessionPurpose,
+    /// The seq of the message a conversation session answers, which its reply names.
+    pub in_reply_to: Option<u64>,
     /// Its working directory: the task's worktree. No tool call reaches outside it.
     pub cwd: PathBuf,
     /// Where the task's commands run, when it has somewhere.
@@ -229,6 +231,7 @@ impl DaemonState {
             task_id: session.registration.task_id.clone(),
             session_id: session.registration.session_id.clone(),
             purpose: session.registration.purpose,
+            in_reply_to: session.registration.in_reply_to,
             executor: session.registration.executor.clone(),
             deps: Arc::clone(&self.deps),
         })
@@ -714,6 +717,7 @@ mod tests {
             limits: DEFAULT_SESSION_LIMITS,
             farik_tools: Vec::new(),
             purpose: SessionPurpose::Implement,
+            in_reply_to: None,
         });
         let context = daemon
             .state
@@ -879,6 +883,7 @@ mod tests {
                 limits: DEFAULT_SESSION_LIMITS,
                 farik_tools: Vec::new(),
                 purpose: SessionPurpose::Implement,
+                in_reply_to: None,
             });
         }
         assert_eq!(state.session_ids(), ["s-1", "s-2"]);

@@ -131,7 +131,7 @@ fn post_message(tools: &ToolDeps, text: String) -> Result<CommandReport, Command
     )
     .map_err(|error| match error {
         ChannelError::Refused { reason } => CommandError::Invalid { detail: reason },
-        ChannelError::Store(error) => failed(error),
+        other => failed(other),
     })?;
     Ok(CommandReport {
         said: "posted in the channel".to_string(),

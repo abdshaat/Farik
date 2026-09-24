@@ -5,9 +5,11 @@ use farik_core::contract::TaskId;
 use farik_core::team::Team;
 use farik_protocol::clock::Clock;
 use farik_protocol::event::{
-    EventBody, EventIds, MessageKind, MessagePostedBody, Thread, new_event,
+    EventBody, EventIds, EventKind, FarikEvent, MessageKind, MessagePostedBody,
+    SessionStartedBodyPurpose, Thread, new_event,
 };
-use farik_store::{EventLog, StoreError};
+use farik_store::files::{FilesError, ProjectFiles};
+use farik_store::{EventLog, EventQuery, StoreError};
 
 /// The most a message holds, in characters (5.9).
 pub const TEXT_LIMIT: usize = 2_000;
@@ -69,6 +71,8 @@ pub struct NewMessage {
 pub enum ChannelError {
     /// The log could not be read or written.
     Store(StoreError),
+    /// The channel's summary could not be written.
+    Files(FilesError),
     /// The message breaks a rule of the channel; `reason` says which.
     Refused {
         /// The rule and what broke it.
@@ -80,6 +84,7 @@ impl std::fmt::Display for ChannelError {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Store(error) => write!(formatter, "the channel's log failed: {error}"),
+            Self::Files(error) => write!(formatter, "the channel's summary failed: {error}"),
             Self::Refused { reason } => formatter.write_str(reason),
         }
     }
@@ -91,6 +96,93 @@ impl From<StoreError> for ChannelError {
     fn from(error: StoreError) -> Self {
         Self::Store(error)
     }
+}
+
+impl From<FilesError> for ChannelError {
+    fn from(error: FilesError) -> Self {
+        Self::Files(error)
+    }
+}
+
+/// The messages that mention `agent_id` and that it has not been given a conversation about:
+/// those after its last `conversation` session started, oldest first. A reply's mentions and a
+/// system line's start nothing, so that replies are one deep.
+///
+/// # Errors
+///
+/// `StoreError` when the log cannot be read.
+pub fn pending_mentions(log: &EventLog, agent_id: &str) -> Result<Vec<FarikEvent>, StoreError> {
+    let since = log
+        .read(&EventQuery {
+            agent_id: Some(agent_id.to_string()),
+            kinds: vec![EventKind::SessionStarted],
+            ..EventQuery::default()
+        })?
+        .iter()
+        .rev()
+        .find(|event| {
+            matches!(&event.body, EventBody::SessionStarted(body)
+                if body.purpose == SessionStartedBodyPurpose::Conversation)
+        })
+        .map(|event| event.envelope.seq);
+    Ok(log
+        .read(&EventQuery {
+            after_seq: since,
+            kinds: vec![EventKind::MessagePosted],
+            ..EventQuery::default()
+        })?
+        .into_iter()
+        .filter(|event| {
+            matches!(&event.body, EventBody::MessagePosted(body)
+                if !matches!(body.kind, MessageKind::Reply | MessageKind::System)
+                    && body.mentions.iter().any(|mentioned| mentioned == agent_id))
+        })
+        .collect())
+}
+
+/// The most tokens the channel's summary holds.
+const SUMMARY_TOKENS: usize = 2_000;
+
+/// The tokens of a text of `characters` characters, as the channel counts them: a quarter of
+/// them, rounded up.
+fn tokens(characters: usize) -> usize {
+    characters.div_ceil(4)
+}
+
+/// The channel as an agent is shown it, derived with no model: the latest messages that fit
+/// `SUMMARY_TOKENS`, oldest first, one line each (`<author> [<thread>]: <text>`). It is written to
+/// `.farik/local/channel-summary.md` each time, so that the human can read what the agents saw.
+///
+/// # Errors
+///
+/// `Store` when the log cannot be read, `Files` when the summary cannot be written.
+pub fn channel_summary(log: &EventLog, files: &ProjectFiles) -> Result<String, ChannelError> {
+    let messages = log.read(&EventQuery {
+        kinds: vec![EventKind::MessagePosted],
+        ..EventQuery::default()
+    })?;
+    let mut lines: Vec<String> = Vec::new();
+    let mut characters = 0;
+    for event in messages.iter().rev() {
+        let EventBody::MessagePosted(body) = &event.body else {
+            continue;
+        };
+        let thread = body
+            .thread
+            .map_or_else(String::new, |thread| format!(" [{thread}]"));
+        let line = format!("{}{thread}: {}", body.author, body.text);
+        // The line, and the line break that joins it to those already held.
+        let with_it = characters + line.chars().count() + usize::from(!lines.is_empty());
+        if tokens(with_it) > SUMMARY_TOKENS {
+            break;
+        }
+        characters = with_it;
+        lines.push(line);
+    }
+    lines.reverse();
+    let summary = lines.join("\n");
+    files.write_channel_summary(&summary)?;
+    Ok(summary)
 }
 
 /// Posts `message` in the channel and answers its seq. Each line break in its text becomes a

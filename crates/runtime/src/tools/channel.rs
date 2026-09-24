@@ -37,13 +37,16 @@ pub(super) fn post_message(call: &Call<'_>, input: PostMessageInput) -> Result<V
             text: input.text,
             task_id: call.context.task_id.clone(),
             thread: None,
-            in_reply_to: None,
+            // A conversation's reply names the latest message it was started to answer.
+            in_reply_to: (kind == MessageKind::Reply)
+                .then_some(call.context.in_reply_to)
+                .flatten(),
             session_id: Some(call.context.session_id.clone()),
         },
     )
     .map_err(|error| match error {
         ChannelError::Refused { reason } => ToolError::Refused { reason },
-        ChannelError::Store(error) => failed(error),
+        other => failed(other),
     })?;
     Ok(json!({ "seq": seq, "kind": kind }))
 }
@@ -270,5 +273,30 @@ mod tests {
             kinds(&project.events(&[EventKind::MessagePosted])),
             [MessageKind::Reply]
         );
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn limits_a_conversation_to_one_post() {
+        let project = TestProject::new("channel-one-reply", &a_team_of_three(|_| {}));
+        let mut context = project.context("dev-a", None);
+        context.purpose = SessionPurpose::Conversation;
+        context.in_reply_to = Some(7);
+        let say = |text: &str| run(&context, "farik_post_message", json!({ "text": text }));
+
+        say("On it.").expect("the reply");
+        let before = project.event_count();
+        let refused = say("And another.").expect_err("one post");
+
+        assert!(
+            matches!(&refused, ToolError::Refused { reason } if reason.starts_with("channel_limit: ")),
+            "{refused:?}"
+        );
+        assert_eq!(project.event_count(), before, "nothing is recorded");
+        let posted = project.events(&[EventKind::MessagePosted]);
+        let EventBody::MessagePosted(reply) = &posted[0].body else {
+            panic!("a message");
+        };
+        assert_eq!(reply.in_reply_to, Some(7));
     }
 }

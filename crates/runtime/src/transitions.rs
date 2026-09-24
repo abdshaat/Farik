@@ -161,6 +161,7 @@ impl From<ChannelError> for TransitionError {
         match error {
             ChannelError::Store(error) => error.into(),
             ChannelError::Refused { reason } => Self::Event { detail: reason },
+            ChannelError::Files(error) => error.into(),
         }
     }
 }

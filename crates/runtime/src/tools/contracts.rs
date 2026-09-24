@@ -20,6 +20,7 @@ use serde_json::{Map, Value, json};
 
 use super::refusal::Refusal;
 use super::{Call, ToolError, failed};
+use crate::session::SessionPurpose;
 use crate::sprints::{self, PlannedBy, SprintError};
 
 /// How big a request is (5.16).
@@ -264,6 +265,14 @@ pub(super) fn write_contract(
 /// once `check_child_creation` allows the caller. A `reviewer_role` left out is filled with the
 /// role the team can staff, when there is one.
 pub(super) fn create_task(call: &Call<'_>, input: CreateTaskInput) -> Result<Value, ToolError> {
+    // Nothing said in the channel is work (5.9): a conversation files a request, which triage
+    // sizes, and never a task of an epic.
+    if input.parent.is_some() && call.context.purpose == SessionPurpose::Conversation {
+        return Err(Refusal::ChannelLimit {
+            detail: "a conversation files a request, without a parent".to_string(),
+        }
+        .into());
+    }
     let parent = match &input.parent {
         None => None,
         Some(parent) => {
@@ -458,8 +467,9 @@ mod tests {
     use farik_protocol::event::{EventBody, EventKind, FarikEvent};
     use serde_json::{Value, json};
 
+    use crate::session::SessionPurpose;
     use crate::tools::ToolError;
-    use crate::tools::fixtures::{TestProject, a_team_of_three};
+    use crate::tools::fixtures::{TestProject, a_team_of_three, run};
 
     fn a_project(name: &str) -> TestProject {
         TestProject::new(name, &a_team_of_three(|_| {}))
@@ -896,6 +906,41 @@ mod tests {
         refused_with(write(), "question_unanswered");
         answer(&second);
         write().expect("both questions are answered, so the epic is written");
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn files_a_request_from_the_channel() {
+        let project = a_project("tools-channel-request");
+        project.filed("FRK-1", "in_progress", "epic", None);
+        project.moved(
+            "FRK-1",
+            "assigned",
+            "in_progress",
+            &json!({ "assignee": "pm" }),
+        );
+        let mut context = project.context("pm", None);
+        context.purpose = SessionPurpose::Conversation;
+
+        let filed = run(
+            &context,
+            "farik_create_task",
+            json!({ "contract": a_request() }),
+        )
+        .expect("a request is filed from a conversation");
+        assert_eq!(filed["status"], "draft");
+        assert_eq!(project.file("FRK-2")["parent"], Value::Null);
+
+        let before = project.event_count();
+        refused_with(
+            run(
+                &context,
+                "farik_create_task",
+                json!({ "contract": a_request(), "parent": "FRK-1" }),
+            ),
+            "channel_limit",
+        );
+        assert_eq!(project.event_count(), before);
     }
 
     #[test]

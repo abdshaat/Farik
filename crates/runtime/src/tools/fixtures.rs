@@ -97,6 +97,7 @@ impl TestProject {
             task_id: task.map(|task| task.parse().expect("a task id")),
             session_id: "session-1".to_string(),
             purpose: SessionPurpose::Implement,
+            in_reply_to: None,
             executor: None,
             deps: Arc::clone(&self.deps),
         }

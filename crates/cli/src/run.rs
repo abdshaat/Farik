@@ -198,6 +198,13 @@ pub(crate) async fn ticks(
                 );
                 after(printer);
             }
+            Ok(TickReport::Conversation { agent_id, what }) => {
+                printer.line(
+                    &format!("{agent_id}: {what}"),
+                    &json!({ "agent_id": agent_id, "what": what }),
+                );
+                after(printer);
+            }
             Err(error) => return Ended::Failed(error.to_string()),
         }
     }

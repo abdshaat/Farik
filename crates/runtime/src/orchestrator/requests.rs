@@ -91,6 +91,8 @@ pub(super) async fn draft(
                 executor: None,
                 read_only: false,
                 only_tool: Some(TRIAGE_TOOL),
+                tools: None,
+                in_reply_to: None,
                 initial_prompt: triage_message(&contract),
             },
         )
@@ -159,6 +161,8 @@ pub(super) async fn refining(
                 executor: None,
                 read_only: false,
                 only_tool: Some(JUDGMENT_TOOL),
+                tools: None,
+                in_reply_to: None,
                 initial_prompt: judgment_message(&contract),
             },
         )
@@ -184,6 +188,8 @@ pub(super) async fn refining(
             executor: None,
             read_only: false,
             only_tool: None,
+            tools: None,
+            in_reply_to: None,
             initial_prompt: refine_message(&contract, !asked, &failures),
         },
     )
@@ -457,6 +463,8 @@ pub(super) async fn in_progress_epic(
             executor: None,
             read_only: false,
             only_tool: None,
+            tools: None,
+            in_reply_to: None,
             initial_prompt,
         },
     )

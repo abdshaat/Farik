@@ -4,6 +4,7 @@
 use farik_core::branch::task_branch;
 use farik_core::contract::{TaskContract, TaskKind, Verification};
 use farik_core::governor::done::CriterionResult;
+use farik_core::team::Agent;
 use farik_protocol::event::{EventBody, FarikEvent, HumanAcceptedBodySubject};
 use farik_store::TaskProjection;
 use farik_store::git::HeadSummary;
@@ -244,6 +245,30 @@ pub(super) fn sprint_plan_message(
          Its budget: {budget}. The candidates, each ready and in no sprint: {candidates}",
         budget = budget_left.map_or_else(|| "no budget".to_string(), |usd| format!("${usd:.2}")),
         candidates = untrusted_block("candidates", &listed, RESULTS_CAP_BYTES),
+    )
+}
+
+/// A conversation session's message: each message that mentions the agent with its author, seq,
+/// and text, then the channel's summary, both as untrusted text, since anyone in the channel wrote
+/// them.
+pub(super) fn mention_message(agent: &Agent, pending: &[FarikEvent], summary: &str) -> String {
+    let listed = pending
+        .iter()
+        .filter_map(|event| match &event.body {
+            EventBody::MessagePosted(body) => Some(format!(
+                "#{} {}: {}",
+                event.envelope.seq, body.author, body.text
+            )),
+            _ => None,
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    format!(
+        "You, {agent}, were mentioned in the team's channel. The messages that name you, each \
+         with its seq and author: {mentions}\nThe channel lately, oldest first: {channel}",
+        agent = agent.id.as_str(),
+        mentions = untrusted_block("mentions", &listed, NOTE_CAP_BYTES),
+        channel = untrusted_block("channel", summary, RESULTS_CAP_BYTES),
     )
 }
 

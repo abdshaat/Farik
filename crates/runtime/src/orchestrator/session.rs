@@ -20,7 +20,7 @@ use farik_store::EventQuery;
 use super::messages::human_message;
 use super::verify::{append, append_stamped};
 use super::{OrchestratorDeps, OrchestratorError, TRIAGE_MODEL};
-use crate::channel::{ChannelError, post_system};
+use crate::channel::post_system;
 use crate::claude::allowed_builtins;
 use crate::cost::{CostError, CostSource, budget_state, record_exhaustion, record_session_cost};
 use crate::daemon::SessionRegistration;
@@ -65,6 +65,11 @@ pub(super) struct SessionAsk<'a> {
     /// `farik_triage_request`, the judgment's `farik_record_judgment`, a sprint's planning
     /// `farik_plan_sprint`.
     pub(super) only_tool: Option<&'static str>,
+    /// The Farik tools it is offered, when it is offered a list of them rather than every tool:
+    /// each still only when the agent's tiers allow it.
+    pub(super) tools: Option<&'static [&'static str]>,
+    /// The seq of the message a conversation session answers, which its reply names.
+    pub(super) in_reply_to: Option<u64>,
     /// Its first message.
     pub(super) initial_prompt: String,
 }
@@ -97,6 +102,7 @@ pub(super) async fn run_session(
         agent_id: spec.agent_id.clone(),
         task_id: spec.task_id.clone(),
         purpose: ask.purpose,
+        in_reply_to: ask.in_reply_to,
         cwd: spec.cwd.clone(),
         executor: ask.executor,
         limits: spec.limits,
@@ -162,11 +168,7 @@ fn sleep(
             agent.id.as_str(),
             until.format("%Y-%m-%d %H:%M UTC")
         ),
-    )
-    .map_err(|error| match error {
-        ChannelError::Store(error) => OrchestratorError::Store(error),
-        ChannelError::Refused { reason } => OrchestratorError::Refused { reason },
-    })?;
+    )?;
     Ok(())
 }
 
@@ -255,9 +257,9 @@ fn leave_note(
 const NOT_FOR_READ_ONLY: [&str; 3] = ["farik_exec", "farik_git_commit", "farik_git_push"];
 
 /// The spec of the session `ask` describes, its prompt assembled from the files as they are now,
-/// with what the human said about its task since its last session started. A triage session runs
-/// on `TRIAGE_MODEL` at low effort. A session asked with one tool is given it alone, whatever the
-/// agent's tiers, and no built-in tool.
+/// with what the human said about its task since its last session started. A triage session and a
+/// conversation run on `TRIAGE_MODEL` at low effort. A session asked with one tool is given it
+/// alone, whatever the agent's tiers, and no built-in tool.
 fn session_spec(
     deps: &OrchestratorDeps,
     team: &Team,
@@ -266,8 +268,12 @@ fn session_spec(
     let files = &deps.tools.files;
     let role_id = Role::from(ask.agent.role);
     let role = load_role(role_id)?;
-    // 5.16 runs triage on the cheaper model, whatever the agent's own.
-    let (model, effort) = if ask.purpose == SessionPurpose::Triage {
+    // 5.16 runs triage on the cheaper model, whatever the agent's own, and 5.9 the channel's
+    // conversations.
+    let (model, effort) = if matches!(
+        ask.purpose,
+        SessionPurpose::Triage | SessionPurpose::Conversation
+    ) {
         (TRIAGE_MODEL.to_string(), Effort::Low)
     } else {
         session_model(ask.agent, &role)
@@ -290,6 +296,7 @@ fn session_spec(
         .into_iter()
         .filter(|tool| !(ask.read_only && NOT_FOR_READ_ONLY.contains(&tool.name)))
         .filter(|tool| ask.only_tool.is_none_or(|only| tool.name == only))
+        .filter(|tool| ask.tools.is_none_or(|listed| listed.contains(&tool.name)))
         .collect();
     // A session given one tool has it whatever the agent's tiers.
     let farik_tools = tools
@@ -548,7 +555,7 @@ mod tests {
     use farik_protocol::event::{EventBody, EventKind, MessageKind};
 
     use super::{SPRINT_PLAN_TOOL, SessionAsk, SessionEnd, TRIAGE_TOOL, session_spec, sleep};
-    use crate::prompt::SPRINT_PLAN_INSTRUCTION;
+    use crate::prompt::{CLOSING_INSTRUCTIONS, SPRINT_PLAN_INSTRUCTION};
     use crate::session::EndReason;
 
     #[test]
@@ -577,6 +584,8 @@ mod tests {
                     executor: None,
                     read_only: false,
                     only_tool,
+                    tools: None,
+                    in_reply_to: None,
                     initial_prompt: String::new(),
                 },
             )
@@ -623,6 +632,8 @@ mod tests {
                 executor: None,
                 read_only: false,
                 only_tool: Some("farik_record_judgment"),
+                tools: None,
+                in_reply_to: None,
                 initial_prompt: String::new(),
             },
         )
@@ -630,6 +641,47 @@ mod tests {
 
         assert_eq!(spec.farik_tools, vec!["farik_record_judgment".to_string()]);
         assert!(spec.builtin_tools.is_empty(), "{:?}", spec.builtin_tools);
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn closes_a_conversation_with_its_reply() {
+        let harness = Harness::new("session-conversation", |_| {});
+        let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
+        let deps = &orchestrator.deps;
+        let team = deps.tools.files.read_team().expect("the team");
+        let agent = team.active_agents().nth(1).expect("an agent");
+
+        let spec = session_spec(
+            deps,
+            &team,
+            &SessionAsk {
+                agent,
+                contract: None,
+                purpose: SessionPurpose::Conversation,
+                cwd: deps.tools.files.root().to_path_buf(),
+                executor: None,
+                read_only: true,
+                only_tool: None,
+                tools: None,
+                in_reply_to: None,
+                initial_prompt: String::new(),
+            },
+        )
+        .expect("the spec");
+
+        let closing = CLOSING_INSTRUCTIONS
+            .iter()
+            .find(|(purpose, _)| *purpose == SessionPurpose::Conversation)
+            .map(|(_, text)| *text)
+            .expect("an entry");
+        assert!(
+            spec.system_prompt.trim_end().ends_with(closing),
+            "{}",
+            spec.system_prompt
+        );
+        assert!(closing.contains("`farik_post_message`"), "{closing}");
+        assert!(closing.contains("`farik_create_task`"), "{closing}");
     }
 
     #[test]
@@ -652,6 +704,8 @@ mod tests {
                 executor: None,
                 read_only: false,
                 only_tool: Some(SPRINT_PLAN_TOOL),
+                tools: None,
+                in_reply_to: None,
                 initial_prompt: String::new(),
             },
         )

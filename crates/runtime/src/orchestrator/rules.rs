@@ -17,13 +17,16 @@ use farik_protocol::event::{EventBody, EventKind, FarikEvent};
 use farik_store::{EventQuery, Git, TaskProjection};
 
 use super::integrate::{awaiting, cleanup};
-use super::messages::{Resume, implement_message, plan_message, sprint_plan_message};
+use super::messages::{
+    Resume, implement_message, mention_message, plan_message, sprint_plan_message,
+};
 use super::requests;
 use super::session::{SPRINT_PLAN_TOOL, SessionAsk, SessionEnd, run_session};
 use super::verify::verifying;
 use super::{
     Orchestrator, OrchestratorDeps, OrchestratorError, TickReport, TickRules, TickScope, worktree,
 };
+use crate::channel::{channel_summary, pending_mentions};
 use crate::cost::budget_state;
 use crate::exec::Executor;
 use crate::session::{EndReason, SessionPurpose};
@@ -87,7 +90,7 @@ pub(super) async fn tick(
             }
         }
     }
-    if let Some(report) = budget(deps, scope, &team, &board)? {
+    if let Some(report) = budget_and_channel(deps, scope, &team, &board, &mut waiting).await? {
         return Ok(report);
     }
     if runs(3) {
@@ -292,6 +295,8 @@ async fn sprint_planning(
             executor: None,
             read_only: false,
             only_tool: Some(SPRINT_PLAN_TOOL),
+            tools: None,
+            in_reply_to: None,
             initial_prompt: sprint_plan_message(&open.sprint_id, &contracts, open.budget_usd),
         },
     )
@@ -323,6 +328,66 @@ fn day_is_spent(
         .any(|exhausted| exhausted.scope == BudgetScope::DayUsd);
     *day_spent |= spent;
     Ok(spent)
+}
+
+/// The Farik tools a conversation session is offered (5.9): the reading tools, its one post, and
+/// a request filed without a parent.
+const CONVERSATION_TOOLS: &[&str] = &[
+    "farik_read_task",
+    "farik_read_board",
+    "farik_read_rules",
+    "farik_read_criteria",
+    "farik_post_message",
+    "farik_create_task",
+];
+
+/// The channel rule, between the budget rule and rule 3 (5.9): the first active agent in team
+/// order with a pending mention, awake, on a day whose budget is not spent, gets one
+/// `conversation` session about no task, on the read tier's built-ins and `CONVERSATION_TOOLS`,
+/// to answer it. It is about no one task, so it runs only under `All` in a tick scoped to none.
+async fn conversation(
+    deps: &OrchestratorDeps,
+    scope: &TickScope,
+    team: &Team,
+    waiting: &mut Waiting,
+) -> Result<Option<TickReport>, OrchestratorError> {
+    if scope.rules != TickRules::All || scope.task_id.is_some() {
+        return Ok(None);
+    }
+    for agent in team.active_agents() {
+        let pending = pending_mentions(&deps.tools.log, agent.id.as_str())?;
+        let Some(latest) = pending.last() else {
+            continue;
+        };
+        if day_is_spent(deps, team, Role::from(agent.role), &mut waiting.day_spent)?
+            | asleep(deps, agent, &mut waiting.slept)?
+        {
+            continue;
+        }
+        let summary = channel_summary(&deps.tools.log, &deps.tools.files)?;
+        let end = run_session(
+            deps,
+            team,
+            SessionAsk {
+                agent,
+                contract: None,
+                purpose: SessionPurpose::Conversation,
+                cwd: deps.tools.files.root().to_path_buf(),
+                executor: None,
+                read_only: true,
+                only_tool: None,
+                tools: Some(CONVERSATION_TOOLS),
+                in_reply_to: Some(latest.envelope.seq),
+                initial_prompt: mention_message(agent, &pending, &summary),
+            },
+        )
+        .await?;
+        return Ok(Some(TickReport::Conversation {
+            agent_id: agent.id.to_string(),
+            what: ran(agent, "conversation", &end),
+        }));
+    }
+    Ok(None)
 }
 
 /// Whether `rules` runs rule `rule` (1 to 10, in the order of work) for every task. `Planning`
@@ -412,6 +477,20 @@ fn blocked(
         })),
         TransitionOutcome::Refused(_) => Ok(None),
     }
+}
+
+/// The rules between rules 2 and 3: the budget rule, then the channel rule.
+async fn budget_and_channel(
+    deps: &OrchestratorDeps,
+    scope: &TickScope,
+    team: &Team,
+    board: &[TaskProjection],
+    waiting: &mut Waiting,
+) -> Result<Option<TickReport>, OrchestratorError> {
+    if let Some(report) = budget(deps, scope, team, board)? {
+        return Ok(Some(report));
+    }
+    conversation(deps, scope, team, waiting).await
 }
 
 /// The budget rule, between rules 2 and 3: a task whose dollars or sessions are spent is escalated
@@ -620,6 +699,8 @@ async fn in_progress(
             executor: Some(executor),
             read_only: false,
             only_tool: None,
+            tools: None,
+            in_reply_to: None,
             initial_prompt: implement_message(&contract, &resume),
         },
     )
@@ -798,6 +879,8 @@ async fn ready(
             executor: None,
             read_only: false,
             only_tool: None,
+            tools: None,
+            in_reply_to: None,
             initial_prompt: plan_message(&contract, &assignees, &reviewers),
         },
     )
@@ -924,7 +1007,8 @@ mod tests {
     use crate::recorded::fixtures::{
         accept_frk_1, hits_the_turn_limit, implement_finishes_frk_1, implement_stops_early,
         plan_assigns_frk_1, plan_sprint_frk_1, provider_limit_429, provider_limit_rejected,
-        reads_a_file, replays_farik_read_board, review_answers_nothing, review_writes_note,
+        reads_a_file, replays_farik_read_board, reply_to_a_mention, review_answers_nothing,
+        review_writes_note,
     };
     use crate::recorded::{RecordedAdapter, Transcript};
     use crate::session::SessionPurpose;
@@ -936,7 +1020,9 @@ mod tests {
     fn acted_on(report: &TickReport) -> Option<&str> {
         match report {
             TickReport::Acted { task_id, .. } => Some(task_id.as_str()),
-            TickReport::Idle { .. } | TickReport::Sprint { .. } => None,
+            TickReport::Idle { .. }
+            | TickReport::Sprint { .. }
+            | TickReport::Conversation { .. } => None,
         }
     }
 
@@ -4627,5 +4713,215 @@ mod tests {
             sleeps(&harness),
             vec![(Some("dev-a".to_string()), at() + chrono::Duration::hours(1))]
         );
+    }
+
+    /// Posts `text` in the channel as the human, its mentions parsed, and answers its seq.
+    fn said(harness: &Harness, author: &str, kind: MessageKind, text: &str) -> u64 {
+        let deps = &harness.project.deps;
+        let team = deps.files.read_team().expect("the team");
+        crate::channel::post(
+            &deps.log,
+            deps.clock.as_ref(),
+            &deps.ids,
+            crate::channel::NewMessage {
+                author: author.to_string(),
+                agent_id: (author != "human").then(|| author.to_string()),
+                kind,
+                text: text.to_string(),
+                mentions: crate::channel::mentions_in(text, &team, author),
+                task_id: None,
+                thread: None,
+                in_reply_to: None,
+                session_id: None,
+            },
+        )
+        .expect("posted")
+    }
+
+    /// Every message in the channel, oldest first.
+    fn messages(harness: &Harness) -> Vec<farik_protocol::event::MessagePostedBody> {
+        harness
+            .events(&[EventKind::MessagePosted])
+            .into_iter()
+            .filter_map(|event| match event.body {
+                EventBody::MessagePosted(body) => Some(body),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn answers_a_mention_in_a_conversation() {
+        let harness = Harness::new("orch-mention", |_| {});
+        let seq = said(&harness, "human", MessageKind::Human, "@dev-a status?");
+        let adapter = harness.recorded(vec![reply_to_a_mention()]);
+        let orchestrator = harness.orchestrator(adapter.clone());
+
+        let report = orchestrator.tick().await.expect("the tick runs");
+
+        assert!(
+            matches!(&report, TickReport::Conversation { agent_id, .. } if agent_id == "dev-a"),
+            "{report:?}"
+        );
+        let started = adapter.started();
+        assert_eq!(started.len(), 1, "{started:?}");
+        let spec = &started[0];
+        assert_eq!(spec.agent_id, "dev-a");
+        assert_eq!(spec.purpose, SessionPurpose::Conversation);
+        assert_eq!(spec.model, "claude-sonnet-5");
+        assert_eq!(spec.effort, Effort::Low);
+        assert_eq!(spec.task_id, None);
+        assert_eq!(
+            spec.farik_tools,
+            [
+                "farik_read_task",
+                "farik_read_board",
+                "farik_read_rules",
+                "farik_read_criteria",
+                "farik_create_task",
+                "farik_post_message",
+            ]
+        );
+        assert_eq!(
+            spec.builtin_tools,
+            allowed_builtins(&BTreeSet::from([PermissionTier::Read]))
+        );
+        let mentions = block(&spec.initial_prompt, "mentions");
+        assert!(
+            mentions.contains("@dev-a status?"),
+            "{}",
+            spec.initial_prompt
+        );
+        assert!(
+            block(&spec.initial_prompt, "channel").contains("human: @dev-a status?"),
+            "{}",
+            spec.initial_prompt
+        );
+        let said = messages(&harness);
+        assert_eq!(said.len(), 2, "{said:?}");
+        assert_eq!(said[1].author, "dev-a");
+        assert_eq!(said[1].kind, MessageKind::Reply);
+        assert_eq!(said[1].in_reply_to, Some(seq));
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn answers_each_mention_once() {
+        let harness = Harness::new("orch-mention-once", |_| {});
+        said(&harness, "human", MessageKind::Human, "@dev-a status?");
+        let adapter = harness.recorded(vec![reply_to_a_mention(), reply_to_a_mention()]);
+        let orchestrator = harness.orchestrator(adapter.clone());
+
+        orchestrator.tick().await.expect("the tick runs");
+        let second = orchestrator.tick().await.expect("the tick runs");
+
+        assert!(matches!(&second, TickReport::Idle { .. }), "{second:?}");
+        assert_eq!(adapter.started().len(), 1, "{:?}", adapter.started());
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn answers_no_mention_on_a_spent_day() {
+        let harness = Harness::new("orch-mention-day", |_| {});
+        harness.spent(None, "s-0", 20.0);
+        said(&harness, "human", MessageKind::Human, "@dev-a status?");
+        let adapter = harness.recorded(vec![reply_to_a_mention()]);
+        let orchestrator = harness.orchestrator(adapter.clone());
+
+        let report = orchestrator.tick().await.expect("the tick runs");
+
+        assert_eq!(
+            report,
+            TickReport::Idle {
+                why: "the team's daily budget is spent".to_string(),
+                until: None,
+            }
+        );
+        assert!(adapter.started().is_empty(), "{:?}", adapter.started());
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn does_not_answer_a_reply() {
+        let harness = Harness::new("orch-mention-reply", |_| {});
+        said(
+            &harness,
+            "dev-a",
+            MessageKind::Reply,
+            "@dev-b can you look?",
+        );
+        let adapter = harness.recorded(vec![reply_to_a_mention()]);
+        let orchestrator = harness.orchestrator(adapter.clone());
+
+        let report = orchestrator.tick().await.expect("the tick runs");
+
+        assert!(matches!(&report, TickReport::Idle { .. }), "{report:?}");
+        assert!(adapter.started().is_empty(), "{:?}", adapter.started());
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn waits_for_a_sleeping_agent_to_answer() {
+        let harness = Harness::new("orch-mention-asleep", |_| {});
+        let until = at() + chrono::Duration::hours(1);
+        harness.asleep("dev-a", until);
+        said(&harness, "human", MessageKind::Human, "@dev-a status?");
+        let adapter = harness.recorded(vec![reply_to_a_mention()]);
+
+        let asleep = harness
+            .orchestrator(adapter.clone())
+            .tick()
+            .await
+            .expect("the tick runs");
+        assert!(
+            matches!(&asleep, TickReport::Idle { until: Some(woken), .. } if *woken == until),
+            "{asleep:?}"
+        );
+        assert!(adapter.started().is_empty(), "{:?}", adapter.started());
+
+        let awake = harness
+            .orchestrator_at(adapter.clone(), until + chrono::Duration::minutes(1))
+            .tick()
+            .await
+            .expect("the tick runs");
+        assert!(
+            matches!(&awake, TickReport::Conversation { agent_id, .. } if agent_id == "dev-a"),
+            "{awake:?}"
+        );
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn writes_the_summary_it_shows() {
+        let harness = Harness::new("orch-mention-summary", |_| {});
+        for number in 0..10 {
+            said(
+                &harness,
+                "human",
+                MessageKind::Human,
+                &format!("{number} {}", "word ".repeat(300)),
+            );
+        }
+        said(&harness, "human", MessageKind::Human, "@dev-a status?");
+        let adapter = harness.recorded(vec![reply_to_a_mention()]);
+        let orchestrator = harness.orchestrator(adapter.clone());
+
+        orchestrator.tick().await.expect("the tick runs");
+
+        let written = std::fs::read_to_string(
+            harness
+                .project
+                .repo
+                .path
+                .join(".farik/local/channel-summary.md"),
+        )
+        .expect("the summary is written");
+        let started = adapter.started();
+        let shown = block(&started[0].initial_prompt, "channel").trim_matches('\n');
+        assert_eq!(written, shown);
+        assert!(written.chars().count() <= 8_000, "{}", written.len());
+        assert!(written.ends_with("human: @dev-a status?"), "{written}");
+        assert!(!written.contains("human: 0 "), "the oldest is left out");
     }
 }

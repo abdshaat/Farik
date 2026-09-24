@@ -56,6 +56,10 @@ impl From<ChannelError> for CostError {
         match error {
             ChannelError::Store(error) => error.into(),
             ChannelError::Refused { reason } => Self::Event { detail: reason },
+            // A post writes no file.
+            ChannelError::Files(error) => Self::Event {
+                detail: error.to_string(),
+            },
         }
     }
 }

@@ -20,7 +20,8 @@ use farik_protocol::clock::MovableClock;
 use farik_protocol::event::{EventBody, EventKind, SessionEndedBodyReason};
 use farik_runtime::recorded::fixtures::{
     UsageThenWaitAdapter, accept_frk_1, implement_finishes_frk_1, plan_assigns_frk_1,
-    plan_sprint_frk_1, refine_writes_task_frk_1, review_writes_note, tool_runner,
+    plan_sprint_frk_1, refine_writes_task_frk_1, reply_to_a_mention, review_writes_note,
+    tool_runner,
 };
 use farik_runtime::sleep::Sleeper;
 use farik_runtime::{RecordedAdapter, RuntimeAdapter, Transcript};
@@ -663,6 +664,27 @@ fn prints_a_sprint_line_for_a_planning_session() {
         ran.out
             .lines()
             .any(|line| line.starts_with("S1: ") && line.contains("S1 holds FRK-1")),
+        "{}",
+        ran.out
+    );
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn prints_a_conversation_line() {
+    let repository = a_team("run-conversation");
+    let said = run(&repository.path, &["say", "@dev-a status?"]);
+    assert_eq!(said.code, 0, "{}", said.err);
+
+    let ran = run_with(&repository.path, &["run"], |io| {
+        io.engine = recorded(vec![reply_to_a_mention()]);
+    });
+
+    assert_eq!(ran.code, 0, "{}\n{}", ran.out, ran.err);
+    assert!(
+        ran.out
+            .lines()
+            .any(|line| line.starts_with("dev-a: ") && line.contains("conversation")),
         "{}",
         ran.out
     );
