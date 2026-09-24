@@ -1,6 +1,6 @@
 # Phase 4, step 08: Milestone 1 team exit
 
-Status: ready
+Status: moved, not run. The founder decided on 2026-09-24 that all live testing is done in the web UI once the product side is built, so this run is carried out at the web UI phase's exit (ADR 0016), in the browser instead of at the command line. Its decisions (the team, the two requests, the pass criteria) are that exit's starting point. Stage 1 was prepared in `~/farik-m1` at a826b2d and is no longer needed.
 Branch: `phase/4-team`
 Spec: `docs/SPEC.md` section 11 (Milestones 0 and 1), F17; the flow it exercises is 5.2 to 5.9, 5.14, 5.16
 Depends on: steps 01 to 07 of this phase; a start gate: stage 1 does not begin until step 07 has landed on this branch and `cargo xtask check --integration` passes on it
