@@ -281,7 +281,7 @@ impl fmt::Display for CommandError {
 impl std::error::Error for CommandError {}
 
 /// What `recover` found and did.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct RecoveryReport {
     /// Sessions the log shows started and never ended, now recorded as ended `aborted`.
     pub sessions_interrupted: u32,

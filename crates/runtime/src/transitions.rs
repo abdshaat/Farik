@@ -733,7 +733,7 @@ pub(crate) fn refusal_wire(refusal: &TransitionRefusal) -> TransitionRefusedBody
 }
 
 /// A status as the wire spells it. The two lists are one, which a test in `farik-protocol` pins.
-fn status_wire(status: TaskStatus) -> Result<TaskStatusWire, TransitionError> {
+pub(crate) fn status_wire(status: TaskStatus) -> Result<TaskStatusWire, TransitionError> {
     TaskStatusWire::from_str(&status.to_string()).map_err(|_| TransitionError::Event {
         detail: format!("the event vocabulary has no status {status}"),
     })

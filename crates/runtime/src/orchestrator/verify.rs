@@ -7,7 +7,7 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use farik_core::contract::{ExitCriterion, Role, TaskContract, TaskId, TaskStatus, wire_method};
+use farik_core::contract::{ExitCriterion, TaskContract, TaskId, TaskStatus, wire_method};
 use farik_core::governor::done::{CriterionResult, RunBy, requires_human_acceptance};
 use farik_core::governor::gates::Rejection;
 use farik_core::governor::transition::{TransitionContext, TransitionRequest};
@@ -159,12 +159,7 @@ async fn run_what_farik_runs(
     let pending: Vec<&ExitCriterion> = contract
         .exit_criteria
         .iter()
-        .filter(|criterion| {
-            matches!(
-                wire_method(&criterion.verification),
-                Some("command" | "test" | "artifact")
-            )
-        })
+        .filter(|criterion| is_mechanical(criterion))
         .filter(|criterion| {
             !governor_results(history, since)
                 .iter()
@@ -439,10 +434,7 @@ async fn accept(
     ran: usize,
 ) -> Result<Option<TickReport>, OrchestratorError> {
     let deps = &orchestrator.deps;
-    let Some(product_manager) = team
-        .active_agents()
-        .find(|agent| Role::from(agent.role) == Role::ProductManager)
-    else {
+    let Some(product_manager) = requests::product_manager(team) else {
         return Ok(ran_criteria(row, ran));
     };
     let contract = deps.tools.files.read_contract(&row.task_id)?;
@@ -492,7 +484,7 @@ pub(super) fn ran_criteria(row: &TaskProjection, ran: usize) -> Option<TickRepor
 
 /// The governor's context for `verifying -> accepted`, so that every step judges on exactly what
 /// the governor will.
-fn context(
+pub(super) fn context(
     deps: &OrchestratorDeps,
     team: &Team,
     task_id: &TaskId,
@@ -544,8 +536,16 @@ pub(super) fn governor_results(history: &[FarikEvent], since: u64) -> Vec<Criter
     results
 }
 
-fn is_human(criterion: &ExitCriterion) -> bool {
+pub(super) fn is_human(criterion: &ExitCriterion) -> bool {
     wire_method(&criterion.verification) == Some("human")
+}
+
+/// A `command`, `test`, or `artifact` criterion: one Farik runs itself.
+pub(super) fn is_mechanical(criterion: &ExitCriterion) -> bool {
+    matches!(
+        wire_method(&criterion.verification),
+        Some("command" | "test" | "artifact")
+    )
 }
 
 /// Every event about the task, oldest first.
