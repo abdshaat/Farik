@@ -7,6 +7,7 @@ use farik_core::contract::{
     ExitCriterion, Role, TaskContract, TaskId, TaskKind, TaskStatus, VerificationWire,
 };
 use farik_core::governor::done::{CriterionResult, RunBy};
+use farik_core::governor::gates::fits_the_open_sprint;
 use farik_core::governor::readiness::{ReadinessRule, evaluate_readiness};
 use farik_core::governor::transition::TransitionRequest;
 use farik_core::governor::transition_table::TransitionActor;
@@ -296,7 +297,8 @@ pub(super) fn is_epic(row: &TaskProjection) -> bool {
 /// Rule 8 for an epic `ready`: with an active Scrum Master, assigned to it on its behalf with the
 /// Product Manager as reviewer; without one, to the Product Manager on its behalf with no reviewer
 /// (the human reviews it). No session, and only when the assignee holds fewer open tasks than the
-/// WIP limit, counted as the assignment gate counts them; otherwise passed over, so that the run
+/// WIP limit, counted as the assignment gate counts them, and the open sprint, if any, holds the
+/// epic and can pay for it, by the gate's own predicates; otherwise passed over, so that the run
 /// idles rather than being refused on every tick.
 pub(super) fn ready_epic(
     deps: &OrchestratorDeps,
@@ -316,20 +318,26 @@ pub(super) fn ready_epic(
     {
         return Ok(None);
     }
-    let outcome = deps.tools.transitions.request(
-        &TransitionRequest {
-            task_id: row.task_id.clone(),
-            to: TaskStatus::Assigned,
-            actor,
-            agent_id: Some(assignee.id.to_string()),
-        },
-        &TransitionAsk {
-            assignee_id: Some(assignee.id.to_string()),
-            reviewer_id: reviewer,
-            ..TransitionAsk::default()
-        },
-        team,
-    )?;
+    let request = TransitionRequest {
+        task_id: row.task_id.clone(),
+        to: TaskStatus::Assigned,
+        actor,
+        agent_id: Some(assignee.id.to_string()),
+    };
+    let ask = TransitionAsk {
+        assignee_id: Some(assignee.id.to_string()),
+        reviewer_id: reviewer,
+        ..TransitionAsk::default()
+    };
+    let contract = deps.tools.files.read_contract(&row.task_id)?;
+    let context = deps.tools.transitions.context(&request, &ask, team)?;
+    if !context
+        .assignment
+        .is_some_and(|assignment| fits_the_open_sprint(&contract, &assignment))
+    {
+        return Ok(None);
+    }
+    let outcome = deps.tools.transitions.request(&request, &ask, team)?;
     Ok(match outcome {
         TransitionOutcome::Moved(_) => Some(TickReport::Acted {
             task_id: row.task_id.clone(),
@@ -913,8 +921,8 @@ mod tests {
         crate::tools::call_tool(&harness.project.context(agent, task), tool, input).await
     }
 
-    /// The failing write the tests seed: a budget of 50 dollars, over the 20 the team's day has and
-    /// over a cap of 5 dollars where a test sets one.
+    /// The failing write the tests seed: a budget of 50 dollars, over a cap of 5 dollars where a
+    /// test sets one.
     async fn write_over_the_cap(harness: &Harness) {
         call(
             harness,
@@ -1357,6 +1365,34 @@ mod tests {
 
     #[tokio::test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn refines_a_contract_larger_than_the_open_sprints_remainder_once() {
+        let harness = Harness::new("req-sprint-left", |_| {});
+        // S1 has one dollar and holds nothing; the contract refined meanwhile asks for five.
+        harness.project.open_sprint("S1", Some(1.0), &[]);
+        let adapter = harness.recorded(vec![refine_writes_task_frk_1()]);
+        let orchestrator = harness.orchestrator(adapter.clone());
+        refining(&harness, &orchestrator, RequestSize::Small).await;
+        orchestrator.tick().await.expect("the contract is written");
+
+        orchestrator.tick().await.expect("the tick runs");
+
+        assert_eq!(harness.row("FRK-1").status, TaskStatus::Ready);
+        let evaluated = last(&harness, EventKind::ContractEvaluated).expect("the judgement");
+        assert!(
+            matches!(&evaluated.body, EventBody::ContractEvaluated(body) if body.passed),
+            "{:?}",
+            evaluated.body
+        );
+        let refines = adapter
+            .started()
+            .iter()
+            .filter(|spec| spec.purpose == SessionPurpose::Refine)
+            .count();
+        assert_eq!(refines, 1);
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn returns_a_failing_contract_with_its_failures() {
         let harness = Harness::new("req-failing", |wire| {
             wire["rules"]["max_task_budget_usd"] = json!(5);
@@ -1408,7 +1444,9 @@ mod tests {
     #[tokio::test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn judges_a_contract_written_again_after_a_failure() {
-        let harness = Harness::new("req-judges-again", |_| {});
+        let harness = Harness::new("req-judges-again", |wire| {
+            wire["rules"]["max_task_budget_usd"] = json!(5);
+        });
         let adapter = harness.recorded(Vec::new());
         let orchestrator = harness.orchestrator(adapter.clone());
         refining(&harness, &orchestrator, RequestSize::Small).await;
@@ -1540,7 +1578,9 @@ mod tests {
     #[tokio::test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn escalates_a_contract_that_failed_three_times() {
-        let harness = Harness::new("req-three-failures", |_| {});
+        let harness = Harness::new("req-three-failures", |wire| {
+            wire["rules"]["max_task_budget_usd"] = json!(5);
+        });
         let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
         refining(&harness, &orchestrator, RequestSize::Small).await;
         for _ in 0..3 {

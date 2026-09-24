@@ -149,7 +149,7 @@ Files: `cost.rs`, `transitions.rs`, `gates.rs`, `orchestrator/rules.rs`, `orches
 - `lets_a_session_finish_past_the_sprint_budget` — a session whose reported usage crosses S1's budget: it is not aborted (`session.ended` reason `completed`).
 - The transitions test that pinned the daily stand-in (`remaining_sprint_budget_usd` 17.5, and 0 on a spent day, transitions.rs ~1748) is changed to the sprint's remainder; `lists_every_tool_with_its_tier` (tools.rs) and the MCP server's tool count (21) change with the new tool.
 
-- [ ] `feat(runtime): assign within the open sprint and within its budget`
+- [x] `feat(runtime): assign within the open sprint and within its budget`
 
 ### Task 6: metrics per sprint
 

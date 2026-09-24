@@ -406,10 +406,18 @@ impl Transitions {
             &SessionLedger::default(),
             now,
         )?;
-        let day_left = (budget.day_max_usd - budget.day_spent_usd).max(0.0);
+        let open_sprint = self.projections.open_sprint()?.map(|open| open.sprint_id);
+        // Infinite with no sprint open or one with no budget (ADR 0015).
+        let sprint_left = (budget.sprint_max_usd - budget.sprint_spent_usd).max(0.0);
 
         let readiness = ReadinessContext {
-            remaining_sprint_budget_usd: day_left,
+            // The contract's own sprint (5.3), and none for a contract in no sprint: what goes into
+            // a sprint is checked against its budget when the sprint is planned.
+            remaining_sprint_budget_usd: if row.sprint.is_some() && row.sprint == open_sprint {
+                sprint_left
+            } else {
+                f64::INFINITY
+            },
             dependency_statuses: contract
                 .dependencies
                 .iter()
@@ -431,7 +439,8 @@ impl Transitions {
             ask,
             team,
             &board,
-            day_left,
+            row,
+            (open_sprint, sprint_left),
             dependency_states(&contract, &board),
         );
 
@@ -839,12 +848,14 @@ fn dependency_states(contract: &TaskContract, board: &[TaskProjection]) -> Vec<D
 }
 
 /// The pair an assignment would name, from the ask's ids and the team's roles, when the ask names
-/// an assignee. `requested_by` is the governor's to set from the request's actor.
+/// an assignee, with the sprint `row` and its epic are in, beside the open sprint and what is left
+/// of its budget. `requested_by` is the governor's to set from the request's actor.
 fn assignment(
     ask: &TransitionAsk,
     team: &Team,
     board: &[TaskProjection],
-    remaining_sprint_budget_usd: f64,
+    row: &TaskProjection,
+    (open_sprint, sprint_left_usd): (Option<String>, f64),
     dependencies: Vec<DependencyState>,
 ) -> Option<AssignmentInput> {
     let assignee_id = ask.assignee_id.as_deref()?;
@@ -863,7 +874,15 @@ fn assignment(
         reviewer_role,
         assignee_open_tasks: open_tasks(board, assignee_id),
         wip_limit: u32::try_from(team.policy.wip_limit_per_agent).unwrap_or(u32::MAX),
-        remaining_sprint_budget_usd,
+        remaining_sprint_budget_usd: sprint_left_usd,
+        open_sprint,
+        task_sprint: row.sprint.clone(),
+        parent_sprint: row.parent.as_ref().map(|parent| {
+            board
+                .iter()
+                .find(|epic| &epic.task_id == parent)
+                .and_then(|epic| epic.sprint.clone())
+        }),
         dependencies,
     })
 }
@@ -1129,6 +1148,7 @@ mod tests {
     use farik_core::contract::fixtures::a_contract_wire;
     use farik_core::contract::{Role, TaskStatus, validate_contract};
     use farik_core::governor::gates::{Blocker, DependencyState, Rejection};
+    use farik_core::governor::readiness::{ReadinessRule, evaluate_readiness};
     use farik_core::governor::transition::TransitionRefusal;
     use farik_core::governor::transition::TransitionRequest;
     use farik_core::governor::transition_table::GateId;
@@ -1263,6 +1283,30 @@ mod tests {
                     "cost_usd": usd
                 },
             }));
+        }
+
+        /// Sprint `sprint` open with `budget_usd` and holding `tasks`, as the log records starting
+        /// and planning it.
+        fn open_sprint(&self, sprint: &str, budget_usd: f64, tasks: &[&str]) {
+            for (kind, body) in [
+                (
+                    "sprint.started",
+                    json!({ "sprint_id": sprint, "budget_usd": budget_usd, "started_by": "human" }),
+                ),
+                (
+                    "sprint.planned",
+                    json!({ "sprint_id": sprint, "task_ids": tasks, "planned_by": "maya" }),
+                ),
+            ] {
+                self.append_wire(&json!({
+                    "seq": 1,
+                    "recorded_at": at(9).to_rfc3339(),
+                    "team_id": "farik",
+                    "project_id": "farik",
+                    "kind": kind,
+                    "body": body,
+                }));
+            }
         }
 
         fn append_wire(&self, wire: &Value) -> FarikEvent {
@@ -1536,7 +1580,9 @@ mod tests {
         assert_eq!(assignment.assignee_open_tasks, 1);
         assert_eq!(assignment.wip_limit, 2);
         assert!(!assignment.has_active_scrum_master);
-        assert!((assignment.remaining_sprint_budget_usd - 20.0).abs() < 1e-9);
+        // No sprint is open, so none bounds it, whatever the day has left.
+        let left = assignment.remaining_sprint_budget_usd;
+        assert!(left.is_infinite() && left > 0.0, "{left}");
     }
 
     #[test]
@@ -1710,7 +1756,7 @@ mod tests {
 
     #[test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
-    fn reads_the_epics_remaining_budget_and_the_days_remainder() {
+    fn reads_the_epics_remaining_budget_and_the_sprints_remainder() {
         let project = Project::new("epic-budget", a_team(|_| {}), at(12));
         project.file("FRK-1", |wire| {
             wire["kind"] = json!("epic");
@@ -1745,16 +1791,68 @@ mod tests {
             parent.allowed_paths,
             vec!["src/**".to_string(), "docs/**".to_string()]
         );
+        // In no sprint, the child is held to none, whatever the day has left.
+        let left = context.readiness.remaining_sprint_budget_usd;
+        assert!(left.is_infinite() && left > 0.0, "{left}");
+
+        // In S1, to what S1 has left: twenty, less the 2.50 spent in it.
+        project.open_sprint("S1", 20.0, &["FRK-1", "FRK-2"]);
+        project.spent("FRK-1", 2.5);
+        let context = project.context(&request, &TransitionAsk::default());
         assert!((context.readiness.remaining_sprint_budget_usd - 17.5).abs() < 1e-9);
 
-        // A day spent past its budget leaves nothing, not less than nothing.
-        let poor = a_team(|wire| wire["budgets"]["daily_usd"] = json!(1));
-        let context = project
-            .transitions
-            .context(&request, &TransitionAsk::default(), &poor)
-            .expect("the context reads");
+        // A sprint spent past its budget leaves nothing, not less than nothing.
+        project.spent("FRK-1", 30.0);
+        let context = project.context(&request, &TransitionAsk::default());
         assert!(context.readiness.remaining_sprint_budget_usd.abs() < 1e-12);
         assert!(context.readiness.remaining_sprint_budget_usd >= 0.0);
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn checks_readiness_against_the_contracts_own_sprint() {
+        let project = Project::new("readiness-sprint", a_team(|_| {}), at(12));
+        project.file("FRK-1", |wire| {
+            wire["kind"] = json!("epic");
+            wire["budget"]["max_cost_usd"] = json!(12);
+        });
+        project.created_under("FRK-1", "in_progress", "epic", None);
+        project.file("FRK-2", |wire| {
+            wire["parent"] = json!("FRK-1");
+            wire["budget"]["max_cost_usd"] = json!(3);
+        });
+        project.created_under("FRK-2", "refining", "task", Some("FRK-1"));
+        project.file("FRK-3", |wire| wire["budget"]["max_cost_usd"] = json!(3));
+        project.created("FRK-3", "refining");
+        project.open_sprint("S1", 10.0, &["FRK-1", "FRK-2"]);
+        project.spent("FRK-1", 8.0);
+        let refuses_on_the_sprint = |task: &str, team: &Team| {
+            let context = project
+                .transitions
+                .context(
+                    &a_request(task, TaskStatus::Ready, TransitionActor::Governor, None),
+                    &TransitionAsk::default(),
+                    team,
+                )
+                .expect("the context reads");
+            let contract = project
+                .files
+                .read_contract(&task.parse().expect("a task id"))
+                .expect("the file reads");
+            evaluate_readiness(&contract, &context.readiness)
+                .err()
+                .unwrap_or_default()
+                .iter()
+                .any(|failure| failure.rule == ReadinessRule::BudgetWithinSprint)
+        };
+
+        // The breakdown's task is in S1, which has two dollars left.
+        assert!(refuses_on_the_sprint("FRK-2", &project.team));
+        // A contract in no sprint is not held to the open one's budget.
+        assert!(!refuses_on_the_sprint("FRK-3", &project.team));
+        // Nor to what is left of the day, which `spent` enforces instead.
+        let poor = a_team(|wire| wire["budgets"]["daily_usd"] = json!(9));
+        assert!(!refuses_on_the_sprint("FRK-3", &poor));
     }
 
     #[test]
@@ -2474,7 +2572,11 @@ mod tests {
     #[test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
     fn escalates_on_the_third_readiness_failure() {
-        let project = Project::new("readiness-escalation", a_team(|_| {}), at(12));
+        let project = Project::new(
+            "readiness-escalation",
+            a_team(|wire| wire["rules"]["max_task_budget_usd"] = json!(5)),
+            at(12),
+        );
         // Fifty dollars is past the team's five-dollar task maximum, so the contract fails.
         project.file("FRK-1", |wire| wire["budget"]["max_cost_usd"] = json!(50));
         project.created("FRK-1", "refining");

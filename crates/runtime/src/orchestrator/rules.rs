@@ -7,6 +7,7 @@ use std::sync::Arc;
 use farik_core::branch::task_branch;
 use farik_core::budget::{BudgetScope, SessionLedger, check_budgets};
 use farik_core::contract::{Role, TaskContract, TaskId, TaskStatus};
+use farik_core::governor::gates::fits_the_open_sprint;
 use farik_core::governor::transition::TransitionRequest;
 use farik_core::governor::transition_table::TransitionActor;
 use farik_core::team::{Agent, Team};
@@ -610,8 +611,8 @@ pub(super) fn active<'a>(team: &'a Team, agent_id: Option<&str>) -> Option<&'a A
 }
 
 /// Rule 8: a standalone task that is `ready` gets a plan session of its assigner (the active Scrum
-/// Master, else the Product Manager), when an agent of its assignee role has room for it and every
-/// dependency is accepted and integrated.
+/// Master, else the Product Manager), when an agent of its assignee role has room for it, the open
+/// sprint, if any, holds it and can pay for it, and every dependency is accepted and integrated.
 async fn ready(
     deps: &OrchestratorDeps,
     team: &Team,
@@ -643,7 +644,7 @@ async fn ready(
     let Some(first) = assignees.first() else {
         return Ok(None);
     };
-    if !dependencies_integrated(deps, team, &contract, assigner, first)? {
+    if !assignable(deps, team, &contract, assigner, first)? {
         return Ok(None);
     }
     let reviewers: Vec<String> = team
@@ -684,18 +685,17 @@ pub(super) fn has_room(team: &Team, board: &[TaskProjection], agent: &Agent) -> 
         < u64::try_from(team.policy.wip_limit_per_agent).unwrap_or(0)
 }
 
-/// Whether every dependency of the task is accepted and integrated, as the governor's context for
-/// the assignment reads them.
-fn dependencies_integrated(
+/// Whether the governor would let `candidate` be assigned the task on the rules the orchestrator
+/// checks before asking, read from the governor's own context for the assignment: the open sprint's
+/// membership and budget, by the gate's own predicates, and every dependency accepted and
+/// integrated. A task that fails them is passed over, so that it is not asked about on every tick.
+fn assignable(
     deps: &OrchestratorDeps,
     team: &Team,
     contract: &TaskContract,
     assigner: &Agent,
     candidate: &str,
 ) -> Result<bool, OrchestratorError> {
-    if contract.dependencies.is_empty() {
-        return Ok(true);
-    }
     let request = TransitionRequest {
         task_id: contract.id.clone(),
         to: TaskStatus::Assigned,
@@ -710,12 +710,17 @@ fn dependencies_integrated(
         assignee_id: Some(candidate.to_string()),
         ..TransitionAsk::default()
     };
-    let context = deps.tools.transitions.context(&request, &ask, team)?;
-    let states = context
+    let Some(assignment) = deps
+        .tools
+        .transitions
+        .context(&request, &ask, team)?
         .assignment
-        .map(|assignment| assignment.dependencies)
-        .unwrap_or_default();
-    Ok(states.len() == contract.dependencies.len()
+    else {
+        return Ok(false);
+    };
+    let states = &assignment.dependencies;
+    Ok(fits_the_open_sprint(contract, &assignment)
+        && states.len() == contract.dependencies.len()
         && states
             .iter()
             .all(|state| state.status == TaskStatus::Accepted && state.integrated))
@@ -3632,5 +3637,117 @@ mod tests {
             .filter(|spec| spec.task_id.is_none())
             .count();
         assert_eq!(planning, 1);
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn assigns_only_the_open_sprints_tasks() {
+        let harness = Harness::new("orch-sprint-assign", |_| {});
+        harness.ready("FRK-1");
+        harness.ready("FRK-2");
+        harness.open_sprint("S1", &["FRK-2"]);
+        let adapter = harness.recorded(vec![reads_a_file()]);
+        let orchestrator = harness.orchestrator(adapter.clone());
+
+        orchestrator.tick().await.expect("the tick runs");
+
+        let started = adapter.started();
+        assert_eq!(started.len(), 1, "{started:?}");
+        assert_eq!(
+            (
+                started[0].purpose,
+                started[0].task_id.as_ref().map(|task| task.as_str())
+            ),
+            (SessionPurpose::Plan, Some("FRK-2"))
+        );
+        assert!(
+            started[0].initial_prompt.contains("FRK-2")
+                && !started[0].initial_prompt.contains("FRK-1"),
+            "{}",
+            started[0].initial_prompt
+        );
+        assert!(harness.events(&[EventKind::TransitionRefused]).is_empty());
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn assigns_the_backlog_without_a_sprint() {
+        let harness = Harness::new("orch-sprint-none", |_| {});
+        harness.ready("FRK-1");
+        let adapter = harness.recorded(vec![reads_a_file()]);
+        let orchestrator = harness.orchestrator(adapter.clone());
+
+        orchestrator.tick().await.expect("the tick runs");
+
+        let started = adapter.started();
+        assert_eq!(started.len(), 1, "{started:?}");
+        assert_eq!(
+            (
+                started[0].purpose,
+                started[0].task_id.as_ref().map(|task| task.as_str())
+            ),
+            (SessionPurpose::Plan, Some("FRK-1"))
+        );
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn stops_assigning_once_the_sprint_budget_is_spent() {
+        let harness = Harness::new("orch-sprint-spent", |_| {});
+        harness.in_progress("FRK-1", "dev-a", "dev-b");
+        harness.ready("FRK-2");
+        harness.accepted("FRK-3");
+        harness
+            .project
+            .open_sprint("S1", Some(5.0), &["FRK-1", "FRK-2", "FRK-3"]);
+        // Spent in S1 by a task already accepted, so that neither FRK-1's nor FRK-2's own budget
+        // is what stops anything.
+        harness.spent(Some("FRK-3"), "s-0", 5.0);
+        let adapter = harness.recorded(vec![implement_stops_early()]);
+        let orchestrator = harness.orchestrator(adapter.clone());
+
+        let scoped = orchestrator
+            .tick_within(&TickScope {
+                task_id: Some("FRK-2".parse().expect("a task id")),
+                ..TickScope::default()
+            })
+            .await
+            .expect("the tick runs");
+        assert!(matches!(scoped, TickReport::Idle { .. }), "{scoped:?}");
+        assert!(adapter.started().is_empty(), "{:?}", adapter.started());
+        assert_eq!(harness.row("FRK-2").status, TaskStatus::Ready);
+        assert!(harness.events(&[EventKind::TransitionRefused]).is_empty());
+
+        let report = orchestrator.tick().await.expect("the tick runs");
+        assert_eq!(acted_on(&report), Some("FRK-1"), "{report:?}");
+        let started = adapter.started();
+        assert_eq!(started.len(), 1, "{started:?}");
+        assert_eq!(started[0].purpose, SessionPurpose::Implement);
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn lets_a_session_finish_past_the_sprint_budget() {
+        let harness = Harness::new("orch-sprint-finish", |_| {});
+        harness.in_progress("FRK-1", "dev-a", "dev-b");
+        harness.project.open_sprint("S1", Some(0.001), &["FRK-1"]);
+        let adapter = Arc::new(UsageThenWaitAdapter::completing(a_thousand_tokens()));
+        let orchestrator = harness.orchestrator(adapter.clone());
+
+        tokio::time::timeout(Duration::from_secs(10), orchestrator.tick())
+            .await
+            .expect("the session ends")
+            .expect("the tick runs");
+
+        assert_eq!(adapter.aborts(), 0);
+        assert_eq!(
+            scopes_exhausted(&harness),
+            vec![BudgetExhaustedBodyScope::SprintUsd]
+        );
+        let ended = harness.events(&[EventKind::SessionEnded]);
+        assert!(matches!(
+            &ended.last().expect("an end").body,
+            EventBody::SessionEnded(body) if body.reason == SessionEndedBodyReason::Completed
+        ));
     }
 }

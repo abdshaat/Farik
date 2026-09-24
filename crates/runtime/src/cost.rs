@@ -179,7 +179,7 @@ pub fn unpriced_models(
 /// The session limits are the role's defaults with each field `team.budgets.session` sets put in
 /// its place. The task's come from its contract, and a session with no task is bounded by none. The
 /// day is the UTC date of `now`, and a team that sets no daily budget has an unbounded day (ADR
-/// 0015). The sprint's is unbounded until sprints exist.
+/// 0015). The sprint's is the open sprint's, and unbounded with none open or one with no budget.
 ///
 /// # Errors
 ///
@@ -220,6 +220,13 @@ pub fn budget_state(
         }
     };
     let day = spent_by(projections, CostScope::Day, &now.date_naive().to_string())?;
+    let (sprint_spent_usd, sprint_max_usd) = match projections.open_sprint()? {
+        None => (0.0, f64::INFINITY),
+        Some(open) => (
+            spent_by(projections, CostScope::Sprint, &open.sprint_id)?.map_or(0.0, |row| row.usd),
+            open.budget_usd.unwrap_or(f64::INFINITY),
+        ),
+    };
     Ok(BudgetState {
         session: *session,
         session_limits,
@@ -227,8 +234,8 @@ pub fn budget_state(
         task_max_usd,
         task_sessions,
         task_max_sessions,
-        sprint_spent_usd: 0.0,
-        sprint_max_usd: f64::INFINITY,
+        sprint_spent_usd,
+        sprint_max_usd,
         day_spent_usd: day.map_or(0.0, |row| row.usd),
         day_max_usd: team.budgets.daily_usd.unwrap_or(f64::INFINITY),
     })
@@ -350,10 +357,10 @@ mod tests {
     use farik_core::team::fixtures::{a_team_wire, an_agent_wire};
     use farik_core::team::{Team, validate_team};
     use farik_protocol::clock::FixedClock;
-    use farik_protocol::event::fixtures::a_new_event;
+    use farik_protocol::event::fixtures::{a_new_event, an_event_wire};
     use farik_protocol::event::{
         BudgetExhaustedBodyConsequence, BudgetExhaustedBodyScope, CostRecordedBodyPurpose,
-        EventBody, EventIds, EventKind, FarikEvent,
+        EventBody, EventIds, EventKind, FarikEvent, NewEvent, event_from_value,
     };
     use farik_store::{
         CostScope, EventLog, EventQuery, IN_MEMORY, Projections, open_event_log, open_projections,
@@ -733,6 +740,46 @@ mod tests {
         assert!(close(read.day_max_usd, 20.0));
         assert!(read.sprint_max_usd.is_infinite() && read.sprint_max_usd > 0.0);
         assert!(close(read.sprint_spent_usd, 0.0));
+    }
+
+    #[test]
+    fn fills_the_sprint_budget_from_the_open_sprint() {
+        let (log, projections) = a_board();
+        filed(&log, &projections, "FRK-1");
+        let team = a_team(None);
+        let none = state(&projections, &team, Role::SoftwareDeveloper, None);
+        assert!(none.sprint_max_usd.is_infinite() && none.sprint_max_usd > 0.0);
+        assert!(close(none.sprint_spent_usd, 0.0));
+
+        // S1 open with ten dollars, holding FRK-1.
+        let mut started = an_event_wire(EventKind::SprintStarted);
+        started["body"]["budget_usd"] = json!(10.0);
+        let started = event_from_value(&started).expect("the fixture is schema-valid");
+        let started = NewEvent {
+            recorded_at: started.envelope.recorded_at,
+            ids: started.envelope.ids,
+            body: started.body,
+        };
+        for event in [started, a_new_event(EventKind::SprintPlanned)] {
+            let appended = log.append(&event).expect("appends");
+            projections.apply(&appended).expect("projects");
+        }
+        record_session_cost(
+            &log,
+            &projections,
+            &source(ids(Some("FRK-1"), "a")),
+            &usage(4_000_000, 0),
+            &prices(),
+            &clock(),
+        )
+        .expect("recorded");
+        let read = state(&projections, &team, Role::SoftwareDeveloper, None);
+        assert!(close(read.sprint_max_usd, 10.0), "{}", read.sprint_max_usd);
+        assert!(
+            close(read.sprint_spent_usd, 4.0),
+            "{}",
+            read.sprint_spent_usd
+        );
     }
 
     #[test]

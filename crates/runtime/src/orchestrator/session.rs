@@ -355,10 +355,14 @@ async fn read_to_end(
                 let after = state(&ledger)?;
                 let crossed =
                     record_exhaustion(&tools.log, &tools.projections, &before, &after, ids, clock)?;
-                if crossed
-                    .iter()
-                    .any(|exhausted| exhausted.scope != BudgetScope::TaskSessions)
-                {
+                // A task's last session and in-progress work past the sprint's budget may finish
+                // (5.5): what those stop is the next session and the next assignment.
+                if crossed.iter().any(|exhausted| {
+                    !matches!(
+                        exhausted.scope,
+                        BudgetScope::TaskSessions | BudgetScope::SprintUsd
+                    )
+                }) {
                     handle.abort()?;
                 }
             }
