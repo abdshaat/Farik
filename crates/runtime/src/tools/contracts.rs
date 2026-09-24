@@ -142,15 +142,17 @@ pub(super) fn triage(call: &Call<'_>, input: &TriageInput) -> Result<Value, Tool
     )
 }
 
-/// Records the Scrum Master's Definition of Ready judgment of the session's contract (5.3):
-/// whether it fits its budget and whether its criteria would detect the failure its intent
-/// worries about, with the reason. Only the Scrum Master judges, and only a task `refining`.
+/// Records the Scrum Master's judgment of the session's contract against the Definition of
+/// Ready's judgment rules (5.3): whether it fits its budget and whether its criteria would detect
+/// the failure its intent worries about, with the reason. Only the Scrum Master judges, and only
+/// a task `refining`.
 pub(super) fn record_judgment(
     call: &Call<'_>,
     input: &RecordJudgmentInput,
 ) -> Result<Value, ToolError> {
     let task = call.task()?;
-    if input.reason.trim().is_empty() {
+    let reason = input.reason.trim();
+    if reason.is_empty() {
         return Err(Refusal::BlankReason.into());
     }
     let (_, row) = call.contract(task)?;
@@ -167,7 +169,7 @@ pub(super) fn record_judgment(
             judged_by: call.agent_id().to_string(),
             fits_budget: input.fits_budget,
             criteria_detect_failure: input.criteria_detect_failure,
-            reason: input.reason.trim().to_string(),
+            reason: reason.to_string(),
         }),
     )?;
     Ok(json!({ "task_id": task.as_str(), "seq": event.envelope.seq }))

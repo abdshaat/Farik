@@ -35,8 +35,8 @@ pub(crate) enum Refusal {
         has_parent: bool,
         triaged: bool,
     },
-    /// This caller may not judge this contract now: only the Scrum Master, on a task `refining`
-    /// (5.3).
+    /// This caller may not judge this contract now: only the Scrum Master does, on a task
+    /// `refining` (5.3).
     JudgmentNotAllowed { role: Role, status: TaskStatus },
     /// The caller is neither a contract-writing role nor the task's assignee or reviewer.
     NotAContractWriter { agent_id: String, task_id: String },
@@ -279,16 +279,17 @@ fn triage(role: Role, status: TaskStatus, has_parent: bool, triaged: bool) -> St
 }
 
 fn judgment(role: Role, status: TaskStatus) -> String {
-    if role != Role::ScrumMaster {
-        return format!(
+    if role == Role::ScrumMaster {
+        format!(
+            "the task is {status}, and the Scrum Master judges a contract only while it is \
+             refining (5.3)"
+        )
+    } else {
+        format!(
             "role {role} does not judge a contract: the Scrum Master does, on a task refining \
              (5.3)"
-        );
+        )
     }
-    format!(
-        "the task is {status}, and the Scrum Master judges a contract only while it is refining \
-         (5.3)"
-    )
 }
 
 fn command(refusal: &CommandRefusal) -> (&'static str, String) {

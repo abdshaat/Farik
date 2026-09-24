@@ -1014,6 +1014,7 @@ mod tests {
             (EventKind::CriteriaUpdated, "updated_by"),
             (EventKind::TaskTransitioned, "requested_by"),
             (EventKind::TransitionRefused, "requested_by"),
+            (EventKind::ContractJudged, "judged_by"),
             (EventKind::CriterionRecorded, "recorded_by"),
             (EventKind::NoteWritten, "written_by"),
             (EventKind::ReviewRecorded, "reviewer"),
