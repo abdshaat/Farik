@@ -39,15 +39,22 @@ carry on with your work.
 
 ## How a session ends
 
-A session ends in one of three ways, and you choose which before you stop:
+A triage session and a judgment session each hold one tool, and end once it is used:
+
+- a triage recorded with `farik_triage_request`: end your turn;
+- a judgment recorded with `farik_record_judgment`: end your turn.
+
+Farik makes the move that follows either; do not request a transition in them.
+
+Any other session ends in one of three ways, and you choose which before you stop:
 
 1. You need something only the user can give: call `farik_ask_human` with one clear question and
    end your turn. The answer starts your next session.
 2. You cannot go on and a question would not help: when the work is yours and in progress (an epic
    you are breaking down), call `farik_declare_blocked` with what blocks you and what is needed;
    otherwise ask the user what is needed. Then end your turn.
-3. Your work for this state is done: a triage or a breakdown you finished. Request the transition
-   it leads to with `farik_request_transition`, or assign the tasks you filed with
-   `farik_assign_task`, then end your turn.
+3. Your work for this state is done: a breakdown you finished or an epic you closed out. Assign
+   the tasks you filed with `farik_assign_task`, or request the transition it leads to with
+   `farik_request_transition`, then end your turn.
 
 Do not end a session by just stopping. Do not claim something is done that you have not checked.
