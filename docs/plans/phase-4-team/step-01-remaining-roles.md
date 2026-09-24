@@ -113,7 +113,7 @@ Consumes: nothing
 
 - `gives_each_role_the_default_tiers_of_the_spec_table` — changed: the Architect holds `read, write_workspace, execute, network, git_local` and the Marketing Specialist `read, network, write_workspace, git_local`, each in that order; the others unchanged.
 
-- [ ] `feat(core): let the architect and the marketing specialist commit their documents`
+- [x] `feat(core): let the architect and the marketing specialist commit their documents`
 
 ### Task 3: `contract.judged` and `farik_record_judgment`
 

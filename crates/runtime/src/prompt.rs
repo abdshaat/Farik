@@ -712,7 +712,10 @@ mod tests {
         let shell = "The shell is `farik_exec`, and git is the `farik_git_*` tools: the program's \
                      own shell tool is never enabled, and `farik_exec` refuses a command that runs \
                      git.";
-        let mut inputs = Inputs::new(Role::Architect, "architect");
+        let mut inputs = Inputs::new(Role::SoftwareDeveloper, "software_developer");
+        let mut wire = an_agent_wire("maya-chen", "software_developer");
+        wire["revokes"] = json!(["git_local"]);
+        inputs.agent = serde_json::from_value(wire).expect("the fixture is an agent");
         let prompt = assembled(&inputs.full(SessionPurpose::Implement));
         let tools = section(&prompt, "Your tools");
         assert!(tools.contains("\n- farik_exec (execute): "), "{tools}");

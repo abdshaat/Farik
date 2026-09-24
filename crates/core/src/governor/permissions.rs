@@ -39,8 +39,15 @@ pub fn default_tiers(role: Role) -> &'static [PermissionTier] {
     use PermissionTier as T;
     match role {
         Role::SoftwareDeveloper => &[T::Read, T::WriteWorkspace, T::Execute, T::GitLocal],
-        Role::Architect => &[T::Read, T::WriteWorkspace, T::Execute, T::Network],
-        Role::ProductManager | Role::MarketingSpecialist => &[T::Read, T::Network],
+        Role::Architect => &[
+            T::Read,
+            T::WriteWorkspace,
+            T::Execute,
+            T::Network,
+            T::GitLocal,
+        ],
+        Role::ProductManager => &[T::Read, T::Network],
+        Role::MarketingSpecialist => &[T::Read, T::Network, T::WriteWorkspace, T::GitLocal],
         Role::ScrumMaster | Role::Human => &[T::Read],
     }
 }
@@ -372,10 +379,19 @@ mod tests {
             ),
             (
                 Role::Architect,
-                vec![T::Read, T::WriteWorkspace, T::Execute, T::Network],
+                vec![
+                    T::Read,
+                    T::WriteWorkspace,
+                    T::Execute,
+                    T::Network,
+                    T::GitLocal,
+                ],
             ),
             (Role::ProductManager, vec![T::Read, T::Network]),
-            (Role::MarketingSpecialist, vec![T::Read, T::Network]),
+            (
+                Role::MarketingSpecialist,
+                vec![T::Read, T::Network, T::WriteWorkspace, T::GitLocal],
+            ),
             (Role::ScrumMaster, vec![T::Read]),
             (Role::Human, vec![T::Read]),
         ];
