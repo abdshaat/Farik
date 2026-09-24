@@ -20,7 +20,7 @@ use farik_protocol::clock::MovableClock;
 use farik_protocol::event::{EventBody, EventKind, SessionEndedBodyReason};
 use farik_runtime::recorded::fixtures::{
     UsageThenWaitAdapter, accept_frk_1, implement_finishes_frk_1, plan_assigns_frk_1,
-    plan_sprint_frk_1, refine_writes_task_frk_1, reply_to_a_mention, review_writes_note,
+    planning_ceremony_frk_1, refine_writes_task_frk_1, reply_to_a_mention, review_writes_note,
     tool_runner,
 };
 use farik_runtime::sleep::Sleeper;
@@ -656,7 +656,7 @@ fn prints_a_sprint_line_for_a_planning_session() {
     assert_eq!(started.code, 0, "{}", started.err);
 
     let ran = run_with(&repository.path, &["plan"], |io| {
-        io.engine = recorded(vec![plan_sprint_frk_1(), plan_assigns_frk_1()]);
+        io.engine = recorded(vec![planning_ceremony_frk_1(), plan_assigns_frk_1()]);
     });
 
     assert_eq!(ran.code, 0, "{}\n{}", ran.out, ran.err);

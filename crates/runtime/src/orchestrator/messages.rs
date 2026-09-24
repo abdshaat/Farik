@@ -1,14 +1,18 @@
 //! The first user message of each kind of session: what it is about, in words the agent reads
 //! before anything else.
 
+use chrono::{DateTime, Utc};
 use farik_core::branch::task_branch;
 use farik_core::contract::{TaskContract, TaskKind, Verification};
 use farik_core::governor::done::CriterionResult;
 use farik_core::team::Agent;
-use farik_protocol::event::{EventBody, FarikEvent, HumanAcceptedBodySubject};
+use farik_protocol::event::{
+    BudgetExhaustedBodyScope, EventBody, FarikEvent, HumanAcceptedBodySubject,
+};
 use farik_store::TaskProjection;
 use farik_store::git::HeadSummary;
 
+use crate::ceremonies::OpenEscalation;
 use crate::prompt::untrusted_block;
 
 /// How much of a note a first message carries.
@@ -220,12 +224,27 @@ pub(super) fn plan_message(
     )
 }
 
-/// The sprint's planning session's message: the sprint, its budget left or "no budget", and each
-/// candidate's id, kind, most it may cost, and title, the titles being an agent's words.
-pub(super) fn sprint_plan_message(
+/// What the planning ceremony's digest lists (5.9).
+pub(super) struct Digest {
+    /// Every open escalation, oldest first.
+    pub(super) escalations: Vec<OpenEscalation>,
+    /// Each `budget.exhausted` of the day's or the sprint's dollars since the previous planning,
+    /// with when it was recorded.
+    pub(super) spent: Vec<(BudgetExhaustedBodyScope, DateTime<Utc>)>,
+    /// Now, which each escalation has waited until.
+    pub(super) now: DateTime<Utc>,
+}
+
+/// The planning ceremony's message: the sprint, its budget left or "no budget", each candidate's
+/// id, kind, most it may cost, and title; the digest, each open escalation's task, title, reason,
+/// detail, and hours waiting, and each budget spent; and the last retro, when there is one. What an
+/// agent or the human wrote is untrusted text, each block cut at 16 KiB.
+pub(super) fn planning_message(
     sprint_id: &str,
     candidates: &[TaskContract],
     budget_left: Option<f64>,
+    digest: &Digest,
+    retro: Option<&str>,
 ) -> String {
     let listed = candidates
         .iter()
@@ -240,11 +259,60 @@ pub(super) fn sprint_plan_message(
         })
         .collect::<Vec<_>>()
         .join("\n");
+    let escalations = digest.escalations.iter().map(|open| {
+        format!(
+            "{} ({}): {}, {}; waiting {} hours",
+            open.task_id.as_str(),
+            open.title,
+            open.reason,
+            open.detail,
+            (digest.now - open.raised_at).num_hours()
+        )
+    });
+    let spent = digest.spent.iter().map(|(scope, at)| {
+        let whose = match scope {
+            BudgetExhaustedBodyScope::DayUsd => "the day's",
+            _ => "the sprint's",
+        };
+        format!(
+            "{whose} budget spent at {}",
+            at.format("%Y-%m-%d %H:%M UTC")
+        )
+    });
+    let facts = escalations.chain(spent).collect::<Vec<_>>().join("\n");
     format!(
         "Plan {sprint_id} with `farik_plan_sprint`, naming the tasks the team should finish in it. \
-         Its budget: {budget}. The candidates, each ready and in no sprint: {candidates}",
+         Its budget: {budget}. The candidates, each ready and in no sprint: {candidates}\nThe \
+         digest, each open escalation and each budget spent since the last planning: \
+         {digest}{retro}",
         budget = budget_left.map_or_else(|| "no budget".to_string(), |usd| format!("${usd:.2}")),
-        candidates = untrusted_block("candidates", &listed, RESULTS_CAP_BYTES),
+        candidates = untrusted_block("candidates", &listed, NOTE_CAP_BYTES),
+        digest = if facts.is_empty() {
+            "none".to_string()
+        } else {
+            untrusted_block("digest", &facts, NOTE_CAP_BYTES)
+        },
+        retro = retro.map_or_else(String::new, |text| format!(
+            "\nWhat the last retros learned, their latest part: {}",
+            untrusted_block("retro", last_bytes(text, NOTE_CAP_BYTES), NOTE_CAP_BYTES)
+        )),
+    )
+}
+
+/// The last `cap` bytes of `text` at most, starting on a character.
+fn last_bytes(text: &str, cap: usize) -> &str {
+    let mut from = text.len().saturating_sub(cap);
+    while !text.is_char_boundary(from) {
+        from += 1;
+    }
+    &text[from..]
+}
+
+/// A ceremony's first message: its facts, then the channel's summary as untrusted text.
+pub(super) fn ceremony_message(facts: &str, summary: &str) -> String {
+    format!(
+        "{facts}\nThe channel lately, oldest first: {}",
+        untrusted_block("channel", summary, NOTE_CAP_BYTES)
     )
 }
 
@@ -494,8 +562,8 @@ mod tests {
     use serde_json::{Value, json};
 
     use super::{
-        Resume, ReviewBrief, close_out_message, human_message, implement_message, refine_message,
-        review_message,
+        Digest, Resume, ReviewBrief, close_out_message, human_message, implement_message,
+        planning_message, refine_message, review_message,
     };
     use crate::tools::fixtures::at;
 
@@ -691,5 +759,26 @@ mod tests {
             human_message(&history).as_deref(),
             Some("The human, approving the contract: Keep it to one file.")
         );
+    }
+
+    #[test]
+    fn gives_the_planning_ceremony_the_end_of_the_retro() {
+        let digest = Digest {
+            escalations: Vec::new(),
+            spent: Vec::new(),
+            now: at(),
+        };
+        let retro = format!("# Retro\n{}\nkeep the tasks small", "x".repeat(20 * 1024));
+
+        let message = planning_message("S2", &[contract()], None, &digest, Some(&retro));
+
+        assert!(
+            message.contains("<untrusted source=\"retro\">"),
+            "{message}"
+        );
+        assert!(message.contains("keep the tasks small"), "{message}");
+        assert!(!message.contains("# Retro"), "{message}");
+        let without = planning_message("S2", &[contract()], None, &digest, None);
+        assert!(!without.contains("source=\"retro\""), "{without}");
     }
 }

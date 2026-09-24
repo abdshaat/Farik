@@ -1,6 +1,8 @@
 //! Farik's agent runtime: a session is started, read, talked to, and stopped through one trait
 //! (`docs/SPEC.md` section 8.2), whatever program or recording is behind it.
 
+/// The team's ceremonies: the facts each is given.
+pub mod ceremonies;
 /// The team's channel: messages, and whom they mention.
 pub mod channel;
 /// The Claude Code program as a runtime: its command line, credential, and version.

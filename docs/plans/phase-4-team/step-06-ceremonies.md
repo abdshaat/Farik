@@ -123,7 +123,7 @@ Files: `ceremonies.rs`, `orchestrator/rules.rs`, `orchestrator/messages.rs`, `pr
 - `plans_the_sprint_in_a_ceremony` — S1 open and empty: the Scrum Master's session has purpose `ceremony`, thread `planning`, tools including `farik_plan_sprint` and `farik_post_message`. Its first message holds the candidates, the open escalations, and the retro's text. After the replay, the channel holds its ceremony posts and S1 holds the planned task.
 - `plans_once_per_sprint_as_a_ceremony` (changed from step 03's) — a completed planning ceremony: no second one.
 
-- [ ] `feat(runtime): plan a sprint in a ceremony with the escalation digest`
+- [x] `feat(runtime): plan a sprint in a ceremony with the escalation digest`
 
 ### Task 3: standup
 

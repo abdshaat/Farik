@@ -5,7 +5,10 @@ use std::fmt;
 
 use farik_core::contract::{Role, TaskId, TaskStatus};
 use farik_core::sprint::{Sprint, SprintStatus, validate_sprint};
-use farik_protocol::event::{EventBody, EventKind, SessionEndedBodyReason, new_event};
+use farik_protocol::event::{
+    EventBody, EventKind, FarikEvent, SessionEndedBodyReason, SessionStartedBodyPurpose, Thread,
+    new_event,
+};
 use farik_store::files::FilesError;
 use farik_store::{EventLog, EventQuery, SprintProjection, StoreError, TaskProjection};
 use serde::de::DeserializeOwned;
@@ -388,8 +391,8 @@ pub fn join_epics_sprint(deps: &ToolDeps, task: &TaskId) -> Result<Option<Sprint
     plan_sprint(deps, std::slice::from_ref(task), &PlannedBy::Governor).map(Some)
 }
 
-/// Whether sprint `sprint_id` has had its planning session: a `session.started` of purpose `plan`
-/// about no task, recorded after the sprint's `sprint.started`, whose `session.ended` says it
+/// Whether sprint `sprint_id` has had its planning ceremony: a planning session's start
+/// (`is_planning`), recorded after the sprint's `sprint.started`, whose `session.ended` says it
 /// completed, was aborted, or failed, or three such sessions whatever their ends. One that stopped
 /// at a limit or at its model provider's limit is asked again, but not for ever.
 ///
@@ -411,11 +414,7 @@ pub fn planning_session_spent(log: &EventLog, sprint_id: &str) -> Result<bool, S
         let session_id = event.envelope.ids.session_id.as_deref();
         match &event.body {
             EventBody::SprintStarted(body) => started = body.sprint_id.as_str() == sprint_id,
-            EventBody::SessionStarted(body)
-                if started
-                    && event.envelope.ids.task_id.is_none()
-                    && body.purpose.to_string() == "plan" =>
-            {
+            EventBody::SessionStarted(_) if started && is_planning(event) => {
                 planning.push(session_id);
                 if planning.len() >= PLANNING_SESSIONS {
                     return Ok(true);
@@ -436,6 +435,21 @@ pub fn planning_session_spent(log: &EventLog, sprint_id: &str) -> Result<bool, S
         }
     }
     Ok(false)
+}
+
+/// Whether `event` is the start of a sprint's planning: a `session.started` in the `planning`
+/// thread, or, as logs from before the ceremonies wrote it, one of purpose `plan` about no task
+/// and in no thread.
+pub(crate) fn is_planning(event: &FarikEvent) -> bool {
+    match &event.body {
+        EventBody::SessionStarted(body) => {
+            body.thread == Some(Thread::Planning)
+                || (body.thread.is_none()
+                    && event.envelope.ids.task_id.is_none()
+                    && body.purpose == SessionStartedBodyPurpose::Plan)
+        }
+        _ => false,
+    }
 }
 
 /// How many planning sessions a sprint is given at most, so that one that keeps stopping at a limit
@@ -518,7 +532,7 @@ fn record(deps: &ToolDeps, body: EventBody) -> Result<(), SprintError> {
 mod tests {
     use super::{
         EndedBy, PlannedBy, SprintStatus, end_sprint, plan_refused, plan_sprint_racing,
-        start_sprint,
+        planning_session_spent, start_sprint,
     };
     use crate::tools::fixtures::{TestProject, a_team_of_three};
     use farik_core::contract::TaskId;
@@ -554,5 +568,23 @@ mod tests {
             file.task_ids.is_empty(),
             "the plan wrote nothing into the ended file"
         );
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn counts_the_planning_sessions_of_an_older_log() {
+        let project = TestProject::new("sprints-older-planning", &a_team_of_three(|_| {}));
+        project.open_sprint("S1", None, &[]);
+        // Before the ceremonies, a sprint was planned in a `plan` session about no task.
+        let start = serde_json::json!({
+            "purpose": "plan",
+            "model": "claude-opus-5",
+            "effort": "high"
+        });
+        for _ in 0..3 {
+            project.record("", "session.started", &start);
+        }
+
+        assert!(planning_session_spent(&project.deps.log, "S1").expect("the log reads"));
     }
 }

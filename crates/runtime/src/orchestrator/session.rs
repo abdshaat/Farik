@@ -26,8 +26,7 @@ use crate::cost::{CostError, CostSource, budget_state, record_exhaustion, record
 use crate::daemon::SessionRegistration;
 use crate::exec::Executor;
 use crate::prompt::{
-    CEREMONY_INSTRUCTIONS, JUDGMENT_INSTRUCTION, PromptInput, SPRINT_PLAN_INSTRUCTION,
-    assemble_system_prompt,
+    CEREMONY_INSTRUCTIONS, JUDGMENT_INSTRUCTION, PromptInput, assemble_system_prompt,
 };
 use crate::session::{
     EndReason, SessionEvent, SessionHandle, SessionPurpose, SessionSpec, session_model,
@@ -41,10 +40,6 @@ pub(super) const TRIAGE_TOOL: &str = "farik_triage_request";
 /// The one tool the Scrum Master's judgment session is given; a session given it alone closes
 /// with `JUDGMENT_INSTRUCTION`.
 pub(super) const JUDGMENT_TOOL: &str = "farik_record_judgment";
-
-/// The one tool a sprint's planning session is given; a session given it alone closes with
-/// `SPRINT_PLAN_INSTRUCTION`.
-pub(super) const SPRINT_PLAN_TOOL: &str = "farik_plan_sprint";
 
 /// What a rule asks a session for.
 pub(super) struct SessionAsk<'a> {
@@ -63,8 +58,7 @@ pub(super) struct SessionAsk<'a> {
     /// change it.
     pub(super) read_only: bool,
     /// The one Farik tool it is given, when it is given one alone and no built-in tool: triage's
-    /// `farik_triage_request`, the judgment's `farik_record_judgment`, a sprint's planning
-    /// `farik_plan_sprint`.
+    /// `farik_triage_request`, the judgment's `farik_record_judgment`.
     pub(super) only_tool: Option<&'static str>,
     /// The Farik tools it is offered, when it is offered a list of them rather than every tool:
     /// each still only when the agent's tiers allow it.
@@ -344,7 +338,6 @@ fn session_spec(
                 .find(|(named, _)| *named == thread)
                 .map(|(_, text)| *text),
             (None, Some(JUDGMENT_TOOL)) => Some(JUDGMENT_INSTRUCTION),
-            (None, Some(SPRINT_PLAN_TOOL)) => Some(SPRINT_PLAN_INSTRUCTION),
             (None, _) => None,
         },
     })?;
@@ -574,10 +567,8 @@ mod tests {
     use farik_core::team::Effort;
     use farik_protocol::event::{EventBody, EventKind, MessageKind, Thread};
 
-    use super::{
-        SPRINT_PLAN_TOOL, SessionAsk, SessionEnd, TRIAGE_TOOL, run_session, session_spec, sleep,
-    };
-    use crate::prompt::{CEREMONY_INSTRUCTIONS, CLOSING_INSTRUCTIONS, SPRINT_PLAN_INSTRUCTION};
+    use super::{SessionAsk, SessionEnd, TRIAGE_TOOL, run_session, session_spec, sleep};
+    use crate::prompt::{CEREMONY_INSTRUCTIONS, CLOSING_INSTRUCTIONS};
     use crate::recorded::fixtures::reply_to_a_mention;
     use crate::session::EndReason;
 
@@ -708,54 +699,6 @@ mod tests {
         );
         assert!(closing.contains("`farik_post_message`"), "{closing}");
         assert!(closing.contains("`farik_create_task`"), "{closing}");
-    }
-
-    #[test]
-    #[ignore = "needs the git program: cargo xtask check --integration"]
-    fn closes_a_sprint_planning_session_with_its_own_instruction() {
-        let harness = Harness::new("session-sprint-plan", |_| {});
-        let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
-        let deps = &orchestrator.deps;
-        let team = deps.tools.files.read_team().expect("the team");
-        let pm = team.active_agents().next().expect("an agent");
-
-        let spec = session_spec(
-            deps,
-            &team,
-            &SessionAsk {
-                agent: pm,
-                contract: None,
-                purpose: SessionPurpose::Plan,
-                cwd: deps.tools.files.root().to_path_buf(),
-                executor: None,
-                read_only: false,
-                only_tool: Some(SPRINT_PLAN_TOOL),
-                tools: None,
-                in_reply_to: None,
-                thread: None,
-                initial_prompt: String::new(),
-            },
-        )
-        .expect("the spec");
-
-        assert!(
-            spec.system_prompt
-                .trim_end()
-                .ends_with(SPRINT_PLAN_INSTRUCTION),
-            "{}",
-            spec.system_prompt
-        );
-        // The role's own words may name it; the tools and the instruction do not.
-        let from_the_tools = &spec.system_prompt[spec
-            .system_prompt
-            .find("## Your tools")
-            .expect("a tools section")..];
-        assert!(
-            !from_the_tools.contains("farik_assign_task"),
-            "{from_the_tools}"
-        );
-        assert_eq!(spec.task_id, None);
-        assert_eq!(spec.farik_tools, vec![SPRINT_PLAN_TOOL.to_string()]);
     }
 
     /// The Product Manager's ceremony in `thread`, as a rule would ask for it.

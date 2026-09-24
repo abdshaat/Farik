@@ -244,11 +244,12 @@ pub fn plan_closes_epic_frk_1() -> Transcript {
     Transcript::from_jsonl(include_str!("transcripts/plan_closes_epic_frk_1.jsonl"))
 }
 
-/// The assigner's planning session of the open sprint: `farik_plan_sprint` of FRK-1, then "S1
-/// holds FRK-1, within its budget.". Hand-written.
+/// The Scrum Master's planning ceremony of the open sprint: two posts, the plan and the
+/// escalation digest, then `farik_plan_sprint` of FRK-1, then "S1 holds FRK-1, within its
+/// budget.". Hand-written.
 #[must_use]
-pub fn plan_sprint_frk_1() -> Transcript {
-    Transcript::from_jsonl(include_str!("transcripts/plan_sprint_frk_1.jsonl"))
+pub fn planning_ceremony_frk_1() -> Transcript {
+    Transcript::from_jsonl(include_str!("transcripts/planning_ceremony_frk_1.jsonl"))
 }
 
 /// An adapter whose every session reports `usage` at once and then either ends `completed` at

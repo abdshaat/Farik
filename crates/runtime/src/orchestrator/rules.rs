@@ -13,19 +13,21 @@ use farik_core::governor::task_status::is_terminal;
 use farik_core::governor::transition::TransitionRequest;
 use farik_core::governor::transition_table::TransitionActor;
 use farik_core::team::{Agent, Team};
-use farik_protocol::event::{EventBody, EventKind, FarikEvent};
+use farik_protocol::event::{EventBody, EventKind, FarikEvent, Thread};
 use farik_store::{EventQuery, Git, TaskProjection};
 
 use super::integrate::{awaiting, cleanup};
 use super::messages::{
-    Resume, implement_message, mention_message, plan_message, sprint_plan_message,
+    Digest, Resume, ceremony_message, implement_message, mention_message, plan_message,
+    planning_message,
 };
 use super::requests;
-use super::session::{SPRINT_PLAN_TOOL, SessionAsk, SessionEnd, run_session};
+use super::session::{SessionAsk, SessionEnd, run_session};
 use super::verify::verifying;
 use super::{
     Orchestrator, OrchestratorDeps, OrchestratorError, TickReport, TickRules, TickScope, worktree,
 };
+use crate::ceremonies::{budgets_spent_since_planning, open_escalations};
 use crate::channel::{channel_summary, pending_mentions};
 use crate::cost::budget_state;
 use crate::exec::Executor;
@@ -236,11 +238,13 @@ fn sprint_rules_run(scope: &TickScope) -> bool {
     scope.task_id.is_none() && scope.rules != TickRules::Refining
 }
 
-/// The open sprint's planning (5.5): while it holds no task and has had no planning session, the
-/// assigner gets one `plan` session about no task, given `farik_plan_sprint` alone and offered the
-/// candidates, the rows `ready` with no parent and in no sprint. Passed over with no candidate, no
-/// assigner, or on a spent day; a planning session that plans nothing is not asked again, and the
-/// empty sprint waits for the human to end it.
+/// The open sprint's planning ceremony (5.5, 5.9): while it holds no task and its planning has not
+/// run, the assigner (the ceremony runner) gets one `ceremony` session in the `planning` thread,
+/// about no task, given the reading tools, `farik_post_message`, and `farik_plan_sprint`, and
+/// offered the candidates, the rows `ready` with no parent and in no sprint, the digest of the
+/// open escalations and the budgets spent since the previous planning, and the channel. Passed
+/// over with no candidate, no assigner, or on a spent day; a planning that plans nothing is not
+/// asked again, and the empty sprint waits for the human to end it.
 async fn sprint_planning(
     deps: &OrchestratorDeps,
     scope: &TickScope,
@@ -280,33 +284,50 @@ async fn sprint_planning(
     {
         return Ok(None);
     }
+    let tools = &deps.tools;
     let contracts = candidates
         .iter()
-        .map(|row| deps.tools.files.read_contract(&row.task_id))
+        .map(|row| tools.files.read_contract(&row.task_id))
         .collect::<Result<Vec<_>, _>>()?;
+    let digest = Digest {
+        escalations: open_escalations(&tools.log, &tools.projections)?,
+        spent: budgets_spent_since_planning(&tools.log, &open.sprint_id)?,
+        now: tools.clock.now(),
+    };
+    let facts = planning_message(&open.sprint_id, &contracts, open.budget_usd, &digest, None);
     let end = run_session(
         deps,
         team,
         SessionAsk {
             agent: assigner,
             contract: None,
-            purpose: SessionPurpose::Plan,
-            cwd: deps.tools.files.root().to_path_buf(),
+            purpose: SessionPurpose::Ceremony,
+            cwd: tools.files.root().to_path_buf(),
             executor: None,
-            read_only: false,
-            only_tool: Some(SPRINT_PLAN_TOOL),
-            tools: None,
+            read_only: true,
+            only_tool: None,
+            tools: Some(PLANNING_TOOLS),
             in_reply_to: None,
-            thread: None,
-            initial_prompt: sprint_plan_message(&open.sprint_id, &contracts, open.budget_usd),
+            thread: Some(Thread::Planning),
+            initial_prompt: ceremony_message(&facts, &channel_summary(&tools.log, &tools.files)?),
         },
     )
     .await?;
     Ok(Some(TickReport::Sprint {
         sprint_id: open.sprint_id,
-        what: ran(assigner, "plan", &end),
+        what: ran(assigner, "planning ceremony", &end),
     }))
 }
+
+/// The Farik tools the planning ceremony is offered: the reading tools, the channel, and the plan.
+const PLANNING_TOOLS: &[&str] = &[
+    "farik_read_task",
+    "farik_read_board",
+    "farik_read_rules",
+    "farik_read_criteria",
+    "farik_post_message",
+    "farik_plan_sprint",
+];
 
 /// Whether the day's dollars stop a session about no task from starting; `day_spent` is set when
 /// they do, as `spent` sets it.
@@ -995,7 +1016,7 @@ mod tests {
         EventBody, EventKind, NoteWrittenBodyKind, ReviewRecordedBody, SessionEndedBodyReason,
         SessionStartedBodyPurpose, TransitionActorWire,
     };
-    use farik_protocol::event::{MessageKind, NewEvent, event_from_value};
+    use farik_protocol::event::{MessageKind, NewEvent, Thread, event_from_value};
     use farik_store::event_log::fixtures::refuse_appends_of;
     use farik_store::git::fixtures::git_output_in;
     use serde_json::json;
@@ -1011,7 +1032,7 @@ mod tests {
     use crate::orchestrator::{OrchestratorError, TickReport, TickRules, TickScope};
     use crate::recorded::fixtures::{
         accept_frk_1, hits_the_turn_limit, implement_finishes_frk_1, implement_stops_early,
-        plan_assigns_frk_1, plan_sprint_frk_1, provider_limit_429, provider_limit_rejected,
+        plan_assigns_frk_1, planning_ceremony_frk_1, provider_limit_429, provider_limit_rejected,
         reads_a_file, replays_farik_read_board, reply_to_a_mention, review_answers_nothing,
         review_writes_note,
     };
@@ -4060,13 +4081,37 @@ mod tests {
             ));
     }
 
+    /// `task` escalated at its iterations, waiting on the human.
+    fn escalated(harness: &Harness, task: &str) {
+        harness.project.filed(task, "rejected", "task", None);
+        harness
+            .project
+            .moved(task, "rejected", "escalated", &json!({}));
+        harness.project.record(
+            task,
+            "escalation.raised",
+            &json!({ "reason": "iterations", "detail": "three rejections" }),
+        );
+    }
+
     #[tokio::test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
-    async fn asks_the_assigner_to_plan_an_empty_sprint() {
+    async fn plans_the_sprint_in_a_ceremony() {
         let harness = Harness::new("orch-sprint-plan", with_a_scrum_master);
         harness.ready("FRK-1");
+        escalated(&harness, "FRK-2");
         harness.open_sprint("S1", &[]);
-        let adapter = harness.recorded(vec![plan_sprint_frk_1()]);
+        harness.project.record(
+            "",
+            "message.posted",
+            &json!({
+                "author": "human",
+                "kind": "human",
+                "text": "the login page comes first",
+                "mentions": []
+            }),
+        );
+        let adapter = harness.recorded(vec![planning_ceremony_frk_1()]);
         let orchestrator = harness.orchestrator(adapter.clone());
 
         let report = orchestrator.tick().await.expect("the tick runs");
@@ -4081,15 +4126,92 @@ mod tests {
         let spec = &started[0];
         assert_eq!(
             (spec.agent_id.as_str(), spec.purpose, spec.task_id.as_ref()),
-            ("sm", SessionPurpose::Plan, None)
+            ("sm", SessionPurpose::Ceremony, None)
         );
-        assert_eq!(spec.farik_tools, vec!["farik_plan_sprint".to_string()]);
-        assert!(
-            spec.initial_prompt.contains("FRK-1") && spec.initial_prompt.contains("$5.00"),
-            "{}",
-            spec.initial_prompt
+        let starts = harness.events(&[EventKind::SessionStarted]);
+        let EventBody::SessionStarted(start) = &starts[0].body else {
+            panic!("a session's start");
+        };
+        assert_eq!(start.thread, Some(Thread::Planning));
+        for tool in [
+            "farik_plan_sprint",
+            "farik_post_message",
+            "farik_read_board",
+        ] {
+            assert!(
+                spec.farik_tools.iter().any(|given| given == tool),
+                "{tool}: {:?}",
+                spec.farik_tools
+            );
+        }
+        // The candidates, the escalation the digest lists, and the channel; the retro's text is
+        // step 06's Task 4, which gives the files `team/retro.md`.
+        for fact in [
+            "FRK-1",
+            "$5.00",
+            "FRK-2",
+            "iterations",
+            "three rejections",
+            "the login page comes first",
+        ] {
+            assert!(
+                spec.initial_prompt.contains(fact),
+                "{fact}: {}",
+                spec.initial_prompt
+            );
+        }
+        let posted: Vec<_> = harness
+            .events(&[EventKind::MessagePosted])
+            .into_iter()
+            .filter_map(|event| match event.body {
+                EventBody::MessagePosted(body) => Some((body.kind, body.thread)),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            posted[1..],
+            vec![(MessageKind::Ceremony, Some(Thread::Planning)); 2]
         );
         assert_eq!(harness.row("FRK-1").sprint.as_deref(), Some("S1"));
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn lists_the_spent_budgets_in_the_digest() {
+        let harness = Harness::new("orch-sprint-spent-digest", with_a_scrum_master);
+        harness.ready("FRK-1");
+        let exhausted = |scope: &str, consequence: &str| {
+            harness.project.record(
+                "",
+                "budget.exhausted",
+                &json!({ "scope": scope, "consequence": consequence }),
+            );
+        };
+        // The day spent before the previous planning, the sprint's budget since.
+        exhausted("day_usd", "pause_team");
+        harness.project.record(
+            "",
+            "session.started",
+            &json!({
+                "purpose": "ceremony",
+                "model": "claude-sonnet-5",
+                "effort": "medium",
+                "thread": "planning"
+            }),
+        );
+        exhausted("sprint_usd", "stop_new_assignments");
+        harness.open_sprint("S1", &[]);
+        let adapter = harness.recorded(vec![planning_ceremony_frk_1()]);
+
+        harness
+            .orchestrator(adapter.clone())
+            .tick()
+            .await
+            .expect("the tick runs");
+
+        let prompt = &adapter.started()[0].initial_prompt;
+        assert!(prompt.contains("the sprint's budget spent"), "{prompt}");
+        assert!(!prompt.contains("the day's budget spent"), "{prompt}");
     }
 
     #[tokio::test]
@@ -4098,7 +4220,7 @@ mod tests {
         let harness = Harness::new("orch-sprint-scoped", with_a_scrum_master);
         harness.ready("FRK-1");
         harness.open_sprint("S1", &[]);
-        let adapter = harness.recorded(vec![plan_sprint_frk_1()]);
+        let adapter = harness.recorded(vec![planning_ceremony_frk_1()]);
         let orchestrator = harness.orchestrator(adapter.clone());
 
         for scope in [
@@ -4129,7 +4251,7 @@ mod tests {
         harness.spent(None, "s-0", 20.0);
         harness.ready("FRK-1");
         harness.open_sprint("S1", &[]);
-        let adapter = harness.recorded(vec![plan_sprint_frk_1()]);
+        let adapter = harness.recorded(vec![planning_ceremony_frk_1()]);
         let orchestrator = harness.orchestrator(adapter.clone());
 
         let report = orchestrator.tick().await.expect("the tick runs");
@@ -4165,7 +4287,7 @@ mod tests {
 
     #[tokio::test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
-    async fn plans_a_sprint_once() {
+    async fn plans_once_per_sprint_as_a_ceremony() {
         let harness = Harness::new("orch-sprint-once", with_a_scrum_master);
         harness.ready("FRK-1");
         harness.open_sprint("S1", &[]);
@@ -4185,7 +4307,7 @@ mod tests {
         let planning = adapter
             .started()
             .iter()
-            .filter(|spec| spec.task_id.is_none())
+            .filter(|spec| spec.purpose == SessionPurpose::Ceremony)
             .count();
         assert_eq!(planning, 1);
     }
@@ -4211,7 +4333,7 @@ mod tests {
         let planning = adapter
             .started()
             .iter()
-            .filter(|spec| spec.task_id.is_none())
+            .filter(|spec| spec.purpose == SessionPurpose::Ceremony)
             .count();
         assert_eq!(planning, 3);
     }
@@ -4432,7 +4554,7 @@ mod tests {
         harness.ready("FRK-1");
         harness.open_sprint("S1", &[]);
         let until = at() + chrono::Duration::hours(2);
-        let adapter = harness.recorded(vec![refused_until(until), plan_sprint_frk_1()]);
+        let adapter = harness.recorded(vec![refused_until(until), planning_ceremony_frk_1()]);
         let first = harness
             .orchestrator(adapter.clone())
             .tick()
@@ -4454,7 +4576,7 @@ mod tests {
         let planning = adapter
             .started()
             .iter()
-            .filter(|spec| spec.task_id.is_none() && spec.agent_id == "sm")
+            .filter(|spec| spec.purpose == SessionPurpose::Ceremony && spec.agent_id == "sm")
             .count();
         assert_eq!(planning, 2);
         assert_eq!(harness.row("FRK-1").sprint.as_deref(), Some("S1"));
