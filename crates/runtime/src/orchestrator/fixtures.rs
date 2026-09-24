@@ -90,12 +90,23 @@ impl Harness {
         sandboxes: Arc<dyn SandboxFactory>,
         forge: Forge,
     ) -> Orchestrator {
+        self.orchestrator_with_ids(adapter, sandboxes, forge, Arc::new(SequentialIds::new()))
+    }
+
+    /// An orchestrator over this project with `adapter`, `sandboxes`, `forge`, and `session_ids`.
+    pub(crate) fn orchestrator_with_ids(
+        &self,
+        adapter: Arc<dyn RuntimeAdapter>,
+        sandboxes: Arc<dyn SandboxFactory>,
+        forge: Forge,
+        session_ids: Arc<dyn IdSource + Send + Sync>,
+    ) -> Orchestrator {
         Orchestrator::new(OrchestratorDeps {
             tools: Arc::clone(&self.project.deps),
             daemon: Arc::clone(&self.daemon),
             adapter,
             sandboxes,
-            session_ids: Arc::new(SequentialIds::new()),
+            session_ids,
             forge: Arc::new(forge),
             sleeper: Arc::new(NeverWakes),
         })

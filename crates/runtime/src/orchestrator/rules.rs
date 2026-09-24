@@ -5011,6 +5011,72 @@ mod tests {
         assert_eq!(harness.row("FRK-1").status, TaskStatus::Rejected);
     }
 
+    /// Session ids `session-1` and so on, the human posting `@dev-a and the tests?` each time
+    /// one is asked for: after the channel rule has read the pending mentions, before the
+    /// session's start is recorded.
+    struct PostsWhenAsked {
+        tools: Arc<crate::tools::ToolDeps>,
+        ids: farik_protocol::clock::SequentialIds,
+    }
+
+    impl farik_protocol::clock::IdSource for PostsWhenAsked {
+        fn session_id(&self) -> String {
+            crate::channel::post(
+                &self.tools.log,
+                self.tools.clock.as_ref(),
+                &self.tools.ids,
+                crate::channel::NewMessage {
+                    author: "human".to_string(),
+                    agent_id: None,
+                    kind: MessageKind::Human,
+                    text: "@dev-a and the tests?".to_string(),
+                    mentions: vec!["dev-a".to_string()],
+                    task_id: None,
+                    thread: None,
+                    in_reply_to: None,
+                    session_id: None,
+                },
+            )
+            .expect("posted");
+            self.ids.session_id()
+        }
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn keeps_a_mention_posted_while_its_conversation_starts_pending() {
+        let harness = Harness::new("orch-mention-race", |_| {});
+        let shown = said(&harness, "human", MessageKind::Human, "@dev-a status?");
+        let adapter = harness.recorded(vec![reply_to_a_mention()]);
+        let orchestrator = harness.orchestrator_with_ids(
+            adapter.clone(),
+            Arc::new(crate::sandbox::host::HostSandboxFactory),
+            harness.gh.forge(&harness.project.repo.path),
+            Arc::new(PostsWhenAsked {
+                tools: Arc::clone(&harness.project.deps),
+                ids: farik_protocol::clock::SequentialIds::new(),
+            }),
+        );
+
+        orchestrator.tick().await.expect("the tick runs");
+
+        let starts = harness.events(&[EventKind::SessionStarted]);
+        let EventBody::SessionStarted(start) = &starts[0].body else {
+            panic!("a session's start");
+        };
+        assert_eq!(start.in_reply_to.map(NonZeroU64::get), Some(shown));
+        let pending: Vec<String> =
+            crate::channel::pending_mentions(&harness.project.deps.log, "dev-a")
+                .expect("the log reads")
+                .into_iter()
+                .filter_map(|event| match event.body {
+                    EventBody::MessagePosted(body) => Some(body.text),
+                    _ => None,
+                })
+                .collect();
+        assert_eq!(pending, ["@dev-a and the tests?"]);
+    }
+
     #[tokio::test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn answers_a_mention_again_after_its_conversation_hits_the_provider_limit() {
