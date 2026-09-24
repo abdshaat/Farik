@@ -203,7 +203,7 @@ static TOOLS: LazyLock<Vec<FarikTool>> = LazyLock::new(|| {
         tool::<contracts::PlanSprintInput>(
             "farik_plan_sprint",
             Read,
-            "Plan the open sprint: put ready tasks and approved epics in it, within its budget.",
+            "Plan the open sprint, in its planning ceremony: put ready tasks and approved epics in it, within its budget.",
         ),
         tool::<work::DeclareBlockedInput>(
             "farik_declare_blocked",

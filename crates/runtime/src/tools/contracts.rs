@@ -10,7 +10,7 @@ use farik_core::governor::gates::{
 use farik_core::governor::transition_table::TransitionActor;
 use farik_protocol::event::{
     ContractJudgedBody, ContractWrittenBody, EventBody, EventKind, RequestTriagedBody,
-    RequestTriagedBodySize,
+    RequestTriagedBodySize, Thread,
 };
 use farik_store::EventQuery;
 use farik_store::requests::{RequestError, file_request, summary_of};
@@ -335,9 +335,15 @@ pub(super) fn create_task(call: &Call<'_>, input: CreateTaskInput) -> Result<Val
     Ok(answer)
 }
 
-/// Plans the open sprint as the assigner (5.5), through `sprints::plan_sprint`, and answers the
+/// Plans the open sprint as the assigner (5.5), through `sprints::plan_sprint`, in a planning
+/// ceremony session alone, where the digest and the retro are in front of it, and answers the
 /// sprint and every task now in it.
 pub(super) fn plan_sprint(call: &Call<'_>, input: &PlanSprintInput) -> Result<Value, ToolError> {
+    if call.context.thread != Some(Thread::Planning) {
+        return Err(ToolError::Refused {
+            reason: "sprint_plan_refused: only the planning ceremony plans a sprint".to_string(),
+        });
+    }
     let task_ids = input
         .task_ids
         .iter()
@@ -464,7 +470,7 @@ fn changed_fields(before: &Value, after: &Value) -> Vec<String> {
 
 #[cfg(test)]
 mod tests {
-    use farik_protocol::event::{EventBody, EventKind, FarikEvent};
+    use farik_protocol::event::{EventBody, EventKind, FarikEvent, Thread};
     use serde_json::{Value, json};
 
     use crate::session::SessionPurpose;
@@ -989,13 +995,43 @@ mod tests {
         });
     }
 
+    /// `agent` calls `farik_plan_sprint` of `tasks` from a planning ceremony session.
     fn plan(project: &TestProject, agent: &str, tasks: &[&str]) -> Result<Value, ToolError> {
-        project.call(
-            agent,
-            None,
-            "farik_plan_sprint",
-            json!({ "task_ids": tasks }),
-        )
+        let mut context = project.context(agent, None);
+        context.purpose = SessionPurpose::Ceremony;
+        context.thread = Some(Thread::Planning);
+        run(&context, "farik_plan_sprint", json!({ "task_ids": tasks }))
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn refuses_a_plan_outside_the_planning_ceremony() {
+        let project = a_project_with_scrum_master("tools-plan-ceremony");
+        project.filed("FRK-1", "ready", "task", None);
+        project.open_sprint("S1", None, &[]);
+        let before = project.event_count();
+
+        for purpose in [SessionPurpose::Plan, SessionPurpose::Refine] {
+            let mut context = project.context("sm", None);
+            context.purpose = purpose;
+            let refused = run(
+                &context,
+                "farik_plan_sprint",
+                json!({ "task_ids": ["FRK-1"] }),
+            )
+            .expect_err("only the planning ceremony plans");
+            assert_eq!(
+                refused,
+                ToolError::Refused {
+                    reason: "sprint_plan_refused: only the planning ceremony plans a sprint"
+                        .to_string()
+                },
+                "{purpose:?}"
+            );
+        }
+
+        assert_eq!(project.event_count(), before, "nothing is recorded");
+        assert_eq!(sprint_of(&project, "FRK-1"), Value::Null);
     }
 
     /// The sprint the contract file of `task` names.
