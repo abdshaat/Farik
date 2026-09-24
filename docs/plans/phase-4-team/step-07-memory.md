@@ -99,7 +99,7 @@ Files: `prompt.rs`, `orchestrator/session.rs`
 - `leaves_out_a_section_with_nothing_in_it` (prompt.rs, changed) — an empty notebook now writes `Your memory` with `0 of 8000 tokens.` and no untrusted block; the other empty sections are still left out.
 - `cuts_the_memory_at_its_cap` — a cap of 500 and a notebook of 2,100 characters: the untrusted block holds the first 2,000 and the cut line.
 
-- [ ] `feat(runtime): tell an agent how full its notebook is`
+- [x] `feat(runtime): tell an agent how full its notebook is`
 
 ### Task 3: decisions
 

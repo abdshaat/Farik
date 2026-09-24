@@ -325,6 +325,7 @@ fn session_spec(
         agent: ask.agent,
         project_scan: project_scan.as_deref(),
         memory: &memory,
+        memory_cap_tokens: usize::try_from(team.policy.memory_cap_tokens).unwrap_or(usize::MAX),
         rules: &rules,
         criteria: &criteria,
         contract: ask.contract,
