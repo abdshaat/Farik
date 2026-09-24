@@ -163,7 +163,7 @@ Files: `crates/store/src/metrics.rs`, `crates/cli/src/metrics.rs`, `crates/cli/s
 
 Revision 0.12 in the header naming each change: section 3 (a sprint is started by the human, planned by the assigner, ends by itself or by the human; `farik sprint` and `farik metrics --sprint` among the commands); 5.3 (the remaining sprint budget is the open sprint's); 5.5 (the sprint budget from the sprint file, what it stops, and a cost staying with its sprint); 5.11 (the governor writes `sprint` when a task is planned or leaves); 6.2 (the Scrum Master plans the sprint); 8.4 (`.farik/sprints/`); 8.5 (the three kinds); F17 (per sprint). The step's interface line in the project plan is written as landed.
 
-- [ ] `docs(docs): record sprints in the spec`
+- [x] `docs(docs): record sprints in the spec`
 
 ## Verification
 
