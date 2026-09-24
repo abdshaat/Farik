@@ -372,7 +372,7 @@ Interfaces this phase adds: written when the phase is next to be planned.
 
 ## Phase 6: Web UI
 
-Ends with: in a browser on the user's own machine, a new user with no help goes from nothing to an accepted task on their own repository inside thirty minutes, measured with five test users, at least three of them non-technical. This is Milestone 1's criterion (spec 11), met in the browser. No terminal is needed after `farik serve` is started, and phase 7's desktop app removes even that.
+Ends with: in a browser on the user's own machine, a new user with no help goes from nothing to an accepted task on their own repository inside thirty minutes, measured with five test users, at least three of them non-technical. This is Milestone 1's criterion (spec 11), met in the browser. Before that test, the recorded team sprint that phase 4 moved here (its step 08) is run from the browser, and it closes Milestone 0 too: all live testing is done in the web UI once the product side is built (the founder, 2026-09-24). No terminal is needed after `farik serve` is started, and phase 7's desktop app removes even that.
 
 Decisions for this phase (revision 12, 2026-09-24; ADR 0016):
 
@@ -414,7 +414,7 @@ Steps:
 | 05 | Requests, contracts, and human gates | F4, F14, 5.2, 5.4, 5.7, 5.11, 5.13, 5.16 | File a request in plain words; triage shown and overruled; the Product Manager's questions answered; the contract editor with Definition of Ready results inline; lock and unlock; approve or send back; each human gate with the plain-language summary, the diff, and Farik's checks; resolve an escalation; the runtime change making the summaries required |
 | 06 | Board, sprints, and task detail | F3, F17, 5.14, 5.16 | The kanban with epics and their tasks; filters by agent, sprint, risk, and epic; waiting markers; task detail with contract history, events, diff, notes, and cost by purpose; start, plan, and end a sprint; integrate; the harness metrics per project and per sprint |
 | 07 | Channel | F7, 5.9 | The team channel with agent posts, the user's posts, mentions, ceremony threads, and links to tasks and events |
-| 08 | Milestone 1 web exit | 11 | The thirty-minute test with five users, at least three non-technical, in the browser; the protocol and results in `docs/milestones/m1-web-exit.md` |
+| 08 | Milestones 0 and 1 in the web UI | 11 | The live testing the founder moved to the web UI (2026-09-24), run once the product side is built. First, the recorded team sprint that phase 4's step 08 planned, driven from the browser, in the founder's words: six agents in the five roles, two requests, one sprint, its ceremonies and channel, with the review of each task. It closes Milestone 0 (phase 3 step 18) and phase 4's team exit. Then the thirty-minute test with five users, at least three non-technical. The records are `docs/milestones/m1-team-exit.md` and `docs/milestones/m1-web-exit.md`; phase 4's runbook is the first record's starting point |
 
 Interfaces this phase adds: written when the phase is next to be planned.
 
