@@ -88,6 +88,7 @@ fn named(drift: &Drift) -> DriftDetectedBodyDrift {
         Drift::EventsWithoutContract { .. } => DriftDetectedBodyDrift::EventsWithoutContract,
         Drift::StatusMismatch { .. } => DriftDetectedBodyDrift::StatusMismatch,
         Drift::LockMismatch { .. } => DriftDetectedBodyDrift::LockMismatch,
+        Drift::SprintMismatch { .. } => DriftDetectedBodyDrift::SprintMismatch,
         Drift::ContractUnreadable { .. } => DriftDetectedBodyDrift::ContractUnreadable,
     }
 }
