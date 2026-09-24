@@ -713,7 +713,7 @@ pub const FIELDS_FIXED_AT_CREATION: [&str; 2] = ["kind", "parent"];
 /// assignee writing the tasks under it, and by the human. Written out rather than left as
 /// whatever is not in the other sets, so that a field added to the schema is refused until
 /// somebody says who writes it.
-pub const FIELDS_OF_THE_CONTENT: [&str; 13] = [
+pub const FIELDS_OF_THE_CONTENT: [&str; 14] = [
     "title",
     "intent",
     "scope",
@@ -725,6 +725,7 @@ pub const FIELDS_OF_THE_CONTENT: [&str; 13] = [
     "assignee_role",
     "reviewer_role",
     "risk",
+    "change",
     "budget",
     "allowed_paths",
 ];
@@ -1913,6 +1914,42 @@ mod tests {
                 "{status}"
             );
         }
+    }
+
+    #[test]
+    fn lets_the_product_manager_write_the_change() {
+        let product_manager = ContractWriteActor {
+            kind: TransitionActor::ProductManager,
+            agent_id: Some("pm-1".to_string()),
+        };
+        assert_eq!(
+            check_contract_write(
+                Kind::Task,
+                TaskStatus::Refining,
+                false,
+                &product_manager,
+                &["change".to_string()]
+            ),
+            Ok(ContractWriteOutcome::Allowed)
+        );
+        // A Developer is the assignee, not one of the roles that write content: refused as
+        // `change` is content, exactly as `risk` is.
+        let developer = ContractWriteActor {
+            kind: TransitionActor::Assignee,
+            agent_id: Some("dev-1".to_string()),
+        };
+        assert_eq!(
+            check_contract_write(
+                Kind::Task,
+                TaskStatus::Refining,
+                false,
+                &developer,
+                &["change".to_string()]
+            ),
+            Err(ContractWriteRefusal::ContentFields {
+                fields: vec!["change".to_string()]
+            })
+        );
     }
 
     #[test]

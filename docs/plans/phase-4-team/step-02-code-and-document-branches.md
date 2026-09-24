@@ -101,7 +101,7 @@ Produces: `TaskContract::change`
 - `lets_the_product_manager_write_the_change` (gates.rs) — a write of `change` by the Product Manager on a `refining` task passes the contract-write gate; by a Developer, refused as content, as `risk` is.
 - `reads_a_contract_without_a_change` (contract.rs, guard) — a contract with no `change` validates and reads `change` as `None`.
 
-- [ ] `feat(core): let a contract say whether its code change is a feature or a fix`
+- [x] `feat(core): let a contract say whether its code change is a feature or a fix`
 
 ### Task 3: `task_branch`
 

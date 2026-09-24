@@ -152,6 +152,14 @@
       ],
       "description": "high requires human acceptance of the contract before work starts and of the result before the task is accepted."
     },
+    "change": {
+      "type": "string",
+      "enum": [
+        "feature",
+        "fix"
+      ],
+      "description": "Whether the code this task changes adds a feature or repairs a defect. Absent reads as feature (docs/SPEC.md 5.14). Read only for a task whose assignee_role is software_developer; accepted and ignored for every other role."
+    },
     "budget": {
       "type": "object",
       "additionalProperties": false,
