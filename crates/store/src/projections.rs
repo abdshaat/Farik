@@ -589,7 +589,8 @@ fn apply_to(transaction: &Transaction<'_>, event: &FarikEvent) -> Result<(), Sto
         | EventBody::MessagePosted(_)
         | EventBody::RetroAppended(_)
         | EventBody::EscalationAged(_)
-        | EventBody::MemoryWritten(_) => Ok(()),
+        | EventBody::MemoryWritten(_)
+        | EventBody::DecisionWritten(_) => Ok(()),
     }
 }
 

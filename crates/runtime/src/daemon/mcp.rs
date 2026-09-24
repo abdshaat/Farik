@@ -454,7 +454,7 @@ mod tests {
             .filter_map(|tool| tool["name"].as_str())
             .collect();
         let mut expected: Vec<&str> = tool_descriptors().iter().map(|tool| tool.name).collect();
-        assert_eq!(expected.len(), 24);
+        assert_eq!(expected.len(), 26);
         expected.push("permission");
         assert_eq!(names, expected);
         for tool in answer["result"]["tools"].as_array().expect("a list") {

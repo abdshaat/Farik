@@ -47,6 +47,11 @@ pub enum FilesError {
         /// What it said.
         detail: String,
     },
+    /// There is a file there already, and this one is never written over.
+    Exists {
+        /// The path, relative to the project root.
+        path: String,
+    },
 }
 
 impl fmt::Display for FilesError {
@@ -55,11 +60,27 @@ impl fmt::Display for FilesError {
             Self::NotFound { path } => write!(formatter, "there is no {path}"),
             Self::Invalid { path, detail } => write!(formatter, "{path} is not usable: {detail}"),
             Self::Io { path, detail } => write!(formatter, "{path} could not be used: {detail}"),
+            Self::Exists { path } => write!(formatter, "{path} is there already"),
         }
     }
 }
 
 impl std::error::Error for FilesError {}
+
+/// One decision under `.farik/decisions/`, as its file names it and says it (5.8).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DecisionEntry {
+    /// Its number, which its file name starts with.
+    pub number: u32,
+    /// The rest of its file name, without `.md`.
+    pub slug: String,
+    /// Its title: its `# ` heading without the number, or its slug when it has none.
+    pub title: String,
+    /// The day it was written, from its `Date:` line, when it has one.
+    pub date: Option<NaiveDate>,
+    /// Who wrote it, from its `By:` line, when it has one.
+    pub author: Option<String>,
+}
 
 /// Where the sandbox runs (`docs/SPEC.md` section 8.3). Machine-local, because one person's laptop
 /// has Docker and another's does not, and that is not a fact about the project.
@@ -489,6 +510,141 @@ impl ProjectFiles {
         self.write_text(RETRO, &retro)
     }
 
+    /// Writes a decision (5.8) as `decisions/<NNNN>-<slug>.md`, numbered one past the highest
+    /// there is, and answers what it wrote. A decision is never written over: when another writer
+    /// took the number first, this answers `Exists`, and a caller that asks again gets the next
+    /// number.
+    ///
+    /// # Errors
+    ///
+    /// `Exists` when the file is there already, `Invalid` when the project has 9999 decisions,
+    /// `Io` when the directory cannot be read or the file cannot be written.
+    pub fn write_decision(
+        &self,
+        title: &str,
+        text: &str,
+        author: &str,
+        date: NaiveDate,
+    ) -> Result<DecisionEntry, FilesError> {
+        let last = self
+            .decision_files()?
+            .last()
+            .map_or(0, |(number, _)| *number);
+        if last >= 9999 {
+            return Err(FilesError::Invalid {
+                path: Self::named(DECISIONS),
+                detail: "the project has 9999 decisions".to_string(),
+            });
+        }
+        let number = last + 1;
+        let slug = slug(title);
+        self.write_new(
+            &format!("{DECISIONS}/{number:04}-{slug}.md"),
+            &format!(
+                "# {number:04}. {title}\n\nDate: {}\nBy: {author}\n\n{}\n",
+                date.format("%Y-%m-%d"),
+                text.trim_end()
+            ),
+        )?;
+        Ok(DecisionEntry {
+            number,
+            slug,
+            title: title.to_string(),
+            date: Some(date),
+            author: Some(author.to_string()),
+        })
+    }
+
+    /// Every decision, oldest first: the files named `^[0-9]{4}-[a-z0-9-]+\.md$`, each with what
+    /// can be read of it, so that one written by hand is listed too. Anything else there is
+    /// ignored.
+    ///
+    /// # Errors
+    ///
+    /// `Io` when the directory or a decision cannot be read. A project with no
+    /// `.farik/decisions/` has no decisions, which is not an error.
+    pub fn list_decisions(&self) -> Result<Vec<DecisionEntry>, FilesError> {
+        let mut decisions = Vec::new();
+        for (number, slug) in self.decision_files()? {
+            let text = self.read_text(&format!("{DECISIONS}/{number:04}-{slug}.md"))?;
+            let line = |prefix: &str| {
+                text.lines()
+                    .find_map(|line| line.strip_prefix(prefix))
+                    .map(str::trim)
+            };
+            // `# 0001. Title` as Farik writes it; a heading written by hand may have no number.
+            let title = line("# ").map_or_else(
+                || slug.clone(),
+                |heading| {
+                    heading
+                        .split_once(". ")
+                        .filter(|(digits, _)| digits.bytes().all(|byte| byte.is_ascii_digit()))
+                        .map_or(heading, |(_, title)| title)
+                        .to_string()
+                },
+            );
+            decisions.push(DecisionEntry {
+                number,
+                title,
+                date: line("Date: ")
+                    .and_then(|date| NaiveDate::parse_from_str(date, "%Y-%m-%d").ok()),
+                author: line("By: ").map(str::to_string),
+                slug,
+            });
+        }
+        Ok(decisions)
+    }
+
+    /// Decision `number`'s whole file.
+    ///
+    /// # Errors
+    ///
+    /// `NotFound` when there is no decision with that number, `Io` when it cannot be read.
+    pub fn read_decision(&self, number: u32) -> Result<String, FilesError> {
+        let (_, slug) = self
+            .decision_files()?
+            .into_iter()
+            .find(|(found, _)| *found == number)
+            .ok_or_else(|| FilesError::NotFound {
+                path: Self::named(&format!("{DECISIONS}/{number:04}-*.md")),
+            })?;
+        self.read_text(&format!("{DECISIONS}/{number:04}-{slug}.md"))
+    }
+
+    /// The number and slug of every file under `decisions/` named as a decision, by number.
+    fn decision_files(&self) -> Result<Vec<(u32, String)>, FilesError> {
+        let directory = self.path_of(DECISIONS);
+        if !directory.is_dir() {
+            return Ok(Vec::new());
+        }
+        let io = |error: std::io::Error| FilesError::Io {
+            path: Self::named(DECISIONS),
+            detail: error.to_string(),
+        };
+        let mut files = Vec::new();
+        for entry in std::fs::read_dir(&directory).map_err(io)? {
+            let name = entry.map_err(io)?.file_name();
+            let Some((digits, slug)) = name
+                .to_str()
+                .and_then(|name| name.strip_suffix(".md"))
+                .and_then(|name| name.split_at_checked(4))
+                .and_then(|(digits, rest)| Some((digits, rest.strip_prefix('-')?)))
+            else {
+                continue;
+            };
+            let named_as_one = digits.bytes().all(|byte| byte.is_ascii_digit())
+                && !slug.is_empty()
+                && slug
+                    .bytes()
+                    .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-');
+            if let (true, Ok(number)) = (named_as_one, digits.parse()) {
+                files.push((number, slug.to_string()));
+            }
+        }
+        files.sort();
+        Ok(files)
+    }
+
     /// A product document, by its path under `product/`.
     ///
     /// # Errors
@@ -574,6 +730,7 @@ const TEAM: &str = "team.yaml";
 const CRITERIA: &str = "team/criteria.yaml";
 const RETRO: &str = "team/retro.md";
 const SPRINTS: &str = "sprints";
+const DECISIONS: &str = "decisions";
 const PROJECT_SCAN: &str = "project.md";
 const PRICES: &str = "prices.json";
 const SETTINGS: &str = "local/settings.json";
@@ -678,6 +835,24 @@ fn is_sprint_id(name: &str) -> bool {
 /// path cannot climb anywhere.
 fn memory_path(agent_id: &AgentId) -> String {
     format!("agents/{}/memory.md", agent_id.as_str())
+}
+
+/// A decision's slug (5.8): the title in lower case, each run of anything but `a-z0-9` one `-`,
+/// trimmed of `-`, cut at 60 characters and trimmed again, and `decision` when nothing is left.
+fn slug(title: &str) -> String {
+    let mut slug = String::new();
+    for character in title.to_lowercase().chars() {
+        if character.is_ascii_lowercase() || character.is_ascii_digit() {
+            slug.push(character);
+        } else if !slug.ends_with('-') {
+            slug.push('-');
+        }
+    }
+    let cut: String = slug.trim_matches('-').chars().take(60).collect();
+    match cut.trim_matches('-') {
+        "" => "decision".to_string(),
+        slug => slug.to_string(),
+    }
 }
 
 /// A product document's path, or a refusal when it climbs out of `product/`.
@@ -877,6 +1052,39 @@ impl ProjectFiles {
         })
     }
 
+    /// Writes a file only where there is none, and never half of one: the text goes to a file
+    /// beside it, which is then hard-linked to the name, and a hard link fails when the name is
+    /// taken. A decision is immutable (5.8), so what is there is refused with `Exists`, not
+    /// replaced.
+    fn write_new(&self, relative: &str, text: &str) -> Result<(), FilesError> {
+        let path = self.path_of(relative);
+        if let Some(directory) = path.parent() {
+            self.make_directory(directory)?;
+        }
+        let beside = path.with_extension(format!(
+            "{}.{}-{}.writing",
+            path.extension()
+                .and_then(std::ffi::OsStr::to_str)
+                .unwrap_or_default(),
+            std::process::id(),
+            WRITES_BESIDE.fetch_add(1, Ordering::Relaxed)
+        ));
+        let linked =
+            std::fs::write(&beside, text).and_then(|()| std::fs::hard_link(&beside, &path));
+        let _ = std::fs::remove_file(&beside);
+        match linked {
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+                Err(FilesError::Exists {
+                    path: Self::named(relative),
+                })
+            }
+            other => other.map_err(|error| FilesError::Io {
+                path: Self::named(relative),
+                detail: error.to_string(),
+            }),
+        }
+    }
+
     /// One YAML file under `.farik/` as an untrusted value, for a validator to hold to its rules.
     fn read_yaml(&self, relative: &str) -> Result<Value, FilesError> {
         let text = self.read_text(relative)?;
@@ -894,7 +1102,10 @@ mod tests {
     use farik_core::contract::TaskId;
     use farik_core::team::AgentId;
 
-    use super::{FilesError, contract_path, memory_path, product_path};
+    use chrono::NaiveDate;
+
+    use super::fixtures::TempProject;
+    use super::{DecisionEntry, FilesError, contract_path, memory_path, product_path, slug};
 
     #[test]
     fn says_what_it_could_not_use_and_why_in_plain_words() {
@@ -981,5 +1192,147 @@ mod tests {
             assert_eq!(named, format!(".farik/product/{path}"));
             assert!(detail.contains("climbs out of it"), "{detail}");
         }
+    }
+
+    /// The day every decision in these tests is written on.
+    fn day() -> NaiveDate {
+        NaiveDate::from_ymd_opt(2026, 9, 24).expect("a real date")
+    }
+
+    #[test]
+    fn writes_a_numbered_decision() {
+        let project = TempProject::new("decision-numbered");
+        let files = project.files();
+
+        let first = files
+            .write_decision(
+                "Use SQLite for the log",
+                "One file, no server.",
+                "arch",
+                day(),
+            )
+            .expect("the first decision");
+        let second = files
+            .write_decision(
+                "Keep the log append-only",
+                "Nothing is rewritten.",
+                "pm",
+                day(),
+            )
+            .expect("the second decision");
+
+        assert_eq!(
+            first,
+            DecisionEntry {
+                number: 1,
+                slug: "use-sqlite-for-the-log".to_string(),
+                title: "Use SQLite for the log".to_string(),
+                date: Some(day()),
+                author: Some("arch".to_string()),
+            }
+        );
+        assert_eq!(
+            std::fs::read_to_string(
+                project
+                    .root
+                    .join(".farik/decisions/0001-use-sqlite-for-the-log.md")
+            )
+            .expect("the first file"),
+            "# 0001. Use SQLite for the log\n\nDate: 2026-09-24\nBy: arch\n\nOne file, no server.\n"
+        );
+        assert_eq!(second.number, 2);
+        assert!(
+            project
+                .root
+                .join(".farik/decisions/0002-keep-the-log-append-only.md")
+                .is_file()
+        );
+        assert_eq!(
+            files.list_decisions().expect("the decisions"),
+            [first, second]
+        );
+    }
+
+    #[test]
+    fn never_overwrites_a_decision() {
+        let project = TempProject::new("decision-immutable");
+        let files = project.files();
+        let decisions = project.root.join(".farik/decisions");
+        std::fs::create_dir_all(&decisions).expect("the directory");
+        std::fs::write(decisions.join("0003-x.md"), "placed by hand").expect("a file");
+
+        let next = files
+            .write_decision("Next", "After the hand-made one.", "arch", day())
+            .expect("the next decision");
+        let clash = files.write_new("decisions/0004-next.md", "another text");
+
+        assert_eq!(next.number, 4, "one past the highest there is");
+        assert_eq!(
+            clash,
+            Err(FilesError::Exists {
+                path: ".farik/decisions/0004-next.md".to_string()
+            })
+        );
+        assert!(
+            std::fs::read_to_string(decisions.join("0004-next.md"))
+                .expect("the file")
+                .ends_with("After the hand-made one.\n"),
+            "the decision is what was first written"
+        );
+        let mut left: Vec<String> = std::fs::read_dir(&decisions)
+            .expect("the directory")
+            .map(|entry| {
+                entry
+                    .expect("an entry")
+                    .file_name()
+                    .to_string_lossy()
+                    .into_owned()
+            })
+            .collect();
+        left.sort();
+        assert_eq!(
+            left,
+            ["0003-x.md", "0004-next.md"],
+            "no temporary file is left"
+        );
+    }
+
+    #[test]
+    fn slugs_a_title() {
+        assert_eq!(slug("  Why?! Rust & Tauri  "), "why-rust-tauri");
+        assert_eq!(slug("!!!"), "decision");
+        // 59 characters, a space, then more: the cut at 60 falls on the `-` the space became.
+        let title = format!("{} {}", "a".repeat(59), "b".repeat(10));
+        assert_eq!(title.chars().count(), 70);
+        assert_eq!(slug(&title), "a".repeat(59));
+    }
+
+    #[test]
+    fn lists_a_decision_written_by_hand() {
+        let project = TempProject::new("decision-by-hand");
+        let files = project.files();
+        let decisions = project.root.join(".farik/decisions");
+        std::fs::create_dir_all(&decisions).expect("the directory");
+        std::fs::write(decisions.join("0005-x.md"), "hello").expect("a file");
+        std::fs::write(decisions.join("README.md"), "not a decision").expect("a file");
+        std::fs::write(decisions.join("0006-Upper.md"), "not a decision").expect("a file");
+
+        assert_eq!(
+            files.list_decisions().expect("the decisions"),
+            [DecisionEntry {
+                number: 5,
+                slug: "x".to_string(),
+                title: "x".to_string(),
+                date: None,
+                author: None,
+            }]
+        );
+        assert_eq!(files.read_decision(5).expect("its text"), "hello");
+        assert_eq!(
+            files.read_decision(9),
+            Err(FilesError::NotFound {
+                path: ".farik/decisions/0009-*.md".to_string()
+            })
+        );
     }
 }

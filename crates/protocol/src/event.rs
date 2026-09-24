@@ -18,9 +18,9 @@ pub use crate::generated::event::{
     ContractSummaryKind, ContractSummaryParent, ContractSummaryRisk, ContractSummaryStatus,
     ContractUnlockedBody, ContractWrittenBody, CostRecordedBody, CostRecordedBodyModelId,
     CostRecordedBodyPurpose, CriteriaUpdatedBody, CriterionRecordedBody,
-    CriterionRecordedBodyRunBy, DriftDetectedBody, DriftDetectedBodyDrift, EscalationAgedBody,
-    EscalationRaisedBody, EscalationRaisedBodyReason, EscalationResolvedBody, EventKind,
-    HumanAcceptedBody, HumanAcceptedBodySubject, MemoryWrittenBody, MessagePostedBody,
+    CriterionRecordedBodyRunBy, DecisionWrittenBody, DriftDetectedBody, DriftDetectedBodyDrift,
+    EscalationAgedBody, EscalationRaisedBody, EscalationRaisedBodyReason, EscalationResolvedBody,
+    EventKind, HumanAcceptedBody, HumanAcceptedBodySubject, MemoryWrittenBody, MessagePostedBody,
     NoteWrittenBody, NoteWrittenBodyKind, ProductDocWrittenBody, ProjectScannedBody,
     PullRequestOpenedBody, QuestionAnsweredBody, QuestionAskedBody, RequestTriagedBody,
     RequestTriagedBodySize, RetroAppendedBody, ReviewRecordedBody, SessionEndedBody,
@@ -62,7 +62,7 @@ static VALIDATOR: LazyLock<Validator> = LazyLock::new(|| {
 });
 
 /// One validator per kind, each holding that kind's body schema alone. The event schema types
-/// `body` as a choice of forty shapes, so it can only say that a body matched none of them; these
+/// `body` as a choice of forty-one shapes, so it can only say that a body matched none of them; these
 /// say what is wrong with the one shape the event's `kind` asked for.
 static BODY_VALIDATORS: LazyLock<Vec<Validator>> = LazyLock::new(|| {
     let schema: Value = serde_json::from_str(SCHEMA_JSON).expect(
@@ -135,6 +135,7 @@ fn body_def_name(kind: EventKind) -> &'static str {
         EventKind::RetroAppended => "retroAppendedBody",
         EventKind::EscalationAged => "escalationAgedBody",
         EventKind::MemoryWritten => "memoryWrittenBody",
+        EventKind::DecisionWritten => "decisionWrittenBody",
     }
 }
 
@@ -201,6 +202,7 @@ fn attribution(body: &mut EventBody) -> Option<(&'static str, &mut String)> {
         EventBody::MessagePosted(body) => Some(("author", &mut body.author)),
         EventBody::RetroAppended(body) => Some(("appended_by", &mut body.appended_by)),
         EventBody::MemoryWritten(body) => Some(("written_by", &mut body.written_by)),
+        EventBody::DecisionWritten(body) => Some(("written_by", &mut body.written_by)),
         EventBody::DriftDetected(_)
         | EventBody::ProjectScanned(_)
         | EventBody::CostRecorded(_)
@@ -222,7 +224,7 @@ fn attribution(body: &mut EventBody) -> Option<(&'static str, &mut String)> {
 
 /// Every kind the log holds in this phase, in the order `docs/schemas/event.schema.json` lists
 /// them. The step that adds a kind adds it here.
-pub const EVERY_KIND: [EventKind; 40] = [
+pub const EVERY_KIND: [EventKind; 41] = [
     EventKind::TaskCreated,
     EventKind::RequestTriaged,
     EventKind::ContractWritten,
@@ -263,6 +265,7 @@ pub const EVERY_KIND: [EventKind; 40] = [
     EventKind::RetroAppended,
     EventKind::EscalationAged,
     EventKind::MemoryWritten,
+    EventKind::DecisionWritten,
 ];
 
 /// The ids an event is stamped with: which team and project it belongs to, and the contract, agent
@@ -422,6 +425,9 @@ pub enum EventBody {
     /// An agent replaced its notebook.
     #[serde(rename = "memory.written")]
     MemoryWritten(MemoryWrittenBody),
+    /// The Architect or the Product Manager recorded a decision, which is never written over.
+    #[serde(rename = "decision.written")]
+    DecisionWritten(DecisionWrittenBody),
 }
 
 impl EventBody {
@@ -469,6 +475,7 @@ impl EventBody {
             Self::RetroAppended(_) => EventKind::RetroAppended,
             Self::EscalationAged(_) => EventKind::EscalationAged,
             Self::MemoryWritten(_) => EventKind::MemoryWritten,
+            Self::DecisionWritten(_) => EventKind::DecisionWritten,
         }
     }
 }
@@ -617,7 +624,7 @@ pub fn event_from_value(input: &Value) -> Result<FarikEvent, Vec<ValidationError
 }
 
 /// The schema's own failures. A failure inside `body` is reported by the schema once, at `/body`,
-/// because `body` there is a choice of forty shapes and the schema can only say that none matched.
+/// because `body` there is a choice of forty-one shapes and the schema can only say that none matched.
 /// The event's `kind` says which one it was meant to be, so such a failure is asked again of that
 /// shape alone and reported where it actually is.
 fn schema_errors(input: &Value) -> Vec<ValidationError> {
@@ -1012,7 +1019,7 @@ mod tests {
 
     #[test]
     fn reports_a_malformed_field_inside_a_body_at_its_own_path() {
-        // The schema types `body` as a choice of forty shapes, so it reports a failure anywhere
+        // The schema types `body` as a choice of forty-one shapes, so it reports a failure anywhere
         // inside one at `/body`, with the whole body echoed back. The kind says which shape the
         // body was meant to be, so the reader checks it again against that one alone.
         let mut input = an_event_wire(EventKind::ProjectScanned);

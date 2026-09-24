@@ -86,6 +86,10 @@ pub(crate) enum Refusal {
     RetroRefused { detail: String },
     /// A notebook write past the team's `memory_cap_tokens` (5.8).
     MemoryRefused { detail: String },
+    /// A decision the caller may not write, or one that cannot be written (5.8).
+    DecisionRefused { detail: String },
+    /// There is no decision with this number.
+    NoSuchDecision { number: u32 },
     /// A commit named a directory, which git would stage whole, files the path checks never saw
     /// among it.
     PathIsADirectory { path: String },
@@ -169,17 +173,12 @@ impl Refusal {
             | Self::CriterionAnsweredByTheHuman { .. }
             | Self::NotTheNamedAgent { .. } => self.reach(),
             Self::Command(refusal) => command(refusal),
-            Self::PathIsADirectory { path } => (
-                "path_is_a_directory",
-                format!("{path} is a directory; name the files to commit"),
-            ),
+            Self::PathIsADirectory { .. } | Self::OutsideWorkspace { .. } => self.workspace(),
             Self::ChannelLimit { detail } => ("channel_limit", detail.clone()),
             Self::RetroRefused { detail } => ("retro_refused", detail.clone()),
             Self::MemoryRefused { detail } => ("memory_refused", detail.clone()),
-            Self::OutsideWorkspace { cwd } => (
-                "outside_workspace",
-                format!("{cwd} is not a directory inside the task's workspace"),
-            ),
+            Self::DecisionRefused { detail } => ("decision_refused", detail.clone()),
+            Self::NoSuchDecision { number } => ("no_such_decision", number.to_string()),
             Self::NotTheNotesWriter { agent_id, kind } => (
                 "not_the_notes_writer",
                 format!(
@@ -224,6 +223,24 @@ impl Refusal {
                 ),
             ),
             other => unreachable!("reach is asked only of the three refusals it names: {other:?}"),
+        }
+    }
+
+    /// The refusals of a path in the task's workspace: a commit naming a directory, and a command
+    /// run outside the workspace.
+    fn workspace(&self) -> (&'static str, String) {
+        match self {
+            Self::PathIsADirectory { path } => (
+                "path_is_a_directory",
+                format!("{path} is a directory; name the files to commit"),
+            ),
+            Self::OutsideWorkspace { cwd } => (
+                "outside_workspace",
+                format!("{cwd} is not a directory inside the task's workspace"),
+            ),
+            other => {
+                unreachable!("workspace is asked only of the two refusals it names: {other:?}")
+            }
         }
     }
 }

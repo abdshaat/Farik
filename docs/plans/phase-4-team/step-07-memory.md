@@ -112,7 +112,7 @@ Files: event schema (`decision.written`), protocol, `files.rs`, `tools/memory.rs
 - `refuses_a_decision_from_a_developer` — `decision_refused`, nothing written.
 - `reads_the_decisions` — two written: `farik_read_decisions {}` lists both oldest first; `{ number: 2 }` answers the second's text; `{ number: 9 }` refused `no_such_decision: 9`.
 
-- [ ] `feat(runtime): let the architect and the product manager record decisions`
+- [x] `feat(runtime): let the architect and the product manager record decisions`
 
 ### Task 4: the scan refresh
 

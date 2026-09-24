@@ -113,7 +113,7 @@ pub fn a_body_wire(kind: EventKind) -> Value {
             "detail": "blocked_age: no key"
         }),
         EventKind::EscalationAged => json!({ "raised_seq": 1, "hours": 25 }),
-        EventKind::MemoryWritten => json!({ "text": "Use pnpm.", "written_by": "maya-chen" }),
+        EventKind::MemoryWritten | EventKind::DecisionWritten => a_kept_body_wire(kind),
         EventKind::ContractEvaluated => json!({
             "gate": "definition_of_ready",
             "passed": false,
@@ -158,6 +158,20 @@ fn a_summary_body_wire(kind: EventKind) -> Value {
         json!({ "summary": a_contract_summary_wire(), "created_by": "human" })
     } else {
         json!({ "summary": a_contract_summary_wire(), "written_by": "maya-chen" })
+    }
+}
+
+/// A record an agent keeps: its notebook, or a decision, by `maya-chen`.
+fn a_kept_body_wire(kind: EventKind) -> Value {
+    if kind == EventKind::MemoryWritten {
+        json!({ "text": "Use pnpm.", "written_by": "maya-chen" })
+    } else {
+        json!({
+            "number": 1,
+            "slug": "use-sqlite-for-the-log",
+            "title": "Use SQLite for the log",
+            "written_by": "maya-chen"
+        })
     }
 }
 

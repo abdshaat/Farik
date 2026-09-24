@@ -96,7 +96,8 @@
         "message.posted",
         "retro.appended",
         "escalation.aged",
-        "memory.written"
+        "memory.written",
+        "decision.written"
       ]
     },
     "eventBodyWire": {
@@ -142,7 +143,8 @@
         { "$ref": "#/$defs/messagePostedBody" },
         { "$ref": "#/$defs/retroAppendedBody" },
         { "$ref": "#/$defs/escalationAgedBody" },
-        { "$ref": "#/$defs/memoryWrittenBody" }
+        { "$ref": "#/$defs/memoryWrittenBody" },
+        { "$ref": "#/$defs/decisionWrittenBody" }
       ]
     },
     "contractSummary": {
@@ -638,6 +640,19 @@
       "required": ["text", "written_by"],
       "properties": {
         "text": { "type": "string" },
+        "written_by": { "type": "string" }
+      }
+    },
+    "decisionWrittenBody": {
+      "title": "Decision Written Body",
+      "description": "The Architect or the Product Manager recorded a decision through farik_write_decision (docs/SPEC.md 5.8): .farik/decisions/<number, four digits>-<slug>.md, which is never written over. written_by is the agent. It is about no one contract.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["number", "slug", "title", "written_by"],
+      "properties": {
+        "number": { "type": "integer", "minimum": 1, "maximum": 9999 },
+        "slug": { "type": "string", "pattern": "^[a-z0-9-]+$" },
+        "title": { "type": "string", "minLength": 1 },
         "written_by": { "type": "string" }
       }
     },
