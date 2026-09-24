@@ -1331,8 +1331,6 @@ mod tests {
             );
         }
 
-        /// The fixture contract as `task`, a Software Developer's reviewed by another, written to its
-        /// file in `draft` with `change` applied.
         /// The branch of `task`, the one its contract's file names (5.14).
         fn branch(&self, task: &str) -> String {
             task_branch(
@@ -1343,6 +1341,8 @@ mod tests {
             )
         }
 
+        /// The fixture contract as `task`, a Software Developer's reviewed by another, written to its
+        /// file in `draft` with `change` applied.
         fn file(&self, task: &str, change: impl FnOnce(&mut Value)) {
             let mut wire = a_contract_wire();
             wire["id"] = json!(task);
