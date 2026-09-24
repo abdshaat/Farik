@@ -5013,6 +5013,37 @@ mod tests {
 
     #[tokio::test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn answers_a_mention_again_after_its_conversation_hits_the_provider_limit() {
+        let harness = Harness::new("orch-mention-limit", |_| {});
+        said(&harness, "human", MessageKind::Human, "@dev-a status?");
+        let adapter = harness.recorded(vec![provider_limit_429(), reply_to_a_mention()]);
+
+        let limited = harness
+            .orchestrator(adapter.clone())
+            .tick()
+            .await
+            .expect("the tick runs");
+        assert!(
+            matches!(&limited, TickReport::Conversation { agent_id, .. } if agent_id == "dev-a"),
+            "{limited:?}"
+        );
+        let until = at() + chrono::Duration::hours(1);
+        assert_eq!(sleeps(&harness), vec![(Some("dev-a".to_string()), until)]);
+
+        let awake = harness
+            .orchestrator_at(adapter.clone(), until + chrono::Duration::minutes(1))
+            .tick()
+            .await
+            .expect("the tick runs");
+        assert!(
+            matches!(&awake, TickReport::Conversation { agent_id, .. } if agent_id == "dev-a"),
+            "{awake:?}"
+        );
+        assert_eq!(adapter.started().len(), 2, "{:?}", adapter.started());
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn writes_the_summary_it_shows() {
         let harness = Harness::new("orch-mention-summary", |_| {});
         for number in 0..10 {

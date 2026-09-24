@@ -1,6 +1,7 @@
 //! The team's channel (`docs/SPEC.md` 5.9): what somebody said, kept in the log as
 //! `message.posted` and nowhere else.
 
+use std::collections::HashSet;
 use std::num::NonZeroU64;
 
 use farik_core::contract::TaskId;
@@ -8,7 +9,7 @@ use farik_core::team::Team;
 use farik_protocol::clock::Clock;
 use farik_protocol::event::{
     EventBody, EventIds, EventKind, FarikEvent, MessageKind, MessagePostedBody,
-    SessionStartedBodyPurpose, Thread, new_event,
+    SessionEndedBodyReason, SessionStartedBodyPurpose, Thread, new_event,
 };
 use farik_store::files::{FilesError, ProjectFiles};
 use farik_store::{EventLog, EventQuery, StoreError};
@@ -109,33 +110,48 @@ impl From<FilesError> for ChannelError {
 /// The messages that mention `agent_id` and that it has not been given a conversation about:
 /// those after the latest message its last `conversation` session was shown (that session's
 /// `in_reply_to`, or its start in a log recorded before it carried one), oldest first. A message
-/// posted while that session was starting is after it, so it stays pending. A reply's mentions and
-/// a system line's start nothing, so that replies are one deep.
+/// posted while that session was starting is after it, so it stays pending. A conversation that
+/// ended at its provider's limit is passed over, so that its mentions wait for the agent to wake;
+/// one that ended any other way used them up. A reply's mentions and a system line's start
+/// nothing, so that replies are one deep.
 ///
 /// # Errors
 ///
 /// `StoreError` when the log cannot be read.
 pub fn pending_mentions(log: &EventLog, agent_id: &str) -> Result<Vec<FarikEvent>, StoreError> {
-    // ponytail: each tick reads, for every active agent, its session starts and then every message
-    // since its last conversation (every message ever for one never mentioned): linear in the log,
-    // fine at a team's size. Upgrade: a projection holding each agent's last answered seq and its
+    // ponytail: each tick reads, for every active agent, its session starts and ends and then
+    // every message since its last conversation (every message ever for one never mentioned):
+    // linear in the log, fine at a team's size. Upgrade: a projection holding each agent's last answered seq and its
     // pending mentions.
-    let since = log
-        .read(&EventQuery {
-            agent_id: Some(agent_id.to_string()),
-            kinds: vec![EventKind::SessionStarted],
-            ..EventQuery::default()
-        })?
+    let sessions = log.read(&EventQuery {
+        agent_id: Some(agent_id.to_string()),
+        kinds: vec![EventKind::SessionStarted, EventKind::SessionEnded],
+        ..EventQuery::default()
+    })?;
+    // A conversation stopped at its provider's limit answered nothing: its agent sleeps, and the
+    // sleep, not the spent mentions, keeps it from being started again at once.
+    let limited: HashSet<&str> = sessions
         .iter()
-        .rev()
-        .find_map(|event| match &event.body {
-            EventBody::SessionStarted(body)
-                if body.purpose == SessionStartedBodyPurpose::Conversation =>
-            {
-                Some(body.in_reply_to.map_or(event.envelope.seq, NonZeroU64::get))
-            }
-            _ => None,
-        });
+        .filter(|event| {
+            matches!(&event.body, EventBody::SessionEnded(body)
+                if body.reason == SessionEndedBodyReason::ProviderLimit)
+        })
+        .filter_map(|event| event.envelope.ids.session_id.as_deref())
+        .collect();
+    let since = sessions.iter().rev().find_map(|event| match &event.body {
+        EventBody::SessionStarted(body)
+            if body.purpose == SessionStartedBodyPurpose::Conversation
+                && !event
+                    .envelope
+                    .ids
+                    .session_id
+                    .as_deref()
+                    .is_some_and(|session| limited.contains(session)) =>
+        {
+            Some(body.in_reply_to.map_or(event.envelope.seq, NonZeroU64::get))
+        }
+        _ => None,
+    });
     Ok(log
         .read(&EventQuery {
             after_seq: since,
