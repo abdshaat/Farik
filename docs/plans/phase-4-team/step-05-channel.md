@@ -104,7 +104,7 @@ Files: `tools.rs`, `tools/channel.rs`, `tools/refusal.rs`, `daemon/mcp.rs`, `cha
 - `asks_for_a_reaction_after_a_move` — the `implement` closing instruction holds `farik_post_message`; `triage`'s does not.
 - `lists_every_tool_with_its_tier` (changed) and the MCP tool count.
 
-- [ ] `feat(runtime): let an agent post in the channel from its session`
+- [x] `feat(runtime): let an agent post in the channel from its session`
 
 ### Task 3: system lines
 

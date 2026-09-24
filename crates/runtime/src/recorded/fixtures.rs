@@ -124,6 +124,13 @@ pub fn implement_stops_early() -> Transcript {
     Transcript::from_jsonl(include_str!("transcripts/implement_stops_early.jsonl"))
 }
 
+/// `dev-a`'s implement session of FRK-1 saying so in the channel: one `farik_post_message`, and a
+/// successful end. Hand-written.
+#[must_use]
+pub fn implement_reacts_frk_1() -> Transcript {
+    Transcript::from_jsonl(include_str!("transcripts/implement_reacts_frk_1.jsonl"))
+}
+
 /// `dev-b`'s verify session of FRK-1: a review note, and nothing else. Hand-written.
 #[must_use]
 pub fn review_writes_note() -> Transcript {

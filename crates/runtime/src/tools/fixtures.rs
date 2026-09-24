@@ -23,6 +23,7 @@ use serde_json::{Value, json};
 
 use super::{ToolContext, ToolDeps, ToolError, call_tool};
 use crate::exec::Executor;
+use crate::session::SessionPurpose;
 use crate::transitions::Transitions;
 
 /// The time every fixture event and every tool call is stamped with.
@@ -95,6 +96,7 @@ impl TestProject {
             agent_id: agent.to_string(),
             task_id: task.map(|task| task.parse().expect("a task id")),
             session_id: "session-1".to_string(),
+            purpose: SessionPurpose::Implement,
             executor: None,
             deps: Arc::clone(&self.deps),
         }
@@ -315,7 +317,7 @@ impl TestProject {
 }
 
 /// Runs one call to the end on a runtime of its own.
-fn run(context: &ToolContext, name: &str, input: Value) -> Result<Value, ToolError> {
+pub(crate) fn run(context: &ToolContext, name: &str, input: Value) -> Result<Value, ToolError> {
     tokio::runtime::Builder::new_current_thread()
         .build()
         .expect("a runtime is made")

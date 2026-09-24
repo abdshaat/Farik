@@ -22,8 +22,10 @@ use serde::de::DeserializeOwned;
 use serde_json::Value;
 
 use crate::exec::Executor;
+use crate::session::SessionPurpose;
 use crate::transitions::Transitions;
 
+mod channel;
 mod contracts;
 mod exec;
 #[cfg(test)]
@@ -97,6 +99,8 @@ pub struct ToolContext {
     pub task_id: Option<TaskId>,
     /// The session, stamped on every event a call appends.
     pub session_id: String,
+    /// Why the session runs, which decides what kind of message it posts.
+    pub purpose: SessionPurpose,
     /// Where the task's commands run, when it has somewhere.
     pub executor: Option<Arc<dyn Executor>>,
     /// The project's store, files, and repository.
@@ -220,6 +224,11 @@ static TOOLS: LazyLock<Vec<FarikTool>> = LazyLock::new(|| {
             Read,
             "Write a product document under .farik/product/ for the approved epic of this session.",
         ),
+        tool::<channel::PostMessageInput>(
+            "farik_post_message",
+            Read,
+            "Say something in the team's channel. One or two sentences: what happened and what is next, with no instruction to anyone.",
+        ),
         tool::<exec::ExecInput>(
             "farik_exec",
             Execute,
@@ -318,6 +327,7 @@ pub async fn call_tool(
         "farik_write_note" => work::write_note(&call, parse(input)?),
         "farik_ask_human" => work::ask_human(&call, parse(input)?),
         "farik_write_product_doc" => work::write_product_doc(&call, parse(input)?),
+        "farik_post_message" => channel::post_message(&call, parse(input)?),
         "farik_exec" => exec::exec(&call, parse(input)?).await,
         "farik_git_status" => nothing_in(input).and_then(|()| git::status(&call)),
         "farik_git_diff" => nothing_in(input).and_then(|()| git::diff(&call)),
@@ -515,6 +525,7 @@ mod tests {
             "farik_write_note",
             "farik_ask_human",
             "farik_write_product_doc",
+            "farik_post_message",
             "farik_exec",
             "farik_git_status",
             "farik_git_diff",
@@ -533,7 +544,7 @@ mod tests {
         assert_eq!(tier("farik_git_diff"), Some(PermissionTier::GitLocal));
         assert_eq!(tier("farik_git_commit"), Some(PermissionTier::GitLocal));
         assert_eq!(tier("farik_git_push"), Some(PermissionTier::GitRemote));
-        for tool in &tools[..16] {
+        for tool in &tools[..17] {
             assert_eq!(tool.tier, PermissionTier::Read, "{}", tool.name);
         }
         for tool in &tools {

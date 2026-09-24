@@ -17,9 +17,9 @@ use farik_core::team::fixtures::{a_team_wire, an_agent_wire};
 use farik_core::team::validate_team;
 use farik_protocol::clock::{Clock, FixedClock};
 use farik_protocol::event::{EventIds, EventKind};
-use farik_runtime::ToolDeps;
 use farik_runtime::daemon::{DaemonConfig, DaemonHandle, DaemonState, SessionRegistration, serve};
 use farik_runtime::transitions::Transitions;
+use farik_runtime::{SessionPurpose, ToolDeps};
 use farik_store::files::ProjectFiles;
 use farik_store::git::fixtures::TempRepo;
 use farik_store::{EventLog, EventQuery, IN_MEMORY, open_event_log, open_projections};
@@ -129,6 +129,7 @@ impl Served {
             executor: None,
             limits: DEFAULT_SESSION_LIMITS,
             farik_tools: Vec::new(),
+            purpose: SessionPurpose::Implement,
         });
         let runtime = tokio::runtime::Builder::new_multi_thread()
             .enable_all()

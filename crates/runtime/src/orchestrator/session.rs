@@ -95,6 +95,7 @@ pub(super) async fn run_session(
         session_id: spec.session_id.clone(),
         agent_id: spec.agent_id.clone(),
         task_id: spec.task_id.clone(),
+        purpose: ask.purpose,
         cwd: spec.cwd.clone(),
         executor: ask.executor,
         limits: spec.limits,
@@ -523,8 +524,54 @@ mod tests {
     use crate::orchestrator::fixtures::Harness;
     use crate::session::SessionPurpose;
 
-    use super::{SPRINT_PLAN_TOOL, SessionAsk, session_spec};
+    use super::{SPRINT_PLAN_TOOL, SessionAsk, TRIAGE_TOOL, session_spec};
     use crate::prompt::SPRINT_PLAN_INSTRUCTION;
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn offers_no_post_to_a_one_tool_session() {
+        let harness = Harness::new("session-no-post", |_| {});
+        harness.file("FRK-1", "draft", |_| {});
+        let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
+        let deps = &orchestrator.deps;
+        let team = deps.tools.files.read_team().expect("the team");
+        let contract = deps
+            .tools
+            .files
+            .read_contract(&"FRK-1".parse().expect("a task id"))
+            .expect("the contract");
+        let pm = team.active_agents().next().expect("an agent");
+        let spec = |purpose, only_tool| {
+            session_spec(
+                deps,
+                &team,
+                &SessionAsk {
+                    agent: pm,
+                    contract: Some(&contract),
+                    purpose,
+                    cwd: deps.tools.files.root().to_path_buf(),
+                    executor: None,
+                    read_only: false,
+                    only_tool,
+                    initial_prompt: String::new(),
+                },
+            )
+            .expect("the spec")
+        };
+
+        let triage = spec(SessionPurpose::Triage, Some(TRIAGE_TOOL));
+        let refine = spec(SessionPurpose::Refine, None);
+
+        assert_eq!(triage.farik_tools, vec![TRIAGE_TOOL.to_string()]);
+        assert!(
+            refine
+                .farik_tools
+                .iter()
+                .any(|tool| tool == "farik_post_message"),
+            "{:?}",
+            refine.farik_tools
+        );
+    }
 
     #[test]
     #[ignore = "needs the git program: cargo xtask check --integration"]

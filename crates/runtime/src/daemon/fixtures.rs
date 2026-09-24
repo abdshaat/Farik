@@ -14,6 +14,7 @@ use farik_store::open_event_log;
 use serde_json::{Value, json};
 
 use super::{DaemonState, HookRequest, SessionRegistration};
+use crate::session::SessionPurpose;
 use crate::tools::fixtures::{TestProject, a_team_of_three, at};
 use crate::tools::{ToolDeps, tool_descriptors};
 
@@ -94,6 +95,7 @@ impl TestDaemon {
             executor: None,
             limits,
             farik_tools: farik_tools.iter().map(ToString::to_string).collect(),
+            purpose: SessionPurpose::Implement,
         });
     }
 
@@ -148,6 +150,7 @@ impl TestDaemon {
             executor: None,
             limits: DEFAULT_SESSION_LIMITS,
             farik_tools: every_farik_tool().iter().map(ToString::to_string).collect(),
+            purpose: SessionPurpose::Implement,
         });
         state
     }

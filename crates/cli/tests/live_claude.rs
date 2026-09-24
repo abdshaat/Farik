@@ -176,6 +176,7 @@ impl Project {
             executor: None,
             limits: DEFAULT_SESSION_LIMITS,
             farik_tools: vec![FARIK_TOOL.to_string()],
+            purpose: SessionPurpose::Implement,
         });
         Project {
             repo,

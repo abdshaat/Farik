@@ -72,7 +72,8 @@ pub const CLOSING_INSTRUCTIONS: [(SessionPurpose, &str); 7] = [
         "This session writes the contract you were given, or improves it. Write it with \
          `farik_write_contract` and end the session once it is written. For an epic whose \
          questions are not yet answered, ask them first with `farik_ask_human` and end your turn \
-         after asking.",
+         after asking. After asking for a move, post one or two sentences \
+         about it with `farik_post_message`, in your persona's voice, naming the task.",
     ),
     (
         SessionPurpose::Plan,
@@ -80,7 +81,8 @@ pub const CLOSING_INSTRUCTIONS: [(SessionPurpose, &str); 7] = [
          `farik_create_task`, and assign each ready task, naming its reviewer, with \
          `farik_assign_task`. When every task under the epic is done, write its completion note with \
          `farik_write_note` of kind `completion` and request `verifying`. End the session when \
-         there is nothing left to file or assign.",
+         there is nothing left to file or assign. After asking for a move, post one or two sentences \
+         about it with `farik_post_message`, in your persona's voice, naming the task.",
     ),
     (
         SessionPurpose::Implement,
@@ -88,7 +90,8 @@ pub const CLOSING_INSTRUCTIONS: [(SessionPurpose, &str); 7] = [
          criterion you can run is recorded, and the completion note is written, end the session \
          by asking for `verifying` with `farik_request_transition`. If something you cannot \
          change stops you, end it with `farik_declare_blocked`, saying what is in the way and what \
-         is needed.",
+         is needed. After asking for a move, post one or two sentences \
+         about it with `farik_post_message`, in your persona's voice, naming the task.",
     ),
     (
         SessionPurpose::Verify,
@@ -98,7 +101,8 @@ pub const CLOSING_INSTRUCTIONS: [(SessionPurpose, &str); 7] = [
          write the review note with `farik_write_note` of kind `review`, mapping each criterion to \
          its evidence, and request `rejected` with `farik_request_transition` only if a criterion \
          failed, naming each one that failed. If you are the Product Manager and the first message \
-         says the review passed, request `accepted` with `farik_request_transition`.",
+         says the review passed, request `accepted` with `farik_request_transition`. After asking for a move, post one or two sentences \
+         about it with `farik_post_message`, in your persona's voice, naming the task.",
     ),
     (
         SessionPurpose::Ceremony,
@@ -939,6 +943,26 @@ mod tests {
                     .expect("an entry")
             );
         }
+    }
+
+    #[test]
+    fn asks_for_a_reaction_after_a_move() {
+        let inputs = a_product_manager();
+        let closing = |purpose| {
+            let prompt = assembled(&inputs.full(purpose));
+            section(&prompt, "This session").to_string()
+        };
+        for purpose in [
+            SessionPurpose::Refine,
+            SessionPurpose::Plan,
+            SessionPurpose::Implement,
+            SessionPurpose::Verify,
+        ] {
+            let text = closing(purpose);
+            assert!(text.contains("farik_post_message"), "{purpose:?}: {text}");
+        }
+        let triage = closing(SessionPurpose::Triage);
+        assert!(!triage.contains("farik_post_message"), "{triage}");
     }
 
     #[test]
