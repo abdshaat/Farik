@@ -448,8 +448,10 @@ fn split_glob(pattern: &str) -> (&str, &str) {
 }
 
 /// Whether a path glob stays under one of the ceiling globs. `**` admits everything. A ceiling
-/// that is a directory (`src`, `src/`, `src/**`) admits every path whose literal prefix is that
-/// directory or below it: `src/login/**` is within `src/**`, `src2/**` is not. Any other ceiling
+/// that is a directory (`src`, `src/`, `src/**`) admits a path without a wildcard that is that
+/// directory or below it, and a path whose literal prefix, cut at its first wildcard, is below
+/// it and so ends at a `/`: `src/login/**` is within `src/**`; `src2/**` is not, nor is
+/// `src*/**`, whose wildcard runs on into a sibling. Any other ceiling
 /// (`docs/**/*.md`, `src/*.rs`, an empty entry, `/`) admits only a path written exactly like it,
 /// so that a file filter is never widened and a stray entry never opens the ceiling. A path
 /// with a `..` segment is never within a directory. Paths are compared as written: `./src/**`
@@ -464,11 +466,12 @@ fn is_within_any(path: &str, ceilings: &[String]) -> bool {
         if !matches!(rest, "" | "**") || directory.is_empty() {
             return path == ceiling;
         }
-        let path = split_glob(path).0.trim_end_matches('/');
-        if path.split('/').any(|segment| segment == "..") {
+        let (prefix, wildcard) = split_glob(path);
+        if prefix.split('/').any(|segment| segment == "..") {
             return false;
         }
-        path == directory || path.starts_with(&format!("{directory}/"))
+        prefix.starts_with(&format!("{directory}/"))
+            || (wildcard.is_empty() && prefix.trim_end_matches('/') == directory)
     })
 }
 
@@ -1000,6 +1003,36 @@ mod tests {
         );
         contract.allowed_paths = vec!["docs/**/*.md".to_string()];
         assert_eq!(evaluate_readiness(&contract, &context), Ok(()));
+    }
+
+    #[test]
+    fn refuses_a_wildcard_that_runs_past_the_directory_name() {
+        // Each of these reaches `docsrc/` or `docs-site/`, siblings of `docs`, not inside it.
+        for path in ["docs*/**", "docs?/x", "docs{,rc}/**", "docs[x]/**"] {
+            let mut contract = a_contract();
+            contract.allowed_paths = vec![path.to_string()];
+            let mut context = a_ready_context();
+            context.rules.allowed_paths_ceiling = vec!["docs/**".to_string()];
+            assert_eq!(
+                failed_rules(&contract, &context),
+                [R::AllowedPathsWithinCeiling],
+                "{path} against the ceiling"
+            );
+            let task = a_task_for(Role::Architect, &[path]);
+            assert_eq!(
+                failed_rules(&task, &a_ready_context()),
+                [R::DocumentPathsOnly],
+                "{path} against the document paths"
+            );
+        }
+        for path in ["docs", "docs/**", "docs/*.md"] {
+            let task = a_task_for(Role::Architect, &[path]);
+            assert_eq!(
+                evaluate_readiness(&task, &a_ready_context()),
+                Ok(()),
+                "{path}"
+            );
+        }
     }
 
     /// A task for `role`, reviewed by the Product Manager so that any role may be the assignee,

@@ -286,7 +286,7 @@ Team rules are constraints the human writes once, in `.farik/team.yaml` under `r
 | Rule | Type | Enforced where |
 |---|---|---|
 | `protected_paths` | globs | every file tool call, read or write, is refused inside them (5.6) |
-| `allowed_paths_ceiling` | globs | Definition of Ready refuses a contract whose `allowed_paths` reach outside them |
+| `allowed_paths_ceiling` | globs | Definition of Ready refuses a contract whose `allowed_paths` reach outside them. A path lies within a directory glob such as `docs/**` only when its literal part, up to its first wildcard, reaches past the directory's `/` (`docs/adr/**`, `docs/*.md`), or it has no wildcard and is the directory or below it; `docs*/**` and `docs?/x` are outside, since the wildcard runs on into a sibling such as `docsrc/` (changed in 0.11) |
 | `required_criteria` | verification methods | Definition of Ready refuses a contract that has no criterion of each listed method |
 | `require_new_tests` | boolean | Definition of Ready refuses a contract whose `test` criteria do not set `new_tests_required` |
 | `max_task_budget_usd` | number | Definition of Ready refuses a task whose budget exceeds it, when it is set; an epic is bounded by the sprint budget instead |
