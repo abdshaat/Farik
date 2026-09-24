@@ -359,8 +359,7 @@ fn nothing_filed(repository: &TempRepo, before: usize) {
 #[test]
 #[ignore = "needs the git program: cargo xtask check --integration"]
 fn files_nothing_when_the_start_refuses() {
-    let repository = a_team("new-start-refused");
-    let before = events(&repository, &[]).len();
+    // Each refusal in a project of its own, so that what one leaves behind cannot hide another.
     let (_old, old_claude) = a_claude_saying("new-old-claude", "2.1.200 (Claude Code)");
     let nowhere = scratch("new-no-claude");
     let with_key = |path: String| {
@@ -369,14 +368,21 @@ fn files_nothing_when_the_start_refuses() {
             ("ANTHROPIC_API_KEY".to_string(), "sk-test".to_string()),
         ])
     };
-    for (said, env) in [
-        ("CLAUDE_CODE_OAUTH_TOKEN", a_bare_env()),
+    for (name, said, env) in [
         (
+            "new-start-refused-token",
+            "CLAUDE_CODE_OAUTH_TOKEN",
+            a_bare_env(),
+        ),
+        (
+            "new-start-refused-path",
             "there is no claude on PATH",
             with_key(nowhere.display().to_string()),
         ),
-        ("2.1.272", with_key(old_claude)),
+        ("new-start-refused-version", "2.1.272", with_key(old_claude)),
     ] {
+        let repository = a_team(name);
+        let before = events(&repository, &[]).len();
         let ran = run_with(
             &repository.path,
             &["contract", "new", "--brief", BRIEF, "--size", "small"],
@@ -387,6 +393,8 @@ fn files_nothing_when_the_start_refuses() {
         nothing_filed(&repository, before);
     }
 
+    let repository = a_team("new-start-refused-prices");
+    let before = events(&repository, &[]).len();
     std::fs::write(
         repository.path.join(".farik/prices.json"),
         "{\"version\": 2}",
