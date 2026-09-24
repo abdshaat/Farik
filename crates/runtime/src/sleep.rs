@@ -38,8 +38,13 @@ pub trait Sleeper: Send + Sync {
     fn sleep_until(&self, until: DateTime<Utc>) -> Pin<Box<dyn Future<Output = ()> + Send + '_>>;
 }
 
-/// A sleeper on the machine's timer: it waits `until` less the clock's now, and not at all when
-/// that has passed.
+/// The longest the machine's timer is waited on before the clock is read again. The timer does
+/// not run while the machine is suspended and the clock does, so a wait read once would wake late
+/// by the time suspended; read every chunk, it wakes at most one chunk late.
+const CHUNK: std::time::Duration = std::time::Duration::from_secs(1);
+
+/// A sleeper on the machine's timer: it waits until the clock says `until`, reading the clock
+/// again at least every `CHUNK`, and not at all when that has passed.
 pub struct TokioSleeper {
     /// The clock the run reads.
     pub clock: Arc<dyn Clock + Send + Sync>,
@@ -47,20 +52,28 @@ pub struct TokioSleeper {
 
 impl Sleeper for TokioSleeper {
     fn sleep_until(&self, until: DateTime<Utc>) -> Pin<Box<dyn Future<Output = ()> + Send + '_>> {
-        let wait = (until - self.clock.now()).to_std().unwrap_or_default();
-        Box::pin(tokio::time::sleep(wait))
+        Box::pin(async move {
+            // A time past is an error from `to_std`, and ends the wait as a zero one does.
+            while let Ok(left) = (until - self.clock.now()).to_std()
+                && !left.is_zero()
+            {
+                tokio::time::sleep(left.min(CHUNK)).await;
+            }
+        })
     }
 }
 
 #[cfg(test)]
 mod tests {
     use std::path::Path;
+    use std::sync::Arc;
 
-    use chrono::Duration;
+    use chrono::{DateTime, Duration, Utc};
+    use farik_protocol::clock::{Clock, MovableClock};
     use farik_protocol::event::{AgentSleptBody, EventBody, EventIds, NewEvent};
     use farik_store::{EventLog, IN_MEMORY, open_event_log};
 
-    use super::asleep_until;
+    use super::{Sleeper, TokioSleeper, asleep_until};
     use crate::tools::fixtures::at;
 
     /// Records that `agent` sleeps until `until`.
@@ -99,5 +112,68 @@ mod tests {
             asleep_until(&log, "dev-a", at() + Duration::hours(2)).expect("the log reads"),
             None
         );
+    }
+
+    /// The machine's clock.
+    struct MachineClock;
+
+    impl Clock for MachineClock {
+        fn now(&self) -> DateTime<Utc> {
+            Utc::now()
+        }
+    }
+
+    /// `sleeper`'s wait until `until`, and how long it took, failing the test rather than
+    /// hanging when it takes more than three seconds.
+    async fn timed(sleeper: &TokioSleeper, until: DateTime<Utc>) -> std::time::Duration {
+        let started = std::time::Instant::now();
+        tokio::time::timeout(
+            std::time::Duration::from_secs(3),
+            sleeper.sleep_until(until),
+        )
+        .await
+        .expect("the wait ends");
+        started.elapsed()
+    }
+
+    #[tokio::test]
+    async fn waits_on_the_machines_timer_until_the_time() {
+        let sleeper = TokioSleeper {
+            clock: Arc::new(MachineClock),
+        };
+
+        let took = timed(&sleeper, Utc::now() + Duration::milliseconds(300)).await;
+
+        assert!(took >= std::time::Duration::from_millis(250), "{took:?}");
+    }
+
+    #[tokio::test]
+    async fn does_not_wait_for_a_time_past() {
+        let sleeper = TokioSleeper {
+            clock: Arc::new(MachineClock),
+        };
+
+        let took = timed(&sleeper, Utc::now() - Duration::seconds(1)).await;
+
+        assert!(took < std::time::Duration::from_millis(100), "{took:?}");
+    }
+
+    #[tokio::test]
+    async fn wakes_when_the_clock_jumps_past_the_time() {
+        // A machine that suspends stops the timer and not the clock: after it resumes, the clock
+        // is past the time while the timer still has most of the wait to go.
+        let clock = Arc::new(MovableClock::new(at()));
+        let sleeper = TokioSleeper {
+            clock: Arc::clone(&clock) as Arc<dyn Clock + Send + Sync>,
+        };
+        let until = at() + Duration::hours(1);
+        let resumed = async {
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+            clock.set(until);
+        };
+
+        let (took, ()) = tokio::join!(timed(&sleeper, until), resumed);
+
+        assert!(took < std::time::Duration::from_secs(3), "{took:?}");
     }
 }
