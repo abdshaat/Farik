@@ -465,23 +465,62 @@ fn says_an_empty_sprint_whose_planning_is_spent_waits_for_its_end() {
 #[ignore = "needs the git program: cargo xtask check --integration"]
 fn joins_a_task_the_human_files_under_a_sprints_epic() {
     let repository = a_team("human-sprint-child");
-    let epic = filed(&repository, "A whole board");
+    let epic = an_epic_in_the_open_sprint(&repository);
+
+    let ran = file_under(&repository, &epic);
+
+    assert_eq!(ran.code, 0, "{}", ran.err);
+    let contract = files_of(&repository)
+        .read_contract(&"FRK-2".parse().expect("a task id"))
+        .expect("the child is written");
+    assert_eq!(contract.sprint.as_deref(), Some("S1"));
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn files_a_task_whose_join_fails_and_says_so() {
+    let repository = a_team("human-sprint-child-ending");
+    let epic = an_epic_in_the_open_sprint(&repository);
+    // The human's end has written S1's file and not yet recorded `sprint.ended`.
+    let path = repository.path.join(".farik/sprints/S1.yaml");
+    let text = std::fs::read_to_string(&path).expect("S1 reads");
+    let ending = text.replace(
+        "status: open",
+        "status: ended\nended_at: 2026-09-24T01:00:00Z",
+    );
+    assert_ne!(ending, text, "{text}");
+    std::fs::write(&path, ending).expect("S1 is written");
+
+    let ran = file_under(&repository, &epic);
+
+    assert_eq!(ran.code, 0, "{}", ran.err);
+    assert!(ran.out.contains("FRK-2 filed"), "{}", ran.out);
+    assert!(ran.out.contains("S1 has ended"), "{}", ran.out);
+    let contract = files_of(&repository)
+        .read_contract(&"FRK-2".parse().expect("a task id"))
+        .expect("the child is written");
+    assert_eq!(contract.sprint, None);
+}
+
+/// An epic, in progress with the Product Manager, planned into S1, which is open.
+fn an_epic_in_the_open_sprint(repository: &farik_store::git::fixtures::TempRepo) -> String {
+    let epic = filed(repository, "A whole board");
     let ran = run(
         &repository.path,
         &["triage", &epic, "large", "--reason", "Two parts."],
     );
     assert_eq!(ran.code, 0, "{}", ran.err);
-    moved(&repository, &epic, "draft", "refining", &json!({}));
-    moved(&repository, &epic, "refining", "ready", &json!({}));
+    moved(repository, &epic, "draft", "refining", &json!({}));
+    moved(repository, &epic, "refining", "ready", &json!({}));
     moved(
-        &repository,
+        repository,
         &epic,
         "ready",
         "assigned",
         &json!({ "assignee": "pm" }),
     );
     moved(
-        &repository,
+        repository,
         &epic,
         "assigned",
         "in_progress",
@@ -490,28 +529,26 @@ fn joins_a_task_the_human_files_under_a_sprints_epic() {
     let started = run(&repository.path, &["sprint", "start"]);
     assert_eq!(started.code, 0, "{}", started.err);
     plan_sprint(
-        &tool_deps(&repository),
+        &tool_deps(repository),
         &[epic.parse().expect("a task id")],
         &PlannedBy::Governor,
     )
     .expect("the epic is planned");
+    epic
+}
+
+/// `farik task create` of a request under `epic`.
+fn file_under(repository: &farik_store::git::fixtures::TempRepo, epic: &str) -> project::Ran {
     let child = repository.path.join("child.yaml");
     std::fs::write(&child, project::a_request("One row of the board")).expect("written");
-
-    let ran = run(
+    run(
         &repository.path,
         &[
             "task",
             "create",
             child.to_str().expect("a path"),
             "--parent",
-            &epic,
+            epic,
         ],
-    );
-
-    assert_eq!(ran.code, 0, "{}", ran.err);
-    let contract = files_of(&repository)
-        .read_contract(&"FRK-2".parse().expect("a task id"))
-        .expect("the child is written");
-    assert_eq!(contract.sprint.as_deref(), Some("S1"));
+    )
 }

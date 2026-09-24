@@ -4,7 +4,7 @@
 use std::fmt;
 
 use farik_core::contract::{Role, TaskId, TaskStatus};
-use farik_core::sprint::{Sprint, validate_sprint};
+use farik_core::sprint::{Sprint, SprintStatus, validate_sprint};
 use farik_protocol::event::{EventBody, EventKind, new_event};
 use farik_store::files::FilesError;
 use farik_store::{EventLog, EventQuery, SprintProjection, StoreError, TaskProjection};
@@ -140,22 +140,32 @@ pub fn end_sprint(deps: &ToolDeps, ended_by: EndedBy) -> Result<Sprint, SprintEr
     wire["status"] = json!("ended");
     wire["ended_at"] = json!(deps.clock.now().to_rfc3339());
     let sprint = held(&wire)?;
-    let mut left: Vec<TaskId> = Vec::new();
+    // The tasks in it are the ones its file lists and the ones the board holds in it: a file
+    // restored from before a plan, or edited by hand, does not keep a task in an ended sprint.
+    let board = deps.projections.board()?;
+    let mut in_sprint: Vec<TaskId> = Vec::new();
     for id in &sprint.task_ids {
-        let task_id: TaskId = id.as_str().parse().map_err(|error| SprintError::Refused {
+        in_sprint.push(id.as_str().parse().map_err(|error| SprintError::Refused {
             reason: format!(
                 "sprint_refused: {} holds {id:?}: {error}",
                 sprint.id.as_str()
             ),
-        })?;
-        let finished = deps
-            .projections
-            .task(&task_id)?
-            .is_some_and(|row| matches!(row.status, TaskStatus::Accepted | TaskStatus::Cancelled));
-        if !finished {
-            left.push(task_id);
+        })?);
+    }
+    for row in &board {
+        if row.sprint.as_deref() == Some(sprint.id.as_str()) && !in_sprint.contains(&row.task_id) {
+            in_sprint.push(row.task_id.clone());
         }
     }
+    let left: Vec<TaskId> = in_sprint
+        .into_iter()
+        .filter(|task_id| {
+            !board.iter().any(|row| {
+                &row.task_id == task_id
+                    && matches!(row.status, TaskStatus::Accepted | TaskStatus::Cancelled)
+            })
+        })
+        .collect();
     deps.files.write_sprint(&sprint)?;
     for task_id in &left {
         let mut contract = deps.files.read_contract(task_id)?;
@@ -244,7 +254,13 @@ pub fn plan_sprint(
     if assigner.is_some() {
         fits(deps, &open, &board, task_ids)?;
     }
-    let mut wire = as_wire(&deps.files.read_sprint(&open.sprint_id)?)?;
+    let file = deps.files.read_sprint(&open.sprint_id)?;
+    // An end writes the file before its event: a plan that sees it ended writes nothing. One that
+    // reads it a moment earlier still loses, since the board applies no plan after the end.
+    if file.status != SprintStatus::Open {
+        return Err(plan_refused(&format!("{} has ended", open.sprint_id)));
+    }
+    let mut wire = as_wire(&file)?;
     let ids: Vec<&str> = planned.iter().map(|id| id.as_str()).collect();
     if let Some(listed) = wire["task_ids"].as_array_mut() {
         listed.extend(ids.iter().map(|id| json!(id)));

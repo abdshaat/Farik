@@ -313,10 +313,17 @@ pub(super) fn create_task(call: &Call<'_>, input: CreateTaskInput) -> Result<Val
         other => failed(other),
     })?;
     deps.projections.catch_up().map_err(failed)?;
-    if parent.is_some() {
-        sprints::join_epics_sprint(deps, &filed.id).map_err(sprint_failed)?;
+    let mut answer = json!({ "task_id": filed.id.as_str(), "status": "draft" });
+    // The task is filed whatever the join says: an error here would have the agent file it again.
+    if parent.is_some()
+        && let Err(error) = sprints::join_epics_sprint(deps, &filed.id)
+    {
+        answer["warning"] = json!(format!(
+            "{} is filed and joined no sprint: {error}",
+            filed.id.as_str()
+        ));
     }
-    Ok(json!({ "task_id": filed.id.as_str(), "status": "draft" }))
+    Ok(answer)
 }
 
 /// Plans the open sprint as the assigner (5.5), through `sprints::plan_sprint`, and answers the
@@ -1086,6 +1093,27 @@ mod tests {
 
     #[test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn refuses_a_plan_into_a_sprint_that_is_ending() {
+        let project = a_project_with_scrum_master("tools-plan-ending");
+        project.filed("FRK-1", "ready", "task", None);
+        project.open_sprint("S1", None, &[]);
+        // An end has written S1's file and not yet recorded `sprint.ended`.
+        let mut ending = farik_core::sprint::fixtures::an_open_sprint_wire();
+        ending["id"] = json!("S1");
+        ending["status"] = json!("ended");
+        ending["ended_at"] = json!("2026-09-24T01:00:00Z");
+        project
+            .deps
+            .files
+            .write_sprint(&farik_core::sprint::validate_sprint(&ending).expect("a sprint"))
+            .expect("S1 is written");
+
+        plan_refused(&project, "sm", &["FRK-1"], &["S1", "ended"]);
+        assert_eq!(sprint_of(&project, "FRK-1"), Value::Null);
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
     fn plans_an_epics_tasks_with_it() {
         let project = a_project_with_scrum_master("tools-plan-epic");
         project.filed("FRK-1", "ready", "epic", None);
@@ -1149,6 +1177,46 @@ mod tests {
             planned(&project).last(),
             Some(&json!({ "sprint_id": "S1", "task_ids": ["FRK-2"], "planned_by": "governor" }))
         );
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn files_a_task_whose_join_fails_and_says_so() {
+        let project = a_project("tools-child-sprint-ending");
+        project.filed("FRK-1", "in_progress", "epic", None);
+        project.moved(
+            "FRK-1",
+            "assigned",
+            "in_progress",
+            &json!({ "assignee": "pm" }),
+        );
+        project.open_sprint("S1", None, &["FRK-1"]);
+        // The human's end has written S1's file and not yet recorded `sprint.ended`.
+        let mut ending = farik_core::sprint::fixtures::an_open_sprint_wire();
+        ending["id"] = json!("S1");
+        ending["task_ids"] = json!(["FRK-1"]);
+        ending["status"] = json!("ended");
+        ending["ended_at"] = json!("2026-09-24T01:00:00Z");
+        project
+            .deps
+            .files
+            .write_sprint(&farik_core::sprint::validate_sprint(&ending).expect("a sprint"))
+            .expect("S1 is written");
+
+        let answer = project
+            .call(
+                "pm",
+                None,
+                "farik_create_task",
+                json!({ "contract": a_request(), "parent": "FRK-1" }),
+            )
+            .expect("the task is filed though it joins no sprint");
+
+        assert_eq!(answer["task_id"], "FRK-2");
+        let warning = answer["warning"].as_str().expect("a warning");
+        assert!(warning.contains("S1 has ended"), "{warning}");
+        assert_eq!(sprint_of(&project, "FRK-2"), Value::Null);
+        assert_eq!(planned(&project).len(), 1, "only the fixture's plan");
     }
 
     /// A request as its author writes it.

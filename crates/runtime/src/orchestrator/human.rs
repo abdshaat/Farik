@@ -1848,4 +1848,34 @@ mod tests {
         let again = refused(&orchestrator, Command::SprintEnd).await;
         assert!(again.contains("no sprint is open"), "{again}");
     }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn ends_a_sprint_whose_file_omits_a_task_on_the_board() {
+        let harness = Harness::new("human-sprint-end-omitted", |_| {});
+        harness.in_progress("FRK-1", "dev-a", "dev-b");
+        harness.open_sprint("S1", &["FRK-1"]);
+        // S1's file restored from before FRK-1 was planned into it.
+        let files = &harness.project.deps.files;
+        let mut restored = an_open_sprint_wire();
+        restored["id"] = json!("S1");
+        files
+            .write_sprint(&validate_sprint(&restored).expect("a sprint"))
+            .expect("S1 is written");
+        let orchestrator = an_orchestrator(&harness);
+
+        handled(&orchestrator, Command::SprintEnd).await;
+
+        let ended = last(&harness, EventKind::SprintEnded).expect("the end is recorded");
+        let EventBody::SprintEnded(body) = &ended.body else {
+            panic!("an end");
+        };
+        assert_eq!(
+            body.left.iter().map(|id| id.as_str()).collect::<Vec<_>>(),
+            vec!["FRK-1"]
+        );
+        let contract = files.read_contract(&task("FRK-1")).expect("FRK-1 reads");
+        assert_eq!(contract.sprint, None);
+        assert_eq!(harness.row("FRK-1").sprint, None);
+    }
 }

@@ -79,11 +79,20 @@ pub fn create(
         }
         other => other.to_string(),
     })?;
-    // A task filed under an epic in the open sprint joins it (5.5).
-    if parent.is_some() {
+    // A task filed under an epic in the open sprint joins it (5.5). The task is filed whatever the
+    // join says, so its failure is a warning: an error would have the person file it again.
+    let warning = if parent.is_some() {
         join_epics_sprint(&*tool_deps(project, io)?, &contract.id)
-            .map_err(|error| error.to_string())?;
-    }
+            .err()
+            .map(|error| {
+                format!(
+                    "warning: {} is filed and joined no sprint: {error}",
+                    contract.id.as_str()
+                )
+            })
+    } else {
+        None
+    };
     let seqs: Vec<u64> = project
         .log
         .read(&EventQuery {
@@ -95,7 +104,7 @@ pub fn create(
         .map(|event| event.envelope.seq)
         .collect();
 
-    let lines = match &parent {
+    let mut lines = match &parent {
         Some(parent) => vec![
             format!(
                 "{} filed as a task of {}: {}",
@@ -120,15 +129,20 @@ pub fn create(
                 .to_string(),
         ],
     };
+    let mut json = json!({
+        "task_id": contract.id.to_string(),
+        "title": contract.title,
+        "status": "draft",
+        "path": format!(".farik/contracts/{}.yaml", contract.id.as_str()),
+        "events": seqs,
+    });
+    if let Some(warning) = warning {
+        json["warning"] = json!(warning);
+        lines.push(warning);
+    }
     Ok(Report {
         lines,
-        json: json!({
-            "task_id": contract.id.to_string(),
-            "title": contract.title,
-            "status": "draft",
-            "path": format!(".farik/contracts/{}.yaml", contract.id.as_str()),
-            "events": seqs,
-        }),
+        json,
         json_lines: None,
     })
 }
