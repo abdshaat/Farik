@@ -126,7 +126,7 @@ Consumes: `Call`, `append` of the tools
 - `refuses_a_judgment_outside_refining` — a task `ready`: `judgment_not_allowed`.
 - `refuses_a_blank_reason` — `reason: "  "`: `blank_reason`.
 - `names_the_contract_a_judgment_is_about` — `is_about_one_contract(ContractJudged)` is true, and appending one with no task id is refused as the other contract kinds are.
-- `lists_every_kind_the_schema_lists` — unchanged, now 32.
+- `names_every_event_kind_as_an_entity_and_a_past_tense_verb` (`crates/protocol/src/lib.rs`, which asserts the schema's kinds are `EVERY_KIND`) and `reads_an_event_of_every_kind_and_gives_the_body_its_own_kind_back` (`crates/protocol/src/event.rs`) — unchanged, now 32 kinds. (Corrected at landing: this line first named a test that does not exist.)
 
 - [x] `feat(runtime): record the scrum master's judgment of a contract`
 
