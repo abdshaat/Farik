@@ -253,6 +253,13 @@
           "minLength": 1,
           "maxLength": 200,
           "description": "The branch accepted work integrates into. Left out, it is the repository's default branch (spec 5.14)."
+        },
+        "ambient_messages_per_sprint": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 20,
+          "default": 1,
+          "description": "How many unprompted messages each agent may post in the channel per sprint, or per UTC day while no sprint is open (spec 5.9). Left out, one."
         }
       }
     },

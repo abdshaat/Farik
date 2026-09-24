@@ -597,6 +597,12 @@ mod tests {
     }
 
     #[test]
+    fn defaults_the_ambient_allowance() {
+        // 5.9: each agent has one unprompted message per sprint unless the team says otherwise.
+        assert_eq!(team(&a_team_wire()).policy.ambient_messages_per_sprint, 1);
+    }
+
+    #[test]
     fn refuses_a_number_outside_what_a_rule_allows() {
         // Every bound here carries a spec number: 5.2's work-in-progress limit, 5.7's blocked age
         // and iteration count, 5.5's daily budget, 5.12's task cap and its list of methods. A bound

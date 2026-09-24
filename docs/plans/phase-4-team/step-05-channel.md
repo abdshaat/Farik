@@ -92,7 +92,7 @@ Files: the three schemas, `team.rs`, protocol, `channel.rs`, `orchestrator/human
 - `escapes_what_an_agent_wrote_in_the_channel` (cli) — a message holding `\u001b[31m`: printed as the six characters `\u001b`.
 - `defaults_the_ambient_allowance` (core) — a team file without it: 1.
 
-- [ ] `feat(runtime): let the human post in the team's channel and read it`
+- [x] `feat(runtime): let the human post in the team's channel and read it`
 
 ### Task 2: agents post
 

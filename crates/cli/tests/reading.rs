@@ -1068,3 +1068,33 @@ fn says_there_is_no_sprint_yet() {
     assert_eq!(ran.code, 0, "{}", ran.err);
     assert!(ran.out.contains("no sprint yet"), "{}", ran.out);
 }
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn escapes_what_an_agent_wrote_in_the_channel() {
+    use serde_json::json;
+
+    let repository = a_project_with_a_task("read-channel-escaped");
+    project::record_as(
+        &repository,
+        "FRK-1",
+        Some(("pm", "session-1")),
+        "message.posted",
+        &json!({
+            "author": "pm",
+            "kind": "reaction",
+            "text": "FRK-1 is \u{1b}[31mready",
+            "mentions": []
+        }),
+    );
+
+    let shown = run_in(&repository.path, &["channel"]);
+
+    assert_eq!(shown.code, 0, "{}", shown.err);
+    assert!(!shown.out.contains('\u{1b}'), "{:?}", shown.out);
+    assert!(
+        shown.out.contains("pm FRK-1 is \\u001b[31mready"),
+        "{:?}",
+        shown.out
+    );
+}

@@ -560,3 +560,51 @@ fn file_under(repository: &farik_store::git::fixtures::TempRepo, epic: &str) -> 
         ],
     )
 }
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn says_and_shows_the_channel() {
+    let repository = a_team("human-say");
+
+    let said = run(&repository.path, &["say", "hello @dev-a"]);
+    assert_eq!(said.code, 0, "{}", said.err);
+    assert!(said.out.contains("posted in the channel"), "{}", said.out);
+
+    let shown = run(&repository.path, &["channel"]);
+    assert_eq!(shown.code, 0, "{}", shown.err);
+    assert!(
+        shown
+            .out
+            .lines()
+            .any(|line| line.contains("human") && line.contains("hello @dev-a")),
+        "{}",
+        shown.out
+    );
+    let listed = run(&repository.path, &["--json", "channel"]);
+    assert_eq!(listed.code, 0, "{}", listed.err);
+    let first: Value = serde_json::from_str(listed.out.lines().next().expect("a line"))
+        .expect("one JSON object per line");
+    assert_eq!(first["kind"], "human");
+    assert_eq!(first["author"], "human");
+    assert_eq!(first["mentions"], json!(["dev-a"]));
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn shows_the_last_messages_of_the_channel() {
+    let repository = a_team("human-channel-last");
+    for text in ["one", "two", "three"] {
+        let said = run(&repository.path, &["say", text]);
+        assert_eq!(said.code, 0, "{}", said.err);
+    }
+
+    let shown = run(&repository.path, &["channel", "--last", "2"]);
+
+    assert_eq!(shown.code, 0, "{}", shown.err);
+    let texts: Vec<&str> = shown
+        .out
+        .lines()
+        .filter_map(|line| line.rsplit(' ').next())
+        .collect();
+    assert_eq!(texts, ["two", "three"], "{}", shown.out);
+}

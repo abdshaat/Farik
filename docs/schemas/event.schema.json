@@ -92,7 +92,8 @@
         "sprint.started",
         "sprint.planned",
         "sprint.ended",
-        "agent.slept"
+        "agent.slept",
+        "message.posted"
       ]
     },
     "eventBodyWire": {
@@ -134,7 +135,8 @@
         { "$ref": "#/$defs/sprintStartedBody" },
         { "$ref": "#/$defs/sprintPlannedBody" },
         { "$ref": "#/$defs/sprintEndedBody" },
-        { "$ref": "#/$defs/agentSleptBody" }
+        { "$ref": "#/$defs/agentSleptBody" },
+        { "$ref": "#/$defs/messagePostedBody" }
       ]
     },
     "contractSummary": {
@@ -568,6 +570,29 @@
       "properties": {
         "until": { "type": "string", "format": "date-time" },
         "detail": { "type": "string" }
+      }
+    },
+    "messagePostedBody": {
+      "title": "Message Posted Body",
+      "description": "A message in the team's channel, which is where the channel is kept (docs/SPEC.md 5.9). author is an agent id, human, or farik, and is who said it; the envelope names the agent for an agent's message and none for human or farik, and the task when the message is about one. text is one line, not blank, and at most 2,000 characters: Farik turns each line break into a space and refuses the rest when the message is posted, so that reading the log never fails on an old message. mentions are the agents Farik found named as @<id> in text, never what the author said they were. thread names a ceremony's thread, and in_reply_to the seq of the message a reply answers.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["author", "kind", "text", "mentions"],
+      "properties": {
+        "author": { "type": "string" },
+        "kind": {
+          "type": "string",
+          "enum": ["reaction", "ambient", "reply", "ceremony", "system", "human"]
+        },
+        "text": { "type": "string" },
+        "mentions": {
+          "type": "array",
+          "maxItems": 7,
+          "uniqueItems": true,
+          "items": { "type": "string" }
+        },
+        "thread": { "type": "string", "enum": ["planning", "standup", "review", "retro"] },
+        "in_reply_to": { "type": "integer", "minimum": 0 }
       }
     },
     "questionAskedBody": {

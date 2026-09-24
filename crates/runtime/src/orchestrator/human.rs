@@ -12,7 +12,7 @@ use farik_core::team::{AgentStatus, Team};
 use farik_protocol::command::{AcceptSubject, Command, RequestSize};
 use farik_protocol::event::{
     AgentUpdatedBody, EscalationResolvedBody, EventBody, EventIds, EventKind, HumanAcceptedBody,
-    HumanAcceptedBodySubject, QuestionAnsweredBody, new_event,
+    HumanAcceptedBodySubject, MessageKind, QuestionAnsweredBody, new_event,
 };
 use farik_store::requests::{RequestError, hold_contract, triage_by_human};
 use farik_store::{EventQuery, TaskProjection};
@@ -20,6 +20,7 @@ use farik_store::{EventQuery, TaskProjection};
 use super::requests::HUMAN;
 use super::verify::{governor_results, is_human, is_mechanical, since_verifying};
 use super::{CommandError, CommandReport, IntegrationOutcome, Orchestrator, OrchestratorError};
+use crate::channel::{ChannelError, NewMessage, mentions_in, post};
 use crate::sprints::{EndedBy, SprintError, end_sprint, start_sprint};
 use crate::tools::ToolDeps;
 use crate::transitions::{
@@ -95,6 +96,7 @@ pub(super) async fn handle(
             end_sprint(tools, EndedBy::Human),
             EventKind::SprintEnded,
         ),
+        Command::MessagePost { text } => post_message(tools, text),
         Command::RunStop => {
             orchestrator.stop();
             Ok(CommandReport {
@@ -105,6 +107,36 @@ pub(super) async fn handle(
             })
         }
     }
+}
+
+/// The human's message in the team's channel (5.9), its mentions found by Farik.
+fn post_message(tools: &ToolDeps, text: String) -> Result<CommandReport, CommandError> {
+    let team = tools.files.read_team().map_err(failed)?;
+    let mentions = mentions_in(&text, &team, HUMAN);
+    let seq = post(
+        &tools.log,
+        tools.clock.as_ref(),
+        &tools.ids,
+        NewMessage {
+            author: HUMAN.to_string(),
+            agent_id: None,
+            kind: MessageKind::Human,
+            text,
+            mentions,
+            task_id: None,
+            thread: None,
+            in_reply_to: None,
+            session_id: None,
+        },
+    )
+    .map_err(|error| match error {
+        ChannelError::Refused { reason } => CommandError::Invalid { detail: reason },
+        ChannelError::Store(error) => failed(error),
+    })?;
+    Ok(CommandReport {
+        said: "posted in the channel".to_string(),
+        events: vec![seq],
+    })
 }
 
 /// What starting or ending a sprint did, as the human's report: the sprint and the event of
@@ -889,7 +921,7 @@ mod tests {
     use farik_protocol::command::{AcceptSubject, Command, RequestSize};
     use farik_protocol::event::{
         EscalationRaisedBodyReason, EventBody, EventKind, FarikEvent, HumanAcceptedBodySubject,
-        SessionEndedBodyReason,
+        MessageKind, SessionEndedBodyReason,
     };
     use serde_json::{Value, json};
 
@@ -1877,5 +1909,76 @@ mod tests {
         let contract = files.read_contract(&task("FRK-1")).expect("FRK-1 reads");
         assert_eq!(contract.sprint, None);
         assert_eq!(harness.row("FRK-1").sprint, None);
+    }
+
+    /// What `handle` answers for the human's `text` in the channel.
+    async fn said_in_the_channel(
+        orchestrator: &Orchestrator,
+        text: &str,
+    ) -> Result<CommandReport, CommandError> {
+        orchestrator
+            .handle(Command::MessagePost {
+                text: text.to_string(),
+            })
+            .await
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn posts_the_humans_message() {
+        let harness = Harness::new("human-message", |_| {});
+        let orchestrator = an_orchestrator(&harness);
+
+        let report = said_in_the_channel(&orchestrator, "@dev-a how is FRK-1?")
+            .await
+            .expect("the message is posted");
+
+        let posted = harness.events(&[EventKind::MessagePosted]);
+        assert_eq!(posted.len(), 1);
+        let EventBody::MessagePosted(body) = &posted[0].body else {
+            panic!("a message");
+        };
+        assert_eq!(
+            (body.author.as_str(), body.kind, body.text.as_str()),
+            ("human", MessageKind::Human, "@dev-a how is FRK-1?")
+        );
+        assert_eq!(body.mentions, ["dev-a"]);
+        assert_eq!(posted[0].envelope.ids.agent_id, None);
+        assert_eq!(report.events, vec![posted[0].envelope.seq]);
+        assert_eq!(report.said, "posted in the channel");
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn refuses_an_empty_message() {
+        let harness = Harness::new("human-message-empty", |_| {});
+        let orchestrator = an_orchestrator(&harness);
+
+        let said = said_in_the_channel(&orchestrator, "   ").await;
+
+        assert!(
+            matches!(said, Err(CommandError::Invalid { .. })),
+            "{said:?}"
+        );
+        assert!(harness.events(&[EventKind::MessagePosted]).is_empty());
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn refuses_a_message_too_long() {
+        let harness = Harness::new("human-message-long", |_| {});
+        let orchestrator = an_orchestrator(&harness);
+
+        let said = said_in_the_channel(&orchestrator, &"a".repeat(2_001)).await;
+
+        assert!(
+            matches!(said, Err(CommandError::Invalid { .. })),
+            "{said:?}"
+        );
+        assert!(harness.events(&[EventKind::MessagePosted]).is_empty());
+        // The limit counts characters, not bytes: 2,000 of a two-byte letter is a message.
+        said_in_the_channel(&orchestrator, &"é".repeat(2_000))
+            .await
+            .expect("2,000 characters are posted");
     }
 }

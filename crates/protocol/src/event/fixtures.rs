@@ -63,8 +63,7 @@ pub fn a_body_wire(kind: EventKind) -> Value {
         EventKind::ContractWritten => {
             json!({ "summary": a_contract_summary_wire(), "written_by": "maya-chen" })
         }
-        EventKind::ContractLocked => json!({ "locked_by": "human" }),
-        EventKind::ContractUnlocked => json!({ "unlocked_by": "human" }),
+        EventKind::ContractLocked | EventKind::ContractUnlocked => a_hold_body_wire(kind),
         EventKind::DriftDetected => json!({
             "drift": "contract_without_events",
             "detail": "FRK-1 has a contract file and no events."
@@ -145,11 +144,21 @@ pub fn a_body_wire(kind: EventKind) -> Value {
         EventKind::QuestionAsked
         | EventKind::QuestionAnswered
         | EventKind::HumanAccepted
-        | EventKind::EscalationResolved => a_human_body_wire(kind),
+        | EventKind::EscalationResolved
+        | EventKind::MessagePosted => a_human_body_wire(kind),
         EventKind::AgentUpdated | EventKind::AgentSlept => an_agent_body_wire(kind),
         EventKind::SprintStarted | EventKind::SprintPlanned | EventKind::SprintEnded => {
             a_sprint_body_wire(kind)
         }
+    }
+}
+
+/// A lock or an unlock of a contract, by the human.
+fn a_hold_body_wire(kind: EventKind) -> Value {
+    if kind == EventKind::ContractLocked {
+        json!({ "locked_by": "human" })
+    } else {
+        json!({ "unlocked_by": "human" })
     }
 }
 
@@ -173,7 +182,8 @@ fn a_record_body_wire(kind: EventKind) -> Value {
 }
 
 /// A body of a question to the human or of the human's own acts: a question, an answer to question
-/// 3, an acceptance of a result with its words, and a resolution back to `refining`.
+/// 3, an acceptance of a result with its words, a resolution back to `refining`, and a message
+/// in the channel mentioning `dev-a`.
 fn a_human_body_wire(kind: EventKind) -> Value {
     match kind {
         EventKind::QuestionAsked => json!({
@@ -186,6 +196,12 @@ fn a_human_body_wire(kind: EventKind) -> Value {
         EventKind::HumanAccepted => {
             json!({ "subject": "result", "accepted_by": "human", "message": "Both look right." })
         }
+        EventKind::MessagePosted => json!({
+            "author": "human",
+            "kind": "human",
+            "text": "@dev-a how is FRK-1?",
+            "mentions": ["dev-a"]
+        }),
         _ => json!({ "to": "refining", "message": "Split it by page.", "resolved_by": "human" }),
     }
 }

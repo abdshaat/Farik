@@ -8,6 +8,8 @@
 
 /// The lifecycle, one line per task.
 pub mod board;
+/// The team's channel.
+pub mod channel;
 /// Taking a contract from the team, and giving it back.
 pub mod contract;
 /// Writing a contract with the Product Manager at the terminal.
@@ -314,6 +316,18 @@ enum Commands {
         #[command(subcommand)]
         command: SprintCommands,
     },
+    /// Say something in the team's channel; @<id> mentions an agent (5.9).
+    Say {
+        /// What you say.
+        #[arg(required = true, trailing_var_arg = true, allow_hyphen_values = true)]
+        text: Vec<String>,
+    },
+    /// Show the team's channel, oldest first (5.9).
+    Channel {
+        /// How many of the latest messages.
+        #[arg(long, default_value_t = 50)]
+        last: usize,
+    },
     /// Stop the process driving this project after its session, or stop one session now (5.2).
     Stop {
         /// A session id, or a task whose running session to stop.
@@ -513,6 +527,7 @@ pub fn run_cli(args: &[String], io: &mut CliIo<'_>) -> i32 {
         | Commands::Integrate { .. }
         | Commands::Resolve { .. }
         | Commands::Cancel { .. }
+        | Commands::Say { .. }
         | Commands::Sprint {
             command: SprintCommands::Start { .. } | SprintCommands::End,
         } => open_project(&io.cwd, now).and_then(|project| {
@@ -529,6 +544,9 @@ pub fn run_cli(args: &[String], io: &mut CliIo<'_>) -> i32 {
             command: SprintCommands::Show { sprint_id },
         } => open_project(&io.cwd, now)
             .and_then(|project| sprint::show(&project, sprint_id.as_deref())),
+        Commands::Channel { last } => {
+            open_project(&io.cwd, now).and_then(|project| channel::channel(&project, *last))
+        }
         Commands::Board => open_project(&io.cwd, now).and_then(|project| board::board(&project)),
         Commands::Log { task, kind, limit } => open_project(&io.cwd, now)
             .and_then(|project| log::log(&project, task.as_ref(), kind.as_ref(), *limit)),
@@ -677,6 +695,12 @@ fn humans(command: &Commands) -> Result<(&'static str, Command), String> {
         Commands::Sprint {
             command: SprintCommands::End,
         } => ("sprint end", Command::SprintEnd),
+        Commands::Say { text } => (
+            "say",
+            Command::MessagePost {
+                text: text.join(" "),
+            },
+        ),
         _ => return Err("this is not one of the human's commands".to_string()),
     })
 }

@@ -27,7 +27,8 @@
         "session_stop",
         "run_stop",
         "sprint_start",
-        "sprint_end"
+        "sprint_end",
+        "message_post"
       ]
     },
     "commandBodyWire": {
@@ -44,6 +45,7 @@
         { "$ref": "#/$defs/agentUpdateBody" },
         { "$ref": "#/$defs/sessionStopBody" },
         { "$ref": "#/$defs/sprintStartBody" },
+        { "$ref": "#/$defs/messagePostBody" },
         { "$ref": "#/$defs/emptyBody" }
       ]
     },
@@ -156,6 +158,16 @@
       "required": ["budget_usd"],
       "properties": {
         "budget_usd": { "type": ["number", "null"], "exclusiveMinimum": 0 }
+      }
+    },
+    "messagePostBody": {
+      "title": "Message Post Body",
+      "description": "The human says something in the team's channel (docs/SPEC.md 5.9). Whether text is blank or too long is the handler's to say, with the rule's own words.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["text"],
+      "properties": {
+        "text": { "type": "string" }
       }
     },
     "emptyBody": {

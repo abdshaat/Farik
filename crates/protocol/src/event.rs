@@ -20,21 +20,25 @@ pub use crate::generated::event::{
     CostRecordedBodyPurpose, CriteriaUpdatedBody, CriterionRecordedBody,
     CriterionRecordedBodyRunBy, DriftDetectedBody, DriftDetectedBodyDrift, EscalationRaisedBody,
     EscalationRaisedBodyReason, EscalationResolvedBody, EventKind, HumanAcceptedBody,
-    HumanAcceptedBodySubject, NoteWrittenBody, NoteWrittenBodyKind, ProductDocWrittenBody,
-    ProjectScannedBody, PullRequestOpenedBody, QuestionAnsweredBody, QuestionAskedBody,
-    RequestTriagedBody, RequestTriagedBodySize, ReviewRecordedBody, SessionEndedBody,
-    SessionEndedBodyReason, SessionStartedBody, SessionStartedBodyEffort, SessionStartedBodyModel,
-    SessionStartedBodyPurpose, SprintEndedBody, SprintEndedBodyEndedBy, SprintPlannedBody,
-    SprintStartedBody, TaskCreatedBody, TaskIntegratedBody, TaskIntegratedBodyIntegratedBy,
-    TaskTransitionedBody, TaskTransitionedBodyEffectsItem, TeamUpdatedBody, TokenUsage,
-    ToolCalledBody, ToolDeniedBody, ToolReturnedBody, TransitionRefusedBody,
-    TransitionRefusedBodyRefusal,
+    HumanAcceptedBodySubject, MessagePostedBody, NoteWrittenBody, NoteWrittenBodyKind,
+    ProductDocWrittenBody, ProjectScannedBody, PullRequestOpenedBody, QuestionAnsweredBody,
+    QuestionAskedBody, RequestTriagedBody, RequestTriagedBodySize, ReviewRecordedBody,
+    SessionEndedBody, SessionEndedBodyReason, SessionStartedBody, SessionStartedBodyEffort,
+    SessionStartedBodyModel, SessionStartedBodyPurpose, SprintEndedBody, SprintEndedBodyEndedBy,
+    SprintPlannedBody, SprintStartedBody, TaskCreatedBody, TaskIntegratedBody,
+    TaskIntegratedBodyIntegratedBy, TaskTransitionedBody, TaskTransitionedBodyEffectsItem,
+    TeamUpdatedBody, TokenUsage, ToolCalledBody, ToolDeniedBody, ToolReturnedBody,
+    TransitionRefusedBody, TransitionRefusedBodyRefusal,
 };
 /// The generated names of the vocabularies the governor's events repeat, renamed at the edge so
 /// that they cannot be mistaken for `farik-core`'s own types of the same name.
 pub use crate::generated::event::{
     BlockerWire, GateId as GateWire, RejectionWire, TaskStatus as TaskStatusWire,
     TransitionActor as TransitionActorWire,
+};
+/// The channel's vocabularies, named for what they are rather than for the body they sit in.
+pub use crate::generated::event::{
+    MessagePostedBodyKind as MessageKind, MessagePostedBodyThread as Thread,
 };
 
 use crate::generated::event::FarikEvent as EventWire;
@@ -59,7 +63,7 @@ static VALIDATOR: LazyLock<Validator> = LazyLock::new(|| {
 });
 
 /// One validator per kind, each holding that kind's body schema alone. The event schema types
-/// `body` as a choice of thirty-six shapes, so it can only say that a body matched none of them; these
+/// `body` as a choice of thirty-seven shapes, so it can only say that a body matched none of them; these
 /// say what is wrong with the one shape the event's `kind` asked for.
 static BODY_VALIDATORS: LazyLock<Vec<Validator>> = LazyLock::new(|| {
     let schema: Value = serde_json::from_str(SCHEMA_JSON).expect(
@@ -128,6 +132,7 @@ fn body_def_name(kind: EventKind) -> &'static str {
         EventKind::SprintPlanned => "sprintPlannedBody",
         EventKind::SprintEnded => "sprintEndedBody",
         EventKind::AgentSlept => "agentSleptBody",
+        EventKind::MessagePosted => "messagePostedBody",
     }
 }
 
@@ -189,6 +194,7 @@ fn attribution(body: &mut EventBody) -> Option<(&'static str, &mut String)> {
         EventBody::AgentUpdated(body) => Some(("updated_by", &mut body.updated_by)),
         EventBody::SprintStarted(body) => Some(("started_by", &mut body.started_by)),
         EventBody::SprintPlanned(body) => Some(("planned_by", &mut body.planned_by)),
+        EventBody::MessagePosted(body) => Some(("author", &mut body.author)),
         EventBody::DriftDetected(_)
         | EventBody::ProjectScanned(_)
         | EventBody::CostRecorded(_)
@@ -209,7 +215,7 @@ fn attribution(body: &mut EventBody) -> Option<(&'static str, &mut String)> {
 
 /// Every kind the log holds in this phase, in the order `docs/schemas/event.schema.json` lists
 /// them. The step that adds a kind adds it here.
-pub const EVERY_KIND: [EventKind; 36] = [
+pub const EVERY_KIND: [EventKind; 37] = [
     EventKind::TaskCreated,
     EventKind::RequestTriaged,
     EventKind::ContractWritten,
@@ -246,6 +252,7 @@ pub const EVERY_KIND: [EventKind; 36] = [
     EventKind::SprintPlanned,
     EventKind::SprintEnded,
     EventKind::AgentSlept,
+    EventKind::MessagePosted,
 ];
 
 /// The ids an event is stamped with: which team and project it belongs to, and the contract, agent
@@ -392,6 +399,9 @@ pub enum EventBody {
     /// An agent's model provider refused it at a usage limit; it sleeps until the limit resets.
     #[serde(rename = "agent.slept")]
     AgentSlept(AgentSleptBody),
+    /// Somebody said something in the team's channel.
+    #[serde(rename = "message.posted")]
+    MessagePosted(MessagePostedBody),
 }
 
 impl EventBody {
@@ -435,6 +445,7 @@ impl EventBody {
             Self::SprintPlanned(_) => EventKind::SprintPlanned,
             Self::SprintEnded(_) => EventKind::SprintEnded,
             Self::AgentSlept(_) => EventKind::AgentSlept,
+            Self::MessagePosted(_) => EventKind::MessagePosted,
         }
     }
 }
@@ -583,7 +594,7 @@ pub fn event_from_value(input: &Value) -> Result<FarikEvent, Vec<ValidationError
 }
 
 /// The schema's own failures. A failure inside `body` is reported by the schema once, at `/body`,
-/// because `body` there is a choice of thirty-six shapes and the schema can only say that none matched.
+/// because `body` there is a choice of thirty-seven shapes and the schema can only say that none matched.
 /// The event's `kind` says which one it was meant to be, so such a failure is asked again of that
 /// shape alone and reported where it actually is.
 fn schema_errors(input: &Value) -> Vec<ValidationError> {
@@ -978,7 +989,7 @@ mod tests {
 
     #[test]
     fn reports_a_malformed_field_inside_a_body_at_its_own_path() {
-        // The schema types `body` as a choice of thirty-six shapes, so it reports a failure anywhere
+        // The schema types `body` as a choice of thirty-seven shapes, so it reports a failure anywhere
         // inside one at `/body`, with the whole body echoed back. The kind says which shape the
         // body was meant to be, so the reader checks it again against that one alone.
         let mut input = an_event_wire(EventKind::ProjectScanned);
