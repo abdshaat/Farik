@@ -393,6 +393,23 @@ mod tests {
     }
 
     #[test]
+    fn records_the_architects_decisions_through_the_tools() {
+        let definition = loaded(Role::Architect);
+        for text in [&definition.system_prompt, &definition.skills[0].body] {
+            assert!(text.contains("farik_write_decision"), "{text}");
+            assert!(text.contains("farik_read_decisions"), "{text}");
+            assert!(
+                !text.contains("written directly to the repository"),
+                "a decision is not written into the repository: {text}"
+            );
+            assert!(
+                !text.contains("write an architecture decision record"),
+                "{text}"
+            );
+        }
+    }
+
+    #[test]
     fn loads_the_marketing_specialist() {
         let definition = loaded(Role::MarketingSpecialist);
         assert_eq!(definition.id, Role::MarketingSpecialist);
