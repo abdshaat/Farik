@@ -1266,16 +1266,6 @@ fn sized(repository: &TempRepo, name: &str, title: &str, size: &str) {
     assert_eq!(ran.code, 0, "{}", ran.err);
 }
 
-/// Walks `task` from `draft` through `path`, as the governor's moves.
-#[cfg(unix)]
-fn walked(repository: &TempRepo, task: &str, path: &[&str]) {
-    let mut from = "draft";
-    for to in path {
-        project::moved(repository, task, from, to, &json!({}));
-        from = to;
-    }
-}
-
 #[cfg(unix)]
 #[test]
 #[ignore = "needs the git program: cargo xtask check --integration"]
@@ -1284,7 +1274,7 @@ fn files_a_task_under_an_epic_in_progress() {
 
     let repository = a_project("cli-child");
     sized(&repository, "epic.yaml", "A whole board", "large");
-    walked(
+    project::walked(
         &repository,
         "FRK-1",
         &["refining", "ready", "assigned", "in_progress"],
@@ -1334,7 +1324,7 @@ fn refuses_a_parent_that_is_not_an_epic_in_progress() {
     let repository = a_project("cli-child-refused");
     sized(&repository, "task.yaml", "One board", "small");
     sized(&repository, "epic.yaml", "A whole board", "large");
-    walked(&repository, "FRK-2", &["refining", "ready"]);
+    project::walked(&repository, "FRK-2", &["refining", "ready"]);
     let child = a_request_file(&repository, "child.yaml", "One row of the board");
     let before = kinds_in(&repository).len();
 

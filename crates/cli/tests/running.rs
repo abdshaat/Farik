@@ -27,8 +27,8 @@ use serde_json::{Value, json};
 use farik_core::team::fixtures::an_agent_wire;
 use project::{
     LiveDriver, a_bare_env, a_claude_saying, a_high_risk_task_verifying, a_project, a_team,
-    a_team_with, events, filed, hold_the_run_lock, joined, moved, no_sandbox, record, record_as,
-    run, run_with, scratch, status_of,
+    a_team_with, events, filed, hold_the_run_lock, joined, no_sandbox, record, record_as, run,
+    run_with, scratch, status_of, walked,
 };
 
 /// An engine replaying `transcripts`, whose Farik tool calls the driving process's daemon answers.
@@ -538,15 +538,6 @@ fn stops_a_plan_through_farik_stop() {
     assert_eq!(ran.code, 0, "{}\n{}", ran.out, ran.err);
     assert!(ran.out.lines().any(|line| line == "stopped"), "{}", ran.out);
     assert_eq!(adapter.started().len(), 1);
-}
-
-/// Records `task`'s moves from `draft` through `path`.
-fn walked(repository: &TempRepo, task: &str, path: &[&str]) {
-    let mut from = "draft";
-    for to in path {
-        moved(repository, task, from, to, &json!({}));
-        from = to;
-    }
 }
 
 #[test]
