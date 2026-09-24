@@ -620,6 +620,7 @@ mod tests {
     fn idle() -> TickReport {
         TickReport::Idle {
             why: NOTHING_TO_DO.to_string(),
+            until: None,
         }
     }
 

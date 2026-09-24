@@ -8,6 +8,7 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 
+use chrono::{DateTime, Utc};
 use farik_core::contract::TaskId;
 use farik_core::governor::permissions::PermissionTier;
 use farik_core::team::Team;
@@ -22,6 +23,7 @@ use crate::daemon::{CommandHandler, DaemonState};
 use crate::forge::{Forge, ForgeError};
 use crate::sandbox::{Sandbox, SandboxError, SandboxFactory};
 use crate::session::{RuntimeAdapter, RuntimeError};
+use crate::sleep::Sleeper;
 use crate::sprints::SprintError;
 use crate::tools::ToolDeps;
 use crate::transitions::TransitionError;
@@ -53,6 +55,8 @@ pub struct OrchestratorDeps {
     pub session_ids: Arc<dyn IdSource + Send + Sync>,
     /// The forge pull requests are opened on, under the `pull_request` policy.
     pub forge: Arc<Forge>,
+    /// What a run waits on while every agent with work is asleep.
+    pub sleeper: Arc<dyn Sleeper>,
 }
 
 /// Why a tick could not finish. Something the governor refused is not one of these: it is an
@@ -188,6 +192,9 @@ pub enum TickReport {
     Idle {
         /// Why not.
         why: String,
+        /// When the first sleeping agent the rules passed over wakes, when one was (5.5): a run
+        /// waits until then and ticks again.
+        until: Option<DateTime<Utc>>,
     },
     /// Something was done about a task.
     Acted {
@@ -203,6 +210,15 @@ pub enum TickReport {
         /// What was done.
         what: String,
     },
+}
+
+/// How a wait for a sleeping agent ended.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Waited {
+    /// It is the time waited for.
+    Reached,
+    /// `stop` was called first.
+    Stopped,
 }
 
 /// Which of the rules a tick runs (`docs/SPEC.md` 8.2): every one, the planning ones, or the
@@ -319,6 +335,8 @@ pub struct Orchestrator {
     sandboxes: Mutex<BTreeMap<TaskId, Arc<dyn Sandbox>>>,
     /// Read before each tick of `run_until_idle`.
     stopped: AtomicBool,
+    /// Notified by `stop`, so that a wait for a sleeping agent ends at once.
+    stops: tokio::sync::Notify,
 }
 
 impl Orchestrator {
@@ -329,6 +347,7 @@ impl Orchestrator {
             deps,
             sandboxes: Mutex::new(BTreeMap::new()),
             stopped: AtomicBool::new(false),
+            stops: tokio::sync::Notify::new(),
         }
     }
 
@@ -358,18 +377,41 @@ impl Orchestrator {
         self.stopped.load(Ordering::SeqCst)
     }
 
-    /// Ticks until a tick is idle or `stop` was called.
+    /// Ticks until a tick is idle with no agent to wait for, or `stop` was called. A tick idle
+    /// while an agent sleeps is waited out (`wait_until`), and the ticks go on.
     ///
     /// # Errors
     ///
     /// The first error a tick returns.
     pub async fn run_until_idle(&self) -> Result<(), OrchestratorError> {
         while !self.is_stopped() {
-            if let TickReport::Idle { .. } = self.tick().await? {
-                break;
+            match self.tick().await? {
+                TickReport::Idle {
+                    until: Some(until), ..
+                } => {
+                    self.wait_until(until).await;
+                }
+                TickReport::Idle { until: None, .. } => break,
+                TickReport::Acted { .. } | TickReport::Sprint { .. } => {}
             }
         }
         Ok(())
+    }
+
+    /// Waits until `until`, or until `stop` is called, whichever comes first; at once when
+    /// `stop` was called before.
+    pub async fn wait_until(&self, until: DateTime<Utc>) -> Waited {
+        // Taken before the stop is read, so that a stop between the two still ends the wait.
+        let stopped = self.stops.notified();
+        tokio::pin!(stopped);
+        stopped.as_mut().enable();
+        if self.is_stopped() {
+            return Waited::Stopped;
+        }
+        tokio::select! {
+            () = self.deps.sleeper.sleep_until(until) => Waited::Reached,
+            () = stopped => Waited::Stopped,
+        }
     }
 
     /// Integrates an accepted task now, as the human asks (`farik integrate`), whatever
@@ -422,9 +464,11 @@ impl Orchestrator {
         recover::recover(self)
     }
 
-    /// Stops `run_until_idle` before its next tick. A session already running runs to its end.
+    /// Stops `run_until_idle` before its next tick, and ends a wait at once. A session already
+    /// running runs to its end.
     pub fn stop(&self) {
         self.stopped.store(true, Ordering::SeqCst);
+        self.stops.notify_waiters();
     }
 
     /// The task's sandbox: the one made for it earlier in this process, or a new one rooted at
@@ -548,6 +592,7 @@ fn worktree(deps: &OrchestratorDeps, task_id: &TaskId) -> PathBuf {
 
 #[cfg(test)]
 mod tests {
+    use chrono::{DateTime, Utc};
     use farik_core::contract::TaskStatus;
     use farik_protocol::event::{
         CriterionRecordedBodyRunBy, EventBody, EventKind, NoteWrittenBodyKind,
@@ -566,6 +611,7 @@ mod tests {
         plan_breaks_down_frk_1, plan_closes_epic_frk_1, refine_asks_frk_1,
         refine_writes_epic_frk_1, refine_writes_task_frk_1, review_writes_note, triage_frk_1_large,
     };
+    use crate::tools::fixtures::at;
 
     /// Each session started, as its purpose and its agent, in order.
     fn sessions(harness: &Harness) -> Vec<(SessionStartedBodyPurpose, String)> {
@@ -630,6 +676,79 @@ mod tests {
         assert!(!orchestrator.is_stopped());
         orchestrator.stop();
         assert!(orchestrator.is_stopped());
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn waits_for_a_sleeping_agent_then_goes_on() {
+        let harness = Harness::new("orch-wait", |_| {});
+        harness.ready("FRK-1");
+        let until = at() + chrono::Duration::hours(1);
+        harness.asleep("dev-a", until);
+        let adapter = harness.recorded(vec![
+            plan_assigns_frk_1(),
+            implement_finishes_frk_1(),
+            review_writes_note(),
+            accept_frk_1(),
+        ]);
+        let orchestrator = harness.orchestrator_at(adapter.clone(), at());
+
+        orchestrator
+            .run_until_idle()
+            .await
+            .expect("the run ends idle");
+
+        assert_eq!(orchestrator.deps.tools.clock.now(), until);
+        assert_eq!(
+            sessions(&harness),
+            vec![
+                (SessionStartedBodyPurpose::Plan, "pm".to_string()),
+                (SessionStartedBodyPurpose::Implement, "dev-a".to_string()),
+                (SessionStartedBodyPurpose::Verify, "dev-b".to_string()),
+                (SessionStartedBodyPurpose::Verify, "pm".to_string()),
+            ]
+        );
+        assert_eq!(harness.row("FRK-1").status, TaskStatus::Accepted);
+    }
+
+    /// Waits until `until` on `orchestrator`, failing the test rather than hanging when the wait
+    /// does not end within five seconds.
+    async fn waited(orchestrator: &super::Orchestrator, until: DateTime<Utc>) -> super::Waited {
+        tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            orchestrator.wait_until(until),
+        )
+        .await
+        .expect("the wait ends")
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn stops_a_wait() {
+        let harness = Harness::new("orch-wait-stop", |_| {});
+        let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
+
+        let (ended, ()) = tokio::join!(
+            waited(&orchestrator, at() + chrono::Duration::hours(1)),
+            async {
+                tokio::task::yield_now().await;
+                orchestrator.stop();
+            }
+        );
+
+        assert_eq!(ended, super::Waited::Stopped);
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn sees_a_stop_before_the_wait() {
+        let harness = Harness::new("orch-wait-stopped", |_| {});
+        let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
+        orchestrator.stop();
+
+        let ended = waited(&orchestrator, at() + chrono::Duration::hours(1)).await;
+
+        assert_eq!(ended, super::Waited::Stopped);
     }
 
     #[tokio::test]

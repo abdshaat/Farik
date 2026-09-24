@@ -16,6 +16,7 @@ use farik_runtime::orchestrator::{
     CommandError, CommandReport, Orchestrator, OrchestratorDeps, RecoveryReport, command_handler,
     result_of,
 };
+use farik_runtime::sleep::{Sleeper, TokioSleeper};
 use farik_runtime::{
     DockerSandboxFactory, HostSandboxFactory, RuntimeAdapter, RuntimeError, SANDBOX_IMAGE,
     SandboxFactory, SessionHandle, SessionSpec,
@@ -198,7 +199,17 @@ pub(crate) fn command_orchestrator(
         sandboxes: Arc::new(HostSandboxFactory),
         session_ids: Arc::clone(&io.session_ids),
         forge: Arc::new(forge(&project.root, io)),
+        sleeper: sleeper(io),
     }))
+}
+
+/// What a driving process waits on: the test's sleeper, else the machine's timer over the clock.
+fn sleeper(io: &CliIo<'_>) -> Arc<dyn Sleeper> {
+    io.sleeper.clone().unwrap_or_else(|| {
+        Arc::new(TokioSleeper {
+            clock: Arc::clone(&io.clock),
+        })
+    })
 }
 
 /// The forge: the `gh` on the environment's `PATH`, else `gh`.
@@ -398,6 +409,7 @@ pub(crate) async fn start_holding(
         sandboxes,
         session_ids: Arc::clone(&io.session_ids),
         forge: Arc::new(forge(&project.root, io)),
+        sleeper: sleeper(io),
     }));
     daemon.set_command_handler(command_handler(Arc::clone(&orchestrator)));
     let recovering = Arc::clone(&orchestrator);

@@ -126,7 +126,7 @@ Files: `orchestrator.rs`, `sleep.rs`, `orchestrator/rules.rs`, `orchestrator/fix
 - `plans_a_sprint_at_most_three_times` — three planning sessions ending `Limit`: no fourth.
 - `prints_the_wait` (cli, recorded adapter and the test sleeper) — `farik run` with dev-a asleep: the output holds "waiting for dev-a, asleep until", then dev-a's session.
 
-- [ ] `feat(runtime): wait for a sleeping agent instead of ending the run`
+- [x] `feat(runtime): wait for a sleeping agent instead of ending the run`
 
 ### Task 5: escalating a spent task
 

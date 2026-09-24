@@ -69,6 +69,7 @@ use farik_protocol::command::{AcceptSubject, Command};
 use farik_runtime::RuntimeAdapter;
 #[cfg(unix)]
 use farik_runtime::daemon::DaemonState;
+use farik_runtime::sleep::Sleeper;
 use serde_json::{Value, json};
 
 pub use project::{Project, open_project};
@@ -124,12 +125,15 @@ pub struct CliIo<'a> {
     pub interrupts: Interrupts,
     /// Where session ids come from.
     pub session_ids: Arc<dyn IdSource + Send + Sync>,
+    /// What a driving process waits on while every agent with work is asleep: the machine's timer
+    /// over `clock` when `None`, a test's own otherwise.
+    pub sleeper: Option<Arc<dyn Sleeper>>,
 }
 
 impl<'a> CliIo<'a> {
     /// A harness writing to `stdout` and `stderr`, run in `cwd` at `clock`'s time, with nothing on
     /// standard input, an empty environment, the Claude Code engine, interrupts that never come,
-    /// and session ids `session-1`, `session-2`, and so on.
+    /// session ids `session-1`, `session-2`, and so on, and the machine's timer to wait on.
     #[must_use]
     pub fn new(
         cwd: PathBuf,
@@ -149,6 +153,7 @@ impl<'a> CliIo<'a> {
             engine: Engine::Claude,
             interrupts: Interrupts::Channel(never),
             session_ids: Arc::new(SequentialIds::new()),
+            sleeper: None,
         }
     }
 }

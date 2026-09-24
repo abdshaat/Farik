@@ -126,7 +126,8 @@ pub(crate) fn started(printer: &mut Printer<'_, '_>, driver: &Driver) {
     }
 }
 
-/// Ticks within `scope` until a tick is idle, the run is stopped, or a tick fails, printing each;
+/// Ticks within `scope` until a tick is idle with no agent to wait for, the run is stopped, or a
+/// tick fails, printing each; a tick idle while an agent sleeps is waited out, and says so.
 /// Ctrl-C is heard between and during ticks. `after` is called after each tick that acted.
 pub(crate) async fn ticks(
     driver: &mut Driver,
@@ -153,7 +154,27 @@ pub(crate) async fn ticks(
             }
         };
         match report {
-            Ok(TickReport::Idle { why }) => {
+            Ok(TickReport::Idle {
+                why,
+                until: Some(until),
+            }) => {
+                printer.line(
+                    &why,
+                    &json!({ "waiting": why, "until": until.to_rfc3339() }),
+                );
+                let wait = orchestrator.wait_until(until);
+                tokio::pin!(wait);
+                loop {
+                    tokio::select! {
+                        _ = &mut wait => break,
+                        Some(()) = driver.interrupts.recv() => {
+                            *presses += 1;
+                            interrupted(driver, printer, *presses);
+                        }
+                    }
+                }
+            }
+            Ok(TickReport::Idle { why, until: None }) => {
                 printer.line(&format!("idle: {why}"), &json!({ "idle": why }));
                 return Ended::Idle(why);
             }

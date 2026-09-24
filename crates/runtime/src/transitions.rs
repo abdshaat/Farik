@@ -1155,7 +1155,7 @@ mod tests {
     use farik_core::governor::transition_table::TransitionActor;
     use farik_core::team::fixtures::{a_team_wire, an_agent_wire};
     use farik_core::team::{Team, validate_team};
-    use farik_protocol::clock::Clock;
+    use farik_protocol::clock::{Clock, MovableClock};
     use farik_protocol::event::{
         ContractEvaluatedBodyGate, EscalationRaisedBodyReason, EventBody, EventIds, EventKind,
         FarikEvent, GateWire, NewEvent, TaskStatusWire, TaskTransitionedBodyEffectsItem,
@@ -1168,15 +1168,6 @@ mod tests {
     use serde_json::{Value, json};
 
     use super::{TransitionAsk, TransitionOutcome, Transitions, reviewed_by_the_human};
-
-    /// A clock a test moves by hand, for a block that has to age.
-    struct MovableClock(std::sync::Mutex<DateTime<Utc>>);
-
-    impl Clock for MovableClock {
-        fn now(&self) -> DateTime<Utc> {
-            *self.0.lock().expect("no test panics holding the clock")
-        }
-    }
 
     fn at(hour: u32) -> DateTime<Utc> {
         Utc.with_ymd_and_hms(2026, 9, 22, hour, 0, 0)
@@ -1217,7 +1208,7 @@ mod tests {
             let log = Arc::new(open_event_log(Path::new(IN_MEMORY), now).expect("the log opens"));
             let projections =
                 Arc::new(open_projections(Arc::clone(&log)).expect("the projections open"));
-            let clock = Arc::new(MovableClock(std::sync::Mutex::new(now)));
+            let clock = Arc::new(MovableClock::new(now));
             let transitions = Transitions::new(
                 Arc::clone(&log),
                 Arc::clone(&projections),
@@ -2358,13 +2349,13 @@ mod tests {
             TransitionActor::Governor,
             None,
         );
-        *project.clock.0.lock().expect("the clock") = at(9) + chrono::Duration::hours(23);
+        project.clock.set(at(9) + chrono::Duration::hours(23));
         let outcome = project.ask(&escalating, &TransitionAsk::default());
         assert!(
             matches!(outcome, TransitionOutcome::Refused(_)),
             "a day's limit is not reached in 23 hours: {outcome:?}"
         );
-        *project.clock.0.lock().expect("the clock") = at(9) + chrono::Duration::hours(25);
+        project.clock.set(at(9) + chrono::Duration::hours(25));
         let outcome = project.ask(
             &a_request(
                 "FRK-1",

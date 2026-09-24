@@ -1,7 +1,12 @@
 //! An agent asleep until its model provider's limit resets (`docs/SPEC.md` 5.5). Sleep is not a
 //! status: the team file is not written, and the log's `agent.slept` is all there is of it.
 
+use std::future::Future;
+use std::pin::Pin;
+use std::sync::Arc;
+
 use chrono::{DateTime, Utc};
+use farik_protocol::clock::Clock;
 use farik_protocol::event::{EventBody, EventKind};
 use farik_store::{EventLog, EventQuery, StoreError};
 
@@ -25,6 +30,26 @@ pub fn asleep_until(
         EventBody::AgentSlept(body) if body.until > now => Some(body.until),
         _ => None,
     }))
+}
+
+/// What a run waits on while every agent with work is asleep: the machine's time, or a test's.
+pub trait Sleeper: Send + Sync {
+    /// Returns once it is `until`.
+    fn sleep_until(&self, until: DateTime<Utc>) -> Pin<Box<dyn Future<Output = ()> + Send + '_>>;
+}
+
+/// A sleeper on the machine's timer: it waits `until` less the clock's now, and not at all when
+/// that has passed.
+pub struct TokioSleeper {
+    /// The clock the run reads.
+    pub clock: Arc<dyn Clock + Send + Sync>,
+}
+
+impl Sleeper for TokioSleeper {
+    fn sleep_until(&self, until: DateTime<Utc>) -> Pin<Box<dyn Future<Output = ()> + Send + '_>> {
+        let wait = (until - self.clock.now()).to_std().unwrap_or_default();
+        Box::pin(tokio::time::sleep(wait))
+    }
 }
 
 #[cfg(test)]

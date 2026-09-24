@@ -390,8 +390,8 @@ pub fn join_epics_sprint(deps: &ToolDeps, task: &TaskId) -> Result<Option<Sprint
 
 /// Whether sprint `sprint_id` has had its planning session: a `session.started` of purpose `plan`
 /// about no task, recorded after the sprint's `sprint.started`, whose `session.ended` says it
-/// completed, was aborted, or failed. One that stopped at a limit or at its model provider's limit
-/// is asked again.
+/// completed, was aborted, or failed, or three such sessions whatever their ends. One that stopped
+/// at a limit or at its model provider's limit is asked again, but not for ever.
 ///
 /// # Errors
 ///
@@ -417,6 +417,9 @@ pub fn planning_session_spent(log: &EventLog, sprint_id: &str) -> Result<bool, S
                     && body.purpose.to_string() == "plan" =>
             {
                 planning.push(session_id);
+                if planning.len() >= PLANNING_SESSIONS {
+                    return Ok(true);
+                }
             }
             EventBody::SessionEnded(body)
                 if planning.contains(&session_id)
@@ -434,6 +437,10 @@ pub fn planning_session_spent(log: &EventLog, sprint_id: &str) -> Result<bool, S
     }
     Ok(false)
 }
+
+/// How many planning sessions a sprint is given at most, so that one that keeps stopping at a limit
+/// is not asked for ever.
+const PLANNING_SESSIONS: usize = 3;
 
 /// A refusal of a plan, in the words `farik_plan_sprint` answers.
 fn plan_refused(why: &str) -> SprintError {

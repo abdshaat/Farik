@@ -40,8 +40,9 @@ const DAY_SPENT: &str = "the team's daily budget is spent";
 pub(super) struct Waiting {
     /// Whether the team's daily budget stopped one (`spent`).
     pub(super) day_spent: bool,
-    /// The earliest time a sleeping agent whose session was not started wakes (`asleep`).
-    pub(super) slept: Option<DateTime<Utc>>,
+    /// The earliest time a sleeping agent whose session was not started wakes, and that agent
+    /// (`asleep`).
+    pub(super) slept: Option<(DateTime<Utc>, String)>,
 }
 
 /// One tick within `scope`: the first rule of the scope's set that acts on a task in scope, or
@@ -150,19 +151,24 @@ pub(super) async fn tick(
             }
         }
     }
-    Ok(TickReport::Idle {
-        why: why_idle(&waiting),
-    })
+    Ok(idle(&waiting))
 }
 
-/// What an idle tick says, from what kept its rules from starting a session.
-fn why_idle(waiting: &Waiting) -> String {
-    if waiting.day_spent {
-        DAY_SPENT
-    } else {
-        NOTHING_TO_DO
+/// What an idle tick says, from what kept its rules from starting a session: a spent day before a
+/// sleeping agent, and the time the first sleeping agent wakes whichever it names.
+fn idle(waiting: &Waiting) -> TickReport {
+    let why = match &waiting.slept {
+        _ if waiting.day_spent => DAY_SPENT.to_string(),
+        Some((until, agent)) => format!(
+            "waiting for {agent}, asleep until {} (its model's usage limit)",
+            until.format("%Y-%m-%d %H:%M:%S UTC")
+        ),
+        None => NOTHING_TO_DO.to_string(),
+    };
+    TickReport::Idle {
+        why,
+        until: waiting.slept.as_ref().map(|(until, _)| *until),
     }
-    .to_string()
 }
 
 /// Whether `scope` takes in a row: every row, or the one task it names.
@@ -483,19 +489,21 @@ pub(super) fn spent(
 }
 
 /// Whether `agent` is asleep until its model provider's limit resets (5.5): no session of its
-/// starts, and no sandbox is made for it. The earliest `until` of the tick is kept in `slept`, as
-/// `spent` keeps a spent day in `day_spent`. A rule asks it with `|` beside `spent`, not `||`, so
-/// that both are kept whichever stops the session.
+/// starts, and no sandbox is made for it. The earliest `until` of the tick and its agent are kept
+/// in `slept`, as `spent` keeps a spent day in `day_spent`. A rule asks it with `|` beside
+/// `spent`, not `||`, so that both are kept whichever stops the session.
 pub(super) fn asleep(
     deps: &OrchestratorDeps,
     agent: &Agent,
-    slept: &mut Option<DateTime<Utc>>,
+    slept: &mut Option<(DateTime<Utc>, String)>,
 ) -> Result<bool, OrchestratorError> {
     let Some(until) = asleep_until(&deps.tools.log, agent.id.as_str(), deps.tools.clock.now())?
     else {
         return Ok(false);
     };
-    *slept = Some(slept.map_or(until, |earlier| earlier.min(until)));
+    if slept.as_ref().is_none_or(|(earlier, _)| until < *earlier) {
+        *slept = Some((until, agent.id.to_string()));
+    }
     Ok(true)
 }
 
@@ -1136,7 +1144,8 @@ mod tests {
         assert_eq!(
             report,
             TickReport::Idle {
-                why: NOTHING_TO_DO.to_string()
+                why: NOTHING_TO_DO.to_string(),
+                until: None,
             }
         );
         assert!(adapter.started().is_empty());
@@ -1195,7 +1204,8 @@ mod tests {
         assert_eq!(
             report,
             TickReport::Idle {
-                why: NOTHING_TO_DO.to_string()
+                why: NOTHING_TO_DO.to_string(),
+                until: None,
             }
         );
         assert!(adapter.started().is_empty());
@@ -1225,7 +1235,8 @@ mod tests {
         assert_eq!(
             report,
             TickReport::Idle {
-                why: NOTHING_TO_DO.to_string()
+                why: NOTHING_TO_DO.to_string(),
+                until: None,
             }
         );
         assert!(adapter.started().is_empty());
@@ -1395,7 +1406,8 @@ mod tests {
         assert_eq!(
             orchestrator.tick().await.expect("the tick runs"),
             TickReport::Idle {
-                why: NOTHING_TO_DO.to_string()
+                why: NOTHING_TO_DO.to_string(),
+                until: None,
             }
         );
     }
@@ -1816,7 +1828,8 @@ mod tests {
         assert_eq!(
             report,
             TickReport::Idle {
-                why: NOTHING_TO_DO.to_string()
+                why: NOTHING_TO_DO.to_string(),
+                until: None,
             }
         );
         assert_eq!(harness.row("FRK-1").status, TaskStatus::Blocked);
@@ -1878,7 +1891,8 @@ mod tests {
         assert_eq!(
             report,
             TickReport::Idle {
-                why: NOTHING_TO_DO.to_string()
+                why: NOTHING_TO_DO.to_string(),
+                until: None,
             }
         );
         assert_eq!(harness.events(&[EventKind::TransitionRefused]).len(), 3);
@@ -2320,7 +2334,8 @@ mod tests {
         assert_eq!(
             report,
             TickReport::Idle {
-                why: NOTHING_TO_DO.to_string()
+                why: NOTHING_TO_DO.to_string(),
+                until: None,
             }
         );
         assert!(adapter.started().is_empty());
@@ -2518,7 +2533,8 @@ mod tests {
         assert_eq!(
             report,
             TickReport::Idle {
-                why: NOTHING_TO_DO.to_string()
+                why: NOTHING_TO_DO.to_string(),
+                until: None,
             }
         );
         assert_eq!(
@@ -2591,7 +2607,8 @@ mod tests {
         assert_eq!(
             report,
             TickReport::Idle {
-                why: NOTHING_TO_DO.to_string()
+                why: NOTHING_TO_DO.to_string(),
+                until: None,
             }
         );
         assert_eq!(
@@ -2619,7 +2636,8 @@ mod tests {
         assert_eq!(
             report,
             TickReport::Idle {
-                why: NOTHING_TO_DO.to_string()
+                why: NOTHING_TO_DO.to_string(),
+                until: None,
             }
         );
         assert_eq!(adapter.started().len(), 2);
@@ -2852,7 +2870,8 @@ mod tests {
         assert_eq!(
             report,
             TickReport::Idle {
-                why: NOTHING_TO_DO.to_string()
+                why: NOTHING_TO_DO.to_string(),
+                until: None,
             }
         );
         assert_eq!(harness.row("FRK-1").status, TaskStatus::Ready);
@@ -3070,7 +3089,8 @@ mod tests {
         assert_eq!(
             report,
             TickReport::Idle {
-                why: NOTHING_TO_DO.to_string()
+                why: NOTHING_TO_DO.to_string(),
+                until: None,
             }
         );
         assert_eq!(adapter.started().len(), 1);
@@ -3305,7 +3325,8 @@ mod tests {
         assert_eq!(
             second,
             TickReport::Idle {
-                why: "the team's daily budget is spent".to_string()
+                why: "the team's daily budget is spent".to_string(),
+                until: None,
             }
         );
         assert!(adapter.started().is_empty());
@@ -3328,7 +3349,8 @@ mod tests {
         assert_ne!(
             second,
             TickReport::Idle {
-                why: "the team's daily budget is spent".to_string()
+                why: "the team's daily budget is spent".to_string(),
+                until: None,
             }
         );
         let started = adapter.started();
@@ -3436,7 +3458,8 @@ mod tests {
         assert_eq!(
             report,
             TickReport::Idle {
-                why: NOTHING_TO_DO.to_string()
+                why: NOTHING_TO_DO.to_string(),
+                until: None,
             }
         );
         assert!(adapter.started().is_empty());
@@ -3479,7 +3502,8 @@ mod tests {
         assert_eq!(
             report,
             TickReport::Idle {
-                why: NOTHING_TO_DO.to_string()
+                why: NOTHING_TO_DO.to_string(),
+                until: None,
             }
         );
         assert!(adapter.started().is_empty());
@@ -3820,7 +3844,8 @@ mod tests {
         assert_eq!(
             report,
             TickReport::Idle {
-                why: "the team's daily budget is spent".to_string()
+                why: "the team's daily budget is spent".to_string(),
+                until: None,
             }
         );
         assert!(adapter.started().is_empty(), "{:?}", adapter.started());
@@ -3870,6 +3895,32 @@ mod tests {
             .filter(|spec| spec.task_id.is_none())
             .count();
         assert_eq!(planning, 1);
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn plans_a_sprint_at_most_three_times() {
+        let harness = Harness::new("orch-sprint-thrice", with_a_scrum_master);
+        harness.ready("FRK-1");
+        harness.open_sprint("S1", &[]);
+        let adapter = harness.recorded(vec![
+            hits_its_wall_clock(),
+            hits_its_wall_clock(),
+            hits_its_wall_clock(),
+            hits_its_wall_clock(),
+        ]);
+        let orchestrator = harness.orchestrator(adapter.clone());
+
+        for _ in 0..4 {
+            orchestrator.tick().await.expect("the tick runs");
+        }
+
+        let planning = adapter
+            .started()
+            .iter()
+            .filter(|spec| spec.task_id.is_none())
+            .count();
+        assert_eq!(planning, 3);
     }
 
     #[tokio::test]
@@ -4005,26 +4056,6 @@ mod tests {
             .collect()
     }
 
-    /// Records that `agent` sleeps until `until`, as the end of its refused session would.
-    fn asleep(harness: &Harness, agent: &str, until: chrono::DateTime<chrono::Utc>) {
-        let deps = &harness.project.deps;
-        let appended = deps
-            .log
-            .append(&NewEvent {
-                recorded_at: at(),
-                ids: farik_protocol::event::EventIds {
-                    agent_id: Some(agent.to_string()),
-                    ..deps.ids.clone()
-                },
-                body: EventBody::AgentSlept(farik_protocol::event::AgentSleptBody {
-                    until,
-                    detail: "Claude AI usage limit reached".to_string(),
-                }),
-            })
-            .expect("appends");
-        deps.projections.apply(&appended).expect("projects");
-    }
-
     /// The team file as it is on disk.
     fn team_file(harness: &Harness) -> String {
         std::fs::read_to_string(harness.project.repo.path.join(".farik/team.yaml"))
@@ -4090,7 +4121,7 @@ mod tests {
     async fn makes_no_sandbox_for_a_sleeping_agent() {
         let harness = Harness::new("orch-sleep-sandbox", |_| {});
         harness.in_progress("FRK-1", "dev-a", "dev-b");
-        asleep(&harness, "dev-a", at() + chrono::Duration::hours(1));
+        harness.asleep("dev-a", at() + chrono::Duration::hours(1));
         let sandboxes = Arc::new(CountingSandboxFactory::default());
         let adapter = harness.recorded(vec![reads_a_file()]);
         let orchestrator = harness.orchestrator_with(adapter.clone(), sandboxes.clone());
@@ -4142,7 +4173,7 @@ mod tests {
         let harness = Harness::new("orch-sleep-other", |_| {});
         harness.in_progress("FRK-1", "dev-a", "dev-b");
         harness.in_progress("FRK-2", "dev-b", "dev-a");
-        asleep(&harness, "dev-a", at() + chrono::Duration::hours(1));
+        harness.asleep("dev-a", at() + chrono::Duration::hours(1));
         let adapter = harness.recorded(vec![reads_a_file(), reads_a_file()]);
         let orchestrator = harness.orchestrator(adapter.clone());
 
@@ -4156,6 +4187,41 @@ mod tests {
             .map(|spec| spec.agent_id.clone())
             .collect();
         assert_eq!(agents, vec!["dev-b".to_string(), "dev-b".to_string()]);
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn idles_until_the_first_agent_wakes() {
+        let harness = Harness::new("orch-sleep-idle", |_| {});
+        harness.in_progress("FRK-1", "dev-a", "dev-b");
+        let until = at() + chrono::Duration::hours(1);
+        harness.asleep("dev-a", until);
+        let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
+
+        let report = orchestrator.tick().await.expect("the tick runs");
+
+        assert!(
+            matches!(&report, TickReport::Idle { why, until: Some(woken) }
+                if *woken == until && why.starts_with("waiting for dev-a, asleep until ")),
+            "{report:?}"
+        );
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn idles_without_a_time_when_nobody_sleeps() {
+        let harness = Harness::new("orch-sleep-nobody", |_| {});
+        let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
+
+        let report = orchestrator.tick().await.expect("the tick runs");
+
+        assert_eq!(
+            report,
+            TickReport::Idle {
+                why: NOTHING_TO_DO.to_string(),
+                until: None,
+            }
+        );
     }
 
     #[tokio::test]
@@ -4202,7 +4268,7 @@ mod tests {
         let harness = Harness::new("orch-sleep-assign", with_a_scrum_master);
         harness.blocked("FRK-2", "dev-b", "dev-a");
         harness.ready("FRK-3");
-        asleep(&harness, "dev-a", at() + chrono::Duration::hours(1));
+        harness.asleep("dev-a", at() + chrono::Duration::hours(1));
         let adapter = harness.recorded(vec![reads_a_file()]);
         let orchestrator = harness.orchestrator(adapter.clone());
 

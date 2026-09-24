@@ -11,7 +11,7 @@ use std::time::Duration;
 
 use chrono::{DateTime, Utc};
 use farik_core::contract::TaskId;
-use farik_protocol::clock::{FixedClock, IdSource, SequentialIds};
+use farik_protocol::clock::{Clock, IdSource, MovableClock, SequentialIds};
 use farik_protocol::event::{EventKind, FarikEvent, NewEvent, event_from_value};
 use farik_store::TaskProjection;
 use farik_store::git::fixtures::{git_in, git_output_in};
@@ -26,8 +26,10 @@ use crate::recorded::{RecordedAdapter, Transcript};
 use crate::sandbox::host::HostSandboxFactory;
 use crate::sandbox::{Sandbox, SandboxError, SandboxFactory};
 use crate::session::{RuntimeAdapter, RuntimeError, SessionHandle, SessionSpec};
+use crate::sleep::Sleeper;
 use crate::tools::ToolDeps;
 use crate::tools::fixtures::{TestProject, a_team_of_three, at};
+use crate::transitions::Transitions;
 
 pub(crate) use crate::recorded::fixtures::{UsageThenWaitAdapter, tool_runner};
 
@@ -95,25 +97,34 @@ impl Harness {
             sandboxes,
             session_ids: Arc::new(SequentialIds::new()),
             forge: Arc::new(forge),
+            sleeper: Arc::new(NeverWakes),
         })
     }
 
-    /// An orchestrator over this project with `adapter` and host sandboxes, whose tools read the
-    /// time as `now`, and whose session ids are `later-session-1` and so on, so that they are not
-    /// those of an orchestrator made before it. The governor's door keeps the project's clock.
+    /// An orchestrator over this project with `adapter` and host sandboxes, whose tools, governor's
+    /// door, and sleeper share one clock at `now`, which a wait moves, and whose session ids are
+    /// `later-session-1` and so on, so that they are not those of an orchestrator made before it.
     pub(crate) fn orchestrator_at(
         &self,
         adapter: Arc<dyn RuntimeAdapter>,
         now: DateTime<Utc>,
     ) -> Orchestrator {
         let deps = &self.project.deps;
+        let clock = Arc::new(MovableClock::new(now));
         let tools = Arc::new(ToolDeps {
             log: Arc::clone(&deps.log),
             projections: Arc::clone(&deps.projections),
             files: Arc::clone(&deps.files),
-            transitions: Arc::clone(&deps.transitions),
+            transitions: Arc::new(Transitions::new(
+                Arc::clone(&deps.log),
+                Arc::clone(&deps.projections),
+                Arc::clone(&deps.files),
+                self.project.repo.adapter(),
+                Arc::clone(&clock) as Arc<dyn Clock + Send + Sync>,
+                deps.ids.clone(),
+            )),
             git: self.project.repo.adapter(),
-            clock: Arc::new(FixedClock::new(now)),
+            clock: Arc::clone(&clock) as Arc<dyn Clock + Send + Sync>,
             ids: deps.ids.clone(),
         });
         Orchestrator::new(OrchestratorDeps {
@@ -123,7 +134,30 @@ impl Harness {
             sandboxes: Arc::new(HostSandboxFactory),
             session_ids: Arc::new(LaterIds(SequentialIds::new())),
             forge: Arc::new(self.gh.forge(&self.project.repo.path)),
+            sleeper: Arc::new(MovingSleeper(clock)),
         })
+    }
+
+    /// Records that `agent` sleeps until `until`, as the end of its refused session would.
+    pub(crate) fn asleep(&self, agent: &str, until: DateTime<Utc>) {
+        let deps = &self.project.deps;
+        let appended = deps
+            .log
+            .append(&NewEvent {
+                recorded_at: at(),
+                ids: farik_protocol::event::EventIds {
+                    agent_id: Some(agent.to_string()),
+                    ..deps.ids.clone()
+                },
+                body: farik_protocol::event::EventBody::AgentSlept(
+                    farik_protocol::event::AgentSleptBody {
+                        until,
+                        detail: "Claude AI usage limit reached".to_string(),
+                    },
+                ),
+            })
+            .expect("appends");
+        deps.projections.apply(&appended).expect("projects");
     }
 
     /// Files `task` in `status`: a standalone task of a Software Developer's, reviewed by another,
@@ -537,6 +571,32 @@ impl Harness {
 
 /// Session ids `later-session-1`, `later-session-2`, and so on.
 struct LaterIds(SequentialIds);
+
+/// A sleeper that moves its clock to the time waited for and returns at once.
+pub(crate) struct MovingSleeper(pub(crate) Arc<MovableClock>);
+
+impl Sleeper for MovingSleeper {
+    fn sleep_until(
+        &self,
+        until: DateTime<Utc>,
+    ) -> std::pin::Pin<Box<dyn Future<Output = ()> + Send + '_>> {
+        self.0.set(until);
+        Box::pin(std::future::ready(()))
+    }
+}
+
+/// A sleeper that never returns: an orchestrator whose clock no wait moves waits for ever, or until
+/// it is stopped.
+pub(crate) struct NeverWakes;
+
+impl Sleeper for NeverWakes {
+    fn sleep_until(
+        &self,
+        _until: DateTime<Utc>,
+    ) -> std::pin::Pin<Box<dyn Future<Output = ()> + Send + '_>> {
+        Box::pin(std::future::pending())
+    }
+}
 
 impl IdSource for LaterIds {
     fn session_id(&self) -> String {
