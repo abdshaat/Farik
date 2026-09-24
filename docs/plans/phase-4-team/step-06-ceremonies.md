@@ -174,7 +174,7 @@ Revision 0.15 in the header, naming each change:
 
 The step's interface line, and step 07's line (retro done here), are written in the project plan.
 
-- [ ] `docs(docs): record the ceremonies and aged escalations in the spec`
+- [x] `docs(docs): record the ceremonies and aged escalations in the spec`
 
 ## Verification
 
