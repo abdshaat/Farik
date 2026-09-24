@@ -536,7 +536,31 @@ impl ProjectFiles {
                 detail: "the project has 9999 decisions".to_string(),
             });
         }
-        let number = last + 1;
+        self.write_numbered_decision(last + 1, title, text, author, date)
+    }
+
+    /// Writes decision `number`, unless a decision with that number is there already: the check
+    /// that keeps two writers who picked the same number with different titles from both writing.
+    fn write_numbered_decision(
+        &self,
+        number: u32,
+        title: &str,
+        text: &str,
+        author: &str,
+        date: NaiveDate,
+    ) -> Result<DecisionEntry, FilesError> {
+        // ponytail: a check before the link, so two writers inside the same instant can still both
+        // pass it; today one `farik run` writes at a time. Take a lock around list-then-link when
+        // sessions run concurrently.
+        if let Some((_, taken)) = self
+            .decision_files()?
+            .into_iter()
+            .find(|(found, _)| *found == number)
+        {
+            return Err(FilesError::Exists {
+                path: Self::named(&format!("{DECISIONS}/{number:04}-{taken}.md")),
+            });
+        }
         let slug = slug(title);
         self.write_new(
             &format!("{DECISIONS}/{number:04}-{slug}.md"),
@@ -1295,6 +1319,59 @@ mod tests {
             ["0003-x.md", "0004-next.md"],
             "no temporary file is left"
         );
+    }
+
+    #[test]
+    fn gives_no_two_decisions_one_number() {
+        let project = TempProject::new("decision-one-number");
+        let files = project.files();
+
+        // Two writers that both saw no decision pick number 1, with different titles.
+        files
+            .write_numbered_decision(1, "A", "The first.", "arch", day())
+            .expect("the first writer's decision");
+        let clash = files.write_numbered_decision(1, "B", "The second.", "pm", day());
+
+        assert_eq!(
+            clash,
+            Err(FilesError::Exists {
+                path: ".farik/decisions/0001-a.md".to_string()
+            })
+        );
+        assert_eq!(
+            files
+                .list_decisions()
+                .expect("the decisions")
+                .iter()
+                .map(|decision| decision.slug.as_str())
+                .collect::<Vec<_>>(),
+            ["a"],
+            "the second writer wrote nothing"
+        );
+    }
+
+    #[test]
+    fn refuses_a_decision_past_9999() {
+        let project = TempProject::new("decision-past-9999");
+        let files = project.files();
+        let decisions = project.root.join(".farik/decisions");
+        std::fs::create_dir_all(&decisions).expect("the directory");
+        std::fs::write(decisions.join("9998-x.md"), "placed by hand").expect("a file");
+
+        let last = files
+            .write_decision("The last", "Number 9999.", "arch", day())
+            .expect("the 9999th decision");
+        let refused = files.write_decision("One more", "Number 10000.", "arch", day());
+
+        assert_eq!(last.number, 9999);
+        assert_eq!(
+            refused,
+            Err(FilesError::Invalid {
+                path: ".farik/decisions".to_string(),
+                detail: "the project has 9999 decisions".to_string(),
+            })
+        );
+        assert_eq!(files.list_decisions().expect("the decisions").len(), 2);
     }
 
     #[test]

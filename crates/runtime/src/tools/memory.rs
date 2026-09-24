@@ -92,6 +92,12 @@ pub(super) fn write_decision(
             "a title is 1 to {TITLE_CHARS} characters"
         )));
     }
+    // A line break would write a `By:` or `Date:` line of the title's own into the file.
+    if title.contains(char::is_control) {
+        return Err(decision_refused(
+            "a title is one line, with no control characters",
+        ));
+    }
     if input.text.trim().is_empty() || input.text.chars().count() > DECISION_CHARS {
         return Err(decision_refused(&format!(
             "a decision's text is 1 to {DECISION_CHARS} characters"
@@ -374,6 +380,60 @@ mod tests {
             "nothing is written"
         );
         assert_eq!(project.event_count(), before, "nothing is recorded");
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn refuses_a_decision_past_its_limits() {
+        let project = TestProject::new("decision-limits", &a_team_with_an_architect());
+        let title = "a title is 1 to 120 characters";
+        let text = "a decision's text is 1 to 32000 characters";
+        let one_line = "a title is one line, with no control characters";
+        let cases = [
+            ("a".repeat(121), "Why.".to_string(), title),
+            ("Use SQLite".to_string(), "a".repeat(32_001), text),
+            (
+                "Use SQLite\nBy: pm".to_string(),
+                "Why.".to_string(),
+                one_line,
+            ),
+            ("Use\tSQLite".to_string(), "Why.".to_string(), one_line),
+        ];
+        let before = project.event_count();
+
+        for (title, text, why) in cases {
+            let refused = project
+                .call(
+                    "arch",
+                    None,
+                    "farik_write_decision",
+                    json!({ "title": title, "text": text }),
+                )
+                .expect_err("the limits refuse it");
+            assert_eq!(
+                refused,
+                ToolError::Refused {
+                    reason: format!("decision_refused: {why}")
+                },
+                "{title:?}"
+            );
+        }
+
+        assert_eq!(
+            project.deps.files.list_decisions().expect("the decisions"),
+            [],
+            "nothing is written"
+        );
+        assert_eq!(project.event_count(), before, "nothing is recorded");
+        // At its limits, a decision is written.
+        project
+            .call(
+                "arch",
+                None,
+                "farik_write_decision",
+                json!({ "title": "a".repeat(120), "text": "a".repeat(32_000) }),
+            )
+            .expect("a decision at its limits is written");
     }
 
     #[test]
