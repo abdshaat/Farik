@@ -145,7 +145,7 @@ Files: `orchestrator/rules.rs`, tests
 
 Revision 0.13 in the header naming each change: 5.5's first row (a note on an implement session, not a block), `budget.exhausted`'s new consequence value, the "This release enforces" paragraph rewritten (the note, the escalation of a task's dollars and sessions, the unchanged day, the sprint as step 03 left it), and a paragraph on the provider's limit (how it is read and the residual that no refused capture exists, the sleep, the waiting run); 5.2's `any -> escalated` row now asked by Farik for a spent task; 8.2 (`session.ended` `provider_limit`, and that the parser reads `is_error` and the rate-limit events); 8.5 (`agent.slept`); F1 (a sleeping agent stays active and is not paused); 5.7 (a budget escalation resolved without more room is raised again); 8.2 (`farik run` waits for a sleeping agent and says so). The step's interface line in the project plan is written as landed.
 
-- [ ] `docs(docs): record the budget consequences and the provider-limit sleep in the spec`
+- [x] `docs(docs): record the budget consequences and the provider-limit sleep in the spec`
 
 ## Verification
 
