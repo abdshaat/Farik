@@ -121,11 +121,19 @@ fn tool<Input: JsonSchema>(
     tier: PermissionTier,
     description: &'static str,
 ) -> FarikTool {
+    let mut input_schema = Value::from(schemars::schema_for!(Input));
+    // The dialect, the struct's name and its doc line ("`farik_x`'s input.") tell an agent
+    // nothing, and every session is shown every schema.
+    if let Some(root) = input_schema.as_object_mut() {
+        for noise in ["$schema", "title", "description"] {
+            root.remove(noise);
+        }
+    }
     FarikTool {
         name,
         tier,
         description,
-        input_schema: Value::from(schemars::schema_for!(Input)),
+        input_schema,
     }
 }
 
@@ -516,6 +524,13 @@ mod tests {
         }
         for tool in &tools {
             assert_eq!(tool.input_schema["type"], "object", "{}", tool.name);
+            for noise in ["$schema", "title", "description"] {
+                assert!(
+                    tool.input_schema.get(noise).is_none(),
+                    "{} shows every session its {noise}",
+                    tool.name
+                );
+            }
         }
     }
 
