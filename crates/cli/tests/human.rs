@@ -412,3 +412,27 @@ fn holds_the_run_lock_while_it_handles_a_command_here() {
         assert_eq!(ran.code, 0, "{args:?}: {}", ran.err);
     }
 }
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn starts_and_shows_a_sprint_from_the_command_line() {
+    let repository = a_team("human-sprint");
+
+    let started = run(&repository.path, &["sprint", "start", "--budget", "20"]);
+    assert_eq!(started.code, 0, "{}", started.err);
+    let shown = run(&repository.path, &["sprint", "show"]);
+    assert_eq!(shown.code, 0, "{}", shown.err);
+    for said in ["S1", "open", "budget $20", "spent $0"] {
+        assert!(shown.out.contains(said), "{said} in {}", shown.out);
+    }
+
+    let ended = run(&repository.path, &["sprint", "end"]);
+    assert_eq!(ended.code, 0, "{}", ended.err);
+    let shown = run(&repository.path, &["sprint", "show"]);
+    assert_eq!(shown.code, 0, "{}", shown.err);
+    assert!(
+        shown.out.contains("S1") && shown.out.contains("ended"),
+        "{}",
+        shown.out
+    );
+}

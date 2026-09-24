@@ -28,6 +28,8 @@ pub mod sandbox;
 pub mod session;
 /// When each session started and how it ended, in the log.
 pub mod sessions;
+/// Starting and ending a sprint.
+pub mod sprints;
 /// The Claude Code program's `stream-json` lines, read as session events.
 pub mod stream;
 /// Farik's own tools, each checked against the agent's tier and the rule that owns it.

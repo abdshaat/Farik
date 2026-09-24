@@ -7,6 +7,7 @@ use farik_core::governor::done::requires_human_acceptance;
 use farik_core::governor::gates::Blocker;
 use farik_core::governor::transition::TransitionRequest;
 use farik_core::governor::transition_table::TransitionActor;
+use farik_core::sprint::{Sprint, SprintStatus};
 use farik_core::team::{AgentStatus, Team};
 use farik_protocol::command::{AcceptSubject, Command, RequestSize};
 use farik_protocol::event::{
@@ -19,6 +20,7 @@ use farik_store::{EventQuery, TaskProjection};
 use super::requests::HUMAN;
 use super::verify::{governor_results, is_human, is_mechanical, since_verifying};
 use super::{CommandError, CommandReport, IntegrationOutcome, Orchestrator, OrchestratorError};
+use crate::sprints::{EndedBy, SprintError, end_sprint, start_sprint};
 use crate::tools::ToolDeps;
 use crate::transitions::{
     TransitionAsk, TransitionOutcome, contract_accepted, refusal_details, result_accepted,
@@ -83,6 +85,16 @@ pub(super) async fn handle(
         Command::TaskIntegrate { task_id } => integrate(orchestrator, &task_id).await,
         Command::AgentUpdate { agent_id, status } => update_agent(orchestrator, &agent_id, status),
         Command::SessionStop { session_id } => stop_session(orchestrator, &session_id),
+        Command::SprintStart { budget_usd } => sprint(
+            tools,
+            start_sprint(tools, budget_usd, HUMAN),
+            EventKind::SprintStarted,
+        ),
+        Command::SprintEnd => sprint(
+            tools,
+            end_sprint(tools, EndedBy::Human),
+            EventKind::SprintEnded,
+        ),
         Command::RunStop => {
             orchestrator.stop();
             Ok(CommandReport {
@@ -93,6 +105,46 @@ pub(super) async fn handle(
             })
         }
     }
+}
+
+/// What starting or ending a sprint did, as the human's report: the sprint and the event of
+/// `kind` it recorded last.
+fn sprint(
+    tools: &ToolDeps,
+    done: Result<Sprint, SprintError>,
+    kind: EventKind,
+) -> Result<CommandReport, CommandError> {
+    let sprint = done.map_err(|error| match error {
+        SprintError::AlreadyOpen { .. } => CommandError::Refused {
+            reason: format!("sprint_open: {error}"),
+        },
+        SprintError::NoneOpen => CommandError::Refused {
+            reason: format!("no_sprint_open: {error}"),
+        },
+        SprintError::Refused { reason } => CommandError::Refused { reason },
+        other => failed(other),
+    })?;
+    let recorded = tools
+        .log
+        .read(&EventQuery {
+            kinds: vec![kind],
+            ..EventQuery::default()
+        })
+        .map_err(failed)?;
+    let budget = sprint
+        .budget_usd
+        .map_or_else(|| "no budget".to_string(), |usd| format!("budget ${usd}"));
+    Ok(CommandReport {
+        said: match sprint.status {
+            SprintStatus::Open => format!("{} is open, {budget}", sprint.id.as_str()),
+            SprintStatus::Ended => format!("{} ended", sprint.id.as_str()),
+        },
+        events: recorded
+            .last()
+            .map(|event| event.envelope.seq)
+            .into_iter()
+            .collect(),
+    })
 }
 
 /// The human's triage of a draft, through the store (5.16).
@@ -840,6 +892,10 @@ mod tests {
         SessionEndedBodyReason,
     };
     use serde_json::{Value, json};
+
+    use farik_core::sprint::fixtures::an_open_sprint_wire;
+    use farik_core::sprint::{SprintStatus, validate_sprint};
+    use farik_protocol::event::SprintEndedBodyEndedBy;
 
     use crate::orchestrator::fixtures::{Harness, UsageThenWaitAdapter};
     use crate::orchestrator::{CommandError, CommandReport, Orchestrator};
@@ -1670,5 +1726,126 @@ mod tests {
                 .await,
             Err(CommandError::NotFound { .. })
         ));
+    }
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn starts_a_sprint() {
+        let harness = Harness::new("human-sprint-start", |_| {});
+        let orchestrator = an_orchestrator(&harness);
+
+        let report = handled(
+            &orchestrator,
+            Command::SprintStart {
+                budget_usd: Some(20.0),
+            },
+        )
+        .await;
+
+        let sprint = harness
+            .project
+            .deps
+            .files
+            .read_sprint("S1")
+            .expect("S1 is written");
+        assert_eq!(sprint.status, SprintStatus::Open);
+        assert_eq!(sprint.budget_usd, Some(20.0));
+        assert!(sprint.ended_at.is_none() && sprint.task_ids.is_empty());
+        let started = last(&harness, EventKind::SprintStarted).expect("the start is recorded");
+        let EventBody::SprintStarted(body) = &started.body else {
+            panic!("a start");
+        };
+        assert_eq!(
+            (
+                body.sprint_id.as_str(),
+                body.budget_usd,
+                body.started_by.as_str()
+            ),
+            ("S1", Some(20.0), "human")
+        );
+        assert_eq!(report.events, vec![started.envelope.seq]);
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn numbers_a_sprint_after_the_files_and_the_log() {
+        let harness = Harness::new("human-sprint-numbers", |_| {});
+        let mut ended = an_open_sprint_wire();
+        ended["id"] = json!("S3");
+        ended["status"] = json!("ended");
+        ended["ended_at"] = json!("2026-09-24T01:00:00Z");
+        harness
+            .project
+            .deps
+            .files
+            .write_sprint(&validate_sprint(&ended).expect("a sprint"))
+            .expect("S3 is written");
+        let orchestrator = an_orchestrator(&harness);
+        handled(&orchestrator, Command::SprintStart { budget_usd: None }).await;
+        assert!(harness.project.deps.files.read_sprint("S4").is_ok());
+
+        let harness = Harness::new("human-sprint-numbers-log", |_| {});
+        harness.project.record(
+            "",
+            "sprint.started",
+            &json!({ "sprint_id": "S5", "budget_usd": null, "started_by": "human" }),
+        );
+        harness.project.record(
+            "",
+            "sprint.ended",
+            &json!({ "sprint_id": "S5", "ended_by": "human", "left": [] }),
+        );
+        let orchestrator = an_orchestrator(&harness);
+        handled(&orchestrator, Command::SprintStart { budget_usd: None }).await;
+        assert!(harness.project.deps.files.read_sprint("S6").is_ok());
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn refuses_a_second_open_sprint() {
+        let harness = Harness::new("human-sprint-second", |_| {});
+        harness.open_sprint("S1", &[]);
+        let before = harness.events(&[]).len();
+        let orchestrator = an_orchestrator(&harness);
+
+        let reason = refused(&orchestrator, Command::SprintStart { budget_usd: None }).await;
+
+        assert!(reason.contains("S1"), "{reason}");
+        assert_eq!(harness.events(&[]).len(), before);
+        assert!(harness.project.deps.files.read_sprint("S2").is_err());
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn ends_a_sprint_leaving_its_unfinished_tasks() {
+        let harness = Harness::new("human-sprint-end", |_| {});
+        harness.accepted("FRK-1");
+        harness.in_progress("FRK-2", "dev-a", "dev-b");
+        harness.open_sprint("S1", &["FRK-1", "FRK-2"]);
+        let orchestrator = an_orchestrator(&harness);
+
+        let report = handled(&orchestrator, Command::SprintEnd).await;
+
+        let files = &harness.project.deps.files;
+        let sprint = files.read_sprint("S1").expect("S1 reads");
+        assert_eq!(sprint.status, SprintStatus::Ended);
+        assert!(sprint.ended_at.is_some());
+        let ended = last(&harness, EventKind::SprintEnded).expect("the end is recorded");
+        let EventBody::SprintEnded(body) = &ended.body else {
+            panic!("an end");
+        };
+        assert_eq!(body.ended_by, SprintEndedBodyEndedBy::Human);
+        assert_eq!(
+            body.left.iter().map(|id| id.as_str()).collect::<Vec<_>>(),
+            vec!["FRK-2"]
+        );
+        assert_eq!(report.events, vec![ended.envelope.seq]);
+        let contract = files.read_contract(&task("FRK-2")).expect("FRK-2 reads");
+        assert_eq!(contract.sprint, None);
+        assert_eq!(harness.row("FRK-2").status, TaskStatus::InProgress);
+        assert_eq!(harness.row("FRK-2").sprint, None);
+        assert_eq!(harness.row("FRK-1").sprint.as_deref(), Some("S1"));
+
+        let again = refused(&orchestrator, Command::SprintEnd).await;
+        assert!(again.contains("no sprint is open"), "{again}");
     }
 }

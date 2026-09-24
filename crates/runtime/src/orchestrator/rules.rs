@@ -24,6 +24,7 @@ use super::{
 use crate::cost::budget_state;
 use crate::exec::Executor;
 use crate::session::{EndReason, SessionPurpose};
+use crate::sprints::{EndedBy, end_sprint};
 use crate::transitions::{self, TransitionAsk, TransitionOutcome, integration_branch};
 
 /// What a tick says when no rule matched.
@@ -44,14 +45,12 @@ pub(super) async fn tick(
     // The store gives the board in the order of the number in each task id, which is how ties
     // are broken.
     let board = deps.tools.projections.board()?;
-    let in_scope = |row: &&TaskProjection| {
-        scope
-            .task_id
-            .as_ref()
-            .is_none_or(|task_id| &row.task_id == task_id)
-    };
+    let in_scope = in_scope(scope);
     let runs = |rule: u8| rule_runs(scope.rules, rule);
     let mut day_spent = false;
+    if let Some(report) = finished_sprint(deps, scope, &board)? {
+        return Ok(report);
+    }
     if runs(1) {
         for row in board
             .iter()
@@ -139,6 +138,46 @@ pub(super) async fn tick(
     Ok(TickReport::Idle {
         why: if day_spent { DAY_SPENT } else { NOTHING_TO_DO }.to_string(),
     })
+}
+
+/// Whether `scope` takes in a row: every row, or the one task it names.
+fn in_scope(scope: &TickScope) -> impl Fn(&&TaskProjection) -> bool + Copy + '_ {
+    move |row| {
+        scope
+            .task_id
+            .as_ref()
+            .is_none_or(|task_id| &row.task_id == task_id)
+    }
+}
+
+/// The sprint that ends by itself (5.5): the open sprint, once it holds a task and every task in it
+/// is accepted or cancelled, ended by the governor. A sprint rule is about no one task, so it runs
+/// only in a tick scoped to none, under `All` or `Planning`.
+fn finished_sprint(
+    deps: &OrchestratorDeps,
+    scope: &TickScope,
+    board: &[TaskProjection],
+) -> Result<Option<TickReport>, OrchestratorError> {
+    if scope.task_id.is_some() || scope.rules == TickRules::Refining {
+        return Ok(None);
+    }
+    let Some(open) = deps.tools.projections.open_sprint()? else {
+        return Ok(None);
+    };
+    let mut held = board
+        .iter()
+        .filter(|row| row.sprint.as_deref() == Some(open.sprint_id.as_str()))
+        .peekable();
+    if held.peek().is_none()
+        || !held.all(|row| matches!(row.status, TaskStatus::Accepted | TaskStatus::Cancelled))
+    {
+        return Ok(None);
+    }
+    let sprint = end_sprint(&deps.tools, EndedBy::Governor)?;
+    Ok(Some(TickReport::Sprint {
+        sprint_id: sprint.id.as_str().to_string(),
+        what: "ended it: every task in it is accepted or cancelled".to_string(),
+    }))
 }
 
 /// Whether `rules` runs rule `rule` (1 to 10, in the order of work) for every task. `Planning`
@@ -621,7 +660,9 @@ mod tests {
     use farik_core::contract::{Role, TaskStatus};
     use farik_core::governor::permissions::{PermissionTier, default_tiers};
     use farik_core::pricing::Usage;
+    use farik_core::sprint::SprintStatus;
     use farik_core::team::Effort;
+    use farik_protocol::event::SprintEndedBodyEndedBy;
     use farik_protocol::event::{
         BudgetExhaustedBodyScope, CriterionRecordedBodyRunBy, EscalationRaisedBodyReason,
         EventBody, EventKind, NoteWrittenBodyKind, ReviewRecordedBody, SessionEndedBodyReason,
@@ -654,7 +695,7 @@ mod tests {
     fn acted_on(report: &TickReport) -> Option<&str> {
         match report {
             TickReport::Acted { task_id, .. } => Some(task_id.as_str()),
-            TickReport::Idle { .. } => None,
+            TickReport::Idle { .. } | TickReport::Sprint { .. } => None,
         }
     }
 
@@ -3351,5 +3392,57 @@ mod tests {
             scopes_exhausted(&harness),
             vec![BudgetExhaustedBodyScope::SessionToolCalls]
         );
+    }
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn ends_a_finished_sprint_by_itself() {
+        let harness = Harness::new("orch-sprint-finished", |_| {});
+        harness.accepted("FRK-1");
+        harness.ready("FRK-2");
+        harness.project.moved(
+            "FRK-2",
+            "ready",
+            "cancelled",
+            &json!({ "actor": "human", "requested_by": "human" }),
+        );
+        harness.open_sprint("S1", &["FRK-1", "FRK-2"]);
+        let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
+
+        let report = orchestrator.tick().await.expect("the tick runs");
+
+        assert!(
+            matches!(&report, TickReport::Sprint { sprint_id, .. } if sprint_id == "S1"),
+            "{report:?}"
+        );
+        let ended = harness.events(&[EventKind::SprintEnded]);
+        assert_eq!(ended.len(), 1);
+        let EventBody::SprintEnded(body) = &ended[0].body else {
+            panic!("an end");
+        };
+        assert_eq!(body.ended_by, SprintEndedBodyEndedBy::Governor);
+        assert!(body.left.is_empty());
+        assert_eq!(
+            harness
+                .project
+                .deps
+                .files
+                .read_sprint("S1")
+                .expect("S1 reads")
+                .status,
+            SprintStatus::Ended
+        );
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn leaves_an_empty_sprint_open() {
+        let harness = Harness::new("orch-sprint-empty", |_| {});
+        harness.open_sprint("S1", &[]);
+        let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
+
+        let report = orchestrator.tick().await.expect("the tick runs");
+
+        assert!(matches!(report, TickReport::Idle { .. }), "{report:?}");
+        assert!(harness.events(&[EventKind::SprintEnded]).is_empty());
     }
 }

@@ -164,6 +164,13 @@ pub(crate) async fn ticks(
                 );
                 after(printer);
             }
+            Ok(TickReport::Sprint { sprint_id, what }) => {
+                printer.line(
+                    &format!("{sprint_id}: {what}"),
+                    &json!({ "sprint_id": sprint_id, "what": what }),
+                );
+                after(printer);
+            }
             Err(error) => return Ended::Failed(error.to_string()),
         }
     }

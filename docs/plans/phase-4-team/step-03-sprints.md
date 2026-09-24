@@ -115,7 +115,7 @@ Files: `command.schema.json`, `command.rs`, `crates/runtime/src/sprints.rs`, `ru
 - `starts_and_shows_a_sprint_from_the_command_line` (cli) — `farik sprint start --budget 20` then `farik sprint show`: prints `S1`, `open`, `budget $20`, `spent $0`; `farik sprint end` then `show`: `ended`.
 - `says_there_is_no_sprint_yet` (cli) — `farik sprint show` in a new project prints `no sprint yet`, exit 0.
 
-- [ ] `feat(runtime): start and end a sprint`
+- [x] `feat(runtime): start and end a sprint`
 
 ### Task 4: planning a sprint
 

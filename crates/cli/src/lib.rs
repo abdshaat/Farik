@@ -41,6 +41,8 @@ pub mod refusal;
 mod run;
 /// One contract, and what happened to it.
 pub mod show;
+/// One sprint, and how it went.
+pub mod sprint;
 /// Who drives a project, and how a command reaches it.
 #[cfg(unix)]
 mod start;
@@ -298,6 +300,11 @@ enum Commands {
         #[arg(required = true, trailing_var_arg = true, allow_hyphen_values = true)]
         reason: Vec<String>,
     },
+    /// Start, end, or show a sprint (5.5).
+    Sprint {
+        #[command(subcommand)]
+        command: SprintCommands,
+    },
     /// Stop the process driving this project after its session, or stop one session now (5.2).
     Stop {
         /// A session id, or a task whose running session to stop.
@@ -354,6 +361,23 @@ enum HookCommands {
         /// The daemon's `daemon.json`.
         #[arg(long)]
         daemon: PathBuf,
+    },
+}
+
+#[derive(Subcommand)]
+enum SprintCommands {
+    /// Start a sprint, which the team plans from the ready backlog.
+    Start {
+        /// What it may spend, in dollars. Left out, it has no budget of its own.
+        #[arg(long)]
+        budget: Option<f64>,
+    },
+    /// End the open sprint; its unfinished tasks leave it and keep their status.
+    End,
+    /// Show the sprint named, else the open one, else the latest.
+    Show {
+        /// The sprint, as S<n>.
+        sprint_id: Option<String>,
     },
 }
 
@@ -479,7 +503,10 @@ pub fn run_cli(args: &[String], io: &mut CliIo<'_>) -> i32 {
         | Commands::Answer { .. }
         | Commands::Integrate { .. }
         | Commands::Resolve { .. }
-        | Commands::Cancel { .. } => open_project(&io.cwd, now).and_then(|project| {
+        | Commands::Cancel { .. }
+        | Commands::Sprint {
+            command: SprintCommands::Start { .. } | SprintCommands::End,
+        } => open_project(&io.cwd, now).and_then(|project| {
             let (name, command) = humans(&parsed.command)?;
             human_command(&project, command, name, io)
         }),
@@ -489,6 +516,10 @@ pub fn run_cli(args: &[String], io: &mut CliIo<'_>) -> i32 {
         Commands::Task {
             command: TaskCommands::Show { task_id, diff },
         } => open_project(&io.cwd, now).and_then(|project| show::show(&project, task_id, *diff)),
+        Commands::Sprint {
+            command: SprintCommands::Show { sprint_id },
+        } => open_project(&io.cwd, now)
+            .and_then(|project| sprint::show(&project, sprint_id.as_deref())),
         Commands::Board => open_project(&io.cwd, now).and_then(|project| board::board(&project)),
         Commands::Log { task, kind, limit } => open_project(&io.cwd, now)
             .and_then(|project| log::log(&project, task.as_ref(), kind.as_ref(), *limit)),
@@ -627,6 +658,17 @@ fn humans(command: &Commands) -> Result<(&'static str, Command), String> {
                 reason: reason.join(" "),
             },
         ),
+        Commands::Sprint {
+            command: SprintCommands::Start { budget },
+        } => (
+            "sprint start",
+            Command::SprintStart {
+                budget_usd: *budget,
+            },
+        ),
+        Commands::Sprint {
+            command: SprintCommands::End,
+        } => ("sprint end", Command::SprintEnd),
         _ => return Err("this is not one of the human's commands".to_string()),
     })
 }

@@ -958,3 +958,18 @@ fn prints_the_control_characters_an_agent_wrote_escaped() {
         shown.out
     );
 }
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn says_there_is_no_sprint_yet() {
+    let repository = TempRepo::new("read-sprint-none");
+    repository.write("Cargo.lock", "version = 4\n");
+    repository.write("Cargo.toml", "[package]\nname = \"one\"\n");
+    repository.commit_at("a project", COMMITTED);
+    run_in(&repository.path, &["init"]);
+
+    let ran = run_in(&repository.path, &["sprint", "show"]);
+
+    assert_eq!(ran.code, 0, "{}", ran.err);
+    assert!(ran.out.contains("no sprint yet"), "{}", ran.out);
+}
