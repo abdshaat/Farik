@@ -308,22 +308,27 @@ fn accepts_a_result_with_the_humans_review() {
 #[test]
 #[ignore = "needs the git program: cargo xtask check --integration"]
 fn prints_the_refusal_the_driving_process_answered() {
-    let repository = a_project("human-routed-refusals");
-    let task = filed(&repository, "Add done.txt");
-    for (answer, said) in [
+    // A project per answer: dropping a driver does not free its run lock at once, because a child
+    // another test thread is forking meanwhile holds a copy of the lock's descriptor until it
+    // execs, so a second driver on the same project could find the lock still held.
+    for (name, answer, said) in [
         (
+            "human-routed-not-found",
             CommandError::NotFound {
                 what: "FRK-9".to_string(),
             },
             "farik: FRK-9 is not in this project",
         ),
         (
+            "human-routed-refused",
             CommandError::Refused {
                 reason: "not_awaiting_approval: FRK-1 is a draft".to_string(),
             },
             "farik: not_awaiting_approval: FRK-1 is a draft",
         ),
     ] {
+        let repository = a_project(name);
+        let task = filed(&repository, "Add done.txt");
         let driver = LiveDriver::answering(&repository, Err(answer));
 
         let ran = run(&repository.path, &["approve", &task]);
