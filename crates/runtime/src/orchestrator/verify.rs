@@ -87,13 +87,7 @@ pub(super) async fn verifying(
     if !failed.is_empty() {
         return reject(deps, team, row, reviewer, &failed, review_note).map(Some);
     }
-    let unanswered: Vec<String> = contract
-        .exit_criteria
-        .iter()
-        .filter(|criterion| !is_human(criterion))
-        .map(|criterion| criterion.id.to_string())
-        .filter(|id| !answers.iter().any(|result| result.criterion_id == *id))
-        .collect();
+    let unanswered = unanswered(&contract, &answers);
     if !unanswered.is_empty() {
         return review(
             orchestrator,
@@ -541,6 +535,17 @@ pub(super) fn governor_results(history: &[FarikEvent], since: u64) -> Vec<Criter
         }
     }
     results
+}
+
+/// The ids of the criteria, but `human` ones, that `answers` holds no reviewer's result for.
+pub(super) fn unanswered(contract: &TaskContract, answers: &[CriterionResult]) -> Vec<String> {
+    contract
+        .exit_criteria
+        .iter()
+        .filter(|criterion| !is_human(criterion))
+        .map(|criterion| criterion.id.to_string())
+        .filter(|id| !answers.iter().any(|result| result.criterion_id == *id))
+        .collect()
 }
 
 pub(super) fn is_human(criterion: &ExitCriterion) -> bool {

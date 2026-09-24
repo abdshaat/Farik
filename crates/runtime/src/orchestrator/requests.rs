@@ -27,7 +27,7 @@ use super::session::{JUDGMENT_TOOL, SessionAsk, TRIAGE_TOOL, run_session};
 use super::verify::{
     GOVERNOR, append, context, escalate, failed, fails_the_criterion, governor_results, history,
     is_mechanical, ran_criteria, read_only, record_review, reject, reviewer_results,
-    since_verifying,
+    since_verifying, unanswered,
 };
 use super::{Orchestrator, OrchestratorDeps, OrchestratorError, TickReport};
 use crate::criteria::{CriterionOutcome, remove_base_worktree, run_criteria};
@@ -35,7 +35,7 @@ use crate::session::SessionPurpose;
 use crate::tools::ToolDeps;
 use crate::transitions::{
     TransitionAsk, TransitionOutcome, integration_branch, last_move_into, refining_began,
-    refusal_details, result_accepted, reviewed_by_the_human,
+    refusal_details, result_accepted, the_human_reviews_the_epic,
 };
 
 /// The human, as the reviewer of an epic the Product Manager broke down (5.16 item 4).
@@ -493,7 +493,8 @@ pub(super) fn epic_assignee<'a>(
 
 /// Rule 5 for an epic (ADR 0013): nothing while a task under it awaits integration; then Farik
 /// runs each mechanical criterion it has not run in this verification, on the integration branch's
-/// head. Then, for an epic the Product Manager reviews, its review; for one the human reviews,
+/// head. Then, for an epic whose row names a reviewer (the Product Manager, fixed when the Scrum
+/// Master was assigned it, whatever the team is now), its review; for one the human reviews,
 /// nothing until the human accepts, then the Product Manager's `verify` session, told the human
 /// accepted, after which the epic's review is recorded.
 pub(super) async fn verifying_epic(
@@ -530,7 +531,7 @@ pub(super) async fn verifying_epic(
             EpicRan::Unrunnable(why) => escalate(deps, team, row, &why),
         };
     }
-    if !reviewed_by_the_human(contract, team) {
+    if !the_human_reviews_the_epic(contract.kind, row.reviewer_id.as_deref()) {
         return reviewed_by_the_product_manager(
             deps, team, &board, row, contract, history, day_spent,
         )
@@ -563,8 +564,9 @@ pub(super) async fn verifying_epic(
 /// Rule 5 for an epic the Product Manager reviews, once Farik's runs are recorded, judged on the
 /// governor's own context for `verifying -> accepted`: the Product Manager's read-only `verify`
 /// session in the project root while there is no review note, after which its review is recorded;
-/// the rejection in its name when its results hold a failure; nothing until the human accepts;
-/// then its session again, told the human accepted.
+/// the rejection in its name when its results hold a failure; its review session again, told
+/// which, while a criterion is unanswered; nothing until the human accepts; then its session
+/// again, told the human accepted.
 async fn reviewed_by_the_product_manager(
     deps: &OrchestratorDeps,
     team: &Team,
@@ -578,25 +580,33 @@ async fn reviewed_by_the_product_manager(
         return Ok(None);
     };
     let context = context(deps, team, &row.task_id)?;
+    let answers = reviewer_results(&context);
     let review_note = context.done.review_note.clone();
-    if let Some(review_note) = &review_note {
-        let failed = failed(contract, &reviewer_results(&context));
-        if !failed.is_empty() {
-            return reject(deps, team, row, pm, &failed, review_note.clone()).map(Some);
+    // A review to run, naming what is still unanswered, or none when the review is complete.
+    let to_review = match &review_note {
+        None => Some(Vec::new()),
+        Some(review_note) => {
+            let failed = failed(contract, &answers);
+            if !failed.is_empty() {
+                return reject(deps, team, row, pm, &failed, review_note.clone()).map(Some);
+            }
+            let unanswered = unanswered(contract, &answers);
+            if unanswered.is_empty() && result_accepted(history).is_none() {
+                return Ok(None);
+            }
+            (!unanswered.is_empty()).then_some(unanswered)
         }
-        if result_accepted(history).is_none() {
-            return Ok(None);
-        }
-    }
+    };
     if spent(deps, team, contract, day_spent)? {
         return Ok(None);
     }
     let since = since_verifying(history);
     let ran = governor_results(history, since);
-    let initial_prompt = if review_note.is_some() {
-        epic_accept_message(contract, &ran)
-    } else {
-        epic_review_message(contract, &ran, &tasks_under(deps, board, row)?)
+    let initial_prompt = match &to_review {
+        Some(unanswered) => {
+            epic_review_message(contract, &ran, &tasks_under(deps, board, row)?, unanswered)
+        }
+        None => epic_accept_message(contract, &ran),
     };
     let end = run_session(
         deps,
@@ -609,7 +619,7 @@ async fn reviewed_by_the_product_manager(
         ),
     )
     .await?;
-    if review_note.is_none() {
+    if to_review.is_some() {
         record_review(deps, team, contract, pm, &end.session_id, since)?;
     }
     Ok(Some(acted(row, pm, "verify", &end)))
@@ -2510,6 +2520,87 @@ mod tests {
                 spec.initial_prompt
             );
         }
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn asks_the_product_manager_again_for_an_unanswered_epic_criterion() {
+        let harness = Harness::new("epic-sm-unanswered", with_a_scrum_master);
+        a_scrum_masters_epic_verifying(&harness);
+        integrated(&harness, true);
+        // The Product Manager's review note, with no result for the `review` criterion C2.
+        harness.project.record(
+            "FRK-1",
+            "note.written",
+            &json!({ "kind": "review", "text": "It reads right.", "written_by": "pm" }),
+        );
+        let adapter = harness.recorded(vec![replays_farik_read_board()]);
+        let orchestrator = harness.orchestrator(adapter.clone());
+        orchestrator.tick().await.expect("Farik runs C1");
+
+        orchestrator.tick().await.expect("the tick runs");
+
+        let started = adapter.started();
+        assert_eq!(started.len(), 1);
+        let spec = &started[0];
+        assert_eq!(
+            (spec.purpose, spec.agent_id.as_str()),
+            (SessionPurpose::Verify, "pm")
+        );
+        assert!(
+            spec.initial_prompt.contains("Still unanswered: C2."),
+            "{}",
+            spec.initial_prompt
+        );
+        assert!(
+            !spec.initial_prompt.contains("Request `accepted`"),
+            "{}",
+            spec.initial_prompt
+        );
+        assert_eq!(harness.row("FRK-1").status, TaskStatus::Verifying);
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn keeps_an_epics_reviewer_when_the_scrum_master_is_paused() {
+        // The epic was assigned while `sam` was active; `sam` is paused since.
+        let harness = Harness::new("epic-sm-paused", |wire| {
+            with_a_scrum_master(wire);
+            wire["agents"]
+                .as_array_mut()
+                .expect("a list of agents")
+                .last_mut()
+                .expect("sam")["status"] = json!("paused");
+        });
+        a_scrum_masters_epic_verifying(&harness);
+        integrated(&harness, true);
+        let adapter = harness.recorded(vec![review_epic_frk_1()]);
+        let orchestrator = harness.orchestrator(adapter.clone());
+        orchestrator.tick().await.expect("Farik runs C1");
+
+        orchestrator.tick().await.expect("the tick runs");
+
+        let started = adapter.started();
+        assert_eq!(
+            started.len(),
+            1,
+            "the Product Manager reviews it, not the human"
+        );
+        assert_eq!(
+            (started[0].purpose, started[0].agent_id.as_str()),
+            (SessionPurpose::Verify, "pm")
+        );
+        assert!(
+            started[0].initial_prompt.contains("The tasks under it"),
+            "{}",
+            started[0].initial_prompt
+        );
+        let reviews = harness.events(&[EventKind::ReviewRecorded]);
+        assert!(
+            matches!(&reviews[..], [review] if matches!(&review.body,
+                EventBody::ReviewRecorded(body) if body.reviewer == "pm")),
+            "{reviews:?}"
+        );
     }
 
     #[tokio::test]

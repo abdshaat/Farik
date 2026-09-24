@@ -280,17 +280,11 @@ pub(super) struct ReviewBrief<'a> {
 pub(super) fn review_message(brief: &ReviewBrief<'_>) -> String {
     let contract = brief.contract;
     let task = contract.id.as_str();
-    let mut message = format!(
-        "Verify {task} as its reviewer. Its title: {}",
-        untrusted_block("title", &contract.title.to_string(), NOTE_CAP_BYTES)
+    let message = format!(
+        "Verify {task} as its reviewer. Its title: {}{}",
+        untrusted_block("title", &contract.title.to_string(), NOTE_CAP_BYTES),
+        still_unanswered(brief.unanswered)
     );
-    if !brief.unanswered.is_empty() {
-        message = format!(
-            "{message}\n\nStill unanswered: {}. Record a result for each with \
-             `farik_record_criterion_result`, citing your evidence.",
-            brief.unanswered.join(", ")
-        );
-    }
     format!(
         "{message}\n\nFarik ran its `command`, `test`, and `artifact` criteria in the task's \
          sandbox, as its reviewer: {results}\n\n{rubrics}\n\nThe assignee's completion note: \
@@ -311,11 +305,13 @@ pub(super) fn review_message(brief: &ReviewBrief<'_>) -> String {
 /// The Product Manager's `verify` session's message for an epic it reviews: the epic's title,
 /// Farik's results on the integration branch, the rubric of each `review` criterion, and each task
 /// under it with its status and its completion note, in place of a diff, each an agent's words and
-/// so untrusted; then the review note to write.
+/// so untrusted; then the review note to write. When `unanswered` names any criteria, it says they
+/// are still unanswered, as `review_message` does.
 pub(super) fn epic_review_message(
     contract: &TaskContract,
     results: &[CriterionResult],
     tasks: &[(TaskProjection, Option<String>)],
+    unanswered: &[String],
 ) -> String {
     let listed = tasks
         .iter()
@@ -331,15 +327,28 @@ pub(super) fn epic_review_message(
         .collect::<Vec<_>>()
         .join("\n\n");
     format!(
-        "Verify the epic {epic} as its reviewer. Its title: {title}\n\nFarik ran its `command`, \
-         `test`, and `artifact` criteria on the integration branch, as its reviewer: \
+        "Verify the epic {epic} as its reviewer. Its title: {title}{still}\n\nFarik ran its \
+         `command`, `test`, and `artifact` criteria on the integration branch, as its reviewer: \
          {results}\n\n{rubrics}\n\nThe tasks under it: {tasks}\n\nWrite the review note with \
          `farik_write_note` of kind `review`, mapping each criterion to its evidence.",
         epic = contract.id.as_str(),
         title = untrusted_block("title", &contract.title.to_string(), NOTE_CAP_BYTES),
+        still = still_unanswered(unanswered),
         results = untrusted_block("results", &results_text(results), RESULTS_CAP_BYTES),
         rubrics = rubrics(contract),
         tasks = untrusted_block("tasks", &listed, RESULTS_CAP_BYTES),
+    )
+}
+
+/// The paragraph naming the criteria a review left unanswered, or nothing when it left none.
+fn still_unanswered(unanswered: &[String]) -> String {
+    if unanswered.is_empty() {
+        return String::new();
+    }
+    format!(
+        "\n\nStill unanswered: {}. Record a result for each with \
+         `farik_record_criterion_result`, citing your evidence.",
+        unanswered.join(", ")
     )
 }
 

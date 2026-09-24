@@ -437,7 +437,6 @@ impl Transitions {
         let (results, completion_note, review_note) = evidence_since_work_began(&history);
         let done = with_the_humans_acceptance(
             &contract,
-            team,
             &history,
             DoneEvidence {
                 results: results.clone(),
@@ -630,10 +629,17 @@ fn refused_before_the_governor(
     })
 }
 
-/// Whether the human reviews this contract: an epic, on a team with no active Scrum Master, is
-/// reviewed by the human (5.16 item 4), who has no agent id.
+/// Whether the human is to review this contract, asked when it is assigned: an epic, on a team
+/// with no active Scrum Master, is reviewed by the human (5.16 item 4), who has no agent id.
 pub(crate) fn reviewed_by_the_human(contract: &TaskContract, team: &Team) -> bool {
     contract.kind == TaskKind::Epic && !team.has_active(Role::ScrumMaster)
+}
+
+/// Whether the human reviews an epic already assigned: its row names no reviewer, as the
+/// assignment left it. Read from the row, not the team, so that a Scrum Master activated or paused
+/// since changes no epic's reviewer.
+pub(crate) fn the_human_reviews_the_epic(kind: TaskKind, reviewer_id: Option<&str>) -> bool {
+    kind == TaskKind::Epic && reviewer_id.is_none()
 }
 
 /// The Definition of Ready or Done evaluations a decision holds: the decided row's gate when it
@@ -995,10 +1001,10 @@ pub(crate) fn result_accepted(history: &[FarikEvent]) -> Option<(u64, Option<Str
 /// The Done evidence with the human's acceptance of the result read into it (5.4): the
 /// acceptance itself, and one passing `Human` result for each `human` criterion, which is the one
 /// path to them. For an epic the human reviews (ADR 0013), it also stands for the reviewer's
-/// answer to each `review` criterion, and its words are the review note.
+/// answer to each `review` criterion, and its words are the review note. `contract` carries its
+/// row's reviewer.
 fn with_the_humans_acceptance(
     contract: &TaskContract,
-    team: &Team,
     history: &[FarikEvent],
     mut done: DoneEvidence,
 ) -> DoneEvidence {
@@ -1007,7 +1013,7 @@ fn with_the_humans_acceptance(
     };
     done.human_accepted = true;
     let evidence = format!("human.accepted at seq {seq}");
-    let reviews = reviewed_by_the_human(contract, team);
+    let reviews = the_human_reviews_the_epic(contract.kind, contract.reviewer.as_deref());
     for criterion in &contract.exit_criteria {
         let run_by = match wire_method(&criterion.verification) {
             Some("human") => RunBy::Human,
@@ -3021,6 +3027,45 @@ mod tests {
             ]
         );
         assert!(context.done.human_accepted);
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn keeps_the_review_of_an_epic_its_reviewer_holds_without_a_scrum_master() {
+        use farik_core::governor::done::RunBy;
+        // A Scrum Master's epic, reviewed by `maya`; the team has no active Scrum Master now.
+        let project = Project::new("epic-reviewer-kept", a_team(|_| {}), at(12));
+        let criteria = json!([
+            { "id": "C2", "text": "done.txt says it.", "verification": { "method": "review", "rubric": ["Does done.txt say what the request asked?"] } }
+        ]);
+        project.file("FRK-1", |wire| {
+            wire["kind"] = json!("epic");
+            wire["assignee_role"] = json!("scrum_master");
+            wire["reviewer_role"] = json!("product_manager");
+            wire["exit_criteria"] = criteria.clone();
+        });
+        project.created_under("FRK-1", "assigned", "epic", None);
+        let people = json!({ "assignee": "sam", "reviewer": "maya" });
+        project.moved("FRK-1", "assigned", "in_progress", &people, at(9));
+        project.moved("FRK-1", "in_progress", "verifying", &people, at(10));
+        note(&project, "FRK-1", "review", "maya");
+        accepted(&project, "FRK-1", "result", Some("Both look right."));
+
+        let context = project.context(&accepting("FRK-1"), &TransitionAsk::default());
+
+        assert_eq!(
+            context.done.review_note.as_deref(),
+            Some("The review note."),
+            "the review note is maya's, not the human's words"
+        );
+        assert!(
+            !context
+                .done
+                .results
+                .iter()
+                .any(|result| result.run_by == RunBy::Reviewer),
+            "maya answers C2, not the human's acceptance"
+        );
     }
 
     #[test]
