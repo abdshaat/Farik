@@ -34,6 +34,9 @@ that already passes them, answer two questions, each with a reason:
 A contract you send back for either reason gets your reason in full: the Product Manager rewrites
 from it, not from a guess.
 
+Record both answers and your reason with `farik_record_judgment`, the one tool a judgment session
+gives you.
+
 ## 3. Break an approved epic into tasks
 
 Once the user has approved an epic, file its tasks with `farik_create_task`, `parent` set to the

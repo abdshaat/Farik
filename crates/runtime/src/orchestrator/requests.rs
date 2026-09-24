@@ -7,6 +7,7 @@ use farik_core::contract::{
     ExitCriterion, Role, TaskContract, TaskId, TaskKind, TaskStatus, VerificationWire,
 };
 use farik_core::governor::done::{CriterionResult, RunBy};
+use farik_core::governor::readiness::{ReadinessRule, evaluate_readiness};
 use farik_core::governor::transition::TransitionRequest;
 use farik_core::governor::transition_table::TransitionActor;
 use farik_core::team::{Agent, Team};
@@ -18,10 +19,11 @@ use farik_store::TaskProjection;
 use farik_store::files::FilesError;
 
 use super::messages::{
-    breakdown_message, close_out_message, epic_accept_message, refine_message, triage_message,
+    breakdown_message, close_out_message, epic_accept_message, judgment_message, refine_message,
+    triage_message,
 };
 use super::rules::{acted, active, has_room, refused_since_entering, spent};
-use super::session::{SessionAsk, run_session};
+use super::session::{JUDGMENT_TOOL, SessionAsk, TRIAGE_TOOL, run_session};
 use super::verify::{
     GOVERNOR, append, context, escalate, fails_the_criterion, governor_results, history,
     is_mechanical, ran_criteria, read_only,
@@ -44,9 +46,21 @@ pub(super) fn product_manager(team: &Team) -> Option<&Agent> {
         .find(|agent| Role::from(agent.role) == Role::ProductManager)
 }
 
-/// Rule 10: a `draft`. Untriaged, it gets the Product Manager's triage session; triaged, it is
-/// moved to `refining` on the Product Manager's behalf, with no session, unless that move was
-/// refused since the task became a draft.
+/// The Scrum Master: the first active agent of that role in team-file order.
+fn scrum_master(team: &Team) -> Option<&Agent> {
+    team.active_agents()
+        .find(|agent| Role::from(agent.role) == Role::ScrumMaster)
+}
+
+/// Who triages a request: the Scrum Master when the team has an active one, else the Product
+/// Manager (5.16).
+pub(super) fn triager(team: &Team) -> Option<&Agent> {
+    scrum_master(team).or_else(|| product_manager(team))
+}
+
+/// Rule 10: a `draft`. Untriaged, it gets the triager's triage session; triaged, it is moved to
+/// `refining` on the Product Manager's behalf, with no session, unless that move was refused since
+/// the task became a draft.
 pub(super) async fn draft(
     deps: &OrchestratorDeps,
     team: &Team,
@@ -57,6 +71,7 @@ pub(super) async fn draft(
         return Ok(None);
     };
     if !row.triaged {
+        let triager = triager(team).unwrap_or(pm);
         let contract = deps.tools.files.read_contract(&row.task_id)?;
         if spent(deps, team, &contract, day_spent)? {
             return Ok(None);
@@ -65,17 +80,18 @@ pub(super) async fn draft(
             deps,
             team,
             SessionAsk {
-                agent: pm,
+                agent: triager,
                 contract: &contract,
                 purpose: SessionPurpose::Triage,
                 cwd: deps.tools.files.root().to_path_buf(),
                 executor: None,
                 read_only: false,
+                only_tool: Some(TRIAGE_TOOL),
                 initial_prompt: triage_message(&contract),
             },
         )
         .await?;
-        return Ok(Some(acted(row, pm, "triage", &end)));
+        return Ok(Some(acted(row, triager, "triage", &end)));
     }
     if refused_since_entering(deps, &row.task_id, TaskStatus::Draft, TaskStatus::Refining)? {
         return Ok(None);
@@ -102,8 +118,10 @@ pub(super) async fn draft(
 /// Rule 9: a contract `refining`. A contract written since refining began and not judged since,
 /// or one filed whole (a breakdown's child, or a contract the human holds) and not judged since
 /// refining began, is judged: `escalated` asked as the governor first, whose rows open on three
-/// readiness failures or on a passing contract the human must approve, then `ready`. Otherwise the
-/// Product Manager gets a refine session.
+/// readiness failures or on a passing contract the human must approve, then `ready`. One whose
+/// Definition of Ready fails on the Scrum Master's missing judgment alone gets the Scrum Master's
+/// judgment session first, so that the governor is not asked, and an attempt spent, on a contract
+/// nobody has judged. Otherwise the Product Manager gets a refine session.
 pub(super) async fn refining(
     deps: &OrchestratorDeps,
     team: &Team,
@@ -117,7 +135,29 @@ pub(super) async fn refining(
     let history = history(deps, &row.task_id)?;
     let began = refining_began(&history);
     if is_to_be_judged(&contract, &history, began) {
-        return judge(deps, team, row).map(Some);
+        let sm = match scrum_master(team) {
+            Some(sm) if awaits_judgment(deps, team, row)? => sm,
+            _ => return judge(deps, team, row).map(Some),
+        };
+        if spent(deps, team, &contract, day_spent)? {
+            return Ok(None);
+        }
+        let end = run_session(
+            deps,
+            team,
+            SessionAsk {
+                agent: sm,
+                contract: &contract,
+                purpose: SessionPurpose::Refine,
+                cwd: deps.tools.files.root().to_path_buf(),
+                executor: None,
+                read_only: false,
+                only_tool: Some(JUDGMENT_TOOL),
+                initial_prompt: judgment_message(&contract),
+            },
+        )
+        .await?;
+        return Ok(Some(acted(row, sm, "judgment", &end)));
     }
     if spent(deps, team, &contract, day_spent)? {
         return Ok(None);
@@ -136,11 +176,38 @@ pub(super) async fn refining(
             cwd: deps.tools.files.root().to_path_buf(),
             executor: None,
             read_only: false,
+            only_tool: None,
             initial_prompt: refine_message(&contract, !asked, &failures),
         },
     )
     .await?;
     Ok(Some(acted(row, pm, "refine", &end)))
+}
+
+/// Whether the contract's Definition of Ready, evaluated on the context the governor's
+/// `refining -> ready` would use, fails on the Scrum Master's missing judgment alone. It records
+/// nothing.
+fn awaits_judgment(
+    deps: &OrchestratorDeps,
+    team: &Team,
+    row: &TaskProjection,
+) -> Result<bool, OrchestratorError> {
+    let request = TransitionRequest {
+        task_id: row.task_id.clone(),
+        to: TaskStatus::Ready,
+        actor: TransitionActor::Governor,
+        agent_id: None,
+    };
+    let context = deps
+        .tools
+        .transitions
+        .context(&request, &TransitionAsk::default(), team)?;
+    Ok(matches!(
+        evaluate_readiness(&context.contract, &context.readiness)
+            .err()
+            .as_deref(),
+        Some([only]) if only.rule == ReadinessRule::JudgmentRecorded
+    ))
 }
 
 /// Asks the governor to judge a contract: `escalated` first, because asking for `ready` on a
@@ -361,6 +428,7 @@ pub(super) async fn in_progress_epic(
             cwd: deps.tools.files.root().to_path_buf(),
             executor: None,
             read_only: false,
+            only_tool: None,
             initial_prompt,
         },
     )
@@ -632,11 +700,12 @@ mod tests {
         BrokenSandboxFactory, CountingSandboxFactory, ExecutorWitness, Harness,
     };
     use crate::orchestrator::{CommandError, Orchestrator, TickReport};
+    use crate::prompt::JUDGMENT_INSTRUCTION;
     use crate::recorded::fixtures::{
-        accept_frk_1, implement_finishes_frk_1, plan_assigns_frk_1, plan_assigns_frk_2,
-        plan_breaks_down_frk_1, plan_closes_epic_frk_1, refine_asks_frk_1,
-        refine_writes_epic_frk_1, refine_writes_task_frk_1, replays_farik_read_board,
-        triage_frk_1_large,
+        accept_frk_1, implement_finishes_frk_1, judge_frk_1_fails, judge_frk_1_passes,
+        plan_assigns_frk_1, plan_assigns_frk_2, plan_breaks_down_frk_1, plan_closes_epic_frk_1,
+        refine_asks_frk_1, refine_writes_epic_frk_1, refine_writes_task_frk_1,
+        replays_farik_read_board, triage_by_sm_frk_1, triage_frk_1_large,
     };
     use crate::session::SessionPurpose;
     use crate::tools::fixtures::at;
@@ -751,6 +820,45 @@ mod tests {
         assert_eq!(body.size, RequestTriagedBodySize::Large);
         assert_eq!(body.triaged_by, "pm");
         assert_eq!(harness.row("FRK-1").kind, TaskKind::Epic);
+    }
+
+    /// Adds the active Scrum Master `sam` to the team's wire.
+    fn with_a_scrum_master(wire: &mut Value) {
+        wire["agents"]
+            .as_array_mut()
+            .expect("a list of agents")
+            .push(json!({
+                "id": "sam",
+                "display_name": "sam",
+                "role": "scrum_master",
+                "status": "active"
+            }));
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn triages_with_the_scrum_master_when_there_is_one() {
+        let harness = Harness::new("req-triage-sm", with_a_scrum_master);
+        harness.a_request("Add done.txt and its check");
+        let adapter = harness.recorded(vec![triage_by_sm_frk_1()]);
+        let orchestrator = harness.orchestrator(adapter.clone());
+
+        orchestrator.tick().await.expect("the tick runs");
+
+        let started = adapter.started();
+        assert_eq!(started.len(), 1);
+        let spec = &started[0];
+        assert_eq!(spec.purpose, SessionPurpose::Triage);
+        assert_eq!(spec.agent_id, "sam");
+        assert_eq!(spec.model, TRIAGE_MODEL);
+        assert_eq!(spec.farik_tools, vec!["farik_triage_request".to_string()]);
+        assert!(spec.builtin_tools.is_empty(), "{:?}", spec.builtin_tools);
+        let triaged = last(&harness, EventKind::RequestTriaged).expect("the triage");
+        let EventBody::RequestTriaged(body) = &triaged.body else {
+            panic!("a triage");
+        };
+        assert_eq!(body.triaged_by, "sam");
+        assert_eq!(body.size, RequestTriagedBodySize::Small);
     }
 
     #[tokio::test]
@@ -917,6 +1025,121 @@ mod tests {
             ("refining".to_string(), "ready".to_string(), "governor")
         );
         assert_eq!(adapter.started().len(), 1);
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn asks_the_scrum_master_to_judge_a_written_contract() {
+        let harness = Harness::new("req-sm-judges", with_a_scrum_master);
+        let adapter = harness.recorded(vec![refine_writes_task_frk_1(), judge_frk_1_passes()]);
+        let orchestrator = harness.orchestrator(adapter.clone());
+        refining(&harness, &orchestrator, RequestSize::Small).await;
+        orchestrator.tick().await.expect("the contract is written");
+        assert!(last(&harness, EventKind::ContractWritten).is_some());
+
+        orchestrator.tick().await.expect("the tick runs");
+
+        let started = adapter.started();
+        assert_eq!(started.len(), 2);
+        let spec = &started[1];
+        assert_eq!(spec.agent_id, "sam");
+        assert_eq!(spec.purpose, SessionPurpose::Refine);
+        assert_eq!(spec.farik_tools, vec!["farik_record_judgment".to_string()]);
+        assert!(spec.builtin_tools.is_empty(), "{:?}", spec.builtin_tools);
+        assert!(
+            spec.system_prompt.contains(JUDGMENT_INSTRUCTION),
+            "{}",
+            spec.system_prompt
+        );
+        assert!(last(&harness, EventKind::ContractJudged).is_some());
+        assert_eq!(harness.row("FRK-1").status, TaskStatus::Refining);
+
+        orchestrator.tick().await.expect("the tick runs");
+
+        assert_eq!(harness.row("FRK-1").status, TaskStatus::Ready);
+        assert_eq!(adapter.started().len(), 2);
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn sends_a_badly_judged_contract_back_to_the_product_manager() {
+        let harness = Harness::new("req-sm-judges-badly", with_a_scrum_master);
+        let adapter = harness.recorded(vec![
+            refine_writes_task_frk_1(),
+            judge_frk_1_fails(),
+            replays_farik_read_board(),
+        ]);
+        let orchestrator = harness.orchestrator(adapter.clone());
+        refining(&harness, &orchestrator, RequestSize::Small).await;
+        orchestrator.tick().await.expect("the contract is written");
+        orchestrator.tick().await.expect("the contract is judged");
+        assert!(last(&harness, EventKind::ContractJudged).is_some());
+
+        orchestrator.tick().await.expect("the tick runs");
+        let evaluated = last(&harness, EventKind::ContractEvaluated).expect("the readiness");
+        let EventBody::ContractEvaluated(body) = &evaluated.body else {
+            panic!("a readiness");
+        };
+        assert!(!body.passed);
+        assert!(
+            body.failures
+                .iter()
+                .any(|failure| failure.contains("would not detect the failure")),
+            "{:?}",
+            body.failures
+        );
+        assert_eq!(adapter.started().len(), 2);
+
+        orchestrator.tick().await.expect("the tick runs");
+        let started = adapter.started();
+        assert_eq!(started.len(), 3);
+        assert_eq!(started[2].agent_id, "pm");
+        assert_eq!(started[2].purpose, SessionPurpose::Refine);
+        assert!(
+            started[2]
+                .initial_prompt
+                .contains("C1 checks that done.txt exists, not what it says."),
+            "{}",
+            started[2].initial_prompt
+        );
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn judges_a_structurally_broken_contract_without_the_scrum_master() {
+        let harness = Harness::new("req-sm-broken", with_a_scrum_master);
+        let adapter = harness.recorded(Vec::new());
+        let orchestrator = harness.orchestrator(adapter.clone());
+        refining(&harness, &orchestrator, RequestSize::Small).await;
+        call(
+            &harness,
+            "pm",
+            Some("FRK-1"),
+            "farik_write_contract",
+            json!({ "fields": { "scope": { "in_scope": ["done.txt"], "out_of_scope": [" "] } } }),
+        )
+        .await
+        .expect("the schema allows the write");
+
+        orchestrator.tick().await.expect("the tick runs");
+
+        assert!(adapter.started().is_empty());
+        let refused = last(&harness, EventKind::TransitionRefused).expect("the refusal");
+        let EventBody::TransitionRefused(body) = &refused.body else {
+            panic!("a refusal");
+        };
+        assert!(
+            body.details
+                .iter()
+                .any(|detail| detail.contains("out_of_scope")),
+            "{:?}",
+            body.details
+        );
+        assert!(
+            !body.details.iter().any(|detail| detail.contains("judg")),
+            "{:?}",
+            body.details
+        );
     }
 
     #[tokio::test]

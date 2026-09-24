@@ -470,6 +470,7 @@ pub(super) fn read_only<'a>(
         cwd,
         executor: None,
         read_only: true,
+        only_tool: None,
         initial_prompt,
     }
 }

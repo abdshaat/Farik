@@ -38,6 +38,9 @@ pub struct PromptInput<'a> {
     /// What the human said for this session (an answer, or an escalation's message), when they
     /// said something.
     pub human_message: Option<&'a str>,
+    /// The `This session` section, when it is not the purpose's own: the judgment session's
+    /// `JUDGMENT_INSTRUCTION`.
+    pub closing: Option<&'a str>,
 }
 
 /// The prompt's section titles, each written as a `## ` heading, in the one order every prompt
@@ -107,6 +110,15 @@ pub const CLOSING_INSTRUCTIONS: [(SessionPurpose, &str); 7] = [
     ),
 ];
 
+/// The `This session` section of the Scrum Master's judgment of a contract (5.3), a `refine`
+/// session given `farik_record_judgment` alone.
+pub const JUDGMENT_INSTRUCTION: &str = "This session judges the contract above, which already \
+     passes the governor's structural rules. Answer two questions, each honestly: is the task small \
+     enough to finish within its budget, and would its criteria actually detect the failure its \
+     intent worries about, not just that something ran? End the session by calling \
+     `farik_record_judgment` with both answers and your reason, which the Product Manager \
+     rewrites from when either answer is no.";
+
 /// The system prompt of one session: the sections of `PROMPT_SECTIONS`, in that order.
 ///
 /// # Errors
@@ -133,10 +145,15 @@ pub fn assemble_system_prompt(input: &PromptInput<'_>) -> Result<String, FilesEr
         },
         Some(tools_section(input)),
         input.human_message.map(|message| cut(message, 16 * KIB)),
-        CLOSING_INSTRUCTIONS
-            .iter()
-            .find(|(purpose, _)| *purpose == input.purpose)
-            .map(|(_, text)| (*text).to_string()),
+        input
+            .closing
+            .or_else(|| {
+                CLOSING_INSTRUCTIONS
+                    .iter()
+                    .find(|(purpose, _)| *purpose == input.purpose)
+                    .map(|(_, text)| *text)
+            })
+            .map(str::to_string),
     ];
     Ok(PROMPT_SECTIONS
         .iter()
@@ -492,6 +509,7 @@ mod tests {
                 builtin_tools: &self.builtin_tools,
                 purpose,
                 human_message: Some("Please start with the login form."),
+                closing: None,
             }
         }
     }
@@ -902,6 +920,25 @@ mod tests {
                     .expect("an entry")
             );
         }
+    }
+
+    #[test]
+    fn closes_with_the_given_instruction() {
+        let inputs = a_product_manager();
+        let prompt = assembled(&PromptInput {
+            closing: Some("x"),
+            ..inputs.full(SessionPurpose::Refine)
+        });
+        assert_eq!(section(&prompt, "This session"), "x");
+        let prompt = assembled(&inputs.full(SessionPurpose::Refine));
+        assert_eq!(
+            section(&prompt, "This session"),
+            CLOSING_INSTRUCTIONS
+                .iter()
+                .find(|(named, _)| *named == SessionPurpose::Refine)
+                .map(|(_, text)| *text)
+                .expect("an entry")
+        );
     }
 
     #[test]

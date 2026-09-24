@@ -39,6 +39,17 @@ pub(super) fn triage_message(contract: &TaskContract) -> String {
     )
 }
 
+/// The judgment session's message: judge the contract on the two questions and record both
+/// answers.
+pub(super) fn judgment_message(contract: &TaskContract) -> String {
+    format!(
+        "Judge the contract of {task}, which is above: does it fit its budget, and would its \
+         criteria detect the failure its intent worries about? Record both answers and your reason \
+         with `farik_record_judgment`.",
+        task = contract.id.as_str()
+    )
+}
+
 /// The refine session's message: the task and its kind; for an epic whose questions were not yet
 /// asked, to ask them first; and, when the last judgement of the contract failed, its failures one
 /// per line, which are Farik's words.

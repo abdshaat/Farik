@@ -161,7 +161,7 @@ Consumes: Task 3's tool, Task 4's readiness
 - `judges_a_structurally_broken_contract_without_the_scrum_master` — a contract with no `out_of_scope`: no Scrum Master session starts; the governor's refusal holds the `out_of_scope` failure and no judgment failure (Task 4's core change).
 - Phase 3's `triages_*` tests on a team with no Scrum Master pass unchanged.
 
-- [ ] `feat(runtime): give the scrum master triage and the judgment of each contract`
+- [x] `feat(runtime): give the scrum master triage and the judgment of each contract`
 
 ### Task 6: epics under a Scrum Master
 

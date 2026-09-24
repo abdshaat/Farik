@@ -20,7 +20,7 @@ use crate::claude::allowed_builtins;
 use crate::cost::{CostError, CostSource, budget_state, record_exhaustion, record_session_cost};
 use crate::daemon::SessionRegistration;
 use crate::exec::Executor;
-use crate::prompt::{PromptInput, assemble_system_prompt};
+use crate::prompt::{JUDGMENT_INSTRUCTION, PromptInput, assemble_system_prompt};
 use crate::session::{
     EndReason, SessionEvent, SessionHandle, SessionPurpose, SessionSpec, session_model,
 };
@@ -28,7 +28,11 @@ use crate::sessions::{record_session_ended, record_session_started};
 use crate::tools::{FarikTool, tool_descriptors};
 
 /// The one tool a triage session is given.
-const TRIAGE_TOOL: &str = "farik_triage_request";
+pub(super) const TRIAGE_TOOL: &str = "farik_triage_request";
+
+/// The one tool the Scrum Master's judgment session is given; a session given it alone closes
+/// with `JUDGMENT_INSTRUCTION`.
+pub(super) const JUDGMENT_TOOL: &str = "farik_record_judgment";
 
 /// What a rule asks a session for.
 pub(super) struct SessionAsk<'a> {
@@ -46,6 +50,9 @@ pub(super) struct SessionAsk<'a> {
     /// tool that runs a command or writes to git: a verify session reads the work and does not
     /// change it.
     pub(super) read_only: bool,
+    /// The one Farik tool it is given, when it is given one alone and no built-in tool: triage's
+    /// `farik_triage_request`, the judgment's `farik_record_judgment`.
+    pub(super) only_tool: Option<&'static str>,
     /// Its first message.
     pub(super) initial_prompt: String,
 }
@@ -94,7 +101,8 @@ const NOT_FOR_READ_ONLY: [&str; 3] = ["farik_exec", "farik_git_commit", "farik_g
 
 /// The spec of the session `ask` describes, its prompt assembled from the files as they are now,
 /// with what the human said about its task since its last session started. A triage session runs
-/// on `TRIAGE_MODEL` at low effort with `farik_triage_request` alone and no built-in tool.
+/// on `TRIAGE_MODEL` at low effort. A session asked with one tool is given it alone, whatever the
+/// agent's tiers, and no built-in tool.
 fn session_spec(
     deps: &OrchestratorDeps,
     team: &Team,
@@ -103,9 +111,8 @@ fn session_spec(
     let files = &deps.tools.files;
     let role_id = Role::from(ask.agent.role);
     let role = load_role(role_id)?;
-    // 5.16 runs triage on the cheaper model, whatever the agent's own, with its one tool.
-    let triage = ask.purpose == SessionPurpose::Triage;
-    let (model, effort) = if triage {
+    // 5.16 runs triage on the cheaper model, whatever the agent's own.
+    let (model, effort) = if ask.purpose == SessionPurpose::Triage {
         (TRIAGE_MODEL.to_string(), Effort::Low)
     } else {
         session_model(ask.agent, &role)
@@ -115,7 +122,7 @@ fn session_spec(
     let memory = files.read_memory(&ask.agent.id)?;
     let criteria = files.read_criteria()?;
     let tiers: BTreeSet<PermissionTier> = ask.agent.tiers().into_iter().collect();
-    let builtin_tools = if triage {
+    let builtin_tools = if ask.only_tool.is_some() {
         Vec::new()
     } else if ask.read_only {
         allowed_builtins(&BTreeSet::from([PermissionTier::Read]))
@@ -127,15 +134,15 @@ fn session_spec(
     let tools: Vec<FarikTool> = tool_descriptors()
         .into_iter()
         .filter(|tool| !(ask.read_only && NOT_FOR_READ_ONLY.contains(&tool.name)))
+        .filter(|tool| ask.only_tool.is_none_or(|only| tool.name == only))
         .collect();
-    let farik_tools = if triage {
-        vec![TRIAGE_TOOL.to_string()]
-    } else {
-        tools
+    let farik_tools = match ask.only_tool {
+        Some(only) => vec![only.to_string()],
+        None => tools
             .iter()
             .filter(|tool| tiers.contains(&tool.tier))
             .map(|tool| tool.name.to_string())
-            .collect()
+            .collect(),
     };
     let history = deps.tools.log.read(&EventQuery {
         task_id: Some(ask.contract.id.clone()),
@@ -155,6 +162,7 @@ fn session_spec(
         builtin_tools: &builtin_tools,
         purpose: ask.purpose,
         human_message: human.as_deref(),
+        closing: (ask.only_tool == Some(JUDGMENT_TOOL)).then_some(JUDGMENT_INSTRUCTION),
     })?;
     let limits = budget_state(
         &deps.tools.projections,
@@ -351,5 +359,48 @@ async fn read_to_end(
                 ));
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::orchestrator::fixtures::Harness;
+    use crate::session::SessionPurpose;
+
+    use super::{SessionAsk, session_spec};
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn gives_a_one_tool_session_that_tool_alone() {
+        let harness = Harness::new("session-one-tool", |_| {});
+        harness.file("FRK-1", "refining", |_| {});
+        let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
+        let deps = &orchestrator.deps;
+        let team = deps.tools.files.read_team().expect("the team");
+        let contract = deps
+            .tools
+            .files
+            .read_contract(&"FRK-1".parse().expect("a task id"))
+            .expect("the contract");
+        let pm = team.active_agents().next().expect("an agent");
+
+        let spec = session_spec(
+            deps,
+            &team,
+            &SessionAsk {
+                agent: pm,
+                contract: &contract,
+                purpose: SessionPurpose::Refine,
+                cwd: deps.tools.files.root().to_path_buf(),
+                executor: None,
+                read_only: false,
+                only_tool: Some("farik_record_judgment"),
+                initial_prompt: String::new(),
+            },
+        )
+        .expect("the spec");
+
+        assert_eq!(spec.farik_tools, vec!["farik_record_judgment".to_string()]);
+        assert!(spec.builtin_tools.is_empty(), "{:?}", spec.builtin_tools);
     }
 }

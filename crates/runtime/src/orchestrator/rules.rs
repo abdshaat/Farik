@@ -353,6 +353,7 @@ async fn in_progress(
             cwd: worktree(deps, &row.task_id),
             executor: Some(executor),
             read_only: false,
+            only_tool: None,
             initial_prompt: implement_message(&contract, &resume),
         },
     )
@@ -526,6 +527,7 @@ async fn ready(
             cwd: deps.tools.files.root().to_path_buf(),
             executor: None,
             read_only: false,
+            only_tool: None,
             initial_prompt: plan_message(&contract, &assignees, &reviewers),
         },
     )
