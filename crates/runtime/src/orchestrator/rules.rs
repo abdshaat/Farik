@@ -624,7 +624,6 @@ mod tests {
         SessionStartedBodyPurpose, TransitionActorWire,
     };
     use farik_protocol::event::{NewEvent, event_from_value};
-    use farik_roles::RoleError;
     use farik_store::event_log::fixtures::refuse_appends_of;
     use farik_store::git::fixtures::git_output_in;
     use serde_json::json;
@@ -1253,8 +1252,8 @@ mod tests {
     #[tokio::test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn takes_the_scrum_master_as_assigner_when_there_is_one() {
-        // Farik ships no Scrum Master until phase 4, so its role does not load: the tick fails
-        // naming the role it chose, before any session starts.
+        // A ready standalone task on a team with an active Scrum Master starts the Scrum Master's
+        // plan session, not the Product Manager's, and no other session runs.
         let harness = Harness::new("orch-plan-scrum-master", |wire| {
             let agents = wire["agents"].as_array_mut().expect("a list of agents");
             agents.push(json!({
@@ -1268,15 +1267,17 @@ mod tests {
         let adapter = harness.recorded(vec![plan_assigns_frk_1()]);
         let orchestrator = harness.orchestrator(adapter.clone());
 
-        let ticked = orchestrator.tick().await;
+        let report = orchestrator.tick().await.expect("the tick runs");
 
-        assert_eq!(
-            ticked,
-            Err(OrchestratorError::Role(RoleError::NotFound {
-                role_id: Role::ScrumMaster.to_string()
-            }))
-        );
-        assert!(adapter.started().is_empty());
+        assert_eq!(acted_on(&report), Some("FRK-1"), "{report:?}");
+        let started = adapter.started();
+        assert_eq!(started.len(), 1);
+        assert_eq!(started[0].purpose, SessionPurpose::Plan);
+        assert_eq!(started[0].agent_id, "sam");
+        let row = harness.row("FRK-1");
+        assert_eq!(row.status, TaskStatus::Assigned);
+        assert_eq!(row.assignee_id.as_deref(), Some("dev-a"));
+        assert_eq!(row.reviewer_id.as_deref(), Some("dev-b"));
     }
 
     #[tokio::test]

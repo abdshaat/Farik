@@ -151,7 +151,8 @@ pub fn unpriced_models(
             Some(model) => models.push(model.id.to_string()),
             None => match load_role(role) {
                 Ok(definition) => models.push(session_model(agent, &definition).0),
-                // Nothing could start a session of a role Farik does not ship.
+                // Every role a team file can give an agent ships now; `NotFound` is `Human`
+                // alone, which no agent's role is, so this arm never fires on a real team.
                 Err(RoleError::NotFound { .. }) => {}
                 Err(error) => return Err(error),
             },
@@ -646,7 +647,8 @@ mod tests {
                 .collect()
         };
         assert_eq!(
-            unpriced_models(&team, &only_opus_5).expect("an Architect with no model is skipped"),
+            unpriced_models(&team, &only_opus_5)
+                .expect("an Architect with no model uses its role's shipped model"),
             named(&[
                 ("claude-other-2", &["arch-2"]),
                 ("claude-sonnet-5", &["pm"]),

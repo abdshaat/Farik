@@ -105,9 +105,8 @@ impl std::error::Error for RoleError {}
 ///
 /// # Errors
 ///
-/// `NotFound` for a role Farik does not ship yet (the Scrum Master, the Architect, the Marketing
-/// Specialist) and for `Human`, which no agent is. `Invalid` when a shipped file breaks its schema,
-/// which a test over every shipped role rules out.
+/// `NotFound` for `Human`, which no agent is: every agent role ships. `Invalid` when a shipped
+/// file breaks its schema, which a test over every shipped role rules out.
 pub fn load_role(role: Role) -> Result<RoleDefinition, RoleError> {
     match role {
         Role::ProductManager => parse_role(
@@ -128,11 +127,36 @@ pub fn load_role(role: Role) -> Result<RoleDefinition, RoleError> {
                 include_str!("../roles/software_developer/skills/implementing-a-contract/SKILL.md"),
             )],
         ),
-        Role::ScrumMaster | Role::Architect | Role::MarketingSpecialist | Role::Human => {
-            Err(RoleError::NotFound {
-                role_id: role.to_string(),
-            })
-        }
+        Role::ScrumMaster => parse_role(
+            role,
+            include_str!("../roles/scrum_master/role.yaml"),
+            include_str!("../roles/scrum_master/system.md"),
+            &[(
+                "keeping-work-flowing",
+                include_str!("../roles/scrum_master/skills/keeping-work-flowing/SKILL.md"),
+            )],
+        ),
+        Role::Architect => parse_role(
+            role,
+            include_str!("../roles/architect/role.yaml"),
+            include_str!("../roles/architect/system.md"),
+            &[(
+                "reviewing-for-design",
+                include_str!("../roles/architect/skills/reviewing-for-design/SKILL.md"),
+            )],
+        ),
+        Role::MarketingSpecialist => parse_role(
+            role,
+            include_str!("../roles/marketing_specialist/role.yaml"),
+            include_str!("../roles/marketing_specialist/system.md"),
+            &[(
+                "marketing-what-ships",
+                include_str!("../roles/marketing_specialist/skills/marketing-what-ships/SKILL.md"),
+            )],
+        ),
+        Role::Human => Err(RoleError::NotFound {
+            role_id: role.to_string(),
+        }),
     }
 }
 
@@ -320,6 +344,73 @@ mod tests {
         assert!(definition.system_prompt.contains("untrusted"));
     }
 
+    #[test]
+    fn loads_the_scrum_master() {
+        let definition = loaded(Role::ScrumMaster);
+        assert_eq!(definition.id, Role::ScrumMaster);
+        assert_eq!(definition.model, "claude-sonnet-5");
+        assert_eq!(definition.effort, Effort::Medium);
+        assert_eq!(definition.default_tiers, default_tiers(Role::ScrumMaster));
+        assert_eq!(definition.skills.len(), 1);
+        assert_eq!(definition.skills[0].name, "keeping-work-flowing");
+        assert!(!definition.skills[0].description.trim().is_empty());
+        assert!(!definition.skills[0].body.trim().is_empty());
+        assert!(definition.system_prompt.contains("untrusted"));
+        assert!(definition.system_prompt.contains("farik_triage_request"));
+    }
+
+    #[test]
+    fn loads_the_architect() {
+        let definition = loaded(Role::Architect);
+        assert_eq!(definition.id, Role::Architect);
+        assert_eq!(definition.model, "claude-opus-5");
+        assert_eq!(definition.effort, Effort::High);
+        assert_eq!(definition.default_tiers, default_tiers(Role::Architect));
+        assert_eq!(definition.skills.len(), 1);
+        assert_eq!(definition.skills[0].name, "reviewing-for-design");
+        assert!(!definition.skills[0].description.trim().is_empty());
+        assert!(!definition.skills[0].body.trim().is_empty());
+        assert!(definition.system_prompt.contains("untrusted"));
+        assert!(definition.system_prompt.contains("farik_write_note"));
+    }
+
+    #[test]
+    fn loads_the_marketing_specialist() {
+        let definition = loaded(Role::MarketingSpecialist);
+        assert_eq!(definition.id, Role::MarketingSpecialist);
+        assert_eq!(definition.model, "claude-sonnet-5");
+        assert_eq!(definition.effort, Effort::Medium);
+        assert_eq!(
+            definition.default_tiers,
+            default_tiers(Role::MarketingSpecialist)
+        );
+        assert_eq!(definition.skills.len(), 1);
+        assert_eq!(definition.skills[0].name, "marketing-what-ships");
+        assert!(!definition.skills[0].description.trim().is_empty());
+        assert!(!definition.skills[0].body.trim().is_empty());
+        assert!(definition.system_prompt.contains("untrusted"));
+    }
+
+    #[test]
+    fn forbids_application_code_to_every_role_but_the_developer() {
+        for role in [
+            Role::ProductManager,
+            Role::ScrumMaster,
+            Role::Architect,
+            Role::MarketingSpecialist,
+        ] {
+            let definition = loaded(role);
+            assert!(
+                definition
+                    .forbidden
+                    .iter()
+                    .any(|item| item == "write application code"),
+                "{role}: {:?}",
+                definition.forbidden
+            );
+        }
+    }
+
     /// Reads the role directories as they are on disk rather than as `load_role` embeds them, so
     /// that a role directory nobody wired into the loader, or a skill directory a role file names
     /// and nobody wrote, is found here.
@@ -339,7 +430,16 @@ mod tests {
             })
             .collect();
         directories.sort();
-        assert_eq!(directories, ["product_manager", "software_developer"]);
+        assert_eq!(
+            directories,
+            [
+                "architect",
+                "marketing_specialist",
+                "product_manager",
+                "scrum_master",
+                "software_developer",
+            ]
+        );
         for directory in &directories {
             let yaml = std::fs::read_to_string(roles.join(directory).join("role.yaml"))
                 .expect("a role.yaml");
@@ -380,19 +480,12 @@ mod tests {
 
     #[test]
     fn refuses_a_role_that_is_not_shipped() {
-        for (role, id) in [
-            (Role::ScrumMaster, "scrum_master"),
-            (Role::Architect, "architect"),
-            (Role::MarketingSpecialist, "marketing_specialist"),
-            (Role::Human, "human"),
-        ] {
-            assert_eq!(
-                load_role(role),
-                Err(RoleError::NotFound {
-                    role_id: id.to_string()
-                })
-            );
-        }
+        assert_eq!(
+            load_role(Role::Human),
+            Err(RoleError::NotFound {
+                role_id: "human".to_string()
+            })
+        );
     }
 
     fn pm_with_skill(skill: &str) -> Result<RoleDefinition, RoleError> {

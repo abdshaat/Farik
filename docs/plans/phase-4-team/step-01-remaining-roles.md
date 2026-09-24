@@ -103,7 +103,7 @@ Consumes: nothing new
 - `holds_every_shipped_role_to_its_schema` — unchanged, now over five roles.
 - `takes_the_scrum_master_as_assigner_when_there_is_one` (rules.rs) — rewritten here, since this task makes its old assertion false: a ready standalone task on a team with an active Scrum Master starts the Scrum Master's `plan` session (the replayed `plan_assigns_frk_1`) and no other.
 
-- [ ] `feat(roles): ship the scrum master, the architect, and the marketing specialist`
+- [x] `feat(roles): ship the scrum master, the architect, and the marketing specialist`
 
 ### Task 2: the tier changes
 
