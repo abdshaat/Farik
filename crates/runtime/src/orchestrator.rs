@@ -219,6 +219,8 @@ pub enum Waited {
     Reached,
     /// `stop` was called first.
     Stopped,
+    /// A command the human gave was handled first, which may have made work for an agent awake.
+    Woken,
 }
 
 /// Which of the rules a tick runs (`docs/SPEC.md` 8.2): every one, the planning ones, or the
@@ -337,6 +339,10 @@ pub struct Orchestrator {
     stopped: AtomicBool,
     /// Notified by `stop`, so that a wait for a sleeping agent ends at once.
     stops: tokio::sync::Notify,
+    /// Notified by a command that recorded something, so that a wait ends and the next tick sees
+    /// it. One permit is kept when nobody waits: a command handled during a tick ends the wait
+    /// after it at once, which costs one tick.
+    commands: tokio::sync::Notify,
 }
 
 impl Orchestrator {
@@ -348,6 +354,7 @@ impl Orchestrator {
             sandboxes: Mutex::new(BTreeMap::new()),
             stopped: AtomicBool::new(false),
             stops: tokio::sync::Notify::new(),
+            commands: tokio::sync::Notify::new(),
         }
     }
 
@@ -398,8 +405,8 @@ impl Orchestrator {
         Ok(())
     }
 
-    /// Waits until `until`, or until `stop` is called, whichever comes first; at once when
-    /// `stop` was called before.
+    /// Waits until `until`, until `stop` is called, or until a command the human gave records
+    /// something, whichever comes first; at once when `stop` was called before.
     pub async fn wait_until(&self, until: DateTime<Utc>) -> Waited {
         // Taken before the stop is read, so that a stop between the two still ends the wait.
         let stopped = self.stops.notified();
@@ -411,6 +418,7 @@ impl Orchestrator {
         tokio::select! {
             () = self.deps.sleeper.sleep_until(until) => Waited::Reached,
             () = stopped => Waited::Stopped,
+            () = self.commands.notified() => Waited::Woken,
         }
     }
 
@@ -447,7 +455,14 @@ impl Orchestrator {
     /// own refusals as `transition_refused`; `NotFound` naming what is not there; `Failed` when
     /// the store, a file, git, or the orchestrator fails.
     pub async fn handle(&self, command: Command) -> Result<CommandReport, CommandError> {
-        human::handle(self, command).await
+        let handled = human::handle(self, command).await;
+        if handled
+            .as_ref()
+            .is_ok_and(|report| !report.events.is_empty())
+        {
+            self.commands.notify_one();
+        }
+        handled
     }
 
     /// Picks up a run that was killed (5.15), before the first tick: every session the log shows
@@ -602,7 +617,7 @@ mod tests {
     use farik_store::git::fixtures::git_output_in;
 
     use farik_core::contract::{TaskId, TaskKind};
-    use farik_protocol::command::{AcceptSubject, Command};
+    use farik_protocol::command::{AcceptSubject, Command, RequestSize};
     use farik_protocol::event::EscalationRaisedBodyReason;
 
     use crate::orchestrator::fixtures::{Harness, run_until_idle_within_ten_seconds};
@@ -735,6 +750,31 @@ mod tests {
         );
 
         assert_eq!(ended, super::Waited::Stopped);
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn wakes_a_wait_on_a_human_command() {
+        let harness = Harness::new("orch-wait-command", |_| {});
+        harness.a_request("Add done.txt and its check");
+        let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
+
+        let (ended, ()) = tokio::join!(
+            waited(&orchestrator, at() + chrono::Duration::hours(1)),
+            async {
+                tokio::task::yield_now().await;
+                orchestrator
+                    .handle(Command::RequestTriage {
+                        task_id: "FRK-1".parse().expect("a task id"),
+                        size: RequestSize::Small,
+                        reason: "Sized by the human.".to_string(),
+                    })
+                    .await
+                    .expect("the human sizes the request");
+            }
+        );
+
+        assert_eq!(ended, super::Waited::Woken);
     }
 
     #[tokio::test]
