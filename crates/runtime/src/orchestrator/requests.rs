@@ -955,6 +955,10 @@ mod tests {
         assert_eq!(spec.model, TRIAGE_MODEL);
         assert_eq!(spec.effort, Effort::Low);
         assert_eq!(spec.farik_tools, vec!["farik_triage_request".to_string()]);
+        assert_eq!(
+            listed_tools(&spec.system_prompt),
+            vec!["farik_triage_request"]
+        );
         assert!(spec.builtin_tools.is_empty(), "{:?}", spec.builtin_tools);
         let triaged = last(&harness, EventKind::RequestTriaged).expect("the triage");
         let EventBody::RequestTriaged(body) = &triaged.body else {
@@ -966,6 +970,19 @@ mod tests {
     }
 
     /// Adds the active Scrum Master `sam` to the team's wire.
+    /// The Farik tools the prompt's `Your tools` section lists, in order.
+    fn listed_tools(prompt: &str) -> Vec<&str> {
+        let start = prompt.find("## Your tools\n").expect("a tools section");
+        let section = &prompt[start + 1..];
+        let section = &section[..section.find("\n## ").unwrap_or(section.len())];
+        section
+            .lines()
+            .filter_map(|line| line.strip_prefix("- "))
+            .filter_map(|line| line.split(' ').next())
+            .filter(|name| name.starts_with("farik_"))
+            .collect()
+    }
+
     fn with_a_scrum_master(wire: &mut Value) {
         wire["agents"]
             .as_array_mut()
@@ -995,6 +1012,10 @@ mod tests {
         assert_eq!(spec.agent_id, "sam");
         assert_eq!(spec.model, TRIAGE_MODEL);
         assert_eq!(spec.farik_tools, vec!["farik_triage_request".to_string()]);
+        assert_eq!(
+            listed_tools(&spec.system_prompt),
+            vec!["farik_triage_request"]
+        );
         assert!(spec.builtin_tools.is_empty(), "{:?}", spec.builtin_tools);
         let triaged = last(&harness, EventKind::RequestTriaged).expect("the triage");
         let EventBody::RequestTriaged(body) = &triaged.body else {
@@ -1188,7 +1209,16 @@ mod tests {
         assert_eq!(spec.agent_id, "sam");
         assert_eq!(spec.purpose, SessionPurpose::Refine);
         assert_eq!(spec.farik_tools, vec!["farik_record_judgment".to_string()]);
+        assert_eq!(
+            listed_tools(&spec.system_prompt),
+            vec!["farik_record_judgment"]
+        );
         assert!(spec.builtin_tools.is_empty(), "{:?}", spec.builtin_tools);
+        // The Scrum Master's own model and effort, not triage's.
+        assert_eq!(
+            (spec.model.as_str(), spec.effort),
+            ("claude-sonnet-5", Effort::Medium)
+        );
         assert!(
             spec.system_prompt.contains(JUDGMENT_INSTRUCTION),
             "{}",
@@ -1201,6 +1231,32 @@ mod tests {
 
         assert_eq!(harness.row("FRK-1").status, TaskStatus::Ready);
         assert_eq!(adapter.started().len(), 2);
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn judges_on_the_scrum_masters_own_model() {
+        let harness = Harness::new("req-sm-judges-model", |wire| {
+            with_a_scrum_master(wire);
+            wire["agents"]
+                .as_array_mut()
+                .expect("a list of agents")
+                .last_mut()
+                .expect("sam")["model"] = json!({ "id": "claude-opus-5", "effort": "high" });
+        });
+        let adapter = harness.recorded(vec![refine_writes_task_frk_1(), judge_frk_1_passes()]);
+        let orchestrator = harness.orchestrator(adapter.clone());
+        refining(&harness, &orchestrator, RequestSize::Small).await;
+        orchestrator.tick().await.expect("the contract is written");
+
+        orchestrator.tick().await.expect("the tick runs");
+
+        let spec = &adapter.started()[1];
+        assert_eq!(spec.agent_id, "sam");
+        assert_eq!(
+            (spec.model.as_str(), spec.effort),
+            ("claude-opus-5", Effort::High)
+        );
     }
 
     #[tokio::test]

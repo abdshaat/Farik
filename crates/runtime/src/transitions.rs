@@ -2637,6 +2637,29 @@ mod tests {
 
     #[test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn uses_the_last_judgment_after_the_write() {
+        for (first, last, moves) in [(false, true, true), (true, false, false)] {
+            let project = Project::new(
+                &format!("judged-twice-{moves}"),
+                a_team_with_a_scrum_master(),
+                at(12),
+            );
+            project.file("FRK-1", |_| {});
+            project.created("FRK-1", "refining");
+            written(&project, "FRK-1");
+            judged(&project, "FRK-1", first, true);
+            judged(&project, "FRK-1", last, true);
+            let outcome = readying(&project, "FRK-1");
+            assert_eq!(
+                matches!(outcome, TransitionOutcome::Moved(_)),
+                moves,
+                "judged {first} then {last}: {outcome:?}"
+            );
+        }
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
     fn ignores_a_judgment_from_before_refining_began() {
         let project = Project::new(
             "judged-then-retriaged",
