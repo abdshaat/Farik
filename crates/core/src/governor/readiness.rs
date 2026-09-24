@@ -61,7 +61,7 @@ pub enum ReadinessRule {
 }
 
 /// The Scrum Master's judgment (`docs/SPEC.md` section 5.3), recorded by the runtime as a
-/// `review.recorded` event and passed in.
+/// `contract.judged` event and passed in.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct JudgmentReview {
     /// The task is small enough to finish within its budget.
@@ -114,7 +114,7 @@ pub struct ReadinessFailure {
 
 type Check = fn(&TaskContract, &ReadinessContext) -> Option<ReadinessFailure>;
 
-const CHECKS: [Check; 19] = [
+const CHECKS: [Check; 16] = [
     intent_present,
     criteria_present,
     criteria_methods_valid,
@@ -131,6 +131,11 @@ const CHECKS: [Check; 19] = [
     parent_in_progress,
     paths_within_parent,
     budget_within_parent,
+];
+
+/// The Scrum Master's judgment, asked of a contract only once every other rule passes, so that a
+/// contract going back for another rule is not also refused for a judgment nobody asked for yet.
+const JUDGMENT_CHECKS: [Check; 3] = [
     judgment_recorded,
     judgment_fits_budget,
     judgment_criteria_detect_failure,
@@ -138,7 +143,8 @@ const CHECKS: [Check; 19] = [
 
 /// Checks a contract against the Definition of Ready: the structural rules of `docs/SPEC.md`
 /// section 5.3, the team rules of 5.12, the parent rules of 5.16, and the Scrum Master's
-/// recorded judgment when the team has one. Refuses with every rule the contract fails.
+/// recorded judgment when the team has one, evaluated only when every other rule passes. Refuses
+/// with every rule the contract fails.
 ///
 /// # Errors
 ///
@@ -148,10 +154,16 @@ pub fn evaluate_readiness(
     contract: &TaskContract,
     context: &ReadinessContext,
 ) -> Result<(), Vec<ReadinessFailure>> {
-    let failures: Vec<ReadinessFailure> = CHECKS
-        .iter()
-        .filter_map(|check| check(contract, context))
-        .collect();
+    let failed = |checks: &[Check]| -> Vec<ReadinessFailure> {
+        checks
+            .iter()
+            .filter_map(|check| check(contract, context))
+            .collect()
+    };
+    let mut failures = failed(&CHECKS);
+    if failures.is_empty() {
+        failures = failed(&JUDGMENT_CHECKS);
+    }
     if failures.is_empty() {
         Ok(())
     } else {
@@ -1037,6 +1049,24 @@ mod tests {
     }
 
     #[test]
+    fn asks_no_judgment_of_a_contract_that_fails_another_rule() {
+        let mut contract = a_contract();
+        contract.scope.out_of_scope.clear();
+        let mut context = a_ready_context();
+        context.requires_judgment_review = true;
+        context.judgment_review = None;
+        assert_eq!(failed_rules(&contract, &context), [R::OutOfScopePresent]);
+    }
+
+    #[test]
+    fn asks_the_judgment_of_an_otherwise_ready_contract() {
+        let mut context = a_ready_context();
+        context.requires_judgment_review = true;
+        context.judgment_review = None;
+        assert_eq!(failed_rules(&a_contract(), &context), [R::JudgmentRecorded]);
+    }
+
+    #[test]
     fn reports_every_failure_in_rule_order() {
         let mut contract = a_contract();
         contract.exit_criteria.clear();
@@ -1050,7 +1080,6 @@ mod tests {
                 R::CriteriaPresent,
                 R::BudgetWithinSprint,
                 R::RequiredCriteriaPresent,
-                R::JudgmentRecorded
             ]
         );
     }

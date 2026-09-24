@@ -145,7 +145,7 @@ Consumes: `ContractJudgedBody` (Task 3)
 - `passes_a_child_filed_whole_once_judged` — a breakdown's task filed whole (no `contract.written` since refining began), judged after refining began with both answers true: `refining -> ready`.
 - `asks_no_judgment_without_a_scrum_master` (guard) — a team with none passes without one.
 
-- [ ] `feat(runtime): judge readiness on the scrum master's last judgment`
+- [x] `feat(runtime): judge readiness on the scrum master's last judgment`
 
 ### Task 5: sessions with one tool and the judgment session
 

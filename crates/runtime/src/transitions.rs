@@ -16,7 +16,7 @@ use farik_core::governor::gates::{
     AssignmentInput, AssignmentRequester, Blocker, ChildState, DependencyState, Rejection,
     WorkState,
 };
-use farik_core::governor::readiness::{ParentState, ReadinessContext};
+use farik_core::governor::readiness::{JudgmentReview, ParentState, ReadinessContext};
 use farik_core::governor::transition::{
     ContractAcceptance, GateFailure, TransitionContext, TransitionDecision, TransitionEffect,
     TransitionRefusal, TransitionRequest, evaluate_transition,
@@ -421,7 +421,7 @@ impl Transitions {
             parent: self.parent_state(&board, &contract)?,
             rules: team.rules(),
             requires_judgment_review: team.has_active(Role::ScrumMaster),
-            judgment_review: None,
+            judgment_review: judgment_since_written(&history),
         };
 
         let (work, changed_paths) = self.work(id, team)?;
@@ -926,6 +926,31 @@ pub(crate) fn refining_began(history: &[FarikEvent]) -> u64 {
         .map(|event| event.envelope.seq)
         .max()
         .unwrap_or(0)
+}
+
+/// The Scrum Master's judgment of the contract the task has now (5.3): the last `contract.judged`
+/// after both the task's last `contract.written` and where refining last began, else none, since a
+/// contract written again, or refined over, is not the one that was judged.
+pub(crate) fn judgment_since_written(history: &[FarikEvent]) -> Option<JudgmentReview> {
+    let since = history
+        .iter()
+        .filter(|event| event.body.kind() == EventKind::ContractWritten)
+        .map(|event| event.envelope.seq)
+        .max()
+        .unwrap_or(0)
+        .max(refining_began(history));
+    history
+        .iter()
+        .rev()
+        .filter(|event| event.envelope.seq > since)
+        .find_map(|event| match &event.body {
+            EventBody::ContractJudged(body) => Some(JudgmentReview {
+                fits_budget: body.fits_budget,
+                criteria_detect_failure: body.criteria_detect_failure,
+                reason: body.reason.clone(),
+            }),
+            _ => None,
+        })
 }
 
 /// Whether the human accepted the contract the task has now (5.16 item 2): a `human.accepted
@@ -2461,6 +2486,191 @@ mod tests {
             .expect("the board reads")
             .expect("on the board");
         assert_eq!(row.status, TaskStatus::Escalated);
+    }
+
+    /// The default team with an active Scrum Master, `sam`, whose judgment readiness then needs.
+    fn a_team_with_a_scrum_master() -> Team {
+        a_team(|wire| {
+            wire["agents"]
+                .as_array_mut()
+                .expect("a list of agents")
+                .push(an_agent_wire("sam", "scrum_master"));
+        })
+    }
+
+    /// A `contract.written` of `task` by the Product Manager.
+    fn written(project: &Project, task: &str) {
+        project.record(
+            task,
+            "contract.written",
+            &json!({
+                "summary": { "kind": "task", "title": "Add a login page", "status": "refining", "risk": "low" },
+                "written_by": "maya"
+            }),
+            at(10),
+        );
+    }
+
+    /// A `contract.judged` of `task` by `sam`, with both answers and a reason.
+    fn judged(project: &Project, task: &str, fits_budget: bool, criteria_detect_failure: bool) {
+        project.record(
+            task,
+            "contract.judged",
+            &json!({
+                "judged_by": "sam",
+                "fits_budget": fits_budget,
+                "criteria_detect_failure": criteria_detect_failure,
+                "reason": "Two files and one form, too much for five dollars."
+            }),
+            at(10),
+        );
+    }
+
+    /// The governor asks to move `task` from `refining` to `ready`.
+    fn readying(project: &Project, task: &str) -> TransitionOutcome {
+        project.ask(
+            &a_request(task, TaskStatus::Ready, TransitionActor::Governor, None),
+            &TransitionAsk::default(),
+        )
+    }
+
+    /// The failures of the only failed Definition of Ready evaluation recorded about `task`.
+    fn readiness_failures(project: &Project, task: &str) -> Vec<String> {
+        let failed: Vec<Vec<String>> = project
+            .events(task, &[EventKind::ContractEvaluated])
+            .into_iter()
+            .filter_map(|event| match event.body {
+                EventBody::ContractEvaluated(body) if !body.passed => Some(body.failures),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(failed.len(), 1, "{failed:?}");
+        failed.into_iter().next().unwrap_or_default()
+    }
+
+    fn holds(failures: &[String], text: &str) -> bool {
+        failures.iter().any(|failure| failure.contains(text))
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn passes_a_contract_the_scrum_master_judged() {
+        let project = Project::new("judged-passes", a_team_with_a_scrum_master(), at(12));
+        project.file("FRK-1", |_| {});
+        project.created("FRK-1", "refining");
+        written(&project, "FRK-1");
+        judged(&project, "FRK-1", true, true);
+        let outcome = readying(&project, "FRK-1");
+        assert!(
+            matches!(outcome, TransitionOutcome::Moved(_)),
+            "{outcome:?}"
+        );
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn refuses_a_contract_the_scrum_master_judged_too_large() {
+        let project = Project::new("judged-too-large", a_team_with_a_scrum_master(), at(12));
+        project.file("FRK-1", |_| {});
+        project.created("FRK-1", "refining");
+        written(&project, "FRK-1");
+        judged(&project, "FRK-1", false, true);
+        let outcome = readying(&project, "FRK-1");
+        assert!(
+            matches!(outcome, TransitionOutcome::Refused(_)),
+            "{outcome:?}"
+        );
+        let failures = readiness_failures(&project, "FRK-1");
+        assert!(holds(&failures, "too large for its budget"), "{failures:?}");
+        assert!(
+            holds(
+                &failures,
+                "Two files and one form, too much for five dollars."
+            ),
+            "{failures:?}"
+        );
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn passes_a_child_filed_whole_once_judged() {
+        let project = Project::new("judged-child", a_team_with_a_scrum_master(), at(12));
+        project.file("FRK-1", |wire| wire["kind"] = json!("epic"));
+        project.created_under("FRK-1", "in_progress", "epic", None);
+        // Filed whole by the breakdown: created with its full contract, never written since.
+        project.file("FRK-2", |wire| wire["parent"] = json!("FRK-1"));
+        project.created_under("FRK-2", "refining", "task", Some("FRK-1"));
+        judged(&project, "FRK-2", true, true);
+        let outcome = readying(&project, "FRK-2");
+        assert!(
+            matches!(outcome, TransitionOutcome::Moved(_)),
+            "{outcome:?}"
+        );
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn refuses_a_contract_judged_before_its_last_write() {
+        let project = Project::new("judged-then-written", a_team_with_a_scrum_master(), at(12));
+        project.file("FRK-1", |_| {});
+        project.created("FRK-1", "refining");
+        written(&project, "FRK-1");
+        judged(&project, "FRK-1", true, true);
+        written(&project, "FRK-1");
+        let outcome = readying(&project, "FRK-1");
+        assert!(
+            matches!(outcome, TransitionOutcome::Refused(_)),
+            "{outcome:?}"
+        );
+        let failures = readiness_failures(&project, "FRK-1");
+        assert!(
+            holds(&failures, "judgment review is not recorded"),
+            "{failures:?}"
+        );
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn ignores_a_judgment_from_before_refining_began() {
+        let project = Project::new(
+            "judged-then-retriaged",
+            a_team_with_a_scrum_master(),
+            at(12),
+        );
+        project.file("FRK-1", |_| {});
+        project.created("FRK-1", "refining");
+        written(&project, "FRK-1");
+        judged(&project, "FRK-1", true, true);
+        project.record(
+            "FRK-1",
+            "request.triaged",
+            &json!({ "size": "large", "reason": "Two deliverables.", "triaged_by": "sam" }),
+            at(11),
+        );
+        let outcome = readying(&project, "FRK-1");
+        assert!(
+            matches!(outcome, TransitionOutcome::Refused(_)),
+            "{outcome:?}"
+        );
+        let failures = readiness_failures(&project, "FRK-1");
+        assert!(
+            holds(&failures, "judgment review is not recorded"),
+            "{failures:?}"
+        );
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn asks_no_judgment_without_a_scrum_master() {
+        let project = Project::new("no-scrum-master", a_team(|_| {}), at(12));
+        project.file("FRK-1", |_| {});
+        project.created("FRK-1", "refining");
+        written(&project, "FRK-1");
+        let outcome = readying(&project, "FRK-1");
+        assert!(
+            matches!(outcome, TransitionOutcome::Moved(_)),
+            "{outcome:?}"
+        );
     }
 
     #[test]
