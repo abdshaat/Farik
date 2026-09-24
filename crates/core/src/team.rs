@@ -181,6 +181,12 @@ impl Team {
                 .iter()
                 .map(|pattern| pattern.to_string())
                 .collect(),
+            document_paths: self
+                .rules
+                .document_paths
+                .iter()
+                .map(|glob| glob.to_string())
+                .collect(),
         }
     }
 
@@ -277,7 +283,7 @@ mod tests {
         AgentStatus, HumanAcceptsContracts, Integration, PermissionTier, PermissionTierWire, Role,
         RoleWire, Team, validate_team,
     };
-    use crate::governor::team_rules::DEFAULT_PROTECTED_PATHS;
+    use crate::governor::team_rules::{DEFAULT_DOCUMENT_PATHS, DEFAULT_PROTECTED_PATHS};
 
     fn team(wire: &Value) -> Team {
         validate_team(wire).expect("the fixture is a team")
@@ -512,6 +518,21 @@ mod tests {
                 .is_some_and(|cap| close(cap, 12.5))
         );
         assert_eq!(rules.forbidden_commands, ["^rm -rf /"]);
+    }
+
+    #[test]
+    fn defaults_the_document_paths_when_left_out() {
+        // The schema's default fills a key left out; an explicit `[]` is kept, which is how a
+        // team says that no task but a Developer's can be ready.
+        assert_eq!(
+            team(&a_team_wire()).rules().document_paths,
+            DEFAULT_DOCUMENT_PATHS.map(str::to_string)
+        );
+        let mut wire = a_team_wire();
+        wire["rules"]["document_paths"] = json!(["notes/**"]);
+        assert_eq!(team(&wire).rules().document_paths, ["notes/**"]);
+        wire["rules"]["document_paths"] = json!([]);
+        assert!(team(&wire).rules().document_paths.is_empty());
     }
 
     #[test]

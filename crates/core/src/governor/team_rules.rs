@@ -5,6 +5,11 @@ use std::sync::LazyLock;
 pub const DEFAULT_PROTECTED_PATHS: [&str; 5] =
     [".env", ".env.*", "**/*.pem", "**/*.key", ".farik/local/**"];
 
+/// The document paths every team starts with (`docs/SPEC.md` section 5.12): where a task for any
+/// role but the Software Developer may make changes. `team.schema.json` holds the same three as
+/// its default; `team.rs` reads that one, and this one serves `TeamRules::default()` alone.
+pub const DEFAULT_DOCUMENT_PATHS: [&str; 3] = ["docs/**", "**/*.md", "CHANGELOG.md"];
+
 /// Constraints the human writes once in `.farik/team.yaml` under `rules`, applied by the governor
 /// to every contract and every tool call (`docs/SPEC.md` section 5.12). Rules never loosen a
 /// permission tier; they only narrow what a granted tier allows.
@@ -22,6 +27,9 @@ pub struct TeamRules {
     pub max_task_budget_usd: Option<f64>,
     /// Regular expressions a command must not match.
     pub forbidden_commands: Vec<String>,
+    /// Globs every allowed path of a task not assigned to the Software Developer must fall
+    /// within: only the Developer changes code. Empty means no such task can be ready.
+    pub document_paths: Vec<String>,
 }
 
 impl Default for TeamRules {
@@ -36,6 +44,10 @@ impl Default for TeamRules {
             require_new_tests: false,
             max_task_budget_usd: None,
             forbidden_commands: Vec::new(),
+            document_paths: DEFAULT_DOCUMENT_PATHS
+                .iter()
+                .map(|path| (*path).to_string())
+                .collect(),
         }
     }
 }

@@ -4,6 +4,7 @@
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet};
 
+use super::paths::{GlobError, PathRefusal, check_allowed_paths};
 use super::team_rules::TeamRules;
 use crate::contract::{
     Role, TaskContract, TaskStatus, Verification, VerificationWire, wire_method,
@@ -40,6 +41,9 @@ pub enum ReadinessRule {
     NewTestsRequiredByRule,
     /// Every allowed path falls within the team's ceiling.
     AllowedPathsWithinCeiling,
+    /// A task not assigned to the Software Developer keeps every allowed path within the team's
+    /// document paths: only the Developer changes code.
+    DocumentPathsOnly,
     /// A task's budget does not exceed the team's cap on a task; an epic is bounded by the
     /// sprint budget instead.
     BudgetWithinTeamMax,
@@ -114,7 +118,7 @@ pub struct ReadinessFailure {
 
 type Check = fn(&TaskContract, &ReadinessContext) -> Option<ReadinessFailure>;
 
-const CHECKS: [Check; 16] = [
+const CHECKS: [Check; 17] = [
     intent_present,
     criteria_present,
     criteria_methods_valid,
@@ -126,6 +130,7 @@ const CHECKS: [Check; 16] = [
     required_criteria_present,
     new_tests_required_by_rule,
     allowed_paths_within_ceiling,
+    document_paths_only,
     budget_within_team_max,
     no_parent_for_epic,
     parent_in_progress,
@@ -495,6 +500,54 @@ fn allowed_paths_within_ceiling(
             "allowed paths {} reach outside the team's ceiling {}",
             outside.join(", "),
             context.rules.allowed_paths_ceiling.join(", ")
+        ),
+    ))
+}
+
+/// Whether an allowed path stays inside the document globs: within one by the ceiling's
+/// containment (`docs/adr/**` within `docs/**`), or, having no wildcard, matched by one as a path
+/// (`README.md` by `**/*.md`). A wildcard path within no directory glob could name code.
+fn is_a_document_path(path: &String, documents: &[String]) -> bool {
+    is_within_any(path, documents)
+        || (split_glob(path).1.is_empty()
+            && check_allowed_paths(std::slice::from_ref(path), documents).is_ok())
+}
+
+fn document_paths_only(
+    contract: &TaskContract,
+    context: &ReadinessContext,
+) -> Option<ReadinessFailure> {
+    if contract.kind != Kind::Task || contract.assignee_role == Role::SoftwareDeveloper {
+        return None;
+    }
+    let documents = &context.rules.document_paths;
+    // Fail closed (5.6): a document glob that does not compile puts every path outside.
+    if let Err(PathRefusal::Glob(GlobError::Invalid { pattern, detail })) =
+        check_allowed_paths(&[], documents)
+    {
+        return Some(failure(
+            ReadinessRule::DocumentPathsOnly,
+            format!(
+                "allowed paths {} cannot be checked: the document path {pattern} does not compile ({detail})",
+                contract.allowed_paths.join(", ")
+            ),
+        ));
+    }
+    let outside: Vec<&str> = contract
+        .allowed_paths
+        .iter()
+        .filter(|path| !is_a_document_path(path, documents))
+        .map(String::as_str)
+        .collect();
+    if outside.is_empty() {
+        return None;
+    }
+    Some(failure(
+        ReadinessRule::DocumentPathsOnly,
+        format!(
+            "allowed paths {} reach outside the team's document paths {}",
+            outside.join(", "),
+            context.rules.document_paths.join(", ")
         ),
     ))
 }
@@ -947,6 +1000,91 @@ mod tests {
         );
         contract.allowed_paths = vec!["docs/**/*.md".to_string()];
         assert_eq!(evaluate_readiness(&contract, &context), Ok(()));
+    }
+
+    /// A task for `role`, reviewed by the Product Manager so that any role may be the assignee,
+    /// allowed `paths`.
+    fn a_task_for(role: Role, paths: &[&str]) -> TaskContract {
+        let mut contract = a_contract();
+        contract.assignee_role = role;
+        contract.reviewer_role = Role::ProductManager;
+        contract.allowed_paths = paths.iter().map(|path| (*path).to_string()).collect();
+        contract
+    }
+
+    #[test]
+    fn keeps_an_architects_task_to_the_document_paths() {
+        let task = a_task_for(Role::Architect, &["src/**"]);
+        assert_eq!(
+            failed_rules(&task, &a_ready_context()),
+            [R::DocumentPathsOnly]
+        );
+        assert!(
+            message_of(&task, &a_ready_context(), R::DocumentPathsOnly).contains("src/**"),
+            "the message names the path outside"
+        );
+    }
+
+    #[test]
+    fn passes_an_architects_task_inside_them() {
+        // `docs/adr/**` is within `docs/**`; `README.md` and `notes/plan.md` have no wildcard and
+        // `**/*.md` matches each as a path.
+        let task = a_task_for(
+            Role::Architect,
+            &["docs/adr/**", "README.md", "notes/plan.md"],
+        );
+        assert_eq!(evaluate_readiness(&task, &a_ready_context()), Ok(()));
+    }
+
+    #[test]
+    fn refuses_a_wildcard_outside_a_document_directory() {
+        // `**/*.md` matches no wildcard path as a path, and `notes/*.md` is within no directory
+        // glob: a wildcard could name code.
+        let task = a_task_for(Role::Architect, &["notes/*.md"]);
+        assert_eq!(
+            failed_rules(&task, &a_ready_context()),
+            [R::DocumentPathsOnly]
+        );
+    }
+
+    #[test]
+    fn leaves_a_developers_task_to_the_ceiling_alone() {
+        let task = a_task_for(Role::SoftwareDeveloper, &["src/**"]);
+        assert_eq!(evaluate_readiness(&task, &a_ready_context()), Ok(()));
+    }
+
+    #[test]
+    fn does_not_hold_an_epic_to_the_document_paths() {
+        // An epic's tasks are held, each against its own assignee role.
+        let mut epic = a_task_for(Role::Architect, &["src/**"]);
+        epic.kind = Kind::Epic;
+        assert_eq!(evaluate_readiness(&epic, &a_ready_context()), Ok(()));
+    }
+
+    #[test]
+    fn refuses_a_document_task_when_a_document_glob_does_not_compile() {
+        // Fail closed (5.6): a glob that does not compile makes every path outside, even one a
+        // sound glob beside it would contain.
+        let task = a_task_for(Role::Architect, &["docs/adr/**"]);
+        for globs in [vec!["docs/[**"], vec!["docs/**", "docs/[**"]] {
+            let mut context = a_ready_context();
+            context.rules.document_paths = globs.iter().map(|glob| (*glob).to_string()).collect();
+            assert_eq!(
+                failed_rules(&task, &context),
+                [R::DocumentPathsOnly],
+                "{globs:?}"
+            );
+            let message = message_of(&task, &context, R::DocumentPathsOnly);
+            assert!(message.contains("docs/[** does not compile"), "{message}");
+        }
+    }
+
+    #[test]
+    fn refuses_every_document_task_with_an_empty_list() {
+        let task = a_task_for(Role::MarketingSpecialist, &["docs/marketing/**"]);
+        let mut context = a_ready_context();
+        context.rules.document_paths.clear();
+        assert_eq!(failed_rules(&task, &context), [R::DocumentPathsOnly]);
     }
 
     #[test]

@@ -44,6 +44,8 @@ epic, each contract complete in one call: its own clear deliverable, exit criter
 if the work were wrong, `allowed_paths` within the epic's, and a budget within what the epic has
 left. Read the epic's contract and any tasks already filed under it (`farik_read_board`) before
 adding more, so the breakdown does not overlap or leave a gap.
+Only the Developer changes code: a task for any other role keeps its `allowed_paths` inside the
+team's `document_paths`, and a Developer's task says `change: fix` when it repairs a defect.
 
 ## 4. Assign within the WIP limit
 

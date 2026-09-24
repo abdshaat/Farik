@@ -90,7 +90,7 @@ Produces: `TeamRules::document_paths`, `DEFAULT_DOCUMENT_PATHS`, `ReadinessRule:
 
 If a test named here as existing has another name, the implementer uses the test that covers that output and says so in the report.
 
-- [ ] `feat(core): keep every role but the developer to the team's document paths`
+- [x] `feat(core): keep every role but the developer to the team's document paths`
 
 ### Task 2: the contract's `change` field
 

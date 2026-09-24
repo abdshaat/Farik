@@ -311,6 +311,16 @@
             "minLength": 1
           },
           "description": "ECMAScript regular expressions a command must not match (spec 5.12)."
+        },
+        "document_paths": {
+          "type": "array",
+          "maxItems": 100,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "default": ["docs/**", "**/*.md", "CHANGELOG.md"],
+          "description": "Globs every allowed path of a task not assigned to the software_developer must fall within: only the Developer changes code (spec 5.12). Left out, docs/**, **/*.md and CHANGELOG.md; an empty list means no task but a Developer's can be ready."
         }
       }
     }

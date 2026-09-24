@@ -312,7 +312,8 @@ fn you_section(agent: &Agent) -> String {
     }
 }
 
-/// One line per rule, named as `team.yaml` names it; a list rule with nothing in it says nothing.
+/// One line per rule, named as `team.yaml` names it; a list rule with nothing in it says nothing,
+/// except `document_paths`, whose empty list means no task but a Developer's can be ready.
 fn rules_section(rules: &TeamRules) -> String {
     let list = |name: &str, values: &[String]| {
         (!values.is_empty()).then(|| format!("- {name}: {}", values.join(", ")))
@@ -332,6 +333,13 @@ fn rules_section(rules: &TeamRules) -> String {
                 .map_or_else(|| "none".to_string(), |usd| usd.to_string())
         )),
         list("forbidden_commands", &rules.forbidden_commands),
+        // Unlike the other lists, an empty one here is a rule of its own, so it is said.
+        list("document_paths", &rules.document_paths).or_else(|| {
+            Some(
+                "- document_paths: none (no task but a Software Developer's can be ready)"
+                    .to_string(),
+            )
+        }),
     ]
     .into_iter()
     .flatten()
@@ -805,13 +813,15 @@ mod tests {
             require_new_tests: false,
             max_task_budget_usd: None,
             forbidden_commands: Vec::new(),
+            document_paths: Vec::new(),
         };
         let prompt = assembled(&inputs.full(SessionPurpose::Refine));
         assert_eq!(
             section(&prompt, "Team rules"),
             "- protected_paths: .env, **/*.pem\n\
              - require_new_tests: no\n\
-             - max_task_budget_usd: none"
+             - max_task_budget_usd: none\n\
+             - document_paths: none (no task but a Software Developer's can be ready)"
         );
 
         inputs.rules = TeamRules {
@@ -821,6 +831,7 @@ mod tests {
             require_new_tests: true,
             max_task_budget_usd: Some(12.5),
             forbidden_commands: vec!["^rm -rf /".to_string()],
+            document_paths: TeamRules::default().document_paths,
         };
         let prompt = assembled(&inputs.full(SessionPurpose::Refine));
         assert_eq!(
@@ -830,7 +841,8 @@ mod tests {
              - required_criteria: test\n\
              - require_new_tests: yes\n\
              - max_task_budget_usd: 12.5\n\
-             - forbidden_commands: ^rm -rf /"
+             - forbidden_commands: ^rm -rf /\n\
+             - document_paths: docs/**, **/*.md, CHANGELOG.md"
         );
     }
 

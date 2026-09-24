@@ -255,6 +255,21 @@ fn shows_the_team_rules_and_the_criterion_library() {
         rules.out
     );
     assert!(rules.out.contains("new tests"), "{}", rules.out);
+    assert!(
+        rules
+            .out
+            .contains("document paths: docs/**, **/*.md, CHANGELOG.md"),
+        "the document paths the schema defaults to: {}",
+        rules.out
+    );
+    let json = run_in(&repository.path, &["--json", "rules", "show"]);
+    assert_eq!(json.code, 0, "{}", json.err);
+    let shown: Value = serde_json::from_str(json.out.trim()).expect("JSON");
+    assert_eq!(
+        shown["document_paths"],
+        serde_json::json!(["docs/**", "**/*.md", "CHANGELOG.md"]),
+        "{shown}"
+    );
 
     let criteria = run_in(&repository.path, &["criteria", "list"]);
     assert_eq!(criteria.code, 0, "{}", criteria.err);
@@ -313,15 +328,10 @@ fn reports_a_contract_the_log_has_never_heard_of() {
 #[ignore = "needs the git program: cargo xtask check --integration"]
 fn reports_a_team_rule_that_does_not_compile() {
     let repository = a_project_with_a_task("read-doctor-rules");
-    let team = std::fs::read_to_string(repository.path.join(".farik/team.yaml")).expect("read");
-    std::fs::write(
-        repository.path.join(".farik/team.yaml"),
-        team.replace(
-            "rules: {}",
-            "rules:\n  forbidden_commands:\n    - \"rm -rf (\"\n",
-        ),
-    )
-    .expect("write");
+    replace_the_rules(
+        &repository.path,
+        "rules:\n  forbidden_commands:\n    - \"rm -rf (\"\n",
+    );
 
     let ran = run_in(&repository.path, &["doctor"]);
 
@@ -338,15 +348,30 @@ fn reports_a_team_rule_that_does_not_compile() {
     );
 }
 
+/// Replaces the whole top-level `rules:` block of the project's team.yaml with `rules`, which is
+/// that block written out. `farik init` writes the rules a team starts with (the default document
+/// paths among them), so the block is whatever lines follow `rules:` up to the next top-level key.
+fn replace_the_rules(project: &Path, rules: &str) {
+    let path = project.join(".farik/team.yaml");
+    let team = std::fs::read_to_string(&path).expect("read");
+    let start = team
+        .find("\nrules:")
+        .map(|at| at + 1)
+        .or_else(|| team.starts_with("rules:").then_some(0))
+        .expect("the team has rules");
+    let block = &team[start..];
+    let end = block
+        .match_indices('\n')
+        .map(|(at, _)| at + 1)
+        .find(|&at| block[at..].starts_with(|c: char| !c.is_whitespace()))
+        .map_or(team.len(), |at| start + at);
+    std::fs::write(&path, format!("{}{rules}{}", &team[..start], &team[end..])).expect("write");
+}
+
 /// Runs doctor on a project whose team rules are `rules`, and says it found `rule` and `pattern`.
 fn reports_a_glob_that_does_not_compile(name: &str, rules: &str, rule: &str, pattern: &str) {
     let repository = a_project_with_a_task(name);
-    let team = std::fs::read_to_string(repository.path.join(".farik/team.yaml")).expect("read");
-    std::fs::write(
-        repository.path.join(".farik/team.yaml"),
-        team.replace("rules: {}", rules),
-    )
-    .expect("write");
+    replace_the_rules(&repository.path, rules);
 
     let ran = run_in(&repository.path, &["doctor"]);
 
@@ -379,6 +404,17 @@ fn reports_an_allowed_paths_ceiling_that_does_not_compile() {
         "rules:\n  allowed_paths_ceiling:\n    - \"b/[\"\n",
         "allowed_paths_ceiling",
         "b/[",
+    );
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn reports_a_document_path_that_does_not_compile() {
+    reports_a_glob_that_does_not_compile(
+        "read-doctor-documents",
+        "rules:\n  document_paths:\n    - \"c/[\"\n",
+        "document_paths",
+        "c/[",
     );
 }
 

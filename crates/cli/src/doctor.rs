@@ -118,6 +118,15 @@ fn rules_that_do_not_compile(project: &Project) -> Vec<String> {
              (5.12)"
         ));
     }
+    if let Err(PathRefusal::Glob(GlobError::Invalid { pattern, detail })) =
+        check_allowed_paths(&[], &rules.document_paths)
+    {
+        found.push(format!(
+            ".farik/team.yaml: document_paths has a glob that does not compile, {pattern:?}: \
+             {detail}. Until it is fixed it refuses every task not assigned to the \
+             software_developer (5.12)"
+        ));
+    }
     if let Err(CommandRefusal::InvalidPattern { pattern, detail }) =
         evaluate_command("true", &rules)
     {
