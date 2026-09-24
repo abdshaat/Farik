@@ -20,9 +20,7 @@ use crate::project::Project;
 /// A sentence saying the id is not one, that there is no such contract, what the store refused;
 /// with `with_diff`, that an epic has no branch, that the task has none yet, or what git refused.
 pub fn show(project: &Project, task_id: &str, with_diff: bool) -> Result<Report, String> {
-    let task_id: TaskId = task_id
-        .parse()
-        .map_err(|error| format!("{task_id} is not a task id: {error}"))?;
+    let task_id = crate::task(task_id)?;
     let contract = project
         .files
         .read_contract(&task_id)

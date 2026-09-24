@@ -9,23 +9,9 @@ use farik_runtime::orchestrator::{CommandError, CommandReport};
 use farik_store::EventQuery;
 use serde_json::json;
 
+use crate::Report;
 use crate::project::Project;
 use crate::start::{send, try_lock};
-use crate::{CliIo, Report};
-
-/// Does `command` through `start::command`, and says what it did.
-///
-/// # Errors
-///
-/// The command's refusal in the words `refusal` gives it.
-pub fn human(
-    project: &Project,
-    command: Command,
-    name: &str,
-    io: &CliIo<'_>,
-) -> Result<Report, String> {
-    said(crate::start::command(project, command, name, io))
-}
 
 /// `farik stop`: the run, or with `target` one session, in the process driving the project. A
 /// `FRK-<n>` names the task's last session started and not ended.

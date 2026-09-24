@@ -2,7 +2,7 @@
 //! section 5.16).
 
 use chrono::{DateTime, Utc};
-use farik_core::contract::{TaskId, TaskKind};
+use farik_core::contract::TaskKind;
 use farik_protocol::command::{Command, RequestSize, command_from_value};
 use farik_store::requests::triage_by_human;
 use serde_json::json;
@@ -60,10 +60,7 @@ pub fn triage(
         lines: vec![format!(
             "{} is {}: {kind}. {reason}",
             task_id.as_str(),
-            match size {
-                RequestSize::Large => "large",
-                RequestSize::Small => "small",
-            }
+            wire_size(size)
         )],
         json: json!({
             "task_id": task_id.to_string(),
@@ -90,9 +87,7 @@ pub(crate) fn command_of(
     // what is wrong with what they typed, not the `oneOf` sentence a schema refuses a whole body
     // with. The command is still built and validated, so a triage from a terminal is held to exactly
     // the rules one arriving from an agent is.
-    let named: TaskId = task_id
-        .parse()
-        .map_err(|error| format!("{task_id} is not a task id: {error}"))?;
+    let named = crate::task(task_id)?;
     command_from_value(&json!({
         "command": "request_triage",
         "body": { "task_id": named.as_str(), "size": wire_size(size), "reason": reason }

@@ -2,7 +2,6 @@
 //! 5.11).
 
 use chrono::{DateTime, Utc};
-use farik_core::contract::TaskId;
 use farik_protocol::event::EventIds;
 use farik_store::requests::hold_contract;
 use serde_json::json;
@@ -24,9 +23,7 @@ pub fn hold(
     held: bool,
     now: DateTime<Utc>,
 ) -> Result<Report, String> {
-    let task_id: TaskId = task_id
-        .parse()
-        .map_err(|error| format!("{task_id} is not a task id: {error}"))?;
+    let task_id = crate::task(task_id)?;
     let projections = project.projections()?;
     let event = hold_contract(
         &project.files,
