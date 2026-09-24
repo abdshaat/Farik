@@ -131,6 +131,7 @@ impl Served {
             farik_tools: Vec::new(),
             purpose: SessionPurpose::Implement,
             in_reply_to: None,
+            thread: None,
         });
         let runtime = tokio::runtime::Builder::new_multi_thread()
             .enable_all()

@@ -6,7 +6,7 @@ use farik_core::team::Effort;
 use farik_protocol::clock::Clock;
 use farik_protocol::event::{
     EventBody, EventIds, SessionEndedBody, SessionEndedBodyReason, SessionStartedBody,
-    SessionStartedBodyEffort, SessionStartedBodyPurpose, new_event,
+    SessionStartedBodyEffort, SessionStartedBodyPurpose, Thread, new_event,
 };
 use farik_store::{EventLog, StoreError};
 
@@ -14,7 +14,8 @@ use crate::session::{EndReason, SessionPurpose, SessionSpec};
 
 /// Records `session.started` for `spec`: its purpose, model, and effort, on an envelope naming
 /// the spec's session, agent, and task, and `ids`' team and project. `in_reply_to` is, for a
-/// conversation, the seq of the latest message it was shown, which answers the mentions up to it.
+/// conversation, the seq of the latest message it was shown, which answers the mentions up to it;
+/// `thread` is a ceremony's, which says which ceremony it was.
 ///
 /// # Errors
 ///
@@ -24,6 +25,7 @@ pub fn record_session_started(
     log: &EventLog,
     spec: &SessionSpec,
     in_reply_to: Option<u64>,
+    thread: Option<Thread>,
     ids: &EventIds,
     clock: &dyn Clock,
 ) -> Result<(), StoreError> {
@@ -37,6 +39,7 @@ pub fn record_session_started(
             })?,
         effort: effort_wire(spec.effort),
         in_reply_to: in_reply_to.and_then(NonZeroU64::new),
+        thread,
     };
     let ids = EventIds {
         task_id: spec.task_id.clone(),
@@ -160,7 +163,7 @@ mod tests {
         let log = a_log();
         let spec = spec();
         let clock = FixedClock::new(at("2026-09-22T10:00:00Z"));
-        record_session_started(&log, &spec, None, &ids(&spec), &clock).expect("recorded");
+        record_session_started(&log, &spec, None, None, &ids(&spec), &clock).expect("recorded");
         record_session_ended(
             &log,
             &spec.session_id,
@@ -231,7 +234,7 @@ mod tests {
                 effort,
                 ..spec()
             };
-            record_session_started(&log, &spec, None, &ids(&spec), &clock).expect("recorded");
+            record_session_started(&log, &spec, None, None, &ids(&spec), &clock).expect("recorded");
             record_session_ended(&log, &spec.session_id, reason, "", &ids(&spec), &clock)
                 .expect("recorded");
             expected.push((purpose_wire, effort_wire, reason_wire));

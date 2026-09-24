@@ -12,7 +12,7 @@ use farik_core::governor::permissions::PermissionTier;
 use farik_core::pricing::Usage;
 use farik_core::team::{Agent, Effort, Team};
 use farik_protocol::event::{
-    AgentSleptBody, EventBody, EventIds, EventKind, NoteWrittenBody, NoteWrittenBodyKind,
+    AgentSleptBody, EventBody, EventIds, EventKind, NoteWrittenBody, NoteWrittenBodyKind, Thread,
 };
 use farik_roles::load_role;
 use farik_store::EventQuery;
@@ -26,7 +26,8 @@ use crate::cost::{CostError, CostSource, budget_state, record_exhaustion, record
 use crate::daemon::SessionRegistration;
 use crate::exec::Executor;
 use crate::prompt::{
-    JUDGMENT_INSTRUCTION, PromptInput, SPRINT_PLAN_INSTRUCTION, assemble_system_prompt,
+    CEREMONY_INSTRUCTIONS, JUDGMENT_INSTRUCTION, PromptInput, SPRINT_PLAN_INSTRUCTION,
+    assemble_system_prompt,
 };
 use crate::session::{
     EndReason, SessionEvent, SessionHandle, SessionPurpose, SessionSpec, session_model,
@@ -71,6 +72,8 @@ pub(super) struct SessionAsk<'a> {
     /// The seq of the message a conversation session answers, which its reply names and its
     /// `session.started` records, so that a mention posted after it stays pending.
     pub(super) in_reply_to: Option<u64>,
+    /// A ceremony's thread, which its posts are in and its `session.started` names.
+    pub(super) thread: Option<Thread>,
     /// Its first message.
     pub(super) initial_prompt: String,
 }
@@ -104,12 +107,22 @@ pub(super) async fn run_session(
         task_id: spec.task_id.clone(),
         purpose: ask.purpose,
         in_reply_to: ask.in_reply_to,
+        thread: ask.thread,
         cwd: spec.cwd.clone(),
         executor: ask.executor,
         limits: spec.limits,
         farik_tools: spec.farik_tools.clone(),
     });
-    let ended = drive(deps, team, role, ask.contract, ask.in_reply_to, &spec).await;
+    let ended = drive(
+        deps,
+        team,
+        role,
+        ask.contract,
+        ask.in_reply_to,
+        ask.thread,
+        &spec,
+    )
+    .await;
     deps.daemon.end_session(&spec.session_id);
     let end = ended?;
     // The sleep first: an agent not put to sleep is started again into its provider's refusal.
@@ -259,8 +272,8 @@ const NOT_FOR_READ_ONLY: [&str; 3] = ["farik_exec", "farik_git_commit", "farik_g
 
 /// The spec of the session `ask` describes, its prompt assembled from the files as they are now,
 /// with what the human said about its task since its last session started. A triage session and a
-/// conversation run on `TRIAGE_MODEL` at low effort. A session asked with one tool is given it
-/// alone, whatever the agent's tiers, and no built-in tool.
+/// conversation run on `TRIAGE_MODEL` at low effort, and a ceremony on it at medium effort. A
+/// session asked with one tool is given it alone, whatever the agent's tiers, and no built-in tool.
 fn session_spec(
     deps: &OrchestratorDeps,
     team: &Team,
@@ -270,14 +283,13 @@ fn session_spec(
     let role_id = Role::from(ask.agent.role);
     let role = load_role(role_id)?;
     // 5.16 runs triage on the cheaper model, whatever the agent's own, and 5.9 the channel's
-    // conversations.
-    let (model, effort) = if matches!(
-        ask.purpose,
-        SessionPurpose::Triage | SessionPurpose::Conversation
-    ) {
-        (TRIAGE_MODEL.to_string(), Effort::Low)
-    } else {
-        session_model(ask.agent, &role)
+    // conversations and ceremonies, a ceremony thinking harder.
+    let (model, effort) = match ask.purpose {
+        SessionPurpose::Triage | SessionPurpose::Conversation => {
+            (TRIAGE_MODEL.to_string(), Effort::Low)
+        }
+        SessionPurpose::Ceremony => (TRIAGE_MODEL.to_string(), Effort::Medium),
+        _ => session_model(ask.agent, &role),
     };
     // A project that was never scanned, or whose scan cannot be read, is given none.
     let project_scan = files.read_project_scan().ok();
@@ -326,10 +338,14 @@ fn session_spec(
         builtin_tools: &builtin_tools,
         purpose: ask.purpose,
         human_message: human.as_deref(),
-        closing: match ask.only_tool {
-            Some(JUDGMENT_TOOL) => Some(JUDGMENT_INSTRUCTION),
-            Some(SPRINT_PLAN_TOOL) => Some(SPRINT_PLAN_INSTRUCTION),
-            _ => None,
+        closing: match (ask.thread, ask.only_tool) {
+            (Some(thread), _) => CEREMONY_INSTRUCTIONS
+                .iter()
+                .find(|(named, _)| *named == thread)
+                .map(|(_, text)| *text),
+            (None, Some(JUDGMENT_TOOL)) => Some(JUDGMENT_INSTRUCTION),
+            (None, Some(SPRINT_PLAN_TOOL)) => Some(SPRINT_PLAN_INSTRUCTION),
+            (None, _) => None,
         },
     })?;
     let limits = budget_state(
@@ -372,6 +388,7 @@ async fn drive(
     role: Role,
     contract: Option<&TaskContract>,
     in_reply_to: Option<u64>,
+    thread: Option<Thread>,
     spec: &SessionSpec,
 ) -> Result<SessionEnd, OrchestratorError> {
     let tools = &deps.tools;
@@ -398,7 +415,7 @@ async fn drive(
             clock,
         )
     };
-    record_session_started(&tools.log, spec, in_reply_to, &tools.ids, clock)?;
+    record_session_started(&tools.log, spec, in_reply_to, thread, &tools.ids, clock)?;
     let mut costed = false;
     let mut crossed = Vec::new();
     let read = match deps.adapter.start_session(spec.clone()) {
@@ -554,10 +571,14 @@ mod tests {
     use crate::orchestrator::fixtures::Harness;
     use crate::session::SessionPurpose;
 
-    use farik_protocol::event::{EventBody, EventKind, MessageKind};
+    use farik_core::team::Effort;
+    use farik_protocol::event::{EventBody, EventKind, MessageKind, Thread};
 
-    use super::{SPRINT_PLAN_TOOL, SessionAsk, SessionEnd, TRIAGE_TOOL, session_spec, sleep};
-    use crate::prompt::{CLOSING_INSTRUCTIONS, SPRINT_PLAN_INSTRUCTION};
+    use super::{
+        SPRINT_PLAN_TOOL, SessionAsk, SessionEnd, TRIAGE_TOOL, run_session, session_spec, sleep,
+    };
+    use crate::prompt::{CEREMONY_INSTRUCTIONS, CLOSING_INSTRUCTIONS, SPRINT_PLAN_INSTRUCTION};
+    use crate::recorded::fixtures::reply_to_a_mention;
     use crate::session::EndReason;
 
     #[test]
@@ -588,6 +609,7 @@ mod tests {
                     only_tool,
                     tools: None,
                     in_reply_to: None,
+                    thread: None,
                     initial_prompt: String::new(),
                 },
             )
@@ -636,6 +658,7 @@ mod tests {
                 only_tool: Some("farik_record_judgment"),
                 tools: None,
                 in_reply_to: None,
+                thread: None,
                 initial_prompt: String::new(),
             },
         )
@@ -667,6 +690,7 @@ mod tests {
                 only_tool: None,
                 tools: None,
                 in_reply_to: None,
+                thread: None,
                 initial_prompt: String::new(),
             },
         )
@@ -708,6 +732,7 @@ mod tests {
                 only_tool: Some(SPRINT_PLAN_TOOL),
                 tools: None,
                 in_reply_to: None,
+                thread: None,
                 initial_prompt: String::new(),
             },
         )
@@ -731,6 +756,109 @@ mod tests {
         );
         assert_eq!(spec.task_id, None);
         assert_eq!(spec.farik_tools, vec![SPRINT_PLAN_TOOL.to_string()]);
+    }
+
+    /// The Product Manager's ceremony in `thread`, as a rule would ask for it.
+    fn a_ceremony<'a>(
+        deps: &crate::orchestrator::OrchestratorDeps,
+        pm: &'a farik_core::team::Agent,
+        thread: Thread,
+    ) -> SessionAsk<'a> {
+        SessionAsk {
+            agent: pm,
+            contract: None,
+            purpose: SessionPurpose::Ceremony,
+            cwd: deps.tools.files.root().to_path_buf(),
+            executor: None,
+            read_only: true,
+            only_tool: None,
+            tools: None,
+            in_reply_to: None,
+            thread: Some(thread),
+            initial_prompt: String::new(),
+        }
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn records_a_ceremonys_thread_on_its_start() {
+        let harness = Harness::new("session-ceremony-thread", |_| {});
+        let orchestrator = harness.orchestrator(harness.recorded(vec![reply_to_a_mention()]));
+        let deps = &orchestrator.deps;
+        let team = deps.tools.files.read_team().expect("the team");
+        let pm = team.active_agents().next().expect("an agent");
+
+        run_session(deps, &team, a_ceremony(deps, pm, Thread::Standup))
+            .await
+            .expect("the session runs");
+
+        let starts = harness.events(&[EventKind::SessionStarted]);
+        let EventBody::SessionStarted(start) = &starts[0].body else {
+            panic!("a session's start");
+        };
+        assert_eq!(start.thread, Some(Thread::Standup));
+        // The daemon gives its tool calls the thread it was registered with.
+        let posted = harness.events(&[EventKind::MessagePosted]);
+        let EventBody::MessagePosted(post) = &posted[0].body else {
+            panic!("a message");
+        };
+        assert_eq!(
+            (post.kind, post.thread),
+            (MessageKind::Ceremony, Some(Thread::Standup))
+        );
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn runs_a_ceremony_on_sonnet() {
+        // The team has no Scrum Master, so the Product Manager runs it, on its own model otherwise.
+        let harness = Harness::new("session-ceremony-model", |_| {});
+        let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
+        let deps = &orchestrator.deps;
+        let team = deps.tools.files.read_team().expect("the team");
+        let pm = team.active_agents().next().expect("an agent");
+
+        let spec =
+            session_spec(deps, &team, &a_ceremony(deps, pm, Thread::Planning)).expect("the spec");
+
+        assert_eq!(
+            (spec.model.as_str(), spec.effort),
+            ("claude-sonnet-5", Effort::Medium)
+        );
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn closes_each_ceremony_with_its_own_instruction() {
+        let harness = Harness::new("session-ceremony-closing", |_| {});
+        let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
+        let deps = &orchestrator.deps;
+        let team = deps.tools.files.read_team().expect("the team");
+        let pm = team.active_agents().next().expect("an agent");
+
+        for thread in [
+            Thread::Planning,
+            Thread::Standup,
+            Thread::Review,
+            Thread::Retro,
+        ] {
+            let spec = session_spec(deps, &team, &a_ceremony(deps, pm, thread)).expect("the spec");
+            let closing = CEREMONY_INSTRUCTIONS
+                .iter()
+                .find(|(named, _)| *named == thread)
+                .map(|(_, text)| *text)
+                .expect("an entry");
+            let section = &spec.system_prompt[spec
+                .system_prompt
+                .find("## This session\n\n")
+                .expect("a closing section")
+                + "## This session\n\n".len()..];
+            assert_eq!(section.trim_end(), closing, "{thread:?}");
+            assert!(
+                closing.to_lowercase().contains("mention no one"),
+                "{thread:?}: {closing}"
+            );
+        }
     }
 
     #[test]

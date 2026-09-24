@@ -36,7 +36,8 @@ pub(super) fn post_message(call: &Call<'_>, input: PostMessageInput) -> Result<V
             mentions: mentions_in(&input.text, &call.team, call.agent_id()),
             text: input.text,
             task_id: call.context.task_id.clone(),
-            thread: None,
+            // A ceremony posts in its thread; no other session has one.
+            thread: call.context.thread,
             // A conversation's reply names the latest message it was started to answer.
             in_reply_to: (kind == MessageKind::Reply)
                 .then_some(call.context.in_reply_to)
@@ -51,10 +52,13 @@ pub(super) fn post_message(call: &Call<'_>, input: PostMessageInput) -> Result<V
     Ok(json!({ "seq": seq, "kind": kind }))
 }
 
-/// The kind the session's next post is: a conversation's one `reply`; any other session's first a
-/// `reaction`, and every further one `ambient` while the agent's allowance lasts. The allowance
-/// counts the agent's ambient messages since the open sprint started, or since the UTC day began
-/// when no sprint is open.
+/// The most a ceremony session posts.
+const CEREMONY_POSTS: usize = 3;
+
+/// The kind the session's next post is: a conversation's one `reply`; a ceremony's `ceremony`, up
+/// to `CEREMONY_POSTS`; any other session's first a `reaction`, and every further one `ambient`
+/// while the agent's allowance lasts. The allowance counts the agent's ambient messages since the
+/// open sprint started, or since the UTC day began when no sprint is open.
 fn kind_of(call: &Call<'_>) -> Result<MessageKind, ToolError> {
     let deps = call.deps();
     // ponytail: every post reads all of the agent's messages ever, linear in its history. Upgrade:
@@ -71,6 +75,20 @@ fn kind_of(call: &Call<'_>) -> Result<MessageKind, ToolError> {
     let first = !posted
         .iter()
         .any(|event| event.envelope.ids.session_id.as_deref() == session);
+    if call.context.purpose == SessionPurpose::Ceremony {
+        let said = posted
+            .iter()
+            .filter(|event| event.envelope.ids.session_id.as_deref() == session)
+            .count();
+        return if said < CEREMONY_POSTS {
+            Ok(MessageKind::Ceremony)
+        } else {
+            Err(Refusal::ChannelLimit {
+                detail: format!("a ceremony session posts at most {CEREMONY_POSTS} messages"),
+            }
+            .into())
+        };
+    }
     if call.context.purpose == SessionPurpose::Conversation {
         return if first {
             Ok(MessageKind::Reply)
@@ -141,7 +159,7 @@ mod tests {
 
     use chrono::Duration;
     use farik_protocol::clock::FixedClock;
-    use farik_protocol::event::{EventBody, EventKind, FarikEvent, MessageKind};
+    use farik_protocol::event::{EventBody, EventKind, FarikEvent, MessageKind, Thread};
     use serde_json::json;
 
     use crate::channel::{NewMessage, post};
@@ -308,6 +326,56 @@ mod tests {
 
         say(&project, "FRK-1 is in review.").expect("the reaction");
         say(&project, "Today's.").expect("the sprint's allowance is whole");
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn posts_a_ceremony_message_in_its_thread() {
+        let project = TestProject::new("channel-ceremony", &a_team_of_three(|_| {}));
+        let mut context = project.context("dev-a", None);
+        context.purpose = SessionPurpose::Ceremony;
+        context.thread = Some(Thread::Standup);
+        let say = |text: &str| run(&context, "farik_post_message", json!({ "text": text }));
+
+        for text in [
+            "FRK-1 moved.",
+            "FRK-2 is blocked.",
+            "Nothing waits on the human.",
+        ] {
+            say(text).expect("a ceremony post");
+        }
+
+        let posted: Vec<(MessageKind, Option<Thread>)> = project
+            .events(&[EventKind::MessagePosted])
+            .iter()
+            .filter_map(|event| match &event.body {
+                EventBody::MessagePosted(body) => Some((body.kind, body.thread)),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(posted, [(MessageKind::Ceremony, Some(Thread::Standup)); 3]);
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn caps_a_ceremonys_posts() {
+        let project = TestProject::new("channel-ceremony-cap", &a_team_of_three(|_| {}));
+        let mut context = project.context("dev-a", None);
+        context.purpose = SessionPurpose::Ceremony;
+        context.thread = Some(Thread::Retro);
+        let say = |text: &str| run(&context, "farik_post_message", json!({ "text": text }));
+        for text in ["One.", "Two.", "Three."] {
+            say(text).expect("within the cap");
+        }
+
+        let before = project.event_count();
+        let refused = say("Four.").expect_err("past the cap");
+
+        assert!(
+            matches!(&refused, ToolError::Refused { reason } if reason.starts_with("channel_limit: ")),
+            "{refused:?}"
+        );
+        assert_eq!(project.event_count(), before, "nothing is recorded");
     }
 
     #[test]

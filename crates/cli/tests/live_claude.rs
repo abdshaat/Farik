@@ -178,6 +178,7 @@ impl Project {
             farik_tools: vec![FARIK_TOOL.to_string()],
             purpose: SessionPurpose::Implement,
             in_reply_to: None,
+            thread: None,
         });
         Project {
             repo,

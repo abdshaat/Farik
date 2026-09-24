@@ -93,6 +93,7 @@ pub(super) async fn draft(
                 only_tool: Some(TRIAGE_TOOL),
                 tools: None,
                 in_reply_to: None,
+                thread: None,
                 initial_prompt: triage_message(&contract),
             },
         )
@@ -163,6 +164,7 @@ pub(super) async fn refining(
                 only_tool: Some(JUDGMENT_TOOL),
                 tools: None,
                 in_reply_to: None,
+                thread: None,
                 initial_prompt: judgment_message(&contract),
             },
         )
@@ -190,6 +192,7 @@ pub(super) async fn refining(
             only_tool: None,
             tools: None,
             in_reply_to: None,
+            thread: None,
             initial_prompt: refine_message(&contract, !asked, &failures),
         },
     )
@@ -465,6 +468,7 @@ pub(super) async fn in_progress_epic(
             only_tool: None,
             tools: None,
             in_reply_to: None,
+            thread: None,
             initial_prompt,
         },
     )

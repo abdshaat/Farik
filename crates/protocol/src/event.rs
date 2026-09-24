@@ -37,9 +37,7 @@ pub use crate::generated::event::{
     TransitionActor as TransitionActorWire,
 };
 /// The channel's vocabularies, named for what they are rather than for the body they sit in.
-pub use crate::generated::event::{
-    MessagePostedBodyKind as MessageKind, MessagePostedBodyThread as Thread,
-};
+pub use crate::generated::event::{MessagePostedBodyKind as MessageKind, Thread};
 
 use crate::generated::event::FarikEvent as EventWire;
 

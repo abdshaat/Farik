@@ -459,6 +459,7 @@ pub(super) fn read_only<'a>(
         only_tool: None,
         tools: None,
         in_reply_to: None,
+        thread: None,
         initial_prompt,
     }
 }

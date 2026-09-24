@@ -297,6 +297,7 @@ async fn sprint_planning(
             only_tool: Some(SPRINT_PLAN_TOOL),
             tools: None,
             in_reply_to: None,
+            thread: None,
             initial_prompt: sprint_plan_message(&open.sprint_id, &contracts, open.budget_usd),
         },
     )
@@ -378,6 +379,7 @@ async fn conversation(
                 only_tool: None,
                 tools: Some(CONVERSATION_TOOLS),
                 in_reply_to: Some(latest.envelope.seq),
+                thread: None,
                 initial_prompt: mention_message(agent, &pending, &summary),
             },
         )
@@ -701,6 +703,7 @@ async fn in_progress(
             only_tool: None,
             tools: None,
             in_reply_to: None,
+            thread: None,
             initial_prompt: implement_message(&contract, &resume),
         },
     )
@@ -881,6 +884,7 @@ async fn ready(
             only_tool: None,
             tools: None,
             in_reply_to: None,
+            thread: None,
             initial_prompt: plan_message(&contract, &assignees, &reviewers),
         },
     )
@@ -4810,6 +4814,35 @@ mod tests {
             panic!("a session's start");
         };
         assert_eq!(start.in_reply_to.map(NonZeroU64::get), Some(seq));
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn starts_no_conversation_for_a_ceremonys_mention() {
+        // The channel is read by all: a ceremony's words start no conversation.
+        let harness = Harness::new("orch-ceremony-mention", |_| {});
+        said(
+            &harness,
+            "pm",
+            MessageKind::Ceremony,
+            "@dev-a keep FRK-1 moving.",
+        );
+        let adapter = harness.recorded(vec![reply_to_a_mention()]);
+
+        harness
+            .orchestrator(adapter.clone())
+            .tick()
+            .await
+            .expect("the tick runs");
+
+        assert!(
+            !adapter
+                .started()
+                .iter()
+                .any(|spec| spec.purpose == SessionPurpose::Conversation),
+            "{:?}",
+            adapter.started()
+        );
     }
 
     #[tokio::test]

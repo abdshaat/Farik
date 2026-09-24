@@ -112,8 +112,9 @@ impl From<FilesError> for ChannelError {
 /// `in_reply_to`, or its start in a log recorded before it carried one), oldest first. A message
 /// posted while that session was starting is after it, so it stays pending. A conversation that
 /// ended at its provider's limit is passed over, so that its mentions wait for the agent to wake;
-/// one that ended any other way used them up. A reply's mentions and a system line's start
-/// nothing, so that replies are one deep.
+/// one that ended any other way used them up. A reply's mentions, a system line's, and a
+/// ceremony's start nothing, so that replies are one deep and a ceremony, read by all, calls no
+/// one in.
 ///
 /// # Errors
 ///
@@ -161,7 +162,7 @@ pub fn pending_mentions(log: &EventLog, agent_id: &str) -> Result<Vec<FarikEvent
         .into_iter()
         .filter(|event| {
             matches!(&event.body, EventBody::MessagePosted(body)
-                if !matches!(body.kind, MessageKind::Reply | MessageKind::System)
+                if !matches!(body.kind, MessageKind::Reply | MessageKind::System | MessageKind::Ceremony)
                     && body.mentions.iter().any(|mentioned| mentioned == agent_id))
         })
         .collect())
@@ -419,7 +420,7 @@ mod tests {
             agent_id: Some("dev-a".to_string()),
             ..farik_ids()
         };
-        record_session_started(&log, &spec, Some(shown), &ids, &FixedClock::new(at()))
+        record_session_started(&log, &spec, Some(shown), None, &ids, &FixedClock::new(at()))
             .expect("recorded");
 
         let seqs: Vec<u64> = pending_mentions(&log, "dev-a")
@@ -445,7 +446,8 @@ mod tests {
             agent_id: Some("dev-a".to_string()),
             ..farik_ids()
         };
-        record_session_started(&log, &spec, None, &ids, &FixedClock::new(at())).expect("recorded");
+        record_session_started(&log, &spec, None, None, &ids, &FixedClock::new(at()))
+            .expect("recorded");
         let later = mention(&log, "@dev-a and the tests?");
 
         let seqs: Vec<u64> = pending_mentions(&log, "dev-a")

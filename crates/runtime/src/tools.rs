@@ -14,7 +14,7 @@ use farik_core::governor::permissions::{
 };
 use farik_core::team::{Agent, AgentStatus, Team};
 use farik_protocol::clock::Clock;
-use farik_protocol::event::{EventBody, EventIds, FarikEvent, new_event};
+use farik_protocol::event::{EventBody, EventIds, FarikEvent, Thread, new_event};
 use farik_store::files::ProjectFiles;
 use farik_store::{EventLog, Git, Projections, TaskProjection};
 use schemars::JsonSchema;
@@ -103,6 +103,8 @@ pub struct ToolContext {
     pub purpose: SessionPurpose,
     /// The seq of the message a conversation session answers, which its reply names.
     pub in_reply_to: Option<u64>,
+    /// A ceremony's thread, which its posts are in.
+    pub thread: Option<Thread>,
     /// Where the task's commands run, when it has somewhere.
     pub executor: Option<Arc<dyn Executor>>,
     /// The project's store, files, and repository.

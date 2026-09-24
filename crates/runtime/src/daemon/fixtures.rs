@@ -97,6 +97,7 @@ impl TestDaemon {
             farik_tools: farik_tools.iter().map(ToString::to_string).collect(),
             purpose: SessionPurpose::Implement,
             in_reply_to: None,
+            thread: None,
         });
     }
 
@@ -153,6 +154,7 @@ impl TestDaemon {
             farik_tools: every_farik_tool().iter().map(ToString::to_string).collect(),
             purpose: SessionPurpose::Implement,
             in_reply_to: None,
+            thread: None,
         });
         state
     }

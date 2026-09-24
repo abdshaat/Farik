@@ -113,7 +113,7 @@ Files: event schema (`session.started`'s thread), protocol, `daemon.rs`, `tools.
 - `runs_a_ceremony_on_sonnet` — a ceremony run by the Product Manager (no Scrum Master): its spec's model is `claude-sonnet-5` at `medium`.
 - `closes_each_ceremony_with_its_own_instruction` — for each thread, the prompt's `This session` text is that thread's `CEREMONY_INSTRUCTIONS` entry.
 
-- [ ] `feat(runtime): run a ceremony as one session that posts in its thread`
+- [x] `feat(runtime): run a ceremony as one session that posts in its thread`
 
 ### Task 2: planning as a ceremony, with the digest
 

@@ -98,6 +98,7 @@ impl TestProject {
             session_id: "session-1".to_string(),
             purpose: SessionPurpose::Implement,
             in_reply_to: None,
+            thread: None,
             executor: None,
             deps: Arc::clone(&self.deps),
         }

@@ -295,6 +295,12 @@
       "type": "string",
       "enum": ["draft", "refining", "ready", "assigned", "in_progress", "blocked", "verifying", "rejected", "accepted", "escalated", "cancelled"]
     },
+    "thread": {
+      "title": "Thread",
+      "description": "A ceremony's thread in the team's channel (docs/SPEC.md 5.9): the thread a ceremony session posts in, and that its session.started names.",
+      "type": "string",
+      "enum": ["planning", "standup", "review", "retro"]
+    },
     "transitionActor": {
       "title": "Transition Actor",
       "description": "Which of the lifecycle's actors asked for a move (docs/SPEC.md section 5.2).",
@@ -591,7 +597,7 @@
           "uniqueItems": true,
           "items": { "type": "string" }
         },
-        "thread": { "type": "string", "enum": ["planning", "standup", "review", "retro"] },
+        "thread": { "$ref": "#/$defs/thread" },
         "in_reply_to": { "type": "integer", "minimum": 1, "maximum": 18446744073709551615 }
       }
     },
@@ -656,7 +662,7 @@
     },
     "sessionStartedBody": {
       "title": "Session Started Body",
-      "description": "A Claude Code session started (docs/SPEC.md sections 8.2 and 8.5): why, on which model, and how hard it thinks. The envelope names the session, the agent, and the task when the session has one; the exact system prompt it was given is kept in .farik/local/sessions/<session_id>/system-prompt.md. A conversation's in_reply_to is the seq of the latest message it was shown: the mentions up to it are answered, and one posted after it is still pending, even one posted before this event.",
+      "description": "A Claude Code session started (docs/SPEC.md sections 8.2 and 8.5): why, on which model, and how hard it thinks. The envelope names the session, the agent, and the task when the session has one; the exact system prompt it was given is kept in .farik/local/sessions/<session_id>/system-prompt.md. A conversation's in_reply_to is the seq of the latest message it was shown: the mentions up to it are answered, and one posted after it is still pending, even one posted before this event. A ceremony's thread says which ceremony it was.",
       "type": "object",
       "additionalProperties": false,
       "required": ["purpose", "model", "effort"],
@@ -664,7 +670,8 @@
         "purpose": { "type": "string", "enum": ["triage", "refine", "plan", "implement", "verify", "ceremony", "conversation"] },
         "model": { "type": "string", "minLength": 1 },
         "effort": { "type": "string", "enum": ["low", "medium", "high"] },
-        "in_reply_to": { "type": "integer", "minimum": 1, "maximum": 18446744073709551615 }
+        "in_reply_to": { "type": "integer", "minimum": 1, "maximum": 18446744073709551615 },
+        "thread": { "$ref": "#/$defs/thread" }
       }
     },
     "sessionEndedBody": {

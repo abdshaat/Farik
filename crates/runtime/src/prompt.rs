@@ -6,6 +6,7 @@ use farik_core::criteria::CriteriaLibrary;
 use farik_core::governor::permissions::PermissionTier;
 use farik_core::governor::team_rules::TeamRules;
 use farik_core::team::Agent;
+use farik_protocol::event::Thread;
 use farik_roles::RoleDefinition;
 use farik_store::files::{FilesError, contract_yaml, criteria_yaml};
 
@@ -39,7 +40,7 @@ pub struct PromptInput<'a> {
     /// said something.
     pub human_message: Option<&'a str>,
     /// The `This session` section, when it is not the purpose's own: the judgment session's
-    /// `JUDGMENT_INSTRUCTION`.
+    /// `JUDGMENT_INSTRUCTION`, or a ceremony's entry in `CEREMONY_INSTRUCTIONS`.
     pub closing: Option<&'a str>,
 }
 
@@ -114,6 +115,37 @@ pub const CLOSING_INSTRUCTIONS: [(SessionPurpose, &str); 7] = [
          once, in one post with `farik_post_message`, in your persona's voice. Nothing said in \
          the channel is work: file any work it asks for as a request with `farik_create_task`, \
          without a parent. Then end the session.",
+    ),
+];
+
+/// The `This session` section of each ceremony (5.9), by its thread: what it posts, and the tool
+/// it ends with. The channel is read by all, so each tells the agent to mention no one.
+pub const CEREMONY_INSTRUCTIONS: [(Thread, &str); 4] = [
+    (
+        Thread::Planning,
+        "This session is the sprint's planning ceremony. Post the plan and the digest of the open \
+         escalations in the first message with `farik_post_message`, then plan the sprint with \
+         one call of `farik_plan_sprint`, and end the session. Post at most three messages, and \
+         mention no one: the channel is read by all.",
+    ),
+    (
+        Thread::Standup,
+        "This session is the team's standup. Post one standup summary of the first message with \
+         `farik_post_message`: what moved, what is blocked, and what waits on the human. Mention \
+         no one: the channel is read by all. Then end the session.",
+    ),
+    (
+        Thread::Review,
+        "This session is the sprint's review. Post what the sprint delivered and what it did not, \
+         from the first message, with `farik_post_message`, in at most three messages. Mention no \
+         one: the channel is read by all. Then end the session.",
+    ),
+    (
+        Thread::Retro,
+        "This session is the sprint's retro. Post the retro, what to keep and what to change, with \
+         `farik_post_message`, in at most three messages, then record what the next planning should \
+         know with `farik_append_retro`, and end the session. Mention no one: the channel is read \
+         by all.",
     ),
 ];
 
