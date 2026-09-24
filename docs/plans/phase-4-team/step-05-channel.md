@@ -158,7 +158,7 @@ Revision 0.14 in the header, naming each change:
 
 The step's interface line in the project plan is written as landed.
 
-- [ ] `docs(docs): record the team channel in the spec`
+- [x] `docs(docs): record the team channel in the spec`
 
 ## Verification
 
