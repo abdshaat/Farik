@@ -611,7 +611,7 @@
     },
     "retroAppendedBody": {
       "title": "Retro Appended Body",
-      "description": "The retro ceremony of sprint sprint_id, the latest ended, recorded what the next planning should know (docs/SPEC.md 5.9): text, appended to .farik/team/retro.md under the sprint's section, by appended_by. One per retro session. It is about no one contract.",
+      "description": "The retro ceremony of sprint sprint_id, the latest ended, recorded what the next planning should know (docs/SPEC.md 5.9): text, appended to .farik/team/retro.md under the sprint's section, by appended_by. One per sprint, whichever retro session appends it. It is about no one contract.",
       "type": "object",
       "additionalProperties": false,
       "required": ["sprint_id", "text", "appended_by"],

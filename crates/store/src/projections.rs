@@ -2375,8 +2375,9 @@ mod tests {
         {
             // A plan and an end whose `left` missed FRK-1, as version 8 projected them: FRK-1
             // stuck in S1 after S1 ended. A move into `verifying` and a cost are also already
-            // projected, in `task_projections` and `cost_records`, so a migration that failed to
-            // empty either table (M4c/N2, N4) would replay them a second time.
+            // projected, in `task_projections` and `cost_records`, so a 0009 that failed to empty
+            // either table (N2, N4) would replay them a second time. 0008 runs before these rows
+            // exist, so its own emptying of `task_projections` (M4c) is not pinned here.
             let log = Arc::new(open_event_log(&path, at(9)).expect("the log opens"));
             for event in [
                 about(EventKind::TaskCreated, "FRK-1"),
