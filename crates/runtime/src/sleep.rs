@@ -176,4 +176,22 @@ mod tests {
 
         assert!(took < std::time::Duration::from_secs(3), "{took:?}");
     }
+
+    #[tokio::test]
+    async fn keeps_waiting_past_a_chunk_while_the_clock_does_not_move() {
+        // The clock never moves, so `left` never reaches zero: the wait outlives more than one
+        // `CHUNK`, which a sleeper that returned after its first chunk regardless would not.
+        let clock = Arc::new(MovableClock::new(at()));
+        let sleeper = TokioSleeper {
+            clock: Arc::clone(&clock) as Arc<dyn Clock + Send + Sync>,
+        };
+
+        let waited = tokio::time::timeout(
+            std::time::Duration::from_millis(1500),
+            sleeper.sleep_until(at() + Duration::hours(1)),
+        )
+        .await;
+
+        assert!(waited.is_err(), "the wait ended within 1.5s: {waited:?}");
+    }
 }
