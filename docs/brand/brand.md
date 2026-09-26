@@ -51,7 +51,7 @@ These combinations were measured:
 
 **The Marketing Specialist's tag** is lavender in the kit, which is not in the palette. It is recorded as a tag colour, `#A99BF0` (read from the kit; to be confirmed with the character files), and is used only as a character's tag fill with Midnight Terminal text.
 
-**The Architect** has no character or tag colour in the kit. Until the founder supplies them, its tag is Midnight Terminal with Soft Sand text, and its avatar is a placeholder (see Characters).
+**The Architect's tag** is `#7F9A7F` on the founder's Architect card (2026-09-26). It is a moss green close to the Scrum Master's Moss Grid, so the two tags are hard to tell apart. It is recorded as supplied, and the founder is asked whether the Architect should have its own colour.
 
 **Themes.**
 - **Light is the default:** Soft Sand pages; Midnight Terminal for the hero, the top bar, and terminal-style panels; white-on-sand cards (`#FBF6EC`, a lighter tint of Soft Sand).
@@ -79,7 +79,7 @@ The kit shows three lockups:
 3. **Horizontal:** the mark, then "FARIK", then a thin rule, then "AI HARNESS ENGINE".
 
 Rules:
-- The wordmark is always Clay Coral, with its darker pixel shadow.
+- The wordmark is the supplied Soft Sand file on dark surfaces (see Files). The kit showed it in Clay Coral with a darker pixel shadow.
 - On light backgrounds, the mark keeps its Midnight Terminal tile.
 - Nothing else sits within clear space equal to one pixel-cell of the mark times four.
 
@@ -93,9 +93,13 @@ The characters are pixel-art people, one per role, each with a coloured role tag
 | Scrum Master | SM, Moss Grid | Keeps the team aligned and unblocked. |
 | Developer | DEV, Signal Blue | Builds, tests and ships features. |
 | Marketing Specialist | MKT, lavender | Creates content and drives growth. |
-| Architect | ARCH, placeholder | Holds the shape of the system. (The founder supplies the character later.) |
+| Architect | ARCH, `#7F9A7F` | Designs systems and technical foundations. |
 
-The characters are the agents' default avatars, which the user may change (spec F1). In the web UI they appear as square avatars without their laptops.
+The founder's character files of 2026-09-26 replace the kit's drawings:
+- the Product Manager, Scrum Master, Developer and Marketing Specialist are full-body figures on transparent backgrounds;
+- the Architect is supplied as a finished card: a seated figure at a laptop beside a whiteboard, with its tag and description.
+
+The characters are the agents' default avatars, which the user may change (spec F1). In the web UI they appear as square avatars cropped to the head and shoulders.
 
 ## Pixel art: where it appears
 
@@ -112,10 +116,20 @@ The rest of the interface is clean and flat: forms, tables, the board, the chann
 
 The office scene is a warm pixel-art room: wooden desks, plants, hanging lamps, a window, and a kanban board on the wall with the columns To do, In progress, Review and Done. The team sits at one long table. It is the desktop app's scene (phase 7), and the web app uses a still crop of it on the first-run screen.
 
-## Files still to come from the founder
+## Files
 
-These are needed before phase 5 step 02 builds the assets. The kit image is a flattened picture whose pixel art is not on a clean grid, so it cannot be scaled crisply.
-1. **The logo mark:** an SVG, or a transparent PNG at 1024×1024 or larger. This is also the app icon.
-2. **The wordmark:** an SVG, or a transparent PNG at its native pixel size. Without it, Farik rebuilds the wordmark as an SVG pixel grid from the kit, for the founder's approval.
-3. **The four characters, and later the Architect:** transparent PNGs at their native pixel size (for example 32×32 or 48×48), without the laptop.
-4. **Phase 7 only:** the office scene as layered pieces, and the characters' sitting and walking frames.
+The founder supplied these on 2026-09-26. They are kept unchanged in `docs/brand/assets/`, and phase 5 step 02 builds `@farik/brand` from them:
+
+| File | What it is |
+|---|---|
+| `logo-mark.png` | The mark, 1254 × 1254 px, on a transparent background. It is also the source of the app icons. |
+| `wordmark.png` | "FARIK" in Soft Sand, 1024 × 290 px, on a transparent background, for dark surfaces. On a light surface it sits on a Midnight Terminal tile, as the mark does. |
+| `characters/product-manager.png`, `scrum-master.png`, `developer.png`, `marketing-specialist.png` | Full-body figures, about 200 × 300 px, on transparent backgrounds |
+| `characters/architect-card.png` | The Architect as a finished card, 1086 × 1448 px, on a background. A transparent figure like the others would let it be used the same way. |
+
+The kit's rule that the wordmark is always Clay Coral gives way to the supplied file: the wordmark is Soft Sand on dark surfaces. The README's banner and team images, in `docs/brand/readme/`, are composed from these files.
+
+Still wanted:
+1. **The Architect as a transparent figure**, matching the other four.
+2. **A decision on the Architect's tag colour**, since `#7F9A7F` reads as the Scrum Master's.
+3. **For phase 7 only:** the office scene as layered pieces, and the characters' sitting and walking frames.
