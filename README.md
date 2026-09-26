@@ -1,11 +1,12 @@
 <div align="center">
 
-# Farik
+<img src="docs/brand/readme/banner.png" alt="Farik, AI Harness Engine. Configure AI teams that build together. Plan. Build. Iterate. Ship together." width="100%">
 
-### Your AI agents don't need more autonomy. They need a contract.
+### Configure AI teams that build together.
 
-Farik runs a small team of AI agents against one git repository — under a governance harness
-that decides, in code, what they are allowed to do.
+Farik runs a small team of AI agents on your product — a Product Manager, a Scrum Master, an
+Architect, a Developer and a Marketing Specialist — under a governance harness that decides, in
+code, what they are allowed to do. Your agents don't need more autonomy. They need a contract.
 
 [![check](https://github.com/abdshaat/Farik/actions/workflows/check.yml/badge.svg)](https://github.com/abdshaat/Farik/actions/workflows/check.yml)
 [![license](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
@@ -18,9 +19,10 @@ that decides, in code, what they are allowed to do.
 
 > ### Status
 >
-> **Farik is pre-release and does not run agents yet.** The governance harness and the command line
-> are built and tested; the runtime that drives agent sessions is being written now. There is no
-> installable release and no stable API. Star the repository if you want to hear when there is.
+> **Farik is pre-release.** The governance harness, the agent runtime and a five-role team with
+> sprints and a team channel are built and tested, and run from the command line today. The web app,
+> made for people who never open a terminal, is being designed now. There is no installable release
+> and no stable API. Star the repository if you want to hear when there is.
 
 ## The problem
 
@@ -139,9 +141,25 @@ The governor is the only thing that can move a task between the states it owns, 
 comes with a reason. When an agent runs out of budget, gets blocked, or fails review three times,
 the task escalates to you rather than grinding on.
 
+## Meet the team
+
 You assemble the team yourself: two to seven agents, each with a name, an avatar and one of five
-roles — Product Manager, Scrum Master, Architect, Software Developer, Marketing Specialist. Each
-gets its own model settings, tools, MCP servers and skills.
+roles. Each gets its own model settings, tools, MCP servers and skills. Two developers is the
+common case.
+
+<table align="center">
+<tr>
+<td align="center" width="20%"><img src="docs/brand/readme/pm.png" alt="The Product Manager, a pixel-art character with a PM tag" width="116"><br><b>Product Manager</b><br><sub>Defines vision and priorities, and turns your requests into contracts.</sub></td>
+<td align="center" width="20%"><img src="docs/brand/readme/sm.png" alt="The Scrum Master, a pixel-art character with an SM tag" width="116"><br><b>Scrum Master</b><br><sub>Keeps the team aligned and unblocked, and runs the sprint.</sub></td>
+<td align="center" width="20%"><img src="docs/brand/readme/icon.png" alt="The Farik mark standing in for the Architect's character" width="96"><br><b>Architect</b><br><sub>Holds the shape of the system and reviews the work. Its character is coming.</sub></td>
+<td align="center" width="20%"><img src="docs/brand/readme/dev.png" alt="The Developer, a pixel-art character with a DEV tag" width="116"><br><b>Developer</b><br><sub>Builds, tests and ships features. The only one who changes code.</sub></td>
+<td align="center" width="20%"><img src="docs/brand/readme/mkt.png" alt="The Marketing Specialist, a pixel-art character with an MKT tag" width="116"><br><b>Marketing Specialist</b><br><sub>Creates content and drives growth.</sub></td>
+</tr>
+</table>
+
+<p align="center">
+<img src="docs/brand/readme/office.png" alt="The team at one long table in a pixel-art office, under a sprint board with To do, In progress, Review and Done" width="75%">
+</p>
 
 ## Getting started
 
@@ -174,13 +192,14 @@ The binary lands at `target/release/farik`. Point it at any git repository and r
 
 ## Roadmap
 
-- **Now** — the governance harness and the command line are done. The agent runtime is in progress,
-  ending in the first run where a Product Manager writes contracts for real issues, one Developer
-  implements them and another verifies them.
-- **Next** — all five roles, the team channel, and a desktop application with a board and a
-  pixel-art office you can watch the team work in.
+- **Done** — the governance harness, the command line, the agent runtime, and the team: five roles,
+  sprints, spending limits, the team channel and its ceremonies.
+- **Now** — the brand, then a web app built for people who never open a terminal: set up a team in a
+  wizard, approve plans and accept work from a plain-language summary, with the code changes one
+  click away.
+- **Next** — a desktop app with the pixel-art office you can watch the team work in.
 - **Then** — per-agent MCP servers and skills, one-on-one conversations, the audit viewer, and the
-  public launch.
+  public launch; native iOS and Android apps after that.
 
 Farik is Apache 2.0 and always will be. A hosted tier is planned for people who would rather not run
 it themselves, but nothing that makes the agents safer or more controllable will ever be paid — a
