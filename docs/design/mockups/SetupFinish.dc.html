@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Set up: finishing work</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&amp;family=Silkscreen&amp;family=Space+Grotesk:wght@400;500;600&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0;font-family:'Space Grotesk',system-ui,sans-serif;background:#F3E7D3;color:#161616}
+a{color:#A44D2B}a:hover{color:#7E3A1F}
+.px{image-rendering:pixelated}
+.spin{display:inline-block;width:10px;height:18px;background:#6E8F76;vertical-align:-3px;animation:blink 1.1s steps(1) infinite}
+@keyframes blink{50%{opacity:0}}
+@media (prefers-reduced-motion:reduce){.spin{animation:none}}
+button:focus-visible,a:focus-visible,input:focus-visible,textarea:focus-visible{outline:2px solid #5A8DFF;outline-offset:2px}
+</style>
+</helmet>
+<div style="width: 1440px; height: 900px; display: flex; background: #F3E7D3; color: #161616; font-family: 'Space Grotesk', system-ui, sans-serif;">
+<aside style="width: 520px; flex-shrink: 0; background: #161616; color: #F3E7D3; display: flex; flex-direction: column; padding: 48px; box-sizing: border-box; gap: 28px;">
+<div style="display: flex; align-items: center; gap: 16px;">
+<img class="px" src="/_blob/cbf211abf5739b5bb073797fe4fb08fc" alt="" style="width: 64px; height: 64px;">
+<div style="display: flex; flex-direction: column; gap: 6px;">
+<img src="/_blob/357b43dd6301616912c5f06654da35a4" alt="Farik" style="width: 196px; height: auto;">
+<span style="font-family: 'Silkscreen', monospace; font-size: 13px; letter-spacing: 0.2em; color: #F3E7D3;">AI HARNESS ENGINE</span>
+</div>
+</div>
+<img class="px" src="/_blob/8376139218c7d991cfe8566817a314dc" alt="The team at a long table under a sprint board" style="width: 424px; height: auto; border: 3px solid #D8896A;">
+<div style="font-family: 'JetBrains Mono', monospace; font-size: 18px; line-height: 30px; display: flex; flex-direction: column;">
+<span><span style="color: #D8896A;">&gt;</span> Plan.</span>
+<span><span style="color: #D8896A;">&gt;</span> Build.</span>
+<span><span style="color: #D8896A;">&gt;</span> Iterate.</span>
+<span><span style="color: #D8896A;">&gt;</span> Ship together.</span>
+</div>
+</aside>
+<main style="flex-grow: 1; display: flex; flex-direction: column; padding: 40px 72px 32px; box-sizing: border-box; gap: 28px; min-width: 0;">
+<ol aria-label="Setup steps" style="list-style: none; margin: 0; padding: 0; display: flex; gap: 20px; font-size: 14px;">
+<li style="display: flex; align-items: center; gap: 8px; color: #161616; font-weight: 400;"><span style="font-family: 'JetBrains Mono', monospace; width: 24px; height: 24px; display: inline-flex; align-items: center; justify-content: center; border: 1px solid #161616; background: transparent; color: #161616;">1</span>Your project</li>
+<li style="display: flex; align-items: center; gap: 8px; color: #161616; font-weight: 400;"><span style="font-family: 'JetBrains Mono', monospace; width: 24px; height: 24px; display: inline-flex; align-items: center; justify-content: center; border: 1px solid #161616; background: transparent; color: #161616;">2</span>What we found</li>
+<li style="display: flex; align-items: center; gap: 8px; color: #161616; font-weight: 400;"><span style="font-family: 'JetBrains Mono', monospace; width: 24px; height: 24px; display: inline-flex; align-items: center; justify-content: center; border: 1px solid #161616; background: transparent; color: #161616;">3</span>Your team</li>
+<li style="display: flex; align-items: center; gap: 8px; color: #161616; font-weight: 400;"><span style="font-family: 'JetBrains Mono', monospace; width: 24px; height: 24px; display: inline-flex; align-items: center; justify-content: center; border: 1px solid #161616; background: transparent; color: #161616;">4</span>What they may do</li>
+<li style="display: flex; align-items: center; gap: 8px; color: #161616; font-weight: 400;"><span style="font-family: 'JetBrains Mono', monospace; width: 24px; height: 24px; display: inline-flex; align-items: center; justify-content: center; border: 1px solid #161616; background: transparent; color: #161616;">5</span>Spending</li>
+<li aria-current="step" style="display: flex; align-items: center; gap: 8px; color: #161616; font-weight: 600;"><span style="font-family: 'JetBrains Mono', monospace; width: 24px; height: 24px; display: inline-flex; align-items: center; justify-content: center; border: 1px solid #161616; background: #161616; color: #F3E7D3;">6</span>Finishing work</li>
+</ol>
+<div style="display: flex; flex-direction: column; gap: 8px; max-width: 640px;">
+<h1 style="margin: 0; font-size: 36px; line-height: 40px; font-weight: 600;">When you accept a piece of work, what happens to it?</h1>
+<p style="margin: 0; font-size: 16px; line-height: 24px; color: #5B5347;">Accepted work has to be added to your project. Choose how much you want to do by hand.</p>
+</div>
+<div role="radiogroup" aria-label="Accepted work" style="display: flex; flex-direction: column; gap: 12px;">
+<label style="display: flex; gap: 14px; align-items: flex-start; padding: 16px; border: 1px solid {{autoBorder}}; border-radius: 8px; background: {{autoBg}}; cursor: pointer; max-width: 720px;">
+<input type="radio" name="integ" value="auto" checked="{{auto}}" onChange="{{pickAuto}}" style="width: 20px; height: 20px; margin: 2px 0 0; accent-color: #161616; flex-shrink: 0;">
+<span style="display: flex; flex-direction: column; gap: 4px;"><span style="font-size: 17px; font-weight: 600;">Farik adds it for me</span><span style="font-size: 15px; line-height: 22px; color: #5B5347;">Recommended. Farik adds the work to your project as soon as you accept it, and sends it to your online repository if you have one.</span></span>
+</label>
+<label style="display: flex; gap: 14px; align-items: flex-start; padding: 16px; border: 1px solid {{prBorder}}; border-radius: 8px; background: {{prBg}}; cursor: pointer; max-width: 720px;">
+<input type="radio" name="integ" value="pr" checked="{{pr}}" onChange="{{pickPr}}" style="width: 20px; height: 20px; margin: 2px 0 0; accent-color: #161616; flex-shrink: 0;">
+<span style="display: flex; flex-direction: column; gap: 4px;"><span style="font-size: 17px; font-weight: 600;">Open a pull request on GitHub for each piece</span><span style="font-size: 15px; line-height: 22px; color: #5B5347;">You, or someone you trust, merges each one on GitHub. Needs the GitHub app on this computer.</span></span>
+</label>
+<label style="display: flex; gap: 14px; align-items: flex-start; padding: 16px; border: 1px solid {{manualBorder}}; border-radius: 8px; background: {{manualBg}}; cursor: pointer; max-width: 720px;">
+<input type="radio" name="integ" value="manual" checked="{{manual}}" onChange="{{pickManual}}" style="width: 20px; height: 20px; margin: 2px 0 0; accent-color: #161616; flex-shrink: 0;">
+<span style="display: flex; flex-direction: column; gap: 4px;"><span style="font-size: 17px; font-weight: 600;">I will add each one myself</span><span style="font-size: 15px; line-height: 22px; color: #5B5347;">Farik waits. Each accepted piece shows an "Add to project" button until you press it.</span></span>
+</label>
+</div>
+<div style="max-width: 720px; display: flex; align-items: center; gap: 14px; padding-top: 8px; border-top: 1px solid #D9CBB3;"><span style="flex-grow: 1; font-size: 15px; line-height: 22px; color: #5B5347;">Rules for the whole team, the checks every piece of work must pass, and how plans are judged are already set to safe choices.</span><a href="SetupAdvanced.dc.html" style="font-size: 15px; font-weight: 600;">Show advanced settings</a></div>
+<div style="flex-grow: 1;"></div>
+<div style="display: flex; gap: 12px; align-items: center; max-width: 760px;">
+<button type="button" style="font-family: inherit; font-size: 16px; font-weight: 600; background: transparent; color: #161616; border: 1px solid #161616; border-radius: 4px; padding: 11px 20px; cursor: pointer;">Back</button>
+<span style="flex-grow: 1;"></span>
+
+<button type="button" style="font-family: inherit; font-size: 16px; font-weight: 600; background: {{contBg}}; color: #161616; border: 0; border-radius: 4px; padding: 12px 24px; cursor: pointer;">Start the team</button>
+</div>
+</main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":900}}'>
+class Component extends DCLogic {
+  constructor(props) { super(props); this.state = { mode: 'auto' }; }
+  renderVals() {
+    var m = this.state.mode, auto = m === 'auto', pr = m === 'pr', manual = m === 'manual';
+    return { auto: auto, pr: pr, manual: manual, autoBorder: auto ? '#161616' : '#8A7F6E', autoBg: auto ? '#FBF6EC' : 'transparent', prBorder: pr ? '#161616' : '#8A7F6E', prBg: pr ? '#FBF6EC' : 'transparent', manualBorder: manual ? '#161616' : '#8A7F6E', manualBg: manual ? '#FBF6EC' : 'transparent', contBg: '#D8896A',
+      pickAuto: () => this.setState({ mode: 'auto' }), pickPr: () => this.setState({ mode: 'pr' }), pickManual: () => this.setState({ mode: 'manual' }) };
+  }
+}
+</script>
+</body>
+</html>

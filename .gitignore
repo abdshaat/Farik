@@ -38,3 +38,6 @@ pnpm-debug.log*
 
 # rust
 target/
+
+# the deployment plan holds account details and stays local (ADR 0017)
+deploy/

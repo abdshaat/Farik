@@ -1,0 +1,417 @@
+{
+  "v": 3,
+  "attachments": {},
+  "boards": {
+    "AgentEdit.dc.html": {
+      "h": 1000,
+      "is_interactive": true,
+      "page": "team",
+      "title": "Edit Theo",
+      "w": 1440,
+      "x": 1520,
+      "y": 0
+    },
+    "AnswerQuestion.dc.html": {
+      "h": 1000,
+      "is_interactive": true,
+      "page": "gates",
+      "title": "Answer a question",
+      "w": 1440,
+      "x": 0,
+      "y": 2240
+    },
+    "ApprovePlan.dc.html": {
+      "h": 1000,
+      "is_interactive": true,
+      "page": "gates",
+      "title": "Approve the plan",
+      "w": 1440,
+      "x": 3040,
+      "y": 0
+    },
+    "Board.dc.html": {
+      "h": 900,
+      "is_interactive": true,
+      "page": "daily",
+      "title": "Board",
+      "w": 1440,
+      "x": 3040,
+      "y": 0
+    },
+    "Channel.dc.html": {
+      "h": 1000,
+      "is_interactive": true,
+      "page": "daily",
+      "title": "Channel",
+      "w": 1440,
+      "x": 0,
+      "y": 2240
+    },
+    "Connect.dc.html": {
+      "h": 900,
+      "is_interactive": true,
+      "page": "setup",
+      "title": "Connect to Farik",
+      "w": 1440,
+      "x": 1520,
+      "y": 2040
+    },
+    "Costs.dc.html": {
+      "h": 1000,
+      "is_interactive": true,
+      "page": "daily",
+      "title": "Costs",
+      "w": 1440,
+      "x": 3040,
+      "y": 2240
+    },
+    "Gate.dc.html": {
+      "h": 1000,
+      "is_interactive": true,
+      "page": "daily",
+      "title": "Accept work",
+      "w": 1440,
+      "x": 1520,
+      "y": 0
+    },
+    "HelpNeeded.dc.html": {
+      "h": 1000,
+      "is_interactive": true,
+      "page": "gates",
+      "title": "Help needed",
+      "w": 1440,
+      "x": 3040,
+      "y": 1120
+    },
+    "Main.dc.html": {
+      "h": 1000,
+      "is_interactive": true,
+      "page": "daily",
+      "title": "Today (tweak: dark theme)",
+      "w": 1440,
+      "x": 0,
+      "y": 0
+    },
+    "OneOnOne.dc.html": {
+      "h": 1000,
+      "is_interactive": true,
+      "page": "daily",
+      "title": "Talking with Mira",
+      "w": 1440,
+      "x": 1520,
+      "y": 2240
+    },
+    "Phone.dc.html": {
+      "h": 844,
+      "is_interactive": true,
+      "page": "phone",
+      "title": "Today on a phone",
+      "w": 390,
+      "x": 0,
+      "y": 0
+    },
+    "PhoneBoard.dc.html": {
+      "h": 844,
+      "is_interactive": true,
+      "page": "phone",
+      "title": "Board on a phone",
+      "w": 390,
+      "x": 940,
+      "y": 0
+    },
+    "PhoneChannel.dc.html": {
+      "h": 844,
+      "is_interactive": true,
+      "page": "phone",
+      "title": "Channel on a phone",
+      "w": 390,
+      "x": 1410,
+      "y": 0
+    },
+    "PhoneGate.dc.html": {
+      "h": 844,
+      "is_interactive": true,
+      "page": "phone",
+      "title": "Accept work on a phone",
+      "w": 390,
+      "x": 470,
+      "y": 0
+    },
+    "PlanEditor.dc.html": {
+      "h": 1000,
+      "is_interactive": true,
+      "page": "gates",
+      "title": "Edit the plan",
+      "w": 1440,
+      "x": 0,
+      "y": 1120
+    },
+    "Questions.dc.html": {
+      "h": 1000,
+      "is_interactive": true,
+      "page": "gates",
+      "title": "Mira's questions",
+      "w": 1440,
+      "x": 1520,
+      "y": 0
+    },
+    "RequestFiled.dc.html": {
+      "h": 1000,
+      "is_interactive": true,
+      "page": "gates",
+      "title": "Request filed",
+      "w": 1440,
+      "x": 0,
+      "y": 0
+    },
+    "SendBack.dc.html": {
+      "h": 1000,
+      "is_interactive": true,
+      "page": "gates",
+      "title": "Send back with a note",
+      "w": 1440,
+      "x": 1520,
+      "y": 1120
+    },
+    "Settings.dc.html": {
+      "h": 1000,
+      "is_interactive": true,
+      "page": "team",
+      "title": "Settings",
+      "w": 1440,
+      "x": 3040,
+      "y": 0
+    },
+    "SetupAdvanced.dc.html": {
+      "h": 900,
+      "is_interactive": true,
+      "page": "setup",
+      "title": "Set up: advanced settings",
+      "w": 1440,
+      "x": 0,
+      "y": 2040
+    },
+    "SetupFinish.dc.html": {
+      "h": 900,
+      "is_interactive": true,
+      "page": "setup",
+      "title": "Set up: finishing work",
+      "w": 1440,
+      "x": 3040,
+      "y": 1020
+    },
+    "SetupPermissions.dc.html": {
+      "h": 900,
+      "is_interactive": true,
+      "page": "setup",
+      "title": "Set up: what they may do",
+      "w": 1440,
+      "x": 0,
+      "y": 1020
+    },
+    "SetupProject.dc.html": {
+      "h": 900,
+      "is_interactive": true,
+      "page": "setup",
+      "title": "Set up: your project",
+      "w": 1440,
+      "x": 0,
+      "y": 0
+    },
+    "SetupScan.dc.html": {
+      "h": 900,
+      "page": "setup",
+      "title": "Set up: what we found",
+      "w": 1440,
+      "x": 1520,
+      "y": 0
+    },
+    "SetupSpending.dc.html": {
+      "h": 900,
+      "is_interactive": true,
+      "page": "setup",
+      "title": "Set up: spending",
+      "w": 1440,
+      "x": 1520,
+      "y": 1020
+    },
+    "Site.dc.html": {
+      "h": 2400,
+      "page": "site",
+      "title": "Farik website",
+      "w": 1440,
+      "x": 0,
+      "y": 0
+    },
+    "SprintStart.dc.html": {
+      "h": 1000,
+      "is_interactive": true,
+      "page": "daily",
+      "title": "Start a sprint",
+      "w": 1440,
+      "x": 1520,
+      "y": 1120
+    },
+    "SprintView.dc.html": {
+      "h": 1000,
+      "is_interactive": true,
+      "page": "daily",
+      "title": "Sprint",
+      "w": 1440,
+      "x": 3040,
+      "y": 1120
+    },
+    "TaskDetail.dc.html": {
+      "h": 1000,
+      "is_interactive": true,
+      "page": "daily",
+      "title": "Task detail",
+      "w": 1440,
+      "x": 0,
+      "y": 1120
+    },
+    "Team.dc.html": {
+      "h": 1000,
+      "is_interactive": true,
+      "page": "team",
+      "title": "Your team",
+      "w": 1440,
+      "x": 0,
+      "y": 0
+    },
+    "Welcome.dc.html": {
+      "h": 900,
+      "page": "setup",
+      "title": "Set up: your team",
+      "w": 1440,
+      "x": 3040,
+      "y": 0
+    }
+  },
+  "createdOnFiles": {
+    "at": "2026-09-25T23:55:00Z",
+    "v": 1
+  },
+  "designSystems": [],
+  "launch": {
+    "page": "daily",
+    "view": "canvas"
+  },
+  "notes": {
+    "t_daily": {
+      "kind": "title1",
+      "maxW": 4400,
+      "page": "daily",
+      "text": "Farik: daily work",
+      "w": 240,
+      "x": 0,
+      "y": -300
+    },
+    "t_gates": {
+      "kind": "title1",
+      "maxW": 4400,
+      "page": "gates",
+      "text": "Farik: requests and approvals",
+      "w": 240,
+      "x": 0,
+      "y": -300
+    },
+    "t_phone": {
+      "kind": "title1",
+      "maxW": 4400,
+      "page": "phone",
+      "text": "Farik: phone",
+      "w": 240,
+      "x": 0,
+      "y": -300
+    },
+    "t_setup": {
+      "kind": "title1",
+      "maxW": 4400,
+      "page": "setup",
+      "text": "Farik: first run",
+      "w": 240,
+      "x": 0,
+      "y": -300
+    },
+    "t_site": {
+      "kind": "title1",
+      "maxW": 4400,
+      "page": "site",
+      "text": "Farik: the public website",
+      "w": 240,
+      "x": 0,
+      "y": -300
+    },
+    "t_team": {
+      "kind": "title1",
+      "maxW": 4400,
+      "page": "team",
+      "text": "Farik: team and settings",
+      "w": 240,
+      "x": 0,
+      "y": -300
+    }
+  },
+  "order": [
+    "Main.dc.html",
+    "Gate.dc.html",
+    "Board.dc.html",
+    "TaskDetail.dc.html",
+    "SprintStart.dc.html",
+    "SprintView.dc.html",
+    "Channel.dc.html",
+    "OneOnOne.dc.html",
+    "Costs.dc.html",
+    "RequestFiled.dc.html",
+    "Questions.dc.html",
+    "ApprovePlan.dc.html",
+    "PlanEditor.dc.html",
+    "SendBack.dc.html",
+    "HelpNeeded.dc.html",
+    "AnswerQuestion.dc.html",
+    "SetupProject.dc.html",
+    "SetupScan.dc.html",
+    "Welcome.dc.html",
+    "SetupPermissions.dc.html",
+    "SetupSpending.dc.html",
+    "SetupFinish.dc.html",
+    "SetupAdvanced.dc.html",
+    "Connect.dc.html",
+    "Team.dc.html",
+    "AgentEdit.dc.html",
+    "Settings.dc.html",
+    "Phone.dc.html",
+    "PhoneGate.dc.html",
+    "PhoneBoard.dc.html",
+    "PhoneChannel.dc.html",
+    "Site.dc.html"
+  ],
+  "pages": [
+    {
+      "id": "daily",
+      "name": "Daily work"
+    },
+    {
+      "id": "gates",
+      "name": "Requests and approvals"
+    },
+    {
+      "id": "setup",
+      "name": "First run"
+    },
+    {
+      "id": "team",
+      "name": "Team and settings"
+    },
+    {
+      "id": "phone",
+      "name": "Phone"
+    },
+    {
+      "id": "site",
+      "name": "Website"
+    }
+  ],
+  "title": "Farik web UI mockup"
+}

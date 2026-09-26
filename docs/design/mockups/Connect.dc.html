@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Connect to Farik</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&amp;family=Silkscreen&amp;family=Space+Grotesk:wght@400;500;600&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0;font-family:'Space Grotesk',system-ui,sans-serif;background:#F3E7D3;color:#161616}
+a{color:#A44D2B}a:hover{color:#7E3A1F}
+.px{image-rendering:pixelated}
+.spin{display:inline-block;width:10px;height:18px;background:#6E8F76;vertical-align:-3px;animation:blink 1.1s steps(1) infinite}
+@keyframes blink{50%{opacity:0}}
+@media (prefers-reduced-motion:reduce){.spin{animation:none}}
+button:focus-visible,a:focus-visible,input:focus-visible,textarea:focus-visible{outline:2px solid #5A8DFF;outline-offset:2px}
+</style>
+</helmet>
+<div style="width: 1440px; height: 900px; display: flex; flex-direction: column; background: #161616; color: #F3E7D3; font-family: 'Space Grotesk', system-ui, sans-serif;">
+<div style="flex-grow: 1; display: flex; align-items: center; justify-content: center;">
+<main style="width: 640px; display: flex; flex-direction: column; gap: 28px;">
+<div style="display: flex; align-items: center; gap: 16px;">
+<img class="px" src="/_blob/cbf211abf5739b5bb073797fe4fb08fc" alt="" style="width: 56px; height: 56px;">
+<img src="/_blob/357b43dd6301616912c5f06654da35a4" alt="Farik" style="width: 168px; height: auto;">
+</div>
+<sc-if value="{{lost}}" hint-placeholder-val="{{ false }}">
+<div style="display: flex; flex-direction: column; gap: 12px;">
+<h1 style="margin: 0; font-size: 30px; line-height: 36px; font-weight: 600;">Farik stopped answering</h1>
+<p style="margin: 0; font-size: 17px; line-height: 26px; color: #B9AE9C;">Your team is safe. Nothing is lost while this page waits. If you closed the Farik window on your computer, start it again and this page reconnects by itself.</p>
+<p role="status" style="margin: 0; font-family: 'JetBrains Mono', monospace; font-size: 15px; color: #F3E7D3;"><span style="color: #D8896A;">&gt;</span> Trying again in 5 seconds <span class="spin" aria-hidden="true"></span></p>
+</div>
+</sc-if>
+<sc-if value="{{noToken}}" hint-placeholder-val="{{ true }}">
+<div style="display: flex; flex-direction: column; gap: 12px;">
+<h1 style="margin: 0; font-size: 30px; line-height: 36px; font-weight: 600;">Open Farik from its start link</h1>
+<p style="margin: 0; font-size: 17px; line-height: 26px; color: #B9AE9C;">For your safety, this page only works when opened from the link Farik gives you. Each link works once, so an old one from your history will not open it.</p>
+</div>
+<ol style="margin: 0; padding: 0 0 0 22px; display: flex; flex-direction: column; gap: 14px; font-size: 17px; line-height: 26px;">
+<li>Open the Terminal app on your computer.</li>
+<li>Type this and press Enter:<div style="margin-top: 8px; display: flex; align-items: center; gap: 12px;"><code style="font-family: 'JetBrains Mono', monospace; font-size: 16px; background: #1F1F1F; border: 1px solid #5B5347; border-radius: 4px; padding: 10px 14px;"><span style="color: #D8896A;">&gt;</span> farik serve</code><button type="button" style="font-family: inherit; font-size: 15px; font-weight: 600; background: transparent; color: #F3E7D3; border: 1px solid #F3E7D3; border-radius: 4px; padding: 9px 14px; cursor: pointer;">Copy</button></div></li>
+<li>Farik prints a link that starts with http://127.0.0.1. Open it in this browser.</li>
+</ol>
+<p style="margin: 0; font-size: 15px; line-height: 22px; color: #B9AE9C;">The desktop app, coming later, will skip these steps.</p>
+</sc-if>
+<div style="display: flex; gap: 12px;">
+<button type="button" onClick="{{showNoToken}}" aria-pressed="{{noToken}}" style="font-family: inherit; font-size: 14px; background: transparent; color: #B9AE9C; border: 1px solid #5B5347; border-radius: 4px; padding: 6px 12px; cursor: pointer;">Mockup: no start link</button>
+<button type="button" onClick="{{showLost}}" aria-pressed="{{lost}}" style="font-family: inherit; font-size: 14px; background: transparent; color: #B9AE9C; border: 1px solid #5B5347; border-radius: 4px; padding: 6px 12px; cursor: pointer;">Mockup: connection lost</button>
+</div>
+</main>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":900}}'>
+class Component extends DCLogic {
+  constructor(props) { super(props); this.state = { view: 'noToken' }; }
+  renderVals() {
+    var v = this.state.view;
+    return { noToken: v === 'noToken', lost: v === 'lost',
+      showNoToken: () => this.setState({ view: 'noToken' }), showLost: () => this.setState({ view: 'lost' }) };
+  }
+}
+</script>
+</body>
+</html>

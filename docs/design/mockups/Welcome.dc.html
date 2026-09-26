@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Set up your team</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&amp;family=Silkscreen&amp;family=Space+Grotesk:wght@400;500;600&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0;font-family:'Space Grotesk',system-ui,sans-serif;background:#F3E7D3;color:#161616}
+a{color:#A44D2B}a:hover{color:#7E3A1F}
+.px{image-rendering:pixelated}
+button:focus-visible,a:focus-visible,input:focus-visible{outline:2px solid #5A8DFF;outline-offset:2px}
+</style>
+</helmet>
+<div style="width: 1440px; height: 900px; display: flex; background: #F3E7D3; color: #161616; font-family: 'Space Grotesk', system-ui, sans-serif;">
+
+<aside style="width: 520px; flex-shrink: 0; background: #161616; color: #F3E7D3; display: flex; flex-direction: column; padding: 48px; box-sizing: border-box; gap: 28px;">
+<div style="display: flex; align-items: center; gap: 16px;">
+<img class="px" src="/_blob/cbf211abf5739b5bb073797fe4fb08fc" alt="" style="width: 64px; height: 64px;">
+<div style="display: flex; flex-direction: column; gap: 6px;">
+<img src="/_blob/357b43dd6301616912c5f06654da35a4" alt="Farik" style="width: 196px; height: auto;">
+<span style="font-family: 'Silkscreen', monospace; font-size: 13px; letter-spacing: 0.2em; color: #F3E7D3;">AI HARNESS ENGINE</span>
+</div>
+</div>
+<img class="px" src="/_blob/8376139218c7d991cfe8566817a314dc" alt="The team at a long table under a sprint board" style="width: 424px; height: auto; border: 3px solid #D8896A;">
+<div style="font-family: 'JetBrains Mono', monospace; font-size: 18px; line-height: 30px; display: flex; flex-direction: column;">
+<span><span style="color: #D8896A;">&gt;</span> Plan.</span>
+<span><span style="color: #D8896A;">&gt;</span> Build.</span>
+<span><span style="color: #D8896A;">&gt;</span> Iterate.</span>
+<span><span style="color: #D8896A;">&gt;</span> Ship together.</span>
+</div>
+</aside>
+
+<main style="flex-grow: 1; display: flex; flex-direction: column; padding: 40px 72px 32px; box-sizing: border-box; gap: 28px;">
+<ol aria-label="Setup steps" style="list-style: none; margin: 0; padding: 0; display: flex; gap: 20px; font-size: 14px;">
+<sc-for list="{{steps}}" as="s" hint-placeholder-count="6">
+<li aria-current="{{s.current}}" style="display: flex; align-items: center; gap: 8px; color: {{s.color}}; font-weight: {{s.weight}};"><span style="font-family: 'JetBrains Mono', monospace; width: 24px; height: 24px; display: inline-flex; align-items: center; justify-content: center; border: 1px solid {{s.color}}; background: {{s.fill}}; color: {{s.numColor}};">{{s.n}}</span>{{s.label}}</li>
+</sc-for>
+</ol>
+
+<div style="display: flex; flex-direction: column; gap: 8px; max-width: 640px;">
+<h1 style="margin: 0; font-size: 36px; line-height: 40px; font-weight: 600;">Who should be on your team?</h1>
+<p style="margin: 0; font-size: 16px; line-height: 24px; color: #5B5347;">We suggest five, one for each job. You can rename them and change their pictures now or later. To add a second developer, choose "Add someone".</p>
+</div>
+
+<ul style="list-style: none; margin: 0; padding: 0; max-width: 760px; display: flex; flex-direction: column;">
+<sc-for list="{{agents}}" as="a" hint-placeholder-count="5">
+<li style="display: flex; align-items: center; gap: 18px; padding: 12px 0; border-bottom: 1px solid #D9CBB3;">
+<input type="checkbox" checked="{{a.on}}" aria-label="Include {{a.role}}" style="width: 22px; height: 22px; accent-color: #161616; flex-shrink: 0;">
+<sc-if value="{{a.hasArt}}" hint-placeholder-val="{{ true }}"><img class="px" src="{{a.av}}" alt="" style="width: 56px; height: 56px; border: 3px solid {{a.tag}}; flex-shrink: 0;"></sc-if>
+<sc-if value="{{a.noArt}}" hint-placeholder-val="{{ false }}"><img class="px" src="/_blob/ad487f8d4aefebda16a64e156d704fdb" alt="" style="width: 56px; height: 56px; border: 3px solid #E3B04B; flex-shrink: 0; box-sizing: content-box;"></sc-if>
+<div style="display: flex; flex-direction: column; gap: 4px; width: 200px; flex-shrink: 0;">
+<label style="font-size: 13px; color: #5B5347;">{{a.role}}</label>
+<input type="text" value="{{a.name}}" aria-label="Name for the {{a.role}}" style="font-family: inherit; font-size: 16px; font-weight: 600; border: 1px solid #8A7F6E; border-radius: 4px; padding: 6px 10px; background: #FBF6EC; color: #161616;">
+</div>
+<span style="flex-grow: 1; font-size: 15px; line-height: 22px; color: #161616;">{{a.job}}</span>
+</li>
+</sc-for>
+</ul>
+<button type="button" style="align-self: flex-start; font-family: inherit; font-size: 16px; font-weight: 600; background: transparent; color: #A44D2B; border: 0; padding: 4px 0; cursor: pointer; text-decoration: underline; text-underline-offset: 3px;">Add someone</button>
+
+<div style="flex-grow: 1;"></div>
+<div style="display: flex; gap: 12px; align-items: center; max-width: 760px;">
+<button type="button" style="font-family: inherit; font-size: 16px; font-weight: 600; background: transparent; color: #161616; border: 1px solid #161616; border-radius: 4px; padding: 11px 20px; cursor: pointer;">Back</button>
+<span style="flex-grow: 1;"></span>
+<button type="button" style="font-family: inherit; font-size: 16px; font-weight: 600; background: #D8896A; color: #161616; border: 0; border-radius: 4px; padding: 12px 24px; cursor: pointer;">Continue with these five</button>
+</div>
+</main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":900}}'>
+class Component extends DCLogic {
+  renderVals() {
+    var labels = ['Your project', 'What we found', 'Your team', 'What they may do', 'Spending', 'Finishing work'];
+    var steps = labels.map(function (label, i) {
+      var done = i < 2, cur = i === 2;
+      return { n: String(i + 1), label: label, current: cur ? 'step' : 'false',
+        color: cur || done ? '#161616' : '#5B5347', weight: cur ? '600' : '400',
+        fill: cur ? '#161616' : 'transparent', numColor: cur ? '#F3E7D3' : (done ? '#161616' : '#5B5347') };
+    });
+    function ag(role, name, av, tag, job) { return { role: role, name: name, av: av || '', tag: tag, job: job, on: true, hasArt: !!av, noArt: !av }; }
+    return {
+      steps: steps,
+      agents: [
+        ag('Product Manager', 'Mira', '/_blob/9bb5279ccb2c1912098a3a1b2c486aee', '#D8896A', 'Turns what you ask for into a plan, and asks you when something is unclear.'),
+        ag('Scrum Master', 'Sol', '/_blob/50d64e70d63028a36a09a3b10dd330bb', '#6E8F76', 'Hands out the work and keeps the team unblocked.'),
+        ag('Architect', 'Ada', '/_blob/ad487f8d4aefebda16a64e156d704fdb', '#E3B04B', 'Keeps the project well built, and reviews the work before you see it.'),
+        ag('Developer', 'Theo', '/_blob/b3a8b1467a4f9ce051ca665a72525186', '#5A8DFF', 'Builds and tests what the plan asks for. The only one who changes code.'),
+        ag('Marketing Specialist', 'Kai', '/_blob/d639a95a4e1c0d33f55ba49d10828138', '#A99BF0', 'Writes posts, pages and a plan for getting the word out.')
+      ]
+    };
+  }
+}
+</script>
+</body>
+</html>

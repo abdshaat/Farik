@@ -1,70 +1,95 @@
 <div align="center">
 
-# Farik
+<img src="docs/brand/readme/banner.png" alt="Farik, AI Harness Engine: configure AI teams that build together" width="100%">
 
-### Your AI agents don't need more autonomy. They need a contract.
+<br>
 
-Farik runs a small team of AI agents against one git repository — under a governance harness
-that decides, in code, what they are allowed to do.
+**A team of AI agents for your product, held to contracts in code.**
 
 [![check](https://github.com/abdshaat/Farik/actions/workflows/check.yml/badge.svg)](https://github.com/abdshaat/Farik/actions/workflows/check.yml)
-[![license](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
-[![rust](https://img.shields.io/badge/rust-1.98.1-dea584.svg)](rust-toolchain.toml)
-[![status](https://img.shields.io/badge/status-pre--release-orange.svg)](#status)
+[![license](https://img.shields.io/badge/license-Apache--2.0-6E8F76.svg)](LICENSE)
+[![rust](https://img.shields.io/badge/rust-1.98.1-D8896A.svg)](rust-toolchain.toml)
+[![status](https://img.shields.io/badge/status-pre--release-5A8DFF.svg)](#status)
+
+[Why Farik](#why-farik) &nbsp;|&nbsp; [How it works](#how-it-works) &nbsp;|&nbsp; [The team](#meet-the-team) &nbsp;|&nbsp; [Quick start](#quick-start) &nbsp;|&nbsp; [Roadmap](#roadmap) &nbsp;|&nbsp; [Contributing](#contributing)
 
 </div>
 
----
+Farik runs a small team of AI agents (a Product Manager, a Scrum Master, an Architect, a Developer and a Marketing Specialist) against one git repository. They plan, build, review and ship together. A governance harness sits between every agent and every tool and decides, in code, what each of them may do. Your agents don't need more autonomy. They need a contract.
 
-> ### Status
->
-> **Farik is pre-release and does not run agents yet.** The governance harness and the command line
-> are built and tested; the runtime that drives agent sessions is being written now. There is no
-> installable release and no stable API. Star the repository if you want to hear when there is.
+## Status
 
-## The problem
+> [!NOTE]
+> **Farik is pre-release.** The governance harness, the agent runtime, and a five-role team with sprints, spending limits and a team channel are built, tested and driven from the command line today. A web app for people who never open a terminal is being designed now. There is no installable release and no stable API yet. Star the repository to hear when there is.
 
-Point a swarm of agents at a repository and watch what breaks. It is rarely the model.
+## Why Farik
 
-It is that nothing stops the team from talking itself into a rewrite. That three weeks later nobody
-can reconstruct why a file changed, or what it cost. And that the agent which wrote the code is the
-same one that declares it correct.
+Point a swarm of agents at a repository and watch what breaks. It is rarely the model. It is that nothing stops the team from talking itself into a rewrite. Three weeks later nobody can reconstruct why a file changed or what it cost. And the agent that wrote the code is the same one that declares it correct.
 
-The usual fix is a longer system prompt. But a prompt that says *never push to `main`* is a
-suggestion, and a model having a bad day will take it as one.
+The usual fix is a longer system prompt. But a prompt that says *never push to `main`* is a suggestion, and a model having a bad day will take it as one. Farik puts the rules in code that runs between the agent and the tool, where a bad day cannot reach them.
 
-## The approach
+## How it works
 
-Farik puts the rules in code that runs between the agent and the tool, where a bad day cannot reach
-them.
+| | |
+|---|---|
+| **A contract before any work** | No agent starts a task until it has a written contract. The contract holds the intent, exit criteria with a verification method for each, a budget, a risk level, an explicit out-of-scope list, and a named reviewer. |
+| **Nobody grades their own homework** | The reviewer is never the assignee. Verification runs in a fresh session that sees the contract, the diff and the tools to run the criteria, never the author's transcript. |
+| **Governance is code, not prompts** | A deterministic governor checks every permission, budget, iteration limit and path allowlist. Agents propose and the governor decides. An instruction injected through the repository can make an agent *request* a push, and the request comes back denied. |
+| **You approve what matters** | Every decision that is yours arrives as a plain-language summary written by the agent that asks, with Farik's own check results and the code changes one click away. Those decisions are approving a plan, accepting risky work, and answering a question. |
+| **Bounded by default** | Every session has token, time, tool-call and iteration limits. Spending limits are optional. Hitting a limit escalates to you, so nothing runs away. |
+| **A complete audit trail** | Every tool call, state change, message and dollar lands in an append-only log. Contracts and decisions are plain files in your repository, so they diff and review like code. |
+| **Local first** | The orchestrator runs on your machine and agents execute in a sandbox there. Your code never leaves it. |
 
-- **A contract before any work.** No agent touches a task until it has a written contract: intent,
-  exit criteria with a verification method for each, a budget, a risk level, an explicit
-  out-of-scope list, and a named reviewer. No contract, no start.
+## Meet the team
 
-- **Nobody grades their own homework.** The reviewer is never the assignee, and verification runs
-  in a fresh session that never sees the author's transcript — only the contract, the diff, and the
-  tools to run the criteria. A reviewer that reads *"I ran the tests and they passed"* is measurably
-  worse than one that runs the tests.
+<p align="center">
+<img src="docs/brand/readme/team.png" alt="The five Farik characters, each seated at a laptop: the Product Manager, the Scrum Master, the Architect, the Developer and the Marketing Specialist" width="100%">
+</p>
 
-- **Governance is code, not prompts.** A deterministic governor checks every permission, budget,
-  iteration limit and path allowlist. Agents propose; the governor disposes. Prompt injection
-  through the repository is assumed: an injected instruction can make an agent *request* a push, and
-  the request comes back denied.
+A team has two to seven agents. Each has its own name, avatar, persona, model settings, tools, MCP servers and skills, and one of five roles. Two developers is a common choice. Farik ships ten characters, and any agent can wear any of them:
 
-- **Bounded by default.** Every session has a token budget, a wall-clock limit, a tool-call limit
-  and an iteration limit. Hitting one raises an escalation to you. Nothing runs away.
+<p align="center">
+<img src="docs/brand/readme/avatars.png" alt="The ten Farik avatars, each a pixel-art person at a laptop" width="100%">
+</p>
 
-- **A complete audit trail.** Every tool call, state change, message and dollar lands in an
-  append-only log. Contracts and decisions are plain files in your repository, so they diff and
-  review like code.
+| Role | What it does | What it may not do |
+|---|---|---|
+| **Product Manager** | Turns your requests into contracts after asking you its questions, owns the backlog and the product documents, and accepts work against its contracts. | Write application code, or accept work that no reviewer has verified. |
+| **Scrum Master** | Triages requests, breaks approved plans into tasks, assigns them, and runs planning, standup, review and retro. | Change a plan's requirements, write application code, or accept work. |
+| **Architect** | Holds the shape of the system: writes decision records, sets constraints for contracts, and reviews the Developer's changes. | Write application code, push shared branches, or accept work. |
+| **Developer** | Implements contracts on `feature/` or `fix/` branches and runs the exit criteria before declaring done. It is the only role that writes application code. | Change a contract, accept its own work, or touch files outside the contract's paths. |
+| **Marketing Specialist** | Researches the market and writes the marketing plan, release notes, landing copy and positioning. | Change application code, or publish anywhere without your approval. |
 
-- **Local first, your key.** The orchestrator runs on your machine, agents execute in a sandbox on
-  your machine, and your code never leaves it.
+## How a task moves
 
-## See it work
+A request becomes a plan (an epic) or a single task. Nothing starts until its contract is ready, and nothing is accepted until a reviewer has run every criterion and recorded the evidence.
 
-Here is the command line as it stands today, on a real repository:
+```
+draft ──▶ refining ──▶ ready ──▶ assigned ──▶ in_progress ──▶ verifying ──▶ accepted
+             │            │          │             │              │
+             │            │          │             ▼              ▼
+             │            │          │          blocked        rejected ──▶ in_progress
+             │            │          │             │                          (bounded)
+             ▼            ▼          ▼             ▼
+         escalated    escalated  escalated ──▶ you decide ──▶ any state, or cancelled
+```
+
+The governor alone moves a task between the states it owns, and every refusal comes with a reason. When an agent runs out of budget, gets blocked, or fails review three times, the task escalates to you rather than grinding on.
+
+## Quick start
+
+There is no release yet. To build from source you need:
+- [`rustup`](https://rustup.rs), which reads `rust-toolchain.toml` and installs the pinned toolchain on first use;
+- [Claude Code](https://docs.claude.com/en/docs/claude-code) with an API key or a subscription, to run agents;
+- Docker, for the sandbox.
+
+```console
+$ git clone https://github.com/abdshaat/Farik.git
+$ cd Farik
+$ cargo build --release
+```
+
+The binary lands at `target/release/farik`. Point it at any git repository:
 
 ```console
 $ farik init
@@ -73,8 +98,7 @@ wrote .farik/team.yaml: product-manager, developer
 no criteria: nothing in this repository says how it is tested
 ```
 
-Farik scans the repository, writes `.farik/`, and seeds a library of exit criteria from whatever
-the project says about how it is tested. Now file a request:
+Farik scans the repository, writes `.farik/`, and seeds a library of exit criteria from whatever the project says about how it is tested. File a request, and every contract can be read back with everything that happened to it:
 
 ```console
 $ farik task create request.yaml
@@ -84,13 +108,6 @@ farik triage says whether it is large or small; nothing starts before that (5.16
 $ farik triage FRK-1 small --reason "One command, one file."
 FRK-1 is small: task. One command, one file.
 
-$ farik board
-FRK-1     task  draft       low    Show the board without a database client
-```
-
-Every contract can be read back with everything that happened to it:
-
-```console
 $ farik task show FRK-1
 FRK-1 Show the board without a database client
 draft task, low risk
@@ -107,96 +124,68 @@ events
      5 2026-09-21T18:05:51Z request.triaged
 ```
 
-And nothing happens that the log does not record:
-
-```console
-$ farik log
-   1 2026-09-21T18:05:37Z team.updated       -
-   2 2026-09-21T18:05:37Z project.scanned    -
-   3 2026-09-21T18:05:37Z criteria.updated   -
-   4 2026-09-21T18:05:51Z task.created       FRK-1
-   5 2026-09-21T18:05:51Z request.triaged    FRK-1
-```
-
-Add `--json` to any command when you want to pipe it somewhere.
-
-## How a task moves
-
-A request becomes an epic or a single task. Nothing starts until its contract is ready, and nothing
-is accepted until a reviewer has run every criterion and written down the evidence.
-
-```
-draft ──▶ refining ──▶ ready ──▶ assigned ──▶ in_progress ──▶ verifying ──▶ accepted
-             │            │          │             │              │
-             │            │          │             ▼              ▼
-             │            │          │          blocked        rejected ──▶ in_progress
-             │            │          │             │                          (bounded)
-             ▼            ▼          ▼             ▼
-         escalated    escalated  escalated ──▶ you decide ──▶ any state, or cancelled
-```
-
-The governor is the only thing that can move a task between the states it owns, and every refusal
-comes with a reason. When an agent runs out of budget, gets blocked, or fails review three times,
-the task escalates to you rather than grinding on.
-
-You assemble the team yourself: two to seven agents, each with a name, an avatar and one of five
-roles — Product Manager, Scrum Master, Architect, Software Developer, Marketing Specialist. Each
-gets its own model settings, tools, MCP servers and skills.
-
-## Getting started
-
-There is no release yet. To build from source you need [`rustup`](https://rustup.rs), which reads
-`rust-toolchain.toml` and installs the pinned toolchain on first use.
-
-```console
-$ git clone https://github.com/abdshaat/Farik.git
-$ cd Farik
-$ cargo build --release
-```
-
-The binary lands at `target/release/farik`. Point it at any git repository and run `farik init`.
+Then `farik run` drives the team until nothing needs doing. Add `--json` to any command to pipe its output somewhere.
 
 ### Commands
 
-| Command | |
-|---|---|
-| `farik init` | Make the repository a Farik project, or rescan an existing one |
-| `farik task create <file>` | File a YAML contract as a draft request |
-| `farik task show <id>` | Show one contract and everything that happened to it |
-| `farik triage <id> <large\|small>` | Record how big a request is |
-| `farik contract lock <id>` | Take a contract from the team; agents may then only record results |
-| `farik contract unlock <id>` | Give the contract back to the team |
-| `farik board` | Show the lifecycle, one line per task |
-| `farik log` | Show the event log; filter by `--task`, `--kind`, `--limit` |
-| `farik rules show` | Print the team rules every action is held to |
-| `farik criteria list` | Print every criterion a contract may refer to by name |
-| `farik doctor` | Report every way the files and the log disagree |
+| | Command | What it does |
+|---|---|---|
+| **Set up** | `farik init` | Make the repository a Farik project, or rescan it |
+| | `farik rules show` | Print the team rules every action is held to |
+| | `farik criteria list` | Print every criterion a contract may refer to by name |
+| **Ask** | `farik task create <file>` | File a contract as a draft request |
+| | `farik contract new` | File a request from a brief or an issue, and write its contract with the Product Manager |
+| | `farik triage <id> <large\|small>` | Record how big a request is, or overrule the triage |
+| | `farik contract lock <id>` / `unlock <id>` | Take a contract from the team, or give it back |
+| **Run** | `farik run` | Drive the team until nothing needs doing, a stop, or Ctrl-C |
+| | `farik plan` | Triage, contract, break down and assign, without starting any work |
+| | `farik sprint start` / `end` / `show` | Start, end, or show a sprint, with an optional budget |
+| | `farik stop` | Stop the run after its session, or stop one session now |
+| **Decide** | `farik approve <id>` | Approve a contract that awaits your approval |
+| | `farik accept <id>` | Accept a result that waits for you |
+| | `farik answer <question> <answer>` | Answer a question an agent asked |
+| | `farik resolve <id> <status> <message>` | Resolve an escalation, with a message for the next session |
+| | `farik integrate <id>` | Integrate an accepted task now |
+| | `farik cancel <id> <reason>` | Cancel a task |
+| **Talk** | `farik say <text>` | Post in the team channel; `@<id>` mentions an agent |
+| | `farik channel` | Show the team channel |
+| **Read** | `farik board` | The lifecycle, one line per task |
+| | `farik task show <id>` | One contract and everything that happened to it |
+| | `farik log` | The event log, filtered by `--task`, `--kind` or `--limit` |
+| | `farik metrics` | The harness metrics for the project or one sprint |
+| | `farik doctor` | Every way the files and the log disagree |
 
 ## Roadmap
 
-- **Now** — the governance harness and the command line are done. The agent runtime is in progress,
-  ending in the first run where a Product Manager writes contracts for real issues, one Developer
-  implements them and another verifies them.
-- **Next** — all five roles, the team channel, and a desktop application with a board and a
-  pixel-art office you can watch the team work in.
-- **Then** — per-agent MCP servers and skills, one-on-one conversations, the audit viewer, and the
-  public launch.
+| Stage | What it delivers | Status |
+|---|---|---|
+| Harness and command line | The contract, the governor, the event log, and the commands | Done |
+| Runtime | Agent sessions in a sandbox, with review in a fresh session | Done |
+| The team | Five roles, sprints, spending limits, the team channel and its ceremonies, and memory | Done |
+| Brand | The identity, the design tokens, and every page of the web app designed | In progress |
+| Web app | The whole working loop in the browser, built for people who never open a terminal | Next |
+| Desktop app | The same app with nothing to start, plus the pixel-art office you can watch the team work in | Planned |
+| Launch | Per-agent MCP servers and skills, one-on-one conversations, the audit viewer, and the public release | Planned |
+| Phone apps | Native iOS and Android apps | After launch |
 
-Farik is Apache 2.0 and always will be. A hosted tier is planned for people who would rather not run
-it themselves, but nothing that makes the agents safer or more controllable will ever be paid — a
-governance layer you cannot audit is not one you should trust with your repository.
+## Open source
+
+Farik is Apache 2.0 and always will be. A hosted tier is planned for people who would rather not run it themselves, but nothing that makes the agents safer or more controllable will ever be paid for. A governance layer you cannot audit is not one you should trust with your repository.
 
 ## Contributing
 
-Farik holds itself to the discipline it imposes on the agent teams it runs: no code before a failing
-test, no completion claim without pasted evidence, and nobody approves their own pull request. Start
-with [CONTRIBUTING.md](CONTRIBUTING.md); it is short.
+Farik holds itself to the discipline it imposes on its agent teams: no code before a failing test, no completion claim without pasted evidence, and nobody approves their own pull request. Start with [CONTRIBUTING.md](CONTRIBUTING.md); it is short.
 
-The [specification](docs/SPEC.md) is the place to argue with the design, and the
-[architecture decisions](docs/decisions/) record why things are the way they are. Issues and
-discussions are welcome, especially from anyone who has watched an agent team fail in a way this
-harness would not have caught.
+The [specification](docs/SPEC.md) is the place to argue with the design. The [architecture decisions](docs/decisions/) record why things are the way they are, and the [brand](docs/brand/brand.md) says how Farik looks and speaks. Issues and discussions are welcome, especially from anyone who has watched an agent team fail in a way this harness would not have caught.
 
 ## License
 
 [Apache 2.0](LICENSE).
+
+<br>
+
+<div align="center">
+<img src="docs/brand/assets/logo-mark.png" alt="" width="56">
+<br>
+<sub>Plan. Build. Iterate. Ship together.</sub>
+</div>

@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Edit the plan</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&amp;family=Silkscreen&amp;family=Space+Grotesk:wght@400;500;600&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0;font-family:'Space Grotesk',system-ui,sans-serif;background:#F3E7D3;color:#161616}
+a{color:#A44D2B}a:hover{color:#7E3A1F}
+.px{image-rendering:pixelated}
+button:focus-visible,a:focus-visible,input:focus-visible,textarea:focus-visible,select:focus-visible{outline:2px solid #5A8DFF;outline-offset:2px}
+</style>
+</helmet>
+<div style="width: 1440px; height: 1000px; display: flex; background: #F3E7D3; color: #161616; font-family: 'Space Grotesk', system-ui, sans-serif; position: relative; overflow: hidden;">
+<nav aria-label="Main" style="width: 88px; flex-shrink: 0; background: #161616; display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 20px 0; box-sizing: border-box;">
+<img class="px" src="/_blob/cbf211abf5739b5bb073797fe4fb08fc" alt="Farik" style="width: 48px; height: 48px; margin-bottom: 16px;">
+<a href="Main.dc.html" aria-current="page" style="width: 72px; padding: 10px 0; display: flex; flex-direction: column; align-items: center; gap: 4px; color: #F3E7D3; background: #2A2A2A; border-radius: 4px; text-decoration: none; font-size: 12px;">
+<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="4"></circle><path d="M12 2v2M12 20v2M2 12h2M20 12h2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"></path></svg>Today</a>
+<a href="Board.dc.html" style="width: 72px; padding: 10px 0; display: flex; flex-direction: column; align-items: center; gap: 4px; color: #B9AE9C; text-decoration: none; font-size: 12px;">
+<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="3" y="4" width="5" height="16"></rect><rect x="10" y="4" width="5" height="10"></rect><rect x="17" y="4" width="4" height="13"></rect></svg>Board</a>
+<a href="#" style="width: 72px; padding: 10px 0; display: flex; flex-direction: column; align-items: center; gap: 4px; color: #B9AE9C; text-decoration: none; font-size: 12px;">
+<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 5h16v11H9l-5 4z"></path></svg>Channel</a>
+<a href="#" style="width: 72px; padding: 10px 0; display: flex; flex-direction: column; align-items: center; gap: 4px; color: #B9AE9C; text-decoration: none; font-size: 12px;">
+<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="9" cy="8" r="3"></circle><circle cx="17" cy="9" r="2.5"></circle><path d="M3 20c0-3.3 2.7-6 6-6s6 2.7 6 6M15 20c0-2.2 1.3-4.2 3.5-4.8"></path></svg>Team</a>
+<a href="#" style="width: 72px; padding: 10px 0; display: flex; flex-direction: column; align-items: center; gap: 4px; color: #B9AE9C; text-decoration: none; font-size: 12px;">
+<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><path d="M15 9.5c-.5-1-1.6-1.5-3-1.5-1.7 0-3 .8-3 2s1.3 1.7 3 2 3 .8 3 2-1.3 2-3 2c-1.4 0-2.5-.5-3-1.5M12 6v2M12 16v2"></path></svg>Costs</a>
+</nav>
+<main style="flex-grow: 1; display: flex; flex-direction: column; min-width: 0;">
+<div style="padding: 32px 48px 0; display: flex; flex-direction: column; gap: 8px;">
+<a href="ApprovePlan.dc.html" style="font-size: 14px; font-weight: 600;">Back to the plan</a>
+<div style="display: flex; align-items: center; gap: 16px;">
+<h1 style="margin: 0; font-size: 24px; line-height: 30px; font-weight: 600;">Edit the plan for gift cards</h1>
+<span style="font-family: 'JetBrains Mono', monospace; font-size: 14px; color: #5B5347;">E-3</span>
+<span style="flex-grow: 1;"></span>
+<span style="font-size: 14px; color: #5B5347;">Advanced view</span>
+</div>
+</div>
+
+<div style="margin: 20px 48px 0; padding: 14px 18px; border: 1px solid #8A7F6E; border-radius: 8px; background: #FBF6EC; display: flex; align-items: center; gap: 16px;">
+<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#161616" stroke-width="2" aria-hidden="true"><rect x="5" y="11" width="14" height="10"></rect><path d="M8 11V7a4 4 0 0 1 8 0v4"></path></svg>
+<div style="display: flex; flex-direction: column; gap: 2px; flex-grow: 1;">
+<span style="font-size: 16px; font-weight: 600;">{{lockTitle}}</span>
+<span style="font-size: 14px; line-height: 20px; color: #5B5347;">{{lockHint}}</span>
+</div>
+<button type="button" onClick="{{toggleLock}}" style="font-family: inherit; font-size: 16px; font-weight: 600; background: transparent; color: #161616; border: 1px solid #8A7F6E; border-radius: 4px; padding: 10px 16px; cursor: pointer;">{{lockButton}}</button>
+</div>
+
+<div style="display: flex; gap: 48px; padding: 24px 48px; align-items: flex-start;">
+<form style="width: 760px; flex-shrink: 0; display: flex; flex-direction: column; gap: 22px;">
+<div style="display: grid; grid-template-columns: minmax(0, 1fr) 220px; gap: 20px; align-items: start;">
+<div style="display: flex; flex-direction: column; gap: 6px;">
+<label style="font-size: 14px; font-weight: 600; display: flex; gap: 10px; align-items: baseline;">Why you want it<span style="font-family: 'JetBrains Mono', monospace; font-size: 12px; font-weight: 400; color: #5B5347;">intent</span></label>
+<textarea rows="2" style="font-family: inherit; font-size: 16px; line-height: 24px; border: 1px solid #8A7F6E; border-radius: 4px; padding: 8px 12px; background: #FBF6EC; color: #161616; resize: vertical;">Customers can give a gift card to a friend and use it to pay.</textarea>
+</div>
+<p style="margin: 26px 0 0; display: flex; gap: 8px; font-size: 14px; line-height: 20px; color: #536C59;"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#536C59" stroke-width="3" aria-hidden="true" style="flex-shrink: 0;"><path d="M4 12l5 5L20 6"></path></svg><span>Says why, from the customer's side.</span></p>
+</div>
+<div style="display: grid; grid-template-columns: minmax(0, 1fr) 220px; gap: 20px; align-items: start;">
+<div style="display: flex; flex-direction: column; gap: 6px;">
+<label style="font-size: 14px; font-weight: 600; display: flex; gap: 10px; align-items: baseline;">How we will know it is done<span style="font-family: 'JetBrains Mono', monospace; font-size: 12px; font-weight: 400; color: #5B5347;">exit_criteria</span></label>
+<div style="display: flex; flex-direction: column; gap: 8px;">
+<div style="display: flex; gap: 10px; align-items: center;"><span style="font-family: 'JetBrains Mono', monospace; font-size: 13px; color: #5B5347; width: 28px;">c1</span><input type="text" value="A test purchase of each amount goes through" style="font-family: inherit; font-size: 16px; line-height: 24px; border: 1px solid #8A7F6E; border-radius: 4px; padding: 8px 12px; background: #FBF6EC; color: #161616; flex-grow: 1;"><select aria-label="How c1 is checked" style="font-family: inherit; font-size: 16px; line-height: 24px; border: 1px solid #8A7F6E; border-radius: 4px; padding: 8px 12px; background: #FBF6EC; color: #161616; padding: 8px;"><option>Farik runs a test</option></select></div>
+<div style="display: flex; gap: 10px; align-items: center;"><span style="font-family: 'JetBrains Mono', monospace; font-size: 13px; color: #5B5347; width: 28px;">c2</span><input type="text" value="You read and accept the announcement post" style="font-family: inherit; font-size: 16px; line-height: 24px; border: 1px solid #8A7F6E; border-radius: 4px; padding: 8px 12px; background: #FBF6EC; color: #161616; flex-grow: 1;"><select aria-label="How c2 is checked" style="font-family: inherit; font-size: 16px; line-height: 24px; border: 1px solid #8A7F6E; border-radius: 4px; padding: 8px 12px; background: #FBF6EC; color: #161616; padding: 8px;"><option>You decide</option></select></div>
+<button type="button" style="align-self: flex-start; font-family: inherit; font-size: 14px; font-weight: 600; background: transparent; color: #A44D2B; border: 0; padding: 4px 0; text-decoration: underline; text-underline-offset: 3px; cursor: pointer;">Add a check</button>
+</div>
+</div>
+<p style="margin: 26px 0 0; display: flex; gap: 8px; font-size: 14px; line-height: 20px; color: #536C59;"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#536C59" stroke-width="3" aria-hidden="true" style="flex-shrink: 0;"><path d="M4 12l5 5L20 6"></path></svg><span>Each check says how it is checked.</span></p>
+</div>
+<div style="display: grid; grid-template-columns: minmax(0, 1fr) 220px; gap: 20px; align-items: start;">
+<div style="display: flex; flex-direction: column; gap: 6px;">
+<label style="font-size: 14px; font-weight: 600; display: flex; gap: 10px; align-items: baseline;">What is left out<span style="font-family: 'JetBrains Mono', monospace; font-size: 12px; font-weight: 400; color: #5B5347;">scope.out_of_scope</span></label>
+<input type="text" value="" placeholder="For example: printed cards" style="font-family: inherit; font-size: 16px; line-height: 24px; border: 1px solid #8A7F6E; border-radius: 4px; padding: 8px 12px; background: #FBF6EC; color: #161616;">
+</div>
+<p style="margin: 26px 0 0; display: flex; gap: 8px; font-size: 14px; line-height: 20px; color: #A44D2B;"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#A44D2B" stroke-width="3" aria-hidden="true" style="flex-shrink: 0;"><path d="M12 7v6M12 17v.5"></path></svg><span>Name at least one thing this plan does not do. It keeps the work from growing.</span></p>
+</div>
+<div style="display: grid; grid-template-columns: minmax(0, 1fr) 220px; gap: 20px; align-items: start;">
+<div style="display: flex; flex-direction: column; gap: 6px;">
+<label style="font-size: 14px; font-weight: 600; display: flex; gap: 10px; align-items: baseline;">Spending limit<span style="font-family: 'JetBrains Mono', monospace; font-size: 12px; font-weight: 400; color: #5B5347;">budget.usd</span></label>
+<div style="display: flex; gap: 8px; align-items: center;"><span style="font-family: 'JetBrains Mono', monospace;">$</span><input type="text" value="14.00" style="font-family: inherit; font-size: 16px; line-height: 24px; border: 1px solid #8A7F6E; border-radius: 4px; padding: 8px 12px; background: #FBF6EC; color: #161616; font-family: 'JetBrains Mono', monospace; width: 120px;"></div>
+</div>
+<p style="margin: 26px 0 0; display: flex; gap: 8px; font-size: 14px; line-height: 20px; color: #536C59;"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#536C59" stroke-width="3" aria-hidden="true" style="flex-shrink: 0;"><path d="M4 12l5 5L20 6"></path></svg><span>Within the team's limit of $25 a plan.</span></p>
+</div>
+<div style="display: grid; grid-template-columns: minmax(0, 1fr) 220px; gap: 20px; align-items: start;">
+<div style="display: flex; flex-direction: column; gap: 6px;">
+<label style="font-size: 14px; font-weight: 600; display: flex; gap: 10px; align-items: baseline;">How risky it is<span style="font-family: 'JetBrains Mono', monospace; font-size: 12px; font-weight: 400; color: #5B5347;">risk</span></label>
+<select style="font-family: inherit; font-size: 16px; line-height: 24px; border: 1px solid #8A7F6E; border-radius: 4px; padding: 8px 12px; background: #FBF6EC; color: #161616; width: 240px;"><option>Medium</option></select>
+</div>
+<p style="margin: 26px 0 0; display: flex; gap: 8px; font-size: 14px; line-height: 20px; color: #536C59;"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#536C59" stroke-width="3" aria-hidden="true" style="flex-shrink: 0;"><path d="M4 12l5 5L20 6"></path></svg><span>Set. High would also make you accept the finished work.</span></p>
+</div>
+<div style="display: grid; grid-template-columns: minmax(0, 1fr) 220px; gap: 20px; align-items: start;">
+<div style="display: flex; flex-direction: column; gap: 6px;">
+<label style="font-size: 14px; font-weight: 600; display: flex; gap: 10px; align-items: baseline;">Files the team may change<span style="font-family: 'JetBrains Mono', monospace; font-size: 12px; font-weight: 400; color: #5B5347;">allowed_paths</span></label>
+<input type="text" value="src/shop/**, src/email/**" style="font-family: inherit; font-size: 16px; line-height: 24px; border: 1px solid #8A7F6E; border-radius: 4px; padding: 8px 12px; background: #FBF6EC; color: #161616; font-family: 'JetBrains Mono', monospace; font-size: 14px;">
+</div>
+<p style="margin: 26px 0 0; display: flex; gap: 8px; font-size: 14px; line-height: 20px; color: #536C59;"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#536C59" stroke-width="3" aria-hidden="true" style="flex-shrink: 0;"><path d="M4 12l5 5L20 6"></path></svg><span>Inside the paths your team rules allow.</span></p>
+</div>
+</form>
+<aside style="flex-grow: 1; display: flex; flex-direction: column; gap: 12px;">
+<h2 style="margin: 0; font-size: 18px; line-height: 24px; font-weight: 600;">Ready to approve?</h2>
+<p style="margin: 0; font-size: 16px; line-height: 24px;"><strong>5 of 6 checks pass.</strong> The one left: name at least one thing this plan does not do.</p>
+<p style="margin: 0; font-size: 14px; line-height: 20px; color: #5B5347;">Farik checks the plan as you type. The results come from your project, not from this page.</p>
+<button type="button" disabled="{{ true }}" style="font-family: inherit; font-size: 16px; font-weight: 600; background: #D8896A; color: #161616; border: 0; border-radius: 4px; padding: 12px 22px; cursor: pointer; opacity: 1; background: #D9CBB3; color: #5B5347; cursor: not-allowed; align-self: flex-start; margin-top: 8px;">Approve the plan</button>
+</aside>
+</div>
+</main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1000}}'>
+class Component extends DCLogic {
+  constructor(props) { super(props); this.state = { locked: true }; }
+  renderVals() {
+    var locked = this.state.locked;
+    return {
+      lockTitle: locked ? 'You have locked this plan' : 'Mira can still change this plan',
+      lockHint: locked ? 'Mira will not change it while it is locked. Your edits are kept exactly as you write them.' : 'Lock it to keep your edits exactly as you write them.',
+      lockButton: locked ? 'Unlock' : 'Lock the plan',
+      toggleLock: () => this.setState({ locked: !locked })
+    };
+  }
+}
+</script>
+</body>
+</html>
