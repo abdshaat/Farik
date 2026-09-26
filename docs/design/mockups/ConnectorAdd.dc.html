@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Connect GitHub to Theo</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&amp;family=Silkscreen&amp;family=Space+Grotesk:wght@400;500;600&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0;font-family:'Space Grotesk',system-ui,sans-serif;background:#F3E7D3;color:#161616}
+a{color:#A44D2B}a:hover{color:#7E3A1F}
+.px{image-rendering:pixelated}
+button:focus-visible,a:focus-visible,input:focus-visible{outline:2px solid #5A8DFF;outline-offset:2px}
+</style>
+</helmet>
+<div style="width: 1440px; height: 1000px; position: relative; overflow: hidden; background: #F3E7D3; color: #161616; font-family: 'Space Grotesk', system-ui, sans-serif;">
+
+<div aria-hidden="true" style="position: absolute; inset: 0; display: flex;">
+<div style="width: 88px; background: #161616;"></div>
+<div style="flex-grow: 1; padding: 32px 48px; display: flex; flex-direction: column; gap: 16px;">
+<span style="font-size: 14px; font-weight: 600; color: #A44D2B;">Back to your team</span>
+<span style="font-size: 24px; font-weight: 600;">Theo, your Developer</span>
+<img class="px" src="/_blob/b3a8b1467a4f9ce051ca665a72525186" alt="" style="width: 96px; height: 96px; border: 3px solid #5A8DFF;">
+</div>
+</div>
+<div aria-hidden="true" style="position: absolute; inset: 0; background: rgba(22, 22, 22, 0.55);"></div>
+
+<div role="dialog" aria-modal="true" aria-labelledby="dlg" style="position: absolute; left: 50%; top: 60px; transform: translateX(-50%); width: 760px; background: #FBF6EC; border-radius: 8px; display: flex; flex-direction: column;">
+<div style="padding: 28px 32px 0; display: flex; flex-direction: column; gap: 14px;">
+<div style="display: flex; align-items: center; gap: 14px;">
+<span aria-hidden="true" style="width: 44px; height: 44px; border-radius: 8px; background: #161616; color: #F3E7D3; display: flex; align-items: center; justify-content: center; font-family: 'JetBrains Mono', monospace; font-size: 18px; font-weight: 600;">G</span>
+<h1 id="dlg" style="margin: 0; font-size: 24px; line-height: 30px; font-weight: 600; flex-grow: 1;">Connect GitHub to Theo</h1>
+<img class="px" src="/_blob/b3a8b1467a4f9ce051ca665a72525186" alt="Theo" style="width: 44px; height: 44px; border: 2px solid #5A8DFF;">
+</div>
+<ol aria-label="Steps" style="list-style: none; margin: 0; padding: 0; display: flex; gap: 20px; font-size: 14px;">
+<li style="display: flex; align-items: center; gap: 8px; color: #161616;"><span style="font-family: 'JetBrains Mono', monospace; width: 24px; height: 24px; display: inline-flex; align-items: center; justify-content: center; border: 1px solid #161616;">1</span>Sign in to GitHub</li>
+<li aria-current="step" style="display: flex; align-items: center; gap: 8px; color: #161616; font-weight: 600;"><span style="font-family: 'JetBrains Mono', monospace; width: 24px; height: 24px; display: inline-flex; align-items: center; justify-content: center; background: #161616; color: #F3E7D3;">2</span>Choose what Theo may use</li>
+<li style="display: flex; align-items: center; gap: 8px; color: #5B5347;"><span style="font-family: 'JetBrains Mono', monospace; width: 24px; height: 24px; display: inline-flex; align-items: center; justify-content: center; border: 1px solid #5B5347;">3</span>Done</li>
+</ol>
+<p style="margin: 0; display: flex; gap: 10px; align-items: center; font-size: 14px; line-height: 20px; color: #536C59; font-weight: 600;"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#536C59" stroke-width="3" aria-hidden="true"><path d="M4 12l5 5L20 6"></path></svg>Signed in to GitHub as corner-bakery. Your sign-in is kept in this computer's keychain, never shown to Theo.</p>
+</div>
+
+<div style="padding: 20px 32px 0; display: flex; flex-direction: column; gap: 8px;">
+<h2 style="margin: 0; font-size: 18px; line-height: 24px; font-weight: 600;">What GitHub lets Theo do</h2>
+<p style="margin: 0; font-size: 14px; line-height: 20px; color: #5B5347;">Farik has labelled each one. Tools that only read are free to use. Tools that change things ask you every time, unless you tick "Don't ask me".</p>
+<ul style="list-style: none; margin: 4px 0 0; padding: 0; border-top: 1px solid #D9CBB3;">
+<sc-for list="{{tools}}" as="t" hint-placeholder-count="6">
+<li style="display: flex; align-items: center; gap: 14px; padding: 11px 0; border-bottom: 1px solid #D9CBB3;">
+<span style="flex-grow: 1; display: flex; flex-direction: column; gap: 2px;"><span style="font-size: 15px; font-weight: 600;">{{t.name}}</span><span style="font-family: 'JetBrains Mono', monospace; font-size: 12px; color: #5B5347;">{{t.id}}</span></span>
+<button type="button" onClick="{{t.flip}}" aria-label="{{t.name}}: {{t.label}}. Press to change." style="font-family: inherit; font-size: 13px; font-weight: 600; background: transparent; color: {{t.color}}; border: 1px solid {{t.color}}; border-radius: 4px; padding: 6px 10px; cursor: pointer; min-height: 36px; width: 150px;">{{t.label}}</button>
+<label style="display: flex; align-items: center; gap: 6px; font-size: 13px; color: {{t.askColor}}; width: 118px;"><input type="checkbox" disabled="{{t.readOnly}}" style="width: 16px; height: 16px; accent-color: #161616;">Don't ask me</label>
+</li>
+</sc-for>
+</ul>
+</div>
+
+<div style="margin-top: 22px; padding: 18px 32px; border-top: 1px solid #8A7F6E; display: flex; align-items: center; gap: 14px; border-radius: 0 0 8px 8px;">
+<a href="AgentEdit.dc.html" style="font-size: 16px; font-weight: 600; background: #D8896A; color: #161616; border-radius: 4px; padding: 12px 20px; text-decoration: none;">Add GitHub to Theo</a>
+<a href="AgentEdit.dc.html" style="font-size: 16px; font-weight: 600; color: #161616; border: 1px solid #161616; border-radius: 4px; padding: 11px 18px; text-decoration: none;">Cancel</a>
+<span style="font-size: 14px; line-height: 20px; color: #5B5347;">Only Theo gets GitHub. Add it to others from their own pages; they reuse this sign-in.</span>
+</div>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1000}}'>
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    this.state = { changes: { create_issue: true, add_comment: true, create_pull_request: true } };
+  }
+  renderVals() {
+    var self = this, ch = this.state.changes;
+    var tools = [
+      { id: 'get_issue', name: 'Read an issue' },
+      { id: 'list_pull_requests', name: 'List pull requests' },
+      { id: 'search_code', name: 'Search the code' },
+      { id: 'add_comment', name: 'Comment on an issue or pull request' },
+      { id: 'create_issue', name: 'Open an issue' },
+      { id: 'create_pull_request', name: 'Open a pull request' }
+    ];
+    return { tools: tools.map(function (t) {
+      var changes = !!ch[t.id];
+      return Object.assign({}, t, {
+        label: changes ? 'Changes things' : 'Only reads',
+        color: changes ? '#A44D2B' : '#536C59',
+        readOnly: !changes,
+        askColor: changes ? '#161616' : '#8A7F6E',
+        flip: function () { var c = Object.assign({}, self.state.changes); c[t.id] = !c[t.id]; self.setState({ changes: c }); }
+      });
+    }) };
+  }
+}
+</script>
+</body>
+</html>

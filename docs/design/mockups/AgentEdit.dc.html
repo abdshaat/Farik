@@ -21,7 +21,7 @@ button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible,te
 
 </style>
 </helmet>
-<div style="width: 1440px; height: 1000px; display: flex; background: #F3E7D3; color: #161616; font-family: 'Space Grotesk', system-ui, sans-serif;">
+<div style="width: 1440px; height: 1560px; display: flex; background: #F3E7D3; color: #161616; font-family: 'Space Grotesk', system-ui, sans-serif;">
 <nav aria-label="Main" style="width: 88px; flex-shrink: 0; background: #161616; display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 20px 0; box-sizing: border-box;">
 <img class="px" src="/_blob/cbf211abf5739b5bb073797fe4fb08fc" alt="Farik" style="width: 48px; height: 48px; margin-bottom: 16px;">
 <a href="Main.dc.html" style="width: 72px; padding: 10px 0; display: flex; flex-direction: column; align-items: center; gap: 4px; color: #B9AE9C; text-decoration: none; font-size: 12px;">
@@ -74,6 +74,52 @@ button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible,te
 </div>
 </fieldset>
 
+<section aria-labelledby="sc" style="display: flex; flex-direction: column; gap: 14px;">
+<div style="display: flex; flex-direction: column; gap: 4px;">
+<h2 id="sc" style="margin: 0; font-size: 18px; line-height: 24px; font-weight: 600;">Skills and connectors</h2>
+<p style="margin: 0; font-size: 14px; line-height: 20px; color: #5B5347;">Recommended for developers. Whatever you add here is for Theo only, and starts with Theo's next piece of work.</p>
+</div>
+
+<h3 style="margin: 8px 0 0; font-size: 16px; font-weight: 600;">Connectors <span style="font-weight: 400; color: #5B5347;">let Theo use outside tools</span></h3>
+<ul style="list-style: none; margin: 0; padding: 0; border-top: 1px solid #D9CBB3;">
+<sc-for list="{{connectors}}" as="c" hint-placeholder-count="6">
+<li style="display: flex; align-items: center; gap: 14px; padding: 12px 0; border-bottom: 1px solid #D9CBB3;">
+<span aria-hidden="true" style="width: 40px; height: 40px; flex-shrink: 0; border-radius: 8px; background: #161616; color: #F3E7D3; display: flex; align-items: center; justify-content: center; font-family: 'JetBrains Mono', monospace; font-size: 16px; font-weight: 600;">{{c.initial}}</span>
+<span style="flex-grow: 1; display: flex; flex-direction: column; gap: 2px; min-width: 0;">
+<span style="display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap;"><span style="font-size: 16px; font-weight: 600;">{{c.name}}</span><sc-if value="{{c.found}}" hint-placeholder-val="{{ false }}"><span style="font-size: 13px; font-weight: 600; color: #0653FF;">Your project uses this</span></sc-if></span>
+<span style="font-size: 14px; line-height: 20px; color: #5B5347;">{{c.what}}</span>
+</span>
+<sc-if value="{{c.added}}" hint-placeholder-val="{{ false }}">
+<span style="display: flex; align-items: center; gap: 12px; flex-shrink: 0;"><span style="font-size: 14px; font-weight: 600; color: #536C59;">Added</span><button type="button" onClick="{{c.toggle}}" style="font-family: inherit; font-size: 14px; background: transparent; color: #A44D2B; border: 0; padding: 8px 4px; cursor: pointer; text-decoration: underline; text-underline-offset: 3px; min-height: 40px;">Remove</button></span>
+</sc-if>
+<sc-if value="{{c.canAdd}}" hint-placeholder-val="{{ true }}">
+<a href="{{c.href}}" onClick="{{c.toggle}}" aria-label="Add {{c.name}} to Theo" style="flex-shrink: 0; font-size: 14px; font-weight: 600; color: #161616; border: 1px solid #161616; border-radius: 4px; padding: 9px 16px; text-decoration: none; min-height: 40px; box-sizing: border-box; display: inline-flex; align-items: center;">Add</a>
+</sc-if>
+</li>
+</sc-for>
+</ul>
+
+<h3 style="margin: 8px 0 0; font-size: 16px; font-weight: 600;">Skills <span style="font-weight: 400; color: #5B5347;">teach Theo how your team likes things done</span></h3>
+<ul style="list-style: none; margin: 0; padding: 0; border-top: 1px solid #D9CBB3;">
+<li style="display: flex; align-items: center; gap: 14px; padding: 12px 0; border-bottom: 1px solid #D9CBB3;">
+<span style="flex-grow: 1; display: flex; flex-direction: column; gap: 2px;"><span style="font-size: 16px; font-weight: 600;">Implementing a contract</span><span style="font-size: 14px; line-height: 20px; color: #5B5347;">Comes with the Developer role: build what the plan asks, run its checks, write a note.</span></span>
+<span style="font-size: 14px; font-weight: 600; color: #5B5347; flex-shrink: 0;">Always on</span>
+</li>
+<sc-for list="{{skills}}" as="k" hint-placeholder-count="4">
+<li style="display: flex; align-items: center; gap: 14px; padding: 12px 0; border-bottom: 1px solid #D9CBB3;">
+<span style="flex-grow: 1; display: flex; flex-direction: column; gap: 2px;"><span style="font-size: 16px; font-weight: 600;">{{k.name}}</span><span style="font-size: 14px; line-height: 20px; color: #5B5347;">{{k.what}}</span></span>
+<sc-if value="{{k.added}}" hint-placeholder-val="{{ false }}">
+<span style="display: flex; align-items: center; gap: 12px; flex-shrink: 0;"><span style="font-size: 14px; font-weight: 600; color: #536C59;">Added</span><button type="button" onClick="{{k.toggle}}" style="font-family: inherit; font-size: 14px; background: transparent; color: #A44D2B; border: 0; padding: 8px 4px; cursor: pointer; text-decoration: underline; text-underline-offset: 3px; min-height: 40px;">Remove</button></span>
+</sc-if>
+<sc-if value="{{k.canAdd}}" hint-placeholder-val="{{ true }}">
+<button type="button" onClick="{{k.toggle}}" aria-label="Add {{k.name}} to Theo" style="flex-shrink: 0; font-family: inherit; font-size: 14px; font-weight: 600; background: transparent; color: #161616; border: 1px solid #161616; border-radius: 4px; padding: 9px 16px; cursor: pointer; min-height: 40px;">Add</button>
+</sc-if>
+</li>
+</sc-for>
+</ul>
+<a href="#" style="font-size: 14px; font-weight: 600; align-self: flex-start;">Browse all skills and connectors</a>
+</section>
+
 <section aria-labelledby="may" style="display: flex; flex-direction: column; gap: 10px;">
 <h2 id="may" style="margin: 0; font-size: 18px; line-height: 24px; font-weight: 600;">What Theo may do</h2>
 <p style="margin: 0; font-size: 16px; line-height: 24px;">Theo builds and tests what an approved plan asks for, on its own branch, and runs commands inside a safe box on your computer. Theo cannot change a plan, accept its own work, or push to GitHub unless you allow it.</p>
@@ -82,7 +128,7 @@ button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible,te
 <span style="font-size: 14px; color: #5B5347;">{{advLabel}}</span>
 <button type="button" role="switch" aria-checked="{{adv}}" aria-labelledby="advl" onClick="{{toggleAdv}}" style="width: 48px; height: 28px; border-radius: 14px; border: 0; background: {{advBg}}; position: relative; cursor: pointer; padding: 0;"><span style="position: absolute; top: 2px; left: {{knobX}}; width: 24px; height: 24px; border-radius: 12px; background: #FBF6EC;"></span></button>
 </div>
-<sc-if value="{{notAdv}}" hint-placeholder-val="{{ true }}"><p style="margin: 0; font-size: 14px; line-height: 20px; color: #5B5347;">Turn on Advanced to see each permission, Theo’s skills, and the tools it is connected to.</p></sc-if>
+<sc-if value="{{notAdv}}" hint-placeholder-val="{{ true }}"><p style="margin: 0; font-size: 14px; line-height: 20px; color: #5B5347;">Turn on Advanced to see each permission, and to add a connector or a skill that is not in the list.</p></sc-if>
 <sc-if value="{{adv}}" hint-placeholder-val="{{ false }}">
 <div style="display: flex; flex-direction: column; gap: 20px;">
 <ul style="list-style: none; margin: 0; padding: 0;">
@@ -95,12 +141,12 @@ button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible,te
 </sc-for>
 </ul>
 <div style="display: flex; flex-direction: column; gap: 6px;">
-<h3 style="margin: 0; font-size: 16px; font-weight: 600;">Skills</h3>
-<p style="margin: 0; font-size: 15px; line-height: 22px;">From the Developer role: writing tests first, and writing a completion note. <a href="#">Add a skill</a></p>
+<h3 style="margin: 0; font-size: 16px; font-weight: 600;">A custom skill</h3>
+<p style="margin: 0; font-size: 15px; line-height: 22px;">A folder with a <span style="font-family: 'JetBrains Mono', monospace; font-size: 14px;">SKILL.md</span> file, written by you or someone you trust. <a href="#">Add a skill folder</a></p>
 </div>
 <div style="display: flex; flex-direction: column; gap: 6px;">
-<h3 style="margin: 0; font-size: 16px; font-weight: 600;">Connected tools</h3>
-<p style="margin: 0; font-size: 15px; line-height: 22px; color: #5B5347;">None yet. Connecting outside tools arrives in a later version.</p>
+<h3 style="margin: 0; font-size: 16px; font-weight: 600;">A custom connector</h3>
+<p style="margin: 0; font-size: 15px; line-height: 22px;">Any MCP server, by the command that starts it or its web address. Farik has not checked it, so you label each of its tools yourself. <a href="#">Add a custom connector</a></p>
 </div>
 </div>
 </sc-if>
@@ -132,9 +178,9 @@ button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible,te
 </main>
 </div>
 </x-dc>
-<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1000}}'>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1560}}'>
 class Component extends DCLogic {
-constructor(props) { super(props); this.state = { adv: false, effort: 'high' }; }
+constructor(props) { super(props); this.state = { adv: false, effort: 'high', added: { context7: true, tdd: true } }; }
   renderVals() {
     var adv = this.state.adv, self = this;
     var efforts = [
@@ -143,7 +189,24 @@ constructor(props) { super(props); this.state = { adv: false, effort: 'high' }; 
       { v: 'high', label: 'Careful', note: 'Thinks longest; costs most' }
     ].map(function (e) { var on = e.v === self.state.effort; return Object.assign({}, e, { on: on, pick: function () { self.setState({ effort: e.v }); },
       bg: on ? '#161616' : 'transparent', fg: on ? '#F3E7D3' : '#161616', sub: on ? '#B9AE9C' : '#5B5347' }); });
+    var added = this.state.added;
+    function flip(id) { return function () { var a = Object.assign({}, self.state.added); a[id] = !a[id]; self.setState({ added: a }); }; }
+    var connectors = [
+      { id: 'stripe', initial: 'S', name: 'Stripe, test mode', what: 'Try payments with test cards. Test mode only: no real money moves.', found: true },
+      { id: 'github', initial: 'G', name: 'GitHub', what: 'Read issues and pull requests. Anything that changes GitHub asks you first.', href: 'ConnectorAdd.dc.html' },
+      { id: 'context7', initial: 'C7', name: 'Context7', what: 'Look up current documentation for the libraries your project uses.' },
+      { id: 'playwright', initial: 'P', name: 'Playwright', what: 'Open your web pages in a browser inside the safe box, and test them.' },
+      { id: 'sentry', initial: 'Se', name: 'Sentry', what: 'Read the errors your live product reports.' },
+      { id: 'postgres', initial: 'Pg', name: 'PostgreSQL, read only', what: 'Read your database’s structure. It cannot change data.' }
+    ].map(function (c) { var on = !!added[c.id]; return Object.assign({ found: false, href: '#' }, c, { added: on, canAdd: !on, toggle: c.href ? function () {} : flip(c.id) }); });
+    var skills = [
+      { id: 'tdd', name: 'Test-driven development', what: 'Write a failing test first, then the code that makes it pass.' },
+      { id: 'debug', name: 'Systematic debugging', what: 'Find the cause before changing anything.' },
+      { id: 'a11y', name: 'Checking accessibility', what: 'Check pages work with a keyboard and a screen reader.' },
+      { id: 'note', name: 'Writing a completion note', what: 'Explain what changed in plain words, for your review.' }
+    ].map(function (k) { var on = !!added[k.id]; return Object.assign({}, k, { added: on, canAdd: !on, toggle: flip(k.id) }); });
     return {
+      connectors: connectors, skills: skills,
       adv: adv, notAdv: !adv,
       advLabel: adv ? 'On' : 'Off',
       advBg: adv ? '#536C59' : '#8A7F6E', knobX: adv ? '22px' : '2px',

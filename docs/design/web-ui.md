@@ -156,14 +156,14 @@ These hold without being mentioned on any screen:
 
 ## Every page, mocked up
 
-On 2026-09-26 the founder asked for every page to be mocked up before any code. There are 32 screens. They are on the design canvas (https://claude.ai/artifact/6tNaCmNojhixuiJBsDPsmf) in six pages, and their sources are in `docs/design/mockups/`. Each `.dc.html` file is one screen, and `canvas.json` is the layout. The images in them are the canvas's uploaded crops of the kit, referenced as `/_blob/` addresses, so they show only on the canvas. Phase 6 builds from these screens, and step 02's components are taken from them.
+On 2026-09-26 the founder asked for every page to be mocked up before any code. There are 33 screens. They are on the design canvas (https://claude.ai/artifact/6tNaCmNojhixuiJBsDPsmf) in six pages, and their sources are in `docs/design/mockups/`. Each `.dc.html` file is one screen, and `canvas.json` is the layout. The images in them are the canvas's uploaded crops of the kit, referenced as `/_blob/` addresses, so they show only on the canvas. Phase 6 builds from these screens, and step 02's components are taken from them.
 
 | Canvas page | Screens | Phase 6 step |
 |---|---|---|
 | Daily work | Today (`Main`, with a dark-theme switch), Accept work (`Gate`), `Board`, `TaskDetail`, `SprintStart`, `SprintView`, `Channel`, `OneOnOne`, `Costs` | 03, 05, 06, 07 (the one-on-one is phase 8 step 03) |
 | Requests and approvals | `RequestFiled`, `Questions`, `ApprovePlan`, `PlanEditor`, `SendBack`, `HelpNeeded`, `AnswerQuestion` | 05 |
 | First run | `SetupProject`, `SetupScan`, the team (`Welcome`), `SetupPermissions`, `SetupSpending`, `SetupFinish`, `SetupAdvanced`, `Connect` | 01 (the connect page), 04 |
-| Team and settings | `Team`, `AgentEdit`, `Settings` | 03, 04 |
+| Team and settings | `Team`, `AgentEdit` (with the skills and connectors suggested for the role, spec 6.6), `ConnectorAdd` (adding GitHub to one agent: sign in, then review its tools), `Settings` | 03, 04; the skills and connectors are phase 8 steps 01 and 02 |
 | Phone (360 to 390 px) | Today (`Phone`), `PhoneGate`, `PhoneBoard`, `PhoneChannel` | 03 to 07 |
 | Website | `Site`, the public site on the domain (ADR 0017) | Phase 8 step 07 |
 

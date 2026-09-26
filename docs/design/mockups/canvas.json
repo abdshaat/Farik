@@ -3,7 +3,7 @@
   "attachments": {},
   "boards": {
     "AgentEdit.dc.html": {
-      "h": 1000,
+      "h": 1560,
       "is_interactive": true,
       "page": "team",
       "title": "Edit Theo",
@@ -286,6 +286,15 @@
       "w": 1440,
       "x": 3040,
       "y": 0
+    },
+    "ConnectorAdd.dc.html": {
+      "x": 0,
+      "y": 1120,
+      "w": 1440,
+      "h": 1000,
+      "title": "Connect GitHub to Theo",
+      "page": "team",
+      "is_interactive": true
     }
   },
   "createdOnFiles": {
@@ -380,6 +389,7 @@
     "Connect.dc.html",
     "Team.dc.html",
     "AgentEdit.dc.html",
+    "ConnectorAdd.dc.html",
     "Settings.dc.html",
     "Phone.dc.html",
     "PhoneGate.dc.html",
