@@ -1,0 +1,166 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Edit Theo</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&amp;family=Silkscreen&amp;family=Space+Grotesk:wght@400;500;600&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0;font-family:'Space Grotesk',system-ui,sans-serif;background:#F3E7D3;color:#161616}
+a{color:#A44D2B}a:hover{color:#7E3A1F}
+.px{image-rendering:pixelated}
+button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible{outline:2px solid #5A8DFF;outline-offset:2px}
+.cursor{display:inline-block;width:10px;height:20px;background:#6E8F76;vertical-align:-4px;animation:blink 1.1s steps(1) infinite}
+@keyframes blink{50%{opacity:0}}
+@media (prefers-reduced-motion:reduce){.cursor{animation:none}}
+
+</style>
+</helmet>
+<div style="width: 1440px; height: 1000px; display: flex; background: #F3E7D3; color: #161616; font-family: 'Space Grotesk', system-ui, sans-serif;">
+<nav aria-label="Main" style="width: 88px; flex-shrink: 0; background: #161616; display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 20px 0; box-sizing: border-box;">
+<img class="px" src="/_blob/cbf211abf5739b5bb073797fe4fb08fc" alt="Farik" style="width: 48px; height: 48px; margin-bottom: 16px;">
+<a href="Main.dc.html" style="width: 72px; padding: 10px 0; display: flex; flex-direction: column; align-items: center; gap: 4px; color: #B9AE9C; text-decoration: none; font-size: 12px;">
+<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="4"></circle><path d="M12 2v2M12 20v2M2 12h2M20 12h2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"></path></svg>Today</a>
+<a href="Board.dc.html" style="width: 72px; padding: 10px 0; display: flex; flex-direction: column; align-items: center; gap: 4px; color: #B9AE9C; text-decoration: none; font-size: 12px;">
+<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="3" y="4" width="5" height="16"></rect><rect x="10" y="4" width="5" height="10"></rect><rect x="17" y="4" width="4" height="13"></rect></svg>Board</a>
+<a href="Channel.dc.html" style="width: 72px; padding: 10px 0; display: flex; flex-direction: column; align-items: center; gap: 4px; color: #B9AE9C; text-decoration: none; font-size: 12px;">
+<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 5h16v11H9l-5 4z"></path></svg>Channel</a>
+<a href="Team.dc.html" aria-current="page" style="width: 72px; padding: 10px 0; display: flex; flex-direction: column; align-items: center; gap: 4px; color: #F3E7D3; background: #2A2A2A; border-radius: 4px; text-decoration: none; font-size: 12px;">
+<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="9" cy="8" r="3"></circle><circle cx="17" cy="9" r="2.5"></circle><path d="M3 20c0-3.3 2.7-6 6-6s6 2.7 6 6M15 20c0-2.2 1.3-4.2 3.5-4.8"></path></svg>Team</a>
+<a href="Costs.dc.html" style="width: 72px; padding: 10px 0; display: flex; flex-direction: column; align-items: center; gap: 4px; color: #B9AE9C; text-decoration: none; font-size: 12px;">
+<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><path d="M15 9.5c-.5-1-1.6-1.5-3-1.5-1.7 0-3 .8-3 2s1.3 1.7 3 2 3 .8 3 2-1.3 2-3 2c-1.4 0-2.5-.5-3-1.5M12 6v2M12 16v2"></path></svg>Costs</a>
+<div style="flex-grow: 1;"></div>
+<a href="Settings.dc.html" style="width: 72px; padding: 10px 0; display: flex; flex-direction: column; align-items: center; gap: 4px; color: #B9AE9C; text-decoration: none; font-size: 12px;">
+<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="3"></circle><path d="M12 2v3M12 19v3M2 12h3M19 12h3M5 5l2 2M17 17l2 2M5 19l2-2M17 7l2-2"></path></svg>Settings</a>
+</nav>
+<main style="flex-grow: 1; display: flex; flex-direction: column; min-width: 0; position: relative;">
+<div style="padding: 32px 48px 0; display: flex; flex-direction: column; gap: 8px;">
+<a href="Team.dc.html" style="font-size: 14px; font-weight: 600;">Back to your team</a>
+<h1 style="margin: 0; font-size: 24px; line-height: 30px; font-weight: 600;">Theo, your Developer</h1>
+</div>
+<div style="display: flex; gap: 64px; padding: 28px 48px 120px; align-items: flex-start;">
+<form style="width: 720px; flex-shrink: 0; display: flex; flex-direction: column; gap: 28px;">
+<div style="display: flex; gap: 24px; align-items: center;">
+<img class="px" src="/_blob/5defe7847440351388f344c77c64ce95" alt="Theo's picture" style="width: 96px; height: 96px; border: 3px solid #5A8DFF;">
+<div style="display: flex; flex-direction: column; gap: 8px;">
+<button type="button" style="font-family: inherit; font-size: 14px; font-weight: 600; background: transparent; color: #161616; border: 1px solid #8A7F6E; border-radius: 4px; padding: 8px 14px; cursor: pointer; min-height: 40px;">Choose another picture</button>
+<span style="font-size: 14px; color: #5B5347;">Pictures are only for you; they change nothing about the work.</span>
+</div>
+</div>
+
+<div style="display: flex; flex-direction: column; gap: 6px;">
+<label for="nm" style="font-size: 16px; font-weight: 600;">Name</label>
+<input id="nm" type="text" value="Theo" style="font-family: inherit; font-size: 16px; border: 1px solid #8A7F6E; border-radius: 4px; padding: 10px 12px; background: #FBF6EC; color: #161616; max-width: 320px;">
+</div>
+
+<div style="display: flex; flex-direction: column; gap: 6px;">
+<label for="ps" style="font-size: 16px; font-weight: 600;">How Theo talks</label>
+<span style="font-size: 14px; color: #5B5347;">One line. It shapes Theo’s messages in the channel, not the quality of the work.</span>
+<input id="ps" type="text" value="Terse. Shows rather than tells." style="font-family: inherit; font-size: 16px; border: 1px solid #8A7F6E; border-radius: 4px; padding: 10px 12px; background: #FBF6EC; color: #161616;">
+</div>
+
+<fieldset style="border: 0; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px;">
+<legend style="font-size: 16px; font-weight: 600; padding: 0; margin-bottom: 4px;">How carefully Theo works</legend>
+<span style="font-size: 14px; color: #5B5347;">Theo uses the strongest model. Careful is the safe choice for a developer.</span>
+<div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px;">
+<sc-for list="{{efforts}}" as="e" hint-placeholder-count="3">
+<button type="button" aria-pressed="{{e.on}}" onClick="{{e.pick}}" style="font-family: inherit; text-align: left; border: 1px solid #161616; border-radius: 4px; padding: 12px 14px; background: {{e.bg}}; color: {{e.fg}}; cursor: pointer; display: flex; flex-direction: column; gap: 2px; min-height: 64px;"><span style="font-size: 16px; font-weight: 600;">{{e.label}}</span><span style="font-size: 13px; color: {{e.sub}};">{{e.note}}</span></button>
+</sc-for>
+</div>
+</fieldset>
+
+<section aria-labelledby="may" style="display: flex; flex-direction: column; gap: 10px;">
+<h2 id="may" style="margin: 0; font-size: 18px; line-height: 24px; font-weight: 600;">What Theo may do</h2>
+<p style="margin: 0; font-size: 16px; line-height: 24px;">Theo builds and tests what an approved plan asks for, on its own branch, and runs commands inside a safe box on your computer. Theo cannot change a plan, accept its own work, or push to GitHub unless you allow it.</p>
+<div style="display: flex; align-items: center; gap: 12px; padding: 12px 0; border-top: 1px solid #D9CBB3; border-bottom: 1px solid #D9CBB3;">
+<span id="advl" style="flex-grow: 1; font-size: 16px; font-weight: 600;">Advanced</span>
+<span style="font-size: 14px; color: #5B5347;">{{advLabel}}</span>
+<button type="button" role="switch" aria-checked="{{adv}}" aria-labelledby="advl" onClick="{{toggleAdv}}" style="width: 48px; height: 28px; border-radius: 14px; border: 0; background: {{advBg}}; position: relative; cursor: pointer; padding: 0;"><span style="position: absolute; top: 2px; left: {{knobX}}; width: 24px; height: 24px; border-radius: 12px; background: #FBF6EC;"></span></button>
+</div>
+<sc-if value="{{notAdv}}" hint-placeholder-val="{{ true }}"><p style="margin: 0; font-size: 14px; line-height: 20px; color: #5B5347;">Turn on Advanced to see each permission, Theo’s skills, and the tools it is connected to.</p></sc-if>
+<sc-if value="{{adv}}" hint-placeholder-val="{{ false }}">
+<div style="display: flex; flex-direction: column; gap: 20px;">
+<ul style="list-style: none; margin: 0; padding: 0;">
+<sc-for list="{{tiers}}" as="t" hint-placeholder-count="7">
+<li style="display: grid; grid-template-columns: minmax(0, 1fr) 150px 110px; gap: 16px; align-items: center; padding: 10px 0; border-bottom: 1px solid #D9CBB3;">
+<span style="display: flex; flex-direction: column; gap: 2px;"><span style="font-size: 15px; font-weight: 500;">{{t.name}}</span><span style="font-size: 13px; color: #5B5347;">{{t.note}}</span></span>
+<span style="font-family: 'JetBrains Mono', monospace; font-size: 13px; color: #5B5347;">{{t.tier}}</span>
+<span style="font-size: 14px; font-weight: 600; color: {{t.color}};">{{t.state}}</span>
+</li>
+</sc-for>
+</ul>
+<div style="display: flex; flex-direction: column; gap: 6px;">
+<h3 style="margin: 0; font-size: 16px; font-weight: 600;">Skills</h3>
+<p style="margin: 0; font-size: 15px; line-height: 22px;">From the Developer role: writing tests first, and writing a completion note. <a href="#">Add a skill</a></p>
+</div>
+<div style="display: flex; flex-direction: column; gap: 6px;">
+<h3 style="margin: 0; font-size: 16px; font-weight: 600;">Connected tools</h3>
+<p style="margin: 0; font-size: 15px; line-height: 22px; color: #5B5347;">None yet. Connecting outside tools arrives in a later version.</p>
+</div>
+</div>
+</sc-if>
+</section>
+</form>
+
+<aside aria-labelledby="life" style="flex-grow: 1; display: flex; flex-direction: column; gap: 16px;">
+<h2 id="life" style="margin: 0; font-size: 18px; line-height: 24px; font-weight: 600;">Theo’s place on the team</h2>
+<div style="display: flex; flex-direction: column; gap: 6px; padding-bottom: 16px; border-bottom: 1px solid #D9CBB3;">
+<button type="button" style="font-family: inherit; font-size: 16px; font-weight: 600; background: transparent; color: #161616; border: 1px solid #161616; border-radius: 4px; padding: 11px 18px; cursor: pointer; min-height: 44px; align-self: flex-start;">Pause Theo</button>
+<span style="font-size: 14px; line-height: 20px; color: #5B5347;">Theo finishes nothing halfway and takes no new work until you resume.</span>
+</div>
+<div style="display: flex; flex-direction: column; gap: 6px; padding-bottom: 16px; border-bottom: 1px solid #D9CBB3;">
+<button type="button" style="font-family: inherit; font-size: 16px; font-weight: 600; background: transparent; color: #161616; border: 1px solid #161616; border-radius: 4px; padding: 11px 18px; cursor: pointer; min-height: 44px; align-self: flex-start;">Replace Theo</button>
+<span style="font-size: 14px; line-height: 20px; color: #5B5347;">A new developer joins and starts from what Theo learned.</span>
+</div>
+<div style="display: flex; flex-direction: column; gap: 6px;">
+<button type="button" style="font-family: inherit; font-size: 16px; font-weight: 600; background: transparent; color: #161616; border: 1px solid #161616; border-radius: 4px; padding: 11px 18px; cursor: pointer; min-height: 44px; align-self: flex-start; color: #A44D2B; border-color: #A44D2B;">Retire Theo</button>
+<span style="font-size: 14px; line-height: 20px; color: #5B5347;">Theo leaves the team. What Theo learned stays in your project for whoever comes next. Your team needs a developer, so Farik asks you to add one first.</span>
+</div>
+</aside>
+</div>
+
+<div style="position: absolute; left: 0; right: 0; bottom: 0; background: #FBF6EC; border-top: 1px solid #8A7F6E; padding: 18px 48px; display: flex; align-items: center; gap: 16px;">
+<button type="button" style="font-family: inherit; font-size: 16px; font-weight: 600; background: #D8896A; color: #161616; border: 0; border-radius: 4px; padding: 12px 20px; cursor: pointer; min-height: 44px;">Save changes</button>
+<button type="button" style="font-family: inherit; font-size: 16px; font-weight: 600; background: transparent; color: #161616; border: 1px solid #161616; border-radius: 4px; padding: 11px 18px; cursor: pointer; min-height: 44px;">Cancel</button>
+<span style="font-size: 14px; line-height: 20px; color: #5B5347;">Changes start with Theo’s next piece of work.</span>
+</div>
+</main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1000}}'>
+class Component extends DCLogic {
+constructor(props) { super(props); this.state = { adv: false, effort: 'high' }; }
+  renderVals() {
+    var adv = this.state.adv, self = this;
+    var efforts = [
+      { v: 'low', label: 'Quick', note: 'Cheaper, for simple jobs' },
+      { v: 'medium', label: 'Balanced', note: 'Good for most work' },
+      { v: 'high', label: 'Careful', note: 'Thinks longest; costs most' }
+    ].map(function (e) { var on = e.v === self.state.effort; return Object.assign({}, e, { on: on, pick: function () { self.setState({ effort: e.v }); },
+      bg: on ? '#161616' : 'transparent', fg: on ? '#F3E7D3' : '#161616', sub: on ? '#B9AE9C' : '#5B5347' }); });
+    return {
+      adv: adv, notAdv: !adv,
+      advLabel: adv ? 'On' : 'Off',
+      advBg: adv ? '#536C59' : '#8A7F6E', knobX: adv ? '22px' : '2px',
+      toggleAdv: function () { self.setState({ adv: !adv }); },
+      efforts: efforts,
+      tiers: [
+        { name: 'Read the project', tier: 'read', on: true, note: 'Every agent can.' },
+        { name: 'Change files in its task', tier: 'write_workspace', on: true, note: 'Only the files the plan allows.' },
+        { name: 'Run commands', tier: 'execute', on: true, note: 'Inside a safe box on your computer. You said yes at setup.' },
+        { name: 'Save its work on its own branch', tier: 'git_local', on: true, note: 'Never on your main branch.' },
+        { name: 'Use the internet', tier: 'network', on: false, note: 'Off for developers by default.' },
+        { name: 'Push to GitHub and open pull requests', tier: 'git_remote', on: false, note: 'Nobody has this until you give it.' },
+        { name: 'Do things outside your computer', tier: 'external_effect', on: false, note: 'Sending mail, posting, deploying. You approve each one.' }
+      ].map(function (t) { return Object.assign({}, t, { state: t.on ? 'Allowed' : 'Not allowed', color: t.on ? '#536C59' : '#5B5347' }); })
+    };
+  }
+}
+</script>
+</body>
+</html>

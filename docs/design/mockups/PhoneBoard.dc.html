@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Board on a phone</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&amp;family=Silkscreen&amp;family=Space+Grotesk:wght@400;500;600&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0;font-family:'Space Grotesk',system-ui,sans-serif;background:#F3E7D3;color:#161616}
+a{color:#A44D2B}a:hover{color:#7E3A1F}
+.px{image-rendering:pixelated}
+button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible{outline:2px solid #5A8DFF;outline-offset:2px}
+.cursor{display:inline-block;width:10px;height:20px;background:#6E8F76;vertical-align:-4px;animation:blink 1.1s steps(1) infinite}
+@keyframes blink{50%{opacity:0}}
+@media (prefers-reduced-motion:reduce){.cursor{animation:none}}
+
+</style>
+</helmet>
+<div style="width: 390px; height: 844px; display: flex; flex-direction: column; background: #F3E7D3; color: #161616; font-family: 'Space Grotesk', system-ui, sans-serif; overflow: hidden;">
+<header style="background: #161616; color: #F3E7D3; padding: 8px 16px; display: flex; align-items: center; gap: 12px; flex-shrink: 0; min-height: 56px; box-sizing: border-box;"><img class="px" src="/_blob/cbf211abf5739b5bb073797fe4fb08fc" alt="Farik" style="width: 32px; height: 32px;"><h1 style="margin: 0; font-size: 18px; line-height: 24px; font-weight: 600; flex-grow: 1;">Board</h1></header>
+<div style="padding: 14px 16px 6px; display: flex; flex-direction: column; gap: 2px; flex-shrink: 0;">
+<span style="font-size: 15px; font-weight: 600;">Sprint 2 is running</span>
+<span style="font-size: 14px; color: #5B5347;">4 of 7 tasks done</span>
+</div>
+<div role="tablist" aria-label="Lanes" style="display: flex; gap: 8px; overflow-x: auto; padding: 8px 16px 12px; flex-shrink: 0; border-bottom: 1px solid #161616;">
+<sc-for list="{{lanes}}" as="l" hint-placeholder-count="6">
+<button type="button" role="tab" aria-selected="{{l.on}}" onClick="{{l.pick}}" style="flex-shrink: 0; font-family: inherit; font-size: 15px; font-weight: 600; min-height: 44px; padding: 0 14px; border: 1px solid #161616; border-radius: 4px; background: {{l.bg}}; color: {{l.fg}}; cursor: pointer; display: flex; align-items: center; gap: 8px;">{{l.label}}<span style="font-family: 'JetBrains Mono', monospace; font-size: 12px; font-weight: 400;">{{l.count}}</span></button>
+</sc-for>
+</div>
+<div role="tabpanel" style="flex-grow: 1; overflow-y: auto; padding: 0 16px;">
+<sc-for list="{{tasks}}" as="t" hint-placeholder-count="2">
+<a href="{{t.href}}" style="display: flex; gap: 12px; align-items: center; padding: 14px 0; border-bottom: 1px solid #D9CBB3; color: #161616; text-decoration: none; min-height: 44px;">
+<img class="px" src="{{t.av}}" alt="" style="width: 40px; height: 40px; flex-shrink: 0;">
+<span style="flex-grow: 1; display: flex; flex-direction: column; gap: 4px;"><span style="font-size: 16px; font-weight: 500;">{{t.title}}</span>
+<span style="display: flex; gap: 8px; font-size: 13px;"><span style="font-family: 'JetBrains Mono', monospace; color: #5B5347;">{{t.id}}</span><span style="font-weight: 600; color: {{t.color}};">{{t.mark}}</span></span></span>
+</a>
+</sc-for>
+<sc-if value="{{empty}}" hint-placeholder-val="{{ false }}"><p style="margin: 16px 0; font-size: 15px; color: #5B5347;">Nothing here right now.</p></sc-if>
+</div>
+<nav aria-label="Main" style="display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); background: #161616; padding: 8px 4px 14px; flex-shrink: 0;">
+<a href="Phone.dc.html" style="display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 6px 0; min-height: 44px; box-sizing: border-box; color: #B9AE9C; text-decoration: none; font-size: 12px; font-weight: 400;"><span style="width: 20px; height: 3px; background: transparent;"></span>Today</a>
+<a href="PhoneBoard.dc.html" aria-current="page" style="display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 6px 0; min-height: 44px; box-sizing: border-box; color: #F3E7D3; text-decoration: none; font-size: 12px; font-weight: 600;"><span style="width: 20px; height: 3px; background: #D8896A;"></span>Board</a>
+<a href="PhoneChannel.dc.html" style="display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 6px 0; min-height: 44px; box-sizing: border-box; color: #B9AE9C; text-decoration: none; font-size: 12px; font-weight: 400;"><span style="width: 20px; height: 3px; background: transparent;"></span>Channel</a>
+<a href="Team.dc.html" style="display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 6px 0; min-height: 44px; box-sizing: border-box; color: #B9AE9C; text-decoration: none; font-size: 12px; font-weight: 400;"><span style="width: 20px; height: 3px; background: transparent;"></span>Team</a>
+<a href="#" style="display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 6px 0; min-height: 44px; box-sizing: border-box; color: #B9AE9C; text-decoration: none; font-size: 12px; font-weight: 400;"><span style="width: 20px; height: 3px; background: transparent;"></span>Costs</a>
+</nav>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+constructor(props) { super(props); this.state = { lane: 'review' }; }
+  renderVals() {
+    var self = this;
+    var pm = '/_blob/869069a768cb33e45c8bb866b20acd01', dev = '/_blob/5defe7847440351388f344c77c64ce95', mkt = '/_blob/2099d2edd3191152cc1f897883c205cf', sm = '/_blob/b5b337cd4be20e26bbb640893ac8fa9b';
+    function t(id, title, av, mark, color, href) { return { id: id, title: title, av: av, mark: mark || '', color: color || '#5B5347', href: href || '#' }; }
+    var data = {
+      planning: [t('E-3', 'Gift cards', pm, 'Waiting on you', '#A44D2B'), t('T-19', 'Holiday opening hours', pm, 'Asking you a question', '#A44D2B')],
+      todo: [t('T-17', 'Email a receipt after paying', dev), t('T-18', 'Photo for the gift card page', mkt)],
+      progress: [t('T-16', 'Launch post for gift cards', mkt, 'Writing', '#0653FF'), t('T-15', 'Show sold-out items', dev, 'Being reworked', '#0653FF')],
+      stuck: [],
+      review: [t('T-14', 'New checkout page', dev, 'Waiting on you', '#A44D2B', 'PhoneGate.dc.html')],
+      done: [t('T-12', 'New photos on the menu page', dev, 'Accepted', '#536C59'), t('T-11', 'Standup notes in the channel', sm, 'Accepted', '#536C59')]
+    };
+    var names = [['planning', 'Planning'], ['todo', 'To do'], ['progress', 'In progress'], ['stuck', 'Stuck'], ['review', 'Review'], ['done', 'Done']];
+    var lanes = names.map(function (n) { var on = n[0] === self.state.lane; return { key: n[0], label: n[1], count: String(data[n[0]].length), on: on,
+      bg: on ? '#161616' : 'transparent', fg: on ? '#F3E7D3' : '#161616', pick: function () { self.setState({ lane: n[0] }); } }; });
+    var tasks = data[this.state.lane];
+    return { lanes: lanes, tasks: tasks, empty: tasks.length === 0 };
+  }
+}
+</script>
+</body>
+</html>

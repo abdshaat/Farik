@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Start a sprint</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&amp;family=Silkscreen&amp;family=Space+Grotesk:wght@400;500;600&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0;font-family:'Space Grotesk',system-ui,sans-serif;background:#F3E7D3;color:#161616}
+a{color:#A44D2B}a:hover{color:#7E3A1F}
+.px{image-rendering:pixelated}
+button:focus-visible,a:focus-visible,input:focus-visible,textarea:focus-visible{outline:2px solid #5A8DFF;outline-offset:2px}
+</style>
+</helmet>
+<div style="width: 1440px; height: 1000px; display: flex; background: #F3E7D3; color: #161616; font-family: 'Space Grotesk', system-ui, sans-serif; overflow: hidden; position: relative;">
+<nav aria-label="Main" style="width: 88px; flex-shrink: 0; background: #161616; display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 20px 0; box-sizing: border-box;">
+<img class="px" src="/_blob/cbf211abf5739b5bb073797fe4fb08fc" alt="Farik" style="width: 48px; height: 48px; margin-bottom: 16px;">
+<a href="Main.dc.html" style="width: 72px; padding: 10px 0; display: flex; flex-direction: column; align-items: center; gap: 4px; color: #B9AE9C; text-decoration: none; font-size: 12px;">
+<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="4"></circle><path d="M12 2v2M12 20v2M2 12h2M20 12h2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"></path></svg>Today</a>
+<a href="Board.dc.html" aria-current="page" style="width: 72px; padding: 10px 0; display: flex; flex-direction: column; align-items: center; gap: 4px; color: #F3E7D3; background: #2A2A2A; border-radius: 4px; text-decoration: none; font-size: 12px;">
+<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="3" y="4" width="5" height="16"></rect><rect x="10" y="4" width="5" height="10"></rect><rect x="17" y="4" width="4" height="13"></rect></svg>Board</a>
+<a href="Channel.dc.html" style="width: 72px; padding: 10px 0; display: flex; flex-direction: column; align-items: center; gap: 4px; color: #B9AE9C; text-decoration: none; font-size: 12px;">
+<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 5h16v11H9l-5 4z"></path></svg>Channel</a>
+<a href="Team.dc.html" style="width: 72px; padding: 10px 0; display: flex; flex-direction: column; align-items: center; gap: 4px; color: #B9AE9C; text-decoration: none; font-size: 12px;">
+<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="9" cy="8" r="3"></circle><circle cx="17" cy="9" r="2.5"></circle><path d="M3 20c0-3.3 2.7-6 6-6s6 2.7 6 6M15 20c0-2.2 1.3-4.2 3.5-4.8"></path></svg>Team</a>
+<a href="Costs.dc.html" style="width: 72px; padding: 10px 0; display: flex; flex-direction: column; align-items: center; gap: 4px; color: #B9AE9C; text-decoration: none; font-size: 12px;">
+<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><path d="M15 9.5c-.5-1-1.6-1.5-3-1.5-1.7 0-3 .8-3 2s1.3 1.7 3 2 3 .8 3 2-1.3 2-3 2c-1.4 0-2.5-.5-3-1.5M12 6v2M12 16v2"></path></svg>Costs</a>
+<div style="flex-grow: 1;"></div>
+<a href="Settings.dc.html" style="width: 72px; padding: 10px 0; display: flex; flex-direction: column; align-items: center; gap: 4px; color: #B9AE9C; text-decoration: none; font-size: 12px;">
+<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="3"></circle><path d="M12 2v3M12 19v3M2 12h3M19 12h3M5 5l2 2M17 17l2 2M5 19l2-2M17 7l2-2"></path></svg>Settings</a>
+</nav>
+<main aria-hidden="true" style="flex-grow: 1; display: flex; flex-direction: column; min-width: 0; padding: 32px 40px; gap: 20px; box-sizing: border-box;">
+<div style="display: flex; align-items: center; gap: 16px;">
+<h1 style="margin: 0; font-size: 24px; line-height: 30px; font-weight: 600;">Board</h1>
+<span style="font-size: 16px; color: #5B5347;">No sprint is running. The team works through the board in order.</span>
+<span style="flex-grow: 1;"></span>
+<span style="font-family: inherit; font-size: 16px; font-weight: 600; background: #D8896A; color: #161616; border: 0; border-radius: 4px; padding: 12px 20px; cursor: pointer;">Start a sprint</span>
+</div>
+<div style="flex-grow: 1; display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); border-top: 1px solid #161616;">
+<sc-for list="{{lanes}}" as="lane" hint-placeholder-count="6">
+<section style="padding: 14px; border-right: 1px solid #D9CBB3;">
+<h2 style="margin: 0 0 10px; font-size: 16px; font-weight: 600;">{{lane.name}}</h2>
+<sc-for list="{{lane.tasks}}" as="t" hint-placeholder-count="2">
+<div style="display: flex; gap: 10px; padding: 12px 0; border-bottom: 1px solid #D9CBB3;"><img class="px" src="{{t.av}}" alt="" style="width: 32px; height: 32px;"><span style="font-size: 15px; line-height: 20px;">{{t.title}}</span></div>
+</sc-for>
+</section>
+</sc-for>
+</div>
+</main>
+<div style="position: absolute; inset: 0; background: rgba(22, 22, 22, 0.55);"></div>
+<div role="dialog" aria-modal="true" aria-labelledby="sshead" style="position: absolute; left: 50%; top: 110px; transform: translateX(-50%); width: 600px; background: #FBF6EC; border-radius: 8px; padding: 32px; box-sizing: border-box; display: flex; flex-direction: column; gap: 22px; color: #161616;">
+<div style="display: flex; flex-direction: column; gap: 8px;">
+<h2 id="sshead" style="margin: 0; font-size: 24px; line-height: 30px; font-weight: 600;">Start sprint 3</h2>
+<p style="margin: 0; font-size: 16px; line-height: 24px;">A sprint is a batch of work the team finishes before it stops to look back. It ends by itself when every task in it is done.</p>
+</div>
+<div style="display: flex; gap: 14px; align-items: flex-start; padding: 16px 0; border-top: 1px solid #D9CBB3; border-bottom: 1px solid #D9CBB3;">
+<img class="px" src="/_blob/b5b337cd4be20e26bbb640893ac8fa9b" alt="" style="width: 48px; height: 48px; border: 3px solid #6E8F76; flex-shrink: 0;">
+<p style="margin: 0; font-size: 16px; line-height: 24px;"><strong>Sol</strong> will plan it: Sol picks from the <strong>5 ready tasks</strong> on the board, posts the plan in the channel, and then runs a short standup each day and a review and a look back at the end.</p>
+</div>
+<div style="display: flex; flex-direction: column; gap: 8px;">
+<span id="budlbl" style="font-size: 16px; font-weight: 600;">Spending limit for this sprint</span>
+<div role="radiogroup" aria-labelledby="budlbl" style="display: flex; flex-direction: column; gap: 10px;">
+<label style="display: flex; gap: 10px; align-items: center; font-size: 16px;"><input type="radio" name="bud" checked="{{noLimit}}" onChange="{{pickNone}}" style="width: 20px; height: 20px; accent-color: #161616;">No limit</label>
+<label style="display: flex; gap: 10px; align-items: center; font-size: 16px;"><input type="radio" name="bud" checked="{{hasLimit}}" onChange="{{pickLimit}}" style="width: 20px; height: 20px; accent-color: #161616;">Stop handing out new work after</label>
+</div>
+<sc-if value="{{hasLimit}}" hint-placeholder-val="{{ false }}">
+<div style="display: flex; align-items: center; gap: 8px; padding-left: 30px;">
+<span style="font-family: 'JetBrains Mono', monospace; font-size: 16px;">$</span>
+<input type="text" inputmode="decimal" value="20.00" aria-label="Sprint limit in dollars" style="width: 110px; font-family: 'JetBrains Mono', monospace; font-size: 16px; border: 1px solid #8A7F6E; border-radius: 4px; padding: 8px 10px; background: #FFFFFF;">
+</div>
+</sc-if>
+<p style="margin: 0; font-size: 14px; line-height: 20px; color: #5B5347;">When the limit is reached, work already started may finish. You can leave it empty and watch spending on the Costs page.</p>
+</div>
+<div style="display: flex; gap: 12px; justify-content: flex-end;">
+<button type="button" style="font-family: inherit; font-size: 16px; font-weight: 600; background: transparent; color: #161616; border: 1px solid #161616; border-radius: 4px; padding: 11px 18px; cursor: pointer;">Not now</button>
+<button type="button" style="font-family: inherit; font-size: 16px; font-weight: 600; background: #D8896A; color: #161616; border: 0; border-radius: 4px; padding: 12px 20px; cursor: pointer;">Start sprint 3</button>
+</div>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1000}}'>
+class Component extends DCLogic {
+  constructor(props) { super(props); this.state = { limit: false }; }
+  renderVals() {
+    var pm = '/_blob/869069a768cb33e45c8bb866b20acd01', dev = '/_blob/5defe7847440351388f344c77c64ce95', mkt = '/_blob/2099d2edd3191152cc1f897883c205cf', self = this;
+    function t(title, av) { return { title: title, av: av }; }
+    return {
+      noLimit: !this.state.limit, hasLimit: this.state.limit,
+      pickNone: function () { self.setState({ limit: false }); }, pickLimit: function () { self.setState({ limit: true }); },
+      lanes: [
+        { name: 'Planning', tasks: [t('Loyalty stamps', pm)] },
+        { name: 'To do', tasks: [t('Gift card page', dev), t('Email a receipt after paying', dev), t('Photo for the gift card page', mkt)] },
+        { name: 'In progress', tasks: [] },
+        { name: 'Stuck', tasks: [] },
+        { name: 'Review', tasks: [] },
+        { name: 'Done', tasks: [t('New checkout page', dev), t('Show sold-out items', dev)] }
+      ]
+    };
+  }
+}
+</script>
+</body>
+</html>

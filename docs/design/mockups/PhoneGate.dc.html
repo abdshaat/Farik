@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Accept work on a phone</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&amp;family=Silkscreen&amp;family=Space+Grotesk:wght@400;500;600&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0;font-family:'Space Grotesk',system-ui,sans-serif;background:#F3E7D3;color:#161616}
+a{color:#A44D2B}a:hover{color:#7E3A1F}
+.px{image-rendering:pixelated}
+button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible{outline:2px solid #5A8DFF;outline-offset:2px}
+.cursor{display:inline-block;width:10px;height:20px;background:#6E8F76;vertical-align:-4px;animation:blink 1.1s steps(1) infinite}
+@keyframes blink{50%{opacity:0}}
+@media (prefers-reduced-motion:reduce){.cursor{animation:none}}
+
+</style>
+</helmet>
+<div style="width: 390px; height: 844px; display: flex; flex-direction: column; background: #F3E7D3; color: #161616; font-family: 'Space Grotesk', system-ui, sans-serif; overflow: hidden;">
+<header style="background: #161616; color: #F3E7D3; padding: 8px 16px; display: flex; align-items: center; gap: 12px; flex-shrink: 0; min-height: 56px; box-sizing: border-box;"><a href="Phone.dc.html" style="font-size: 14px; font-weight: 600; color: #F3E7D3; min-height: 44px; display: inline-flex; align-items: center;">Back</a><h1 style="margin: 0; font-size: 18px; line-height: 24px; font-weight: 600; flex-grow: 1;">Accept work</h1></header>
+<div style="flex-grow: 1; overflow-y: auto; padding: 20px 16px; display: flex; flex-direction: column; gap: 22px;">
+<div style="display: flex; flex-direction: column; gap: 4px;">
+<h2 style="margin: 0; font-size: 22px; line-height: 28px; font-weight: 600;">Accept the new checkout page</h2>
+<span style="font-size: 14px; line-height: 20px; color: #5B5347;">It touches payments, so it waits for you.</span>
+</div>
+<article style="display: flex; flex-direction: column; gap: 10px;">
+<div style="display: flex; align-items: center; gap: 10px;"><img class="px" src="/_blob/5defe7847440351388f344c77c64ce95" alt="" style="width: 40px; height: 40px; border: 2px solid #5A8DFF;"><span style="font-size: 14px; color: #5B5347;"><strong style="color: #161616;">Theo</strong> wrote this for you</span></div>
+<p style="margin: 0; font-size: 16px; line-height: 25px;">Customers can now pay at the end of their order. If a card is declined, the page says so and keeps the order. I did not change how prices are worked out.</p>
+</article>
+<article style="display: flex; flex-direction: column; gap: 10px;">
+<div style="display: flex; align-items: center; gap: 10px;"><div aria-hidden="true" style="width: 34px; height: 34px; border: 3px dashed #5B5347; flex-shrink: 0; display: flex; align-items: center; justify-content: center; font-family: 'Silkscreen', monospace; font-size: 16px; color: #5B5347; box-sizing: content-box;">A</div><span style="font-size: 14px; color: #5B5347;"><strong style="color: #161616;">Ada</strong> reviewed it</span></div>
+<p style="margin: 0; font-size: 16px; line-height: 25px;">It does what the plan asked. Closing the page while paying never charges twice.</p>
+</article>
+<section aria-labelledby="pgc">
+<h3 id="pgc" style="margin: 0 0 4px; font-size: 18px; font-weight: 600;">What Farik checked</h3>
+<ul style="list-style: none; margin: 0; padding: 0;">
+<sc-for list="{{checks}}" as="c" hint-placeholder-count="5">
+<li style="display: flex; gap: 10px; align-items: flex-start; padding: 10px 0; border-bottom: 1px solid #D9CBB3; font-size: 15px; line-height: 22px;">
+<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#536C59" stroke-width="3" aria-hidden="true" style="flex-shrink: 0; margin-top: 2px;"><path d="M4 12l5 5L20 6"></path></svg>
+<span style="flex-grow: 1;">{{c.text}}</span><span style="font-size: 13px; font-weight: 600; color: #536C59;">Passed</span>
+</li>
+</sc-for>
+</ul>
+</section>
+<button type="button" onClick="{{toggle}}" aria-expanded="{{open}}" style="font-family: inherit; font-size: 14px; font-weight: 600; background: transparent; color: #161616; border: 1px solid #8A7F6E; border-radius: 4px; padding: 8px 14px; cursor: pointer; min-height: 40px; align-self: stretch; min-height: 44px;">{{label}}</button>
+<sc-if value="{{open}}" hint-placeholder-val="{{ false }}">
+<div style="background: #161616; color: #F3E7D3; border-radius: 8px; padding: 12px 0; font-family: 'JetBrains Mono', monospace; font-size: 12px; line-height: 19px; overflow-x: auto;">
+<div style="padding: 0 12px 8px; color: #B9AE9C;">src/pages/checkout.tsx</div>
+<div style="padding: 0 12px; background: #3A2019; white-space: pre;">-  return &lt;Cart order={order} /&gt;;</div>
+<div style="padding: 0 12px; background: #1E2E22; white-space: pre;">+  const total = priceOf(order);</div>
+</div>
+</sc-if>
+</div>
+<div style="flex-shrink: 0; background: #FBF6EC; border-top: 1px solid #8A7F6E; padding: 12px 16px 16px; display: flex; flex-direction: column; gap: 8px;">
+<button type="button" style="font-family: inherit; font-size: 16px; font-weight: 600; background: #D8896A; color: #161616; border: 0; border-radius: 4px; padding: 12px 20px; cursor: pointer; min-height: 44px; width: 100%;">Accept the work</button>
+<button type="button" style="font-family: inherit; font-size: 16px; font-weight: 600; background: transparent; color: #161616; border: 1px solid #161616; border-radius: 4px; padding: 11px 18px; cursor: pointer; min-height: 44px; width: 100%;">Send back with a note</button>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+constructor(props) { super(props); this.state = { open: false }; }
+  renderVals() {
+    var open = this.state.open, self = this;
+    return { open: open, label: open ? 'Hide the code changes' : 'See the code changes', toggle: function () { self.setState({ open: !open }); },
+      checks: ['The total on the page matches the cart', 'A declined card keeps the order', 'The page works on a phone', 'Everything that worked before still works', 'Only the shop pages were changed'].map(function (t) { return { text: t }; }) };
+  }
+}
+</script>
+</body>
+</html>
