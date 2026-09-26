@@ -44,6 +44,7 @@ The palette has five brand colours. Each has a job:
 | Coral Text | `#A44D2B` | 4.68:1 | 2.23:1 |
 | Moss Text | `#536C59` | 4.70:1 | 2.94:1 |
 | Signal Text | `#0653FF` | 4.66:1 | 2.57:1 |
+| Amber Text | `#856015` | 4.67:1 | 1.93:1 (Amber `#E3B04B`, the Architect's tag) |
 
 These combinations were measured:
 - On Midnight Terminal: Clay Coral 6.64, Soft Sand 14.81, Moss Grid 5.04 and Signal Blue 5.76. All brand colours may be text on dark surfaces.
@@ -51,7 +52,12 @@ These combinations were measured:
 
 **The Marketing Specialist's tag** is lavender in the kit, which is not in the palette. It is recorded as a tag colour, `#A99BF0` (read from the kit; to be confirmed with the character files), and is used only as a character's tag fill with Midnight Terminal text.
 
-**The Architect's tag** is `#7F9A7F` on the founder's Architect card (2026-09-26). It is a moss green close to the Scrum Master's Moss Grid, so the two tags are hard to tell apart. It is recorded as supplied, and the founder is asked whether the Architect should have its own colour.
+**The Architect's tag is Amber `#E3B04B`.** On 2026-09-26 the founder decided the Architect gets its own colour, because the moss green on its card (`#7F9A7F`) could not be told apart from the Scrum Master's. Amber was chosen for three reasons:
+- **It is distinct.** Its hue is one no other tag uses, and it is lighter than all of them (relative luminance 0.48, against 0.24 to 0.38), so it stays distinct for colour-blind readers.
+- **It carries Midnight Terminal text** at 9.12:1.
+- **It echoes the office scene's** warm lamps and sticky notes.
+
+Its text shade for light surfaces is Amber Text `#856015`, at 4.67:1 on Soft Sand. Like the other tag colours, Amber is used only as a tag fill and for status marks tied to the role, never as a general accent.
 
 **Themes.**
 - **Light is the default:** Soft Sand pages; Midnight Terminal for the hero, the top bar, and terminal-style panels; white-on-sand cards (`#FBF6EC`, a lighter tint of Soft Sand).
@@ -93,7 +99,7 @@ The characters are pixel-art people, one per role, each with a coloured role tag
 | Scrum Master | SM, Moss Grid | Keeps the team aligned and unblocked. |
 | Developer | DEV, Signal Blue | Builds, tests and ships features. |
 | Marketing Specialist | MKT, lavender | Creates content and drives growth. |
-| Architect | ARCH, `#7F9A7F` | Designs systems and technical foundations. |
+| Architect | ARCH, Amber `#E3B04B` | Designs systems and technical foundations. |
 
 The founder's character files of 2026-09-26 replace the kit's drawings:
 - the Product Manager, Scrum Master, Developer and Marketing Specialist are full-body figures on transparent backgrounds;
@@ -130,6 +136,5 @@ The founder supplied these on 2026-09-26. They are kept unchanged in `docs/brand
 The kit's rule that the wordmark is always Clay Coral gives way to the supplied file: the wordmark is Soft Sand on dark surfaces. The README's banner and team images, in `docs/brand/readme/`, are composed from these files.
 
 Still wanted:
-1. **The Architect as a transparent figure**, matching the other four.
-2. **A decision on the Architect's tag colour**, since `#7F9A7F` reads as the Scrum Master's.
-3. **For phase 7 only:** the office scene as layered pieces, and the characters' sitting and walking frames.
+1. **All five characters redrawn seated at a laptop.** The founder is regenerating them (2026-09-26). Each should be a transparent PNG at its native pixel size, in one shared pose and scale so they line up. These replace the files above, and the README's team image and the web mockups are rebuilt from them.
+2. **For phase 7 only:** the office scene as layered pieces, and the characters' walking frames.
