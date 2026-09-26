@@ -30,7 +30,7 @@ a{color:#A44D2B}
 <sc-for list="{{team}}" as="m" hint-placeholder-count="5">
 <div style="width: 76px; flex-shrink: 0; display: flex; flex-direction: column; align-items: center; gap: 6px;">
 <sc-if value="{{m.hasArt}}" hint-placeholder-val="{{ true }}"><img class="px" src="{{m.av}}" alt="" style="width: 56px; height: 56px; border: 3px solid {{m.tag}};"></sc-if>
-<sc-if value="{{m.noArt}}" hint-placeholder-val="{{ false }}"><div aria-hidden="true" style="width: 56px; height: 56px; border: 3px dashed #B9AE9C; display: flex; align-items: center; justify-content: center; font-family: 'Silkscreen', monospace; font-size: 22px; color: #B9AE9C; box-sizing: content-box;">A</div></sc-if>
+<sc-if value="{{m.noArt}}" hint-placeholder-val="{{ false }}"><img class="px" src="/_blob/ad487f8d4aefebda16a64e156d704fdb" alt="" style="width: 56px; height: 56px; border: 3px solid #E3B04B; flex-shrink: 0; box-sizing: content-box;"></sc-if>
 <span style="font-size: 14px; font-weight: 600;">{{m.name}}</span>
 <span style="font-size: 12px; line-height: 16px; text-align: center; color: {{m.statusColor}};">{{m.status}}</span>
 </div>
@@ -71,13 +71,13 @@ a{color:#A44D2B}
 <script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":390,"height":844}}'>
 class Component extends DCLogic {
   renderVals() {
-    var pm = '/_blob/869069a768cb33e45c8bb866b20acd01', sm = '/_blob/b5b337cd4be20e26bbb640893ac8fa9b', dev = '/_blob/5defe7847440351388f344c77c64ce95', mkt = '/_blob/2099d2edd3191152cc1f897883c205cf';
+    var pm = '/_blob/9bb5279ccb2c1912098a3a1b2c486aee', sm = '/_blob/50d64e70d63028a36a09a3b10dd330bb', dev = '/_blob/b3a8b1467a4f9ce051ca665a72525186', mkt = '/_blob/d639a95a4e1c0d33f55ba49d10828138';
     function m(name, av, tag, status, waiting) { return { name: name, av: av || '', tag: tag, status: status, hasArt: !!av, noArt: !av, statusColor: waiting ? '#D8896A' : '#B9AE9C' }; }
     var tabs = ['Today', 'Board', 'Channel', 'Team', 'Costs'].map(function (l, i) {
       return { label: l, current: i === 0 ? 'page' : 'false', color: i === 0 ? '#F3E7D3' : '#B9AE9C', weight: i === 0 ? '600' : '400', bar: i === 0 ? '#D8896A' : 'transparent' };
     });
     return {
-      team: [m('Theo', dev, '#5A8DFF', 'Waiting on you', true), m('Mira', pm, '#D8896A', 'Planning'), m('Kai', mkt, '#A99BF0', 'Writing'), m('Sol', sm, '#6E8F76', 'Standup posted'), m('Ada', '', '#161616', 'Resting')],
+      team: [m('Theo', dev, '#5A8DFF', 'Waiting on you', true), m('Mira', pm, '#D8896A', 'Planning'), m('Kai', mkt, '#A99BF0', 'Writing'), m('Sol', sm, '#6E8F76', 'Standup posted'), m('Ada', '/_blob/ad487f8d4aefebda16a64e156d704fdb', '#E3B04B', 'Resting')],
       waiting: [
         { title: 'Accept the checkout page', sub: 'All 5 checks passed', av: dev, href: 'Gate.dc.html' },
         { title: 'Approve the gift card plan', sub: 'A plan in 4 parts', av: pm, href: '#' },

@@ -56,7 +56,7 @@ button:focus-visible,a:focus-visible,input:focus-visible,textarea:focus-visible{
 <tr style="border-bottom: 1px solid #D9CBB3;">
 <td style="padding: 12px 0;"><span style="display: flex; align-items: center; gap: 10px;">
 <sc-if value="{{a.hasArt}}" hint-placeholder-val="{{ true }}"><img class="px" src="{{a.av}}" alt="" style="width: 32px; height: 32px;"></sc-if>
-<sc-if value="{{a.noArt}}" hint-placeholder-val="{{ false }}"><span aria-hidden="true" style="width: 30px; height: 30px; border: 1px dashed #5B5347; display: inline-flex; align-items: center; justify-content: center; font-family: 'Silkscreen', monospace; font-size: 14px; color: #5B5347;">A</span></sc-if>
+<sc-if value="{{a.noArt}}" hint-placeholder-val="{{ false }}"><img class="px" src="/_blob/ad487f8d4aefebda16a64e156d704fdb" alt="" style="width: 30px; height: 30px; border: 1px solid #E3B04B; flex-shrink: 0; box-sizing: content-box;"></sc-if>
 <span><strong>{{a.name}}</strong> <span style="color: #5B5347;">{{a.role}}</span></span></span></td>
 <td style="padding: 12px 0; text-align: right; font-family: 'JetBrains Mono', monospace;">{{a.today}}</td>
 <td style="padding: 12px 0; text-align: right; font-family: 'JetBrains Mono', monospace;">{{a.sprint}}</td>
@@ -91,11 +91,11 @@ class Component extends DCLogic {
     function a(name, role, av, today, sprint, now, color) { return { name: name, role: role, av: av, hasArt: !!av, noArt: !av, today: today, sprint: sprint, now: now, nowColor: color || '#161616' }; }
     return {
       agents: [
-        a('Theo', 'Developer', '/_blob/5defe7847440351388f344c77c64ce95', '$2.94', '$6.10', 'Working on sold-out items'),
-        a('Mira', 'Product Manager', '/_blob/869069a768cb33e45c8bb866b20acd01', '$1.48', '$2.35', 'Writing the gift card plan'),
-        a('Kai', 'Marketing', '/_blob/2099d2edd3191152cc1f897883c205cf', '$0.87', '$1.52', 'Drafting the launch post'),
-        a('Sol', 'Scrum Master', '/_blob/b5b337cd4be20e26bbb640893ac8fa9b', '$0.31', '$0.88', 'Idle until the next standup'),
-        a('Ada', 'Architect', '', '$0.52', '$0.99', 'Resting until 3:40 pm (usage limit reached)', '#A44D2B')
+        a('Theo', 'Developer', '/_blob/b3a8b1467a4f9ce051ca665a72525186', '$2.94', '$6.10', 'Working on sold-out items'),
+        a('Mira', 'Product Manager', '/_blob/9bb5279ccb2c1912098a3a1b2c486aee', '$1.48', '$2.35', 'Writing the gift card plan'),
+        a('Kai', 'Marketing', '/_blob/d639a95a4e1c0d33f55ba49d10828138', '$0.87', '$1.52', 'Drafting the launch post'),
+        a('Sol', 'Scrum Master', '/_blob/50d64e70d63028a36a09a3b10dd330bb', '$0.31', '$0.88', 'Idle until the next standup'),
+        a('Ada', 'Architect', '/_blob/ad487f8d4aefebda16a64e156d704fdb', '$0.52', '$0.99', 'Resting until 3:40 pm (usage limit reached)', '#A44D2B')
       ],
       metrics: [
         { label: 'Work accepted on the first try', value: '6 of 9', note: 'The rest were sent back once before they passed.' },
