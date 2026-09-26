@@ -1,6 +1,6 @@
 # Farik web UI design
 
-Status: draft for the founder's approval. It is the design input to phase 6. Phase 6's step plans build from it, and step 02's component library takes its tokens from `@farik/brand` (phase 5 step 02).
+Status: approved by the founder on 2026-09-26, who then asked for every page to be mocked up before any code. It is the design input to phase 6. Phase 6's step plans build from it, and step 02's component library takes its tokens from `@farik/brand` (phase 5 step 02).
 Sources:
 - the brand, `docs/brand/brand.md` and the founder's kit, `docs/brand/brand-kit.png`;
 - the spec: section 2 (who it is for), 4 (journeys), 5.4 (Definition of Done), 10 (non-functional requirements) and 14 (brand);

@@ -1,6 +1,6 @@
 # Farik brand
 
-Status: draft for the founder's approval (phase 5, step 01).
+Status: approved by the founder on 2026-09-26, together with the web UI design (phase 5, step 01). The final art waits on the files listed at the end.
 Source: the founder's brand kit, `docs/brand/brand-kit.png` (2026-09-25), and the founder's answers of the same day.
 Where this file and the kit disagree, the kit is the founder's intent. This file is what the apps build from.
 
