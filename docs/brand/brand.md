@@ -65,7 +65,7 @@ The founder chose a clean sans for the UI, with monospace accents (2026-09-25). 
 |---|---|---|
 | Pixel display | The wordmark, and the largest headings only | The wordmark is drawn, not typed: an SVG pixel grid, rebuilt from the kit unless the founder supplies it. Headings use Silkscreen (SIL Open Font License), the closest free pixel face. |
 | Sans | All interface text: body, forms, buttons, tables | Space Grotesk (SIL Open Font License) |
-| Monospace | Taglines, section labels in capitals with wide letter-spacing, IDs, costs, the terminal touches, code and diffs | JetBrains Mono (SIL Open Font License) |
+| Monospace | Taglines, the terminal touches (the `>` prompt and the cursor), task ids, costs, code and diffs. Section labels in capitals with wide letter-spacing, as in the kit, appear only on brand surfaces (the brand sheet, the welcome screen, the logo lockups); inside the app, headings are in sentence case (`docs/design/web-ui.md`, pass 2). | JetBrains Mono (SIL Open Font License) |
 
 The fonts are bundled with the app and never loaded from a font CDN, because the product works offline (spec 10).
 
