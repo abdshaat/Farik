@@ -101,11 +101,11 @@ The characters are pixel-art people, one per role, each with a coloured role tag
 | Marketing Specialist | MKT, lavender | Creates content and drives growth. |
 | Architect | ARCH, Amber `#E3B04B` | Designs systems and technical foundations. |
 
-The founder's character files of 2026-09-26 replace the kit's drawings:
-- the Product Manager, Scrum Master, Developer and Marketing Specialist are full-body figures on transparent backgrounds;
-- the Architect is supplied as a finished card: a seated figure at a laptop beside a whiteboard, with its tag and description.
+The founder's character files of 2026-09-26 replace the kit's drawings. There are ten pixel-art people, each seated cross-legged at the same laptop, drawn in one pose and one scale on transparent backgrounds:
+- five are the roles' default characters: the Architect, Product Manager, Scrum Master, Developer and Marketing Specialist;
+- five more are extra characters any agent may wear.
 
-The characters are the agents' default avatars, which the user may change (spec F1). In the web UI they appear as square avatars cropped to the head and shoulders.
+The characters are the agents' default avatars, which the user may change (spec F1). In the web UI they appear as square avatars cropped to the head and shoulders (`docs/brand/assets/avatars/`).
 
 ## Pixel art: where it appears
 
@@ -130,11 +130,12 @@ The founder supplied these on 2026-09-26. They are kept unchanged in `docs/brand
 |---|---|
 | `logo-mark.png` | The mark, 1254 × 1254 px, on a transparent background. It is also the source of the app icons. |
 | `wordmark.png` | "FARIK" in Soft Sand, 1024 × 290 px, on a transparent background, for dark surfaces. On a light surface it sits on a Midnight Terminal tile, as the mark does. |
-| `characters/product-manager.png`, `scrum-master.png`, `developer.png`, `marketing-specialist.png` | Full-body figures, about 200 × 300 px, on transparent backgrounds |
-| `characters/architect-card.png` | The Architect as a finished card, 1086 × 1448 px, on a background. A transparent figure like the others would let it be used the same way. |
+| `characters/architect.png`, `product-manager.png`, `scrum-master.png`, `developer.png`, `marketing-specialist.png` | The roles' default characters, seated at a laptop, each 1254 × 1254 px on a transparent background |
+| `characters/extra-1.png` to `extra-5.png` | Five more characters in the same pose and scale, for any agent |
 
-The kit's rule that the wordmark is always Clay Coral gives way to the supplied file: the wordmark is Soft Sand on dark surfaces. The README's banner and team images, in `docs/brand/readme/`, are composed from these files.
+`avatars/` holds each character cropped to a 256 px square of head and shoulders. It is derived from the files above by Farik, not supplied, and phase 5 step 02 regenerates it as part of `@farik/brand`.
+
+The kit's rule that the wordmark is always Clay Coral gives way to the supplied file: the wordmark is Soft Sand on dark surfaces. The README's images (`docs/brand/readme/`: the banner, the team, and the avatars) are composed from these files.
 
 Still wanted:
-1. **All five characters redrawn seated at a laptop.** The founder is regenerating them (2026-09-26). Each should be a transparent PNG at its native pixel size, in one shared pose and scale so they line up. These replace the files above, and the README's team image and the web mockups are rebuilt from them.
-2. **For phase 7 only:** the office scene as layered pieces, and the characters' walking frames.
+1. **For phase 7 only:** the office scene as layered pieces, and the characters' walking frames.
