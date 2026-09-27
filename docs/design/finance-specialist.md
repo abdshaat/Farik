@@ -88,7 +88,7 @@ A finance task is an ordinary contract: a month's close, a forecast, a pricing a
 
 - **Where its session runs.** The session runs with the finance folder as its working directory, not a git worktree, much as a conversation session runs in the project root. Claude Code's built-in `Read`, `Glob` and `Grep` then work on the folder and nothing outside it. The task's `allowed_paths` are under the folder. Two readiness rules stand in the way today, and each gets one exception for this role, recorded in spec 5.3: the document-paths rule, and the rule that no `allowed_paths` entry reaches under `.farik/` at all (`no_farik_paths`). The task may carry no `command` or `test` criterion, since it has no worktree to run one in; its criteria are `artifact`, `review` and `human`.
 - **No branch and nothing to integrate.** Three more rules take an exception. When the task is assigned, Farik copies every workbook to `.history/<task-id>/`. It reaches `verifying` when every workbook in the `workbooks` list the assignee gives `farik_request_transition` exists (spec 5.2). Its reviewer receives each changed workbook beside that copy in place of a diff (spec 5.4). Once `accepted` it is finished, with nothing to integrate, and it counts as integrated for any task that depends on it (spec 5.14).
-- **One session in the folder at a time.** No sweep starts while a finance task is `in_progress` or `verifying`, and no finance task is assigned while a sweep runs, so the folder changes under one session only, as a worktree does for code.
+- **One session in the folder at a time.** No sweep starts while a finance task is `in_progress` or `verifying`, and no finance task is assigned while a sweep runs or while another finance task is `in_progress` or `verifying`, whatever the WIP limit and however many Finance Specialists the team has, so the folder changes under one session only, as a worktree does for code.
 
 The explanation for the human goes in the task's completion note, which already opens with a plain-language summary (spec 5.4).
 
@@ -150,5 +150,6 @@ Phase 8 step 02:
 - An attachment that is not a PDF or an image, or is over 10 MB, is not filed.
 - A receipt-derived cell comes back as a value.
 - A sweep runs once a day while a process drives the project, never without an active Finance Specialist and a connected mailbox, and never while a finance task is in progress; no finance task is assigned while a sweep runs.
+- A second finance task is not assigned while one is `in_progress` or `verifying`, even under a WIP limit of two or with two Finance Specialists.
 - A sweep with no new messages starts no session and still records its events.
 - A statement line with no receipt and a receipt with no statement line each show in the reconciliation.
