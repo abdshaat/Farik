@@ -57,10 +57,12 @@ Easier:
 
 Harder:
 - Reading a mailbox is the most sensitive access Farik asks for. The filter, the read-only scope, the untrusted-content notice, and the absence of any call that changes mail are each tested. Even so, the OAuth grant itself reaches the whole mailbox, and the user has to trust Farik's code with it, which is one more reason the code is public.
-- Google treats mailbox read access as a restricted scope. Until Google verifies the client, only 100 test users can connect Gmail, and a security assessment may apply. Microsoft wants publisher verification. The founder has to apply early, and the launch may ship with Gmail limited.
+- Google treats mailbox read access as a restricted scope. Until Google verifies the client, only 100 test users can connect Gmail, and for a public app a paid yearly security assessment is likely required. Microsoft wants publisher verification. The founder has to apply early, and the launch may ship with Gmail limited.
 - Farik takes on two provider integrations and OAuth, and has to follow their API changes.
 - The books sit on one machine, unversioned apart from the `.history/` copy of each workbook's last version. Until the hosted tier's sync, the user should back the folder up.
 - A spreadsheet cannot validate an accounting entry. The Product Manager's review and the human's reading are the check.
 - The daily sweep is a new kind of scheduled session, and it costs money every day it finds receipts.
+- A task with no branch and no worktree needs an exception in five of the harness's rules (spec 5.2, 5.3, 5.4, 5.8, 5.14) and in the program's `permissions.deny` list. Each is one more special case to test.
+- Formulas are an injection path into the founder's spreadsheet program, so the write tool refuses the ones that reach outside the workbook and writes untrusted content as values.
 - Its numbers are management accounting. The product must keep saying they are not a tax filing or financial advice.
 - The web UI's team builder is built for five roles and gains the sixth in phase 7.

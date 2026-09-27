@@ -69,7 +69,8 @@ Email goes through a read-only connector of Farik's own, not a general mail MCP 
 - **The filter.** The user picks a Gmail label or an Outlook folder, such as "Receipts", and may add a list of senders. Farik asks the provider only for messages that match. The agent never sees any other mail.
 - **Nothing in the mailbox changes.** The connector cannot send, delete, move, label, or mark a message as read.
 - **No duplicates.** Farik remembers each message the agent has filed and never hands it over again.
-- **Untrusted content.** A message's text reaches the agent under the untrusted-content notice of spec 8.6, since anyone can send an email that tries to instruct an agent.
+- **Untrusted content.** A message's text, and every attachment it files, reaches the agent under the untrusted-content notice of spec 8.6, since anyone can send an email that tries to instruct an agent. An attachment is filed only if it is a PDF or an image and at most 10 MB.
+- **The client id.** OAuth for an installed app ships a client id in the source. The providers define it as public, and no client secret exists, so the repository still holds no secret.
 
 Two Farik tools, which only this role may call:
 
@@ -90,8 +91,8 @@ Stripe is optional. A product that takes no payments through Stripe skips it.
 
 ## When it works
 
-- **The receipts sweep.** While Farik is running, it starts a receipts sweep once a day. A sweep is a short Finance Specialist session that reads the new receipts, files each one, and records it in `books.xlsx`. The user can also start one: "Check now" in the web app, or `farik finance sweep`. A sweep counts against the spending limits like any session. It runs only when the team has an active Finance Specialist and a connected mailbox.
-- **Tasks.** Everything else comes as an ordinary contract: a month's close, a forecast, or a pricing analysis. It is filed, triaged, made ready, assigned, reviewed and accepted. A finance task's session runs in the finance folder instead of a git worktree, much as a conversation session runs in the project root, so its built-in `Read`, `Glob` and `Grep` reach the receipts and nothing else. The task's `allowed_paths` are under the folder, which the Definition of Ready's document-paths rule accepts for this role alone. It makes no commits, so an accepted finance task goes straight to done, without integration.
+- **The receipts sweep.** While a process drives the project, Farik starts a receipts sweep once a day, as a tick rule like the standup. The connector fetches new messages first; when there are none, no session starts and nothing is spent. Otherwise a sweep is a short Finance Specialist session that reads the new receipts, files each one, and records it in `books.xlsx`. The user can also start one: "Check now" in the web app, or `farik finance sweep`. A sweep counts against the spending limits like any session. It runs only when the team has an active Finance Specialist and a connected mailbox.
+- **Tasks.** Everything else comes as an ordinary contract: a month's close, a forecast, or a pricing analysis. It is filed, triaged, made ready, assigned, reviewed and accepted. A finance task's session runs in the finance folder instead of a git worktree, much as a conversation session runs in the project root, so its built-in `Read`, `Glob` and `Grep` reach the receipts and nothing else. The task's `allowed_paths` are under the folder. Two readiness rules stand in the way today, and each gets one exception for this role: the document-paths rule, and the rule that no `allowed_paths` entry reaches under `.farik/` at all (spec 5.3, `no_farik_paths`). The task may carry no `command` or `test` criterion, since it has no worktree to run one in; its criteria are `artifact`, `review` and `human`. It makes no commits, so three more rules take an exception: it reaches `verifying` when the workbooks its completion note names exist (spec 5.2), its reviewer receives the before and after of each changed workbook, from `.history/`, in place of a diff (spec 5.4), and once `accepted` it is finished, with nothing to integrate (spec 5.14).
 
 ## Other tools
 
@@ -101,7 +102,7 @@ Three more Farik tools, which only this role may call:
 |---|---|
 | `farik_read_costs` | The team's AI spending, from `Projections::costs`: totals by task, agent, sprint or day, with tokens and session counts, and optionally a date range |
 | `farik_read_sheet` | One workbook or CSV in the finance folder, as its sheets of rows. Formulas come back with their last computed values. The Product Manager may also call it when it reviews a finance task |
-| `farik_write_sheet` | Writes a whole `.xlsx` workbook in the finance folder: sheets, their columns, and rows of values or formulas. It refuses any other extension or any path outside the folder. Before overwriting a file, it copies the old one to `.history/` |
+| `farik_write_sheet` | Writes a whole `.xlsx` workbook in the finance folder: sheets, their columns, and rows of values or formulas. It refuses any other extension or any path outside the folder, and any formula that reaches outside the workbook: external references, `HYPERLINK`, `WEBSERVICE`, `IMPORTDATA` and its kin, `RTD`, DDE. A cell whose value came from a receipt, an email or Stripe is written as a value, never a formula, because the founder opens the workbook in Excel and a formula runs there. Before overwriting a file, it copies the old one to `.history/` |
 
 Every Farik tool in this design has the `read` tier. Each writes only to Farik's private folder, and the tool itself holds that line, as `farik_write_memory` does.
 
@@ -113,7 +114,7 @@ New dependencies, each pinned per the repository's rules and named in the step p
 
 ## Provider approval
 
-Google classes read access to a mailbox as a restricted scope. Until Google has verified Farik's OAuth client, only up to 100 test users listed on that client can connect Gmail, and a security assessment may also apply. Microsoft asks for publisher verification. Both take weeks, and both need the founder's accounts. So the applications start when phase 7 is planned, not at launch. Until approval comes, the web launch can ship with Gmail limited to test users.
+Google classes read access to a mailbox as a restricted scope. Until Google has verified Farik's OAuth client, only up to 100 test users listed on that client can connect Gmail, and for a public app a paid third-party security assessment, repeated every year, is likely required. Microsoft asks for publisher verification. Both take weeks, and both need the founder's accounts. So the applications start when phase 7 is planned, not at launch. Until approval comes, the web launch can ship with Gmail limited to test users.
 
 ## The web UI
 
@@ -127,13 +128,18 @@ A page that shows the books in the browser is not in these steps.
 
 The step plans turn each of these into a test that fails first:
 - The role loads, and is refused application code.
-- Every finance tool refuses every other role.
+- Every finance tool refuses every other role, except `farik_read_sheet` for the Product Manager reviewing a finance task.
 - A path that climbs out of the finance folder, is absolute, or names another part of `.farik/local` is refused.
 - An `.xlsx` with values and formulas survives a write and a read.
+- A formula that reaches outside the workbook is refused, and a receipt-derived cell comes back as a value.
+- An attachment that is not a PDF or an image, or is over 10 MB, is not filed.
+- A sweep with no new messages starts no session.
 - An overwrite keeps the previous version in `.history/`.
 - A finance task goes from accepted to done without integration.
 - A finance session cannot read the worktrees, the event log, or `settings.json`.
 - The connector asks only for messages that match the filter, and never for any other.
+- A finance task with a `command` or `test` criterion, or with an `allowed_paths` entry elsewhere under `.farik/`, fails readiness.
+- A finance task reaches `verifying` without a commit and `accepted` without integration.
 - The connector has no call that changes the mailbox.
 - A filed message is never handed over again.
 - Email text reaches the agent under the untrusted-content notice.
