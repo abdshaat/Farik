@@ -5,42 +5,62 @@ Status: accepted
 
 ## Context
 
-On 2026-09-27 the founder asked for a sixth role: a financial analyst and an accountant in one agent. It tracks every cost and expense of the product (billing, infrastructure, cloud, storage, and the team's own AI spending), forecasts long-term expenses, and runs the books. The founder chose that the role is optional, that it is built before the web UI, that the books stay private and outside the repository, and that they are spreadsheets. The design is `docs/design/finance-specialist.md`.
+On 2026-09-27 the founder asked for a sixth role: a financial analyst and an accountant in one agent. It tracks every cost and expense of the product (billing, infrastructure, cloud, storage, and the team's own AI spending), forecasts long-term expenses, and runs the books.
 
-Two facts constrained the design. Farik works in the user's repository, which may be public; this one is. And every session's files are its own git worktree (spec 8.6), so an agent cannot reach anything outside it today.
+The founder then decided the following:
+- The role is optional.
+- The books are private and outside the repository, and they are spreadsheets.
+- Receipts come from the user's email alone: the main mailbox, filtered, on Gmail or Google Workspace and on Outlook or Microsoft 365. The user never uploads a bill.
+- The role reads Stripe, read-only, when the product uses it.
+- It is built in phase 7, after MCP connections. The first placement, before the web UI, was withdrawn when email and Stripe were added, because both need what phase 7 step 01 builds.
+
+The design is `docs/design/finance-specialist.md`.
+
+Three facts constrained the design:
+- Farik works in the user's repository, which may be public; this one is.
+- Every session's files are its own git worktree (spec 8.6).
+- A mailbox holds far more than receipts, and anyone can send an email.
 
 The options for where the books live were these:
-- **In the repository**, under a `finance/` folder. This is simple and versioned, but a public repository would publish the company's finances.
-- **A second, private repository.** This is versioned and private, but a non-technical user would have to set up and connect a second repository.
-- **Farik's machine-local folder, `.farik/local/finance/`.** It is never committed, like the event log (D5), and nothing needs setting up. It is not versioned, and it lives on one machine until the hosted tier's sync. This is the chosen place.
+- **In the repository.** Simple, but a public repository would publish the company's finances.
+- **A second, private repository.** Private, but hard for a non-technical user to set up.
+- **Farik's machine-local folder, `.farik/local/finance/`.** It is never committed, and nothing needs setting up. This is the chosen place.
 
 The options for the books' form were these:
-- **A structured ledger written through Farik tools, as JSON Lines.** Each entry is checked against a schema, but the founder would need a Farik view to read it.
+- **A schema-checked ledger.** Farik could validate each entry, but the founder would need a Farik view to read it.
 - **A plain-text accounting journal.** It is readable by accounting tools but not by most founders.
-- **Events in the log.** This is the most auditable form, but it turns one role into a finance subsystem.
-- **Spreadsheets.** This is the founder's choice. Everyone can open, check and hand an `.xlsx` to an accountant.
+- **Events in the log.** The most auditable form, but a subsystem rather than a role.
+- **Spreadsheets.** The founder's choice.
+
+The options for reading email were these:
+- **A general mail MCP server.** Nothing new to build, but the agent could search the whole mailbox, and the filter would be a request in its prompt rather than a rule.
+- **Farik's own read-only connector for Gmail and Microsoft Graph.** It applies the filter in code and has no call that changes the mailbox. This is the chosen way.
 
 ## Decision
 
-Add a sixth role, the Finance Specialist (`finance_specialist`), optional in the team builder, with the Product Manager as its reviewer and the `read` and `network` tiers.
+Add a sixth role, the Finance Specialist (`finance_specialist`). It is optional in the team builder, the Product Manager is its reviewer, and it has the `read` and `network` tiers.
 
-Its books are `.xlsx` workbooks in `.farik/local/finance/`. They are written and read through three Farik tools that only this role may call: `farik_read_costs`, `farik_read_sheet` and `farik_write_sheet`. The Product Manager may also call `farik_read_sheet` when it reviews a finance task.
+Its books are `.xlsx` workbooks in `.farik/local/finance/`, with each receipt filed under `receipts/<yyyy-mm>/`.
 
-A finance task's session runs in that folder instead of a git worktree. The task makes no commits, so once accepted it goes straight to done without integration.
+It reads receipts through Farik's own read-only email connector, filtered by a Gmail label or an Outlook folder. It reads Stripe through Stripe's official MCP server with a read-only restricted key, and Farik allows only Stripe's read tools.
 
-It is phase 6 step 01.
+A daily receipts sweep records new receipts while Farik runs. Other finance work comes as tasks, whose sessions run in the finance folder and which are done without integration.
+
+It is phase 7 steps 02 (the role, the books, Stripe) and 03 (receipts from email).
 
 ## Consequences
 
 Easier:
+- The user does nothing to keep the books but label receipts in their own mail, and a filter can do even that.
 - The founder and any accountant can open the books in the spreadsheet program they already use.
 - A public repository never carries financial data.
-- The AI spending Farik already records becomes something an agent can explain and forecast.
 
 Harder:
-- The books are on one machine and unversioned, apart from the `.history/` copy of each workbook's last version. A lost disk loses them. Until the hosted tier's sync, the user should back the folder up, and the web UI should say so.
-- A workbook tool cannot validate an accounting entry the way a schema-checked ledger could. The Product Manager's review and the human's reading are the check.
-- Two dependencies join the workspace: `rust_xlsxwriter` and `calamine`.
-- A second kind of session root, and a task with no branch, add two special cases to the runtime, each with its own test.
-- Its numbers are management accounting. The product must keep saying it is not a tax filing or financial advice.
-- The step in front of the web UI delays it by one step.
+- Reading a mailbox is the most sensitive access Farik asks for. The filter, the read-only scope, the untrusted-content notice, and the absence of any call that changes mail are each tested. Even so, the OAuth grant itself reaches the whole mailbox, and the user has to trust Farik's code with it, which is one more reason the code is public.
+- Google treats mailbox read access as a restricted scope. Until Google verifies the client, only 100 test users can connect Gmail, and a security assessment may apply. Microsoft wants publisher verification. The founder has to apply early, and the launch may ship with Gmail limited.
+- Farik takes on two provider integrations and OAuth, and has to follow their API changes.
+- The books sit on one machine, unversioned apart from the `.history/` copy of each workbook's last version. Until the hosted tier's sync, the user should back the folder up.
+- A spreadsheet cannot validate an accounting entry. The Product Manager's review and the human's reading are the check.
+- The daily sweep is a new kind of scheduled session, and it costs money every day it finds receipts.
+- Its numbers are management accounting. The product must keep saying they are not a tax filing or financial advice.
+- The web UI's team builder is built for five roles and gains the sixth in phase 7.
