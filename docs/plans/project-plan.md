@@ -1,6 +1,6 @@
 # Farik project plan
 
-Status: draft, revision 15. The backend is Rust (ADR 0005); every interface in this plan is a Rust signature except the front end's. The contract architecture is the one in `docs/SPEC.md` 5.16: a request is triaged into an epic or a standalone task, an epic is approved by the user and broken down into tasks. The step plans of phases 0 to 2 are deleted from the tree; read them in history (`git show a191001:docs/plans/`). Phase 0 is done: its step plans are executed and merged (pull request #4, 2026-09-16). Phase 1 is done and merged (pull request #5, 2026-09-16): all nine of its step plans are executed and reviewed; three rules of section 5 that need a decision in the spec rather than a function in `core` are named at the end of that phase's section. Phase 2 is done and merged (pull request #6, 2026-09-21): all nine of its step plans are executed, seven of them reviewed as they landed; the pull request records which two were not and why. Revision 8 (2026-09-22) cuts phase 3 into fifteen steps rather than thirteen, and revision 9 (the same day) into seventeen, splitting the orchestrator's first step in three; the phase's decisions say why. Revision 10 (2026-09-23) adds step 17, optional spending limits, on the founder's decision recorded in ADR 0015, and moves the Milestone 0 exit to step 18. Revision 11 (2026-09-24) plans phase 4: the founder approved its design and made its decisions (optional sprints, reactions from the session that moved the task, ceremonies run by the Scrum Master alone, a limit note instead of a block, an agent that sleeps until its provider's limit resets, and only the Developer changing code, on `feature/` or `fix/` branches), which closes the budget question phase 3 left open. Revision 12 (2026-09-24) reorders what follows phase 4 on the founder's word (ADR 0016): Farik is for non-technical users, on the web and the desktop and later as native iOS and Android apps. So phase 5 is the brand, which the founder supplies; phase 6 a working web UI served by the local Farik, for easier testing; phase 7 the desktop app; phase 8 the ecosystem and launch; phase 9 native mobile after the product has shipped and been tested; and phase 10 premium. Revision 13 (2026-09-26) records the founder's choice of AWS for everything Farik hosts (ADR 0017), and adds phase 8's step 07, the website and the domain on AWS, before the launch, which becomes step 08. Every product decision the plan raised (D1 to D20) was closed by the founder on 2026-09-15 and folded into the phase it governs; the closed decisions table at the end records each answer and where it lives. Revision 14 (2026-09-27) ships Farik on the web first, on the founder's word (ADR 0018): the ecosystem and launch phase becomes phase 7 and releases `v0.1.0` with the web app alone; the desktop app becomes phase 8, whose first step is a recorded check of the released web product with real users, and no desktop step starts before it passes; native mobile follows the desktop app. It also records that the repository is already public. Revision 15 (the same day) adds a sixth role on the founder's word (ADR 0019): the Finance Specialist, optional, whose books are private spreadsheets filled from the user's email receipts and Stripe. It is phase 7 steps 02 and 03, after MCP, and the rest of phase 7 moves down two.
+Status: draft, revision 16. The backend is Rust (ADR 0005); every interface in this plan is a Rust signature except the front end's. The contract architecture is the one in `docs/SPEC.md` 5.16: a request is triaged into an epic or a standalone task, an epic is approved by the user and broken down into tasks. The step plans of phases 0 to 2 are deleted from the tree; read them in history (`git show a191001:docs/plans/`). Phase 0 is done: its step plans are executed and merged (pull request #4, 2026-09-16). Phase 1 is done and merged (pull request #5, 2026-09-16): all nine of its step plans are executed and reviewed; three rules of section 5 that need a decision in the spec rather than a function in `core` are named at the end of that phase's section. Phase 2 is done and merged (pull request #6, 2026-09-21): all nine of its step plans are executed, seven of them reviewed as they landed; the pull request records which two were not and why. Revision 8 (2026-09-22) cuts phase 3 into fifteen steps rather than thirteen, and revision 9 (the same day) into seventeen, splitting the orchestrator's first step in three; the phase's decisions say why. Revision 10 (2026-09-23) adds step 17, optional spending limits, on the founder's decision recorded in ADR 0015, and moves the Milestone 0 exit to step 18. Revision 11 (2026-09-24) plans phase 4: the founder approved its design and made its decisions (optional sprints, reactions from the session that moved the task, ceremonies run by the Scrum Master alone, a limit note instead of a block, an agent that sleeps until its provider's limit resets, and only the Developer changing code, on `feature/` or `fix/` branches), which closes the budget question phase 3 left open. Revision 12 (2026-09-24) reorders what follows phase 4 on the founder's word (ADR 0016): Farik is for non-technical users, on the web and the desktop and later as native iOS and Android apps. So phase 5 is the brand, which the founder supplies; phase 6 a working web UI served by the local Farik, for easier testing; phase 7 the desktop app; phase 8 the ecosystem and launch; phase 9 native mobile after the product has shipped and been tested; and phase 10 premium. Revision 13 (2026-09-26) records the founder's choice of AWS for everything Farik hosts (ADR 0017), and adds phase 8's step 07, the website and the domain on AWS, before the launch, which becomes step 08. Every product decision the plan raised (D1 to D20) was closed by the founder on 2026-09-15 and folded into the phase it governs; the closed decisions table at the end records each answer and where it lives. Revision 14 (2026-09-27) ships Farik on the web first, on the founder's word (ADR 0018): the ecosystem and launch phase becomes phase 7 and releases `v0.1.0` with the web app alone; the desktop app becomes phase 8, whose first step is a recorded check of the released web product with real users, and no desktop step starts before it passes; native mobile follows the desktop app. It also records that the repository is already public. Revision 15 (the same day) adds a sixth role on the founder's word (ADR 0019): the Finance Specialist, optional, whose books are private spreadsheets. Revision 16 (the same evening, on the market evaluation the founder commissioned) puts the role's AI-spend books and Stripe in phase 7 step 02, before the launch, and moves its receipts intake to phase 8 step 02, after the web release check, from a dedicated receipts mailbox over IMAP rather than the user's main mailbox; the rest of phase 7 moves up one and the desktop steps down one.
 Owner: project founder.
 Decision changes: each pull request that edits this plan says which decision changed and why; the history is `git log -- docs/plans/project-plan.md`.
 
@@ -49,7 +49,7 @@ Made, with the record:
 | `@farik/protocol-client` | `packages/protocol-client` | phase 6 step 01 |
 | `@farik/ui` | `packages/ui` | phase 6 step 02 |
 | `@farik/web` | `apps/web` | phase 6 step 03 |
-| `@farik/desktop` | `apps/desktop` | phase 8 step 02 |
+| `@farik/desktop` | `apps/desktop` | phase 8 step 03 |
 | iOS and Android apps | `apps/ios`, `apps/android` | phase 9, not planned |
 
 - The contract architecture (spec 5.16), which every phase serves:
@@ -58,7 +58,7 @@ Made, with the record:
   3. A large request is an epic (`kind: epic`). The Product Manager asks the user its questions before writing it, may not write product documents until it is approved, and the user approves it (`human_accept` (`HumanAccept`), subject `contract`) or sends it back. The approved epic is assigned to the Scrum Master, or the Product Manager without one, whose work is the breakdown: tasks (`kind: task`, `parent` set) with deliverables and exit criteria, assigned through `farik_assign_task`. An epic waiting for approval sits in `escalated` with reason `Approval`. The epic is done when its tasks are; its reviewer is the Product Manager when the Scrum Master broke it down and the human when the Product Manager did, so that a reviewer is never the assignee; and the user accepts it.
   4. A small request is a standalone task (`kind: task`, no parent) that goes through the ordinary lifecycle, with the user's approval only where policy or risk requires it.
   5. Every contract, epic or task, passes the Definition of Ready before work starts, is verified by a reviewer who is never its assignee, and is accepted by the Product Manager against its exit criteria.
-- Event kinds and commands grow with the code. The step that first emits an event kind, or first handles a command, adds it to the schema. The list in `docs/SPEC.md` section 8.5 is the checklist, and phase 7 step 10 confirms every kind in it exists.
+- Event kinds and commands grow with the code. The step that first emits an event kind, or first handles a command, adds it to the schema. The list in `docs/SPEC.md` section 8.5 is the checklist, and phase 7 step 09 confirms every kind in it exists.
 - Tests are split in three. Unit tests live in `#[cfg(test)] mod tests` in the module they test and run by `cargo xtask check`. Integration tests (`crates/<name>/tests/<subject>.rs`) need Docker, a git binary, or the file system in ways a unit test must not. One that needs only a temporary directory runs in the default `cargo xtask check`; one that needs Docker or a git binary runs by `cargo xtask check --integration`, which CI runs as the one job it has, because `--integration` only adds the ignored tests to the same `cargo test` invocation and a second job would compile the workspace again to run a superset of the first (changed 2026-09-17 by the step 04 plan; a second job was expected to pay for itself when a test needed Docker, and phase 3 step 02 found it does not: the Docker tests are ignored tests in the same `cargo test`, so they join the one job). Changed 2026-09-17 by the phase 2 step 02 plan: the first `tests/` file is the event log's, it needs a temporary directory and nothing else, and gating it would have left reopening, two processes on one file, and the journal mode out of every check until step 04. Live tests (`crates/<name>/tests/live_<subject>.rs`) talk to the Claude Code program and the model, cost money, are run by hand with `FARIK_LIVE_TESTS=1`, and never run in CI.
 - Every function that crosses a crate boundary and can fail returns `Result<T, E>` with the crate's error enum, including the asynchronous ones (`docs/standards/code.md`, "Errors are values"). A non-zero exit code from a command is a value, not a failure.
 - Time, randomness, and identifiers are injected. Nothing in `core`, `protocol`, `store`, or `runtime` reads the clock or generates an identifier on its own; a `Clock` trait (`fn now(&self) -> DateTime<Utc>`) and an `IdSource` trait (`fn session_id(&self) -> String`) are passed in, or, where a call samples the clock exactly once, the `DateTime<Utc>` itself — as `open_event_log(path, now)` takes it, recorded 2026-09-17 by the phase 2 step 02 plan. Task ids are `FRK-<n>` from a counter in the store; session ids are UUID v4 through `IdSource`; event `recorded_at` fields are ISO 8601 UTC from the clock.
@@ -430,11 +430,8 @@ Decisions for this phase:
   - Credentials are named by key and stored in the OS keychain through the `keyring` crate (version pinned in the step plan). The daemon reads them at connection time and passes them to the server process's environment (spec 8.6).
   - Tool listing uses `rmcp` as a client. Untagged tools are `external_effect` (spec 5.6).
   - Approving an `external_effect` call is `tool.approve`, from the web app or with `farik tool approve <approval-id>`.
-- Made (the founder, 2026-09-27; ADR 0019): a sixth role, the Finance Specialist, optional in the team builder, which still suggests five. It tracks every cost and expense of the product, forecasts long-term expenses and runs the books, as `.xlsx` workbooks in the private `.farik/local/finance/`, never committed. Receipts come from the user's main mailbox, filtered by a Gmail label or an Outlook folder, through a read-only connector of Farik's own; the user never uploads a bill. It reads Stripe read-only when the product uses it. It comes after step 01 because Stripe is an MCP server and the connector keeps its tokens where step 01 keeps credentials. The design is `docs/design/finance-specialist.md`.
-- Made: the founder applies for Google's OAuth verification of the restricted `gmail.readonly` scope, which for a public app is likely to require a paid third-party security assessment repeated every year, and for Microsoft's publisher verification, when this phase is planned, because each takes weeks to months. Until Google approves, Gmail is limited to the client's test users, and the launch may ship that way. This is a launch risk: step 03 is the largest scope in the phase and sits before the launch.
-- Made: the OAuth client ids for Google and Microsoft live in the source. An installed app's client id is public by the providers' own definition, and no client secret exists, so the rule that the repository holds no secret is kept.
-- Open (the founder): whether step 03, receipts from email, ships in `v0.1.0` or in the first release after it, once the web release check (phase 8 step 01) has run without it. The landing review of the plan change recommended the second.
-- Open (the founder): which of the five extra characters is the Finance Specialist's avatar.
+- Made (the founder, 2026-09-27; ADR 0019): a sixth role, the Finance Specialist, optional in the team builder, which still suggests five. It tracks every cost and expense of the product, forecasts long-term expenses and runs the books, as `.xlsx` workbooks in the private `.farik/local/finance/`, never committed. Before the launch it records and forecasts the team's own AI spending and reads Stripe read-only when the product uses it; it comes after step 01 because Stripe is an MCP server. Receipts come after the web release (phase 8 step 02), from a dedicated receipts mailbox, and the user never uploads a bill. The design is `docs/design/finance-specialist.md`.
+- Made (the founder, 2026-09-27, evening, on the market evaluation): the receipts step leaves this phase, so no OAuth verification and no mailbox stand between the finance role and the launch. Its avatar is the brand's `extra-4` character.
 - Made: skills live at three levels: the role's embedded `skills/`, `.farik/skills/`, and `.farik/agents/<agent_id>/skills/`. They are loaded into a session through Claude Code's skills directories, in that order.
 - Made: one-on-one conversations are sessions with the `Read` tier only, no task, and one Farik tool, `farik_propose_task`. That tool files a `draft` request, which goes to triage like any other (F8, spec 4.3, 5.16).
 - Made: the premium hooks (F13) are traits with open-source implementations: `LicenseCheck` returns `Tier::OpenSource`; `HostedRunToggle` is unavailable, with the reason "not available in this build"; `SyncProvider` has a no-op implementation. No `ee/` directory exists in this release.
@@ -453,21 +450,20 @@ Steps:
 | Step | Name | Spec | Delivers |
 |---|---|---|---|
 | 01 | MCP per agent | F9, 3, 5.6, 8.6 | Server configuration (stdio and remote), tool listing, tier tagging, keychain credentials, loading into sessions; per-call human approval of `external_effect` tools |
-| 02 | Finance Specialist role | 1, 5.6, 6.6, 8.6 | The sixth role, `finance_specialist`, optional in the team builder: `roles/finance_specialist/` with its prompt and skill; the role id in the three schemas; its tiers and its reviewer; the private finance folder `.farik/local/finance/` as a finance session's working directory, with the one exception to the protected `.farik/local/**`; `farik_read_costs`, `farik_read_sheet` and `farik_write_sheet`, the last refusing formulas that reach outside the workbook and writing untrusted content as values; the finance task's exceptions in the Definition of Ready (`allowed_paths` under the folder, no `command` or `test` criterion), in `in_progress → verifying` (the `workbooks` list given `farik_request_transition` exists), in the Definition of Done (the copy of the folder taken at assignment, under `.history/<task-id>/`, as the diff's baseline) and in integration (`accepted` is the end, and counts as integrated for dependants); one finance session in the folder at a time; the `permissions.deny` exception; the finance setup screen in the team builder; Stripe through its official MCP server with a read-only restricted key and only its read tools tagged `read`; the role in the team builder |
-| 03 | Receipts from email | 6.6, 8.6 | Farik's read-only email connector for Gmail and Microsoft Graph: OAuth for an installed app with the tokens in the keychain; the label or folder filter applied by the connector, with the filter and the ledger of filed messages in `.farik/local/finance/mailbox.json`; `farik_read_receipts` and `farik_file_receipt`; receipts filed under `receipts/<yyyy-mm>/`, PDF or image, at most 10 MB; email text and attachments under the untrusted-content notice; `farik finance connect`, `farik finance disconnect` and `farik finance sweep`, and the connect screens in the web app; the daily receipts sweep as a tick rule that starts no session when nothing is new but records `sweep.started` and `sweep.ended` either way, never while a finance task is in progress, with its cost under the new `finance` purpose; the event kinds `mailbox.connected`, `mailbox.disconnected`, `sweep.started`, `sweep.ended` and `receipt.filed` |
-| 04 | Skills per agent | F9, 3 | Skill folders at agent, role, and team level; loading into sessions; the agent panel's list |
-| 05 | One-on-one | F8, 4.3, 5.8 | A read-only direct conversation with an agent; memory history with revert and a decisions view in the agent panel; an offer to file a task |
-| 06 | Audit viewer | F11, F17 | The event log view with filters, JSON Lines export and replay, cost reports per task, agent, and sprint |
-| 07 | Notifications | F12, 5.7 | Browser notifications for `escalation.raised`, `escalation.aged`, `question.asked`, `sprint.started`, `sprint.ended`; quiet hours |
-| 08 | Premium hooks | F13, 9 | The `LicenseCheck`, `HostedRunToggle`, and `SyncProvider` stubs wired into settings |
-| 09 | Website and domain on AWS | 8.1, 14, 10 | `apps/site` from the approved website design; `infra` with the domain, certificate, bucket, distribution, deploy role and budget stacks, unit-tested; the `site` deploy workflow; the site live on the domain over HTTPS, with its headers checked |
-| 10 | Web launch | 11, product analysis | A README rewrite in the brand's voice, the event kind checklist against spec 8.5, the way a user installs and starts Farik without a terminal, the changelog, the release workflow, the `v0.1.0` tag |
+| 02 | Finance Specialist role | 1, 5.6, 6.6, 8.6 | The sixth role, `finance_specialist`, optional in the team builder, with the `extra-4` avatar: `roles/finance_specialist/` with its prompt and skill; the role id in the three schemas; its tiers and its reviewer; the private finance folder `.farik/local/finance/` as a finance session's working directory, with the one exception to the protected `.farik/local/**` and to the `permissions.deny` list; `farik_read_costs`, `farik_read_sheet` and `farik_write_sheet`, the last refusing formulas that reach outside the workbook and writing untrusted content as values; the first AI-spend books and forecast as the role's first task; the finance task's exceptions in the Definition of Ready (`allowed_paths` under the folder, no `command` or `test` criterion), in `in_progress → verifying` (the `workbooks` list given `farik_request_transition` exists), in the Definition of Done (the copy of the folder taken at assignment, under `.history/<task-id>/`, as the diff's baseline) and in integration (`accepted` is the end, and counts as integrated for dependants); one finance session in the folder at a time; Stripe through its official MCP server, OAuth for the user and a tagged read-only restricted key for scheduled runs, only its read tools tagged `read` and `stripe_api_write` refused at the harness; the role and the Stripe sign-in in the team builder |
+| 03 | Skills per agent | F9, 3 | Skill folders at agent, role, and team level; loading into sessions; the agent panel's list |
+| 04 | One-on-one | F8, 4.3, 5.8 | A read-only direct conversation with an agent; memory history with revert and a decisions view in the agent panel; an offer to file a task |
+| 05 | Audit viewer | F11, F17 | The event log view with filters, JSON Lines export and replay, cost reports per task, agent, and sprint |
+| 06 | Notifications | F12, 5.7 | Browser notifications for `escalation.raised`, `escalation.aged`, `question.asked`, `sprint.started`, `sprint.ended`; quiet hours |
+| 07 | Premium hooks | F13, 9 | The `LicenseCheck`, `HostedRunToggle`, and `SyncProvider` stubs wired into settings |
+| 08 | Website and domain on AWS | 8.1, 14, 10 | `apps/site` from the approved website design; `infra` with the domain, certificate, bucket, distribution, deploy role and budget stacks, unit-tested; the `site` deploy workflow; the site live on the domain over HTTPS, with its headers checked |
+| 09 | Web launch | 11, product analysis | A README rewrite in the brand's voice, the event kind checklist against spec 8.5, the way a user installs and starts Farik without a terminal, the changelog, the release workflow, the `v0.1.0` tag |
 
 Interfaces this phase adds: written when the phase is next to be planned.
 
 ## Phase 8: Desktop
 
-Ends with: the desktop app on macOS, Windows, and Linux runs the same web UI with the daemon in-process, so there is nothing to start in a terminal. It adds the pixel office and native notifications, and ships as a release of its own.
+Ends with: the desktop app on macOS, Windows, and Linux runs the same web UI with the daemon in-process, so there is nothing to start in a terminal. It adds the pixel office and native notifications, and ships as a release of its own. Its step 02, which is not desktop work, gives the Finance Specialist its receipts intake in the first release after the web release check (ADR 0019).
 
 Starts only after the web release is complete and tested (the founder, 2026-09-27; ADR 0018): phase 7 is merged, `v0.1.0` is released, and this phase's step 01 passes. No other step of this phase starts before step 01 passes.
 
@@ -478,17 +474,19 @@ Decisions for this phase:
 - Made (D14): the office scene renderer is PixiJS 8.20.1, drawn in the brand's look (phase 5).
 - Made (D15): cost is shown on the board and in task detail, never in the scene.
 - Made (D16): the desktop app's notifications go through Tauri's notification plugin, driven by the daemon's events.
+- Made (the founder, 2026-09-27; ADR 0019): receipts intake reads a dedicated receipts mailbox over IMAP rather than the user's main mailbox through a mail API. No provider verification applies, the boundary is the mailbox itself, and the user's main mailbox is never granted to anything. A connector to the main mailbox is not planned and is built only if users ask once this step has shipped.
 - Made: the `release` workflow gains the desktop builds for macOS, Windows, and Linux, signed where the platform requires it, attached to the GitHub release beside the `farik` binaries.
 
 Steps:
 
 | Step | Name | Spec | Delivers |
 |---|---|---|---|
-| 01 | Web release check | 11 | The released `v0.1.0` run in the browser by the founder and at least three non-technical testers on their own repositories: first run and setup, a sprint from request to accepted task, MCP and skills, the Finance Specialist's receipts sweep and books, a one-on-one, the audit viewer, and notifications. Every defect found is fixed in a patch release or recorded with the founder's reason to leave it. The founder signs off the record, `docs/milestones/web-release.md` |
-| 02 | Desktop shell | 8.1, F12 | `apps/desktop`: the Tauri app running the daemon in-process and loading the web UI; the brand's app icons; native notifications; the scene on/off setting |
-| 03 | Office scene | F10, 10 | Desks, a meeting table, a whiteboard, a door; agent movement by state; click to open an agent; 60 frames per second on the reference laptop; a disable switch |
-| 04 | Desktop check | 11 | The Milestone 1 loop repeated in the desktop app by the founder and one non-technical tester, recorded in `docs/milestones/m1-desktop.md` |
-| 05 | Desktop release | 11 | The desktop builds in the `release` workflow, and the first release that carries the desktop app |
+| 01 | Web release check | 11 | The released `v0.1.0` run in the browser by the founder and at least three non-technical testers on their own repositories: first run and setup, a sprint from request to accepted task, MCP and skills, the Finance Specialist's AI-spend books, a one-on-one, the audit viewer, and notifications. Every defect found is fixed in a patch release or recorded with the founder's reason to leave it. The founder signs off the record, `docs/milestones/web-release.md` |
+| 02 | Receipts intake | 6.6, 8.4, 8.6 | The Finance Specialist's receipts from a dedicated receipts mailbox over IMAP, with an app password or the provider's IMAP sign-in in the keychain, an approved-sender list, and no call that changes the mailbox; the mailbox settings, the approved senders and the ledger of filed messages in `.farik/local/finance/mailbox.json`; `farik_read_receipts` and `farik_file_receipt`; receipts filed under `receipts/<yyyy-mm>/`, PDF or image, at most 10 MB, text and attachments under the untrusted-content notice; bank and card statements as CSV under `imports/` and the reconciliation against them; `farik finance connect`, `farik finance disconnect` and `farik finance sweep`, and the mailbox setup in the web app; the daily receipts sweep as a tick rule that starts no session when nothing is new but records `sweep.started` and `sweep.ended` either way, never while a finance task is in progress, with its cost under the `finance` purpose; the event kinds `mailbox.connected`, `mailbox.disconnected` and `receipt.filed`; the IMAP client pinned |
+| 03 | Desktop shell | 8.1, F12 | `apps/desktop`: the Tauri app running the daemon in-process and loading the web UI; the brand's app icons; native notifications; the scene on/off setting |
+| 04 | Office scene | F10, 10 | Desks, a meeting table, a whiteboard, a door; agent movement by state; click to open an agent; 60 frames per second on the reference laptop; a disable switch |
+| 05 | Desktop check | 11 | The Milestone 1 loop repeated in the desktop app by the founder and one non-technical tester, recorded in `docs/milestones/m1-desktop.md` |
+| 06 | Desktop release | 11 | The desktop builds in the `release` workflow, and the first release that carries the desktop app |
 
 Interfaces this phase adds: written when the phase is next to be planned.
 
@@ -506,7 +504,7 @@ Decisions for this phase:
 
 ## Phase 10: Premium
 
-Not yet planned. Its steps are written after the web launch's retrospective (phase 7), because what the open-source launch teaches decides what hosted execution must do first. `docs/SPEC.md` section 9 lists the candidate features in priority order. Phase 7 step 08's premium hooks are the seams it fills, and `apps/web` speaks the phase 6 RPC protocol to a hosted daemon.
+Not yet planned. Its steps are written after the web launch's retrospective (phase 7), because what the open-source launch teaches decides what hosted execution must do first. `docs/SPEC.md` section 9 lists the candidate features in priority order. Phase 7 step 07's premium hooks are the seams it fills, and `apps/web` speaks the phase 6 RPC protocol to a hosted daemon.
 
 ## Coverage
 
@@ -518,8 +516,8 @@ Every functional requirement in `docs/SPEC.md` section 7 and every rule in secti
 | 5.3 Definition of Ready | 1.02; judgment sessions in 4.01; the configurable judgment in 6.04; the finance task's exceptions in 7.02 |
 | 5.4 Definition of Done | 1.03, 1.07; reviewer sessions in 3.11; the finance task's baseline in 7.02 |
 | 5.5 budgets | 1.05, 3.03, 3.17; sprint budget in 4.03, its consequences in 4.04 |
-| 5.6 permissions | 1.04, 3.07, 3.08; MCP tagging in 7.01; the finance tools in 7.02 and 7.03 |
-| 5.7 escalation and questions | 1.06, 3.04, 3.05, 3.12; digest and age in 4.06; notifications in 7.07 |
+| 5.6 permissions | 1.04, 3.07, 3.08; MCP tagging in 7.01; the finance tools in 7.02 and 8.02 |
+| 5.7 escalation and questions | 1.06, 3.04, 3.05, 3.12; digest and age in 4.06; notifications in 7.06 |
 | 5.8 memory | 2.05 (files), 3.10 (in prompts), 4.06 (retro), 4.07 (cap, decisions, refresh) |
 | 5.9 channel | 4.05, 4.06; view in 6.07 |
 | 5.11 contract ownership | 0.03 (fields), 1.08 (gate), 2.06 (lock, unlock), 3.05 (enforced on writes), 6.05 (editor) |
@@ -527,8 +525,8 @@ Every functional requirement in `docs/SPEC.md` section 7 and every rule in secti
 | 5.13 authoring and criterion library | 2.05, 2.06, 3.06, 3.13, 6.05, 6.04 |
 | 5.14 integration and worktrees | 1.08 (assignment), 2.04, 3.11, 3.13, 4.02 (branch names), 6.06; the finance task's end in 7.02 |
 | 5.15 recovery | 3.11 |
-| 5.16 requests, triage, epics, and tasks | 0.03 (fields), 1.01 (`Triaged` gate), 1.02, 1.08, 2.01, 2.03, 2.05, 2.06 (human triage), 3.05, 3.12, 3.13, 4.01, 4.05, 6.06, 6.05, 6.04, 7.05 |
-| 6.6 Finance Specialist | 7.02, 7.03 |
+| 5.16 requests, triage, epics, and tasks | 0.03 (fields), 1.01 (`Triaged` gate), 1.02, 1.08, 2.01, 2.03, 2.05, 2.06 (human triage), 3.05, 3.12, 3.13, 4.01, 4.05, 6.06, 6.05, 6.04, 7.04 |
+| 6.6 Finance Specialist | 7.02, 8.02 |
 | F1 team builder | 2.05 (model), 6.04, 6.04 |
 | F2 projects | 2.04, 2.05, 2.06; presets in 3.06; first run in 6.04 |
 | F3 board | 2.06 (text), 6.06 |
@@ -536,24 +534,24 @@ Every functional requirement in `docs/SPEC.md` section 7 and every rule in secti
 | F5 governor | phase 1 |
 | F6 runtime | 3.01, 3.03, 3.07, 3.08, 3.11; stream in 6.01 |
 | F7 channel | 4.05, 6.07 |
-| F8 one-on-one | 7.05 |
-| F9 MCP and skills | 7.01, 7.04 |
-| F10 pixel office | 8.03; brand in 5.01, 5.02 |
-| F11 audit | 2.06 (`farik log`), 7.06 |
-| F12 notifications | 7.07 (browser), 8.02 (desktop) |
-| F13 premium hooks | 7.08 |
+| F8 one-on-one | 7.04 |
+| F9 MCP and skills | 7.01, 7.03 |
+| F10 pixel office | 8.04; brand in 5.01, 5.02 |
+| F11 audit | 2.06 (`farik log`), 7.05 |
+| F12 notifications | 7.06 (browser), 8.03 (desktop) |
+| F13 premium hooks | 7.07 |
 | F14 contract authoring assistant | 3.13 (command line), 6.05 |
 | F15 team rules | 2.05, 2.06, 6.04 |
 | F16 criterion library | 2.05, 2.06, 3.06, 6.04 |
-| F17 harness metrics | 3.16; per sprint in 4.03; panel in 7.06 |
+| F17 harness metrics | 3.16; per sprint in 4.03; panel in 7.05 |
 | 8.1 layout | 0.01 and the crate table above |
 | 8.2 runtime | 3.07, 3.08, ADR 0004, ADR 0005 |
 | 8.3 sandbox | 3.02 |
 | 8.4 storage | 2.02, 2.03, 2.05 |
-| 8.5 event protocol | 2.01 and every step that adds a kind; checked in 7.10 |
-| 8.6 security | 3.07, 3.08 (disallowed tools, untrusted notice), 7.01 (keychain), 7.03 (OAuth, untrusted email) |
-| 14 brand | 5.01, 5.02; applied in 6.02, 8.02, 9 |
-| 10 non-functional | 1.04 (measured, not gated), 2.03 (projections), 8.03 (frame rate), 6.02 (strings) |
+| 8.5 event protocol | 2.01 and every step that adds a kind; checked in 7.09 |
+| 8.6 security | 3.07, 3.08 (disallowed tools, untrusted notice), 7.01 (keychain), 8.02 (IMAP, untrusted email) |
+| 14 brand | 5.01, 5.02; applied in 6.02, 8.03, 9 |
+| 10 non-functional | 1.04 (measured, not gated), 2.03 (projections), 8.04 (frame rate), 6.02 (strings) |
 
 ## Spec changes this plan implies
 
@@ -582,10 +580,10 @@ Every decision the plan raised, the founder's answer of 2026-09-15, and where it
 | D11 | The conversational register is minimal: one ambient message per agent per sprint. | phase 4; spec 5.9 and 12 |
 | D12 | The backend, and so the daemon, is Rust; the desktop app runs it in-process. | ADR 0005; every-phase list; phase 3 step 07; phase 8 |
 | D13 | The design system is provisional at phase 5 step 02 and refined by the founder at phase 6 step 07. Superseded 2026-09-24 by ADR 0016: the founder supplies the brand in phase 5, and every client is built from it. | ADR 0016; phase 5 |
-| D14 | The office scene uses PixiJS 8.20.1. | phase 8 step 03 |
+| D14 | The office scene uses PixiJS 8.20.1. | phase 8 step 04 |
 | D15 | Cost is shown on the board, not in the scene. | phase 6; phase 8; spec 12 |
-| D16 | Notifications use Tauri's notification plugin on all platforms. Since 2026-09-27 (ADR 0018) this is the desktop app's, which ships after the web launch; the launch uses browser notifications. | phase 7 step 07; phase 8 step 02 |
-| D17 | No launch recording. | phase 7 step 10 |
+| D16 | Notifications use Tauri's notification plugin on all platforms. Since 2026-09-27 (ADR 0018) this is the desktop app's, which ships after the web launch; the launch uses browser notifications. | phase 7 step 06; phase 8 step 03 |
+| D17 | No launch recording. | phase 7 step 09 |
 | D18 | Teams have two to seven agents, at least one Product Manager and one Software Developer. | phase 2 step 05; spec 1 and F1 |
 | D19 | The default integration policy is `manual`: the human merges. Changed by the founder 2026-09-22: `auto_merge` is the default; `pull_request` is opt-in, every task's pull request needing the human's approval; `manual` is kept. | ADR 0012; phase 3 step 13; spec 5.14 |
 | D20 | A dependency must be accepted and integrated before the dependent task is assigned. | phase 1 step 08; spec 5.14 |

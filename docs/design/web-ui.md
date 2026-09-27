@@ -160,11 +160,11 @@ On 2026-09-26 the founder asked for every page to be mocked up before any code. 
 
 | Canvas page | Screens | Phase 6 step |
 |---|---|---|
-| Daily work | Today (`Main`, with a dark-theme switch), Accept work (`Gate`), `Board`, `TaskDetail`, `SprintStart`, `SprintView`, `Channel`, `OneOnOne`, `Costs` | 03, 05, 06, 07 (the one-on-one is phase 7 step 05) |
+| Daily work | Today (`Main`, with a dark-theme switch), Accept work (`Gate`), `Board`, `TaskDetail`, `SprintStart`, `SprintView`, `Channel`, `OneOnOne`, `Costs` | 03, 05, 06, 07 (the one-on-one is phase 7 step 04) |
 | Requests and approvals | `RequestFiled`, `Questions`, `ApprovePlan`, `PlanEditor`, `SendBack`, `HelpNeeded`, `AnswerQuestion` | 05 |
 | First run | `SetupProject`, `SetupScan`, the team (`Welcome`), `SetupPermissions`, `SetupSpending`, `SetupFinish`, `SetupAdvanced`, `Connect` | 01 (the connect page), 04 |
 | Team and settings | `Team`, `AgentEdit`, `Settings` | 03, 04 |
 | Phone (360 to 390 px) | Today (`Phone`), `PhoneGate`, `PhoneBoard`, `PhoneChannel` | 03 to 07 |
-| Website | `Site`, the public site on the domain (ADR 0017) | Phase 7 step 09 |
+| Website | `Site`, the public site on the domain (ADR 0017) | Phase 7 step 08 |
 
 The mockups are not the spec. Where one disagrees with `docs/SPEC.md`, the spec wins, and the step plan that builds that screen records the difference. The `Connect` screen's two "Mockup: …" buttons only switch between its states, for review.

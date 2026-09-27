@@ -59,7 +59,7 @@ A team has two to seven agents. Each has its own name, avatar, persona, model se
 | **Architect** | Holds the shape of the system: writes decision records, sets constraints for contracts, and reviews the Developer's changes. | Write application code, push shared branches, or accept work. |
 | **Developer** | Implements contracts on `feature/` or `fix/` branches and runs the exit criteria before declaring done. It is the only role that writes application code. | Change a contract, accept its own work, or touch files outside the contract's paths. |
 | **Marketing Specialist** | Researches the market and writes the marketing plan, release notes, landing copy and positioning. | Change application code, or publish anywhere without your approval. |
-| **Finance Specialist** (planned, optional) | Keeps the product's books in spreadsheets you can open. It picks up receipts from your email, categorises and records them, reads Stripe, and forecasts long-term costs. The books stay private on your machine, never in the repository. | Write code, change your mail or Stripe, pay or move money, or publish anything. |
+| **Finance Specialist** (planned, optional) | Keeps the product's books in spreadsheets you can open. It tracks what the team spends on AI, reads Stripe, picks up receipts from a receipts mailbox you forward to, and forecasts long-term costs. The books stay private on your machine, never in the repository. | Write code, change your mail or Stripe, pay or move money, or publish anything. |
 
 ## How a task moves
 
