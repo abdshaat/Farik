@@ -1,6 +1,6 @@
 # The Finance Specialist
 
-Status: approved by the founder on 2026-09-27, in conversation, and revised the same day to take receipts from email and read Stripe. It is the design input to phase 7 steps 02 and 03. ADR 0019 records the decision, and spec 0.21 (sections 1 and 6.6) carries its rules.
+Status: approved by the founder on 2026-09-27, in conversation, and revised the same day to take receipts from email and read Stripe. It is the design input to phase 7 steps 02 and 03. ADR 0019 records the decision, and spec 0.21 (sections 1 and 6.6, with exceptions in 5.2, 5.3, 5.4, 5.5, 5.6, 5.8 and 5.14) carries its rules.
 
 ## Why
 
@@ -51,7 +51,7 @@ The books live in `.farik/local/finance/`. The folder is on the user's machine, 
   books.xlsx           Expenses, Revenue, Categories, Monthly summary; each row names its receipt file or Stripe object
   forecast.xlsx        the long-term forecast
   <name>.xlsx          further workbooks a task asks for, such as pricing.xlsx
-  .history/            the previous version of each workbook, kept on every overwrite
+  .history/            the previous version of each workbook, kept on every overwrite, and under <task-id>/ the copy of every workbook taken when a finance task is assigned, the baseline its reviewer compares against
 ```
 
 The workbooks are `.xlsx`, which Excel, Google Sheets, Numbers and LibreOffice all open. The user may edit them by hand. The agent reads the file as it is before it writes, so a hand edit is kept.
@@ -91,8 +91,8 @@ Stripe is optional. A product that takes no payments through Stripe skips it.
 
 ## When it works
 
-- **The receipts sweep.** While a process drives the project, Farik starts a receipts sweep once a day, as a tick rule like the standup. The connector fetches new messages first; when there are none, no session starts and nothing is spent. Otherwise a sweep is a short Finance Specialist session that reads the new receipts, files each one, and records it in `books.xlsx`. The user can also start one: "Check now" in the web app, or `farik finance sweep`. A sweep counts against the spending limits like any session. It runs only when the team has an active Finance Specialist and a connected mailbox.
-- **Tasks.** Everything else comes as an ordinary contract: a month's close, a forecast, or a pricing analysis. It is filed, triaged, made ready, assigned, reviewed and accepted. A finance task's session runs in the finance folder instead of a git worktree, much as a conversation session runs in the project root, so its built-in `Read`, `Glob` and `Grep` reach the receipts and nothing else. The task's `allowed_paths` are under the folder. Two readiness rules stand in the way today, and each gets one exception for this role: the document-paths rule, and the rule that no `allowed_paths` entry reaches under `.farik/` at all (spec 5.3, `no_farik_paths`). The task may carry no `command` or `test` criterion, since it has no worktree to run one in; its criteria are `artifact`, `review` and `human`. It makes no commits, so three more rules take an exception: it reaches `verifying` when the workbooks its completion note names exist (spec 5.2), its reviewer receives the before and after of each changed workbook, from `.history/`, in place of a diff (spec 5.4), and once `accepted` it is finished, with nothing to integrate (spec 5.14).
+- **The receipts sweep.** While a process drives the project, Farik starts a receipts sweep once a day, as a tick rule like the standup. The connector fetches new messages first; when there are none, no session starts and nothing is spent. Otherwise a sweep is a short Finance Specialist session that reads the new receipts, files each one, and records it in `books.xlsx`. Its cost goes under a purpose of its own, `finance`. `sweep.started` and `sweep.ended` are recorded even when nothing is new, so the daily rule knows when it last ran. The user can also start one: "Check now" in the web app, or `farik finance sweep`. A sweep counts against the spending limits like any session. It runs only when the team has an active Finance Specialist and a connected mailbox.
+- **Tasks.** Everything else comes as an ordinary contract: a month's close, a forecast, or a pricing analysis. It is filed, triaged, made ready, assigned, reviewed and accepted. A finance task's session runs in the finance folder instead of a git worktree, much as a conversation session runs in the project root, so its built-in `Read`, `Glob` and `Grep` reach the receipts and nothing else. The task's `allowed_paths` are under the folder. Two readiness rules stand in the way today, and each gets one exception for this role, recorded in spec 5.3: the document-paths rule, and the rule that no `allowed_paths` entry reaches under `.farik/` at all (`no_farik_paths`). The task may carry no `command` or `test` criterion, since it has no worktree to run one in; its criteria are `artifact`, `review` and `human`. It makes no commits, so three more rules take an exception. When the task is assigned, Farik copies every workbook to `.history/<task-id>/`. It reaches `verifying` when every workbook in the `workbooks` list the assignee gives `farik_request_transition` exists (spec 5.2). Its reviewer receives each changed workbook beside that copy in place of a diff (spec 5.4). Once `accepted` it is finished, with nothing to integrate, and it counts as integrated for any task that depends on it (spec 5.14). Only one piece of finance work touches the folder at a time: no sweep starts while a finance task is `in_progress` or `verifying`, and no finance task is assigned while a sweep runs, so the folder changes under one session only, as a worktree does for code.
 
 ## Other tools
 
@@ -135,11 +135,12 @@ The step plans turn each of these into a test that fails first:
 - An attachment that is not a PDF or an image, or is over 10 MB, is not filed.
 - A sweep with no new messages starts no session.
 - An overwrite keeps the previous version in `.history/`.
-- A finance task goes from accepted to done without integration.
 - A finance session cannot read the worktrees, the event log, or `settings.json`.
 - The connector asks only for messages that match the filter, and never for any other.
 - A finance task with a `command` or `test` criterion, or with an `allowed_paths` entry elsewhere under `.farik/`, fails readiness.
-- A finance task reaches `verifying` without a commit and `accepted` without integration.
+- A finance task reaches `verifying` without a commit and `accepted` without integration, and a task that depends on it is assignable once it is accepted.
+- No sweep starts while a finance task is in progress, and no finance task is assigned while a sweep runs.
+- The reviewer's baseline is the copy taken at assignment, not the last overwrite.
 - The connector has no call that changes the mailbox.
 - A filed message is never handed over again.
 - Email text reaches the agent under the untrusted-content notice.

@@ -44,7 +44,7 @@ Its books are `.xlsx` workbooks in `.farik/local/finance/`, with each receipt fi
 
 It reads receipts through Farik's own read-only email connector, filtered by a Gmail label or an Outlook folder. It reads Stripe through Stripe's official MCP server with a read-only restricted key, and Farik allows only Stripe's read tools.
 
-A daily receipts sweep records new receipts while Farik runs. Other finance work comes as tasks, whose sessions run in the finance folder and which are done without integration.
+A daily receipts sweep records new receipts while Farik runs. Other finance work comes as tasks, whose sessions run in the finance folder and which end at `accepted`, with nothing to integrate. One piece of finance work touches the folder at a time.
 
 It is phase 7 steps 02 (the role, the books, Stripe) and 03 (receipts from email).
 
