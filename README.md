@@ -46,7 +46,7 @@ The usual fix is a longer system prompt. But a prompt that says *never push to `
 <img src="docs/brand/readme/team.png" alt="The five Farik characters, each seated at a laptop: the Product Manager, the Scrum Master, the Architect, the Developer and the Marketing Specialist" width="100%">
 </p>
 
-A team has two to seven agents. Each has its own name, avatar, persona, model settings, tools, MCP servers and skills, and one of five roles. Two developers is a common choice. Farik ships ten characters, and any agent can wear any of them:
+A team has two to seven agents. Each has its own name, avatar, persona, model settings, tools, MCP servers and skills, and one of five roles, with a sixth, the Finance Specialist, planned. Two developers is a common choice. Farik ships ten characters, and any agent can wear any of them:
 
 <p align="center">
 <img src="docs/brand/readme/avatars.png" alt="The ten Farik avatars, each a pixel-art person at a laptop" width="100%">
@@ -59,6 +59,7 @@ A team has two to seven agents. Each has its own name, avatar, persona, model se
 | **Architect** | Holds the shape of the system: writes decision records, sets constraints for contracts, and reviews the Developer's changes. | Write application code, push shared branches, or accept work. |
 | **Developer** | Implements contracts on `feature/` or `fix/` branches and runs the exit criteria before declaring done. It is the only role that writes application code. | Change a contract, accept its own work, or touch files outside the contract's paths. |
 | **Marketing Specialist** | Researches the market and writes the marketing plan, release notes, landing copy and positioning. | Change application code, or publish anywhere without your approval. |
+| **Finance Specialist** (planned, optional) | Keeps the product's books in spreadsheets you can open: every cost from AI to cloud and storage, monthly closes, and long-term forecasts. They stay private on your machine, never in the repository. | Write code, pay or move money, change budgets, or publish anything. |
 
 ## How a task moves
 
