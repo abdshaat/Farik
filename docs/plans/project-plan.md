@@ -1,12 +1,12 @@
 # Farik project plan
 
-Status: draft, revision 13. The backend is Rust (ADR 0005); every interface in this plan is a Rust signature except the front end's. The contract architecture is the one in `docs/SPEC.md` 5.16: a request is triaged into an epic or a standalone task, an epic is approved by the user and broken down into tasks. The step plans of phases 0 to 2 are deleted from the tree; read them in history (`git show a191001:docs/plans/`). Phase 0 is done: its step plans are executed and merged (pull request #4, 2026-09-16). Phase 1 is done and merged (pull request #5, 2026-09-16): all nine of its step plans are executed and reviewed; three rules of section 5 that need a decision in the spec rather than a function in `core` are named at the end of that phase's section. Phase 2 is done and merged (pull request #6, 2026-09-21): all nine of its step plans are executed, seven of them reviewed as they landed; the pull request records which two were not and why. Revision 8 (2026-09-22) cuts phase 3 into fifteen steps rather than thirteen, and revision 9 (the same day) into seventeen, splitting the orchestrator's first step in three; the phase's decisions say why. Revision 10 (2026-09-23) adds step 17, optional spending limits, on the founder's decision recorded in ADR 0015, and moves the Milestone 0 exit to step 18. Revision 11 (2026-09-24) plans phase 4: the founder approved its design and made its decisions (optional sprints, reactions from the session that moved the task, ceremonies run by the Scrum Master alone, a limit note instead of a block, an agent that sleeps until its provider's limit resets, and only the Developer changing code, on `feature/` or `fix/` branches), which closes the budget question phase 3 left open. Revision 12 (2026-09-24) reorders what follows phase 4 on the founder's word (ADR 0016): Farik is for non-technical users, on the web and the desktop and later as native iOS and Android apps. So phase 5 is the brand, which the founder supplies; phase 6 a working web UI served by the local Farik, for easier testing; phase 7 the desktop app; phase 8 the ecosystem and launch; phase 9 native mobile after the product has shipped and been tested; and phase 10 premium. Revision 13 (2026-09-26) records the founder's choice of AWS for everything Farik hosts (ADR 0017), and adds phase 8's step 07, the website and the domain on AWS, before the launch, which becomes step 08. Every product decision the plan raised (D1 to D20) was closed by the founder on 2026-09-15 and folded into the phase it governs; the closed decisions table at the end records each answer and where it lives.
+Status: draft, revision 14. The backend is Rust (ADR 0005); every interface in this plan is a Rust signature except the front end's. The contract architecture is the one in `docs/SPEC.md` 5.16: a request is triaged into an epic or a standalone task, an epic is approved by the user and broken down into tasks. The step plans of phases 0 to 2 are deleted from the tree; read them in history (`git show a191001:docs/plans/`). Phase 0 is done: its step plans are executed and merged (pull request #4, 2026-09-16). Phase 1 is done and merged (pull request #5, 2026-09-16): all nine of its step plans are executed and reviewed; three rules of section 5 that need a decision in the spec rather than a function in `core` are named at the end of that phase's section. Phase 2 is done and merged (pull request #6, 2026-09-21): all nine of its step plans are executed, seven of them reviewed as they landed; the pull request records which two were not and why. Revision 8 (2026-09-22) cuts phase 3 into fifteen steps rather than thirteen, and revision 9 (the same day) into seventeen, splitting the orchestrator's first step in three; the phase's decisions say why. Revision 10 (2026-09-23) adds step 17, optional spending limits, on the founder's decision recorded in ADR 0015, and moves the Milestone 0 exit to step 18. Revision 11 (2026-09-24) plans phase 4: the founder approved its design and made its decisions (optional sprints, reactions from the session that moved the task, ceremonies run by the Scrum Master alone, a limit note instead of a block, an agent that sleeps until its provider's limit resets, and only the Developer changing code, on `feature/` or `fix/` branches), which closes the budget question phase 3 left open. Revision 12 (2026-09-24) reorders what follows phase 4 on the founder's word (ADR 0016): Farik is for non-technical users, on the web and the desktop and later as native iOS and Android apps. So phase 5 is the brand, which the founder supplies; phase 6 a working web UI served by the local Farik, for easier testing; phase 7 the desktop app; phase 8 the ecosystem and launch; phase 9 native mobile after the product has shipped and been tested; and phase 10 premium. Revision 13 (2026-09-26) records the founder's choice of AWS for everything Farik hosts (ADR 0017), and adds phase 8's step 07, the website and the domain on AWS, before the launch, which becomes step 08. Every product decision the plan raised (D1 to D20) was closed by the founder on 2026-09-15 and folded into the phase it governs; the closed decisions table at the end records each answer and where it lives. Revision 14 (2026-09-27) ships Farik on the web first, on the founder's word (ADR 0018): the ecosystem and launch phase becomes phase 7 and releases `v0.1.0` with the web app alone; the desktop app becomes phase 8, whose first step is a recorded check of the released web product with real users, and no desktop step starts before it passes; native mobile follows the desktop app. It also records that the repository is already public.
 Owner: project founder.
 Decision changes: each pull request that edits this plan says which decision changed and why; the history is `git log -- docs/plans/project-plan.md`.
 
 This document divides the project into phases and each phase into steps. Vocabulary is as defined in `docs/standards/workflow.md`; where a step name below says "task" it means the product's task contract from `docs/SPEC.md`, not a plan task. A phase ends in something a person can use or verify. A phase is one pull request from the branch `phase/<n>-<name>`. A step has its own plan at `docs/plans/phase-<n>-<name>/step-<nn>-<name>.md` and lands as a group of commits on the phase branch. Steps run in the order listed; a step depends only on steps above it in the same phase and on phases already merged. The rules are in `docs/standards/workflow.md` stage 2 (Plan) and ADR 0003.
 
-Phases 0 through 3 together deliver Milestone 0 from `docs/SPEC.md` section 11. Phases 4 and 5 deliver Milestone 1. Phase 6 delivers Milestone 2 and the open-source launch. Phase 7 is Milestone 3.
+Milestones are defined in `docs/SPEC.md` section 11. Phases 0 through 4 build Milestone 0 and the team; its exit, with Milestone 1's, is run in the web UI in phase 6 step 08. Phases 5 and 6 deliver Milestone 1. Phase 7 delivers Milestone 2, the open-source launch on the web. Phase 8 is Milestone 3, the desktop app; phase 9 Milestone 4, mobile; phase 10 Milestone 5, premium.
 
 ## How to read a phase
 
@@ -49,7 +49,7 @@ Made, with the record:
 | `@farik/protocol-client` | `packages/protocol-client` | phase 6 step 01 |
 | `@farik/ui` | `packages/ui` | phase 6 step 02 |
 | `@farik/web` | `apps/web` | phase 6 step 03 |
-| `@farik/desktop` | `apps/desktop` | phase 7 step 01 |
+| `@farik/desktop` | `apps/desktop` | phase 8 step 02 |
 | iOS and Android apps | `apps/ios`, `apps/android` | phase 9, not planned |
 
 - The contract architecture (spec 5.16), which every phase serves:
@@ -58,7 +58,7 @@ Made, with the record:
   3. A large request is an epic (`kind: epic`). The Product Manager asks the user its questions before writing it, may not write product documents until it is approved, and the user approves it (`human_accept` (`HumanAccept`), subject `contract`) or sends it back. The approved epic is assigned to the Scrum Master, or the Product Manager without one, whose work is the breakdown: tasks (`kind: task`, `parent` set) with deliverables and exit criteria, assigned through `farik_assign_task`. An epic waiting for approval sits in `escalated` with reason `Approval`. The epic is done when its tasks are; its reviewer is the Product Manager when the Scrum Master broke it down and the human when the Product Manager did, so that a reviewer is never the assignee; and the user accepts it.
   4. A small request is a standalone task (`kind: task`, no parent) that goes through the ordinary lifecycle, with the user's approval only where policy or risk requires it.
   5. Every contract, epic or task, passes the Definition of Ready before work starts, is verified by a reviewer who is never its assignee, and is accepted by the Product Manager against its exit criteria.
-- Event kinds and commands grow with the code. The step that first emits an event kind, or first handles a command, adds it to the schema. The list in `docs/SPEC.md` section 8.5 is the checklist, and phase 6 step 08 confirms every kind in it exists.
+- Event kinds and commands grow with the code. The step that first emits an event kind, or first handles a command, adds it to the schema. The list in `docs/SPEC.md` section 8.5 is the checklist, and phase 7 step 08 confirms every kind in it exists.
 - Tests are split in three. Unit tests live in `#[cfg(test)] mod tests` in the module they test and run by `cargo xtask check`. Integration tests (`crates/<name>/tests/<subject>.rs`) need Docker, a git binary, or the file system in ways a unit test must not. One that needs only a temporary directory runs in the default `cargo xtask check`; one that needs Docker or a git binary runs by `cargo xtask check --integration`, which CI runs as the one job it has, because `--integration` only adds the ignored tests to the same `cargo test` invocation and a second job would compile the workspace again to run a superset of the first (changed 2026-09-17 by the step 04 plan; a second job was expected to pay for itself when a test needed Docker, and phase 3 step 02 found it does not: the Docker tests are ignored tests in the same `cargo test`, so they join the one job). Changed 2026-09-17 by the phase 2 step 02 plan: the first `tests/` file is the event log's, it needs a temporary directory and nothing else, and gating it would have left reopening, two processes on one file, and the journal mode out of every check until step 04. Live tests (`crates/<name>/tests/live_<subject>.rs`) talk to the Claude Code program and the model, cost money, are run by hand with `FARIK_LIVE_TESTS=1`, and never run in CI.
 - Every function that crosses a crate boundary and can fail returns `Result<T, E>` with the crate's error enum, including the asynchronous ones (`docs/standards/code.md`, "Errors are values"). A non-zero exit code from a command is a value, not a failure.
 - Time, randomness, and identifiers are injected. Nothing in `core`, `protocol`, `store`, or `runtime` reads the clock or generates an identifier on its own; a `Clock` trait (`fn now(&self) -> DateTime<Utc>`) and an `IdSource` trait (`fn session_id(&self) -> String`) are passed in, or, where a call samples the clock exactly once, the `DateTime<Utc>` itself — as `open_event_log(path, now)` takes it, recorded 2026-09-17 by the phase 2 step 02 plan. Task ids are `FRK-<n>` from a counter in the store; session ids are UUID v4 through `IdSource`; event `recorded_at` fields are ISO 8601 UTC from the clock.
@@ -242,7 +242,7 @@ Decisions for this phase:
 - Made: session purpose (`triage`, `refine`, `plan`, `implement`, `verify`, `ceremony`, `conversation`) is stamped on `session.started` and on every `cost.recorded` event.
 - Made: until phase 4 adds sprints, `budget_state` sets `sprint_max_usd` to `f64::INFINITY` and `sprint_spent_usd` to 0, so the `SprintUsd` scope never fires and daily exhaustion fires as `DayUsd` with `PauseTeam`; the readiness context's `remaining_sprint_budget_usd` is the remaining daily budget. Phase 4 step 03 replaces both. (Amended 2026-09-23 by ADR 0015 and step 17: a team with no daily budget has an unbounded day, so this stand-in is unbounded too.)
 - Made (D1): no-sandbox mode ships; `farik run` prints a warning on every start when `sandbox: none`.
-- Made (D9): the Milestone 0 exit test runs on Farik's own repository, which stays private until the phase 8 launch; the three issues are three of Farik's own.
+- Made (D9): the Milestone 0 exit test runs on Farik's own repository, which was to stay private until the launch (phase 7 since revision 14; the repository was found public on 2026-09-27); the three issues are three of Farik's own.
 - Made 2026-09-22 (revision 8), the founder approving the phase design: the steps are fifteen, not thirteen, and ordered so that nothing waits on a later step. Cost recording moves from 09 to 03, because the governor's transition and readiness decisions read the budget, and the tools step would otherwise have had to pass a budget nothing could measure. Governed transitions, the code that turns the store into the `TransitionContext` the governor judges and records what it decided, are their own step, 04: revision 7 left them as a trait in the tools step with no step owning the real implementation. The orchestrator is two steps, 11 (one task from `ready` to `accepted`) and 12 (triage, the epic flow, questions, and the human's commands), because one plan for all of it would be three times the size a step plan is held to (ADR 0008). The command line, the metrics, and the exit move to 13, 14, and 15.
 - Made 2026-09-22 (revision 9): the orchestrator's first step is three, 11 (sessions: the order of work, the session mechanics, `RecordedAdapter::with_tools`, and the `ready`, `assigned`, and `in_progress` rules), 12 (verification: `verifying`, `rejected`, and old blocks, the reviewer's and the Product Manager's sessions, and the end-to-end test), and 13 (integration, cleanup, and recovery), because the step 11 readiness review measured the single plan at about two and a half times ADR 0008's target once its open decisions were written down. The old steps 12 to 15 (requests, epics, and the human; the command line; the metrics; the exit) become 14 to 17. Budgets in 11 are the minimum on the founder's word ("we can enhance budget tracking later"): costs are recorded, a session a budget has run out for is aborted, and no session starts for a task, or at all for the day, until the budget has room; nothing is escalated or noted for a budget, and 5.5's fuller consequences move to phase 4. Integration conflicts in 13 are kept to the minimum on the same word: an escalation on the still-`accepted` task, not retried.
 - Made 2026-09-22: a session authenticates with either an Anthropic API key or a Claude subscription token, whichever the user has (the founder's requirement, on approving the phase). `ClaudeCredential` is `ApiKey` or `OauthToken`; the command line reads `ANTHROPIC_API_KEY`, else `CLAUDE_CODE_OAUTH_TOKEN` (what `claude setup-token` issues, and what the Claude Agent SDK also accepts), and refuses to start a session with neither. The one it chose is set in the child's environment and the other is removed from it, so a key in the user's shell cannot silently win over the token they chose. Neither is ever written to a file, a prompt, an event, or a log line; the credential's `Debug` prints `[redacted]`, a ten-line newtype rather than a dependency.
@@ -372,11 +372,11 @@ Interfaces this phase adds: written when the phase is next to be planned.
 
 ## Phase 6: Web UI
 
-Ends with: in a browser on the user's own machine, a new user with no help goes from nothing to an accepted task on their own repository inside thirty minutes, measured with five test users, at least three of them non-technical. This is Milestone 1's criterion (spec 11), met in the browser. Before that test, the recorded team sprint that phase 4 moved here (its step 08) is run from the browser, and it closes Milestone 0 too: all live testing is done in the web UI once the product side is built (the founder, 2026-09-24). No terminal is needed after `farik serve` is started, and phase 7's desktop app removes even that.
+Ends with: in a browser on the user's own machine, a new user with no help goes from nothing to an accepted task on their own repository inside thirty minutes, measured with five test users, at least three of them non-technical. This is Milestone 1's criterion (spec 11), met in the browser. Before that test, the recorded team sprint that phase 4 moved here (its step 08) is run from the browser, and it closes Milestone 0 too: all live testing is done in the web UI once the product side is built (the founder, 2026-09-24). No terminal is needed after `farik serve` is started; phase 7 decides how a user starts it without one, and phase 8's desktop app removes the step altogether.
 
 Decisions for this phase (revision 12, 2026-09-24; ADR 0016):
 
-- Made: the web app is `apps/web` (`@farik/web`), React 19 and Vite, built from `@farik/brand` and `@farik/ui`. The local daemon serves it: `farik serve` (and every driving process) serves the built app on `127.0.0.1` beside its RPC route, so the same app later runs in phase 7's desktop shell and against phase 10's hosted daemon. The browser gets the daemon's token through a one-time link that `farik serve` prints. The daemon refuses a request whose `Origin` is not its own.
+- Made: the web app is `apps/web` (`@farik/web`), React 19 and Vite, built from `@farik/brand` and `@farik/ui`. The local daemon serves it: `farik serve` (and every driving process) serves the built app on `127.0.0.1` beside its RPC route, so the same app later runs in phase 8's desktop shell and against phase 10's hosted daemon. The browser gets the daemon's token through a one-time link that `farik serve` prints. The daemon refuses a request whose `Origin` is not its own.
 - Made: the wire between the daemon and the front end is JSON-RPC 2.0 over a WebSocket on the daemon's port: `subscribe` streams events from a sequence, `command` sends a `Command`, and `query` reads projections (the old phase 5 decision, kept). `@farik/protocol-client` is the one `camelCase` mapping layer.
 - Made: the front end's toolchain is ADR 0002's (pnpm, TypeScript, Biome, Vitest), which phase 5 step 02 added.
 - Made (the founder, 2026-09-24): the first web UI covers the whole working loop that the command line covers today:
@@ -391,7 +391,7 @@ Decisions for this phase (revision 12, 2026-09-24; ADR 0016):
   - escalations;
   - costs and the harness metrics.
 
-  The pixel office waits for phase 7.
+  The pixel office waits for phase 8.
 - Made (the founder, 2026-09-24): every human gate shows both a plain-language summary and the code diff: a contract's approval, a `high` risk task's acceptance, and an epic's acceptance.
   - The summary is written by the agent that asks: the Product Manager's contract carries a summary for the human, and the assignee's completion note and the reviewer's note each open with one.
   - The screen also shows Farik's check results.
@@ -418,50 +418,30 @@ Steps:
 
 Interfaces this phase adds: written when the phase is next to be planned.
 
-## Phase 7: Desktop
+## Phase 7: Ecosystem and web launch
 
-Ends with: the desktop app on macOS, Windows, and Linux runs the same web UI with the daemon in-process, so there is nothing to start in a terminal. It adds the pixel office.
-
-Decisions for this phase:
-
-- Made: a Tauri 2 shell (`@tauri-apps/cli` 2.11.4). Its Rust side depends on `farik-runtime` and runs the daemon in-process (D12), with no sidecar and no second process. It loads `apps/web`'s build.
-- Made: every action in the office is also reachable from the board (F10). The scene can be disabled in settings, and the board is the default view when it is.
-- Made (D14): the office scene renderer is PixiJS 8.20.1, drawn in the brand's look (phase 5).
-- Made (D15): cost is shown on the board and in task detail, never in the scene.
-
-Steps:
-
-| Step | Name | Spec | Delivers |
-|---|---|---|---|
-| 01 | Desktop shell | 8.1 | `apps/desktop`: the Tauri app running the daemon in-process and loading the web UI; the brand's app icons; the scene on/off setting |
-| 02 | Office scene | F10, 10 | Desks, a meeting table, a whiteboard, a door; agent movement by state; click to open an agent; 60 frames per second on the reference laptop; a disable switch |
-| 03 | Desktop check | 11 | The Milestone 1 loop repeated in the desktop app by the founder and one non-technical tester, recorded in `docs/milestones/m1-desktop.md` |
-
-Interfaces this phase adds: written when the phase is next to be planned.
-
-## Phase 8: Ecosystem and launch
-
-Ends with: the public open-source release, `v0.1.0`. It includes per-agent MCP servers and skills, one-on-one conversations, the audit viewer, notifications, and the premium hooks as stubs. The web app and the desktop app ship together.
+Ends with: the public open-source release, `v0.1.0`, on the web: the `farik` binary with the web app embedded, for macOS, Windows, and Linux. It includes per-agent MCP servers and skills, one-on-one conversations, the audit viewer, notifications, and the premium hooks as stubs. The desktop app is not in it; it follows in phase 8, once the web release is tested (ADR 0018).
 
 Decisions for this phase:
 
+- Made (the founder, 2026-09-27; ADR 0018): Farik is first shipped on the web. The launch ships the web app alone, and the desktop app waits for phase 8.
+- Open (ADR 0018): how a non-technical user installs and starts the local Farik without a terminal before the desktop app exists. Candidates: an installer per platform that starts Farik at login and opens the browser, or a single launcher that does the same. Decided when this phase is planned.
 - Made: MCP servers are configured per agent in `team.yaml` (`mcp_servers: [{ name, transport: stdio | http, command | url, args, env_keys, tool_tiers }]`).
   - Credentials are named by key and stored in the OS keychain through the `keyring` crate (version pinned in the step plan). The daemon reads them at connection time and passes them to the server process's environment (spec 8.6).
   - Tool listing uses `rmcp` as a client. Untagged tools are `external_effect` (spec 5.6).
-  - Approving an `external_effect` call is `tool.approve`, from the web or desktop app or with `farik tool approve <approval-id>`.
+  - Approving an `external_effect` call is `tool.approve`, from the web app or with `farik tool approve <approval-id>`.
 - Made: skills live at three levels: the role's embedded `skills/`, `.farik/skills/`, and `.farik/agents/<agent_id>/skills/`. They are loaded into a session through Claude Code's skills directories, in that order.
 - Made: one-on-one conversations are sessions with the `Read` tier only, no task, and one Farik tool, `farik_propose_task`. That tool files a `draft` request, which goes to triage like any other (F8, spec 4.3, 5.16).
 - Made: the premium hooks (F13) are traits with open-source implementations: `LicenseCheck` returns `Tier::OpenSource`; `HostedRunToggle` is unavailable, with the reason "not available in this build"; `SyncProvider` has a no-op implementation. No `ee/` directory exists in this release.
-- Made (D16): the desktop app's notifications go through Tauri's notification plugin, driven by the daemon's events. The web app uses the browser's notifications when the user allows them.
-- Made (the founder, 2026-09-26; ADR 0017): the public website and the domain run on AWS. The domain is registered in Route 53 Domains, with its DNS in a Route 53 hosted zone and its certificate from AWS Certificate Manager in `us-east-1`. The site is `apps/site` (`@farik/site`), static and built from `@farik/brand`, stored in a private, versioned S3 bucket and served by CloudFront through origin access control, with HSTS and a content security policy. The infrastructure is `infra` (`@farik/infra`), AWS CDK stacks in TypeScript that are unit-tested with the CDK's assertions. A GitHub Actions workflow deploys the site on a merge to `main` through an OpenID Connect role scoped to the bucket and the distribution, so no AWS key is stored. AWS Budgets, CloudWatch and CloudTrail guard the account. The step-by-step deployment plan, with the account details, is kept out of git at `deploy/plan.md` (the founder's request).
+- Made: the web app's notifications use the browser's notifications when the user allows them. The desktop app's native notifications (D16) come with the desktop app in phase 8.
+- Made (the founder, 2026-09-26; ADR 0017): the public website and the domain run on AWS. The domain is registered in Route 53 Domains, with its DNS in a Route 53 hosted zone and its certificate from AWS Certificate Manager in `us-east-1`. The site is `apps/site` (`@farik/site`), static and built from `@farik/brand`, stored in a private, versioned S3 bucket and served by CloudFront through origin access control, with HSTS and a content security policy. The infrastructure is `infra` (`@farik/infra`), AWS CDK stacks in TypeScript that are unit-tested with the CDK's assertions. A GitHub Actions workflow deploys the site on a merge to `main` through an OpenID Connect role scoped to the bucket and the distribution, so no AWS key is stored. AWS Budgets, CloudWatch and CloudTrail guard the account. The step-by-step deployment plan, with the account details, is kept out of the repository at `deploy/plan.md` (the founder's request).
 - Made (D17): there is no launch recording. The launch artifact is the README, the changelog, and the release itself.
 - Made: the release pipeline is a second GitHub Actions workflow, `release`. On a tag it:
-  - builds the desktop app for macOS, Windows, and Linux;
-  - builds the `farik` binary, with the web app embedded, for the same targets;
+  - builds the `farik` binary, with the web app embedded, for macOS, Windows, and Linux;
   - publishes `farik-core` and `farik-protocol` to crates.io;
   - attaches the binaries to the GitHub release.
 
-  The changelog is `git-cliff` 2.14.1 output. The repository is made public in this step.
+  The changelog is `git-cliff` 2.14.1 output. The repository is already public (it was on 2026-09-27), so nothing in it may hold a secret or an account detail at any point, not only from the launch on.
 
 Steps:
 
@@ -471,16 +451,43 @@ Steps:
 | 02 | Skills per agent | F9, 3 | Skill folders at agent, role, and team level; loading into sessions; the agent panel's list |
 | 03 | One-on-one | F8, 4.3, 5.8 | A read-only direct conversation with an agent; memory history with revert and a decisions view in the agent panel; an offer to file a task |
 | 04 | Audit viewer | F11, F17 | The event log view with filters, JSON Lines export and replay, cost reports per task, agent, and sprint |
-| 05 | Notifications | F12, 5.7 | Notifications for `escalation.raised`, `escalation.aged`, `question.asked`, `sprint.started`, `sprint.ended`; quiet hours |
+| 05 | Notifications | F12, 5.7 | Browser notifications for `escalation.raised`, `escalation.aged`, `question.asked`, `sprint.started`, `sprint.ended`; quiet hours |
 | 06 | Premium hooks | F13, 9 | The `LicenseCheck`, `HostedRunToggle`, and `SyncProvider` stubs wired into settings |
 | 07 | Website and domain on AWS | 8.1, 14, 10 | `apps/site` from the approved website design; `infra` with the domain, certificate, bucket, distribution, deploy role and budget stacks, unit-tested; the `site` deploy workflow; the site live on the domain over HTTPS, with its headers checked |
-| 08 | Launch | 11, product analysis | A README rewrite in the brand's voice, the event kind checklist against spec 8.5, the changelog, the release workflow, the `v0.1.0` tag; the repository made public |
+| 08 | Web launch | 11, product analysis | A README rewrite in the brand's voice, the event kind checklist against spec 8.5, the way a user installs and starts Farik without a terminal, the changelog, the release workflow, the `v0.1.0` tag |
+
+Interfaces this phase adds: written when the phase is next to be planned.
+
+## Phase 8: Desktop
+
+Ends with: the desktop app on macOS, Windows, and Linux runs the same web UI with the daemon in-process, so there is nothing to start in a terminal. It adds the pixel office and native notifications, and ships as a release of its own.
+
+Starts only after the web release is complete and tested (the founder, 2026-09-27; ADR 0018): phase 7 is merged, `v0.1.0` is released, and this phase's step 01 passes. No other step of this phase starts before step 01 passes.
+
+Decisions for this phase:
+
+- Made: a Tauri 2 shell (`@tauri-apps/cli` 2.11.4, re-checked when this phase is planned). Its Rust side depends on `farik-runtime` and runs the daemon in-process (D12), with no sidecar and no second process. It loads `apps/web`'s build.
+- Made: every action in the office is also reachable from the board (F10). The scene can be disabled in settings, and the board is the default view when it is.
+- Made (D14): the office scene renderer is PixiJS 8.20.1, drawn in the brand's look (phase 5).
+- Made (D15): cost is shown on the board and in task detail, never in the scene.
+- Made (D16): the desktop app's notifications go through Tauri's notification plugin, driven by the daemon's events.
+- Made: the `release` workflow gains the desktop builds for macOS, Windows, and Linux, signed where the platform requires it, attached to the GitHub release beside the `farik` binaries.
+
+Steps:
+
+| Step | Name | Spec | Delivers |
+|---|---|---|---|
+| 01 | Web release check | 11 | The released `v0.1.0` run in the browser by the founder and at least three non-technical testers on their own repositories: first run and setup, a sprint from request to accepted task, MCP and skills, a one-on-one, the audit viewer, and notifications. Every defect found is fixed in a patch release or recorded with the founder's reason to leave it. The founder signs off the record, `docs/milestones/web-release.md` |
+| 02 | Desktop shell | 8.1, F12 | `apps/desktop`: the Tauri app running the daemon in-process and loading the web UI; the brand's app icons; native notifications; the scene on/off setting |
+| 03 | Office scene | F10, 10 | Desks, a meeting table, a whiteboard, a door; agent movement by state; click to open an agent; 60 frames per second on the reference laptop; a disable switch |
+| 04 | Desktop check | 11 | The Milestone 1 loop repeated in the desktop app by the founder and one non-technical tester, recorded in `docs/milestones/m1-desktop.md` |
+| 05 | Desktop release | 11 | The desktop builds in the `release` workflow, and the first release that carries the desktop app |
 
 Interfaces this phase adds: written when the phase is next to be planned.
 
 ## Phase 9: Native mobile
 
-Not yet planned. It starts after the product has shipped (phase 8) and been tested with real users (the founder, 2026-09-24).
+Not yet planned. It starts after the desktop app has shipped (phase 8) (the founder, 2026-09-24 and 2026-09-27).
 
 Decisions for this phase:
 
@@ -492,7 +499,7 @@ Decisions for this phase:
 
 ## Phase 10: Premium
 
-Not yet planned. Its steps are written after phase 8's retrospective, because what the open-source launch teaches decides what hosted execution must do first. `docs/SPEC.md` section 9 lists the candidate features in priority order. Phase 8 step 06's premium hooks are the seams it fills, and `apps/web` speaks the phase 6 RPC protocol to a hosted daemon.
+Not yet planned. Its steps are written after the web launch's retrospective (phase 7), because what the open-source launch teaches decides what hosted execution must do first. `docs/SPEC.md` section 9 lists the candidate features in priority order. Phase 7 step 06's premium hooks are the seams it fills, and `apps/web` speaks the phase 6 RPC protocol to a hosted daemon.
 
 ## Coverage
 
@@ -504,8 +511,8 @@ Every functional requirement in `docs/SPEC.md` section 7 and every rule in secti
 | 5.3 Definition of Ready | 1.02; judgment sessions in 4.01; the configurable judgment in 6.04 |
 | 5.4 Definition of Done | 1.03, 1.07; reviewer sessions in 3.11 |
 | 5.5 budgets | 1.05, 3.03, 3.17; sprint budget in 4.03, its consequences in 4.04 |
-| 5.6 permissions | 1.04, 3.07, 3.08; MCP tagging in 8.01 |
-| 5.7 escalation and questions | 1.06, 3.04, 3.05, 3.12; digest and age in 4.06; notifications in 8.05 |
+| 5.6 permissions | 1.04, 3.07, 3.08; MCP tagging in 7.01 |
+| 5.7 escalation and questions | 1.06, 3.04, 3.05, 3.12; digest and age in 4.06; notifications in 7.05 |
 | 5.8 memory | 2.05 (files), 3.10 (in prompts), 4.06 (retro), 4.07 (cap, decisions, refresh) |
 | 5.9 channel | 4.05, 4.06; view in 6.07 |
 | 5.11 contract ownership | 0.03 (fields), 1.08 (gate), 2.06 (lock, unlock), 3.05 (enforced on writes), 6.05 (editor) |
@@ -513,7 +520,7 @@ Every functional requirement in `docs/SPEC.md` section 7 and every rule in secti
 | 5.13 authoring and criterion library | 2.05, 2.06, 3.06, 3.13, 6.05, 6.04 |
 | 5.14 integration and worktrees | 1.08 (assignment), 2.04, 3.11, 3.13, 4.02 (branch names), 6.06 |
 | 5.15 recovery | 3.11 |
-| 5.16 requests, triage, epics, and tasks | 0.03 (fields), 1.01 (`Triaged` gate), 1.02, 1.08, 2.01, 2.03, 2.05, 2.06 (human triage), 3.05, 3.12, 3.13, 4.01, 4.05, 6.06, 6.05, 6.04, 8.03 |
+| 5.16 requests, triage, epics, and tasks | 0.03 (fields), 1.01 (`Triaged` gate), 1.02, 1.08, 2.01, 2.03, 2.05, 2.06 (human triage), 3.05, 3.12, 3.13, 4.01, 4.05, 6.06, 6.05, 6.04, 7.03 |
 | F1 team builder | 2.05 (model), 6.04, 6.04 |
 | F2 projects | 2.04, 2.05, 2.06; presets in 3.06; first run in 6.04 |
 | F3 board | 2.06 (text), 6.06 |
@@ -521,24 +528,24 @@ Every functional requirement in `docs/SPEC.md` section 7 and every rule in secti
 | F5 governor | phase 1 |
 | F6 runtime | 3.01, 3.03, 3.07, 3.08, 3.11; stream in 6.01 |
 | F7 channel | 4.05, 6.07 |
-| F8 one-on-one | 8.03 |
-| F9 MCP and skills | 8.01, 8.02 |
-| F10 pixel office | 7.02; brand in 5.01, 5.02 |
-| F11 audit | 2.06 (`farik log`), 8.04 |
-| F12 notifications | 8.05 |
-| F13 premium hooks | 8.06 |
+| F8 one-on-one | 7.03 |
+| F9 MCP and skills | 7.01, 7.02 |
+| F10 pixel office | 8.03; brand in 5.01, 5.02 |
+| F11 audit | 2.06 (`farik log`), 7.04 |
+| F12 notifications | 7.05 (browser), 8.02 (desktop) |
+| F13 premium hooks | 7.06 |
 | F14 contract authoring assistant | 3.13 (command line), 6.05 |
 | F15 team rules | 2.05, 2.06, 6.04 |
 | F16 criterion library | 2.05, 2.06, 3.06, 6.04 |
-| F17 harness metrics | 3.16; per sprint in 4.03; panel in 8.04 |
+| F17 harness metrics | 3.16; per sprint in 4.03; panel in 7.04 |
 | 8.1 layout | 0.01 and the crate table above |
 | 8.2 runtime | 3.07, 3.08, ADR 0004, ADR 0005 |
 | 8.3 sandbox | 3.02 |
 | 8.4 storage | 2.02, 2.03, 2.05 |
-| 8.5 event protocol | 2.01 and every step that adds a kind; checked in 8.07 |
-| 8.6 security | 3.07, 3.08 (disallowed tools, untrusted notice), 8.01 (keychain) |
-| 14 brand | 5.01, 5.02; applied in 6.02, 7.01, 9 |
-| 10 non-functional | 1.04 (measured, not gated), 2.03 (projections), 7.02 (frame rate), 6.02 (strings) |
+| 8.5 event protocol | 2.01 and every step that adds a kind; checked in 7.08 |
+| 8.6 security | 3.07, 3.08 (disallowed tools, untrusted notice), 7.01 (keychain) |
+| 14 brand | 5.01, 5.02; applied in 6.02, 8.02, 9 |
+| 10 non-functional | 1.04 (measured, not gated), 2.03 (projections), 8.03 (frame rate), 6.02 (strings) |
 
 ## Spec changes this plan implies
 
@@ -562,15 +569,15 @@ Every decision the plan raised, the founder's answer of 2026-09-15, and where it
 | D6 | Without a Scrum Master, the Product Manager assigns. | phase 1 (second `ready → assigned` row); phase 3; spec 5.2 |
 | D7 | A Developer's reviewer is the Architect, else another Developer: a Software Developer may review another Developer's work but never its own; with neither, the contract fails readiness and the Product Manager asks the human to add a reviewer agent. | phase 1 step 02 (`ReviewerAvailable`), step 08 (`check_assignment`); phase 3 step 09 and step 11; spec 5.1, 5.3, and 11; the schema's `reviewer_role` description |
 | D8 | `human_accepts_contracts` defaults to `high_risk`. | phase 3; spec 12 |
-| D9 | The Milestone 0 exit runs on Farik's own repository, private until launch. | phase 3 step 18; spec 11 |
+| D9 | The Milestone 0 exit runs on Farik's own repository, private until launch. The repository was found public on 2026-09-27, so the "private until launch" half no longer holds and the launch step no longer changes its visibility. | phase 3 step 18; spec 11 |
 | D10 | A sprint ends when all its tasks are accepted or cancelled. | phase 4; spec 3 and 5.2 |
 | D11 | The conversational register is minimal: one ambient message per agent per sprint. | phase 4; spec 5.9 and 12 |
-| D12 | The backend, and so the daemon, is Rust; the desktop app runs it in-process. | ADR 0005; every-phase list; phase 3 step 07; phase 7 |
+| D12 | The backend, and so the daemon, is Rust; the desktop app runs it in-process. | ADR 0005; every-phase list; phase 3 step 07; phase 8 |
 | D13 | The design system is provisional at phase 5 step 02 and refined by the founder at phase 6 step 07. Superseded 2026-09-24 by ADR 0016: the founder supplies the brand in phase 5, and every client is built from it. | ADR 0016; phase 5 |
-| D14 | The office scene uses PixiJS 8.20.1. | phase 7 step 02 |
-| D15 | Cost is shown on the board, not in the scene. | phase 6; phase 7; spec 12 |
-| D16 | Notifications use Tauri's notification plugin on all platforms. | phase 8 step 05 |
-| D17 | No launch recording. | phase 8 step 08 |
+| D14 | The office scene uses PixiJS 8.20.1. | phase 8 step 03 |
+| D15 | Cost is shown on the board, not in the scene. | phase 6; phase 8; spec 12 |
+| D16 | Notifications use Tauri's notification plugin on all platforms. Since 2026-09-27 (ADR 0018) this is the desktop app's, which ships after the web launch; the launch uses browser notifications. | phase 7 step 05; phase 8 step 02 |
+| D17 | No launch recording. | phase 7 step 08 |
 | D18 | Teams have two to seven agents, at least one Product Manager and one Software Developer. | phase 2 step 05; spec 1 and F1 |
 | D19 | The default integration policy is `manual`: the human merges. Changed by the founder 2026-09-22: `auto_merge` is the default; `pull_request` is opt-in, every task's pull request needing the human's approval; `manual` is kept. | ADR 0012; phase 3 step 13; spec 5.14 |
 | D20 | A dependency must be accepted and integrated before the dependent task is assigned. | phase 1 step 08; spec 5.14 |

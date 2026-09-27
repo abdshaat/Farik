@@ -164,9 +164,9 @@ Then `farik run` drives the team until nothing needs doing. Add `--json` to any 
 | The team | Five roles, sprints, spending limits, the team channel and its ceremonies, and memory | Done |
 | Brand | The identity, the design tokens, and every page of the web app designed | In progress |
 | Web app | The whole working loop in the browser, built for people who never open a terminal | Next |
-| Desktop app | The same app with nothing to start, plus the pixel-art office you can watch the team work in | Planned |
-| Launch | Per-agent MCP servers and skills, one-on-one conversations, the audit viewer, and the public release | Planned |
-| Phone apps | Native iOS and Android apps | After launch |
+| Web launch | Per-agent MCP servers and skills, one-on-one conversations, the audit viewer, and the first public release, in the browser | Planned |
+| Desktop app | The same app with nothing to start, plus the pixel-art office you can watch the team work in | After the web release is tested |
+| Phone apps | Native iOS and Android apps | After the desktop app |
 
 ## Open source
 

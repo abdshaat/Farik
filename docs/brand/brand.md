@@ -113,7 +113,7 @@ These use pixel art:
 - the logo and the wordmark;
 - the characters and avatars;
 - large display headings;
-- the office scene (phase 7);
+- the office scene (phase 8);
 - small decorative touches, such as the blinking block cursor and the frame corners.
 
 The rest of the interface is clean and flat: forms, tables, the board, the channel, and dialogs. The kit shows this mix. Its panels are flat cards with monospace section labels, and its "brand core" icons are simple filled glyphs on dark tiles.
@@ -138,4 +138,4 @@ The founder supplied these on 2026-09-26. They are kept unchanged in `docs/brand
 The kit's rule that the wordmark is always Clay Coral gives way to the supplied file: the wordmark is Soft Sand on dark surfaces. The README's images (`docs/brand/readme/`: the banner, the team, and the avatars) are composed from these files.
 
 Still wanted:
-1. **For phase 7 only:** the office scene as layered pieces, and the characters' walking frames.
+1. **For phase 8 only:** the office scene as layered pieces, and the characters' walking frames.
