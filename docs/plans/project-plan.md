@@ -32,7 +32,7 @@ Made, with the record:
 | `task-contract.schema.json` | `farik-core` | phase 0 step 02 |
 | `prices.schema.json` | `farik-core` | phase 1 step 05 |
 | `event.schema.json`, `command.schema.json` | `farik-protocol` | phase 2 step 01 |
-| `team.schema.json` (agents, budgets, policy, rules), `criteria.schema.json` | `farik-core` | phase 2 step 05 (corrected 2026-09-17 from `farik-store`: `validate_team`, `validate_criteria` and `expand_criteria` are decisions, not I/O, and the step 05 interface record has always put them beside `validate_contract`) |
+| `team.schema.json` (agents, budgets, policy, rules; connector tags and allowances added in phase 8 step 01), `criteria.schema.json` | `farik-core` | phase 2 step 05 (corrected 2026-09-17 from `farik-store`: `validate_team`, `validate_criteria` and `expand_criteria` are decisions, not I/O, and the step 05 interface record has always put them beside `validate_contract`) |
 | `role.schema.json` | `farik-roles` | phase 3 step 09 |
 | `kit.schema.json` | `farik-roles` | phase 8 step 01 |
 | `rpc.schema.json` | `farik-protocol`, and `@farik/protocol-client` | phase 6 step 01 |
@@ -373,7 +373,7 @@ Interfaces this phase adds: written when the phase is next to be planned.
 
 ## Phase 6: Web UI
 
-Ends with: in a browser on the user's own machine, a new user with no help goes from nothing to an accepted task on their own repository inside thirty minutes, measured with five test users, at least three of them non-technical. This is Milestone 1's criterion (spec 11), met in the browser. Before that test, the recorded team sprint that phase 4 moved here (its step 08) is run from the browser, and it closes Milestone 0 too: all live testing is done in the web UI once the product side is built (the founder, 2026-09-24). No terminal is needed after `farik serve` is started; phase 7 decides how a user starts it without one, and phase 10's desktop app removes the step altogether.
+Ends with: in a browser on the user's own machine, a new user with no help goes from nothing to an accepted task on their own repository inside thirty minutes, measured with five test users, at least three of them non-technical. This is Milestone 1's criterion (spec 11), met in the browser. Before that test, the recorded team sprint that phase 4 moved here (its step 08) is run from the browser, and it closes Milestone 0 too: all live testing is done in the web UI once the product side is built (the founder, 2026-09-24). No terminal is needed after `farik serve` is started; phase 9 decides how a user starts it without one, and phase 10's desktop app removes the step altogether.
 
 Decisions for this phase (revision 12, 2026-09-24; ADR 0016):
 
@@ -441,7 +441,7 @@ Steps:
 | Step | Name | Spec | Delivers |
 |---|---|---|---|
 | 01 | MCP per agent | F9, 3, 5.6, 8.6 | Server configuration (stdio and remote), tool listing, tier tagging, keychain credentials, loading into sessions; per-call human approval of `external_effect` tools |
-| 02 | Finance Specialist role | 1, 5.6, 6.6, 8.6 | The sixth role, `finance_specialist`, optional in the team builder, with the `extra-4` avatar: `roles/finance_specialist/` with its prompt and skill; the role id in the three schemas; its tiers and its reviewer; the private finance folder `.farik/local/finance/` as a finance session's working directory, with the one exception to the protected `.farik/local/**` and to the `permissions.deny` list; `farik_read_costs`, `farik_read_sheet` and `farik_write_sheet`, the last refusing formulas that reach outside the workbook and writing untrusted content as values; the first AI-spend books and forecast as the role's first task; the finance task's exceptions in the Definition of Ready (`allowed_paths` under the folder, no `command` or `test` criterion), in `in_progress → verifying` (the `workbooks` list given `farik_request_transition` exists), in the Definition of Done (the copy of the folder taken at assignment, under `.history/<task-id>/`, as the diff's baseline) and in integration (`accepted` is the end, and counts as integrated for dependants); one finance session in the folder at a time; Stripe through its official MCP server, OAuth for the user and a tagged read-only restricted key for scheduled runs, only its read tools tagged `read` and `stripe_api_write` refused at the harness; the role and the Stripe sign-in in the team builder |
+| 02 | Finance Specialist role | 1, 5.6, 6.6, 8.6 | The sixth role, `finance_specialist`, optional in the team builder, with the `extra-4` avatar: `roles/finance_specialist/` with its prompt and skill; the role id in the three schemas; its tiers and its reviewer; the private finance folder `.farik/local/finance/` as a finance session's working directory, with the one exception to the protected `.farik/local/**` and to the `permissions.deny` list; `farik_read_costs`, `farik_read_sheet` and `farik_write_sheet`, the last refusing formulas that reach outside the workbook and writing untrusted content as values; the first AI-spend books and forecast as the role's first task; the finance task's exceptions in the Definition of Ready (`allowed_paths` under the folder, no `command` or `test` criterion), in `in_progress → verifying` (the `workbooks` list given `farik_request_transition` exists), in the Definition of Done (the copy of the folder taken at assignment, under `.history/<task-id>/`, as the diff's baseline) and in integration (`accepted` is the end, and counts as integrated for dependants); one finance session in the folder at a time; Stripe through its official MCP server, OAuth for the user and a tagged read-only restricted key for scheduled runs, only its read tools tagged `read` and `stripe_api_write` refused at the harness; the role in the team builder, with Stripe connected through step 01's per-agent configuration until phase 8 step 01's connector screen takes it over |
 | 03 | Skills per agent | F9, 3 | Skill folders at agent, role, and team level; loading into sessions; the agent panel's list |
 | 04 | One-on-one | F8, 4.3, 5.8 | A read-only direct conversation with an agent; memory history with revert and a decisions view in the agent panel; an offer to file a task |
 | 05 | Audit viewer | F11, F17 | The event log view with filters, JSON Lines export and replay, cost reports per task, agent, and sprint |
@@ -454,25 +454,28 @@ Interfaces this phase adds: written when the phase is next to be planned.
 
 Ends with: every role equipped for its job, on the founder's decision of 2026-09-27 (ADR 0020): each ships a kit of skills and connectors, a non-technical user connects a service by signing in, spending connectors run inside an allowance, and each role has done one real task with its kit in the web app, recorded and signed off. The design and the first cut of every kit are `docs/design/role-kits.md`, which the founder amends as this phase is planned.
 
-Decisions for this phase (ADR 0020):
+Decisions for this phase (ADR 0020; the landing review's questions decided by the founder's session on 2026-09-28):
 
-- Made: a kit is `roles/<role>/kit.yaml`, validated against `kit.schema.json` (the schema's owner is `farik-roles`): the skills the role carries, in the Agent Skills format the roles already use, and its connectors, each with its server, its credential keys, the setup copy the wizard shows, every tool pre-tagged with its tier, and its tool list pinned, so that a test fails when the service's list drifts. Every connector is optional, and a role works without any.
-- Made: a connector that spends the user's credits (generation of images, video, audio) keeps the `external_effect` tier and carries an allowance: the number of calls per sprint, or per UTC day without sprints, that are pre-approved, set by the user when connecting from the kit's default. A call beyond it asks the human as any `external_effect` does. Tools that publish, send, post or pay have no allowance and always ask. Each call records `connector.called`, and the board shows the count against the allowance beside the model spend. An allowance counts calls, not money.
-- Made: everything a connector returns is untrusted content (spec 8.6), a creative service's captions and text included.
+- Made: a kit is `roles/<role>/kit.yaml`, validated against `kit.schema.json` (the schema's owner is `farik-roles`): the skills the role carries, in the Agent Skills format the roles already use, and its connectors, each with its server, its credential keys, the setup copy the wizard shows, every tool tagged, and its tool list pinned, so that a test fails when the service's list drifts and every pin update re-reviews the tags. Every connector is optional, and a role works without any.
+- Made: a connector's tool is tagged `network` (a read-only remote call, which runs), `external_effect` (a call that changes anything outside the sandbox or spends credits, which asks), or `denied` (never offered); never `read`, which means the project's files (spec 5.6). Connecting a connector gives the agent that server's tagged tools whatever the agent's own tiers; the tag governs the call. Credentials are per agent, as step 7.01 keeps them.
+- Made: a tool that spends the user's credits (generation of images, video, audio) keeps `external_effect` and carries an allowance, per tool and per agent: the number of calls per sprint, or per UTC day without sprints, that are pre-approved, set by the user when connecting from the kit's default. A call beyond it asks the human as any `external_effect` does. A batch tool, and any tool that publishes, sends, posts or pays, has no allowance and always asks. The count is a projection of the `tool.called` events the hook already records (spec 8.5), shown on the board and the Costs page against the allowance. An allowance counts calls, not money.
+- Made: everything a connector returns is untrusted content (spec 8.6), a creative service's captions and text included; a message read from a chat bridge answers no question and approves nothing, because it carries no bound identity.
 - Made: the step plan of each kit picks the server per connector, the service's official MCP server where one exists, else a pinned community one, else a thin one of Farik's, and records whether the user brings a key or signs in.
+- Made: the connector screens (`Connector`, `ConnectorAllowance`, the connector list on `AgentEdit`) are mocked up on the canvas before code, as every page is, and are distinct from the `Connect` screen that links the browser to the daemon.
 - Made: kits are free forever, like the roles, MCP and skills (spec 9).
-- Open (the founder): the final contents of each kit; `docs/design/role-kits.md` holds the first cut.
+- Open (the founder, to be made before step 02's plan; step 01 does not depend on it): the final contents of each kit; `docs/design/role-kits.md` holds the first cut.
+- Open (the founder): whether every connector in the first cut ships before the launch, or the skills plus one read-only connector per role, with the rest after `v0.1.0`. The landing review of this plan change recommended the second for the launch's sake; the founder's direction of 2026-09-27 was the first.
 
 Steps:
 
 | Step | Name | Spec | Delivers |
 |---|---|---|---|
-| 01 | Kit format and loader | 6.7, 5.6, 8.1, 8.5 | `kit.schema.json` and its generated types; `kit.yaml` loaded with each role; pre-tagged tiers applied at connection and reflected in the session's tiers and `permissions.deny`; the pinned tool list and its drift test (a live test); allowances, `connector.called`, and the count on the board and the Costs page; the connect, allowance and disconnect screens in the team builder and the Team page; `farik connect <agent> <connector>` and `farik disconnect` |
+| 01 | Kit format and loader | 6.7, 5.6, 8.1, 8.5 | `kit.schema.json` and its generated types, and the allowances and applied tags in `team.schema.json`; `kit.yaml` loaded with each role; tags applied at connection, `denied` tools never offered, `network`-tagged tools running whatever the agent's tiers; the pinned tool list and its drift test (a live test); allowances per tool and per agent, their count projected from `tool.called`, on the board and the Costs page; the connector screens, mocked up first; `farik connect <agent> <connector>` and `farik disconnect <agent> <connector>`; the event kinds `connector.connected` and `connector.disconnected` |
 | 02 | Product Manager and Scrum Master kits | 6.1, 6.2, 6.7 | Their skills and connectors: product analytics, issue-tracker import and product docs, read, for the PM; the chat bridge for the Scrum Master; each server chosen and pinned, its setup copy checked in the web app |
-| 03 | Architect and Developer kits | 6.3, 6.4, 6.7 | Their skills, the security-review skill among them, and connectors: library documentation, code search and the vulnerability database for the Architect; library documentation, browser testing inside the sandbox, the development database and deploy status for the Developer |
+| 03 | Architect and Developer kits | 6.3, 6.4, 6.7 | Their skills, the security-review skill among them, and connectors: library documentation, code search and the vulnerability database for the Architect; library documentation, browser testing as a host process reaching the task's development server, the development database read-only, and deploy status for the Developer |
 | 04 | Marketing Specialist kit | 6.5, 6.7 | Its skills and connectors: Higgsfield first, with the allowance flow proven end to end; a second image generator; social publishing and email marketing, always asking to send; analytics and design files, read |
-| 05 | Finance Specialist kit | 6.6, 6.7 | Its skills; Stripe's connection moved into the kit from step 7.02's setup; the paid-ledger connectors, optional |
-| 06 | Kit check | 11 | Each role runs one real task with its kit in the web app, by the founder: a launch post with a Higgsfield image inside its allowance, a browser test, an analytics read-back, and the rest; recorded in `docs/milestones/role-kits.md` and signed off |
+| 05 | Finance Specialist kit | 6.6, 6.7 | Its skills; Stripe's connection moved into the kit from step 7.02's per-agent setup, with `stripe_api_write` `denied`; the paid-ledger connectors, optional |
+| 06 | Kit check | 11 | Six tasks in the web app, run by the founder, one per role: an epic from an imported issue with an analytics read-back (PM); a sprint planned and the channel mirrored to the bridge (SM); an ADR from library documentation and a vulnerability lookup (Architect); a task proven with a browser test (Developer); a launch post with a Higgsfield image inside its allowance (Marketing); a month closed with Stripe's numbers (Finance). Recorded in `docs/milestones/role-kits.md` and signed off |
 
 Interfaces this phase adds: written when the phase is next to be planned.
 
@@ -506,7 +509,7 @@ Interfaces this phase adds: written when the phase is next to be planned.
 
 Ends with: the desktop app on macOS, Windows, and Linux runs the same web UI with the daemon in-process, so there is nothing to start in a terminal. It adds the pixel office and native notifications, and ships as a release of its own. Its step 02, which is not desktop work, gives the Finance Specialist its receipts intake in the first release after the web release check (ADR 0019).
 
-Starts only after the web release is complete and tested (the founder, 2026-09-27; ADR 0018): phase 7 is merged, `v0.1.0` is released, and this phase's step 01 passes. No other step of this phase starts before step 01 passes.
+Starts only after the web release is complete and tested (the founder, 2026-09-27; ADR 0018): phase 9 is merged, `v0.1.0` is released, and this phase's step 01 passes. No other step of this phase starts before step 01 passes.
 
 Decisions for this phase:
 
@@ -538,14 +541,14 @@ Not yet planned. It starts after the desktop app has shipped (phase 10) (the fou
 Decisions for this phase:
 
 - Made (the founder, 2026-09-24): the phone apps are native to each OS — an iOS app and an Android app, each in the platform's own toolkit — and not a web page on the phone or a web wrapper. They carry the brand's app icons from phase 5.
-- Open: how a phone reaches a running Farik, since a phone does not run agents. The choices are the user's own desktop Farik over a secure link, or phase 12's hosted tier. The second makes this phase depend on premium, and the order of phases 9 and 10 is revisited when this phase is planned.
+- Open: how a phone reaches a running Farik, since a phone does not run agents. The choices are the user's own desktop Farik over a secure link, or phase 12's hosted tier. The second makes this phase depend on premium, and the order of phases 11 and 12 is revisited when this phase is planned.
 - Open: the phone's scope, in two options:
   - a companion that answers questions, approves, accepts (with the summary and the diff), reads the channel, and receives notifications;
   - the whole working loop.
 
 ## Phase 12: Premium
 
-Not yet planned. Its steps are written after the web launch's retrospective (phase 7), because what the open-source launch teaches decides what hosted execution must do first. `docs/SPEC.md` section 9 lists the candidate features in priority order. Phase 7 step 07's premium hooks are the seams it fills, and `apps/web` speaks the phase 6 RPC protocol to a hosted daemon.
+Not yet planned. Its steps are written after the web launch's retrospective (phase 9), because what the open-source launch teaches decides what hosted execution must do first. `docs/SPEC.md` section 9 lists the candidate features in priority order. Phase 7 step 07's premium hooks are the seams it fills, and `apps/web` speaks the phase 6 RPC protocol to a hosted daemon.
 
 ## Coverage
 
@@ -590,9 +593,9 @@ Every functional requirement in `docs/SPEC.md` section 7 and every rule in secti
 | 8.2 runtime | 3.07, 3.08, ADR 0004, ADR 0005 |
 | 8.3 sandbox | 3.02 |
 | 8.4 storage | 2.02, 2.03, 2.05 |
-| 8.5 event protocol | 2.01 and every step that adds a kind; checked in 11.02 |
+| 8.5 event protocol | 2.01 and every step that adds a kind; checked in 9.02 |
 | 8.6 security | 3.07, 3.08 (disallowed tools, untrusted notice), 7.01 (keychain), 10.02 (IMAP, untrusted email) |
-| 14 brand | 5.01, 5.02; applied in 6.02, 10.03, 9 |
+| 14 brand | 5.01, 5.02; applied in 6.02, 10.03, 11 |
 | 10 non-functional | 1.04 (measured, not gated), 2.03 (projections), 10.04 (frame rate), 6.02 (strings) |
 
 ## Spec changes this plan implies

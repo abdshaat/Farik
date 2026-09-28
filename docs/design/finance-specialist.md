@@ -120,7 +120,7 @@ The web app's finance setup gains the mailbox connection and the approved sender
 ## Not planned
 
 - **A connector to the user's main mailbox** through Google's or Microsoft's mail API, filtered by a label or folder, the design of the afternoon of 2026-09-27. It needs Google's restricted-scope verification for `gmail.readonly`, with a paid third-party assessment repeated every year, and Microsoft's publisher verification; its filter is applied after a grant that reaches the whole mailbox; and email read by an agent is the best-documented prompt-injection channel. It is built only if users ask for it once receipts intake has shipped.
-- **Reading a paid ledger** (Kick or Digits expose MCP servers) as an alternative to keeping the books. Noted for phase 12, when the hosted tier decides what it integrates.
+- **Reading a paid ledger** (Kick or Digits expose MCP servers) as an alternative to keeping the books. It is an optional connector in the Finance Specialist's kit (phase 8 step 05), not a replacement for the books.
 - **A page that shows the books in the browser.** The workbooks are the view until a step asks for one.
 
 New dependencies, each pinned per the repository's rules and named in the step plans: `rust_xlsxwriter` to write workbooks and `calamine` to read them (phase 7); an IMAP client (phase 10).

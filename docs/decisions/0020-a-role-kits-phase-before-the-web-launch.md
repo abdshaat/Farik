@@ -27,7 +27,7 @@ The options for spending connectors were these:
 
 Insert a phase, Role kits, between the ecosystem and the web launch. The phases after phase 6 are: 7 Ecosystem; 8 Role kits; 9 Web launch; 10 Desktop; 11 Native mobile; 12 Premium. ADR 0018's order is amended accordingly.
 
-Each role ships a kit, `roles/<role>/kit.yaml`, validated against `kit.schema.json`: the skills it carries, in the Agent Skills format the roles already use, and its connectors, each with its setup copy for the wizard, the credential it needs, every tool pre-tagged with its tier, and an allowance where the connector spends the user's credits. The team builder shows each connector as an optional "Connect" step when the role is added. A connector's tool list is pinned in the kit, and a test fails when the service's list drifts from it.
+Each role ships a kit, `roles/<role>/kit.yaml`, validated against `kit.schema.json`: the skills it carries, in the Agent Skills format the roles already use, and its connectors, each with its setup copy for the wizard, the credential it needs, every tool tagged `network`, `external_effect` or `denied`, and an allowance, per tool and per agent, where a tool spends the user's credits. The team builder shows each connector as an optional "Connect" step when the role is added. A connector's tool list is pinned in the kit, and a test fails when the service's list drifts from it.
 
 The first cut of each kit is in `docs/design/role-kits.md`, and the founder amends it as the phase is planned.
 
@@ -41,6 +41,8 @@ Easier:
 Harder:
 - One more phase and pull request before the launch; the launch moves from phase 7 to phase 9, and everything after it renumbers.
 - Farik takes on a catalogue of third-party services it does not control. Each connector is a dependency on another company's API, terms and pricing, and the kit check in step 06 has to be repeated when a service changes.
-- An allowance counts calls, not money, because Farik cannot price another service's credits. The user still reads the bill on that service.
+- An allowance counts calls, not money, because Farik cannot price another service's credits. The user still reads the bill on that service. A batch tool, one call for many generations, gets no allowance and always asks.
+- A tag is Farik's judgment about another company's tool. The drift test catches a changed list, not a same-name tool that gains a side effect, so every pin update re-reviews the tags by hand.
+- Six steps and some twenty services before the launch is real scope; whether every connector ships before `v0.1.0` is open for the founder.
 - Connectors pull in prompt-injection surface: everything a connector returns is untrusted content (spec 8.6), and a creative service's output is no exception.
 - Some connectors will need the service's own developer registration; which ones, and whether Farik ships a shared client id or the user brings their own key, is decided per connector in the step plans.
