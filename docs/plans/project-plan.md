@@ -441,7 +441,7 @@ Steps:
 | Step | Name | Spec | Delivers |
 |---|---|---|---|
 | 01 | MCP per agent | F9, 3, 5.6, 8.6 | Server configuration (stdio and remote), tool listing, tier tagging, keychain credentials, loading into sessions; per-call human approval of `external_effect` tools |
-| 02 | Finance Specialist role | 1, 5.6, 6.6, 8.6 | The sixth role, `finance_specialist`, optional in the team builder, with the `extra-4` avatar: `roles/finance_specialist/` with its prompt and skill; the role id in the three schemas; its tiers and its reviewer; the private finance folder `.farik/local/finance/` as a finance session's working directory, with the one exception to the protected `.farik/local/**` and to the `permissions.deny` list; `farik_read_costs`, `farik_read_sheet` and `farik_write_sheet`, the last refusing formulas that reach outside the workbook and writing untrusted content as values; the first AI-spend books and forecast as the role's first task; the finance task's exceptions in the Definition of Ready (`allowed_paths` under the folder, no `command` or `test` criterion), in `in_progress → verifying` (the `workbooks` list given `farik_request_transition` exists), in the Definition of Done (the copy of the folder taken at assignment, under `.history/<task-id>/`, as the diff's baseline) and in integration (`accepted` is the end, and counts as integrated for dependants); one finance session in the folder at a time; Stripe through its official MCP server, OAuth for the user and a tagged read-only restricted key for scheduled runs, only its read tools tagged `read` and `stripe_api_write` refused at the harness; the role in the team builder, with Stripe connected through step 01's per-agent configuration until phase 8 step 01's connector screen takes it over |
+| 02 | Finance Specialist role | 1, 5.6, 6.6, 8.6 | The sixth role, `finance_specialist`, optional in the team builder, with the `extra-4` avatar: `roles/finance_specialist/` with its prompt and skill; the role id in the three schemas; its tiers and its reviewer; the private finance folder `.farik/local/finance/` as a finance session's working directory, with the one exception to the protected `.farik/local/**` and to the `permissions.deny` list; `farik_read_costs`, `farik_read_sheet` and `farik_write_sheet`, the last refusing formulas that reach outside the workbook and writing untrusted content as values; the first AI-spend books and forecast as the role's first task; the finance task's exceptions in the Definition of Ready (`allowed_paths` under the folder, no `command` or `test` criterion), in `in_progress → verifying` (the `workbooks` list given `farik_request_transition` exists), in the Definition of Done (the copy of the folder taken at assignment, under `.history/<task-id>/`, as the diff's baseline) and in integration (`accepted` is the end, and counts as integrated for dependants); one finance session in the folder at a time; Stripe through its official MCP server, OAuth for the user and a tagged read-only restricted key for scheduled runs, its read tools tagged `network` and `stripe_api_write` `denied`; the role in the team builder, with Stripe connected through step 01's per-agent configuration until phase 8 step 01's connector screen takes it over |
 | 03 | Skills per agent | F9, 3 | Skill folders at agent, role, and team level; loading into sessions; the agent panel's list |
 | 04 | One-on-one | F8, 4.3, 5.8 | A read-only direct conversation with an agent; memory history with revert and a decisions view in the agent panel; an offer to file a task |
 | 05 | Audit viewer | F11, F17 | The event log view with filters, JSON Lines export and replay, cost reports per task, agent, and sprint |
@@ -525,7 +525,7 @@ Steps:
 
 | Step | Name | Spec | Delivers |
 |---|---|---|---|
-| 01 | Web release check | 11 | The released `v0.1.0` run in the browser by the founder and at least three non-technical testers on their own repositories: first run and setup, a sprint from request to accepted task, MCP and skills, the Finance Specialist's AI-spend books, a one-on-one, the audit viewer, and notifications. Every defect found is fixed in a patch release or recorded with the founder's reason to leave it. The founder signs off the record, `docs/milestones/web-release.md` |
+| 01 | Web release check | 11 | The released `v0.1.0` run in the browser by the founder and at least three non-technical testers on their own repositories: first run and setup, a sprint from request to accepted task, MCP and skills, the Finance Specialist's AI-spend books, one connector from a role's kit in use, a one-on-one, the audit viewer, and notifications. Every defect found is fixed in a patch release or recorded with the founder's reason to leave it. The founder signs off the record, `docs/milestones/web-release.md` |
 | 02 | Receipts intake | 6.6, 8.4, 8.6 | The Finance Specialist's receipts from a dedicated receipts mailbox over IMAP, with an app password or the provider's IMAP sign-in in the keychain, an approved-sender list, and no call that changes the mailbox; the mailbox settings, the approved senders and the ledger of filed messages in `.farik/local/finance/mailbox.json`; `farik_read_receipts` and `farik_file_receipt`; receipts filed under `receipts/<yyyy-mm>/`, PDF or image, at most 10 MB, text and attachments under the untrusted-content notice; bank and card statements as CSV under `imports/` and the reconciliation against them; `farik finance connect`, `farik finance disconnect` and `farik finance sweep`, and the mailbox setup in the web app; the daily receipts sweep as a tick rule that starts no session when nothing is new but records `sweep.started` and `sweep.ended` either way, never while a finance task is in progress, with its cost under the `finance` purpose; the event kinds `mailbox.connected`, `mailbox.disconnected`, `sweep.started`, `sweep.ended` and `receipt.filed`; the IMAP client pinned; shipped as a release of its own, the first after the web release check and before the desktop's |
 | 03 | Desktop shell | 8.1, F12 | `apps/desktop`: the Tauri app running the daemon in-process and loading the web UI; the brand's app icons; native notifications; the scene on/off setting |
 | 04 | Office scene | F10, 10 | Desks, a meeting table, a whiteboard, a door; agent movement by state; click to open an agent; 60 frames per second on the reference laptop; a disable switch |
@@ -559,7 +559,7 @@ Every functional requirement in `docs/SPEC.md` section 7 and every rule in secti
 | 5.2 lifecycle and table | 1.01, 1.09; applied by 3.04 and 3.11; the finance task's exception in 7.02 |
 | 5.3 Definition of Ready | 1.02; judgment sessions in 4.01; the configurable judgment in 6.04; the finance task's exceptions in 7.02 |
 | 5.4 Definition of Done | 1.03, 1.07; reviewer sessions in 3.11; the finance task's baseline in 7.02 |
-| 5.5 budgets | 1.05, 3.03, 3.17; sprint budget in 4.03, its consequences in 4.04 |
+| 5.5 budgets | 1.05, 3.03, 3.17; sprint budget in 4.03, its consequences in 4.04; the sweep under the limits in 10.02 |
 | 5.6 permissions | 1.04, 3.07, 3.08; MCP tagging in 7.01; the finance tools in 7.02 and 10.02; pre-tagged kits and allowances in 8.01 |
 | 5.7 escalation and questions | 1.06, 3.04, 3.05, 3.12; digest and age in 4.06; notifications in 7.06 |
 | 5.8 memory | 2.05 (files), 3.10 (in prompts), 4.06 (retro), 4.07 (cap, decisions, refresh) |
@@ -572,7 +572,7 @@ Every functional requirement in `docs/SPEC.md` section 7 and every rule in secti
 | 5.16 requests, triage, epics, and tasks | 0.03 (fields), 1.01 (`Triaged` gate), 1.02, 1.08, 2.01, 2.03, 2.05, 2.06 (human triage), 3.05, 3.12, 3.13, 4.01, 4.05, 6.06, 6.05, 6.04, 7.04 |
 | 6.6 Finance Specialist | 7.02, 10.02 |
 | 6.7 Role kits | 8.01 to 8.06 |
-| F1 team builder | 2.05 (model), 6.04, 6.04 |
+| F1 team builder | 2.05 (model), 6.04; the sixth role in 7.02; the connectors in 8.01 |
 | F2 projects | 2.04, 2.05, 2.06; presets in 3.06; first run in 6.04 |
 | F3 board | 2.06 (text), 6.06 |
 | F4 contracts | 0.03 (validation), 6.05 (editor) |
@@ -592,9 +592,9 @@ Every functional requirement in `docs/SPEC.md` section 7 and every rule in secti
 | 8.1 layout | 0.01 and the crate table above |
 | 8.2 runtime | 3.07, 3.08, ADR 0004, ADR 0005 |
 | 8.3 sandbox | 3.02 |
-| 8.4 storage | 2.02, 2.03, 2.05 |
+| 8.4 storage | 2.02, 2.03, 2.05; the finance folder in 7.02 and `mailbox.json` in 10.02 |
 | 8.5 event protocol | 2.01 and every step that adds a kind; checked in 9.02 |
-| 8.6 security | 3.07, 3.08 (disallowed tools, untrusted notice), 7.01 (keychain), 10.02 (IMAP, untrusted email) |
+| 8.6 security | 3.07, 3.08 (disallowed tools, untrusted notice), 7.01 (keychain), 7.02 (the deny-list exception, Stripe's key), 8.01 (connector output untrusted), 10.02 (IMAP, untrusted email) |
 | 14 brand | 5.01, 5.02; applied in 6.02, 10.03, 11 |
 | 10 non-functional | 1.04 (measured, not gated), 2.03 (projections), 10.04 (frame rate), 6.02 (strings) |
 

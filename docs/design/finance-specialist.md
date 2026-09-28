@@ -1,6 +1,6 @@
 # The Finance Specialist
 
-Status: approved by the founder on 2026-09-27, in conversation; revised the same day to take receipts from email and read Stripe; and revised again that evening, on the market evaluation's evidence, to record the team's AI spending first, read a dedicated receipts mailbox over IMAP after the web release, and leave a connector to the user's main mailbox unplanned. It is the design input to phase 7 step 02 and phase 10 step 02. ADR 0019 records the decision, and spec 0.21 (sections 1 and 6.6, with exceptions in 5.2, 5.3, 5.4, 5.5, 5.6, 5.8 and 5.14) carries its rules.
+Status: approved by the founder on 2026-09-27, in conversation; revised the same day to take receipts from email and read Stripe; and revised again that evening, on the market evaluation's evidence, to record the team's AI spending first, read a dedicated receipts mailbox over IMAP after the web release, and leave a connector to the user's main mailbox unplanned. It is the design input to phase 7 step 02 and phase 10 step 02. ADR 0019 records the decision, and spec 0.21 (sections 1 and 6.6, with exceptions in 5.2, 5.3, 5.4, 5.6, 5.8 and 5.14, and the `finance` purpose in F17) carries its rules.
 
 ## Why
 
@@ -68,7 +68,7 @@ Access:
 
 The first deliverable is the accounting of the team's own AI spending, because it needs no connector, no verification programme, and answers the market's top complaint: `farik_read_costs` gives the role the totals Farik already keeps, and the role writes them into `books.xlsx` and `forecast.xlsx` with a forecast of the next sprints and a recommended budget.
 
-Stripe is read through Stripe's official MCP server, configured for this agent the way phase 7 step 01 configures any MCP server. The user signs in to Stripe (OAuth), which they can revoke from Stripe's dashboard; a scheduled run uses a restricted key with read permissions only, tagged for agents as Stripe requires from 2026-10-31. Read-only is locked twice: at Stripe by the key's permissions, and in Farik, where only Stripe's read tools are tagged `read` and `stripe_api_write` keeps `external_effect`, which this role is never granted, so the harness refuses a write before Stripe would. Stripe's `stripe_analytics` gives revenue metrics the role uses rather than re-deriving them. Stripe is optional: a product that takes no payments through Stripe skips it.
+Stripe is read through Stripe's official MCP server, configured for this agent the way phase 7 step 01 configures any MCP server. The user signs in to Stripe (OAuth), which they can revoke from Stripe's dashboard; a scheduled run uses a restricted key with read permissions only, tagged for agents as Stripe requires from 2026-10-31. Read-only is locked twice: at Stripe by the key's permissions, and in Farik, where Stripe's read tools are tagged `network` and `stripe_api_write` `denied`, as a kit tags a connector's tools (`docs/design/role-kits.md`), so the harness refuses a write before Stripe would. Stripe's `stripe_analytics` gives revenue metrics the role uses rather than re-deriving them. Stripe is optional: a product that takes no payments through Stripe skips it.
 
 Three Farik tools, which only this role may call:
 
@@ -76,7 +76,7 @@ Three Farik tools, which only this role may call:
 |---|---|
 | `farik_read_costs` | The team's AI spending, from `Projections::costs`: totals by task, agent, sprint or day, with tokens and session counts, and optionally a date range |
 | `farik_read_sheet` | One workbook or CSV in the finance folder, as its sheets of rows. Formulas come back with their last computed values. The Product Manager may also call it when it reviews a finance task |
-| `farik_write_sheet` | Writes a whole `.xlsx` workbook in the finance folder: sheets, their columns, and rows of values or formulas. It refuses any other extension or any path outside the folder, and any formula that reaches outside the workbook: external references, `HYPERLINK`, `WEBSERVICE`, `IMPORTDATA` and its kin, `RTD`, DDE. A cell whose value came from a receipt, an email, a statement or Stripe is written as a value, never a formula, because the founder opens the workbook in Excel and a formula runs there. Before overwriting a file, it copies the old one to `.history/` |
+| `farik_write_sheet` | Writes a whole `.xlsx` workbook in the finance folder: sheets, their columns, and rows of values or formulas. It refuses any other extension or any path outside the folder, and any formula that reaches outside the workbook: external references, `HYPERLINK`, `WEBSERVICE`, `IMPORTDATA`, `IMPORTXML`, `IMPORTHTML`, `IMPORTRANGE`, `RTD`, DDE. A cell whose value came from a receipt, an email, a statement or Stripe is written as a value, never a formula, because the founder opens the workbook in Excel and a formula runs there. Before overwriting a file, it copies the old one to `.history/` |
 
 Every Farik tool in this design has the `read` tier. Each writes only to Farik's private folder, and the tool itself holds that line, as `farik_write_memory` does.
 

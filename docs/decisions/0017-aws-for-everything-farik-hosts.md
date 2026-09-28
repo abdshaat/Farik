@@ -1,15 +1,15 @@
 # 0017. AWS for everything Farik hosts
 
 Date: 2026-09-26
-Status: accepted
+Status: accepted; its phase numbers are shifted by 0018 and 0020 (the launch is phase 9, the hosted tier phase 12)
 
 ## Context
 
-On 2026-09-26 the founder decided that the project uses the AWS stack. That covers getting the domain and deploying Farik on the web. Until now no document named a cloud: the product is local-first (spec 8.1), and hosted execution is phase 10's premium tier (spec 9).
+On 2026-09-26 the founder decided that the project uses the AWS stack. That covers getting the domain and deploying Farik on the web. Until now no document named a cloud: the product is local-first (spec 8.1), and hosted execution is phase 12's premium tier (spec 9).
 
 Farik will host two things:
 - **The public website, from now on.** It lives on the project's domain: what Farik is, how to get it, the docs, and links to the downloads. It is a static site in the brand (`docs/brand/brand.md`) with no server code and no user data.
-- **The hosted tier, in phase 10.** The daemon, the governor and agent execution run in the cloud for users who do not want to run Farik themselves. The same web app talks to it over the phase 6 RPC protocol.
+- **The hosted tier, in phase 12.** The daemon, the governor and agent execution run in the cloud for users who do not want to run Farik themselves. The same web app talks to it over the phase 6 RPC protocol.
 
 The working web app (`apps/web`) is not hosted on the domain. The local daemon serves it on 127.0.0.1 (spec 8.1). The browser gets the daemon's token through a one-time link, and the daemon refuses any other origin (spec 8.6). Serving the app from a public domain to a daemon on `localhost` would break that origin check. It would also depend on browsers letting a public page reach a private address, which they increasingly block. So "Farik on the web" means the website now and the hosted tier later. It does not mean the local app served from the cloud.
 
@@ -35,8 +35,8 @@ The services, by purpose:
 | Infrastructure as code | AWS CDK, deploying through AWS CloudFormation | Now |
 | Cost guard | AWS Budgets (a monthly budget with email alerts) | Now |
 | Monitoring and audit | Amazon CloudWatch (alarms on CloudFront errors) and AWS CloudTrail (account activity) | Now |
-| Release downloads mirror | S3 and CloudFront at `downloads.` on the domain, beside the GitHub release (phase 8) | Phase 8 |
-| Hosted tier | Candidates, decided when phase 10 is planned: Amazon ECS (on AWS Fargate, or on EC2 if the sandbox needs Docker on the host, spec 8.3), an Application Load Balancer for the WebSocket, Amazon Cognito for sign-in, AWS Secrets Manager and AWS KMS for model keys and MCP credentials (spec 8.6's vault), Amazon RDS or Amazon EFS for projects and the event log, Amazon ECR for images, and AWS Organizations to separate production from staging | Phase 10 |
+| Release downloads mirror | S3 and CloudFront at `downloads.` on the domain, beside the GitHub release (phase 9) | Phase 9 |
+| Hosted tier | Candidates, decided when phase 12 is planned: Amazon ECS (on AWS Fargate, or on EC2 if the sandbox needs Docker on the host, spec 8.3), an Application Load Balancer for the WebSocket, Amazon Cognito for sign-in, AWS Secrets Manager and AWS KMS for model keys and MCP credentials (spec 8.6's vault), Amazon RDS or Amazon EFS for projects and the event log, Amazon ECR for images, and AWS Organizations to separate production from staging | Phase 12 |
 
 The step-by-step deployment plan is kept out of git on purpose (the founder's request). It lives at `deploy/plan.md`, and `.gitignore` excludes `deploy/`. It holds the account-specific details: the domain, the account, the budget, and the order of the steps.
 

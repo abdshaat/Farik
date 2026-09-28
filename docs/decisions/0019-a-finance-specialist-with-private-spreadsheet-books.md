@@ -66,7 +66,7 @@ Easier:
 Harder:
 - The user has to create a second address or alias, and set a forwarding rule or tell vendors to bill it; setup asks that of a non-technical user, and the web app must walk them through it.
 - IMAP with an app password is the older, less polished way to reach a mailbox, and some providers make app passwords awkward to find.
-- A task with no branch and no worktree needs an exception in seven of the harness's rules (spec 5.2, 5.3, 5.4, 5.5, 5.8, 5.14 and the tier table in 5.6) and in the program's `permissions.deny` list. Each is one more special case to test.
+- A task with no branch and no worktree needs an exception in six of the harness's rules (spec 5.2, 5.3, 5.4, 5.8, 5.14 and the tier table in 5.6), a purpose of its own in F17, and in the program's `permissions.deny` list. Each is one more special case to test.
 - Formulas are an injection path into the founder's spreadsheet program, so the write tool refuses the ones that reach outside the workbook and writes untrusted content as values.
 - The books sit on one machine, unversioned apart from `.history/`. Until the hosted tier's sync, the user should back the folder up.
 - A spreadsheet cannot validate an accounting entry. The Product Manager's review and the human's reading are the check.
