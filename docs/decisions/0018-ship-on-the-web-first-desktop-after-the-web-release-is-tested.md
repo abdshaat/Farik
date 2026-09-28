@@ -1,7 +1,7 @@
 # 0018. Ship on the web first; desktop after the web release is tested
 
 Date: 2026-09-27
-Status: accepted
+Status: accepted; its phase numbers are shifted by 0020, which inserts a role-kits phase before the launch
 
 ## Context
 

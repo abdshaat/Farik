@@ -112,7 +112,7 @@ The screens map to phase 6's steps as follows:
 
 | Screen | Step | What it shows |
 |---|---|---|
-| Welcome and first-run wizard | 04 | One question per screen, as a numbered sequence (it is one), with a safe default already chosen and one line on why Farik asks. Back and Continue. The welcome uses the office scene and the display face. The team builder shows the five characters with their suggested names. |
+| Welcome and first-run wizard | 04 | One question per screen, as a numbered sequence (it is one), with a safe default already chosen and one line on why Farik asks. Back and Continue. The welcome uses the office scene and the display face. The team builder shows the five characters with their suggested names. Phase 7 step 02 adds the Finance Specialist to it as an optional sixth (ADR 0019). |
 | Today | 03, 05 | The team band, the request box, "Waiting on you", and "What moved". |
 | A human gate: approve a plan, or accept work | 05 | The agent's summary as a short letter signed by the agent's avatar. Then "What Farik checked": each exit criterion in plain words, marked passed or failed. Then "See the code changes" (collapsed). A decision bar with the primary action ("Accept the work" or "Approve the plan") and "Send back with a note". |
 | A question from an agent | 05 | The question with its avatar, the choices the agent offered, and a free-text answer. |
@@ -160,11 +160,11 @@ On 2026-09-26 the founder asked for every page to be mocked up before any code. 
 
 | Canvas page | Screens | Phase 6 step |
 |---|---|---|
-| Daily work | Today (`Main`, with a dark-theme switch), Accept work (`Gate`), `Board`, `TaskDetail`, `SprintStart`, `SprintView`, `Channel`, `OneOnOne`, `Costs` | 03, 05, 06, 07 (the one-on-one is phase 7 step 03) |
+| Daily work | Today (`Main`, with a dark-theme switch), Accept work (`Gate`), `Board`, `TaskDetail`, `SprintStart`, `SprintView`, `Channel`, `OneOnOne`, `Costs` | 03, 05, 06, 07 (the one-on-one is phase 7 step 04) |
 | Requests and approvals | `RequestFiled`, `Questions`, `ApprovePlan`, `PlanEditor`, `SendBack`, `HelpNeeded`, `AnswerQuestion` | 05 |
 | First run | `SetupProject`, `SetupScan`, the team (`Welcome`), `SetupPermissions`, `SetupSpending`, `SetupFinish`, `SetupAdvanced`, `Connect` | 01 (the connect page), 04 |
 | Team and settings | `Team`, `AgentEdit`, `Settings` | 03, 04 |
 | Phone (360 to 390 px) | Today (`Phone`), `PhoneGate`, `PhoneBoard`, `PhoneChannel` | 03 to 07 |
-| Website | `Site`, the public site on the domain (ADR 0017) | Phase 7 step 07 |
+| Website | `Site`, the public site on the domain (ADR 0017) | Phase 9 step 01 |
 
 The mockups are not the spec. Where one disagrees with `docs/SPEC.md`, the spec wins, and the step plan that builds that screen records the difference. The `Connect` screen's two "Mockup: …" buttons only switch between its states, for review.

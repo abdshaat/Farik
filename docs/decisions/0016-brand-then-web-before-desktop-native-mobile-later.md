@@ -1,7 +1,7 @@
 # 0016. Brand, then web, before desktop; native mobile later
 
 Date: 2026-09-24
-Status: proposed; its phase order is amended by 0018
+Status: proposed; its phase order is amended by 0018 and 0020
 
 ## Context
 
