@@ -48,7 +48,7 @@ Add a sixth role, the Finance Specialist (`finance_specialist`). It is optional 
 
 Its books are `.xlsx` workbooks in `.farik/local/finance/`. It records and forecasts the team's own AI spending first, and reads Stripe through Stripe's official MCP server with a read-only key, Farik allowing only Stripe's read tools. That is phase 7 step 02, before the web launch.
 
-In the first release after the web release check, phase 8 step 02, it takes receipts from a dedicated receipts mailbox over IMAP, with approved senders, and reconciles the books against bank or card statements the user exports as CSV. A daily receipts sweep files new receipts while a process drives the project.
+In the first release after the web release check, phase 8 step 02 (phase 10 step 02 since ADR 0020 inserted the role-kits phase), it takes receipts from a dedicated receipts mailbox over IMAP, with approved senders, and reconciles the books against bank or card statements the user exports as CSV. A daily receipts sweep files new receipts while a process drives the project.
 
 A connector to the user's main mailbox is not planned. It is built only if users ask once receipts intake has shipped.
 
