@@ -46,7 +46,7 @@ The usual fix is a longer system prompt. But a prompt that says *never push to `
 <img src="docs/brand/readme/team.png" alt="The five Farik characters, each seated at a laptop: the Product Manager, the Scrum Master, the Architect, the Developer and the Marketing Specialist" width="100%">
 </p>
 
-A team has two to seven agents. Each has its own name, avatar, persona, model settings, tools, MCP servers and skills, and one of five roles. Two developers is a common choice. Farik ships ten characters, and any agent can wear any of them:
+A team has two to seven agents. Each has its own name, avatar, persona, model settings, tools, MCP servers and skills, and one of five roles, with a sixth, the Finance Specialist, planned. Two developers is a common choice. Farik ships ten characters, and any agent can wear any of them:
 
 <p align="center">
 <img src="docs/brand/readme/avatars.png" alt="The ten Farik avatars, each a pixel-art person at a laptop" width="100%">
@@ -59,6 +59,7 @@ A team has two to seven agents. Each has its own name, avatar, persona, model se
 | **Architect** | Holds the shape of the system: writes decision records, sets constraints for contracts, and reviews the Developer's changes. | Write application code, push shared branches, or accept work. |
 | **Developer** | Implements contracts on `feature/` or `fix/` branches and runs the exit criteria before declaring done. It is the only role that writes application code. | Change a contract, accept its own work, or touch files outside the contract's paths. |
 | **Marketing Specialist** | Researches the market and writes the marketing plan, release notes, landing copy and positioning. | Change application code, or publish anywhere without your approval. |
+| **Finance Specialist** (planned, optional) | Keeps the product's books in spreadsheets you can open. It tracks what the team spends on AI, reads Stripe, picks up receipts from a receipts mailbox you forward to, and forecasts long-term costs. The books stay private on your machine, never in the repository. | Write code, change your mail or Stripe, pay or move money, or publish anything. |
 
 ## How a task moves
 
@@ -164,9 +165,11 @@ Then `farik run` drives the team until nothing needs doing. Add `--json` to any 
 | The team | Five roles, sprints, spending limits, the team channel and its ceremonies, and memory | Done |
 | Brand | The identity, the design tokens, and every page of the web app designed | In progress |
 | Web app | The whole working loop in the browser, built for people who never open a terminal | Next |
-| Desktop app | The same app with nothing to start, plus the pixel-art office you can watch the team work in | Planned |
-| Launch | Per-agent MCP servers and skills, one-on-one conversations, the audit viewer, and the public release | Planned |
-| Phone apps | Native iOS and Android apps | After launch |
+| Ecosystem | Per-agent MCP servers and skills, the Finance Specialist, one-on-one conversations, the audit viewer, notifications | Planned |
+| Role kits | Every role equipped for its job: its skills, and connectors such as Higgsfield for the Marketing Specialist, connected by signing in | Planned |
+| Web launch | The website and the first public release, in the browser | Planned |
+| Desktop app | The same app with nothing to start, plus the pixel-art office you can watch the team work in | After the web release is tested |
+| Phone apps | Native iOS and Android apps | After the desktop app |
 
 ## Open source
 
