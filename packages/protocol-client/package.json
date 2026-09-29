@@ -1,0 +1,16 @@
+{
+	"name": "@farik/protocol-client",
+	"private": true,
+	"type": "module",
+	"scripts": {
+		"generate": "node src/generate.ts",
+		"typecheck": "tsc --noEmit -p .",
+		"test": "vitest run"
+	},
+	"devDependencies": {
+		"json-schema-to-typescript": "16.0.0"
+	},
+	"exports": {
+		".": "./src/index.ts"
+	}
+}

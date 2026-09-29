@@ -253,7 +253,7 @@ Tests:
 - `delivers_event_notifications_in_camel_case` asserts that after `subscribe(0, cb)`, a notification's event reaches `cb` with `recordedAt`, not `recorded_at`.
 - `reports_its_status` asserts that `onStatus` sees `connecting`, then `open`, then `closed`, from the fake socket's events.
 
-- [ ] `feat(protocol-client): add the browser's json-rpc client`
+- [x] `feat(protocol-client): add the browser's json-rpc client`
 
 ## Verification
 
