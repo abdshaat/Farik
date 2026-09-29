@@ -82,6 +82,8 @@ pub(crate) enum Refusal {
     },
     /// This note is another's to write.
     NotTheNotesWriter { agent_id: String, kind: String },
+    /// A completion or review note that does not open with a summary for the user (5.4).
+    SummaryMissing,
     /// `evaluate_command` refused.
     Command(CommandRefusal),
     /// A command's directory is outside the workspace.
@@ -191,17 +193,14 @@ impl Refusal {
             Self::MemoryRefused { detail } => ("memory_refused", detail.clone()),
             Self::DecisionRefused { detail } => ("decision_refused", detail.clone()),
             Self::NoSuchDecision { number } => ("no_such_decision", number.to_string()),
-            Self::NotTheNotesWriter { agent_id, kind } => (
-                "not_the_notes_writer",
-                format!(
-                    "a {kind} note is written by {}, and {agent_id} is not",
-                    match kind.as_str() {
-                        "completion" => "the assignee",
-                        "review" => "the reviewer",
-                        _ => "the assignee or the reviewer",
-                    }
-                ),
+            Self::SummaryMissing => (
+                "summary_missing",
+                "open the note with two or three plain sentences for the user, then a blank line"
+                    .to_string(),
             ),
+            Self::NotTheNotesWriter { agent_id, kind } => {
+                ("not_the_notes_writer", notes_writer(agent_id, kind))
+            }
         };
         format!("{kind}: {detail}")
     }
@@ -255,6 +254,15 @@ impl Refusal {
             }
         }
     }
+}
+
+fn notes_writer(agent_id: &str, kind: &str) -> String {
+    let writer = match kind {
+        "completion" => "the assignee",
+        "review" => "the reviewer",
+        _ => "the assignee or the reviewer",
+    };
+    format!("a {kind} note is written by {writer}, and {agent_id} is not")
 }
 
 fn tool(refusal: &ToolRefusal) -> (&'static str, String) {

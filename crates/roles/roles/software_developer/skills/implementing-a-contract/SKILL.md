@@ -50,7 +50,8 @@ If a criterion fails, fix the work and run it again. Do not record a pass you di
 
 ## 5. Write the completion note
 
-Write it with `farik_write_note` and kind `completion`:
+Write it with `farik_write_note` and kind `completion`. Open it with two or three plain sentences
+for the user, then a blank line, then:
 
 - what changed, and why that meets each requirement;
 - what was not done, and why;

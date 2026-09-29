@@ -752,9 +752,10 @@ pub const FIELDS_FIXED_AT_CREATION: [&str; 2] = ["kind", "parent"];
 /// assignee writing the tasks under it, and by the human. Written out rather than left as
 /// whatever is not in the other sets, so that a field added to the schema is refused until
 /// somebody says who writes it.
-pub const FIELDS_OF_THE_CONTENT: [&str; 14] = [
+pub const FIELDS_OF_THE_CONTENT: [&str; 15] = [
     "title",
     "intent",
+    "summary",
     "scope",
     "requirements",
     "exit_criteria",

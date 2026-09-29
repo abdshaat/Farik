@@ -20,6 +20,9 @@ pub mod fixtures;
 pub enum ReadinessRule {
     /// The intent has words in it, not only whitespace.
     IntentPresent,
+    /// A plan the human approves has the summary a human gate leads with: every epic, and every
+    /// task the team's `human_accepts_contracts` policy asks the human to approve.
+    SummaryPresent,
     /// At least one exit criterion exists.
     CriteriaPresent,
     /// Every criterion's `method` value names the shape its fields have.
@@ -113,6 +116,9 @@ pub struct ReadinessContext {
     pub requires_judgment_review: bool,
     /// The recorded judgment review, when there is one.
     pub judgment_review: Option<JudgmentReview>,
+    /// Whether the human approves this plan before work starts, and so reads its summary first:
+    /// the team's policy is `all`, or the contract is an epic or a `high` risk task.
+    pub human_approves: bool,
 }
 
 /// One rule the contract fails, with a message that says what to change.
@@ -126,8 +132,9 @@ pub struct ReadinessFailure {
 
 type Check = fn(&TaskContract, &ReadinessContext) -> Option<ReadinessFailure>;
 
-const CHECKS: [Check; 18] = [
+const CHECKS: [Check; 19] = [
     intent_present,
+    summary_present,
     criteria_present,
     criteria_methods_valid,
     command_criteria_complete,
@@ -210,6 +217,20 @@ fn intent_present(contract: &TaskContract, _: &ReadinessContext) -> Option<Readi
         ));
     }
     None
+}
+
+fn summary_present(
+    contract: &TaskContract,
+    context: &ReadinessContext,
+) -> Option<ReadinessFailure> {
+    (context.human_approves && contract.summary.is_none()).then(|| {
+        failure(
+            ReadinessRule::SummaryPresent,
+            "the plan has no summary for the user; write two or three plain sentences they can \
+             decide on"
+                .to_string(),
+        )
+    })
 }
 
 fn criteria_present(contract: &TaskContract, _: &ReadinessContext) -> Option<ReadinessFailure> {

@@ -49,6 +49,12 @@
       "minLength": 20,
       "description": "The user-facing reason this task exists. If the task were done perfectly, what would be true for a user that is not true today?"
     },
+    "summary": {
+      "type": "string",
+      "minLength": 20,
+      "maxLength": 600,
+      "description": "Two or three plain sentences the user decides on, which a human gate shows first (docs/SPEC.md 5.4). Required by the Definition of Ready for every epic and for every task whose approval the team's human_accepts_contracts policy asks of the human."
+    },
     "scope": {
       "type": "object",
       "additionalProperties": false,

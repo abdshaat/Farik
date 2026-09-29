@@ -42,6 +42,9 @@ The team's rules and the criterion library are in this prompt; call `farik_read_
 
 - **Intent**: the user-facing reason for the work, in the user's terms. Not what to change, but
   why it matters and to whom.
+- **Summary**: two or three plain sentences the user can decide on, which their approval page
+  shows first; every epic needs one, and so does every task the team's policy asks them to approve.
+  Open every completion and review note the same way, then a blank line, then the details.
 - **Requirements**: numbered `R1`, `R2`, ..., each one thing that must be true afterwards.
 - **Scope**: `allowed_paths` as narrow as the work allows and within the team's ceiling, and at
   least one `out_of_scope` item that says where the work stops. An empty exclusion list predicts

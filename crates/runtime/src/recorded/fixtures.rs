@@ -216,17 +216,17 @@ pub fn refine_asks_frk_1() -> Transcript {
     Transcript::from_jsonl(include_str!("transcripts/refine_asks_frk_1.jsonl"))
 }
 
-/// The Product Manager's refine session of FRK-1 as an epic: `farik_write_contract` with its intent,
-/// `product_manager` as assignee role and the human as reviewer, `done.txt` its one allowed path,
-/// C1 (`command`, `test -f done.txt`) and C2 (`review`), one item out of scope, risk `low`, and a
-/// budget of 5 dollars and 10 sessions. Hand-written.
+/// The Product Manager's refine session of FRK-1 as an epic: `farik_write_contract` with its intent
+/// and summary, `product_manager` as assignee role and the human as reviewer, `done.txt` its one
+/// allowed path, C1 (`command`, `test -f done.txt`) and C2 (`review`), one item out of scope, risk
+/// `low`, and a budget of 5 dollars and 10 sessions. Hand-written.
 #[must_use]
 pub fn refine_writes_epic_frk_1() -> Transcript {
     Transcript::from_jsonl(include_str!("transcripts/refine_writes_epic_frk_1.jsonl"))
 }
 
 /// The Product Manager's refine session of FRK-1 as a task: `farik_write_contract` restating the
-/// request's fields. Hand-written.
+/// request's fields, with a summary. Hand-written.
 #[must_use]
 pub fn refine_writes_task_frk_1() -> Transcript {
     Transcript::from_jsonl(include_str!("transcripts/refine_writes_task_frk_1.jsonl"))
@@ -246,8 +246,9 @@ pub fn plan_assigns_frk_2() -> Transcript {
     Transcript::from_jsonl(include_str!("transcripts/plan_assigns_frk_2.jsonl"))
 }
 
-/// The Product Manager's plan session closing epic FRK-1 out: a completion note, "FRK-2 added
-/// done.txt; nothing left out.", and `verifying` asked for. Hand-written.
+/// The Product Manager's plan session closing epic FRK-1 out: a completion note that opens with
+/// its summary and ends "FRK-2 added done.txt; nothing left out.", and `verifying` asked for.
+/// Hand-written.
 #[must_use]
 pub fn plan_closes_epic_frk_1() -> Transcript {
     Transcript::from_jsonl(include_str!("transcripts/plan_closes_epic_frk_1.jsonl"))

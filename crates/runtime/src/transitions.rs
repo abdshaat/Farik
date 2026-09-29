@@ -12,7 +12,7 @@ use farik_core::branch::task_branch;
 use farik_core::budget::SessionLedger;
 use farik_core::contract::{Role, TaskContract, TaskId, TaskKind, TaskStatus, wire_method};
 use farik_core::generated::team::Judgment;
-use farik_core::governor::done::{CriterionResult, DoneEvidence, RunBy};
+use farik_core::governor::done::{CriterionResult, DoneEvidence, RunBy, requires_human_acceptance};
 use farik_core::governor::escalation::EscalationReason;
 use farik_core::governor::gates::{
     AssignmentInput, AssignmentRequester, Blocker, ChildState, DependencyState, Rejection,
@@ -470,6 +470,7 @@ impl Transitions {
             rules: team.rules(),
             requires_judgment_review: team.judgment().required == JudgmentRequired::Always,
             judgment_review: judgment_since_written(&history),
+            human_approves: asks_every_contract(team) || requires_human_acceptance(&contract),
         };
 
         let (work, changed_paths) = self.work(&contract, team)?;
@@ -510,8 +511,7 @@ impl Transitions {
             readiness,
             readiness_failed_attempts: readiness_failed_attempts(&history),
             acceptance: ContractAcceptance {
-                required_by_policy: team.policy.human_accepts_contracts
-                    == HumanAcceptsContracts::All,
+                required_by_policy: asks_every_contract(team),
                 given: contract_accepted(&history),
             },
             assignment,
@@ -980,6 +980,11 @@ fn status_on(board: &[TaskProjection], task: &str) -> Option<TaskStatus> {
 }
 
 /// How many agents of each role are active.
+/// Whether the team's policy asks the human to approve every contract, not only the risky ones.
+fn asks_every_contract(team: &Team) -> bool {
+    team.policy.human_accepts_contracts == HumanAcceptsContracts::All
+}
+
 fn active_agents_by_role(team: &Team) -> BTreeMap<Role, u32> {
     let mut counts = BTreeMap::new();
     for agent in team.active_agents() {
@@ -1909,6 +1914,54 @@ mod tests {
         let context = project.context(&request, &TransitionAsk::default());
         assert!(context.readiness.remaining_sprint_budget_usd.abs() < 1e-12);
         assert!(context.readiness.remaining_sprint_budget_usd >= 0.0);
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn binds_the_summary_to_the_plans_a_human_approves() {
+        // The fixture's team asks the human under `high_risk`.
+        let project = Project::new("readiness-summary", a_team(|_| {}), at(12));
+        project.file("FRK-1", |wire| wire["risk"] = json!("high"));
+        project.created("FRK-1", "refining");
+        project.file("FRK-2", |wire| {
+            wire["kind"] = json!("epic");
+            wire["reviewer_role"] = json!("human");
+        });
+        project.created_under("FRK-2", "refining", "epic", None);
+        project.file("FRK-3", |_| {});
+        project.created("FRK-3", "refining");
+        project.file("FRK-4", |wire| {
+            wire["risk"] = json!("high");
+            wire["summary"] = json!("A login page, so that people can sign in to the app.");
+        });
+        project.created("FRK-4", "refining");
+        let misses_its_summary = |task: &str, team: &Team| {
+            let context = project
+                .transitions
+                .context(
+                    &a_request(task, TaskStatus::Ready, TransitionActor::Governor, None),
+                    &TransitionAsk::default(),
+                    team,
+                )
+                .expect("the context reads");
+            let contract = project
+                .files
+                .read_contract(&task.parse().expect("a task id"))
+                .expect("the file reads");
+            evaluate_readiness(&contract, &context.readiness)
+                .err()
+                .unwrap_or_default()
+                .iter()
+                .any(|failure| failure.rule == ReadinessRule::SummaryPresent)
+        };
+
+        assert!(misses_its_summary("FRK-1", &project.team));
+        assert!(misses_its_summary("FRK-2", &project.team));
+        assert!(!misses_its_summary("FRK-3", &project.team));
+        assert!(!misses_its_summary("FRK-4", &project.team));
+        // Under `all` the human approves every plan, the low risk one too.
+        let all = a_team(|wire| wire["policy"]["human_accepts_contracts"] = json!("all"));
+        assert!(misses_its_summary("FRK-3", &all));
     }
 
     #[test]

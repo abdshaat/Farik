@@ -153,7 +153,7 @@ Files: the contract schema, core contract, readiness and plain, `tools/work.rs`,
 - `refuses_a_note_without_an_opening_summary`: completion and review notes get the exact refusal; progress notes are accepted.
 - The updated transcripts replay, and every existing test passes.
 
-- [ ] `feat(core): require the summaries a human gate leads with`
+- [x] `feat(core): require the summaries a human gate leads with`
 
 ### Task 2: Sending back and more tries
 
