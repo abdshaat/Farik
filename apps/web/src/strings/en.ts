@@ -109,7 +109,7 @@ export const en = {
 	continueWithoutDocker: "Continue without Docker",
 	accountTitle: "Connect your AI account",
 	accountLead:
-		"Your agents think with Claude, and your account pays for it. Farik keeps the key in your computer’s keychain and never shows it to an agent.",
+		"Your agents think with Claude, and your account pays for it. Farik keeps the key safely on this computer and never shows it to an agent.",
 	accountKind: "Your Claude account",
 	subscription: "I have a Claude subscription (Pro or Max)",
 	subscriptionNote:
