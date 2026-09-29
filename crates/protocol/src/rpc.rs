@@ -8,7 +8,8 @@ use serde_json::{Value, json};
 
 pub use crate::generated::rpc::*;
 
-const SCHEMA_JSON: &str = include_str!("../../../docs/schemas/rpc.schema.json");
+/// `docs/schemas/rpc.schema.json`, embedded: what the frames and the query answers are held to.
+pub const SCHEMA_JSON: &str = include_str!("../../../docs/schemas/rpc.schema.json");
 
 /// A validator for one definition of the embedded schema.
 fn validator_for(definition: &str) -> Validator {
@@ -157,5 +158,21 @@ mod tests {
         let mut without_seq = event.clone();
         without_seq.as_object_mut().expect("object").remove("seq");
         assert!(rpc_notification_from_value(&note(&without_seq)).is_err());
+    }
+
+    #[test]
+    fn the_rpc_copy_of_command_reply_matches_command_schema() {
+        // One schema never references another, so the RPC schema repeats the command reply. This
+        // is what stops the copy from drifting from the original.
+        let rpc: Value = serde_json::from_str(super::SCHEMA_JSON).expect("the rpc schema is JSON");
+        let command: Value =
+            serde_json::from_str(include_str!("../../../docs/schemas/command.schema.json"))
+                .expect("the command schema is JSON");
+        for definition in ["commandReply", "commandDone", "commandRefusal"] {
+            assert_eq!(
+                rpc["$defs"][definition], command["$defs"][definition],
+                "{definition}"
+            );
+        }
     }
 }

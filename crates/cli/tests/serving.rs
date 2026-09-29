@@ -215,3 +215,165 @@ fn stops_on_farik_stop() {
     assert_eq!(ran.code, 0, "{}\n{}", ran.out, ran.err);
     assert!(!daemon_file(&repository).exists());
 }
+
+/// The link a line is, as `(port, code)`: `open http://127.0.0.1:<port>/connect#<code> in your
+/// browser`, the code sixty-four lowercase hex digits.
+fn link_of(line: &str) -> Option<(u16, String)> {
+    let rest = line
+        .strip_prefix("open http://127.0.0.1:")?
+        .strip_suffix(" in your browser")?;
+    let (port, code) = rest.split_once("/connect#")?;
+    let hex = code.len() == 64
+        && code
+            .chars()
+            .all(|c| c.is_ascii_digit() || ('a'..='f').contains(&c));
+    (!port.is_empty() && port.chars().all(|c| c.is_ascii_digit()) && hex)
+        .then(|| (port.parse().ok(), code.to_string()))
+        .and_then(|(port, code)| Some((port?, code)))
+}
+
+fn links(text: &str) -> Vec<(u16, String)> {
+    text.lines().filter_map(link_of).collect()
+}
+
+/// `farik serve` on a thread, printing into `out`.
+fn serving_into(root: &Path, out: &SharedOut) -> std::thread::JoinHandle<Ran> {
+    let root = root.to_path_buf();
+    let port = free_port();
+    let shared = out.clone();
+    std::thread::spawn(move || {
+        run_with(&root, &["serve", "--port", &port], |io| {
+            io.engine = recorded(Vec::new());
+            io.stdout = Box::new(shared);
+        })
+    })
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn prints_a_one_time_link() {
+    let repository = a_team("serve-link");
+    let out = SharedOut::default();
+    let serving = serving_into(&repository.path, &out);
+    until("the link is printed", || !links(&out.text()).is_empty());
+    let stopped = run(&repository.path, &["stop"]);
+    assert_eq!(stopped.code, 0, "{}", stopped.err);
+    let ran = joined(serving, "the serve");
+    assert_eq!(ran.code, 0, "{}\n{}", ran.out, ran.err);
+    let printed = links(&out.text());
+    assert_eq!(printed.len(), 1, "{}", out.text());
+    assert!(
+        out.text()
+            .lines()
+            .filter(|line| line.starts_with("open "))
+            .count()
+            == 1,
+        "{}",
+        out.text()
+    );
+
+    let ran = run_with(&repository.path, &["run"], |io| {
+        io.engine = recorded(Vec::new());
+    });
+    assert_eq!(ran.code, 0, "{}\n{}", ran.out, ran.err);
+    assert!(links(&ran.out).is_empty(), "{}", ran.out);
+    assert!(!ran.out.contains("/connect#"), "{}", ran.out);
+}
+
+/// Trades `code` at `POST /connect` for the session cookie's `name=value`.
+fn connected(port: u16, code: &str) -> String {
+    use std::io::Read as _;
+
+    let body = json!({ "code": code }).to_string();
+    let mut stream = std::net::TcpStream::connect(("127.0.0.1", port)).expect("connects");
+    write!(
+        stream,
+        "POST /connect HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nOrigin: http://127.0.0.1:{port}\r\n\
+         Content-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+        body.len()
+    )
+    .expect("sent");
+    let mut answer = String::new();
+    stream.read_to_string(&mut answer).expect("read");
+    assert!(answer.starts_with("HTTP/1.1 204"), "{answer}");
+    answer
+        .lines()
+        .find_map(|line| {
+            let (name, value) = line.split_once(':')?;
+            name.eq_ignore_ascii_case("set-cookie").then(|| {
+                value
+                    .trim()
+                    .split(';')
+                    .next()
+                    .unwrap_or_default()
+                    .to_string()
+            })
+        })
+        .expect("a cookie is set")
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn serve_status_has_no_credential_under_a_given_engine() {
+    use futures_util::{SinkExt as _, StreamExt as _};
+    use tokio_tungstenite::tungstenite::Message;
+    use tokio_tungstenite::tungstenite::client::IntoClientRequest as _;
+
+    let repository = a_team("serve-status");
+    let out = SharedOut::default();
+    let serving = serving_into(&repository.path, &out);
+    until("the link is printed", || !links(&out.text()).is_empty());
+    let (port, code) = links(&out.text()).remove(0);
+    let cookie = connected(port, &code);
+
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("a runtime");
+    let status = runtime.block_on(async {
+        let mut request = format!("ws://127.0.0.1:{port}/rpc")
+            .into_client_request()
+            .expect("a request");
+        let headers = request.headers_mut();
+        headers.insert(
+            "Origin",
+            format!("http://127.0.0.1:{port}")
+                .parse()
+                .expect("a header"),
+        );
+        headers.insert("Cookie", cookie.parse().expect("a header"));
+        let (mut socket, _) = tokio_tungstenite::connect_async(request)
+            .await
+            .expect("the socket opens");
+        let asked = json!({
+            "jsonrpc": "2.0", "id": 1, "method": "query",
+            "params": { "name": "serve.status", "params": {} }
+        });
+        socket
+            .send(Message::Text(asked.to_string().into()))
+            .await
+            .expect("sent");
+        let frame = tokio::time::timeout(Duration::from_secs(30), socket.next())
+            .await
+            .expect("an answer in time")
+            .expect("the socket is open")
+            .expect("a frame");
+        serde_json::from_str::<Value>(frame.to_text().expect("text")).expect("JSON")
+    });
+
+    let stopped = run(&repository.path, &["stop"]);
+    assert_eq!(stopped.code, 0, "{}", stopped.err);
+    let ran = joined(serving, "the serve");
+    assert_eq!(ran.code, 0, "{}\n{}", ran.out, ran.err);
+    let root = repository.path.canonicalize().expect("the root");
+    assert_eq!(
+        status["result"],
+        json!({
+            "project_root": root.display().to_string(),
+            "paused": false,
+            "credential": null,
+            "port": port,
+        }),
+        "{status}"
+    );
+}

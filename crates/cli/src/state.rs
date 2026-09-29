@@ -15,6 +15,21 @@ pub(crate) fn state_dir(env: &BTreeMap<String, String>) -> Option<PathBuf> {
         .or_else(|| set("APPDATA").map(|base| PathBuf::from(base).join("farik")))
 }
 
+/// Makes the state folder `directory` with mode 0700, when it is not there.
+///
+/// # Errors
+///
+/// A sentence saying it cannot be made.
+pub(crate) fn make_state_dir(directory: &Path) -> Result<(), String> {
+    use std::os::unix::fs::DirBuilderExt as _;
+
+    std::fs::DirBuilder::new()
+        .recursive(true)
+        .mode(0o700)
+        .create(directory)
+        .map_err(|error| format!("{} cannot be made: {error}", directory.display()))
+}
+
 /// Writes `state.json`, `{ "last_project": "<root>" }`, in `directory`, made with mode 0700 when it
 /// is not there, and readable by its owner alone.
 ///
@@ -22,13 +37,7 @@ pub(crate) fn state_dir(env: &BTreeMap<String, String>) -> Option<PathBuf> {
 ///
 /// A sentence saying what could not be made or written.
 pub(crate) fn remember(directory: &Path, root: &Path) -> Result<(), String> {
-    use std::os::unix::fs::DirBuilderExt as _;
-
-    std::fs::DirBuilder::new()
-        .recursive(true)
-        .mode(0o700)
-        .create(directory)
-        .map_err(|error| format!("{} cannot be made: {error}", directory.display()))?;
+    make_state_dir(directory)?;
     let file = directory.join("state.json");
     let text = serde_json::json!({ "last_project": root.to_string_lossy() }).to_string();
     farik_runtime::write_private(&file, text.as_bytes())

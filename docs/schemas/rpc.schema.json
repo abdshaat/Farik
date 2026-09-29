@@ -357,7 +357,7 @@
     },
     "rpcError": {
       "title": "Rpc Error",
-      "description": "-32700 parse, -32600 invalid request, -32601 unknown method, -32602 invalid params, -32001 unknown_query, -32002 not_found, -32003 refused_here.",
+      "description": "-32700 parse, -32600 invalid request, -32601 unknown method, -32602 invalid params, -32603 internal (the store or a file failed), -32001 unknown_query, -32002 not_found, -32003 refused_here.",
       "type": "object",
       "additionalProperties": false,
       "required": [
@@ -372,6 +372,7 @@
             -32600,
             -32601,
             -32602,
+            -32603,
             -32001,
             -32002,
             -32003

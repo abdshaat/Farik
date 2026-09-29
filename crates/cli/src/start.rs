@@ -9,7 +9,10 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use farik_protocol::command::{Command, command_to_value, reply_from_value};
-use farik_runtime::claude::{ClaudeAdapter, ClaudeConfig, ClaudeCredential, credential_from_env};
+use farik_runtime::claude::{
+    ClaudeAdapter, ClaudeConfig, ClaudeCredential, CredentialKind, credential_from_env,
+};
+use farik_runtime::daemon::web::{BrowserSessions, ConnectCodes, WebState};
 use farik_runtime::daemon::{DaemonConfig, DaemonHandle, DaemonState, PortChoice, serve};
 use farik_runtime::forge::Forge;
 use farik_runtime::orchestrator::{
@@ -29,6 +32,7 @@ use tokio::sync::mpsc::UnboundedReceiver;
 use crate::daemon_client::{ClientError, DaemonAddress, exchange, read_daemon_file};
 use crate::doctor::unpriced;
 use crate::project::{Project, tool_deps};
+use crate::state::{make_state_dir, state_dir};
 use crate::{CliIo, Engine, Interrupts};
 
 /// The lock the process driving a project holds, under the gitignored `.farik/local/`.
@@ -291,6 +295,9 @@ const SESSION_ENV: [&str; 6] = ["PATH", "HOME", "USER", "LANG", "TERM", "TMPDIR"
 pub(crate) struct StartOptions {
     /// The port the daemon asks for.
     pub(crate) port: PortChoice,
+    /// Whether the daemon answers the browser routes (`farik serve` alone), with a first connect
+    /// code for the link it prints.
+    pub(crate) web: bool,
 }
 
 /// A process driving the project: its lock, its served daemon, its orchestrator, and where it
@@ -308,6 +315,8 @@ pub(crate) struct Driver {
     pub(crate) sandbox: Sandbox,
     /// What recovery found and did.
     pub(crate) recovered: RecoveryReport,
+    /// The first connect code, when the browser routes are on.
+    pub(crate) connect_code: Option<String>,
     handle: DaemonHandle,
     _lock: RunLock,
 }
@@ -397,6 +406,8 @@ pub(crate) async fn start_holding(
     }
     let tools = tool_deps(project, io)?;
     let daemon = Arc::new(DaemonState::new(Arc::clone(&tools)));
+    let kind = claude.as_ref().map(|(credential, _)| credential.kind());
+    let web = options.web.then(|| web(project, io, kind)).transpose()?;
     let handle = serve(
         DaemonConfig {
             port: options.port,
@@ -406,6 +417,12 @@ pub(crate) async fn start_holding(
     )
     .await
     .map_err(|error| error.to_string())?;
+    // The port is known once the daemon listens, and the routes read the state on each request.
+    let connect_code = web.map(|(mut web, code)| {
+        web.port = handle.info.port;
+        daemon.set_web(web);
+        code
+    });
     let adapter = match adapter(project, io, claude, &daemon, &handle) {
         Ok(adapter) => adapter,
         Err(error) => {
@@ -448,9 +465,38 @@ pub(crate) async fn start_holding(
         credential,
         sandbox: settings.sandbox,
         recovered,
+        connect_code,
         handle,
         _lock: lock,
     })
+}
+
+/// What the browser routes need but the port, and the first connect code, issued. The sessions
+/// are kept in the state folder, made here when it is not there yet, or in memory when there is
+/// none.
+fn web(
+    project: &Project,
+    io: &CliIo<'_>,
+    credential: Option<CredentialKind>,
+) -> Result<(WebState, String), String> {
+    let file = match state_dir(&io.env) {
+        Some(directory) => {
+            make_state_dir(&directory)?;
+            Some(directory.join("browser-sessions.json"))
+        }
+        None => None,
+    };
+    let sessions = BrowserSessions::open(file).map_err(|error| error.to_string())?;
+    let codes = ConnectCodes::default();
+    let code = codes.issue().map_err(|error| error.to_string())?;
+    let web = WebState {
+        codes,
+        sessions,
+        project_root: project.root.clone(),
+        credential,
+        port: 0,
+    };
+    Ok((web, code))
 }
 
 /// The adapter sessions start through: the engine's factory's, or Claude Code's once its version

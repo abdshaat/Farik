@@ -24,6 +24,7 @@ pub(crate) fn serve(project: &Project, port: Option<u16>, io: &mut CliIo<'_>) ->
     runtime.block_on(async {
         let options = StartOptions {
             port: PortChoice::Preferred(port.unwrap_or(DEFAULT_PORT)),
+            web: true,
         };
         let mut driver = match start(project, io, options).await {
             Ok(driver) => driver,
@@ -55,6 +56,15 @@ pub(crate) fn serve(project: &Project, port: Option<u16>, io: &mut CliIo<'_>) ->
             ),
             &json!({}),
         );
+        if let Some(code) = &driver.connect_code {
+            printer.line(
+                &format!(
+                    "open http://127.0.0.1:{}/connect#{code} in your browser",
+                    driver.port()
+                ),
+                &json!({}),
+            );
+        }
         let scope = TickScope {
             task_id: None,
             rules: TickRules::All,

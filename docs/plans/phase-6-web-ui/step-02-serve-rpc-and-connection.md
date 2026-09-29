@@ -240,7 +240,7 @@ Tests, over real sockets with `tokio-tungstenite`:
 - `serve_status_has_no_credential_under_a_given_engine` asserts `credential: null` when the driver runs `Engine::Given`.
 - `prints_a_one_time_link` (in `crates/cli/tests/serving.rs`) asserts that `farik serve`'s stdout has one line matching `open http://127\.0\.0\.1:\d+/connect#[0-9a-f]{64} in your browser`, and that `farik run`'s has none.
 
-- [ ] `feat(runtime): serve json-rpc over a websocket at /rpc`
+- [x] `feat(runtime): serve json-rpc over a websocket at /rpc`
 
 ### Task 7: `@farik/protocol-client`
 

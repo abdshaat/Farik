@@ -4,14 +4,23 @@
 
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use axum::Json;
 use axum::body::Bytes;
 use axum::extract::State;
+use axum::extract::ws::rejection::WebSocketUpgradeRejection;
+use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use chrono::{DateTime, Utc};
-use serde_json::Value;
+use farik_core::contract::TaskId;
+use farik_protocol::command::{Command, command_from_value, reply_to_value};
+use farik_protocol::event::event_to_value;
+use farik_protocol::rpc::{QueryName, rpc_request_from_value};
+use farik_store::EventQuery;
+use farik_store::projections::TaskProjection;
+use serde_json::{Value, json};
 use sha2::{Digest as _, Sha256};
 
 use super::{DaemonError, DaemonState, hex, random_token, same_token};
@@ -241,6 +250,324 @@ pub(super) async fn connect(
     }
 }
 
+/// The session secret a request's `Cookie` header carries, if any. One cookie needs no library:
+/// the header is `name=value` pairs split by `;`.
+fn session_cookie(headers: &HeaderMap) -> Option<&str> {
+    headers
+        .get_all(header::COOKIE)
+        .iter()
+        .filter_map(|value| value.to_str().ok())
+        .flat_map(|value| value.split(';'))
+        .find_map(|pair| pair.trim().strip_prefix("farik_session="))
+}
+
+/// `GET /rpc`: a WebSocket that speaks JSON-RPC 2.0 (`docs/schemas/rpc.schema.json`) for the
+/// daemon's own page. A request that is not from that page answers 403, one without a live
+/// session 401, and a daemon without the browser routes 404, each before the upgrade.
+pub(super) async fn rpc(
+    State(state): State<Arc<DaemonState>>,
+    headers: HeaderMap,
+    upgrade: Result<WebSocketUpgrade, WebSocketUpgradeRejection>,
+) -> Response {
+    let Some(web) = state.web() else {
+        return StatusCode::NOT_FOUND.into_response();
+    };
+    if !from_own_page(&headers, web.port) {
+        return StatusCode::FORBIDDEN.into_response();
+    }
+    let now = state.deps().clock.now();
+    if !session_cookie(&headers).is_some_and(|secret| web.sessions.verify(secret, now)) {
+        return StatusCode::UNAUTHORIZED.into_response();
+    }
+    match upgrade {
+        Ok(upgrade) => upgrade.on_upgrade(move |socket| talk(socket, state)),
+        Err(rejection) => rejection.into_response(),
+    }
+}
+
+/// How often a subscription reads the log for new events.
+const POLL: Duration = Duration::from_millis(500);
+
+/// One browser's socket, until it closes: each request answered in turn, and, while it is
+/// subscribed, every event past the last one it was sent.
+async fn talk(mut socket: WebSocket, state: Arc<DaemonState>) {
+    // The seq of the last event sent to the subscription, or `None` while there is none.
+    let mut sent: Option<u64> = None;
+    // ponytail: the log is re-read every 500 ms, because other processes append to it too and the
+    // in-process `EventLog::subscribe` channel misses those; a cross-process notify replaces the
+    // poll if 500 ms ever shows.
+    let mut poll = tokio::time::interval(POLL);
+    loop {
+        tokio::select! {
+            message = socket.recv() => {
+                let text = match message {
+                    Some(Ok(Message::Text(text))) => text,
+                    Some(Ok(Message::Close(_)) | Err(_)) | None => return,
+                    Some(Ok(_)) => continue,
+                };
+                let answer = answer(&state, text.as_str(), &mut sent).await;
+                if socket.send(Message::Text(answer.to_string().into())).await.is_err() {
+                    return;
+                }
+            }
+            _ = poll.tick(), if sent.is_some() => {}
+        }
+        if !push(&mut socket, &state, &mut sent).await {
+            return;
+        }
+    }
+}
+
+/// Sends the subscription every event past `sent`, oldest first. Answers `false` when the socket
+/// is gone. A log that cannot be read is read again at the next poll.
+async fn push(socket: &mut WebSocket, state: &DaemonState, sent: &mut Option<u64>) -> bool {
+    let Some(after) = *sent else {
+        return true;
+    };
+    let query = EventQuery {
+        after_seq: Some(after),
+        ..EventQuery::default()
+    };
+    let Ok(events) = state.deps().log.read(&query) else {
+        return true;
+    };
+    for event in events {
+        *sent = Some(event.envelope.seq);
+        let note = json!({
+            "jsonrpc": "2.0",
+            "method": "event",
+            "params": { "event": event_to_value(&event) },
+        });
+        if socket
+            .send(Message::Text(note.to_string().into()))
+            .await
+            .is_err()
+        {
+            return false;
+        }
+    }
+    true
+}
+
+/// A JSON-RPC error: its code and its sentence, and for invalid params what the schema found.
+struct Failure {
+    code: i64,
+    message: String,
+    data: Option<Value>,
+}
+
+impl Failure {
+    fn new(code: i64, message: impl Into<String>) -> Self {
+        Failure {
+            code,
+            message: message.into(),
+            data: None,
+        }
+    }
+}
+
+const PARSE_ERROR: i64 = -32700;
+const INVALID_REQUEST: i64 = -32600;
+const UNKNOWN_METHOD: i64 = -32601;
+const INVALID_PARAMS: i64 = -32602;
+const INTERNAL_ERROR: i64 = -32603;
+const UNKNOWN_QUERY: i64 = -32001;
+const NOT_FOUND: i64 = -32002;
+const REFUSED_HERE: i64 = -32003;
+
+/// The response to one text frame. A `subscribe` sets `sent` to its `from_seq`, and an
+/// `unsubscribe` clears it.
+async fn answer(state: &DaemonState, text: &str, sent: &mut Option<u64>) -> Value {
+    let Ok(request) = serde_json::from_str::<Value>(text) else {
+        return failure(
+            &Value::Null,
+            Failure::new(PARSE_ERROR, "the frame is not JSON"),
+        );
+    };
+    let id = request
+        .get("id")
+        .filter(|id| id.is_i64() || id.is_u64())
+        .cloned()
+        .unwrap_or(Value::Null);
+    let (Some("2.0"), false, Some(method)) = (
+        request.get("jsonrpc").and_then(Value::as_str),
+        id.is_null(),
+        request.get("method").and_then(Value::as_str),
+    ) else {
+        return failure(
+            &id,
+            Failure::new(
+                INVALID_REQUEST,
+                "the frame is not a JSON-RPC 2.0 request with an integer id and a method",
+            ),
+        );
+    };
+    if !["subscribe", "unsubscribe", "command", "query"].contains(&method) {
+        return failure(
+            &id,
+            Failure::new(UNKNOWN_METHOD, format!("there is no method {method}")),
+        );
+    }
+    let params = &request["params"];
+    if let Err(errors) = rpc_request_from_value(&request) {
+        let known = serde_json::from_value::<QueryName>(params["name"].clone()).is_ok();
+        let failed = if method == "query" && !known {
+            Failure::new(
+                UNKNOWN_QUERY,
+                format!("there is no query {}", params["name"]),
+            )
+        } else {
+            Failure {
+                data: Some(json!(errors)),
+                ..Failure::new(
+                    INVALID_PARAMS,
+                    format!("the params of {method} are not right"),
+                )
+            }
+        };
+        return failure(&id, failed);
+    }
+    let result = match method {
+        "subscribe" => {
+            *sent = params["from_seq"].as_u64();
+            Ok(json!({}))
+        }
+        "unsubscribe" => {
+            *sent = None;
+            Ok(json!({}))
+        }
+        "command" => command(state, &params["command"]).await,
+        _ => query(
+            state,
+            params["name"].as_str().unwrap_or_default(),
+            &params["params"],
+        ),
+    };
+    match result {
+        Ok(result) => json!({ "jsonrpc": "2.0", "id": id, "result": result }),
+        Err(failed) => failure(&id, failed),
+    }
+}
+
+/// The error response to the request `id`.
+fn failure(id: &Value, failed: Failure) -> Value {
+    let mut error = json!({ "code": failed.code, "message": failed.message });
+    if let Some(data) = failed.data {
+        error["data"] = data;
+    }
+    json!({ "jsonrpc": "2.0", "id": id, "error": error })
+}
+
+/// `command { command }`: handled as `POST /command` handles it, and answered with the same
+/// reply, except `run_stop`, which a page cannot ask for: stopping `farik serve` from its own page
+/// would leave the page with nothing to talk to.
+async fn command(state: &DaemonState, wire: &Value) -> Result<Value, Failure> {
+    let reply = match command_from_value(wire) {
+        Err(errors) => super::invalid(&errors),
+        Ok(Command::RunStop) => {
+            return Err(Failure::new(
+                REFUSED_HERE,
+                "stopping Farik is done where it runs; pause the team instead",
+            ));
+        }
+        Ok(command) => super::handled(state, command).await,
+    };
+    Ok(reply_to_value(&reply))
+}
+
+/// `query { name, params }`, whose params the schema already passed. A `match` rather than a
+/// registry until there are enough queries to want one.
+fn query(state: &DaemonState, name: &str, params: &Value) -> Result<Value, Failure> {
+    let deps = state.deps();
+    let internal = |error: &dyn std::fmt::Display| Failure::new(INTERNAL_ERROR, error.to_string());
+    match name {
+        "events.since" => {
+            let query = EventQuery {
+                after_seq: params["after_seq"].as_u64(),
+                limit: params["limit"]
+                    .as_u64()
+                    .and_then(|limit| usize::try_from(limit).ok()),
+                ..EventQuery::default()
+            };
+            let events = deps.log.read(&query).map_err(|error| internal(&error))?;
+            Ok(json!({ "events": events.iter().map(event_to_value).collect::<Vec<_>>() }))
+        }
+        "tasks.list" => {
+            let board = deps.projections.board().map_err(|error| internal(&error))?;
+            Ok(json!({ "tasks": board.iter().map(task_wire).collect::<Vec<_>>() }))
+        }
+        "task.get" => {
+            let asked = params["task_id"].as_str().unwrap_or_default();
+            let missing = || Failure::new(NOT_FOUND, format!("there is no task {asked}"));
+            let task_id: TaskId = asked.parse().map_err(|_| missing())?;
+            match deps
+                .projections
+                .task(&task_id)
+                .map_err(|error| internal(&error))?
+            {
+                Some(task) => Ok(json!({ "task": task_wire(&task) })),
+                None => Err(missing()),
+            }
+        }
+        "team.get" => {
+            let team = deps.files.read_team().map_err(|error| internal(&error))?;
+            let team = serde_json::to_value(team).map_err(|error| internal(&error))?;
+            Ok(json!({ "team": team }))
+        }
+        "serve.status" => {
+            let web = state
+                .web()
+                .ok_or_else(|| Failure::new(INTERNAL_ERROR, "the browser routes are off"))?;
+            let paused = crate::pause::paused(&deps.log).map_err(|error| internal(&error))?;
+            Ok(json!({
+                "project_root": web.project_root.display().to_string(),
+                "paused": paused,
+                "credential": web.credential,
+                "port": web.port,
+            }))
+        }
+        _ => Err(Failure::new(
+            UNKNOWN_QUERY,
+            format!("there is no query {name}"),
+        )),
+    }
+}
+
+/// One board row as the RPC schema's `taskProjection`: an optional field is left out, not null,
+/// when the projection has none.
+fn task_wire(task: &TaskProjection) -> Value {
+    let mut wire = json!({
+        "task_id": task.task_id,
+        "kind": task.kind,
+        "title": task.title,
+        "status": task.status,
+        "risk": task.risk,
+        "triaged": task.triaged,
+        "locked": task.locked,
+        "updated_seq": task.updated_seq,
+        "cost_usd": task.cost_usd,
+        "iteration": task.iteration,
+        "awaiting_integration": task.awaiting_integration,
+        "waiting_on_human": task.waiting_on_human,
+        "awaiting_approval": task.awaiting_approval,
+        "verifications": task.verifications,
+        "rejections": task.rejections,
+        "interventions": task.interventions,
+    });
+    let optional = [
+        ("parent", task.parent.as_ref().map(|parent| json!(parent))),
+        ("assignee_id", task.assignee_id.as_ref().map(|id| json!(id))),
+        ("reviewer_id", task.reviewer_id.as_ref().map(|id| json!(id))),
+        ("sprint", task.sprint.as_ref().map(|sprint| json!(sprint))),
+    ];
+    for (name, value) in optional {
+        if let Some(value) = value {
+            wire[name] = value;
+        }
+    }
+    wire
+}
+
 #[cfg(test)]
 mod tests {
     use std::fmt::Write as _;
@@ -256,9 +583,22 @@ mod tests {
     use tokio_util::sync::CancellationToken;
     use tower::ServiceExt;
 
+    use farik_protocol::command::Command;
+    use farik_protocol::event::{EventKind, NewEvent, event_from_value, event_to_value};
+    use farik_store::open_event_log;
+    use futures_util::{SinkExt as _, StreamExt as _};
+    use tokio_tungstenite::connect_async;
+    use tokio_tungstenite::tungstenite::client::IntoClientRequest as _;
+    use tokio_tungstenite::tungstenite::handshake::client::Request as WsRequest;
+    use tokio_tungstenite::tungstenite::{Error as WsError, Message as WsMessage};
+
     use super::{BrowserSessions, ConnectCodes, WebState};
     use crate::daemon::fixtures::TestDaemon;
-    use crate::daemon::{DaemonState, router};
+    use crate::daemon::{DaemonConfig, DaemonHandle, DaemonState, PortChoice, router, serve};
+    use crate::orchestrator::fixtures::Harness;
+    use crate::orchestrator::{CommandReport, command_handler};
+    use crate::tools::ToolDeps;
+    use crate::tools::fixtures::at;
 
     /// The port the daemon under test says it is on; nothing binds it, since the requests go
     /// straight to the router.
@@ -504,5 +844,522 @@ mod tests {
                 );
             }
         }
+    }
+
+    // The socket tests: a daemon served on a port the system gave, its browser routes on, and a
+    // WebSocket client talking to `/rpc` as a browser would.
+
+    type Socket = tokio_tungstenite::WebSocketStream<
+        tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
+    >;
+
+    /// How long a test waits for a frame before it fails rather than hang.
+    const BOUND: std::time::Duration = std::time::Duration::from_secs(30);
+
+    /// Serves `state` on a port the system gave, turns its browser routes on, and answers the
+    /// handle and a session secret.
+    async fn on_a_socket(
+        state: &Arc<DaemonState>,
+        root: &std::path::Path,
+    ) -> (DaemonHandle, String) {
+        let handle = serve(
+            DaemonConfig {
+                port: PortChoice::Any,
+                daemon_file: root.join(".farik/local/daemon.json"),
+            },
+            Arc::clone(state),
+        )
+        .await
+        .expect("the daemon is up");
+        let sessions = BrowserSessions::open(None).expect("the sessions open");
+        let secret = sessions.issue(state.deps().clock.now()).expect("a session");
+        assert!(state.set_web(WebState {
+            codes: ConnectCodes::default(),
+            sessions,
+            project_root: root.to_path_buf(),
+            credential: None,
+            port: handle.info.port,
+        }));
+        (handle, secret)
+    }
+
+    /// `harness`'s daemon served with its orchestrator taking commands, and a socket open to it.
+    async fn driven(harness: &Harness) -> (DaemonHandle, Socket) {
+        let orchestrator = Arc::new(harness.orchestrator(harness.recorded(Vec::new())));
+        assert!(
+            harness
+                .daemon
+                .set_command_handler(command_handler(orchestrator))
+        );
+        let (handle, secret) = on_a_socket(&harness.daemon, &harness.project.repo.path).await;
+        let socket = open(handle.info.port, &secret).await;
+        (handle, socket)
+    }
+
+    /// The upgrade a browser on `origin` sends, with `cookie` as its `Cookie` header.
+    fn upgrade(port: u16, origin: Option<&str>, cookie: Option<&str>) -> WsRequest {
+        let mut request = format!("ws://127.0.0.1:{port}/rpc")
+            .into_client_request()
+            .expect("a request is built");
+        if let Some(origin) = origin {
+            request
+                .headers_mut()
+                .insert(header::ORIGIN, origin.parse().expect("a header"));
+        }
+        if let Some(cookie) = cookie {
+            request
+                .headers_mut()
+                .insert(header::COOKIE, cookie.parse().expect("a header"));
+        }
+        request
+    }
+
+    /// A socket to `/rpc` from the daemon's own page, with the session `secret`.
+    async fn open(port: u16, secret: &str) -> Socket {
+        let origin = format!("http://127.0.0.1:{port}");
+        let cookie = format!("theme=dark; farik_session={secret}");
+        let (socket, _) = connect_async(upgrade(port, Some(&origin), Some(&cookie)))
+            .await
+            .expect("the socket opens");
+        socket
+    }
+
+    /// The status an upgrade was refused with.
+    async fn refused(request: WsRequest) -> u16 {
+        match connect_async(request).await {
+            Err(WsError::Http(answer)) => answer.status().as_u16(),
+            Err(error) => panic!("the upgrade failed otherwise: {error}"),
+            Ok(_) => panic!("the upgrade was accepted"),
+        }
+    }
+
+    /// The next text frame, as JSON.
+    async fn next(socket: &mut Socket) -> Value {
+        loop {
+            let frame = tokio::time::timeout(BOUND, socket.next())
+                .await
+                .expect("a frame within the bound")
+                .expect("the socket is open")
+                .expect("a frame");
+            if let WsMessage::Text(text) = frame {
+                return serde_json::from_str(text.as_str()).expect("the frame is JSON");
+            }
+        }
+    }
+
+    async fn send_text(socket: &mut Socket, text: String) {
+        socket
+            .send(WsMessage::Text(text.into()))
+            .await
+            .expect("the frame is sent");
+    }
+
+    /// Sends a request and answers the frame that follows it.
+    async fn call(socket: &mut Socket, id: u64, method: &str, params: &Value) -> Value {
+        let request = json!({ "jsonrpc": "2.0", "id": id, "method": method, "params": params });
+        send_text(socket, request.to_string()).await;
+        next(socket).await
+    }
+
+    /// The result of `query { name, params }`, checked against its result definition in the RPC
+    /// schema.
+    async fn query(
+        socket: &mut Socket,
+        id: u64,
+        name: &str,
+        params: &Value,
+        definition: &str,
+    ) -> Value {
+        let answer = call(
+            socket,
+            id,
+            "query",
+            &json!({ "name": name, "params": params }),
+        )
+        .await;
+        assert_eq!(answer["id"], id, "{answer}");
+        conforms(&answer["result"], definition);
+        answer["result"].clone()
+    }
+
+    /// Fails unless `value` is what `definition` of the RPC schema says.
+    fn conforms(value: &Value, definition: &str) {
+        let schema: Value =
+            serde_json::from_str(farik_protocol::rpc::SCHEMA_JSON).expect("the schema is JSON");
+        let root = json!({
+            "$schema": schema["$schema"],
+            "$ref": format!("#/$defs/{definition}"),
+            "$defs": schema["$defs"],
+        });
+        let validator = jsonschema::options()
+            .build(&root)
+            .expect("the definition compiles");
+        let errors: Vec<String> = validator
+            .iter_errors(value)
+            .map(|e| e.to_string())
+            .collect();
+        assert!(errors.is_empty(), "{definition}: {errors:?} in {value}");
+    }
+
+    /// Appends a `team.paused` through `log`.
+    fn paused_through(log: &farik_store::event_log::EventLog) -> u64 {
+        let event = event_from_value(&json!({
+            "seq": 1, "recorded_at": "2026-09-28T10:00:00Z",
+            "team_id": "farik", "project_id": "farik",
+            "kind": "team.paused", "body": { "by": "human" }
+        }))
+        .expect("the fixture is an event");
+        log.append(&NewEvent {
+            recorded_at: event.envelope.recorded_at,
+            ids: event.envelope.ids,
+            body: event.body,
+        })
+        .expect("appends")
+        .envelope
+        .seq
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn refuses_an_upgrade_without_a_session() {
+        let daemon = TestDaemon::new("rpc-refuses", |_| {});
+        let (handle, secret) = on_a_socket(&daemon.state, &daemon.project.repo.path).await;
+        let port = handle.info.port;
+        let own = format!("http://127.0.0.1:{port}");
+        let session = format!("farik_session={secret}");
+
+        let expired = daemon
+            .state
+            .web()
+            .expect("the browser routes are on")
+            .sessions
+            .issue(daemon.state.deps().clock.now() - Duration::days(31))
+            .expect("a session");
+        let unknown = format!("farik_session={}", "0".repeat(64));
+        let expired = format!("farik_session={expired}");
+        for cookie in [None, Some(unknown.as_str()), Some(expired.as_str())] {
+            assert_eq!(
+                refused(upgrade(port, Some(&own), cookie)).await,
+                401,
+                "{cookie:?}"
+            );
+        }
+
+        let another_port = format!("http://127.0.0.1:{}", port.wrapping_add(1));
+        for origin in [
+            Some("http://evil.example"),
+            Some(another_port.as_str()),
+            None,
+        ] {
+            assert_eq!(
+                refused(upgrade(port, origin, Some(&session))).await,
+                403,
+                "{origin:?}"
+            );
+        }
+
+        // The same session from the daemon's own page opens.
+        let mut socket = open(port, &secret).await;
+        let answer = call(&mut socket, 1, "unsubscribe", &json!({})).await;
+        assert_eq!(answer, json!({ "jsonrpc": "2.0", "id": 1, "result": {} }));
+        drop(socket);
+        handle.shutdown().await.expect("the daemon stops");
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn streams_events_after_the_sequence_asked() {
+        let daemon = TestDaemon::new("rpc-streams", |_| {});
+        // A log in a file, so that another handle on it is another writer, as another process is.
+        let path = daemon.project.repo.path.join(".farik/local/stream.db");
+        let log = Arc::new(open_event_log(&path, at()).expect("the log opens"));
+        let other = open_event_log(&path, at()).expect("the log opens again");
+        let deps = &daemon.project.deps;
+        let state = Arc::new(DaemonState::new(Arc::new(ToolDeps {
+            log: Arc::clone(&log),
+            projections: Arc::clone(&deps.projections),
+            files: Arc::clone(&deps.files),
+            transitions: Arc::clone(&deps.transitions),
+            git: daemon.project.repo.adapter(),
+            clock: Arc::clone(&deps.clock),
+            ids: deps.ids.clone(),
+        })));
+        let seqs: Vec<u64> = (0..3).map(|_| paused_through(&log)).collect();
+        assert_eq!(seqs, [1, 2, 3]);
+        let (handle, secret) = on_a_socket(&state, &daemon.project.repo.path).await;
+        let mut socket = open(handle.info.port, &secret).await;
+
+        let answer = call(&mut socket, 1, "subscribe", &json!({ "from_seq": 1 })).await;
+        assert_eq!(answer, json!({ "jsonrpc": "2.0", "id": 1, "result": {} }));
+        for seq in [2, 3] {
+            let note = next(&mut socket).await;
+            assert_eq!(note["method"], "event", "{note}");
+            assert_eq!(note["params"]["event"]["seq"], seq, "{note}");
+            farik_protocol::rpc::rpc_notification_from_value(&note)
+                .unwrap_or_else(|errors| panic!("{note}: {errors:?}"));
+        }
+
+        let appended = paused_through(&other);
+        let note = next(&mut socket).await;
+        assert_eq!(note["params"]["event"]["seq"], appended, "{note}");
+        assert_eq!(note["params"]["event"]["kind"], "team.paused", "{note}");
+        drop(socket);
+        handle.shutdown().await.expect("the daemon stops");
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn runs_a_command_like_post_command() {
+        let harness = Harness::new("rpc-command", |_| {});
+        let (handle, mut socket) = driven(&harness).await;
+        let pause = json!({ "command": "team_pause", "body": {} });
+        let posted = |command: Value| {
+            let router = router(Arc::clone(&harness.daemon), TOKEN, CancellationToken::new());
+            async move {
+                let answer = router
+                    .oneshot(
+                        Request::post("/command")
+                            .header(header::AUTHORIZATION, format!("Bearer {TOKEN}"))
+                            .header(header::CONTENT_TYPE, "application/json")
+                            .body(Body::from(command.to_string()))
+                            .expect("a request is built"),
+                    )
+                    .await
+                    .expect("the router answers");
+                serde_json::from_str::<Value>(&body_text(answer).await).expect("JSON")
+            }
+        };
+
+        let answer = call(&mut socket, 1, "command", &json!({ "command": pause })).await;
+        assert_eq!(answer["id"], 1, "{answer}");
+        let reply = answer["result"].clone();
+        conforms(&reply, "commandReply");
+        let paused = harness.events(&[EventKind::TeamPaused]);
+        assert_eq!(paused.len(), 1);
+        assert_eq!(reply["events"], json!([paused[0].envelope.seq]), "{reply}");
+
+        // The same command twice is refused, and both routes refuse it in the same words.
+        let again = call(&mut socket, 2, "command", &json!({ "command": pause })).await;
+        let posted_again = posted(pause.clone()).await;
+        assert_eq!(again["result"], posted_again, "{again}");
+        assert_eq!(posted_again["error"]["kind"], "refused", "{posted_again}");
+
+        // A done command answers alike on both routes, but for the event it appended.
+        let resumed = posted(json!({ "command": "team_resume", "body": {} })).await;
+        let posted_pause = posted(pause.clone()).await;
+        assert_eq!(reply["said"], posted_pause["said"], "{posted_pause}");
+        assert_eq!(
+            resumed["events"].as_array().map(Vec::len),
+            Some(1),
+            "{resumed}"
+        );
+
+        // A command that is not one is `invalid` on both.
+        let wrong = json!({ "command": "team_pause", "body": { "why": 1 } });
+        let invalid = call(&mut socket, 3, "command", &json!({ "command": wrong })).await;
+        assert_eq!(invalid["result"], posted(wrong).await, "{invalid}");
+        assert_eq!(invalid["result"]["error"]["kind"], "invalid", "{invalid}");
+        drop(socket);
+        handle.shutdown().await.expect("the daemon stops");
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn answers_the_queries() {
+        let harness = Harness::new("rpc-queries", |_| {});
+        harness.file("FRK-1", "refining", |_| {});
+        harness.file("FRK-2", "draft", |_| {});
+        let (handle, mut socket) = driven(&harness).await;
+
+        let listed = query(&mut socket, 1, "tasks.list", &json!({}), "tasksListResult").await;
+        assert_eq!(listed["tasks"][0]["task_id"], "FRK-1", "{listed}");
+        assert_eq!(listed["tasks"][0]["status"], "refining", "{listed}");
+
+        let got = query(
+            &mut socket,
+            2,
+            "task.get",
+            &json!({ "task_id": "FRK-1" }),
+            "taskGetResult",
+        )
+        .await;
+        assert_eq!(got["task"], listed["tasks"][0], "{got}");
+        let missing = call(
+            &mut socket,
+            3,
+            "query",
+            &json!({ "name": "task.get", "params": { "task_id": "FRK-99" } }),
+        )
+        .await;
+        assert_eq!(missing["id"], 3, "{missing}");
+        assert_eq!(missing["error"]["code"], -32002, "{missing}");
+        conforms(&missing, "rpcFailure");
+
+        let team = query(&mut socket, 4, "team.get", &json!({}), "teamGetResult").await;
+        let file = serde_json::to_value(harness.project.deps.files.read_team().expect("the team"))
+            .expect("the team is JSON");
+        assert_eq!(team["team"], file, "{team}");
+
+        let all = harness.project.events(&[]);
+        let since = query(
+            &mut socket,
+            5,
+            "events.since",
+            &json!({ "after_seq": 0, "limit": 500 }),
+            "eventsSinceResult",
+        )
+        .await;
+        let seqs: Vec<&Value> = since["events"]
+            .as_array()
+            .expect("events")
+            .iter()
+            .map(|e| &e["seq"])
+            .collect();
+        assert_eq!(seqs.len(), all.len(), "{since}");
+        assert_eq!(since["events"][0], event_to_value(&all[0]), "{since}");
+        let one = query(
+            &mut socket,
+            6,
+            "events.since",
+            &json!({ "after_seq": 0, "limit": 1 }),
+            "eventsSinceResult",
+        )
+        .await;
+        assert_eq!(one["events"], json!([event_to_value(&all[0])]), "{one}");
+        let rest = query(
+            &mut socket,
+            7,
+            "events.since",
+            &json!({ "after_seq": 1, "limit": 500 }),
+            "eventsSinceResult",
+        )
+        .await;
+        assert_eq!(rest["events"][0]["seq"], 2, "{rest}");
+        assert_eq!(
+            rest["events"].as_array().map(Vec::len),
+            Some(all.len() - 1),
+            "{rest}"
+        );
+
+        let status = query(
+            &mut socket,
+            8,
+            "serve.status",
+            &json!({}),
+            "serveStatusResult",
+        )
+        .await;
+        assert_eq!(
+            status,
+            json!({
+                "project_root": harness.project.repo.path.display().to_string(),
+                "paused": false,
+                "credential": null,
+                "port": handle.info.port,
+            })
+        );
+        let pause = json!({ "command": { "command": "team_pause", "body": {} } });
+        call(&mut socket, 9, "command", &pause).await;
+        let status = query(
+            &mut socket,
+            10,
+            "serve.status",
+            &json!({}),
+            "serveStatusResult",
+        )
+        .await;
+        assert_eq!(status["paused"], true, "{status}");
+        drop(socket);
+        handle.shutdown().await.expect("the daemon stops");
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn answers_json_rpc_errors() {
+        let daemon = TestDaemon::new("rpc-errors", |_| {});
+        let (handle, secret) = on_a_socket(&daemon.state, &daemon.project.repo.path).await;
+        let mut socket = open(handle.info.port, &secret).await;
+
+        send_text(&mut socket, "not json".to_string()).await;
+        let parse = next(&mut socket).await;
+        assert_eq!(parse["error"]["code"], -32700, "{parse}");
+        assert_eq!(parse["id"], Value::Null, "{parse}");
+        conforms(&parse, "rpcFailure");
+
+        let nope = call(&mut socket, 7, "nope", &json!({})).await;
+        assert_eq!(nope["error"]["code"], -32601, "{nope}");
+        assert_eq!(nope["id"], 7, "{nope}");
+        conforms(&nope, "rpcFailure");
+
+        let bare = call(&mut socket, 8, "subscribe", &json!({})).await;
+        assert_eq!(bare["error"]["code"], -32602, "{bare}");
+        assert_eq!(bare["id"], 8, "{bare}");
+        conforms(&bare, "rpcFailure");
+
+        let unknown = call(
+            &mut socket,
+            9,
+            "query",
+            &json!({ "name": "secrets.get", "params": {} }),
+        )
+        .await;
+        assert_eq!(unknown["error"]["code"], -32001, "{unknown}");
+        assert_eq!(unknown["id"], 9, "{unknown}");
+
+        send_text(
+            &mut socket,
+            json!({ "jsonrpc": "1.0", "id": 10, "method": "unsubscribe" }).to_string(),
+        )
+        .await;
+        let invalid = next(&mut socket).await;
+        assert_eq!(invalid["error"]["code"], -32600, "{invalid}");
+        assert_eq!(invalid["id"], 10, "{invalid}");
+
+        // The socket still answers after every error.
+        let answer = call(&mut socket, 11, "unsubscribe", &json!({})).await;
+        assert_eq!(answer["result"], json!({}), "{answer}");
+        drop(socket);
+        handle.shutdown().await.expect("the daemon stops");
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn refuses_to_stop_farik_from_the_browser() {
+        let daemon = TestDaemon::new("rpc-stop", |_| {});
+        let handled: Arc<std::sync::Mutex<Vec<Command>>> = Arc::default();
+        let seen = Arc::clone(&handled);
+        daemon.state.set_command_handler(Arc::new(move |command| {
+            seen.lock().expect("the list").push(command);
+            Box::pin(async {
+                Ok(CommandReport {
+                    said: "handled".to_string(),
+                    events: Vec::new(),
+                })
+            })
+        }));
+        let (handle, secret) = on_a_socket(&daemon.state, &daemon.project.repo.path).await;
+        let mut socket = open(handle.info.port, &secret).await;
+
+        let stop = json!({ "command": { "command": "run_stop", "body": {} } });
+        let answer = call(&mut socket, 1, "command", &stop).await;
+        assert_eq!(
+            answer,
+            json!({
+                "jsonrpc": "2.0", "id": 1,
+                "error": {
+                    "code": -32003,
+                    "message": "stopping Farik is done where it runs; pause the team instead"
+                }
+            })
+        );
+        assert!(handled.lock().expect("the list").is_empty());
+
+        // Any other command reaches the handler.
+        let pause = json!({ "command": { "command": "team_pause", "body": {} } });
+        let answer = call(&mut socket, 2, "command", &pause).await;
+        assert_eq!(answer["result"]["said"], "handled", "{answer}");
+        assert_eq!(*handled.lock().expect("the list"), [Command::TeamPause]);
+        drop(socket);
+        handle.shutdown().await.expect("the daemon stops");
     }
 }

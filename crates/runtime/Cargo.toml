@@ -23,6 +23,9 @@ tokio = { workspace = true, features = ["io-util", "macros", "net", "process", "
 tokio-util.workspace = true
 
 [dev-dependencies]
+futures-util.workspace = true
+jsonschema.workspace = true
+tokio-tungstenite.workspace = true
 tower.workspace = true
 
 [lints]

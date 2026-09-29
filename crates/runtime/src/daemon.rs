@@ -15,7 +15,7 @@ use axum::extract::{Request, State};
 use axum::http::{StatusCode, header};
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
-use axum::routing::post;
+use axum::routing::{get, post};
 use axum::{Json, Router};
 use farik_core::budget::SessionLimits;
 use farik_core::contract::TaskId;
@@ -493,6 +493,7 @@ pub(crate) fn router(state: Arc<DaemonState>, token: &str, cancel: CancellationT
     // browser has no bearer token, and proves itself with its `Origin` and a session instead.
     let browser = Router::new()
         .route("/connect", post(web::connect))
+        .route("/rpc", get(web::rpc))
         .with_state(Arc::clone(&state));
     Router::new()
         .route("/hook/pre-tool-use", post(pre_tool_use))
@@ -540,34 +541,43 @@ async fn pre_tool_use(
 }
 
 /// A command the human gave from another terminal, handled by this process's orchestrator and
-/// answered with the reply wire. A command that is not one is `invalid`, with every error the
-/// schema found; a daemon with no handler answers `failed`. The command runs on a task of its own,
-/// so that a client that goes away does not cut it off half done.
+/// answered with the reply wire.
 async fn command(State(state): State<Arc<DaemonState>>, Json(value): Json<Value>) -> Response {
     let reply = match command_from_value(&value) {
-        Err(errors) => CommandReply::Error {
-            kind: ReplyKind::Invalid,
-            detail: errors
-                .iter()
-                .map(|error| format!("{} {}", error.path, error.message))
-                .collect::<Vec<_>>()
-                .join("; "),
-        },
-        Ok(command) => match state.commands.get() {
-            None => CommandReply::Error {
-                kind: ReplyKind::Failed,
-                detail: "this daemon takes no commands".to_string(),
-            },
-            Some(handler) => match tokio::spawn(handler(command)).await {
-                Ok(result) => reply_of(result),
-                Err(error) => CommandReply::Error {
-                    kind: ReplyKind::Failed,
-                    detail: format!("the command's task failed: {error}"),
-                },
-            },
-        },
+        Err(errors) => invalid(&errors),
+        Ok(command) => handled(&state, command).await,
     };
     Json(reply_to_value(&reply)).into_response()
+}
+
+/// What a command that is not one is answered: `invalid`, with every error the schema found.
+fn invalid(errors: &[farik_protocol::command::ValidationError]) -> CommandReply {
+    CommandReply::Error {
+        kind: ReplyKind::Invalid,
+        detail: errors
+            .iter()
+            .map(|error| format!("{} {}", error.path, error.message))
+            .collect::<Vec<_>>()
+            .join("; "),
+    }
+}
+
+/// `command` handled by the orchestrator, or `failed` on a daemon with no handler. The command
+/// runs on a task of its own, so that a client that goes away does not cut it off half done.
+async fn handled(state: &DaemonState, command: Command) -> CommandReply {
+    match state.commands.get() {
+        None => CommandReply::Error {
+            kind: ReplyKind::Failed,
+            detail: "this daemon takes no commands".to_string(),
+        },
+        Some(handler) => match tokio::spawn(handler(command)).await {
+            Ok(result) => reply_of(result),
+            Err(error) => CommandReply::Error {
+                kind: ReplyKind::Failed,
+                detail: format!("the command's task failed: {error}"),
+            },
+        },
+    }
 }
 
 async fn post_tool_use(
