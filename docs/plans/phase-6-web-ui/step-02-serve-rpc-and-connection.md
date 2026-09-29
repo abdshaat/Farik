@@ -225,7 +225,7 @@ Tests:
 - `browser_routes_are_absent_without_web_state` asserts 404 for `POST /connect` on a daemon whose `set_web` was never called.
 - `browser_routes_need_no_bearer_and_others_still_do` asserts that `/connect` works without `Authorization`, and that `/command` without it is still 401.
 
-- [ ] `feat(runtime): trade a one-time code for a browser session`
+- [x] `feat(runtime): trade a one-time code for a browser session`
 
 ### Task 6: `/rpc`
 

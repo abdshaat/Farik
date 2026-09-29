@@ -43,6 +43,7 @@ use crate::tools::{ToolContext, ToolDeps};
 pub(crate) mod fixtures;
 mod hooks;
 mod mcp;
+pub mod web;
 
 #[cfg(test)]
 pub(crate) use mcp::listed_names;
@@ -126,6 +127,7 @@ pub struct DaemonState {
     sessions: Mutex<BTreeMap<String, Session>>,
     stops: tokio::sync::Notify,
     commands: OnceLock<CommandHandler>,
+    web: OnceLock<web::WebState>,
 }
 
 impl DaemonState {
@@ -137,6 +139,7 @@ impl DaemonState {
             sessions: Mutex::new(BTreeMap::new()),
             stops: tokio::sync::Notify::new(),
             commands: OnceLock::new(),
+            web: OnceLock::new(),
         }
     }
 
@@ -146,6 +149,18 @@ impl DaemonState {
     /// is kept.
     pub fn set_command_handler(&self, handler: CommandHandler) -> bool {
         self.commands.set(handler).is_ok()
+    }
+
+    /// Turns the browser routes on with `web`: until then, and under every driver but
+    /// `farik serve`, they answer 404. Answers `true`, or `false` when they were already on, and
+    /// the state they have is kept.
+    pub fn set_web(&self, web: web::WebState) -> bool {
+        self.web.set(web).is_ok()
+    }
+
+    /// What the browser routes have, once they are on.
+    pub(crate) fn web(&self) -> Option<&web::WebState> {
+        self.web.get()
     }
 
     /// The ids of every registered session, in order.
@@ -435,19 +450,24 @@ fn write_daemon_file(path: &Path, info: &DaemonInfo) -> Result<(), DaemonError> 
 }
 
 /// Thirty-two bytes from the kernel's random source, hex-encoded.
-fn random_token() -> Result<String, DaemonError> {
+pub(crate) fn random_token() -> Result<String, DaemonError> {
     let mut bytes = [0_u8; 32];
     std::fs::File::open("/dev/urandom")
         .and_then(|mut source| source.read_exact(&mut bytes))
         .map_err(|error| DaemonError::Io {
             detail: format!("no token could be made: {error}"),
         })?;
-    Ok(bytes
+    Ok(hex(&bytes))
+}
+
+/// `bytes` in lowercase hex.
+fn hex(bytes: &[u8]) -> String {
+    bytes
         .iter()
-        .fold(String::with_capacity(64), |mut hex, byte| {
+        .fold(String::with_capacity(bytes.len() * 2), |mut hex, byte| {
             let _ = write!(hex, "{byte:02x}");
             hex
-        }))
+        })
 }
 
 /// The routes, each behind the token: the two hooks, and Farik's MCP server for the session
@@ -469,6 +489,11 @@ pub(crate) fn router(state: Arc<DaemonState>, token: &str, cancel: CancellationT
             Arc::clone(&state),
             mcp::require_session,
         ));
+    // Merged after the bearer layer, which a layer only puts on the routes it already has: a
+    // browser has no bearer token, and proves itself with its `Origin` and a session instead.
+    let browser = Router::new()
+        .route("/connect", post(web::connect))
+        .with_state(Arc::clone(&state));
     Router::new()
         .route("/hook/pre-tool-use", post(pre_tool_use))
         .route("/hook/post-tool-use", post(post_tool_use))
@@ -476,6 +501,7 @@ pub(crate) fn router(state: Arc<DaemonState>, token: &str, cancel: CancellationT
         .with_state(state)
         .merge(mcp)
         .layer(middleware::from_fn_with_state(expected, require_token))
+        .merge(browser)
 }
 
 /// Refuses a request without `Authorization: Bearer <token>`.

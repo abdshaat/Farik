@@ -114,6 +114,27 @@ pub enum ClaudeCredential {
     OauthToken(Secret),
 }
 
+/// Which kind of credential the sessions run on, without the secret: what the browser is told.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CredentialKind {
+    /// An `ANTHROPIC_API_KEY`.
+    ApiKey,
+    /// A subscription's `CLAUDE_CODE_OAUTH_TOKEN`.
+    SubscriptionToken,
+}
+
+impl ClaudeCredential {
+    /// Which kind of credential this is.
+    #[must_use]
+    pub fn kind(&self) -> CredentialKind {
+        match self {
+            Self::ApiKey(_) => CredentialKind::ApiKey,
+            Self::OauthToken(_) => CredentialKind::SubscriptionToken,
+        }
+    }
+}
+
 /// The credential an environment holds: `ANTHROPIC_API_KEY` first, else
 /// `CLAUDE_CODE_OAUTH_TOKEN`; a blank value is none.
 #[must_use]
@@ -856,8 +877,8 @@ mod tests {
     use serde_json::{Value, json};
 
     use super::{
-        ClaudeConfig, ClaudeCredential, Secret, allowed_builtins, check_version, child_env,
-        claude_args, credential_from_env, write_session_files,
+        ClaudeConfig, ClaudeCredential, CredentialKind, Secret, allowed_builtins, check_version,
+        child_env, claude_args, credential_from_env, write_session_files,
     };
     use crate::daemon::DaemonInfo;
     use crate::recorded::fixtures::a_session_spec;
@@ -1279,6 +1300,19 @@ mod tests {
         ));
         assert!(credential_from_env(&env(&[("CLAUDE_CODE_OAUTH_TOKEN", "")])).is_none());
         assert!(credential_from_env(&env(&[])).is_none());
+        // What the browser is told of each, never the secret itself.
+        let key = ClaudeCredential::ApiKey(Secret::new("sk-key".to_string()));
+        let token = ClaudeCredential::OauthToken(Secret::new("oauth".to_string()));
+        assert_eq!(key.kind(), CredentialKind::ApiKey);
+        assert_eq!(token.kind(), CredentialKind::SubscriptionToken);
+        assert_eq!(
+            serde_json::to_value(key.kind()).ok(),
+            Some("api_key".into())
+        );
+        assert_eq!(
+            serde_json::to_value(token.kind()).ok(),
+            Some("subscription_token".into())
+        );
     }
 
     #[test]
