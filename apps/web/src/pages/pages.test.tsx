@@ -81,6 +81,12 @@ describe("pages", () => {
 			within(rows[1] as HTMLElement).getAllByRole("cell")[0]?.textContent,
 		).toBe("3");
 		expect(rows).toHaveLength(4);
+		// The time fits a phone: hours, minutes and seconds, with the full value on hover.
+		const time = within(rows[1] as HTMLElement).getAllByRole("cell")[1];
+		expect(time?.textContent).toMatch(/^\d\d:\d\d:56$/);
+		expect(time?.querySelector("time")?.getAttribute("title")).toBe(
+			"2026-09-29T12:34:56.789012Z",
+		);
 		await expectNoAxeViolations(container);
 	});
 

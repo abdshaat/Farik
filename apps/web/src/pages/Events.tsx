@@ -21,7 +21,16 @@ export function Events() {
 						align: "end",
 						render: (e) => e.seq,
 					},
-					{ key: "time", header: t("eventTime"), render: (e) => e.recordedAt },
+					{
+						key: "time",
+						header: t("eventTime"),
+						// Local HH:MM:SS fits a phone; the full value is on hover.
+						render: (e) => (
+							<time dateTime={e.recordedAt} title={e.recordedAt}>
+								{new Date(e.recordedAt).toTimeString().slice(0, 8)}
+							</time>
+						),
+					},
 					{ key: "kind", header: t("eventKind"), render: (e) => e.kind },
 					{ key: "task", header: t("eventTask"), render: (e) => e.taskId },
 				]}

@@ -29,7 +29,14 @@ export class FakeSocket implements SocketLike {
 			data: JSON.stringify({
 				jsonrpc: "2.0",
 				method: "event",
-				params: { event: { seq, kind: "team.paused", body: {} } },
+				params: {
+					event: {
+						seq,
+						recorded_at: "2026-09-29T12:34:56.789012Z",
+						kind: "team.paused",
+						body: {},
+					},
+				},
 			}),
 		});
 	}

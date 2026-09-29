@@ -5,9 +5,13 @@ const shots = new URL("./screenshots/", import.meta.url).pathname;
 
 /** Screenshots of the page as it is, at a phone's size and a desktop's, for the landing review. */
 async function screenshots(page: Page, name: string) {
+	// The Pause control shows once `serve.status` has answered, so the shots hold its data.
+	const control = page.getByRole("button", { name: /^(Pause|Resume)/ });
 	await page.setViewportSize({ width: 360, height: 780 });
+	await expect(control).toBeVisible();
 	await page.screenshot({ path: `${shots}${name}-360.png`, fullPage: true });
 	await page.setViewportSize({ width: 1280, height: 800 });
+	await expect(control).toBeVisible();
 	await page.screenshot({ path: `${shots}${name}-1280.png`, fullPage: true });
 }
 

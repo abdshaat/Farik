@@ -100,12 +100,11 @@ The rail shows only the places that exist, and each later step adds its own.
     - `fixtures/serve.ts` exports `startServe({ transcripts }): Promise<{ url: string; port: number; project: string; stop(): Promise<void> }>`. It makes a temporary git repository, runs `farik init` in it with sandboxing off (the same `settings.json` the CLI tests' `no_sandbox` writes), sets `XDG_CONFIG_HOME` to a temporary folder (so the developer's own Farik state is never touched), finds a free port through Node's `net`, spawns `target/debug/farik-e2e-serve --port <p>`, and reads the link from its stdout. `stop()` sends SIGINT and waits for the exit.
     - `connect.spec.ts` is this step's journey.
     - Screenshots at 360 × 780 and 1280 × 800 go to `apps/web/e2e/screenshots/` (gitignored) for the landing review.
-- **Wiring the check.** `cargo xtask check --integration` runs these after `pnpm check`:
-  1. `pnpm --filter @farik/web build`;
-  2. `cargo clippy -p farik --features e2e --bin farik-e2e-serve -- -D warnings`;
-  3. `cargo test -p farik --features e2e --test serving` (runs the e2e binary's own test);
-  4. `cargo build -p farik --features e2e --bin farik-e2e-serve`;
-  5. `pnpm --filter @farik/web e2e` (`playwright test`).
+- **Wiring the check.** `cargo xtask check --integration` first runs `pnpm -r --if-present generate` and `pnpm --filter @farik/web build`, before its first cargo command, so that no farik it compiles embeds a missing `apps/web/dist` (`xtask::check::web_app_first(tests: Tests) -> Vec<Vec<&'static str>>` lists them, empty without `--integration`). It runs these after `pnpm check`:
+  1. `cargo clippy -p farik --features e2e --bin farik-e2e-serve -- -D warnings`;
+  2. `cargo test -p farik --features e2e --test serving -- --include-ignored` (runs the e2e binary's own test, which needs git and is `#[ignore]`d);
+  3. `cargo build -p farik --features e2e --bin farik-e2e-serve`;
+  4. `pnpm --filter @farik/web e2e` (`playwright test`).
 
   `xtask::check::integration_steps(tests: Tests) -> Vec<(&'static str, Vec<&'static str>)>` lists them, as (program, args), and is empty without `--integration`. CI adds `pnpm install --frozen-lockfile` and `pnpm --filter @farik/web exec playwright install --with-deps chromium` before the check. Clippy's `--all-targets` does not build the feature-gated binary, so `integration_steps`' cargo build is what compiles it.
 
@@ -176,7 +175,7 @@ Tests:
 - `opens_the_link_in_a_browser` asserts that `farik serve`, with a recording `open_url`, calls it once with the printed link.
 - `does_not_open_with_no_open` asserts that with `--no-open` it is never called.
 - `keeps_serving_when_no_browser_opens` asserts that an `open_url` returning `Err("no display")` prints the stderr sentence and serving continues (`farik stop` then exits 0).
-- `the_e2e_binary_serves_with_recorded_sessions` (in `crates/cli/tests/serving.rs`, `#[cfg(feature = "e2e")]`, run by integration step 3) asserts that `farik-e2e-serve --port <p>` prints the link and answers `GET /session` with 401.
+- `the_e2e_binary_serves_with_recorded_sessions` (in `crates/cli/tests/serving.rs`, `#[cfg(feature = "e2e")]`, run by integration step 2) asserts that `farik-e2e-serve --port <p>` prints the link and answers `GET /session` with 401.
 
 - [x] `feat(cli): open the browser from farik serve, and add the e2e server`
 
@@ -220,7 +219,7 @@ Tests:
 - `connect.spec.ts: a used link and a lost connection are said plainly`:
   1. the same link opened in a second page shows the link-used text;
   2. `stop()` makes the first page show "Farik stopped answering".
-- `integration_steps_build_the_app_and_run_the_journey` (xtask unit test) asserts `integration_steps(Tests::All)` is exactly the five steps in order, and `integration_steps(Tests::WithoutTheOnesThatNeedAProgram)` is empty.
+- `integration_steps_build_the_app_and_run_the_journey` (xtask unit test) asserts `integration_steps(Tests::All)` is exactly the four steps in order, and `integration_steps(Tests::WithoutTheOnesThatNeedAProgram)` is empty.
 
 - [x] `test(web): drive the shell through the real server and browser`
 

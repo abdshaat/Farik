@@ -98,6 +98,7 @@ pub fn integration_steps(tests: Tests) -> Vec<(&'static str, Vec<&'static str>)>
             ),
             (
                 "cargo",
+                // Its tests need git, so they are `#[ignore]`d, and without this none of them runs.
                 vec![
                     "test",
                     "-p",
@@ -106,6 +107,8 @@ pub fn integration_steps(tests: Tests) -> Vec<(&'static str, Vec<&'static str>)>
                     "e2e",
                     "--test",
                     "serving",
+                    "--",
+                    "--include-ignored",
                 ],
             ),
             (
@@ -233,7 +236,9 @@ mod tests {
                         "--features",
                         "e2e",
                         "--test",
-                        "serving"
+                        "serving",
+                        "--",
+                        "--include-ignored",
                     ]
                 ),
                 (
