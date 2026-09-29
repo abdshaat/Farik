@@ -47,13 +47,19 @@ pub(super) fn triage_message(contract: &TaskContract) -> String {
     )
 }
 
-/// The judgment session's message: judge the contract on the Definition of Ready's two
-/// questions and record both answers.
-pub(super) fn judgment_message(contract: &TaskContract) -> String {
+/// The judgment session's message: check the contract against the team's questions, numbered,
+/// and record one answer to each.
+pub(super) fn judgment_message(contract: &TaskContract, questions: &[String]) -> String {
+    let numbered: Vec<String> = questions
+        .iter()
+        .enumerate()
+        .map(|(index, question)| format!("{}. {question}", index + 1))
+        .collect();
     format!(
-        "Judge the contract of {task}, which is above: does the task fit its budget, and would its \
-         criteria detect the failure its intent worries about? Record both answers and your reason \
-         with `farik_record_judgment`.",
+        "Check the plan of {task}, whose contract is above, against these questions:\n\n{}\n\n\
+         Record one answer to each, in this order, and your overall reason with \
+         `farik_record_judgment`.",
+        numbered.join("\n"),
         task = contract.id.as_str()
     )
 }

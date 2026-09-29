@@ -157,14 +157,14 @@ pub const CEREMONY_INSTRUCTIONS: [(Thread, &str); 4] = [
     ),
 ];
 
-/// The `This session` section of the Scrum Master's judgment of a contract (5.3), a `refine`
+/// The `This session` section of the judge's check of a contract's plan (5.3), a `refine`
 /// session given `farik_record_judgment` alone.
-pub const JUDGMENT_INSTRUCTION: &str = "This session judges the contract above, which already \
-     passes the governor's structural rules. Answer two questions, each honestly: is the task small \
-     enough to finish within its budget, and would its criteria actually detect the failure its \
-     intent worries about, not just that something ran? End the session by calling \
-     `farik_record_judgment` with both answers and your reason, which the Product Manager \
-     rewrites from when either answer is no.";
+pub const JUDGMENT_INSTRUCTION: &str = "This session checks the plan of the contract above, \
+     which already passes the governor's structural rules. Answer each question of the message you \
+     were given, honestly: yes only when the plan passes it, not just when something would run. \
+     End the session by calling `farik_record_judgment` with one answer to each question, in the \
+     order they are numbered, and your overall reason, which the Product Manager rewrites from \
+     when any answer is no.";
 
 /// The system prompt of one session: the sections of `PROMPT_SECTIONS`, in that order.
 ///

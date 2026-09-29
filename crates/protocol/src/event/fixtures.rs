@@ -185,12 +185,13 @@ fn a_hold_body_wire(kind: EventKind) -> Value {
     }
 }
 
-/// The Scrum Master's judgment of a contract, passing both rules.
+/// The judge's check of a contract's plan, passing its one question.
 fn a_judgment_body_wire() -> Value {
     json!({
         "judged_by": "sam-ortiz",
-        "fits_budget": true,
-        "criteria_detect_failure": true,
+        "answers": [
+            { "question": "Does the task fit its budget?", "pass": true, "reason": "One deliverable." }
+        ],
         "reason": "One deliverable and a criterion that runs it."
     })
 }

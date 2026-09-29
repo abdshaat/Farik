@@ -35,9 +35,15 @@ pub(crate) enum Refusal {
         has_parent: bool,
         triaged: bool,
     },
-    /// This caller may not judge this contract now: only the Scrum Master does, on a task
+    /// This caller may not judge this contract now: only the team's judge does, on a task
     /// `refining` (5.3).
-    JudgmentNotAllowed { role: Role, status: TaskStatus },
+    JudgmentNotAllowed {
+        role: Role,
+        judge: Role,
+        status: TaskStatus,
+    },
+    /// A judgment whose answers are not one per question of the team's plan check.
+    JudgmentAnswers { expected: usize },
     /// The caller is neither a contract-writing role nor the task's assignee or reviewer.
     NotAContractWriter { agent_id: String, task_id: String },
     /// An epic's contract waits for the human's answer.
@@ -131,9 +137,15 @@ impl Refusal {
                 "triage_not_allowed",
                 triage(*role, *status, *has_parent, *triaged),
             ),
-            Self::JudgmentNotAllowed { role, status } => {
-                ("judgment_not_allowed", judgment(*role, *status))
-            }
+            Self::JudgmentNotAllowed {
+                role,
+                judge,
+                status,
+            } => ("judgment_not_allowed", judgment(*role, *judge, *status)),
+            Self::JudgmentAnswers { expected } => (
+                "judgment_answers",
+                format!("expected {expected} answers, one per question"),
+            ),
             Self::NotAContractWriter { agent_id, task_id } => (
                 "not_a_contract_writer",
                 format!(
@@ -304,16 +316,15 @@ fn triage(role: Role, status: TaskStatus, has_parent: bool, triaged: bool) -> St
     }
 }
 
-fn judgment(role: Role, status: TaskStatus) -> String {
-    if role == Role::ScrumMaster {
+fn judgment(role: Role, judge: Role, status: TaskStatus) -> String {
+    if role == judge {
         format!(
-            "the task is {status}, and the Scrum Master judges a contract only while it is \
-             refining (5.3)"
+            "the task is {status}, and the judge checks a contract only while it is refining (5.3)"
         )
     } else {
         format!(
-            "role {role} does not judge a contract: the Scrum Master does, on a task refining \
-             (5.3)"
+            "role {role} does not judge a contract: the team's judge, role {judge}, does, on a \
+             task refining (5.3)"
         )
     }
 }

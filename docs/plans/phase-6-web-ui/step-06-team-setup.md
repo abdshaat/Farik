@@ -188,7 +188,7 @@ RPC:
 - `reads_old_judgments`: both booleans true pass as two answers.
 - `honours_never`: no judgment session starts.
 
-- [ ] `feat(runtime): check plans by the team's questions, by the founder's judge`
+- [x] `feat(runtime): check plans by the team's questions, by the founder's judge`
 
 ### Task 3: Scan facts, the user's note, personas, and the defaults in init
 

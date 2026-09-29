@@ -185,19 +185,28 @@ pub fn triage_by_sm_frk_1() -> Transcript {
     Transcript::from_jsonl(include_str!("transcripts/triage_by_sm_frk_1.jsonl"))
 }
 
-/// The Scrum Master's judgment of FRK-1: `farik_record_judgment` answering yes to both questions,
-/// "One file in five dollars, and C1 fails while done.txt is missing.". Hand-written.
+/// The Scrum Master's judgment of FRK-1: `farik_record_judgment` answering yes to each of the
+/// default two questions, "One file in five dollars, and C1 fails while done.txt is missing.".
+/// Hand-written.
 #[must_use]
 pub fn judge_frk_1_passes() -> Transcript {
     Transcript::from_jsonl(include_str!("transcripts/judge_frk_1_passes.jsonl"))
 }
 
-/// The Scrum Master's judgment of FRK-1: `farik_record_judgment` answering that it fits its budget
-/// and that its criteria would not detect the failure, "C1 checks that done.txt exists, not what
-/// it says.". Hand-written.
+/// The Scrum Master's judgment of FRK-1: `farik_record_judgment` answering yes to the first of the
+/// default two questions and no to the second, "C1 checks that done.txt exists, not what it
+/// says.". Hand-written.
 #[must_use]
 pub fn judge_frk_1_fails() -> Transcript {
     Transcript::from_jsonl(include_str!("transcripts/judge_frk_1_fails.jsonl"))
+}
+
+/// The Architect's judgment of FRK-1: `farik_record_judgment` answering yes to each of the
+/// default two questions, "The design is one file, and C1 fails while done.txt is missing.".
+/// Hand-written.
+#[must_use]
+pub fn judge_frk_1_by_architect() -> Transcript {
+    Transcript::from_jsonl(include_str!("transcripts/judge_frk_1_by_architect.jsonl"))
 }
 
 /// The Product Manager's refine session of FRK-1 that asks the human "Should done.txt be empty?"

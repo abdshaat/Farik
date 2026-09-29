@@ -178,7 +178,7 @@ static TOOLS: LazyLock<Vec<FarikTool>> = LazyLock::new(|| {
         tool::<contracts::RecordJudgmentInput>(
             "farik_record_judgment",
             Read,
-            "Record your judgment of this session's contract: whether the task fits its budget and whether its criteria would detect the failure its intent worries about, with the reason.",
+            "Record your check of this session's contract: one answer (pass, and why) to each question the session's message numbers, in that order, and your overall reason.",
         ),
         tool::<contracts::WriteContractInput>(
             "farik_write_contract",

@@ -9,8 +9,8 @@ use farik_core::governor::gates::{
 };
 use farik_core::governor::transition_table::TransitionActor;
 use farik_protocol::event::{
-    ContractJudgedBody, ContractWrittenBody, EventBody, EventKind, RequestTriagedBody,
-    RequestTriagedBodySize, Thread,
+    ContractJudgedBody, ContractWrittenBody, EventBody, EventKind, JudgmentAnswer,
+    RequestTriagedBody, RequestTriagedBodySize, Thread,
 };
 use farik_store::EventQuery;
 use farik_store::requests::{RequestError, file_request, summary_of};
@@ -43,15 +43,23 @@ pub(crate) struct TriageInput {
     reason: String,
 }
 
+/// One answer of `farik_record_judgment`, to the question of the same number.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct JudgmentAnswerInput {
+    /// Whether the plan passes the question.
+    pub(crate) pass: bool,
+    /// Why, in a sentence the log keeps.
+    pub(crate) reason: String,
+}
+
 /// `farik_record_judgment`'s input.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct RecordJudgmentInput {
-    /// Whether the task fits its budget.
-    pub(crate) fits_budget: bool,
-    /// Whether its criteria would detect the failure its intent worries about.
-    pub(crate) criteria_detect_failure: bool,
-    /// Why, in a sentence the log keeps.
+    /// One answer per question, in the order the session's message numbers them.
+    pub(crate) answers: Vec<JudgmentAnswerInput>,
+    /// Why, overall, in a sentence the log keeps.
     pub(crate) reason: String,
 }
 
@@ -153,10 +161,9 @@ pub(super) fn triage(call: &Call<'_>, input: &TriageInput) -> Result<Value, Tool
     )
 }
 
-/// Records the Scrum Master's judgment of the session's contract against the Definition of
-/// Ready's judgment rules (5.3): whether it fits its budget and whether its criteria would detect
-/// the failure its intent worries about, with the reason. Only the Scrum Master judges, and only
-/// a task `refining`.
+/// Records the judge's check of the session's contract's plan (5.3): one answer per question of
+/// the team's `policy.judgment`, in order, and an overall reason. Only the team's judge
+/// (`Team::judge`) checks, only a task `refining`, and only with one answer per question.
 pub(super) fn record_judgment(
     call: &Call<'_>,
     input: &RecordJudgmentInput,
@@ -167,10 +174,19 @@ pub(super) fn record_judgment(
         return Err(Refusal::BlankReason.into());
     }
     let (_, row) = call.contract(task)?;
-    if call.role() != Role::ScrumMaster || row.status != TaskStatus::Refining {
+    let judge = call.team.judge();
+    if call.role() != judge || row.status != TaskStatus::Refining {
         return Err(Refusal::JudgmentNotAllowed {
             role: call.role(),
+            judge,
             status: row.status,
+        }
+        .into());
+    }
+    let questions = call.team.judgment().questions;
+    if input.answers.len() != questions.len() {
+        return Err(Refusal::JudgmentAnswers {
+            expected: questions.len(),
         }
         .into());
     }
@@ -178,8 +194,17 @@ pub(super) fn record_judgment(
         Some(task),
         EventBody::ContractJudged(ContractJudgedBody {
             judged_by: call.agent_id().to_string(),
-            fits_budget: input.fits_budget,
-            criteria_detect_failure: input.criteria_detect_failure,
+            answers: questions
+                .into_iter()
+                .zip(&input.answers)
+                .map(|(question, answer)| JudgmentAnswer {
+                    question,
+                    pass: answer.pass,
+                    reason: answer.reason.clone(),
+                })
+                .collect(),
+            fits_budget: None,
+            criteria_detect_failure: None,
             reason: reason.to_string(),
         }),
     )?;
@@ -587,7 +612,8 @@ mod tests {
         assert_eq!(project.event_count(), before);
     }
 
-    /// `a_team_of_three`, with an active Scrum Master `sm` besides.
+    /// `a_team_of_three`, with an active Scrum Master `sm` besides, who checks every plan
+    /// against the default two questions.
     fn a_project_with_scrum_master(name: &str) -> TestProject {
         TestProject::new(
             name,
@@ -595,16 +621,101 @@ mod tests {
                 wire["agents"].as_array_mut().expect("agents").push(
                     farik_core::team::fixtures::an_agent_wire("sm", "scrum_master"),
                 );
+                wire["policy"]["judgment"] = json!({ "required": "always" });
             }),
         )
     }
 
+    /// An answer to each of the default two questions, and `reason` for the whole.
     fn judgment(fits_budget: bool, criteria_detect_failure: bool, reason: &str) -> Value {
         json!({
-            "fits_budget": fits_budget,
-            "criteria_detect_failure": criteria_detect_failure,
+            "answers": [
+                { "pass": fits_budget, "reason": "One file in five dollars." },
+                { "pass": criteria_detect_failure, "reason": "C1 runs the form." }
+            ],
             "reason": reason
         })
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn records_one_answer_per_question() {
+        let project = a_project_with_scrum_master("tools-judge-answers");
+        project.filed("FRK-1", "refining", "task", None);
+        project
+            .call(
+                "sm",
+                Some("FRK-1"),
+                "farik_record_judgment",
+                judgment(true, false, "It fits, but the checks miss the failure."),
+            )
+            .expect("the judge answers each question");
+        let judged = project.events(&[EventKind::ContractJudged]);
+        let EventBody::ContractJudged(body) = &judged[0].body else {
+            panic!("a contract.judged");
+        };
+        let answers: Vec<(&str, bool, &str)> = body
+            .answers
+            .iter()
+            .map(|answer| {
+                (
+                    answer.question.as_str(),
+                    answer.pass,
+                    answer.reason.as_str(),
+                )
+            })
+            .collect();
+        assert_eq!(
+            answers,
+            [
+                (
+                    "Does the task fit its budget?",
+                    true,
+                    "One file in five dollars."
+                ),
+                (
+                    "Would its checks notice if the work went wrong the way its intent worries \
+                     about?",
+                    false,
+                    "C1 runs the form."
+                ),
+            ]
+        );
+        assert_eq!(body.reason, "It fits, but the checks miss the failure.");
+        assert_eq!(
+            (body.fits_budget, body.criteria_detect_failure),
+            (None, None),
+            "a new judgment leaves the old answers out"
+        );
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn refuses_the_wrong_number_of_answers() {
+        let project = a_project_with_scrum_master("tools-judge-count");
+        project.filed("FRK-1", "refining", "task", None);
+        let before = project.event_count();
+        for answers in [
+            json!([{ "pass": true, "reason": "Fits." }]),
+            json!([
+                { "pass": true, "reason": "Fits." },
+                { "pass": true, "reason": "Caught." },
+                { "pass": true, "reason": "Small." }
+            ]),
+        ] {
+            let refused = project.call(
+                "sm",
+                Some("FRK-1"),
+                "farik_record_judgment",
+                json!({ "answers": answers, "reason": "One file." }),
+            );
+            assert!(
+                matches!(&refused, Err(ToolError::Refused { reason })
+                    if reason == "judgment_answers: expected 2 answers, one per question"),
+                "{refused:?}"
+            );
+        }
+        assert_eq!(project.event_count(), before);
     }
 
     #[test]
@@ -630,8 +741,13 @@ mod tests {
             panic!("a contract.judged");
         };
         assert_eq!(body.judged_by, "sm");
-        assert!(body.fits_budget);
-        assert!(!body.criteria_detect_failure);
+        assert_eq!(
+            body.answers
+                .iter()
+                .map(|answer| answer.pass)
+                .collect::<Vec<_>>(),
+            [true, false]
+        );
         assert_eq!(
             body.reason,
             "It fits the sprint, but the criteria only check the happy path."

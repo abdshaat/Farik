@@ -20,16 +20,16 @@ pub use crate::generated::event::{
     CostRecordedBodyPurpose, CriteriaUpdatedBody, CriterionRecordedBody,
     CriterionRecordedBodyRunBy, DecisionWrittenBody, DriftDetectedBody, DriftDetectedBodyDrift,
     EscalationAgedBody, EscalationRaisedBody, EscalationRaisedBodyReason, EscalationResolvedBody,
-    EventKind, HumanAcceptedBody, HumanAcceptedBodySubject, MemoryWrittenBody, MessagePostedBody,
-    NoteWrittenBody, NoteWrittenBodyKind, ProductDocWrittenBody, ProjectScannedBody,
-    PullRequestOpenedBody, QuestionAnsweredBody, QuestionAskedBody, RequestTriagedBody,
-    RequestTriagedBodySize, RetroAppendedBody, ReviewRecordedBody, SessionEndedBody,
-    SessionEndedBodyReason, SessionStartedBody, SessionStartedBodyEffort, SessionStartedBodyModel,
-    SessionStartedBodyPurpose, SprintEndedBody, SprintEndedBodyEndedBy, SprintPlannedBody,
-    SprintStartedBody, TaskCreatedBody, TaskIntegratedBody, TaskIntegratedBodyIntegratedBy,
-    TaskTransitionedBody, TaskTransitionedBodyEffectsItem, TeamPausedBody, TeamUpdatedBody,
-    TokenUsage, ToolCalledBody, ToolDeniedBody, ToolReturnedBody, TransitionRefusedBody,
-    TransitionRefusedBodyRefusal,
+    EventKind, HumanAcceptedBody, HumanAcceptedBodySubject, JudgmentAnswer, MemoryWrittenBody,
+    MessagePostedBody, NoteWrittenBody, NoteWrittenBodyKind, ProductDocWrittenBody,
+    ProjectScannedBody, PullRequestOpenedBody, QuestionAnsweredBody, QuestionAskedBody,
+    RequestTriagedBody, RequestTriagedBodySize, RetroAppendedBody, ReviewRecordedBody,
+    SessionEndedBody, SessionEndedBodyReason, SessionStartedBody, SessionStartedBodyEffort,
+    SessionStartedBodyModel, SessionStartedBodyPurpose, SprintEndedBody, SprintEndedBodyEndedBy,
+    SprintPlannedBody, SprintStartedBody, TaskCreatedBody, TaskIntegratedBody,
+    TaskIntegratedBodyIntegratedBy, TaskTransitionedBody, TaskTransitionedBodyEffectsItem,
+    TeamPausedBody, TeamUpdatedBody, TokenUsage, ToolCalledBody, ToolDeniedBody, ToolReturnedBody,
+    TransitionRefusedBody, TransitionRefusedBodyRefusal,
 };
 /// The generated names of the vocabularies the governor's events repeat, renamed at the edge so
 /// that they cannot be mistaken for `farik-core`'s own types of the same name.
@@ -355,7 +355,7 @@ pub enum EventBody {
     /// A contract was held to the Definition of Ready or of Done.
     #[serde(rename = "contract.evaluated")]
     ContractEvaluated(ContractEvaluatedBody),
-    /// The Scrum Master judged a contract against the Definition of Ready's judgment rules.
+    /// The team's judge checked a contract's plan against the team's questions.
     #[serde(rename = "contract.judged")]
     ContractJudged(ContractJudgedBody),
     /// An agent recorded an exit criterion's result.

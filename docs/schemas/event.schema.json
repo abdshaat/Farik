@@ -411,14 +411,32 @@
     },
     "contractJudgedBody": {
       "title": "Contract Judged Body",
-      "description": "The Scrum Master judged a contract against the Definition of Ready's judgment rules (docs/SPEC.md section 5.3): whether it fits its budget and whether its criteria would detect the failure its intent worries about, with the reason.",
+      "description": "The team's judge checked a contract's plan (docs/SPEC.md section 5.3): one answer per question of the team's policy.judgment, in order, each with the question as asked, and an overall reason. fits_budget and criteria_detect_failure are the two answers of a judgment recorded before the questions were the team's, which is read as two answers under the default questions; a new judgment leaves them out.",
       "type": "object",
       "additionalProperties": false,
-      "required": ["judged_by", "fits_budget", "criteria_detect_failure", "reason"],
+      "required": ["judged_by", "reason"],
       "properties": {
         "judged_by": { "type": "string" },
+        "answers": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 5,
+          "items": { "$ref": "#/$defs/judgmentAnswer" }
+        },
         "fits_budget": { "type": "boolean" },
         "criteria_detect_failure": { "type": "boolean" },
+        "reason": { "type": "string" }
+      }
+    },
+    "judgmentAnswer": {
+      "title": "Judgment Answer",
+      "description": "The judge's answer to one question of the plan check.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["question", "pass", "reason"],
+      "properties": {
+        "question": { "type": "string" },
+        "pass": { "type": "boolean" },
         "reason": { "type": "string" }
       }
     },

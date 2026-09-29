@@ -57,25 +57,31 @@ pub enum ReadinessRule {
     PathsWithinParent,
     /// A task's budget fits in its parent's remaining budget.
     BudgetWithinParent,
-    /// The Scrum Master's judgment review is recorded when the team has one.
+    /// The judge's review is recorded when the team's policy checks plans.
     JudgmentRecorded,
-    /// The Scrum Master judged that the task fits its budget.
-    JudgmentFitsBudget,
-    /// The Scrum Master judged that the criteria would detect the failure the intent worries
-    /// about.
-    JudgmentCriteriaDetectFailure,
+    /// The judge answered yes to every question it was asked.
+    JudgmentAnswers,
 }
 
-/// The Scrum Master's judgment (`docs/SPEC.md` section 5.3), recorded by the runtime as a
-/// `contract.judged` event and passed in.
+/// The judge's answer to one question of the plan check.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct JudgmentAnswer {
+    /// The question, as it was asked.
+    pub question: String,
+    /// Whether the plan passes it.
+    pub pass: bool,
+    /// Why.
+    pub reason: String,
+}
+
+/// The judge's check of a plan (`docs/SPEC.md` section 5.3), recorded by the runtime as a
+/// `contract.judged` event and passed in. It counts under whatever questions it answered: a
+/// change to the team's questions does not reopen a judged contract.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct JudgmentReview {
-    /// The task is small enough to finish within its budget.
-    pub fits_budget: bool,
-    /// The criteria would detect the failure the intent worries about, not just that something
-    /// ran.
-    pub criteria_detect_failure: bool,
-    /// The written reason for both answers.
+    /// One answer per question, in the order asked.
+    pub answers: Vec<JudgmentAnswer>,
+    /// The judge's overall reason.
     pub reason: String,
 }
 
@@ -103,7 +109,7 @@ pub struct ReadinessContext {
     pub parent: Option<ParentState>,
     /// The team rules in force.
     pub rules: TeamRules,
-    /// Whether the team has an active Scrum Master, whose judgment review is then required.
+    /// Whether the team's policy checks plans, and the judge's review is then required.
     pub requires_judgment_review: bool,
     /// The recorded judgment review, when there is one.
     pub judgment_review: Option<JudgmentReview>,
@@ -141,17 +147,13 @@ const CHECKS: [Check; 18] = [
     budget_within_parent,
 ];
 
-/// The Scrum Master's judgment, asked of a contract only once every other rule passes, so that a
+/// The judge's review, asked of a contract only once every other rule passes, so that a
 /// contract going back for another rule is not also refused for a judgment nobody asked for yet.
-const JUDGMENT_CHECKS: [Check; 3] = [
-    judgment_recorded,
-    judgment_fits_budget,
-    judgment_criteria_detect_failure,
-];
+const JUDGMENT_CHECKS: [Check; 2] = [judgment_recorded, judgment_answers];
 
 /// Checks a contract against the Definition of Ready: the structural rules of `docs/SPEC.md`
-/// section 5.3, the team rules of 5.12, the parent rules of 5.16, and the Scrum Master's
-/// recorded judgment when the team has one, evaluated only when every other rule passes. Refuses
+/// section 5.3, the team rules of 5.12, the parent rules of 5.16, and the judge's
+/// recorded judgment when the team checks plans, evaluated only when every other rule passes. Refuses
 /// with every rule the contract fails.
 ///
 /// # Errors
@@ -694,45 +696,34 @@ fn judgment_recorded(_: &TaskContract, context: &ReadinessContext) -> Option<Rea
     if context.requires_judgment_review && context.judgment_review.is_none() {
         return Some(failure(
             ReadinessRule::JudgmentRecorded,
-            "the Scrum Master's judgment review is not recorded".to_string(),
+            "the judge's judgment review is not recorded".to_string(),
         ));
     }
     None
 }
 
-fn judgment_fits_budget(_: &TaskContract, context: &ReadinessContext) -> Option<ReadinessFailure> {
-    if context.requires_judgment_review
-        && let Some(review) = &context.judgment_review
-        && !review.fits_budget
-    {
-        return Some(failure(
-            ReadinessRule::JudgmentFitsBudget,
-            format!(
-                "the Scrum Master judged the task too large for its budget: {}",
-                review.reason
-            ),
-        ));
+fn judgment_answers(_: &TaskContract, context: &ReadinessContext) -> Option<ReadinessFailure> {
+    let review = context
+        .judgment_review
+        .as_ref()
+        .filter(|_| context.requires_judgment_review)?;
+    let failed: Vec<String> = review
+        .answers
+        .iter()
+        .filter(|answer| !answer.pass)
+        .map(|answer| format!("{} ({})", answer.question, answer.reason))
+        .collect();
+    if failed.is_empty() {
+        return None;
     }
-    None
-}
-
-fn judgment_criteria_detect_failure(
-    _: &TaskContract,
-    context: &ReadinessContext,
-) -> Option<ReadinessFailure> {
-    if context.requires_judgment_review
-        && let Some(review) = &context.judgment_review
-        && !review.criteria_detect_failure
-    {
-        return Some(failure(
-            ReadinessRule::JudgmentCriteriaDetectFailure,
-            format!(
-                "the Scrum Master judged that the criteria would not detect the failure the intent worries about: {}",
-                review.reason
-            ),
-        ));
-    }
-    None
+    Some(failure(
+        ReadinessRule::JudgmentAnswers,
+        format!(
+            "the judge answered no: {}. {}",
+            failed.join("; "),
+            review.reason
+        ),
+    ))
 }
 
 #[cfg(test)]
@@ -741,8 +732,8 @@ mod tests {
 
     use super::fixtures::{a_contract, a_ready_context};
     use super::{
-        JudgmentReview, ParentState, ReadinessContext, ReadinessRule as R, TeamRules,
-        evaluate_readiness,
+        JudgmentAnswer, JudgmentReview, ParentState, ReadinessContext, ReadinessRule as R,
+        TeamRules, evaluate_readiness,
     };
     use crate::contract::{Role, TaskContract, TaskStatus, VerificationWire};
     use crate::generated::task_contract::FarikTaskContractKind as Kind;
@@ -765,9 +756,16 @@ mod tests {
     }
 
     fn a_review(fits_budget: bool, criteria_detect_failure: bool) -> JudgmentReview {
+        let answer = |question: &str, pass: bool| JudgmentAnswer {
+            question: question.to_string(),
+            pass,
+            reason: format!("{question} {pass}"),
+        };
         JudgmentReview {
-            fits_budget,
-            criteria_detect_failure,
+            answers: vec![
+                answer("Fits?", fits_budget),
+                answer("Caught?", criteria_detect_failure),
+            ],
             reason: "Two files, one form.".to_string(),
         }
     }
@@ -1296,7 +1294,7 @@ mod tests {
     }
 
     #[test]
-    fn requires_the_judgment_review_only_when_the_team_has_a_scrum_master() {
+    fn requires_the_judgment_review_only_when_the_policy_asks_for_it() {
         let mut context = a_ready_context();
         context.judgment_review = None;
         assert_eq!(failed_rules(&a_contract(), &context), [R::JudgmentRecorded]);
@@ -1308,23 +1306,21 @@ mod tests {
     }
 
     #[test]
-    fn refuses_a_judgment_that_the_task_does_not_fit_its_budget() {
+    fn refuses_a_judgment_with_a_failed_answer_naming_each_one() {
         let mut context = a_ready_context();
         context.judgment_review = Some(a_review(false, true));
         assert_eq!(
-            failed_rules(&a_contract(), &context),
-            [R::JudgmentFitsBudget]
+            message_of(&a_contract(), &context, R::JudgmentAnswers),
+            "the judge answered no: Fits? (Fits? false). Two files, one form."
         );
-    }
-
-    #[test]
-    fn refuses_a_judgment_that_the_criteria_would_not_detect_the_failure() {
-        let mut context = a_ready_context();
-        context.judgment_review = Some(a_review(true, false));
+        context.judgment_review = Some(a_review(false, false));
         assert_eq!(
-            failed_rules(&a_contract(), &context),
-            [R::JudgmentCriteriaDetectFailure]
+            message_of(&a_contract(), &context, R::JudgmentAnswers),
+            "the judge answered no: Fits? (Fits? false); Caught? (Caught? false). Two files, \
+             one form."
         );
+        context.judgment_review = Some(a_review(true, true));
+        assert_eq!(evaluate_readiness(&a_contract(), &context), Ok(()));
     }
 
     #[test]

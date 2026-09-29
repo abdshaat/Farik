@@ -11,26 +11,29 @@ use std::time::Duration;
 use farik_core::branch::task_branch;
 use farik_core::budget::SessionLedger;
 use farik_core::contract::{Role, TaskContract, TaskId, TaskKind, TaskStatus, wire_method};
+use farik_core::generated::team::Judgment;
 use farik_core::governor::done::{CriterionResult, DoneEvidence, RunBy};
 use farik_core::governor::escalation::EscalationReason;
 use farik_core::governor::gates::{
     AssignmentInput, AssignmentRequester, Blocker, ChildState, DependencyState, Rejection,
     WorkState,
 };
-use farik_core::governor::readiness::{JudgmentReview, ParentState, ReadinessContext};
+use farik_core::governor::readiness::{
+    JudgmentAnswer, JudgmentReview, ParentState, ReadinessContext,
+};
 use farik_core::governor::transition::{
     ContractAcceptance, GateFailure, TransitionContext, TransitionDecision, TransitionEffect,
     TransitionRefusal, TransitionRequest, evaluate_transition,
 };
 use farik_core::governor::transition_table::{GateId, TransitionActor};
-use farik_core::team::{AgentStatus, HumanAcceptsContracts, Team};
+use farik_core::team::{AgentStatus, HumanAcceptsContracts, JudgmentRequired, Team};
 use farik_protocol::clock::Clock;
 use farik_protocol::event::{
-    BlockerWire, ContractEvaluatedBody, ContractEvaluatedBodyGate, CriterionRecordedBodyRunBy,
-    EscalationRaisedBody, EscalationRaisedBodyReason, EventBody, EventIds, EventKind, FarikEvent,
-    GateWire, HumanAcceptedBodySubject, NoteWrittenBodyKind, RejectionWire, TaskStatusWire,
-    TaskTransitionedBody, TaskTransitionedBodyEffectsItem, TransitionActorWire,
-    TransitionRefusedBody, TransitionRefusedBodyRefusal, new_event,
+    BlockerWire, ContractEvaluatedBody, ContractEvaluatedBodyGate, ContractJudgedBody,
+    CriterionRecordedBodyRunBy, EscalationRaisedBody, EscalationRaisedBodyReason, EventBody,
+    EventIds, EventKind, FarikEvent, GateWire, HumanAcceptedBodySubject, NoteWrittenBodyKind,
+    RejectionWire, TaskStatusWire, TaskTransitionedBody, TaskTransitionedBodyEffectsItem,
+    TransitionActorWire, TransitionRefusedBody, TransitionRefusedBodyRefusal, new_event,
 };
 use farik_store::files::{FilesError, ProjectFiles};
 use farik_store::{EventLog, EventQuery, Git, GitError, Projections, StoreError, TaskProjection};
@@ -465,7 +468,7 @@ impl Transitions {
             active_agents_by_role: active_agents_by_role(team),
             parent: self.parent_state(&board, &contract)?,
             rules: team.rules(),
-            requires_judgment_review: team.has_active(Role::ScrumMaster),
+            requires_judgment_review: team.judgment().required == JudgmentRequired::Always,
             judgment_review: judgment_since_written(&history),
         };
 
@@ -1039,7 +1042,7 @@ pub(crate) fn refining_began(history: &[FarikEvent]) -> u64 {
         .unwrap_or(0)
 }
 
-/// The Scrum Master's judgment of the contract the task has now (5.3): the last `contract.judged`
+/// The judge's review of the contract the task has now (5.3): the last `contract.judged`
 /// after both the task's last `contract.written` and where refining last began, else none, since a
 /// contract written again, or refined over, is not the one that was judged.
 pub(crate) fn judgment_since_written(history: &[FarikEvent]) -> Option<JudgmentReview> {
@@ -1055,13 +1058,41 @@ pub(crate) fn judgment_since_written(history: &[FarikEvent]) -> Option<JudgmentR
         .rev()
         .filter(|event| event.envelope.seq > since)
         .find_map(|event| match &event.body {
-            EventBody::ContractJudged(body) => Some(JudgmentReview {
-                fits_budget: body.fits_budget,
-                criteria_detect_failure: body.criteria_detect_failure,
-                reason: body.reason.clone(),
-            }),
+            EventBody::ContractJudged(body) => Some(judgment_review(body)),
             _ => None,
         })
+}
+
+/// A `contract.judged` as the judge's review: its answers, or, for one recorded before the
+/// questions were the team's, its two booleans as answers to the default two questions, each with
+/// the judgment's reason. A boolean left out of such an event is read as no.
+fn judgment_review(body: &ContractJudgedBody) -> JudgmentReview {
+    let answers = if body.answers.is_empty() {
+        let old = [body.fits_budget, body.criteria_detect_failure];
+        Judgment::default()
+            .questions
+            .into_iter()
+            .zip(old)
+            .map(|(question, pass)| JudgmentAnswer {
+                question: question.to_string(),
+                pass: pass.unwrap_or(false),
+                reason: body.reason.clone(),
+            })
+            .collect()
+    } else {
+        body.answers
+            .iter()
+            .map(|answer| JudgmentAnswer {
+                question: answer.question.clone(),
+                pass: answer.pass,
+                reason: answer.reason.clone(),
+            })
+            .collect()
+    };
+    JudgmentReview {
+        answers,
+        reason: body.reason.clone(),
+    }
 }
 
 /// Whether the human accepted the contract the task has now (5.16 item 2): a `human.accepted
@@ -1936,6 +1967,7 @@ mod tests {
             let mut paused = an_agent_wire("dev-c", "software_developer");
             paused["status"] = json!("paused");
             agents.push(paused);
+            wire["policy"]["judgment"] = json!({ "required": "always" });
         });
         let project = Project::new("context-sources", team, at(12));
         project.file("FRK-1", |wire| {
@@ -2687,13 +2719,21 @@ mod tests {
         assert_eq!(row.status, TaskStatus::Escalated);
     }
 
-    /// The default team with an active Scrum Master, `sam`, whose judgment readiness then needs.
+    /// The default team with an active Scrum Master, `sam`, who checks every plan against the
+    /// default two questions, whose judgment readiness then needs.
     fn a_team_with_a_scrum_master() -> Team {
+        a_team_with_a_scrum_master_and(|_| {})
+    }
+
+    /// `a_team_with_a_scrum_master`, with `change` applied to its wire last.
+    fn a_team_with_a_scrum_master_and(change: impl FnOnce(&mut Value)) -> Team {
         a_team(|wire| {
             wire["agents"]
                 .as_array_mut()
                 .expect("a list of agents")
                 .push(an_agent_wire("sam", "scrum_master"));
+            wire["policy"]["judgment"] = json!({ "required": "always" });
+            change(wire);
         })
     }
 
@@ -2710,15 +2750,36 @@ mod tests {
         );
     }
 
-    /// A `contract.judged` of `task` by `sam`, with both answers and a reason.
+    /// A `contract.judged` of `task` by `sam`, answering the default two questions, and a reason.
     fn judged(project: &Project, task: &str, fits_budget: bool, criteria_detect_failure: bool) {
+        judged_with(
+            project,
+            task,
+            &[
+                ("Does the task fit its budget?", fits_budget),
+                (
+                    "Would its checks notice if the work went wrong the way its intent worries \
+                     about?",
+                    criteria_detect_failure,
+                ),
+            ],
+        );
+    }
+
+    /// A `contract.judged` of `task` by `sam` with these answers, each with its own reason.
+    fn judged_with(project: &Project, task: &str, answers: &[(&str, bool)]) {
+        let answers: Vec<Value> = answers
+            .iter()
+            .map(|(question, pass)| {
+                json!({ "question": question, "pass": pass, "reason": format!("Answered {pass}.") })
+            })
+            .collect();
         project.record(
             task,
             "contract.judged",
             &json!({
                 "judged_by": "sam",
-                "fits_budget": fits_budget,
-                "criteria_detect_failure": criteria_detect_failure,
+                "answers": answers,
                 "reason": "Two files and one form, too much for five dollars."
             }),
             at(10),
@@ -2780,7 +2841,10 @@ mod tests {
             "{outcome:?}"
         );
         let failures = readiness_failures(&project, "FRK-1");
-        assert!(holds(&failures, "too large for its budget"), "{failures:?}");
+        assert!(
+            holds(&failures, "Does the task fit its budget?"),
+            "{failures:?}"
+        );
         assert!(
             holds(
                 &failures,
@@ -2788,6 +2852,92 @@ mod tests {
             ),
             "{failures:?}"
         );
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn passes_only_when_every_answer_passes() {
+        let questions = [
+            "Does the task fit its budget?",
+            "Is it small enough to finish in one go?",
+            "Would its checks notice if the work went wrong the way its intent worries about?",
+        ];
+        for (answers, moves) in [([true, true, true], true), ([true, false, true], false)] {
+            let project = Project::new(
+                &format!("judged-answers-{moves}"),
+                a_team_with_a_scrum_master_and(|wire| {
+                    wire["policy"]["judgment"]["questions"] = json!(questions);
+                }),
+                at(12),
+            );
+            project.file("FRK-1", |_| {});
+            project.created("FRK-1", "refining");
+            written(&project, "FRK-1");
+            let answered: Vec<(&str, bool)> = questions.into_iter().zip(answers).collect();
+            judged_with(&project, "FRK-1", &answered);
+            let outcome = readying(&project, "FRK-1");
+            assert_eq!(
+                matches!(outcome, TransitionOutcome::Moved(_)),
+                moves,
+                "{answers:?}: {outcome:?}"
+            );
+            if !moves {
+                let failures = readiness_failures(&project, "FRK-1");
+                assert!(
+                    holds(
+                        &failures,
+                        "Is it small enough to finish in one go? (Answered false.)"
+                    ),
+                    "{failures:?}"
+                );
+                assert!(
+                    !holds(&failures, "Does the task fit its budget?"),
+                    "only the failed question is named: {failures:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn reads_old_judgments() {
+        for (fits_budget, moves) in [(true, true), (false, false)] {
+            let project = Project::new(
+                &format!("judged-old-{moves}"),
+                a_team_with_a_scrum_master(),
+                at(12),
+            );
+            project.file("FRK-1", |_| {});
+            project.created("FRK-1", "refining");
+            written(&project, "FRK-1");
+            project.record(
+                "FRK-1",
+                "contract.judged",
+                &json!({
+                    "judged_by": "sam",
+                    "fits_budget": fits_budget,
+                    "criteria_detect_failure": true,
+                    "reason": "One file, and C1 runs it."
+                }),
+                at(10),
+            );
+            let outcome = readying(&project, "FRK-1");
+            assert_eq!(
+                matches!(outcome, TransitionOutcome::Moved(_)),
+                moves,
+                "{outcome:?}"
+            );
+            if !moves {
+                let failures = readiness_failures(&project, "FRK-1");
+                assert!(
+                    holds(
+                        &failures,
+                        "Does the task fit its budget? (One file, and C1 runs it.)"
+                    ),
+                    "{failures:?}"
+                );
+            }
+        }
     }
 
     #[test]
