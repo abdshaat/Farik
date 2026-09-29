@@ -427,6 +427,13 @@ async fn save(state: &DaemonState, deps: &ToolDeps, params: &Value) -> Result<Va
     let row = row(deps, &task_id)?;
     let edited = &params["contract"];
     let changed = changed_fields(&before, edited);
+    // Locking is recorded as `contract.locked`/`contract.unlocked`, which a save does not write.
+    if changed.iter().any(|field| field == "locked") {
+        return Err(Failure::new(
+            REFUSED,
+            "a save does not lock or unlock the plan; lock or unlock it on its own",
+        ));
+    }
     let outcome = check_contract_write(
         contract.kind,
         row.status,
@@ -829,6 +836,21 @@ mod tests {
                 .as_str()
                 .is_some_and(|message| message.starts_with("iteration is the governor's")),
             "{refused}"
+        );
+        assert_eq!(harness.project.file("FRK-1"), before);
+
+        // A save never locks or unlocks the plan: that is recorded by its own command.
+        let mut locking = before.clone();
+        locking["locked"] = json!(true);
+        let refused = rpc(
+            &harness.daemon,
+            "contract.save",
+            &json!({ "task_id": "FRK-1", "contract": locking }),
+        );
+        assert_eq!(refused["error"]["code"], -32005, "{refused}");
+        assert_eq!(
+            refused["error"]["message"],
+            "a save does not lock or unlock the plan; lock or unlock it on its own"
         );
         assert_eq!(harness.project.file("FRK-1"), before);
     }
