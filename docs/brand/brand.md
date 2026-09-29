@@ -124,7 +124,7 @@ The office scene is a warm pixel-art room: wooden desks, plants, hanging lamps, 
 
 ## Files
 
-The founder supplied these on 2026-09-26. They are kept unchanged in `docs/brand/assets/`, and phase 5 step 02 builds `@farik/brand` from them:
+The founder supplied these on 2026-09-26. They are kept unchanged in `docs/brand/assets/`, and phase 6 step 01 builds `@farik/brand` from them:
 
 | File | What it is |
 |---|---|
@@ -133,7 +133,7 @@ The founder supplied these on 2026-09-26. They are kept unchanged in `docs/brand
 | `characters/architect.png`, `product-manager.png`, `scrum-master.png`, `developer.png`, `marketing-specialist.png` | The roles' default characters, seated at a laptop, each 1254 × 1254 px on a transparent background |
 | `characters/extra-1.png` to `extra-5.png` | Five more characters in the same pose and scale, for any agent |
 
-`avatars/` holds each character cropped to a 256 px square of head and shoulders. It is derived from the files above by Farik, not supplied, and phase 5 step 02 regenerates it as part of `@farik/brand`.
+`avatars/` holds each character cropped to a 256 px square of head and shoulders. It is derived from the files above by Farik, not supplied, and phase 6 step 01 regenerates it as part of `@farik/brand`.
 
 The kit's rule that the wordmark is always Clay Coral gives way to the supplied file: the wordmark is Soft Sand on dark surfaces. The README's images (`docs/brand/readme/`: the banner, the team, and the avatars) are composed from these files.
 
