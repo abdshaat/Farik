@@ -196,7 +196,7 @@ RPC:
 - `keeps_the_user_note_across_a_rescan`: after `append_project_note` and a `project_document` rewrite, the "The user says" section remains.
 - `ships_the_mockup_persona_per_role`: the five exact lines.
 
-- [ ] `feat(store): read the scan back in parts and keep the user's note across rescans`
+- [x] `feat(store): read the scan back in parts and keep the user's note across rescans`
 
 ### Task 4: Team, criteria and account over the wire; session tiers; the setup marker
 

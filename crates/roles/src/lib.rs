@@ -53,6 +53,8 @@ pub struct RoleDefinition {
     pub id: Role,
     /// What the role is for.
     pub mandate: String,
+    /// The line a person is shown beside the role: what it does for them, in plain words.
+    pub persona: String,
     /// What the role's work leaves behind.
     pub produces: Vec<String>,
     /// What the role may not do.
@@ -214,6 +216,7 @@ fn parse_role(
     Ok(RoleDefinition {
         id: role,
         mandate: file.mandate.to_string(),
+        persona: file.persona.to_string(),
         produces: file.produces.into_iter().map(String::from).collect(),
         forbidden: file.forbidden.into_iter().map(String::from).collect(),
         default_tiers: default_tiers(role).to_vec(),
@@ -329,6 +332,25 @@ mod tests {
             "the frontmatter is not part of the body"
         );
         definition
+    }
+
+    #[test]
+    fn ships_the_mockup_persona_per_role() {
+        for (role, line) in [
+            (
+                Role::ProductManager,
+                "Asks the questions that decide what to build",
+            ),
+            (Role::ScrumMaster, "Keeps the work moving and nobody stuck"),
+            (Role::Architect, "Thinks about how it all fits together"),
+            (Role::SoftwareDeveloper, "Builds it and tests it"),
+            (
+                Role::MarketingSpecialist,
+                "Tells people about what you made",
+            ),
+        ] {
+            assert_eq!(loaded(role).persona, line, "{role}");
+        }
     }
 
     #[test]

@@ -523,6 +523,7 @@ mod tests {
     fn a_role(role: Role) -> RoleDefinition {
         RoleDefinition {
             id: role,
+            persona: "Writes the contracts.".to_string(),
             mandate: "Write the contracts.".to_string(),
             produces: vec!["contracts".to_string()],
             forbidden: vec!["code".to_string()],

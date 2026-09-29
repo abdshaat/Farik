@@ -462,6 +462,31 @@ impl ProjectFiles {
         self.write_text(PROJECT_SCAN, text)
     }
 
+    /// Adds what the user said about the project to `project.md`, as one paragraph dated `date`
+    /// under `## The user says`, made when it is not there yet. A rescan keeps the section.
+    ///
+    /// # Errors
+    ///
+    /// `Io` when the file cannot be read or written.
+    pub fn append_project_note(&self, text: &str, date: NaiveDate) -> Result<(), FilesError> {
+        let before = match self.read_project_scan() {
+            Err(FilesError::NotFound { .. }) => "# The project\n".to_string(),
+            other => other?,
+        };
+        let heading = if before.contains(crate::scan::USER_SAYS) {
+            String::new()
+        } else {
+            format!("\n{}\n", crate::scan::USER_SAYS)
+        };
+        let end = if before.ends_with('\n') { "" } else { "\n" };
+        let note = format!(
+            "{before}{end}{heading}\n{}: {}\n",
+            date.format("%Y-%m-%d"),
+            text.trim()
+        );
+        self.write_text(PROJECT_SCAN, &note)
+    }
+
     /// Writes the channel's summary as the agents were last shown it, for the human to read.
     ///
     /// # Errors
