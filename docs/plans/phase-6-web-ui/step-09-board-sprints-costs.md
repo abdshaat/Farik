@@ -1,10 +1,10 @@
 # Phase 6, step 09: Board, sprints, task detail, and costs
 
-Status: draft
+Status: ready
 Branch: `phase/6-web-ui`
 Spec: `docs/SPEC.md` sections 5.2, 5.14, 5.16, F3, F17
 Depends on: steps 01 to 08 of this phase
-Readiness confirmed by: fresh-session reviewer, 2026-09-29, round one: not ready on four planner decisions, all settled below; round two is limited to them.
+Readiness confirmed by: fresh-session reviewer, 2026-09-29, round one: not ready on four planner decisions, all settled below; round two found them settled (ready with findings, folded in).
 
 Signatures, not bodies; test names and what each asserts, not test code; around 300 lines at most (ADR 0008).
 
@@ -72,7 +72,7 @@ Out of scope: the channel (step 10), one-on-ones (phase 8), notifications (phase
 - **Costs** (`/costs`).
   - `Projections::costs_for(scope: CostScope, window: CostWindow) -> Result<Vec<CostProjection>, StoreError>`, with `CostWindow { Day(NaiveDate), Sprint(String), All }`, gives agent × day and agent × sprint.
   - `costs.summary {}` answers `{ today_usd, daily_limit_usd, sprint: { sprint_id, spent_usd, budget_usd } | null, agents: [{ agent_id, today_usd, sprint_usd }] }`.
-  - `metrics { sprint_id? }` answers this wire shape, built by the daemon from `HarnessMetrics` (no `Serialize` added): `{ accepted_tasks, first_pass_acceptance_rate: number | null, interventions_per_accepted_task: number | null, cost_per_accepted_task: { total_usd, by_purpose: [{ words, usd }] } | null, mechanically_verified_share: number | null, active_weeks, messages: { reaction, ambient, reply, ceremony, system, human } }`. The page shows the five rate lines, then "Active weeks: N" and one messages line ("Messages: N reactions, N replies, N from meetings, N from you").
+  - `metrics { sprint_id? }` answers this wire shape, built by the daemon from `HarnessMetrics` (no `Serialize` added): `{ accepted_tasks, first_pass_acceptance_rate: number | null, interventions_per_accepted_task: number | null, cost_per_accepted_task: { total_usd, by_purpose: [{ words, usd }] } | null, mechanically_verified_criteria_share: number | null, active_weeks, messages: { reaction, ambient, reply, ceremony, system, human } }`. The page shows the five rate lines, then "Active weeks: N" and one messages line ("Messages: N reactions, N replies, N from meetings, N from you").
   - Differences from the mockup: SprintView's "See costs by agent" is the link to `/costs`; the board's empty lane reads "Nothing here right now" everywhere, not "Nobody is stuck."
   - The page reads "Today the team has spent $X" and either "with no daily limit set" or "of $L a day". Beside it:
     - the sprint line;
@@ -83,11 +83,11 @@ Out of scope: the channel (step 10), one-on-ones (phase 8), notifications (phase
 - **Activity.** Step 07's `AgentActivity` gains `session_id: Option<String>` and `purpose: Option<SessionPurpose>`, and its `state` is the enum `working | resting | waiting_on_you | paused | idle` (step 07's list), so the page never parses `line`.
 - **Tests.**
   - Vitest and axe on each page. `lanes.test.ts` checks every `TaskStatus`.
-  - Playwright `board.spec.ts`, on step 08's team. The recorded adapter replays in order, so every session is listed: `triage_frk_1_small_by_pm`, `refine_writes_task_for_theo_frk_1`, `judge_frk_1_by_architect`, `planning_ceremony_frk_1` (phase 4's, which plans FRK-1 and plays as Mira, the planner without a Scrum Master), `plan_assigns_frk_1_to_theo`, `implement_finishes_frk_1`, `review_writes_note`, `accept_frk_1`, then the sprint's review and look-back ceremonies: `sprint_review_s1` (synthetic, added by Task 5) and phase 4's `retro` transcript (`transcripts/retro.jsonl`). It assumes no UTC midnight during the run, so no standup session starts. The steps:
+  - Playwright `board.spec.ts`, on step 08's team. The recorded adapter replays in order, so every session is listed: `triage_frk_1_small_by_pm`, `refine_writes_task_for_theo_frk_1`, `judge_frk_1_by_architect`, `planning_ceremony_frk_1` (phase 4's, which plans FRK-1 and plays as Mira, the planner without a Scrum Master), `plan_assigns_frk_1_to_theo`, `implement_finishes_frk_1`, `review_writes_note`, `accept_frk_1`, then the sprint's review and look-back ceremonies: phase 4's `review` and `retro` transcripts (`transcripts/review.jsonl`, `transcripts/retro.jsonl`), the order phase 4's orchestrator tests already use. It assumes no UTC midnight during the run, so no standup session starts. The steps:
     1. start a sprint with a $20 budget;
     2. file the request on Today (after the sprint opens, so the planning ceremony plans it);
     3. see the task move from Planning to To do to In progress to Review to Done on the board by itself;
-    4. open the task's tabs while it is in Review;
+    4. once the task is Done, open its five tabs;
     5. see the sprint end by itself once its one task is accepted (spec 5.2), and its meetings listed;
     6. see the Costs page's per-agent row;
     7. take screenshots at 360 and 1280 px.
@@ -98,7 +98,6 @@ Out of scope: the channel (step 10), one-on-ones (phase 8), notifications (phase
 
 ```
 crates/store/src/{projections.rs,activity.rs} (+ tests)                      modifies: costs_by_purpose, costs_for; session_id and purpose (T1)
-crates/runtime/src/recorded/{fixtures.rs,transcripts/sprint_review_s1.jsonl}   creates (T5)
 apps/web/src/pages/Gate.tsx                                                  modifies: "See the whole history" to /tasks/:id (T3)
 crates/runtime/src/daemon/web.rs, docs/schemas/rpc.schema.json, crates/protocol/src/rpc.rs, packages/protocol-client/src/client.ts   modifies: queries (T1)
 apps/web/src/app/{lanes.ts,lanes.test.ts,App.tsx}, shell/{Shell.tsx,Shell.test.tsx}, strings/en.ts   creates / modifies (T2)

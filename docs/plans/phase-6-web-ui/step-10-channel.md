@@ -1,10 +1,10 @@
 # Phase 6, step 10: Channel
 
-Status: draft
+Status: ready
 Branch: `phase/6-web-ui`
 Spec: `docs/SPEC.md` section 5.9, F7
 Depends on: steps 01 to 09 of this phase
-Readiness confirmed by: fresh-session reviewer, 2026-09-29, round one: not ready on one planner decision (reading the newest page), settled below; round two is limited to it.
+Readiness confirmed by: fresh-session reviewer, 2026-09-29, round one: not ready on one planner decision (reading the newest page), settled below; round two found it settled (ready with findings, folded in).
 
 Signatures, not bodies; test names and what each asserts, not test code; around 300 lines at most (ADR 0008).
 
@@ -32,10 +32,10 @@ Out of scope: one-on-ones ("Talk to one person" is phase 8), notifications (phas
   - `@human` in a text is shown as "@you". Mentions of agents are shown as "@<Name>" and highlighted.
 - **Threads.** Ceremony messages (`kind: ceremony`) that share a `thread` and a UTC day form one collapsible block, titled "<Planning | Standup | Review | Looking back>, <weekday>: N posted". Blocks start collapsed, except today's standup. Each block has an anchor `#thread-<thread>-<date>` for the sprint page's "Read it" links, which step 09 left out and this step adds.
 - **Links.** A message's `task_id`, and any `FRK-n` in its text, link to `/tasks/:id`. A task waiting on the user shows "waiting on you" after its link, from `waiting.list`.
-- **Copy** is the mockups' word for word: the thread title "<Thread>, <weekday>: N people posted"; the composer hint "A mentioned agent answers here. To have work done, send a request instead."; the intro as the Channel mockup writes it; PhoneChannel's heading "Message the team". "Talk to one person" is left out (phase 8).
+- **Copy** is the mockups' word for word: the thread title "<Thread>, <weekday>: N people posted" ("1 person posted" for one); the composer hint "A mentioned agent answers here. To have work done, send a request instead."; the intro as the Channel mockup writes it; PhoneChannel's heading "Message the team". "Talk to one person" is left out (phase 8).
 - **A reply** shows "Replying to <author of in_reply_to>" above its text.
 - **Posting.** The composer is "Post to the team", with the mockup's hint, and "Post" sends `message_post { text }`. Typing `@` opens a listbox of the team's agents (arrow keys and Enter, `role="listbox"`), which inserts `@<id>`. Text over 2000 characters, counted in code points (`[...text].length`, as the runtime's `chars().count()`), is refused before sending, with the runtime's limit sentence. A refusal from the daemon shows under the box.
-- **Intro.** The line "Nothing said here starts work. To ask for something, use the box on Today." sits at the top (spec 5.9: only a filed request starts work).
+- **Intro.** The Channel mockup's intro, word for word, at the top (spec 5.9: only a filed request starts work).
 - **Side panel.** "Meetings in this sprint" links to the open sprint's thread blocks, from `sprint.get`'s meetings. On a phone the side panel moves below the messages.
 - **Today's preview.** Today shows the last two messages whose kind is not `system`, then "Open the channel".
 - **The rail** gains Channel between Board and Team: six places on desktop, five on the phone bar.
@@ -76,7 +76,7 @@ Produces: the RPC query `channel.messages`; `renderMessageText(text: string, tea
 ### Task 2: The channel page, the preview, and the meeting links
 
 - `shows_each_kind_of_message`: an agent's post, a system line, and your post, with their labels.
-- `groups_ceremonies_into_threads`: one block per thread and day, titled "<Thread>, <weekday>: N people posted"; only today's standup starts open.
+- `groups_ceremonies_into_threads`: one block per thread and day, titled "<Thread>, <weekday>: N people posted" ("1 person posted" for one); only today's standup starts open.
 - `links_tasks_and_mentions`: `FRK-2` in text links, and `@human` shows as "@you".
 - `posts_and_mentions`: `@` opens the listbox; Enter inserts `@theo`; Post sends `message_post`; too long a text is refused before sending.
 - `appends_new_messages_live`: a `message.posted` event adds a row without a query.
