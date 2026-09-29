@@ -1,10 +1,10 @@
 # Phase 6, step 02: Serve, RPC, and connection
 
-Status: draft
+Status: ready
 Branch: `phase/6-web-ui`
 Spec: `docs/SPEC.md` sections 3 (`farik serve`, `farik pause`, `farik resume`), 8.1, 8.2 ("Driving the team"), 8.5 (`team.paused`, `team.resumed`), 8.6 (the web UI); F6
 Depends on: phase 5 and earlier (merged); step 01 of this phase (done, 77a16c7)
-Readiness confirmed by: fresh-session reviewer, 2026-09-28 (round one: not ready, two unmade decisions and one forward dependency, all the planner's; settled below and sent to a second round limited to them)
+Readiness confirmed by: fresh-session reviewer, 2026-09-28 (round one: not ready, two unmade decisions and one forward dependency, all the planner's; settled below; round two, limited to them, found them settled and asked for two mechanical moves, made)
 
 Signatures, not bodies; test names and what each asserts, not test code; around 300 lines at most (ADR 0008).
 
@@ -28,7 +28,7 @@ Out of scope, and the step that owns each:
   - Rejected: pausing each agent (`agent_update`), which would lose each agent's own paused status on resume.
 - **`farik serve [--port <n>]`** is a new driving process in `crates/cli/src/serve.rs`.
   - It starts exactly as `run` does, with the rules `TickRules::All`, and refuses outside a project with `run`'s own sentence (step 05 lifts that). `--no-open` is not added here; step 04 adds opening the browser together with the flag.
-  - `start` and `start_holding` gain one parameter, `options: StartOptions { port: PortChoice, web: bool }`, `Default` being `{ Any, false }`, which `run`, `plan`, `contract new` and every existing caller pass. `serve` passes `{ Preferred(n), true }`. With `web: true`, `start_holding` opens the browser sessions, issues the first connect code, and calls `DaemonState::set_web` before the daemon serves; only `serve` has browser routes that answer (spec 8.1 changes to say so, in Task 6).
+  - `start` and `start_holding` gain one parameter, `options: StartOptions`, whose `Default` every existing caller (`run`, `plan`, `contract new`) passes. Task 3 adds it with `port: PortChoice` alone (`Default` `Any`; `serve` passes `Preferred(n)`); Task 6 adds `web: bool` (`Default` `false`) with what it does, and switches `serve` to `web: true`. With `web: true`, `start_holding` opens the browser sessions, issues the first connect code, and calls `DaemonState::set_web` before the daemon serves; only `serve` has browser routes that answer (spec 8.1 changes to say so, in Task 6).
   - Its loop is `run::ticks` with one difference: on `Idle { until: None }` it does not return. It waits with `Orchestrator::wait_until(now + 24 h)`, which a command, a stop, or the 60 s recheck already wake (orchestrator.rs:476; the recheck is a sleep on the injected `Sleeper`), and then ticks again. So a request filed from another process is picked up within a minute, and the standup's UTC day turns over on a recheck. The idle line prints once per change of `why`, as `ticks` does for waits. `ticks` gains a parameter `idle: OnIdle { Return, Wait }` rather than being copied.
   - Ctrl-C and `farik stop` end it as they end `run` (exit 130 after Ctrl-C, 0 after `farik stop`), with `finish` shutting the daemon down.
 - **Port** (spec 8.1): `DaemonConfig::port` becomes `port: PortChoice`, with `enum PortChoice { Any, Preferred(u16) }`.
@@ -66,9 +66,9 @@ Out of scope, and the step that owns each:
   - Methods:
     - `subscribe { from_seq: integer ≥ 0 }` answers `{}` and then streams every event with `seq > from_seq`, oldest first, then each new one. A second `subscribe` replaces the first.
     - `unsubscribe {}` answers `{}`.
-    - `command { command }`: the command wire of `command.schema.json`, handled by the same `CommandHandler` as `POST /command`. It answers `$defs/commandReply`. `run_stop` is refused with `-32602` "stopping Farik is done where it runs; pause the team instead", because stopping `serve` from its own page leaves the page with nothing to talk to.
+    - `command { command }`: the command wire of `command.schema.json`, handled by the same `CommandHandler` as `POST /command`. It answers `$defs/commandReply`. `run_stop` is refused with `-32003` `refused_here`, "stopping Farik is done where it runs; pause the team instead", because stopping `serve` from its own page leaves the page with nothing to talk to.
     - `query { name, params }`: the names are listed below.
-  - Error codes: JSON-RPC's `-32700` (parse), `-32600` (invalid request), `-32601` (unknown method), and `-32602` (invalid params), plus `-32001` `unknown_query`.
+  - Error codes: JSON-RPC's `-32700` (parse), `-32600` (invalid request), `-32601` (unknown method), and `-32602` (invalid params), plus `-32001` `unknown_query`, `-32002` `not_found`, and `-32003` `refused_here`.
 - **The event stream** re-reads the log every 500 ms with `EventQuery { after_seq: last, .. }`, because appends come from other processes too (the `RECHECK` reason, orchestrator.rs:249). The in-process `EventLog::subscribe` channel is rejected: it misses those appends. A `ponytail:` comment marks the poll: a cross-process notify replaces it if 500 ms ever shows. The socket's task ends when the socket closes.
 - **Queries** in this step:
   - `events.since { after_seq, limit ≤ 500 }` returns `{ events }`, from `EventLog::read`.
@@ -106,8 +106,8 @@ crates/runtime/src/orchestrator.rs, orchestrator/human.rs  modifies: pause in ti
 crates/cli/src/lib.rs                                 modifies: pause, resume, serve subcommands (T2, T3)
 crates/cli/tests/human.rs                             tests: pause and resume from the command line (T2)
 crates/runtime/src/daemon.rs                          modifies: PortChoice; DaemonState.web; the browser sub-router (T3, T5)
-crates/cli/src/state.rs, serve.rs, run.rs, start.rs   creates/modifies: state dir, serve loop, OnIdle, StartOptions (T3); web on (T6)
-crates/runtime/src/claude.rs                          modifies: CredentialKind (T6)
+crates/cli/src/state.rs, serve.rs, run.rs, start.rs   creates/modifies: state dir, serve loop, OnIdle, StartOptions.port (T3); StartOptions.web (T6)
+crates/runtime/src/claude.rs                          modifies: CredentialKind (T5)
 crates/cli/tests/serving.rs                           creates: serve's tests (T3)
 docs/schemas/rpc.schema.json, crates/protocol/src/rpc.rs, generated/mod.rs  creates: the wire (T4)
 Cargo.toml, crates/runtime/Cargo.toml, Cargo.lock    modifies: axum ws, sha2, tokio-tungstenite dev (T5)
@@ -140,7 +140,7 @@ DaemonState::set_web(&self, web: WebState) -> bool
 // farik (CLI)
 pub(crate) fn state::state_dir(env: &BTreeMap<String, String>) -> Option<PathBuf>;
 pub(crate) enum OnIdle { Return, Wait }   // run::ticks gains it
-pub(crate) struct StartOptions { pub(crate) port: PortChoice, pub(crate) web: bool }   // Default: Any, false
+pub(crate) struct StartOptions { pub(crate) port: PortChoice, pub(crate) web: bool }   // Default: Any, false; `port` from T3, `web` from T6
 pub(crate) async fn start(project: &Project, io: &mut CliIo<'_>, options: StartOptions) -> Result<Driver, String>;
 pub(crate) async fn start_holding(project: &Project, io: &mut CliIo<'_>, lock: RunLock, options: StartOptions) -> Result<Driver, String>;
 pub(crate) fn serve::serve(project: &Project, port: Option<u16>, io: &mut CliIo<'_>) -> i32;
@@ -213,7 +213,7 @@ Tests:
 
 ### Task 5: Connect codes, browser sessions, and `/connect`
 
-Files: created `crates/runtime/src/daemon/web.rs`; modified `daemon.rs`, `Cargo.toml`, `crates/runtime/Cargo.toml`, `Cargo.lock`.
+Files: created `crates/runtime/src/daemon/web.rs`; modified `daemon.rs`, `crates/runtime/src/claude.rs` (`CredentialKind`, `ClaudeCredential::kind`, which `WebState` holds), `Cargo.toml`, `crates/runtime/Cargo.toml`, `Cargo.lock`.
 Tests:
 - `a_code_opens_once` asserts that `redeem(issued)` is true and then false, and that an earlier code is false after a new `issue`.
 - `sessions_keep_only_hashes` asserts that after `issue`, the file holds 64-hex `hash` values and not the secret, with mode 0600.
@@ -228,14 +228,14 @@ Tests:
 
 ### Task 6: `/rpc`
 
-Files: modified `crates/runtime/src/daemon/web.rs`, `crates/runtime/src/claude.rs` (`CredentialKind`), `crates/cli/src/start.rs` (`web: true` sets `WebState`), `crates/cli/src/serve.rs` (prints the link), `docs/SPEC.md` (8.1: only `farik serve` answers the browser routes; 8.6: the checks are the browser routes', and the two residuals above).
+Files: modified `crates/runtime/src/daemon/web.rs`, `crates/cli/src/start.rs` (`StartOptions.web`, which sets `WebState`), `crates/cli/src/serve.rs` (prints the link), `docs/SPEC.md` (8.1: only `farik serve` answers the browser routes; 8.6: the checks are the browser routes', and the two residuals above).
 Tests, over real sockets with `tokio-tungstenite`:
 - `refuses_an_upgrade_without_a_session` asserts 401 without a cookie, 401 with an unknown or expired one, 403 with a foreign Origin, 403 with `Origin: http://127.0.0.1:<another port>`, and 403 with no Origin.
 - `streams_events_after_the_sequence_asked` asserts that with 3 events in the log, `subscribe { from_seq: 1 }` answers `{}` and then sends seq 2 and 3, and that an event appended through another `EventLog` handle on the same file arrives (30 s failure bound).
 - `runs_a_command_like_post_command` asserts that `command { team_pause }` answers the same `commandReply` JSON that `POST /command` answers, and appends `team.paused`.
 - `answers_the_queries` asserts that `tasks.list`, `task.get` (a known and an unknown id, the latter `-32002`), `team.get`, `events.since`, and `serve.status` (`paused` true after the pause) answer their schema shapes. Each answer is validated against `rpc.schema.json`.
 - `answers_json_rpc_errors` asserts `-32700` for non-JSON, `-32601` for `method: "nope"`, and `-32602` for `subscribe` without `from_seq`, each with the request's `id` where it had one.
-- `refuses_to_stop_farik_from_the_browser` asserts that `command { run_stop }` answers `-32602` with "stopping Farik is done where it runs; pause the team instead", and that the run is not stopped.
+- `refuses_to_stop_farik_from_the_browser` asserts that `command { run_stop }` answers `-32003` with "stopping Farik is done where it runs; pause the team instead", and that the run is not stopped.
 - `serve_status_has_no_credential_under_a_given_engine` asserts `credential: null` when the driver runs `Engine::Given`.
 - `prints_a_one_time_link` (in `crates/cli/tests/serving.rs`) asserts that `farik serve`'s stdout has one line matching `open http://127\.0\.0\.1:\d+/connect#[0-9a-f]{64} in your browser`, and that `farik run`'s has none.
 
