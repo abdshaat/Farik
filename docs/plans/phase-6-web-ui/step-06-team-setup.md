@@ -1,242 +1,259 @@
 # Phase 6, step 06: Team setup
 
-Status: draft
+Status: draft (round two of readiness)
 Branch: `phase/6-web-ui`
-Spec: `docs/SPEC.md` sections 4.1, 4.4, 5.3 (the configurable judgment), 5.6, 5.12, 10 (foolproof configuration), F1, F2, F15, F16
-Depends on: steps 01 to 05 of this phase
-Readiness confirmed by: (pending)
+Spec: `docs/SPEC.md` sections 4.1, 4.4, 5.1, 5.3 (the configurable judgment), 5.6, 5.12, 10 (foolproof configuration), F1, F2, F15, F16
+Depends on: steps 01 to 05 of this phase (landed)
+Readiness confirmed by: fresh-session reviewer, 2026-09-29. Round one was not ready: four unmade decisions (three the planner's, one the founder's) and sixteen findings. All are settled below. Round two is limited to the four decisions.
 
 Signatures, not bodies; test names and what each asserts, not test code; around 300 lines at most (ADR 0008).
 
 ## Goal
 
-After step 05's project screen, the wizard walks steps 4 to 8, then Farik starts the team:
-- **What we found:** the scan read back in rows.
-- **Your team:** five suggested agents, each with a name, avatar and persona, and a place to add or remove agents.
-- **What they may do:** the two explicit permission questions.
-- **Spending:** an optional daily limit.
-- **Finishing work:** the integration policy.
-- **Advanced:** team rules, the checks every piece of work must pass, and how plans are judged.
-- **Start the team:** resumes the paused team.
+A project that step 05 has just set up opens on the wizard's steps 4 to 8, in this order:
+1. What we found: the scan, read back in rows.
+2. Your team: five agents suggested, each with a name, an avatar and a persona.
+3. What they may do: two explicit permission questions.
+4. Spending: an optional daily limit.
+5. Finishing work: the integration policy.
 
-The Team page and the agent editor then let the user change any of it later. Every change is validated by the daemon before it is saved, shows its effect in plain words, and can be put back to its default (spec 10).
+An Advanced area covers team rules, checks, and plan checking.
+
+"Start the team" saves everything and resumes the paused team. After that, the Team page and the agent editor change the same settings. The daemon validates every change before it is saved, and each change shows its effect in plain words and can be put back to its default (spec 10).
 
 Built for the first time:
-- the configurable readiness judgment (`policy.judgment`, spec 5.3);
-- a permission change that waits for the agent's next session (spec 4.4). Today it reaches a running session at the next tool call.
+- the configurable plan check (spec 5.3), with the founder's new rule for who checks;
+- a permission change that waits for the agent's next session (spec 4.4).
 
-Out of scope, and where each goes:
-- skills and connectors on the agent page (phases 8 and 9);
-- the Finance Specialist in the builder (phase 8);
-- Today and the gates (step 07).
+Out of scope: skills and connectors on the agent page (phases 8 and 9), the Finance Specialist (phase 8), Today and the gates (step 07).
 
 ## Decisions
 
-- **Mockups.** Setup screens 4 to 8 and Advanced follow the approved mockups `SetupScan`, `Welcome`, `SetupPermissions`, `SetupSpending`, `SetupFinish`, `SetupAdvanced`, `Team`, and `AgentEdit`, with the eight-step stepper step 05 introduced.
-  - Where a mockup shows something the code does not have, the plan records the difference: `SetupScan`'s "42 of them, and they pass today" and "by you" are not scanned, so the rows show only what the scan reads.
-- **Scan facts.** `ProjectScan` gains `facts: ScanFacts { language: Option<String>, toolchain: Option<String>, packages: u32, test_runner: Option<String>, last_commit: Option<DateTime<Utc>> }`.
-  - `read_back` is built from the facts, and the same line comes out.
-  - A new query, `project.scan {}`, answers `{ facts, read_back, checks: [{ name, text }], kept_private: [string] }`.
-  - `checks` are the scan's detected criteria.
-  - `kept_private` is the team's protected paths that exist in the tree.
-  - "Something is wrong" opens a text box whose words are saved as a human note in `.farik/project.md` under "The user says" (a `ProjectFiles::append_project_note`), so the Product Manager reads them.
-- **The suggested team.** `team.propose {}` answers the five roles, each with:
-  - the role's default model and effort (`load_role`);
-  - a suggested name: Mira (Product Manager), Sol (Scrum Master), Ada (Architect), Theo (Developer), Kai (Marketing Specialist), the names the founder approved in the mockups;
-  - an avatar key (the role's own);
-  - a one-line persona per role, kept in `crates/roles/roles/<role>/role.yaml` as a new `persona:` key.
-
-  "Add someone" picks a role, and its avatar is the first unused `extra-N`. A second agent of a role takes a name from a fixed pool (`Noor`, `Ivo`, `Lena`, `Sami`, `Rui`) and gets an id with a numeral (`developer-2`). The builder keeps 2 to 7 agents, with at least one Product Manager and one Developer (D18); the daemon enforces it.
-- **Validation and save.** `team.validate { team }` is a query and `team.save { team }` a method. Both run `validate_team` plus the foolproof rules below and answer `{ errors: [{ path, message }] }`. `team.save` writes only when there are no errors, then appends `team.updated { updated_by: "human" }`, and answers `{ saved: true, effects: [string] }`. The effect sentences are computed by `farik_core::team::describe_change(old, new) -> Vec<String>`, one per change, for example "Theo will use the Everyday model from its next piece of work".
-
-  The foolproof rules, added to `validate_team` in `farik-core` and reported like its other errors:
-  - a judge role no active agent holds: "no active agent is a <role> to check plans; choose another checker or turn checking off";
-  - `judgment.required` with an empty rubric: "checking plans needs at least one question";
-  - any rubric question under 10 or over 200 characters.
-
-  Every setting shows a "Put back" control that restores the schema default.
-- **Permissions** (spec 4.1). Two questions, both unanswered at first. Continue is enabled only once both are answered.
-  - "May the team run commands?" Yes changes nothing, because the Developer and Architect hold `execute` by default. No writes `revokes: [execute]` on every Developer and Architect.
-  - "May the Developer send its work to your online repository?" Yes writes `grants: [git_remote]` on every Developer. No changes nothing.
-
-  The answers are written with the rest of the team at "Start the team", which is also the only way the paused team starts. That keeps spec 4.1's "Nothing runs until the two permissions are set".
-- **Spending.** Either "No limit", or a daily limit in dollars (`budgets.daily_usd`, above 0, defaulting to 10 in the field). The note under it lists the limits that always hold, as the mockup does.
-  - **The first-day figure** (spec 10) is stated on the Team page and at "Your team" as the sentence "A first full day for a team of five costs under twenty dollars on your own key at today's prices", held in `en.ts`. It is a property of the shipped defaults, re-derived by hand when prices change (ADR 0015), not computed.
-- **Finishing work.** A `Choice` with three options, which map to `policy.integration` `auto_merge` (the default), `pull_request`, and `manual`.
-- **Advanced** (the Settings switch from step 04 shows it inside the wizard and on the Team page).
-  - **Team rules:**
-    - keep private files private: protected paths, read-only in the view;
-    - every code change comes with new tests: `rules.require_new_tests`;
-    - only the Developer changes code: `document_paths`, shown as fixed;
-    - "at most $ per piece of work": `rules.max_task_budget_usd`.
-    - "Edit as text" shows `team.yaml` read-only, with a line saying edits there are checked the same way. The file is still the source of truth, and nothing in the UI writes raw YAML.
-  - **Checks for every piece of work:** the criterion library as a list. The scan's checks are shown. "Add a check" adds a `human` criterion by name and text, of method `review`, since no screen asks for a command or glob (phase decision). Criteria go through `criteria.save { criteria }` (a method that validates, writes, and appends `criteria.updated`).
-  - **Checking plans:** the judgment policy below.
-- **The configurable judgment** (spec 5.3). `policy.judgment` is added to `team.schema.json`:
+- **Who checks plans** (the founder, 2026-09-29). This replaces the 2026-09-24 decision that the Scrum Master judges. The judge is the first active agent of these roles, in order: Architect, Scrum Master, Product Manager.
+  - The Product Manager checks its own plans only when the team has neither an Architect nor a Scrum Master. This is the founder's stated exception to spec 5.1's "nobody grades their own homework", and spec 5.1 and 5.3 record it.
+  - `policy.judgment.judge` is `auto` (that order, the default), `architect`, or `scrum_master`. A named judge must be an active agent. `product_manager` is never named; it is reached only through `auto`.
+  - Since every team has an active Product Manager (D18), `auto` always finds a judge.
+- **The policy** in `team.schema.json`:
 
   ```
-  judgment: {
-    required: boolean | "while_judge_active",   // default "while_judge_active"
-    questions: string[],                        // 0 to 5; default the two of 5.3
-    judge: role                                 // default scrum_master
-  }
+  judgment: { required: "always" | "never", questions: string[], judge: "auto" | "architect" | "scrum_master" }
   ```
 
-  - **Readiness** (`requires_judgment_review` in `transitions.rs`) reads it. `true` always, `false` never, and `"while_judge_active"` while an active agent holds the judge role.
-  - **The judgment tool** becomes `farik_record_judgment { answers: [{ pass: boolean, reason: string }] }`, one answer per question in order. It refuses a count that differs from the rubric with `judgment_answers: expected <n> answers, one per question`, and refuses any agent but one of the judge role.
-  - **The judgment prompt** (`JUDGMENT_INSTRUCTION`) lists the team's questions, numbered.
-  - **The event.** `contract.judged` gains `answers: [{ question, pass, reason }]`. `fits_budget` and `criteria_detect_failure` become optional in the schema, so older logs stay readable, and new events leave them out.
-  - **The review.** `judgment_since_written` gives a `JudgmentReview` that passes when every answer passes. An old event with the two booleans passes when both are true.
-  - **Transcripts.** The recorded transcripts `judge_frk_1_passes` and `judge_frk_1_fails` are rewritten to the new tool shape.
-  - **The screen:** a switch "Check every plan before work starts", the question checkboxes as in the mockup (the two defaults and "Is it small enough to finish in one go?", off by default), an editable list, and "Who checks" as a select of the active agents' roles.
-- **Permission changes wait for the next session** (spec 4.4).
-  - `SessionRegistration` gains `tiers: Vec<PermissionTier>`, the agent's tiers when the session started.
-  - The hook (`daemon/hooks.rs`) decides with the registered tiers, not the team file's.
-  - A pause or retire still stops sessions at once, as `update_agent` does now.
-  - Model and effort were already fixed at start.
-- **The agent editor** (`AgentEdit`):
-  - picture: the ten avatars;
-  - name: `display_name`;
-  - "How <name> talks": `persona`;
-  - "How carefully <name> works": Quick, Balanced, or Careful, mapped to effort `low`, `medium`, or `high`;
-  - model: under Advanced, a select of the price table's models with plain labels ("Strongest model, thinks hard" for Opus, "Everyday model" for Sonnet);
-  - "What <name> may do": the effective tiers in words;
-  - under Advanced, seven tier toggles, which write `grants` and `revokes` against the role's defaults.
+  - Defaults: `required: "always"`; `judge: "auto"`; `questions`: the two of spec 5.3 as pinned strings, "Does the task fit its budget?" and "Would its checks notice if the work went wrong the way its intent worries about?".
+  - The mockup's third question is the pinned string "Is it small enough to finish in one go?", off by default.
+  - Questions are 10 to 200 characters, at most 5.
+  - Foolproof rules, in `validate_team`:
+    - a named judge no active agent holds is refused ("no active <role> can check plans; choose auto or add one");
+    - `required: always` with no questions is refused ("checking plans needs at least one question").
+  - With the defaults, every existing `team.yaml` still validates. The 2-agent base fixture judges through the Product Manager.
+- **The judgment's code path** (the plan file map gains these files).
+  - `requests.rs` starts the judgment session for the resolved judge, not `scrum_master(team)`.
+  - `judgment_message` (`messages.rs`) and the tool's description (`tools.rs`) take the team's numbered questions.
+  - `farik_record_judgment { answers: [{ pass: boolean, reason: string }], reason: string }` takes one answer per question in order, plus an overall reason. It refuses a count that differs from the rubric (`judgment_answers: expected <n> answers, one per question`). It refuses any agent but the resolved judge.
+  - `contract.judged` becomes `{ judged_by, answers: [{ question, pass, reason }] (1 to 5), reason }`. `fits_budget` and `criteria_detect_failure` become optional, and new events leave them out. It stays one `eventBodyWire` branch, distinguished by the kind.
+  - In core, `JudgmentReview` becomes `{ answers: Vec<JudgmentAnswer>, reason: String }`. `JudgmentAnswer { question, pass, reason }`.
+  - An old event maps to two answers under the pinned strings.
+  - The readiness rules `JudgmentFitsBudget` and `JudgmentCriteriaDetectFailure` are replaced by `JudgmentAnswers`, which fails listing each failed question and its reason. A judgment made under an older rubric still counts; changing the rubric does not reopen judged contracts.
+  - The judge transcripts `judge_frk_1_passes` and `judge_frk_1_fails` are rewritten, and `judge_frk_1_by_architect` is added.
+- **Reaching the setup screens** (round one, decision 1).
+  - Step 05's setup host writes a machine-local marker `.farik/local/setup-pending` when it ran `farik init` (the step 05 plan's host gains this; it has not been built yet).
+  - `serve.status` gains `setup_pending: boolean`.
+  - `/` redirects to `/setup/scan` while it is true.
+  - "Start the team" removes the marker through `team.start`.
+  - A project that already had Farik skips screens 4 to 8, because it has no marker and no pause from setup.
+  - "Your team" starts from `team.propose`, and `team.start` replaces `farik init`'s two-agent starter team. That is allowed only while the marker exists, because no work has used those ids.
+- **Ids** (round one, decision 2).
+  - An agent's id is the slug of its display name: `mira`, `sol`, `ada`, `theo`, `kai`.
+  - A second agent whose slug is taken gets `-2`, `-3`, and so on.
+  - Extra suggested names come from a fixed pool: Noor, Ivo, Lena, Sami, Rui.
+  - An id never changes after it is saved, even if the name does.
+- **The AI account** (round one, decision 3).
+  - `CredentialStore` gains `fn delete(&self) -> Result<(), CredentialError>`.
+  - `WebState` holds the credential stores in both modes.
+  - `account.disconnect {}` deletes from every store, appends `team.paused { by: human }` if the team is running, and answers `{ removed_from: [source], paused: bool }`.
+  - The Settings row then says: "Disconnected. The team is paused; start Farik again to connect another account." The running driver keeps the key it already loaded, so nothing new may start.
+  - A key from the environment cannot be removed, and the row says which variable holds it.
+- **Replacing an agent.** Replace is Retire, done through `agent_update`, followed by Add someone of the same role, through `team.save`. The retired agent's memory stays (spec 4.4).
+- **Saving the team.**
+  - `team.validate { team }` is a query. It answers `{ errors: [{ path, message }], effects: [string] }`, so the effect of a change shows before it is saved (spec 10).
+  - `team.save { team }` writes the team only with no errors, then appends `team.updated { updated_by: "human" }`.
+    - It refuses a status change ("pause, retire or resume an agent from its card").
+    - It refuses removing an id the log has seen ("<name> has done work; retire it instead").
+  - `team.start { team, criteria }` is the setup form: it writes both, removes the marker, and appends `team.updated`, `criteria.updated` and `team.resumed`.
+  - `describe_change(old, new) -> Vec<String>` gives each effect. The sentences are pinned in its tests.
+- **Permissions.** The team policy gains `permissions: { run_commands: boolean (default true), push: boolean (default false) }`.
+  - `Agent::tiers` (core) is: the role's defaults; minus `execute` for Developers and Architects when `run_commands` is false; plus `git_remote` for Developers when `push` is true; then the agent's own `grants` and `revokes`.
+  - An agent added later therefore follows the answers.
+  - A "No" to commands adds the line "Farik still runs every check itself; the agents cannot run commands".
+- **Session tiers** (spec 4.4). `SessionRegistration` and `ToolContext` gain `tiers: Vec<PermissionTier>`, taken at session start. The hook and `call_tool` both decide with them. A pause or retire still stops sessions at once.
+- **Putting a setting back.** The defaults are the schema's, plus these starter values:
+  - `human_accepts_contracts: high_risk`, `wip_limit_per_agent: 1`, `blocked_limit_hours: 24`, `max_iterations: 3`;
+  - `integration: auto_merge`;
+  - `ambient_messages_per_sprint: 1`, `escalation_age_hours: 24`, `memory_cap_tokens: 8000`;
+  - `permissions` as above, `judgment` as above, no `daily_usd`.
 
-  It saves through `team.save`, and the page says "Changes start with <name>'s next piece of work". Pause, retire, and replace use the existing `agent_update` command.
-- **The AI account in Settings** (ADR 0022). A row names the provider, kind, and where the key is kept, with "Disconnect". The method `account.disconnect {}` removes the key from both stores and answers `{ removed_from: [source] }`. A key set in the environment cannot be removed by Farik, and the row says so.
-- **Start the team.** On the last screen, "Start the team" does three things in order:
-  1. saves the team, and the criteria if they changed;
-  2. sends `team_resume`;
-  3. goes to `/`.
+  `farik_core::team::defaults() -> TeamDefaults` holds them in one place, and both `starter_team` and the page read them.
+- **The scan.**
+  - `ScanFacts` mirrors the scan's `Reading`: `language`, `toolchain`, `workspace: bool`, `packages`, `tests_in: Option<String>` (a location), `tracked_files: u32`, and `last_commit`.
+  - `read_back` is built from it unchanged.
+  - `project.scan` scans again, since it is cheap.
+  - `kept_private` lists the protected-path globs that match anything on disk, walked to a depth of 4, skipping `.git` and `node_modules`, capped at 2000 entries.
+  - The rows are:
+    - "What it is": language and toolchain, and "a workspace of N packages" when there is one.
+    - "How it is tested": "tests in <location>", or "no tests found".
+    - "How it is checked": the detected checks.
+    - "Last change": relative time.
+    - "Kept private": the matches.
 
-  A refusal from `team.save` shows its errors on the screen of the setting at fault, and the stepper links to it.
-- **Tests.** Rust unit and route tests. Vitest and axe tests for every screen. The Playwright journey `setup-team.spec.ts` continues from `setup-project.spec.ts`'s end state, using `startServe({ project: true, paused: true })` on an initialised project. It:
-  1. accepts the scan;
-  2. keeps the five;
-  3. answers both permission questions (commands yes, push no);
-  4. sets a $10 limit;
-  5. chooses auto;
-  6. starts the team.
-
-  It then asserts that `team.yaml` has 5 agents and `daily_usd: 10`, that the log has `team.updated` then `team.resumed`, and that `serve.status.paused` is false.
+  The mockup's "a website … React", "3 parts: the shop…", test counts, and "by you" are not scanned, so they are dropped. "Something is wrong" saves the user's words in `.farik/project.md` under "The user says". `project_document` carries that section across every rescan, so a refresh keeps it.
+- **Models.**
+  - A query, `models.list`, answers the newest model per family from the price table.
+  - Labels: `claude-fable-*` "Most capable model"; `claude-opus-*` "Strongest model, thinks hard"; `claude-sonnet-*` "Everyday model"; `claude-haiku-*` "Quick model".
+  - Advanced shows the id beside the label.
+- **Checks** (Advanced). "Add a check" makes a criterion with the name slugged from its text (kebab, at most 64 characters), the text (at least 10 characters), `source: human`, and `verification: { method: review, rubric: [text] }`. `criteria.save { criteria }` validates it, writes it, and appends `criteria.updated`.
+- **Mockup differences.**
+  - SetupScan: rows as above.
+  - SetupPermissions: "the others send documents" becomes "Farik sends the other agents' documents itself", because only Developers get `git_remote`. The "What each agent may do already" list is shown, from the effective tiers.
+  - SetupAdvanced: "Edit as text" is shown on team rules only. The default check "Someone on the team reviewed it" is the reviewer rule that always holds (spec 5.4), shown fixed.
+  - Personas: each role's `persona:` in `role.yaml` (a `role.schema.json` change) is the Welcome mockup's line: Mira "Asks the questions that decide what to build"; Sol "Keeps the work moving and nobody stuck"; Ada "Thinks about how it all fits together"; Theo "Builds it and tests it"; Kai "Tells people about what you made".
+- **Spending.** "No limit", or a daily limit (the field defaults to $10). The note gives the fixed limits: a session stops after 30 minutes, and a task sent back three times comes to you. The first-day sentence lives in `en.ts`: "A first full day for a team of five costs under twenty dollars on your own key at today's prices" (ADR 0015).
+- **Tests.** Every web test also runs axe inside the test. The Playwright journey `setup-team.spec.ts` uses `startServe({ project: true, setupPending: true })` and does the following:
+  1. accept the scan;
+  2. keep the five;
+  3. commands yes, push no;
+  4. set a $10 limit;
+  5. choose auto;
+  6. Start the team;
+  7. assert `team.yaml` has five agents with ids `mira`…`kai`, `daily_usd: 10`, `run_commands: true`;
+  8. assert the log has `team.updated` and then `team.resumed`;
+  9. assert there is no marker and `paused` is false.
 
 ## File map
 
 ```
-docs/schemas/team.schema.json, event.schema.json, rpc.schema.json          modifies: judgment; contract.judged answers; queries/methods (T1, T2, T4)
-crates/core/src/team.rs (+ tests), crates/core/src/team/describe.rs        modifies / creates: foolproof rules; describe_change (T1)
-crates/store/src/scan.rs, files.rs (+ tests)                               modifies: ScanFacts; append_project_note (T3)
-crates/roles/roles/*/role.yaml, crates/roles/src/lib.rs                    modifies: persona (T3)
-crates/runtime/src/{transitions.rs,prompt.rs,tools/*judgment*,daemon.rs,daemon/hooks.rs,daemon/web.rs}, recorded/transcripts/judge_*.jsonl  modifies (T2, T4)
-crates/protocol/src/{event.rs,rpc.rs}                                      modifies (T2, T4)
-crates/cli/src/setup.rs (account.disconnect via the host), crates/runtime/src/credential.rs  modifies (T4)
-packages/protocol-client/src/client.ts                                    modifies: method names (T4)
-apps/web/src/pages/setup/{SetupScan,SetupTeam,SetupPermissions,SetupSpending,SetupFinish,SetupAdvanced}.tsx (+ tests)  creates (T5)
-apps/web/src/pages/{Team,AgentEdit}.tsx, pages/Settings.tsx (+ tests), app/App.tsx, strings/en.ts   creates / modifies (T6)
-apps/web/e2e/setup-team.spec.ts, e2e/fixtures/serve.ts                     creates / modifies (T7)
-docs/SPEC.md (4.1, 4.4, 5.3, 8.5), docs/plans/project-plan.md              modifies (T8)
+docs/schemas/{team,event,rpc,role}.schema.json                             modifies (T1, T2, T4, T3)
+crates/core/src/{team.rs,team/describe.rs,team/defaults.rs,governor/permissions.rs,governor/readiness.rs} (+ tests)  modifies / creates (T1, T2)
+crates/store/src/{scan.rs,files.rs} (+ tests)                              modifies (T3)
+crates/roles/roles/*/role.yaml, crates/roles/src/lib.rs                    modifies (T3)
+crates/runtime/src/{transitions.rs,prompt.rs,tools.rs,tools/contracts.rs,orchestrator/requests.rs,orchestrator/messages.rs,recorded/fixtures.rs,recorded/transcripts/judge_*.jsonl}  modifies / creates (T2)
+crates/runtime/src/{daemon.rs,daemon/hooks.rs,daemon/web.rs,daemon/setup.rs,credential.rs,tools.rs}  modifies (T4)
+crates/cli/src/{init.rs,setup.rs}, crates/cli/tests/{hook.rs,serving.rs}   modifies (T3 init defaults, T4)
+crates/protocol/src/{event.rs,rpc.rs}, packages/protocol-client/src/client.ts   modifies (T2, T4)
+apps/web/src/pages/setup/{SetupScan,SetupTeam,SetupPermissions,SetupSpending,SetupFinish,SetupAdvanced}.tsx (+ tests), app/App.tsx   creates / modifies (T5)
+apps/web/src/pages/{Team,AgentEdit,Settings}.tsx (+ tests), strings/en.ts   creates / modifies (T6)
+apps/web/e2e/{setup-team.spec.ts,fixtures/serve.ts}                        creates / modifies (T7)
+docs/SPEC.md (4.1, 4.4, 5.1, 5.3, 8.5, 10), docs/plans/project-plan.md (step 06 line; D2 in closed decisions)   modifies (T8)
 ```
 
 ## Interfaces
 
 ```rust
-pub struct ScanFacts { pub language: Option<String>, pub toolchain: Option<String>, pub packages: u32, pub test_runner: Option<String>, pub last_commit: Option<DateTime<Utc>> }
-pub fn describe_change(old: &Team, new: &Team) -> Vec<String>;
-pub struct JudgmentPolicy { pub required: JudgmentRequired, pub questions: Vec<String>, pub judge: Role }  pub enum JudgmentRequired { Always, Never, WhileJudgeActive }
-impl Team { pub fn judgment(&self) -> JudgmentPolicy; }   // the defaults when absent
+pub struct JudgmentPolicy { pub required: JudgmentRequired, pub questions: Vec<String>, pub judge: JudgeChoice }
+pub enum JudgmentRequired { Always, Never }  pub enum JudgeChoice { Auto, Architect, ScrumMaster }
+impl Team { pub fn judgment(&self) -> JudgmentPolicy; pub fn judge(&self) -> Role; }   // resolved: Architect, else Scrum Master, else PM
 pub struct JudgmentAnswer { pub question: String, pub pass: bool, pub reason: String }
-SessionRegistration.tiers: Vec<PermissionTier>
-ProjectFiles::append_project_note(&self, text: &str, date: NaiveDate) -> Result<(), FilesError>;
+pub struct JudgmentReview { pub answers: Vec<JudgmentAnswer>, pub reason: String }
+pub struct TeamPermissions { pub run_commands: bool, pub push: bool }
+pub fn describe_change(old: &Team, new: &Team) -> Vec<String>;  pub fn defaults() -> TeamDefaults;
+pub struct ScanFacts { pub language: Option<String>, pub toolchain: Option<String>, pub workspace: bool, pub packages: u32, pub tests_in: Option<String>, pub tracked_files: u32, pub last_commit: Option<DateTime<Utc>> }
+CredentialStore::delete(&self) -> Result<(), CredentialError>;
+SessionRegistration.tiers / ToolContext.tiers: Vec<PermissionTier>
 ```
 
-RPC: queries `project.scan`, `team.propose`, and `team.validate`; methods `team.save`, `criteria.save`, and `account.disconnect`.
+RPC:
+- queries: `project.scan`, `team.propose`, `team.validate`, `models.list`;
+- methods: `team.save`, `team.start`, `criteria.save`, `account.disconnect`;
+- `serve.status.setup_pending`.
 
 ## Tasks
 
-### Task 1: Foolproof team rules and the change description (`farik-core`)
+### Task 1: Team policy, permissions, defaults, and change descriptions (`farik-core`)
 
-- `refuses_a_judge_no_active_agent_holds` asserts the sentence at `/policy/judgment/judge` for a judge role no agent holds, and also for one held only by a paused agent.
-- `refuses_checking_with_no_questions` asserts that `required: true` with `questions: []` is refused, and that `required: false` with none is accepted.
-- `refuses_a_question_too_short_or_long` asserts the bounds.
-- `describes_each_change_in_words` asserts exact sentences for a model change, an effort change, a grant, a revoke, a budget set and cleared, and an integration change.
-- `defaults_the_judgment_when_absent` asserts that `Team::judgment()` is `WhileJudgeActive`, the two questions, and the Scrum Master.
+- `resolves_the_judge_in_the_founders_order`: Architect over Scrum Master over Product Manager, and a paused agent is skipped.
+- `refuses_a_named_judge_no_active_agent_holds` and `refuses_checking_with_no_questions` (the exact sentences).
+- `accepts_every_existing_team`: the base fixture and `starter_team` validate unchanged.
+- `applies_the_permission_answers_to_every_agent_of_the_role`: `run_commands: false` removes `execute` from a Developer added later; `push: true` gives `git_remote` to a Developer only.
+- `describes_each_change_in_words`: pinned sentences for model, effort, a grant, a revoke, a budget set and cleared, integration, permissions, and the judge.
 
-- [ ] `feat(core): hold the team to foolproof rules and describe each change`
+- [ ] `feat(core): add the plan-check policy, team permissions and defaults, and describe changes`
 
 ### Task 2: The configurable judgment
 
-- `judges_with_the_team_questions` asserts that the judgment prompt lists the team's three questions, numbered.
-- `records_one_answer_per_question` asserts that `farik_record_judgment` with 3 answers appends `contract.judged` with 3 `answers`, each carrying its question text.
-- `refuses_the_wrong_number_of_answers` asserts the refusal for 2 answers.
-- `passes_only_when_every_answer_passes` asserts that one fail gives a readiness failure sent back to the Product Manager, as today.
-- `reads_old_judgments` asserts that an old event with both booleans true still passes.
-- `honours_required` asserts that `Never` skips the judgment even with a Scrum Master, and that `Always` needs a judge.
-- `refuses_all_but_the_judge_role` asserts the refusal when the judge is the Architect and the Scrum Master calls.
+- `starts_the_judgment_for_the_resolved_judge`: with an Architect, the session is the Architect's (`judge_frk_1_by_architect`).
+- `judges_with_the_team_questions`: the message lists three numbered questions.
+- `records_one_answer_per_question` and `refuses_the_wrong_number_of_answers`.
+- `passes_only_when_every_answer_passes`: one fail sends the contract back, naming the failed question.
+- `reads_old_judgments`: both booleans true pass as two answers.
+- `honours_never`: no judgment session starts.
 
-- [ ] `feat(runtime): judge plans by the team's own questions`
+- [ ] `feat(runtime): check plans by the team's questions, by the founder's judge`
 
-### Task 3: Scan facts, notes, and personas
+### Task 3: Scan facts, the user's note, personas, and the defaults in init
 
-- `reads_the_same_line_from_its_facts` asserts that for the existing scan fixtures, `read_back` is unchanged and `facts` holds each part.
-- `keeps_the_user_note_in_project_md` asserts that `append_project_note` adds the text under "The user says" with the date, and that a second note is appended, not replaced.
-- `ships_a_persona_per_role` asserts that `load_role` gives a non-empty persona of at most 200 characters for each of the five roles.
+- `builds_the_same_line_from_its_facts`: every scan fixture's `read_back` is unchanged.
+- `keeps_the_user_note_across_a_rescan`: after `append_project_note` and a `project_document` rewrite, the "The user says" section remains.
+- `ships_the_mockup_persona_per_role`: the five exact lines.
 
-- [ ] `feat(store): read the scan back in parts and keep the user's notes`
+- [ ] `feat(store): read the scan back in parts and keep the user's note across rescans`
 
-### Task 4: Team and account over the wire, and permissions from the session's start
+### Task 4: Team, criteria and account over the wire; session tiers; the setup marker
 
-- `proposes_the_suggested_five` asserts names, roles, avatars, models, and personas.
-- `validates_without_saving_and_saves_with_effects` asserts that `team.validate` returns errors and writes nothing, and that `team.save` of a valid change writes it, appends `team.updated`, and answers its effect sentences.
-- `refuses_an_invalid_save_in_words` asserts that a save with no Developer is refused with the core sentence at its path.
-- `saves_the_criteria` asserts that `criteria.save` validates, writes, and appends `criteria.updated`.
-- `keeps_a_session_to_the_tiers_it_started_with` asserts that after a session registers with `execute`, a `team.save` revoking `execute` still lets that session's `Bash` hook call through, and that the agent's next session is refused.
-- `disconnects_the_account` asserts that `account.disconnect` removes the key from both stores and answers them, and that with the key in the environment it answers `[]` with the environment note.
-- `answers_the_scan` asserts `project.scan`'s shape on a fixture project.
+- `proposes_the_suggested_five`: ids, names, roles, avatars, models, personas.
+- `validates_with_effects_and_saves`: validate writes nothing and answers effects; save writes and appends `team.updated`.
+- `refuses_status_changes_and_removing_a_worked_agent` (the sentences).
+- `starts_the_team_from_setup`: `team.start` replaces the starter team, writes criteria, removes the marker, and appends the three events in order; without the marker, replacing a worked id is refused.
+- `keeps_a_session_to_the_tiers_it_started_with`: after a revoke of `execute`, the running session's `Bash` hook call and its `farik_exec` call both pass, and the next session is refused.
+- `disconnects_the_account_and_pauses`: stores emptied, `team.paused` appended, answer as specified; an environment key answers `[]` with the variable named.
+- `lists_the_models_with_labels`: the newest per family with the pinned labels.
+- `reports_setup_pending`: `serve.status.setup_pending` follows the marker.
 
-- [ ] `feat(runtime): propose, validate and save the team, and hold sessions to their starting permissions`
+- [ ] `feat(runtime): propose, validate, save and start the team, and hold sessions to their starting tiers`
 
 ### Task 5: The wizard's screens 4 to 8 and Advanced
 
-- `reads_the_scan_back_in_rows` asserts the rows, the kept-private list, and that "Something is wrong" sends the note.
-- `builds_the_team_from_the_five` asserts five rows with name fields; unticking the Scrum Master leaves four; "Add someone" adds a Developer as `developer-2`; a daemon validation error shows at its row.
-- `asks_both_permission_questions` asserts Continue is disabled until both are answered, and that "No, nobody may" gives `revokes: [execute]` on the Developer and Architect in the saved team.
-- `sets_or_clears_the_daily_limit` asserts that `daily_usd` is `10` with the limit on and absent with No limit.
-- `chooses_how_work_is_finished` asserts the three options' `integration` values.
-- `edits_the_checks_and_the_judgment` asserts that adding a check calls `criteria.save`, the third question's checkbox adds it, and unticking all questions with checking on shows the daemon's refusal.
-- `starts_the_team` asserts the order: `team.save`, then `team_resume`, then navigation to `/`.
+- `sends_a_new_project_to_the_scan`: `/` goes to `/setup/scan` while `setup_pending` is true.
+- `reads_the_scan_back_in_rows`: the rows as specified; "Something is wrong" sends the note.
+- `builds_the_team_from_the_five`: five rows; untick the Scrum Master; Add someone gives `noor` as a second Developer; a daemon error shows at its row.
+- `asks_both_permission_questions`: Continue stays disabled until both are answered; "No" sets `run_commands: false` and shows the Farik-still-checks line.
+- `sets_or_clears_the_daily_limit`, and `chooses_how_work_is_finished`.
+- `edits_the_checks_and_the_plan_check`: Add a check calls `criteria.save` with the review rubric; the third question toggles; a named judge that is not held shows the daemon's refusal.
+- `starts_the_team`: `team.start`, then navigation to `/`.
 
 - [ ] `feat(web): add the wizard's team, permissions, spending, finishing and advanced screens`
 
-### Task 6: The Team page, the agent editor, and the account row
+### Task 6: The Team page, the agent editor, the account row
 
-- `lists_the_team_with_its_costs_line` asserts one card per agent, the first-day sentence, and Pause sending `agent_update`.
-- `edits_an_agent_and_says_when_it_applies` asserts that changing effort to Quick saves `low`, and that the page shows "Changes start with Theo's next piece of work" and the effect sentence.
-- `toggles_tiers_in_advanced` asserts that the seven toggles show only with Advanced on, and that turning off `execute` for the Developer writes `revokes: [execute]`.
-- `shows_and_disconnects_the_account` asserts the Settings row and that Disconnect calls `account.disconnect`.
+- `lists_the_team_with_the_first_day_line`: the cards, and Pause sending `agent_update`.
+- `edits_an_agent_and_shows_the_effect_first`: changing effort to Quick shows the validate effect before Save, and saves `low`.
+- `toggles_tiers_in_advanced`: seven toggles only with Advanced on; an Architect's `network` off writes `revokes: [network]`.
+- `replaces_an_agent`: Retire, then Add someone of the same role.
+- `shows_and_disconnects_the_account`: the row, and the paused note after Disconnect.
 
-- [ ] `feat(web): add the team page and the agent editor, and the account row in settings`
+- [ ] `feat(web): add the team page and the agent editor, and the account row`
 
 ### Task 7: The team journey (Playwright)
 
-- `setup-team.spec.ts` is the journey in the Tests decision, with screenshots of "Your team" and "What they may do" at 360 and 1280 px.
+- `setup-team.spec.ts`: the journey in the Tests decision, with screenshots of "Your team" and "What they may do" at 360 and 1280 px.
 
 - [ ] `test(web): walk the team setup through the real server and browser`
 
 ### Task 8: Spec and plan
 
-- Spec 5.3: the paragraph on the configurable judgment says it is built, and gives the tool's new shape.
-- Spec 8.5: `contract.judged` gets `answers`, and the two booleans become optional.
-- Spec 4.4: say that permission changes wait for the next session, as they now do.
-- Spec 4.1: the setup screens and "Start the team".
-- Project plan: the step 06 line.
+- Spec 5.1 and 5.3: the judge order, and the Product Manager's exception.
+- Spec 5.3 also: the policy and the tool.
+- Spec 8.5: `contract.judged`.
+- Spec 4.4: tiers wait for the next session.
+- Spec 4.1: steps 4 to 8 and Start the team.
+- Spec 10: effects before saving.
+- The project plan: the step 06 line, and D2's row updated with the founder's 2026-09-29 rule.
+- The step 05 plan: a line recording the marker the host gained.
 
-- [ ] `docs(spec): the configurable judgment is built, and team changes wait for the next session`
+- [ ] `docs(spec): the plan check's judge and questions, and team changes that wait for the next session`
 
 ## Verification
 
 ```
 cargo xtask check --integration
-# expected: cargo 0 failed; @farik/web "Tests  31 passed (31)" (step 05's 20, T5 7, T6 4);
-#   playwright "4 passed"; last line: xtask check: ok
+# expected: cargo 0 failed; @farik/web: step 05's landed count plus 13 (T5 8, T6 5);
+#   playwright 4 passed; last line: xtask check: ok
 ```
