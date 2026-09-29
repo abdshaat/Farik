@@ -5,6 +5,7 @@
 
 use std::fmt::Display;
 use std::str::FromStr as _;
+use std::sync::Arc;
 
 use chrono::{DateTime, Utc};
 use farik_core::contract::{Role, TaskContract, TaskId, TaskKind, TaskStatus, validate_contract};
@@ -387,11 +388,18 @@ pub(super) async fn call(
     };
     if method == "request.file" {
         let text = params["text"].as_str().unwrap_or_default().to_string();
-        return tokio::task::spawn_blocking(move || file_words(&deps, &text))
-            .await
-            .unwrap_or_else(|error| Err(internal(&error)));
+        return off_the_worker(move || file_words(&deps, &text)).await;
     }
     save(state, &deps, params).await
+}
+
+/// `work`, which reads and writes the store, run where it cannot hold up the daemon's worker.
+async fn off_the_worker<T: Send + 'static>(
+    work: impl FnOnce() -> Result<T, Failure> + Send + 'static,
+) -> Result<T, Failure> {
+    tokio::task::spawn_blocking(work)
+        .await
+        .unwrap_or_else(|error| Err(internal(&error)))
 }
 
 /// `request.file`: the person's words filed as a draft request of the human's.
@@ -420,7 +428,30 @@ fn file_words(deps: &ToolDeps, text: &str) -> Result<Value, Failure> {
 /// `refining` first (5.11), by the escalation's resolve, and one the team is working to is
 /// refused; then the fields the human changed are written over the file and
 /// `contract.written` is recorded as theirs.
-async fn save(state: &DaemonState, deps: &ToolDeps, params: &Value) -> Result<Value, Failure> {
+async fn save(state: &DaemonState, deps: &Arc<ToolDeps>, params: &Value) -> Result<Value, Failure> {
+    let (held, edit) = (deps.clone(), params.clone());
+    let (task_id, changed, after, back) = off_the_worker(move || judged(&held, &edit)).await?;
+    if back {
+        let command = Command::EscalationResolve {
+            task_id: task_id.clone(),
+            to: TaskStatus::Refining,
+            message: EDITED.to_string(),
+            extra_tries: None,
+        };
+        if let CommandReply::Error { detail, .. } = super::handled(state, command).await {
+            return Err(Failure::new(REFUSED, detail));
+        }
+    }
+    if !changed.is_empty() {
+        let held = deps.clone();
+        off_the_worker(move || written_over(&held, &task_id, &changed, &after)).await?;
+    }
+    Ok(json!({ "saved": true, "back_to_refining": back }))
+}
+
+/// The human's edit judged before anything moves: the task, the fields it changes, the contract
+/// as it would be, and whether it first goes back to `refining`.
+fn judged(deps: &ToolDeps, params: &Value) -> Result<(TaskId, Vec<String>, Value, bool), Failure> {
     let task_id = task_of(deps, params)?;
     let before = file_value(deps, &task_id)?;
     let contract = contract_of(deps, &task_id)?;
@@ -459,30 +490,26 @@ async fn save(state: &DaemonState, deps: &ToolDeps, params: &Value) -> Result<Va
     }
     validate_contract(&after).map_err(|errors| Failure::new(REFUSED, schema_words(&errors)))?;
     let back = outcome == ContractWriteOutcome::ReturnsToRefining;
-    if back {
-        // The human's only way into `refining` from a frozen plan is an escalation's resolve.
-        if row.status != TaskStatus::Escalated {
-            return Err(Failure::new(
-                REFUSED,
-                "the team is working to this plan; stop the task before you change it",
-            ));
-        }
-        let command = Command::EscalationResolve {
-            task_id: task_id.clone(),
-            to: TaskStatus::Refining,
-            message: EDITED.to_string(),
-            extra_tries: None,
-        };
-        if let CommandReply::Error { detail, .. } = super::handled(state, command).await {
-            return Err(Failure::new(REFUSED, detail));
-        }
+    // The human's only way into `refining` from a frozen plan is an escalation's resolve.
+    if back && row.status != TaskStatus::Escalated {
+        return Err(Failure::new(
+            REFUSED,
+            "the team is working to this plan; stop the task before you change it",
+        ));
     }
-    if changed.is_empty() {
-        return Ok(json!({ "saved": true, "back_to_refining": back }));
-    }
+    Ok((task_id, changed, after, back))
+}
+
+/// The human's fields written over the contract as it is now, and `contract.written` recorded.
+fn written_over(
+    deps: &ToolDeps,
+    task_id: &TaskId,
+    changed: &[String],
+    after: &Value,
+) -> Result<(), Failure> {
     // The move wrote the file's lifecycle fields, so the human's fields go over what it left.
-    let mut written = file_value(deps, &task_id)?;
-    for field in &changed {
+    let mut written = file_value(deps, task_id)?;
+    for field in changed {
         written[field] = after[field].clone();
         if after.get(field).is_none()
             && let Some(object) = written.as_object_mut()
@@ -512,7 +539,7 @@ async fn save(state: &DaemonState, deps: &ToolDeps, params: &Value) -> Result<Va
     deps.projections
         .apply(&recorded)
         .map_err(|e| internal(&e))?;
-    Ok(json!({ "saved": true, "back_to_refining": back }))
+    Ok(())
 }
 
 fn schema_words(errors: &[farik_core::contract::ValidationError]) -> String {
