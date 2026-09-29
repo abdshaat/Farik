@@ -194,8 +194,8 @@ Tests:
 ```
 cargo xtask check
 # expected: the Rust checks as before; then pnpm's Vitest summary for @farik/brand,
-#   "Test Files  4 passed (4)" and "Tests  25 passed (25)" (generate 7, contrast 6, assets 5, sheet 7: the
-#   plan's 19 and the 6 the landing review added; the 2 xtask tests are counted by cargo);
+#   "Test Files  4 passed (4)" and "Tests  27 passed (27)" (generate 7, contrast 8, assets 5, sheet 7: the
+#   plan's 19, the 6 the landing review added, and the 2 of the palette change; the 2 xtask tests are counted by cargo);
 #   last line: xtask check: ok
 pnpm --filter @farik/brand sheet
 # expected: vite writes packages/brand/dist/sheet/index.html and its assets, exit 0
