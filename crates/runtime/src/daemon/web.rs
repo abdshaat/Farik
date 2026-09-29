@@ -767,8 +767,9 @@ async fn setup_call(state: &DaemonState, method: &str, params: &Value) -> Result
                             "the params of account.connect are not right",
                         )
                     })?;
-                host.connect(kind, text("secret"))
-                    .map(|source| json!({ "stored_in": source }))
+                host.connect(kind, text("secret")).map(
+                    |(source, taking_on)| json!({ "stored_in": source, "taking_on": taking_on }),
+                )
             }
         };
         answered.map_err(|error| match error {
@@ -1982,13 +1983,17 @@ mod tests {
             Ok(self.home.join(parent).join(name))
         }
 
-        fn connect(&self, kind: CredentialKind, secret: &str) -> Result<Source, SetupError> {
+        fn connect(
+            &self,
+            kind: CredentialKind,
+            secret: &str,
+        ) -> Result<(Source, bool), SetupError> {
             self.calls
                 .lock()
                 .expect("the calls")
                 .push(json!({ "connect": kind }));
             credential_of_kind(kind, secret)
-                .map(|_| Source::File)
+                .map(|_| (Source::File, false))
                 .map_err(SetupError::Refused)
         }
 
@@ -2275,7 +2280,12 @@ mod tests {
             &json!({ "kind": "subscription_token", "secret": secret }),
         )
         .await;
-        assert_eq!(stored["result"], json!({ "stored_in": "file" }), "{text}");
+        conforms(&stored["result"], "accountConnectResult");
+        assert_eq!(
+            stored["result"],
+            json!({ "stored_in": "file", "taking_on": false }),
+            "{text}"
+        );
         let (text, malformed) =
             asked(&state, "account.connect", &json!({ "secret": secret })).await;
         assert_eq!(malformed["error"]["code"], -32602, "{text}");

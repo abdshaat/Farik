@@ -1,5 +1,5 @@
 import { Button, Choice, TextField } from "@farik/ui";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router";
 import { useConnection } from "../../app/connection.tsx";
 import { useQuery } from "../../app/store.ts";
@@ -12,7 +12,7 @@ const SETUP_TOKEN = "claude setup-token";
 
 /** Setup's second step: the key Farik's agents use, kept in the keychain or a private file. */
 export function SetupAccount() {
-	const { client } = useConnection();
+	const { client, status, reopen } = useConnection();
 	const navigate = useNavigate();
 	const { data: account } = useQuery<{ source: string | null }>(
 		"account.status",
@@ -22,6 +22,7 @@ export function SetupAccount() {
 	const [secret, setSecret] = useState("");
 	const [saving, setSaving] = useState(false);
 	const [refused, setRefused] = useState<string>();
+	const [opening, setOpening] = useState(false);
 	const subscription = kind === "subscription_token";
 
 	const save = async () => {
@@ -32,7 +33,13 @@ export function SetupAccount() {
 			const answer = (await client.call("account.connect", {
 				kind,
 				secret,
-			})) as { storedIn: "keychain" | "file" };
+			})) as { storedIn: "keychain" | "file"; takingOn: boolean };
+			// A project that waited on the key is being taken on: Farik restarts on it.
+			if (answer.takingOn) {
+				reopen();
+				setOpening(true);
+				return;
+			}
 			// The next screen says where the key went.
 			navigate("/setup/project", { state: { stored: answer.storedIn } });
 		} catch (e) {
@@ -41,6 +48,18 @@ export function SetupAccount() {
 		}
 	};
 	const done = secret === "" && !!account?.source;
+
+	// Once the page is connected to the restarted Farik, it goes home.
+	useEffect(() => {
+		if (opening && status === "open") navigate("/", { replace: true });
+	}, [opening, status, navigate]);
+
+	if (opening)
+		return (
+			<Wizard step={1} title={t("accountTitle")} lead={t("accountLead")}>
+				<p role="status">{t("opening")}</p>
+			</Wizard>
+		);
 
 	return (
 		<Wizard step={1} title={t("accountTitle")} lead={t("accountLead")}>

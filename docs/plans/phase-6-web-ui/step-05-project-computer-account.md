@@ -66,7 +66,7 @@ Out of scope:
     - `account.status {}`, answering `{ provider: 'anthropic' | null, kind: 'api_key' | 'subscription_token' | null, source: 'environment' | 'keychain' | 'file' | null }`.
   - Methods:
     - `project.open { path, no_sandbox }` and `project.create { parent, name, description, no_sandbox }`, each answering `{ project_root }`;
-    - `account.connect { kind, secret }`, answering `{ stored_in: 'keychain' | 'file' }`;
+    - `account.connect { kind, secret }`, answering `{ stored_in: 'keychain' | 'file', taking_on: bool }`, `taking_on` true when a project that waited on the credential is now taken on, so the page reopens (added by the landing review);
     - `sandbox.build {}`, answering `{ image }`.
   - Errors: `-32004 no_project`, and `-32005 refused` with the sentence as its `message`.
   - A refused `account.connect` frame never echoes its params. `answer` drops `error.data` for every method whose params hold a secret, which is `account.connect`, because `rpc_request_from_value`'s messages quote the whole frame.

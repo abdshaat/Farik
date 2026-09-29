@@ -39,12 +39,13 @@ pub trait SetupHost: Send + Sync {
         description: &str,
         no_sandbox: bool,
     ) -> Result<PathBuf, SetupError>;
-    /// Keeps the pasted `secret` of `kind`, and answers where.
+    /// Keeps the pasted `secret` of `kind`, and answers where, and whether a project that waited
+    /// on the credential is now being taken on.
     ///
     /// # Errors
     ///
     /// `Refused` with the sentence to show, which never quotes the secret.
-    fn connect(&self, kind: CredentialKind, secret: &str) -> Result<Source, SetupError>;
+    fn connect(&self, kind: CredentialKind, secret: &str) -> Result<(Source, bool), SetupError>;
     /// The user's home folder, which the folder browser stays inside.
     fn home(&self) -> PathBuf;
     /// The environment the computer's programs are looked for and run in.

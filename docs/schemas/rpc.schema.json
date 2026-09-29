@@ -1191,10 +1191,15 @@
             "keychain",
             "file"
           ]
+        },
+        "taking_on": {
+          "type": "boolean",
+          "description": "True when a project that waited on the credential is now being taken on, so the daemon restarts on it."
         }
       },
       "required": [
-        "stored_in"
+        "stored_in",
+        "taking_on"
       ]
     },
     "sandboxBuildResult": {

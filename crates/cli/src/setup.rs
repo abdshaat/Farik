@@ -232,7 +232,7 @@ impl SetupHost for CliHost {
         Ok(self.choose(root))
     }
 
-    fn connect(&self, kind: CredentialKind, secret: &str) -> Result<Source, SetupError> {
+    fn connect(&self, kind: CredentialKind, secret: &str) -> Result<(Source, bool), SetupError> {
         let credential = credential_of_kind(kind, secret).map_err(|why| refused(&why))?;
         if let Some(directory) = state_dir(&self.env) {
             make_state_dir(&directory).map_err(failed)?;
@@ -246,7 +246,7 @@ impl SetupHost for CliHost {
         if let Some(root) = &self.waiting {
             self.choose(root.clone());
         }
-        Ok(source)
+        Ok((source, self.waiting.is_some()))
     }
 
     fn home(&self) -> PathBuf {

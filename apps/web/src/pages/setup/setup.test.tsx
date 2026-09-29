@@ -131,6 +131,38 @@ describe("setup", () => {
 		).toBeTruthy();
 	});
 
+	it("takes_the_waiting_project_on_once_connected", async () => {
+		const { socket, sockets } = await renderApp(
+			"/setup/account",
+			{ "GET /session": 204 },
+			<Status />,
+		);
+		const s = socket as FakeSocket;
+		await answerQuery(s, "account.status", {
+			provider: null,
+			kind: null,
+			source: null,
+		});
+		const field = await screen.findByLabelText(en.subscriptionKey);
+		fireEvent.change(field, { target: { value: "sk-ant-oat01-test" } });
+		fireEvent.click(screen.getByRole("button", { name: en.saveContinue }));
+		const call = await sent(s, "account.connect");
+		act(() => s.reply(call, { stored_in: "file", taking_on: true }));
+		expect(await screen.findByText(en.opening)).toBeTruthy();
+		expect(screen.getByTestId("status").textContent).toBe("reopening");
+
+		// The setup daemon stops: the page asks for its session again at once, then goes home.
+		act(() => s.close());
+		expect(screen.queryByText(en.lostTitle)).toBeNull();
+		await waitFor(() => expect(sockets).toHaveLength(2));
+		const next = sockets[1] as FakeSocket;
+		act(() => next.emit("open", {}));
+		await answerStatus(next, true);
+		expect(
+			await screen.findByRole("heading", { name: en.events }),
+		).toBeTruthy();
+	});
+
 	it("browses_folders_and_uses_one", async () => {
 		sessionStorage.setItem("farik.noSandbox", "true");
 		const { container, socket } = await renderApp("/setup/project");

@@ -1082,3 +1082,39 @@ fn refuses_paths_outside_home_and_bad_names() {
     assert!(!state.join("farik/state.json").exists());
     assert_eq!(ran.code, 130, "{out}\n{err}");
 }
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn connecting_the_account_takes_the_waiting_project_on() {
+    let repository = a_team("setup-connect-takes-on");
+    let (_home, state) = setup_folders("setup-connect-takes-on");
+    let (_claude, path) = project::a_claude_saying("setup-connect-claude", "2.1.300 (Claude Code)");
+    let mut env = setup_env(&repository.path, &state);
+    env.insert("PATH".to_string(), path);
+    // Run in a project with no credential, on Claude Code's engine: setup waits on the account.
+    let serving = serving_in(&repository.path, env, false);
+    let before = serve_status(serving.port, &serving.cookie);
+    assert_eq!(before["project_root"], Value::Null, "{before}");
+
+    let connected = call(
+        serving.port,
+        &serving.cookie,
+        "account.connect",
+        json!({ "kind": "api_key", "secret": "sk-ant-api03-test" }),
+    );
+    assert_eq!(
+        connected["result"],
+        json!({ "stored_in": "keychain", "taking_on": true }),
+        "{connected}"
+    );
+    until("the team is driven", || daemon_file(&repository).exists());
+    let status = serve_status(serving.port, &serving.cookie);
+    let (ran, out, err) = serving.interrupted();
+    let root = repository.path.canonicalize().expect("the root");
+    assert_eq!(
+        status["project_root"],
+        json!(root.display().to_string()),
+        "{status}"
+    );
+    assert_eq!(ran.code, 130, "{out}\n{err}");
+}
