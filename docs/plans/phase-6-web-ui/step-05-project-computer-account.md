@@ -160,7 +160,7 @@ type Status = 'checking' | 'no_session' | 'connecting' | 'open' | 'lost' | 'reop
 - `treats_no_entry_as_nothing_stored` asserts that `load` on an empty store answers `Ok(None)`, and `load_credential` then tries the next store.
 - `refuses_a_key_of_the_wrong_kind` asserts the prefix refusals for both kinds.
 
-- [ ] `feat(runtime): keep the model credential in the keychain or a private file`
+- [x] `feat(runtime): keep the model credential in the keychain or a private file`
 
 ### Task 3: The setup daemon
 

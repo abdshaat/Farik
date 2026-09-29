@@ -10,6 +10,9 @@ pub mod channel;
 pub mod claude;
 /// What a session cost, and what each budget has left.
 pub mod cost;
+/// Where the model credential is kept: the environment, the keychain, or a private file.
+#[cfg(unix)]
+pub mod credential;
 /// Contract exit criteria, run and judged.
 pub mod criteria;
 /// The local service: the hooks around every tool call, and Farik's tools over MCP.

@@ -22,6 +22,7 @@ farik-store = { path = "crates/store" }
 futures-util = { version = "=0.3.34", default-features = false, features = ["sink"] }
 globset = { version = "=0.4.20", default-features = false }
 jsonschema = { version = "=0.56.0", default-features = false }
+keyring = "=4.2.0"
 regress = "=0.12.0"
 rmcp = { version = "=3.3.0", default-features = false, features = ["server", "transport-streamable-http-server"] }
 rusqlite = { version = "=0.40.2", features = ["bundled"] }
