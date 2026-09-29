@@ -340,7 +340,7 @@ pub(crate) fn waiting_now(project: &Project) -> Result<Vec<Waiting>, String> {
         .read_team()
         .map_err(|error| error.to_string())?;
     let projections = project.projections()?;
-    waiting(&project.log, &projections, &team)
+    waiting(&project.log, &projections, &project.files, &team)
 }
 
 /// Prints what waits on the human: a person's lines, or one `{"waiting_on_you"}` object.

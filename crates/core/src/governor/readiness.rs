@@ -188,6 +188,21 @@ pub fn evaluate_readiness(
     }
 }
 
+/// How many rules `evaluate_readiness` ran to give `result`: every rule but the judge's, and the
+/// judge's two as well once every other passed.
+#[must_use]
+pub fn rules_evaluated(result: &Result<(), Vec<ReadinessFailure>>) -> usize {
+    let judged = result.as_ref().err().is_none_or(|failures| {
+        failures.iter().all(|failure| {
+            matches!(
+                failure.rule,
+                ReadinessRule::JudgmentRecorded | ReadinessRule::JudgmentAnswers
+            )
+        })
+    });
+    CHECKS.len() + if judged { JUDGMENT_CHECKS.len() } else { 0 }
+}
+
 fn failure(rule: ReadinessRule, message: String) -> ReadinessFailure {
     ReadinessFailure { rule, message }
 }

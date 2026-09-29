@@ -2,7 +2,7 @@
 //! diff may touch, what was written down, and when the human must accept, as one function over a
 //! contract and the evidence gathered for it.
 
-use crate::contract::{ExitCriterion, TaskContract, wire_method};
+use crate::contract::{ExitCriterion, TaskContract, TaskStatus, wire_method};
 use crate::generated::task_contract::FarikTaskContractKind as Kind;
 use crate::generated::task_contract::FarikTaskContractRisk as Risk;
 use crate::governor::paths::{
@@ -94,6 +94,19 @@ pub struct DoneFailure {
 #[must_use]
 pub fn requires_human_acceptance(contract: &TaskContract) -> bool {
     contract.risk == Risk::High || contract.kind == Kind::Epic
+}
+
+/// Whether the task's result waits on the human's acceptance (5.4): it is `verifying`, and it is an
+/// epic, risk `high`, or has a `human` criterion. The status is the contract's, which the caller
+/// takes from the board.
+#[must_use]
+pub fn result_awaits_human(contract: &TaskContract) -> bool {
+    contract.status == TaskStatus::Verifying
+        && (requires_human_acceptance(contract)
+            || contract
+                .exit_criteria
+                .iter()
+                .any(|criterion| wire_method(&criterion.verification) == Some("human")))
 }
 
 type Check = fn(&TaskContract, &DoneEvidence) -> Option<DoneFailure>;

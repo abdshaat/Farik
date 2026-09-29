@@ -182,7 +182,7 @@ Files: the store's requests, waiting, diff, activity and git; CLI moves; runtime
 - `records_question_choices`: labels and hints within their bounds, and `questions.list`'s fields.
 - `answers_tries_and_the_sprint`: `task.tries` after an extra-tries grant; `sprint.current` counts; `contract.check`'s `total`.
 
-- [ ] `feat(runtime): answer the gates' queries, and file, check and save plans from the browser`
+- [x] `feat(runtime): answer the gates' queries, and file, check and save plans from the browser`
 
 ### Task 4: Spec and plan
 

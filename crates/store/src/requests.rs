@@ -28,6 +28,91 @@ use crate::{EventLog, Projections, StoreError, TaskProjection};
 /// Who the human is in the log: the id every act of theirs is recorded under.
 const HUMAN: &str = "human";
 
+/// Every text of a request the Product Manager replaces while refining it.
+pub const PLACEHOLDER: &str = "(placeholder, for the Product Manager to write)";
+/// The budget a request is filed with when the team caps no task's budget (ADR 0015). The Product
+/// Manager rewrites it while refining, as it rewrites every placeholder.
+pub const PLACEHOLDER_MAX_COST_USD: f64 = 20.0;
+/// A request a person files from a brief: its title and its intent, the brief, are theirs, and
+/// every other field is a placeholder the refine session replaces. The placeholder path is a glob
+/// no file matches.
+///
+/// # Errors
+///
+/// A sentence saying the title is under three characters or the brief under twenty, the schema's
+/// minimums.
+pub fn request_from_brief(title: &str, brief: &str, max_cost_usd: f64) -> Result<Value, String> {
+    if title.trim().chars().count() < 3 {
+        return Err(format!(
+            "{title:?} is too short a title: a contract's title is three characters or more"
+        ));
+    }
+    if brief.trim().chars().count() < 20 {
+        return Err(format!(
+            "{brief:?} is too short a brief: it is the contract's intent, which is twenty \
+             characters or more"
+        ));
+    }
+    Ok(json!({
+        "title": title,
+        "intent": brief,
+        "scope": { "in_scope": [PLACEHOLDER], "out_of_scope": [PLACEHOLDER] },
+        "requirements": [{ "id": "R1", "text": PLACEHOLDER }],
+        "exit_criteria": [{
+            "id": "C1",
+            "text": PLACEHOLDER,
+            "satisfies": ["R1"],
+            "verification": { "method": "review", "rubric": [PLACEHOLDER] }
+        }],
+        "assignee_role": "software_developer",
+        "reviewer_role": "software_developer",
+        "risk": "low",
+        "budget": { "max_cost_usd": max_cost_usd },
+        "allowed_paths": [PLACEHOLDER]
+    }))
+}
+
+/// The budget a request is filed with: the team's cap on a task's budget when it has one, and
+/// otherwise `PLACEHOLDER_MAX_COST_USD`.
+#[must_use]
+pub fn placeholder_budget_usd(rules: &TeamRules) -> f64 {
+    rules
+        .max_task_budget_usd
+        .unwrap_or(PLACEHOLDER_MAX_COST_USD)
+}
+
+/// Why a request in plain words is refused before anything else is said of it.
+pub const TOO_SHORT: &str = "say a little more: at least 20 characters";
+/// The longest title a request in plain words is given.
+const WORDS_TITLE_LIMIT: usize = 80;
+
+/// A request a person files in plain words (F3): its title is the text's first line, cut at 80
+/// characters on a word boundary, and its intent the whole text; every other field is a
+/// placeholder, as `request_from_brief` makes it.
+///
+/// # Errors
+///
+/// `TOO_SHORT` for a text under 20 characters, asked first; otherwise `request_from_brief`'s.
+pub fn request_from_text(text: &str, max_cost_usd: f64) -> Result<Value, String> {
+    if text.trim().chars().count() < 20 {
+        return Err(TOO_SHORT.to_string());
+    }
+    let line = text.trim().lines().next().unwrap_or_default().trim();
+    let title = if line.chars().count() <= WORDS_TITLE_LIMIT {
+        line.to_string()
+    } else {
+        let kept: String = line.chars().take(WORDS_TITLE_LIMIT).collect();
+        let next = line.chars().nth(WORDS_TITLE_LIMIT);
+        if next.is_some_and(char::is_whitespace) {
+            kept
+        } else {
+            kept.rsplit_once(char::is_whitespace)
+                .map_or(kept.clone(), |(before, _)| before.to_string())
+        }
+    };
+    request_from_brief(title.trim_end(), text, max_cost_usd)
+}
+
 /// Why a request was not filed.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RequestError {
@@ -555,7 +640,14 @@ mod tests {
     use farik_protocol::command::RequestSize;
     use farik_protocol::event::{ContractLockedBody, event_from_value, fixtures::an_event_wire};
 
-    use super::{RequestError, file_request, hold_contract, triage_by_human};
+    use farik_core::contract::validate_contract;
+    use farik_core::governor::team_rules::TeamRules;
+    use serde_json::json;
+
+    use super::{
+        PLACEHOLDER, RequestError, file_request, hold_contract, placeholder_budget_usd,
+        request_from_brief, triage_by_human,
+    };
     use crate::files::fixtures::{TempProject, a_team};
     use crate::{EventLog, EventQuery, IN_MEMORY, Projections, open_event_log, open_projections};
 
@@ -595,6 +687,48 @@ mod tests {
             .iter()
             .map(|event| event.body.kind())
             .collect()
+    }
+
+    /// Every string in `value` that is one of its texts, as against its ids, roles, and risk.
+    fn texts(value: &Value) -> Vec<String> {
+        [
+            value["scope"]["in_scope"][0].clone(),
+            value["scope"]["out_of_scope"][0].clone(),
+            value["requirements"][0]["text"].clone(),
+            value["exit_criteria"][0]["text"].clone(),
+            value["exit_criteria"][0]["verification"]["rubric"][0].clone(),
+            value["allowed_paths"][0].clone(),
+        ]
+        .iter()
+        .map(|text| text.as_str().unwrap_or_default().to_string())
+        .collect()
+    }
+
+    #[test]
+    fn builds_a_request_the_store_files() {
+        let brief = "Add done.txt and a check that it exists";
+        assert_eq!(brief.len(), 39);
+        let brief = format!("{brief}.");
+        let budget = placeholder_budget_usd(&TeamRules::default());
+        let mut request =
+            request_from_brief("Add done.txt", &brief, budget).expect("a request is built");
+        assert!(texts(&request).iter().all(|text| text == PLACEHOLDER));
+        request["id"] = json!("FRK-1");
+        request["status"] = json!("draft");
+        validate_contract(&request).expect("the store would file it");
+
+        assert!(request_from_brief("Add done.txt", "A brief too short.!", 5.0).is_err());
+        assert!(request_from_brief("Ad", &brief, 5.0).is_err());
+    }
+
+    #[test]
+    fn places_a_budget_of_the_team_cap_or_twenty_dollars() {
+        let capped = TeamRules {
+            max_task_budget_usd: Some(12.5),
+            ..TeamRules::default()
+        };
+        assert!((placeholder_budget_usd(&capped) - 12.5).abs() < 1e-9);
+        assert!((placeholder_budget_usd(&TeamRules::default()) - 20.0).abs() < 1e-9);
     }
 
     #[test]

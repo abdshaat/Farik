@@ -25,6 +25,7 @@ use serde_json::{Value, json};
 use sha2::{Digest as _, Sha256};
 use tokio_util::sync::CancellationToken;
 
+use super::gates;
 use super::setup::list_folders;
 use super::{DaemonError, DaemonState, SetupError, SetupHost, hex, random_token, same_token};
 use crate::claude::CredentialKind;
@@ -473,14 +474,14 @@ async fn push(
 }
 
 /// A JSON-RPC error: its code and its sentence, and for invalid params what the schema found.
-struct Failure {
+pub(super) struct Failure {
     code: i64,
     message: String,
     data: Option<Value>,
 }
 
 impl Failure {
-    fn new(code: i64, message: impl Into<String>) -> Self {
+    pub(super) fn new(code: i64, message: impl Into<String>) -> Self {
         Failure {
             code,
             message: message.into(),
@@ -493,12 +494,12 @@ const PARSE_ERROR: i64 = -32700;
 const INVALID_REQUEST: i64 = -32600;
 const UNKNOWN_METHOD: i64 = -32601;
 const INVALID_PARAMS: i64 = -32602;
-const INTERNAL_ERROR: i64 = -32603;
-const UNKNOWN_QUERY: i64 = -32001;
-const NOT_FOUND: i64 = -32002;
+pub(super) const INTERNAL_ERROR: i64 = -32603;
+pub(super) const UNKNOWN_QUERY: i64 = -32001;
+pub(super) const NOT_FOUND: i64 = -32002;
 const REFUSED_HERE: i64 = -32003;
-const NO_PROJECT: i64 = -32004;
-const REFUSED: i64 = -32005;
+pub(super) const NO_PROJECT: i64 = -32004;
+pub(super) const REFUSED: i64 = -32005;
 
 /// The methods the first-run wizard calls, which setup mode's host answers.
 const SETUP_METHODS: [&str; 4] = [
@@ -513,7 +514,7 @@ const SECRET_METHODS: [&str; 1] = ["account.connect"];
 
 /// The response to one text frame. A `subscribe` sets `sent` to its `from_seq`, and an
 /// `unsubscribe` clears it.
-async fn answer(state: &Arc<DaemonState>, text: &str, sent: &mut Option<u64>) -> Value {
+pub(super) async fn answer(state: &Arc<DaemonState>, text: &str, sent: &mut Option<u64>) -> Value {
     let Ok(request) = serde_json::from_str::<Value>(text) else {
         return failure(
             &Value::Null,
@@ -540,6 +541,7 @@ async fn answer(state: &Arc<DaemonState>, text: &str, sent: &mut Option<u64>) ->
     };
     if !["subscribe", "unsubscribe", "command", "query"].contains(&method)
         && !SETUP_METHODS.contains(&method)
+        && !gates::METHODS.contains(&method)
     {
         return failure(
             &id,
@@ -575,6 +577,7 @@ async fn answer(state: &Arc<DaemonState>, text: &str, sent: &mut Option<u64>) ->
             Ok(json!({}))
         }
         "command" => command(state, &params["command"]).await,
+        method if gates::METHODS.contains(&method) => gates::call(state, method, params).await,
         "query" => {
             // The store and the files are read off the async workers.
             let (state, params) = (Arc::clone(state), params.clone());
@@ -670,10 +673,7 @@ fn query(state: &DaemonState, name: &str, params: &Value) -> Result<Value, Failu
             let team = serde_json::to_value(team).map_err(|error| internal(&error))?;
             Ok(json!({ "team": team }))
         }
-        _ => Err(Failure::new(
-            UNKNOWN_QUERY,
-            format!("there is no query {name}"),
-        )),
+        _ => gates::query(deps, name, params),
     }
 }
 

@@ -13,7 +13,7 @@ use farik_protocol::event::{
 };
 use farik_store::EventQuery;
 use schemars::JsonSchema;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
 use super::refusal::Refusal;
@@ -122,6 +122,22 @@ pub(crate) struct WriteNoteInput {
 pub(crate) struct AskHumanInput {
     /// The question.
     question: String,
+    /// At most four answers to offer the person, each a label of 1 to 80 characters and an
+    /// optional hint of up to 160 that says what picking it means. The person may still answer in
+    /// words.
+    #[serde(default)]
+    choices: Vec<ChoiceInput>,
+}
+
+/// One answer `farik_ask_human` offers.
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct ChoiceInput {
+    /// What the person picks, in 1 to 80 characters.
+    label: String,
+    /// What picking it means, in up to 160 characters.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    hint: Option<String>,
 }
 
 /// `farik_write_product_doc`'s input.
@@ -317,11 +333,28 @@ fn opens_with_a_summary(text: &str) -> bool {
 /// Asks the human, and answers with the question's id: the sequence number of its event, which
 /// is unique and is what `farik answer` takes.
 pub(super) fn ask_human(call: &Call<'_>, input: AskHumanInput) -> Result<Value, ToolError> {
+    let bounded = input.choices.len() <= 4
+        && input.choices.iter().all(|choice| {
+            (1..=80).contains(&choice.label.chars().count())
+                && choice
+                    .hint
+                    .as_ref()
+                    .is_none_or(|hint| hint.chars().count() <= 160)
+        });
+    if !bounded {
+        return Err(ToolError::InvalidInput {
+            detail: "offer at most 4 choices, each a label of 1 to 80 characters and a hint of \
+                     at most 160"
+                .to_string(),
+        });
+    }
+    let choices = serde_json::from_value(json!(input.choices)).map_err(failed)?;
     let event = call.append(
         call.context.task_id.as_ref(),
         EventBody::QuestionAsked(QuestionAskedBody {
             question: input.question,
             asked_by: call.agent_id().to_string(),
+            choices,
         }),
     )?;
     Ok(json!({

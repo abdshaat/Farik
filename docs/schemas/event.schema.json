@@ -690,13 +690,29 @@
     },
     "questionAskedBody": {
       "title": "Question Asked Body",
-      "description": "An agent asked the human a question (docs/SPEC.md section 5.16). The event's sequence number is the question's id. A conversation with no task can ask one, so the envelope names a task only when there is one.",
+      "description": "An agent asked the human a question (docs/SPEC.md section 5.16). The event's sequence number is the question's id. A conversation with no task can ask one, so the envelope names a task only when there is one. choices are the answers the agent offers the person to pick from, at most four, each a short label and an optional hint; the person may still answer in words.",
       "type": "object",
       "additionalProperties": false,
       "required": ["question", "asked_by"],
       "properties": {
         "question": { "type": "string" },
-        "asked_by": { "type": "string" }
+        "asked_by": { "type": "string" },
+        "choices": {
+          "type": "array",
+          "maxItems": 4,
+          "items": { "$ref": "#/$defs/questionChoice" }
+        }
+      }
+    },
+    "questionChoice": {
+      "title": "Question Choice",
+      "description": "An answer an agent offers with its question: a short label, and an optional hint that says what picking it means.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["label"],
+      "properties": {
+        "label": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "hint": { "type": "string", "maxLength": 160 }
       }
     },
     "productDocWrittenBody": {

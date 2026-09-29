@@ -26,7 +26,7 @@ use crate::session::SessionPurpose;
 use crate::transitions::Transitions;
 
 mod channel;
-mod contracts;
+pub(crate) mod contracts;
 mod exec;
 #[cfg(test)]
 pub(crate) mod fixtures;

@@ -23,13 +23,13 @@ pub use crate::generated::event::{
     EventKind, HumanAcceptedBody, HumanAcceptedBodySubject, JudgmentAnswer, MemoryWrittenBody,
     MessagePostedBody, NoteWrittenBody, NoteWrittenBodyKind, ProductDocWrittenBody,
     ProjectScannedBody, PullRequestOpenedBody, QuestionAnsweredBody, QuestionAskedBody,
-    RequestTriagedBody, RequestTriagedBodySize, RetroAppendedBody, ReviewRecordedBody,
-    SessionEndedBody, SessionEndedBodyReason, SessionStartedBody, SessionStartedBodyEffort,
-    SessionStartedBodyModel, SessionStartedBodyPurpose, SprintEndedBody, SprintEndedBodyEndedBy,
-    SprintPlannedBody, SprintStartedBody, TaskCreatedBody, TaskIntegratedBody,
-    TaskIntegratedBodyIntegratedBy, TaskTransitionedBody, TaskTransitionedBodyEffectsItem,
-    TeamPausedBody, TeamUpdatedBody, TokenUsage, ToolCalledBody, ToolDeniedBody, ToolReturnedBody,
-    TransitionRefusedBody, TransitionRefusedBodyRefusal,
+    QuestionChoice, RequestTriagedBody, RequestTriagedBodySize, RetroAppendedBody,
+    ReviewRecordedBody, SessionEndedBody, SessionEndedBodyReason, SessionStartedBody,
+    SessionStartedBodyEffort, SessionStartedBodyModel, SessionStartedBodyPurpose, SprintEndedBody,
+    SprintEndedBodyEndedBy, SprintPlannedBody, SprintStartedBody, TaskCreatedBody,
+    TaskIntegratedBody, TaskIntegratedBodyIntegratedBy, TaskTransitionedBody,
+    TaskTransitionedBodyEffectsItem, TeamPausedBody, TeamUpdatedBody, TokenUsage, ToolCalledBody,
+    ToolDeniedBody, ToolReturnedBody, TransitionRefusedBody, TransitionRefusedBodyRefusal,
 };
 /// The generated names of the vocabularies the governor's events repeat, renamed at the edge so
 /// that they cannot be mistaken for `farik-core`'s own types of the same name.

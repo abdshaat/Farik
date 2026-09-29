@@ -29,7 +29,19 @@
         "serve.status",
         "folders.list",
         "computer.check",
-        "account.status"
+        "account.status",
+        "waiting.list",
+        "contract.get",
+        "contract.check",
+        "task.history",
+        "task.diff",
+        "task.checks",
+        "task.tries",
+        "sprint.current",
+        "questions.list",
+        "escalation.choices",
+        "team.activity",
+        "moved.since"
       ]
     },
     "subscribeRequest": {
@@ -175,6 +187,42 @@
             },
             {
               "$ref": "#/$defs/accountStatusQuery"
+            },
+            {
+              "$ref": "#/$defs/waitingListQuery"
+            },
+            {
+              "$ref": "#/$defs/contractGetQuery"
+            },
+            {
+              "$ref": "#/$defs/contractCheckQuery"
+            },
+            {
+              "$ref": "#/$defs/taskHistoryQuery"
+            },
+            {
+              "$ref": "#/$defs/taskDiffQuery"
+            },
+            {
+              "$ref": "#/$defs/taskChecksQuery"
+            },
+            {
+              "$ref": "#/$defs/taskTriesQuery"
+            },
+            {
+              "$ref": "#/$defs/sprintCurrentQuery"
+            },
+            {
+              "$ref": "#/$defs/questionsListQuery"
+            },
+            {
+              "$ref": "#/$defs/escalationChoicesQuery"
+            },
+            {
+              "$ref": "#/$defs/teamActivityQuery"
+            },
+            {
+              "$ref": "#/$defs/movedSinceQuery"
             }
           ]
         }
@@ -325,6 +373,12 @@
         },
         {
           "$ref": "#/$defs/sandboxBuildRequest"
+        },
+        {
+          "$ref": "#/$defs/requestFileRequest"
+        },
+        {
+          "$ref": "#/$defs/contractSaveRequest"
         }
       ]
     },
@@ -1153,6 +1207,829 @@
       },
       "required": [
         "image"
+      ]
+    },
+    "waitingListQuery": {
+      "title": "Waiting List Query",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "params"
+      ],
+      "properties": {
+        "name": {
+          "const": "waiting.list"
+        },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {}
+        }
+      }
+    },
+    "contractGetQuery": {
+      "title": "Contract Get Query",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "params"
+      ],
+      "properties": {
+        "name": {
+          "const": "contract.get"
+        },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "task_id": {
+              "type": "string",
+              "pattern": "^FRK-[0-9]{1,6}$"
+            }
+          },
+          "required": [
+            "task_id"
+          ]
+        }
+      }
+    },
+    "contractCheckQuery": {
+      "title": "Contract Check Query",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "params"
+      ],
+      "properties": {
+        "name": {
+          "const": "contract.check"
+        },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "task_id": {
+              "type": "string",
+              "pattern": "^FRK-[0-9]{1,6}$"
+            },
+            "contract": {
+              "type": "object",
+              "description": "A contract as task-contract.schema.json shapes it; the daemon validates it."
+            }
+          },
+          "required": [
+            "task_id",
+            "contract"
+          ]
+        }
+      }
+    },
+    "taskHistoryQuery": {
+      "title": "Task History Query",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "params"
+      ],
+      "properties": {
+        "name": {
+          "const": "task.history"
+        },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "task_id": {
+              "type": "string",
+              "pattern": "^FRK-[0-9]{1,6}$"
+            }
+          },
+          "required": [
+            "task_id"
+          ]
+        }
+      }
+    },
+    "taskDiffQuery": {
+      "title": "Task Diff Query",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "params"
+      ],
+      "properties": {
+        "name": {
+          "const": "task.diff"
+        },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "task_id": {
+              "type": "string",
+              "pattern": "^FRK-[0-9]{1,6}$"
+            }
+          },
+          "required": [
+            "task_id"
+          ]
+        }
+      }
+    },
+    "taskChecksQuery": {
+      "title": "Task Checks Query",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "params"
+      ],
+      "properties": {
+        "name": {
+          "const": "task.checks"
+        },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "task_id": {
+              "type": "string",
+              "pattern": "^FRK-[0-9]{1,6}$"
+            }
+          },
+          "required": [
+            "task_id"
+          ]
+        }
+      }
+    },
+    "taskTriesQuery": {
+      "title": "Task Tries Query",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "params"
+      ],
+      "properties": {
+        "name": {
+          "const": "task.tries"
+        },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "task_id": {
+              "type": "string",
+              "pattern": "^FRK-[0-9]{1,6}$"
+            }
+          },
+          "required": [
+            "task_id"
+          ]
+        }
+      }
+    },
+    "sprintCurrentQuery": {
+      "title": "Sprint Current Query",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "params"
+      ],
+      "properties": {
+        "name": {
+          "const": "sprint.current"
+        },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {}
+        }
+      }
+    },
+    "questionsListQuery": {
+      "title": "Questions List Query",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "params"
+      ],
+      "properties": {
+        "name": {
+          "const": "questions.list"
+        },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "task_id": {
+              "type": "string",
+              "pattern": "^FRK-[0-9]{1,6}$"
+            }
+          }
+        }
+      }
+    },
+    "escalationChoicesQuery": {
+      "title": "Escalation Choices Query",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "params"
+      ],
+      "properties": {
+        "name": {
+          "const": "escalation.choices"
+        },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "task_id": {
+              "type": "string",
+              "pattern": "^FRK-[0-9]{1,6}$"
+            }
+          },
+          "required": [
+            "task_id"
+          ]
+        }
+      }
+    },
+    "teamActivityQuery": {
+      "title": "Team Activity Query",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "params"
+      ],
+      "properties": {
+        "name": {
+          "const": "team.activity"
+        },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {}
+        }
+      }
+    },
+    "movedSinceQuery": {
+      "title": "Moved Since Query",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "params"
+      ],
+      "properties": {
+        "name": {
+          "const": "moved.since"
+        },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "since": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          "required": [
+            "since"
+          ]
+        }
+      }
+    },
+    "requestFileRequest": {
+      "title": "Request File Request",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "jsonrpc",
+        "id",
+        "method",
+        "params"
+      ],
+      "properties": {
+        "jsonrpc": {
+          "const": "2.0"
+        },
+        "id": {
+          "$ref": "#/$defs/requestId"
+        },
+        "method": {
+          "const": "request.file"
+        },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "text": {
+              "type": "string",
+              "maxLength": 20000,
+              "description": "The request in the person's words: its first line is the title, and the whole is the intent. The daemon refuses a text under 20 characters."
+            }
+          },
+          "required": [
+            "text"
+          ]
+        }
+      }
+    },
+    "contractSaveRequest": {
+      "title": "Contract Save Request",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "jsonrpc",
+        "id",
+        "method",
+        "params"
+      ],
+      "properties": {
+        "jsonrpc": {
+          "const": "2.0"
+        },
+        "id": {
+          "$ref": "#/$defs/requestId"
+        },
+        "method": {
+          "const": "contract.save"
+        },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "task_id": {
+              "type": "string",
+              "pattern": "^FRK-[0-9]{1,6}$"
+            },
+            "contract": {
+              "type": "object",
+              "description": "A contract as task-contract.schema.json shapes it; the daemon validates it."
+            }
+          },
+          "required": [
+            "task_id",
+            "contract"
+          ]
+        }
+      }
+    },
+    "waitingListResult": {
+      "description": "What waits on the human, questions first, then approvals, other escalations, acceptances, and integrations.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "waiting": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "task_id": {
+                "type": "string",
+                "pattern": "^FRK-[0-9]{1,6}$"
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "approval",
+                  "acceptance",
+                  "question",
+                  "help",
+                  "integration"
+                ]
+              },
+              "agent_id": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "title": {
+                "type": "string"
+              },
+              "line": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "task_id",
+              "kind",
+              "agent_id",
+              "title",
+              "line"
+            ]
+          }
+        }
+      },
+      "required": [
+        "waiting"
+      ]
+    },
+    "contractGetResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "contract": {
+          "type": "object",
+          "description": "A contract as task-contract.schema.json shapes it; the daemon validates it."
+        }
+      },
+      "required": [
+        "contract"
+      ]
+    },
+    "contractCheckResult": {
+      "description": "The rules an unsaved plan fails: schema errors first, as rule schema, then the Definition of Ready's; total is the number of checks run, the schema counting as one.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "failures": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "rule": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              },
+              "plain": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "rule",
+              "message",
+              "plain"
+            ]
+          }
+        },
+        "total": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "failures",
+        "total"
+      ]
+    },
+    "taskHistoryResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "events": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          }
+        }
+      },
+      "required": [
+        "events"
+      ]
+    },
+    "taskDiffResult": {
+      "description": "A task's diff against the integration branch, or an epic's tasks' integrated diffs joined in id order, each under a # FRK-n line.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "diff": {
+          "type": "string"
+        },
+        "files": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "added": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "removed": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "diff",
+        "files",
+        "added",
+        "removed"
+      ]
+    },
+    "taskChecksResult": {
+      "description": "Each criterion's latest result since the task last entered verifying; for a plan awaiting approval, the Definition of Ready's failures, each named by its rule.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "checks": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "criterion_id": {
+                "type": "string"
+              },
+              "text": {
+                "type": "string"
+              },
+              "passed": {
+                "type": "boolean"
+              },
+              "evidence": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "criterion_id",
+              "text",
+              "passed",
+              "evidence"
+            ]
+          }
+        }
+      },
+      "required": [
+        "checks"
+      ]
+    },
+    "taskTriesResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "used": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "allowed": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "used",
+        "allowed"
+      ]
+    },
+    "sprintCurrentResult": {
+      "description": "The open sprint and how many of its tasks are done (accepted or cancelled), or null when none is open.",
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "$ref": "#/$defs/sprintSummary"
+        }
+      ]
+    },
+    "questionsListResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "questions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "question_id": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "task_id": {
+                "oneOf": [
+                  {
+                    "type": "string",
+                    "pattern": "^FRK-[0-9]{1,6}$"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "agent_id": {
+                "type": "string"
+              },
+              "text": {
+                "type": "string"
+              },
+              "choices": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "label": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 80
+                    },
+                    "hint": {
+                      "type": "string",
+                      "maxLength": 160
+                    }
+                  },
+                  "required": [
+                    "label"
+                  ]
+                }
+              },
+              "answer": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "required": [
+              "question_id",
+              "task_id",
+              "agent_id",
+              "text",
+              "choices",
+              "answer"
+            ]
+          }
+        }
+      },
+      "required": [
+        "questions"
+      ]
+    },
+    "escalationChoicesResult": {
+      "description": "What the human may do about an escalation: each choice's label and the command the page sends, to which it adds the message.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "choices": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "label": {
+                "type": "string"
+              },
+              "body": {
+                "type": "object"
+              }
+            },
+            "required": [
+              "label",
+              "body"
+            ]
+          }
+        }
+      },
+      "required": [
+        "choices"
+      ]
+    },
+    "teamActivityResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "activity": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "agent_id": {
+                "type": "string"
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "working",
+                  "resting",
+                  "waiting",
+                  "paused",
+                  "idle"
+                ]
+              },
+              "line": {
+                "type": "string"
+              },
+              "task_id": {
+                "type": "string",
+                "pattern": "^FRK-[0-9]{1,6}$"
+              },
+              "until": {
+                "type": "string",
+                "format": "date-time"
+              }
+            },
+            "required": [
+              "agent_id",
+              "state",
+              "line"
+            ]
+          }
+        }
+      },
+      "required": [
+        "activity"
+      ]
+    },
+    "movedSinceResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "moved": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "at": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "line": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "at",
+              "line"
+            ]
+          }
+        }
+      },
+      "required": [
+        "moved"
+      ]
+    },
+    "requestFileResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "task_id": {
+          "type": "string",
+          "pattern": "^FRK-[0-9]{1,6}$"
+        }
+      },
+      "required": [
+        "task_id"
+      ]
+    },
+    "contractSaveResult": {
+      "description": "The human's edit is saved; back_to_refining says a frozen plan went back to refining, to be checked and approved again.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "saved": {
+          "const": true
+        },
+        "back_to_refining": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "saved",
+        "back_to_refining"
+      ]
+    },
+    "sprintSummary": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "sprint_id": {
+          "type": "string"
+        },
+        "done": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "total": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "sprint_id",
+        "done",
+        "total"
       ]
     }
   }

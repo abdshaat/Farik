@@ -14,10 +14,11 @@ use farik_runtime::credential::{
 };
 use farik_runtime::daemon::{SetupError, SetupHost};
 use farik_store::files::{LocalSettings, Sandbox};
-use farik_store::requests::{RequestError, file_request};
+use farik_store::requests::{
+    RequestError, file_request, placeholder_budget_usd, request_from_brief,
+};
 use tokio::sync::watch;
 
-use crate::contract_new::{placeholder_budget_usd, request_from_brief};
 use crate::project::{Project, open_project, repository_root};
 use crate::start::{on_path_of, try_lock};
 use crate::state::{make_state_dir, state_dir};

@@ -8,10 +8,12 @@ use std::str::FromStr;
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 
+use chrono::{DateTime, Utc};
 use farik_core::branch::task_branch;
-use farik_core::budget::SessionLedger;
+use farik_core::budget::{BudgetState, SessionLedger};
 use farik_core::contract::{Role, TaskContract, TaskId, TaskKind, TaskStatus, wire_method};
 use farik_core::generated::team::Judgment;
+pub(crate) use farik_core::governor::done::result_awaits_human;
 use farik_core::governor::done::{CriterionResult, DoneEvidence, RunBy, requires_human_acceptance};
 use farik_core::governor::escalation::EscalationReason;
 use farik_core::governor::gates::{
@@ -36,6 +38,7 @@ use farik_protocol::event::{
     TransitionActorWire, TransitionRefusedBody, TransitionRefusedBodyRefusal, new_event,
 };
 use farik_store::files::{FilesError, ProjectFiles};
+pub use farik_store::git::integration_branch;
 use farik_store::{EventLog, EventQuery, Git, GitError, Projections, StoreError, TaskProjection};
 
 use crate::channel::{ChannelError, post_system};
@@ -441,41 +444,8 @@ impl Transitions {
         })?;
         let now = self.clock.now();
 
-        let budget = budget_state(
-            &self.projections,
-            team,
-            contract.assignee_role,
-            Some(&contract),
-            &SessionLedger::default(),
-            now,
-        )?;
-        let open_sprint = self.projections.open_sprint()?.map(|open| open.sprint_id);
-        // Infinite with no sprint open or one with no budget (ADR 0015).
-        let sprint_left = (budget.sprint_max_usd - budget.sprint_spent_usd).max(0.0);
-
-        let readiness = ReadinessContext {
-            // The contract's own sprint (5.3), and none for a contract in no sprint: what goes into
-            // a sprint is checked against its budget when the sprint is planned.
-            remaining_sprint_budget_usd: if row.sprint.is_some() && row.sprint == open_sprint {
-                sprint_left
-            } else {
-                f64::INFINITY
-            },
-            dependency_statuses: contract
-                .dependencies
-                .iter()
-                .filter_map(|dependency| {
-                    status_on(&board, dependency.as_str())
-                        .map(|status| (dependency.to_string(), status))
-                })
-                .collect(),
-            active_agents_by_role: active_agents_by_role(team),
-            parent: self.parent_state(&board, &contract)?,
-            rules: team.rules(),
-            requires_judgment_review: team.judgment().required == JudgmentRequired::Always,
-            judgment_review: judgment_since_written(&history),
-            human_approves: asks_every_contract(team) || requires_human_acceptance(&contract),
-        };
+        let (budget, open_sprint, sprint_left, readiness) =
+            self.readiness_parts(&board, row, &history, team, &contract, now)?;
 
         let (work, changed_paths) = self.work(&contract, team)?;
 
@@ -530,6 +500,79 @@ impl Transitions {
             extra_iterations: extra_tries(&history),
             contract,
         })
+    }
+
+    /// The Definition of Ready's context for `contract` as it is given, which need not be the
+    /// file's: the browser checks a plan the human has not saved yet. Everything else is read from
+    /// the store as `context` reads it.
+    ///
+    /// # Errors
+    ///
+    /// As `context`'s, but for git, which it does not ask.
+    pub fn readiness_context(
+        &self,
+        team: &Team,
+        contract: &TaskContract,
+    ) -> Result<ReadinessContext, TransitionError> {
+        let board = self.projections.board()?;
+        let row = row_of(&board, &contract.id)?;
+        let history = self.log.read(&EventQuery {
+            task_id: Some(contract.id.clone()),
+            ..EventQuery::default()
+        })?;
+        let now = self.clock.now();
+        Ok(self
+            .readiness_parts(&board, row, &history, team, contract, now)?
+            .3)
+    }
+
+    /// The budgets, the open sprint, what is left of it, and the readiness context of `contract`.
+    fn readiness_parts(
+        &self,
+        board: &[TaskProjection],
+        row: &TaskProjection,
+        history: &[FarikEvent],
+        team: &Team,
+        contract: &TaskContract,
+        now: DateTime<Utc>,
+    ) -> Result<(BudgetState, Option<String>, f64, ReadinessContext), TransitionError> {
+        let budget = budget_state(
+            &self.projections,
+            team,
+            contract.assignee_role,
+            Some(contract),
+            &SessionLedger::default(),
+            now,
+        )?;
+        let open_sprint = self.projections.open_sprint()?.map(|open| open.sprint_id);
+        // Infinite with no sprint open or one with no budget (ADR 0015).
+        let sprint_left = (budget.sprint_max_usd - budget.sprint_spent_usd).max(0.0);
+
+        let readiness = ReadinessContext {
+            // The contract's own sprint (5.3), and none for a contract in no sprint: what goes into
+            // a sprint is checked against its budget when the sprint is planned.
+            remaining_sprint_budget_usd: if row.sprint.is_some() && row.sprint == open_sprint {
+                sprint_left
+            } else {
+                f64::INFINITY
+            },
+            dependency_statuses: contract
+                .dependencies
+                .iter()
+                .filter_map(|dependency| {
+                    status_on(board, dependency.as_str())
+                        .map(|status| (dependency.to_string(), status))
+                })
+                .collect(),
+            active_agents_by_role: active_agents_by_role(team),
+            parent: self.parent_state(board, contract)?,
+            rules: team.rules(),
+            requires_judgment_review: team.judgment().required == JudgmentRequired::Always,
+            judgment_review: judgment_since_written(history),
+            human_approves: asks_every_contract(team) || requires_human_acceptance(contract),
+        };
+
+        Ok((budget, open_sprint, sprint_left, readiness))
     }
 
     /// What the task's branch holds, read from git only when its worktree
@@ -737,18 +780,6 @@ fn children_of(board: &[TaskProjection], id: &TaskId) -> Vec<ChildState> {
             status: child.status,
         })
         .collect()
-}
-
-/// Whether the task's result waits on the human's acceptance (5.4): it is `verifying`, and it is an
-/// epic, risk `high`, or has a `human` criterion. The status is the contract's, which the caller
-/// takes from the board.
-pub(crate) fn result_awaits_human(contract: &TaskContract) -> bool {
-    contract.status == TaskStatus::Verifying
-        && (requires_human_acceptance(contract)
-            || contract
-                .exit_criteria
-                .iter()
-                .any(|criterion| wire_method(&criterion.verification) == Some("human")))
 }
 
 /// Whether the latest `review.recorded` since the task last entered `verifying` passed.
@@ -1272,25 +1303,6 @@ pub(crate) fn last_move_into(history: &[FarikEvent], status: TaskStatus) -> Opti
 /// pins, so `None` is a log no Farik wrote.
 fn wire_status(status: TaskStatusWire) -> Option<TaskStatus> {
     TaskStatus::from_str(&status.to_string()).ok()
-}
-
-/// The branch a task's work is measured against and merges into: the team's
-/// `policy.integration_branch`, or the repository's default branch when the team names none.
-///
-/// # Errors
-///
-/// `CommandFailed` naming the team's branch when git would not take it for a branch name
-/// (`Git::check_branch_name`); what `Git::default_branch` refuses, asked only when the team names
-/// no branch.
-pub fn integration_branch(team: &Team, git: &Git) -> Result<String, GitError> {
-    match &team.policy.integration_branch {
-        Some(branch) => {
-            // The team file's word reaches refspecs and options, so git judges it first.
-            git.check_branch_name(branch.as_str())?;
-            Ok(branch.to_string())
-        }
-        None => git.default_branch(),
-    }
 }
 
 #[cfg(test)]

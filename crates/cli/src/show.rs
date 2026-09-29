@@ -1,6 +1,5 @@
 //! `farik task show`: one contract, and what happened to it (F3).
 
-use farik_core::branch::task_branch;
 use farik_core::contract::{TaskContract, TaskId, TaskKind};
 use farik_protocol::event::{FarikEvent, event_to_value};
 use farik_store::requests::board_row_json;
@@ -302,67 +301,21 @@ fn cut(text: &str, limit: usize) -> String {
     }
 }
 
-/// The task's branch's diff against the integration branch (5.14): before integration, what the
-/// branch adds; after, against the first parent of the merge commit it was integrated by, or, when
-/// its integration was not a merge commit, against the integration branch, which then holds it all.
+/// The task's branch's diff against the integration branch (5.14), as `farik_store::diff` gives
+/// it; an epic, which has no branch, is refused.
 fn diff_of(
     project: &Project,
     task_id: &TaskId,
     contract: &TaskContract,
     events: &[FarikEvent],
 ) -> Result<String, String> {
-    let id = task_id.as_str();
     if contract.kind == TaskKind::Epic {
         return Err(format!(
-            "{id} is an epic and has no branch: farik task show <task> --diff shows each of its \
-             tasks'"
+            "{} is an epic and has no branch: farik task show <task> --diff shows each of its \
+             tasks'",
+            task_id.as_str()
         ));
     }
     let git = Git::open(project.root.clone());
-    let branch = task_branch(contract);
-    // `merge-base x x` answers `x`'s commit, and refuses a name that names none.
-    if git.merge_base(&branch, &branch).is_err() {
-        return Err(format!(
-            "{id} has no branch yet: its work starts at assignment"
-        ));
-    }
-    let integrated = events.iter().rev().find_map(|event| {
-        let value = event_to_value(event);
-        (value["kind"] == "task.integrated").then(|| {
-            (
-                value["body"]["sha"]
-                    .as_str()
-                    .unwrap_or_default()
-                    .to_string(),
-                value["body"]["into"]
-                    .as_str()
-                    .unwrap_or_default()
-                    .to_string(),
-            )
-        })
-    });
-    let words = |error: farik_store::GitError| error.to_string();
-    match integrated {
-        None => {
-            let base = farik_runtime::transitions::integration_branch(&project.team, &git)
-                .map_err(words)?;
-            git.diff(&base, &branch).map_err(words)
-        }
-        Some((sha, into)) => {
-            let second_parent = format!("{sha}^2");
-            if git.merge_base(&second_parent, &second_parent).is_ok() {
-                git.diff(&format!("{sha}^1"), &branch).map_err(words)
-            } else {
-                let diff = git.diff(&into, &branch).map_err(words)?;
-                if diff.trim().is_empty() {
-                    Ok(format!(
-                        "{branch} is wholly in {into}; its merge is not a commit farik can diff \
-                         against"
-                    ))
-                } else {
-                    Ok(diff)
-                }
-            }
-        }
-    }
+    farik_store::diff::diff_of(&git, &project.team, contract, events, &[]).map(|diff| diff.diff)
 }

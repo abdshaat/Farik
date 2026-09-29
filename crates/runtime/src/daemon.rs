@@ -42,6 +42,7 @@ use crate::tools::{ToolContext, ToolDeps};
 mod app;
 #[cfg(test)]
 pub(crate) mod fixtures;
+mod gates;
 mod hooks;
 mod mcp;
 mod setup;

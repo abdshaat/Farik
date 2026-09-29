@@ -476,7 +476,7 @@ fn fill_reviewer_role(call: &Call<'_>, wire: &mut Map<String, Value>, kind: Task
 
 /// The top-level fields whose values differ between the two contracts, in `after`'s order, then
 /// any `before` had that `after` dropped.
-fn changed_fields(before: &Value, after: &Value) -> Vec<String> {
+pub(crate) fn changed_fields(before: &Value, after: &Value) -> Vec<String> {
     let (Some(before), Some(after)) = (before.as_object(), after.as_object()) else {
         return Vec::new();
     };

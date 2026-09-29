@@ -4,13 +4,14 @@
 use std::io::{BufRead, BufReader, Read, Write};
 
 use farik_core::contract::{TaskId, TaskStatus};
-use farik_core::governor::team_rules::TeamRules;
 use farik_protocol::command::{Command, RequestSize};
 use farik_protocol::event::{EventBody, EventKind};
 use farik_runtime::forge::{Forge, Issue};
 use farik_runtime::orchestrator::{TickRules, TickScope};
 use farik_store::EventQuery;
-use farik_store::requests::{RequestError, file_request};
+use farik_store::requests::{
+    RequestError, file_request, placeholder_budget_usd, request_from_brief,
+};
 use serde_json::{Value, json};
 use tokio::sync::mpsc::UnboundedReceiver;
 
@@ -25,11 +26,6 @@ use crate::start::{Driver, StartOptions, on_path, runtime, send, start_holding, 
 use crate::waiting::Waiting;
 use crate::{CliIo, HUMAN};
 
-/// Every text of a request the Product Manager replaces while refining it.
-pub(crate) const PLACEHOLDER: &str = "(placeholder, for the Product Manager to write)";
-/// The budget a request is filed with when the team caps no task's budget (ADR 0015). The Product
-/// Manager rewrites it while refining, as it rewrites every placeholder.
-pub(crate) const PLACEHOLDER_MAX_COST_USD: f64 = 20.0;
 /// The longest title a contract has (the schema's `maxLength`).
 const TITLE_LIMIT: usize = 120;
 /// Why the human's size was given, as the log keeps it.
@@ -66,49 +62,6 @@ pub(crate) fn brief_from_issue(issue: &Issue) -> (String, String) {
         issue.title.clone(),
         format!("{}\n\n{}\n\nFrom {}", issue.title, issue.body, issue.url),
     )
-}
-
-/// A request a person files from a brief: its title and its intent, the brief, are theirs, and
-/// every other field is a placeholder the refine session replaces. The placeholder path is a glob
-/// no file matches.
-///
-/// # Errors
-///
-/// A sentence saying the title is under three characters or the brief under twenty, the schema's
-/// minimums.
-pub(crate) fn request_from_brief(
-    title: &str,
-    brief: &str,
-    max_cost_usd: f64,
-) -> Result<Value, String> {
-    if title.trim().chars().count() < 3 {
-        return Err(format!(
-            "{title:?} is too short a title: a contract's title is three characters or more"
-        ));
-    }
-    if brief.trim().chars().count() < 20 {
-        return Err(format!(
-            "{brief:?} is too short a brief: it is the contract's intent, which is twenty \
-             characters or more"
-        ));
-    }
-    Ok(json!({
-        "title": title,
-        "intent": brief,
-        "scope": { "in_scope": [PLACEHOLDER], "out_of_scope": [PLACEHOLDER] },
-        "requirements": [{ "id": "R1", "text": PLACEHOLDER }],
-        "exit_criteria": [{
-            "id": "C1",
-            "text": PLACEHOLDER,
-            "satisfies": ["R1"],
-            "verification": { "method": "review", "rubric": [PLACEHOLDER] }
-        }],
-        "assignee_role": "software_developer",
-        "reviewer_role": "software_developer",
-        "risk": "low",
-        "budget": { "max_cost_usd": max_cost_usd },
-        "allowed_paths": [PLACEHOLDER]
-    }))
 }
 
 /// A brief's first line, cut at the longest title a contract has.
@@ -215,14 +168,6 @@ fn sized_line(task_id: &TaskId, size: RequestSize) -> String {
         RequestSize::Small => ("small", "a standalone task"),
     };
     format!("{} sized {size} by you, so it is {kind}", task_id.as_str())
-}
-
-/// The budget a request is filed with: the team's cap on a task's budget when it has one, and
-/// otherwise `PLACEHOLDER_MAX_COST_USD`.
-pub(crate) fn placeholder_budget_usd(rules: &TeamRules) -> f64 {
-    rules
-        .max_task_budget_usd
-        .unwrap_or(PLACEHOLDER_MAX_COST_USD)
 }
 
 /// Files `request` as the human's, and answers its id and the line that says so.
@@ -701,55 +646,9 @@ fn readiness(project: &Project, task_id: &TaskId) -> (&'static str, Vec<String>)
 
 #[cfg(test)]
 mod tests {
-    use farik_core::contract::validate_contract;
     use farik_runtime::forge::Issue;
-    use serde_json::{Value, json};
 
-    use farik_core::governor::team_rules::TeamRules;
-
-    use super::{PLACEHOLDER, brief_from_issue, placeholder_budget_usd, request_from_brief};
-
-    /// Every string in `value` that is one of its texts, as against its ids, roles, and risk.
-    fn texts(value: &Value) -> Vec<String> {
-        [
-            value["scope"]["in_scope"][0].clone(),
-            value["scope"]["out_of_scope"][0].clone(),
-            value["requirements"][0]["text"].clone(),
-            value["exit_criteria"][0]["text"].clone(),
-            value["exit_criteria"][0]["verification"]["rubric"][0].clone(),
-            value["allowed_paths"][0].clone(),
-        ]
-        .iter()
-        .map(|text| text.as_str().unwrap_or_default().to_string())
-        .collect()
-    }
-
-    #[test]
-    fn builds_a_request_the_store_files() {
-        let brief = "Add done.txt and a check that it exists";
-        assert_eq!(brief.len(), 39);
-        let brief = format!("{brief}.");
-        let budget = placeholder_budget_usd(&TeamRules::default());
-        let mut request =
-            request_from_brief("Add done.txt", &brief, budget).expect("a request is built");
-        assert!(texts(&request).iter().all(|text| text == PLACEHOLDER));
-        request["id"] = json!("FRK-1");
-        request["status"] = json!("draft");
-        validate_contract(&request).expect("the store would file it");
-
-        assert!(request_from_brief("Add done.txt", "A brief too short.!", 5.0).is_err());
-        assert!(request_from_brief("Ad", &brief, 5.0).is_err());
-    }
-
-    #[test]
-    fn places_a_budget_of_the_team_cap_or_twenty_dollars() {
-        let capped = TeamRules {
-            max_task_budget_usd: Some(12.5),
-            ..TeamRules::default()
-        };
-        assert!((placeholder_budget_usd(&capped) - 12.5).abs() < 1e-9);
-        assert!((placeholder_budget_usd(&TeamRules::default()) - 20.0).abs() < 1e-9);
-    }
+    use super::brief_from_issue;
 
     #[test]
     fn reads_a_request_from_an_issue() {

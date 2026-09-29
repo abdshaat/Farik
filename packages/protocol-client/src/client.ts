@@ -31,7 +31,9 @@ export type MethodName =
 	| "project.open"
 	| "project.create"
 	| "account.connect"
-	| "sandbox.build";
+	| "sandbox.build"
+	| "request.file"
+	| "contract.save";
 export type Status = "connecting" | "open" | "closed";
 
 /** The part of the browser `WebSocket` the client uses. */

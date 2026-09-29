@@ -5,6 +5,8 @@ use std::fmt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+use farik_core::team::Team;
+
 /// Why a git operation did not happen.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum GitError {
@@ -679,6 +681,25 @@ fn paths_of(listed: &str) -> Vec<String> {
         .filter(|path| !path.is_empty())
         .map(ToString::to_string)
         .collect()
+}
+
+/// The branch a task's work is measured against and merges into: the team's
+/// `policy.integration_branch`, or the repository's default branch when the team names none.
+///
+/// # Errors
+///
+/// `CommandFailed` naming the team's branch when git would not take it for a branch name
+/// (`Git::check_branch_name`); what `Git::default_branch` refuses, asked only when the team names
+/// no branch.
+pub fn integration_branch(team: &Team, git: &Git) -> Result<String, GitError> {
+    match &team.policy.integration_branch {
+        Some(branch) => {
+            // The team file's word reaches refspecs and options, so git judges it first.
+            git.check_branch_name(branch.as_str())?;
+            Ok(branch.to_string())
+        }
+        None => git.default_branch(),
+    }
 }
 
 #[cfg(test)]
