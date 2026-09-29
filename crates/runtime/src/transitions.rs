@@ -1036,12 +1036,12 @@ fn status_on(board: &[TaskProjection], task: &str) -> Option<TaskStatus> {
         .map(|row| row.status)
 }
 
-/// How many agents of each role are active.
 /// Whether the team's policy asks the human to approve every contract, not only the risky ones.
 fn asks_every_contract(team: &Team) -> bool {
     team.policy.human_accepts_contracts == HumanAcceptsContracts::All
 }
 
+/// How many agents of each role are active.
 fn active_agents_by_role(team: &Team) -> BTreeMap<Role, u32> {
     let mut counts = BTreeMap::new();
     for agent in team.active_agents() {
