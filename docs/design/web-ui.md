@@ -113,15 +113,15 @@ The screens map to phase 6's steps as follows:
 | Screen | Step | What it shows |
 |---|---|---|
 | Welcome and first-run wizard | 05, 06 | One question per screen, as a numbered sequence (it is one), with a safe default already chosen and one line on why Farik asks. Back and Continue. The welcome uses the office scene and the display face. The team builder shows the five characters with their suggested names. Phase 8 step 02 adds the Finance Specialist to it as an optional sixth (ADR 0019). |
-| Today | 07 | The team band, the request box, "Waiting on you", and "What moved". |
-| A human gate: approve a plan, or accept work | 07 | The agent's summary as a short letter signed by the agent's avatar. Then "What Farik checked": each exit criterion in plain words, marked passed or failed. Then "See the code changes" (collapsed). A decision bar with the primary action ("Accept the work" or "Approve the plan") and "Send back with a note". |
-| A question from an agent | 07 | The question with its avatar, the choices the agent offered, and a free-text answer. |
-| Help needed (an escalation) | 07 | What happened in plain words, what the agent tried, and the user's options. |
-| Board | 08 | Lanes named for the kit's sprint board (To do, In progress, Review, Done) plus Planning before them and Stuck after In progress. Each task is a row showing its assignee's avatar, its title, and a status word. Filters are chips. Sprint controls sit at the top. |
-| Task detail | 08 | Summary, checks, history, the diff, notes, and cost, in that order. |
-| Channel | 09 | Chat with avatars. Ceremonies (standup, review, retro) are collapsible threads titled in plain words. |
+| Today | 08 | The team band, the request box, "Waiting on you", and "What moved". |
+| A human gate: approve a plan, or accept work | 08 | The agent's summary as a short letter signed by the agent's avatar. Then "What Farik checked": each exit criterion in plain words, marked passed or failed. Then "See the code changes" (collapsed). A decision bar with the primary action ("Accept the work" or "Approve the plan") and "Send back with a note". |
+| A question from an agent | 08 | The question with its avatar, the choices the agent offered, and a free-text answer. |
+| Help needed (an escalation) | 08 | What happened in plain words, what the agent tried, and the user's options. |
+| Board | 09 | Lanes named for the kit's sprint board (To do, In progress, Review, Done) plus Planning before them and Stuck after In progress. Each task is a row showing its assignee's avatar, its title, and a status word. Filters are chips. Sprint controls sit at the top. |
+| Task detail | 09 | Summary, checks, history, the diff, notes, and cost, in that order. |
+| Channel | 10 | Chat with avatars. Ceremonies (standup, review, retro) are collapsible threads titled in plain words. |
 | Team | 06 | Each agent's card-sized profile: avatar, name, role, persona, model, and pause or retire. Its advanced view holds permissions and rules. |
-| Costs | 08 | Today's and this sprint's spend per agent, in dollars, with the harness metrics. |
+| Costs | 09 | Today's and this sprint's spend per agent, in dollars, with the harness metrics. |
 | Settings | 04, 06 | Theme (light, dark, or match the system) and the Advanced switch. |
 
 Lifecycle states map to plain words. Nothing shows the raw state names unless the user opens a task's advanced view:
@@ -142,7 +142,7 @@ The mark "Waiting on you" cuts across the lanes. It sits on:
 
 Every other `escalated` task is marked "Needs your help".
 
-The spec's lifecycle (5.2) is the authority. Step 08's plan checks this mapping against it.
+The spec's lifecycle (5.2) is the authority. Step 09's plan checks this mapping against it.
 
 ## Quality floor
 
@@ -160,13 +160,13 @@ On 2026-09-26 the founder asked for every page to be mocked up before any code. 
 
 | Canvas page | Screens | Phase 6 step |
 |---|---|---|
-| Daily work | Today (`Main`, with a dark-theme switch), Accept work (`Gate`), `Board`, `TaskDetail`, `SprintStart`, `SprintView`, `Channel`, `OneOnOne`, `Costs` | 07, 08, 09 (the one-on-one is phase 8 step 04) |
-| Requests and approvals | `RequestFiled`, `Questions`, `ApprovePlan`, `PlanEditor`, `SendBack`, `HelpNeeded`, `AnswerQuestion` | 07 |
+| Daily work | Today (`Main`, with a dark-theme switch), Accept work (`Gate`), `Board`, `TaskDetail`, `SprintStart`, `SprintView`, `Channel`, `OneOnOne`, `Costs` | 08, 09, 10 (the one-on-one is phase 8 step 04) |
+| Requests and approvals | `RequestFiled`, `Questions`, `ApprovePlan`, `PlanEditor`, `SendBack`, `HelpNeeded`, `AnswerQuestion` | 08 |
 | First run | `SetupProject`, `SetupScan`, the team (`Welcome`), `SetupPermissions`, `SetupSpending`, `SetupFinish`, `SetupAdvanced`, `Connect` | 04 (the connect page), 05, 06 |
 | Team and settings | `Team`, `AgentEdit`, `Settings` | 04, 06 |
-| Phone (360 to 390 px) | Today (`Phone`), `PhoneGate`, `PhoneBoard`, `PhoneChannel` | 04 to 09 |
+| Phone (360 to 390 px) | Today (`Phone`), `PhoneGate`, `PhoneBoard`, `PhoneChannel` | 04 to 10 |
 | Website | `Site`, the public site on the domain (ADR 0017) | Phase 10 step 01 |
 
 The mockups are not the spec. Where one disagrees with `docs/SPEC.md`, the spec wins, and the step plan that builds that screen records the difference. The `Connect` screen's two "Mockup: …" buttons only switch between its states, for review.
 
-The step numbers above are revision 18's (ADR 0021). Three first-run screens the founder's decisions of 2026-09-28 added have no mockup yet: the folder browser inside `SetupProject`, "Checking your computer", and "Connect your AI account". Phase 6 step 05 mocks them up in the same style, and the founder approves them, before any of its code. The Pause and Resume control in the rail, added the same day, is mocked up the same way by step 04.
+The step numbers above are revision 20's (revision 18's, ADR 0021, with step 07 split in two). Three first-run screens the founder's decisions of 2026-09-28 added have no mockup yet: the folder browser inside `SetupProject`, "Checking your computer", and "Connect your AI account". Phase 6 step 05 mocks them up in the same style, and the founder approves them, before any of its code. The Pause and Resume control in the rail, added the same day, is mocked up the same way by step 04.

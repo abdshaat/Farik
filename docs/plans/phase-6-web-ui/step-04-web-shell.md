@@ -24,9 +24,9 @@ A Playwright suite drives the real binary and browser through this, under `cargo
 
 Out of scope, and where each goes:
 - the first-run wizard (steps 05 and 06);
-- Today, the request box, and the gates (step 07);
-- the board and costs (step 08);
-- the channel (step 09).
+- Today, the request box, and the gates (step 08, on step 07's runtime);
+- the board and costs (step 09);
+- the channel (step 10).
 
 The rail shows only the places that exist, and each later step adds its own.
 
@@ -36,7 +36,7 @@ The rail shows only the places that exist, and each later step adds its own.
   - Routing uses `react-router` `=8.4.0` in declarative mode (`BrowserRouter`, `Routes`, `Route`, `NavLink`). Version 8 is current, and its declarative mode is the one the phase decision names for version 7, so version 7 is not pinned.
   - `pnpm-workspace.yaml` gains `apps/*`. `biome.json` includes `apps/**`, as step 01's ledger required.
 - **Routes:**
-  - `/` redirects to `/events` until Today exists (step 07 changes it).
+  - `/` redirects to `/events` until Today exists (step 08 changes it).
   - `/connect` is the connect page.
   - `/settings` is Settings.
   - `/events` is the event list.

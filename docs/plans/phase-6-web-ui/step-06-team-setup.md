@@ -25,7 +25,7 @@ Built for the first time:
 - the configurable plan check (spec 5.3), with the founder's new rule for who checks;
 - a permission change that waits for the agent's next session (spec 4.4).
 
-Out of scope: skills and connectors on the agent page (phases 8 and 9), the Finance Specialist (phase 8), Today and the gates (step 07).
+Out of scope: skills and connectors on the agent page (phases 8 and 9), the Finance Specialist (phase 8), Today and the gates (steps 07 and 08).
 
 ## Decisions
 
