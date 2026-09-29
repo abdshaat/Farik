@@ -225,24 +225,7 @@ pub(crate) fn forge(root: &Path, io: &CliIo<'_>) -> Forge {
 
 /// The first executable called `program` on the environment's `PATH`.
 pub(crate) fn on_path(program: &str, io: &CliIo<'_>) -> Option<PathBuf> {
-    on_path_of(program, &io.env)
-}
-
-/// The first executable called `program` on `env`'s `PATH`.
-pub(crate) fn on_path_of(
-    program: &str,
-    env: &std::collections::BTreeMap<String, String>,
-) -> Option<PathBuf> {
-    use std::os::unix::fs::PermissionsExt;
-
-    env.get("PATH").and_then(|path| {
-        std::env::split_paths(path)
-            .map(|directory| directory.join(program))
-            .find(|candidate| {
-                std::fs::metadata(candidate)
-                    .is_ok_and(|meta| meta.is_file() && meta.permissions().mode() & 0o111 != 0)
-            })
-    })
+    farik_runtime::computer::on_path(program, &io.env)
 }
 
 /// The adapter of a command handled in this process, which starts no session: answering a

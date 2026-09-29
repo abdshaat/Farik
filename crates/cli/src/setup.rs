@@ -9,6 +9,7 @@ use std::sync::Arc;
 use farik_protocol::clock::Clock;
 use farik_protocol::event::EventBody;
 use farik_runtime::claude::CredentialKind;
+use farik_runtime::computer::on_path;
 use farik_runtime::credential::{
     CredentialError, CredentialStore, Source, credential_of_kind, load_credential, save_credential,
 };
@@ -20,7 +21,7 @@ use farik_store::requests::{
 use tokio::sync::watch;
 
 use crate::project::{Project, open_project, repository_root};
-use crate::start::{on_path_of, try_lock};
+use crate::start::try_lock;
 use crate::state::{make_state_dir, state_dir};
 use crate::{HUMAN, init};
 
@@ -109,8 +110,7 @@ impl CliHost {
 
     /// Runs `git <args>` in `directory`, as farik, with `git` from the environment's `PATH`.
     fn git(&self, directory: &Path, args: &[&str]) -> Result<(), SetupError> {
-        let program =
-            on_path_of("git", &self.env).ok_or_else(|| refused("git is not installed"))?;
+        let program = on_path("git", &self.env).ok_or_else(|| refused("git is not installed"))?;
         let output = std::process::Command::new(program)
             .args([
                 "-c",
@@ -196,7 +196,7 @@ impl SetupHost for CliHost {
             return Err(refused("a folder with that name is already there"));
         }
         self.has_account()?;
-        on_path_of("git", &self.env).ok_or_else(|| refused("git is not installed"))?;
+        on_path("git", &self.env).ok_or_else(|| refused("git is not installed"))?;
 
         std::fs::create_dir(&root)
             .map_err(|error| failed(format!("{} cannot be made: {error}", root.display())))?;

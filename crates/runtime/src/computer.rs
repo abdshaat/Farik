@@ -208,7 +208,8 @@ fn run(env: &BTreeMap<String, String>, program: &str, args: &[&str]) -> Option<(
 }
 
 /// The first executable called `program` on `env`'s `PATH`.
-fn on_path(program: &str, env: &BTreeMap<String, String>) -> Option<PathBuf> {
+#[must_use]
+pub fn on_path(program: &str, env: &BTreeMap<String, String>) -> Option<PathBuf> {
     use std::os::unix::fs::PermissionsExt as _;
 
     env.get("PATH").and_then(|path| {
