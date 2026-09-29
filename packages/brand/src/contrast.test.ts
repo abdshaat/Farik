@@ -56,4 +56,34 @@ describe("contrast", () => {
 			).toBe(true);
 		}
 	});
+	it("pins the pairs the plan lists", () => {
+		expect(
+			TEXT_PAIRS.map((p) => [p.foreground, p.background, p.minimum]),
+		).toEqual([
+			["ink", "page", 4.5],
+			["ink-muted", "page", 4.5],
+			["link", "page", 4.5],
+			["status-done", "page", 4.5],
+			["status-working", "page", 4.5],
+			["status-waiting", "page", 4.5],
+			["control-border", "page", 3],
+			["focus", "page", 3],
+			["ink", "surface", 4.5],
+			["ink-muted", "surface", 4.5],
+			["link", "surface", 4.5],
+			["status-done", "surface", 4.5],
+			["status-working", "surface", 4.5],
+			["status-waiting", "surface", 4.5],
+			["control-border", "surface", 3],
+			["focus", "surface", 3],
+			["action-ink", "action", 4.5],
+			["band-ink", "band", 4.5],
+			["focus", "band", 3],
+			["role-ink", "role-product-manager", 4.5],
+			["role-ink", "role-scrum-master", 4.5],
+			["role-ink", "role-architect", 4.5],
+			["role-ink", "role-developer", 4.5],
+			["role-ink", "role-marketing-specialist", 4.5],
+		]);
+	});
 });

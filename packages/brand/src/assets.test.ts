@@ -13,6 +13,22 @@ const size = (url: URL) => {
 };
 
 describe("assets", () => {
+	it("pins the icon sizes and avatar keys", () => {
+		expect(ICON_SIZES).toEqual([16, 32, 48, 180, 192, 512, 1024]);
+		expect(AVATAR_KEYS).toEqual([
+			"product-manager",
+			"scrum-master",
+			"architect",
+			"developer",
+			"marketing-specialist",
+			"extra-1",
+			"extra-2",
+			"extra-3",
+			"extra-4",
+			"extra-5",
+		]);
+	});
+
 	it("has every icon size at its size", () => {
 		for (const n of ICON_SIZES) {
 			expect(size(here(`assets/icons/icon-${n}.png`))).toEqual([n, n]);
@@ -48,7 +64,9 @@ describe("assets", () => {
 			mono: "jetbrains-mono",
 		};
 		for (const step of Object.values(tokens.type)) {
-			expect(css).toContain(`@import "@fontsource/${pkg[step.family]}/`);
+			expect(css).toContain(
+				`@import "@fontsource/${pkg[step.family]}/${step.weight}.css";`,
+			);
 		}
 	});
 });

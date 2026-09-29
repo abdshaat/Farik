@@ -37,6 +37,8 @@ describe("generate", () => {
 			"--farik-type-body-weight: 400;",
 			"--farik-type-title-weight: 600;",
 			"--farik-type-body-family: 'Space Grotesk', system-ui, sans-serif;",
+			"--farik-type-display-family: 'Silkscreen', monospace;",
+			"--farik-type-code-family: 'JetBrains Mono', ui-monospace, monospace;",
 		]) {
 			expect(css).toContain(line);
 		}
@@ -48,6 +50,12 @@ describe("generate", () => {
 		expect(() => readTokens(bad)).toThrow(/link.*dark|dark.*link/);
 	});
 
+	it("refuses a colour defined in the light theme only", () => {
+		const { link: _link, ...light } = source.color.light;
+		const bad = { ...source, color: { light, dark: source.color.dark } };
+		expect(() => readTokens(bad)).toThrow(/link.*light|light.*link/);
+	});
+
 	it("refuses a colour that is not #rrggbb", () => {
 		const bad = {
 			...source,
@@ -57,6 +65,14 @@ describe("generate", () => {
 			},
 		};
 		expect(() => readTokens(bad)).toThrow(/ink/);
+		const lower = {
+			...source,
+			color: {
+				...source.color,
+				light: { ...source.color.light, ink: "#f3e7d3" },
+			},
+		};
+		expect(() => readTokens(lower)).toThrow(/ink/);
 	});
 
 	it("generates camelCase keys in the TypeScript module", () => {
