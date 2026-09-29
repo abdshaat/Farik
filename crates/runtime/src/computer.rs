@@ -14,6 +14,10 @@ use crate::session::RuntimeError;
 /// How long each check may take; one that takes longer reads as missing.
 const CHECK_TIMEOUT: Duration = Duration::from_secs(10);
 
+/// How many more times a program that is busy being written is tried, and how long apart.
+const BUSY_TRIES: u32 = 5;
+const BUSY_WAIT: Duration = Duration::from_millis(50);
+
 /// The sandbox image's Dockerfile, which has no `COPY`, so it builds from an empty context.
 const DOCKERFILE: &str = include_str!("../sandbox/Dockerfile");
 
@@ -160,16 +164,31 @@ pub async fn build_sandbox_image(env: &BTreeMap<String, String>) -> Result<Strin
 /// Runs `program` with `args`, and answers whether it succeeded and what it printed; `None` when
 /// it is not on the `PATH`, cannot be run, or takes longer than `CHECK_TIMEOUT`.
 fn run(env: &BTreeMap<String, String>, program: &str, args: &[&str]) -> Option<(bool, String)> {
-    let child = std::process::Command::new(on_path(program, env)?)
-        .args(args)
-        .env_clear()
-        .envs(env)
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .process_group(0)
-        .spawn()
-        .ok()?;
+    let program = on_path(program, env)?;
+    let spawn = || {
+        std::process::Command::new(&program)
+            .args(args)
+            .env_clear()
+            .envs(env)
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .process_group(0)
+            .spawn()
+    };
+    // A program being updated as it is checked is busy for a moment; it is tried again then.
+    let mut tries = 0;
+    let child = loop {
+        match spawn() {
+            Err(error)
+                if error.kind() == std::io::ErrorKind::ExecutableFileBusy && tries < BUSY_TRIES =>
+            {
+                tries += 1;
+                std::thread::sleep(BUSY_WAIT);
+            }
+            spawned => break spawned.ok()?,
+        }
+    };
     let pid = child.id();
     let (sender, receiver) = std::sync::mpsc::channel();
     std::thread::spawn(move || {
@@ -200,4 +219,38 @@ fn on_path(program: &str, env: &BTreeMap<String, String>) -> Option<PathBuf> {
                     .is_ok_and(|meta| meta.is_file() && meta.permissions().mode() & 0o111 != 0)
             })
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::BTreeMap;
+    use std::io::Write as _;
+    use std::os::unix::fs::OpenOptionsExt as _;
+    use std::time::Duration;
+
+    use super::run;
+
+    #[test]
+    fn retries_a_program_that_is_busy_being_written() {
+        let bin = std::env::temp_dir().join(format!("farik-computer-busy-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&bin);
+        std::fs::create_dir_all(&bin).expect("the folder is made");
+        // Held open for writing, as while it is being updated: running it fails with ETXTBSY.
+        let mut file = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o755)
+            .open(bin.join("git"))
+            .expect("the file is made");
+        file.write_all(b"#!/bin/sh\necho 'git version 2.43.0'\n")
+            .expect("written");
+        let writer = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(100));
+            drop(file);
+        });
+        let env = BTreeMap::from([("PATH".to_string(), bin.display().to_string())]);
+        let ran = run(&env, "git", &["--version"]);
+        writer.join().expect("the writer lets go");
+        assert_eq!(ran, Some((true, "git version 2.43.0\n".to_string())));
+    }
 }
