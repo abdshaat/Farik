@@ -9,7 +9,7 @@ use std::time::Duration;
 use axum::body::Bytes;
 use axum::extract::State;
 use axum::extract::ws::rejection::WebSocketUpgradeRejection;
-use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
+use axum::extract::ws::{CloseFrame, Message, WebSocket, WebSocketUpgrade, close_code};
 use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use axum::{Extension, Json};
@@ -155,6 +155,23 @@ impl BrowserSessions {
         })
     }
 
+    /// Ends the session `secret`, if it is one.
+    ///
+    /// # Errors
+    ///
+    /// `Io` when the file cannot be read or written.
+    pub fn revoke(&self, secret: &str) -> Result<(), DaemonError> {
+        let wanted = hash(secret);
+        let mut memory = locked(&self.memory);
+        let mut sessions = self.load(&memory)?;
+        sessions.retain(|session| !same_token(wanted.as_bytes(), session.hash.as_bytes()));
+        if let Some(file) = &self.file {
+            return write(file, &sessions);
+        }
+        *memory = sessions;
+        Ok(())
+    }
+
     /// What is stored now: the file, read afresh because another process may have written it, or
     /// `memory`, the sessions the caller holds locked.
     fn load(&self, memory: &[StoredSession]) -> Result<Vec<StoredSession>, DaemonError> {
@@ -201,13 +218,24 @@ const USED_LINK: &str =
 /// link and the cookie are bound to `127.0.0.1`; the port counts, because a browser sends the
 /// cookie to every port of a host, and a page on another local port is another origin.
 fn from_own_page(headers: &HeaderMap, port: u16) -> bool {
-    let named = |name| {
-        headers
-            .get(name)
-            .and_then(|value: &HeaderValue| value.to_str().ok())
-    };
-    named(header::HOST) == Some(format!("127.0.0.1:{port}").as_str())
-        && named(header::ORIGIN) == Some(format!("http://127.0.0.1:{port}").as_str())
+    own_host(headers, port) && named(headers, header::ORIGIN) == Some(own_origin(port).as_str())
+}
+
+/// Whether `Host` is `127.0.0.1:<port>`, exactly: what a navigation, which sends no `Origin`, is
+/// checked by.
+pub(super) fn own_host(headers: &HeaderMap, port: u16) -> bool {
+    named(headers, header::HOST) == Some(format!("127.0.0.1:{port}").as_str())
+}
+
+fn own_origin(port: u16) -> String {
+    format!("http://127.0.0.1:{port}")
+}
+
+/// The header `name`, when it is there and is text.
+fn named(headers: &HeaderMap, name: header::HeaderName) -> Option<&str> {
+    headers
+        .get(name)
+        .and_then(|value: &HeaderValue| value.to_str().ok())
 }
 
 /// `POST /connect { "code" }`: trades the code the terminal printed for a session, set as an
@@ -263,6 +291,54 @@ fn session_cookies(headers: &HeaderMap) -> impl Iterator<Item = &str> {
         .filter_map(|pair| pair.trim().strip_prefix("farik_session="))
 }
 
+/// `GET /session`: 204 when the request carries a live session, 401 when it does not. The page
+/// asks it before opening `/rpc`, whose refused upgrade gives a browser no status. A same-origin
+/// fetch sends no `Origin`, so one is refused only when it is there and foreign; `Host` must be
+/// the daemon's own. A daemon without the browser routes answers 404.
+pub(super) async fn session(State(state): State<Arc<DaemonState>>, headers: HeaderMap) -> Response {
+    let Some(web) = state.web() else {
+        return StatusCode::NOT_FOUND.into_response();
+    };
+    let origin = named(&headers, header::ORIGIN);
+    if !own_host(&headers, web.port) || origin.is_some_and(|origin| origin != own_origin(web.port))
+    {
+        return StatusCode::FORBIDDEN.into_response();
+    }
+    let now = state.deps().clock.now();
+    if session_cookies(&headers).any(|secret| web.sessions.verify(secret, now)) {
+        StatusCode::NO_CONTENT.into_response()
+    } else {
+        StatusCode::UNAUTHORIZED.into_response()
+    }
+}
+
+/// `POST /disconnect`: ends every session the request carries and clears the cookie, answering
+/// 204; a request not from the daemon's own page answers 403, and a daemon without the browser
+/// routes 404.
+pub(super) async fn disconnect(
+    State(state): State<Arc<DaemonState>>,
+    headers: HeaderMap,
+) -> Response {
+    let Some(web) = state.web() else {
+        return StatusCode::NOT_FOUND.into_response();
+    };
+    if !from_own_page(&headers, web.port) {
+        return StatusCode::FORBIDDEN.into_response();
+    }
+    if let Err(error) = session_cookies(&headers).try_for_each(|secret| web.sessions.revoke(secret))
+    {
+        return (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()).into_response();
+    }
+    (
+        StatusCode::NO_CONTENT,
+        [(
+            header::SET_COOKIE,
+            "farik_session=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0",
+        )],
+    )
+        .into_response()
+}
+
 /// `GET /rpc`: a WebSocket that speaks JSON-RPC 2.0 (`docs/schemas/rpc.schema.json`) for the
 /// daemon's own page. A request that is not from that page answers 403, one without a live
 /// session 401, and a daemon without the browser routes 404, each before the upgrade.
@@ -298,6 +374,8 @@ const POLL: Duration = Duration::from_millis(500);
 async fn talk(mut socket: WebSocket, state: Arc<DaemonState>, cancel: CancellationToken) {
     // The seq of the last event sent to the subscription, or `None` while there is none.
     let mut sent: Option<u64> = None;
+    // How many polls running have failed to read the log.
+    let mut failed = 0;
     // ponytail: the log is re-read every 500 ms, because other processes append to it too and the
     // in-process `EventLog::subscribe` channel misses those; a cross-process notify replaces the
     // poll if 500 ms ever shows.
@@ -324,15 +402,25 @@ async fn talk(mut socket: WebSocket, state: Arc<DaemonState>, cancel: Cancellati
                 return;
             }
         }
-        if !push(&mut socket, &state, &mut sent).await {
+        if !push(&mut socket, &state, &mut sent, &mut failed).await {
             return;
         }
     }
 }
 
+/// How many polls running may fail to read the log before the socket is closed.
+const READS_TRIED: u32 = 3;
+
 /// Sends the subscription every event past `sent`, oldest first. Answers `false` when the socket
-/// is gone. A log that cannot be read is read again at the next poll.
-async fn push(socket: &mut WebSocket, state: &Arc<DaemonState>, sent: &mut Option<u64>) -> bool {
+/// is gone. A log that cannot be read is read again at the next poll; after `READS_TRIED` polls
+/// running have failed (`failed` counts them), the socket is closed with 1011, so that the page
+/// shows the failure rather than wait in silence.
+async fn push(
+    socket: &mut WebSocket,
+    state: &Arc<DaemonState>,
+    sent: &mut Option<u64>,
+    failed: &mut u32,
+) -> bool {
     let Some(after) = *sent else {
         return true;
     };
@@ -343,8 +431,18 @@ async fn push(socket: &mut WebSocket, state: &Arc<DaemonState>, sent: &mut Optio
     let reader = Arc::clone(state);
     let read = tokio::task::spawn_blocking(move || reader.deps().log.read(&query)).await;
     let Ok(Ok(events)) = read else {
-        return true;
+        *failed += 1;
+        if *failed < READS_TRIED {
+            return true;
+        }
+        let close = CloseFrame {
+            code: close_code::ERROR,
+            reason: "farik could not read its event log".into(),
+        };
+        let _ = socket.send(Message::Close(Some(close))).await;
+        return false;
     };
+    *failed = 0;
     for event in events {
         *sent = Some(event.envelope.seq);
         let note = json!({
@@ -614,9 +712,14 @@ mod tests {
     use tokio_tungstenite::tungstenite::handshake::client::Request as WsRequest;
     use tokio_tungstenite::tungstenite::{Error as WsError, Message as WsMessage};
 
+    use rust_embed::RustEmbed;
+
     use super::{BrowserSessions, ConnectCodes, WebState};
+    use crate::daemon::app::fixtures::{Fixture, Unbuilt};
     use crate::daemon::fixtures::TestDaemon;
-    use crate::daemon::{DaemonConfig, DaemonHandle, DaemonState, PortChoice, router, serve};
+    use crate::daemon::{
+        DaemonConfig, DaemonHandle, DaemonState, PortChoice, router, router_serving, serve,
+    };
     use crate::orchestrator::fixtures::Harness;
     use crate::orchestrator::{CommandReport, command_handler};
     use crate::tools::ToolDeps;
@@ -834,6 +937,231 @@ mod tests {
         let daemon = TestDaemon::new("web-absent", |_| {});
         let answer = send(&daemon.state, connect(Some(ORIGIN), HOST, &"0".repeat(64))).await;
         assert_eq!(answer.status(), StatusCode::NOT_FOUND);
+        for request in [
+            page("/", HOST),
+            page("/settings", HOST),
+            page("/session", HOST),
+            disconnect("farik_session=x"),
+        ] {
+            let path = request.uri().to_string();
+            let answer = fetch::<Fixture>(&daemon.state, request).await;
+            assert_eq!(answer.status(), StatusCode::NOT_FOUND, "{path}");
+        }
+    }
+
+    // The app's own routes, served from a test embed in place of the built web app.
+
+    /// `request` answered by the router, serving the embed `E` as the web app.
+    async fn fetch<E: RustEmbed + 'static>(
+        state: &Arc<DaemonState>,
+        request: Request<Body>,
+    ) -> axum::response::Response {
+        router_serving::<E>(Arc::clone(state), TOKEN, CancellationToken::new())
+            .oneshot(request)
+            .await
+            .expect("the router answers")
+    }
+
+    /// A navigation to `path`: a browser sends it with a `Host` and no `Origin`.
+    fn page(path: &str, host: &str) -> Request<Body> {
+        Request::get(path)
+            .header(header::HOST, host)
+            .body(Body::empty())
+            .expect("a request is built")
+    }
+
+    fn header_of<'a>(answer: &'a axum::response::Response, name: &header::HeaderName) -> &'a str {
+        answer
+            .headers()
+            .get(name)
+            .and_then(|value| value.to_str().ok())
+            .unwrap_or_else(|| panic!("no {name} header"))
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn serves_the_app_and_its_routes() {
+        let (daemon, _) = served("app-serves");
+        for path in ["/", "/settings"] {
+            let answer = fetch::<Fixture>(&daemon.state, page(path, HOST)).await;
+            assert_eq!(answer.status(), StatusCode::OK, "{path}");
+            assert!(
+                header_of(&answer, &header::CONTENT_TYPE).starts_with("text/html"),
+                "{path}"
+            );
+            assert_eq!(
+                header_of(&answer, &header::CACHE_CONTROL),
+                "no-store",
+                "{path}"
+            );
+            assert_eq!(
+                body_text(answer).await,
+                include_str!("app-fixture/index.html"),
+                "{path}"
+            );
+        }
+        let asset = fetch::<Fixture>(&daemon.state, page("/assets/app-3f2a.js", HOST)).await;
+        assert_eq!(asset.status(), StatusCode::OK);
+        assert_eq!(header_of(&asset, &header::CONTENT_TYPE), "text/javascript");
+        assert_eq!(
+            header_of(&asset, &header::CACHE_CONTROL),
+            "max-age=31536000, immutable"
+        );
+        assert_eq!(
+            body_text(asset).await,
+            include_str!("app-fixture/assets/app-3f2a.js")
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn says_when_the_app_was_not_built() {
+        let (daemon, _) = served("app-unbuilt");
+        let answer = fetch::<Unbuilt>(&daemon.state, page("/", HOST)).await;
+        assert_eq!(answer.status(), StatusCode::OK);
+        assert_eq!(
+            body_text(answer).await,
+            "The web app was not built into this farik. Run pnpm --filter @farik/web build, then build farik again."
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn sends_the_security_headers() {
+        let (daemon, _) = served("app-headers");
+        let policy = format!(
+            "default-src 'self'; connect-src 'self' ws://127.0.0.1:{PORT}; img-src 'self' data:; font-src 'self' data:; style-src 'self'; frame-ancestors 'none'"
+        );
+        let answers = [
+            fetch::<Fixture>(&daemon.state, page("/", HOST)).await,
+            fetch::<Fixture>(&daemon.state, page("/assets/app-3f2a.js", HOST)).await,
+            fetch::<Unbuilt>(&daemon.state, page("/", HOST)).await,
+        ];
+        for answer in &answers {
+            assert_eq!(header_of(answer, &header::CONTENT_SECURITY_POLICY), policy);
+            assert_eq!(
+                header_of(answer, &header::X_CONTENT_TYPE_OPTIONS),
+                "nosniff"
+            );
+            assert_eq!(header_of(answer, &header::REFERRER_POLICY), "no-referrer");
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn serves_the_app_only_to_its_own_host() {
+        let (daemon, _) = served("app-host");
+        let localhost = format!("localhost:{PORT}");
+        for host in ["evil.example", localhost.as_str()] {
+            for path in ["/", "/assets/app-3f2a.js"] {
+                let answer = fetch::<Fixture>(&daemon.state, page(path, host)).await;
+                assert_eq!(answer.status(), StatusCode::FORBIDDEN, "{host} {path}");
+                assert_eq!(body_text(answer).await, "", "{host} {path}");
+            }
+        }
+        let answer = fetch::<Fixture>(&daemon.state, page("/", HOST)).await;
+        assert_eq!(answer.status(), StatusCode::OK);
+    }
+
+    /// `GET /session` with `cookie`, from `origin` when there is one.
+    fn session(origin: Option<&str>, host: &str, cookie: Option<&str>) -> Request<Body> {
+        let mut request = Request::get("/session").header(header::HOST, host);
+        if let Some(origin) = origin {
+            request = request.header(header::ORIGIN, origin);
+        }
+        if let Some(cookie) = cookie {
+            request = request.header(header::COOKIE, cookie);
+        }
+        request.body(Body::empty()).expect("a request is built")
+    }
+
+    /// `POST /disconnect` from the daemon's own page, with `cookie`.
+    fn disconnect(cookie: &str) -> Request<Body> {
+        Request::post("/disconnect")
+            .header(header::HOST, HOST)
+            .header(header::ORIGIN, ORIGIN)
+            .header(header::COOKIE, cookie)
+            .body(Body::empty())
+            .expect("a request is built")
+    }
+
+    /// A new session on `daemon`'s browser routes.
+    fn a_session(daemon: &TestDaemon) -> String {
+        let web = daemon.state.web().expect("the browser routes are on");
+        web.sessions
+            .issue(daemon.state.deps().clock.now())
+            .expect("a session")
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn tells_the_page_whether_it_has_a_session() {
+        let (daemon, _) = served("app-session");
+        let secret = a_session(&daemon);
+        let live = format!("theme=dark; farik_session={secret}");
+        let unknown = format!("farik_session={}", "0".repeat(64));
+        let asked = [
+            (None, HOST, Some(live.as_str()), StatusCode::NO_CONTENT),
+            (
+                Some(ORIGIN),
+                HOST,
+                Some(live.as_str()),
+                StatusCode::NO_CONTENT,
+            ),
+            (None, HOST, None, StatusCode::UNAUTHORIZED),
+            (None, HOST, Some(unknown.as_str()), StatusCode::UNAUTHORIZED),
+            (
+                Some("http://evil.example"),
+                HOST,
+                Some(live.as_str()),
+                StatusCode::FORBIDDEN,
+            ),
+            (
+                None,
+                "evil.example",
+                Some(live.as_str()),
+                StatusCode::FORBIDDEN,
+            ),
+        ];
+        for (origin, host, cookie, status) in asked {
+            let answer = send(&daemon.state, session(origin, host, cookie)).await;
+            assert_eq!(answer.status(), status, "{origin:?} {host} {cookie:?}");
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn disconnect_revokes_the_session() {
+        let (daemon, _) = served("app-disconnect");
+        let secret = a_session(&daemon);
+        let other = a_session(&daemon);
+        let carried = format!("farik_session=junk; farik_session={secret}");
+        let now = daemon.state.deps().clock.now();
+        let web = daemon.state.web().expect("the browser routes are on");
+
+        // Not from the daemon's own page: refused, and the session lives on.
+        let foreign = Request::post("/disconnect")
+            .header(header::HOST, HOST)
+            .header(header::COOKIE, carried.as_str())
+            .body(Body::empty())
+            .expect("a request is built");
+        assert_eq!(
+            send(&daemon.state, foreign).await.status(),
+            StatusCode::FORBIDDEN
+        );
+        assert!(web.sessions.verify(&secret, now));
+
+        let answer = send(&daemon.state, disconnect(&carried)).await;
+        assert_eq!(answer.status(), StatusCode::NO_CONTENT);
+        assert_eq!(
+            header_of(&answer, &header::SET_COOKIE),
+            "farik_session=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0"
+        );
+        assert!(!web.sessions.verify(&secret, now));
+        // Another browser's session is not this one's to end.
+        assert!(web.sessions.verify(&other, now));
+        let asked = send(&daemon.state, session(None, HOST, Some(&carried))).await;
+        assert_eq!(asked.status(), StatusCode::UNAUTHORIZED);
     }
 
     #[tokio::test(flavor = "multi_thread")]
@@ -1168,6 +1496,49 @@ mod tests {
         let note = next(&mut socket).await;
         assert_eq!(note["params"]["event"]["seq"], appended, "{note}");
         assert_eq!(note["params"]["event"]["kind"], "team.paused", "{note}");
+        drop(socket);
+        handle.shutdown().await.expect("the daemon stops");
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn closes_the_socket_when_the_log_cannot_be_read() {
+        let daemon = TestDaemon::new("rpc-unreadable", |_| {});
+        let path = daemon.project.repo.path.join(".farik/local/unreadable.db");
+        let log = Arc::new(open_event_log(&path, at()).expect("the log opens"));
+        let deps = &daemon.project.deps;
+        let state = Arc::new(DaemonState::new(Arc::new(ToolDeps {
+            log,
+            projections: Arc::clone(&deps.projections),
+            files: Arc::clone(&deps.files),
+            transitions: Arc::clone(&deps.transitions),
+            git: daemon.project.repo.adapter(),
+            clock: Arc::clone(&deps.clock),
+            ids: deps.ids.clone(),
+        })));
+        let (handle, secret) = on_a_socket(&state, &daemon.project.repo.path).await;
+        let mut socket = open(handle.info.port, &secret).await;
+        let answer = call(&mut socket, 1, "subscribe", &json!({ "from_seq": 0 })).await;
+        assert_eq!(answer["result"], json!({}), "{answer}");
+
+        rusqlite::Connection::open(&path)
+            .expect("a second connection opens")
+            .execute_batch("DROP TABLE events")
+            .expect("the table is dropped");
+        let closed = loop {
+            let frame = tokio::time::timeout(BOUND, socket.next())
+                .await
+                .expect("the socket closes within the bound");
+            match frame {
+                Some(Ok(WsMessage::Close(frame))) => break frame,
+                Some(Ok(WsMessage::Text(text))) => panic!("the socket still talks: {text}"),
+                Some(Ok(_)) => {}
+                other => panic!("the socket ended without a close frame: {other:?}"),
+            }
+        };
+        let closed = closed.expect("the close frame has a code");
+        assert_eq!(u16::from(closed.code), 1011);
+        assert_eq!(closed.reason.as_str(), "farik could not read its event log");
         drop(socket);
         handle.shutdown().await.expect("the daemon stops");
     }

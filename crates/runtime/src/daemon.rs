@@ -39,6 +39,7 @@ use crate::orchestrator::{CommandError, CommandReport, reply_of};
 use crate::session::SessionPurpose;
 use crate::tools::{ToolContext, ToolDeps};
 
+mod app;
 #[cfg(test)]
 pub(crate) mod fixtures;
 mod hooks;
@@ -474,6 +475,15 @@ fn hex(bytes: &[u8]) -> String {
 /// `X-Farik-Session` names. `cancel` ends every MCP session, whose event streams a graceful
 /// shutdown would otherwise wait on forever, and every browser socket, which it does not track.
 pub(crate) fn router(state: Arc<DaemonState>, token: &str, cancel: CancellationToken) -> Router {
+    router_serving::<app::WebApp>(state, token, cancel)
+}
+
+/// `router`, serving the embed `E` as the web app.
+pub(crate) fn router_serving<E: rust_embed::RustEmbed + 'static>(
+    state: Arc<DaemonState>,
+    token: &str,
+    cancel: CancellationToken,
+) -> Router {
     let expected: Arc<str> = Arc::from(format!("Bearer {token}"));
     let server = StreamableHttpService::new(
         || Ok(FarikMcp),
@@ -492,8 +502,12 @@ pub(crate) fn router(state: Arc<DaemonState>, token: &str, cancel: CancellationT
     // Merged after the bearer layer, which a layer only puts on the routes it already has: a
     // browser has no bearer token, and proves itself with its `Origin` and a session instead.
     let browser = Router::new()
-        .route("/connect", post(web::connect))
+        .route("/", get(app::app_from::<E>))
+        .route("/connect", get(app::app_from::<E>).post(web::connect))
         .route("/rpc", get(web::rpc))
+        .route("/session", get(web::session))
+        .route("/disconnect", post(web::disconnect))
+        .fallback(get(app::app_from::<E>))
         .layer(Extension(cancel))
         .with_state(Arc::clone(&state));
     Router::new()

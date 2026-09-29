@@ -168,7 +168,7 @@ Tests (Rust, route tests like step 02's, `#[ignore]` where they need `TestDaemon
 - `disconnect_revokes_the_session` asserts that `POST /disconnect` answers 204 with the clearing `Set-Cookie`, and that `verify` of that secret is then false.
 - `closes_the_socket_when_the_log_cannot_be_read` asserts that after the event log's table is dropped through a second SQLite connection, the subscribed socket closes with code 1011 and the reason text (30 s failure bound).
 
-- [ ] `feat(runtime): serve the web app from the binary, with its session routes`
+- [x] `feat(runtime): serve the web app from the binary, with its session routes`
 
 ### Task 2: Opening the browser, and the end-to-end binary
 

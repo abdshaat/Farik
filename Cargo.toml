@@ -25,6 +25,7 @@ jsonschema = { version = "=0.56.0", default-features = false }
 regress = "=0.12.0"
 rmcp = { version = "=3.3.0", default-features = false, features = ["server", "transport-streamable-http-server"] }
 rusqlite = { version = "=0.40.2", features = ["bundled"] }
+rust-embed = { version = "=8.12.0", features = ["mime-guess"] }
 schemars = "=1.2.2"
 serde = { version = "=1.0.229", features = ["derive"] }
 serde-saphyr = "=1.3.0"
