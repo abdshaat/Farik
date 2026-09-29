@@ -1,4 +1,5 @@
 import { mkdirSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import sharp from "sharp";
 import { ICON_SIZES } from "./assets.ts";
 
@@ -9,9 +10,9 @@ const out = new URL("../assets/icons/", import.meta.url);
 if (import.meta.main) {
 	mkdirSync(out, { recursive: true });
 	for (const n of ICON_SIZES) {
-		await sharp(master.pathname)
+		await sharp(fileURLToPath(master))
 			.resize(n, n, { kernel: "lanczos3" })
 			.png()
-			.toFile(new URL(`icon-${n}.png`, out).pathname);
+			.toFile(fileURLToPath(new URL(`icon-${n}.png`, out)));
 	}
 }
