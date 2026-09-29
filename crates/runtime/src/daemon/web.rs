@@ -2134,13 +2134,22 @@ mod tests {
         );
     }
 
-    /// Writes an executable `sh` script called `name` into `bin`, through a rename, so that no
-    /// other thread's fork holds it open for writing as it runs.
+    /// Writes an executable `sh` script called `name` into `bin`. A child process writes it, so
+    /// that the write descriptor never lives in this process: another test thread's fork would
+    /// inherit it until its exec, and running the script meanwhile fails with "text file busy".
     fn script(bin: &std::path::Path, name: &str, body: &str) {
         let staged = bin.join(format!(".{name}.new"));
-        std::fs::write(&staged, format!("#!/bin/sh\n{body}\n")).expect("written");
-        std::fs::set_permissions(&staged, std::fs::Permissions::from_mode(0o755))
-            .expect("the mode is set");
+        let written = std::process::Command::new("sh")
+            .args([
+                "-c",
+                "printf '%s\\n' \"$2\" > \"$1\" && chmod 755 \"$1\"",
+                "sh",
+            ])
+            .arg(&staged)
+            .arg(format!("#!/bin/sh\n{body}"))
+            .status()
+            .expect("sh runs");
+        assert!(written.success());
         std::fs::rename(&staged, bin.join(name)).expect("renamed");
     }
 
