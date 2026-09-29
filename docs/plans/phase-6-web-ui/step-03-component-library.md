@@ -19,7 +19,7 @@ Signatures, not bodies; test names and what each asserts, not test code; around 
 
 Every visible default string is in one file. The code-changes view gets two new pale tints, which the founder approved on 2026-09-28. A gallery page shows every part in light and dark and at phone width, and the step is done when the founder signs it off.
 
-Out of scope: screens, routing, and data (steps 04 to 09), the task row's composition (step 08), and the office scene (phase 10).
+Out of scope: screens, routing, and data (steps 04 to 09), the task row's composition (step 08), and the office scene (phase 11).
 
 ## Decisions
 
