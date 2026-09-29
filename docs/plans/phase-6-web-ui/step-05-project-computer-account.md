@@ -1,10 +1,10 @@
 # Phase 6, step 05: Project, computer, and account
 
-Status: draft (round two of readiness)
+Status: ready
 Branch: `phase/6-web-ui`
 Spec: `docs/SPEC.md` sections 4.1 (first run), 8.3 (sandbox), 8.6 (credential), F2
 Depends on: steps 01 to 04 of this phase (step 04 landed at the commit its landing review records)
-Readiness confirmed by: fresh-session reviewer, 2026-09-29, round one: not ready, with three planner decisions and one founder decision unmade. All four are made below. Round two is limited to them.
+Readiness confirmed by: fresh-session reviewer, 2026-09-29, round one: not ready, with three planner decisions and one founder decision unmade. All four are made below. Round two, limited to them, found all four settled (ready with findings, which are folded in).
 
 Signatures, not bodies; test names and what each asserts, not test code; around 300 lines at most (ADR 0008).
 
@@ -131,6 +131,8 @@ pub trait SetupHost: Send + Sync {
     fn create(&self, parent: &str, name: &str, description: &str, no_sandbox: bool) -> Result<PathBuf, SetupError>;
     fn connect(&self, kind: CredentialKind, secret: &str) -> Result<Source, SetupError>;
     fn home(&self) -> PathBuf;
+    fn env(&self) -> BTreeMap<String, String>;                 // for computer.check in setup mode
+    fn account(&self) -> Option<(CredentialKind, Source)>;     // for account.status and serve.status.credential
 }
 DaemonState::setup(host: Arc<dyn SetupHost>, web: WebState) -> DaemonState;  DaemonConfig.daemon_file: Option<PathBuf>;
 pub enum PortChoice { Any, Preferred(u16), Exact(u16) }
@@ -181,6 +183,7 @@ Tests go in `crates/cli/tests/serving.rs`, with memory credential stores.
 - `creates_a_project_paused_with_its_first_request` asserts that `project.create` over the socket makes `bakery/` with a `.git`, a README holding the description, `.farik/team.yaml`, a `team.paused` event, and a filed request whose intent is the description. It also asserts that a 17-character description is refused before any folder exists.
 - `takes_on_the_chosen_project_on_the_same_port` asserts, after `project.open`, that the socket closes; a new socket with the same cookie reconnects on the same port; `project_root` is set and the team is paused; no second link is printed; and `state.json` names the project.
 - `stays_in_setup_when_the_project_is_busy` asserts that `project.open` on a project whose run lock another process holds is refused with its sentence, and that `state.json` is unchanged.
+- `goes_back_to_setup_when_the_driver_cannot_start` asserts that when the driver's start fails after the answer (the project's `.farik/prices.json` made unreadable), serve returns to setup mode on the same port and `serve.status.take_on_error` holds the reason.
 - `keeps_ctrl_c_after_the_take_on` asserts that after a take-on, one interrupt ends serve with 130.
 - `writes_no_sandbox_into_the_project` asserts that `project.open { no_sandbox: true }` leaves `{"sandbox":"none"}` in the project's `settings.json`, and the warning on stderr.
 
@@ -192,7 +195,7 @@ Tests go in `crates/cli/tests/serving.rs`, with memory credential stores.
 - `connects_a_subscription_key` asserts that the call is `account.connect` with `subscription_token`, that the page says where the key was stored, that it moves to `/setup/project`, and that a refusal shows under the field.
 - `browses_folders_and_uses_one` asserts that the page lists the entries, marks those that are not git projects, opens a folder, and calls `project.open` with the relative path and `no_sandbox`.
 - `starts_a_new_project` asserts that `project.create` is called with the slugged name, and that the status becomes `reopening` while the page shows "Opening your project…".
-- `sends_the_user_to_setup_without_a_project` asserts that `/` redirects to `/setup/computer`.
+- `sends_the_user_to_setup_without_a_project` asserts that `/` redirects to `/setup/computer`, and to `/setup/project` when `take_on_error` is set, where the error shows.
 - `setup-project.spec.ts` is the Playwright journey from the Tests decision.
 
 - [ ] `feat(web): add the computer, account and project setup screens`
@@ -212,5 +215,5 @@ Tests go in `crates/cli/tests/serving.rs`, with memory credential stores.
 ```
 cargo xtask check --integration
 # expected: cargo 0 failed; @farik/protocol-client "Tests  7 passed (7)"; @farik/web "Tests  20 passed (20)";
-#   playwright "3 passed"; last line: xtask check: ok
+#   playwright "3 passed"; last line: xtask check: ok  (T4 has 8 tests)
 ```
