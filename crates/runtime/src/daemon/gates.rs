@@ -552,13 +552,6 @@ pub(crate) fn choices(
         }
         // Spec 5.7 raises these again on a resume, so only the plan's budget changing helps.
         "budget" | "sessions" => vec![change(), cancel],
-        "integration" => vec![
-            choice(
-                "Add it now",
-                json!({ "command": "task_integrate", "body": { "task_id": task_id } }),
-            ),
-            cancel,
-        ],
         "blocker_age" | "permission" | "readiness_failures" | "explicit_request" => {
             let mut offered = Vec::new();
             if let Some(before) = before {
@@ -1169,13 +1162,6 @@ mod tests {
                 "{reason}"
             );
         }
-        assert_eq!(
-            offered("integration"),
-            vec![
-                json!({ "label": "Add it now", "body": { "command": "task_integrate", "body": { "task_id": "FRK-4" } } }),
-                cancel.clone(),
-            ]
-        );
         for reason in [
             "blocker_age",
             "permission",
@@ -1199,6 +1185,8 @@ mod tests {
         );
         // A plan to approve is the plan page's, and is no help case.
         assert!(offered("approval").is_empty());
+        // Integration is no escalation of a task: an accepted task waits to be added (5.7).
+        assert!(offered("integration").is_empty());
         assert!(offered("risk_gate").is_empty());
     }
 }
