@@ -1,6 +1,6 @@
 # Phase 6, step 03: Component library
 
-Status: landed and landing-reviewed 2026-09-29; done on the founder's sign-off of the gallery
+Status: done (landed and landing-reviewed 2026-09-29; gallery signed off by the founder, 2026-09-29)
 Branch: `phase/6-web-ui`
 Spec: `docs/SPEC.md` sections 10 (WCAG 2.2 AA, 360 px, strings externalized, clients built from the brand's tokens) and 14
 Depends on: step 01 (`@farik/brand`, done) and step 02 (done, 11e324f) of this phase
