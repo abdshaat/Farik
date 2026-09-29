@@ -32,9 +32,9 @@ The five brand colours, the three text shades, and the light and dark themes are
 | `ink-muted` | `#5B5347` | `#B9AE9C` | Secondary text (checked for AA in step 01) |
 | `rule` | `#D9CBB3` | `#333333` | Borders and dividers |
 | `band` | Midnight `#161616` | `#0E0E0E` | The team band and the navigation rail, dark in both themes |
-| `action` | Clay Coral `#D8896A`, with Midnight text | the same | The one primary action on a screen |
-| `role-*` | Coral (Product Manager), Moss (Scrum Master), Architect's Amber `#E3B04B`, Signal Blue (Developer), lavender (Marketing Specialist), with Midnight text | the same | Role tags only |
-| `status-*` | Moss Text (done), Signal Text (working), Coral Text (waiting on you) | the base colours | Status words, always with a word, never colour alone |
+| `action` | Clay Coral `#D8896A`, with Midnight text | the same | The main button, and nothing else |
+| `role-*` | Dusty Rose `#C9A0A6` (Product Manager), Sage `#A3B8A0` (Scrum Master), Wheat `#D6B77A` (Architect), Sky `#B7C7DA` (Developer), Heather `#B3A9CF` (Marketing Specialist), with Midnight text | the same | Role tags only |
+| `status-*` | Moss Text `#536C59` (done), Slate Text `#44607F` (in progress), Clay Text `#96533A` (waiting on you) | Moss Grid `#6E8F76`, Slate `#8AA3C2`, Peach `#E0A68C` | Status words, always with a word, never colour alone |
 
 ### Type
 
@@ -148,7 +148,7 @@ The spec's lifecycle (5.2) is the authority. Step 08's plan checks this mapping 
 
 These hold without being mentioned on any screen:
 - responsive from 360 px, with no sideways page scroll;
-- visible keyboard focus: a 2 px ring with a 2 px offset, Signal Text `#0653FF` in light and Signal Blue in dark, because Signal Blue on Soft Sand is 2.57:1, under 3:1;
+- visible keyboard focus: a 2 px ring with a 2 px offset, Slate Focus `#5F7A9B` in light (3.62:1 on Soft Sand) and Mist `#A7BCD6` in dark, both over 3:1;
 - `prefers-reduced-motion` respected;
 - WCAG 2.2 AA for every text pair, checked by phase 6 step 01's contrast test;
 - status never shown by colour alone;
@@ -156,7 +156,7 @@ These hold without being mentioned on any screen:
 
 ## Every page, mocked up
 
-On 2026-09-26 the founder asked for every page to be mocked up before any code. There are 32 screens. They are on the design canvas (https://claude.ai/artifact/6tNaCmNojhixuiJBsDPsmf) in six pages, and their sources are in `docs/design/mockups/`. Each `.dc.html` file is one screen, and `canvas.json` is the layout. The images in them are the canvas's uploaded crops of the kit, referenced as `/_blob/` addresses, so they show only on the canvas. Phase 6 builds from these screens, and step 03's components are taken from them.
+On 2026-09-26 the founder asked for every page to be mocked up before any code. There are 32 screens. They are on the design canvas (https://claude.ai/artifact/6tNaCmNojhixuiJBsDPsmf) in six pages, and their sources are in `docs/design/mockups/`. Each `.dc.html` file is one screen, and `canvas.json` is the layout. The images in them are the canvas's uploaded crops of the kit, referenced as `/_blob/` addresses, so they show only on the canvas. The mockups keep the colours of 2026-09-26; the palette in `docs/brand/brand.md` (2026-09-28) replaces them, and the tokens win. Phase 6 builds from these screens, and step 03's components are taken from them.
 
 | Canvas page | Screens | Phase 6 step |
 |---|---|---|

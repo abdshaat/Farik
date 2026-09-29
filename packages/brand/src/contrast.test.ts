@@ -11,10 +11,10 @@ const tokens = readTokens(
 
 describe("contrast", () => {
 	it("matches the ratios brand.md records", () => {
-		expect(contrastRatio("#A44D2B", "#F3E7D3").toFixed(2)).toBe("4.68");
+		expect(contrastRatio("#96533A", "#F3E7D3").toFixed(2)).toBe("4.78");
 		expect(contrastRatio("#161616", "#D8896A").toFixed(2)).toBe("6.64");
 		expect(contrastRatio("#F3E7D3", "#161616").toFixed(2)).toBe("14.81");
-		expect(contrastRatio("#5A8DFF", "#F3E7D3").toFixed(2)).toBe("2.57");
+		expect(contrastRatio("#5F7A9B", "#F3E7D3").toFixed(2)).toBe("3.62");
 	});
 
 	it("is the same either way round", () => {
@@ -56,6 +56,34 @@ describe("contrast", () => {
 			).toBe(true);
 		}
 	});
+	for (const theme of ["light", "dark"] as ThemeName[]) {
+		it(`gives every job its own colour in the ${theme} theme`, () => {
+			const c = tokens.color[theme];
+			const jobs = [
+				"action",
+				"role-product-manager",
+				"role-scrum-master",
+				"role-architect",
+				"role-developer",
+				"role-marketing-specialist",
+				"status-done",
+				"status-working",
+				"status-waiting",
+				"focus",
+			];
+			const seen = new Map<string, string>();
+			for (const job of jobs) {
+				const value = c[job]?.toLowerCase() ?? "";
+				const other = seen.get(value);
+				expect(
+					other,
+					`${job} and ${other} share ${value} in ${theme}`,
+				).toBeUndefined();
+				seen.set(value, job);
+			}
+		});
+	}
+
 	it("pins the pairs the plan lists", () => {
 		expect(
 			TEXT_PAIRS.map((p) => [p.foreground, p.background, p.minimum]),

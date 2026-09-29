@@ -1,6 +1,6 @@
 # Farik brand
 
-Status: approved by the founder on 2026-09-26, together with the web UI design (phase 5, step 01). The final art waits on the files listed at the end.
+Status: approved by the founder on 2026-09-26, together with the web UI design (phase 5, step 01); the palette changed on 2026-09-28 (see Colour). The final art waits on the files listed at the end.
 Source: the founder's brand kit, `docs/brand/brand-kit.png` (2026-09-25), and the founder's answers of the same day.
 Where this file and the kit disagree, the kit is the founder's intent. This file is what the apps build from.
 
@@ -27,37 +27,47 @@ Voice: short, plain, confident sentences, with a terminal's economy. It speaks t
 
 ## Colour
 
-The palette has five brand colours. Each has a job:
+Changed on 2026-09-28 by the founder: muted colours, one per job; Signal Blue, the lavender and Amber left the palette.
+
+**One colour per job.** No two jobs share a colour. The main button, each of the five role tags, each of the three statuses, and the focus ring all have their own colour, in both themes, and a test in `packages/brand` fails if two of them match. Links are the one exception to "a job has a colour": they are underlined text in the ink colour, so the underline marks them, and the components draw it (phase 6 step 03).
+
+The kept base colours:
 
 | Name | Hex | Role |
 |---|---|---|
-| Midnight Terminal | `#161616` | Dark surfaces (the hero, terminal panels, the dark theme's background), and body text on light surfaces |
-| Clay Coral | `#D8896A` | The primary accent: the wordmark, the logo frame, primary buttons, the `>` prompt, the Product Manager's tag |
-| Soft Sand | `#F3E7D3` | The light theme's background, and text on dark surfaces |
-| Moss Grid | `#6E8F76` | Secondary accent: success and "done", the cursor, the Scrum Master's tag |
-| Signal Blue | `#5A8DFF` | Information, links on dark surfaces, "in progress", the Developer's tag |
+| Midnight Terminal | `#161616` | Dark surfaces (the hero, terminal panels, the dark theme's background), body text and links on light surfaces, and text on every fill |
+| Clay Coral | `#D8896A` | The main button and nothing else, plus the wordmark's frame, the logo frame and the `>` prompt |
+| Soft Sand | `#F3E7D3` | The light theme's background, and text and links on dark surfaces |
+| Moss Grid | `#6E8F76` | "Done" on dark surfaces, and the cursor |
 
-**Text shades.** These are derived by Farik and approved by the founder on 2026-09-25. Each is the same hue made darker, and is used only for text and links on light surfaces, because the brand colours fall short of WCAG 2.2 AA there:
+The new colours, each with one job:
 
-| Shade | Hex | On Soft Sand | Base colour on Soft Sand |
-|---|---|---|---|
-| Coral Text | `#A44D2B` | 4.68:1 | 2.23:1 |
-| Moss Text | `#536C59` | 4.70:1 | 2.94:1 |
-| Signal Text | `#0653FF` | 4.66:1 | 2.57:1 |
-| Amber Text | `#856015` | 4.67:1 | 1.93:1 (Amber `#E3B04B`, the Architect's tag) |
+| Name | Hex | Job |
+|---|---|---|
+| Dusty Rose | `#C9A0A6` | The Product Manager's tag |
+| Sage | `#A3B8A0` | The Scrum Master's tag |
+| Wheat | `#D6B77A` | The Architect's tag |
+| Sky | `#B7C7DA` | The Developer's tag |
+| Heather | `#B3A9CF` | The Marketing Specialist's tag |
+| Slate | `#8AA3C2` | "In progress" on dark surfaces |
+| Peach | `#E0A68C` | "Waiting on you" on dark surfaces |
+| Mist | `#A7BCD6` | The focus ring on dark surfaces |
 
-These combinations were measured:
-- On Midnight Terminal: Clay Coral 6.64, Soft Sand 14.81, Moss Grid 5.04 and Signal Blue 5.76. All brand colours may be text on dark surfaces.
-- Text on a Clay Coral, Moss Grid or Signal Blue fill is Midnight Terminal (6.64, 5.04 and 5.76). Soft Sand on Clay Coral is 2.23 and is never used.
+The tags carry Midnight Terminal text, measured at 7.81 (Dusty Rose), 8.55 (Sage), 9.40 (Wheat), 10.51 (Sky) and 8.18 (Heather).
 
-**The Marketing Specialist's tag** is lavender in the kit, which is not in the palette. It is recorded as a tag colour, `#A99BF0` (read from the kit; to be confirmed with the character files), and is used only as a character's tag fill with Midnight Terminal text.
+**Text shades.** These are the same hues made darker, and are used only for text, status marks and the focus ring on light surfaces, because the lighter colours fall short of WCAG 2.2 AA there:
 
-**The Architect's tag is Amber `#E3B04B`.** On 2026-09-26 the founder decided the Architect gets its own colour, because the moss green on its card (`#7F9A7F`) could not be told apart from the Scrum Master's. Amber was chosen for three reasons:
-- **It is distinct.** Its hue is one no other tag uses, and it is lighter than all of them (relative luminance 0.48, against 0.24 to 0.38), so it stays distinct for colour-blind readers.
-- **It carries Midnight Terminal text** at 9.12:1.
-- **It echoes the office scene's** warm lamps and sticky notes.
+| Shade | Hex | On Soft Sand | Base colour on Soft Sand | Job |
+|---|---|---|---|---|
+| Moss Text | `#536C59` | 4.70:1 | 2.94:1 (Moss Grid) | "Done" |
+| Slate Text | `#44607F` | 5.33:1 | 2.12:1 (Slate) | "In progress" |
+| Clay Text | `#96533A` | 4.78:1 | 1.72:1 (Peach) | "Waiting on you" |
+| Wheat Text | `#7A6232` | 4.75:1 | 1.57:1 (Wheat) | The Architect, where its name or mark must be text on a light surface |
+| Slate Focus | `#5F7A9B` | 3.62:1 | | The focus ring on light surfaces (3:1 is the floor for a focus indicator; it is 4.11 on a card and 4.09 on the band) |
 
-Its text shade for light surfaces is Amber Text `#856015`, at 4.67:1 on Soft Sand. Like the other tag colours, Amber is used only as a tag fill and for status marks tied to the role, never as a general accent.
+On dark surfaces (Midnight Terminal) the measured ratios are: done 5.04 (Moss Grid) and 4.59 on a card, in progress 6.98 and 6.36, waiting 8.62 and 7.85, focus 9.31 and 8.48, and focus on the band 9.93. On light surfaces, on the page and on a card: done 4.70 and 5.33, in progress 5.33 and 6.04, waiting 4.78 and 5.42.
+
+Text on a Clay Coral fill is Midnight Terminal (6.64); Soft Sand on Clay Coral is 2.23 and is never used. Soft Sand on Midnight Terminal is 14.81.
 
 **Themes.**
 - **Light is the default:** Soft Sand pages; Midnight Terminal for the hero, the top bar, and terminal-style panels; white-on-sand cards (`#FBF6EC`, a lighter tint of Soft Sand).
@@ -95,11 +105,11 @@ The characters are pixel-art people, one per role, each with a coloured role tag
 
 | Role | Tag | Description |
 |---|---|---|
-| Product Manager | PM, Clay Coral | Defines vision and priorities. |
-| Scrum Master | SM, Moss Grid | Keeps the team aligned and unblocked. |
-| Developer | DEV, Signal Blue | Builds, tests and ships features. |
-| Marketing Specialist | MKT, lavender | Creates content and drives growth. |
-| Architect | ARCH, Amber `#E3B04B` | Designs systems and technical foundations. |
+| Product Manager | PM, Dusty Rose | Defines vision and priorities. |
+| Scrum Master | SM, Sage | Keeps the team aligned and unblocked. |
+| Developer | DEV, Sky | Builds, tests and ships features. |
+| Marketing Specialist | MKT, Heather | Creates content and drives growth. |
+| Architect | ARCH, Wheat | Designs systems and technical foundations. |
 
 The founder's character files of 2026-09-26 replace the kit's drawings. There are ten pixel-art people, each seated cross-legged at the same laptop, drawn in one pose and one scale on transparent backgrounds:
 - five are the roles' default characters: the Architect, Product Manager, Scrum Master, Developer and Marketing Specialist;
