@@ -222,7 +222,7 @@ Tests:
   2. `stop()` makes the first page show "Farik stopped answering".
 - `integration_steps_build_the_app_and_run_the_journey` (xtask unit test) asserts `integration_steps(Tests::All)` is exactly the five steps in order, and `integration_steps(Tests::WithoutTheOnesThatNeedAProgram)` is empty.
 
-- [ ] `test(web): drive the shell through the real server and browser`
+- [x] `test(web): drive the shell through the real server and browser`
 
 ### Task 6: Spec and plan
 

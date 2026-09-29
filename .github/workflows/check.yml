@@ -31,4 +31,7 @@ jobs:
           cache: pnpm
       - run: git --version
       - run: docker pull alpine:3.22
+      # The browser journey's Chromium, which Playwright downloads rather than finds on the runner.
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @farik/web exec playwright install --with-deps chromium
       - run: cargo xtask check --integration

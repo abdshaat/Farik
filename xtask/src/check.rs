@@ -54,9 +54,66 @@ pub fn front_end_commands(has_package_json: bool) -> Vec<Vec<&'static str>> {
     }
 }
 
+/// What runs after `pnpm check` under `--integration`, one `(program, args)` after another: the web
+/// app built, the end-to-end server linted, tested and built, and the browser journey run over them.
+/// Nothing without the flag.
+///
+/// The journey also runs `target/debug/farik` (`farik init`, `farik log`). It is not built here: the
+/// check's `cargo test --workspace`, and step three's `cargo test -p farik`, build the package's
+/// binaries for its integration tests, so it exists by the time the journey runs.
+#[must_use]
+pub fn integration_steps(tests: Tests) -> Vec<(&'static str, Vec<&'static str>)> {
+    match tests {
+        Tests::WithoutTheOnesThatNeedAProgram => vec![],
+        Tests::All => vec![
+            ("pnpm", vec!["--filter", "@farik/web", "build"]),
+            (
+                "cargo",
+                vec![
+                    "clippy",
+                    "-p",
+                    "farik",
+                    "--features",
+                    "e2e",
+                    "--bin",
+                    "farik-e2e-serve",
+                    "--",
+                    "-D",
+                    "warnings",
+                ],
+            ),
+            (
+                "cargo",
+                vec![
+                    "test",
+                    "-p",
+                    "farik",
+                    "--features",
+                    "e2e",
+                    "--test",
+                    "serving",
+                ],
+            ),
+            (
+                "cargo",
+                vec![
+                    "build",
+                    "-p",
+                    "farik",
+                    "--features",
+                    "e2e",
+                    "--bin",
+                    "farik-e2e-serve",
+                ],
+            ),
+            ("pnpm", vec!["--filter", "@farik/web", "e2e"]),
+        ],
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{Tests, front_end_commands, test_arguments, tests_requested};
+    use super::{Tests, front_end_commands, integration_steps, test_arguments, tests_requested};
 
     #[test]
     fn runs_the_tests_that_need_no_program_when_asked_for_nothing() {
@@ -113,5 +170,57 @@ mod tests {
     #[test]
     fn runs_no_front_end_command_without_a_package_json() {
         assert!(front_end_commands(false).is_empty());
+    }
+
+    #[test]
+    fn integration_steps_build_the_app_and_run_the_journey() {
+        // In this order: the server embeds the built app, and the journey runs the built server.
+        assert_eq!(
+            integration_steps(Tests::All),
+            [
+                ("pnpm", vec!["--filter", "@farik/web", "build"]),
+                (
+                    "cargo",
+                    vec![
+                        "clippy",
+                        "-p",
+                        "farik",
+                        "--features",
+                        "e2e",
+                        "--bin",
+                        "farik-e2e-serve",
+                        "--",
+                        "-D",
+                        "warnings",
+                    ]
+                ),
+                (
+                    "cargo",
+                    vec![
+                        "test",
+                        "-p",
+                        "farik",
+                        "--features",
+                        "e2e",
+                        "--test",
+                        "serving"
+                    ]
+                ),
+                (
+                    "cargo",
+                    vec![
+                        "build",
+                        "-p",
+                        "farik",
+                        "--features",
+                        "e2e",
+                        "--bin",
+                        "farik-e2e-serve",
+                    ]
+                ),
+                ("pnpm", vec!["--filter", "@farik/web", "e2e"]),
+            ]
+        );
+        assert!(integration_steps(Tests::WithoutTheOnesThatNeedAProgram).is_empty());
     }
 }

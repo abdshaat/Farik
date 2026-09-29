@@ -77,16 +77,28 @@ fn check(root: &Path, tests: Tests) -> anyhow::Result<()> {
     todos(root)?;
     core_io(root)?;
     for args in xtask::check::front_end_commands(root.join("package.json").exists()) {
-        let status = Command::new("pnpm")
-            .args(&args)
-            .current_dir(root)
-            .status()
-            .with_context(|| format!("running pnpm {}", args.join(" ")))?;
-        if !status.success() {
-            bail!("pnpm {} failed", args.join(" "));
+        program(root, "pnpm", &args)?;
+    }
+    for (name, args) in xtask::check::integration_steps(tests) {
+        if name == "cargo" {
+            cargo(root, &args)?;
+        } else {
+            program(root, name, &args)?;
         }
     }
     println!("xtask check: ok");
+    Ok(())
+}
+
+fn program(root: &Path, name: &str, args: &[&str]) -> anyhow::Result<()> {
+    let status = Command::new(name)
+        .args(args)
+        .current_dir(root)
+        .status()
+        .with_context(|| format!("running {name} {}", args.join(" ")))?;
+    if !status.success() {
+        bail!("{name} {} failed", args.join(" "));
+    }
     Ok(())
 }
 

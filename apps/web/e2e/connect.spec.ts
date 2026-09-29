@@ -1,0 +1,66 @@
+import { expect, type Page, test } from "@playwright/test";
+import { farik, startServe } from "./fixtures/serve.ts";
+
+const shots = new URL("./screenshots/", import.meta.url).pathname;
+
+/** Screenshots of the page as it is, at a phone's size and a desktop's, for the landing review. */
+async function screenshots(page: Page, name: string) {
+	await page.setViewportSize({ width: 360, height: 780 });
+	await page.screenshot({ path: `${shots}${name}-360.png`, fullPage: true });
+	await page.setViewportSize({ width: 1280, height: 800 });
+	await page.screenshot({ path: `${shots}${name}-1280.png`, fullPage: true });
+}
+
+test("the start link opens the app and pause works end to end", async ({
+	page,
+}) => {
+	const serve = await startServe({ transcripts: [] });
+	try {
+		await page.goto(serve.url);
+		await expect(page).toHaveURL(/\/events$/);
+		await expect(page.getByText("Connected", { exact: true })).toBeVisible();
+		await screenshots(page, "connected");
+
+		const banner = page.getByText("Nothing new starts until you resume.");
+		await page.getByRole("button", { name: "Pause the team" }).click();
+		await expect(banner).toBeVisible();
+		const kinds = farik(serve.project, ["--json", "log"])
+			.trim()
+			.split("\n")
+			.map((line) => JSON.parse(line).kind);
+		expect(kinds).toContain("team.paused");
+		await screenshots(page, "paused");
+
+		await page.getByRole("button", { name: "Resume the team" }).click();
+		await expect(banner).toBeHidden();
+
+		await page.reload();
+		await expect(page).toHaveURL(`http://127.0.0.1:${serve.port}/events`);
+		await expect(page.getByText("Connected", { exact: true })).toBeVisible();
+	} finally {
+		await serve.stop();
+	}
+});
+
+test("a used link and a lost connection are said plainly", async ({
+	page,
+	browser,
+}) => {
+	const serve = await startServe({ transcripts: [] });
+	try {
+		await page.goto(serve.url);
+		await expect(page.getByText("Connected", { exact: true })).toBeVisible();
+
+		// A new context has no cookie, so only the link could let it in, and the link is spent.
+		const second = await browser.newContext();
+		const again = await second.newPage();
+		await again.goto(serve.url);
+		await expect(
+			again.getByText(/This start link was already used/),
+		).toBeVisible();
+		await second.close();
+	} finally {
+		await serve.stop();
+	}
+	await expect(page.getByText("Farik stopped answering")).toBeVisible();
+});
