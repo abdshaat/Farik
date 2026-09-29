@@ -19,6 +19,28 @@ describe("DiffView", () => {
 		await expectNoAxeViolations(container);
 	});
 
+	it("says a file was only renamed or is binary, under its path", async () => {
+		const { container } = render(
+			<DiffView
+				diff={[
+					"diff --git a/old.txt b/new.txt",
+					"rename from old.txt",
+					"rename to new.txt",
+					"diff --git a/logo.png b/logo.png",
+					"Binary files a/logo.png and b/logo.png differ",
+				].join("\n")}
+				label="Changes"
+			/>,
+		);
+		expect(screen.getByText("new.txt").nextElementSibling?.textContent).toBe(
+			uiStrings.renamed,
+		);
+		expect(screen.getByText("logo.png").nextElementSibling?.textContent).toBe(
+			uiStrings.binary,
+		);
+		await expectNoAxeViolations(container);
+	});
+
 	it("says when there are no changes", async () => {
 		const { container } = render(<DiffView diff="" label="Changes" />);
 		expect(screen.getByText(uiStrings.noChanges)).toBeTruthy();

@@ -14,6 +14,9 @@ export function DiffView({ diff, label }: { diff: string; label: string }) {
 					// biome-ignore lint/suspicious/noArrayIndexKey: the list is static per render
 					<section key={n} className={styles.file}>
 						<h3 className={styles.path}>{file.path}</h3>
+						{file.note ? (
+							<p className={styles.empty}>{uiStrings[file.note]}</p>
+						) : null}
 						<div className={styles.block}>
 							{file.lines.map((line, i) => (
 								<div

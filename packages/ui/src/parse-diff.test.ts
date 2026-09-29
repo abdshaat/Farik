@@ -65,6 +65,100 @@ describe("parseDiff", () => {
 			{ kind: "hunk", text: "@@ -0,0 +1 @@" },
 			{ kind: "added", text: "hi" },
 		]);
+		expect(files[1]?.lines).toEqual([
+			{ kind: "hunk", text: "@@ -1 +0,0 @@" },
+			{ kind: "removed", text: "bye" },
+		]);
+	});
+
+	it("reads hunk lines that look like headers by the hunk's counts", () => {
+		const files = parseDiff(
+			[
+				"diff --git a/q.sql b/q.sql",
+				"--- a/q.sql",
+				"+++ b/q.sql",
+				"@@ -1,2 +1,2 @@",
+				"--- x",
+				"+++ y",
+				" select 1;",
+			].join("\n"),
+		);
+		expect(files).toEqual([
+			{
+				path: "q.sql",
+				lines: [
+					{ kind: "hunk", text: "@@ -1,2 +1,2 @@" },
+					{ kind: "removed", text: "-- x" },
+					{ kind: "added", text: "++ y" },
+					{ kind: "context", text: "select 1;" },
+				],
+			},
+		]);
+	});
+
+	it("counts a blank line inside a hunk as context", () => {
+		const [file] = parseDiff(
+			[
+				"--- a/f.txt",
+				"+++ b/f.txt",
+				"@@ -1,3 +1,3 @@",
+				" a",
+				"",
+				"-b",
+				"\\ No newline at end of file",
+				"+c",
+			].join("\n"),
+		);
+		expect(file?.lines.slice(1)).toEqual([
+			{ kind: "context", text: "a" },
+			{ kind: "context", text: "" },
+			{ kind: "removed", text: "b" },
+			{ kind: "added", text: "c" },
+		]);
+	});
+
+	it("reads a diff with CRLF line ends", () => {
+		const files = parseDiff(
+			"--- a/f.txt\r\n+++ b/f.txt\r\n@@ -1 +1 @@\r\n-x\r\n+y\r\n",
+		);
+		expect(files).toEqual([
+			{
+				path: "f.txt",
+				lines: [
+					{ kind: "hunk", text: "@@ -1 +1 @@" },
+					{ kind: "removed", text: "x" },
+					{ kind: "added", text: "y" },
+				],
+			},
+		]);
+	});
+
+	it("names a rename with no other change and a binary file", () => {
+		const files = parseDiff(
+			[
+				"diff --git a/old.txt b/new.txt",
+				"similarity index 100%",
+				"rename from old.txt",
+				"rename to new.txt",
+				"diff --git a/a.txt b/b.txt",
+				"similarity index 90%",
+				"rename from a.txt",
+				"rename to b.txt",
+				"--- a/a.txt",
+				"+++ b/b.txt",
+				"@@ -1 +1 @@",
+				"-x",
+				"+y",
+				"diff --git a/logo.png b/logo.png",
+				"index 1..2 100644",
+				"Binary files a/logo.png and b/logo.png differ",
+			].join("\n"),
+		);
+		expect(files.map((f) => [f.path, f.note])).toEqual([
+			["new.txt", "renamed"],
+			["b.txt", undefined],
+			["logo.png", "binary"],
+		]);
 	});
 
 	it("gives nothing for text that is not a diff", () => {

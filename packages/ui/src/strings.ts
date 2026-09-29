@@ -19,6 +19,8 @@ const roleName: Record<Role, string> = {
 export const uiStrings = {
 	close: "Close",
 	noChanges: "No changes",
+	renamed: "Renamed, no other change",
+	binary: "A binary file changed; it cannot be shown",
 	added: "added",
 	removed: "removed",
 	stepOf: (n: number, m: number) => `Step ${n} of ${m}`,
