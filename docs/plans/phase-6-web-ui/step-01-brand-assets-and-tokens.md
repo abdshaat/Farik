@@ -1,6 +1,6 @@
 # Phase 6, step 01: Brand assets and tokens
 
-Status: ready
+Status: in progress (landed and landing-reviewed 2026-09-28; waiting on the founder's sign-off of the brand sheet)
 Branch: `phase/6-web-ui`
 Spec: `docs/SPEC.md` sections 10 (WCAG 2.2 AA, clients built from the brand's tokens, offline) and 14 (brand)
 Depends on: phase 5 (merged in #16: `docs/brand/brand.md`, `docs/design/web-ui.md`, the founder's files in `docs/brand/assets/`); the planning commit of this phase (111629a)
@@ -194,7 +194,8 @@ Tests:
 ```
 cargo xtask check
 # expected: the Rust checks as before; then pnpm's Vitest summary for @farik/brand,
-#   "Test Files  4 passed (4)" and "Tests  19 passed (19)" (6 + 5 + 4 + 4; the 2 xtask tests are counted by cargo);
+#   "Test Files  4 passed (4)" and "Tests  25 passed (25)" (generate 7, contrast 6, assets 5, sheet 7: the
+#   plan's 19 and the 6 the landing review added; the 2 xtask tests are counted by cargo);
 #   last line: xtask check: ok
 pnpm --filter @farik/brand sheet
 # expected: vite writes packages/brand/dist/sheet/index.html and its assets, exit 0
