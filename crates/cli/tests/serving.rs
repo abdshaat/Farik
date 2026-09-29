@@ -1143,3 +1143,34 @@ fn connecting_the_account_takes_the_waiting_project_on() {
     );
     assert_eq!(ran.code, 130, "{out}\n{err}");
 }
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn keeps_waiting_on_the_project_after_a_failed_take_on() {
+    let repository = a_team("setup-waits-again");
+    std::fs::write(repository.path.join(".farik/prices.json"), "not JSON").expect("written");
+    let (_home, state) = setup_folders("setup-waits-again");
+    let (_claude, path) = project::a_claude_saying("setup-waits-claude", "2.1.300 (Claude Code)");
+    let mut env = setup_env(&repository.path, &state);
+    env.insert("PATH".to_string(), path);
+    let serving = serving_in(&repository.path, env, false);
+    let connect = json!({ "kind": "api_key", "secret": "sk-ant-api03-test" });
+
+    let first = call(
+        serving.port,
+        &serving.cookie,
+        "account.connect",
+        connect.clone(),
+    );
+    assert_eq!(first["result"]["taking_on"], true, "{first}");
+    let mut status = Value::Null;
+    until("serve is back in setup mode with the reason", || {
+        status = serve_status_across_a_restart(serving.port, &serving.cookie).unwrap_or_default();
+        status["take_on_error"].is_string()
+    });
+    // The project is still the one setup waits on: connecting again takes it on again.
+    let again = call(serving.port, &serving.cookie, "account.connect", connect);
+    let (ran, out, err) = serving.interrupted();
+    assert_eq!(again["result"]["taking_on"], true, "{again}");
+    assert_eq!(ran.code, 130, "{out}\n{err}");
+}

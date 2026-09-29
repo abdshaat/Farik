@@ -51,9 +51,12 @@ pub(crate) fn serve(port: Option<u16>, no_open: bool, io: &mut CliIo<'_>) -> i32
         let mut port = PortChoice::Preferred(port.unwrap_or(DEFAULT_PORT));
         let mut linked = None;
         let (mut take_on_error, mut taking_on) = (None, false);
+        // The project setup waits on the credential for, kept across a take-on that fails.
+        let mut waited_on = None;
         loop {
             mode = match mode {
                 Mode::Setup(waiting) => {
+                    waited_on.clone_from(&waiting);
                     let set_up = set_up(
                         io,
                         port,
@@ -82,7 +85,7 @@ pub(crate) fn serve(port: Option<u16>, no_open: bool, io: &mut CliIo<'_>) -> i32
                             &format!("farik: the project could not be taken on: {error}"),
                         );
                         take_on_error = Some(error);
-                        Mode::Setup(None)
+                        Mode::Setup(waited_on.take())
                     }
                     Err(error) => return refuse(io, false, &error),
                 },
