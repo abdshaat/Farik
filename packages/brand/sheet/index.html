@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Farik brand sheet</title>
+<style>
+	body { margin: 0; padding: var(--farik-space-5); background: var(--farik-color-page); color: var(--farik-color-ink); font: var(--farik-type-body-weight) var(--farik-type-body-size)/var(--farik-type-body-line-height) var(--farik-type-body-family); }
+	h1 { font-family: var(--farik-type-display-family); font-size: var(--farik-type-display-size); line-height: var(--farik-type-display-line-height); font-weight: var(--farik-type-display-weight); margin: 0 0 var(--farik-space-5); }
+	h2 { font: var(--farik-type-title-weight) var(--farik-type-title-size)/var(--farik-type-title-line-height) var(--farik-type-title-family); margin: 0 0 var(--farik-space-4); }
+	h3 { font-family: var(--farik-type-code-family); font-size: var(--farik-type-small-size); font-weight: var(--farik-type-code-weight); text-transform: uppercase; letter-spacing: 0.1em; margin: var(--farik-space-5) 0 var(--farik-space-3); }
+	code { font-family: var(--farik-type-code-family); font-size: var(--farik-type-code-size); }
+	section { margin-bottom: var(--farik-space-6); }
+	.themes { display: grid; grid-template-columns: repeat(auto-fit, minmax(20rem, 1fr)); gap: var(--farik-space-5); }
+	.themes > section { padding: var(--farik-space-5); border: 1px solid var(--farik-color-rule); border-radius: var(--farik-radius-raised); margin: 0; }
+	.swatches { display: grid; grid-template-columns: repeat(auto-fill, minmax(9rem, 1fr)); gap: var(--farik-space-3); }
+	.swatch { display: flex; flex-direction: column; gap: var(--farik-space-1); }
+	.chip { display: block; height: var(--farik-space-7); border: 1px solid var(--farik-color-control-border); border-radius: var(--farik-radius-control); }
+	.pair { display: grid; grid-template-columns: var(--farik-space-7) 1fr auto; gap: var(--farik-space-3); align-items: center; padding: var(--farik-space-1) 0; }
+	.sample { text-align: center; padding: var(--farik-space-2); border: 1px solid var(--farik-color-control-border); border-radius: var(--farik-radius-control); }
+	.lockup { display: flex; gap: var(--farik-space-5); align-items: center; }
+	.mark { height: var(--farik-space-8); }
+	.wordmark { height: var(--farik-space-7); }
+	.row { display: flex; flex-wrap: wrap; gap: var(--farik-space-5); align-items: end; }
+	figure { margin: 0; text-align: center; }
+	figcaption { font-family: var(--farik-type-code-family); font-size: var(--farik-type-small-size); }
+	.scale p { margin: 0 0 var(--farik-space-3); }
+</style>
+</head>
+<body>
+<main id="root"></main>
+<script type="module">
+	import "../src/fonts.css";
+	import "../dist/tokens.css";
+	import { renderSheet } from "./sheet.ts";
+
+	renderSheet(document.getElementById("root"));
+</script>
+</body>
+</html>

@@ -187,7 +187,7 @@ Tests:
 - `shows every icon and avatar` asserts one `img` per `ICON_SIZES` entry and per `AVATAR_KEYS` entry, each with non-empty `alt` text.
 - `has no axe violations` asserts that `axe-core` finds no violation in the rendered sheet.
 
-- [ ] `feat(brand): add the brand sheet for sign-off`
+- [x] `feat(brand): add the brand sheet for sign-off`
 
 ## Verification
 
