@@ -470,7 +470,7 @@ impl LiveDriver {
             .block_on(serve(
                 DaemonConfig {
                     port: farik_runtime::daemon::PortChoice::Any,
-                    daemon_file: repository.path.join(".farik/local/daemon.json"),
+                    daemon_file: Some(repository.path.join(".farik/local/daemon.json")),
                 },
                 Arc::clone(&state),
             ))

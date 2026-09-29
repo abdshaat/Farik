@@ -8,6 +8,9 @@ pub mod channel;
 /// The Claude Code program as a runtime: its command line, credential, and version.
 #[cfg(unix)]
 pub mod claude;
+/// What the first-run wizard finds on the computer, and the sandbox image it builds.
+#[cfg(unix)]
+pub mod computer;
 /// What a session cost, and what each budget has left.
 pub mod cost;
 /// Where the model credential is kept: the environment, the keychain, or a private file.

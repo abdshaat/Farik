@@ -174,7 +174,7 @@ Route tests use `DaemonState::setup` with a fake `SetupHost`.
 - `answers_503_and_no_project_in_setup_mode` asserts `/command` answers 503, `tasks.list` answers `-32004`, and `serve.status` answers `project_root: null`, `take_on_error: null`.
 - `never_echoes_the_secret` asserts that neither a valid `account.connect` nor a malformed one (a missing `kind`) returns a reply frame containing the secret.
 
-- [ ] `feat(runtime): answer the setup wizard's calls through a setup host`
+- [x] `feat(runtime): answer the setup wizard's calls through a setup host`
 
 ### Task 4: `farik serve` without a project, and taking one on
 

@@ -15,6 +15,7 @@ use axum::response::{IntoResponse, Response};
 use axum::{Extension, Json};
 use chrono::{DateTime, Utc};
 use farik_core::contract::TaskId;
+use farik_protocol::clock::Clock;
 use farik_protocol::command::{Command, command_from_value, reply_to_value};
 use farik_protocol::event::event_to_value;
 use farik_protocol::rpc::{QueryName, rpc_request_from_value};
@@ -24,8 +25,10 @@ use serde_json::{Value, json};
 use sha2::{Digest as _, Sha256};
 use tokio_util::sync::CancellationToken;
 
-use super::{DaemonError, DaemonState, hex, random_token, same_token};
+use super::setup::list_folders;
+use super::{DaemonError, DaemonState, SetupError, SetupHost, hex, random_token, same_token};
 use crate::claude::CredentialKind;
+use crate::computer::{build_sandbox_image, check_computer};
 use crate::locked;
 
 /// What the browser routes need, which only `farik serve` gives the daemon (`DaemonState::set_web`).
@@ -40,6 +43,11 @@ pub struct WebState {
     pub credential: Option<CredentialKind>,
     /// The daemon's own port, which every browser request's `Origin` and `Host` must name.
     pub port: u16,
+    /// The time sessions are issued and checked at, which in setup mode no project's tools give.
+    pub clock: Arc<dyn Clock + Send + Sync>,
+    /// Why taking the chosen project on failed, which `serve` sets when it goes back to setup
+    /// mode, and `serve.status` tells the page.
+    pub take_on_error: Mutex<Option<String>>,
 }
 
 /// The one live connect code: `issue` replaces it, and `redeem` spends it. It lives in memory, so
@@ -263,7 +271,7 @@ pub(super) async fn connect(
         )
             .into_response();
     }
-    match web.sessions.issue(state.deps().clock.now()) {
+    match web.sessions.issue(web.clock.now()) {
         Ok(secret) => (
             StatusCode::NO_CONTENT,
             [(
@@ -304,7 +312,7 @@ pub(super) async fn session(State(state): State<Arc<DaemonState>>, headers: Head
     {
         return StatusCode::FORBIDDEN.into_response();
     }
-    let now = state.deps().clock.now();
+    let now = web.clock.now();
     if session_cookies(&headers).any(|secret| web.sessions.verify(secret, now)) {
         StatusCode::NO_CONTENT.into_response()
     } else {
@@ -354,7 +362,7 @@ pub(super) async fn rpc(
     if !from_own_page(&headers, web.port) {
         return StatusCode::FORBIDDEN.into_response();
     }
-    let now = state.deps().clock.now();
+    let now = web.clock.now();
     // ponytail: `verify` reads the sessions file on this async worker, one small read per upgrade;
     // move it to `spawn_blocking` if upgrades ever come in bursts.
     if !session_cookies(&headers).any(|secret| web.sessions.verify(secret, now)) {
@@ -428,8 +436,11 @@ async fn push(
         after_seq: Some(after),
         ..EventQuery::default()
     };
-    let reader = Arc::clone(state);
-    let read = tokio::task::spawn_blocking(move || reader.deps().log.read(&query)).await;
+    // A daemon with no project has no log, and nothing to send.
+    let Some(deps) = state.deps().cloned() else {
+        return true;
+    };
+    let read = tokio::task::spawn_blocking(move || deps.log.read(&query)).await;
     let Ok(Ok(events)) = read else {
         *failed += 1;
         if *failed < READS_TRIED {
@@ -486,6 +497,19 @@ const INTERNAL_ERROR: i64 = -32603;
 const UNKNOWN_QUERY: i64 = -32001;
 const NOT_FOUND: i64 = -32002;
 const REFUSED_HERE: i64 = -32003;
+const NO_PROJECT: i64 = -32004;
+const REFUSED: i64 = -32005;
+
+/// The methods the first-run wizard calls, which setup mode's host answers.
+const SETUP_METHODS: [&str; 4] = [
+    "project.open",
+    "project.create",
+    "account.connect",
+    "sandbox.build",
+];
+/// The methods whose params hold a secret, whose refusal never quotes them: the schema's errors
+/// quote the whole frame.
+const SECRET_METHODS: [&str; 1] = ["account.connect"];
 
 /// The response to one text frame. A `subscribe` sets `sent` to its `from_seq`, and an
 /// `unsubscribe` clears it.
@@ -514,7 +538,9 @@ async fn answer(state: &Arc<DaemonState>, text: &str, sent: &mut Option<u64>) ->
             ),
         );
     };
-    if !["subscribe", "unsubscribe", "command", "query"].contains(&method) {
+    if !["subscribe", "unsubscribe", "command", "query"].contains(&method)
+        && !SETUP_METHODS.contains(&method)
+    {
         return failure(
             &id,
             Failure::new(UNKNOWN_METHOD, format!("there is no method {method}")),
@@ -530,7 +556,7 @@ async fn answer(state: &Arc<DaemonState>, text: &str, sent: &mut Option<u64>) ->
             )
         } else {
             Failure {
-                data: Some(json!(errors)),
+                data: (!SECRET_METHODS.contains(&method)).then(|| json!(errors)),
                 ..Failure::new(
                     INVALID_PARAMS,
                     format!("the params of {method} are not right"),
@@ -549,7 +575,7 @@ async fn answer(state: &Arc<DaemonState>, text: &str, sent: &mut Option<u64>) ->
             Ok(json!({}))
         }
         "command" => command(state, &params["command"]).await,
-        _ => {
+        "query" => {
             // The store and the files are read off the async workers.
             let (state, params) = (Arc::clone(state), params.clone());
             tokio::task::spawn_blocking(move || {
@@ -562,6 +588,7 @@ async fn answer(state: &Arc<DaemonState>, text: &str, sent: &mut Option<u64>) ->
             .await
             .unwrap_or_else(|error| Err(Failure::new(INTERNAL_ERROR, error.to_string())))
         }
+        _ => setup_call(state, method, params).await,
     };
     match result {
         Ok(result) => json!({ "jsonrpc": "2.0", "id": id, "result": result }),
@@ -598,8 +625,17 @@ async fn command(state: &DaemonState, wire: &Value) -> Result<Value, Failure> {
 /// `query { name, params }`, whose params the schema already passed. A `match` rather than a
 /// registry until there are enough queries to want one.
 fn query(state: &DaemonState, name: &str, params: &Value) -> Result<Value, Failure> {
-    let deps = state.deps();
     let internal = |error: &dyn std::fmt::Display| Failure::new(INTERNAL_ERROR, error.to_string());
+    match name {
+        "serve.status" => return serve_status(state),
+        "folders.list" | "computer.check" | "account.status" => {
+            return setup_query(host_of(state)?, name, params);
+        }
+        _ => {}
+    }
+    let Some(deps) = state.deps() else {
+        return Err(Failure::new(NO_PROJECT, super::NO_PROJECT));
+    };
     match name {
         "events.since" => {
             let query = EventQuery {
@@ -634,24 +670,114 @@ fn query(state: &DaemonState, name: &str, params: &Value) -> Result<Value, Failu
             let team = serde_json::to_value(team).map_err(|error| internal(&error))?;
             Ok(json!({ "team": team }))
         }
-        "serve.status" => {
-            let web = state
-                .web()
-                .ok_or_else(|| Failure::new(INTERNAL_ERROR, "the browser routes are off"))?;
-            let paused = crate::pause::paused(&deps.log).map_err(|error| internal(&error))?;
-            Ok(json!({
-                "project_root": web.project_root.display().to_string(),
-                "paused": paused,
-                "credential": web.credential,
-                "port": web.port,
-                "take_on_error": null,
-            }))
-        }
         _ => Err(Failure::new(
             UNKNOWN_QUERY,
             format!("there is no query {name}"),
         )),
     }
+}
+
+/// `serve.status`: the project and whether its team is paused, or in setup mode no project and the
+/// credential read afresh; and why the last take-on failed, if it did.
+fn serve_status(state: &DaemonState) -> Result<Value, Failure> {
+    let web = state
+        .web()
+        .ok_or_else(|| Failure::new(INTERNAL_ERROR, "the browser routes are off"))?;
+    let (project_root, paused, credential) = match state.deps() {
+        Some(deps) => (
+            json!(web.project_root.display().to_string()),
+            crate::pause::paused(&deps.log)
+                .map_err(|error| Failure::new(INTERNAL_ERROR, error.to_string()))?,
+            web.credential,
+        ),
+        None => (
+            Value::Null,
+            false,
+            state
+                .host()
+                .and_then(|host| host.account())
+                .map(|(kind, _)| kind),
+        ),
+    };
+    Ok(json!({
+        "project_root": project_root,
+        "paused": paused,
+        "credential": credential,
+        "port": web.port,
+        "take_on_error": *locked(&web.take_on_error),
+    }))
+}
+
+/// The setup host, or the refusal of a setup call on a daemon that has a project.
+fn host_of(state: &DaemonState) -> Result<&Arc<dyn SetupHost>, Failure> {
+    state.host().ok_or_else(|| {
+        Failure::new(
+            REFUSED_HERE,
+            "farik answers this only while it is being set up",
+        )
+    })
+}
+
+/// The wizard's queries, answered through the setup host.
+fn setup_query(host: &Arc<dyn SetupHost>, name: &str, params: &Value) -> Result<Value, Failure> {
+    match name {
+        "folders.list" => list_folders(&host.home(), params["path"].as_str().unwrap_or_default())
+            .map_err(|sentence| Failure::new(REFUSED, sentence)),
+        "computer.check" => serde_json::to_value(check_computer(&host.env()))
+            .map_err(|error| Failure::new(INTERNAL_ERROR, error.to_string())),
+        _ => Ok(match host.account() {
+            Some((kind, source)) => {
+                json!({ "provider": "anthropic", "kind": kind, "source": source })
+            }
+            None => json!({ "provider": null, "kind": null, "source": null }),
+        }),
+    }
+}
+
+/// The wizard's methods, `SETUP_METHODS`, whose params the schema already passed, answered through
+/// the setup host off the async workers. A refusal answers `-32005` with the host's sentence.
+async fn setup_call(state: &DaemonState, method: &str, params: &Value) -> Result<Value, Failure> {
+    let host = Arc::clone(host_of(state)?);
+    if method == "sandbox.build" {
+        return build_sandbox_image(&host.env())
+            .await
+            .map(|image| json!({ "image": image }))
+            .map_err(|sentence| Failure::new(REFUSED, sentence));
+    }
+    let (method, params) = (method.to_string(), params.clone());
+    tokio::task::spawn_blocking(move || {
+        let text = |name: &str| params[name].as_str().unwrap_or_default();
+        let no_sandbox = params["no_sandbox"].as_bool().unwrap_or_default();
+        let root = |root: PathBuf| json!({ "project_root": root.display().to_string() });
+        let answered = match method.as_str() {
+            "project.open" => host.open(text("path"), no_sandbox).map(root),
+            "project.create" => host
+                .create(
+                    text("parent"),
+                    text("name"),
+                    text("description"),
+                    no_sandbox,
+                )
+                .map(root),
+            _ => {
+                let kind = serde_json::from_value::<CredentialKind>(params["kind"].clone())
+                    .map_err(|_| {
+                        Failure::new(
+                            INVALID_PARAMS,
+                            "the params of account.connect are not right",
+                        )
+                    })?;
+                host.connect(kind, text("secret"))
+                    .map(|source| json!({ "stored_in": source }))
+            }
+        };
+        answered.map_err(|error| match error {
+            SetupError::Refused(sentence) => Failure::new(REFUSED, sentence),
+            SetupError::Failed(why) => Failure::new(INTERNAL_ERROR, why),
+        })
+    })
+    .await
+    .unwrap_or_else(|error| Err(Failure::new(INTERNAL_ERROR, error.to_string())))
 }
 
 /// One board row as the RPC schema's `taskProjection`: an optional field is left out, not null,
@@ -716,15 +842,19 @@ mod tests {
     use rust_embed::RustEmbed;
 
     use super::{BrowserSessions, ConnectCodes, WebState};
+    use crate::claude::CredentialKind;
+    use crate::credential::{Source, credential_of_kind};
     use crate::daemon::app::fixtures::{Fixture, Unbuilt};
     use crate::daemon::fixtures::TestDaemon;
     use crate::daemon::{
         DaemonConfig, DaemonHandle, DaemonState, PortChoice, router, router_serving, serve,
     };
+    use crate::daemon::{SetupError, SetupHost};
     use crate::orchestrator::fixtures::Harness;
     use crate::orchestrator::{CommandReport, command_handler};
     use crate::tools::ToolDeps;
     use crate::tools::fixtures::at;
+    use farik_protocol::clock::FixedClock;
 
     /// The port the daemon under test says it is on; nothing binds it, since the requests go
     /// straight to the router.
@@ -831,6 +961,8 @@ mod tests {
             project_root: daemon.project.repo.path.clone(),
             credential: None,
             port: PORT,
+            clock: Arc::new(FixedClock::new(now())),
+            take_on_error: std::sync::Mutex::default(),
         }));
         (daemon, code)
     }
@@ -884,7 +1016,7 @@ mod tests {
             assert!(parts.contains(&part), "{cookie}");
         }
         assert!(!parts.contains(&"Secure"), "{cookie}");
-        let now = daemon.state.deps().clock.now();
+        let now = daemon.state.deps().expect("a project").clock.now();
         let web = daemon.state.web().expect("the browser routes are on");
         assert!(web.sessions.verify(secret, now), "{cookie}");
     }
@@ -1094,7 +1226,7 @@ mod tests {
     fn a_session(daemon: &TestDaemon) -> String {
         let web = daemon.state.web().expect("the browser routes are on");
         web.sessions
-            .issue(daemon.state.deps().clock.now())
+            .issue(daemon.state.deps().expect("a project").clock.now())
             .expect("a session")
     }
 
@@ -1141,7 +1273,7 @@ mod tests {
         let secret = a_session(&daemon);
         let other = a_session(&daemon);
         let carried = format!("farik_session=junk; farik_session={secret}");
-        let now = daemon.state.deps().clock.now();
+        let now = daemon.state.deps().expect("a project").clock.now();
         let web = daemon.state.web().expect("the browser routes are on");
 
         // Not from the daemon's own page: refused, and the session lives on.
@@ -1223,20 +1355,24 @@ mod tests {
         let handle = serve(
             DaemonConfig {
                 port: PortChoice::Any,
-                daemon_file: root.join(".farik/local/daemon.json"),
+                daemon_file: Some(root.join(".farik/local/daemon.json")),
             },
             Arc::clone(state),
         )
         .await
         .expect("the daemon is up");
         let sessions = BrowserSessions::open(None).expect("the sessions open");
-        let secret = sessions.issue(state.deps().clock.now()).expect("a session");
+        let secret = sessions
+            .issue(state.deps().expect("a project").clock.now())
+            .expect("a session");
         assert!(state.set_web(WebState {
             codes: ConnectCodes::default(),
             sessions,
             project_root: root.to_path_buf(),
             credential: None,
             port: handle.info.port,
+            clock: Arc::clone(&state.deps().expect("a project").clock),
+            take_on_error: std::sync::Mutex::default(),
         }));
         (handle, secret)
     }
@@ -1391,7 +1527,7 @@ mod tests {
             .web()
             .expect("the browser routes are on")
             .sessions
-            .issue(daemon.state.deps().clock.now() - Duration::days(31))
+            .issue(daemon.state.deps().expect("a project").clock.now() - Duration::days(31))
             .expect("a session");
         let unknown = format!("farik_session={}", "0".repeat(64));
         let expired = format!("farik_session={expired}");
@@ -1807,5 +1943,350 @@ mod tests {
         assert_eq!(*handled.lock().expect("the list"), [Command::TeamPause]);
         drop(socket);
         handle.shutdown().await.expect("the daemon stops");
+    }
+
+    // Setup mode: a daemon with no project, answering the wizard through a fake host.
+
+    /// A setup host that records what it was asked and hands out paths under `home`.
+    struct FakeHost {
+        home: PathBuf,
+        path: String,
+        calls: std::sync::Mutex<Vec<Value>>,
+        account: std::sync::Mutex<Option<(CredentialKind, Source)>>,
+    }
+
+    impl SetupHost for FakeHost {
+        fn open(&self, path: &str, no_sandbox: bool) -> Result<PathBuf, SetupError> {
+            self.calls
+                .lock()
+                .expect("the calls")
+                .push(json!({ "open": path, "no_sandbox": no_sandbox }));
+            if path == "busy" {
+                return Err(SetupError::Refused(
+                    "another farik is already running this project".to_string(),
+                ));
+            }
+            Ok(self.home.join(path))
+        }
+
+        fn create(
+            &self,
+            parent: &str,
+            name: &str,
+            description: &str,
+            no_sandbox: bool,
+        ) -> Result<PathBuf, SetupError> {
+            self.calls.lock().expect("the calls").push(json!({
+                "create": [parent, name, description], "no_sandbox": no_sandbox
+            }));
+            Ok(self.home.join(parent).join(name))
+        }
+
+        fn connect(&self, kind: CredentialKind, secret: &str) -> Result<Source, SetupError> {
+            self.calls
+                .lock()
+                .expect("the calls")
+                .push(json!({ "connect": kind }));
+            credential_of_kind(kind, secret)
+                .map(|_| Source::File)
+                .map_err(SetupError::Refused)
+        }
+
+        fn home(&self) -> PathBuf {
+            self.home.clone()
+        }
+
+        fn env(&self) -> std::collections::BTreeMap<String, String> {
+            std::collections::BTreeMap::from([("PATH".to_string(), self.path.clone())])
+        }
+
+        fn account(&self) -> Option<(CredentialKind, Source)> {
+            *self.account.lock().expect("the account")
+        }
+    }
+
+    /// A daemon in setup mode over `home`, whose programs are looked for on `path`.
+    fn in_setup(home: &std::path::Path, path: &str) -> (Arc<DaemonState>, Arc<FakeHost>) {
+        let host = Arc::new(FakeHost {
+            home: home.to_path_buf(),
+            path: path.to_string(),
+            calls: std::sync::Mutex::default(),
+            account: std::sync::Mutex::default(),
+        });
+        let web = WebState {
+            codes: ConnectCodes::default(),
+            sessions: BrowserSessions::open(None).expect("the sessions open"),
+            project_root: PathBuf::new(),
+            credential: None,
+            port: PORT,
+            clock: Arc::new(FixedClock::new(now())),
+            take_on_error: std::sync::Mutex::default(),
+        };
+        let state = Arc::new(DaemonState::setup(
+            Arc::clone(&host) as Arc<dyn SetupHost>,
+            web,
+        ));
+        (state, host)
+    }
+
+    /// The reply frame to `method` with `params`, as text, and as JSON.
+    async fn asked(state: &Arc<DaemonState>, method: &str, params: &Value) -> (String, Value) {
+        let frame = json!({ "jsonrpc": "2.0", "id": 1, "method": method, "params": params });
+        let reply = super::answer(state, &frame.to_string(), &mut None).await;
+        (reply.to_string(), reply)
+    }
+
+    async fn setup_query(state: &Arc<DaemonState>, name: &str, params: &Value) -> Value {
+        asked(state, "query", &json!({ "name": name, "params": params }))
+            .await
+            .1
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn lists_only_folders_inside_home() {
+        let home = scratch("setup-home");
+        let outside = scratch("setup-outside");
+        for folder in ["a/.git", "b", ".hidden"] {
+            std::fs::create_dir_all(home.join(folder)).expect("the folder is made");
+        }
+        std::fs::write(home.join("f.txt"), "a file").expect("written");
+        std::os::unix::fs::symlink(&outside, home.join("out")).expect("the link is made");
+        let (state, _) = in_setup(&home, "");
+
+        let listed = setup_query(&state, "folders.list", &json!({})).await;
+        conforms(&listed["result"], "foldersListResult");
+        assert_eq!(
+            listed["result"],
+            json!({
+                "path": "", "parent": null,
+                "entries": [{ "name": "a", "git": true }, { "name": "b", "git": false }]
+            })
+        );
+        let inside = setup_query(&state, "folders.list", &json!({ "path": "a" })).await;
+        assert_eq!(
+            inside["result"],
+            json!({ "path": "a", "parent": "", "entries": [] })
+        );
+        for path in ["../", "out"] {
+            let refused = setup_query(&state, "folders.list", &json!({ "path": path })).await;
+            assert_eq!(
+                refused["error"],
+                json!({ "code": -32005, "message": "that folder is outside your home folder" }),
+                "{path}"
+            );
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn passes_open_and_create_to_the_host_and_refuses_in_words() {
+        let home = scratch("setup-open");
+        let (state, host) = in_setup(&home, "");
+        let description = "A bakery's web shop, with orders taken online.";
+
+        let (_, opened) = asked(
+            &state,
+            "project.open",
+            &json!({ "path": "code/a", "no_sandbox": true }),
+        )
+        .await;
+        conforms(&opened["result"], "projectOpenResult");
+        assert_eq!(
+            opened["result"]["project_root"],
+            home.join("code/a").display().to_string()
+        );
+        let (_, created) = asked(
+            &state,
+            "project.create",
+            &json!({
+                "parent": "code", "name": "bakery",
+                "description": description, "no_sandbox": false
+            }),
+        )
+        .await;
+        conforms(&created["result"], "projectCreateResult");
+        assert_eq!(
+            created["result"]["project_root"],
+            home.join("code/bakery").display().to_string()
+        );
+        let (_, busy) = asked(
+            &state,
+            "project.open",
+            &json!({ "path": "busy", "no_sandbox": false }),
+        )
+        .await;
+        assert_eq!(
+            busy["error"],
+            json!({ "code": -32005, "message": "another farik is already running this project" })
+        );
+        conforms(&busy, "rpcFailure");
+        assert_eq!(
+            *host.calls.lock().expect("the calls"),
+            [
+                json!({ "open": "code/a", "no_sandbox": true }),
+                json!({ "create": ["code", "bakery", description], "no_sandbox": false }),
+                json!({ "open": "busy", "no_sandbox": false }),
+            ]
+        );
+    }
+
+    /// Writes an executable `sh` script called `name` into `bin`, through a rename, so that no
+    /// other thread's fork holds it open for writing as it runs.
+    fn script(bin: &std::path::Path, name: &str, body: &str) {
+        let staged = bin.join(format!(".{name}.new"));
+        std::fs::write(&staged, format!("#!/bin/sh\n{body}\n")).expect("written");
+        std::fs::set_permissions(&staged, std::fs::Permissions::from_mode(0o755))
+            .expect("the mode is set");
+        std::fs::rename(&staged, bin.join(name)).expect("renamed");
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn answers_the_computer_check() {
+        let bin = scratch("setup-computer");
+        script(&bin, "claude", "echo '2.1.300 (Claude Code)'");
+        script(&bin, "git", "echo 'git version 2.43.0'");
+        let recorded = bin.join("recorded");
+        script(
+            &bin,
+            "docker",
+            &format!(
+                "case \"$1\" in\n  version) exit 0 ;;\n  image) exit 1 ;;\n  build) echo \"$@\" > '{0}/args'; cat > '{0}/stdin' ;;\nesac",
+                recorded.display()
+            ),
+        );
+        std::fs::create_dir_all(&recorded).expect("the folder is made");
+        let (state, _) = in_setup(&bin, &format!("{}:/usr/bin:/bin", bin.display()));
+
+        let checked = setup_query(&state, "computer.check", &json!({})).await;
+        conforms(&checked["result"], "computerCheckResult");
+        assert_eq!(
+            checked["result"]["claude"],
+            json!({ "state": "ready", "version": "2.1.300" })
+        );
+        assert_eq!(checked["result"]["git"]["state"], "ready", "{checked}");
+        assert_eq!(checked["result"]["docker"]["state"], "ready", "{checked}");
+        assert_eq!(
+            checked["result"]["sandbox_image"]["state"], "missing",
+            "{checked}"
+        );
+
+        script(&bin, "claude", "echo '2.1.200 (Claude Code)'");
+        let old = setup_query(&state, "computer.check", &json!({})).await;
+        assert_eq!(
+            old["result"]["claude"],
+            json!({ "state": "too_old", "version": "2.1.200" })
+        );
+
+        let (_, built) = asked(&state, "sandbox.build", &json!({})).await;
+        assert_eq!(
+            built["result"],
+            json!({ "image": crate::SANDBOX_IMAGE }),
+            "{built}"
+        );
+        assert_eq!(
+            std::fs::read_to_string(recorded.join("args")).expect("docker was run"),
+            format!("build -t {} -\n", crate::SANDBOX_IMAGE)
+        );
+        assert_eq!(
+            std::fs::read_to_string(recorded.join("stdin")).expect("docker was fed"),
+            include_str!("../../sandbox/Dockerfile")
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn answers_503_and_no_project_in_setup_mode() {
+        let home = scratch("setup-503");
+        let (state, host) = in_setup(&home, "");
+        for path in [
+            "/command",
+            "/hook/pre-tool-use",
+            "/hook/post-tool-use",
+            "/mcp",
+        ] {
+            let request = Request::post(path)
+                .header(header::AUTHORIZATION, format!("Bearer {TOKEN}"))
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    json!({ "command": "run_stop", "body": {} }).to_string(),
+                ))
+                .expect("a request is built");
+            let answer = send(&state, request).await;
+            assert_eq!(answer.status(), StatusCode::SERVICE_UNAVAILABLE, "{path}");
+            assert_eq!(
+                body_text(answer).await,
+                "farik has no project yet",
+                "{path}"
+            );
+        }
+
+        let tasks = setup_query(&state, "tasks.list", &json!({})).await;
+        assert_eq!(tasks["error"]["code"], -32004, "{tasks}");
+        conforms(&tasks, "rpcFailure");
+
+        let status = setup_query(&state, "serve.status", &json!({})).await;
+        conforms(&status["result"], "serveStatusResult");
+        assert_eq!(
+            status["result"],
+            json!({
+                "project_root": null, "paused": false, "credential": null,
+                "port": PORT, "take_on_error": null,
+            })
+        );
+        let account = setup_query(&state, "account.status", &json!({})).await;
+        assert_eq!(
+            account["result"],
+            json!({ "provider": null, "kind": null, "source": null })
+        );
+
+        // The credential is read afresh, and a failed take-on is told.
+        *host.account.lock().expect("the account") =
+            Some((CredentialKind::SubscriptionToken, Source::Keychain));
+        *state
+            .web()
+            .expect("the browser routes are on")
+            .take_on_error
+            .lock()
+            .expect("the error") = Some("the prices file cannot be read".to_string());
+        let status = setup_query(&state, "serve.status", &json!({})).await;
+        assert_eq!(
+            status["result"]["credential"], "subscription_token",
+            "{status}"
+        );
+        assert_eq!(
+            status["result"]["take_on_error"], "the prices file cannot be read",
+            "{status}"
+        );
+        let account = setup_query(&state, "account.status", &json!({})).await;
+        conforms(&account["result"], "accountStatusResult");
+        assert_eq!(
+            account["result"],
+            json!({ "provider": "anthropic", "kind": "subscription_token", "source": "keychain" })
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn never_echoes_the_secret() {
+        let home = scratch("setup-secret");
+        let (state, _) = in_setup(&home, "");
+        let secret = "sk-ant-oat01-never-to-be-echoed";
+
+        let (text, stored) = asked(
+            &state,
+            "account.connect",
+            &json!({ "kind": "subscription_token", "secret": secret }),
+        )
+        .await;
+        assert_eq!(stored["result"], json!({ "stored_in": "file" }), "{text}");
+        let (text, malformed) =
+            asked(&state, "account.connect", &json!({ "secret": secret })).await;
+        assert_eq!(malformed["error"]["code"], -32602, "{text}");
+        assert!(!text.contains(secret), "{text}");
+        let (text, refused) = asked(
+            &state,
+            "account.connect",
+            &json!({ "kind": "api_key", "secret": secret }),
+        )
+        .await;
+        assert_eq!(refused["error"]["code"], -32005, "{text}");
+        assert!(!text.contains(secret), "{text}");
     }
 }

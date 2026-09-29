@@ -142,7 +142,7 @@ impl Served {
             .block_on(serve(
                 DaemonConfig {
                     port: farik_runtime::daemon::PortChoice::Any,
-                    daemon_file: daemon_file.clone(),
+                    daemon_file: Some(daemon_file.clone()),
                 },
                 state,
             ))

@@ -411,7 +411,7 @@ pub(crate) async fn start_holding(
     let handle = serve(
         DaemonConfig {
             port: options.port,
-            daemon_file: project.root.join(DAEMON_FILE),
+            daemon_file: Some(project.root.join(DAEMON_FILE)),
         },
         Arc::clone(&daemon),
     )
@@ -495,6 +495,8 @@ fn web(
         project_root: project.root.clone(),
         credential,
         port: 0,
+        clock: Arc::clone(&io.clock),
+        take_on_error: std::sync::Mutex::default(),
     };
     Ok((web, code))
 }

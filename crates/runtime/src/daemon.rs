@@ -44,6 +44,7 @@ mod app;
 pub(crate) mod fixtures;
 mod hooks;
 mod mcp;
+mod setup;
 pub mod web;
 
 #[cfg(test)]
@@ -52,6 +53,10 @@ pub(crate) use mcp::listed_names;
 pub use hooks::{
     HookDecision, HookRequest, builtin_tool_tier, decide_pre_tool_use, record_post_tool_use,
 };
+pub use setup::{SetupError, SetupHost};
+
+/// What a daemon with no project answers what needs one.
+pub(crate) const NO_PROJECT: &str = "farik has no project yet";
 
 /// Why the daemon could not do what it was asked.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -122,9 +127,11 @@ pub type CommandHandler = Arc<
 >;
 
 /// What the daemon holds: the project's tools, the sessions it answers for, the notice a
-/// session's loop waits on for a stop, and who takes the human's commands.
+/// session's loop waits on for a stop, and who takes the human's commands. In setup mode it has no
+/// project's tools, and a host that answers the wizard in their place.
 pub struct DaemonState {
-    deps: Arc<ToolDeps>,
+    deps: Option<Arc<ToolDeps>>,
+    host: Option<Arc<dyn SetupHost>>,
     sessions: Mutex<BTreeMap<String, Session>>,
     stops: tokio::sync::Notify,
     commands: OnceLock<CommandHandler>,
@@ -136,12 +143,32 @@ impl DaemonState {
     #[must_use]
     pub fn new(deps: Arc<ToolDeps>) -> DaemonState {
         DaemonState {
-            deps,
+            deps: Some(deps),
+            host: None,
             sessions: Mutex::new(BTreeMap::new()),
             stops: tokio::sync::Notify::new(),
             commands: OnceLock::new(),
             web: OnceLock::new(),
         }
+    }
+
+    /// A daemon in setup mode: no project, the browser routes on with `web`, and the wizard's
+    /// calls answered through `host`.
+    #[must_use]
+    pub fn setup(host: Arc<dyn SetupHost>, web: web::WebState) -> DaemonState {
+        DaemonState {
+            deps: None,
+            host: Some(host),
+            sessions: Mutex::new(BTreeMap::new()),
+            stops: tokio::sync::Notify::new(),
+            commands: OnceLock::new(),
+            web: OnceLock::from(web),
+        }
+    }
+
+    /// The host answering the wizard, in setup mode.
+    pub(crate) fn host(&self) -> Option<&Arc<dyn SetupHost>> {
+        self.host.as_ref()
     }
 
     /// Hands the human's commands to `handler` from now on. It is set once the orchestrator
@@ -245,6 +272,7 @@ impl DaemonState {
     /// daemon does not answer for. The MCP server and a replayed session both take this path.
     #[must_use]
     pub fn tool_context(&self, session_id: &str) -> Option<ToolContext> {
+        let deps = self.deps.as_ref()?;
         self.sessions().get(session_id).map(|session| ToolContext {
             agent_id: session.registration.agent_id.clone(),
             task_id: session.registration.task_id.clone(),
@@ -253,7 +281,7 @@ impl DaemonState {
             in_reply_to: session.registration.in_reply_to,
             thread: session.registration.thread,
             executor: session.registration.executor.clone(),
-            deps: Arc::clone(&self.deps),
+            deps: Arc::clone(deps),
         })
     }
 
@@ -265,8 +293,9 @@ impl DaemonState {
             .map(|session| session.registration.farik_tools.clone())
     }
 
-    pub(crate) fn deps(&self) -> &Arc<ToolDeps> {
-        &self.deps
+    /// The project's tools, or `None` in setup mode.
+    pub(crate) fn deps(&self) -> Option<&Arc<ToolDeps>> {
+        self.deps.as_ref()
     }
 
     /// The sessions, locked. A panic while they were held leaves them as they were, which is
@@ -286,6 +315,8 @@ pub enum PortChoice {
     Any,
     /// This one, else the next nine in order, else `Any`.
     Preferred(u16),
+    /// This one, or none.
+    Exact(u16),
 }
 
 /// The ports to try, in order, for `choice`; `0` is the operating system's pick.
@@ -294,6 +325,7 @@ pub fn candidates(choice: PortChoice) -> Vec<u16> {
     match choice {
         PortChoice::Any => vec![0],
         PortChoice::Preferred(port) => (port..=port.saturating_add(9)).chain([0]).collect(),
+        PortChoice::Exact(port) => vec![port],
     }
 }
 
@@ -301,8 +333,9 @@ pub fn candidates(choice: PortChoice) -> Vec<u16> {
 pub struct DaemonConfig {
     /// The port to bind on `127.0.0.1`.
     pub port: PortChoice,
-    /// Where `daemon.json` is written: `.farik/local/daemon.json`.
-    pub daemon_file: PathBuf,
+    /// Where `daemon.json` is written: `.farik/local/daemon.json`; `None` writes none, as the
+    /// setup daemon, which no hook reaches, does not.
+    pub daemon_file: Option<PathBuf>,
 }
 
 /// What `daemon.json` holds: how a hook reaches the daemon. Its `Debug` prints the token as
@@ -332,7 +365,7 @@ impl fmt::Debug for DaemonInfo {
 pub struct DaemonHandle {
     /// How it is reached.
     pub info: DaemonInfo,
-    daemon_file: PathBuf,
+    daemon_file: Option<PathBuf>,
     cancel: CancellationToken,
     stop: oneshot::Sender<()>,
     server: JoinHandle<std::io::Result<()>>,
@@ -353,10 +386,16 @@ impl DaemonHandle {
         let served = self.server.await.map_err(|error| DaemonError::Io {
             detail: format!("the server's task failed: {error}"),
         })?;
-        let removed = match std::fs::remove_file(&self.daemon_file) {
-            Err(error) if error.kind() != std::io::ErrorKind::NotFound => Err(DaemonError::Io {
-                detail: format!("{} cannot be removed: {error}", self.daemon_file.display()),
-            }),
+        let removed = match self
+            .daemon_file
+            .as_deref()
+            .map(|file| (file, std::fs::remove_file(file)))
+        {
+            Some((file, Err(error))) if error.kind() != std::io::ErrorKind::NotFound => {
+                Err(DaemonError::Io {
+                    detail: format!("{} cannot be removed: {error}", file.display()),
+                })
+            }
             _ => Ok(()),
         };
         served.map_err(|error| DaemonError::Io {
@@ -407,7 +446,11 @@ pub async fn serve(
         stop,
         server,
     };
-    if let Err(error) = write_daemon_file(&handle.daemon_file, &handle.info) {
+    let written = handle
+        .daemon_file
+        .as_deref()
+        .map_or(Ok(()), |file| write_daemon_file(file, &handle.info));
+    if let Err(error) = written {
         let _ = handle.shutdown().await;
         return Err(error);
     }
@@ -514,10 +557,24 @@ pub(crate) fn router_serving<E: rust_embed::RustEmbed + 'static>(
         .route("/hook/pre-tool-use", post(pre_tool_use))
         .route("/hook/post-tool-use", post(post_tool_use))
         .route("/command", post(command))
-        .with_state(state)
+        .with_state(Arc::clone(&state))
         .merge(mcp)
+        .layer(middleware::from_fn_with_state(state, require_project))
         .layer(middleware::from_fn_with_state(expected, require_token))
         .merge(browser)
+}
+
+/// Answers 503 for a route that needs the project, on a daemon in setup mode.
+async fn require_project(
+    State(state): State<Arc<DaemonState>>,
+    request: Request,
+    next: Next,
+) -> Response {
+    if state.deps().is_some() {
+        next.run(request).await
+    } else {
+        (StatusCode::SERVICE_UNAVAILABLE, NO_PROJECT).into_response()
+    }
 }
 
 /// Refuses a request without `Authorization: Bearer <token>`.
@@ -705,6 +762,7 @@ mod tests {
             ]
         );
         assert_eq!(candidates(PortChoice::Any), [0]);
+        assert_eq!(candidates(PortChoice::Exact(7420)), [7420]);
         assert_eq!(
             candidates(PortChoice::Preferred(65530)),
             [65530, 65531, 65532, 65533, 65534, 65535, 0]
@@ -720,7 +778,7 @@ mod tests {
         let handle = serve(
             DaemonConfig {
                 port: PortChoice::Preferred(held),
-                daemon_file: daemon.project.repo.path.join(".farik/local/daemon.json"),
+                daemon_file: Some(daemon.project.repo.path.join(".farik/local/daemon.json")),
             },
             daemon.state.clone(),
         )
@@ -738,7 +796,7 @@ mod tests {
         let handle = serve(
             DaemonConfig {
                 port: PortChoice::Any,
-                daemon_file: daemon_file.clone(),
+                daemon_file: Some(daemon_file.clone()),
             },
             daemon.state.clone(),
         )
@@ -777,7 +835,7 @@ mod tests {
         let handle = serve(
             DaemonConfig {
                 port: PortChoice::Any,
-                daemon_file: daemon_file.clone(),
+                daemon_file: Some(daemon_file.clone()),
             },
             daemon.state.clone(),
         )
@@ -804,7 +862,7 @@ mod tests {
         let handle = serve(
             DaemonConfig {
                 port: PortChoice::Any,
-                daemon_file: daemon.project.repo.path.join(".farik/local/daemon.json"),
+                daemon_file: Some(daemon.project.repo.path.join(".farik/local/daemon.json")),
             },
             daemon.state.clone(),
         )
@@ -1054,7 +1112,7 @@ mod tests {
         let handle = serve(
             DaemonConfig {
                 port: PortChoice::Any,
-                daemon_file: daemon.project.repo.path.join(".farik/local/daemon.json"),
+                daemon_file: Some(daemon.project.repo.path.join(".farik/local/daemon.json")),
             },
             daemon.state.clone(),
         )

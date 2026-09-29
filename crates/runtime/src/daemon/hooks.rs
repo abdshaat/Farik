@@ -109,7 +109,9 @@ pub fn builtin_tool_tier(tool: &str) -> Option<PermissionTier> {
 /// Code runs read tools in parallel.
 #[must_use]
 pub fn decide_pre_tool_use(request: &HookRequest, state: &DaemonState) -> HookDecision {
-    let deps = state.deps();
+    let Some(deps) = state.deps() else {
+        return HookDecision::deny(format!("no_project: {}", super::NO_PROJECT));
+    };
     let mut sessions = state.sessions();
     let Some(session) = sessions.get_mut(&request.session_id) else {
         let reason = format!(
@@ -159,7 +161,11 @@ impl From<String> for Denial {
 ///
 /// `Io` when the log does not take the event.
 pub fn record_post_tool_use(request: &HookRequest, state: &DaemonState) -> Result<(), DaemonError> {
-    let deps = state.deps();
+    let Some(deps) = state.deps() else {
+        return Err(DaemonError::Io {
+            detail: super::NO_PROJECT.to_string(),
+        });
+    };
     let ids = state.sessions().get(&request.session_id).map_or_else(
         || EventIds {
             session_id: Some(request.session_id.clone()),
