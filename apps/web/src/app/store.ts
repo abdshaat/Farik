@@ -4,6 +4,14 @@ import { useConnection } from "./connection.tsx";
 
 const REFETCH_MS = 250;
 
+/** The `serve.status` query's answer, in camelCase. */
+export type ServeStatus = {
+	projectRoot: string;
+	paused: boolean;
+	credential: string;
+	port: number;
+};
+
 /** The last 500 events, oldest first, from the provider's one subscription. */
 export function useEvents(): Event[] {
 	return useConnection().events;

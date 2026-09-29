@@ -1,0 +1,97 @@
+.title {
+	margin: 0;
+	font:
+		var(--farik-type-title-weight) var(--farik-type-title-size) /
+		var(--farik-type-title-line-height) var(--farik-type-title-family);
+}
+
+.page {
+	display: grid;
+	gap: var(--farik-space-6);
+	max-width: 720px;
+}
+
+.section {
+	display: grid;
+	gap: var(--farik-space-2);
+}
+
+.section h2 {
+	margin: 0;
+	font:
+		var(--farik-type-heading-weight) var(--farik-type-heading-size) /
+		var(--farik-type-heading-line-height) var(--farik-type-heading-family);
+}
+
+.section p {
+	margin: 0;
+	max-width: 65ch;
+}
+
+.muted {
+	color: var(--farik-color-ink-muted);
+}
+
+.facts {
+	display: grid;
+	grid-template-columns: max-content 1fr;
+	gap: var(--farik-space-1) var(--farik-space-4);
+	margin: 0;
+}
+
+.facts dd {
+	margin: 0;
+	overflow-wrap: anywhere;
+	font-family: var(--farik-type-code-family);
+}
+
+/* The connect page is dark in both themes, like the rail. */
+.connect {
+	min-height: 100vh;
+	box-sizing: border-box;
+	display: grid;
+	align-content: start;
+	gap: var(--farik-space-4);
+	padding: var(--farik-space-7) var(--farik-space-4);
+	background: var(--farik-color-band);
+	color: var(--farik-color-band-ink);
+}
+
+.connect > * {
+	width: 100%;
+	max-width: 40rem;
+	margin: 0 auto;
+}
+
+.connect .muted {
+	color: inherit;
+	opacity: 0.8;
+}
+
+.steps {
+	display: grid;
+	gap: var(--farik-space-3);
+	padding-left: var(--farik-space-5);
+}
+
+.command {
+	display: flex;
+	flex-wrap: wrap;
+	gap: var(--farik-space-3);
+	align-items: center;
+	margin-top: var(--farik-space-2);
+}
+
+.command code {
+	padding: 10px 14px;
+	border: 1px solid
+		color-mix(in srgb, var(--farik-color-band-ink) 30%, var(--farik-color-band));
+	border-radius: var(--farik-radius-control);
+	font:
+		var(--farik-type-code-weight) var(--farik-type-code-size) /
+		var(--farik-type-code-line-height) var(--farik-type-code-family);
+}
+
+.retry {
+	font-family: var(--farik-type-code-family);
+}

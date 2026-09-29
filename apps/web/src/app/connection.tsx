@@ -21,6 +21,8 @@ type Connection = {
 	linkUsed: boolean;
 	/** The last events received, oldest first. */
 	events: Event[];
+	/** Revokes this browser's session and closes the socket; the page then asks for a start link. */
+	disconnect: () => Promise<void>;
 };
 
 const RETRY_MS = 5000;
@@ -32,6 +34,7 @@ const Context = createContext<Connection>({
 	client: null,
 	linkUsed: false,
 	events: [],
+	disconnect: async () => {},
 });
 
 /** One per page, around the router: it owns the one socket and the one event subscription. */
@@ -43,6 +46,7 @@ export function ConnectionProvider(props: {
 	const [client, setClient] = useState<DaemonClient | null>(null);
 	const [linkUsed, setLinkUsed] = useState(false);
 	const [events, setEvents] = useState<Event[]>([]);
+	const disconnect = useRef(async () => {});
 	const socketFactory = useRef(
 		props.socketFactory ?? ((url: string) => new WebSocket(url)),
 	);
@@ -114,6 +118,19 @@ export function ConnectionProvider(props: {
 			}
 			await check();
 		}
+		disconnect.current = async () => {
+			const answer = await fetch("/disconnect", {
+				method: "POST",
+				credentials: "same-origin",
+			});
+			if (stopped || answer.status !== 204) return;
+			// Unset first, so this close is not taken for a lost connection.
+			const c = current;
+			current = null;
+			c?.close();
+			setClient(null);
+			setStatus("no_session");
+		};
 		start();
 		return () => {
 			stopped = true;
@@ -123,7 +140,15 @@ export function ConnectionProvider(props: {
 	}, []);
 
 	return (
-		<Context value={{ status, client, linkUsed, events }}>
+		<Context
+			value={{
+				status,
+				client,
+				linkUsed,
+				events,
+				disconnect: () => disconnect.current(),
+			}}
+		>
 			{props.children}
 		</Context>
 	);

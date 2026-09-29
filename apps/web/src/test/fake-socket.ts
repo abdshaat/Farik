@@ -33,6 +33,12 @@ export class FakeSocket implements SocketLike {
 			}),
 		});
 	}
+	/** Answers a request the client sent, as the daemon would. */
+	reply(frame: Frame, result: unknown) {
+		this.emit("message", {
+			data: JSON.stringify({ jsonrpc: "2.0", id: frame.id, result }),
+		});
+	}
 	calls(method: string): Frame[] {
 		return this.sent.filter((f) => f.method === method);
 	}

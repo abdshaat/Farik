@@ -205,7 +205,7 @@ Tests (Vitest, jsdom; each screen also passes `expectNoAxeViolations`):
 - `lists_the_newest_events_first` asserts that the Events table's first row is the highest seq.
 - `says_there_is_no_page_here` asserts that an unknown route shows `en.noPage` and a link to `/`.
 
-- [ ] `feat(web): add the shell with pause, settings, connect and events`
+- [x] `feat(web): add the shell with pause, settings, connect and events`
 
 ### Task 5: The Playwright journey and its wiring
 

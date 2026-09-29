@@ -1,36 +1,30 @@
-import { Link, Navigate, Route, Routes } from "react-router";
-import { t } from "../strings/t.ts";
+import { Navigate, Route, Routes } from "react-router";
+import { Connect } from "../pages/Connect.tsx";
+import { Events } from "../pages/Events.tsx";
+import { NotFound } from "../pages/NotFound.tsx";
+import { Settings } from "../pages/Settings.tsx";
+import { Shell } from "../shell/Shell.tsx";
 import { useConnection } from "./connection.tsx";
-
-// Bare pages until the shell step replaces them with the real ones.
-function ConnectPage() {
-	const { status, linkUsed } = useConnection();
-	return (
-		<main>
-			{linkUsed && <p>{t("linkUsed")}</p>}
-			{status === "no_session" && <h1>{t("noSessionTitle")}</h1>}
-			{status === "lost" && <h1>{t("lostTitle")}</h1>}
-		</main>
-	);
-}
-
-function NoPage() {
-	return (
-		<main>
-			<h1>{t("noPage")}</h1>
-			<Link to="/">{t("noPageHome")}</Link>
-		</main>
-	);
-}
+import { useTheme } from "./theme.ts";
 
 export function App() {
+	const { status } = useConnection();
+	// The one theme state: Settings changes it, and it applies on every page.
+	const [theme, setTheme] = useTheme();
+	// Without a session, or while Farik is not answering, every path shows why.
+	if (status === "no_session" || status === "lost") return <Connect />;
 	return (
 		<Routes>
-			<Route path="/" element={<Navigate to="/events" replace />} />
-			<Route path="/connect" element={<ConnectPage />} />
-			<Route path="/events" element={<h1>{t("events")}</h1>} />
-			<Route path="/settings" element={<h1>{t("settings")}</h1>} />
-			<Route path="*" element={<NoPage />} />
+			<Route path="/connect" element={<Connect />} />
+			<Route element={<Shell />}>
+				<Route path="/" element={<Navigate to="/events" replace />} />
+				<Route path="/events" element={<Events />} />
+				<Route
+					path="/settings"
+					element={<Settings theme={theme} onTheme={setTheme} />}
+				/>
+				<Route path="*" element={<NotFound />} />
+			</Route>
 		</Routes>
 	);
 }

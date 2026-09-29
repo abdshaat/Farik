@@ -1,5 +1,6 @@
 import "@farik/brand/tokens.css";
 import "@farik/brand/fonts.css";
+import "./app/base.css";
 import { createRoot } from "react-dom/client";
 import { BrowserRouter } from "react-router";
 import { App } from "./app/App.tsx";
