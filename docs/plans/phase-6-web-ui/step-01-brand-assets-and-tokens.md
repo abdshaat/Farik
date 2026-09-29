@@ -159,7 +159,7 @@ Tests:
 - `holds every pair to its minimum in the dark theme`: the same for dark.
 - `lists every role colour against role-ink` asserts that for every `role-*` key in `tokens.json` other than `role-ink`, `TEXT_PAIRS` holds `role-ink` on it, so a role added to the tokens without a pair fails here.
 
-- [ ] `test(brand): hold every text and control colour pair to wcag aa`
+- [x] `test(brand): hold every text and control colour pair to wcag aa`
 
 ### Task 4: Fonts, logo, icons, avatars
 
