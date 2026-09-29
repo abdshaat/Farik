@@ -44,7 +44,8 @@
         "moved.since",
         "team.propose",
         "team.validate",
-        "models.list"
+        "models.list",
+        "project.scan"
       ]
     },
     "subscribeRequest": {
@@ -235,6 +236,9 @@
             },
             {
               "$ref": "#/$defs/modelsListQuery"
+            },
+            {
+              "$ref": "#/$defs/projectScanQuery"
             }
           ]
         }
@@ -403,6 +407,9 @@
         },
         {
           "$ref": "#/$defs/accountDisconnectRequest"
+        },
+        {
+          "$ref": "#/$defs/projectNoteRequest"
         }
       ]
     },
@@ -2384,6 +2391,147 @@
         "removed_from",
         "paused"
       ]
+    },
+    "projectScanQuery": {
+      "title": "Project Scan Query",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "params"
+      ],
+      "properties": {
+        "name": {
+          "const": "project.scan"
+        },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {}
+        }
+      },
+      "description": "The project scanned again, as the setup screen \"What we found\" reads it back in rows. Nothing is written."
+    },
+    "projectNoteRequest": {
+      "title": "Project Note Request",
+      "description": "Something is wrong: the user's words kept in .farik/project.md under \"The user says\", which every rescan carries across. Answers emptyResult.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "jsonrpc",
+        "id",
+        "method",
+        "params"
+      ],
+      "properties": {
+        "jsonrpc": {
+          "const": "2.0"
+        },
+        "id": {
+          "$ref": "#/$defs/requestId"
+        },
+        "method": {
+          "const": "project.note"
+        },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "text"
+          ],
+          "properties": {
+            "text": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 2000,
+              "pattern": "\\S",
+              "description": "What the user says about the project, in their own words."
+            }
+          }
+        }
+      }
+    },
+    "projectScanResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "facts",
+        "checks",
+        "kept_private"
+      ],
+      "properties": {
+        "facts": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "language",
+            "toolchain",
+            "workspace",
+            "packages",
+            "tests_in",
+            "tracked_files",
+            "last_commit"
+          ],
+          "properties": {
+            "language": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "description": "The language with the most tracked files."
+            },
+            "toolchain": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "description": "The toolchain's name."
+            },
+            "workspace": {
+              "type": "boolean",
+              "description": "Whether the project is a workspace."
+            },
+            "packages": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "How many packages the workspace has."
+            },
+            "tests_in": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "description": "Where the tests are, as a location."
+            },
+            "tracked_files": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "How many files git tracks."
+            },
+            "last_commit": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "description": "How long ago the last commit was, in words; null before the first commit."
+            }
+          }
+        },
+        "checks": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "The text of each check the scan found in the project's own commands."
+        },
+        "kept_private": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "The protected-path globs that match something on disk, walked four folders deep without .git and node_modules, over at most 2000 entries."
+        }
+      }
     }
   }
 }

@@ -1,19 +1,21 @@
 //! The team's setup and settings for the browser (`docs/SPEC.md` 4.1, 4.4, 10): the suggested five,
 //! a change checked and described before it is saved, the setup form's start, the checks, the
-//! models, and the AI account's disconnect. `web.rs` answers the frames; this module answers what
-//! they ask.
+//! models, the AI account's disconnect, and the project read back with the user's note on it.
+//! `web.rs` answers the frames; this module answers what they ask.
 
 use std::fmt::Display;
+use std::path::Path;
 use std::sync::Arc;
 
 use farik_core::contract::Role;
 use farik_core::criteria::validate_criteria;
+use farik_core::governor::paths::{PathRefusal, check_protected_paths};
 use farik_core::team::{Team, ValidationError, describe_change, validate_team};
 use farik_protocol::command::{Command, CommandReply};
 use farik_protocol::event::{EventBody, new_event};
 use farik_protocol::generated::event::{CriteriaUpdatedBody, TeamUpdatedBody};
 use farik_roles::load_role;
-use farik_store::{EventQuery, names_of};
+use farik_store::{EventQuery, names_of, scan_project};
 use serde_json::{Value, json};
 
 use super::DaemonState;
@@ -24,15 +26,20 @@ use crate::pause::paused;
 use crate::tools::ToolDeps;
 
 /// The methods this module answers.
-pub(super) const METHODS: [&str; 4] = [
+pub(super) const METHODS: [&str; 5] = [
     "team.save",
     "team.start",
     "criteria.save",
     "account.disconnect",
+    "project.note",
 ];
 
 /// The marker the setup host leaves in a project it just made one, which "Start the team" removes.
 pub const SETUP_PENDING: &str = ".farik/local/setup-pending";
+
+/// How deep `project.scan` looks for private files, and how many entries it looks at at most.
+const WALK_DEPTH: u32 = 4;
+const WALK_CAP: usize = 2000;
 
 /// Who the human is in the log.
 const HUMAN: &str = "human";
@@ -76,6 +83,7 @@ pub(super) fn query(deps: &ToolDeps, name: &str, params: &Value) -> Result<Value
             }
         }
         "models.list" => models(deps),
+        "project.scan" => scanned(deps),
         _ => Err(Failure::new(
             super::web::UNKNOWN_QUERY,
             format!("there is no query {name}"),
@@ -149,6 +157,70 @@ fn models(deps: &ToolDeps) -> Result<Value, Failure> {
         })
         .collect();
     Ok(json!({ "models": models }))
+}
+
+/// `project.scan`: the project scanned again, its facts for the rows, the checks it found, and the
+/// protected globs that match something on disk.
+fn scanned(deps: &ToolDeps) -> Result<Value, Failure> {
+    let scan = scan_project(&deps.git, deps.clock.now()).map_err(|e| internal(&e))?;
+    let globs = deps
+        .files
+        .read_team()
+        .map_err(|e| internal(&e))?
+        .rules()
+        .protected_paths;
+    let mut on_disk = Vec::new();
+    walk(deps.files.root(), "", 1, &mut on_disk);
+    let kept_private: Vec<&String> = globs
+        .iter()
+        .filter(|glob| {
+            matches!(
+                check_protected_paths(&on_disk, std::slice::from_ref(glob)),
+                Err(PathRefusal::Violations(_))
+            )
+        })
+        .collect();
+    let facts = &scan.facts;
+    Ok(json!({
+        "facts": {
+            "language": facts.language,
+            "toolchain": facts.toolchain,
+            "workspace": facts.workspace,
+            "packages": facts.packages,
+            "tests_in": facts.tests_in,
+            "tracked_files": facts.tracked_files,
+            "last_commit": facts.last_commit,
+        },
+        "checks": scan.detected_criteria.iter().map(|one| one.text.to_string()).collect::<Vec<_>>(),
+        "kept_private": kept_private,
+    }))
+}
+
+/// Adds the paths under `dir`, as `prefix` and each name, to `found`, in name order and folders
+/// first-deep, `WALK_DEPTH` folders down, without `.git` and `node_modules` or following a link,
+/// until `found` holds `WALK_CAP`.
+fn walk(dir: &Path, prefix: &str, depth: u32, found: &mut Vec<String>) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    let mut names: Vec<String> = entries
+        .filter_map(|entry| entry.ok()?.file_name().into_string().ok())
+        .collect();
+    names.sort();
+    for name in names {
+        if found.len() >= WALK_CAP {
+            return;
+        }
+        if name == ".git" || name == "node_modules" {
+            continue;
+        }
+        let path = format!("{prefix}{name}");
+        found.push(path.clone());
+        let full = dir.join(&name);
+        if depth < WALK_DEPTH && std::fs::symlink_metadata(&full).is_ok_and(|meta| meta.is_dir()) {
+            walk(&full, &format!("{path}/"), depth + 1, found);
+        }
+    }
 }
 
 /// Why a team change is not made: the errors to show at their rows, or a failure.
@@ -303,6 +375,16 @@ pub(super) async fn call(
     };
     let params = params.clone();
     match method {
+        "project.note" => off_the_worker(move || {
+            deps.files
+                .append_project_note(
+                    params["text"].as_str().unwrap_or_default(),
+                    deps.clock.now().date_naive(),
+                )
+                .map_err(|e| internal(&e))
+        })
+        .await
+        .map(|()| json!({})),
         "team.save" => off_the_worker(move || {
             let (_, team) = checked(&deps, &params["team"], false)?;
             write_team(&deps, &team)
@@ -871,6 +953,110 @@ mod tests {
                 { "id": "claude-haiku-4-5", "label": "Quick model" },
             ] })
         );
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn reads_the_scan_back_for_the_browser() {
+        let harness = driven("project-scan");
+        let root = &harness.project.repo.path;
+        let write = |path: &str| {
+            let path = root.join(path);
+            std::fs::create_dir_all(path.parent().expect("a parent")).expect("made");
+            std::fs::write(path, "x").expect("written");
+        };
+        write(".env");
+        // Four deep is looked at; five deep, node_modules and .git are not.
+        write("a/b/c/near.pem");
+        write("a/b/c/d/far.key");
+        write("node_modules/x/dep.key");
+        write(".git/secret.key");
+        let scanned = query(
+            &harness.daemon,
+            "project.scan",
+            &json!({}),
+            "projectScanResult",
+        );
+        let found = farik_store::scan_project(&harness.project.deps.git, at()).expect("scans");
+        assert_eq!(
+            scanned["facts"],
+            json!({
+                "language": found.facts.language,
+                "toolchain": found.facts.toolchain,
+                "workspace": found.facts.workspace,
+                "packages": found.facts.packages,
+                "tests_in": found.facts.tests_in,
+                "tracked_files": found.facts.tracked_files,
+                "last_commit": found.facts.last_commit,
+            })
+        );
+        assert_eq!(
+            scanned["checks"],
+            json!(
+                found
+                    .detected_criteria
+                    .iter()
+                    .map(|one| one.text.to_string())
+                    .collect::<Vec<_>>()
+            )
+        );
+        assert_eq!(
+            scanned["kept_private"],
+            json!([".env", "**/*.pem", ".farik/local/**"])
+        );
+
+        // The walk stops after 2000 entries: a key file met after them is not seen.
+        for n in 0..2000 {
+            write(&format!("many/f{n:04}"));
+        }
+        write("zz.key");
+        let capped = query(
+            &harness.daemon,
+            "project.scan",
+            &json!({}),
+            "projectScanResult",
+        );
+        assert_eq!(
+            capped["kept_private"],
+            json!([".env", "**/*.pem", ".farik/local/**"])
+        );
+        std::fs::remove_dir_all(root.join("many")).expect("removed");
+        let uncapped = query(
+            &harness.daemon,
+            "project.scan",
+            &json!({}),
+            "projectScanResult",
+        );
+        assert_eq!(
+            uncapped["kept_private"],
+            json!([".env", "**/*.pem", "**/*.key", ".farik/local/**"])
+        );
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn keeps_the_user_note_from_the_browser() {
+        let harness = driven("project-note");
+        call(
+            &harness.daemon,
+            "project.note",
+            &json!({ "text": "It is a shop, not a game." }),
+            "emptyResult",
+        );
+        let document = harness
+            .project
+            .deps
+            .files
+            .read_project_scan()
+            .expect("project.md reads");
+        assert!(
+            document.contains("## The user says\n\n2026-09-22: It is a shop, not a game.\n"),
+            "{document}"
+        );
+        for text in [String::new(), "   ".to_string(), "x".repeat(2001)] {
+            let (code, _) = refused(&harness, "project.note", &json!({ "text": text }));
+            assert_eq!(code, -32602, "{text:?}");
+        }
     }
 
     #[test]

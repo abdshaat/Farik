@@ -682,7 +682,9 @@ fn query(state: &DaemonState, name: &str, params: &Value) -> Result<Value, Failu
             let team = serde_json::to_value(team).map_err(|error| internal(&error))?;
             Ok(json!({ "team": team }))
         }
-        "team.propose" | "team.validate" | "models.list" => team::query(deps, name, params),
+        "team.propose" | "team.validate" | "models.list" | "project.scan" => {
+            team::query(deps, name, params)
+        }
         _ => gates::query(deps, name, params),
     }
 }

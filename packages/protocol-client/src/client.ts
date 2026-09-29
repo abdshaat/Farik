@@ -37,7 +37,8 @@ export type MethodName =
 	| "team.save"
 	| "team.start"
 	| "criteria.save"
-	| "account.disconnect";
+	| "account.disconnect"
+	| "project.note";
 export type Status = "connecting" | "open" | "closed";
 
 /** The part of the browser `WebSocket` the client uses. */
