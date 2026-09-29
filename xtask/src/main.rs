@@ -76,6 +76,16 @@ fn check(root: &Path, tests: Tests) -> anyhow::Result<()> {
     cargo(root, &xtask::check::test_arguments(tests))?;
     todos(root)?;
     core_io(root)?;
+    for args in xtask::check::front_end_commands(root.join("package.json").exists()) {
+        let status = Command::new("pnpm")
+            .args(&args)
+            .current_dir(root)
+            .status()
+            .with_context(|| format!("running pnpm {}", args.join(" ")))?;
+        if !status.success() {
+            bail!("pnpm {} failed", args.join(" "));
+        }
+    }
     println!("xtask check: ok");
     Ok(())
 }

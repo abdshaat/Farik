@@ -128,7 +128,7 @@ Tests:
 
 By hand before the commit: `pnpm check` in the empty workspace exits 0 (Biome checks only the root JSON files).
 
-- [ ] `build(repo): add the pnpm workspace and run pnpm check from xtask`
+- [x] `build(repo): add the pnpm workspace and run pnpm check from xtask`
 
 ### Task 2: Tokens and their generation
 

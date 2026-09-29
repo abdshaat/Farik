@@ -1,0 +1,14 @@
+{
+	"name": "farik",
+	"private": true,
+	"type": "module",
+	"packageManager": "pnpm@12.3.4",
+	"scripts": {
+		"check": "pnpm -r --if-present generate && pnpm -r --if-present typecheck && biome check . && pnpm -r --if-present test"
+	},
+	"devDependencies": {
+		"@biomejs/biome": "2.5.14",
+		"typescript": "7.0.2",
+		"vitest": "5.0.2"
+	}
+}

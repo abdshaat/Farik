@@ -41,9 +41,22 @@ pub fn test_arguments(tests: Tests) -> Vec<&'static str> {
     }
 }
 
+/// What `pnpm` is given, one command after another, once the Rust checks have passed.
+///
+/// Nothing when the workspace has no `package.json`, so a checkout without the front end checks as
+/// before.
+#[must_use]
+pub fn front_end_commands(has_package_json: bool) -> Vec<Vec<&'static str>> {
+    if has_package_json {
+        vec![vec!["install", "--frozen-lockfile"], vec!["check"]]
+    } else {
+        vec![]
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{Tests, test_arguments, tests_requested};
+    use super::{Tests, front_end_commands, test_arguments, tests_requested};
 
     #[test]
     fn runs_the_tests_that_need_no_program_when_asked_for_nothing() {
@@ -87,5 +100,18 @@ mod tests {
                 "unknown flag --intergration; usage: cargo xtask check [--integration]".to_string()
             )
         );
+    }
+
+    #[test]
+    fn runs_pnpm_install_and_check_when_the_workspace_has_a_package_json() {
+        assert_eq!(
+            front_end_commands(true),
+            [vec!["install", "--frozen-lockfile"], vec!["check"]]
+        );
+    }
+
+    #[test]
+    fn runs_no_front_end_command_without_a_package_json() {
+        assert!(front_end_commands(false).is_empty());
     }
 }
