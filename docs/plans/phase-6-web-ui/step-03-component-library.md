@@ -178,7 +178,7 @@ Tests:
 - `KanbanColumn`: `names the lane and counts its tasks` asserts a `region` whose accessible name is exactly `<title>` and whose heading's text contains the count.
 - `ChatList`: `shows who said what, and when` asserts per message the author's name, the time, the text, and the avatar's `alt`. `shows an agent's text as text` asserts that a message `<img src=x onerror=alert(1)>` renders as that literal text, with no `img` added.
 
-- [ ] `feat(ui): add lists, tables, the kanban column and the chat list`
+- [x] `feat(ui): add lists, tables, the kanban column and the chat list`
 
 ### Task 6: The diff viewer
 

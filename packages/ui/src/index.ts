@@ -1,14 +1,18 @@
 export { Avatar } from "./Avatar.tsx";
 export { AVATAR_URLS, type AvatarKey } from "./avatars.ts";
 export { Button } from "./Button.tsx";
+export { ChatList } from "./ChatList.tsx";
 export { Choice } from "./Choice.tsx";
 export { Dialog } from "./Dialog.tsx";
+export { KanbanColumn } from "./KanbanColumn.tsx";
+export { List } from "./List.tsx";
 export { RoleTag } from "./RoleTag.tsx";
 export type { Role } from "./role.ts";
 export { StatusWord } from "./StatusWord.tsx";
 export { Stepper } from "./Stepper.tsx";
 export { Switch } from "./Switch.tsx";
 export { uiStrings } from "./strings.ts";
+export { Table } from "./Table.tsx";
 export { TextArea } from "./TextArea.tsx";
 export { TextField } from "./TextField.tsx";
 export { expectNoAxeViolations } from "./test/axe.ts";

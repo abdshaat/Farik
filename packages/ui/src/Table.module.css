@@ -1,0 +1,34 @@
+.wrap {
+	overflow-x: auto;
+}
+
+.table {
+	width: 100%;
+	border-collapse: collapse;
+	color: var(--farik-color-ink);
+	font:
+		var(--farik-type-body-weight) var(--farik-type-body-size) /
+		var(--farik-type-body-line-height) var(--farik-type-body-family);
+}
+
+.caption {
+	padding-bottom: var(--farik-space-2);
+	color: var(--farik-color-ink-muted);
+	text-align: start;
+}
+
+.table th,
+.table td {
+	padding: var(--farik-space-2) var(--farik-space-3);
+	border-bottom: 1px solid var(--farik-color-rule);
+	text-align: start;
+}
+
+.table th {
+	font-weight: 600;
+}
+
+.table .numeric {
+	font-variant-numeric: tabular-nums;
+	text-align: right;
+}
