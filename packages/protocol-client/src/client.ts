@@ -27,6 +27,11 @@ export type CommandReply =
 				detail: string;
 			};
 	  };
+export type MethodName =
+	| "project.open"
+	| "project.create"
+	| "account.connect"
+	| "sandbox.build";
 export type Status = "connecting" | "open" | "closed";
 
 /** The part of the browser `WebSocket` the client uses. */
@@ -50,6 +55,7 @@ export type DaemonClient = {
 	subscribe(fromSeq: number, onEvent: (e: Event) => void): Promise<void>;
 	command(c: Command): Promise<CommandReply>;
 	query(name: QueryName, params: object): Promise<unknown>;
+	call(method: MethodName, params: object): Promise<unknown>;
 	onStatus(cb: (s: Status) => void): void;
 	close(): void;
 };
@@ -123,6 +129,7 @@ export function connect(url: string, socket?: SocketLike): DaemonClient {
 		command: (command) =>
 			request("command", { command }) as Promise<CommandReply>,
 		query: (name, params) => request("query", { name, params }),
+		call: (method, params) => request(method, params),
 		onStatus(cb) {
 			listeners.push(cb);
 			cb(status);

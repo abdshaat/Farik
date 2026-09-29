@@ -26,7 +26,10 @@
         "tasks.list",
         "task.get",
         "team.get",
-        "serve.status"
+        "serve.status",
+        "folders.list",
+        "computer.check",
+        "account.status"
       ]
     },
     "subscribeRequest": {
@@ -163,6 +166,15 @@
             },
             {
               "$ref": "#/$defs/serveStatusQuery"
+            },
+            {
+              "$ref": "#/$defs/foldersListQuery"
+            },
+            {
+              "$ref": "#/$defs/computerCheckQuery"
+            },
+            {
+              "$ref": "#/$defs/accountStatusQuery"
             }
           ]
         }
@@ -301,6 +313,18 @@
         },
         {
           "$ref": "#/$defs/queryRequest"
+        },
+        {
+          "$ref": "#/$defs/projectOpenRequest"
+        },
+        {
+          "$ref": "#/$defs/projectCreateRequest"
+        },
+        {
+          "$ref": "#/$defs/accountConnectRequest"
+        },
+        {
+          "$ref": "#/$defs/sandboxBuildRequest"
         }
       ]
     },
@@ -322,7 +346,7 @@
         },
         "result": {
           "type": "object",
-          "description": "emptyResult for subscribe and unsubscribe, commandReply for command, and the query's own result def for query."
+          "description": "emptyResult for subscribe and unsubscribe, commandReply for command, the query's own result def for query, and the method's own result def (projectOpenResult, projectCreateResult, accountConnectResult, sandboxBuildResult) for a setup method."
         }
       }
     },
@@ -357,7 +381,7 @@
     },
     "rpcError": {
       "title": "Rpc Error",
-      "description": "-32700 parse, -32600 invalid request, -32601 unknown method, -32602 invalid params, -32603 internal (the store or a file failed), -32001 unknown_query, -32002 not_found, -32003 refused_here.",
+      "description": "-32700 parse, -32600 invalid request, -32601 unknown method, -32602 invalid params, -32603 internal (the store or a file failed), -32001 unknown_query, -32002 not_found, -32003 refused_here, -32004 no_project (the daemon has no project yet, so it answers only the setup queries), -32005 refused (a setup method was refused; the message is the sentence to show).",
       "type": "object",
       "additionalProperties": false,
       "required": [
@@ -375,7 +399,9 @@
             -32603,
             -32001,
             -32002,
-            -32003
+            -32003,
+            -32004,
+            -32005
           ]
         },
         "message": {
@@ -558,7 +584,15 @@
       "additionalProperties": false,
       "properties": {
         "project_root": {
-          "type": "string"
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "null while the daemon is in setup mode, before a project is chosen."
         },
         "paused": {
           "type": "boolean"
@@ -581,12 +615,24 @@
           "type": "integer",
           "minimum": 0,
           "maximum": 65535
+        },
+        "take_on_error": {
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Why taking the chosen project on failed, or null."
         }
       },
       "required": [
         "project_root",
         "paused",
         "credential",
+        "take_on_error",
         "port"
       ]
     },
@@ -704,6 +750,410 @@
         "interventions"
       ],
       "description": "One row of the board (farik_store::TaskProjection). Optional fields are absent, not null, when the projection has none."
+    },
+    "foldersListQuery": {
+      "title": "Folders List Query",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "params"
+      ],
+      "properties": {
+        "name": {
+          "const": "folders.list"
+        },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "path": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "computerCheckQuery": {
+      "title": "Computer Check Query",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "params"
+      ],
+      "properties": {
+        "name": {
+          "const": "computer.check"
+        },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {}
+        }
+      }
+    },
+    "accountStatusQuery": {
+      "title": "Account Status Query",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "params"
+      ],
+      "properties": {
+        "name": {
+          "const": "account.status"
+        },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {}
+        }
+      }
+    },
+    "projectOpenRequest": {
+      "title": "Project Open Request",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "jsonrpc",
+        "id",
+        "method",
+        "params"
+      ],
+      "properties": {
+        "jsonrpc": {
+          "const": "2.0"
+        },
+        "id": {
+          "$ref": "#/$defs/requestId"
+        },
+        "method": {
+          "const": "project.open"
+        },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "path": {
+              "type": "string"
+            },
+            "no_sandbox": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "path",
+            "no_sandbox"
+          ]
+        }
+      }
+    },
+    "projectCreateRequest": {
+      "title": "Project Create Request",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "jsonrpc",
+        "id",
+        "method",
+        "params"
+      ],
+      "properties": {
+        "jsonrpc": {
+          "const": "2.0"
+        },
+        "id": {
+          "$ref": "#/$defs/requestId"
+        },
+        "method": {
+          "const": "project.create"
+        },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "parent": {
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            },
+            "description": {
+              "type": "string"
+            },
+            "no_sandbox": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "parent",
+            "name",
+            "description",
+            "no_sandbox"
+          ]
+        }
+      }
+    },
+    "accountConnectRequest": {
+      "title": "Account Connect Request",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "jsonrpc",
+        "id",
+        "method",
+        "params"
+      ],
+      "properties": {
+        "jsonrpc": {
+          "const": "2.0"
+        },
+        "id": {
+          "$ref": "#/$defs/requestId"
+        },
+        "method": {
+          "const": "account.connect"
+        },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "api_key",
+                "subscription_token"
+              ]
+            },
+            "secret": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "secret"
+          ]
+        }
+      }
+    },
+    "sandboxBuildRequest": {
+      "title": "Sandbox Build Request",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "jsonrpc",
+        "id",
+        "method",
+        "params"
+      ],
+      "properties": {
+        "jsonrpc": {
+          "const": "2.0"
+        },
+        "id": {
+          "$ref": "#/$defs/requestId"
+        },
+        "method": {
+          "const": "sandbox.build"
+        },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {}
+        }
+      }
+    },
+    "foldersListResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "type": "string"
+        },
+        "parent": {
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "entries": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "git": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "name",
+              "git"
+            ]
+          }
+        }
+      },
+      "required": [
+        "path",
+        "parent",
+        "entries"
+      ]
+    },
+    "computerItem": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "state": {
+          "type": "string",
+          "enum": [
+            "ready",
+            "missing",
+            "too_old",
+            "not_running"
+          ]
+        },
+        "version": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "state"
+      ]
+    },
+    "computerCheckResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "claude": {
+          "$ref": "#/$defs/computerItem"
+        },
+        "git": {
+          "$ref": "#/$defs/computerItem"
+        },
+        "docker": {
+          "$ref": "#/$defs/computerItem"
+        },
+        "sandbox_image": {
+          "$ref": "#/$defs/computerItem"
+        }
+      },
+      "required": [
+        "claude",
+        "git",
+        "docker",
+        "sandbox_image"
+      ]
+    },
+    "accountStatusResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "provider": {
+          "oneOf": [
+            {
+              "const": "anthropic"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "kind": {
+          "oneOf": [
+            {
+              "type": "string",
+              "enum": [
+                "api_key",
+                "subscription_token"
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "source": {
+          "oneOf": [
+            {
+              "type": "string",
+              "enum": [
+                "environment",
+                "keychain",
+                "file"
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "provider",
+        "kind",
+        "source"
+      ]
+    },
+    "projectOpenResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "project_root": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "project_root"
+      ]
+    },
+    "projectCreateResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "project_root": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "project_root"
+      ]
+    },
+    "accountConnectResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "stored_in": {
+          "type": "string",
+          "enum": [
+            "keychain",
+            "file"
+          ]
+        }
+      },
+      "required": [
+        "stored_in"
+      ]
+    },
+    "sandboxBuildResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "image": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "image"
+      ]
     }
   }
 }

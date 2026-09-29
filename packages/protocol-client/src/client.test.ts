@@ -90,4 +90,19 @@ describe("client", () => {
 		ws.emit("close", {});
 		expect(seen).toEqual(["connecting", "open", "closed"]);
 	});
+
+	it("call sends a method and resolves its result", async () => {
+		const ws = new FakeSocket();
+		const client = connect("ws://x/rpc", ws);
+		ws.emit("open", {});
+		const p = client.call("project.open", { path: "code/a", noSandbox: true });
+		await tick();
+		expect(ws.sent[0]).toMatchObject({
+			jsonrpc: "2.0",
+			method: "project.open",
+			params: { path: "code/a", no_sandbox: true },
+		});
+		ws.receive({ jsonrpc: "2.0", id: 1, result: { project_root: "/h/a" } });
+		expect(await p).toEqual({ projectRoot: "/h/a" });
+	});
 });

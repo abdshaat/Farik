@@ -151,7 +151,7 @@ type Status = 'checking' | 'no_session' | 'connecting' | 'open' | 'lost' | 'reop
 - `reads_the_setup_queries_and_methods` asserts that each new query and method validates with its params, and that each refuses when a required field is missing.
 - `client.call sends a method and resolves its result`.
 
-- [ ] `feat(protocol): add the setup queries and methods to the browser's wire`
+- [x] `feat(protocol): add the setup queries and methods to the browser's wire`
 
 ### Task 2: The credential stores
 

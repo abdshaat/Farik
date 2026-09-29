@@ -130,6 +130,64 @@ mod tests {
     }
 
     #[test]
+    fn reads_the_setup_queries_and_methods() {
+        let q = |name: &str, params: Value| {
+            request(1, "query", &json!({ "name": name, "params": params }))
+        };
+        // Each frame with its params validates; the second of each pair lacks a required field.
+        let cases = [
+            (q("folders.list", json!({})), None),
+            (
+                q("folders.list", json!({ "path": "code" })),
+                Some(q("folders.list", json!({ "path": 3 }))),
+            ),
+            (q("computer.check", json!({})), None),
+            (q("account.status", json!({})), None),
+            (
+                request(
+                    2,
+                    "project.open",
+                    &json!({ "path": "code/a", "no_sandbox": false }),
+                ),
+                Some(request(2, "project.open", &json!({ "path": "code/a" }))),
+            ),
+            (
+                request(
+                    3,
+                    "project.create",
+                    &json!({ "parent": "code", "name": "a", "description": "d", "no_sandbox": true }),
+                ),
+                Some(request(
+                    3,
+                    "project.create",
+                    &json!({ "parent": "code", "name": "a", "no_sandbox": true }),
+                )),
+            ),
+            (
+                request(
+                    4,
+                    "account.connect",
+                    &json!({ "kind": "api_key", "secret": "sk-ant-api-x" }),
+                ),
+                Some(request(4, "account.connect", &json!({ "kind": "api_key" }))),
+            ),
+            (request(5, "sandbox.build", &json!({})), None),
+        ];
+        for (good, bad) in cases {
+            rpc_request_from_value(&good).unwrap_or_else(|e| panic!("{good} refused: {e:?}"));
+            if let Some(bad) = bad {
+                assert!(rpc_request_from_value(&bad).is_err(), "{bad} was read");
+            }
+        }
+        let wrong_kind = request(
+            4,
+            "account.connect",
+            &json!({ "kind": "password", "secret": "x" }),
+        );
+        assert!(rpc_request_from_value(&wrong_kind).is_err());
+    }
+
+    #[test]
     fn refuses_a_request_without_jsonrpc_2_0() {
         let wrong = json!({ "jsonrpc": "1.0", "id": 1, "method": "unsubscribe", "params": {} });
         assert!(rpc_request_from_value(&wrong).is_err());
