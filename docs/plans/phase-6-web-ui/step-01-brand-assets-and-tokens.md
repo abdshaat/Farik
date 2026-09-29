@@ -1,10 +1,10 @@
 # Phase 6, step 01: Brand assets and tokens
 
-Status: draft
+Status: ready
 Branch: `phase/6-web-ui`
 Spec: `docs/SPEC.md` sections 10 (WCAG 2.2 AA, clients built from the brand's tokens, offline) and 14 (brand)
 Depends on: phase 5 (merged in #16: `docs/brand/brand.md`, `docs/design/web-ui.md`, the founder's files in `docs/brand/assets/`); the planning commit of this phase (111629a)
-Readiness confirmed by: (pending)
+Readiness confirmed by: fresh-session reviewer, 2026-09-28 (one round, ready with findings, no decision open; its seventeen findings folded in)
 
 Signatures, not bodies; test names and what each asserts, not test code; around 300 lines at most (ADR 0008).
 
@@ -17,11 +17,12 @@ The repository has a front end toolchain and the brand as code. `pnpm check` run
 - The toolchain is ADR 0002's. Versions are exact, pinned in `package.json`, and the lockfile is committed:
   - pnpm `12.3.4`, set in the root `packageManager`;
   - Node `24.14.0`, set in `.node-version`, which CI's `actions/setup-node` reads;
-  - TypeScript `7.0.2`, `@biomejs/biome` `2.5.14`, Vitest `5.0.2`, Vite `8.3.1`, `sharp` `0.35.5`, `jsdom` (its current version, pinned at install);
-  - `@fontsource/space-grotesk`, `@fontsource/jetbrains-mono`, and `@fontsource/silkscreen`, each `5.3.0`.
+  - in the root `package.json`: TypeScript `7.0.2`, `@biomejs/biome` `2.5.14`, Vitest `5.0.2`;
+  - in `packages/brand/package.json`: Vite `8.3.1`, `sharp` `0.35.5`, `jsdom` `30.1.1`, `axe-core` `4.13.0` (dev dependencies), and `@fontsource/space-grotesk`, `@fontsource/jetbrains-mono`, `@fontsource/silkscreen`, each `5.3.0` (dependencies);
+  - CI actions `pnpm/action-setup@v4` and `actions/setup-node@v5`.
 
-  Rejected: ranges. Every-phase rule.
-- `tsconfig.base.json` sets `strict`, `noUncheckedIndexedAccess`, `exactOptionalPropertyTypes`, `module`/`moduleResolution` `nodenext`, `target` `es2024`, and `verbatimModuleSyntax` (code.md). One `biome.json` at the root, with the recommended rules and the formatter on. Biome ignores generated files and `docs/`.
+  Rejected: ranges. Every-phase rule. Rejected from ADR 0002's list for now: lefthook, because `cargo xtask install-hooks` already writes the hooks, and Changesets, because nothing is published before phase 9.
+- `tsconfig.base.json` sets `strict`, `noUncheckedIndexedAccess`, `exactOptionalPropertyTypes`, `module`/`moduleResolution` `nodenext`, `target` `es2024`, `verbatimModuleSyntax` (code.md), and, so that Node runs the sources directly, `noEmit`, `allowImportingTsExtensions`, and `erasableSyntaxOnly`; imports between source files use the `.ts` extension. Every package is `"type": "module"`. One `biome.json` at the root, with the recommended rules and the formatter on. Biome ignores generated files and `docs/`.
 - The root `pnpm check` runs four things in order: `pnpm -r --if-present generate`, then `pnpm -r --if-present typecheck`, then `biome check .`, then `pnpm -r --if-present test`. Each package's `test` is `vitest run`. Rejected: a task runner (turbo). Four commands need none.
 - `cargo xtask check` runs `pnpm install --frozen-lockfile`, then `pnpm check`, after `core-io`, when the workspace root has a `package.json`. It prints nothing extra, and a failing exit code fails the check. The decision is a pure function (`xtask::check::front_end_commands`), so a test can hold it; `main.rs` only runs what it returns. `pre-commit` does not run pnpm, because it stays fast.
 - CI's one job gains `pnpm/action-setup` (reading `packageManager`) and `actions/setup-node` (reading `.node-version`, with the pnpm cache) before `cargo xtask check --integration`.
@@ -34,21 +35,21 @@ The repository has a front end toolchain and the brand as code. `pnpm check` run
 
   - **Colour tokens**, in both themes: `page`, `surface`, `ink`, `ink-muted`, `rule`, `control-border`, `band`, `band-ink`, `action`, `action-ink`, `link`, `focus`, `status-done`, `status-working`, `status-waiting`, and `role-product-manager`, `role-scrum-master`, `role-architect`, `role-developer`, `role-marketing-specialist`, `role-ink`.
   - **Light values** come from `docs/design/web-ui.md` and `brand.md`. `link` and `status-waiting` are Coral Text `#A44D2B`, `status-done` is Moss Text `#536C59`, `status-working` is Signal Text `#0653FF`, `control-border` is `#8A7F6E`, `band-ink` is Soft Sand, and `role-ink` is Midnight.
-  - **Dark values:** the base colours are used as text, as `web-ui.md` says. `control-border` stays `#8A7F6E`.
+  - **Every value**, light then dark: `page` `#F3E7D3` / `#161616`; `surface` `#FBF6EC` / `#1F1F1F`; `ink` `#161616` / `#F3E7D3`; `ink-muted` `#5B5347` / `#B9AE9C`; `rule` `#D9CBB3` / `#333333`; `control-border` `#8A7F6E` / `#8A7F6E`; `band` `#161616` / `#0E0E0E`; `band-ink` `#F3E7D3` / `#F3E7D3`; `action` `#D8896A` / `#D8896A`; `action-ink` `#161616` / `#161616`; `link` `#A44D2B` / `#5A8DFF` (brand.md: links on dark surfaces are Signal Blue); `focus` `#0653FF` / `#5A8DFF`; `status-done` `#536C59` / `#6E8F76`; `status-working` `#0653FF` / `#5A8DFF`; `status-waiting` `#A44D2B` / `#D8896A`; `role-product-manager` `#D8896A`, `role-scrum-master` `#6E8F76`, `role-architect` `#E3B04B`, `role-developer` `#5A8DFF`, `role-marketing-specialist` `#A99BF0`, and `role-ink` `#161616`, the same in both themes. Hex digits are upper case in the source and in every output. `web-ui.md`'s `role-*` row, which predates the Architect's Amber, is corrected to these five in Task 2.
   - **`focus` differs from `web-ui.md`.** It is Signal Text `#0653FF` in light and Signal Blue `#5A8DFF` in dark. `web-ui.md` asks for a Signal Blue ring in both themes, but Signal Blue on Soft Sand is 2.57:1, under 1.4.11's 3:1 for a focus indicator, so the light theme uses the text shade. `web-ui.md` is corrected in the same commit.
   - **`rule` is decorative** (dividers), so it is not held to a ratio. A control's edge uses `control-border`, which is.
-  - **Type steps** are `display`, `title`, `heading`, `body`, `small`, and `code`. Each has a `size` and a `line_height` in px and a `family` (`pixel`, `sans`, or `mono`), from `web-ui.md`'s table.
-  - **`space`** is `0, 4, 8, 12, 16, 24, 32, 48, 64` as `space-0` to `space-8`.
+  - **Type steps** are `display`, `title`, `heading`, `body`, `small`, and `code`. Each has a `size` and a `line_height` in px, a `weight` (400 or 600), and a `family` (`pixel`, `sans`, or `mono`), from `web-ui.md`'s table: title and heading 600, the rest 400. A family is written in CSS as its stack: `pixel` `'Silkscreen', monospace`; `sans` `'Space Grotesk', system-ui, sans-serif`; `mono` `'JetBrains Mono', ui-monospace, monospace`.
+  - **`space`** is `0, 4, 8, 12, 16, 24, 32, 48, 64` under keys `0` to `8` (`--farik-space-0` to `--farik-space-8`; in TypeScript `tokens.space[0]` to `tokens.space[8]`).
   - **`radius`** is `none` 0, `control` 4, and `raised` 8.
   - **No elevation tokens:** `web-ui.md`, pass 2, has no drop shadows. Rejected: an unused elevation scale (the old phase 5 bullet), which was YAGNI before the design removed shadows.
 - The generator is `packages/brand/src/generate.ts`, run with `node` directly: Node 24 strips types, so no `tsx` is needed. It exports `generateCss(tokens: Tokens): string` and `generateTs(tokens: Tokens): string` and writes two files:
-  - `dist/tokens.css`: light under `:root` and dark under `:root[data-theme="dark"]`. Custom properties are named `--farik-<group>-<name>`, for example `--farik-color-ink` and `--farik-type-body-size`. Choosing the theme (and "match my computer") is the web shell's job (step 04), which sets `data-theme`.
+  - `dist/tokens.css`: light under `:root` and dark under `:root[data-theme="dark"]`. Custom properties are named `--farik-<group>-<name>`, for example `--farik-color-ink`, and a type step's four as `--farik-type-<step>-size`, `-line-height`, `-weight`, and `-family`; sizes carry `px`. Choosing the theme (and "match my computer") is the web shell's job (step 04), which sets `data-theme`.
   - `src/generated/tokens.ts`: `export const tokens`, `as const`, with keys in `camelCase` (rule 6), and `export type ThemeName = 'light' | 'dark'`.
 
-  A colour token present in one theme and missing from the other is an error that names it, so a theme can never be half-designed.
+  A colour token present in one theme and missing from the other is an error that names it, so a theme can never be half-designed. The two files are written only when the module is run (`import.meta.main`), so tests import the functions without writing anything.
 - The contrast check is our own code, the WCAG 2.x relative-luminance formula (`src/contrast.ts`), because it is ten lines. Rejected: a colour library. `TEXT_PAIRS` lists each pair by token name with its minimum:
   - 4.5 for text: `ink`, `ink-muted`, `link`, and each `status-*` on `page` and on `surface`; `action-ink` on `action`; `band-ink` on `band`; `role-ink` on each `role-*`;
-  - 3 for controls: `control-border` and `focus` on `page` and on `surface`.
+  - 3 for controls: `control-border` and `focus` on `page` and on `surface`, and `focus` on `band`, which holds the rail's focusable places.
 
   The test runs every pair in both themes.
 - **Fonts** come from the `@fontsource` packages. `src/fonts.css` imports weights 400 and 600 of Space Grotesk, 400 of JetBrains Mono, and 400 of Silkscreen. A bundler copies the `woff2` files, so nothing is fetched from a font service at run time (spec 10). Rejected: copying the font files into the repository, which the packages already ship under the OFL.
@@ -57,13 +58,13 @@ The repository has a front end toolchain and the brand as code. `pnpm check` run
   - `icons/icon-<n>.png` for `n` in `16, 32, 48, 180, 192, 512, 1024`: favicon, Apple touch, web manifest, and the desktop master;
   - `avatars/<key>-256.png` for the five role keys (`product-manager`, `scrum-master`, `architect`, `developer`, `marketing-specialist`) and `extra-1` to `extra-5`.
 
-  The avatars are moved there with `git mv` from `docs/brand/assets/avatars/`, and `brand.md`'s Files section is updated. The icons are derived once by `src/icons.ts` (`sharp`, a Lanczos resize of the mark on its own tile) and committed as binary assets. `pnpm --filter @farik/brand icons` re-derives them when the master changes, and `check` does not run it, because `sharp` is slow and the output is fixed.
+  The avatars are moved there with `git mv` from `docs/brand/assets/avatars/`, not regenerated, and `brand.md` is updated where it names their path (the Files section and the Characters section) and where it says this step regenerates them. The icons are derived once by `src/icons.ts` (`sharp`, a Lanczos resize of `logo-mark.png` as it is: the file already draws the Midnight rounded tile, with transparent corners, so nothing is composed) and committed as binary assets. `pnpm --filter @farik/brand icons` re-derives them when the master changes, and `check` does not run it, because `sharp` is slow and the output is fixed.
 - `package.json` `exports`: `"."` is `src/index.ts`, which exports `tokens`, `ThemeName`, `contrastRatio`, `TEXT_PAIRS`, `AVATAR_KEYS`, and `ICON_SIZES`. There are also `"./tokens.css"`, `"./fonts.css"`, and `"./assets/*"`. The package is private and consumed as TypeScript source by Vite and Vitest, so it has no build step of its own.
 - **The brand sheet** is `packages/brand/sheet/index.html` with `sheet/sheet.ts`, which exports `renderSheet(root: HTMLElement): void`. It shows:
   - both themes side by side: every colour swatch with its name and hex, every `TEXT_PAIRS` pair with its measured ratio and minimum, and the type scale in its faces;
   - the logo and wordmark lockups on dark and light, every icon size, and the ten avatars.
 
-  `pnpm --filter @farik/brand sheet` builds it with Vite into `packages/brand/dist/sheet/`. The founder signs it off from a private artifact of that build, and the step is `done` only after that sign-off, recorded in this file's status line.
+  Each swatch is an element with `data-swatch="<theme>:<name>"` and each pair row `data-pair="<theme>:<foreground>/<background>"`. `pnpm --filter @farik/brand sheet` runs `vite build --config sheet/vite.config.ts` into `packages/brand/dist/sheet/`; that config is the sheet's alone, so Vitest, which reads `packages/brand/vitest.config.ts` (tests under `src/` and `sheet/`, environment `node`), is unaffected. `sheet/sheet.test.ts` opts into jsdom with `// @vitest-environment jsdom`. The founder signs it off from a private artifact of that build, and the step is `done` only after that sign-off, recorded in this file's status line.
 
 ## File map
 
@@ -85,7 +86,10 @@ packages/brand/src/assets.ts, assets.test.ts           creates: AVATAR_KEYS, ICO
 packages/brand/src/index.ts                            creates: the package's exports
 packages/brand/assets/**                               creates: logo, wordmark, icons; moves: avatars from docs/brand/assets/avatars/
 packages/brand/sheet/index.html, sheet.ts, sheet.test.ts   creates: the brand sheet and its test
-docs/brand/brand.md, docs/design/web-ui.md             modifies: where the avatars live; the focus token
+docs/brand/brand.md                                    modifies: where the avatars and icons live (Task 4)
+docs/design/web-ui.md                                  modifies: the focus ring's light value and the role-* row (Task 2)
+docs/plans/project-plan.md                             modifies: phase 6 step 01's interface line, to this plan's (Task 2)
+packages/brand/vitest.config.ts, sheet/vite.config.ts  creates: the tests' config (Task 2); the sheet's build config (Task 5)
 ```
 
 ## Interfaces
@@ -98,7 +102,7 @@ Produces (TypeScript unless marked):
 // xtask (Rust): pub fn front_end_commands(has_package_json: bool) -> Vec<Vec<&'static str>>
 export type Tokens = { color: Record<ThemeName, Record<string, string>>; type: Record<string, TypeStep>;
   space: Record<string, number>; radius: Record<string, number> };
-export type TypeStep = { size: number; lineHeight: number; family: 'pixel' | 'sans' | 'mono' };
+export type TypeStep = { size: number; lineHeight: number; weight: 400 | 600; family: 'pixel' | 'sans' | 'mono' };
 export function readTokens(json: unknown): Tokens;          // throws Error naming the first bad or one-sided token
 export function generateCss(tokens: Tokens): string;
 export function generateTs(tokens: Tokens): string;
@@ -122,18 +126,20 @@ Tests:
 - `runs_pnpm_install_and_check_when_the_workspace_has_a_package_json`: asserts that `front_end_commands(true)` is exactly `[["install", "--frozen-lockfile"], ["check"]]`, in that order.
 - `runs_no_front_end_command_without_a_package_json`: asserts that `front_end_commands(false)` is empty, so a checkout without the front end, or an older one, checks as before.
 
+By hand before the commit: `pnpm check` in the empty workspace exits 0 (Biome checks only the root JSON files).
+
 - [ ] `build(repo): add the pnpm workspace and run pnpm check from xtask`
 
 ### Task 2: Tokens and their generation
 
-Files: created `packages/brand/{package.json,tsconfig.json}`, `tokens/tokens.json`, `src/tokens-schema.ts`, `src/generate.ts`; tested by `src/generate.test.ts`
+Files: created `packages/brand/{package.json,tsconfig.json,vitest.config.ts}`, `tokens/tokens.json`, `src/tokens-schema.ts`, `src/generate.ts`; modified `docs/design/web-ui.md` (focus ring, `role-*` row) and `docs/plans/project-plan.md` (step 01's interface line: no elevation, no committed generated files, PNG logo and wordmark, `<key>-256.png` avatars, fonts from `@fontsource`); tested by `src/generate.test.ts`
 Produces: `Tokens`, `TypeStep`, `readTokens`, `generateCss`, `generateTs`, and the `generate` script
 Consumes: `pnpm check` from Task 1
 
 Tests:
 - `writes every colour token of the light theme under :root` asserts that the output of `generateCss(readTokens(tokens.json))` has one `--farik-color-<name>: <hex>;` inside `:root { … }` for each light colour, and `--farik-color-page: #F3E7D3`.
 - `writes every colour token of the dark theme under :root[data-theme="dark"]` asserts the same for dark, including `--farik-color-page: #161616`.
-- `writes each type step as size, line height and family` asserts that `--farik-type-body-size: 16px`, `--farik-type-body-line-height: 24px`, and a `--farik-type-body-family` naming Space Grotesk are present.
+- `writes each type step as size, line height, weight and family` asserts that `--farik-type-body-size: 16px;`, `--farik-type-body-line-height: 24px;`, `--farik-type-body-weight: 400;`, `--farik-type-title-weight: 600;`, and `--farik-type-body-family: 'Space Grotesk', system-ui, sans-serif;` are present.
 - `refuses a colour defined in one theme only` asserts that `readTokens` given a dark theme without `link` throws an Error whose message contains `link` and `dark`.
 - `refuses a colour that is not #rrggbb` asserts that `readTokens` given `ink: "black"` throws, naming `ink`.
 - `generates camelCase keys in the TypeScript module` asserts that `generateTs` contains `inkMuted` and `statusWaiting`, contains no `ink-muted` key, and ends `as const`.
@@ -151,13 +157,13 @@ Tests:
 - `is the same either way round` asserts that `contrastRatio(a, b) === contrastRatio(b, a)` for Midnight and Soft Sand.
 - `holds every pair to its minimum in the light theme` asserts that, for each `TEXT_PAIRS` entry, the ratio of its two light values is at least its minimum. On failure the message names the pair, the theme, and the ratio.
 - `holds every pair to its minimum in the dark theme`: the same for dark.
-- `lists every role colour against role-ink` asserts that `TEXT_PAIRS` holds `role-ink` on each of the five `role-*` tokens, so a sixth role added to the tokens without a pair fails here.
+- `lists every role colour against role-ink` asserts that for every `role-*` key in `tokens.json` other than `role-ink`, `TEXT_PAIRS` holds `role-ink` on it, so a role added to the tokens without a pair fails here.
 
 - [ ] `test(brand): hold every text and control colour pair to wcag aa`
 
 ### Task 4: Fonts, logo, icons, avatars
 
-Files: created `packages/brand/src/fonts.css`, `src/icons.ts`, `src/assets.ts`, `src/index.ts`, `assets/logo-mark-1254.png`, `assets/wordmark-1024.png`, `assets/icons/icon-*.png`; moved `docs/brand/assets/avatars/*.png` to `packages/brand/assets/avatars/*-256.png`; modified `docs/brand/brand.md` (Files: where the avatars and icons live) and `docs/design/web-ui.md` (the focus ring's light value); tested by `src/assets.test.ts`
+Files: created `packages/brand/src/fonts.css`, `src/icons.ts`, `src/assets.ts`, `src/index.ts`, `assets/logo-mark-1254.png`, `assets/wordmark-1024.png`, `assets/icons/icon-*.png`; moved `docs/brand/assets/avatars/*.png` to `packages/brand/assets/avatars/*-256.png`; modified `docs/brand/brand.md` (where the avatars and icons live); tested by `src/assets.test.ts`
 Produces: `AVATAR_KEYS`, `ICON_SIZES`, the package's `exports`, and the `icons` script
 Consumes: Tasks 2 and 3
 
@@ -171,15 +177,15 @@ Tests:
 
 ### Task 5: The brand sheet
 
-Files: created `packages/brand/sheet/index.html`, `sheet/sheet.ts`, `vite.config.ts` (sheet root, `dist/sheet` output); tested by `sheet/sheet.test.ts` (jsdom)
+Files: created `packages/brand/sheet/index.html`, `sheet/sheet.ts`, `sheet/vite.config.ts`; tested by `sheet/sheet.test.ts` (jsdom)
 Produces: `renderSheet`, and the `sheet` script
 Consumes: Tasks 2 to 4
 
 Tests:
-- `shows a swatch for every colour in both themes` asserts that `renderSheet` renders one swatch for each colour token in each theme, labelled `<name> <hex>`.
-- `shows every checked pair with its ratio` asserts one row per `TEXT_PAIRS` entry per theme, with the ratio to two decimals and its minimum.
+- `shows a swatch for every colour in both themes` asserts that `renderSheet` renders exactly one `[data-swatch="<theme>:<name>"]` per colour token per theme, whose text contains `<name>` and the upper-case `<hex>`.
+- `shows every checked pair with its ratio` asserts exactly one `[data-pair]` per `TEXT_PAIRS` entry per theme, whose text contains the ratio to two decimals (`contrastRatio(...).toFixed(2)`) and the minimum.
 - `shows every icon and avatar` asserts one `img` per `ICON_SIZES` entry and per `AVATAR_KEYS` entry, each with non-empty `alt` text.
-- `has no axe violations` asserts that `axe-core` (pinned at install) finds no violation in the rendered sheet.
+- `has no axe violations` asserts that `axe-core` finds no violation in the rendered sheet.
 
 - [ ] `feat(brand): add the brand sheet for sign-off`
 
@@ -187,7 +193,9 @@ Tests:
 
 ```
 cargo xtask check
-# expected, last line: xtask check: ok  (with the pnpm check run between core-io and it, every test passing)
+# expected: the Rust checks as before; then pnpm's Vitest summary for @farik/brand,
+#   "Test Files  4 passed (4)" and "Tests  19 passed (19)" (6 + 5 + 4 + 4; the 2 xtask tests are counted by cargo);
+#   last line: xtask check: ok
 pnpm --filter @farik/brand sheet
 # expected: vite writes packages/brand/dist/sheet/index.html and its assets, exit 0
 ```
