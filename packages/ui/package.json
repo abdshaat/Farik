@@ -4,7 +4,8 @@
 	"type": "module",
 	"scripts": {
 		"typecheck": "tsc --noEmit -p .",
-		"test": "vitest run"
+		"test": "vitest run",
+		"gallery": "vite build --config gallery/vite.config.ts"
 	},
 	"dependencies": {
 		"@farik/brand": "workspace:*",

@@ -202,7 +202,7 @@ Tests:
 
 Then `pnpm --filter @farik/ui gallery` builds it, and the controller publishes it for the founder.
 
-- [ ] `feat(ui): add the component gallery for sign-off`
+- [x] `feat(ui): add the component gallery for sign-off`
 
 ## Verification
 
