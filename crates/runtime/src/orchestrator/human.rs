@@ -2216,6 +2216,17 @@ mod tests {
         let failed = refused(&orchestrator, back.clone()).await;
         assert!(failed.starts_with("review_first"), "{failed}");
         a_review(&harness, "FRK-1", true);
+        // The human names only criteria the contract has, as the reviewer does.
+        let unknown = refused(
+            &orchestrator,
+            send_back("FRK-1", AcceptSubject::Result, &["C99"]),
+        )
+        .await;
+        assert!(
+            unknown.contains("this contract has no criterion C99"),
+            "{unknown}"
+        );
+        assert_eq!(harness.row("FRK-1").status, TaskStatus::Verifying);
 
         let report = handled(&orchestrator, back).await;
         let moved = last(&harness, EventKind::TaskTransitioned).expect("a move");

@@ -616,15 +616,27 @@ pub fn check_rejection_reasons(
     if rejection.failed_criterion_ids.is_empty() {
         reasons.push("the rejection names no failed criterion".to_string());
     }
-    if rejection
-        .failed_criterion_ids
-        .iter()
-        .any(|id| id.trim().is_empty())
-    {
+    if let Err(mut named) = check_failed_criterion_ids(contract, &rejection.failed_criterion_ids) {
+        reasons.append(&mut named);
+    }
+    if !is_written(&rejection.reasons) {
+        reasons.push("the rejection says nothing about why the criteria failed".to_string());
+    }
+    verdict(reasons)
+}
+
+/// The failed criteria a rejection names, the reviewer's or the human's: each has an id, and the
+/// contract has a criterion of that id. Naming none is the caller's to judge.
+///
+/// # Errors
+///
+/// A blank id, and the ids this contract has no criterion of.
+pub fn check_failed_criterion_ids(contract: &TaskContract, ids: &[String]) -> GateResult {
+    let mut reasons = Vec::new();
+    if ids.iter().any(|id| id.trim().is_empty()) {
         reasons.push("the rejection names a criterion with no id".to_string());
     }
-    let unknown: Vec<String> = rejection
-        .failed_criterion_ids
+    let unknown: Vec<String> = ids
         .iter()
         .map(|id| id.trim().to_string())
         .filter(|id| !id.is_empty())
@@ -640,9 +652,6 @@ pub fn check_rejection_reasons(
             "this contract has no {}",
             listed("criterion", "criteria", &unknown)
         ));
-    }
-    if !is_written(&rejection.reasons) {
-        reasons.push("the rejection says nothing about why the criteria failed".to_string());
     }
     verdict(reasons)
 }

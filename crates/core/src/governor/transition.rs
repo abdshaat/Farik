@@ -25,7 +25,7 @@ use crate::governor::escalation::{
 use crate::governor::gates::{
     AssignmentInput, AssignmentRequester, Blocker, ChildState, GateResult, Rejection, WorkState,
     check_assignment, check_blocker_resolved, check_blocker_written, check_children_done,
-    check_criteria_recorded, check_rejection_reasons,
+    check_criteria_recorded, check_failed_criterion_ids, check_rejection_reasons,
 };
 use crate::governor::readiness::{ReadinessContext, evaluate_readiness};
 use crate::governor::transition_table::{GateId, TransitionActor, TransitionRow, find_transitions};
@@ -421,7 +421,11 @@ fn check_gate(gate: GateId, actor: TransitionActor, context: &TransitionContext)
                 || {
                     "the reviewer has not passed the review yet, and the human sends back once it has".to_string()
                 },
-            )
+            )?;
+            // The ids the human names are held as the reviewer's are; naming none is allowed.
+            context.rejection.as_ref().map_or(Ok(()), |rejection| {
+                check_failed_criterion_ids(&context.contract, &rejection.failed_criterion_ids)
+            })
         }
     }
 }
@@ -1508,6 +1512,27 @@ mod tests {
         // An epic is the human's to review, so it waits on no reviewer.
         unreviewed.contract.kind = Kind::Epic;
         assert_eq!(effects(&request, &unreviewed), []);
+
+        // The human names the failed criteria as the reviewer does, or none at all (ADR 0024).
+        context.rejection = Some(Rejection {
+            failed_criterion_ids: Vec::new(),
+            reasons: "The button is too small to tap.".to_string(),
+        });
+        assert_eq!(effects(&request, &context), []);
+        context.rejection = Some(Rejection {
+            failed_criterion_ids: vec!["C99".to_string(), "  ".to_string()],
+            reasons: "The button is too small to tap.".to_string(),
+        });
+        assert_eq!(
+            one_gate(&request, &context),
+            (
+                GateId::HumanRejection,
+                vec![
+                    "the rejection names a criterion with no id".to_string(),
+                    "this contract has no criterion C99".to_string()
+                ]
+            )
+        );
     }
 
     #[test]
