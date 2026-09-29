@@ -158,7 +158,7 @@ Tests:
 - `Choice`: `picks an option with a click or the arrow keys` asserts that a click selects option 2 (calling `onChange` with its value), and that ArrowDown from option 2 selects option 3. `names the group` asserts a `group` role named by the legend.
 - `Switch`: `switches on and off` asserts `role="switch"` named by its label, `aria-checked` following `checked`, and that Space calls `onChange(!checked)`.
 
-- [ ] `feat(ui): add text fields, text areas, choice cards and switches`
+- [x] `feat(ui): add text fields, text areas, choice cards and switches`
 
 ### Task 4: Dialog and stepper
 

@@ -1,8 +1,12 @@
 export { Avatar } from "./Avatar.tsx";
 export { AVATAR_URLS, type AvatarKey } from "./avatars.ts";
 export { Button } from "./Button.tsx";
+export { Choice } from "./Choice.tsx";
 export { RoleTag } from "./RoleTag.tsx";
 export type { Role } from "./role.ts";
 export { StatusWord } from "./StatusWord.tsx";
+export { Switch } from "./Switch.tsx";
 export { uiStrings } from "./strings.ts";
+export { TextArea } from "./TextArea.tsx";
+export { TextField } from "./TextField.tsx";
 export { expectNoAxeViolations } from "./test/axe.ts";
