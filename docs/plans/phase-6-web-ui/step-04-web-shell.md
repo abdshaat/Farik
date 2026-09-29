@@ -230,7 +230,7 @@ Tests:
 
 The phase decision naming `react-router` 7 changes to 8.4.0, with the reason (8 is current; its declarative mode is the one decided).
 
-- [ ] `docs(spec): say how the web app is served and how a browser disconnects`
+- [x] `docs(spec): say how the web app is served and how a browser disconnects`
 
 ## Verification
 
