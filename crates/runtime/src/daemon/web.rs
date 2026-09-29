@@ -2204,6 +2204,19 @@ mod tests {
             std::fs::read_to_string(recorded.join("stdin")).expect("docker was fed"),
             include_str!("../../sandbox/Dockerfile")
         );
+
+        // Docker is there, but its daemon does not answer.
+        script(&bin, "docker", "exit 1");
+        let stopped = setup_query(&state, "computer.check", &json!({})).await;
+        assert_eq!(
+            stopped["result"]["docker"],
+            json!({ "state": "not_running" }),
+            "{stopped}"
+        );
+        assert_eq!(
+            stopped["result"]["sandbox_image"]["state"], "missing",
+            "{stopped}"
+        );
     }
 
     #[tokio::test(flavor = "multi_thread")]
