@@ -26,7 +26,12 @@ export function Button({
 			onClick={onClick}
 		>
 			{children}
-			{busy ? ` ${uiStrings.busy}` : null}
+			{busy ? (
+				<>
+					{" "}
+					<span className={styles.hidden}>{uiStrings.busy}</span>
+				</>
+			) : null}
 		</button>
 	);
 }

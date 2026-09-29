@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { render } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { expectNoAxeViolations } from "../src/test/axe.ts";
@@ -34,6 +36,11 @@ describe("Gallery", () => {
 			}
 		}
 		expect(container.querySelectorAll("dialog[open]").length).toBe(0);
+	});
+
+	it("sets the light theme on the page, so its ground is the brand's", () => {
+		const html = readFileSync(join(import.meta.dirname, "index.html"), "utf8");
+		expect(html).toMatch(/<html lang="en" data-theme="light">/);
 	});
 
 	it("passes the accessibility check", async () => {

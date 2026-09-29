@@ -32,7 +32,7 @@ export function ChatList({
 						<p className={styles.meta}>
 							<strong>{m.author.name}</strong>
 							{m.author.role ? <RoleTag role={m.author.role} /> : null}
-							<time>{m.time}</time>
+							<span className={styles.time}>{m.time}</span>
 							{m.thread ? (
 								<span className={styles.thread}>{m.thread}</span>
 							) : null}

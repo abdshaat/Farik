@@ -25,6 +25,8 @@ describe("ChatList", () => {
 		).getAllByRole("listitem");
 		expect(within(first as HTMLElement).getByText("Ada")).toBeTruthy();
 		expect(within(first as HTMLElement).getByText("09:15")).toBeTruthy();
+		// A free-form time has no machine-readable dateTime, so it is no <time>.
+		expect(container.querySelector("time")).toBeNull();
 		expect(first?.textContent).toContain("Line one\nLine two");
 		expect(first?.textContent).toContain("Sprint 2");
 		expect(within(first as HTMLElement).getByAltText("Ada")).toBeTruthy();

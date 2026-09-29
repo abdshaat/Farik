@@ -2,6 +2,9 @@
 	display: grid;
 	gap: var(--farik-space-4);
 	color: var(--farik-color-ink);
+	font:
+		var(--farik-type-body-weight) var(--farik-type-body-size) /
+		var(--farik-type-body-line-height) var(--farik-type-body-family);
 }
 
 .empty {
@@ -23,6 +26,11 @@
 		var(--farik-type-code-weight) var(--farik-type-code-size) /
 		var(--farik-type-code-line-height) var(--farik-type-code-family);
 	white-space: pre;
+}
+
+.block:focus-visible {
+	outline: 2px solid var(--farik-color-focus);
+	outline-offset: 2px;
 }
 
 .row {

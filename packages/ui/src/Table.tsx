@@ -20,7 +20,12 @@ export function Table<T>({
 	const cls = (align?: "start" | "end") =>
 		align === "end" ? styles.numeric : undefined;
 	return (
-		<div className={styles.wrap}>
+		<section
+			className={styles.wrap}
+			aria-label={caption}
+			// biome-ignore lint/a11y/noNoninteractiveTabindex: a scroll box must take focus to scroll by keyboard
+			tabIndex={0}
+		>
 			<table className={styles.table}>
 				<caption className={styles.caption}>{caption}</caption>
 				<thead>
@@ -44,6 +49,6 @@ export function Table<T>({
 					))}
 				</tbody>
 			</table>
-		</div>
+		</section>
 	);
 }

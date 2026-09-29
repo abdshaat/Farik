@@ -30,6 +30,9 @@ export function Dialog({
 			ref={ref}
 			className={styles.dialog}
 			aria-labelledby={titleId}
+			// The browser can close a modal itself (a form, a close request);
+			// tell the parent so its state does not drift.
+			onClose={() => open && onClose()}
 			onCancel={(e) => {
 				// React state is the source of truth: the parent closes us.
 				e.preventDefault();

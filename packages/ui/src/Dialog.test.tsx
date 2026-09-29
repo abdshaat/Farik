@@ -39,4 +39,21 @@ describe("Dialog", () => {
 		expect(onClose).toHaveBeenCalledTimes(2);
 		await expectNoAxeViolations(container);
 	});
+
+	it("tells its parent when the browser closes it while open", () => {
+		const onClose = vi.fn();
+		const { rerender } = render(
+			<Dialog open title="Remove the plan" onClose={onClose}>
+				<p>Sure?</p>
+			</Dialog>,
+		);
+		fireEvent(screen.getByRole("dialog"), new Event("close"));
+		expect(onClose).toHaveBeenCalledTimes(1);
+		rerender(
+			<Dialog open={false} title="Remove the plan" onClose={onClose}>
+				<p>Sure?</p>
+			</Dialog>,
+		);
+		expect(onClose).toHaveBeenCalledTimes(1);
+	});
 });

@@ -1,14 +1,19 @@
 .wrap {
 	overflow-x: auto;
+	font:
+		var(--farik-type-body-weight) var(--farik-type-body-size) /
+		var(--farik-type-body-line-height) var(--farik-type-body-family);
+}
+
+.wrap:focus-visible {
+	outline: 2px solid var(--farik-color-focus);
+	outline-offset: 2px;
 }
 
 .table {
 	width: 100%;
 	border-collapse: collapse;
 	color: var(--farik-color-ink);
-	font:
-		var(--farik-type-body-weight) var(--farik-type-body-size) /
-		var(--farik-type-body-line-height) var(--farik-type-body-family);
 }
 
 .caption {
@@ -30,5 +35,5 @@
 
 .table .numeric {
 	font-variant-numeric: tabular-nums;
-	text-align: right;
+	text-align: end;
 }

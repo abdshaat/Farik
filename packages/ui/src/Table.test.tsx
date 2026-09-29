@@ -30,6 +30,8 @@ describe("Table", () => {
 			expect(header.getAttribute("scope")).toBe("col");
 		}
 		expect(screen.getAllByRole("row")).toHaveLength(3);
+		// The scroll box takes focus so a keyboard can scroll it.
+		expect(screen.getByRole("region", { name: "Spending" }).tabIndex).toBe(0);
 		const cell = screen.getByText("$1.00");
 		expect(cell.className).toMatch(/numeric/);
 		expect(screen.getByText("Ada").className).not.toMatch(/numeric/);

@@ -11,6 +11,10 @@ describe("DiffView", () => {
 		const { container } = render(<DiffView diff={diff} label="Changes" />);
 		expect(screen.getByRole("region", { name: "Changes" })).toBeTruthy();
 		expect(screen.getByText("f.txt")).toBeTruthy();
+		// Each file's scroll box takes focus so a keyboard can scroll it.
+		expect(
+			screen.getByRole("region", { name: "Changes, f.txt" }).tabIndex,
+		).toBe(0);
 		const added = screen.getByText("+new").closest("div");
 		const removed = screen.getByText("\u2212old").closest("div");
 		expect(added?.textContent).toBe(`+new${uiStrings.added}`);

@@ -4,6 +4,9 @@
 	align-items: flex-start;
 	gap: var(--farik-space-6);
 	padding: var(--farik-space-6);
+	font:
+		var(--farik-type-body-weight) var(--farik-type-body-size) /
+		var(--farik-type-body-line-height) var(--farik-type-body-family);
 }
 
 .column {

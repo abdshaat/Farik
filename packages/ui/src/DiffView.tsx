@@ -17,7 +17,12 @@ export function DiffView({ diff, label }: { diff: string; label: string }) {
 						{file.note ? (
 							<p className={styles.empty}>{uiStrings[file.note]}</p>
 						) : null}
-						<div className={styles.block}>
+						<section
+							className={styles.block}
+							aria-label={`${label}, ${file.path}`}
+							// biome-ignore lint/a11y/noNoninteractiveTabindex: a scroll box must take focus to scroll by keyboard
+							tabIndex={0}
+						>
 							{file.lines.map((line, i) => (
 								<div
 									// biome-ignore lint/suspicious/noArrayIndexKey: the list is static per render
@@ -43,7 +48,7 @@ export function DiffView({ diff, label }: { diff: string; label: string }) {
 									)}
 								</div>
 							))}
-						</div>
+						</section>
 					</section>
 				))
 			)}

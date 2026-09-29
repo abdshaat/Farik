@@ -5,6 +5,9 @@
 	margin: 0;
 	padding: 0;
 	list-style: none;
+	font:
+		var(--farik-type-body-weight) var(--farik-type-body-size) /
+		var(--farik-type-body-line-height) var(--farik-type-body-family);
 }
 
 .message {
@@ -32,7 +35,7 @@
 	font-weight: 600;
 }
 
-.meta time,
+.time,
 .thread {
 	color: var(--farik-color-ink-muted);
 }

@@ -233,7 +233,7 @@ function Column({ theme }: { theme: "light" | "dark" }) {
 			</Example>
 			<Example name="Table">
 				<Table
-					caption="Costs per agent"
+					caption={`Costs per agent, ${theme}`}
 					rows={costs}
 					getKey={(r) => r.agent}
 					columns={[
