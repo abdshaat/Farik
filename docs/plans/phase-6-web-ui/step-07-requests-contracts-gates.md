@@ -64,7 +64,7 @@ The runtime gives step 08's pages what spec 5.4 and 5.16 ask of a human gate. It
   - It files through `file_request` with `created_by: human`, and answers `{ task_id }`.
 - **Checking and saving a plan.**
   - `Transitions::context` is split: `pub fn readiness_context(files: &ProjectFiles, log: &EventLog, team: &Team, contract: &TaskContract, now: DateTime<Utc>) -> Result<ReadinessContext, TransitionError>` builds from a given contract, and `context` calls it with the file's contract.
-  - `contract.check { task_id, contract }` answers `{ failures: [{ rule, message, plain }] }`:
+  - `contract.check { task_id, contract }` answers `{ failures: [{ rule, message, plain }], total }`, where `total` is the number of checks run (the `ReadinessRule` variants evaluated for this contract, plus one for the schema):
     - schema errors come first, as `rule: "schema"`, with the schema's message as `plain`;
     - then `evaluate_readiness`'s failures, with `plain` from `farik_core::governor::plain::plain_readiness(rule) -> &'static str`, which covers every `ReadinessRule` variant.
   - This is the phase decision's `contract.validate`, renamed because it validates nothing it saves. The project plan records the rename.
@@ -78,7 +78,9 @@ The runtime gives step 08's pages what spec 5.4 and 5.16 ask of a human gate. It
   - **`task.history { task_id }`** answers its events.
   - **`task.diff { task_id }`** answers `{ diff, files, added, removed }`. For an epic it joins its tasks' integrated diffs in id order, each under a `# FRK-n` line, which is new.
   - **`task.checks { task_id }`** answers `[{ criterion_id, text, passed, evidence }]` from `criterion.recorded` since the task last entered `verifying`. For a contract awaiting approval it answers the readiness results.
-  - **`questions.list { task_id? }`** answers the questions, their choices, and their answers.
+  - **`questions.list { task_id? }`** answers `[{ question_id (the seq of its question.asked), task_id, agent_id, text, choices: [{ label, hint? }], answer: string | null }]`, oldest first.
+  - **`task.tries { task_id }`** answers `{ used: iteration, allowed: max_iterations + extra_iterations }`.
+  - **`sprint.current {}`** answers `{ sprint_id, done, total } | null`, from `Projections::open_sprint` and the sprint's tasks (done = accepted or cancelled).
   - **`escalation.choices`** is described above.
   - **`team.activity {}`** answers `[{ agent_id, state, line, task_id?, until? }]`.
     - Lines by session purpose: triage, "Sizing a request"; refine, "Writing the plan for <title>"; plan, "Planning <title>"; implement, "Building <title>"; verify, "Reviewing <title>"; ceremony, "Running the <thread>"; conversation, "Answering in the channel".
@@ -99,7 +101,7 @@ The runtime gives step 08's pages what spec 5.4 and 5.16 ask of a human gate. It
   - completion notes: `implement_finishes_frk_1`, `plan_closes_epic_frk_1`;
   - review notes: `review_writes_note`, `review_answers_nothing`, `review_epic_frk_1`, `review_epic_fails_frk_1`.
 
-  `plan_breaks_down_frk_1` changes only if a fixture's policy binds its children; it does not, since the fixtures use `high_risk` with low-risk children. New synthetic transcripts for step 08's journeys: `ask_with_choices_frk_1` and `implement_after_send_back_frk_1`.
+  `plan_breaks_down_frk_1` changes only if a fixture's policy binds its children; it does not, since the fixtures use `high_risk` with low-risk children. New synthetic transcripts for step 08's journeys: `ask_with_choices_frk_1`, `implement_after_send_back_frk_1`, `triage_frk_1_small_by_pm`, and `refine_writes_high_risk_frk_1` (a `high` risk task for a Developer, reviewed by the Architect, with a summary).
 - **Skills.** The Product Manager's, Scrum Master's, Architect's, Developer's, and Marketing Specialist's skills each gain one line on the summary they write.
 
 ## File map
@@ -138,7 +140,7 @@ pub fn farik_store::activity::activity(log: &EventLog, projections: &Projections
 pub fn readiness_context(files: &ProjectFiles, log: &EventLog, team: &Team, contract: &TaskContract, now: DateTime<Utc>) -> Result<ReadinessContext, TransitionError>;
 ```
 
-RPC queries: `waiting.list`, `contract.get`, `contract.check`, `task.history`, `task.diff`, `task.checks`, `questions.list`, `escalation.choices`, `team.activity`, `moved.since`. RPC methods: `request.file`, `contract.save`.
+RPC queries: `waiting.list`, `contract.get`, `contract.check`, `task.history`, `task.diff`, `task.checks`, `task.tries`, `sprint.current`, `questions.list`, `escalation.choices`, `team.activity`, `moved.since`. RPC methods: `request.file`, `contract.save`.
 
 ## Tasks
 
@@ -177,7 +179,8 @@ Files: the store's requests, waiting, diff, activity and git; CLI moves; runtime
 - `derives_each_agents_activity`: each state's exact line.
 - `says_what_moved_since`: each kind's exact line, `agent.slept` included.
 - `offers_the_choices_for_each_reason`: the bodies above per reason.
-- `records_question_choices`: labels and hints within their bounds.
+- `records_question_choices`: labels and hints within their bounds, and `questions.list`'s fields.
+- `answers_tries_and_the_sprint`: `task.tries` after an extra-tries grant; `sprint.current` counts; `contract.check`'s `total`.
 
 - [ ] `feat(runtime): answer the gates' queries, and file, check and save plans from the browser`
 
