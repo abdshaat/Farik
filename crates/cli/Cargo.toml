@@ -14,6 +14,15 @@ path = "src/lib.rs"
 name = "farik"
 path = "src/main.rs"
 
+[[bin]]
+name = "farik-e2e-serve"
+path = "src/bin/farik-e2e-serve.rs"
+required-features = ["e2e"]
+
+[features]
+# The end-to-end binary, which replays recorded sessions; the shipped `farik` has no path to.
+e2e = []
+
 [dependencies]
 chrono.workspace = true
 clap.workspace = true

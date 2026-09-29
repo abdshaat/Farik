@@ -136,7 +136,12 @@ pub struct CliIo<'a> {
     /// What a driving process waits on while every agent with work is asleep: the machine's timer
     /// over `clock` when `None`, a test's own otherwise.
     pub sleeper: Option<Arc<dyn Sleeper>>,
+    /// What `farik serve` opens its link with: nothing here, and the system's opener in `main`.
+    pub open_url: Opener,
 }
+
+/// Opens a link in a browser, or says why it could not.
+pub type Opener = Arc<dyn Fn(&str) -> Result<(), String> + Send + Sync>;
 
 impl<'a> CliIo<'a> {
     /// A harness writing to `stdout` and `stderr`, run in `cwd` at `clock`'s time, with nothing on
@@ -162,6 +167,7 @@ impl<'a> CliIo<'a> {
             interrupts: Interrupts::Channel(never),
             session_ids: Arc::new(SequentialIds::new()),
             sleeper: None,
+            open_url: Arc::new(|_| Ok(())),
         }
     }
 }
@@ -276,6 +282,9 @@ enum Commands {
         /// The port to listen on, instead of 7420 and the nine after it.
         #[arg(long)]
         port: Option<u16>,
+        /// Print the link and do not open it in a browser.
+        #[arg(long)]
+        no_open: bool,
     },
     /// Plan without doing: triage, contracts, breakdowns, and assignments, and no work (8.2).
     Plan,
@@ -813,7 +822,7 @@ fn drive(command: &Commands, as_json: bool, io: &mut CliIo<'_>) -> i32 {
             )
         }
         Commands::Plan => run::drive(&project, TickRules::Planning, io, as_json),
-        Commands::Serve { port } => serve::serve(&project, *port, io),
+        Commands::Serve { port, no_open } => serve::serve(&project, *port, *no_open, io),
         _ => run::drive(&project, TickRules::All, io, as_json),
     }
 }

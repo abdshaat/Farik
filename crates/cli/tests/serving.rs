@@ -440,3 +440,131 @@ fn serve_status_has_no_credential_under_a_given_engine() {
         "{status}"
     );
 }
+
+/// `farik serve <extra>` on a thread whose opener records what it is asked to open, and answers
+/// `opened`.
+fn serving_opening(
+    root: &Path,
+    extra: &[&str],
+    out: &SharedOut,
+    err: &SharedOut,
+    asked: &Arc<Mutex<Vec<String>>>,
+    opened: Result<(), String>,
+) -> std::thread::JoinHandle<Ran> {
+    let root = root.to_path_buf();
+    let mut args = vec!["serve".to_string(), "--port".to_string(), free_port()];
+    args.extend(extra.iter().map(ToString::to_string));
+    let (out, err, asked) = (out.clone(), err.clone(), Arc::clone(asked));
+    std::thread::spawn(move || {
+        let args: Vec<&str> = args.iter().map(String::as_str).collect();
+        run_with(&root, &args, |io| {
+            io.engine = recorded(Vec::new());
+            io.stdout = Box::new(out);
+            io.stderr = Box::new(err);
+            io.open_url = Arc::new(move |url| {
+                asked.lock().expect("the urls").push(url.to_string());
+                opened.clone()
+            });
+        })
+    })
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn opens_the_link_in_a_browser() {
+    let repository = a_team("serve-opens");
+    let (out, err) = (SharedOut::default(), SharedOut::default());
+    let asked = Arc::new(Mutex::new(Vec::new()));
+    let serving = serving_opening(&repository.path, &[], &out, &err, &asked, Ok(()));
+    until("the link is printed", || !links(&out.text()).is_empty());
+    let stopped = run(&repository.path, &["stop"]);
+    assert_eq!(stopped.code, 0, "{}", stopped.err);
+    joined(serving, "the serve");
+    let (port, code) = links(&out.text()).remove(0);
+    assert_eq!(
+        *asked.lock().expect("the urls"),
+        vec![format!("http://127.0.0.1:{port}/connect#{code}")]
+    );
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn does_not_open_with_no_open() {
+    let repository = a_team("serve-no-open");
+    let (out, err) = (SharedOut::default(), SharedOut::default());
+    let asked = Arc::new(Mutex::new(Vec::new()));
+    let serving = serving_opening(&repository.path, &["--no-open"], &out, &err, &asked, Ok(()));
+    until("the link is printed", || !links(&out.text()).is_empty());
+    let stopped = run(&repository.path, &["stop"]);
+    assert_eq!(stopped.code, 0, "{}", stopped.err);
+    joined(serving, "the serve");
+    assert!(asked.lock().expect("the urls").is_empty());
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn keeps_serving_when_no_browser_opens() {
+    let repository = a_team("serve-no-browser");
+    let (out, err) = (SharedOut::default(), SharedOut::default());
+    let asked = Arc::new(Mutex::new(Vec::new()));
+    let serving = serving_opening(
+        &repository.path,
+        &[],
+        &out,
+        &err,
+        &asked,
+        Err("no display".to_string()),
+    );
+    until("the link is printed", || !links(&out.text()).is_empty());
+    until("the warning is printed", || !err.text().is_empty());
+    assert!(!serving.is_finished());
+    let stopped = run(&repository.path, &["stop"]);
+    assert_eq!(stopped.code, 0, "{}", stopped.err);
+    let ran = joined(serving, "the serve");
+    assert_eq!(ran.code, 0, "{}\n{}", ran.out, ran.err);
+    assert!(
+        err.text()
+            .contains("could not open a browser: no display; open the link above yourself"),
+        "{}",
+        err.text()
+    );
+}
+
+#[cfg(feature = "e2e")]
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn the_e2e_binary_serves_with_recorded_sessions() {
+    use std::io::{BufRead as _, BufReader, Read as _};
+    use std::process::{Command, Stdio};
+
+    let repository = a_team("serve-e2e");
+    let port = free_port();
+    let mut child = Command::new(env!("CARGO_BIN_EXE_farik-e2e-serve"))
+        .args(["--port", &port])
+        .current_dir(&repository.path)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("the binary starts");
+    let mut lines = BufReader::new(child.stdout.take().expect("stdout")).lines();
+    let printed = loop {
+        let line = lines.next().expect("the link is printed").expect("a line");
+        if let Some(link) = link_of(&line) {
+            break link;
+        }
+    };
+    assert_eq!(printed.0.to_string(), port);
+    let mut stream = std::net::TcpStream::connect(("127.0.0.1", printed.0)).expect("connects");
+    write!(
+        stream,
+        "GET /session HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nConnection: close\r\n\r\n"
+    )
+    .expect("the request is sent");
+    let mut answer = String::new();
+    stream.read_to_string(&mut answer).expect("the answer");
+    let stopped = run(&repository.path, &["stop"]);
+    let status = child.wait().expect("the binary ends");
+    assert!(answer.starts_with("HTTP/1.1 401"), "{answer}");
+    assert_eq!(stopped.code, 0, "{}", stopped.err);
+    assert!(status.success());
+}

@@ -16,7 +16,12 @@ const DEFAULT_PORT: u16 = 7420;
 
 /// Drives `project` with every rule until a stop or Ctrl-C, whatever the board. Answers the exit
 /// code: 130 after Ctrl-C, 1 after a refusal or a failed tick, 0 after `farik stop`.
-pub(crate) fn serve(project: &Project, port: Option<u16>, io: &mut CliIo<'_>) -> i32 {
+pub(crate) fn serve(
+    project: &Project,
+    port: Option<u16>,
+    no_open: bool,
+    io: &mut CliIo<'_>,
+) -> i32 {
     let runtime = match runtime() {
         Ok(runtime) => runtime,
         Err(error) => return refuse(io, false, &error),
@@ -57,13 +62,14 @@ pub(crate) fn serve(project: &Project, port: Option<u16>, io: &mut CliIo<'_>) ->
             &json!({}),
         );
         if let Some(code) = &driver.connect_code {
-            printer.line(
-                &format!(
-                    "open http://127.0.0.1:{}/connect#{code} in your browser",
-                    driver.port()
-                ),
-                &json!({}),
-            );
+            let link = format!("http://127.0.0.1:{}/connect#{code}", driver.port());
+            printer.line(&format!("open {link} in your browser"), &json!({}));
+            if !no_open && let Err(why) = (printer.io.open_url)(&link) {
+                say(
+                    &mut printer.io.stderr,
+                    &format!("could not open a browser: {why}; open the link above yourself"),
+                );
+            }
         }
         let scope = TickScope {
             task_id: None,

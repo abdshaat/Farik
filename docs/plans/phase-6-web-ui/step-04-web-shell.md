@@ -178,7 +178,7 @@ Tests:
 - `keeps_serving_when_no_browser_opens` asserts that an `open_url` returning `Err("no display")` prints the stderr sentence and serving continues (`farik stop` then exits 0).
 - `the_e2e_binary_serves_with_recorded_sessions` (in `crates/cli/tests/serving.rs`, `#[cfg(feature = "e2e")]`, run by integration step 3) asserts that `farik-e2e-serve --port <p>` prints the link and answers `GET /session` with 401.
 
-- [ ] `feat(cli): open the browser from farik serve, and add the e2e server`
+- [x] `feat(cli): open the browser from farik serve, and add the e2e server`
 
 ### Task 3: The app's frame and its connection
 

@@ -27,6 +27,28 @@ fn main() -> std::process::ExitCode {
     io.engine = Engine::Claude;
     io.interrupts = Interrupts::CtrlC;
     io.session_ids = Arc::new(RandomSessionIds);
+    io.open_url = Arc::new(open_in_browser);
     let code = run_cli(&arguments, &mut io);
     std::process::ExitCode::from(u8::try_from(code).unwrap_or(1))
+}
+
+/// Starts the system's opener on `url` and does not wait for it.
+fn open_in_browser(url: &str) -> Result<(), String> {
+    let mut command = if cfg!(target_os = "macos") {
+        std::process::Command::new("open")
+    } else if cfg!(windows) {
+        let mut command = std::process::Command::new("cmd");
+        command.args(["/c", "start", ""]);
+        command
+    } else {
+        std::process::Command::new("xdg-open")
+    };
+    command
+        .arg(url)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .map(|_| ())
+        .map_err(|error| error.to_string())
 }
