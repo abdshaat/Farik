@@ -4,6 +4,7 @@
 		"includes": [
 			"*.json",
 			"packages/**",
+			"apps/**",
 			"!**/generated",
 			"!**/dist",
 			"!**/node_modules"

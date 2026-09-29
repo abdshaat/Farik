@@ -192,7 +192,7 @@ Tests (Vitest, jsdom):
 - `remembers_the_theme_and_follows_the_computer` asserts that `setTheme('dark')` sets `data-theme="dark"` and `localStorage['farik.theme']`, and that `system` follows a `matchMedia` change.
 - `works_without_local_storage` asserts that with `localStorage` throwing, the theme defaults to light and no error escapes.
 
-- [ ] `feat(web): add the web app's frame, connection, events and theme`
+- [x] `feat(web): add the web app's frame, connection, events and theme`
 
 ### Task 4: The shell, Pause, Settings, and the pages
 

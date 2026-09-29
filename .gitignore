@@ -16,6 +16,7 @@ packages/*/src/generated/
 src-tauri/target/
 
 # test and coverage
+apps/web/e2e/screenshots/
 coverage/
 .vitest/
 
