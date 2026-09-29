@@ -10,14 +10,12 @@ use farik_store::{EventLog, EventQuery, StoreError};
 ///
 /// When the log cannot be read.
 pub fn paused(log: &EventLog) -> Result<bool, StoreError> {
-    let events = log.read(&EventQuery {
+    let query = EventQuery {
         kinds: vec![EventKind::TeamPaused, EventKind::TeamResumed],
         ..EventQuery::default()
-    })?;
-    Ok(matches!(
-        events.last().map(|event| &event.body),
-        Some(EventBody::TeamPaused(_))
-    ))
+    };
+    let last = log.read(&query)?.into_iter().last();
+    Ok(last.is_some_and(|event| matches!(event.body, EventBody::TeamPaused(_))))
 }
 
 #[cfg(test)]

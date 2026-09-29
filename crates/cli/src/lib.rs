@@ -316,7 +316,7 @@ enum Commands {
         #[command(subcommand)]
         command: SprintCommands,
     },
-    /// Pause the whole team: no rule runs, no session starts, until `farik resume`.
+    /// Pause the whole team: no rule runs and no session starts until `farik resume`.
     Pause,
     /// Resume a paused team.
     Resume,
