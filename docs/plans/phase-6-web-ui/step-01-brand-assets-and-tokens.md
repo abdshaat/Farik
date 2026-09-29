@@ -1,6 +1,6 @@
 # Phase 6, step 01: Brand assets and tokens
 
-Status: in progress (landed and landing-reviewed 2026-09-28; waiting on the founder's sign-off of the brand sheet)
+Status: done (signed off by the founder, 2026-09-28, on the brand sheet with the muted palette)
 Branch: `phase/6-web-ui`
 Spec: `docs/SPEC.md` sections 10 (WCAG 2.2 AA, clients built from the brand's tokens, offline) and 14 (brand)
 Depends on: phase 5 (merged in #16: `docs/brand/brand.md`, `docs/design/web-ui.md`, the founder's files in `docs/brand/assets/`); the planning commit of this phase (111629a)
