@@ -52,6 +52,8 @@ The new colours, each with one job:
 | Slate | `#8AA3C2` | "In progress" on dark surfaces |
 | Peach | `#E0A68C` | "Waiting on you" on dark surfaces |
 | Mist | `#A7BCD6` | The focus ring on dark surfaces |
+| Added tint | `#E3EBDF` light, `#243029` dark | The background of an added line in the code-changes view, under ink (2026-09-28) |
+| Removed tint | `#F2DDD3` light, `#3A2822` dark | The background of a removed line in the code-changes view, under ink (2026-09-28) |
 
 The tags carry Midnight Terminal text, measured at 7.81 (Dusty Rose), 8.55 (Sage), 9.40 (Wheat), 10.51 (Sky) and 8.18 (Heather).
 

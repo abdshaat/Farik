@@ -135,7 +135,7 @@ Tests (in `packages/brand`):
 - The two existing colour tests are rewritten to find the blocks by the new selector lists.
 - `gives every job its own colour`, extended, asserts that `diff-added` and `diff-removed` are among the jobs and are distinct from each other and from every other job, in each theme.
 
-- [ ] `feat(brand): add the diff tints and let any element take a theme`
+- [x] `feat(brand): add the diff tints and let any element take a theme`
 
 ### Task 2: The package, the small parts, and the rules
 

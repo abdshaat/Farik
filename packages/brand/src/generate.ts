@@ -30,7 +30,15 @@ export function generateCss(tokens: Tokens): string {
 		Object.entries(tokens.color[t]).map(
 			([k, hex]) => `--farik-color-${k}: ${hex};`,
 		);
-	return `${block(":root", [...theme("light"), ...shared])}\n${block(':root[data-theme="dark"]', theme("dark"))}`;
+	const paint = [
+		"color: var(--farik-color-ink);",
+		"background-color: var(--farik-color-page);",
+	];
+	return [
+		block(':root, [data-theme="light"]', [...theme("light"), ...shared]),
+		block(':root[data-theme="dark"], [data-theme="dark"]', theme("dark")),
+		block('[data-theme="light"], [data-theme="dark"]', paint),
+	].join("\n");
 }
 
 export function generateTs(tokens: Tokens): string {

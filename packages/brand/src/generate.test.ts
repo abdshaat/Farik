@@ -8,26 +8,56 @@ const source = JSON.parse(
 );
 const tokens = readTokens(source);
 const css = generateCss(tokens);
+const LIGHT = ':root, [data-theme="light"]';
+const DARK = ':root[data-theme="dark"], [data-theme="dark"]';
 const block = (selector: string) => {
 	const start = css.indexOf(`${selector} {`);
 	return css.slice(start, css.indexOf("}", start));
 };
+const rules = css
+	.split("}")
+	.map((r) => r.split("{"))
+	.filter((p): p is [string, string] => p.length === 2)
+	.map(([selector, body]) => ({ selector: selector.trim(), body }));
+const ruleFor = (token: string) =>
+	rules.find(
+		(r) =>
+			r.selector.split(/,\s*/).includes(token) &&
+			r.body.includes("--farik-color-page"),
+	);
 
 describe("generate", () => {
-	it("writes every colour token of the light theme under :root", () => {
-		const root = block(":root");
+	it("writes every colour token of the light theme under the light selectors", () => {
+		const root = block(LIGHT);
 		for (const [name, hex] of Object.entries(source.color.light)) {
 			expect(root).toContain(`--farik-color-${name}: ${hex};`);
 		}
 		expect(root).toContain("--farik-color-page: #F3E7D3;");
 	});
 
-	it('writes every colour token of the dark theme under :root[data-theme="dark"]', () => {
-		const dark = block(':root[data-theme="dark"]');
+	it("writes every colour token of the dark theme under the dark selectors", () => {
+		const dark = block(DARK);
 		for (const [name, hex] of Object.entries(source.color.dark)) {
 			expect(dark).toContain(`--farik-color-${name}: ${hex};`);
 		}
 		expect(dark).toContain("--farik-color-page: #161616;");
+	});
+
+	it("writes the dark theme for any element that asks for it", () => {
+		const dark = ruleFor('[data-theme="dark"]');
+		expect(dark?.body).toContain("--farik-color-page: #161616;");
+		const light = ruleFor('[data-theme="light"]');
+		expect(light?.body).toContain("--farik-color-page: #F3E7D3;");
+	});
+
+	it("a themed element paints its own text and ground", () => {
+		const paint = rules.find(
+			(r) =>
+				r.selector.split(/,\s*/).includes('[data-theme="dark"]') &&
+				r.body.includes("background-color"),
+		);
+		expect(paint?.body).toContain("color: var(--farik-color-ink);");
+		expect(paint?.body).toContain("background-color: var(--farik-color-page);");
 	});
 
 	it("writes each type step as size, line height, weight and family", () => {

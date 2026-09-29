@@ -70,6 +70,8 @@ describe("contrast", () => {
 				"status-working",
 				"status-waiting",
 				"focus",
+				"diff-added",
+				"diff-removed",
 			];
 			const seen = new Map<string, string>();
 			for (const job of jobs) {
@@ -83,6 +85,17 @@ describe("contrast", () => {
 			}
 		});
 	}
+
+	it("holds ink on the diff tints to AA", () => {
+		for (const bg of ["diff-added", "diff-removed"])
+			expect(
+				TEXT_PAIRS.some(
+					(p) =>
+						p.foreground === "ink" && p.background === bg && p.minimum === 4.5,
+				),
+				`ink on ${bg}`,
+			).toBe(true);
+	});
 
 	it("pins the pairs the plan lists", () => {
 		expect(
@@ -112,6 +125,8 @@ describe("contrast", () => {
 			["role-ink", "role-architect", 4.5],
 			["role-ink", "role-developer", 4.5],
 			["role-ink", "role-marketing-specialist", 4.5],
+			["ink", "diff-added", 4.5],
+			["ink", "diff-removed", 4.5],
 		]);
 	});
 });
