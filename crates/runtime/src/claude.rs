@@ -135,6 +135,15 @@ impl ClaudeCredential {
     }
 }
 
+/// The variable of `env` a credential comes from, when one does: what cannot be removed from
+/// Farik, since the environment is the user's.
+#[must_use]
+pub fn credential_variable(env: &BTreeMap<String, String>) -> Option<&'static str> {
+    [API_KEY, OAUTH_TOKEN]
+        .into_iter()
+        .find(|name| env.get(*name).is_some_and(|value| !value.trim().is_empty()))
+}
+
 /// The credential an environment holds: `ANTHROPIC_API_KEY` first, else
 /// `CLAUDE_CODE_OAUTH_TOKEN`; a blank value is none.
 #[must_use]

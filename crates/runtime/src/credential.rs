@@ -53,6 +53,12 @@ pub trait CredentialStore: Send + Sync {
     ///
     /// The store could not be written.
     fn save(&self, credential: &ClaudeCredential) -> Result<(), CredentialError>;
+    /// Removes the credential kept here; nothing kept is nothing to remove.
+    ///
+    /// # Errors
+    ///
+    /// The store could not be written.
+    fn delete(&self) -> Result<(), CredentialError>;
     /// Which source this store is.
     fn source(&self) -> Source;
 }
@@ -69,6 +75,13 @@ impl CredentialStore for KeychainStore {
         keyring::Entry::new(SERVICE, PROVIDER)
             .and_then(|entry| entry.set_password(&to_json(credential)))
             .map_err(|error| map_keyring_error(&error))
+    }
+
+    fn delete(&self) -> Result<(), CredentialError> {
+        match keyring::Entry::new(SERVICE, PROVIDER).and_then(|entry| entry.delete_credential()) {
+            Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
+            Err(error) => Err(map_keyring_error(&error)),
+        }
     }
 
     fn source(&self) -> Source {
@@ -107,6 +120,18 @@ impl CredentialStore for FileStore {
         })
     }
 
+    fn delete(&self) -> Result<(), CredentialError> {
+        match std::fs::remove_file(&self.path) {
+            Err(error) if error.kind() != std::io::ErrorKind::NotFound => {
+                Err(CredentialError::Failed(format!(
+                    "could not remove {}: {error}",
+                    self.path.display()
+                )))
+            }
+            _ => Ok(()),
+        }
+    }
+
     fn source(&self) -> Source {
         Source::File
     }
@@ -125,6 +150,11 @@ impl CredentialStore for MemoryStore {
 
     fn save(&self, credential: &ClaudeCredential) -> Result<(), CredentialError> {
         *crate::locked(&self.held) = Some(credential.clone());
+        Ok(())
+    }
+
+    fn delete(&self) -> Result<(), CredentialError> {
+        *crate::locked(&self.held) = None;
         Ok(())
     }
 
@@ -258,6 +288,10 @@ mod tests {
         }
 
         fn save(&self, _credential: &ClaudeCredential) -> Result<(), CredentialError> {
+            Err(self.0.clone())
+        }
+
+        fn delete(&self) -> Result<(), CredentialError> {
             Err(self.0.clone())
         }
 
@@ -402,6 +436,20 @@ mod tests {
             Some((token(), Source::File))
         );
         assert_eq!(load_credential(&BTreeMap::new(), &stores[..2]), None);
+    }
+
+    #[test]
+    fn forgets_the_credential_on_delete() {
+        let file = FileStore::new(scratch("delete").join("credential.json"));
+        file.save(&token()).expect("the file is written");
+        file.delete().expect("the file is removed");
+        assert_eq!(file.load(), Ok(None));
+        // Nothing kept is nothing to remove.
+        file.delete().expect("nothing to remove");
+        let memory = MemoryStore::default();
+        memory.save(&token()).expect("kept");
+        memory.delete().expect("forgotten");
+        assert_eq!(memory.load(), Ok(None));
     }
 
     #[test]

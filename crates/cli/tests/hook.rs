@@ -129,6 +129,7 @@ impl Served {
             executor: None,
             limits: DEFAULT_SESSION_LIMITS,
             farik_tools: Vec::new(),
+            tiers: team.agents[1].tiers(&team.permissions()),
             purpose: SessionPurpose::Implement,
             in_reply_to: None,
             thread: None,

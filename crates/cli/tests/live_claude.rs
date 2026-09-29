@@ -131,7 +131,7 @@ impl Project {
             an_agent_wire("dev-a", "software_developer"),
         ]);
         let team = validate_team(&wire).expect("a team");
-        let tiers = team
+        let tiers: BTreeSet<PermissionTier> = team
             .agents
             .iter()
             .find(|agent| agent.id.as_str() == "dev-a")
@@ -176,6 +176,7 @@ impl Project {
             executor: None,
             limits: DEFAULT_SESSION_LIMITS,
             farik_tools: vec![FARIK_TOOL.to_string()],
+            tiers: tiers.iter().copied().collect(),
             purpose: SessionPurpose::Implement,
             in_reply_to: None,
             thread: None,

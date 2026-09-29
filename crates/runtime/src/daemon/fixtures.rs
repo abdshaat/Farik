@@ -15,7 +15,7 @@ use serde_json::{Value, json};
 
 use super::{DaemonState, HookRequest, SessionRegistration};
 use crate::session::SessionPurpose;
-use crate::tools::fixtures::{TestProject, a_team_of_three, at};
+use crate::tools::fixtures::{TestProject, a_team_of_three, at, tiers_of};
 use crate::tools::{ToolDeps, tool_descriptors};
 
 /// The session of `dev-a`, on FRK-1.
@@ -95,6 +95,7 @@ impl TestDaemon {
             executor: None,
             limits,
             farik_tools: farik_tools.iter().map(ToString::to_string).collect(),
+            tiers: tiers_of(&self.project.deps, agent),
             purpose: SessionPurpose::Implement,
             in_reply_to: None,
             thread: None,
@@ -152,6 +153,7 @@ impl TestDaemon {
             executor: None,
             limits: DEFAULT_SESSION_LIMITS,
             farik_tools: every_farik_tool().iter().map(ToString::to_string).collect(),
+            tiers: tiers_of(deps, "dev-a"),
             purpose: SessionPurpose::Implement,
             in_reply_to: None,
             thread: None,

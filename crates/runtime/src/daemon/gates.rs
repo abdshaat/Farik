@@ -591,7 +591,7 @@ pub(crate) fn choices(
 }
 
 #[cfg(test)]
-mod tests {
+pub(super) mod tests {
     use std::sync::Arc;
 
     use farik_core::contract::TaskStatus;
@@ -604,7 +604,7 @@ mod tests {
     use crate::orchestrator::fixtures::Harness;
 
     /// The reply frame to `method` with `params`, answered on a runtime of its own.
-    fn rpc(state: &Arc<DaemonState>, method: &str, params: &Value) -> Value {
+    pub(crate) fn rpc(state: &Arc<DaemonState>, method: &str, params: &Value) -> Value {
         let frame = json!({ "jsonrpc": "2.0", "id": 1, "method": method, "params": params });
         tokio::runtime::Builder::new_multi_thread()
             .enable_all()
@@ -618,14 +618,24 @@ mod tests {
     }
 
     /// The result of the query `name`, checked against `definition` of the RPC schema.
-    fn query(state: &Arc<DaemonState>, name: &str, params: &Value, definition: &str) -> Value {
+    pub(crate) fn query(
+        state: &Arc<DaemonState>,
+        name: &str,
+        params: &Value,
+        definition: &str,
+    ) -> Value {
         let reply = rpc(state, "query", &json!({ "name": name, "params": params }));
         conforms(&reply["result"], definition, &reply);
         reply["result"].clone()
     }
 
     /// The result of the method `method`, checked against `definition` of the RPC schema.
-    fn call(state: &Arc<DaemonState>, method: &str, params: &Value, definition: &str) -> Value {
+    pub(crate) fn call(
+        state: &Arc<DaemonState>,
+        method: &str,
+        params: &Value,
+        definition: &str,
+    ) -> Value {
         let reply = rpc(state, method, params);
         conforms(&reply["result"], definition, &reply);
         reply["result"].clone()
@@ -650,7 +660,7 @@ mod tests {
     }
 
     /// A harness whose daemon takes commands through its orchestrator.
-    fn driven(name: &str) -> Harness {
+    pub(crate) fn driven(name: &str) -> Harness {
         let harness = Harness::new(name, |_| {});
         let orchestrator = Arc::new(harness.orchestrator(harness.recorded(Vec::new())));
         assert!(

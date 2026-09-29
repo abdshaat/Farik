@@ -10,6 +10,7 @@ use farik_core::contract::fixtures::a_contract_wire;
 use farik_core::contract::{TaskId, validate_contract};
 use farik_core::criteria::fixtures::a_criteria_library_wire;
 use farik_core::criteria::validate_criteria;
+use farik_core::governor::permissions::PermissionTier;
 use farik_core::sprint::fixtures::an_open_sprint_wire;
 use farik_core::sprint::validate_sprint;
 use farik_core::team::fixtures::{a_team_wire, an_agent_wire};
@@ -100,6 +101,7 @@ impl TestProject {
             in_reply_to: None,
             thread: None,
             executor: None,
+            tiers: tiers_of(&self.deps, agent),
             deps: Arc::clone(&self.deps),
         }
     }
@@ -316,6 +318,17 @@ impl TestProject {
         self.deps.projections.apply(&appended).expect("projects");
         appended
     }
+}
+
+/// `agent`'s tiers as the team file says now, which a session starting now is given; none for an
+/// agent the team does not have.
+pub(crate) fn tiers_of(deps: &ToolDeps, agent: &str) -> Vec<PermissionTier> {
+    let team = deps.files.read_team().expect("the team reads");
+    team.agents
+        .iter()
+        .find(|one| one.id.as_str() == agent)
+        .map(|one| one.tiers(&team.permissions()))
+        .unwrap_or_default()
 }
 
 /// Runs one call to the end on a runtime of its own.

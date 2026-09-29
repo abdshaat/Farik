@@ -94,8 +94,8 @@ pub struct ToolDeps {
 
 /// The session a call comes from.
 pub struct ToolContext {
-    /// The calling agent. Its role and tiers are read from `.farik/team.yaml` on every call, so a
-    /// pause, a grant, or a revoke changes the next call rather than the next session.
+    /// The calling agent. Its status and role are read from `.farik/team.yaml` on every call, so
+    /// a pause or a retirement stops the next call.
     pub agent_id: String,
     /// The task the session works on, when it works on one.
     pub task_id: Option<TaskId>,
@@ -109,6 +109,9 @@ pub struct ToolContext {
     pub thread: Option<Thread>,
     /// Where the task's commands run, when it has somewhere.
     pub executor: Option<Arc<dyn Executor>>,
+    /// The agent's tiers when the session started (spec 4.4): a grant or a revoke waits for the
+    /// agent's next session.
+    pub tiers: Vec<PermissionTier>,
     /// The project's store, files, and repository.
     pub deps: Arc<ToolDeps>,
 }
@@ -489,11 +492,7 @@ impl Call<'_> {
                 input_hash: String::new(),
             },
             &AgentGrants {
-                tiers: self
-                    .agent
-                    .tiers(&self.team.permissions())
-                    .into_iter()
-                    .collect::<BTreeSet<_>>(),
+                tiers: self.context.tiers.iter().copied().collect::<BTreeSet<_>>(),
                 preauthorized_external_tools: BTreeSet::new(),
             },
             &ToolCallContext {

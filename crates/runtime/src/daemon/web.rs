@@ -2,6 +2,7 @@
 //! at `POST /connect` for a session cookie, on a daemon that checks every browser request's
 //! `Origin` and `Host`.
 
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -25,11 +26,12 @@ use serde_json::{Value, json};
 use sha2::{Digest as _, Sha256};
 use tokio_util::sync::CancellationToken;
 
-use super::gates;
 use super::setup::list_folders;
 use super::{DaemonError, DaemonState, SetupError, SetupHost, hex, random_token, same_token};
+use super::{gates, team};
 use crate::claude::CredentialKind;
 use crate::computer::{build_sandbox_image, check_computer};
+use crate::credential::CredentialStore;
 use crate::locked;
 
 /// What the browser routes need, which only `farik serve` gives the daemon (`DaemonState::set_web`).
@@ -49,6 +51,10 @@ pub struct WebState {
     /// Why taking the chosen project on failed, which `serve` sets when it goes back to setup
     /// mode, and `serve.status` tells the page.
     pub take_on_error: Mutex<Option<String>>,
+    /// Where the AI account's credential is kept, in the order they are tried.
+    pub stores: Vec<Arc<dyn CredentialStore>>,
+    /// The environment `farik serve` was given, which a credential may come from.
+    pub env: BTreeMap<String, String>,
 }
 
 /// The one live connect code: `issue` replaces it, and `redeem` spends it. It lives in memory, so
@@ -477,7 +483,7 @@ async fn push(
 pub(super) struct Failure {
     code: i64,
     message: String,
-    data: Option<Value>,
+    pub(super) data: Option<Value>,
 }
 
 impl Failure {
@@ -542,6 +548,7 @@ pub(super) async fn answer(state: &Arc<DaemonState>, text: &str, sent: &mut Opti
     if !["subscribe", "unsubscribe", "command", "query"].contains(&method)
         && !SETUP_METHODS.contains(&method)
         && !gates::METHODS.contains(&method)
+        && !team::METHODS.contains(&method)
     {
         return failure(
             &id,
@@ -578,6 +585,7 @@ pub(super) async fn answer(state: &Arc<DaemonState>, text: &str, sent: &mut Opti
         }
         "command" => command(state, &params["command"]).await,
         method if gates::METHODS.contains(&method) => gates::call(state, method, params).await,
+        method if team::METHODS.contains(&method) => team::call(state, method, params).await,
         "query" => {
             // The store and the files are read off the async workers.
             let (state, params) = (Arc::clone(state), params.clone());
@@ -631,6 +639,7 @@ fn query(state: &DaemonState, name: &str, params: &Value) -> Result<Value, Failu
     let internal = |error: &dyn std::fmt::Display| Failure::new(INTERNAL_ERROR, error.to_string());
     match name {
         "serve.status" => return serve_status(state),
+        "account.status" if state.host().is_none() => return team::account_status(state),
         "folders.list" | "computer.check" | "account.status" => {
             return setup_query(host_of(state)?, name, params);
         }
@@ -673,16 +682,20 @@ fn query(state: &DaemonState, name: &str, params: &Value) -> Result<Value, Failu
             let team = serde_json::to_value(team).map_err(|error| internal(&error))?;
             Ok(json!({ "team": team }))
         }
+        "team.propose" | "team.validate" | "models.list" => team::query(deps, name, params),
         _ => gates::query(deps, name, params),
     }
 }
 
 /// `serve.status`: the project and whether its team is paused, or in setup mode no project and the
-/// credential read afresh; and why the last take-on failed, if it did.
+/// credential read afresh; why the last take-on failed, if it did; and whether the project waits
+/// for the team's setup.
 fn serve_status(state: &DaemonState) -> Result<Value, Failure> {
     let web = state
         .web()
         .ok_or_else(|| Failure::new(INTERNAL_ERROR, "the browser routes are off"))?;
+    let setup_pending =
+        state.deps().is_some() && web.project_root.join(team::SETUP_PENDING).exists();
     let (project_root, paused, credential) = match state.deps() {
         Some(deps) => (
             json!(web.project_root.display().to_string()),
@@ -705,6 +718,7 @@ fn serve_status(state: &DaemonState) -> Result<Value, Failure> {
         "credential": credential,
         "port": web.port,
         "take_on_error": *locked(&web.take_on_error),
+        "setup_pending": setup_pending,
     }))
 }
 
@@ -964,6 +978,8 @@ mod tests {
             port: PORT,
             clock: Arc::new(FixedClock::new(now())),
             take_on_error: std::sync::Mutex::default(),
+            stores: Vec::new(),
+            env: std::collections::BTreeMap::new(),
         }));
         (daemon, code)
     }
@@ -1374,6 +1390,8 @@ mod tests {
             port: handle.info.port,
             clock: Arc::clone(&state.deps().expect("a project").clock),
             take_on_error: std::sync::Mutex::default(),
+            stores: Vec::new(),
+            env: std::collections::BTreeMap::new(),
         }));
         (handle, secret)
     }
@@ -1839,6 +1857,7 @@ mod tests {
                 "credential": null,
                 "port": handle.info.port,
                 "take_on_error": null,
+                "setup_pending": false,
             })
         );
         let pause = json!({ "command": { "command": "team_pause", "body": {} } });
@@ -2026,6 +2045,8 @@ mod tests {
             port: PORT,
             clock: Arc::new(FixedClock::new(now())),
             take_on_error: std::sync::Mutex::default(),
+            stores: Vec::new(),
+            env: std::collections::BTreeMap::new(),
         };
         let state = Arc::new(DaemonState::setup(
             Arc::clone(&host) as Arc<dyn SetupHost>,
@@ -2255,7 +2276,7 @@ mod tests {
             status["result"],
             json!({
                 "project_root": null, "paused": false, "credential": null,
-                "port": PORT, "take_on_error": null,
+                "port": PORT, "take_on_error": null, "setup_pending": false,
             })
         );
         let account = setup_query(&state, "account.status", &json!({})).await;

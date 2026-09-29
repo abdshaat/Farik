@@ -19,6 +19,7 @@ use axum::routing::{get, post};
 use axum::{Extension, Json, Router};
 use farik_core::budget::SessionLimits;
 use farik_core::contract::TaskId;
+use farik_core::governor::permissions::PermissionTier;
 use rmcp::transport::streamable_http_server::session::local::LocalSessionManager;
 use rmcp::transport::streamable_http_server::{StreamableHttpServerConfig, StreamableHttpService};
 use tokio::net::TcpListener;
@@ -46,6 +47,7 @@ mod gates;
 mod hooks;
 mod mcp;
 mod setup;
+mod team;
 pub mod web;
 
 #[cfg(test)]
@@ -55,6 +57,7 @@ pub use hooks::{
     HookDecision, HookRequest, builtin_tool_tier, decide_pre_tool_use, record_post_tool_use,
 };
 pub use setup::{SetupError, SetupHost};
+pub use team::SETUP_PENDING;
 
 /// What a daemon with no project answers what needs one.
 pub(crate) const NO_PROJECT: &str = "farik has no project yet";
@@ -109,6 +112,9 @@ pub struct SessionRegistration {
     /// `mcp__farik__` prefix: the hook denies every other Farik tool (`tool_not_in_session`), and
     /// the MCP server neither lists nor calls one.
     pub farik_tools: Vec<String>,
+    /// The agent's tiers when the session started (spec 4.4): a grant or a revoke waits for the
+    /// agent's next session, while a pause or a retirement stops this one at once.
+    pub tiers: Vec<PermissionTier>,
 }
 
 /// A registration, the tool calls the hook has allowed it, and why it was told to stop, once it
@@ -282,6 +288,7 @@ impl DaemonState {
             in_reply_to: session.registration.in_reply_to,
             thread: session.registration.thread,
             executor: session.registration.executor.clone(),
+            tiers: session.registration.tiers.clone(),
             deps: Arc::clone(deps),
         })
     }
@@ -902,6 +909,7 @@ mod tests {
             executor: Some(Arc::clone(&executor)),
             limits: DEFAULT_SESSION_LIMITS,
             farik_tools: Vec::new(),
+            tiers: Vec::new(),
             purpose: SessionPurpose::Implement,
             in_reply_to: None,
             thread: None,
@@ -1069,6 +1077,7 @@ mod tests {
                 executor: None,
                 limits: DEFAULT_SESSION_LIMITS,
                 farik_tools: Vec::new(),
+                tiers: Vec::new(),
                 purpose: SessionPurpose::Implement,
                 in_reply_to: None,
                 thread: None,

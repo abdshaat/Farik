@@ -106,6 +106,7 @@ pub(super) async fn run_session(
         executor: ask.executor,
         limits: spec.limits,
         farik_tools: spec.farik_tools.clone(),
+        tiers: ask.agent.tiers(&team.permissions()),
     });
     let ended = drive(
         deps,

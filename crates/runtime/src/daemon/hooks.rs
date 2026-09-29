@@ -8,7 +8,7 @@ use farik_core::governor::permissions::{
     AgentGrants, PermissionTier, ToolCallContext, ToolCallRequest, ToolDescriptor,
     evaluate_tool_call,
 };
-use farik_core::team::{Agent, AgentStatus, Team};
+use farik_core::team::{AgentStatus, Team};
 use farik_protocol::event::{
     EventBody, EventIds, ToolCalledBody, ToolDeniedBody, ToolReturnedBody, new_event,
 };
@@ -204,12 +204,12 @@ fn judge(
         .files
         .read_team()
         .map_err(|error| format!("team_unreadable: {error}"))?;
-    let agent = match team
+    match team
         .agents
         .iter()
         .find(|agent| agent.id.as_str() == registration.agent_id)
     {
-        Some(agent) if agent.status == AgentStatus::Active => agent,
+        Some(agent) if agent.status == AgentStatus::Active => {}
         found => {
             let status = found.map(|agent| agent.status);
             return Err(Denial {
@@ -225,18 +225,18 @@ fn judge(
                 }),
             });
         }
-    };
-    judge_call(request, registration, tool_calls, deps, &team, agent).map_err(Denial::from)
+    }
+    judge_call(request, registration, tool_calls, deps, &team).map_err(Denial::from)
 }
 
-/// Whether an active agent's call may go ahead, or the reason it may not.
+/// Whether an active agent's call may go ahead, or the reason it may not: by the tiers the
+/// session started with (spec 4.4).
 fn judge_call(
     request: &HookRequest,
     registration: &SessionRegistration,
     tool_calls: u32,
     deps: &ToolDeps,
     team: &Team,
-    agent: &Agent,
 ) -> Result<(), String> {
     if tool_calls >= registration.limits.max_tool_calls {
         return Err(format!(
@@ -285,10 +285,7 @@ fn judge_call(
             input_hash: String::new(),
         },
         &AgentGrants {
-            tiers: agent
-                .tiers(&team.permissions())
-                .into_iter()
-                .collect::<BTreeSet<_>>(),
+            tiers: registration.tiers.iter().copied().collect::<BTreeSet<_>>(),
             preauthorized_external_tools: BTreeSet::new(),
         },
         &ToolCallContext {
@@ -902,6 +899,49 @@ mod tests {
             daemon.state.stop_reason(DEV_SESSION).as_deref(),
             Some("agent paused by the user")
         );
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn keeps_a_session_to_the_tiers_it_started_with() {
+        let daemon = TestDaemon::new("hook-session-tiers", |_| {});
+        // dev-a's session started holding `execute`; the tier is taken away while it runs.
+        daemon
+            .project
+            .deps
+            .files
+            .write_team(&a_team_of_three(|wire| {
+                wire["agents"][1]["revokes"] = json!(["execute"]);
+            }))
+            .expect("the team is written");
+        let exec = json!({ "command": "true" });
+        let running = decide_pre_tool_use(
+            &daemon.dev_call("mcp__farik__farik_exec", &exec),
+            &daemon.state,
+        );
+        assert!(running.allow, "{running:?}");
+        let context = daemon
+            .state
+            .tool_context(DEV_SESSION)
+            .expect("the session is registered");
+        // Past the tier check: the fixture's session has no sandbox to run the command in.
+        assert_eq!(
+            crate::tools::fixtures::run(&context, "farik_exec", exec.clone()),
+            Err(crate::tools::ToolError::Failed {
+                detail: "this session has no sandbox to run a command in".to_string()
+            })
+        );
+        daemon.register(
+            "session-next",
+            "dev-a",
+            Some("FRK-1"),
+            DEFAULT_SESSION_LIMITS,
+        );
+        let next = decide_pre_tool_use(
+            &daemon.call("session-next", "mcp__farik__farik_exec", &exec),
+            &daemon.state,
+        );
+        denied_for(&next, "tier_not_granted");
     }
 
     #[test]

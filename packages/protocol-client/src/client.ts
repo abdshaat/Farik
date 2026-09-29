@@ -33,7 +33,11 @@ export type MethodName =
 	| "account.connect"
 	| "sandbox.build"
 	| "request.file"
-	| "contract.save";
+	| "contract.save"
+	| "team.save"
+	| "team.start"
+	| "criteria.save"
+	| "account.disconnect";
 export type Status = "connecting" | "open" | "closed";
 
 /** The part of the browser `WebSocket` the client uses. */

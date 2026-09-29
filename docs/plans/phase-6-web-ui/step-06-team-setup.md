@@ -209,7 +209,7 @@ RPC:
 - `lists_the_models_with_labels`: the newest per family with the pinned labels.
 - `reports_setup_pending`: `serve.status.setup_pending` follows the marker.
 
-- [ ] `feat(runtime): propose, validate, save and start the team, and hold sessions to their starting tiers`
+- [x] `feat(runtime): propose, validate, save and start the team, and hold sessions to their starting tiers`
 
 ### Task 5: The wizard's screens 4 to 8 and Advanced
 

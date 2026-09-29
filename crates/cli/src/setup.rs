@@ -13,7 +13,7 @@ use farik_runtime::computer::on_path;
 use farik_runtime::credential::{
     CredentialError, CredentialStore, Source, credential_of_kind, load_credential, save_credential,
 };
-use farik_runtime::daemon::{SetupError, SetupHost};
+use farik_runtime::daemon::{SETUP_PENDING, SetupError, SetupHost};
 use farik_store::files::{LocalSettings, Sandbox};
 use farik_store::requests::{
     RequestError, file_request, placeholder_budget_usd, request_from_brief,
@@ -25,8 +25,6 @@ use crate::start::try_lock;
 use crate::state::{make_state_dir, state_dir};
 use crate::{HUMAN, init};
 
-/// The marker step 06's wizard reads, and its "Start the team" removes.
-pub(crate) const SETUP_PENDING: &str = ".farik/local/setup-pending";
 /// What `open` and `create` refuse a project another process drives with.
 const BUSY: &str = "another farik is already running this project";
 /// What `open` and `create` refuse with before a credential is kept.
