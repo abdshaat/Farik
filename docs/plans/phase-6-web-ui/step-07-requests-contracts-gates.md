@@ -1,6 +1,6 @@
 # Phase 6, step 07: The gates' runtime
 
-Status: ready
+Status: done (landed and landing-reviewed 2026-09-29)
 Branch: `phase/6-web-ui`
 Spec: `docs/SPEC.md` sections 5.1, 5.2, 5.4 (what a human gate shows), 5.5, 5.7, 5.11, 5.13, 5.16, 8.5, F4, F14
 Depends on: steps 01 to 06 of this phase

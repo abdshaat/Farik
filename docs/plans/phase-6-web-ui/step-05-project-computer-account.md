@@ -1,6 +1,6 @@
 # Phase 6, step 05: Project, computer, and account
 
-Status: ready
+Status: done (landed and landing-reviewed 2026-09-29)
 Branch: `phase/6-web-ui`
 Spec: `docs/SPEC.md` sections 4.1 (first run), 8.3 (sandbox), 8.6 (credential), F2
 Depends on: steps 01 to 04 of this phase (step 04 landed at the commit its landing review records)
