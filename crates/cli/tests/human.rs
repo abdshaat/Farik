@@ -14,7 +14,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use farik::Engine;
-use farik_protocol::command::{Command, RequestSize};
+use farik_protocol::command::{AcceptSubject, Command, RequestSize};
 use farik_protocol::event::{EventBody, EventKind, HumanAcceptedBodySubject};
 use farik_runtime::orchestrator::CommandError;
 use farik_runtime::recorded::fixtures::tool_runner;
@@ -303,6 +303,39 @@ fn accepts_a_result_with_the_humans_review() {
     assert_eq!(body.subject, HumanAcceptedBodySubject::Result);
     assert_eq!(body.message.as_deref(), Some("I read it."));
     assert_eq!(body.accepted_by, "human");
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn sends_back_from_the_command_line() {
+    let repository = a_project("human-send-back");
+    let task = filed(&repository, "Add done.txt");
+    let driver = LiveDriver::new(&repository);
+
+    let ran = run(
+        &repository.path,
+        &[
+            "send-back",
+            &task,
+            "The button is too small to tap.",
+            "--criterion",
+            "C1",
+            "--criterion",
+            "C2",
+        ],
+    );
+
+    assert_eq!(ran.code, 0, "{}", ran.err);
+    assert!(ran.out.contains("handled by the run"), "{}", ran.out);
+    assert_eq!(
+        driver.commands(),
+        vec![Command::HumanSendBack {
+            task_id: task.parse().expect("a task id"),
+            subject: AcceptSubject::Result,
+            message: "The button is too small to tap.".to_string(),
+            failed_criteria: vec!["C1".to_string(), "C2".to_string()],
+        }]
+    );
 }
 
 #[test]

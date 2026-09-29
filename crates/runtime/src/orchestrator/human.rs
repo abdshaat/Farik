@@ -2,23 +2,25 @@
 //! human gives the orchestrator, each judged and recorded through the store and the governor, so
 //! that any process may handle one.
 
+use std::num::NonZeroU64;
+
 use farik_core::contract::{TaskContract, TaskId, TaskKind, TaskStatus};
-use farik_core::governor::done::requires_human_acceptance;
-use farik_core::governor::gates::Blocker;
+use farik_core::governor::gates::{Blocker, Rejection};
 use farik_core::governor::transition::TransitionRequest;
 use farik_core::governor::transition_table::TransitionActor;
 use farik_core::sprint::{Sprint, SprintStatus};
 use farik_core::team::{AgentStatus, Team};
 use farik_protocol::command::{AcceptSubject, Command, RequestSize};
 use farik_protocol::event::{
-    AgentUpdatedBody, EscalationResolvedBody, EventBody, EventIds, EventKind, HumanAcceptedBody,
-    HumanAcceptedBodySubject, MessageKind, QuestionAnsweredBody, new_event,
+    AgentUpdatedBody, EscalationRaisedBodyReason, EscalationResolvedBody, EventBody, EventIds,
+    EventKind, HumanAcceptedBody, HumanAcceptedBodySubject, MessageKind, QuestionAnsweredBody,
+    new_event,
 };
 use farik_store::requests::{RequestError, hold_contract, triage_by_human};
 use farik_store::{EventQuery, TaskProjection};
 
 use super::requests::HUMAN;
-use super::verify::{governor_results, is_human, is_mechanical, since_verifying};
+use super::verify::{governor_results, is_mechanical, since_verifying};
 use super::{CommandError, CommandReport, IntegrationOutcome, Orchestrator, OrchestratorError};
 use crate::channel::{ChannelError, NewMessage, mentions_in, post};
 use crate::pause::paused;
@@ -26,7 +28,7 @@ use crate::sprints::{EndedBy, SprintError, end_sprint, start_sprint};
 use crate::tools::ToolDeps;
 use crate::transitions::{
     TransitionAsk, TransitionOutcome, contract_accepted, refusal_details, result_accepted,
-    status_wire,
+    result_awaits_human, review_passed, status_wire,
 };
 
 /// Who the human is in the log.
@@ -78,7 +80,20 @@ pub(super) async fn handle(
             task_id,
             to,
             message,
-        } => resolve(tools, &task_id, to, &message),
+            extra_tries,
+        } => resolve(tools, &task_id, to, &message, extra_tries),
+        Command::HumanSendBack {
+            task_id,
+            subject: AcceptSubject::Contract,
+            message,
+            failed_criteria: _,
+        } => send_plan_back(tools, &task_id, &message),
+        Command::HumanSendBack {
+            task_id,
+            subject: AcceptSubject::Result,
+            message,
+            failed_criteria,
+        } => send_result_back(tools, &task_id, &message, failed_criteria),
         Command::TaskTransition {
             task_id,
             to,
@@ -345,13 +360,7 @@ fn approve(
 ) -> Result<CommandReport, CommandError> {
     let row = row_of(tools, task_id)?;
     if !row.awaiting_approval {
-        return Err(CommandError::Refused {
-            reason: format!(
-                "not_awaiting_approval: {} is {} and no approval is asked of the human",
-                task_id.as_str(),
-                row.status
-            ),
-        });
+        return Err(not_awaiting_approval(&row));
     }
     let team = tools.files.read_team().map_err(failed)?;
     let mut events = vec![append(
@@ -385,7 +394,8 @@ fn accept_result(
     message: Option<String>,
 ) -> Result<CommandReport, CommandError> {
     let row = row_of(tools, task_id)?;
-    let contract = tools.files.read_contract(task_id).map_err(failed)?;
+    let mut contract = tools.files.read_contract(task_id).map_err(failed)?;
+    contract.status = row.status;
     if row.status != TaskStatus::Verifying {
         return Err(not_waiting(&row));
     }
@@ -407,7 +417,7 @@ fn accept_result(
                     .to_string(),
             });
         }
-    } else if !requires_human_acceptance(&contract) && !has_human_criterion(&contract) {
+    } else if !result_awaits_human(&contract) {
         return Err(not_waiting(&row));
     }
     let seq = append(
@@ -449,8 +459,72 @@ fn not_waiting(row: &TaskProjection) -> CommandError {
     }
 }
 
-fn has_human_criterion(contract: &TaskContract) -> bool {
-    contract.exit_criteria.iter().any(is_human)
+fn not_awaiting_approval(row: &TaskProjection) -> CommandError {
+    CommandError::Refused {
+        reason: format!(
+            "not_awaiting_approval: {} is {} and no approval is asked of the human",
+            row.task_id.as_str(),
+            row.status
+        ),
+    }
+}
+
+/// Sends a contract awaiting approval back to `refining` with the human's message (ADR 0024): the
+/// escalation's own resolve.
+fn send_plan_back(
+    tools: &ToolDeps,
+    task_id: &TaskId,
+    message: &str,
+) -> Result<CommandReport, CommandError> {
+    written(message, "a send-back's message")?;
+    let row = row_of(tools, task_id)?;
+    if !row.awaiting_approval {
+        return Err(not_awaiting_approval(&row));
+    }
+    resolve(tools, task_id, TaskStatus::Refining, message, None)
+}
+
+/// Sends a result that waits on the human back to its assignee (ADR 0024): `verifying ->
+/// rejected` as the human, the message its reason, once the reviewer's review has passed; an epic
+/// waits on no reviewer. The governor's return to work counts the try.
+fn send_result_back(
+    tools: &ToolDeps,
+    task_id: &TaskId,
+    message: &str,
+    failed_criteria: Vec<String>,
+) -> Result<CommandReport, CommandError> {
+    written(message, "a send-back's message")?;
+    let row = row_of(tools, task_id)?;
+    let mut contract = tools.files.read_contract(task_id).map_err(failed)?;
+    contract.status = row.status;
+    if !result_awaits_human(&contract) {
+        return Err(not_waiting(&row));
+    }
+    if contract.kind != TaskKind::Epic && !review_passed(&history_of(tools, task_id)?) {
+        return Err(CommandError::Refused {
+            reason: "review_first: the reviewer has not finished; send back once the review is in"
+                .to_string(),
+        });
+    }
+    let team = tools.files.read_team().map_err(failed)?;
+    let events = human_moves(
+        tools,
+        &team,
+        task_id,
+        TaskStatus::Rejected,
+        &TransitionAsk {
+            reason: Some(message.to_string()),
+            rejection: Some(Rejection {
+                failed_criterion_ids: failed_criteria,
+                reasons: message.to_string(),
+            }),
+            ..TransitionAsk::default()
+        },
+    )?;
+    Ok(CommandReport {
+        said: format!("{} is sent back to its assignee", task_id.as_str()),
+        events,
+    })
 }
 
 /// Every `command`, `test`, or `artifact` criterion of the epic has Farik's passing result since
@@ -497,14 +571,16 @@ fn mechanical_criteria_passed(
 }
 
 /// Resolves an escalation (5.7): `escalated -> to` as the human, then, on the move,
-/// `escalation.resolved { to, message }`. Never to `ready` while the contract awaits approval,
-/// which is `HumanAccept`'s, nor for an epic whose contract the human has not approved, which
-/// reaches `ready` only by that approval (5.16 item 2).
+/// `escalation.resolved { to, message, extra_tries }`. Never to `ready` while the contract awaits
+/// approval, which is `HumanAccept`'s, nor for an epic whose contract the human has not approved,
+/// which reaches `ready` only by that approval (5.16 item 2). `extra_tries` is only for an
+/// `iterations` escalation, and the move it makes counts the attempt it starts (ADR 0024).
 fn resolve(
     tools: &ToolDeps,
     task_id: &TaskId,
     to: TaskStatus,
     message: &str,
+    extra_tries: Option<u8>,
 ) -> Result<CommandReport, CommandError> {
     written(message, "a resolution's message")?;
     let row = row_of(tools, task_id)?;
@@ -539,6 +615,24 @@ fn resolve(
             ),
         });
     }
+    if let Some(tries) = extra_tries {
+        if !(1..=5).contains(&tries) {
+            return Err(CommandError::Invalid {
+                detail: format!("extra_tries is {tries}, and it is 1 to 5"),
+            });
+        }
+        let reason = escalated_for(tools, task_id)?;
+        if reason != Some(EscalationRaisedBodyReason::Iterations) {
+            return Err(CommandError::Refused {
+                reason: format!(
+                    "extra_tries_only_for_tries: {} escalated for {}, and more tries are granted \
+                     only to a task that used its tries",
+                    task_id.as_str(),
+                    reason.map_or_else(|| "no recorded reason".to_string(), |r| r.to_string())
+                ),
+            });
+        }
+    }
     let team = tools.files.read_team().map_err(failed)?;
     let mut events = human_moves(
         tools,
@@ -547,6 +641,7 @@ fn resolve(
         to,
         &TransitionAsk {
             reason: Some(message.to_string()),
+            grants_tries: extra_tries.is_some(),
             ..TransitionAsk::default()
         },
     )?;
@@ -557,12 +652,27 @@ fn resolve(
             to: status_wire(to).map_err(failed)?,
             message: message.to_string(),
             resolved_by: HUMAN.to_string(),
+            extra_tries: extra_tries.and_then(|tries| NonZeroU64::new(u64::from(tries))),
         }),
     )?);
     Ok(CommandReport {
         said: format!("{} is resolved to {to}", task_id.as_str()),
         events,
     })
+}
+
+/// The reason of the task's last escalation.
+fn escalated_for(
+    tools: &ToolDeps,
+    task_id: &TaskId,
+) -> Result<Option<EscalationRaisedBodyReason>, CommandError> {
+    Ok(history_of(tools, task_id)?
+        .iter()
+        .rev()
+        .find_map(|event| match &event.body {
+            EventBody::EscalationRaised(body) => Some(body.reason),
+            _ => None,
+        }))
 }
 
 /// Moves a task as the human (5.2), from any status but `escalated`, whose way out is `resolve`.
@@ -1352,6 +1462,7 @@ mod tests {
             task_id: task(id),
             to,
             message: message.to_string(),
+            extra_tries: None,
         };
 
         handled(
@@ -1413,6 +1524,7 @@ mod tests {
             task_id: task(id),
             to: TaskStatus::Ready,
             message: "Go.".to_string(),
+            extra_tries: None,
         };
 
         let unapproved = refused(&orchestrator, to_ready("FRK-1")).await;
@@ -2065,5 +2177,247 @@ mod tests {
         said_in_the_channel(&orchestrator, &"é".repeat(2_000))
             .await
             .expect("2,000 characters are posted");
+    }
+
+    fn send_back(id: &str, subject: AcceptSubject, criteria: &[&str]) -> Command {
+        Command::HumanSendBack {
+            task_id: task(id),
+            subject,
+            message: "The button is too small to tap.".to_string(),
+            failed_criteria: criteria.iter().map(ToString::to_string).collect(),
+        }
+    }
+
+    fn a_review(harness: &Harness, id: &str, passed: bool) {
+        harness.project.record(
+            id,
+            "review.recorded",
+            &json!({ "reviewer": "dev-b", "criteria_run": 1, "passed": passed }),
+        );
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn sends_a_result_back_after_the_review() {
+        let harness = Harness::new("human-send-back", |wire| {
+            wire["policy"]["wip_limit_per_agent"] = json!(4);
+        });
+        harness.verifying_with("FRK-1", true, true, |wire| wire["risk"] = json!("high"));
+        harness.verifying("FRK-2");
+        let orchestrator = an_orchestrator(&harness);
+        let back = send_back("FRK-1", AcceptSubject::Result, &["C1"]);
+
+        let early = refused(&orchestrator, back.clone()).await;
+        assert_eq!(
+            early,
+            "review_first: the reviewer has not finished; send back once the review is in"
+        );
+        a_review(&harness, "FRK-1", false);
+        let failed = refused(&orchestrator, back.clone()).await;
+        assert!(failed.starts_with("review_first"), "{failed}");
+        a_review(&harness, "FRK-1", true);
+
+        let report = handled(&orchestrator, back).await;
+        let moved = last(&harness, EventKind::TaskTransitioned).expect("a move");
+        assert!(report.events.contains(&moved.envelope.seq));
+        let EventBody::TaskTransitioned(body) = &moved.body else {
+            panic!("a move");
+        };
+        assert_eq!(
+            (
+                body.from.to_string(),
+                body.to.to_string(),
+                body.actor.to_string(),
+                body.gate.to_string()
+            ),
+            (
+                "verifying".to_string(),
+                "rejected".to_string(),
+                "human".to_string(),
+                "human_rejection".to_string()
+            )
+        );
+        let rejection = body.rejection.as_ref().expect("the human's reasons");
+        assert_eq!(rejection.failed_criterion_ids, vec!["C1".to_string()]);
+        assert_eq!(rejection.reasons, "The button is too small to tap.");
+        assert_eq!(
+            body.reason.as_deref(),
+            Some("The button is too small to tap.")
+        );
+        // The rejection counts as a try: the governor's return to work counts it.
+        orchestrator.tick().await.expect("the tick runs");
+        let row = harness.row("FRK-1");
+        assert_eq!(row.status, TaskStatus::InProgress);
+        assert_eq!(row.iteration, 1);
+
+        let low = refused(
+            &orchestrator,
+            send_back("FRK-2", AcceptSubject::Result, &[]),
+        )
+        .await;
+        assert!(low.starts_with("not_waiting_for_the_human"), "{low}");
+        assert!(matches!(
+            orchestrator
+                .handle(Command::HumanSendBack {
+                    task_id: task("FRK-2"),
+                    subject: AcceptSubject::Result,
+                    message: " ".to_string(),
+                    failed_criteria: Vec::new(),
+                })
+                .await,
+            Err(CommandError::Invalid { .. })
+        ));
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn sends_a_plan_back_to_refining() {
+        let harness = Harness::new("human-send-plan-back", |_| {});
+        an_epic(&harness, "FRK-1", "refining", a_command_criterion());
+        escalated(&harness, "FRK-1", "approval");
+        harness.ready("FRK-2");
+        let orchestrator = an_orchestrator(&harness);
+
+        handled(
+            &orchestrator,
+            send_back("FRK-1", AcceptSubject::Contract, &[]),
+        )
+        .await;
+        assert_eq!(harness.row("FRK-1").status, TaskStatus::Refining);
+        let resolved = last(&harness, EventKind::EscalationResolved).expect("the resolution");
+        let EventBody::EscalationResolved(body) = &resolved.body else {
+            panic!("a resolution");
+        };
+        assert_eq!(body.to.to_string(), "refining");
+        assert_eq!(body.message, "The button is too small to tap.");
+
+        let not = refused(
+            &orchestrator,
+            send_back("FRK-2", AcceptSubject::Contract, &[]),
+        )
+        .await;
+        assert!(not.starts_with("not_awaiting_approval"), "{not}");
+    }
+
+    /// FRK-1's sessions allowance as the budgets read it now.
+    fn max_sessions(harness: &Harness) -> u32 {
+        let deps = &harness.project.deps;
+        let contract = deps
+            .files
+            .read_contract(&task("FRK-1"))
+            .expect("the contract reads");
+        crate::cost::budget_state(
+            &deps.projections,
+            &deps.files.read_team().expect("the team reads"),
+            contract.assignee_role,
+            Some(&contract),
+            &farik_core::budget::SessionLedger::default(),
+            deps.clock.now(),
+        )
+        .expect("the budgets read")
+        .task_max_sessions
+    }
+
+    /// FRK-1, back in `in_progress` at `iteration`, verified and rejected by its reviewer.
+    fn rejected_again(harness: &Harness, iteration: u32) {
+        let people = json!({ "assignee": "dev-a", "reviewer": "dev-b", "iteration": iteration });
+        harness
+            .project
+            .moved("FRK-1", "in_progress", "verifying", &people);
+        let mut body = people;
+        body["actor"] = json!("reviewer");
+        body["requested_by"] = json!("dev-b");
+        body["rejection"] = json!({ "failed_criterion_ids": ["C1"], "reasons": "still missing" });
+        harness
+            .project
+            .moved("FRK-1", "verifying", "rejected", &body);
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn grants_extra_tries() {
+        let harness = Harness::new("human-extra-tries", |_| {});
+        harness.rejected("FRK-1", 3, "C1: done.txt missing");
+        let orchestrator = an_orchestrator(&harness);
+        orchestrator.tick().await.expect("the tick runs");
+        assert_eq!(harness.row("FRK-1").status, TaskStatus::Escalated);
+        let sessions = max_sessions(&harness);
+
+        handled(
+            &orchestrator,
+            Command::EscalationResolve {
+                task_id: task("FRK-1"),
+                to: TaskStatus::InProgress,
+                message: "Try again with the new API.".to_string(),
+                extra_tries: Some(2),
+            },
+        )
+        .await;
+        let row = harness.row("FRK-1");
+        assert_eq!(row.status, TaskStatus::InProgress);
+        // The resumed attempt is the first of the two, so it is counted.
+        assert_eq!(row.iteration, 4);
+        let resolved = last(&harness, EventKind::EscalationResolved).expect("the resolution");
+        let EventBody::EscalationResolved(body) = &resolved.body else {
+            panic!("a resolution");
+        };
+        assert_eq!(body.extra_tries.map(std::num::NonZero::get), Some(2));
+        assert_eq!(max_sessions(&harness), sessions + 8);
+
+        // The resumed attempt fails, and the second one runs.
+        rejected_again(&harness, 4);
+        orchestrator.tick().await.expect("the tick runs");
+        let row = harness.row("FRK-1");
+        assert_eq!((row.status, row.iteration), (TaskStatus::InProgress, 5));
+        // The second fails too, and iterations escalates again.
+        rejected_again(&harness, 5);
+        orchestrator.tick().await.expect("the tick runs");
+        assert_eq!(harness.row("FRK-1").status, TaskStatus::Escalated);
+        let reasons: Vec<EscalationRaisedBodyReason> = harness
+            .events(&[EventKind::EscalationRaised])
+            .iter()
+            .filter_map(|event| match &event.body {
+                EventBody::EscalationRaised(body) => Some(body.reason),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            reasons,
+            vec![
+                EscalationRaisedBodyReason::Iterations,
+                EscalationRaisedBodyReason::Iterations
+            ]
+        );
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn refuses_extra_tries_for_other_reasons() {
+        let harness = Harness::new("human-extra-tries-refused", |_| {});
+        harness.file("FRK-1", "refining", |_| {});
+        escalated(&harness, "FRK-1", "readiness_failures");
+        let orchestrator = an_orchestrator(&harness);
+
+        let reason = refused(
+            &orchestrator,
+            Command::EscalationResolve {
+                task_id: task("FRK-1"),
+                to: TaskStatus::Refining,
+                message: "Split it by page.".to_string(),
+                extra_tries: Some(2),
+            },
+        )
+        .await;
+        assert!(reason.starts_with("extra_tries_only_for_tries"), "{reason}");
+        assert_eq!(harness.row("FRK-1").status, TaskStatus::Escalated);
+        assert!(harness.events(&[EventKind::EscalationResolved]).is_empty());
+        // The schema holds the number to 1 to 5.
+        assert!(
+            farik_protocol::command::command_from_value(&json!({
+                "command": "escalation_resolve",
+                "body": { "task_id": "FRK-1", "to": "in_progress", "message": "Go.", "extra_tries": 6 }
+            }))
+            .is_err()
+        );
     }
 }

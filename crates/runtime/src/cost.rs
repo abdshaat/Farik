@@ -17,10 +17,10 @@ use farik_protocol::clock::Clock;
 use farik_protocol::event::{
     BudgetExhaustedBody, BudgetExhaustedBodyConsequence, BudgetExhaustedBodyScope,
     CostRecordedBody, CostRecordedBodyModelId, CostRecordedBodyPurpose, EventBody, EventIds,
-    TokenUsage, new_event,
+    EventKind, FarikEvent, TokenUsage, new_event,
 };
 use farik_roles::{RoleError, load_role};
-use farik_store::{CostProjection, CostScope, EventLog, Projections, StoreError};
+use farik_store::{CostProjection, CostScope, EventLog, EventQuery, Projections, StoreError};
 
 use crate::channel::{ChannelError, post_system};
 use crate::session::{SessionPurpose, TRIAGE_MODEL, session_model};
@@ -190,7 +190,8 @@ pub fn unpriced_models(
 /// Everything `check_budgets` needs for one session, read from the projections at `now`.
 ///
 /// The session limits are the role's defaults with each field `team.budgets.session` sets put in
-/// its place. The task's come from its contract, and a session with no task is bounded by none. The
+/// its place. The task's come from its contract, and a session with no task is bounded by none;
+/// its sessions allowance grows by 4 for every extra try the human granted it (ADR 0024). The
 /// day is the UTC date of `now`, and a team that sets no daily budget has an unbounded day (ADR
 /// 0015). The sprint's is the open sprint's, and unbounded with none open or one with no budget.
 ///
@@ -224,11 +225,18 @@ pub fn budget_state(
         None => (0.0, 0, f64::INFINITY, u32::MAX),
         Some(contract) => {
             let spent = spent_by(projections, CostScope::Task, &contract.id.to_string())?;
+            let resolved = projections.log().read(&EventQuery {
+                task_id: Some(contract.id.clone()),
+                kinds: vec![EventKind::EscalationResolved],
+                ..EventQuery::default()
+            })?;
             (
                 spent.as_ref().map_or(0.0, |row| row.usd),
                 spent.as_ref().map_or(0, |row| row.sessions),
                 contract.budget.max_cost_usd,
-                u32::try_from(contract.budget.max_sessions.get()).unwrap_or(u32::MAX),
+                u32::try_from(contract.budget.max_sessions.get())
+                    .unwrap_or(u32::MAX)
+                    .saturating_add(extra_tries(&resolved).saturating_mul(4)),
             )
         }
     };
@@ -252,6 +260,18 @@ pub fn budget_state(
         day_spent_usd: day.map_or(0.0, |row| row.usd),
         day_max_usd: team.budgets.daily_usd.unwrap_or(f64::INFINITY),
     })
+}
+
+/// The more tries the human granted over `history`'s `escalation.resolved` events (ADR 0024).
+pub(crate) fn extra_tries(history: &[FarikEvent]) -> u32 {
+    history
+        .iter()
+        .filter_map(|event| match &event.body {
+            EventBody::EscalationResolved(body) => body.extra_tries,
+            _ => None,
+        })
+        .map(|tries| u32::try_from(tries.get()).unwrap_or(u32::MAX))
+        .fold(0, u32::saturating_add)
 }
 
 /// Records a `budget.exhausted` for every budget exhausted in `after` that was not in `before`,

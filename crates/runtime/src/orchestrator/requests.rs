@@ -2370,6 +2370,7 @@ mod tests {
                 task_id: task("FRK-1"),
                 to: TaskStatus::InProgress,
                 message: "Add the missing file.".to_string(),
+                extra_tries: None,
             })
             .await
             .expect("the human sends it back");

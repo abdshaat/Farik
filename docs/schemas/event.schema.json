@@ -322,7 +322,7 @@
       "title": "Gate Id",
       "description": "The gate of the row a move took (docs/SPEC.md section 5.2); none for a row with no gate.",
       "type": "string",
-      "enum": ["none", "triaged", "definition_of_ready", "readiness_exhausted", "contract_requires_human", "assignment", "criteria_recorded", "blocker_written", "blocker_resolved", "blocked_age", "definition_of_done", "rejection_reasons", "iteration_below_limit", "iteration_limit_reached", "governor_escalation"]
+      "enum": ["none", "triaged", "definition_of_ready", "readiness_exhausted", "contract_requires_human", "assignment", "criteria_recorded", "blocker_written", "blocker_resolved", "blocked_age", "definition_of_done", "rejection_reasons", "iteration_below_limit", "iteration_limit_reached", "governor_escalation", "human_rejection"]
     },
     "blockerWire": {
       "title": "Blocker Wire",
@@ -528,14 +528,15 @@
     },
     "escalationResolvedBody": {
       "title": "Escalation Resolved Body",
-      "description": "The human resolved an escalation (docs/SPEC.md section 5.7): the contract moved out of escalated to to, and message is what the next session about it is given.",
+      "description": "The human resolved an escalation (docs/SPEC.md section 5.7): the contract moved out of escalated to to, and message is what the next session about it is given. extra_tries is the more attempts the human granted an iterations escalation (ADR 0024): the task's iteration limit and its sessions allowance grow by the sum of them.",
       "type": "object",
       "additionalProperties": false,
       "required": ["to", "message", "resolved_by"],
       "properties": {
         "to": { "$ref": "#/$defs/taskStatus" },
         "message": { "type": "string" },
-        "resolved_by": { "type": "string" }
+        "resolved_by": { "type": "string" },
+        "extra_tries": { "type": "integer", "minimum": 1, "maximum": 5 }
       }
     },
     "agentUpdatedBody": {

@@ -3484,6 +3484,7 @@ mod tests {
                 task_id: "FRK-1".parse().expect("a task id"),
                 to: TaskStatus::InProgress,
                 message: "Carry on.".to_string(),
+                extra_tries: None,
             })
             .await
             .expect("the human resolves the escalation");

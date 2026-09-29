@@ -362,6 +362,12 @@ impl Projections {
         Ok(behind.len())
     }
 
+    /// The log these project.
+    #[must_use]
+    pub fn log(&self) -> &EventLog {
+        &self.log
+    }
+
     /// The log's own connection: the projections live in the same database, and share its lock so
     /// that a view cannot read a half-written append.
     pub(crate) fn connection(&self) -> std::sync::MutexGuard<'_, Connection> {

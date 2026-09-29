@@ -19,6 +19,7 @@
         "task_transition",
         "human_accept",
         "escalation_resolve",
+        "human_send_back",
         "question_answer",
         "contract_lock",
         "contract_unlock",
@@ -42,6 +43,7 @@
         { "$ref": "#/$defs/taskTransitionBody" },
         { "$ref": "#/$defs/humanAcceptBody" },
         { "$ref": "#/$defs/escalationResolveBody" },
+        { "$ref": "#/$defs/humanSendBackBody" },
         { "$ref": "#/$defs/questionAnswerBody" },
         { "$ref": "#/$defs/taskIdBody" },
         { "$ref": "#/$defs/agentUpdateBody" },
@@ -100,14 +102,28 @@
     },
     "escalationResolveBody": {
       "title": "Escalation Resolve Body",
-      "description": "The human resolves an escalation (docs/SPEC.md section 5.7) by moving the task to a status, with a message the next session about it is given.",
+      "description": "The human resolves an escalation (docs/SPEC.md section 5.7) by moving the task to a status, with a message the next session about it is given. extra_tries grants that many more attempts, counting the one the resolve starts; only an iterations escalation takes it (ADR 0024).",
       "type": "object",
       "additionalProperties": false,
       "required": ["task_id", "to", "message"],
       "properties": {
         "task_id": { "type": "string", "pattern": "^FRK-[0-9]{1,6}$" },
         "to": { "$ref": "#/$defs/taskStatus" },
-        "message": { "type": "string" }
+        "message": { "type": "string" },
+        "extra_tries": { "type": "integer", "minimum": 1, "maximum": 5 }
+      }
+    },
+    "humanSendBackBody": {
+      "title": "Human Send Back Body",
+      "description": "The human sends a contract awaiting approval back to refining, or a result that waits for them back to its assignee as a rejection (ADR 0024). message is required; failed_criteria may be empty, and is required so that this body matches no other branch.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["task_id", "subject", "message", "failed_criteria"],
+      "properties": {
+        "task_id": { "type": "string", "pattern": "^FRK-[0-9]{1,6}$" },
+        "subject": { "type": "string", "enum": ["contract", "result"] },
+        "message": { "type": "string" },
+        "failed_criteria": { "type": "array", "items": { "type": "string" } }
       }
     },
     "questionAnswerBody": {

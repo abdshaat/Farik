@@ -340,6 +340,16 @@ enum Commands {
         #[arg(long)]
         message: Option<String>,
     },
+    /// Send a result that waits for you back to its assignee, after its review (ADR 0024).
+    SendBack {
+        /// The task whose result it is.
+        task_id: String,
+        /// What is wrong, for the next attempt.
+        message: String,
+        /// A criterion the result fails; repeat it for each one.
+        #[arg(long = "criterion")]
+        criteria: Vec<String>,
+    },
     /// Answer a question an agent asked (5.7).
     Answer {
         /// The question's number, as farik run prints it.
@@ -595,6 +605,7 @@ pub fn run_cli(args: &[String], io: &mut CliIo<'_>) -> i32 {
             .and_then(|project| phase_two_write(&parsed.command, &project, now)),
         Commands::Approve { .. }
         | Commands::Accept { .. }
+        | Commands::SendBack { .. }
         | Commands::Answer { .. }
         | Commands::Integrate { .. }
         | Commands::Resolve { .. }
@@ -723,6 +734,19 @@ fn humans(command: &Commands) -> Result<(&'static str, Command), String> {
                 message: message.clone(),
             },
         ),
+        Commands::SendBack {
+            task_id,
+            message,
+            criteria,
+        } => (
+            "send-back",
+            Command::HumanSendBack {
+                task_id: task(task_id)?,
+                subject: AcceptSubject::Result,
+                message: message.clone(),
+                failed_criteria: criteria.clone(),
+            },
+        ),
         Commands::Answer {
             question_id,
             answer,
@@ -749,6 +773,7 @@ fn humans(command: &Commands) -> Result<(&'static str, Command), String> {
                 task_id: task(task_id)?,
                 to: (*status).into(),
                 message: message.join(" "),
+                extra_tries: None,
             },
         ),
         Commands::Cancel { task_id, reason } => (

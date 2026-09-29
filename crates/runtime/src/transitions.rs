@@ -39,7 +39,7 @@ use farik_store::files::{FilesError, ProjectFiles};
 use farik_store::{EventLog, EventQuery, Git, GitError, Projections, StoreError, TaskProjection};
 
 use crate::channel::{ChannelError, post_system};
-use crate::cost::{CostError, budget_state};
+use crate::cost::{CostError, budget_state, extra_tries};
 
 /// The governor's door: everything a transition is judged on and recorded in.
 pub struct Transitions {
@@ -82,6 +82,9 @@ pub struct TransitionAsk {
     /// Whether Farik files this move in the named agent's name, as it files a reviewer's rejection
     /// from the note of a session that has ended (5.4); such a move is said in the channel.
     pub filed_by_farik: bool,
+    /// Whether the human's resolve grants more tries (ADR 0024): the attempt it starts is counted,
+    /// so the move increments the iteration.
+    pub grants_tries: bool,
 }
 
 /// The governor's answer, which is recorded either way.
@@ -265,10 +268,11 @@ impl Transitions {
         decision: &TransitionDecision,
     ) -> Result<(), TransitionError> {
         contract.status = decision.to;
-        if decision
-            .effects
-            .contains(&TransitionEffect::IncrementIteration)
-        {
+        let mut effects = decision.effects.clone();
+        if ask.grants_tries && !effects.contains(&TransitionEffect::IncrementIteration) {
+            effects.insert(0, TransitionEffect::IncrementIteration);
+        }
+        if effects.contains(&TransitionEffect::IncrementIteration) {
             contract.iteration = contract.iteration.saturating_add(1);
         }
         if decision.from == TaskStatus::Ready && decision.to == TaskStatus::Assigned {
@@ -283,7 +287,7 @@ impl Transitions {
             actor: actor_wire(request.actor),
             requested_by: requested_by(request),
             gate: gate_wire(decision.row.gate),
-            effects: decision.effects.iter().copied().map(effect_wire).collect(),
+            effects: effects.iter().copied().map(effect_wire).collect(),
             assignee: contract.assignee.clone(),
             reviewer: contract.reviewer.clone(),
             iteration: u32::try_from(contract.iteration).unwrap_or(u32::MAX),
@@ -500,14 +504,7 @@ impl Transitions {
         let hours = team.policy.blocked_limit_hours.get();
         Ok(TransitionContext {
             triaged: row.triaged,
-            children: board
-                .iter()
-                .filter(|child| child.parent.as_ref() == Some(id))
-                .map(|child| ChildState {
-                    task_id: child.task_id.to_string(),
-                    status: child.status,
-                })
-                .collect(),
+            children: children_of(&board, id),
             readiness,
             readiness_failed_attempts: readiness_failed_attempts(&history),
             acceptance: ContractAcceptance {
@@ -528,6 +525,9 @@ impl Transitions {
             budget,
             permission_denied: ask.permission_denied,
             criterion_unrunnable: ask.criterion_unrunnable.is_some(),
+            result_awaits_human: result_awaits_human(&contract),
+            review_passed: review_passed(&history),
+            extra_iterations: extra_tries(&history),
             contract,
         })
     }
@@ -727,6 +727,45 @@ fn refused_before_the_governor(
     })
 }
 
+/// The tasks under the epic `id`, as the board has them.
+fn children_of(board: &[TaskProjection], id: &TaskId) -> Vec<ChildState> {
+    board
+        .iter()
+        .filter(|child| child.parent.as_ref() == Some(id))
+        .map(|child| ChildState {
+            task_id: child.task_id.to_string(),
+            status: child.status,
+        })
+        .collect()
+}
+
+/// Whether the task's result waits on the human's acceptance (5.4): it is `verifying`, and it is an
+/// epic, risk `high`, or has a `human` criterion. The status is the contract's, which the caller
+/// takes from the board.
+pub(crate) fn result_awaits_human(contract: &TaskContract) -> bool {
+    contract.status == TaskStatus::Verifying
+        && (requires_human_acceptance(contract)
+            || contract
+                .exit_criteria
+                .iter()
+                .any(|criterion| wire_method(&criterion.verification) == Some("human")))
+}
+
+/// Whether the latest `review.recorded` since the task last entered `verifying` passed.
+pub(crate) fn review_passed(history: &[FarikEvent]) -> bool {
+    let since =
+        last_move_into(history, TaskStatus::Verifying).map_or(0, |event| event.envelope.seq);
+    history
+        .iter()
+        .rev()
+        .take_while(|event| event.envelope.seq > since)
+        .find_map(|event| match &event.body {
+            EventBody::ReviewRecorded(body) => Some(body.passed),
+            _ => None,
+        })
+        .unwrap_or(false)
+}
+
 /// Whether the human is to review this contract, asked when it is assigned: an epic, on a team
 /// with no active Scrum Master, is reviewed by the human (5.16 item 4), who has no agent id.
 pub(crate) fn reviewed_by_the_human(contract: &TaskContract, team: &Team) -> bool {
@@ -871,6 +910,7 @@ fn gate_wire(gate: GateId) -> GateWire {
         GateId::IterationBelowLimit => GateWire::IterationBelowLimit,
         GateId::IterationLimitReached => GateWire::IterationLimitReached,
         GateId::GovernorEscalation => GateWire::GovernorEscalation,
+        GateId::HumanRejection => GateWire::HumanRejection,
     }
 }
 

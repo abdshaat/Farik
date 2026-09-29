@@ -165,7 +165,7 @@ Files: core transition table, transition and gates, budget, escalation; protocol
 - `refuses_extra_tries_for_other_reasons`.
 - `sends_back_from_the_command_line`: `farik send-back FRK-1 "…"` works through the daemon.
 
-- [ ] `feat(runtime): let the human send work back and grant more tries`
+- [x] `feat(runtime): let the human send work back and grant more tries`
 
 ### Task 3: Filing, checking, saving, choices, and the shared queries
 
