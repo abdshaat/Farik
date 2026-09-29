@@ -417,8 +417,8 @@ fn file_words(deps: &ToolDeps, text: &str) -> Result<Value, Failure> {
 }
 
 /// `contract.save`: the human's edit, judged by `check_contract_write`. A frozen plan goes back to
-/// `refining` first (5.11), as the escalation's resolve when it awaits approval and as the human's
-/// move otherwise; then the fields the human changed are written over the file and
+/// `refining` first (5.11), by the escalation's resolve, and one the team is working to is
+/// refused; then the fields the human changed are written over the file and
 /// `contract.written` is recorded as theirs.
 async fn save(state: &DaemonState, deps: &ToolDeps, params: &Value) -> Result<Value, Failure> {
     let task_id = task_of(deps, params)?;
@@ -460,19 +460,18 @@ async fn save(state: &DaemonState, deps: &ToolDeps, params: &Value) -> Result<Va
     validate_contract(&after).map_err(|errors| Failure::new(REFUSED, schema_words(&errors)))?;
     let back = outcome == ContractWriteOutcome::ReturnsToRefining;
     if back {
-        let command = if row.status == TaskStatus::Escalated {
-            Command::EscalationResolve {
-                task_id: task_id.clone(),
-                to: TaskStatus::Refining,
-                message: EDITED.to_string(),
-                extra_tries: None,
-            }
-        } else {
-            Command::TaskTransition {
-                task_id: task_id.clone(),
-                to: TaskStatus::Refining,
-                reason: EDITED.to_string(),
-            }
+        // The human's only way into `refining` from a frozen plan is an escalation's resolve.
+        if row.status != TaskStatus::Escalated {
+            return Err(Failure::new(
+                REFUSED,
+                "the team is working to this plan; stop the task before you change it",
+            ));
+        }
+        let command = Command::EscalationResolve {
+            task_id: task_id.clone(),
+            to: TaskStatus::Refining,
+            message: EDITED.to_string(),
+            extra_tries: None,
         };
         if let CommandReply::Error { detail, .. } = super::handled(state, command).await {
             return Err(Failure::new(REFUSED, detail));
@@ -831,6 +830,14 @@ mod tests {
             "{refused}"
         );
         assert_eq!(harness.project.file("FRK-1"), before);
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn refuses_a_save_it_cannot_make() {
+        let harness = driven("gates-save-refused");
+        harness.file("FRK-1", "refining", |_| {});
+        let before = harness.project.file("FRK-1");
 
         // A save never locks or unlocks the plan: that is recorded by its own command.
         let mut locking = before.clone();
@@ -846,6 +853,23 @@ mod tests {
             "a save does not lock or unlock the plan; lock or unlock it on its own"
         );
         assert_eq!(harness.project.file("FRK-1"), before);
+
+        // A plan the team works to changes only once the task is stopped, in plain words.
+        harness.ready("FRK-2");
+        let before = harness.project.file("FRK-2");
+        let mut edited = before.clone();
+        edited["intent"] = json!("A person signs in with an email and a password, and signs out.");
+        let refused = rpc(
+            &harness.daemon,
+            "contract.save",
+            &json!({ "task_id": "FRK-2", "contract": edited }),
+        );
+        assert_eq!(refused["error"]["code"], -32005, "{refused}");
+        assert_eq!(
+            refused["error"]["message"],
+            "the team is working to this plan; stop the task before you change it"
+        );
+        assert_eq!(harness.project.file("FRK-2"), before);
     }
 
     #[test]
