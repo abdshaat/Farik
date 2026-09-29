@@ -1,10 +1,10 @@
 # Phase 6, step 08: Today and the gate pages
 
-Status: draft (round two of readiness)
+Status: ready
 Branch: `phase/6-web-ui`
 Spec: `docs/SPEC.md` sections 5.4 (what a human gate shows), 5.7, 5.11, 5.13, 5.16, 10, F4, F14
 Depends on: steps 01 to 07 of this phase (step 07 supplies every query, method and command these pages use)
-Readiness confirmed by: fresh-session reviewer, 2026-09-29, round one: not ready (two blockers, seven planner decisions, three interface gaps now added to step 07). All are settled below; round two is limited to them.
+Readiness confirmed by: fresh-session reviewer, 2026-09-29, round one: not ready (two blockers, seven planner decisions, three interface gaps now added to step 07). All are settled below. Round two found them settled apart from two journey transcripts whose agent ids did not match the team; step 07 now promises matching ones, and the lists use them.
 
 Signatures, not bodies; test names and what each asserts, not test code; around 300 lines at most (ADR 0008).
 
@@ -116,7 +116,6 @@ Out of scope: the board and task detail (step 09); the channel preview on Today 
   - The ids R-7, E-3 and T-14 all become the task's `FRK-n`.
   - Main's acceptance row keeps "All N of Farik's checks passed" (from `task.checks`).
   - "In the channel" waits for step 10.
-  - "R-7" becomes the task id.
   - HelpNeeded's "Pause the task" is dropped (step 07's decision).
   - "Give Theo 2 more tries" appears only for reason `iterations`.
   - Choices show their hints where the agent gave one.
@@ -125,9 +124,9 @@ Out of scope: the board and task detail (step 09); the channel preview on Today 
   - Vitest and axe for each page's logic.
   - Layout checks (phone fit, the sticky rail) run in the Playwright journeys at 360 × 780, since jsdom does not lay out.
   - The journeys start from a team written by `startServe({ team: 'pm-architect-developer' })`: Mira (Product Manager), Ada (Architect, who reviews the Developer and checks plans), and Theo (Developer), under `human_accepts_contracts: high_risk`. The recorded adapter replays transcripts in order, so each journey lists every session:
-    - request: `triage_frk_1_small_by_pm`, `ask_with_choices_frk_1`, `refine_writes_task_frk_1`, `judge_frk_1_by_architect`;
+    - request: `triage_frk_1_small_by_pm`, `ask_with_choices_frk_1`, `refine_writes_task_for_theo_frk_1`, `judge_frk_1_by_architect`;
     - approve: `triage_frk_1_large`, `refine_writes_epic_frk_1`, `judge_frk_1_by_architect`, `refine_writes_epic_frk_1`, `judge_frk_1_by_architect`;
-    - accept: `triage_frk_1_small_by_pm`, `refine_writes_high_risk_frk_1`, `judge_frk_1_by_architect`, the human's approval, `plan_assigns_frk_1`, `implement_finishes_frk_1`, `review_writes_note`, `implement_after_send_back_frk_1`, `review_writes_note`.
+    - accept: `triage_frk_1_small_by_pm`, `refine_writes_high_risk_frk_1`, `judge_frk_1_by_architect`, the human's approval, `plan_assigns_frk_1_to_theo`, `implement_finishes_frk_1`, `review_writes_note`, `implement_after_send_back_frk_1`, `review_writes_note`.
   - `farik-e2e-serve`'s name map gains every one of these names. The steps are:
     - `request.spec.ts`: file a request, see it sized as small, and answer a question by choice. The task then reaches `ready` (a low-risk plan needs no approval), shown as "To do" on its request page.
     - `approve.spec.ts`: open the plan, see the summary and checks, edit the intent and see the live check change, save back to refining, then approve once it returns.
@@ -148,7 +147,7 @@ docs/plans/project-plan.md (step 08 line)                          modifies (T5)
 
 Consumes: `serve.status`, `tasks.list`, `team.get` (steps 02 and 05); step 07's queries (`task.tries`, `sprint.current`, `waiting.list`, `contract.get`, `contract.check`, `task.history`, `task.diff`, `task.checks`, `questions.list`, `escalation.choices`, `team.activity`, `moved.since`), methods (`request.file`, `contract.save`), and commands (`human_accept`, `human_send_back`, `question_answer`, `request_triage`, `contract_lock`, `contract_unlock`, `escalation_resolve`, `task_integrate`); step 04's app frame; `@farik/ui`.
 
-Produces: the routes above; `statusWord(status: TaskStatus): string`.
+Produces: the routes above; `statusWord(status: TaskStatus, reason?: EscalationReason): string`.
 
 ## Tasks
 

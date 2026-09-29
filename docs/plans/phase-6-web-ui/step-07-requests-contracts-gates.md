@@ -101,7 +101,7 @@ The runtime gives step 08's pages what spec 5.4 and 5.16 ask of a human gate. It
   - completion notes: `implement_finishes_frk_1`, `plan_closes_epic_frk_1`;
   - review notes: `review_writes_note`, `review_answers_nothing`, `review_epic_frk_1`, `review_epic_fails_frk_1`.
 
-  `plan_breaks_down_frk_1` changes only if a fixture's policy binds its children; it does not, since the fixtures use `high_risk` with low-risk children. New synthetic transcripts for step 08's journeys: `ask_with_choices_frk_1`, `implement_after_send_back_frk_1`, `triage_frk_1_small_by_pm`, and `refine_writes_high_risk_frk_1` (a `high` risk task for a Developer, reviewed by the Architect, with a summary).
+  `plan_breaks_down_frk_1` changes only if a fixture's policy binds its children; it does not, since the fixtures use `high_risk` with low-risk children. New synthetic transcripts for step 08's journeys: `ask_with_choices_frk_1`, `implement_after_send_back_frk_1`, `triage_frk_1_small_by_pm`, and `refine_writes_high_risk_frk_1` (a `high` risk task for a Developer, reviewed by the Architect, with a summary), `refine_writes_task_for_theo_frk_1` (a `low` risk task for a Developer, reviewed by the Architect), and `plan_assigns_frk_1_to_theo` (assigns FRK-1 to `theo` with `ada` reviewing); these last three match step 08's Mira, Ada and Theo team.
 - **Skills.** The Product Manager's, Scrum Master's, Architect's, Developer's, and Marketing Specialist's skills each gain one line on the summary they write.
 
 ## File map
