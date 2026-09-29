@@ -681,20 +681,38 @@ struct Serving {
 /// `farik serve` in `cwd`, with `PATH`, `HOME` at `home`, the state folder at `state`, an API key
 /// in the environment, and interrupts the test sends.
 fn serving_setup(cwd: &Path, home: &Path, state: &Path) -> Serving {
-    let (out, err) = (SharedOut::default(), SharedOut::default());
-    let (interrupt, interrupts) = tokio::sync::mpsc::unbounded_channel();
-    let mut env = project::a_bare_env();
-    env.insert("HOME".to_string(), home.display().to_string());
-    env.insert("XDG_CONFIG_HOME".to_string(), state.display().to_string());
+    let mut env = setup_env(home, state);
     env.insert(
         "ANTHROPIC_API_KEY".to_string(),
         "sk-ant-api03-test".to_string(),
     );
+    serving_in(cwd, env, true)
+}
+
+/// `PATH`, `HOME` at `home`, and the state folder at `state`: no credential.
+fn setup_env(home: &Path, state: &Path) -> std::collections::BTreeMap<String, String> {
+    let mut env = project::a_bare_env();
+    env.insert("HOME".to_string(), home.display().to_string());
+    env.insert("XDG_CONFIG_HOME".to_string(), state.display().to_string());
+    env
+}
+
+/// `farik serve` in `cwd` with `env` alone, on the recorded engine when `recorded_engine`, else on
+/// Claude Code's, with interrupts the test sends.
+fn serving_in(
+    cwd: &Path,
+    env: std::collections::BTreeMap<String, String>,
+    recorded_engine: bool,
+) -> Serving {
+    let (out, err) = (SharedOut::default(), SharedOut::default());
+    let (interrupt, interrupts) = tokio::sync::mpsc::unbounded_channel();
     let (cwd, port) = (cwd.to_path_buf(), free_port());
     let (shared_out, shared_err) = (out.clone(), err.clone());
     let thread = std::thread::spawn(move || {
         run_with(&cwd, &["serve", "--port", &port], |io| {
-            io.engine = recorded(Vec::new());
+            if recorded_engine {
+                io.engine = recorded(Vec::new());
+            }
             io.env = env;
             io.stdout = Box::new(shared_out);
             io.stderr = Box::new(shared_err);
@@ -993,4 +1011,74 @@ fn writes_no_sandbox_into_the_project() {
     .expect("JSON");
     assert_eq!(settings, json!({ "sandbox": "none" }));
     assert!(err.contains("warning: no-sandbox mode"), "{err}");
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn refuses_paths_outside_home_and_bad_names() {
+    let (cwd, state) = setup_folders("setup-guards");
+    let home = scratch("setup-guards-home");
+    let shop = home.join("shop");
+    std::fs::create_dir_all(shop.join("src")).expect("the folders");
+    farik_store::git::fixtures::git_in(&shop, &["init", "-b", "main"]);
+    // No credential kept, and none in the environment.
+    let serving = serving_in(&cwd, setup_env(&home, &state), true);
+    let description = "A shop for bread, with an order page and a daily menu.";
+    let create = |parent: &str, name: &str| json!({ "parent": parent, "name": name, "description": description, "no_sandbox": false });
+    let open = |path: &str| json!({ "path": path, "no_sandbox": false });
+    let named = "a project's name is lowercase letters, digits, and -, up to 64 characters";
+    let shop_root = shop.canonicalize().expect("the shop");
+    let inside = format!(
+        "that folder is inside a git project; choose {} instead",
+        shop_root.display()
+    );
+    let escaped = format!("../{}-out", name_of(&home));
+    let asked = [
+        (
+            "project.open",
+            open("../"),
+            "that folder is outside your home folder",
+        ),
+        ("project.create", create("", &escaped), named),
+        ("project.create", create("", "Bad Name"), named),
+        ("project.open", open("shop/src"), inside.as_str()),
+        (
+            "project.create",
+            create("", "shop"),
+            "a folder with that name is already there",
+        ),
+        (
+            "project.open",
+            open("shop"),
+            "connect your AI account first",
+        ),
+        (
+            "project.create",
+            create("", "bakery"),
+            "connect your AI account first",
+        ),
+    ];
+    let answers: Vec<Value> = asked
+        .iter()
+        .map(|(method, params, _)| call(serving.port, &serving.cookie, method, params.clone()))
+        .collect();
+    let (ran, out, err) = serving.interrupted();
+    for ((method, params, sentence), answer) in asked.iter().zip(&answers) {
+        assert_eq!(
+            answer["error"]["code"], -32005,
+            "{method} {params}: {answer}"
+        );
+        assert_eq!(answer["error"]["message"], *sentence, "{method} {params}");
+    }
+    assert!(!home.join("bakery").exists());
+    assert!(
+        !home
+            .parent()
+            .expect("a parent")
+            .join(&escaped[3..])
+            .exists()
+    );
+    assert!(!shop.join(".farik/team.yaml").exists());
+    assert!(!state.join("farik/state.json").exists());
+    assert_eq!(ran.code, 130, "{out}\n{err}");
 }
