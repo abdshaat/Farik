@@ -1480,6 +1480,37 @@ mod tests {
     }
 
     #[test]
+    fn lets_the_human_send_back_only_a_result_that_waits_on_them_once_it_is_reviewed() {
+        let mut context = a_context();
+        context.contract.status = TaskStatus::Verifying;
+        let request = ask(TaskStatus::Rejected, A::Human, None);
+        assert_eq!(effects(&request, &context), []);
+
+        let mut waits_on_nobody = context.clone();
+        waits_on_nobody.result_awaits_human = false;
+        assert_eq!(
+            one_gate(&request, &waits_on_nobody),
+            (
+                GateId::HumanRejection,
+                vec!["the result does not wait on the human's acceptance, so it is the reviewer's to send back".to_string()]
+            )
+        );
+
+        let mut unreviewed = context.clone();
+        unreviewed.review_passed = false;
+        assert_eq!(
+            one_gate(&request, &unreviewed),
+            (
+                GateId::HumanRejection,
+                vec!["the reviewer has not passed the review yet, and the human sends back once it has".to_string()]
+            )
+        );
+        // An epic is the human's to review, so it waits on no reviewer.
+        unreviewed.contract.kind = Kind::Epic;
+        assert_eq!(effects(&request, &unreviewed), []);
+    }
+
+    #[test]
     fn counts_the_iteration_when_the_task_returns_to_work_and_clears_its_blocker() {
         let mut context = a_context();
         context.contract.status = TaskStatus::Rejected;

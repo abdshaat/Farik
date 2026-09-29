@@ -2256,6 +2256,14 @@ mod tests {
         )
         .await;
         assert!(low.starts_with("not_waiting_for_the_human"), "{low}");
+        // An epic is the human's to review, so it goes back with no reviewer's review.
+        an_epic(&harness, "FRK-3", "verifying", a_command_criterion());
+        handled(
+            &orchestrator,
+            send_back("FRK-3", AcceptSubject::Result, &[]),
+        )
+        .await;
+        assert_eq!(harness.row("FRK-3").status, TaskStatus::Rejected);
         assert!(matches!(
             orchestrator
                 .handle(Command::HumanSendBack {
