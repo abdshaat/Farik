@@ -144,7 +144,7 @@ Tests:
 - `refuses a colour that is not #rrggbb` asserts that `readTokens` given `ink: "black"` throws, naming `ink`.
 - `generates camelCase keys in the TypeScript module` asserts that `generateTs` contains `inkMuted` and `statusWaiting`, contains no `ink-muted` key, and ends `as const`.
 
-- [ ] `feat(brand): generate css and typescript from one token source`
+- [x] `feat(brand): generate css and typescript from one token source`
 
 ### Task 3: Contrast
 

@@ -33,7 +33,7 @@ The five brand colours, the three text shades, and the light and dark themes are
 | `rule` | `#D9CBB3` | `#333333` | Borders and dividers |
 | `band` | Midnight `#161616` | `#0E0E0E` | The team band and the navigation rail, dark in both themes |
 | `action` | Clay Coral `#D8896A`, with Midnight text | the same | The one primary action on a screen |
-| `role-*` | Coral, Moss, Signal Blue, lavender, Midnight | the same | Role tags only |
+| `role-*` | Coral (Product Manager), Moss (Scrum Master), Architect's Amber `#E3B04B`, Signal Blue (Developer), lavender (Marketing Specialist), with Midnight text | the same | Role tags only |
 | `status-*` | Moss Text (done), Signal Text (working), Coral Text (waiting on you) | the base colours | Status words, always with a word, never colour alone |
 
 ### Type
@@ -148,7 +148,7 @@ The spec's lifecycle (5.2) is the authority. Step 08's plan checks this mapping 
 
 These hold without being mentioned on any screen:
 - responsive from 360 px, with no sideways page scroll;
-- visible keyboard focus: a 2 px Signal Blue ring with a 2 px offset;
+- visible keyboard focus: a 2 px ring with a 2 px offset, Signal Text `#0653FF` in light and Signal Blue in dark, because Signal Blue on Soft Sand is 2.57:1, under 3:1;
 - `prefers-reduced-motion` respected;
 - WCAG 2.2 AA for every text pair, checked by phase 6 step 01's contrast test;
 - status never shown by colour alone;
