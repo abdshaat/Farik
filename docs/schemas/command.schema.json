@@ -28,7 +28,9 @@
         "run_stop",
         "sprint_start",
         "sprint_end",
-        "message_post"
+        "message_post",
+        "team_pause",
+        "team_resume"
       ]
     },
     "commandBodyWire": {
@@ -172,7 +174,7 @@
     },
     "emptyBody": {
       "title": "Empty Body",
-      "description": "The body of a command that carries nothing: run_stop and sprint_end.",
+      "description": "The body of a command that carries nothing: run_stop, sprint_end, team_pause, and team_resume.",
       "type": "object",
       "additionalProperties": false,
       "properties": {}

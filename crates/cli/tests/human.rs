@@ -445,6 +445,52 @@ fn starts_and_shows_a_sprint_from_the_command_line() {
 
 #[test]
 #[ignore = "needs the git program: cargo xtask check --integration"]
+fn pauses_and_resumes_from_the_command_line() {
+    let repository = a_team("human-pause");
+
+    let paused = run(&repository.path, &["pause"]);
+    assert_eq!(paused.code, 0, "{}", paused.err);
+    assert!(paused.out.contains("paused the team"), "{}", paused.out);
+    let resumed = run(&repository.path, &["resume"]);
+    assert_eq!(resumed.code, 0, "{}", resumed.err);
+    assert!(resumed.out.contains("resumed the team"), "{}", resumed.out);
+
+    let again = run(&repository.path, &["resume"]);
+    assert_eq!(again.code, 1, "{}", again.out);
+    assert!(
+        again.err.contains("not_paused: the team is not paused"),
+        "{}",
+        again.err
+    );
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn run_on_a_paused_team_says_so_and_exits() {
+    let repository = a_team("human-pause-run");
+    let paused = run(&repository.path, &["pause"]);
+    assert_eq!(paused.code, 0, "{}", paused.err);
+
+    let ran = run_with(&repository.path, &["run"], |io| {
+        io.engine = Engine::Given(Arc::new(|daemon| {
+            let adapter: Arc<dyn RuntimeAdapter> =
+                Arc::new(RecordedAdapter::with_tools(Vec::new(), tool_runner(daemon)));
+            adapter
+        }));
+    });
+
+    assert_eq!(ran.code, 0, "{}\n{}", ran.out, ran.err);
+    assert!(
+        ran.out
+            .contains("idle: the team is paused; farik resume starts it again"),
+        "{}",
+        ran.out
+    );
+    assert!(events(&repository, &[EventKind::SessionStarted]).is_empty());
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
 fn says_an_empty_sprint_whose_planning_is_spent_waits_for_its_end() {
     let repository = a_team("human-sprint-empty");
     let started = run(&repository.path, &["sprint", "start"]);

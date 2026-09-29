@@ -316,6 +316,10 @@ enum Commands {
         #[command(subcommand)]
         command: SprintCommands,
     },
+    /// Pause the whole team: no rule runs, no session starts, until `farik resume`.
+    Pause,
+    /// Resume a paused team.
+    Resume,
     /// Say something in the team's channel; @<id> mentions an agent (5.9).
     Say {
         /// What you say.
@@ -528,6 +532,8 @@ pub fn run_cli(args: &[String], io: &mut CliIo<'_>) -> i32 {
         | Commands::Resolve { .. }
         | Commands::Cancel { .. }
         | Commands::Say { .. }
+        | Commands::Pause
+        | Commands::Resume
         | Commands::Sprint {
             command: SprintCommands::Start { .. } | SprintCommands::End,
         } => open_project(&io.cwd, now).and_then(|project| {
@@ -695,6 +701,8 @@ fn humans(command: &Commands) -> Result<(&'static str, Command), String> {
         Commands::Sprint {
             command: SprintCommands::End,
         } => ("sprint end", Command::SprintEnd),
+        Commands::Pause => ("pause", Command::TeamPause),
+        Commands::Resume => ("resume", Command::TeamResume),
         Commands::Say { text } => (
             "say",
             Command::MessagePost {

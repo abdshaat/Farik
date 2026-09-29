@@ -1309,6 +1309,7 @@ mod tests {
     use farik_core::sprint::SprintStatus;
     use farik_core::team::Effort;
     use farik_protocol::clock::MovableClock;
+    use farik_protocol::command::Command;
     use farik_protocol::event::SprintEndedBodyEndedBy;
     use farik_protocol::event::{
         BudgetExhaustedBodyScope, CriterionRecordedBodyRunBy, EscalationRaisedBodyReason,
@@ -4383,6 +4384,57 @@ mod tests {
                 .status,
             SprintStatus::Ended
         );
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn starts_no_session_while_paused() {
+        let harness = Harness::new("orch-paused-no-session", |_| {});
+        harness.ready("FRK-1");
+        let adapter = harness.recorded(vec![plan_assigns_frk_1()]);
+        let orchestrator = harness.orchestrator(adapter.clone());
+        orchestrator
+            .handle(Command::TeamPause)
+            .await
+            .expect("the pause is handled");
+        let before = harness.events(&[]).len();
+
+        let report = orchestrator.tick().await.expect("the tick runs");
+
+        assert_eq!(
+            report,
+            TickReport::Idle {
+                why: "the team is paused; farik resume starts it again".to_string(),
+                until: None
+            }
+        );
+        assert_eq!(harness.events(&[]).len(), before);
+        assert!(adapter.started().is_empty());
+
+        orchestrator
+            .handle(Command::TeamResume)
+            .await
+            .expect("the resume is handled");
+        orchestrator.tick().await.expect("the tick runs");
+        assert_eq!(adapter.started().len(), 1);
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn ends_no_finished_sprint_while_paused() {
+        let harness = Harness::new("orch-paused-sprint", |_| {});
+        harness.accepted("FRK-1");
+        harness.open_sprint("S1", &["FRK-1"]);
+        let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
+        orchestrator
+            .handle(Command::TeamPause)
+            .await
+            .expect("the pause is handled");
+
+        let report = orchestrator.tick().await.expect("the tick runs");
+
+        assert!(matches!(report, TickReport::Idle { .. }), "{report:?}");
+        assert!(harness.events(&[EventKind::SprintEnded]).is_empty());
     }
 
     #[tokio::test]

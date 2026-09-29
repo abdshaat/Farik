@@ -21,6 +21,7 @@ use super::requests::HUMAN;
 use super::verify::{governor_results, is_human, is_mechanical, since_verifying};
 use super::{CommandError, CommandReport, IntegrationOutcome, Orchestrator, OrchestratorError};
 use crate::channel::{ChannelError, NewMessage, mentions_in, post};
+use crate::pause::paused;
 use crate::sprints::{EndedBy, SprintError, end_sprint, start_sprint};
 use crate::tools::ToolDeps;
 use crate::transitions::{
@@ -96,6 +97,8 @@ pub(super) async fn handle(
             end_sprint(tools, EndedBy::Human),
             EventKind::SprintEnded,
         ),
+        Command::TeamPause => pause(tools, true),
+        Command::TeamResume => pause(tools, false),
         Command::MessagePost { text } => post_message(tools, text),
         Command::RunStop => {
             orchestrator.stop();
@@ -107,6 +110,31 @@ pub(super) async fn handle(
             })
         }
     }
+}
+
+/// The human's pause of the whole team, or its resume: recorded once, and refused when the team
+/// is already so.
+fn pause(tools: &ToolDeps, pausing: bool) -> Result<CommandReport, CommandError> {
+    if paused(&tools.log).map_err(failed)? == pausing {
+        return Err(CommandError::Refused {
+            reason: if pausing {
+                "already_paused: the team is already paused"
+            } else {
+                "not_paused: the team is not paused"
+            }
+            .to_string(),
+        });
+    }
+    let by = serde_json::from_value(serde_json::json!({ "by": HUMAN })).map_err(failed)?;
+    let (body, said) = if pausing {
+        (EventBody::TeamPaused(by), "paused the team")
+    } else {
+        (EventBody::TeamResumed(by), "resumed the team")
+    };
+    Ok(CommandReport {
+        said: said.to_string(),
+        events: vec![append(tools, None, body)?],
+    })
 }
 
 /// The human's message in the team's channel (5.9), its mentions found by Farik.
@@ -1849,6 +1877,58 @@ mod tests {
         assert!(reason.contains("S1"), "{reason}");
         assert_eq!(harness.events(&[]).len(), before);
         assert!(harness.project.deps.files.read_sprint("S2").is_err());
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn records_a_pause_the_human_asks_for() {
+        let harness = Harness::new("human-pause", |_| {});
+        let orchestrator = an_orchestrator(&harness);
+
+        let report = handled(&orchestrator, Command::TeamPause).await;
+
+        let paused = last(&harness, EventKind::TeamPaused).expect("the pause is recorded");
+        assert_eq!(report.events, vec![paused.envelope.seq]);
+        assert_eq!(
+            serde_json::to_value(&paused.body).expect("a body")["body"],
+            json!({ "by": "human" })
+        );
+        let again = refused(&orchestrator, Command::TeamPause).await;
+        assert_eq!(again, "already_paused: the team is already paused");
+        assert_eq!(harness.events(&[EventKind::TeamPaused]).len(), 1);
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn refuses_a_resume_when_not_paused() {
+        let harness = Harness::new("human-resume-refused", |_| {});
+        let orchestrator = an_orchestrator(&harness);
+
+        let reason = refused(&orchestrator, Command::TeamResume).await;
+
+        assert_eq!(reason, "not_paused: the team is not paused");
+        assert!(harness.events(&[EventKind::TeamResumed]).is_empty());
+
+        handled(&orchestrator, Command::TeamPause).await;
+        handled(&orchestrator, Command::TeamResume).await;
+        assert_eq!(harness.events(&[EventKind::TeamResumed]).len(), 1);
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn takes_the_human_commands_while_paused() {
+        let harness = Harness::new("human-paused-commands", |_| {});
+        harness.open_sprint("S1", &[]);
+        let orchestrator = an_orchestrator(&harness);
+        handled(&orchestrator, Command::TeamPause).await;
+
+        handled(&orchestrator, Command::SprintEnd).await;
+
+        let ended = last(&harness, EventKind::SprintEnded).expect("the end is recorded");
+        let EventBody::SprintEnded(body) = &ended.body else {
+            panic!("an end");
+        };
+        assert_eq!(body.ended_by, SprintEndedBodyEndedBy::Human);
     }
 
     #[tokio::test]

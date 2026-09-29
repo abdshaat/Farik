@@ -182,7 +182,7 @@ Tests:
 - `pauses_and_resumes_from_the_command_line` asserts that `farik pause` prints "paused the team" and exits 0, then `farik resume` prints "resumed the team". A second `farik resume` exits 1 with `not_paused: the team is not paused`.
 - `run_on_a_paused_team_says_so_and_exits` asserts that after `farik pause`, `farik run` exits 0 and prints the pause line as its idle reason, with no `session.started` in the log.
 
-- [ ] `feat(runtime): pause and resume the whole team`
+- [x] `feat(runtime): pause and resume the whole team`
 
 ### Task 3: `farik serve`
 

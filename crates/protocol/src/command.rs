@@ -164,6 +164,10 @@ pub enum Command {
     },
     /// End the open sprint.
     SprintEnd,
+    /// Pause the whole team: no rule runs until it is resumed.
+    TeamPause,
+    /// Resume a paused team.
+    TeamResume,
     /// Say something in the team's channel.
     MessagePost {
         /// What the human says.
@@ -289,12 +293,16 @@ fn human_command(name: CommandName, body: &Value) -> Result<Command, Vec<Validat
                 session_id: body.session_id.to_string(),
             })
         }
-        CommandName::RunStop | CommandName::SprintEnd => {
+        CommandName::RunStop
+        | CommandName::SprintEnd
+        | CommandName::TeamPause
+        | CommandName::TeamResume => {
             let _: EmptyBody = read_body(body, name)?;
-            Ok(if name == CommandName::RunStop {
-                Command::RunStop
-            } else {
-                Command::SprintEnd
+            Ok(match name {
+                CommandName::RunStop => Command::RunStop,
+                CommandName::SprintEnd => Command::SprintEnd,
+                CommandName::TeamPause => Command::TeamPause,
+                _ => Command::TeamResume,
             })
         }
         CommandName::SprintStart => {
@@ -410,6 +418,8 @@ pub fn command_to_value(command: &Command) -> Value {
             json!({ "budget_usd": budget_usd }),
         ),
         Command::SprintEnd => (CommandName::SprintEnd, json!({})),
+        Command::TeamPause => (CommandName::TeamPause, json!({})),
+        Command::TeamResume => (CommandName::TeamResume, json!({})),
         Command::MessagePost { text } => (CommandName::MessagePost, json!({ "text": text })),
     };
     json!({ "command": name.to_string(), "body": body })
@@ -790,6 +800,22 @@ mod tests {
                 text: "@dev-a how is FRK-1?".to_string()
             }
         );
+    }
+
+    #[test]
+    fn reads_and_writes_team_pause_and_team_resume() {
+        for (name, command) in [
+            ("team_pause", Command::TeamPause),
+            ("team_resume", Command::TeamResume),
+        ] {
+            assert_eq!(read(name, &json!({})), command);
+            assert_eq!(
+                command_to_value(&command),
+                json!({ "command": name, "body": {} })
+            );
+            let errors = refusal(&json!({ "command": name, "body": { "why": "lunch" } }));
+            assert!(!errors.is_empty(), "{name} takes no field");
+        }
     }
 
     #[test]

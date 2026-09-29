@@ -22,6 +22,8 @@ pub mod forge;
 /// Farik running its team: the board read, the next thing on it done, one session at a time.
 #[cfg(unix)]
 pub mod orchestrator;
+/// Whether the human has paused the team.
+pub mod pause;
 /// A session's system prompt, assembled in one fixed order.
 pub mod prompt;
 /// Sessions replayed from recorded transcripts.

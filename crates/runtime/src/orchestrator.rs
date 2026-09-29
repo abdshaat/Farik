@@ -438,6 +438,12 @@ impl Orchestrator {
     ///
     /// As `tick`.
     pub async fn tick_within(&self, scope: &TickScope) -> Result<TickReport, OrchestratorError> {
+        if crate::pause::paused(&self.deps.tools.log)? {
+            return Ok(TickReport::Idle {
+                why: "the team is paused; farik resume starts it again".to_string(),
+                until: None,
+            });
+        }
         rules::tick(self, scope).await
     }
 
