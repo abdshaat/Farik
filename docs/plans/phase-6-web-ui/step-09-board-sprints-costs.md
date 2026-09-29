@@ -83,7 +83,7 @@ Out of scope: the channel (step 10), one-on-ones (phase 8), notifications (phase
 - **Activity.** Step 07's `AgentActivity` gains `session_id: Option<String>` and `purpose: Option<SessionPurpose>`, and its `state` is the enum `working | resting | waiting_on_you | paused | idle` (step 07's list), so the page never parses `line`.
 - **Tests.**
   - Vitest and axe on each page. `lanes.test.ts` checks every `TaskStatus`.
-  - Playwright `board.spec.ts`, on step 08's team. The recorded adapter replays in order, so every session is listed: `triage_frk_1_small_by_pm`, `refine_writes_task_for_theo_frk_1`, `judge_frk_1_by_architect`, `planning_ceremony_frk_1` (phase 4's, which plans FRK-1 and plays as Mira, the planner without a Scrum Master), `plan_assigns_frk_1_to_theo`, `implement_finishes_frk_1`, `review_writes_note`, `accept_frk_1`, then the sprint's review and look-back ceremonies, `review_ceremony_s1` and `retro_ceremony_s1` (synthetic, added by Task 5 if phase 4 has none). It assumes no UTC midnight during the run, so no standup session starts. The steps:
+  - Playwright `board.spec.ts`, on step 08's team. The recorded adapter replays in order, so every session is listed: `triage_frk_1_small_by_pm`, `refine_writes_task_for_theo_frk_1`, `judge_frk_1_by_architect`, `planning_ceremony_frk_1` (phase 4's, which plans FRK-1 and plays as Mira, the planner without a Scrum Master), `plan_assigns_frk_1_to_theo`, `implement_finishes_frk_1`, `review_writes_note`, `accept_frk_1`, then the sprint's review and look-back ceremonies: `sprint_review_s1` (synthetic, added by Task 5) and phase 4's `retro` transcript (`transcripts/retro.jsonl`). It assumes no UTC midnight during the run, so no standup session starts. The steps:
     1. start a sprint with a $20 budget;
     2. file the request on Today (after the sprint opens, so the planning ceremony plans it);
     3. see the task move from Planning to To do to In progress to Review to Done on the board by itself;
@@ -98,7 +98,7 @@ Out of scope: the channel (step 10), one-on-ones (phase 8), notifications (phase
 
 ```
 crates/store/src/{projections.rs,activity.rs} (+ tests)                      modifies: costs_by_purpose, costs_for; session_id and purpose (T1)
-crates/runtime/src/recorded/{fixtures.rs,transcripts/*_ceremony_s1.jsonl}   creates if missing (T5)
+crates/runtime/src/recorded/{fixtures.rs,transcripts/sprint_review_s1.jsonl}   creates (T5)
 apps/web/src/pages/Gate.tsx                                                  modifies: "See the whole history" to /tasks/:id (T3)
 crates/runtime/src/daemon/web.rs, docs/schemas/rpc.schema.json, crates/protocol/src/rpc.rs, packages/protocol-client/src/client.ts   modifies: queries (T1)
 apps/web/src/app/{lanes.ts,lanes.test.ts,App.tsx}, shell/{Shell.tsx,Shell.test.tsx}, strings/en.ts   creates / modifies (T2)
