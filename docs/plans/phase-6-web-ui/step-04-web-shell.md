@@ -1,6 +1,6 @@
 # Phase 6, step 04: Web shell
 
-Status: ready (Task 4 waits on the founder's changes to the Pause mockup)
+Status: in progress
 Branch: `phase/6-web-ui`
 Spec: `docs/SPEC.md` sections 8.1 (the daemon serves the app), 8.6 (the web UI), and 10 (360 px, WCAG 2.2 AA, strings externalized, themes)
 Depends on: steps 01 to 03 of this phase (`@farik/brand`, the daemon's browser routes and `@farik/protocol-client`, and `@farik/ui`)
@@ -80,7 +80,7 @@ The rail shows only the places that exist, and each later step adds its own.
 - **Theme** (`src/app/theme.ts`) exports `useTheme(): [ThemeChoice, (c: ThemeChoice) => void]`, where `ThemeChoice = 'light' | 'dark' | 'system'`, kept in `localStorage` key `farik.theme` (read and written inside try/catch, default `light`). It sets `data-theme` on `<html>`. With `system` it follows `matchMedia('(prefers-color-scheme: dark)')`, including changes to it.
 - **Advanced** is a switch in Settings, kept in `localStorage` key `farik.advanced` (default off). It changes nothing yet; steps 06 to 08 read it. Its explanation is the Settings mockup's text.
 - **Layout** follows `web-ui.md`, and the Pause control follows the mockup as the founder approved it on 2026-09-29, with the changes recorded in the next bullet.
-- **The founder's changes to the Pause mockup** (approved with changes, 2026-09-29): to be recorded here when received. Task 4 starts only after they are.
+- **The founder's changes to the Pause mockup:** none. On 2026-09-29 the founder confirmed it is built exactly as shown.
   - At 1024 px and wider there is a dark rail (`band`) with the logo, the places, and at its foot the connection state, the team state, and Pause or Resume.
   - Below 1024 px there is a top bar with the project's name and Pause or Resume, and a bottom bar with the places.
   - While paused, a banner reads "The team is paused. Nothing new starts until you resume. You can still answer, approve and accept." This follows the mockup published to the founder on 2026-09-29 (Farik pause control). If the founder asks for changes, they are made in place.
