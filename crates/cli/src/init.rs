@@ -4,7 +4,7 @@ use std::path::Path;
 use std::sync::Arc;
 
 use chrono::{DateTime, Utc};
-use farik_core::team::{Team, validate_team};
+use farik_core::team::{Team, defaults, validate_team};
 use farik_protocol::event::EventBody;
 use farik_protocol::generated::event::{CriteriaUpdatedBody, ProjectScannedBody, TeamUpdatedBody};
 use farik_store::files::{FilesError, ProjectFiles};
@@ -178,6 +178,7 @@ fn absent_or<T>(read: Result<T, FilesError>) -> Result<Option<T>, String> {
 /// The sentence `validate_team`'s refusal reads as, which would mean this function and the schema
 /// disagree.
 fn starter_team(project: &str) -> Result<Team, String> {
+    let defaults = defaults();
     let wire = json!({
         "name": if project.is_empty() { "Farik".to_string() } else { project.to_string() },
         "agents": [
@@ -198,14 +199,8 @@ fn starter_team(project: &str) -> Result<Team, String> {
                 "model": { "id": "claude-opus-5", "effort": "high" }
             }
         ],
-        "budgets": {},
-        "policy": {
-            "human_accepts_contracts": "high_risk",
-            "wip_limit_per_agent": 1,
-            "blocked_limit_hours": 24,
-            "max_iterations": 3,
-            "integration": "auto_merge"
-        },
+        "budgets": defaults.budgets,
+        "policy": defaults.policy,
         "rules": {}
     });
     validate_team(&wire).map_err(|errors| {

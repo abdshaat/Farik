@@ -583,7 +583,11 @@ impl Orchestrator {
             .agents
             .iter()
             .find(|agent| Some(agent.id.as_str()) == assignee.as_deref())
-            .is_some_and(|agent| agent.tiers().contains(&PermissionTier::Network));
+            .is_some_and(|agent| {
+                agent
+                    .tiers(&team.permissions())
+                    .contains(&PermissionTier::Network)
+            });
         let sandbox: Arc<dyn Sandbox> = Arc::from(self.deps.sandboxes.create(
             &self.deps.tools.ids.project_id,
             task_id,

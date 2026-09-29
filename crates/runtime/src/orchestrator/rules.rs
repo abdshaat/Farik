@@ -1550,7 +1550,11 @@ mod tests {
             .expect("pm is on the team");
         assert_eq!(
             spec.builtin_tools,
-            allowed_builtins(&pm.tiers().into_iter().collect::<BTreeSet<_>>())
+            allowed_builtins(
+                &pm.tiers(&team.permissions())
+                    .into_iter()
+                    .collect::<BTreeSet<_>>()
+            )
         );
         assert!(
             spec.initial_prompt.contains("FRK-1"),

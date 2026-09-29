@@ -285,7 +285,10 @@ fn judge_call(
             input_hash: String::new(),
         },
         &AgentGrants {
-            tiers: agent.tiers().into_iter().collect::<BTreeSet<_>>(),
+            tiers: agent
+                .tiers(&team.permissions())
+                .into_iter()
+                .collect::<BTreeSet<_>>(),
             preauthorized_external_tools: BTreeSet::new(),
         },
         &ToolCallContext {

@@ -136,7 +136,7 @@ impl Project {
             .iter()
             .find(|agent| agent.id.as_str() == "dev-a")
             .expect("dev-a")
-            .tiers()
+            .tiers(&team.permissions())
             .into_iter()
             .collect();
         let files = Arc::new(ProjectFiles::open(repo.path.clone()));

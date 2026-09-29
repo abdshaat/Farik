@@ -289,7 +289,8 @@ fn session_spec(
     let project_scan = files.read_project_scan().ok();
     let memory = files.read_memory(&ask.agent.id)?;
     let criteria = files.read_criteria()?;
-    let tiers: BTreeSet<PermissionTier> = ask.agent.tiers().into_iter().collect();
+    let tiers: BTreeSet<PermissionTier> =
+        ask.agent.tiers(&team.permissions()).into_iter().collect();
     let builtin_tools = if ask.only_tool.is_some() {
         Vec::new()
     } else if ask.read_only {
@@ -320,9 +321,11 @@ fn session_spec(
         None => None,
     };
     let rules = team.rules();
+    let permissions = team.permissions();
     let system_prompt = assemble_system_prompt(&PromptInput {
         role: &role,
         agent: ask.agent,
+        permissions: &permissions,
         project_scan: project_scan.as_deref(),
         memory: &memory,
         memory_cap_tokens: usize::try_from(team.policy.memory_cap_tokens).unwrap_or(usize::MAX),

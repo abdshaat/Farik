@@ -274,8 +274,71 @@
           "maximum": 16000,
           "default": 8000,
           "description": "How long each agent's notebook, .farik/agents/<id>/memory.md, may be, in tokens counted as a quarter of its characters; a longer write is refused (spec 5.8). Left out, 8000."
+        },
+        "judgment": {
+          "$ref": "#/$defs/judgment"
+        },
+        "permissions": {
+          "$ref": "#/$defs/permissions"
         }
       }
+    },
+    "judgment": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "required": {
+          "type": "string",
+          "enum": [
+            "always",
+            "never"
+          ],
+          "default": "always",
+          "description": "Whether every contract's plan is checked before work starts (spec 5.3). Left out, always."
+        },
+        "questions": {
+          "type": "array",
+          "maxItems": 5,
+          "items": {
+            "type": "string",
+            "minLength": 10,
+            "maxLength": 200
+          },
+          "default": [
+            "Does the task fit its budget?",
+            "Would its checks notice if the work went wrong the way its intent worries about?"
+          ],
+          "description": "What the judge answers about each plan, one answer per question. Left out, the two of spec 5.3. validate_team refuses none while required is always."
+        },
+        "judge": {
+          "type": "string",
+          "enum": [
+            "auto",
+            "architect",
+            "scrum_master"
+          ],
+          "default": "auto",
+          "description": "Who checks plans. `auto` is the first active agent of the Architect, the Scrum Master and the Product Manager, in that order (the founder, 2026-09-29). A named judge must be an active agent (validate_team)."
+        }
+      },
+      "description": "The plan check (spec 5.3). Left out, every plan is checked by the defaults."
+    },
+    "permissions": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "run_commands": {
+          "type": "boolean",
+          "default": true,
+          "description": "Whether Developers and Architects run commands (the execute tier). Farik still runs every check itself. Left out, true."
+        },
+        "push": {
+          "type": "boolean",
+          "default": false,
+          "description": "Whether Developers push and open pull requests (the git_remote tier). Left out, false."
+        }
+      },
+      "description": "The team's answers to what its agents may do, applied to every agent of the role before the agent's own grants and revokes (spec 5.6)."
     },
     "rules": {
       "type": "object",

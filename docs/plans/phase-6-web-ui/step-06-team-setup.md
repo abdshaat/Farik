@@ -177,7 +177,7 @@ RPC:
 - `applies_the_permission_answers_to_every_agent_of_the_role`: `run_commands: false` removes `execute` from a Developer added later; `push: true` gives `git_remote` to a Developer only.
 - `describes_each_change_in_words`: pinned sentences for model, effort, a grant, a revoke, a budget set and cleared, integration, permissions, and the judge.
 
-- [ ] `feat(core): add the plan-check policy, team permissions and defaults, and describe changes`
+- [x] `feat(core): add the plan-check policy, team permissions and defaults, and describe changes`
 
 ### Task 2: The configurable judgment
 

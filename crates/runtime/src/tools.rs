@@ -489,7 +489,11 @@ impl Call<'_> {
                 input_hash: String::new(),
             },
             &AgentGrants {
-                tiers: self.agent.tiers().into_iter().collect::<BTreeSet<_>>(),
+                tiers: self
+                    .agent
+                    .tiers(&self.team.permissions())
+                    .into_iter()
+                    .collect::<BTreeSet<_>>(),
                 preauthorized_external_tools: BTreeSet::new(),
             },
             &ToolCallContext {

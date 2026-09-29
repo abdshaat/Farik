@@ -5,7 +5,7 @@ use farik_core::contract::TaskContract;
 use farik_core::criteria::CriteriaLibrary;
 use farik_core::governor::permissions::PermissionTier;
 use farik_core::governor::team_rules::TeamRules;
-use farik_core::team::Agent;
+use farik_core::team::{Agent, TeamPermissions};
 use farik_core::text::tokens;
 use farik_protocol::event::Thread;
 use farik_roles::RoleDefinition;
@@ -21,6 +21,8 @@ pub struct PromptInput<'a> {
     pub role: &'a RoleDefinition,
     /// The agent the session is for.
     pub agent: &'a Agent,
+    /// The team's permission answers, which the agent's tiers follow.
+    pub permissions: &'a TeamPermissions,
     /// The project scan, `.farik/project.md`, when there is one.
     pub project_scan: Option<&'a str>,
     /// The agent's notebook, empty when it never wrote one.
@@ -291,7 +293,7 @@ fn memory_section(input: &PromptInput<'_>) -> String {
 
 /// Whether the session's tiers let it call the tool named `name`, among those it is offered.
 fn offers(input: &PromptInput<'_>, name: &str) -> bool {
-    let tiers = input.agent.tiers();
+    let tiers = input.agent.tiers(input.permissions);
     input
         .tools
         .iter()
@@ -429,7 +431,7 @@ fn rules_section(rules: &TeamRules) -> String {
 /// The Farik tools the agent's tiers allow of those it is offered, the built-ins it may use, and,
 /// for a session offered a tool that runs commands or git, where its shell and git are (ADR 0004).
 fn tools_section(input: &PromptInput<'_>) -> String {
-    let tiers = input.agent.tiers();
+    let tiers = input.agent.tiers(input.permissions);
     let farik = std::iter::once(
         "Farik's tools are called `mcp__farik__<name>`: `farik_read_board` is \
          `mcp__farik__farik_read_board`. These are yours:"
@@ -506,7 +508,7 @@ mod tests {
     use farik_core::governor::permissions::{PermissionTier, default_tiers};
     use farik_core::governor::team_rules::TeamRules;
     use farik_core::team::fixtures::an_agent_wire;
-    use farik_core::team::{Agent, Effort};
+    use farik_core::team::{Agent, Effort, TeamPermissions};
     use farik_roles::{RoleDefinition, Skill, load_role};
     use farik_store::files::{contract_yaml, criteria_yaml, yaml_value};
     use serde_json::json;
@@ -563,6 +565,7 @@ mod tests {
         tools: Vec<FarikTool>,
         builtin_tools: Vec<String>,
         memory_cap_tokens: usize,
+        permissions: TeamPermissions,
     }
 
     impl Inputs {
@@ -576,6 +579,7 @@ mod tests {
                 tools: tool_descriptors(),
                 builtin_tools: vec!["Read".to_string(), "Glob".to_string()],
                 memory_cap_tokens: 8_000,
+                permissions: TeamPermissions::default(),
             }
         }
 
@@ -583,6 +587,7 @@ mod tests {
             PromptInput {
                 role: &self.role,
                 agent: &self.agent,
+                permissions: &self.permissions,
                 project_scan: Some("A Rust workspace with a check command."),
                 memory: "Last time the check was slow.",
                 memory_cap_tokens: self.memory_cap_tokens,
