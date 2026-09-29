@@ -2,6 +2,7 @@
 
 Date: 2026-09-26
 Status: accepted; its phase numbers are shifted by 0018 and 0020 (the launch is phase 9, the hosted tier phase 12)
+Amended 2026-09-29 by ADR 0023: phase numbers after 6 moved up by one.
 
 ## Context
 

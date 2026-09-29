@@ -2,6 +2,7 @@
 
 Date: 2026-09-27
 Status: accepted
+Amended 2026-09-29 by ADR 0023: phase numbers after 6 moved up by one.
 
 ## Context
 

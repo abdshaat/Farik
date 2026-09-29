@@ -1,24 +1,24 @@
 # Role kits
 
-Status: approved by the founder on 2026-09-28, in conversation, as the first cut; the decisions its landing review asked for were made the same day and are marked below. It is the design input to phase 8. ADR 0020 records the decision, and spec 0.22 (sections 5.6, 6.7, 8.1 and 9) carries its rules. The founder amends the kit tables before phase 8 step 02 is planned; step 01 does not depend on them.
+Status: approved by the founder on 2026-09-28, in conversation, as the first cut; the decisions its landing review asked for were made the same day and are marked below. It is the design input to phase 9. ADR 0020 records the decision, and spec 0.22 (sections 5.6, 6.7, 8.1 and 9) carries its rules. The founder amends the kit tables before phase 9 step 02 is planned; step 01 does not depend on them.
 
 ## Why
 
-The founder wants every role to be great at its job: each with a special set of skills and connectors, the Marketing Specialist with marketing skills and creative connectors such as Higgsfield among them. Phase 7 builds the plumbing, MCP servers per agent and skills loaded into sessions. This phase fills it, role by role, before the web launch.
+The founder wants every role to be great at its job: each with a special set of skills and connectors, the Marketing Specialist with marketing skills and creative connectors such as Higgsfield among them. Phase 8 builds the plumbing, MCP servers per agent and skills loaded into sessions. This phase fills it, role by role, before the web launch.
 
 ## What a kit is
 
 Each role ships `roles/<role>/kit.yaml`, beside its `role.yaml`, `system.md` and `skills/`, validated against `docs/schemas/kit.schema.json`:
 
-- **Skills.** The `skills/<name>/SKILL.md` files the role carries, in the Agent Skills format the roles already use, loaded into every session of the role at the role level (phase 7 step 03). A skill is a way of working, with the checklists and templates the role needs; it is prose the model reads, not code.
+- **Skills.** The `skills/<name>/SKILL.md` files the role carries, in the Agent Skills format the roles already use, loaded into every session of the role at the role level (phase 8 step 03). A skill is a way of working, with the checklists and templates the role needs; it is prose the model reads, not code.
 - **Connectors.** The MCP servers the role may be connected to, each with:
-  - its name, transport (`stdio` or `http`), command or URL, and the credential keys it needs, as phase 7 step 01 configures any server;
+  - its name, transport (`stdio` or `http`), command or URL, and the credential keys it needs, as phase 8 step 01 configures any server;
   - the setup copy the wizard shows: what the service is, why the role wants it, and what the user must do (sign in, or paste a key from a named page);
   - **every tool tagged** by the kit, so the user never tags a tool by hand: `network` for a read-only remote call, `external_effect` for a call that changes anything outside the sandbox or spends the user's credits, or `denied` for a tool the agent is never offered (a creative service's `deploy_website`, `website_secrets` or `sandbox_exec`, say). A connector's tool is never `read`: `read` means the project's files (spec 5.6), and a remote read is an outbound call carrying arguments the agent chose. Connecting a connector gives the agent that server's tagged tools whatever the agent's own tiers, so a Developer without `network` can still read library documentation; the tag decides whether a call runs, asks, or is never offered;
   - the tool list **pinned**: a test lists the live server's tools and fails when they differ from the kit's, so a change at the service is caught in the repository rather than in a session. Because a tag is Farik's judgment about another company's tool, every pin update re-reviews the tags, since a tool can keep its name and gain a side effect;
   - an **allowance** where a tool spends the user's credits: the default number of calls per sprint that are pre-approved, which the user sets when connecting. An allowance is per tool and per agent. A batch tool (one call, many generations) carries no allowance and always asks. Tools that publish, send, post or pay have no allowance and always ask.
 - **Optional, every one of them.** Adding a role to the team shows its connectors as "Connect" steps the user may skip. A role works without any of them; a kit makes it better, not possible.
-- **Credentials are per agent**, as phase 7 step 01 keeps them. Disconnecting removes that agent's credential from the keychain and the server from that agent, and touches no other agent's.
+- **Credentials are per agent**, as phase 8 step 01 keeps them. Disconnecting removes that agent's credential from the keychain and the server from that agent, and touches no other agent's.
 
 Kits are free forever, like the roles, MCP and skills (spec 9).
 
@@ -41,7 +41,7 @@ The founder amends these before step 02 is planned. A connector is named by the 
 | Architect | ADR writing; API and data-model design; dependency and licence review; threat modelling and security review before a deploy is accepted; performance budgets | library documentation, `network` (Context7); code search, `network` (GitHub); vulnerability database, `network` (OSV); the same web research the role has |
 | Software Developer | test-driven development; debugging; safe migrations; testing per stack (web, API, mobile); answering a review | library documentation, `network`; browser testing (Playwright), a host process as every MCP server is, reaching the development server the task runs, `network`; the development database, `network`, read-only; deploy status, `network` (Vercel, Netlify, AWS) |
 | Marketing Specialist | positioning and messaging; launch plans; SEO; copywriting in the brand's voice (landing pages, README, release notes, email); content calendars; competitor research; campaign measurement | **Higgsfield**, images, video and audio: generation `external_effect` with an allowance, batch generation always asks, its deploy, secrets, sandbox and TikTok publishing tools `denied`; a second image generator, with an allowance; social publishing (X, LinkedIn, TikTok), always asks; email marketing, stats `network`, sending asks; product analytics, `network`; design files, `network` (Figma, Canva) |
-| Finance Specialist | expense categorisation; month-end close; forecasting; unit economics and pricing analysis; budget recommendations | Stripe, read tools `network`, `stripe_api_write` `denied` (connected in phase 7 step 02, moved into the kit in step 05); a paid ledger, `network` (Kick, Digits), optional. The receipts mailbox is not a connector: Farik's own tools take it (phase 10 step 02) |
+| Finance Specialist | expense categorisation; month-end close; forecasting; unit economics and pricing analysis; budget recommendations | Stripe, read tools `network`, `stripe_api_write` `denied` (connected in phase 8 step 02, moved into the kit in step 05); a paid ledger, `network` (Kick, Digits), optional. The receipts mailbox is not a connector: Farik's own tools take it (phase 11 step 02) |
 
 What is not a kit: Farik's own tools (`farik_*`), which every role has by its tiers; the sandbox; git. A kit adds what the role does beyond the harness.
 
@@ -57,7 +57,7 @@ Adding a role in the team builder, or opening its card on the Team page, lists t
 | 02 Product Manager and Scrum Master kits | Their skills and connectors, each connector's server chosen and pinned, its setup copy written and checked in the web app |
 | 03 Architect and Developer kits | The same, including the browser-testing connector as a host process and the security-review skill |
 | 04 Marketing Specialist kit | The same, Higgsfield first, with the allowance flow proven end to end, its dangerous tools `denied`, and the publishing connectors always asking |
-| 05 Finance Specialist kit | The same; Stripe's connection moves into the kit from phase 7 step 02's per-agent setup, and the ledger connectors are optional |
+| 05 Finance Specialist kit | The same; Stripe's connection moves into the kit from phase 8 step 02's per-agent setup, and the ledger connectors are optional |
 | 06 Kit check | Six tasks in the web app, run by the founder, one per role: the Product Manager files an epic from an imported issue and an analytics read-back; the Scrum Master plans a sprint and mirrors the channel to the bridge; the Architect writes an ADR from library documentation and a vulnerability lookup; the Developer implements a task and proves it with a browser test; the Marketing Specialist produces a launch post with a Higgsfield image inside its allowance; the Finance Specialist closes a month with Stripe's numbers. Recorded in `docs/milestones/role-kits.md` and signed off by the founder |
 
 ## Tests
