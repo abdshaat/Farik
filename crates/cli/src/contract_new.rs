@@ -17,11 +17,11 @@ use tokio::sync::mpsc::UnboundedReceiver;
 use crate::human::{refusal, said};
 use crate::project::Project;
 use crate::run::{
-    Ended, INTERRUPTED, Printer, finish_quietly, print_waiting, refuse, report_error, ticks,
-    waiting_now,
+    Ended, INTERRUPTED, OnIdle, Printer, finish_quietly, print_waiting, refuse, report_error,
+    ticks, waiting_now,
 };
 use crate::show::{body_lines, event_line};
-use crate::start::{Driver, on_path, runtime, send, start_holding, try_lock};
+use crate::start::{Driver, StartOptions, on_path, runtime, send, start_holding, try_lock};
 use crate::waiting::Waiting;
 use crate::{CliIo, HUMAN};
 
@@ -163,7 +163,7 @@ pub(crate) fn contract_new(
         Err(error) => return refuse(io, as_json, &error),
     };
     runtime.block_on(async {
-        let driver = match start_holding(project, io, lock).await {
+        let driver = match start_holding(project, io, lock, StartOptions::default()).await {
             Ok(driver) => driver,
             Err(error) => return refuse(io, as_json, &error),
         };
@@ -429,9 +429,16 @@ async fn converse(
     let mut stdin = Some(stdin);
     let mut answers: Option<UnboundedReceiver<String>> = None;
     loop {
-        let ended = ticks(driver, &scope, printer, presses, |printer| {
-            print_new_events(project, task_id, &mut seen, printer);
-        })
+        let ended = ticks(
+            driver,
+            &scope,
+            printer,
+            presses,
+            OnIdle::Return,
+            |printer| {
+                print_new_events(project, task_id, &mut seen, printer);
+            },
+        )
         .await;
         let open = match &ended {
             Ended::Failed(_) => return (ended, None),

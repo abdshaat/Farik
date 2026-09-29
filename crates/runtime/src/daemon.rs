@@ -262,10 +262,29 @@ impl DaemonState {
     }
 }
 
+/// Which port the daemon asks for.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum PortChoice {
+    /// One the operating system picks.
+    #[default]
+    Any,
+    /// This one, else the next nine in order, else `Any`.
+    Preferred(u16),
+}
+
+/// The ports to try, in order, for `choice`; `0` is the operating system's pick.
+#[must_use]
+pub fn candidates(choice: PortChoice) -> Vec<u16> {
+    match choice {
+        PortChoice::Any => vec![0],
+        PortChoice::Preferred(port) => (port..=port.saturating_add(9)).chain([0]).collect(),
+    }
+}
+
 /// Where the daemon listens, and where it says so.
 pub struct DaemonConfig {
-    /// The port to bind on `127.0.0.1`; `None` lets the operating system pick one.
-    pub port: Option<u16>,
+    /// The port to bind on `127.0.0.1`.
+    pub port: PortChoice,
     /// Where `daemon.json` is written: `.farik/local/daemon.json`.
     pub daemon_file: PathBuf,
 }
@@ -331,7 +350,7 @@ impl DaemonHandle {
     }
 }
 
-/// Starts the daemon on `127.0.0.1`, on the configured port or one the operating system picks,
+/// Starts the daemon on `127.0.0.1`, on the configured port (`PortChoice`) or one the operating system picks,
 /// with a fresh token, and writes `daemon.json` (mode 0600) once it is listening. A file left by
 /// a daemon that crashed is overwritten: only the one `farik run` that owns the project serves.
 ///
@@ -343,11 +362,7 @@ pub async fn serve(
     state: Arc<DaemonState>,
 ) -> Result<DaemonHandle, DaemonError> {
     let token = random_token()?;
-    let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, config.port.unwrap_or(0)))
-        .await
-        .map_err(|error| DaemonError::Bind {
-            detail: error.to_string(),
-        })?;
+    let listener = bind(config.port).await?;
     let port = listener
         .local_addr()
         .map_err(|error| DaemonError::Bind {
@@ -381,6 +396,28 @@ pub async fn serve(
         return Err(error);
     }
     Ok(handle)
+}
+
+/// Binds the first of `candidates(choice)` that is free on `127.0.0.1`. A port in use is skipped;
+/// any other error fails.
+async fn bind(choice: PortChoice) -> Result<TcpListener, DaemonError> {
+    let mut last = None;
+    for port in candidates(choice) {
+        match TcpListener::bind((Ipv4Addr::LOCALHOST, port)).await {
+            Ok(listener) => return Ok(listener),
+            Err(error) if error.kind() == std::io::ErrorKind::AddrInUse => last = Some(error),
+            Err(error) => {
+                return Err(DaemonError::Bind {
+                    detail: error.to_string(),
+                });
+            }
+        }
+    }
+    // `Any` (port 0) is last, and the system does not answer "in use" for it, so this is a
+    // defensive answer for a list that ended without a listener.
+    Err(DaemonError::Bind {
+        detail: last.map_or_else(|| "no port to try".to_string(), |error| error.to_string()),
+    })
 }
 
 /// Writes `info` to `path` readable by its owner alone, replacing whatever was there.
@@ -535,7 +572,8 @@ mod tests {
 
     use super::fixtures::{PRE_READ, TestDaemon};
     use super::{
-        DaemonConfig, DaemonInfo, DaemonState, SessionPurpose, SessionRegistration, router, serve,
+        DaemonConfig, DaemonInfo, DaemonState, PortChoice, SessionPurpose, SessionRegistration,
+        candidates, router, serve,
     };
     use crate::exec::Executor;
     use crate::orchestrator::command_handler;
@@ -607,6 +645,40 @@ mod tests {
         assert_eq!(body["hookSpecificOutput"]["hookEventName"], "PreToolUse");
     }
 
+    #[test]
+    fn candidates_are_the_port_the_next_nine_then_any() {
+        assert_eq!(
+            candidates(PortChoice::Preferred(7420)),
+            [
+                7420, 7421, 7422, 7423, 7424, 7425, 7426, 7427, 7428, 7429, 0
+            ]
+        );
+        assert_eq!(candidates(PortChoice::Any), [0]);
+        assert_eq!(
+            candidates(PortChoice::Preferred(65530)),
+            [65530, 65531, 65532, 65533, 65534, 65535, 0]
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn skips_a_port_in_use() {
+        let daemon = TestDaemon::new("daemon-port-in-use", |_| {});
+        let holder = std::net::TcpListener::bind(("127.0.0.1", 0)).expect("a port is held");
+        let held = holder.local_addr().expect("an address").port();
+        let handle = serve(
+            DaemonConfig {
+                port: PortChoice::Preferred(held),
+                daemon_file: daemon.project.repo.path.join(".farik/local/daemon.json"),
+            },
+            daemon.state.clone(),
+        )
+        .await
+        .expect("the daemon is up on another port");
+        assert_ne!(handle.info.port, held);
+        handle.shutdown().await.expect("the daemon stops");
+    }
+
     #[tokio::test(flavor = "multi_thread")]
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn writes_the_daemon_file_and_removes_it_on_shutdown() {
@@ -614,7 +686,7 @@ mod tests {
         let daemon_file = daemon.project.repo.path.join(".farik/local/daemon.json");
         let handle = serve(
             DaemonConfig {
-                port: None,
+                port: PortChoice::Any,
                 daemon_file: daemon_file.clone(),
             },
             daemon.state.clone(),
@@ -653,7 +725,7 @@ mod tests {
             .expect("the mode is set");
         let handle = serve(
             DaemonConfig {
-                port: None,
+                port: PortChoice::Any,
                 daemon_file: daemon_file.clone(),
             },
             daemon.state.clone(),
@@ -680,7 +752,7 @@ mod tests {
         let daemon = TestDaemon::new("daemon-loopback", |_| {});
         let handle = serve(
             DaemonConfig {
-                port: None,
+                port: PortChoice::Any,
                 daemon_file: daemon.project.repo.path.join(".farik/local/daemon.json"),
             },
             daemon.state.clone(),
@@ -930,7 +1002,7 @@ mod tests {
         let daemon = TestDaemon::new("daemon-stream", |_| {});
         let handle = serve(
             DaemonConfig {
-                port: None,
+                port: PortChoice::Any,
                 daemon_file: daemon.project.repo.path.join(".farik/local/daemon.json"),
             },
             daemon.state.clone(),

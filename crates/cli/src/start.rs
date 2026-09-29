@@ -10,7 +10,7 @@ use std::time::Duration;
 
 use farik_protocol::command::{Command, command_to_value, reply_from_value};
 use farik_runtime::claude::{ClaudeAdapter, ClaudeConfig, ClaudeCredential, credential_from_env};
-use farik_runtime::daemon::{DaemonConfig, DaemonHandle, DaemonState, serve};
+use farik_runtime::daemon::{DaemonConfig, DaemonHandle, DaemonState, PortChoice, serve};
 use farik_runtime::forge::Forge;
 use farik_runtime::orchestrator::{
     CommandError, CommandReport, Orchestrator, OrchestratorDeps, RecoveryReport, command_handler,
@@ -286,6 +286,13 @@ pub(crate) const NO_SANDBOX_WARNING: &str = "warning: no-sandbox mode (.farik/lo
 /// The variables of the environment a Claude Code session is given besides its credential.
 const SESSION_ENV: [&str; 6] = ["PATH", "HOME", "USER", "LANG", "TERM", "TMPDIR"];
 
+/// What a start is told besides the project: how the process differs from `run`'s.
+#[derive(Clone, Copy, Default)]
+pub(crate) struct StartOptions {
+    /// The port the daemon asks for.
+    pub(crate) port: PortChoice,
+}
+
 /// A process driving the project: its lock, its served daemon, its orchestrator, and where it
 /// hears Ctrl-C.
 pub(crate) struct Driver {
@@ -306,6 +313,11 @@ pub(crate) struct Driver {
 }
 
 impl Driver {
+    /// The port the daemon listens on.
+    pub(crate) fn port(&self) -> u16 {
+        self.handle.info.port
+    }
+
     /// Shuts the daemon down, removing `daemon.json`, then gives the lock back.
     ///
     /// # Errors
@@ -326,11 +338,15 @@ impl Driver {
 /// # Errors
 ///
 /// The sentence of the step that failed.
-pub(crate) async fn start(project: &Project, io: &mut CliIo<'_>) -> Result<Driver, String> {
+pub(crate) async fn start(
+    project: &Project,
+    io: &mut CliIo<'_>,
+    options: StartOptions,
+) -> Result<Driver, String> {
     let Some(lock) = try_lock(&project.root)? else {
         return Err(driven_elsewhere(&project.root));
     };
-    start_holding(project, io, lock).await
+    start_holding(project, io, lock, options).await
 }
 
 /// `start`, with the run lock already taken by the caller, which it gives back on a refusal.
@@ -342,6 +358,7 @@ pub(crate) async fn start_holding(
     project: &Project,
     io: &mut CliIo<'_>,
     lock: RunLock,
+    options: StartOptions,
 ) -> Result<Driver, String> {
     let interrupts = listen(std::mem::replace(
         &mut io.interrupts,
@@ -382,7 +399,7 @@ pub(crate) async fn start_holding(
     let daemon = Arc::new(DaemonState::new(Arc::clone(&tools)));
     let handle = serve(
         DaemonConfig {
-            port: None,
+            port: options.port,
             daemon_file: project.root.join(DAEMON_FILE),
         },
         Arc::clone(&daemon),

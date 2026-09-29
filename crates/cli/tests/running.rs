@@ -18,33 +18,21 @@ use farik::{Engine, Interrupts};
 use farik_core::pricing::Usage;
 use farik_protocol::clock::MovableClock;
 use farik_protocol::event::{EventBody, EventKind, SessionEndedBodyReason};
+use farik_runtime::RuntimeAdapter;
 use farik_runtime::recorded::fixtures::{
     UsageThenWaitAdapter, accept_frk_1, implement_finishes_frk_1, plan_assigns_frk_1,
     planning_ceremony_frk_1, refine_writes_task_frk_1, reply_to_a_mention, review_writes_note,
-    tool_runner,
 };
 use farik_runtime::sleep::Sleeper;
-use farik_runtime::{RecordedAdapter, RuntimeAdapter, Transcript};
 use farik_store::git::fixtures::TempRepo;
 use serde_json::{Value, json};
 
 use farik_core::team::fixtures::an_agent_wire;
 use project::{
     LiveDriver, a_bare_env, a_claude_saying, a_high_risk_task_verifying, a_project, a_team,
-    a_team_with, at, events, filed, hold_the_run_lock, joined, no_sandbox, record, record_as, run,
-    run_with, scratch, status_of, the_run_lock_frees, walked,
+    a_team_with, at, events, filed, hold_the_run_lock, joined, no_sandbox, record, record_as,
+    recorded, run, run_with, scratch, status_of, the_run_lock_frees, walked,
 };
-
-/// An engine replaying `transcripts`, whose Farik tool calls the driving process's daemon answers.
-fn recorded(transcripts: Vec<Transcript>) -> Engine {
-    Engine::Given(Arc::new(move |daemon| {
-        let adapter: Arc<dyn RuntimeAdapter> = Arc::new(RecordedAdapter::with_tools(
-            transcripts.clone(),
-            tool_runner(daemon),
-        ));
-        adapter
-    }))
-}
 
 /// An engine whose sessions are `adapter`'s.
 fn given(adapter: &Arc<UsageThenWaitAdapter>) -> Engine {

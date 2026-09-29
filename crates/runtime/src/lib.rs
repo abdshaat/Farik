@@ -55,8 +55,12 @@ pub(crate) fn locked<Value>(mutex: &std::sync::Mutex<Value>) -> std::sync::Mutex
 /// Writes `bytes` to `path` readable by its owner alone, replacing whatever was there. The file is
 /// removed first, because a mode is only given to a file as it is created, and a file left
 /// behind may be readable by others.
+///
+/// # Errors
+///
+/// The error of removing the old file, or of creating or writing the new one.
 #[cfg(unix)]
-pub(crate) fn write_private(path: &std::path::Path, bytes: &[u8]) -> std::io::Result<()> {
+pub fn write_private(path: &std::path::Path, bytes: &[u8]) -> std::io::Result<()> {
     use std::io::Write as _;
     use std::os::unix::fs::OpenOptionsExt as _;
     match std::fs::remove_file(path) {

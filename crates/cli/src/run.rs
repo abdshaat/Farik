@@ -6,7 +6,7 @@ use farik_store::files::Sandbox;
 use serde_json::{Value, json};
 
 use crate::project::Project;
-use crate::start::{Driver, runtime, start};
+use crate::start::{Driver, StartOptions, runtime, start};
 use crate::waiting::{Waiting, waiting};
 use crate::{CliIo, say};
 
@@ -44,6 +44,18 @@ impl Printer<'_, '_> {
     }
 }
 
+/// What `ticks` does when a tick is idle with no agent to wait for.
+#[derive(Clone, Copy)]
+pub(crate) enum OnIdle {
+    /// Return: the run is done.
+    Return,
+    /// Say why, once, and wait for a command, a stop, or the recheck: `farik serve`.
+    Wait,
+}
+
+/// How long an idle `serve` asks to wait; `Orchestrator::wait_until` caps it at its recheck.
+const IDLE_WAIT: chrono::Duration = chrono::Duration::hours(24);
+
 /// How a loop of ticks ended.
 pub(crate) enum Ended {
     /// A tick was idle, for this reason.
@@ -62,7 +74,7 @@ pub(crate) fn drive(project: &Project, rules: TickRules, io: &mut CliIo<'_>, as_
         Err(error) => return refuse(io, as_json, &error),
     };
     runtime.block_on(async {
-        let mut driver = match start(project, io).await {
+        let mut driver = match start(project, io, StartOptions::default()).await {
             Ok(driver) => driver,
             Err(error) => return refuse(io, as_json, &error),
         };
@@ -77,7 +89,15 @@ pub(crate) fn drive(project: &Project, rules: TickRules, io: &mut CliIo<'_>, as_
             rules,
         };
         let mut presses = 0;
-        let ended = ticks(&mut driver, &scope, &mut printer, &mut presses, |_| {}).await;
+        let ended = ticks(
+            &mut driver,
+            &scope,
+            &mut printer,
+            &mut presses,
+            OnIdle::Return,
+            |_| {},
+        )
+        .await;
         finish(project, driver, &mut printer, ended, presses).await
     })
 }
@@ -127,18 +147,22 @@ pub(crate) fn started(printer: &mut Printer<'_, '_>, driver: &Driver) {
 }
 
 /// Ticks within `scope` until a tick is idle with no agent to wait for, the run is stopped, or a
-/// tick fails, printing each; a tick idle while an agent sleeps is waited out, and says so.
-/// Ctrl-C is heard between and during ticks. `after` is called after each tick that acted.
+/// tick fails, printing each; a tick idle while an agent sleeps is waited out, and says so. An
+/// idle tick with no agent to wait for ends the loop under `OnIdle::Return`; under `Wait` it is
+/// printed once per change of reason and waited out. Ctrl-C is heard between and during ticks.
+/// `after` is called after each tick that acted.
 pub(crate) async fn ticks(
     driver: &mut Driver,
     scope: &TickScope,
     printer: &mut Printer<'_, '_>,
     presses: &mut u32,
+    on_idle: OnIdle,
     mut after: impl FnMut(&mut Printer<'_, '_>),
 ) -> Ended {
     // The last wait printed, so a wait capped and rechecked (`Orchestrator::wait_until`) prints
     // its line once, not once per recheck; printed again only when the agent or the time changes.
     let mut last_wait: Option<(String, chrono::DateTime<chrono::Utc>)> = None;
+    let mut last_idle: Option<String> = None;
     loop {
         if driver.orchestrator.is_stopped() {
             printer.line("stopped", &json!({ "stopped": true }));
@@ -168,21 +192,18 @@ pub(crate) async fn ticks(
                     );
                     last_wait = Some((why.clone(), until));
                 }
-                let wait = orchestrator.wait_until(until);
-                tokio::pin!(wait);
-                loop {
-                    tokio::select! {
-                        _ = &mut wait => break,
-                        Some(()) = driver.interrupts.recv() => {
-                            *presses += 1;
-                            interrupted(driver, printer, *presses);
-                        }
-                    }
-                }
+                wait_out(driver, printer, presses, orchestrator.wait_until(until)).await;
             }
             Ok(TickReport::Idle { why, until: None }) => {
-                printer.line(&format!("idle: {why}"), &json!({ "idle": why }));
-                return Ended::Idle(why);
+                if last_idle.as_ref() != Some(&why) || matches!(on_idle, OnIdle::Return) {
+                    printer.line(&format!("idle: {why}"), &json!({ "idle": why }));
+                    last_idle = Some(why.clone());
+                }
+                if matches!(on_idle, OnIdle::Return) {
+                    return Ended::Idle(why);
+                }
+                let until = chrono::Utc::now() + IDLE_WAIT;
+                wait_out(driver, printer, presses, orchestrator.wait_until(until)).await;
             }
             Ok(TickReport::Acted { task_id, what }) => {
                 printer.line(
@@ -206,6 +227,25 @@ pub(crate) async fn ticks(
                 after(printer);
             }
             Err(error) => return Ended::Failed(error.to_string()),
+        }
+    }
+}
+
+/// Waits for `wait`, hearing Ctrl-C meanwhile.
+async fn wait_out(
+    driver: &mut Driver,
+    printer: &mut Printer<'_, '_>,
+    presses: &mut u32,
+    wait: impl Future<Output = farik_runtime::orchestrator::Waited>,
+) {
+    tokio::pin!(wait);
+    loop {
+        tokio::select! {
+            _ = &mut wait => break,
+            Some(()) = driver.interrupts.recv() => {
+                *presses += 1;
+                interrupted(driver, printer, *presses);
+            }
         }
     }
 }

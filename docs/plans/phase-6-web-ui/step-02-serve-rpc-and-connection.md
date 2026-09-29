@@ -198,7 +198,7 @@ Tests:
 
 The project-plan edit, in the steps table and in "Interfaces this phase adds": step 02's Delivers and interface line become this plan's (no embedded app; `PortChoice { Any, Preferred }`, `candidates`, `StartOptions`, `DaemonState::set_web`, `rpc_request_from_value`, numeric JSON-RPC error codes, `state_dir` and `state.json`, `serve.status` with a project root always present, `CredentialKind`). Step 04's gains the `/connect` page, the embedded app (`rust-embed`, version pinned in step 04's plan), opening the browser with `--no-open`, `revoke` with "Disconnect this browser", and the Vite proxy rewriting `Origin` to the daemon's. Step 05's gains `farik serve` outside a project. The phase's `farik serve` decision says which step each piece lands in.
 
-- [ ] `feat(cli): add farik serve, which keeps driving when idle`
+- [x] `feat(cli): add farik serve, which keeps driving when idle`
 
 ### Task 4: The RPC schema
 

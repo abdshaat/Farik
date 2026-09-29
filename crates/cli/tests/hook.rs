@@ -141,7 +141,7 @@ impl Served {
         let handle = runtime
             .block_on(serve(
                 DaemonConfig {
-                    port: None,
+                    port: farik_runtime::daemon::PortChoice::Any,
                     daemon_file: daemon_file.clone(),
                 },
                 state,

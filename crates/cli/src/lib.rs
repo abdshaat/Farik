@@ -41,6 +41,9 @@ pub mod refusal;
 /// `farik run` and `farik plan`.
 #[cfg(unix)]
 mod run;
+/// `farik serve`.
+#[cfg(unix)]
+mod serve;
 /// One contract, and what happened to it.
 pub mod show;
 /// One sprint, and how it went.
@@ -48,6 +51,9 @@ pub mod sprint;
 /// Who drives a project, and how a command reaches it.
 #[cfg(unix)]
 mod start;
+/// What outlives a project: the state folder.
+#[cfg(unix)]
+mod state;
 /// Filing a request.
 pub mod task;
 /// The team's rules and its criterion library.
@@ -265,6 +271,12 @@ enum Commands {
     },
     /// Drive the team until nothing needs doing, a stop, or Ctrl-C (8.2).
     Run,
+    /// Drive the team and keep driving when the board is idle, until a stop or Ctrl-C (8.1).
+    Serve {
+        /// The port to listen on, instead of 7420 and the nine after it.
+        #[arg(long)]
+        port: Option<u16>,
+    },
     /// Plan without doing: triage, contracts, breakdowns, and assignments, and no work (8.2).
     Plan,
     /// Approve a contract that awaits your approval (5.16).
@@ -507,6 +519,7 @@ pub fn run_cli(args: &[String], io: &mut CliIo<'_>) -> i32 {
     }
     let now = io.clock.now();
     if let Commands::Run
+    | Commands::Serve { .. }
     | Commands::Plan
     | Commands::Contract {
         command: ContractCommands::New { .. },
@@ -578,6 +591,7 @@ pub fn run_cli(args: &[String], io: &mut CliIo<'_>) -> i32 {
         } => open_project(&io.cwd, now).and_then(|project| team::criteria(&project)),
         Commands::Hook { .. }
         | Commands::Run
+        | Commands::Serve { .. }
         | Commands::Plan
         | Commands::Contract {
             command: ContractCommands::New { .. },
@@ -792,6 +806,7 @@ fn drive(command: &Commands, as_json: bool, io: &mut CliIo<'_>) -> i32 {
             )
         }
         Commands::Plan => run::drive(&project, TickRules::Planning, io, as_json),
+        Commands::Serve { port } => serve::serve(&project, *port, io),
         _ => run::drive(&project, TickRules::All, io, as_json),
     }
 }
