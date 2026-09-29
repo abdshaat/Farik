@@ -1,6 +1,6 @@
 # Phase 6, step 03: Component library
 
-Status: ready
+Status: landed and landing-reviewed 2026-09-29; done on the founder's sign-off of the gallery
 Branch: `phase/6-web-ui`
 Spec: `docs/SPEC.md` sections 10 (WCAG 2.2 AA, 360 px, strings externalized, clients built from the brand's tokens) and 14
 Depends on: step 01 (`@farik/brand`, done) and step 02 (done, 11e324f) of this phase
@@ -210,7 +210,7 @@ Then `pnpm --filter @farik/ui gallery` builds it, and the controller publishes i
 cargo xtask check
 # expected: the Rust tests unchanged; pnpm: @farik/brand "Tests  30 passed (30)" (27 plus Task 1's three new tests;
 #   the job test is extended and two colour tests rewritten, not added), @farik/protocol-client "Tests  6 passed (6)",
-#   @farik/ui "Tests  28 passed (28)" (T2 6, T3 6, T4 3, T5 5, T6 6, T7 2); last line: xtask check: ok
+#   @farik/ui "Tests  39 passed (39)" (the plan's 28, and 11 the landing review added); last line: xtask check: ok
 pnpm --filter @farik/ui gallery   # writes packages/ui/dist/gallery/index.html, exit 0
 ```
 
