@@ -1,12 +1,13 @@
-//! Builds `farik-runtime` again when the web app is built again. A release build embeds
-//! `apps/web/dist`, and its macro cannot tell cargo that a new file came into the folder; a debug
-//! build reads the folder at run time, so it needs no rebuild, and cargo, which counts a missing
-//! path as changed, would otherwise rebuild the crate every time while the app is not built.
+//! Builds `farik-runtime` again when the web app is built again. The embed of `apps/web/dist` is
+//! fixed when the crate is compiled: a release build holds its files, and a debug build, which reads
+//! them at run time, still answers "not built" when the folder was missing at compile time. So both
+//! watch the folder, or, while it is missing, `apps/web`, whose listing changes when it appears.
 
 fn main() {
-    if std::env::var("PROFILE").as_deref() == Ok("release") {
-        println!("cargo:rerun-if-changed=../../apps/web/dist");
+    let watched = if std::path::Path::new("../../apps/web/dist").exists() {
+        "../../apps/web/dist"
     } else {
-        println!("cargo:rerun-if-changed=build.rs");
-    }
+        "../../apps/web"
+    };
+    println!("cargo:rerun-if-changed={watched}");
 }

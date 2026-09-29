@@ -54,19 +54,33 @@ pub fn front_end_commands(has_package_json: bool) -> Vec<Vec<&'static str>> {
     }
 }
 
-/// What runs after `pnpm check` under `--integration`, one `(program, args)` after another: the web
-/// app built, the end-to-end server linted, tested and built, and the browser journey run over them.
+/// What `pnpm` is given under `--integration` before the first cargo command: the brand's tokens
+/// generated, then the web app built. A farik compiled while `apps/web/dist` is missing serves "not
+/// built" until the crate is compiled again, so every farik the check compiles comes after the app.
+#[must_use]
+pub fn web_app_first(tests: Tests) -> Vec<Vec<&'static str>> {
+    match tests {
+        Tests::WithoutTheOnesThatNeedAProgram => vec![],
+        Tests::All => vec![
+            vec!["-r", "--if-present", "generate"],
+            vec!["--filter", "@farik/web", "build"],
+        ],
+    }
+}
+
+/// What runs after `pnpm check` under `--integration`, one `(program, args)` after another: the
+/// end-to-end server linted, tested and built, and the browser journey run over it and the app
+/// [`web_app_first`] built.
 /// Nothing without the flag.
 ///
 /// The journey also runs `target/debug/farik` (`farik init`, `farik log`). It is not built here: the
-/// check's `cargo test --workspace`, and step three's `cargo test -p farik`, build the package's
+/// check's `cargo test --workspace`, and the step's own `cargo test -p farik`, build the package's
 /// binaries for its integration tests, so it exists by the time the journey runs.
 #[must_use]
 pub fn integration_steps(tests: Tests) -> Vec<(&'static str, Vec<&'static str>)> {
     match tests {
         Tests::WithoutTheOnesThatNeedAProgram => vec![],
         Tests::All => vec![
-            ("pnpm", vec!["--filter", "@farik/web", "build"]),
             (
                 "cargo",
                 vec![
@@ -113,7 +127,24 @@ pub fn integration_steps(tests: Tests) -> Vec<(&'static str, Vec<&'static str>)>
 
 #[cfg(test)]
 mod tests {
-    use super::{Tests, front_end_commands, integration_steps, test_arguments, tests_requested};
+    use super::{
+        Tests, front_end_commands, integration_steps, test_arguments, tests_requested,
+        web_app_first,
+    };
+
+    #[test]
+    fn builds_the_web_app_before_any_farik_is_compiled_under_integration() {
+        // A farik compiled while `apps/web/dist` is missing serves "not built" even after the app
+        // is built, so the app comes first. The tokens come before it: a fresh checkout has none.
+        assert_eq!(
+            web_app_first(Tests::All),
+            [
+                vec!["-r", "--if-present", "generate"],
+                vec!["--filter", "@farik/web", "build"],
+            ]
+        );
+        assert!(web_app_first(Tests::WithoutTheOnesThatNeedAProgram).is_empty());
+    }
 
     #[test]
     fn runs_the_tests_that_need_no_program_when_asked_for_nothing() {
@@ -174,11 +205,10 @@ mod tests {
 
     #[test]
     fn integration_steps_build_the_app_and_run_the_journey() {
-        // In this order: the server embeds the built app, and the journey runs the built server.
+        // In this order: the journey runs the built server.
         assert_eq!(
             integration_steps(Tests::All),
             [
-                ("pnpm", vec!["--filter", "@farik/web", "build"]),
                 (
                     "cargo",
                     vec![

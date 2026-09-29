@@ -42,7 +42,13 @@ pub(crate) async fn app_from<E: RustEmbed>(
         "no-cache"
     };
     let (mime, body) = match file {
-        Some(file) => (file.metadata.mimetype().to_string(), file.data.into_owned()),
+        // Vite writes UTF-8, and a text file without its charset is read as the browser guesses.
+        Some(file) => match file.metadata.mimetype() {
+            text if text.starts_with("text/") => {
+                (format!("{text}; charset=utf-8"), file.data.into_owned())
+            }
+            other => (other.to_string(), file.data.into_owned()),
+        },
         None => (
             "text/html; charset=utf-8".to_string(),
             UNBUILT.as_bytes().to_vec(),

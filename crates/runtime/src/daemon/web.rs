@@ -985,8 +985,9 @@ mod tests {
         for path in ["/", "/settings"] {
             let answer = fetch::<Fixture>(&daemon.state, page(path, HOST)).await;
             assert_eq!(answer.status(), StatusCode::OK, "{path}");
-            assert!(
-                header_of(&answer, &header::CONTENT_TYPE).starts_with("text/html"),
+            assert_eq!(
+                header_of(&answer, &header::CONTENT_TYPE),
+                "text/html; charset=utf-8",
                 "{path}"
             );
             assert_eq!(
@@ -1002,7 +1003,10 @@ mod tests {
         }
         let asset = fetch::<Fixture>(&daemon.state, page("/assets/app-3f2a.js", HOST)).await;
         assert_eq!(asset.status(), StatusCode::OK);
-        assert_eq!(header_of(&asset, &header::CONTENT_TYPE), "text/javascript");
+        assert_eq!(
+            header_of(&asset, &header::CONTENT_TYPE),
+            "text/javascript; charset=utf-8"
+        );
         assert_eq!(
             header_of(&asset, &header::CACHE_CONTROL),
             "max-age=31536000, immutable"

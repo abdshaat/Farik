@@ -61,6 +61,9 @@ fn cargo(root: &Path, args: &[&str]) -> anyhow::Result<()> {
 }
 
 fn check(root: &Path, tests: Tests) -> anyhow::Result<()> {
+    for args in xtask::check::web_app_first(tests) {
+        program(root, "pnpm", &args)?;
+    }
     cargo(root, &["fmt", "--all", "--check"])?;
     cargo(
         root,
