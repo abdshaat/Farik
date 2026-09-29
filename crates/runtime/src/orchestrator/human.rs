@@ -2457,6 +2457,26 @@ mod tests {
             .await;
             assert!(reason.starts_with("extra_tries_only_for_tries"), "{reason}");
         }
+        // The escalation that counts is the latest one.
+        harness.project.record(
+            "FRK-2",
+            "escalation.raised",
+            &json!({ "reason": "explicit_request", "detail": "the PM asks" }),
+        );
+        let reason = refused(
+            &orchestrator,
+            Command::EscalationResolve {
+                task_id: task("FRK-2"),
+                to: TaskStatus::InProgress,
+                message: "Go on.".to_string(),
+                extra_tries: Some(2),
+            },
+        )
+        .await;
+        assert!(
+            reason.contains("escalated for explicit_request"),
+            "{reason}"
+        );
         assert_eq!(harness.row("FRK-2").status, TaskStatus::Escalated);
         assert!(harness.events(&[EventKind::EscalationResolved]).is_empty());
         // The schema holds the number to 1 to 5.

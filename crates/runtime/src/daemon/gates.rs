@@ -684,17 +684,24 @@ mod tests {
         assert_eq!(contract["status"], "draft");
         assert_eq!(contract["budget"]["max_cost_usd"], json!(20.0));
 
+        // Twenty characters are enough, trimmed; nineteen are not.
         let short = rpc(
             &harness.daemon,
             "request.file",
-            &json!({ "text": "Make it nicer  " }),
+            &json!({ "text": "Make the page nicer  " }),
         );
         assert_eq!(short["error"]["code"], -32005, "{short}");
         assert_eq!(
             short["error"]["message"],
             "say a little more: at least 20 characters"
         );
-        assert_eq!(harness.project.events(&[EventKind::TaskCreated]).len(), 1);
+        call(
+            &harness.daemon,
+            "request.file",
+            &json!({ "text": "Make the pages nicer" }),
+            "requestFileResult",
+        );
+        assert_eq!(harness.project.events(&[EventKind::TaskCreated]).len(), 2);
     }
 
     #[test]
@@ -722,8 +729,10 @@ mod tests {
         );
         assert_eq!(checked["total"], 1, "{checked}");
 
-        // Schema-valid, with no architect on the team to review it.
+        // Schema-valid, with no architect on the team to review it. The draft is checked as the
+        // task it is asked about, whatever id it carries.
         draft["title"] = json!("Add a login page");
+        draft["id"] = json!("FRK-9");
         let checked = query(
             &harness.daemon,
             "contract.check",
@@ -897,6 +906,33 @@ mod tests {
             "the team is working to this plan; stop the task before you change it"
         );
         assert_eq!(harness.project.file("FRK-2"), before);
+
+        // A plan awaiting approval that the edit would break stays where it is.
+        harness.file("FRK-3", "refining", |_| {});
+        harness
+            .project
+            .moved("FRK-3", "refining", "escalated", &json!({}));
+        harness.project.record(
+            "FRK-3",
+            "escalation.raised",
+            &json!({ "reason": "approval", "detail": "the plan waits" }),
+        );
+        let mut broken = harness.project.file("FRK-3");
+        broken["title"] = json!("");
+        let refused = rpc(
+            &harness.daemon,
+            "contract.save",
+            &json!({ "task_id": "FRK-3", "contract": broken }),
+        );
+        assert_eq!(refused["error"]["code"], -32005, "{refused}");
+        let row = harness
+            .project
+            .deps
+            .projections
+            .task(&"FRK-3".parse().expect("an id"))
+            .expect("the board reads")
+            .expect("a row");
+        assert_eq!(row.status, TaskStatus::Escalated);
     }
 
     #[test]
@@ -915,7 +951,7 @@ mod tests {
                 .expect("committed")
         };
         harness.project.filed("FRK-3", "in_progress", "epic", None);
-        for task in ["FRK-1", "FRK-2"] {
+        for task in ["FRK-1", "FRK-2", "FRK-5"] {
             harness.verifying_with(task, false, false, |wire| {
                 wire["parent"] = json!("FRK-3");
             });
@@ -956,9 +992,26 @@ mod tests {
             checks["checks"],
             json!([{ "criterion_id": "C1", "text": "done.txt exists.", "passed": true, "evidence": "exit 0" }])
         );
+        // A result from before the task last entered verifying is not this verification's.
+        let people = json!({ "assignee": "dev-a", "reviewer": "dev-b" });
+        harness
+            .project
+            .moved("FRK-1", "verifying", "in_progress", &people);
+        harness
+            .project
+            .moved("FRK-1", "in_progress", "verifying", &people);
+        let checks = query(
+            &harness.daemon,
+            "task.checks",
+            &json!({ "task_id": "FRK-1" }),
+            "taskChecksResult",
+        );
+        assert_eq!(checks["checks"], json!([]));
 
         // The epic joins its tasks' integrated diffs, in id order, under their ids.
         let second = commit("FRK-2", "three\n");
+        // FRK-5's work is not added to the project, so it is not the epic's yet.
+        commit("FRK-5", "four\n");
         let first = git
             .merge_base(&harness.branch("FRK-1"), &harness.branch("FRK-1"))
             .expect("the branch names a commit");
@@ -982,6 +1035,7 @@ mod tests {
         );
         assert!(one < two && text[one..two].contains("+one"), "{text}");
         assert!(text[two..].contains("+three"), "{text}");
+        assert!(!text.contains("FRK-5") && !text.contains("+four"), "{text}");
         assert_eq!(epic["files"], json!(["done.txt"]), "{epic}");
         assert_eq!(
             (epic["added"].clone(), epic["removed"].clone()),
@@ -1147,16 +1201,21 @@ mod tests {
         assert_eq!(none, Value::Null);
         harness.accepted("FRK-2");
         harness.ready("FRK-3");
+        // A cancelled task is done with, as an accepted one is.
+        harness.file("FRK-5", "refining", |_| {});
         harness
             .project
-            .open_sprint("S1", Some(50.0), &["FRK-2", "FRK-3"]);
+            .moved("FRK-5", "refining", "cancelled", &json!({}));
+        harness
+            .project
+            .open_sprint("S1", Some(50.0), &["FRK-2", "FRK-3", "FRK-5"]);
         let sprint = query(
             &harness.daemon,
             "sprint.current",
             &json!({}),
             "sprintCurrentResult",
         );
-        assert_eq!(sprint, json!({ "sprint_id": "S1", "done": 1, "total": 2 }));
+        assert_eq!(sprint, json!({ "sprint_id": "S1", "done": 2, "total": 3 }));
 
         let contract = harness.project.file("FRK-3");
         let checked = query(
@@ -1183,6 +1242,31 @@ mod tests {
         assert!(
             !moved["moved"].as_array().expect("moved").is_empty(),
             "{moved}"
+        );
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn offers_to_carry_on_where_the_task_was() {
+        let harness = driven("gates-carry-on");
+        harness.file("FRK-4", "refining", |_| {});
+        harness
+            .project
+            .moved("FRK-4", "refining", "escalated", &json!({}));
+        harness.project.record(
+            "FRK-4",
+            "escalation.raised",
+            &json!({ "reason": "explicit_request", "detail": "the PM asks" }),
+        );
+        let offered = query(
+            &harness.daemon,
+            "escalation.choices",
+            &json!({ "task_id": "FRK-4" }),
+            "escalationChoicesResult",
+        );
+        assert_eq!(
+            offered["choices"][0],
+            json!({ "label": "Carry on", "body": resolve("refining") })
         );
     }
 

@@ -810,6 +810,16 @@ mod tests {
     }
 
     #[test]
+    fn measures_the_opening_summary_in_characters() {
+        let opens =
+            |first: String| super::opens_with_a_summary(&format!("{first}\n\nThe details."));
+        assert!(!opens("x".repeat(19)));
+        assert!(opens("x".repeat(20)));
+        assert!(opens("é".repeat(600)));
+        assert!(!opens("x".repeat(601)));
+    }
+
+    #[test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
     fn refuses_a_note_without_an_opening_summary() {
         let project = a_project("tools-note-summary");
