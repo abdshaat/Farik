@@ -1,10 +1,10 @@
 # Phase 6, step 07: The gates' runtime
 
-Status: draft (round two of readiness)
+Status: ready
 Branch: `phase/6-web-ui`
 Spec: `docs/SPEC.md` sections 5.1, 5.2, 5.4 (what a human gate shows), 5.5, 5.7, 5.11, 5.13, 5.16, 8.5, F4, F14
 Depends on: steps 01 to 06 of this phase
-Readiness confirmed by: fresh-session reviewer, 2026-09-29, round one: not ready, with six unmade decisions, one of them the founder's (made through the approved mockups, now recorded in ADR 0024). The step was split in two on its advice: the pages are step 08. Round two is limited to the six decisions.
+Readiness confirmed by: fresh-session reviewer, 2026-09-29, round one: not ready, with six unmade decisions, one of them the founder's (made through the approved mockups, now recorded in ADR 0024). The step was split in two on its advice: the pages are step 08. Round two, limited to the six, found them settled (ready with findings, folded in: the extra-tries arithmetic, `budget_state`'s real signature, `human_approves` exactly, the integration help case, and `review.recorded`'s description).
 
 Signatures, not bodies; test names and what each asserts, not test code; around 300 lines at most (ADR 0008).
 
@@ -28,7 +28,7 @@ The runtime gives step 08's pages what spec 5.4 and 5.16 ask of a human gate. It
   - It is a content field: `FIELDS_OF_THE_CONTENT` becomes `[&str; 15]`.
   - The name also appears on `task.created` and `contract.written`, where it is the log's one-line summary. Those event fields keep their name, and a comment in `contract.rs` says the two differ.
   - A new readiness rule, `SummaryPresent`, binds the contracts a human gate shows: every epic, and every task whose approval the team's `human_accepts_contracts` policy asks of the human. That is a `high` risk task under `high_risk`, or any task under `all`. It fails with "the plan has no summary for the user; write two or three plain sentences they can decide on". The Scrum Master's breakdown tasks are bound only when that policy asks.
-  - `ReadinessContext` gains `human_approves: bool`, computed by `readiness_context`.
+  - `ReadinessContext` gains `human_approves: bool`, computed by `readiness_context` as exactly `policy.human_accepts_contracts == all || requires_human_acceptance(contract)`, the expression `transition.rs` already uses.
   - A completion or review note must open with a summary: its first paragraph, up to the first blank line, 20 to 600 characters. `farik_write_note` refuses one that does not, with `summary_missing: open the note with two or three plain sentences for the user, then a blank line`. Every progress note, whether an agent's or Farik's, is exempt.
 - **Sending back** (ADR 0024).
   - Core gains `GateId::HumanRejection` for the new transition-table row `verifying → rejected` by the human. It opens when `TransitionContext.result_awaits_human` is true, and, for a task, when `TransitionContext.review_passed` is true. An epic needs only the first.
@@ -45,13 +45,14 @@ The runtime gives step 08's pages what spec 5.4 and 5.16 ask of a human gate. It
   - `escalation_resolve`'s command body and the `escalation.resolved` event body both gain `extra_tries: integer 1..5`, optional.
   - `TransitionContext` gains `extra_iterations: u32`, the sum of the task's `extra_tries` over its `escalation.resolved` events, which `Transitions::context` reads from the history it already loads.
   - Core's `IterationBelowLimit` and `IterationLimitReached` compare against `max_iterations + extra_iterations`.
-  - The sessions check allows `max_sessions + 4 × extra_iterations`: `budget_state` receives the sum through `BudgetInput.extra_sessions`.
-  - "N more tries" means N more attempts, counting the one the resume starts. The human's resolve to `in_progress` does not add to `iteration` (as today), so the arithmetic is `iteration < max_iterations + extra_iterations` with the resume included.
+  - The sessions check allows `max_sessions + 4 × extra_iterations`. `budget_state(projections, team, role, task, session, now)` in `runtime/cost.rs` derives the task's extra tries itself, from its `escalation.resolved` events, so every caller (`transitions.rs`, `rules.rs`, the session start) gets it without a new parameter.
+  - "N more tries" means N more attempts, counting the one the resume starts. A resolve that carries `extra_tries` also increments `iteration`, so the resumed attempt is counted. The limit stays `iteration < max_iterations + extra_iterations`, which remains correct for repeated grants. A resolve without `extra_tries` does not change `iteration`, as today.
   - `extra_tries` is accepted only when the escalation's reason is `iterations`. Otherwise the refusal is `extra_tries_only_for_tries`.
 - **Help choices, per escalation reason.** These are the exact `escalation_resolve` bodies step 08's page sends.
   - `iterations`: "Give 2 more tries" `{ to: in_progress, extra_tries: 2 }`; "Ask <PM> to change the plan" `{ to: refining }`; "Cancel the task" `{ to: cancelled }`.
   - `budget` and `sessions`: "Change the plan" `{ to: refining }`; "Cancel the task" `{ to: cancelled }`. Resuming is not offered, because spec 5.7 raises these again. The page explains that the plan's budget must change.
-  - `blocker_age`, `permission`, `readiness_failures`, `integration`, `explicit_request`: "Carry on" `{ to: <the status the task held before the escalation>, from its last task.transitioned into escalated }`; "Change the plan" `{ to: refining }`; "Cancel the task".
+  - `integration`: "Add it now" `task_integrate`, then "Cancel the task".
+  - `blocker_age`, `permission`, `readiness_failures`, `explicit_request`: "Carry on" `{ to: <the status the task held before the escalation>, from its last task.transitioned into escalated }`; "Change the plan" `{ to: refining }`; "Cancel the task".
   - `approval` is not a help case: the plan page handles it.
   - "Pause the task" is dropped, because leaving `blocked` needs a resolution page this phase does not have.
   - The query `escalation.choices { task_id }` answers `[{ label, body }]`, so the rule lives in one place.
@@ -126,7 +127,6 @@ Produces:
 TaskContract::summary: Option<String>;  ReadinessRule::SummaryPresent;  ReadinessContext::human_approves: bool
 pub fn farik_core::governor::plain::plain_readiness(rule: ReadinessRule) -> &'static str;
 GateId::HumanRejection;  TransitionContext { result_awaits_human: bool, review_passed: bool, extra_iterations: u32, .. }
-BudgetInput::extra_sessions: u32
 Command::HumanSendBack { task_id: TaskId, subject: AcceptSubject, message: String, failed_criteria: Vec<String> }
 EscalationResolve body and EscalationResolvedBody: extra_tries: Option<u8>
 AskHumanInput::choices / QuestionAskedBody::choices: Vec<QuestionChoice { label: String, hint: Option<String> }>
@@ -159,7 +159,7 @@ Files: core transition table, transition and gates, budget, escalation; protocol
 
 - `sends_a_result_back_after_the_review`: the rejection event and the try counted; before the review passed it is refused with `review_first`; a result not waiting on the human is refused.
 - `sends_a_plan_back_to_refining`.
-- `grants_extra_tries`: with `max_iterations: 3` at iteration 3, `extra_tries: 2` allows exactly two more attempts, and the third escalates `iterations` again; the sessions limit grows by 8.
+- `grants_extra_tries`: with `max_iterations: 3` at iteration 3, a resolve with `extra_tries: 2` sets iteration to 4, and exactly two attempts run (the resumed one and one after a rejection) before `iterations` escalates again; the sessions limit grows by 8.
 - `refuses_extra_tries_for_other_reasons`.
 - `sends_back_from_the_command_line`: `farik send-back FRK-1 "…"` works through the daemon.
 
@@ -188,7 +188,7 @@ Files: the store's requests, waiting, diff, activity and git; CLI moves; runtime
 - Spec 5.4: the summary and the opening rule; which plans are bound.
 - Spec 5.5 and 5.7: extra tries and sessions.
 - Spec 5.11: `summary` as content.
-- Spec 8.5: the events.
+- Spec 8.5: the events, and `review.recorded`'s description in `event.schema.json`, which said nothing gates on it, now says the human's send-back waits for it.
 - The project plan: this step's line, and the `contract.validate` rename.
 
 - [ ] `docs(spec): the gates' summaries, sending back, and more tries`
