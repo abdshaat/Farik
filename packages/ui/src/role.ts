@@ -1,0 +1,6 @@
+export type Role =
+	| "product_manager"
+	| "scrum_master"
+	| "architect"
+	| "software_developer"
+	| "marketing_specialist";

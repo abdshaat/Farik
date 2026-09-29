@@ -148,7 +148,7 @@ Tests:
 - `RoleTag`: `names the role in full for screen readers` (one test looping over the five roles) asserts, for each, the text `uiStrings.roleShort[role]` inside an `abbr` whose `title` is `uiStrings.roleName[role]` (for `software_developer`: `DEV`, `Software Developer`).
 - `Avatar`: `shows the agent's character with its name` asserts an `img` whose `alt` is the name and whose `src` is `AVATAR_URLS[avatarKey]`, at the given size in `width` and `height`.
 
-- [ ] `feat(ui): add the package with buttons, status words, role tags and avatars`
+- [x] `feat(ui): add the package with buttons, status words, role tags and avatars`
 
 ### Task 3: Form controls
 

@@ -1,0 +1,15 @@
+.word {
+	font-weight: 600;
+}
+
+.done {
+	color: var(--farik-color-status-done);
+}
+
+.working {
+	color: var(--farik-color-status-working);
+}
+
+.waiting {
+	color: var(--farik-color-status-waiting);
+}

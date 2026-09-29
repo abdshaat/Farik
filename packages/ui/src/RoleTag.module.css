@@ -1,0 +1,30 @@
+.tag {
+	display: inline-block;
+	padding: 0 var(--farik-space-2);
+	border-radius: var(--farik-radius-control);
+	color: var(--farik-color-role-ink);
+	font:
+		600 var(--farik-type-small-size) / var(--farik-type-small-line-height)
+		var(--farik-type-small-family);
+	text-decoration: none;
+}
+
+.productManager {
+	background: var(--farik-color-role-product-manager);
+}
+
+.scrumMaster {
+	background: var(--farik-color-role-scrum-master);
+}
+
+.architect {
+	background: var(--farik-color-role-architect);
+}
+
+.developer {
+	background: var(--farik-color-role-developer);
+}
+
+.marketingSpecialist {
+	background: var(--farik-color-role-marketing-specialist);
+}
