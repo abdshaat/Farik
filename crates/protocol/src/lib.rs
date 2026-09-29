@@ -9,6 +9,8 @@ pub mod command;
 pub mod event;
 /// Types generated from `docs/schemas/`.
 pub mod generated;
+/// The JSON-RPC wire between the browser and the daemon.
+pub mod rpc;
 
 #[cfg(test)]
 mod tests {

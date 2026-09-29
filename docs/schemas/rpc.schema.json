@@ -1,0 +1,708 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://farik.dev/schemas/rpc.schema.json",
+  "title": "Farik RPC",
+  "description": "The JSON-RPC 2.0 text frames between the browser and the daemon's GET /rpc (docs/SPEC.md section 8). Any frame is a request, a response, or a notification; the query results and the command reply are $defs that Task 6's tests hold the daemon's answers to. command and event are objects here, not references, because one schema never references another: command_from_value and event_from_value read them.",
+  "oneOf": [
+    {
+      "$ref": "#/$defs/rpcRequest"
+    },
+    {
+      "$ref": "#/$defs/rpcResponse"
+    },
+    {
+      "$ref": "#/$defs/rpcNotification"
+    }
+  ],
+  "$defs": {
+    "requestId": {
+      "type": "integer",
+      "description": "The caller's own number for a request, echoed by its response."
+    },
+    "queryName": {
+      "type": "string",
+      "enum": [
+        "events.since",
+        "tasks.list",
+        "task.get",
+        "team.get",
+        "serve.status"
+      ]
+    },
+    "subscribeRequest": {
+      "title": "Subscribe Request",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "jsonrpc",
+        "id",
+        "method",
+        "params"
+      ],
+      "properties": {
+        "jsonrpc": {
+          "const": "2.0"
+        },
+        "id": {
+          "$ref": "#/$defs/requestId"
+        },
+        "method": {
+          "const": "subscribe"
+        },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "from_seq": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 18446744073709551615
+            }
+          },
+          "required": [
+            "from_seq"
+          ]
+        }
+      }
+    },
+    "unsubscribeRequest": {
+      "title": "Unsubscribe Request",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "jsonrpc",
+        "id",
+        "method",
+        "params"
+      ],
+      "properties": {
+        "jsonrpc": {
+          "const": "2.0"
+        },
+        "id": {
+          "$ref": "#/$defs/requestId"
+        },
+        "method": {
+          "const": "unsubscribe"
+        },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {}
+        }
+      }
+    },
+    "commandRequest": {
+      "title": "Command Request",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "jsonrpc",
+        "id",
+        "method",
+        "params"
+      ],
+      "properties": {
+        "jsonrpc": {
+          "const": "2.0"
+        },
+        "id": {
+          "$ref": "#/$defs/requestId"
+        },
+        "method": {
+          "const": "command"
+        },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "command": {
+              "type": "object",
+              "description": "A command wire of command.schema.json; the daemon validates it with command_from_value."
+            }
+          },
+          "required": [
+            "command"
+          ]
+        }
+      }
+    },
+    "queryRequest": {
+      "title": "Query Request",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "jsonrpc",
+        "id",
+        "method",
+        "params"
+      ],
+      "properties": {
+        "jsonrpc": {
+          "const": "2.0"
+        },
+        "id": {
+          "$ref": "#/$defs/requestId"
+        },
+        "method": {
+          "const": "query"
+        },
+        "params": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/eventsSinceQuery"
+            },
+            {
+              "$ref": "#/$defs/tasksListQuery"
+            },
+            {
+              "$ref": "#/$defs/taskGetQuery"
+            },
+            {
+              "$ref": "#/$defs/teamGetQuery"
+            },
+            {
+              "$ref": "#/$defs/serveStatusQuery"
+            }
+          ]
+        }
+      }
+    },
+    "eventsSinceQuery": {
+      "title": "Events Since Query",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "params"
+      ],
+      "properties": {
+        "name": {
+          "const": "events.since"
+        },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "after_seq": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 18446744073709551615
+            },
+            "limit": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 500
+            }
+          },
+          "required": [
+            "after_seq",
+            "limit"
+          ]
+        }
+      }
+    },
+    "tasksListQuery": {
+      "title": "Tasks List Query",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "params"
+      ],
+      "properties": {
+        "name": {
+          "const": "tasks.list"
+        },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {}
+        }
+      }
+    },
+    "taskGetQuery": {
+      "title": "Task Get Query",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "params"
+      ],
+      "properties": {
+        "name": {
+          "const": "task.get"
+        },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "task_id": {
+              "type": "string",
+              "pattern": "^FRK-[0-9]{1,6}$"
+            }
+          },
+          "required": [
+            "task_id"
+          ]
+        }
+      }
+    },
+    "teamGetQuery": {
+      "title": "Team Get Query",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "params"
+      ],
+      "properties": {
+        "name": {
+          "const": "team.get"
+        },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {}
+        }
+      }
+    },
+    "serveStatusQuery": {
+      "title": "Serve Status Query",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "params"
+      ],
+      "properties": {
+        "name": {
+          "const": "serve.status"
+        },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {}
+        }
+      }
+    },
+    "rpcRequest": {
+      "title": "Rpc Request",
+      "description": "What the browser sends. The pairing of a query's name with its params is the schema's; the meaning of a command is command_from_value's.",
+      "oneOf": [
+        {
+          "$ref": "#/$defs/subscribeRequest"
+        },
+        {
+          "$ref": "#/$defs/unsubscribeRequest"
+        },
+        {
+          "$ref": "#/$defs/commandRequest"
+        },
+        {
+          "$ref": "#/$defs/queryRequest"
+        }
+      ]
+    },
+    "rpcSuccess": {
+      "title": "Rpc Success",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "jsonrpc",
+        "id",
+        "result"
+      ],
+      "properties": {
+        "jsonrpc": {
+          "const": "2.0"
+        },
+        "id": {
+          "$ref": "#/$defs/requestId"
+        },
+        "result": {
+          "type": "object",
+          "description": "emptyResult for subscribe and unsubscribe, commandReply for command, and the query's own result def for query."
+        }
+      }
+    },
+    "rpcFailure": {
+      "title": "Rpc Failure",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "jsonrpc",
+        "id",
+        "error"
+      ],
+      "properties": {
+        "jsonrpc": {
+          "const": "2.0"
+        },
+        "id": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/requestId"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "null when the request's id could not be read."
+        },
+        "error": {
+          "$ref": "#/$defs/rpcError"
+        }
+      }
+    },
+    "rpcError": {
+      "title": "Rpc Error",
+      "description": "-32700 parse, -32600 invalid request, -32601 unknown method, -32602 invalid params, -32001 unknown_query, -32002 not_found, -32003 refused_here.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "code",
+        "message"
+      ],
+      "properties": {
+        "code": {
+          "type": "integer",
+          "enum": [
+            -32700,
+            -32600,
+            -32601,
+            -32602,
+            -32001,
+            -32002,
+            -32003
+          ]
+        },
+        "message": {
+          "type": "string"
+        },
+        "data": {}
+      }
+    },
+    "rpcResponse": {
+      "title": "Rpc Response",
+      "oneOf": [
+        {
+          "$ref": "#/$defs/rpcSuccess"
+        },
+        {
+          "$ref": "#/$defs/rpcFailure"
+        }
+      ]
+    },
+    "rpcNotification": {
+      "title": "Rpc Notification",
+      "description": "The server's push of one event. The event is an object here because one schema never references another; rpc_notification_from_value reads it with event_from_value.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "jsonrpc",
+        "method",
+        "params"
+      ],
+      "properties": {
+        "jsonrpc": {
+          "const": "2.0"
+        },
+        "method": {
+          "const": "event"
+        },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "event": {
+              "type": "object"
+            }
+          },
+          "required": [
+            "event"
+          ]
+        }
+      }
+    },
+    "emptyResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {}
+    },
+    "commandReply": {
+      "title": "Command Reply",
+      "description": "What the daemon's POST /command answers once the token passes (docs/SPEC.md section 8.2): what the command did, as one sentence and the sequence numbers of the events it appended, or why it did nothing. A reply is what leaves a process, so it has a schema as a command does; farik_protocol::command::reply_from_value reads it against this definition.",
+      "oneOf": [
+        {
+          "$ref": "#/$defs/commandDone"
+        },
+        {
+          "$ref": "#/$defs/commandRefusal"
+        }
+      ]
+    },
+    "commandDone": {
+      "title": "Command Done",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "said",
+        "events"
+      ],
+      "properties": {
+        "said": {
+          "type": "string"
+        },
+        "events": {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 18446744073709551615
+          }
+        }
+      }
+    },
+    "commandRefusal": {
+      "title": "Command Refusal",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "error"
+      ],
+      "properties": {
+        "error": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "detail"
+          ],
+          "properties": {
+            "kind": {
+              "description": "invalid: the command cannot be handled as given, a schema refusal among them; refused: it cannot be done to what it names as things stand; not_found: what it names is not there; failed: the store, a file, git, or the orchestrator failed.",
+              "type": "string",
+              "enum": [
+                "invalid",
+                "refused",
+                "not_found",
+                "failed"
+              ]
+            },
+            "detail": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "eventsSinceResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "events": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          }
+        }
+      },
+      "required": [
+        "events"
+      ]
+    },
+    "tasksListResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "tasks": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/taskProjection"
+          }
+        }
+      },
+      "required": [
+        "tasks"
+      ]
+    },
+    "taskGetResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "task": {
+          "$ref": "#/$defs/taskProjection"
+        }
+      },
+      "required": [
+        "task"
+      ]
+    },
+    "teamGetResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "team": {
+          "type": "object",
+          "description": "The team file as team.schema.json shapes it."
+        }
+      },
+      "required": [
+        "team"
+      ]
+    },
+    "serveStatusResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "project_root": {
+          "type": "string"
+        },
+        "paused": {
+          "type": "boolean"
+        },
+        "credential": {
+          "oneOf": [
+            {
+              "type": "string",
+              "enum": [
+                "api_key",
+                "subscription_token"
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "port": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 65535
+        }
+      },
+      "required": [
+        "project_root",
+        "paused",
+        "credential",
+        "port"
+      ]
+    },
+    "taskProjection": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "task_id": {
+          "type": "string",
+          "pattern": "^FRK-[0-9]{1,6}$"
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "epic",
+            "task"
+          ]
+        },
+        "parent": {
+          "type": "string",
+          "pattern": "^FRK-[0-9]{1,6}$"
+        },
+        "title": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "draft",
+            "refining",
+            "ready",
+            "assigned",
+            "in_progress",
+            "blocked",
+            "verifying",
+            "rejected",
+            "accepted",
+            "escalated",
+            "cancelled"
+          ]
+        },
+        "risk": {
+          "type": "string",
+          "enum": [
+            "low",
+            "medium",
+            "high"
+          ]
+        },
+        "triaged": {
+          "type": "boolean"
+        },
+        "locked": {
+          "type": "boolean"
+        },
+        "updated_seq": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 18446744073709551615
+        },
+        "cost_usd": {
+          "type": "number"
+        },
+        "assignee_id": {
+          "type": "string"
+        },
+        "reviewer_id": {
+          "type": "string"
+        },
+        "iteration": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "awaiting_integration": {
+          "type": "boolean"
+        },
+        "waiting_on_human": {
+          "type": "boolean"
+        },
+        "awaiting_approval": {
+          "type": "boolean"
+        },
+        "verifications": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "rejections": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "interventions": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "sprint": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "task_id",
+        "kind",
+        "title",
+        "status",
+        "risk",
+        "triaged",
+        "locked",
+        "updated_seq",
+        "cost_usd",
+        "iteration",
+        "awaiting_integration",
+        "waiting_on_human",
+        "awaiting_approval",
+        "verifications",
+        "rejections",
+        "interventions"
+      ],
+      "description": "One row of the board (farik_store::TaskProjection). Optional fields are absent, not null, when the projection has none."
+    }
+  }
+}

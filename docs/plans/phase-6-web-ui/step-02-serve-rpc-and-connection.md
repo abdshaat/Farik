@@ -125,7 +125,8 @@ Produces:
 ```rust
 // farik-protocol
 Command::TeamPause, Command::TeamResume;  EventBody::TeamPaused(TeamPausedBody), EventBody::TeamResumed(TeamResumedBody)
-pub mod rpc { /* generated: RpcRequest, RpcResponse, RpcNotification, RpcError, QueryName, … */ pub fn rpc_request_from_value(v: &Value) -> Result<RpcRequest, Vec<String>>; }
+pub mod rpc { /* generated: RpcRequest, RpcResponse, RpcNotification, RpcError, QueryName, … */ pub fn rpc_request_from_value(v: &Value) -> Result<RpcRequest, Vec<String>>;
+  pub fn rpc_notification_from_value(v: &Value) -> Result<RpcNotification, Vec<String>>; }
 // farik-runtime
 pub fn pause::paused(log: &EventLog) -> Result<bool, StoreError>;
 pub enum PortChoice { Any, Preferred(u16) }                    // DaemonConfig.port
@@ -209,7 +210,7 @@ Tests:
 - `refuses_an_unknown_query_name` asserts that `query { name: "secrets.get" }` fails the schema.
 - `an_event_notification_carries_an_event_wire` asserts that a notification whose `event` is `team.paused` validates, and that one whose `event` lacks `seq` does not.
 
-- [ ] `feat(protocol): add the json-rpc schema for the browser`
+- [x] `feat(protocol): add the json-rpc schema for the browser`
 
 ### Task 5: Connect codes, browser sessions, and `/connect`
 
