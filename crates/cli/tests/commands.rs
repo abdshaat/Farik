@@ -1224,6 +1224,20 @@ fn refuses_an_invocation_it_cannot_use() {
     assert!(ran.out.is_empty(), "{}", ran.out);
 }
 
+#[test]
+fn refuses_serve_with_json() {
+    let ran = run_in(Path::new("."), &["serve", "--json"]);
+
+    assert_eq!(ran.code, 2, "{}", ran.err);
+    assert!(
+        ran.err
+            .contains("farik serve prints lines for a person; --json is not available for it"),
+        "{}",
+        ran.err
+    );
+    assert!(ran.out.is_empty(), "{}", ran.out);
+}
+
 /// Puts a task's board row at a status, so that a test can ask what a command does about one.
 ///
 /// `contract.written` is the only event of this phase that moves a row, and its body carries a whole

@@ -517,6 +517,13 @@ pub fn run_cli(args: &[String], io: &mut CliIo<'_>) -> i32 {
             HookCommands::PostToolUse { daemon } => hook::post_tool_use(&io.cwd.join(daemon), io),
         };
     }
+    if parsed.json && matches!(parsed.command, Commands::Serve { .. }) {
+        say(
+            &mut io.stderr,
+            "farik: farik serve prints lines for a person; --json is not available for it",
+        );
+        return MISUSE;
+    }
     let now = io.clock.now();
     if let Commands::Run
     | Commands::Serve { .. }

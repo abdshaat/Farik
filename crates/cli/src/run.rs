@@ -49,7 +49,8 @@ impl Printer<'_, '_> {
 pub(crate) enum OnIdle {
     /// Return: the run is done.
     Return,
-    /// Say why, once, and wait for a command, a stop, or the recheck: `farik serve`.
+    /// Say why, once until a tick acts or the reason changes, and wait for a command, a stop, or
+    /// the recheck: `farik serve`.
     Wait,
 }
 
@@ -149,7 +150,7 @@ pub(crate) fn started(printer: &mut Printer<'_, '_>, driver: &Driver) {
 /// Ticks within `scope` until a tick is idle with no agent to wait for, the run is stopped, or a
 /// tick fails, printing each; a tick idle while an agent sleeps is waited out, and says so. An
 /// idle tick with no agent to wait for ends the loop under `OnIdle::Return`; under `Wait` it is
-/// printed once per change of reason and waited out. Ctrl-C is heard between and during ticks.
+/// printed once until its reason changes or a tick acts, and waited out. Ctrl-C is heard between and during ticks.
 /// `after` is called after each tick that acted.
 pub(crate) async fn ticks(
     driver: &mut Driver,
@@ -202,10 +203,11 @@ pub(crate) async fn ticks(
                 if matches!(on_idle, OnIdle::Return) {
                     return Ended::Idle(why);
                 }
-                let until = chrono::Utc::now() + IDLE_WAIT;
+                let until = printer.io.clock.now() + IDLE_WAIT;
                 wait_out(driver, printer, presses, orchestrator.wait_until(until)).await;
             }
             Ok(TickReport::Acted { task_id, what }) => {
+                last_idle = None;
                 printer.line(
                     &format!("{}: {what}", task_id.as_str()),
                     &json!({ "task_id": task_id.as_str(), "what": what }),
@@ -213,6 +215,7 @@ pub(crate) async fn ticks(
                 after(printer);
             }
             Ok(TickReport::Sprint { sprint_id, what }) => {
+                last_idle = None;
                 printer.line(
                     &format!("{sprint_id}: {what}"),
                     &json!({ "sprint_id": sprint_id, "what": what }),
@@ -220,6 +223,7 @@ pub(crate) async fn ticks(
                 after(printer);
             }
             Ok(TickReport::Conversation { agent_id, what }) => {
+                last_idle = None;
                 printer.line(
                     &format!("{agent_id}: {what}"),
                     &json!({ "agent_id": agent_id, "what": what }),

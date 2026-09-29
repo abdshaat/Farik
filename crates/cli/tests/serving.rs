@@ -19,6 +19,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use chrono::{DateTime, Utc};
+use farik_protocol::clock::FixedClock;
 use farik_protocol::event::{EventBody, EventKind};
 use farik_runtime::recorded::fixtures::{refine_asks_frk_1, triage_frk_1_large};
 use farik_runtime::sleep::Sleeper;
@@ -82,15 +83,16 @@ impl Write for SharedOut {
     }
 }
 
-/// A sleeper that says it was entered and then returns only when the test releases it, once.
+/// A sleeper that says it was entered, and until when, and then returns only when the test
+/// releases it, once.
 struct GatedSleeper {
-    entered: Mutex<Sender<()>>,
+    entered: Mutex<Sender<DateTime<Utc>>>,
     gate: Arc<Semaphore>,
 }
 
 impl Sleeper for GatedSleeper {
-    fn sleep_until(&self, _until: DateTime<Utc>) -> Pin<Box<dyn Future<Output = ()> + Send + '_>> {
-        let _ = self.entered.lock().expect("the sender").send(());
+    fn sleep_until(&self, until: DateTime<Utc>) -> Pin<Box<dyn Future<Output = ()> + Send + '_>> {
+        let _ = self.entered.lock().expect("the sender").send(until);
         Box::pin(async move {
             if let Ok(permit) = self.gate.acquire().await {
                 permit.forget();
@@ -117,6 +119,10 @@ fn serving(root: &Path, port: &str, env: Vec<(&str, String)>) -> std::thread::Jo
 fn remembers_the_project_it_serves() {
     let repository = a_team("serve-remembers");
     let state = scratch("serve-state");
+    // A state folder already there with a looser mode is tightened.
+    std::fs::create_dir_all(state.join("farik")).expect("the folder is made");
+    std::fs::set_permissions(state.join("farik"), std::fs::Permissions::from_mode(0o755))
+        .expect("the mode is set");
     let serving = serving(
         &repository.path,
         &free_port(),
@@ -216,12 +222,46 @@ fn keeps_serving_when_the_board_is_idle() {
     assert_eq!(stopped.code, 0, "{}", stopped.err);
     let ran = joined(serving, "the serve");
     assert_eq!(ran.code, 0, "{}\n{}", ran.out, ran.err);
+    // The idle line is said again after the ticks that acted, though its reason is the same.
     let seen = out.idle_lines();
     assert_eq!(
         seen.iter().filter(|line| **line == idle[0]).count(),
-        1,
+        2,
         "{seen:?}"
     );
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn waits_on_the_injected_clock_when_idle() {
+    let repository = a_team("serve-clock");
+    let port = free_port();
+    // A clock a year from the machine's, so that a wait reckoned from the machine's time shows.
+    let now = project::at() + chrono::Duration::days(365);
+    let (entered, waiting) = channel();
+    let gate = Arc::new(Semaphore::new(0));
+    let sleeper = Arc::new(GatedSleeper {
+        entered: Mutex::new(entered),
+        gate: Arc::clone(&gate),
+    });
+    let root = repository.path.clone();
+    let serving = std::thread::spawn(move || {
+        run_with(&root, &["serve", "--port", &port], |io| {
+            io.engine = recorded(Vec::new());
+            io.clock = Arc::new(FixedClock::new(now));
+            io.sleeper = Some(sleeper);
+        })
+    });
+
+    let until = waiting
+        .recv_timeout(Duration::from_secs(30))
+        .expect("serve waits on its sleeper when the board is idle");
+    // The day's wait, capped at the minute's recheck, both from the clock serve was given.
+    assert_eq!(until, now + chrono::Duration::seconds(60));
+    let stopped = run(&repository.path, &["stop"]);
+    assert_eq!(stopped.code, 0, "{}", stopped.err);
+    let ran = joined(serving, "the serve");
+    assert_eq!(ran.code, 0, "{}\n{}", ran.out, ran.err);
 }
 
 #[test]

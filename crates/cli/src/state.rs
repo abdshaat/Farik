@@ -15,19 +15,22 @@ pub(crate) fn state_dir(env: &BTreeMap<String, String>) -> Option<PathBuf> {
         .or_else(|| set("APPDATA").map(|base| PathBuf::from(base).join("farik")))
 }
 
-/// Makes the state folder `directory` with mode 0700, when it is not there.
+/// Makes the state folder `directory` with mode 0700, when it is not there, and sets 0700 on one
+/// that is.
 ///
 /// # Errors
 ///
 /// A sentence saying it cannot be made.
 pub(crate) fn make_state_dir(directory: &Path) -> Result<(), String> {
-    use std::os::unix::fs::DirBuilderExt as _;
+    use std::os::unix::fs::{DirBuilderExt as _, PermissionsExt as _};
 
+    let unmade = |error: std::io::Error| format!("{} cannot be made: {error}", directory.display());
     std::fs::DirBuilder::new()
         .recursive(true)
         .mode(0o700)
         .create(directory)
-        .map_err(|error| format!("{} cannot be made: {error}", directory.display()))
+        .map_err(unmade)?;
+    std::fs::set_permissions(directory, std::fs::Permissions::from_mode(0o700)).map_err(unmade)
 }
 
 /// Writes `state.json`, `{ "last_project": "<root>" }`, in `directory`, made with mode 0700 when it
