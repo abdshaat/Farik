@@ -1,5 +1,6 @@
 //! `farik serve` on recorded sessions, for the browser suites: `farik-e2e-serve --port <p>
-//! [--transcripts <name>,...]`, run in a project directory. Built only with the `e2e` feature, so
+//! [--transcripts <name>,...] [--no-keychain]`, run in a project directory, or anywhere else for
+//! the first-run wizard. `--no-keychain` keeps the credential in the state folder's file alone. Built only with the `e2e` feature, so
 //! the shipped `farik` has no path to replay.
 
 use std::path::PathBuf;
@@ -20,20 +21,20 @@ fn transcript(name: &str) -> Option<Transcript> {
 
 fn main() -> std::process::ExitCode {
     let mut arguments = std::env::args().skip(1);
-    let (mut port, mut names) = (None, String::new());
+    let (mut port, mut names, mut keychain) = (None, String::new(), true);
     while let Some(flag) = arguments.next() {
+        if flag == "--no-keychain" {
+            keychain = false;
+            continue;
+        }
         match (flag.as_str(), arguments.next()) {
             ("--port", Some(value)) => port = Some(value),
             ("--transcripts", Some(value)) => names = value,
-            _ => {
-                eprintln!("usage: farik-e2e-serve --port <p> [--transcripts <name>,...]");
-                return std::process::ExitCode::from(2);
-            }
+            _ => return usage(),
         }
     }
     let Some(port) = port else {
-        eprintln!("usage: farik-e2e-serve --port <p> [--transcripts <name>,...]");
-        return std::process::ExitCode::from(2);
+        return usage();
     };
     let mut transcripts = Vec::new();
     for name in names.split(',').filter(|name| !name.is_empty()) {
@@ -66,7 +67,13 @@ fn main() -> std::process::ExitCode {
         adapter
     }));
     io.interrupts = Interrupts::CtrlC;
+    io.credential_stores = farik::system_credential_stores(&io.env, keychain);
     let arguments = ["farik", "serve", "--no-open", "--port", &port].map(String::from);
     let code = run_cli(&arguments, &mut io);
     std::process::ExitCode::from(u8::try_from(code).unwrap_or(1))
+}
+
+fn usage() -> std::process::ExitCode {
+    eprintln!("usage: farik-e2e-serve --port <p> [--transcripts <name>,...] [--no-keychain]");
+    std::process::ExitCode::from(2)
 }

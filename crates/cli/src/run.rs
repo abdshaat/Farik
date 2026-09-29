@@ -1,6 +1,8 @@
 //! `farik run` and `farik plan` (`docs/SPEC.md` 8.2): a process that drives the project until
 //! nothing needs doing, a stop, or Ctrl-C, and then says what waits on the human.
 
+use farik_runtime::claude::CredentialKind;
+use farik_runtime::credential::Source;
 use farik_runtime::orchestrator::{TickReport, TickRules, TickScope};
 use farik_store::files::Sandbox;
 use serde_json::{Value, json};
@@ -110,7 +112,7 @@ pub(crate) fn started(printer: &mut Printer<'_, '_>, driver: &Driver) {
         printer.line(
             "",
             &json!({
-                "credential": driver.credential,
+                "credential": driver.credential.map(credential_name),
                 "sandbox": match driver.sandbox {
                     Sandbox::Docker => "docker",
                     Sandbox::None => "none",
@@ -124,15 +126,18 @@ pub(crate) fn started(printer: &mut Printer<'_, '_>, driver: &Driver) {
         );
         return;
     }
-    match driver.credential {
-        Some("ANTHROPIC_API_KEY") => {
-            printer.line("credential: ANTHROPIC_API_KEY (an API key)", &Value::Null);
-        }
-        Some(name) => printer.line(
-            &format!("credential: {name} (a subscription token)"),
-            &Value::Null,
-        ),
-        None => {}
+    if let Some((kind, source)) = driver.credential {
+        let what = match kind {
+            CredentialKind::ApiKey => "an API key",
+            CredentialKind::SubscriptionToken => "a subscription token",
+        };
+        let name = credential_name((kind, source));
+        let line = match source {
+            Source::Environment => format!("credential: {name} ({what})"),
+            Source::Keychain => format!("credential: {what}, kept in your computer's keychain"),
+            Source::File => format!("credential: {what}, kept in farik's credential.json"),
+        };
+        printer.line(&line, &Value::Null);
     }
     if recovered.sessions_interrupted + recovered.worktrees_removed + recovered.tasks_resumed > 0 {
         printer.line(
@@ -144,6 +149,16 @@ pub(crate) fn started(printer: &mut Printer<'_, '_>, driver: &Driver) {
             ),
             &Value::Null,
         );
+    }
+}
+
+/// Where the credential came from, as `--json` names it: the variable, or the store.
+fn credential_name((kind, source): (CredentialKind, Source)) -> &'static str {
+    match (source, kind) {
+        (Source::Environment, CredentialKind::ApiKey) => "ANTHROPIC_API_KEY",
+        (Source::Environment, CredentialKind::SubscriptionToken) => "CLAUDE_CODE_OAUTH_TOKEN",
+        (Source::Keychain, _) => "keychain",
+        (Source::File, _) => "file",
     }
 }
 

@@ -569,3 +569,428 @@ fn the_e2e_binary_serves_with_recorded_sessions() {
     assert_eq!(stopped.code, 0, "{}", stopped.err);
     assert!(status.success());
 }
+
+type Socket =
+    tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>;
+
+/// A runtime for a test's side of the socket.
+fn a_runtime() -> tokio::runtime::Runtime {
+    tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("a runtime")
+}
+
+/// The browser's socket on `port`, with the session `cookie`; retried for 30 s, since across a
+/// take-on the daemon is briefly not there.
+async fn socket(port: u16, cookie: &str) -> Socket {
+    use tokio_tungstenite::tungstenite::client::IntoClientRequest as _;
+
+    let deadline = Instant::now() + Duration::from_secs(30);
+    loop {
+        let mut request = format!("ws://127.0.0.1:{port}/rpc")
+            .into_client_request()
+            .expect("a request");
+        let headers = request.headers_mut();
+        headers.insert(
+            "Origin",
+            format!("http://127.0.0.1:{port}")
+                .parse()
+                .expect("a header"),
+        );
+        headers.insert("Cookie", cookie.parse().expect("a header"));
+        match tokio_tungstenite::connect_async(request).await {
+            Ok((socket, _)) => return socket,
+            Err(error) => assert!(Instant::now() < deadline, "the socket opens: {error}"),
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+}
+
+/// Sends `method` with `params` and answers the reply.
+async fn ask(socket: &mut Socket, id: u64, method: &str, params: Value) -> Value {
+    use futures_util::{SinkExt as _, StreamExt as _};
+    use tokio_tungstenite::tungstenite::Message;
+
+    let asked = json!({ "jsonrpc": "2.0", "id": id, "method": method, "params": params });
+    socket
+        .send(Message::Text(asked.to_string().into()))
+        .await
+        .expect("sent");
+    loop {
+        let frame = tokio::time::timeout(Duration::from_secs(60), socket.next())
+            .await
+            .expect("an answer in time")
+            .expect("the socket is open")
+            .expect("a frame");
+        if let Message::Text(text) = frame {
+            return serde_json::from_str(text.as_str()).expect("JSON");
+        }
+    }
+}
+
+/// `serve.status`, on a socket of its own.
+fn serve_status(port: u16, cookie: &str) -> Value {
+    a_runtime().block_on(async {
+        let mut socket = socket(port, cookie).await;
+        let status = json!({ "name": "serve.status", "params": {} });
+        ask(&mut socket, 1, "query", status).await["result"].clone()
+    })
+}
+
+/// `method` on a socket of its own, answering the reply.
+fn call(port: u16, cookie: &str, method: &str, params: Value) -> Value {
+    a_runtime().block_on(async {
+        let mut socket = socket(port, cookie).await;
+        ask(&mut socket, 1, method, params).await
+    })
+}
+
+/// `call`, also answering whether the daemon then closed the socket within 30 s.
+fn call_then_closed(port: u16, cookie: &str, method: &str, params: Value) -> (Value, bool) {
+    use futures_util::StreamExt as _;
+    use tokio_tungstenite::tungstenite::Message;
+
+    a_runtime().block_on(async {
+        let mut socket = socket(port, cookie).await;
+        let answer = ask(&mut socket, 1, method, params).await;
+        let closed = tokio::time::timeout(Duration::from_secs(30), async {
+            loop {
+                match socket.next().await {
+                    Some(Ok(Message::Close(_)) | Err(_)) | None => return,
+                    Some(Ok(_)) => {}
+                }
+            }
+        })
+        .await
+        .is_ok();
+        (answer, closed)
+    })
+}
+
+/// `farik serve` in setup mode or not, on a thread, with its link traded for a cookie.
+struct Serving {
+    out: SharedOut,
+    err: SharedOut,
+    interrupt: tokio::sync::mpsc::UnboundedSender<()>,
+    thread: std::thread::JoinHandle<Ran>,
+    port: u16,
+    cookie: String,
+}
+
+/// `farik serve` in `cwd`, with `PATH`, `HOME` at `home`, the state folder at `state`, an API key
+/// in the environment, and interrupts the test sends.
+fn serving_setup(cwd: &Path, home: &Path, state: &Path) -> Serving {
+    let (out, err) = (SharedOut::default(), SharedOut::default());
+    let (interrupt, interrupts) = tokio::sync::mpsc::unbounded_channel();
+    let mut env = project::a_bare_env();
+    env.insert("HOME".to_string(), home.display().to_string());
+    env.insert("XDG_CONFIG_HOME".to_string(), state.display().to_string());
+    env.insert(
+        "ANTHROPIC_API_KEY".to_string(),
+        "sk-ant-api03-test".to_string(),
+    );
+    let (cwd, port) = (cwd.to_path_buf(), free_port());
+    let (shared_out, shared_err) = (out.clone(), err.clone());
+    let thread = std::thread::spawn(move || {
+        run_with(&cwd, &["serve", "--port", &port], |io| {
+            io.engine = recorded(Vec::new());
+            io.env = env;
+            io.stdout = Box::new(shared_out);
+            io.stderr = Box::new(shared_err);
+            io.interrupts = farik::Interrupts::Channel(interrupts);
+        })
+    });
+    until("the link is printed", || {
+        !links(&out.text()).is_empty() || thread.is_finished()
+    });
+    let Some((port, code)) = links(&out.text()).first().cloned() else {
+        panic!("no link\n{}\n{}", out.text(), err.text());
+    };
+    let cookie = connected(port, &code);
+    Serving {
+        out,
+        err,
+        interrupt,
+        thread,
+        port,
+        cookie,
+    }
+}
+
+impl Serving {
+    /// Interrupts serve once and answers how it ended.
+    fn interrupted(self) -> (Ran, String, String) {
+        self.interrupt.send(()).expect("serve listens");
+        let ran = joined(self.thread, "the serve");
+        (ran, self.out.text(), self.err.text())
+    }
+}
+
+/// The folders a setup test runs in: an empty one to run in, and a state folder.
+fn setup_folders(name: &str) -> (std::path::PathBuf, std::path::PathBuf) {
+    (
+        scratch(&format!("{name}-cwd")),
+        scratch(&format!("{name}-state")),
+    )
+}
+
+/// The name `path` has inside its parent, which the tests make home.
+fn name_of(path: &Path) -> String {
+    path.file_name()
+        .expect("a name")
+        .to_string_lossy()
+        .to_string()
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn serves_setup_outside_a_project() {
+    let (cwd, state) = setup_folders("setup-outside");
+    let serving = serving_setup(&cwd, &cwd, &state);
+    let status = serve_status(serving.port, &serving.cookie);
+    let (ran, out, err) = serving.interrupted();
+    assert_eq!(status["project_root"], Value::Null, "{status}");
+    assert_eq!(ran.code, 130, "{out}\n{err}");
+    assert!(!cwd.join(".farik").exists(), "no daemon.json, nor anything");
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn reopens_the_last_project() {
+    let repository = a_team("setup-reopens");
+    let (cwd, state) = setup_folders("setup-reopens");
+    std::fs::create_dir_all(state.join("farik")).expect("the folder");
+    let root = repository.path.canonicalize().expect("the root");
+    std::fs::write(
+        state.join("farik/state.json"),
+        json!({ "last_project": root.display().to_string() }).to_string(),
+    )
+    .expect("state.json");
+    let serving = serving_setup(&cwd, &cwd, &state);
+    let status = serve_status(serving.port, &serving.cookie);
+    let stopped = run(&repository.path, &["stop"]);
+    assert_eq!(stopped.code, 0, "{}", stopped.err);
+    let ran = joined(serving.thread, "the serve");
+    assert_eq!(ran.code, 0, "{}", serving.err.text());
+    assert_eq!(
+        status["project_root"],
+        json!(root.display().to_string()),
+        "{status}"
+    );
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn creates_a_project_paused_with_its_first_request() {
+    let (home, state) = setup_folders("setup-creates");
+    let serving = serving_setup(&home, &home, &state);
+    let description = "A shop for bread, with an order page and a daily menu.";
+    let create = |description: &str| json!({ "parent": "", "name": "bakery", "description": description, "no_sandbox": false });
+
+    let short = call(
+        serving.port,
+        &serving.cookie,
+        "project.create",
+        create("seventeen chars!!"),
+    );
+    assert_eq!(short["error"]["code"], -32005, "{short}");
+    assert_eq!(
+        short["error"]["message"],
+        "say a little more about the project: at least 20 characters"
+    );
+    assert!(!home.join("bakery").exists());
+
+    let made = call(
+        serving.port,
+        &serving.cookie,
+        "project.create",
+        create(description),
+    );
+    let root = home.join("bakery").canonicalize().expect("bakery is made");
+    assert_eq!(
+        made["result"]["project_root"],
+        json!(root.display().to_string()),
+        "{made}"
+    );
+    until("the team is driven", || {
+        root.join(".farik/local/daemon.json").exists()
+    });
+    let (ran, out, err) = serving.interrupted();
+    assert_eq!(ran.code, 130, "{out}\n{err}");
+
+    assert!(root.join(".git").is_dir());
+    let readme = std::fs::read_to_string(root.join("README.md")).expect("a README");
+    assert!(readme.contains(description), "{readme}");
+    assert!(root.join(".farik/team.yaml").is_file());
+    assert!(root.join(".farik/local/setup-pending").is_file());
+    let log = farik_store::open_event_log(&root.join(".farik/local/farik.db"), project::at())
+        .expect("the log opens");
+    let paused = log
+        .read(&farik_store::EventQuery {
+            kinds: vec![EventKind::TeamPaused],
+            ..farik_store::EventQuery::default()
+        })
+        .expect("the log reads");
+    assert_eq!(paused.len(), 1);
+    let contract = farik_store::files::ProjectFiles::open(root.clone())
+        .read_contract(&"FRK-1".parse().expect("an id"))
+        .expect("the first request is filed");
+    assert_eq!(contract.intent.as_str(), description);
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn takes_on_the_chosen_project_on_the_same_port() {
+    let repository = TempRepo::new("setup-takes-on");
+    let home = repository.path.parent().expect("a parent").to_path_buf();
+    let (cwd, state) = setup_folders("setup-takes-on");
+    let serving = serving_setup(&cwd, &home, &state);
+
+    let (opened, closed) = call_then_closed(
+        serving.port,
+        &serving.cookie,
+        "project.open",
+        json!({ "path": name_of(&repository.path), "no_sandbox": false }),
+    );
+    let root = repository.path.canonicalize().expect("the root");
+    assert_eq!(
+        opened["result"]["project_root"],
+        json!(root.display().to_string()),
+        "{opened}"
+    );
+    assert!(closed, "the setup daemon closes the socket");
+    until("the team is driven", || {
+        root.join(".farik/local/daemon.json").exists()
+    });
+    let status = serve_status(serving.port, &serving.cookie);
+    let stopped = run(&root, &["stop"]);
+    assert_eq!(stopped.code, 0, "{}", stopped.err);
+    let ran = joined(serving.thread, "the serve");
+    assert_eq!(ran.code, 0, "{}", serving.err.text());
+
+    assert_eq!(
+        status["project_root"],
+        json!(root.display().to_string()),
+        "{status}"
+    );
+    assert_eq!(status["paused"], true, "{status}");
+    assert_eq!(status["port"], serving.port, "{status}");
+    assert_eq!(
+        links(&serving.out.text()).len(),
+        1,
+        "{}",
+        serving.out.text()
+    );
+    let written: Value = serde_json::from_str(
+        &std::fs::read_to_string(state.join("farik/state.json")).expect("state.json"),
+    )
+    .expect("JSON");
+    assert_eq!(written["last_project"], json!(root.display().to_string()));
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn stays_in_setup_when_the_project_is_busy() {
+    let repository = a_team("setup-busy");
+    let home = repository.path.parent().expect("a parent").to_path_buf();
+    let (cwd, state) = setup_folders("setup-busy");
+    let _lock = hold_the_run_lock(&repository);
+    let serving = serving_setup(&cwd, &home, &state);
+
+    let refused = call(
+        serving.port,
+        &serving.cookie,
+        "project.open",
+        json!({ "path": name_of(&repository.path), "no_sandbox": false }),
+    );
+    let status = serve_status(serving.port, &serving.cookie);
+    let (ran, out, err) = serving.interrupted();
+    assert_eq!(refused["error"]["code"], -32005, "{refused}");
+    assert_eq!(
+        refused["error"]["message"],
+        "another farik is already running this project"
+    );
+    assert_eq!(status["project_root"], Value::Null, "{status}");
+    assert!(!state.join("farik/state.json").exists());
+    assert_eq!(ran.code, 130, "{out}\n{err}");
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn goes_back_to_setup_when_the_driver_cannot_start() {
+    let repository = a_team("setup-cannot-start");
+    std::fs::write(repository.path.join(".farik/prices.json"), "not JSON").expect("written");
+    let home = repository.path.parent().expect("a parent").to_path_buf();
+    let (cwd, state) = setup_folders("setup-cannot-start");
+    let serving = serving_setup(&cwd, &home, &state);
+
+    let opened = call(
+        serving.port,
+        &serving.cookie,
+        "project.open",
+        json!({ "path": name_of(&repository.path), "no_sandbox": false }),
+    );
+    assert!(opened["result"]["project_root"].is_string(), "{opened}");
+    let mut status = Value::Null;
+    until("serve is back in setup mode with the reason", || {
+        status = serve_status(serving.port, &serving.cookie);
+        status["take_on_error"].is_string()
+    });
+    let (ran, out, err) = serving.interrupted();
+    assert_eq!(status["project_root"], Value::Null, "{status}");
+    assert!(
+        status["take_on_error"]
+            .as_str()
+            .is_some_and(|why| why.contains("prices.json")),
+        "{status}"
+    );
+    assert!(!state.join("farik/state.json").exists());
+    assert_eq!(ran.code, 130, "{out}\n{err}");
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn keeps_ctrl_c_after_the_take_on() {
+    let repository = a_team("setup-ctrl-c");
+    let home = repository.path.parent().expect("a parent").to_path_buf();
+    let (cwd, state) = setup_folders("setup-ctrl-c");
+    let serving = serving_setup(&cwd, &home, &state);
+
+    call(
+        serving.port,
+        &serving.cookie,
+        "project.open",
+        json!({ "path": name_of(&repository.path), "no_sandbox": false }),
+    );
+    until("the team is driven", || daemon_file(&repository).exists());
+    let (ran, out, err) = serving.interrupted();
+    assert_eq!(ran.code, 130, "{out}\n{err}");
+    assert!(!daemon_file(&repository).exists());
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn writes_no_sandbox_into_the_project() {
+    let repository = TempRepo::new("setup-no-sandbox");
+    let home = repository.path.parent().expect("a parent").to_path_buf();
+    let (cwd, state) = setup_folders("setup-no-sandbox");
+    let serving = serving_setup(&cwd, &home, &state);
+
+    call(
+        serving.port,
+        &serving.cookie,
+        "project.open",
+        json!({ "path": name_of(&repository.path), "no_sandbox": true }),
+    );
+    until("the team is driven", || daemon_file(&repository).exists());
+    let (ran, out, err) = serving.interrupted();
+    assert_eq!(ran.code, 130, "{out}\n{err}");
+    let settings: Value = serde_json::from_str(
+        &std::fs::read_to_string(repository.path.join(".farik/local/settings.json"))
+            .expect("settings.json"),
+    )
+    .expect("JSON");
+    assert_eq!(settings, json!({ "sandbox": "none" }));
+    assert!(err.contains("warning: no-sandbox mode"), "{err}");
+}

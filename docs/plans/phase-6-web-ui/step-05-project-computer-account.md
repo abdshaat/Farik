@@ -189,7 +189,7 @@ Tests go in `crates/cli/tests/serving.rs`, with memory credential stores.
 - `keeps_ctrl_c_after_the_take_on` asserts that after a take-on, one interrupt ends serve with 130.
 - `writes_no_sandbox_into_the_project` asserts that `project.open { no_sandbox: true }` leaves `{"sandbox":"none"}` in the project's `settings.json`, and the warning on stderr.
 
-- [ ] `feat(cli): serve the setup wizard outside a project and take the chosen one on`
+- [x] `feat(cli): serve the setup wizard outside a project and take the chosen one on`
 
 ### Task 5: The three screens
 

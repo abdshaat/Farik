@@ -9,9 +9,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use farik_protocol::command::{Command, command_to_value, reply_from_value};
-use farik_runtime::claude::{
-    ClaudeAdapter, ClaudeConfig, ClaudeCredential, CredentialKind, credential_from_env,
-};
+use farik_runtime::claude::{ClaudeAdapter, ClaudeConfig, ClaudeCredential, CredentialKind};
+use farik_runtime::credential::{Source, load_credential};
 use farik_runtime::daemon::web::{BrowserSessions, ConnectCodes, WebState};
 use farik_runtime::daemon::{DaemonConfig, DaemonHandle, DaemonState, PortChoice, serve};
 use farik_runtime::forge::Forge;
@@ -226,9 +225,17 @@ pub(crate) fn forge(root: &Path, io: &CliIo<'_>) -> Forge {
 
 /// The first executable called `program` on the environment's `PATH`.
 pub(crate) fn on_path(program: &str, io: &CliIo<'_>) -> Option<PathBuf> {
+    on_path_of(program, &io.env)
+}
+
+/// The first executable called `program` on `env`'s `PATH`.
+pub(crate) fn on_path_of(
+    program: &str,
+    env: &std::collections::BTreeMap<String, String>,
+) -> Option<PathBuf> {
     use std::os::unix::fs::PermissionsExt;
 
-    io.env.get("PATH").and_then(|path| {
+    env.get("PATH").and_then(|path| {
         std::env::split_paths(path)
             .map(|directory| directory.join(program))
             .find(|candidate| {
@@ -309,8 +316,8 @@ pub(crate) struct Driver {
     pub(crate) daemon: Arc<DaemonState>,
     /// One `()` per interrupt.
     pub(crate) interrupts: UnboundedReceiver<()>,
-    /// The credential variable it chose, when the engine is Claude Code.
-    pub(crate) credential: Option<&'static str>,
+    /// The credential it chose and where it came from, when the engine is Claude Code.
+    pub(crate) credential: Option<(CredentialKind, Source)>,
     /// Whether it runs in no-sandbox mode.
     pub(crate) sandbox: Sandbox,
     /// What recovery found and did.
@@ -358,7 +365,9 @@ pub(crate) async fn start(
     start_holding(project, io, lock, options).await
 }
 
-/// `start`, with the run lock already taken by the caller, which it gives back on a refusal.
+/// `start`, with the run lock already taken by the caller, which it gives back on a refusal. The
+/// interrupts are taken from `io` and put back there on a refusal, so that `serve`, which goes
+/// back to setup mode then, still hears Ctrl-C.
 ///
 /// # Errors
 ///
@@ -369,10 +378,31 @@ pub(crate) async fn start_holding(
     lock: RunLock,
     options: StartOptions,
 ) -> Result<Driver, String> {
-    let interrupts = listen(std::mem::replace(
-        &mut io.interrupts,
-        Interrupts::Channel(tokio::sync::mpsc::unbounded_channel().1),
-    ))?;
+    let interrupts = listen(std::mem::replace(&mut io.interrupts, never()))?;
+    match start_listening(project, io, lock, options).await {
+        Ok(driver) => Ok(Driver {
+            interrupts,
+            ..driver
+        }),
+        Err(error) => {
+            io.interrupts = Interrupts::Channel(interrupts);
+            Err(error)
+        }
+    }
+}
+
+/// Interrupts that never come.
+fn never() -> Interrupts {
+    Interrupts::Channel(tokio::sync::mpsc::unbounded_channel().1)
+}
+
+/// `start_holding` once the interrupts are listened for: the driver it answers hears none yet.
+async fn start_listening(
+    project: &Project,
+    io: &mut CliIo<'_>,
+    lock: RunLock,
+    options: StartOptions,
+) -> Result<Driver, String> {
     let settings = project
         .files
         .read_settings()
@@ -382,20 +412,21 @@ pub(crate) async fn start_holding(
     }
     let claude = match &io.engine {
         Engine::Claude => {
-            let credential = credential_from_env(&io.env).ok_or(
-                "no credential for Claude Code: set ANTHROPIC_API_KEY to an API key, or \
+            let found = load_credential(&io.env, &(io.credential_stores)()).ok_or(
+                "no credential for Claude Code: connect your AI account in the browser farik \
+                 serve opens, or set ANTHROPIC_API_KEY to an API key, or \
                  CLAUDE_CODE_OAUTH_TOKEN to the token claude setup-token prints",
             )?;
             let path = on_path("claude", io)
                 .ok_or("Claude Code is not installed: there is no claude on PATH")?;
-            Some((credential, path))
+            Some((found, path))
         }
         Engine::Given(_) => None,
     };
-    let credential = claude.as_ref().map(|(credential, _)| match credential {
-        ClaudeCredential::ApiKey(_) => "ANTHROPIC_API_KEY",
-        ClaudeCredential::OauthToken(_) => "CLAUDE_CODE_OAUTH_TOKEN",
-    });
+    let credential = claude
+        .as_ref()
+        .map(|((credential, source), _)| (credential.kind(), *source));
+    let claude = claude.map(|((credential, _), path)| (credential, path));
     // Every session reads the prices, so a table that cannot be read is refused here, once.
     for sentence in unpriced(project)? {
         let _ = writeln!(
@@ -407,7 +438,10 @@ pub(crate) async fn start_holding(
     let tools = tool_deps(project, io)?;
     let daemon = Arc::new(DaemonState::new(Arc::clone(&tools)));
     let kind = claude.as_ref().map(|(credential, _)| credential.kind());
-    let web = options.web.then(|| web(project, io, kind)).transpose()?;
+    let web = options
+        .web
+        .then(|| web(&project.root, io, kind))
+        .transpose()?;
     let handle = serve(
         DaemonConfig {
             port: options.port,
@@ -461,7 +495,7 @@ pub(crate) async fn start_holding(
     Ok(Driver {
         orchestrator,
         daemon,
-        interrupts,
+        interrupts: tokio::sync::mpsc::unbounded_channel().1,
         credential,
         sandbox: settings.sandbox,
         recovered,
@@ -474,8 +508,8 @@ pub(crate) async fn start_holding(
 /// What the browser routes need but the port, and the first connect code, issued. The sessions
 /// are kept in the state folder, made here when it is not there yet, or in memory when there is
 /// none.
-fn web(
-    project: &Project,
+pub(crate) fn web(
+    root: &Path,
     io: &CliIo<'_>,
     credential: Option<CredentialKind>,
 ) -> Result<(WebState, String), String> {
@@ -492,7 +526,7 @@ fn web(
     let web = WebState {
         codes,
         sessions,
-        project_root: project.root.clone(),
+        project_root: root.to_path_buf(),
         credential,
         port: 0,
         clock: Arc::clone(&io.clock),
@@ -541,7 +575,7 @@ fn adapter(
 
 /// Where the process hears the person's interrupts: Ctrl-C, listened for from now on, or the
 /// test's channel.
-fn listen(interrupts: Interrupts) -> Result<UnboundedReceiver<()>, String> {
+pub(crate) fn listen(interrupts: Interrupts) -> Result<UnboundedReceiver<()>, String> {
     match interrupts {
         Interrupts::Channel(receiver) => Ok(receiver),
         Interrupts::CtrlC => {

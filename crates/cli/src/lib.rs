@@ -44,6 +44,9 @@ mod run;
 /// `farik serve`.
 #[cfg(unix)]
 mod serve;
+/// What `farik serve` does for the first-run wizard before there is a project.
+#[cfg(unix)]
+mod setup;
 /// One contract, and what happened to it.
 pub mod show;
 /// One sprint, and how it went.
@@ -75,6 +78,8 @@ use farik_protocol::clock::{Clock, IdSource, SequentialIds};
 use farik_protocol::command::{AcceptSubject, Command};
 #[cfg(unix)]
 use farik_runtime::RuntimeAdapter;
+#[cfg(unix)]
+use farik_runtime::credential::{CredentialStore, FileStore, KeychainStore, MemoryStore};
 #[cfg(unix)]
 use farik_runtime::daemon::DaemonState;
 use farik_runtime::sleep::Sleeper;
@@ -138,6 +143,35 @@ pub struct CliIo<'a> {
     pub sleeper: Option<Arc<dyn Sleeper>>,
     /// What `farik serve` opens its link with: nothing here, and the system's opener in `main`.
     pub open_url: Opener,
+    /// Where the model credential is kept: one store in memory here, so that no test touches a
+    /// real keychain, and the keychain then the file in `main`.
+    #[cfg(unix)]
+    pub credential_stores: CredentialStores,
+}
+
+/// The places the model credential is kept, in the order they are tried.
+#[cfg(unix)]
+pub type CredentialStores = Arc<dyn Fn() -> Vec<Arc<dyn CredentialStore>> + Send + Sync>;
+
+/// The computer's credential stores: its keychain when `keychain` is true, then
+/// `credential.json` in the state folder of `env`, when there is one.
+#[cfg(unix)]
+#[must_use]
+pub fn system_credential_stores(
+    env: &BTreeMap<String, String>,
+    keychain: bool,
+) -> CredentialStores {
+    let file = state::state_dir(env).map(|directory| directory.join("credential.json"));
+    Arc::new(move || {
+        let mut stores: Vec<Arc<dyn CredentialStore>> = Vec::new();
+        if keychain {
+            stores.push(Arc::new(KeychainStore));
+        }
+        if let Some(file) = &file {
+            stores.push(Arc::new(FileStore::new(file.clone())));
+        }
+        stores
+    })
 }
 
 /// Opens a link in a browser, or says why it could not.
@@ -168,6 +202,11 @@ impl<'a> CliIo<'a> {
             session_ids: Arc::new(SequentialIds::new()),
             sleeper: None,
             open_url: Arc::new(|_| Ok(())),
+            #[cfg(unix)]
+            credential_stores: {
+                let memory: Arc<dyn CredentialStore> = Arc::new(MemoryStore::default());
+                Arc::new(move || vec![Arc::clone(&memory)])
+            },
         }
     }
 }
@@ -789,6 +828,9 @@ fn human_command(
 fn drive(command: &Commands, as_json: bool, io: &mut CliIo<'_>) -> i32 {
     use farik_runtime::orchestrator::TickRules;
 
+    if let Commands::Serve { port, no_open } = command {
+        return serve::serve(*port, *no_open, io);
+    }
     let project = match open_project(&io.cwd, io.clock.now()) {
         Ok(project) => project,
         Err(error) => return run::refuse(io, as_json, &error),
@@ -822,7 +864,6 @@ fn drive(command: &Commands, as_json: bool, io: &mut CliIo<'_>) -> i32 {
             )
         }
         Commands::Plan => run::drive(&project, TickRules::Planning, io, as_json),
-        Commands::Serve { port, no_open } => serve::serve(&project, *port, *no_open, io),
         _ => run::drive(&project, TickRules::All, io, as_json),
     }
 }

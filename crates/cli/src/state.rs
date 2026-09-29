@@ -47,6 +47,13 @@ pub(crate) fn remember(directory: &Path, root: &Path) -> Result<(), String> {
         .map_err(|error| format!("{} cannot be written: {error}", file.display()))
 }
 
+/// The project `state.json` in `directory` remembers, when it says one.
+pub(crate) fn last_project(directory: &Path) -> Option<PathBuf> {
+    let text = std::fs::read_to_string(directory.join("state.json")).ok()?;
+    let state: serde_json::Value = serde_json::from_str(&text).ok()?;
+    state["last_project"].as_str().map(PathBuf::from)
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeMap;
