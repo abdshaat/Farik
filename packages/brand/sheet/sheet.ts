@@ -41,12 +41,26 @@ const img = (src: string, alt: string, attrs: Record<string, string> = {}) =>
 
 function themeColumn(theme: ThemeName): HTMLElement {
 	const c = tokens.color[theme];
+	const scale = el("div", { class: "scale" });
+	for (const [name, t] of Object.entries(tokens.type)) {
+		scale.append(
+			el(
+				"p",
+				{
+					"data-type": name,
+					style: `color:${c.ink};font:${t.weight} ${t.size}px/${t.lineHeight}px var(--farik-type-${name}-family)`,
+				},
+				`${name}, ${t.size}/${t.lineHeight}, ${t.weight}: Farik runs your team`,
+			),
+		);
+	}
+
 	const col = el(
 		"section",
 		{
 			"data-theme": theme,
 			"aria-labelledby": `h-${theme}`,
-			style: `background:${c.page};color:${c.ink}`,
+			style: `background:${c.page};color:${c.ink};border:1px solid ${c.rule}`,
 		},
 		el("h2", { id: `h-${theme}` }, `${words(theme)} theme`),
 	);
@@ -58,7 +72,10 @@ function themeColumn(theme: ThemeName): HTMLElement {
 			el(
 				"div",
 				{ "data-swatch": `${theme}:${name}`, class: "swatch" },
-				el("span", { class: "chip", style: `background:${hex}` }),
+				el("span", {
+					class: "chip",
+					style: `background:${hex};border-color:${c.controlBorder}`,
+				}),
 				el("span", {}, name),
 				el("code", {}, hex.toUpperCase()),
 			),
@@ -78,7 +95,10 @@ function themeColumn(theme: ThemeName): HTMLElement {
 				},
 				el(
 					"span",
-					{ class: "sample", style: `color:${fg};background:${bg}` },
+					{
+						class: "sample",
+						style: `color:${fg};background:${bg};border-color:${c.controlBorder}`,
+					},
 					"Aa",
 				),
 				el("span", {}, `${p.foreground} on ${p.background}`),
@@ -97,32 +117,28 @@ function themeColumn(theme: ThemeName): HTMLElement {
 		el("h3", {}, "Checked contrast pairs"),
 		pairs,
 		el("h3", {}, "Logo and wordmark"),
+		// brand.md: on a light surface the wordmark sits on a Midnight Terminal tile.
 		el(
 			"div",
-			{ class: "lockup" },
+			{
+				class: "lockup",
+				style:
+					theme === "light"
+						? `background:${c.band};padding:${tokens.space["4"]}px;border-radius:${tokens.radius.raised}px`
+						: "",
+			},
 			img(asset("logo-mark-1254.png"), "Farik logo mark", {
 				class: "mark",
 			}),
 			img(asset("wordmark-1024.png"), "Farik wordmark", { class: "wordmark" }),
 		),
+		el("h3", {}, "Type scale"),
+		scale,
 	);
 	return col;
 }
 
 export function renderSheet(root: HTMLElement): void {
-	const scale = el("div", { class: "scale" });
-	for (const [name, t] of Object.entries(tokens.type)) {
-		scale.append(
-			el(
-				"p",
-				{
-					style: `font:${t.weight} ${t.size}px/${t.lineHeight}px var(--farik-type-${name}-family)`,
-				},
-				`${name}, ${t.size}/${t.lineHeight}, ${t.weight}: Farik runs your team`,
-			),
-		);
-	}
-
 	const icons = el("div", { class: "row" });
 	for (const n of ICON_SIZES) {
 		icons.append(
@@ -155,12 +171,6 @@ export function renderSheet(root: HTMLElement): void {
 	root.replaceChildren(
 		el("h1", {}, "Farik brand sheet"),
 		el("div", { class: "themes" }, ...THEMES.map(themeColumn)),
-		el(
-			"section",
-			{ "aria-labelledby": "h-type" },
-			el("h2", { id: "h-type" }, "Type scale"),
-			scale,
-		),
 		el(
 			"section",
 			{ "aria-labelledby": "h-icons" },

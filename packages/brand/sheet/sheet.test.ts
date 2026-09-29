@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+/// <reference types="vite/client" />
 import axe from "axe-core";
 import { beforeEach, describe, expect, it } from "vitest";
 import {
@@ -8,6 +9,7 @@ import {
 	TEXT_PAIRS,
 	tokens,
 } from "../src/index.ts";
+import page from "./index.html?raw";
 import { renderSheet } from "./sheet.ts";
 
 const THEMES = ["light", "dark"] as const;
@@ -70,6 +72,44 @@ describe("brand sheet", () => {
 		);
 		for (const img of imgs) {
 			expect(img.getAttribute("alt")?.trim()).toBeTruthy();
+		}
+	});
+
+	it("puts the light wordmark on a band tile", () => {
+		const light = root.querySelector('section[data-theme="light"]') as Element;
+		let tile = light.querySelector('img[alt="Farik wordmark"]')?.parentElement;
+		while (
+			tile &&
+			tile !== light &&
+			!tile
+				.getAttribute("style")
+				?.includes(`background:${hex("light", "band")}`)
+		)
+			tile = tile.parentElement;
+		expect(tile, "a tile inside the column").not.toBe(light);
+		expect(tile, "a tile inside the column").toBeTruthy();
+	});
+
+	it("sets every colour in a column inline from that theme", () => {
+		const rules = page.match(/[^{}]+\{[^{}]*\}/g) ?? [];
+		for (const rule of rules) {
+			if (/\.(chip|sample|swatch|pair|lockup)\b|\.themes/.test(rule))
+				expect(rule).not.toContain("var(--farik-color");
+		}
+		for (const theme of THEMES) {
+			const col = root.querySelector(`section[data-theme="${theme}"]`);
+			expect(col?.outerHTML).not.toContain("var(--farik-color");
+		}
+	});
+
+	it("shows the type scale in each theme's ink", () => {
+		for (const theme of THEMES) {
+			const col = root.querySelector(`section[data-theme="${theme}"]`);
+			for (const name of Object.keys(tokens.type)) {
+				const line = col?.querySelector(`[data-type="${name}"]`);
+				expect(line, `${theme} ${name}`).not.toBeNull();
+				expect(line?.getAttribute("style")).toContain(hex(theme, "ink"));
+			}
 		}
 	});
 
