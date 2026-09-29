@@ -1,0 +1,4 @@
+#!/bin/sh
+# A Docker whose daemon does not answer.
+echo "Cannot connect to the Docker daemon" >&2
+exit 1

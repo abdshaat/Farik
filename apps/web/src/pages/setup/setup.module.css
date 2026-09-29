@@ -1,0 +1,296 @@
+/* The two panels of the first-run wizard, as in the "Farik first-run screens" mockup. */
+.wizard {
+	display: grid;
+	grid-template-columns: 260px 1fr;
+	min-height: 100dvh;
+	background: var(--farik-color-page);
+	color: var(--farik-color-ink);
+}
+
+.side {
+	position: sticky;
+	top: 0;
+	height: 100dvh;
+	box-sizing: border-box;
+	display: flex;
+	flex-direction: column;
+	gap: var(--farik-space-4);
+	padding: var(--farik-space-6) var(--farik-space-5);
+	background: var(--farik-color-band);
+	color: var(--farik-color-band-ink);
+}
+
+.mark {
+	width: 56px;
+	height: 56px;
+	image-rendering: pixelated;
+}
+
+.wordmark {
+	width: 140px;
+	height: auto;
+}
+
+.tag,
+.loop {
+	margin: 0;
+	font:
+		var(--farik-type-code-weight) var(--farik-type-small-size) /
+		var(--farik-type-code-line-height) var(--farik-type-code-family);
+}
+
+.tag {
+	letter-spacing: 0.2em;
+}
+
+.loop {
+	display: grid;
+}
+
+.prompt {
+	color: var(--farik-color-action);
+}
+
+.main {
+	display: flex;
+	flex-direction: column;
+	gap: var(--farik-space-5);
+	min-width: 0;
+	padding: var(--farik-space-6) var(--farik-space-7);
+}
+
+.title {
+	margin: 0;
+	font:
+		var(--farik-type-title-weight) var(--farik-type-title-size) /
+		var(--farik-type-title-line-height) var(--farik-type-title-family);
+}
+
+.lead,
+.note {
+	margin: 0;
+	max-width: 62ch;
+	color: var(--farik-color-ink-muted);
+}
+
+.note {
+	font:
+		var(--farik-type-small-weight) var(--farik-type-small-size) /
+		var(--farik-type-small-line-height) var(--farik-type-small-family);
+}
+
+.rows {
+	display: grid;
+	max-width: 720px;
+	margin: 0;
+	padding: 0;
+	list-style: none;
+	border-top: 1px solid var(--farik-color-rule);
+}
+
+.row {
+	display: grid;
+	grid-template-columns: 1fr auto;
+	gap: var(--farik-space-1) var(--farik-space-4);
+	padding: var(--farik-space-3) 0;
+	border-bottom: 1px solid var(--farik-color-rule);
+}
+
+.row > :first-child {
+	font-weight: 600;
+}
+
+.how {
+	grid-column: 1 / -1;
+	display: grid;
+	gap: var(--farik-space-2);
+	justify-items: start;
+	color: var(--farik-color-ink-muted);
+}
+
+.how p {
+	margin: 0;
+}
+
+.warn,
+.alert {
+	margin: 0;
+	max-width: 700px;
+	padding: var(--farik-space-2) var(--farik-space-3);
+	border-left: 3px solid var(--farik-color-status-waiting);
+}
+
+.foot {
+	margin-top: auto;
+	display: flex;
+	flex-wrap: wrap;
+	gap: var(--farik-space-3);
+	justify-content: space-between;
+	max-width: 760px;
+}
+
+.foot > span {
+	display: flex;
+	flex-wrap: wrap;
+	gap: var(--farik-space-3);
+}
+
+.card {
+	display: grid;
+	gap: var(--farik-space-2);
+	max-width: 720px;
+}
+
+.card p {
+	margin: 0;
+	color: var(--farik-color-ink-muted);
+}
+
+.card ol {
+	margin: 0;
+	padding-left: var(--farik-space-5);
+	display: grid;
+	gap: var(--farik-space-2);
+}
+
+.copy {
+	display: inline-flex;
+	gap: var(--farik-space-2);
+	align-items: center;
+	margin-left: var(--farik-space-2);
+	padding: var(--farik-space-1) var(--farik-space-2);
+	background: var(--farik-color-surface);
+	border: 1px solid var(--farik-color-control-border);
+	border-radius: var(--farik-radius-control);
+	font-family: var(--farik-type-code-family);
+}
+
+.form {
+	display: grid;
+	gap: var(--farik-space-4);
+	max-width: 560px;
+}
+
+.where {
+	display: flex;
+	flex-wrap: wrap;
+	gap: var(--farik-space-3);
+	align-items: center;
+}
+
+.where code,
+.path {
+	font-family: var(--farik-type-code-family);
+	overflow-wrap: anywhere;
+}
+
+.browser {
+	display: grid;
+	max-width: 720px;
+	min-width: 0;
+	margin: 0;
+	padding: 0;
+	border: 1px solid var(--farik-color-ink);
+	border-radius: var(--farik-radius-raised);
+	background: var(--farik-color-surface);
+}
+
+.hidden {
+	position: absolute;
+	width: 1px;
+	height: 1px;
+	overflow: hidden;
+	clip-path: inset(50%);
+	white-space: nowrap;
+}
+
+.crumb {
+	margin: 0;
+	display: flex;
+	flex-wrap: wrap;
+	gap: var(--farik-space-1);
+	padding: var(--farik-space-2) var(--farik-space-3);
+	border-bottom: 1px solid var(--farik-color-rule);
+	font-family: var(--farik-type-code-family);
+}
+
+.crumb button,
+.item {
+	font: inherit;
+	color: inherit;
+	background: transparent;
+	border: 0;
+	cursor: pointer;
+}
+
+.crumb button {
+	padding: 0;
+	text-decoration: underline;
+	text-underline-offset: 3px;
+}
+
+.items {
+	margin: 0;
+	padding: 0;
+	list-style: none;
+}
+
+.item {
+	display: flex;
+	justify-content: space-between;
+	gap: var(--farik-space-3);
+	width: 100%;
+	padding: var(--farik-space-2) var(--farik-space-3);
+	border-bottom: 1px solid var(--farik-color-rule);
+	text-align: left;
+}
+
+.item small {
+	color: var(--farik-color-ink-muted);
+}
+
+.item[aria-pressed="true"] {
+	outline: 2px solid var(--farik-color-ink);
+	outline-offset: -2px;
+	background: color-mix(
+		in srgb,
+		var(--farik-color-ink) 6%,
+		var(--farik-color-surface)
+	);
+}
+
+.crumb button:focus-visible,
+.item:focus-visible {
+	outline: 2px solid var(--farik-color-focus);
+	outline-offset: -2px;
+}
+
+.act {
+	display: flex;
+	flex-wrap: wrap;
+	justify-content: space-between;
+	align-items: center;
+	gap: var(--farik-space-3);
+	padding: var(--farik-space-2) var(--farik-space-3);
+	color: var(--farik-color-ink-muted);
+}
+
+.act > span:last-child {
+	display: flex;
+	gap: var(--farik-space-2);
+}
+
+/* A phone: the question alone, as in the mockup. */
+@media (max-width: 760px) {
+	.wizard {
+		grid-template-columns: 1fr;
+	}
+
+	.side {
+		display: none;
+	}
+
+	.main {
+		padding: var(--farik-space-5) var(--farik-space-4);
+	}
+}

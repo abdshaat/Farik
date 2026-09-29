@@ -6,10 +6,13 @@ const REFETCH_MS = 250;
 
 /** The `serve.status` query's answer, in camelCase. */
 export type ServeStatus = {
-	projectRoot: string;
+	/** Null while Farik is being set up, before a project is chosen. */
+	projectRoot: string | null;
 	paused: boolean;
-	credential: string;
+	credential: string | null;
 	port: number;
+	/** Why taking the chosen project on failed, or null. */
+	takeOnError: string | null;
 };
 
 /** The last 500 events, oldest first, from the provider's one subscription. */
@@ -17,11 +20,11 @@ export function useEvents(): Event[] {
 	return useConnection().events;
 }
 
-/** Queries on mount and on a new connection, and again after events, at most once per 250 ms. */
+/** Queries on mount and on a new connection, and again after events, at most once per 250 ms, or on `again()`. */
 export function useQuery<T>(
 	name: QueryName,
 	params: object,
-): { data: T | undefined; error: RpcError | undefined } {
+): { data: T | undefined; error: RpcError | undefined; again: () => void } {
 	const { client, events } = useConnection();
 	const [result, setResult] = useState<{
 		data: T | undefined;
@@ -55,5 +58,5 @@ export function useQuery<T>(
 		};
 	}, [client, name, key, round]);
 
-	return result;
+	return { ...result, again: () => setRound((n) => n + 1) };
 }

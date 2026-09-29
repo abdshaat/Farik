@@ -1,4 +1,5 @@
 import { act, render, waitFor } from "@testing-library/react";
+import type { ReactNode } from "react";
 import { MemoryRouter } from "react-router";
 import { expect, vi } from "vitest";
 import { App } from "../app/App.tsx";
@@ -9,12 +10,14 @@ import { type FakeSocket, fakeFetch, socketsMade } from "./fake-socket.ts";
 export async function renderApp(
 	path: string,
 	statuses: Record<string, number> = { "GET /session": 204 },
+	beside?: ReactNode,
 ) {
 	const fetch = vi.fn(fakeFetch(statuses));
 	vi.stubGlobal("fetch", fetch);
 	const { factory, sockets } = socketsMade();
 	const { container } = render(
 		<ConnectionProvider socketFactory={factory}>
+			{beside}
 			<MemoryRouter initialEntries={[path]}>
 				<App />
 			</MemoryRouter>
@@ -30,7 +33,19 @@ export async function renderApp(
 		const open = socket;
 		act(() => open.emit("open", {}));
 	}
-	return { container, fetch, socket };
+	return { container, fetch, socket, sockets };
+}
+
+/** Answers every `name` query asked so far with `result`, once one has been asked. */
+export async function answerQuery(
+	socket: FakeSocket,
+	name: string,
+	result: unknown,
+) {
+	const asked = () =>
+		socket.calls("query").filter((f) => f.params.name === name);
+	await waitFor(() => expect(asked().length).toBeGreaterThan(0));
+	for (const frame of asked()) act(() => socket.reply(frame, result));
 }
 
 /** Answers the latest `serve.status` query, once it has been asked `count` times in all. */
@@ -38,6 +53,7 @@ export async function answerStatus(
 	socket: FakeSocket,
 	paused: boolean,
 	count = 1,
+	fields: Record<string, unknown> = {},
 ) {
 	const asked = () =>
 		socket.calls("query").filter((f) => f.params.name === "serve.status");
@@ -49,6 +65,8 @@ export async function answerStatus(
 				paused,
 				credential: "api_key",
 				port: 7420,
+				take_on_error: null,
+				...fields,
 			}),
 		);
 }

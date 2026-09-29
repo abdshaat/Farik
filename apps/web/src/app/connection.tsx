@@ -13,7 +13,13 @@ import {
 	useState,
 } from "react";
 
-type Status = "checking" | "no_session" | "connecting" | "open" | "lost";
+type Status =
+	| "checking"
+	| "no_session"
+	| "connecting"
+	| "open"
+	| "lost"
+	| "reopening";
 type Connection = {
 	status: Status;
 	client: DaemonClient | null;
@@ -23,9 +29,13 @@ type Connection = {
 	events: Event[];
 	/** Revokes this browser's session and closes the socket; the page then asks for a start link. */
 	disconnect: () => Promise<void>;
+	/** Farik is about to restart on the chosen project: its close is expected, and the page reconnects at once. */
+	reopen: () => void;
 };
 
 const RETRY_MS = 5000;
+const REOPEN_RETRY_MS = 500;
+const REOPEN_FOR_MS = 30_000;
 // ponytail: the event list view needs no more than the last 500.
 const KEEP = 500;
 
@@ -35,6 +45,7 @@ const Context = createContext<Connection>({
 	linkUsed: false,
 	events: [],
 	disconnect: async () => {},
+	reopen: () => {},
 });
 
 /** One per page, around the router: it owns the one socket and the one event subscription. */
@@ -47,6 +58,7 @@ export function ConnectionProvider(props: {
 	const [linkUsed, setLinkUsed] = useState(false);
 	const [events, setEvents] = useState<Event[]>([]);
 	const disconnect = useRef(async () => {});
+	const reopen = useRef(() => {});
 	const socketFactory = useRef(
 		props.socketFactory ?? ((url: string) => new WebSocket(url)),
 	);
@@ -56,11 +68,20 @@ export function ConnectionProvider(props: {
 		let lastSeq = 0;
 		let retry: ReturnType<typeof setTimeout> | undefined;
 		let current: DaemonClient | null = null;
+		// While Farik restarts on a chosen project: until when to keep trying, and whether it was tried yet.
+		let reopenUntil: number | undefined;
+		let retried = false;
 
 		const lose = () => {
 			if (stopped) return;
 			current = null;
 			setClient(null);
+			if (reopenUntil !== undefined && Date.now() < reopenUntil) {
+				retry = setTimeout(check, retried ? REOPEN_RETRY_MS : 0);
+				retried = true;
+				return;
+			}
+			reopenUntil = undefined;
 			setStatus("lost");
 			retry = setTimeout(check, RETRY_MS);
 		};
@@ -69,11 +90,12 @@ export function ConnectionProvider(props: {
 			const c = connect(url, socketFactory.current(url));
 			current = c;
 			setClient(c);
-			setStatus("connecting");
+			if (reopenUntil === undefined) setStatus("connecting");
 			c.onStatus((s) => {
 				if (stopped || c !== current) return;
 				if (s === "closed") return lose();
 				if (s !== "open") return;
+				reopenUntil = undefined;
 				setStatus("open");
 				// From the last seq held, so a reconnect has no gap and no repeat.
 				c.subscribe(lastSeq, (e) => {
@@ -134,6 +156,11 @@ export function ConnectionProvider(props: {
 			setClient(null);
 			setStatus("no_session");
 		};
+		reopen.current = () => {
+			reopenUntil = Date.now() + REOPEN_FOR_MS;
+			retried = false;
+			setStatus("reopening");
+		};
 		start();
 		return () => {
 			stopped = true;
@@ -150,6 +177,7 @@ export function ConnectionProvider(props: {
 				linkUsed,
 				events,
 				disconnect: () => disconnect.current(),
+				reopen: () => reopen.current(),
 			}}
 		>
 			{props.children}

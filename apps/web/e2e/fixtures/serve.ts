@@ -55,18 +55,12 @@ function link(
 	});
 }
 
-/** `farik-e2e-serve` on a new project with its team, sandboxing off, on a free port. */
-export async function startServe(o: { transcripts: string[] }): Promise<{
-	url: string;
-	port: number;
-	project: string;
-	stop(): Promise<void>;
-}> {
-	const project = mkdtempSync(join(tmpdir(), "farik-e2e-project-"));
-	const git = (...args: string[]) =>
-		execFileSync("git", args, { cwd: project });
+/** Makes `folder` a git repository with one commit. */
+export function gitProject(folder: string): void {
+	mkdirSync(folder, { recursive: true });
+	const git = (...args: string[]) => execFileSync("git", args, { cwd: folder });
 	git("init", "-b", "main");
-	writeFileSync(join(project, "README.md"), "the first line\n");
+	writeFileSync(join(folder, "README.md"), "the first line\n");
 	git("add", "README.md");
 	git(
 		"-c",
@@ -77,21 +71,49 @@ export async function startServe(o: { transcripts: string[] }): Promise<{
 		"-m",
 		"the first commit",
 	);
-	farik(project, ["init"]);
-	// What the CLI tests' `no_sandbox` writes: this machine runs tasks without Docker.
-	mkdirSync(join(project, ".farik/local"), { recursive: true });
-	writeFileSync(
-		join(project, ".farik/local/settings.json"),
-		'{"sandbox":"none"}',
-	);
+}
+
+/**
+ * `farik-e2e-serve` on a free port. By default on a new project with its team, sandboxing off.
+ * With `project: false` it starts in an empty folder, for the first-run wizard: `HOME` is `home`,
+ * which holds Farik's state folder too, the fake `claude` and `docker` come first on `PATH`, no
+ * key is in the environment, and the key is kept in a file, never the keychain.
+ */
+export async function startServe(o: {
+	transcripts: string[];
+	project?: boolean;
+	home?: string;
+}): Promise<{
+	url: string;
+	port: number;
+	project: string;
+	stop(): Promise<void>;
+}> {
+	const project = mkdtempSync(join(tmpdir(), "farik-e2e-project-"));
+	const args: string[] = [];
+	let serveEnv: NodeJS.ProcessEnv = env;
+	if (o.project === false) {
+		const {
+			ANTHROPIC_API_KEY: _key,
+			CLAUDE_CODE_OAUTH_TOKEN: _token,
+			XDG_CONFIG_HOME: _config,
+			...rest
+		} = process.env;
+		serveEnv = {
+			...rest,
+			HOME: o.home ?? mkdtempSync(join(tmpdir(), "farik-e2e-home-")),
+			PATH: `${resolve(import.meta.dirname, "fake-bin")}:${process.env.PATH}`,
+		};
+		args.push("--no-keychain");
+	} else setUp(project);
 
 	const port = await freePort();
-	const args = ["--port", String(port)];
+	args.push("--port", String(port));
 	if (o.transcripts.length > 0)
 		args.push("--transcripts", o.transcripts.join(","));
 	const server = spawn(join(target, "farik-e2e-serve"), args, {
 		cwd: project,
-		env,
+		env: serveEnv,
 		stdio: ["ignore", "pipe", "inherit"],
 	});
 	const url = await link(server);
@@ -105,4 +127,16 @@ export async function startServe(o: { transcripts: string[] }): Promise<{
 			await exited;
 		},
 	};
+}
+
+/** A project with its team, and sandboxing off, as `startServe` serves by default. */
+function setUp(project: string): void {
+	gitProject(project);
+	farik(project, ["init"]);
+	// What the CLI tests' `no_sandbox` writes: this machine runs tasks without Docker.
+	mkdirSync(join(project, ".farik/local"), { recursive: true });
+	writeFileSync(
+		join(project, ".farik/local/settings.json"),
+		'{"sandbox":"none"}',
+	);
 }

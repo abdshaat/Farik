@@ -200,7 +200,7 @@ Tests go in `crates/cli/tests/serving.rs`, with memory credential stores.
 - `sends_the_user_to_setup_without_a_project` asserts that `/` redirects to `/setup/computer`, and to `/setup/project` when `take_on_error` is set, where the error shows.
 - `setup-project.spec.ts` is the Playwright journey from the Tests decision.
 
-- [ ] `feat(web): add the computer, account and project setup screens`
+- [x] `feat(web): add the computer, account and project setup screens`
 
 ### Task 6: Spec and plan
 

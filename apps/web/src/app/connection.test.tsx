@@ -3,6 +3,7 @@ import { BrowserRouter } from "react-router";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { en } from "../strings/en.ts";
 import { fakeFetch, socketsMade } from "../test/fake-socket.ts";
+import { answerStatus } from "../test/render-app.tsx";
 import { App } from "./App.tsx";
 import { ConnectionProvider, useConnection } from "./connection.tsx";
 
@@ -27,7 +28,7 @@ describe("connection", () => {
 			fakeFetch({ "POST /connect": 204, "GET /session": 204 }),
 		);
 		vi.stubGlobal("fetch", fetch);
-		const { factory } = socketsMade();
+		const { factory, sockets } = socketsMade();
 		render(
 			<ConnectionProvider socketFactory={factory}>
 				<BrowserRouter>
@@ -36,7 +37,14 @@ describe("connection", () => {
 			</ConnectionProvider>,
 		);
 		expect(location.hash).toBe("");
-		// "/" redirects to the event list until Today exists.
+		const socket = await waitFor(() => {
+			const s = sockets[0];
+			if (!s) throw new Error("no socket was opened");
+			return s;
+		});
+		act(() => socket.emit("open", {}));
+		// "/" redirects to the event list, once Farik says it has a project, until Today exists.
+		await answerStatus(socket, false);
 		await waitFor(() => expect(location.pathname).toBe("/events"));
 		expect(fetch).toHaveBeenCalledWith(
 			"/connect",
@@ -88,8 +96,8 @@ describe("connection", () => {
 		if (!socket) throw new Error("no socket was opened");
 		act(() => socket.emit("open", {}));
 		expect(screen.getByTestId("used").textContent).toBe("false");
-		// "/" redirects to the event list until Today exists.
-		expect(location.pathname).toBe("/events");
+		// The used link goes to "/", which then asks Farik where to go.
+		expect(location.pathname).toBe("/");
 	});
 
 	it("asks_for_a_start_link_without_a_session", async () => {

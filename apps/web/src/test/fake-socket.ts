@@ -46,6 +46,16 @@ export class FakeSocket implements SocketLike {
 			data: JSON.stringify({ jsonrpc: "2.0", id: frame.id, result }),
 		});
 	}
+	/** Refuses a request the client sent, as the daemon would. */
+	fail(frame: Frame, code: number, message: string) {
+		this.emit("message", {
+			data: JSON.stringify({
+				jsonrpc: "2.0",
+				id: frame.id,
+				error: { code, message },
+			}),
+		});
+	}
 	calls(method: string): Frame[] {
 		return this.sent.filter((f) => f.method === method);
 	}

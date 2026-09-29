@@ -51,7 +51,7 @@ export function Shell() {
 				</header>
 			) : (
 				<header className={styles.top}>
-					<span>{data?.projectRoot.split(/[\\/]/).at(-1) ?? t("brand")}</span>
+					<span>{data?.projectRoot?.split(/[\\/]/).at(-1) ?? t("brand")}</span>
 					{pause}
 				</header>
 			)}

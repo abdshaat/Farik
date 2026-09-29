@@ -3,9 +3,27 @@ import { Connect } from "../pages/Connect.tsx";
 import { Events } from "../pages/Events.tsx";
 import { NotFound } from "../pages/NotFound.tsx";
 import { Settings } from "../pages/Settings.tsx";
+import { SetupAccount } from "../pages/setup/SetupAccount.tsx";
+import { SetupComputer } from "../pages/setup/SetupComputer.tsx";
+import { SetupProject } from "../pages/setup/SetupProject.tsx";
 import { Shell } from "../shell/Shell.tsx";
 import { useConnection } from "./connection.tsx";
+import { type ServeStatus, useQuery } from "./store.ts";
 import { useTheme } from "./theme.ts";
+
+/** The start page: setup until Farik has a project, the event list after. */
+function Home() {
+	const { data } = useQuery<ServeStatus>("serve.status", {});
+	if (!data) return null;
+	if (data.projectRoot !== null) return <Navigate to="/events" replace />;
+	// A project was chosen but could not be taken on: its screen says why.
+	return (
+		<Navigate
+			to={data.takeOnError ? "/setup/project" : "/setup/computer"}
+			replace
+		/>
+	);
+}
 
 export function App() {
 	const { status } = useConnection();
@@ -20,8 +38,12 @@ export function App() {
 				path="/connect"
 				element={status === "open" ? <Navigate to="/" replace /> : <Connect />}
 			/>
+			<Route path="/" element={<Home />} />
+			{/* Setup has its own two-panel layout, without the rail and bars. */}
+			<Route path="/setup/computer" element={<SetupComputer />} />
+			<Route path="/setup/account" element={<SetupAccount />} />
+			<Route path="/setup/project" element={<SetupProject />} />
 			<Route element={<Shell />}>
-				<Route path="/" element={<Navigate to="/events" replace />} />
 				<Route path="/events" element={<Events />} />
 				<Route
 					path="/settings"
