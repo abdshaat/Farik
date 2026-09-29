@@ -40,7 +40,7 @@ The rest of its setup:
 - **Tiers:** `read` and `network`, the network to research prices. It has no `write_workspace`, `execute`, git, or `external_effect` tier.
 - **Reviewer:** the Product Manager, as for the Marketing Specialist.
 - **Model:** `claude-sonnet-5` at medium effort, the Marketing Specialist's default. The team file can override it.
-- **In the team builder:** it is optional and not among the five suggested. The user adds it with one click. Its avatar is `extra-4` (the character with glasses and the green cardigan), chosen on 2026-09-27; the brand's `characters/extra-4.png` and `avatars/extra-4.png` become `finance-specialist.png` in phase 7 step 02, and the character keeps its place among the extras for any other agent.
+- **In the team builder:** it is optional and not among the five suggested. The user adds it with one click. Its avatar is `extra-4` (the character with glasses and the green cardigan), chosen on 2026-09-27; the brand's `characters/extra-4.png` and `avatars/extra-4-256.png` become `finance-specialist.png` in phase 7 step 02, and the character keeps its place among the extras for any other agent.
 
 ## The finance folder
 

@@ -4,7 +4,22 @@
 	"type": "module",
 	"scripts": {
 		"generate": "node src/generate.ts",
+		"icons": "node src/icons.ts",
 		"typecheck": "tsc --noEmit -p .",
 		"test": "vitest run"
+	},
+	"dependencies": {
+		"@fontsource/jetbrains-mono": "5.3.0",
+		"@fontsource/silkscreen": "5.3.0",
+		"@fontsource/space-grotesk": "5.3.0"
+	},
+	"devDependencies": {
+		"sharp": "0.35.5"
+	},
+	"exports": {
+		".": "./src/index.ts",
+		"./tokens.css": "./dist/tokens.css",
+		"./fonts.css": "./src/fonts.css",
+		"./assets/*": "./assets/*"
 	}
 }

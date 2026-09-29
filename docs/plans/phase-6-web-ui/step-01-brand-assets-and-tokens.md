@@ -173,7 +173,7 @@ Tests:
 - `keeps the founder's masters unchanged` asserts that the SHA-256 of `assets/logo-mark-1254.png` and `assets/wordmark-1024.png` equals that of the files in `docs/brand/assets/`.
 - `bundles every font family the type tokens name` asserts that `fonts.css` imports a `@fontsource` package for each family used in `tokens.type`.
 
-- [ ] `feat(brand): add the fonts, logo, icons and avatars`
+- [x] `feat(brand): add the fonts, logo, icons and avatars`
 
 ### Task 5: The brand sheet
 

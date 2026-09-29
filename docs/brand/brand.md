@@ -105,7 +105,7 @@ The founder's character files of 2026-09-26 replace the kit's drawings. There ar
 - five are the roles' default characters: the Architect, Product Manager, Scrum Master, Developer and Marketing Specialist;
 - five more are extra characters any agent may wear.
 
-The characters are the agents' default avatars, which the user may change (spec F1). In the web UI they appear as square avatars cropped to the head and shoulders (`docs/brand/assets/avatars/`).
+The characters are the agents' default avatars, which the user may change (spec F1). In the web UI they appear as square avatars cropped to the head and shoulders (`packages/brand/assets/avatars/`).
 
 ## Pixel art: where it appears
 
@@ -133,7 +133,7 @@ The founder supplied these on 2026-09-26. They are kept unchanged in `docs/brand
 | `characters/architect.png`, `product-manager.png`, `scrum-master.png`, `developer.png`, `marketing-specialist.png` | The roles' default characters, seated at a laptop, each 1254 × 1254 px on a transparent background |
 | `characters/extra-1.png` to `extra-5.png` | Five more characters in the same pose and scale, for any agent |
 
-`avatars/` holds each character cropped to a 256 px square of head and shoulders. It is derived from the files above by Farik, not supplied, and phase 6 step 01 regenerates it as part of `@farik/brand`.
+The 256 px square avatars of head and shoulders (`<key>-256.png`, ten of them) were derived from the characters by Farik, not supplied. They live in `packages/brand/assets/avatars/`, moved there from `docs/brand/assets/avatars/` in phase 6 step 01. The app icons (`icon-<n>.png` for 16, 32, 48, 180, 192, 512 and 1024 px) are a Lanczos resize of `logo-mark.png`, made by `pnpm --filter @farik/brand icons` and committed in `packages/brand/assets/icons/`.
 
 The kit's rule that the wordmark is always Clay Coral gives way to the supplied file: the wordmark is Soft Sand on dark surfaces. The README's images (`docs/brand/readme/`: the banner, the team, and the avatars) are composed from these files.
 
