@@ -55,16 +55,23 @@ test("a first run checks the computer, keeps the key, and takes the project on",
 		await screenshots(page, "setup-folders");
 		await page.getByRole("button", { name: "Use this folder" }).click();
 
-		// Farik restarts on the project, and the page reconnects by itself.
-		await expect(page).toHaveURL(`http://127.0.0.1:${serve.port}/events`, {
+		// Farik restarts on the project, the page reconnects by itself, and the team's setup
+		// starts from what the scan found.
+		await expect(page).toHaveURL(`http://127.0.0.1:${serve.port}/setup/scan`, {
 			timeout: 30_000,
 		});
+		await expect(
+			page.getByRole("heading", {
+				name: "Here is what Farik found in your project",
+			}),
+		).toBeVisible();
+		await expect(page.getByText("What it is")).toBeVisible();
+		await screenshots(page, "setup-opened");
+		await page.goto(`http://127.0.0.1:${serve.port}/settings`);
 		await expect(page.getByText("Connected", { exact: true })).toBeVisible();
 		await expect(
 			page.getByText("Nothing new starts until you resume."),
 		).toBeVisible();
-		await screenshots(page, "setup-opened");
-		await page.getByRole("link", { name: "Settings" }).click();
 		await expect(page.getByText(project, { exact: true })).toBeVisible();
 		const kinds = farik(project, ["--json", "log"])
 			.trim()

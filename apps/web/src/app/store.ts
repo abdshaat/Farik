@@ -13,6 +13,8 @@ export type ServeStatus = {
 	port: number;
 	/** Why taking the chosen project on failed, or null. */
 	takeOnError: string | null;
+	/** Whether the project was just set up and waits for the team's setup. */
+	setupPending?: boolean;
 };
 
 /** The last 500 events, oldest first, from the provider's one subscription. */

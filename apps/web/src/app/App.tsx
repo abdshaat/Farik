@@ -4,18 +4,28 @@ import { Events } from "../pages/Events.tsx";
 import { NotFound } from "../pages/NotFound.tsx";
 import { Settings } from "../pages/Settings.tsx";
 import { SetupAccount } from "../pages/setup/SetupAccount.tsx";
+import { SetupAdvanced } from "../pages/setup/SetupAdvanced.tsx";
 import { SetupComputer } from "../pages/setup/SetupComputer.tsx";
+import { SetupFinish } from "../pages/setup/SetupFinish.tsx";
+import { SetupPermissions } from "../pages/setup/SetupPermissions.tsx";
 import { SetupProject } from "../pages/setup/SetupProject.tsx";
+import { SetupScan } from "../pages/setup/SetupScan.tsx";
+import { SetupSpending } from "../pages/setup/SetupSpending.tsx";
+import { SetupTeam } from "../pages/setup/SetupTeam.tsx";
+import { TeamSetup } from "../pages/setup/TeamSetup.tsx";
 import { Shell } from "../shell/Shell.tsx";
 import { useConnection } from "./connection.tsx";
 import { type ServeStatus, useQuery } from "./store.ts";
 import { useTheme } from "./theme.ts";
 
-/** The start page: setup until Farik has a project, the event list after. */
+/** The start page: setup until Farik has a project and its team, the event list after. */
 function Home() {
 	const { data } = useQuery<ServeStatus>("serve.status", {});
 	if (!data) return null;
-	if (data.projectRoot !== null) return <Navigate to="/events" replace />;
+	if (data.projectRoot !== null)
+		return (
+			<Navigate to={data.setupPending ? "/setup/scan" : "/events"} replace />
+		);
 	// A project was chosen but could not be taken on: its screen says why.
 	return (
 		<Navigate
@@ -43,6 +53,15 @@ export function App() {
 			<Route path="/setup/computer" element={<SetupComputer />} />
 			<Route path="/setup/account" element={<SetupAccount />} />
 			<Route path="/setup/project" element={<SetupProject />} />
+			<Route path="/setup/scan" element={<SetupScan />} />
+			{/* The team screens share one draft, which "Start the team" sends. */}
+			<Route element={<TeamSetup />}>
+				<Route path="/setup/team" element={<SetupTeam />} />
+				<Route path="/setup/permissions" element={<SetupPermissions />} />
+				<Route path="/setup/spending" element={<SetupSpending />} />
+				<Route path="/setup/finish" element={<SetupFinish />} />
+				<Route path="/setup/advanced" element={<SetupAdvanced />} />
+			</Route>
 			<Route element={<Shell />}>
 				<Route path="/events" element={<Events />} />
 				<Route

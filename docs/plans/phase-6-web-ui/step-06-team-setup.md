@@ -221,7 +221,7 @@ RPC:
 - `edits_the_checks_and_the_plan_check`: Add a check calls `criteria.save` with the review rubric; the third question toggles; a named judge that is not held shows the daemon's refusal.
 - `starts_the_team`: `team.start`, then navigation to `/`.
 
-- [ ] `feat(web): add the wizard's team, permissions, spending, finishing and advanced screens`
+- [x] `feat(web): add the wizard's team, permissions, spending, finishing and advanced screens`
 
 ### Task 6: The Team page, the agent editor, the account row
 
