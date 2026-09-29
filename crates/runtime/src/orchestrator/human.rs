@@ -574,7 +574,8 @@ fn mechanical_criteria_passed(
 /// `escalation.resolved { to, message, extra_tries }`. Never to `ready` while the contract awaits
 /// approval, which is `HumanAccept`'s, nor for an epic whose contract the human has not approved,
 /// which reaches `ready` only by that approval (5.16 item 2). `extra_tries` is only for an
-/// `iterations` escalation, and the move it makes counts the attempt it starts (ADR 0024).
+/// `iterations` escalation resolved to `in_progress`, and the move it makes counts the attempt it
+/// starts (ADR 0024).
 fn resolve(
     tools: &ToolDeps,
     task_id: &TaskId,
@@ -619,6 +620,14 @@ fn resolve(
         if !(1..=5).contains(&tries) {
             return Err(CommandError::Invalid {
                 detail: format!("extra_tries is {tries}, and it is 1 to 5"),
+            });
+        }
+        if to != TaskStatus::InProgress {
+            return Err(CommandError::Refused {
+                reason: format!(
+                    "extra_tries_only_for_tries: more tries resume the work, so they come with a \
+                     move to in_progress, not to {to}"
+                ),
             });
         }
         let reason = escalated_for(tools, task_id)?;
@@ -2421,7 +2430,7 @@ mod tests {
             &orchestrator,
             Command::EscalationResolve {
                 task_id: task("FRK-1"),
-                to: TaskStatus::Refining,
+                to: TaskStatus::InProgress,
                 message: "Split it by page.".to_string(),
                 extra_tries: Some(2),
             },
@@ -2429,6 +2438,26 @@ mod tests {
         .await;
         assert!(reason.starts_with("extra_tries_only_for_tries"), "{reason}");
         assert_eq!(harness.row("FRK-1").status, TaskStatus::Escalated);
+        assert!(harness.events(&[EventKind::EscalationResolved]).is_empty());
+
+        // More tries resume the work, so they come only with a move back to it.
+        harness.rejected("FRK-2", 3, "C1: done.txt missing");
+        orchestrator.tick().await.expect("the tick runs");
+        assert_eq!(harness.row("FRK-2").status, TaskStatus::Escalated);
+        for to in [TaskStatus::Cancelled, TaskStatus::Refining] {
+            let reason = refused(
+                &orchestrator,
+                Command::EscalationResolve {
+                    task_id: task("FRK-2"),
+                    to,
+                    message: "Stop here.".to_string(),
+                    extra_tries: Some(2),
+                },
+            )
+            .await;
+            assert!(reason.starts_with("extra_tries_only_for_tries"), "{reason}");
+        }
+        assert_eq!(harness.row("FRK-2").status, TaskStatus::Escalated);
         assert!(harness.events(&[EventKind::EscalationResolved]).is_empty());
         // The schema holds the number to 1 to 5.
         assert!(
