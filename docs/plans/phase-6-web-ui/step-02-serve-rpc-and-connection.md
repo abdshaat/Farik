@@ -1,6 +1,6 @@
 # Phase 6, step 02: Serve, RPC, and connection
 
-Status: ready
+Status: done (landed and landing-reviewed 2026-09-28)
 Branch: `phase/6-web-ui`
 Spec: `docs/SPEC.md` sections 3 (`farik serve`, `farik pause`, `farik resume`), 8.1, 8.2 ("Driving the team"), 8.5 (`team.paused`, `team.resumed`), 8.6 (the web UI); F6
 Depends on: phase 5 and earlier (merged); step 01 of this phase (done, 77a16c7)
@@ -28,8 +28,8 @@ Out of scope, and the step that owns each:
   - Rejected: pausing each agent (`agent_update`), which would lose each agent's own paused status on resume.
 - **`farik serve [--port <n>]`** is a new driving process in `crates/cli/src/serve.rs`.
   - It starts exactly as `run` does, with the rules `TickRules::All`, and refuses outside a project with `run`'s own sentence (step 05 lifts that). `--no-open` is not added here; step 04 adds opening the browser together with the flag.
-  - `start` and `start_holding` gain one parameter, `options: StartOptions`, whose `Default` every existing caller (`run`, `plan`, `contract new`) passes. Task 3 adds it with `port: PortChoice` alone (`Default` `Any`; `serve` passes `Preferred(n)`); Task 6 adds `web: bool` (`Default` `false`) with what it does, and switches `serve` to `web: true`. With `web: true`, `start_holding` opens the browser sessions, issues the first connect code, and calls `DaemonState::set_web` before the daemon serves; only `serve` has browser routes that answer (spec 8.1 changes to say so, in Task 6).
-  - Its loop is `run::ticks` with one difference: on `Idle { until: None }` it does not return. It waits with `Orchestrator::wait_until(now + 24 h)`, which a command, a stop, or the 60 s recheck already wake (orchestrator.rs:476; the recheck is a sleep on the injected `Sleeper`), and then ticks again. So a request filed from another process is picked up within a minute, and the standup's UTC day turns over on a recheck. The idle line prints once per change of `why`, as `ticks` does for waits. `ticks` gains a parameter `idle: OnIdle { Return, Wait }` rather than being copied.
+  - `start` and `start_holding` gain one parameter, `options: StartOptions`, whose `Default` every existing caller (`run`, `plan`, `contract new`) passes. Task 3 adds it with `port: PortChoice` alone (`Default` `Any`; `serve` passes `Preferred(n)`); Task 6 adds `web: bool` (`Default` `false`) with what it does, and switches `serve` to `web: true`. With `web: true`, `start_holding` opens the browser sessions, issues the first connect code, and calls `DaemonState::set_web` after the daemon's `serve` returns, with the real port, and before the link prints; only `serve` has browser routes that answer (spec 8.1 changes to say so, in Task 6).
+  - Its loop is `run::ticks` with one difference: on `Idle { until: None }` it does not return. It waits with `Orchestrator::wait_until(now + 24 h)`, which a command, a stop, or the 60 s recheck already wake (orchestrator.rs:476; the recheck is a sleep on the injected `Sleeper`), and then ticks again. So a request filed from another process is picked up within a minute, and the standup's UTC day turns over on a recheck. The idle line prints once per change of `why`, and again after a tick that acted (landing review). `serve` prints lines for a person, so `serve --json` is refused with exit 2. `ticks` gains a parameter `idle: OnIdle { Return, Wait }` rather than being copied.
   - Ctrl-C and `farik stop` end it as they end `run` (exit 130 after Ctrl-C, 0 after `farik stop`), with `finish` shutting the daemon down.
 - **Port** (spec 8.1): `DaemonConfig::port` becomes `port: PortChoice`, with `enum PortChoice { Any, Preferred(u16) }`.
   - `Preferred(p)` tries `p` to `p + 9` in order and then takes `Any`: the list is the pure `pub fn candidates(choice: PortChoice) -> Vec<u16>` (`Any` → `[0]`, `Preferred(p)` → `[p, …, p+9 (saturating, stopping at 65535), 0]`). `serve` passes `Preferred(7420)`, or `Preferred(n)` for `--port n`.
@@ -38,6 +38,7 @@ Out of scope, and the step that owns each:
 - **The state folder** holds what outlives a project: `farik_cli::state::state_dir(env: &BTreeMap<String, String>) -> Option<PathBuf>`. It is `$XDG_CONFIG_HOME/farik`, else `$HOME/.config/farik`, else `%APPDATA%\farik`, and `None` when none is set (then nothing is remembered, and `serve` says so on stderr).
   - The folder is created with mode 0700. `state.json` is `{ "last_project": "<absolute root>" }`, written by `serve` once the driver has started, mode 0600, through `write_private` (made `pub` in `crates/runtime/src/lib.rs`; it is `cfg(unix)` there, and the non-unix branch stays as it is).
   - The `dirs` crate is rejected because the env is injected (CliIo) and three variables cover the platforms.
+  - `serve` and `state` are unix-only today, as the daemon is; the `%APPDATA%` branch waits for a Windows build.
 - **The one-time code**, in `farik_runtime::daemon::web::ConnectCodes`, holds one live code at a time.
   - `issue()` replaces any earlier code with 32 random bytes, hex-encoded (the existing `random_token`, made `pub(crate)`).
   - `redeem(code) -> bool` compares in constant time (`same_token`) and consumes the code on success.
@@ -47,7 +48,6 @@ Out of scope, and the step that owns each:
   - `hash` is the lowercase hex SHA-256 of the session secret (`sha2` `=0.11.0`, a new workspace dependency). The secret is 32 random bytes, hex. The file never holds a secret.
   - `issue(now) -> String` returns the secret and records its hash with `expires_at = now + 30 days`, dropping expired entries as it writes.
   - `verify(secret, now) -> bool` is true for a stored, unexpired hash.
-  - `revoke(secret)` drops it.
   - With no state folder, sessions are kept in memory for the process's life.
   - Two `serve` processes (two projects) share the file with a read-modify-write each; a `ponytail:` comment records the race and its fix (a lock file) if it ever bites.
   - `revoke` is step 04's, with "Disconnect this browser", which is its first caller.
@@ -68,7 +68,7 @@ Out of scope, and the step that owns each:
     - `unsubscribe {}` answers `{}`.
     - `command { command }`: the command wire of `command.schema.json`, handled by the same `CommandHandler` as `POST /command`. It answers `$defs/commandReply`. `run_stop` is refused with `-32003` `refused_here`, "stopping Farik is done where it runs; pause the team instead", because stopping `serve` from its own page leaves the page with nothing to talk to.
     - `query { name, params }`: the names are listed below.
-  - Error codes: JSON-RPC's `-32700` (parse), `-32600` (invalid request), `-32601` (unknown method), and `-32602` (invalid params), plus `-32001` `unknown_query`, `-32002` `not_found`, and `-32003` `refused_here`.
+  - Error codes: JSON-RPC's `-32700` (parse), `-32600` (invalid request), `-32601` (unknown method), `-32602` (invalid params), and `-32603` (internal error: a store failure in a query), plus `-32001` `unknown_query`, `-32002` `not_found`, and `-32003` `refused_here`.
 - **The event stream** re-reads the log every 500 ms with `EventQuery { after_seq: last, .. }`, because appends come from other processes too (the `RECHECK` reason, orchestrator.rs:249). The in-process `EventLog::subscribe` channel is rejected: it misses those appends. A `ponytail:` comment marks the poll: a cross-process notify replaces it if 500 ms ever shows. The socket's task ends when the socket closes.
 - **Queries** in this step:
   - `events.since { after_seq, limit ≤ 500 }` returns `{ events }`, from `EventLog::read`.
@@ -90,6 +90,12 @@ Out of scope, and the step that owns each:
     - `close()`.
   - It numbers requests from 1, matches responses by `id`, and rejects a pending promise on an error response with an `RpcError { code, message }`. Reconnecting is the web shell's (step 04).
 - **Test transport:** axum's `ws` for the server; `tokio-tungstenite` `=0.29.0` as a dev-dependency of `farik-runtime` (the version axum 0.8.9's `ws` needs). Real sockets on ports the OS assigns (`127.0.0.1:0`), like the existing raw-TCP daemon tests; no test binds 7420, because tests run in parallel and a CI host may hold it. Time bounds in tests are failure bounds of 30 s, never assertions about the 500 ms poll.
+
+- **Recorded choices** (not planned, kept after the landing review).
+  - `serve` prints `serving <root> on 127.0.0.1:<port>` before the link, so a person sees which project and port answer.
+  - `farik_protocol::rpc::SCHEMA_JSON` is `pub`, so the daemon's tests hold its answers to the schema's `$defs`.
+  - `state::make_state_dir` makes the folder 0700, and sets 0700 on one already there.
+  - The CLI's dev-deps `tokio-tungstenite` and `futures-util` open a real socket in `serving.rs`; the runtime's dev-dep `jsonschema` checks answers against `rpc.schema.json`.
 
 ## File map
 
@@ -114,6 +120,8 @@ Cargo.toml, crates/runtime/Cargo.toml, Cargo.lock    modifies: axum ws, sha2, to
 crates/runtime/src/daemon/web.rs                      creates: codes, sessions, /connect, /rpc, queries (T5, T6)
 packages/protocol-client/**, pnpm-lock.yaml          creates: the TypeScript client (T7)
 docs/plans/project-plan.md                            modifies: steps 02, 04, 05 in the table and the interface lines (T3)
+crates/cli/Cargo.toml                                 modifies: dev-deps tokio-tungstenite, futures-util (recorded choice, landing review)
+crates/runtime/Cargo.toml                             modifies: dev-dep jsonschema, to hold answers to rpc.schema.json (recorded choice)
 ```
 
 ## Interfaces
@@ -124,7 +132,7 @@ Produces:
 
 ```rust
 // farik-protocol
-Command::TeamPause, Command::TeamResume;  EventBody::TeamPaused(TeamPausedBody), EventBody::TeamResumed(TeamResumedBody)
+Command::TeamPause, Command::TeamResume;  EventBody::TeamPaused(TeamPausedBody), EventBody::TeamResumed(TeamPausedBody)   // one shared body
 pub mod rpc { /* generated: RpcRequest, RpcResponse, RpcNotification, RpcError, QueryName, … */ pub fn rpc_request_from_value(v: &Value) -> Result<RpcRequest, Vec<String>>;
   pub fn rpc_notification_from_value(v: &Value) -> Result<RpcNotification, Vec<String>>; }
 // farik-runtime
