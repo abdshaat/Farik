@@ -7,13 +7,11 @@ describe("StatusWord", () => {
 	it("says the status in words", async () => {
 		const tones = ["done", "working", "waiting"] as const;
 		const { container } = render(
-			<>
-				{tones.map((tone) => (
-					<StatusWord key={tone} tone={tone}>
-						{`is ${tone}`}
-					</StatusWord>
-				))}
-			</>,
+			tones.map((tone) => (
+				<StatusWord key={tone} tone={tone}>
+					{`is ${tone}`}
+				</StatusWord>
+			)),
 		);
 		const classes = tones.map(
 			(tone) => screen.getByText(`is ${tone}`).className,

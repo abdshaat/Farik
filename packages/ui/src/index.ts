@@ -17,4 +17,3 @@ export { uiStrings } from "./strings.ts";
 export { Table } from "./Table.tsx";
 export { TextArea } from "./TextArea.tsx";
 export { TextField } from "./TextField.tsx";
-export { expectNoAxeViolations } from "./test/axe.ts";

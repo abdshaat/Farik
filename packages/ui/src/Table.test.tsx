@@ -26,6 +26,9 @@ describe("Table", () => {
 		expect(
 			screen.getAllByRole("columnheader").map((h) => h.textContent),
 		).toEqual(["Who", "Cost"]);
+		for (const header of screen.getAllByRole("columnheader")) {
+			expect(header.getAttribute("scope")).toBe("col");
+		}
 		expect(screen.getAllByRole("row")).toHaveLength(3);
 		const cell = screen.getByText("$1.00");
 		expect(cell.className).toMatch(/numeric/);

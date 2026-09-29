@@ -56,7 +56,7 @@ Out of scope: screens, routing, and data (steps 04 to 09), the task row's compos
   - status is never shown by colour alone;
   - agent-written text is rendered as text, never as HTML.
 
-  `src/test/axe.ts` exports `expectNoAxeViolations(container: Element): Promise<void>`. It runs `axe-core` with its `color-contrast` rule off, because jsdom does not lay out, and the brand's contrast test holds colour.
+  `src/test/axe.ts` exports `expectNoAxeViolations(container: Element): Promise<void>`, reached by other packages as `@farik/ui/test` (a separate `package.json` export, so `axe-core` never ships in an app bundle). It runs `axe-core` with its `color-contrast` rule off, because jsdom does not lay out, and the brand's contrast test holds colour.
 - **The components and their props.** Every component is a named export, one per file (code.md).
   - `Button { kind?: 'primary' | 'secondary' | 'quiet' = 'secondary'; type?: 'button' | 'submit' = 'button'; disabled?; busy?; onClick?; children }`.
     - `primary` is `action` with `action-ink`: the one main action on a screen.
@@ -118,7 +118,7 @@ pnpm-lock.yaml                                                        modifies (
 
 Consumes: `tokens.css`, `fonts.css`, `AVATAR_KEYS`, `TEXT_PAIRS`, and the asset paths from `@farik/brand` (step 01); the root `pnpm check` (step 01).
 
-Produces: the components and props above, plus `uiStrings`, `parseDiff`, `DiffFile`, `AVATAR_URLS`, `AvatarKey`, `Role`, and `expectNoAxeViolations`, all exported from `@farik/ui`'s `src/index.ts`.
+Produces: the components and props above, plus `uiStrings`, `parseDiff`, `DiffFile`, `AVATAR_URLS`, `AvatarKey`, and `Role`, all exported from `@farik/ui`'s `src/index.ts`; and `expectNoAxeViolations`, exported from `@farik/ui/test`.
 
 ## Tasks
 
