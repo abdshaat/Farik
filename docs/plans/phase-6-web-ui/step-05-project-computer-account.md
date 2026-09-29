@@ -210,7 +210,7 @@ Tests go in `crates/cli/tests/serving.rs`, with memory credential stores.
 - ADR 0021 gets an amendment line for the order.
 - Project plan: step 05's interface line and its row in the table.
 
-- [ ] `docs(spec): describe the first run's computer, account and project screens`
+- [x] `docs(spec): describe the first run's computer, account and project screens`
 
 ## Verification
 
