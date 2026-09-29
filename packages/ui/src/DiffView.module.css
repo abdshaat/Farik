@@ -1,0 +1,52 @@
+.view {
+	display: grid;
+	gap: var(--farik-space-4);
+	color: var(--farik-color-ink);
+}
+
+.empty {
+	margin: 0;
+	color: var(--farik-color-ink-muted);
+}
+
+.path {
+	margin: 0 0 var(--farik-space-2);
+	font:
+		var(--farik-type-code-weight) var(--farik-type-code-size) /
+		var(--farik-type-code-line-height) var(--farik-type-code-family);
+}
+
+.block {
+	overflow-x: auto;
+	border: 1px solid var(--farik-color-rule);
+	font:
+		var(--farik-type-code-weight) var(--farik-type-code-size) /
+		var(--farik-type-code-line-height) var(--farik-type-code-family);
+	white-space: pre;
+}
+
+.row {
+	min-width: max-content;
+	padding-inline: var(--farik-space-2);
+}
+
+.hunk {
+	color: var(--farik-color-ink-muted);
+}
+
+.added {
+	background: var(--farik-color-diff-added);
+}
+
+.removed {
+	background: var(--farik-color-diff-removed);
+}
+
+.hidden {
+	position: absolute;
+	width: 1px;
+	height: 1px;
+	overflow: hidden;
+	clip-path: inset(50%);
+	white-space: nowrap;
+}

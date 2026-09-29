@@ -192,7 +192,7 @@ Tests:
   - `shows added and removed lines with their marks` asserts each added line's text begins `+`, each removed line's begins `−` (U+2212), and each carries its visually hidden word.
   - `says when there are no changes` asserts `uiStrings.noChanges` for `''`.
 
-- [ ] `feat(ui): add the diff viewer`
+- [x] `feat(ui): add the diff viewer`
 
 ### Task 7: The gallery
 
