@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://farik.dev/schemas/rpc.schema.json",
   "title": "Farik RPC",
-  "description": "The JSON-RPC 2.0 text frames between the browser and the daemon's GET /rpc (docs/SPEC.md section 8). Any frame is a request, a response, or a notification; the query results and the command reply are $defs that Task 6's tests hold the daemon's answers to. command and event are objects here, not references, because one schema never references another: command_from_value and event_from_value read them.",
+  "description": "The JSON-RPC 2.0 text frames between the browser and the daemon's GET /rpc (docs/SPEC.md section 8). Any frame is a request, a response, or a notification; the query results and the command reply are $defs, which name the shape of each answer. command and event are objects here, not references, because one schema never references another: command_from_value and event_from_value read them.",
   "oneOf": [
     {
       "$ref": "#/$defs/rpcRequest"

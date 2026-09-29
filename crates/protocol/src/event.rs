@@ -813,8 +813,10 @@ mod tests {
         // after it would have to guess which one to believe.
         for kind in EVERY_KIND {
             for other in EVERY_KIND {
-                // team.paused and team.resumed share one body, so neither can carry the other's.
-                if other == kind || a_body_wire(other) == a_body_wire(kind) {
+                // team.paused and team.resumed share one body, so each carries the other's; no
+                // other pair does, and a fixture that made one equal must not hide it.
+                let shared = [EventKind::TeamPaused, EventKind::TeamResumed];
+                if other == kind || (shared.contains(&kind) && shared.contains(&other)) {
                     continue;
                 }
                 let mut input = an_event_wire(kind);
