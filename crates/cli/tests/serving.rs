@@ -20,7 +20,7 @@ use std::time::{Duration, Instant};
 
 use chrono::{DateTime, Utc};
 use farik_protocol::event::{EventBody, EventKind};
-use farik_runtime::recorded::fixtures::triage_frk_1_large;
+use farik_runtime::recorded::fixtures::{refine_asks_frk_1, triage_frk_1_large};
 use farik_runtime::sleep::Sleeper;
 use farik_store::git::fixtures::TempRepo;
 use serde_json::{Value, json};
@@ -163,7 +163,9 @@ fn keeps_serving_when_the_board_is_idle() {
     let shared = out.clone();
     let serving = std::thread::spawn(move || {
         run_with(&root, &["serve", "--port", &port], |io| {
-            io.engine = recorded(vec![triage_frk_1_large()]);
+            // The triage makes FRK-1 an epic, so serve refines it next; the refine asks the human
+            // and leaves the board waiting on them, so serve goes back to its idle wait.
+            io.engine = recorded(vec![triage_frk_1_large(), refine_asks_frk_1()]);
             io.stdout = Box::new(shared);
             io.sleeper = Some(sleeper);
         })
@@ -189,6 +191,10 @@ fn keeps_serving_when_the_board_is_idle() {
             })
     });
 
+    // Back in its idle wait, with no permit left, so the stop lands before any other tick.
+    waiting
+        .recv_timeout(Duration::from_secs(30))
+        .unwrap_or_else(|_| panic!("serve waits again once the board is idle\n{}", out.text()));
     let stopped = run(&repository.path, &["stop"]);
     assert_eq!(stopped.code, 0, "{}", stopped.err);
     let ran = joined(serving, "the serve");
