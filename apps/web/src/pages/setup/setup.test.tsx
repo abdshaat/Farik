@@ -223,7 +223,14 @@ describe("setup", () => {
 			name: /corner-bakery/,
 		});
 		expect(within(bakery).getByText(en.gitProject)).toBeTruthy();
+		// A folder that is not a git project cannot be used.
+		fireEvent.click(
+			within(folders).getByRole("button", { name: /photos-2025/ }),
+		);
+		const use = screen.getByRole("button", { name: en.useFolder });
+		expect((use as HTMLButtonElement).disabled).toBe(true);
 		fireEvent.click(bakery);
+		expect((use as HTMLButtonElement).disabled).toBe(false);
 		fireEvent.click(screen.getByRole("button", { name: en.useFolder }));
 		const open = await sent(s, "project.open");
 		expect(open.params).toEqual({
