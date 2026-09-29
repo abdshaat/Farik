@@ -96,6 +96,54 @@ describe("parseDiff", () => {
 		]);
 	});
 
+	it("stops a hunk whose counts run past the next file", () => {
+		const files = parseDiff(
+			[
+				"diff --git a/a.txt b/a.txt",
+				"--- a/a.txt",
+				"+++ b/a.txt",
+				"@@ -1,5 +1,5 @@",
+				" keep",
+				"-old",
+				"+new",
+				"diff --git a/b b/b",
+				"--- a/b",
+				"+++ b/b",
+				"@@ -1 +1 @@",
+				"-x",
+				"+y",
+			].join("\n"),
+		);
+		expect(files.map((f) => f.path)).toEqual(["a.txt", "b"]);
+		expect(files[0]?.lines).toHaveLength(4);
+		expect(files[1]?.lines).toEqual([
+			{ kind: "hunk", text: "@@ -1 +1 @@" },
+			{ kind: "removed", text: "x" },
+			{ kind: "added", text: "y" },
+		]);
+	});
+
+	it("starts a new hunk when a hunk's counts run past the next @@ row", () => {
+		const [file] = parseDiff(
+			[
+				"--- a/f.txt",
+				"+++ b/f.txt",
+				"@@ -1,5 +1,5 @@",
+				" a",
+				"@@ -9 +9 @@",
+				"-x",
+				"+y",
+			].join("\n"),
+		);
+		expect(file?.lines).toEqual([
+			{ kind: "hunk", text: "@@ -1,5 +1,5 @@" },
+			{ kind: "context", text: "a" },
+			{ kind: "hunk", text: "@@ -9 +9 @@" },
+			{ kind: "removed", text: "x" },
+			{ kind: "added", text: "y" },
+		]);
+	});
+
 	it("counts a blank line inside a hunk as context", () => {
 		const [file] = parseDiff(
 			[

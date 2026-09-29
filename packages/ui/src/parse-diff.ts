@@ -20,6 +20,10 @@ export function parseDiff(diff: string): DiffFile[] {
 		files.push(file);
 	};
 	for (const row of diff.split(/\r?\n/)) {
+		// Counts can overrun; neither of these can be a content row.
+		if (row.startsWith("diff --git ") || row.startsWith("@@ ")) {
+			oldLeft = newLeft = 0;
+		}
 		if (file && (oldLeft > 0 || newLeft > 0)) {
 			if (row.startsWith("+")) {
 				newLeft--;
