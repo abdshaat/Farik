@@ -251,15 +251,16 @@ pub(super) async fn connect(
     }
 }
 
-/// The session secret a request's `Cookie` header carries, if any. One cookie needs no library:
-/// the header is `name=value` pairs split by `;`.
-fn session_cookie(headers: &HeaderMap) -> Option<&str> {
+/// Every session secret a request's `Cookie` header carries: a browser can send the name twice,
+/// a stale cookie beside the live one, and either may be the one that opens. One cookie needs no
+/// library: the header is `name=value` pairs split by `;`.
+fn session_cookies(headers: &HeaderMap) -> impl Iterator<Item = &str> {
     headers
         .get_all(header::COOKIE)
         .iter()
         .filter_map(|value| value.to_str().ok())
         .flat_map(|value| value.split(';'))
-        .find_map(|pair| pair.trim().strip_prefix("farik_session="))
+        .filter_map(|pair| pair.trim().strip_prefix("farik_session="))
 }
 
 /// `GET /rpc`: a WebSocket that speaks JSON-RPC 2.0 (`docs/schemas/rpc.schema.json`) for the
@@ -278,7 +279,9 @@ pub(super) async fn rpc(
         return StatusCode::FORBIDDEN.into_response();
     }
     let now = state.deps().clock.now();
-    if !session_cookie(&headers).is_some_and(|secret| web.sessions.verify(secret, now)) {
+    // ponytail: `verify` reads the sessions file on this async worker, one small read per upgrade;
+    // move it to `spawn_blocking` if upgrades ever come in bursts.
+    if !session_cookies(&headers).any(|secret| web.sessions.verify(secret, now)) {
         return StatusCode::UNAUTHORIZED.into_response();
     }
     match upgrade {
@@ -299,6 +302,9 @@ async fn talk(mut socket: WebSocket, state: Arc<DaemonState>, cancel: Cancellati
     // in-process `EventLog::subscribe` channel misses those; a cross-process notify replaces the
     // poll if 500 ms ever shows.
     let mut poll = tokio::time::interval(POLL);
+    // ponytail: a request is answered before the next frame is read, so a long command holds up
+    // this socket's other requests and its events; spawning each answer and sending it back through
+    // a channel lifts that if a page ever waits on it.
     loop {
         tokio::select! {
             message = socket.recv() => {
@@ -326,7 +332,7 @@ async fn talk(mut socket: WebSocket, state: Arc<DaemonState>, cancel: Cancellati
 
 /// Sends the subscription every event past `sent`, oldest first. Answers `false` when the socket
 /// is gone. A log that cannot be read is read again at the next poll.
-async fn push(socket: &mut WebSocket, state: &DaemonState, sent: &mut Option<u64>) -> bool {
+async fn push(socket: &mut WebSocket, state: &Arc<DaemonState>, sent: &mut Option<u64>) -> bool {
     let Some(after) = *sent else {
         return true;
     };
@@ -334,7 +340,9 @@ async fn push(socket: &mut WebSocket, state: &DaemonState, sent: &mut Option<u64
         after_seq: Some(after),
         ..EventQuery::default()
     };
-    let Ok(events) = state.deps().log.read(&query) else {
+    let reader = Arc::clone(state);
+    let read = tokio::task::spawn_blocking(move || reader.deps().log.read(&query)).await;
+    let Ok(Ok(events)) = read else {
         return true;
     };
     for event in events {
@@ -383,7 +391,7 @@ const REFUSED_HERE: i64 = -32003;
 
 /// The response to one text frame. A `subscribe` sets `sent` to its `from_seq`, and an
 /// `unsubscribe` clears it.
-async fn answer(state: &DaemonState, text: &str, sent: &mut Option<u64>) -> Value {
+async fn answer(state: &Arc<DaemonState>, text: &str, sent: &mut Option<u64>) -> Value {
     let Ok(request) = serde_json::from_str::<Value>(text) else {
         return failure(
             &Value::Null,
@@ -443,11 +451,19 @@ async fn answer(state: &DaemonState, text: &str, sent: &mut Option<u64>) -> Valu
             Ok(json!({}))
         }
         "command" => command(state, &params["command"]).await,
-        _ => query(
-            state,
-            params["name"].as_str().unwrap_or_default(),
-            &params["params"],
-        ),
+        _ => {
+            // The store and the files are read off the async workers.
+            let (state, params) = (Arc::clone(state), params.clone());
+            tokio::task::spawn_blocking(move || {
+                query(
+                    &state,
+                    params["name"].as_str().unwrap_or_default(),
+                    &params["params"],
+                )
+            })
+            .await
+            .unwrap_or_else(|error| Err(Failure::new(INTERNAL_ERROR, error.to_string())))
+        }
     };
     match result {
         Ok(result) => json!({ "jsonrpc": "2.0", "id": id, "result": result }),
@@ -1066,6 +1082,12 @@ mod tests {
                 "{origin:?}"
             );
         }
+
+        // A stale `farik_session` ahead of the live one does not hide it.
+        let shadowed = format!("farik_session=junk; farik_session={secret}");
+        connect_async(upgrade(port, Some(&own), Some(&shadowed)))
+            .await
+            .expect("the live session behind a stale one opens");
 
         // The same session from the daemon's own page opens.
         let mut socket = open(port, &secret).await;
