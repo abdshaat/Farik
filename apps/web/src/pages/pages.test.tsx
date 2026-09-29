@@ -84,6 +84,19 @@ describe("pages", () => {
 		await expectNoAxeViolations(container);
 	});
 
+	it("lists_the_last_hundred_events", async () => {
+		const { socket } = await renderApp("/events");
+		act(() => {
+			for (let seq = 1; seq <= 101; seq++) socket?.event(seq);
+		});
+		const rows = within(await screen.findByRole("table")).getAllByRole("row");
+		// A header row and a hundred events, the newest first.
+		expect(rows).toHaveLength(101);
+		expect(
+			within(rows[1] as HTMLElement).getAllByRole("cell")[0]?.textContent,
+		).toBe("101");
+	});
+
 	it("says_there_is_no_page_here", async () => {
 		const { container } = await renderApp("/nowhere");
 		expect(screen.getByRole("heading", { name: en.noPage })).toBeTruthy();

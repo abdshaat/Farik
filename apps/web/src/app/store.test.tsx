@@ -56,9 +56,11 @@ describe("store", () => {
 		const queries = () =>
 			socket.calls("query").filter((f) => f.params.name === "serve.status");
 		expect(queries()).toHaveLength(1);
-		act(() => {
-			for (let seq = 1; seq <= 10; seq++) socket.event(seq);
-		});
+		// Ten events, each its own render, 20 ms apart: one query for all of them, not ten.
+		for (let seq = 1; seq <= 10; seq++) {
+			act(() => socket.event(seq));
+			await act(() => vi.advanceTimersByTimeAsync(20));
+		}
 		await act(() => vi.advanceTimersByTimeAsync(250));
 		expect(queries()).toHaveLength(2);
 	});
