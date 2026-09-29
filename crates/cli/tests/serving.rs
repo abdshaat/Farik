@@ -609,6 +609,18 @@ async fn socket(port: u16, cookie: &str) -> Socket {
 
 /// Sends `method` with `params` and answers the reply.
 async fn ask(socket: &mut Socket, id: u64, method: &str, params: Value) -> Value {
+    try_ask(socket, id, method, params)
+        .await
+        .unwrap_or_else(|why| panic!("{method}: {why}"))
+}
+
+/// `ask`, answering why when the daemon cut the socket before it replied.
+async fn try_ask(
+    socket: &mut Socket,
+    id: u64,
+    method: &str,
+    params: Value,
+) -> Result<Value, String> {
     use futures_util::{SinkExt as _, StreamExt as _};
     use tokio_tungstenite::tungstenite::Message;
 
@@ -616,15 +628,15 @@ async fn ask(socket: &mut Socket, id: u64, method: &str, params: Value) -> Value
     socket
         .send(Message::Text(asked.to_string().into()))
         .await
-        .expect("sent");
+        .map_err(|error| format!("not sent: {error}"))?;
     loop {
         let frame = tokio::time::timeout(Duration::from_secs(60), socket.next())
             .await
             .expect("an answer in time")
-            .expect("the socket is open")
-            .expect("a frame");
+            .ok_or("the socket closed")?
+            .map_err(|error| format!("no frame: {error}"))?;
         if let Message::Text(text) = frame {
-            return serde_json::from_str(text.as_str()).expect("JSON");
+            return Ok(serde_json::from_str(text.as_str()).expect("JSON"));
         }
     }
 }
@@ -635,6 +647,17 @@ fn serve_status(port: u16, cookie: &str) -> Value {
         let mut socket = socket(port, cookie).await;
         let status = json!({ "name": "serve.status", "params": {} });
         ask(&mut socket, 1, "query", status).await["result"].clone()
+    })
+}
+
+/// `serve.status` while serve may be restarting: `None` when the daemon it reached was shutting
+/// down and cut the socket before it replied.
+fn serve_status_across_a_restart(port: u16, cookie: &str) -> Option<Value> {
+    a_runtime().block_on(async {
+        let mut socket = socket(port, cookie).await;
+        let status = json!({ "name": "serve.status", "params": {} });
+        let answer = try_ask(&mut socket, 1, "query", status).await.ok()?;
+        Some(answer["result"].clone())
     })
 }
 
@@ -950,9 +973,11 @@ fn goes_back_to_setup_when_the_driver_cannot_start() {
         json!({ "path": name_of(&repository.path), "no_sandbox": false }),
     );
     assert!(opened["result"]["project_root"].is_string(), "{opened}");
+    // Meanwhile the setup daemon shuts down and another starts, and a status asked of the one
+    // shutting down is cut off unanswered.
     let mut status = Value::Null;
     until("serve is back in setup mode with the reason", || {
-        status = serve_status(serving.port, &serving.cookie);
+        status = serve_status_across_a_restart(serving.port, &serving.cookie).unwrap_or_default();
         status["take_on_error"].is_string()
     });
     let (ran, out, err) = serving.interrupted();
