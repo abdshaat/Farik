@@ -436,6 +436,7 @@ fn serve_status_has_no_credential_under_a_given_engine() {
             "paused": false,
             "credential": null,
             "port": port,
+            "take_on_error": null,
         }),
         "{status}"
     );

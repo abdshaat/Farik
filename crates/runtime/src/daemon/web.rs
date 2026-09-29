@@ -644,6 +644,7 @@ fn query(state: &DaemonState, name: &str, params: &Value) -> Result<Value, Failu
                 "paused": paused,
                 "credential": web.credential,
                 "port": web.port,
+                "take_on_error": null,
             }))
         }
         _ => Err(Failure::new(
@@ -1605,6 +1606,10 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     #[ignore = "needs the git program: cargo xtask check --integration"]
+    #[allow(
+        clippy::too_many_lines,
+        reason = "one walk through every query the browser makes"
+    )]
     async fn answers_the_queries() {
         let harness = Harness::new("rpc-queries", |_| {});
         harness.file("FRK-1", "refining", |_| {});
@@ -1696,6 +1701,7 @@ mod tests {
                 "paused": false,
                 "credential": null,
                 "port": handle.info.port,
+                "take_on_error": null,
             })
         );
         let pause = json!({ "command": { "command": "team_pause", "body": {} } });
