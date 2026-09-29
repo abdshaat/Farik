@@ -27,8 +27,8 @@ pub use crate::generated::event::{
     SessionEndedBodyReason, SessionStartedBody, SessionStartedBodyEffort, SessionStartedBodyModel,
     SessionStartedBodyPurpose, SprintEndedBody, SprintEndedBodyEndedBy, SprintPlannedBody,
     SprintStartedBody, TaskCreatedBody, TaskIntegratedBody, TaskIntegratedBodyIntegratedBy,
-    TaskTransitionedBody, TaskTransitionedBodyEffectsItem, TeamUpdatedBody, TokenUsage,
-    ToolCalledBody, ToolDeniedBody, ToolReturnedBody, TransitionRefusedBody,
+    TaskTransitionedBody, TaskTransitionedBodyEffectsItem, TeamPausedBody, TeamUpdatedBody,
+    TokenUsage, ToolCalledBody, ToolDeniedBody, ToolReturnedBody, TransitionRefusedBody,
     TransitionRefusedBodyRefusal,
 };
 /// The generated names of the vocabularies the governor's events repeat, renamed at the edge so
@@ -62,7 +62,7 @@ static VALIDATOR: LazyLock<Validator> = LazyLock::new(|| {
 });
 
 /// One validator per kind, each holding that kind's body schema alone. The event schema types
-/// `body` as a choice of forty-one shapes, so it can only say that a body matched none of them; these
+/// `body` as a choice of forty-two shapes, so it can only say that a body matched none of them; these
 /// say what is wrong with the one shape the event's `kind` asked for.
 static BODY_VALIDATORS: LazyLock<Vec<Validator>> = LazyLock::new(|| {
     let schema: Value = serde_json::from_str(SCHEMA_JSON).expect(
@@ -136,6 +136,7 @@ fn body_def_name(kind: EventKind) -> &'static str {
         EventKind::EscalationAged => "escalationAgedBody",
         EventKind::MemoryWritten => "memoryWrittenBody",
         EventKind::DecisionWritten => "decisionWrittenBody",
+        EventKind::TeamPaused | EventKind::TeamResumed => "teamPausedBody",
     }
 }
 
@@ -175,7 +176,8 @@ pub fn is_about_one_contract(kind: EventKind) -> bool {
 /// `sprint.ended` name who acted in a closed vocabulary, `governor` or `human`, which cannot be
 /// blank. Nor for the three `tool.` kinds, the two `session.` kinds, and `agent.slept`, whose
 /// envelope names the agent and the session; Farik observed the sleep, and nobody asked for it.
-/// Nor for `escalation.aged`: the human left it waiting, and nobody acted.
+/// Nor for `escalation.aged`: the human left it waiting, and nobody acted. `team.paused` and
+/// `team.resumed` name the human in a closed vocabulary, which cannot be blank.
 fn attribution(body: &mut EventBody) -> Option<(&'static str, &mut String)> {
     match body {
         EventBody::TaskCreated(body) => Some(("created_by", &mut body.created_by)),
@@ -218,13 +220,15 @@ fn attribution(body: &mut EventBody) -> Option<(&'static str, &mut String)> {
         | EventBody::SprintEnded(_)
         | EventBody::AgentSlept(_)
         | EventBody::PullRequestOpened(_)
-        | EventBody::EscalationAged(_) => None,
+        | EventBody::EscalationAged(_)
+        | EventBody::TeamPaused(_)
+        | EventBody::TeamResumed(_) => None,
     }
 }
 
 /// Every kind the log holds in this phase, in the order `docs/schemas/event.schema.json` lists
 /// them. The step that adds a kind adds it here.
-pub const EVERY_KIND: [EventKind; 41] = [
+pub const EVERY_KIND: [EventKind; 43] = [
     EventKind::TaskCreated,
     EventKind::RequestTriaged,
     EventKind::ContractWritten,
@@ -266,6 +270,8 @@ pub const EVERY_KIND: [EventKind; 41] = [
     EventKind::EscalationAged,
     EventKind::MemoryWritten,
     EventKind::DecisionWritten,
+    EventKind::TeamPaused,
+    EventKind::TeamResumed,
 ];
 
 /// The ids an event is stamped with: which team and project it belongs to, and the contract, agent
@@ -428,6 +434,12 @@ pub enum EventBody {
     /// The Architect or the Product Manager recorded a decision, which is never written over.
     #[serde(rename = "decision.written")]
     DecisionWritten(DecisionWrittenBody),
+    /// The human paused every agent of the team.
+    #[serde(rename = "team.paused")]
+    TeamPaused(TeamPausedBody),
+    /// The human resumed the team.
+    #[serde(rename = "team.resumed")]
+    TeamResumed(TeamPausedBody),
 }
 
 impl EventBody {
@@ -476,6 +488,8 @@ impl EventBody {
             Self::EscalationAged(_) => EventKind::EscalationAged,
             Self::MemoryWritten(_) => EventKind::MemoryWritten,
             Self::DecisionWritten(_) => EventKind::DecisionWritten,
+            Self::TeamPaused(_) => EventKind::TeamPaused,
+            Self::TeamResumed(_) => EventKind::TeamResumed,
         }
     }
 }
@@ -624,7 +638,7 @@ pub fn event_from_value(input: &Value) -> Result<FarikEvent, Vec<ValidationError
 }
 
 /// The schema's own failures. A failure inside `body` is reported by the schema once, at `/body`,
-/// because `body` there is a choice of forty-one shapes and the schema can only say that none matched.
+/// because `body` there is a choice of forty-two shapes and the schema can only say that none matched.
 /// The event's `kind` says which one it was meant to be, so such a failure is asked again of that
 /// shape alone and reported where it actually is.
 fn schema_errors(input: &Value) -> Vec<ValidationError> {
@@ -799,7 +813,8 @@ mod tests {
         // after it would have to guess which one to believe.
         for kind in EVERY_KIND {
             for other in EVERY_KIND {
-                if other == kind {
+                // team.paused and team.resumed share one body, so neither can carry the other's.
+                if other == kind || a_body_wire(other) == a_body_wire(kind) {
                     continue;
                 }
                 let mut input = an_event_wire(kind);
@@ -1019,7 +1034,7 @@ mod tests {
 
     #[test]
     fn reports_a_malformed_field_inside_a_body_at_its_own_path() {
-        // The schema types `body` as a choice of forty-one shapes, so it reports a failure anywhere
+        // The schema types `body` as a choice of forty-two shapes, so it reports a failure anywhere
         // inside one at `/body`, with the whole body echoed back. The kind says which shape the
         // body was meant to be, so the reader checks it again against that one alone.
         let mut input = an_event_wire(EventKind::ProjectScanned);
@@ -1215,6 +1230,29 @@ mod tests {
         let errors = refusal(&input);
         assert_eq!(errors.len(), 1);
         assert_eq!(errors[0].path, "/body/usage/input_tokens");
+    }
+
+    #[test]
+    fn reads_a_team_paused_and_resumed_by_the_human() {
+        assert_eq!(EVERY_KIND.len(), 43);
+        for kind in [EventKind::TeamPaused, EventKind::TeamResumed] {
+            assert_eq!(a_body_wire(kind), json!({ "by": "human" }));
+            let input = an_event_wire(kind);
+            let event = event_from_value(&input).expect("valid");
+            assert_eq!(event.body.kind(), kind);
+            assert_eq!(event_to_value(&event), input);
+        }
+    }
+
+    #[test]
+    fn refuses_a_team_paused_by_anyone_but_the_human() {
+        for kind in [EventKind::TeamPaused, EventKind::TeamResumed] {
+            let mut input = an_event_wire(kind);
+            input["body"]["by"] = json!("governor");
+            let errors = refusal(&input);
+            assert_eq!(errors.len(), 1, "{kind}");
+            assert_eq!(errors[0].path, "/body/by", "{kind}");
+        }
     }
 
     #[test]

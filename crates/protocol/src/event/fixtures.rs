@@ -144,6 +144,7 @@ pub fn a_body_wire(kind: EventKind) -> Value {
         | EventKind::EscalationResolved
         | EventKind::MessagePosted => a_human_body_wire(kind),
         EventKind::AgentUpdated | EventKind::AgentSlept => an_agent_body_wire(kind),
+        EventKind::TeamPaused | EventKind::TeamResumed => json!({ "by": "human" }),
         EventKind::SprintStarted
         | EventKind::SprintPlanned
         | EventKind::SprintEnded

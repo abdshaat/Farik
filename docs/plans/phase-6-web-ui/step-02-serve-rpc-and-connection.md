@@ -165,7 +165,7 @@ Tests:
 - `every_kind_round_trips`, the existing test extended by `EVERY_KIND`, asserts that `team.paused` and `team.resumed` with `{ by: "human" }` round-trip. `EVERY_KIND.len() == 43`.
 - `refuses_a_team_paused_by_anyone_but_the_human` asserts that `{ by: "governor" }` fails the schema.
 
-- [ ] `feat(protocol): add the team.paused and team.resumed events`
+- [x] `feat(protocol): add the team.paused and team.resumed events`
 
 ### Task 2: Pausing the team
 

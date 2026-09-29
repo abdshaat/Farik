@@ -97,7 +97,9 @@
         "retro.appended",
         "escalation.aged",
         "memory.written",
-        "decision.written"
+        "decision.written",
+        "team.paused",
+        "team.resumed"
       ]
     },
     "eventBodyWire": {
@@ -144,7 +146,8 @@
         { "$ref": "#/$defs/retroAppendedBody" },
         { "$ref": "#/$defs/escalationAgedBody" },
         { "$ref": "#/$defs/memoryWrittenBody" },
-        { "$ref": "#/$defs/decisionWrittenBody" }
+        { "$ref": "#/$defs/decisionWrittenBody" },
+        { "$ref": "#/$defs/teamPausedBody" }
       ]
     },
     "contractSummary": {
@@ -654,6 +657,16 @@
         "slug": { "type": "string", "pattern": "^[a-z0-9-]+$" },
         "title": { "type": "string", "minLength": 1 },
         "written_by": { "type": "string" }
+      }
+    },
+    "teamPausedBody": {
+      "title": "Team Paused Body",
+      "description": "The body of both team.paused and team.resumed: the human paused every agent of the team at once, or resumed them. The two share one shape, so the one branch of the body choice serves both and the event's kind says which it is. by is the human, the only one who can. It is about no one contract, and the team file is not written; the pause is what the log says last.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["by"],
+      "properties": {
+        "by": { "type": "string", "enum": ["human"] }
       }
     },
     "questionAskedBody": {

@@ -590,7 +590,9 @@ fn apply_to(transaction: &Transaction<'_>, event: &FarikEvent) -> Result<(), Sto
         | EventBody::RetroAppended(_)
         | EventBody::EscalationAged(_)
         | EventBody::MemoryWritten(_)
-        | EventBody::DecisionWritten(_) => Ok(()),
+        | EventBody::DecisionWritten(_)
+        | EventBody::TeamPaused(_)
+        | EventBody::TeamResumed(_) => Ok(()),
     }
 }
 
