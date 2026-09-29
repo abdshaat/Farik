@@ -1,6 +1,6 @@
 # Phase 6, step 04: Web shell
 
-Status: in progress
+Status: done (landed and landing-reviewed 2026-09-29)
 Branch: `phase/6-web-ui`
 Spec: `docs/SPEC.md` sections 8.1 (the daemon serves the app), 8.6 (the web UI), and 10 (360 px, WCAG 2.2 AA, strings externalized, themes)
 Depends on: steps 01 to 03 of this phase (`@farik/brand`, the daemon's browser routes and `@farik/protocol-client`, and `@farik/ui`)
