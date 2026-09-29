@@ -38,6 +38,8 @@ Out of scope:
   2. else `state.json`'s `last_project`, when it is still a Farik project;
   3. else setup mode.
 
+  A project found in 1 or 2 with no credential (`load_credential` finds none, as after step 06's Disconnect) also starts in setup mode, with that project already chosen: the page shows "Connect your AI account", and `account.connect` then takes the project on (added 2026-09-29 by step 06's readiness review).
+
   In setup mode:
   - `DaemonState.deps` is `Option<Arc<ToolDeps>>`: `DaemonState::new` keeps its signature and wraps `Some`, and `setup` sets `None`.
   - The hook, MCP, and `/command` routes answer 503 with "farik has no project yet".

@@ -1,10 +1,10 @@
 # Phase 6, step 06: Team setup
 
-Status: draft (round two of readiness)
+Status: ready
 Branch: `phase/6-web-ui`
 Spec: `docs/SPEC.md` sections 4.1, 4.4, 5.1, 5.3 (the configurable judgment), 5.6, 5.12, 10 (foolproof configuration), F1, F2, F15, F16
 Depends on: steps 01 to 05 of this phase (landed)
-Readiness confirmed by: fresh-session reviewer, 2026-09-29. Round one was not ready: four unmade decisions (three the planner's, one the founder's) and sixteen findings. All are settled below. Round two is limited to the four decisions.
+Readiness confirmed by: fresh-session reviewer, 2026-09-29. Round one was not ready: four unmade decisions (three the planner's, one the founder's) and sixteen findings. All are settled below. Round two, limited to the four, found them settled (ready with findings, folded in).
 
 Signatures, not bodies; test names and what each asserts, not test code; around 300 lines at most (ADR 0008).
 
@@ -46,6 +46,7 @@ Out of scope: skills and connectors on the agent page (phases 8 and 9), the Fina
     - a named judge no active agent holds is refused ("no active <role> can check plans; choose auto or add one");
     - `required: always` with no questions is refused ("checking plans needs at least one question").
   - With the defaults, every existing `team.yaml` still validates. The 2-agent base fixture judges through the Product Manager.
+  - This changes behaviour: a Product Manager and Developer team now judges every contract (one short Product Manager session per plan), where spec 5.3 skipped judging without a Scrum Master. It is the founder's rule. The shared test fixtures whose tests are not about judging (`an_agent_wire`/the base team in `farik-core`'s fixtures, the orchestrator `Harness`, and the CLI `a_team`) set `judgment.required: never` explicitly, so each existing test keeps testing what it names. Judging tests set `always`.
 - **The judgment's code path** (the plan file map gains these files).
   - `requests.rs` starts the judgment session for the resolved judge, not `scrum_master(team)`.
   - `judgment_message` (`messages.rs`) and the tool's description (`tools.rs`) take the team's numbered questions.
@@ -154,6 +155,7 @@ impl Team { pub fn judgment(&self) -> JudgmentPolicy; pub fn judge(&self) -> Rol
 pub struct JudgmentAnswer { pub question: String, pub pass: bool, pub reason: String }
 pub struct JudgmentReview { pub answers: Vec<JudgmentAnswer>, pub reason: String }
 pub struct TeamPermissions { pub run_commands: bool, pub push: bool }
+impl Agent { pub fn tiers(&self, permissions: &TeamPermissions) -> Vec<PermissionTier>; }   // was tiers(&self); callers pass team.permissions()
 pub fn describe_change(old: &Team, new: &Team) -> Vec<String>;  pub fn defaults() -> TeamDefaults;
 pub struct ScanFacts { pub language: Option<String>, pub toolchain: Option<String>, pub workspace: bool, pub packages: u32, pub tests_in: Option<String>, pub tracked_files: u32, pub last_commit: Option<DateTime<Utc>> }
 CredentialStore::delete(&self) -> Result<(), CredentialError>;
