@@ -6,13 +6,13 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use axum::Json;
 use axum::body::Bytes;
 use axum::extract::State;
 use axum::extract::ws::rejection::WebSocketUpgradeRejection;
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
+use axum::{Extension, Json};
 use chrono::{DateTime, Utc};
 use farik_core::contract::TaskId;
 use farik_protocol::command::{Command, command_from_value, reply_to_value};
@@ -22,6 +22,7 @@ use farik_store::EventQuery;
 use farik_store::projections::TaskProjection;
 use serde_json::{Value, json};
 use sha2::{Digest as _, Sha256};
+use tokio_util::sync::CancellationToken;
 
 use super::{DaemonError, DaemonState, hex, random_token, same_token};
 use crate::claude::CredentialKind;
@@ -266,6 +267,7 @@ fn session_cookie(headers: &HeaderMap) -> Option<&str> {
 /// session 401, and a daemon without the browser routes 404, each before the upgrade.
 pub(super) async fn rpc(
     State(state): State<Arc<DaemonState>>,
+    Extension(cancel): Extension<CancellationToken>,
     headers: HeaderMap,
     upgrade: Result<WebSocketUpgrade, WebSocketUpgradeRejection>,
 ) -> Response {
@@ -280,7 +282,7 @@ pub(super) async fn rpc(
         return StatusCode::UNAUTHORIZED.into_response();
     }
     match upgrade {
-        Ok(upgrade) => upgrade.on_upgrade(move |socket| talk(socket, state)),
+        Ok(upgrade) => upgrade.on_upgrade(move |socket| talk(socket, state, cancel)),
         Err(rejection) => rejection.into_response(),
     }
 }
@@ -288,9 +290,9 @@ pub(super) async fn rpc(
 /// How often a subscription reads the log for new events.
 const POLL: Duration = Duration::from_millis(500);
 
-/// One browser's socket, until it closes: each request answered in turn, and, while it is
-/// subscribed, every event past the last one it was sent.
-async fn talk(mut socket: WebSocket, state: Arc<DaemonState>) {
+/// One browser's socket, until it or the daemon closes (`cancel`): each request answered in turn,
+/// and, while it is subscribed, every event past the last one it was sent.
+async fn talk(mut socket: WebSocket, state: Arc<DaemonState>, cancel: CancellationToken) {
     // The seq of the last event sent to the subscription, or `None` while there is none.
     let mut sent: Option<u64> = None;
     // ponytail: the log is re-read every 500 ms, because other processes append to it too and the
@@ -311,6 +313,10 @@ async fn talk(mut socket: WebSocket, state: Arc<DaemonState>) {
                 }
             }
             _ = poll.tick(), if sent.is_some() => {}
+            () = cancel.cancelled() => {
+                let _ = socket.send(Message::Close(None)).await;
+                return;
+            }
         }
         if !push(&mut socket, &state, &mut sent).await {
             return;
@@ -1064,6 +1070,40 @@ mod tests {
         assert_eq!(answer, json!({ "jsonrpc": "2.0", "id": 1, "result": {} }));
         drop(socket);
         handle.shutdown().await.expect("the daemon stops");
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn closes_browser_sockets_on_shutdown() {
+        let daemon = TestDaemon::new("rpc-shutdown", |_| {});
+        let (handle, secret) = on_a_socket(&daemon.state, &daemon.project.repo.path).await;
+        let mut socket = open(handle.info.port, &secret).await;
+        let answer = call(&mut socket, 1, "unsubscribe", &json!({})).await;
+        assert_eq!(answer["result"], json!({}), "{answer}");
+
+        handle.shutdown().await.expect("the daemon stops");
+        // The socket ends with the daemon: a close frame or the end of the stream, in time.
+        let ended = tokio::time::timeout(BOUND, socket.next())
+            .await
+            .expect("the socket ends within the bound");
+        assert!(
+            matches!(ended, Some(Ok(WsMessage::Close(_)) | Err(_)) | None),
+            "the socket still talks: {ended:?}"
+        );
+        // A request after it gets no answer.
+        let request = json!({ "jsonrpc": "2.0", "id": 2, "method": "unsubscribe", "params": {} });
+        if socket
+            .send(WsMessage::Text(request.to_string().into()))
+            .await
+            .is_ok()
+        {
+            let later =
+                tokio::time::timeout(std::time::Duration::from_secs(2), socket.next()).await;
+            assert!(
+                !matches!(later, Ok(Some(Ok(WsMessage::Text(_))))),
+                "{later:?}"
+            );
+        }
     }
 
     #[tokio::test(flavor = "multi_thread")]

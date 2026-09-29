@@ -16,7 +16,7 @@ use axum::http::{StatusCode, header};
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
-use axum::{Json, Router};
+use axum::{Extension, Json, Router};
 use farik_core::budget::SessionLimits;
 use farik_core::contract::TaskId;
 use rmcp::transport::streamable_http_server::session::local::LocalSessionManager;
@@ -472,7 +472,7 @@ fn hex(bytes: &[u8]) -> String {
 
 /// The routes, each behind the token: the two hooks, and Farik's MCP server for the session
 /// `X-Farik-Session` names. `cancel` ends every MCP session, whose event streams a graceful
-/// shutdown would otherwise wait on forever.
+/// shutdown would otherwise wait on forever, and every browser socket, which it does not track.
 pub(crate) fn router(state: Arc<DaemonState>, token: &str, cancel: CancellationToken) -> Router {
     let expected: Arc<str> = Arc::from(format!("Bearer {token}"));
     let server = StreamableHttpService::new(
@@ -481,7 +481,7 @@ pub(crate) fn router(state: Arc<DaemonState>, token: &str, cancel: CancellationT
         // The stateful sessions Claude Code opens with `initialize` are the default.
         StreamableHttpServerConfig::default()
             .with_json_response(true)
-            .with_cancellation_token(cancel),
+            .with_cancellation_token(cancel.clone()),
     );
     let mcp = Router::new()
         .route_service("/mcp", server)
@@ -494,6 +494,7 @@ pub(crate) fn router(state: Arc<DaemonState>, token: &str, cancel: CancellationT
     let browser = Router::new()
         .route("/connect", post(web::connect))
         .route("/rpc", get(web::rpc))
+        .layer(Extension(cancel))
         .with_state(Arc::clone(&state));
     Router::new()
         .route("/hook/pre-tool-use", post(pre_tool_use))
