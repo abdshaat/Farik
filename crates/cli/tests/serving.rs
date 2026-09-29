@@ -26,7 +26,9 @@ use farik_store::git::fixtures::TempRepo;
 use serde_json::{Value, json};
 use tokio::sync::Semaphore;
 
-use project::{Ran, a_team, events, filed, joined, recorded, run, run_with, scratch};
+use project::{
+    Ran, a_team, events, filed, hold_the_run_lock, joined, recorded, run, run_with, scratch,
+};
 
 /// A port the operating system gave out and nothing holds now.
 fn free_port() -> String {
@@ -145,6 +147,21 @@ fn remembers_the_project_it_serves() {
     assert_eq!(stopped.code, 0, "{}", stopped.err);
     let ran = joined(serving, "the serve");
     assert_eq!(ran.code, 0, "{}\n{}", ran.out, ran.err);
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn writes_no_state_before_the_driver_starts() {
+    let repository = a_team("serve-refused");
+    let state = scratch("serve-refused-state");
+    let _lock = hold_the_run_lock(&repository);
+    let ran = run_with(&repository.path, &["serve", "--port", &free_port()], |io| {
+        io.engine = recorded(Vec::new());
+        io.env
+            .insert("XDG_CONFIG_HOME".to_string(), state.display().to_string());
+    });
+    assert_eq!(ran.code, 1, "{}\n{}", ran.out, ran.err);
+    assert!(!state.join("farik/state.json").exists(), "{}", ran.err);
 }
 
 #[test]

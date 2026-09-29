@@ -638,6 +638,9 @@ mod tests {
         let codes = ConnectCodes::default();
         let code = codes.issue().expect("a code");
         assert!(is_hex_64(&code), "{code}");
+        // Neither a prefix of the live code nor nothing opens it, and neither spends it.
+        assert!(!codes.redeem(&code[..32]));
+        assert!(!codes.redeem(""));
         assert!(codes.redeem(&code));
         assert!(!codes.redeem(&code));
 
