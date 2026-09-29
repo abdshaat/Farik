@@ -756,6 +756,13 @@ fn lists_what_waits_on_the_human() {
 fn lists_a_high_risk_result_and_no_answered_question() {
     let repository = a_team("plan-waiting");
     let task = a_high_risk_task_verifying(&repository, "Add done.txt");
+    // A result waits on the human once its reviewer has passed it.
+    record(
+        &repository,
+        &task,
+        "review.recorded",
+        &json!({ "reviewer": "dev-b", "criteria_run": 1, "passed": true }),
+    );
     let n = record(
         &repository,
         &task,

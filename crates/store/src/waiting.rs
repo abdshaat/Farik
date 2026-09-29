@@ -3,10 +3,12 @@
 //! the tasks waiting to be integrated by hand. One list, which the command line and the browser
 //! both read.
 
-use farik_core::contract::{Role, TaskId, TaskStatus};
+use std::str::FromStr;
+
+use farik_core::contract::{Role, TaskId, TaskKind, TaskStatus};
 use farik_core::governor::done::result_awaits_human;
 use farik_core::team::{Integration, Team};
-use farik_protocol::event::{EventBody, EventKind, FarikEvent};
+use farik_protocol::event::{EventBody, EventKind, FarikEvent, TaskStatusWire};
 
 use crate::files::ProjectFiles;
 use crate::{EventLog, EventQuery, Projections, StoreError, TaskProjection};
@@ -141,6 +143,15 @@ pub fn waiting(
         if !result_awaits_human(&contract) {
             continue;
         }
+        // A task's result reaches the human once its reviewer passed it; an epic's is theirs.
+        if contract.kind != TaskKind::Epic
+            && !review_passed(&log.read(&EventQuery {
+                task_id: Some(row.task_id.clone()),
+                ..EventQuery::default()
+            })?)
+        {
+            continue;
+        }
         let assignee = row.assignee_id.as_deref();
         let finished = name_of(team, assignee.unwrap_or("the team"));
         let line = match row.reviewer_id.as_deref() {
@@ -163,6 +174,43 @@ pub fn waiting(
         }
     }
     Ok(waiting)
+}
+
+/// Whether the latest `review.recorded` since the task last entered `verifying` passed.
+#[must_use]
+pub fn review_passed(history: &[FarikEvent]) -> bool {
+    let since =
+        last_move_into(history, TaskStatus::Verifying).map_or(0, |event| event.envelope.seq);
+    history
+        .iter()
+        .rev()
+        .take_while(|event| event.envelope.seq > since)
+        .find_map(|event| match &event.body {
+            EventBody::ReviewRecorded(body) => Some(body.passed),
+            _ => None,
+        })
+        .unwrap_or(false)
+}
+
+/// Whether `event` is a `task.transitioned` into `status`.
+#[must_use]
+pub fn is_move_into(event: &FarikEvent, status: TaskStatus) -> bool {
+    matches!(&event.body, EventBody::TaskTransitioned(body) if wire_status(body.to) == Some(status))
+}
+
+/// The task's last `task.transitioned` into `status`.
+#[must_use]
+pub fn last_move_into(history: &[FarikEvent], status: TaskStatus) -> Option<&FarikEvent> {
+    history
+        .iter()
+        .rev()
+        .find(|event| is_move_into(event, status))
+}
+
+/// A wire status as the contract's own. The two lists are one, which a test in `farik-protocol`
+/// pins, so `None` is a log no Farik wrote.
+fn wire_status(status: TaskStatusWire) -> Option<TaskStatus> {
+    TaskStatus::from_str(&status.to_string()).ok()
 }
 
 /// Every question nobody answered, by task.
@@ -413,6 +461,66 @@ mod tests {
     use super::fixtures::{Board, a_team, at};
     use super::{WaitingKind, waiting};
 
+    /// A passing review of `task` by Grace.
+    fn reviewed(board: &Board, task: &str) {
+        board.put(
+            at(9, 2),
+            Some(task),
+            Some("grace"),
+            "review.recorded",
+            json!({ "reviewer": "grace", "criteria_run": 1, "passed": true }),
+        );
+    }
+
+    #[test]
+    fn lists_a_result_once_its_review_passed() {
+        let board = Board::new("waiting-reviewed");
+        let people = (Some("linus"), Some("grace"));
+        let high = |wire: &mut serde_json::Value| wire["risk"] = json!("high");
+        board.file("FRK-1", "Unreviewed work", high);
+        board.moved(at(9, 1), "FRK-1", ("draft", "verifying"), "linus", people);
+        // A pass from before the task went back to work is not this verification's.
+        board.file("FRK-2", "Reworked work", high);
+        board.moved(at(9, 2), "FRK-2", ("draft", "verifying"), "linus", people);
+        reviewed(&board, "FRK-2");
+        board.moved(
+            at(9, 3),
+            "FRK-2",
+            ("verifying", "in_progress"),
+            "human",
+            people,
+        );
+        board.moved(
+            at(9, 4),
+            "FRK-2",
+            ("in_progress", "verifying"),
+            "linus",
+            people,
+        );
+        // An epic's result is the human's to review, so it waits on no reviewer.
+        board.file("FRK-3", "An epic", |wire| wire["kind"] = json!("epic"));
+        board.moved(
+            at(9, 5),
+            "FRK-3",
+            ("draft", "verifying"),
+            "linus",
+            (Some("linus"), None),
+        );
+
+        let listed = waiting(&board.projections, &board.log, &board.files, &a_team())
+            .expect("the store reads");
+        let seen: Vec<(&str, &str)> = listed
+            .iter()
+            .map(|item| (item.task_id.as_str(), item.line.as_str()))
+            .collect();
+        assert_eq!(seen, vec![("FRK-3", "Linus finished it")]);
+
+        reviewed(&board, "FRK-1");
+        let listed = waiting(&board.projections, &board.log, &board.files, &a_team())
+            .expect("the store reads");
+        assert_eq!(listed[0].line, "Linus finished it and Grace reviewed it");
+    }
+
     #[test]
     fn lists_what_waits_on_the_human() {
         let board = Board::new("waiting-five");
@@ -437,6 +545,7 @@ mod tests {
                 json!({ "method": "human", "question": "Does it look right?" });
         });
         board.moved(at(9, 2), "FRK-2", ("draft", "verifying"), "linus", people);
+        reviewed(&board, "FRK-2");
         board.file("FRK-3", "A question", |_| {});
         let asked = board.put(
             at(9, 3),

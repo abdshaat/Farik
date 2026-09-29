@@ -39,6 +39,7 @@ use farik_protocol::event::{
 };
 use farik_store::files::{FilesError, ProjectFiles};
 pub use farik_store::git::integration_branch;
+pub(crate) use farik_store::waiting::{is_move_into, last_move_into, review_passed};
 use farik_store::{EventLog, EventQuery, Git, GitError, Projections, StoreError, TaskProjection};
 
 use crate::channel::{ChannelError, post_system};
@@ -782,21 +783,6 @@ fn children_of(board: &[TaskProjection], id: &TaskId) -> Vec<ChildState> {
         .collect()
 }
 
-/// Whether the latest `review.recorded` since the task last entered `verifying` passed.
-pub(crate) fn review_passed(history: &[FarikEvent]) -> bool {
-    let since =
-        last_move_into(history, TaskStatus::Verifying).map_or(0, |event| event.envelope.seq);
-    history
-        .iter()
-        .rev()
-        .take_while(|event| event.envelope.seq > since)
-        .find_map(|event| match &event.body {
-            EventBody::ReviewRecorded(body) => Some(body.passed),
-            _ => None,
-        })
-        .unwrap_or(false)
-}
-
 /// Whether the human is to review this contract, asked when it is assigned: an epic, on a team
 /// with no active Scrum Master, is reviewed by the human (5.16 item 4), who has no agent id.
 pub(crate) fn reviewed_by_the_human(contract: &TaskContract, team: &Team) -> bool {
@@ -1285,24 +1271,6 @@ fn evidence_since_work_began(
         }
     }
     (results, completion_note, review_note)
-}
-
-pub(crate) fn is_move_into(event: &FarikEvent, status: TaskStatus) -> bool {
-    matches!(&event.body, EventBody::TaskTransitioned(body) if wire_status(body.to) == Some(status))
-}
-
-/// The task's last `task.transitioned` into `status`.
-pub(crate) fn last_move_into(history: &[FarikEvent], status: TaskStatus) -> Option<&FarikEvent> {
-    history
-        .iter()
-        .rev()
-        .find(|event| is_move_into(event, status))
-}
-
-/// A wire status as the contract's own. The two lists are one, which a test in `farik-protocol`
-/// pins, so `None` is a log no Farik wrote.
-fn wire_status(status: TaskStatusWire) -> Option<TaskStatus> {
-    TaskStatus::from_str(&status.to_string()).ok()
 }
 
 #[cfg(test)]
