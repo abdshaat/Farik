@@ -124,11 +124,28 @@ describe("setup", () => {
 			kind: "subscription_token",
 			secret: "sk-ant-oat01-test",
 		});
-		act(() => s.reply(call, { stored_in: "file" }));
+		act(() => s.reply(call, { stored_in: "file", taking_on: false }));
 		expect(await screen.findByText(en.storedFile)).toBeTruthy();
 		expect(
 			await screen.findByRole("heading", { name: en.projectTitle }),
 		).toBeTruthy();
+		cleanup();
+
+		// A computer with a keychain: the page says the key went there.
+		const again = (await renderApp("/setup/account")).socket as FakeSocket;
+		await answerQuery(again, "account.status", {
+			provider: null,
+			kind: null,
+			source: null,
+		});
+		fireEvent.change(await screen.findByLabelText(en.subscriptionKey), {
+			target: { value: "sk-ant-oat01-test" },
+		});
+		fireEvent.click(screen.getByRole("button", { name: en.saveContinue }));
+		const kept = await sent(again, "account.connect");
+		act(() => again.reply(kept, { stored_in: "keychain", taking_on: false }));
+		expect(await screen.findByText(en.storedKeychain)).toBeTruthy();
+		expect(screen.queryByText(en.storedFile)).toBeNull();
 	});
 
 	it("takes_the_waiting_project_on_once_connected", async () => {
