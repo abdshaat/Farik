@@ -11,6 +11,13 @@ async function screenshots(page: Page, name: string) {
 	await page.screenshot({ path: `${shots}${name}-1280.png`, fullPage: true });
 }
 
+/** How many lines an element's text takes. */
+function lines(element: Element): number {
+	const range = document.createRange();
+	range.selectNodeContents(element);
+	return new Set([...range.getClientRects()].map((r) => r.top)).size;
+}
+
 test("the start link opens the app and pause works end to end", async ({
 	page,
 }) => {
@@ -24,6 +31,9 @@ test("the start link opens the app and pause works end to end", async ({
 		const banner = page.getByText("Nothing new starts until you resume.");
 		await page.getByRole("button", { name: "Pause the team" }).click();
 		await expect(banner).toBeVisible();
+		// The rail's Resume keeps to one line.
+		const resume = page.getByRole("button", { name: "Resume the team" });
+		expect(await resume.evaluate(lines)).toBe(1);
 		const kinds = farik(serve.project, ["--json", "log"])
 			.trim()
 			.split("\n")
@@ -58,6 +68,13 @@ test("a used link and a lost connection are said plainly", async ({
 		await expect(
 			again.getByText(/This start link was already used/),
 		).toBeVisible();
+		// It fits a phone, and its Copy button is outlined, as in the Connect mockup.
+		await again.setViewportSize({ width: 360, height: 780 });
+		expect(
+			await again.evaluate(() => document.documentElement.scrollWidth),
+		).toBeLessThanOrEqual(360);
+		const copy = again.getByRole("button", { name: "Copy" });
+		await expect(copy).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
 		await second.close();
 	} finally {
 		await serve.stop();

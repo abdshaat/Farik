@@ -1,3 +1,5 @@
+import mark from "@farik/brand/assets/logo-mark-1254.png";
+import wordmark from "@farik/brand/assets/wordmark-1024.png";
 import { Button } from "@farik/ui";
 import { useConnection } from "../app/connection.tsx";
 import { t } from "../strings/t.ts";
@@ -10,6 +12,10 @@ export function Connect() {
 	const { status, linkUsed } = useConnection();
 	return (
 		<main className={styles.connect}>
+			<div className={styles.brand}>
+				<img className={styles.mark} src={mark} alt="" />
+				<img className={styles.wordmark} src={wordmark} alt={t("brand")} />
+			</div>
 			{linkUsed && <p>{t("linkUsed")}</p>}
 			{status === "no_session" && (
 				<>

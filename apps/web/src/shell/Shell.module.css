@@ -92,6 +92,12 @@
 	gap: var(--farik-space-2);
 }
 
+.pause button,
+.resume button {
+	white-space: nowrap;
+	padding-inline: var(--farik-space-3);
+}
+
 .pause button {
 	background: transparent;
 	color: inherit;

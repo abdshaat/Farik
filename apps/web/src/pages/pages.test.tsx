@@ -55,6 +55,9 @@ describe("pages", () => {
 		const code = first.container.querySelector("code");
 		expect(code?.textContent).toBe("farik serve");
 		expect(screen.getByRole("button", { name: en.copy })).toBeTruthy();
+		// The mark is decoration beside the wordmark, which names Farik.
+		expect(screen.getByRole("img", { name: en.brand })).toBeTruthy();
+		expect(first.container.querySelectorAll('img[alt=""]').length).toBe(1);
 		await expectNoAxeViolations(first.container);
 		cleanup();
 

@@ -15,7 +15,11 @@ export function App() {
 	if (status === "no_session" || status === "lost") return <Connect />;
 	return (
 		<Routes>
-			<Route path="/connect" element={<Connect />} />
+			{/* With a live session, the connect page has nothing to say: a used link goes home. */}
+			<Route
+				path="/connect"
+				element={status === "open" ? <Navigate to="/" replace /> : <Connect />}
+			/>
 			<Route element={<Shell />}>
 				<Route path="/" element={<Navigate to="/events" replace />} />
 				<Route path="/events" element={<Events />} />

@@ -91,8 +91,11 @@ export function ConnectionProvider(props: {
 			}
 			if (stopped) return;
 			// A refused WebSocket upgrade gives no status, so the session is asked first.
-			if (answer.status === 204) open();
-			else if (answer.status === 401) setStatus("no_session");
+			// A live session outranks a used link: this browser was let in before.
+			if (answer.status === 204) {
+				setLinkUsed(false);
+				open();
+			} else if (answer.status === 401) setStatus("no_session");
 			else lose();
 		}
 		async function start() {

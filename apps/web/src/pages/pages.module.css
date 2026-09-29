@@ -58,9 +58,27 @@
 }
 
 .connect > * {
+	box-sizing: border-box;
 	width: 100%;
 	max-width: 40rem;
 	margin: 0 auto;
+}
+
+.brand {
+	display: flex;
+	align-items: center;
+	gap: var(--farik-space-4);
+}
+
+.mark {
+	width: 56px;
+	height: 56px;
+	image-rendering: pixelated;
+}
+
+.wordmark {
+	width: 168px;
+	height: auto;
 }
 
 .connect .muted {
@@ -90,6 +108,14 @@
 	font:
 		var(--farik-type-code-weight) var(--farik-type-code-size) /
 		var(--farik-type-code-line-height) var(--farik-type-code-family);
+}
+
+/* Outlined on the dark band, as in the Connect mockup. */
+.command button {
+	background: transparent;
+	color: inherit;
+	border-color: currentColor;
+	font-weight: 600;
 }
 
 .retry {
