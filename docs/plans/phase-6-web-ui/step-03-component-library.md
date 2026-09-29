@@ -168,7 +168,7 @@ Tests:
 - `Dialog`: `opens as a modal named by its title` asserts that with `open` true, `showModal` was called and the dialog's accessible name is the title. `closes on Escape and on the close button` asserts that a `cancel` event and a click on the button named `uiStrings.close` each call `onClose`.
 - `Stepper`: `marks the current step` asserts three `listitem`s, `aria-current="step"` only on the one at `current`, and the text `Step 2 of 3` present for `current = 1`.
 
-- [ ] `feat(ui): add the dialog and the stepper`
+- [x] `feat(ui): add the dialog and the stepper`
 
 ### Task 5: Lists, tables, the kanban column, and the chat
 
