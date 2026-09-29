@@ -468,7 +468,7 @@
     },
     "reviewRecordedBody": {
       "title": "Review Recorded Body",
-      "description": "One verification of a contract summed up (docs/SPEC.md section 5.4), recorded once per verification when the reviewer's session ends and every criterion other than a human one has a reviewer result: criteria_run is how many criteria have one, and passed is whether each one's latest passed. reviewer names the reviewer the verification was about. Nothing gates on it; the metrics read it.",
+      "description": "One verification of a contract summed up (docs/SPEC.md section 5.4), recorded once per verification when the reviewer's session ends and every criterion other than a human one has a reviewer result: criteria_run is how many criteria have one, and passed is whether each one's latest passed. reviewer names the reviewer the verification was about. The human's send-back of a task waits for it (5.2); the metrics read it too.",
       "type": "object",
       "additionalProperties": false,
       "required": ["reviewer", "criteria_run", "passed"],

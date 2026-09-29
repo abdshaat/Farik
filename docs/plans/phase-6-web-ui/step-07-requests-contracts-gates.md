@@ -32,7 +32,7 @@ The runtime gives step 08's pages what spec 5.4 and 5.16 ask of a human gate. It
   - A completion or review note must open with a summary: its first paragraph, up to the first blank line, 20 to 600 characters. `farik_write_note` refuses one that does not, with `summary_missing: open the note with two or three plain sentences for the user, then a blank line`. Every progress note, whether an agent's or Farik's, is exempt.
 - **Sending back** (ADR 0024).
   - Core gains `GateId::HumanRejection` for the new transition-table row `verifying → rejected` by the human. It opens when `TransitionContext.result_awaits_human` is true, and, for a task, when `TransitionContext.review_passed` is true. An epic needs only the first.
-  - The human's message is required. `failed_criteria` is optional.
+  - The human's message is required. `failed_criteria` is required on the wire and may be `[]`, because the command schema's `oneOf` would otherwise match `human_accept` too; the page sends `failed_criteria: []`.
   - `Transitions::context` computes the two flags with the same predicate `human.rs` uses for acceptance: `verifying` and (an epic, or risk `high`, or a `human` criterion). `review_passed` means the latest `review.recorded` since `verifying` passed.
   - The command is `human_send_back { task_id, subject: AcceptSubject, message, failed_criteria: [string] }`, reusing `AcceptSubject` (`contract | result`).
     - For `contract`, while approval is awaited, it runs the existing escalation resolve to `refining` with the message.
@@ -51,11 +51,11 @@ The runtime gives step 08's pages what spec 5.4 and 5.16 ask of a human gate. It
 - **Help choices, per escalation reason.** These are the exact `escalation_resolve` bodies step 08's page sends.
   - `iterations`: "Give 2 more tries" `{ to: in_progress, extra_tries: 2 }`; "Ask <PM> to change the plan" `{ to: refining }`; "Cancel the task" `{ to: cancelled }`.
   - `budget` and `sessions`: "Change the plan" `{ to: refining }`; "Cancel the task" `{ to: cancelled }`. Resuming is not offered, because spec 5.7 raises these again. The page explains that the plan's budget must change.
-  - `integration`: "Add it now" `task_integrate`, then "Cancel the task".
+  - `integration` is not an escalation the human resolves. It is a `waiting.list` kind on an accepted task, and its page offers one action, "Add to project" (`task_integrate`). An accepted task is terminal, so there is nothing to cancel.
   - `blocker_age`, `permission`, `readiness_failures`, `explicit_request`: "Carry on" `{ to: <the status the task held before the escalation>, from its last task.transitioned into escalated }`; "Change the plan" `{ to: refining }`; "Cancel the task".
   - `approval` is not a help case: the plan page handles it.
   - "Pause the task" is dropped, because leaving `blocked` needs a resolution page this phase does not have.
-  - The query `escalation.choices { task_id }` answers `[{ label, body }]`, so the rule lives in one place.
+  - The query `escalation.choices { task_id }` answers `{ choices: [{ label, body }] }` (`[]` unless the task is `escalated`), so the rule lives in one place.
 - **Question choices.** `farik_ask_human` (`tools/work.rs`, `AskHumanInput`) gains optional `choices: [{ label (1..80), hint? (0..160) }]`, at most 4. `question.asked` gains the same `choices`. "Let <agent> decide" answers the exact text "Decide as you think best, and say what you chose."
 - **Filing** (`request.file { text }`).
   - `request_from_brief`, `placeholder_budget_usd`, and `PLACEHOLDER` move from `crates/cli/src/contract_new.rs` to `farik_store::requests`, and the CLI calls them there.
@@ -63,12 +63,13 @@ The runtime gives step 08's pages what spec 5.4 and 5.16 ask of a human gate. It
   - A text under 20 characters is refused with "say a little more: at least 20 characters". `request_from_brief`'s own messages are unchanged; the method checks the length first.
   - It files through `file_request` with `created_by: human`, and answers `{ task_id }`.
 - **Checking and saving a plan.**
-  - `Transitions::context` is split: `pub fn readiness_context(files: &ProjectFiles, log: &EventLog, team: &Team, contract: &TaskContract, now: DateTime<Utc>) -> Result<ReadinessContext, TransitionError>` builds from a given contract, and `context` calls it with the file's contract.
+  - `Transitions::context` is split: `Transitions::readiness_context(&self, team, contract) -> Result<ReadinessContext, TransitionError>` builds from a given contract, because it needs the board and the budgets the transitions object holds, and `context` shares its body.
   - `contract.check { task_id, contract }` answers `{ failures: [{ rule, message, plain }], total }`, where `total` is the number of checks run (the `ReadinessRule` variants evaluated for this contract, plus one for the schema):
     - schema errors come first, as `rule: "schema"`, with the schema's message as `plain`;
     - then `evaluate_readiness`'s failures, with `plain` from `farik_core::governor::plain::plain_readiness(rule) -> &'static str`, which covers every `ReadinessRule` variant.
   - This is the phase decision's `contract.validate`, renamed because it validates nothing it saves. The project plan records the rename.
   - `contract.save { task_id, contract }` writes content fields as the human, through `check_contract_write`. When the task is frozen (awaiting approval), `ReturnsToRefining` is accepted for the human. The task moves to `refining`, and the judgment and approval are asked again. The answer says so: `{ saved: true, back_to_refining: true }`. A write refused otherwise answers `-32005` with the gate's sentence.
+- **Answers are wrapped**, as `tasks.list` is: `{ waiting }`, `{ questions }`, `{ choices }`, `{ activity }`, `{ moved }`, `{ checks }`, `{ events }`, `{ contract }`. `sprint.current` answers the bare object or `null`.
 - **Queries.** `farik_store` gains `waiting`, `diff`, and `activity`. `integration_branch` moves from `farik_runtime::transitions` to `farik_store::git` (it needs only `Team` and `Git`), so that `diff` has no runtime dependency.
   - **`waiting.list {}`** answers `[{ task_id, kind: approval | acceptance | question | help | integration, agent_id, title, line }]`.
     - Lines: approval, "<PM name> wrote a plan for you to approve"; acceptance, "<assignee> finished it and <reviewer> reviewed it"; question, the question's text; help, "<assignee> needs your help: <reason in words>"; integration, "Accepted, waiting for you to add it".
@@ -133,11 +134,11 @@ Command::HumanSendBack { task_id: TaskId, subject: AcceptSubject, message: Strin
 EscalationResolve body and EscalationResolvedBody: extra_tries: Option<u8>
 AskHumanInput::choices / QuestionAskedBody::choices: Vec<QuestionChoice { label: String, hint: Option<String> }>
 pub fn farik_store::requests::{request_from_brief, placeholder_budget_usd};  pub const PLACEHOLDER: &str;
-pub fn farik_store::git::integration_branch(team: &Team, git: &Git) -> Result<String, StoreError>;
-pub fn farik_store::waiting::waiting(projections: &Projections, log: &EventLog, team: &Team) -> Result<Vec<Waiting>, StoreError>;
-pub fn farik_store::diff::diff_of(git: &Git, team: &Team, contract: &TaskContract, history: &[FarikEvent], children: &[TaskContract]) -> Result<TaskDiff, StoreError>;
-pub fn farik_store::activity::activity(log: &EventLog, projections: &Projections, team: &Team, now: DateTime<Utc>) -> Result<Vec<AgentActivity>, StoreError>;
-pub fn readiness_context(files: &ProjectFiles, log: &EventLog, team: &Team, contract: &TaskContract, now: DateTime<Utc>) -> Result<ReadinessContext, TransitionError>;
+pub fn farik_store::git::integration_branch(team: &Team, git: &Git) -> Result<String, GitError>;
+pub fn farik_store::waiting::waiting(projections: &Projections, log: &EventLog, files: &ProjectFiles, team: &Team) -> Result<Vec<Waiting>, StoreError>;
+pub fn farik_store::diff::diff_of(git: &Git, team: &Team, contract: &TaskContract, history: &[FarikEvent], children: &[(TaskContract, Vec<FarikEvent>)]) -> Result<TaskDiff, String>;
+pub fn farik_store::activity::activity(log: &EventLog, projections: &Projections, files: &ProjectFiles, team: &Team, now: DateTime<Utc>) -> Result<Vec<AgentActivity>, StoreError>;
+Transitions::readiness_context(&self, team: &Team, contract: &TaskContract) -> Result<ReadinessContext, TransitionError>;
 ```
 
 RPC queries: `waiting.list`, `contract.get`, `contract.check`, `task.history`, `task.diff`, `task.checks`, `task.tries`, `sprint.current`, `questions.list`, `escalation.choices`, `team.activity`, `moved.since`. RPC methods: `request.file`, `contract.save`.
@@ -194,7 +195,7 @@ Files: the store's requests, waiting, diff, activity and git; CLI moves; runtime
 - Spec 8.5: the events, and `review.recorded`'s description in `event.schema.json`, which said nothing gates on it, now says the human's send-back waits for it.
 - The project plan: this step's line, and the `contract.validate` rename.
 
-- [ ] `docs(spec): the gates' summaries, sending back, and more tries`
+- [x] `docs(spec): the gates' summaries, sending back, and more tries`
 
 ## Verification
 
