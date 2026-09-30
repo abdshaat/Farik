@@ -50,7 +50,7 @@ static VALIDATOR: LazyLock<Validator> = LazyLock::new(|| {
 /// `docs/SPEC.md` section 3 and F1: a team with nobody to write a contract has no way to start, and
 /// a team with nobody to do the work has no way to finish. Every other role is the human's choice.
 const REQUIRED_ROLES: [(RoleWire, &str); 2] = [
-    (RoleWire::ProductManager, "write a contract"),
+    (RoleWire::ProductManager, "write its plans"),
     (RoleWire::SoftwareDeveloper, "do the work"),
 ];
 
@@ -156,10 +156,9 @@ pub fn validate_team(input: &Value) -> Result<Team, Vec<ValidationError>> {
             errors.push(ValidationError {
                 path: format!("/agents/{index}/revokes"),
                 message: format!(
-                    "{} cannot have read taken away: everyone reads (docs/SPEC.md section 5.6), \
-                     and an agent that cannot read is one every tool call is refused for. A team \
-                     pauses an agent instead.",
-                    agent.id.as_str()
+                    "{id} must keep reading the project: every agent reads, and one that cannot \
+                     is refused everything it tries. Pause {id} instead.",
+                    id = agent.id.as_str()
                 ),
             });
         }
@@ -171,7 +170,7 @@ pub fn validate_team(input: &Value) -> Result<Team, Vec<ValidationError>> {
         errors.push(ValidationError {
             path: "/policy/judgment/judge".to_string(),
             message: format!(
-                "no active {} can check plans; choose auto or add one",
+                "No active {} can check plans. Let Farik choose, or add one.",
                 plain_role(role)
             ),
         });
@@ -179,7 +178,7 @@ pub fn validate_team(input: &Value) -> Result<Team, Vec<ValidationError>> {
     if judgment.required == JudgmentRequired::Always && judgment.questions.is_empty() {
         errors.push(ValidationError {
             path: "/policy/judgment/questions".to_string(),
-            message: "checking plans needs at least one question".to_string(),
+            message: "Checking plans needs at least one question.".to_string(),
         });
     }
     for (role, what) in REQUIRED_ROLES {
@@ -187,8 +186,8 @@ pub fn validate_team(input: &Value) -> Result<Team, Vec<ValidationError>> {
             errors.push(ValidationError {
                 path: "/agents".to_string(),
                 message: format!(
-                    "a team needs an active {role} to {what}; this one has none (docs/SPEC.md \
-                     section 3)"
+                    "A team needs an active {} to {what}, and this one has none.",
+                    plain_role(Role::from(role))
                 ),
             });
         }
@@ -584,10 +583,8 @@ mod tests {
         assert_eq!(
             messages,
             [
-                "a team needs an active product_manager to write a contract; this one has none \
-                 (docs/SPEC.md section 3)",
-                "a team needs an active software_developer to do the work; this one has none \
-                 (docs/SPEC.md section 3)",
+                "A team needs an active Product Manager to write its plans, and this one has none.",
+                "A team needs an active Software Developer to do the work, and this one has none.",
             ],
             "both, not the first of them"
         );
@@ -609,7 +606,7 @@ mod tests {
         assert_eq!(messages.len(), 2, "{messages:?}");
         assert!(messages[0].contains("the id ada names"), "{}", messages[0]);
         assert!(
-            messages[1].contains("software_developer"),
+            messages[1].contains("Software Developer"),
             "{}",
             messages[1]
         );
@@ -626,7 +623,7 @@ mod tests {
             .map(|(_, message)| message)
             .collect();
         assert_eq!(messages.len(), 1, "{messages:?}");
-        assert!(messages[0].contains("product_manager"), "{}", messages[0]);
+        assert!(messages[0].contains("Product Manager"), "{}", messages[0]);
     }
 
     #[test]
@@ -892,9 +889,8 @@ mod tests {
         assert_eq!(refusals[0].0, "/agents/1/revokes");
         assert_eq!(
             refusals[0].1,
-            "linus cannot have read taken away: everyone reads (docs/SPEC.md section 5.6), and an \
-             agent that cannot read is one every tool call is refused for. A team pauses an agent \
-             instead."
+            "linus must keep reading the project: every agent reads, and one that cannot is \
+             refused everything it tries. Pause linus instead."
         );
     }
 
@@ -942,7 +938,7 @@ mod tests {
             refusals(&wire),
             [(
                 "/policy/judgment/judge".to_string(),
-                "no active Architect can check plans; choose auto or add one".to_string()
+                "No active Architect can check plans. Let Farik choose, or add one.".to_string()
             )]
         );
 
@@ -957,7 +953,7 @@ mod tests {
             refusals(&wire),
             [(
                 "/policy/judgment/judge".to_string(),
-                "no active Scrum Master can check plans; choose auto or add one".to_string()
+                "No active Scrum Master can check plans. Let Farik choose, or add one.".to_string()
             )],
             "a paused one is not active"
         );
@@ -978,7 +974,7 @@ mod tests {
             refusals(&wire),
             [(
                 "/policy/judgment/questions".to_string(),
-                "checking plans needs at least one question".to_string()
+                "Checking plans needs at least one question.".to_string()
             )]
         );
 

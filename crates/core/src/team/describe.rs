@@ -63,7 +63,7 @@ pub fn describe_change(old: &Team, new: &Team) -> Vec<String> {
         } else {
             said.push("Developers and Architects may no longer run commands.".to_string());
             said.push(
-                "Farik still runs every check itself; the agents cannot run commands".to_string(),
+                "Farik still runs every check itself; the agents cannot run commands.".to_string(),
             );
         }
     }
@@ -178,7 +178,7 @@ mod tests {
                 "The team may spend up to $10 a day.",
                 "Finished work is merged on its own.",
                 "Developers and Architects may no longer run commands.",
-                "Farik still runs every check itself; the agents cannot run commands",
+                "Farik still runs every check itself; the agents cannot run commands.",
                 "Developers may now push their work and open pull requests.",
                 "Every plan is checked before work starts.",
                 "Plans are checked against 1 question.",

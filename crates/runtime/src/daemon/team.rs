@@ -701,7 +701,7 @@ mod tests {
         assert_eq!(wrong["errors"][0]["path"], "/agents");
         assert!(
             wrong["errors"][0]["message"].as_str().is_some_and(
-                |message| message.starts_with("a team needs an active product_manager")
+                |message| message.starts_with("A team needs an active Product Manager")
             ),
             "{wrong}"
         );
