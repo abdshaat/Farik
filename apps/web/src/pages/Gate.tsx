@@ -17,6 +17,7 @@ export type HistoryEvent = {
 	seq: number;
 	recordedAt: string;
 	kind: string;
+	agentId?: string;
 	body: {
 		kind?: string;
 		text?: string;
@@ -25,6 +26,7 @@ export type HistoryEvent = {
 		to?: string;
 		costUsd?: number;
 		detail?: string;
+		reason?: string;
 	};
 };
 /** The try in progress, of all the task gets, as `task.tries` works them out. */

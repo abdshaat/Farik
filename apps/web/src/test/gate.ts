@@ -4,7 +4,7 @@ import type { FakeSocket } from "./fake-socket.ts";
 import { CONTRACT, TEAM } from "./plan.ts";
 import { answerQuery, answerStatus, renderApp } from "./render-app.tsx";
 
-const event = (
+export const event = (
 	seq: number,
 	kind: string,
 	body: object,
@@ -33,7 +33,7 @@ const cost = (seq: number, cost_usd: number) =>
 		"2026-09-25T08:00:00Z",
 		"theo",
 	);
-const note = (
+export const note = (
 	seq: number,
 	kind: string,
 	text: string,

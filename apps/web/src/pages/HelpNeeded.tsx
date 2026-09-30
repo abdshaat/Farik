@@ -23,6 +23,9 @@ type EscalationChoice = {
 	body: { command: string; body: Record<string, unknown> };
 };
 
+/** The reasons the governor raises in its own words, not an agent's (SPEC 5.7). */
+const FARIKS = ["iterations", "budget", "sessions", "blocker_age"];
+
 /** A request for help: what happened, what was tried, and the choices that fit its reason. */
 export function HelpNeeded() {
 	const { id = "" } = useParams();
@@ -56,8 +59,13 @@ export function HelpNeeded() {
 	const reviewer =
 		contract.reviewerRole && active(agents, contract.reviewerRole);
 	const raised = events.findLast((e) => e.kind === "escalation.raised");
+	const fariks = !raised?.agentId || FARIKS.includes(raised.body.reason ?? "");
+	// What was tried since the human last answered an escalation of this task.
+	const since =
+		events.findLast((e) => e.kind === "escalation.resolved")?.seq ?? 0;
 	const tried = events.filter(
-		(e) => e.kind === "note.written" && e.body.kind === "progress",
+		(e) =>
+			e.seq > since && e.kind === "note.written" && e.body.kind === "progress",
 	);
 	const choices = offered.choices;
 	const choice = choices[Number(picked)];
@@ -89,10 +97,12 @@ export function HelpNeeded() {
 				</h1>
 				<p className={styles.muted}>{id}</p>
 			</div>
-			{raised && builder && (
+			{raised && (
 				<section className={own.letter} aria-labelledby="explains">
 					<p id="explains" className={styles.muted}>
-						{signed("helpExplains", builder)}
+						{fariks || !builder
+							? t("helpFarikExplains")
+							: signed("helpExplains", builder)}
 					</p>
 					<p>{raised.body.detail}</p>
 				</section>
@@ -119,12 +129,20 @@ export function HelpNeeded() {
 					onChange={setPicked}
 				/>
 			)}
-			<TextArea
-				id="help-note"
-				label={t("helpNote", { name })}
-				value={note}
-				onChange={setNote}
-			/>
+			{choices.length > 0 ? (
+				<TextArea
+					id="help-note"
+					label={t("helpNote", { name })}
+					value={note}
+					onChange={setNote}
+				/>
+			) : raised?.body.reason === "approval" ? (
+				<p>
+					<Link to={`/tasks/${id}/plan`}>{t("helpReadPlan")}</Link>
+				</p>
+			) : (
+				<p className={styles.muted}>{t("helpNothing")}</p>
+			)}
 			{refusal && (
 				<p role="alert" className={styles.alert}>
 					{refusal}
