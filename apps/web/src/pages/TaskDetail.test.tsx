@@ -671,6 +671,26 @@ describe("task detail", () => {
 		await expectNoAxeViolations(container);
 	});
 
+	it("names_the_active_designer_whose_browser_is_off", async () => {
+		// Iris is paused; Kai, the active Designer, has Playwright off.
+		const paused = { ...IRIS, status: "paused" };
+		const kai = { ...IRIS, id: "kai", display_name: "Kai", status: "active" };
+		const { container } = await opened(CONTRACT, [], {
+			"team.get": { team: { ...TEAM, agents: [...TEAM.agents, paused, kai] } },
+			"task.get": {
+				task: {},
+				design_plan: null,
+				ui_change: true,
+				design_review: { state: "designer_needs_browser", checks: [] },
+			},
+		});
+		const link = await screen.findByRole("link", {
+			name: "Turn Playwright on for Kai on the Team page",
+		});
+		expect(link.getAttribute("href")).toBe("/team/kai");
+		await expectNoAxeViolations(container);
+	});
+
 	it("shows_how_the_designer_works_beside_its_task", async () => {
 		const { container } = await opened(
 			{

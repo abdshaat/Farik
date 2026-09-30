@@ -856,6 +856,43 @@ pub(super) mod tests {
 
     #[test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn names_the_active_designer_whose_browser_is_off() {
+        // Iris is paused and Kai, the active Designer, has it off: the row is Kai's, not Iris's.
+        let harness = Harness::new("gates-design-review-kai", |wire| {
+            crate::tools::fixtures::browsing(wire);
+            wire["agents"][3]["status"] = json!("paused");
+            let mut kai = farik_core::team::fixtures::an_agent_wire("kai", "ui_ux_designer");
+            kai["display_name"] = json!("Kai");
+            wire["agents"]
+                .as_array_mut()
+                .expect("a list of agents")
+                .push(kai);
+        });
+        harness
+            .project
+            .deps
+            .transitions
+            .set_previews(Arc::new(crate::preview::fixtures::FakePreviews::ready()));
+        harness.verifying_a_ui_change("FRK-1");
+        let waiting = query(
+            &harness.daemon,
+            "waiting.list",
+            &json!({}),
+            "waitingListResult",
+        );
+        assert_eq!(
+            waiting["waiting"],
+            json!([{
+                "task_id": "FRK-1", "kind": "designer_needs_browser", "agent_id": "kai",
+                "title": "Add a login page",
+                "line": "Kai has Playwright off, so Farik gives Kai no work. Turn Playwright \
+                         on for Kai on the Team page"
+            }])
+        );
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
     fn files_a_request_from_plain_words() {
         let harness = driven("gates-file");
         let text = "Add a dark mode to the settings page so that people who work late at night \

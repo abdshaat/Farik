@@ -284,10 +284,12 @@ export function TaskDetail() {
 		(checking && t("designChecking")) ||
 		(onDesigner && t("designOnDesigner")) ||
 		(noBrowser && t("designNoBrowser"));
-	// The team's Designer, who checks every screen a Developer changes.
-	const iris = agents.find(
+	// The team's Designer, who checks every screen a Developer changes: the active one, as the
+	// runtime picks it, else a paused one the review waits on.
+	const designers = agents.filter(
 		(a) => a.role === "ui_ux_designer" && a.status !== "retired",
 	);
+	const iris = designers.find((a) => a.status === "active") ?? designers[0];
 	const names = {
 		designer: iris?.displayName ?? designer,
 		reviewer: reviewer ?? "",
