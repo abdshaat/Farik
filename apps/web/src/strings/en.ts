@@ -194,7 +194,16 @@ export const en = {
 	teamLead:
 		"We suggest six, one for each job. You can rename them now or later. To add a second developer, choose “Add someone”.",
 	teamMembers: "Your team",
-	teamInclude: "Include {role}",
+	teamInclude: "Include the {role}",
+	jobProductManager:
+		"Turns what you ask for into a plan, and asks you when something is unclear.",
+	jobScrumMaster: "Hands out the work and keeps the team unblocked.",
+	jobArchitect:
+		"Keeps the project well built, and reviews the work before you see it.",
+	jobDeveloper: "Builds and tests what the plan asks for.",
+	jobMarketing: "Writes posts, pages and a plan for getting the word out.",
+	jobDesigner:
+		"Looks at your app the way a customer does, plans changes to its screens, and makes them once {pm} agrees.",
 	teamName: "Name for the {role}",
 	teamAdd: "Add someone",
 	teamContinueSix: "Continue with these six",

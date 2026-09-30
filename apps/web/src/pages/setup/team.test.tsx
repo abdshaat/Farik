@@ -198,13 +198,24 @@ describe("team setup", () => {
 		await answerQuery(s, "team.propose", proposed());
 		const list = await screen.findByRole("list", { name: en.teamMembers });
 		expect(within(list).getAllByRole("listitem")).toHaveLength(5);
-		expect(within(list).getByText("Ada persona")).toBeTruthy();
+		// Each row says the role's job, as the approved mockup does.
+		expect(
+			within(list).getByText(
+				"Keeps the project well built, and reviews the work before you see it.",
+			),
+		).toBeTruthy();
+		expect(within(list).queryByText("Ada persona")).toBeNull();
 		await expectNoAxeViolations(container);
 
 		fireEvent.click(
-			screen.getByRole("checkbox", { name: "Include Scrum Master" }),
+			screen.getByRole("checkbox", { name: "Include the Scrum Master" }),
 		);
 		fireEvent.click(screen.getByRole("button", { name: en.teamAdd }));
+		// With no Designer on the team, an added agent still never takes Iris's picture.
+		const added = within(list).getAllByRole("listitem").at(-1);
+		expect(added?.querySelector("img")?.getAttribute("src")).toBe(
+			AVATAR_URLS["extra-2"],
+		);
 		const names = within(list).getAllByRole("textbox", {
 			name: "Name for the Developer",
 		});
@@ -288,9 +299,14 @@ describe("team setup", () => {
 		const list = await screen.findByRole("list", { name: en.teamMembers });
 		expect(within(list).getAllByRole("listitem")).toHaveLength(6);
 		const include = screen.getByRole("checkbox", {
-			name: "Include UI/UX Designer",
+			name: "Include the UI/UX Designer",
 		}) as HTMLInputElement;
 		expect(include.checked).toBe(true);
+		expect(
+			within(include.closest("li") as HTMLElement).getByText(
+				"Looks at your app the way a customer does, plans changes to its screens, and makes them once Mira agrees.",
+			),
+		).toBeTruthy();
 		expect(
 			(
 				screen.getByRole("textbox", {

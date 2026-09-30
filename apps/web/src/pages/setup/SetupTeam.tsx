@@ -10,6 +10,16 @@ import { Wizard } from "./Wizard.tsx";
 
 type Checked = { errors: Refusal[] };
 
+/** Each role's job, in the words of the approved setup mockups. */
+const JOBS = {
+	product_manager: "jobProductManager",
+	scrum_master: "jobScrumMaster",
+	architect: "jobArchitect",
+	software_developer: "jobDeveloper",
+	marketing_specialist: "jobMarketing",
+	ui_ux_designer: "jobDesigner",
+} as const;
+
 /** Setup's fifth step: the six suggested agents, named, and any second Developer. */
 export function SetupTeam() {
 	const { client } = useConnection();
@@ -18,6 +28,9 @@ export function SetupTeam() {
 	const [errors, setErrors] = useState<Checked["errors"]>([]);
 	const [busy, setBusy] = useState(false);
 	const on = draft.members.filter((m) => m.on);
+	const pm =
+		draft.members.find((m) => m.agent.role === "product_manager")?.agent
+			.displayName ?? roleName("product_manager");
 	// An error's path names the agent by its place on the team, which leaves out the unticked.
 	const at = (spot: number) =>
 		errors.filter(
@@ -118,7 +131,9 @@ export function SetupTeam() {
 									onChange={(e) => set(index, { name: e.target.value })}
 								/>
 							</span>
-							<span className={styles.persona}>{agent.persona}</span>
+							<span className={styles.persona}>
+								{t(JOBS[agent.role], { pm })}
+							</span>
 							{why.length > 0 && (
 								<span id={whyId} className={styles.error}>
 									{why.map((e) => said(e.code)).join(" ")}
