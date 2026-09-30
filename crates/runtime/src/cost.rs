@@ -162,8 +162,8 @@ pub fn unpriced_models(
     for agent in team.active_agents() {
         let role = Role::from(agent.role);
         let mut models = Vec::new();
-        match &agent.model {
-            Some(model) => models.push(model.id.to_string()),
+        match agent.model.as_ref().and_then(|model| model.id.as_ref()) {
+            Some(id) => models.push(id.to_string()),
             None => match load_role(role) {
                 Ok(definition) => models.push(session_model(agent, &definition).0),
                 // Every role a team file can give an agent ships now; `NotFound` is `Human`

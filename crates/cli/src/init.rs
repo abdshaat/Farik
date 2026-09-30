@@ -240,7 +240,12 @@ mod tests {
             team.agents
                 .iter()
                 .map(|agent| agent.model.as_ref().map(|model| (
-                    model.id.as_str().to_string(),
+                    model
+                        .id
+                        .as_deref()
+                        .map(String::as_str)
+                        .unwrap_or_default()
+                        .to_string(),
                     model.effort.map(|effort| effort.to_string())
                 )))
                 .collect::<Vec<_>>(),

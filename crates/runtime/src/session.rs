@@ -242,16 +242,18 @@ pub trait RuntimeAdapter: Send + Sync {
 /// that `cost::unpriced_models` can name it where the orchestrator is not built.
 pub const TRIAGE_MODEL: &str = "claude-sonnet-5";
 
-/// The model and effort an agent's sessions run on: its own `model.id` when it has one, with its
-/// own effort or else its role's, and otherwise its role's model and effort. A triage session
+/// The model and effort an agent's sessions run on: its own `model.id` when it has one and
+/// otherwise its role's model, with its own effort when it has one and otherwise its role's. A triage session
 /// runs on the orchestrator's `TRIAGE_MODEL` instead (5.16), which is the orchestrator's choice
 /// rather than this one.
 #[must_use]
 pub fn session_model(agent: &Agent, role: &RoleDefinition) -> (String, Effort) {
-    match &agent.model {
-        Some(model) => (model.id.to_string(), model.effort.unwrap_or(role.effort)),
-        None => (role.model.clone(), role.effort),
-    }
+    let own = agent.model.as_ref();
+    (
+        own.and_then(|model| model.id.as_ref())
+            .map_or_else(|| role.model.clone(), |id| id.as_str().to_string()),
+        own.and_then(|model| model.effort).unwrap_or(role.effort),
+    )
 }
 
 #[cfg(test)]
@@ -294,6 +296,12 @@ mod tests {
         assert_eq!(
             session_model(&an_agent(None), &role),
             (role.model.clone(), role.effort)
+        );
+        // An effort alone keeps the role's model: changing how carefully an agent works never
+        // changes what it runs on.
+        assert_eq!(
+            session_model(&an_agent(Some(json!({ "effort": "low" }))), &role),
+            (role.model.clone(), Effort::Low)
         );
     }
 

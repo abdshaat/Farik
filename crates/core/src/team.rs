@@ -461,8 +461,11 @@ mod tests {
             Some("Asks the question nobody asked.")
         );
         assert_eq!(
-            ada.model.as_ref().expect("a model").id.as_str(),
-            "claude-opus-5"
+            ada.model
+                .as_ref()
+                .and_then(|model| model.id.as_deref())
+                .map(String::as_str),
+            Some("claude-opus-5")
         );
         assert_eq!(
             ada.preauthorized_external_tools

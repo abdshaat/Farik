@@ -139,9 +139,7 @@
     "model": {
       "type": "object",
       "additionalProperties": false,
-      "required": [
-        "id"
-      ],
+      "description": "The agent's own model and effort. Either may be left out, and the role's stands in for it: changing how carefully an agent works never changes what it runs on.",
       "properties": {
         "id": {
           "type": "string",

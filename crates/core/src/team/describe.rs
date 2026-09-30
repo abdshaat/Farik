@@ -111,7 +111,11 @@ pub fn describe_change(old: &Team, new: &Team) -> Vec<String> {
 }
 
 fn model(agent: &Agent) -> Option<String> {
-    agent.model.as_ref().map(|model| model.id.to_string())
+    agent
+        .model
+        .as_ref()
+        .and_then(|model| model.id.as_ref())
+        .map(|id| id.as_str().to_string())
 }
 
 fn effort(agent: &Agent) -> Option<String> {
@@ -145,6 +149,18 @@ mod tests {
 
     fn team(wire: &Value) -> Team {
         validate_team(wire).expect("the fixture is a team")
+    }
+
+    #[test]
+    fn says_an_effort_alone_without_a_model() {
+        let old = validate_team(&a_team_wire()).expect("a team");
+        let mut new = a_team_wire();
+        new["agents"][1]["model"] = json!({ "effort": "low" });
+        let new = validate_team(&new).expect("an effort without a model is a team");
+        assert_eq!(
+            describe_change(&old, &new),
+            ["linus now thinks with low effort."]
+        );
     }
 
     #[test]
