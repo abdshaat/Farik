@@ -101,6 +101,9 @@ pub(crate) enum Refusal {
     /// A design plan proposed or decided outside the session that gives the tool, out of its
     /// bounds, or with none waiting (ADR 0026).
     DesignPlanRefused { detail: String },
+    /// A page check asked outside a UI/UX Designer's session of its task with the preview open,
+    /// or of a path that is not the preview's (step 12).
+    CheckPageRefused { detail: String },
     /// A commit named a directory, which git would stage whole, files the path checks never saw
     /// among it.
     PathIsADirectory { path: String },
@@ -197,6 +200,7 @@ impl Refusal {
             Self::DecisionRefused { detail } => ("decision_refused", detail.clone()),
             Self::NoSuchDecision { number } => ("no_such_decision", number.to_string()),
             Self::DesignPlanRefused { detail } => ("design_plan_refused", detail.clone()),
+            Self::CheckPageRefused { detail } => ("check_page_refused", detail.clone()),
             Self::SummaryMissing => (
                 "summary_missing",
                 "open the note with two or three plain sentences for the user, then a blank line"

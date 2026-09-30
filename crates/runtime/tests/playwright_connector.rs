@@ -14,8 +14,8 @@ use farik_core::contract::TaskId;
 use farik_core::team::Preview;
 use farik_roles::{ConnectorDefinition, builtin_connector};
 use farik_runtime::{
-    DockerPreviewFactory, McpTransport, PreviewFactory, RunningPreview, browser_container,
-    connector_server,
+    CheckTheme, CheckWidth, DockerPreviewFactory, McpTransport, PreviewFactory, RunningPreview,
+    browser_container, check_page, connector_server,
 };
 use serde_json::{Value, json};
 
@@ -558,5 +558,60 @@ fn the_task_cleanup_removes_the_preview() {
     .expect("the task's containers are removed");
 
     assert_eq!(containers_named(&name), 0);
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+#[test]
+#[ignore = "needs docker"]
+fn checks_a_page_on_the_pinned_image() {
+    let root = worktree("check");
+    std::fs::write(
+        root.join("site/index.html"),
+        "<!doctype html><html lang=\"en\"><title>Preview</title>\
+         <style>body { background: #fff; color: #111 }\
+         @media (prefers-color-scheme: dark) { body { background: #111; color: #eee } }</style>\
+         <main><h1>Settings</h1><button class=\"menu\"></button></main>\n",
+    )
+    .expect("the page is written");
+    let project = project("check");
+    let _cleanup = Cleanup(project.clone());
+    let output = root.join("screenshots");
+    std::fs::create_dir_all(&output).expect("the output folder is made");
+    let preview = DockerPreviewFactory {
+        image: ALPINE.to_owned(),
+    }
+    .start(&project, &task(), &root, &serving(), "tree")
+    .unwrap_or_else(|error| panic!("the preview did not start: {error}"));
+    let check = |theme: CheckTheme| {
+        check_page(
+            &playwright(),
+            preview.as_ref(),
+            "/",
+            CheckWidth::Phone,
+            theme,
+            &output.join(format!("phone-{}.png", theme.as_str())),
+        )
+        .unwrap_or_else(|error| panic!("the page was not checked: {error}"))
+    };
+    let (light, dark) = (check(CheckTheme::Light), check(CheckTheme::Dark));
+    preview.stop("the test ended").expect("stopped");
+
+    for checked in [&light, &dark] {
+        assert!(
+            checked
+                .violations
+                .iter()
+                .any(|violation| violation.rule == "button-name"),
+            "{:?}",
+            checked.violations
+        );
+    }
+    let read = |path: &Path| std::fs::read(path).expect("the screenshot is saved");
+    let (light_png, dark_png) = (read(&light.screenshot), read(&dark.screenshot));
+    assert!(light_png.starts_with(b"\x89PNG"), "a PNG");
+    assert!(
+        light_png != dark_png,
+        "the dark theme looks the same as the light"
+    );
     let _ = std::fs::remove_dir_all(&root);
 }

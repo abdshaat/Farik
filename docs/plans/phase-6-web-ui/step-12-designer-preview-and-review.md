@@ -220,7 +220,7 @@ Tests:
 - `bundles_the_axe_the_web_tests_pin`: the banner equals `packages/ui`'s `axe-core`, and the tag list has all five.
 - Integration: `checks_a_page_on_the_pinned_image`: a page with an unlabelled button reports `button-name`, and the dark and light screenshots differ.
 
-- [ ] `feat(runtime): check a preview page for accessibility at two widths and two themes`
+- [x] `feat(runtime): check a preview page for accessibility at two widths and two themes`
 
 ### Task 4: The design review of a Developer's UI change, and the wire
 

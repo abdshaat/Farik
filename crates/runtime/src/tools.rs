@@ -274,6 +274,11 @@ static TOOLS: LazyLock<Vec<FarikTool>> = LazyLock::new(|| {
             Read,
             "Approve the Designer's plan for this session's task, or return it, with your reason.",
         ),
+        tool::<design::CheckPageInput>(
+            "farik_check_page",
+            Read,
+            "Check a page of the task's preview for accessibility (axe-core, WCAG 2.2 A and AA) at one width, phone (360 px) or desktop (1280 px), in one theme, light or dark. Answers what it found and a screenshot.",
+        ),
         tool::<exec::ExecInput>(
             "farik_exec",
             Execute,
@@ -379,6 +384,7 @@ pub async fn call_tool(
         "farik_read_decisions" => memory::read_decisions(&call, &parse(input)?),
         "farik_propose_design_plan" => design::propose(&call, parse(input)?),
         "farik_decide_design_plan" => design::decide(&call, parse(input)?),
+        "farik_check_page" => design::check(&call, parse(input)?).await,
         "farik_exec" => exec::exec(&call, parse(input)?).await,
         "farik_git_status" => nothing_in(input).and_then(|()| git::status(&call)),
         "farik_git_diff" => nothing_in(input).and_then(|()| git::diff(&call)),
@@ -589,6 +595,7 @@ mod tests {
             "farik_read_decisions",
             "farik_propose_design_plan",
             "farik_decide_design_plan",
+            "farik_check_page",
             "farik_exec",
             "farik_git_status",
             "farik_git_diff",
@@ -607,7 +614,7 @@ mod tests {
         assert_eq!(tier("farik_git_diff"), Some(PermissionTier::GitLocal));
         assert_eq!(tier("farik_git_commit"), Some(PermissionTier::GitLocal));
         assert_eq!(tier("farik_git_push"), Some(PermissionTier::GitRemote));
-        for tool in &tools[..23] {
+        for tool in &tools[..24] {
             assert_eq!(tool.tier, PermissionTier::Read, "{}", tool.name);
         }
         for tool in &tools {

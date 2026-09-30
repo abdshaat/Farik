@@ -3,9 +3,15 @@
 //! approval or return of it. Both only write the log. Where a task's plan stands is read back from
 //! the log by the governor's checks, the orchestrator, and the browser.
 
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
+
 use farik_core::contract::{Role, TaskId};
 use farik_core::governor::permissions::{PermissionTier, check_design_plan};
-use farik_protocol::event::{DesignPlanProposedBody, EventBody, EventKind, FarikEvent, ReasonBody};
+use farik_protocol::event::{
+    DesignPlanProposedBody, EventBody, EventKind, FarikEvent, PageCheckedBody, ReasonBody,
+};
+use farik_roles::builtin_connector;
 use farik_store::{EventLog, EventQuery, StoreError};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -14,6 +20,8 @@ use serde_json::{Value, json};
 use super::refusal::Refusal;
 use super::work::opens_with_a_summary;
 use super::{Call, ToolError};
+use crate::preview::{CheckTheme, CheckWidth, check_page};
+use crate::prompt::untrusted_block;
 use crate::session::SessionPurpose;
 
 /// How long a plan may be, in characters.
@@ -217,10 +225,95 @@ pub(super) fn decide(call: &Call<'_>, input: DecideDesignPlanInput) -> Result<Va
     Ok(json!({ "seq": event.envelope.seq }))
 }
 
+/// `farik_check_page`'s input.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct CheckPageInput {
+    /// The page's path on the preview, starting with `/`.
+    path: String,
+    /// phone (360 px wide) or desktop (1280 px).
+    width: CheckWidth,
+    /// light or dark: the colour scheme the page is told the user prefers.
+    theme: CheckTheme,
+}
+
+/// How much of a check's violations an agent is shown.
+const VIOLATIONS_CAP_BYTES: usize = 16 * 1024;
+
+/// Where the screenshots of `task` are kept, under the project at `root`.
+pub(crate) fn screenshots(root: &Path, task: &TaskId) -> PathBuf {
+    root.join(".farik/local/screenshots").join(task.as_str())
+}
+
+/// Checks a page of the task's preview, from the UI/UX Designer's session that has it open, and
+/// records `page.checked`. The page's words reach the agent inside an `untrusted` block.
+pub(super) async fn check(call: &Call<'_>, input: CheckPageInput) -> Result<Value, ToolError> {
+    let (task, preview) = match (&call.context.task_id, &call.context.preview) {
+        (Some(task), Some(preview)) if call.role() == Role::UiUxDesigner => {
+            (task, Arc::clone(preview))
+        }
+        _ => {
+            return Err(Refusal::CheckPageRefused {
+                detail: "only the UI/UX Designer checks a page, in a session of its task with \
+                         the preview open"
+                    .to_string(),
+            }
+            .into());
+        }
+    };
+    if !input.path.starts_with('/') {
+        return Err(Refusal::CheckPageRefused {
+            detail: format!("a page's path starts with /, and {:?} does not", input.path),
+        }
+        .into());
+    }
+    let definition = builtin_connector("playwright").ok_or_else(|| ToolError::Failed {
+        detail: "Farik ships no playwright connector".to_string(),
+    })?;
+    let folder = screenshots(call.deps().files.root(), task);
+    std::fs::create_dir_all(&folder).map_err(super::failed)?;
+    let file = format!(
+        "{}-{}-{}.png",
+        call.context.session_id,
+        input.width.as_str(),
+        input.theme.as_str()
+    );
+    let out = folder.join(&file);
+    let (path, width, theme) = (input.path.clone(), input.width, input.theme);
+    let checked = tokio::task::spawn_blocking(move || {
+        check_page(&definition, preview.as_ref(), &path, width, theme, &out)
+    })
+    .await
+    .map_err(super::failed)?
+    .map_err(super::failed)?;
+    let body: PageCheckedBody = serde_json::from_value(json!({
+        "width": width.as_str(),
+        "theme": theme.as_str(),
+        "path": checked.path,
+        "violations": checked.violations,
+        "screenshot": file,
+    }))
+    .map_err(super::failed)?;
+    call.append(Some(task), EventBody::PageChecked(body))?;
+    let listed = serde_json::to_string_pretty(&checked.violations).map_err(super::failed)?;
+    Ok(json!({
+        "width": width.as_str(),
+        "theme": theme.as_str(),
+        "path": checked.path,
+        "screenshot": file,
+        "violation_count": checked.violations.len(),
+        "violations": untrusted_block("page", &listed, VIOLATIONS_CAP_BYTES),
+    }))
+}
+
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
     use farik_protocol::event::{EventBody, EventKind};
     use serde_json::{Value, json};
+
+    use crate::preview::fixtures::{CheckedPreview, SCREENSHOT, after};
 
     use super::super::ToolError;
     use super::super::fixtures::{TestProject, a_team_of_three, run, with_the_designer};
@@ -289,6 +382,158 @@ mod tests {
             Err(ToolError::Refused { reason }) => reason,
             other => panic!("expected a refusal, got {other:?}"),
         }
+    }
+
+    /// The check's own arguments, after asserting docker's: run once, as the user, in the
+    /// preview's namespace, labelled, by `node` in the pinned image.
+    fn beside_the_preview(args: &[String]) -> &[String] {
+        assert_eq!(&args[..4], ["run", "--rm", "-i", "--init"], "{args:?}");
+        assert_eq!(after(args, "--user"), ["1000:1000"]);
+        assert_eq!(
+            after(args, "--network"),
+            ["container:farik-preview-p-frk-1"]
+        );
+        assert_eq!(
+            after(args, "--label"),
+            ["farik.project=p", "farik.task=FRK-1"]
+        );
+        assert_eq!(after(args, "--entrypoint"), ["node"]);
+        let definition = farik_roles::builtin_connector("playwright").expect("shipped");
+        let image = args
+            .iter()
+            .position(|arg| *arg == definition.image)
+            .expect("the pinned image");
+        &args[image + 1..]
+    }
+
+    const A_VIOLATION: &str = r#"{"violations":[{"rule":"button-name","impact":"critical","target":"button.menu","help":"Buttons must have discernible text"}]}"#;
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn checks_a_page_through_the_runner() {
+        let project = a_project("tools-check-page");
+        let preview = Arc::new(CheckedPreview::printing(A_VIOLATION));
+        let mut context = project.context("iris", Some("FRK-1"));
+        context.preview = Some(preview.clone());
+        let phone = run(
+            &context,
+            "farik_check_page",
+            json!({ "path": "/settings", "width": "phone", "theme": "dark" }),
+        )
+        .expect("the Designer checks a page of its task's preview");
+        run(
+            &context,
+            "farik_check_page",
+            json!({ "path": "/", "width": "desktop", "theme": "light" }),
+        )
+        .expect("and another");
+
+        let runs = preview.runs();
+        assert_eq!(runs.len(), 2);
+        let per_check = [
+            ("/settings", "360", "dark", "session-1-phone-dark.png"),
+            ("/", "1280", "light", "session-1-desktop-light.png"),
+        ];
+        for (args, (path, width, theme, file)) in runs.iter().zip(per_check) {
+            let script = beside_the_preview(args);
+            assert_eq!(script[..2], ["--input-type=module", "-"]);
+            assert_eq!(
+                after(script, "--url"),
+                [format!("http://localhost:4400{path}").as_str()]
+            );
+            assert_eq!(after(script, "--width"), [width]);
+            assert_eq!(after(script, "--theme"), [theme]);
+            assert_eq!(
+                after(script, "--screenshot"),
+                [format!("/output/{file}").as_str()]
+            );
+            assert_eq!(after(script, "--module-root"), ["/app/node_modules"]);
+            assert_eq!(after(script, "--proxy-server"), ["http://127.0.0.1:9"]);
+            assert_eq!(after(script, "--proxy-bypass"), ["localhost"]);
+            assert_eq!(
+                after(script, "--tags"),
+                ["wcag2a,wcag2aa,wcag21a,wcag21aa,wcag22aa"]
+            );
+            assert_eq!(
+                std::fs::read(
+                    project
+                        .repo
+                        .path
+                        .join(".farik/local/screenshots/FRK-1")
+                        .join(file)
+                )
+                .expect("the screenshot is kept"),
+                SCREENSHOT
+            );
+        }
+
+        let checked = project.events(&[EventKind::PageChecked]);
+        assert_eq!(checked.len(), 2);
+        assert_eq!(
+            serde_json::to_value(&checked[0].body).expect("a body")["body"],
+            json!({
+                "width": "phone",
+                "theme": "dark",
+                "path": "/settings",
+                "violations": [{
+                    "rule": "button-name",
+                    "impact": "critical",
+                    "target": "button.menu",
+                    "help": "Buttons must have discernible text"
+                }],
+                "screenshot": "session-1-phone-dark.png"
+            })
+        );
+        let ids = &checked[0].envelope.ids;
+        assert_eq!(ids.task_id.as_ref().map(|id| id.as_str()), Some("FRK-1"));
+        assert_eq!(ids.agent_id.as_deref(), Some("iris"));
+        assert_eq!(ids.session_id.as_deref(), Some("session-1"));
+
+        // The page's words reach the agent inside an untrusted block, Farik's own beside it.
+        assert_eq!(phone["width"], "phone");
+        assert_eq!(phone["theme"], "dark");
+        assert_eq!(phone["path"], "/settings");
+        assert_eq!(phone["screenshot"], "session-1-phone-dark.png");
+        assert_eq!(phone["violation_count"], 1);
+        let violations = phone["violations"].as_str().expect("text");
+        assert!(
+            violations.starts_with("<untrusted source=\"page\">\n"),
+            "{violations}"
+        );
+        assert!(violations.ends_with("\n</untrusted>"), "{violations}");
+        assert!(violations.contains("button-name"), "{violations}");
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn refuses_outside_a_designer_session() {
+        let project = a_project("tools-check-page-refused");
+        let preview = Arc::new(CheckedPreview::printing(A_VIOLATION));
+        let page = json!({ "path": "/", "width": "phone", "theme": "light" });
+        let outside = "check_page_refused: only the UI/UX Designer checks a page, in a session \
+                       of its task with the preview open";
+
+        let mut architect = project.context("ada", Some("FRK-1"));
+        architect.purpose = SessionPurpose::Verify;
+        architect.preview = Some(preview.clone());
+        assert_eq!(
+            refused(run(&architect, "farik_check_page", page.clone())),
+            outside
+        );
+        let without_preview = project.context("iris", Some("FRK-1"));
+        assert_eq!(
+            refused(run(&without_preview, "farik_check_page", page.clone())),
+            outside
+        );
+        let mut without_task = project.context("iris", None);
+        without_task.preview = Some(preview.clone());
+        assert_eq!(
+            refused(run(&without_task, "farik_check_page", page)),
+            outside
+        );
+
+        assert!(preview.runs().is_empty(), "nothing was checked");
+        assert!(project.events(&[EventKind::PageChecked]).is_empty());
     }
 
     #[test]

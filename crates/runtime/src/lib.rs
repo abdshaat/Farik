@@ -87,8 +87,9 @@ pub use exec::{ExecError, ExecResult, Executor, OUTPUT_LIMIT_BYTES};
 #[cfg(unix)]
 pub use preview::docker::DockerPreviewFactory;
 pub use preview::{
-    BLACKHOLE_PROXY, NoPreviews, PreviewError, PreviewFactory, RunningPreview, browser_container,
-    connector_server, disallowed_tools,
+    BLACKHOLE_PROXY, CheckError, CheckTheme, CheckWidth, NoPreviews, PageCheck, PreviewError,
+    PreviewFactory, RunningPreview, browser_container, check_page, connector_server,
+    disallowed_tools,
 };
 pub use recorded::{RecordedAdapter, Transcript};
 #[cfg(unix)]
