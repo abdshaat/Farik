@@ -776,6 +776,13 @@ export const en = {
 	costsTodayOf: "Today the team has spent {spent}, of {limit} a day.",
 	costsSprint: "Sprint {n} has spent {spent} of its {budget} limit.",
 	costsSprintNoLimit: "Sprint {n} has spent {spent}, with no limit.",
+	costsSprintEnded:
+		"Sprint {n} has ended. It spent {spent} of its {budget} limit.",
+	costsSprintEndedNoLimit:
+		"Sprint {n} has ended. It spent {spent}, with no limit.",
+	costsSprintEndedColumn: "Sprint {n}",
+	costsSprintWhy:
+		"Planning meetings, and work done before a task joined the sprint, count toward the day, not the sprint.",
 	costsSetLimit: "Set a daily limit",
 	limitSave: "Save the limit",
 	costsByAgent: "By agent",

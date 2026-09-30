@@ -14,6 +14,7 @@ type Summary = {
 	dailyLimitUsd?: number | null;
 	sprint: {
 		sprintId: string;
+		status: "open" | "ended";
 		spentUsd: number;
 		budgetUsd?: number | null;
 	} | null;
@@ -51,6 +52,7 @@ export function Costs() {
 	const [limiting, setLimiting] = useState(false);
 	if (!team || !summary || !activity || !metrics) return null;
 	const n = sprint?.sprintId.slice(1) ?? "";
+	const ended = sprint?.status === "ended";
 	const today = dollars(summary.todayUsd);
 
 	const rate = (
@@ -81,14 +83,20 @@ export function Costs() {
 						: t("costsToday").replace("{spent}", today)}
 				</p>
 				{sprint && (
-					<p>
-						{(sprint.budgetUsd
-							? t("costsSprint").replace("{budget}", dollars(sprint.budgetUsd))
-							: t("costsSprintNoLimit")
-						)
-							.replace("{n}", n)
-							.replace("{spent}", dollars(sprint.spentUsd))}
-					</p>
+					<>
+						<p>
+							{(sprint.budgetUsd
+								? t(ended ? "costsSprintEnded" : "costsSprint").replace(
+										"{budget}",
+										dollars(sprint.budgetUsd),
+									)
+								: t(ended ? "costsSprintEndedNoLimit" : "costsSprintNoLimit")
+							)
+								.replace("{n}", n)
+								.replace("{spent}", dollars(sprint.spentUsd))}
+						</p>
+						<p className={styles.muted}>{t("costsSprintWhy")}</p>
+					</>
 				)}
 				<Button onClick={() => setLimiting(true)}>{t("costsSetLimit")}</Button>
 			</div>
@@ -99,7 +107,11 @@ export function Costs() {
 						<tr>
 							<th scope="col">{t("costsAgent")}</th>
 							<th scope="col">{t("costsTodayColumn")}</th>
-							<th scope="col">{t("costsSprintColumn")}</th>
+							<th scope="col">
+								{ended
+									? t("costsSprintEndedColumn").replace("{n}", n)
+									: t("costsSprintColumn")}
+							</th>
 							<th scope="col">{t("costsNow")}</th>
 						</tr>
 					</thead>
@@ -171,7 +183,10 @@ export function Costs() {
 										),
 									)
 									.replace("{accepted}", String(m.acceptedTasks)),
-						t("metricFirstTryNote"),
+						// Only when some were sent back: "the rest" of "9 of 9" is none.
+						m.firstPassAcceptanceRate !== null && m.firstPassAcceptanceRate < 1
+							? t("metricFirstTryNote")
+							: undefined,
 					)}
 					{rate(
 						"metricNeeded",

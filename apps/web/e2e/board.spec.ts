@@ -177,9 +177,13 @@ test("a sprint runs on the board by itself, from its planning to its look back",
 		await expect(page).toHaveURL(/\/costs$/);
 		const theo = page.getByRole("row", { name: /^Theo/ });
 		await expect(theo.getByRole("rowheader")).toHaveText(/^Theo/);
+		// The sprint has ended, and its column keeps its figures under its name.
+		await expect(
+			page.getByRole("columnheader", { name: "Sprint 1" }),
+		).toBeVisible();
 		await expect(theo.getByRole("cell")).toHaveText([
 			"$0.04",
-			"$0.00",
+			"$0.04",
 			"Nothing to do right now",
 		]);
 		await expect(page.getByText("1 of 1", { exact: true })).toBeVisible();

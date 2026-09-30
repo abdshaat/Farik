@@ -32,7 +32,7 @@ const TEAM = {
 const SUMMARY = {
 	today_usd: 6.12,
 	daily_limit_usd: null,
-	sprint: { sprint_id: "S2", spent_usd: 11.84, budget_usd: 20 },
+	sprint: { sprint_id: "S2", status: "open", spent_usd: 11.84, budget_usd: 20 },
 	agents: [
 		{ agent_id: "mira", today_usd: 1.48, sprint_usd: 2.35 },
 		{ agent_id: "theo", today_usd: 2.94, sprint_usd: 6.1 },
@@ -119,6 +119,8 @@ describe("costs page", () => {
 		expect(
 			screen.getByText("Sprint 2 has spent $11.84 of its $20.00 limit."),
 		).toBeTruthy();
+		// Why the sprint's figure and the day's differ.
+		expect(screen.getByText(en.costsSprintWhy)).toBeTruthy();
 
 		// One row per agent: today, this sprint, and what it is doing right now.
 		const table = screen.getByRole("table", { name: en.costsByAgent });
@@ -151,6 +153,7 @@ describe("costs page", () => {
 		const rates = screen.getByRole("region", { name: en.costsHowWell });
 		expect(within(rates).queryByText(en.metricNotYet)).toBeNull();
 		expect(within(rates).getByText("6 of 9")).toBeTruthy();
+		expect(within(rates).getByText(en.metricFirstTryNote)).toBeTruthy();
 		expect(within(rates).getByText("1.3")).toBeTruthy();
 		expect(within(rates).getByText("$3.07")).toBeTruthy();
 		expect(
@@ -163,6 +166,44 @@ describe("costs page", () => {
 		expect(
 			within(rates).getByText(
 				"Messages: 4 reactions, 3 replies, 7 from meetings, 5 from you",
+			),
+		).toBeTruthy();
+		cleanup();
+
+		// An open sprint with no limit; every task passed first time, so none was sent back.
+		await costs(
+			{ ...SUMMARY, sprint: { ...SUMMARY.sprint, budget_usd: null } },
+			{ ...METRICS, first_pass_acceptance_rate: 1 },
+		);
+		expect(
+			screen.getByText("Sprint 2 has spent $11.84, with no limit."),
+		).toBeTruthy();
+		expect(screen.getByText("9 of 9")).toBeTruthy();
+		expect(screen.queryByText(en.metricFirstTryNote)).toBeNull();
+		cleanup();
+
+		// Once the sprint ends, its figures stay, under its name rather than "This sprint".
+		await costs({
+			...SUMMARY,
+			sprint: { ...SUMMARY.sprint, status: "ended", budget_usd: null },
+		});
+		expect(
+			screen.getByText("Sprint 2 has ended. It spent $11.84, with no limit."),
+		).toBeTruthy();
+		const ended = screen.getByRole("table", { name: en.costsByAgent });
+		expect(
+			within(ended)
+				.getAllByRole("columnheader")
+				.map((h) => h.textContent),
+		).toEqual(["Agent", "Today", "Sprint 2", "Right now"]);
+		cleanup();
+		await costs({
+			...SUMMARY,
+			sprint: { ...SUMMARY.sprint, status: "ended" },
+		});
+		expect(
+			screen.getByText(
+				"Sprint 2 has ended. It spent $11.84 of its $20.00 limit.",
 			),
 		).toBeTruthy();
 	});
