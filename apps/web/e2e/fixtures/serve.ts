@@ -82,6 +82,8 @@ export function gitProject(folder: string): void {
 export async function startServe(o: {
 	transcripts: string[];
 	project?: boolean;
+	/** A paused project that still waits for the team's setup, as a fresh take-on leaves it. */
+	setupPending?: boolean;
 	home?: string;
 }): Promise<{
 	url: string;
@@ -105,7 +107,7 @@ export async function startServe(o: {
 			PATH: `${resolve(import.meta.dirname, "fake-bin")}:${process.env.PATH}`,
 		};
 		args.push("--no-keychain");
-	} else setUp(project);
+	} else setUp(project, o.setupPending === true);
 
 	const port = await freePort();
 	args.push("--port", String(port));
@@ -130,7 +132,7 @@ export async function startServe(o: {
 }
 
 /** A project with its team, and sandboxing off, as `startServe` serves by default. */
-function setUp(project: string): void {
+function setUp(project: string, setupPending: boolean): void {
 	gitProject(project);
 	farik(project, ["init"]);
 	// What the CLI tests' `no_sandbox` writes: this machine runs tasks without Docker.
@@ -139,4 +141,8 @@ function setUp(project: string): void {
 		join(project, ".farik/local/settings.json"),
 		'{"sandbox":"none"}',
 	);
+	if (setupPending) {
+		farik(project, ["pause"]);
+		writeFileSync(join(project, ".farik/local/setup-pending"), "");
+	}
 }

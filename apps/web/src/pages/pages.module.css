@@ -7,6 +7,8 @@
 
 .page {
 	display: grid;
+	/* A card's 16rem floor must not widen the column past a phone's screen. */
+	grid-template-columns: minmax(0, 1fr);
 	gap: var(--farik-space-6);
 	max-width: 720px;
 }

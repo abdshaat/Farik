@@ -237,7 +237,7 @@ RPC:
 
 - `setup-team.spec.ts`: the journey in the Tests decision, with screenshots of "Your team" and "What they may do" at 360 and 1280 px.
 
-- [ ] `test(web): walk the team setup through the real server and browser`
+- [x] `test(web): walk the team setup through the real server and browser`
 
 ### Task 8: Spec and plan
 
