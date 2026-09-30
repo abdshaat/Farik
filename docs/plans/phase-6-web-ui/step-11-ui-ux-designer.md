@@ -1,6 +1,6 @@
 # Phase 6, step 11: The UI/UX Designer and its plan gate
 
-Status: in progress (Tasks 1 to 6 landed 2026-09-30; the landing review is next)
+Status: done (landed and landing-reviewed 2026-09-30)
 Branch: `phase/6-web-ui`
 Spec: `docs/SPEC.md` sections 3, 4.1, 5.1 to 5.4, 5.6 (the Designer's tiers), 5.12 (`document_paths`), 6 (6.1 to 6.5, a new 6.8), 8.2 (the `explore` session), 8.5, F1. The same list is in the project plan's step 11 row and the design's placement table.
 Depends on: steps 01 to 10 of this phase (landed); ADR 0026 and `docs/design/designer-chats-templates.md` (accepted 2026-09-30), whose decisions are binding and not restated here
