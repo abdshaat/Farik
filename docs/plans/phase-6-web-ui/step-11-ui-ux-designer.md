@@ -207,4 +207,6 @@ cargo xtask check --integration
 # landed 2026-09-30 (Task 6): cargo 1630 passed, 0 failed (step start 1610, plus T2 6, T3 4, T4 10);
 #   protocol-client 8, brand 30 (unchanged), ui 43 (step start 42, plus T3's RoleTag test),
 #   @farik/web 133 (step start 129, plus T5's 3 and its Board test); playwright 9 passed; xtask check: ok
+# landing fix wave 2026-09-30: cargo 1637 passed, 0 failed (+7); protocol-client 8, brand 30, ui 43,
+#   @farik/web 133 (tests strengthened, none added); playwright 10 passed (+design.spec.ts); xtask check: ok
 ```
