@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 import { events, startServe } from "./fixtures/serve.ts";
-import { narrow, screenshots } from "./fixtures/shots.ts";
+import { narrow, screenshots, wide } from "./fixtures/shots.ts";
 
 test("a request is sized, its question answered by choice, and it becomes a task to do", async ({
 	page,
@@ -37,24 +37,32 @@ test("a request is sized, its question answered by choice, and it becomes a task
 		// desktop, below the words and across the row on a phone.
 		const answer = page.getByRole("link", { name: "Answer" });
 		const row = page.getByRole("listitem").filter({ has: answer });
-		const box = async () => {
-			const [a, r, words] = await Promise.all([
-				answer.boundingBox(),
-				row.boundingBox(),
-				row.locator("strong").boundingBox(),
-			]);
-			if (!a || !r || !words) throw new Error("the Answer row is not laid out");
-			return { a, r, words };
-		};
+		// The three boxes and the row's own inset come from one layout, in one evaluate.
+		const box = () =>
+			answer.evaluate((a) => {
+				const r = a.closest("li");
+				const words = r?.querySelector("strong");
+				if (!r || !words) throw new Error("the Answer row is not laid out");
+				const style = getComputedStyle(r);
+				return {
+					a: a.getBoundingClientRect().toJSON() as DOMRect,
+					r: r.getBoundingClientRect().toJSON() as DOMRect,
+					words: words.getBoundingClientRect().toJSON() as DOMRect,
+					inset:
+						Number.parseFloat(style.paddingRight) +
+						Number.parseFloat(style.borderRightWidth),
+				};
+			});
 		const measure = async () => {
-			await page.setViewportSize({ width: 1280, height: 800 });
-			const wide = await box();
-			expect(wide.a.height).toBeGreaterThanOrEqual(44);
-			expect(wide.r.x + wide.r.width - (wide.a.x + wide.a.width)).toBeLessThan(
-				16,
+			await wide(page);
+			const w = await box();
+			expect(w.a.height).toBeGreaterThanOrEqual(44);
+			// At the row's right end: only the row's padding and border lie beyond the button.
+			expect(w.r.x + w.r.width - (w.a.x + w.a.width)).toBeLessThanOrEqual(
+				w.inset + 1,
 			);
 			expect(
-				Math.abs(wide.a.y + wide.a.height / 2 - (wide.r.y + wide.r.height / 2)),
+				Math.abs(w.a.y + w.a.height / 2 - (w.r.y + w.r.height / 2)),
 			).toBeLessThanOrEqual(1);
 			await narrow(page);
 			const phone = await box();
@@ -73,7 +81,7 @@ test("a request is sized, its question answered by choice, and it becomes a task
 		});
 		await expect(row.locator("> :not(div):not(a)")).toHaveCount(0);
 		await measure();
-		await page.setViewportSize({ width: 1280, height: 800 });
+		await wide(page);
 
 		// While connected, the rail's dot breathes; under reduced motion it holds still.
 		const dot = page.getByText("Connected", { exact: true }).locator("span");

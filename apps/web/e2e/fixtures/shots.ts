@@ -26,12 +26,28 @@ export async function narrow(page: Page): Promise<void> {
 		.toEqual([]);
 }
 
+/**
+ * The page at a desktop's size, once the shell has traded the phone's bar back for its rail, which
+ * it does a render after the resize: measured before, the rail's 200 px column is not there yet.
+ */
+export async function wide(page: Page): Promise<void> {
+	await page.setViewportSize({ width: 1280, height: 800 });
+	await expect
+		.poll(() =>
+			page
+				.getByRole("navigation", { name: "Main" })
+				.evaluate((rail) => rail.getBoundingClientRect().width)
+				.catch(() => 0),
+		)
+		.toBeGreaterThan(0);
+}
+
 /** The page at a phone's size, which must not scroll sideways, and at a desktop's, for the landing review. */
 export async function screenshots(page: Page, name: string): Promise<void> {
 	await page.evaluate(() => window.scrollTo(0, 0));
 	await narrow(page);
 	await page.screenshot({ path: `${shots}${name}-360.png`, fullPage: true });
-	await page.setViewportSize({ width: 1280, height: 800 });
+	await wide(page);
 	await page.screenshot({ path: `${shots}${name}-1280.png`, fullPage: true });
 }
 
