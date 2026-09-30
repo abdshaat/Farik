@@ -1,0 +1,260 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Iris on your team</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&amp;family=Silkscreen&amp;family=Space+Grotesk:wght@400;500;600&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0;font-family:'Space Grotesk',system-ui,sans-serif;background:#F3E7D3;color:#161616}
+a{color:#161616;text-decoration:underline;text-underline-offset:3px}a:hover{color:#5B5347}
+.px{image-rendering:pixelated}
+button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible,summary:focus-visible{outline:2px solid #5F7A9B;outline-offset:2px}
+</style>
+</helmet>
+<div style="width: 1440px; height: 2600px; display: flex; flex-direction: column; background: #F3E7D3; color: #161616; font-family: 'Space Grotesk', system-ui, sans-serif;">
+<div style="height: 1000px; flex-shrink: 0; display: flex;">
+<nav aria-label="Main" style="width: 88px; flex-shrink: 0; background: #161616; display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 20px 0; box-sizing: border-box;">
+<img class="px" src="/_blob/cbf211abf5739b5bb073797fe4fb08fc" alt="Farik" style="width: 48px; height: 48px; margin-bottom: 16px;">
+<a href="Main.dc.html" style="width: 72px; padding: 10px 0; display: flex; flex-direction: column; align-items: center; gap: 4px; color: #B9AE9C; text-decoration: none; font-size: 12px;">
+<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="4"></circle><path d="M12 2v2M12 20v2M2 12h2M20 12h2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"></path></svg>Today</a>
+<a href="Board.dc.html" style="width: 72px; padding: 10px 0; display: flex; flex-direction: column; align-items: center; gap: 4px; color: #B9AE9C; text-decoration: none; font-size: 12px;">
+<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="3" y="4" width="5" height="16"></rect><rect x="10" y="4" width="5" height="10"></rect><rect x="17" y="4" width="4" height="13"></rect></svg>Board</a>
+<a href="Channel.dc.html" style="width: 72px; padding: 10px 0; display: flex; flex-direction: column; align-items: center; gap: 4px; color: #B9AE9C; text-decoration: none; font-size: 12px;">
+<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 5h16v11H9l-5 4z"></path></svg>Channel</a>
+<a href="Team.dc.html" aria-current="page" style="width: 72px; padding: 10px 0; display: flex; flex-direction: column; align-items: center; gap: 4px; color: #F3E7D3; background: #2A2A2A; border-radius: 4px; text-decoration: none; font-size: 12px;">
+<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="9" cy="8" r="3"></circle><circle cx="17" cy="9" r="2.5"></circle><path d="M3 20c0-3.3 2.7-6 6-6s6 2.7 6 6M15 20c0-2.2 1.3-4.2 3.5-4.8"></path></svg>Team</a>
+<a href="Costs.dc.html" style="width: 72px; padding: 10px 0; display: flex; flex-direction: column; align-items: center; gap: 4px; color: #B9AE9C; text-decoration: none; font-size: 12px;">
+<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><path d="M15 9.5c-.5-1-1.6-1.5-3-1.5-1.7 0-3 .8-3 2s1.3 1.7 3 2 3 .8 3 2-1.3 2-3 2c-1.4 0-2.5-.5-3-1.5M12 6v2M12 16v2"></path></svg>Costs</a>
+<div style="flex-grow: 1;"></div>
+<a href="Settings.dc.html" style="width: 72px; padding: 10px 0; display: flex; flex-direction: column; align-items: center; gap: 4px; color: #B9AE9C; text-decoration: none; font-size: 12px;">
+<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="3"></circle><path d="M12 2v3M12 19v3M2 12h3M19 12h3M5 5l2 2M17 17l2 2M5 19l2-2M17 7l2-2"></path></svg>Settings</a>
+</nav>
+<main style="flex-grow: 1; display: flex; flex-direction: column; min-width: 0; padding: 32px 48px; gap: 24px; box-sizing: border-box;">
+<div style="display: flex; align-items: flex-end; gap: 16px;">
+<div style="display: flex; flex-direction: column; gap: 6px; flex-grow: 1;">
+<h1 style="margin: 0; font-size: 24px; line-height: 30px; font-weight: 600;">Your team</h1>
+<p style="margin: 0; font-size: 16px; line-height: 24px; color: #5B5347; max-width: 640px;">Six agents work on Corner Bakery orders. A team needs a Product Manager and a Developer; everyone else is up to you. You can have up to seven.</p>
+</div>
+<button type="button" style="font-family: inherit; font-size: 16px; font-weight: 600; background: #D8896A; color: #161616; border: 0; border-radius: 4px; padding: 12px 20px; cursor: pointer; min-height: 44px;">Add someone</button>
+</div>
+
+<ul style="list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; border-top: 1px solid #161616;">
+<sc-for list="{{agents}}" as="a" hint-placeholder-count="6">
+<li style="display: grid; grid-template-columns: 72px 220px minmax(0, 1fr) 220px 240px; gap: 24px; align-items: center; padding: 16px 0; border-bottom: 1px solid #D9CBB3;">
+<img class="px" src="{{a.av}}" alt="" style="width: 64px; height: 64px; border: 3px solid {{a.tagFill}};">
+<div style="display: flex; flex-direction: column; gap: 6px;">
+<div style="display: flex; align-items: center; gap: 8px;"><span style="font-size: 18px; font-weight: 600;">{{a.name}}</span><span style="font-family: 'JetBrains Mono', monospace; font-size: 11px; font-weight: 600; padding: 1px 6px; background: {{a.tagFill}}; color: #161616;">{{a.tag}}</span></div>
+<span style="font-size: 14px; color: #5B5347;">{{a.role}}</span>
+</div>
+<div style="display: flex; flex-direction: column; gap: 4px;">
+<span style="font-size: 16px; line-height: 24px;">{{a.persona}}</span>
+<span style="font-size: 14px; line-height: 20px; font-weight: 600; color: {{a.statusColor}};">{{a.status}}</span>
+</div>
+<div style="display: flex; flex-direction: column; gap: 2px;">
+<span style="font-size: 13px; color: #5B5347;">Model</span>
+<span style="font-size: 15px;">{{a.model}}</span>
+</div>
+<div style="display: flex; gap: 8px; justify-content: flex-end;">
+<a href="{{a.edit}}" aria-label="Edit {{a.name}}" style="font-size: 14px; font-weight: 600; color: #161616; border: 1px solid #8A7F6E; border-radius: 4px; padding: 8px 14px; min-height: 40px; box-sizing: border-box; text-decoration: none; display: inline-flex; align-items: center;">Edit</a>
+<button type="button" aria-label="Pause {{a.name}}" style="font-family: inherit; font-size: 14px; font-weight: 600; background: transparent; color: #161616; border: 1px solid #8A7F6E; border-radius: 4px; padding: 8px 14px; cursor: pointer; min-height: 40px;">Pause</button>
+</div>
+</li>
+</sc-for>
+</ul>
+
+<div style="display: flex; gap: 48px; max-width: 1100px;">
+<section aria-labelledby="t-why" style="flex: 1; display: flex; flex-direction: column; gap: 8px;">
+<h2 id="t-why" style="margin: 0; font-size: 18px; line-height: 24px; font-weight: 600;">Pause, retire or replace</h2>
+<p style="margin: 0; font-size: 15px; line-height: 22px;">Pausing stops an agent from taking new work; it finishes nothing halfway. Retiring removes it from the team but keeps what it learned in your project, so whoever replaces it can read it. Changes start with the agent’s next piece of work, never in the middle of one.</p>
+</section>
+<section aria-labelledby="t-cost" style="flex: 1; display: flex; flex-direction: column; gap: 8px;">
+<h2 id="t-cost" style="margin: 0; font-size: 18px; line-height: 24px; font-weight: 600;">What a team like this costs</h2>
+<p style="margin: 0; font-size: 15px; line-height: 22px;">Iris uses the same model as Theo, so a sixth agent adds to what a day costs. Before Iris changes a screen, Iris looks at it and writes a plan, and that costs a little too. Set a limit in <a href="Costs.dc.html">Costs</a>.</p>
+</section>
+</div>
+</main>
+</div>
+
+<div style="flex-grow: 1; border-top: 1px solid #161616; padding: 56px 48px 56px 136px; display: flex; flex-direction: column; gap: 64px; box-sizing: border-box;">
+
+<div style="display: flex; gap: 64px; align-items: flex-start;">
+<section aria-labelledby="setup-h" style="width: 760px; flex-shrink: 0; display: flex; flex-direction: column; gap: 12px;">
+<p style="margin: 0; font-family: 'JetBrains Mono', monospace; font-size: 13px; line-height: 20px; color: #5B5347;">First run, step 3 of 6, “Who should be on your team?”</p>
+<h2 id="setup-h" style="margin: 0; font-size: 18px; line-height: 24px; font-weight: 600;">We suggest six, one for each job</h2>
+<ul style="list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; border-top: 1px solid #D9CBB3;">
+<li style="display: flex; align-items: center; gap: 18px; padding: 12px 0; border-bottom: 1px solid #D9CBB3;">
+<input type="checkbox" checked="{{true}}" aria-label="Include the UI/UX Designer" style="width: 22px; height: 22px; accent-color: #161616; flex-shrink: 0;">
+<img class="px" src="{{picSrc}}" alt="" style="width: 56px; height: 56px; border: 3px solid {{colHex}}; flex-shrink: 0;">
+<div style="display: flex; flex-direction: column; gap: 4px; width: 200px; flex-shrink: 0;">
+<label for="setup-name" style="font-size: 13px; color: #5B5347;">UI/UX Designer</label>
+<input id="setup-name" type="text" value="Iris" style="font-family: inherit; font-size: 16px; font-weight: 600; border: 1px solid #8A7F6E; border-radius: 4px; padding: 6px 10px; background: #FBF6EC; color: #161616;">
+</div>
+<span style="flex-grow: 1; font-size: 15px; line-height: 22px;">Looks at your app the way a customer does, plans changes to its screens, and makes them once Mira agrees. Checks every screen Theo builds.</span>
+</li>
+</ul>
+<p style="margin: 0; font-family: 'JetBrains Mono', monospace; font-size: 13px; line-height: 20px; color: #5B5347;">The same row when this computer has no Docker</p>
+<ul style="list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; border-top: 1px solid #D9CBB3;">
+<li style="display: flex; align-items: flex-start; gap: 18px; padding: 12px 0; border-bottom: 1px solid #D9CBB3;">
+<input type="checkbox" disabled="{{true}}" aria-label="Include the UI/UX Designer" aria-describedby="nodocker" style="width: 22px; height: 22px; accent-color: #161616; flex-shrink: 0; margin-top: 17px;">
+<img class="px" src="{{picSrc}}" alt="" style="width: 56px; height: 56px; border: 3px solid #D9CBB3; flex-shrink: 0; filter: grayscale(1); opacity: 0.5;">
+<div style="display: flex; flex-direction: column; gap: 4px; width: 200px; flex-shrink: 0;">
+<label for="setup-name-off" style="font-size: 13px; color: #5B5347;">UI/UX Designer</label>
+<input id="setup-name-off" type="text" value="Iris" disabled="{{true}}" style="font-family: inherit; font-size: 16px; font-weight: 600; border: 1px solid #D9CBB3; border-radius: 4px; padding: 6px 10px; background: transparent; color: #5B5347;">
+</div>
+<div id="nodocker" style="flex-grow: 1; display: flex; flex-direction: column; gap: 6px;">
+<span style="font-size: 15px; line-height: 22px; font-weight: 600;">Needs Docker’s sandbox</span>
+<span style="font-size: 15px; line-height: 22px;">Iris opens your app in a browser, and only inside Docker’s sandbox, a safe box that keeps it away from the rest of your computer. Farik did not find Docker here.</span>
+<span style="display: flex; gap: 16px; align-items: center;">
+<button type="button" style="font-family: inherit; font-size: 14px; font-weight: 600; background: transparent; color: #161616; border: 1px solid #8A7F6E; border-radius: 4px; padding: 8px 14px; cursor: pointer; min-height: 40px;">Check again</button>
+<a href="#" style="font-size: 14px; font-weight: 600;">How to install Docker</a>
+</span>
+</div>
+</li>
+</ul>
+</section>
+
+<section id="iris-editor" aria-labelledby="ed-h" style="flex-grow: 1; display: flex; flex-direction: column; gap: 14px;">
+<p style="margin: 0; font-family: 'JetBrains Mono', monospace; font-size: 13px; line-height: 20px; color: #5B5347;">Editing Iris, “Skills and connectors”</p>
+<h2 id="ed-h" style="margin: 0; font-size: 18px; line-height: 24px; font-weight: 600;">Connectors <span style="font-weight: 400; color: #5B5347;">let Iris use outside tools</span></h2>
+<ul style="list-style: none; margin: 0; padding: 0; border-top: 1px solid #D9CBB3;">
+<li style="display: flex; align-items: flex-start; gap: 14px; padding: 12px 0; border-bottom: 1px solid #D9CBB3;">
+<span aria-hidden="true" style="width: 40px; height: 40px; flex-shrink: 0; border-radius: 8px; background: #161616; color: #F3E7D3; display: flex; align-items: center; justify-content: center; font-family: 'JetBrains Mono', monospace; font-size: 16px; font-weight: 600;">P</span>
+<span style="flex-grow: 1; display: flex; flex-direction: column; gap: 2px; min-width: 0;">
+<span id="pw-name" style="font-size: 16px; font-weight: 600;">Playwright <span style="font-size: 13px; font-weight: 400; color: #5B5347;">comes with Farik</span></span>
+<span style="font-size: 14px; line-height: 20px; color: #5B5347;">Opens your app in a browser inside Docker’s sandbox, so Iris can see its screens as a customer would. It reaches only your app, nothing else on the internet.</span>
+</span>
+<span style="display: flex; align-items: center; gap: 10px; flex-shrink: 0;">
+<span style="font-size: 14px; color: #5B5347;">{{pwLabel}}</span>
+<button type="button" role="switch" aria-checked="{{pw}}" aria-labelledby="pw-name" onClick="{{togglePw}}" style="width: 48px; height: 28px; border-radius: 14px; border: 0; background: {{pwBg}}; position: relative; cursor: pointer; padding: 0;"><span style="position: absolute; top: 2px; left: {{pwKnob}}; width: 24px; height: 24px; border-radius: 12px; background: #FBF6EC;"></span></button>
+</span>
+</li>
+</ul>
+<sc-if value="{{pwOff}}" hint-placeholder-val="{{ false }}"><p style="margin: 0; font-size: 14px; line-height: 20px; color: #96533A; font-weight: 600;">Without it Iris cannot look at your app, so Farik gives Iris no work.</p></sc-if>
+<p style="margin: 0; font-size: 14px; line-height: 20px; color: #5B5347;">On for a UI/UX Designer. You can turn it on for anyone else. More connectors arrive in a later version.</p>
+<h2 style="margin: 12px 0 0; font-size: 18px; line-height: 24px; font-weight: 600;">What Iris may do</h2>
+<p style="margin: 0; font-size: 15px; line-height: 22px;">Iris changes your app’s code, as Theo does, but only on Iris’s own tasks and only after Mira agrees to Iris’s plan. Ada reviews Iris’s work.</p>
+</section>
+</div>
+
+<section aria-labelledby="pick-h" style="display: flex; flex-direction: column; gap: 24px;">
+<div style="display: flex; flex-direction: column; gap: 6px;">
+<p style="margin: 0; font-family: 'JetBrains Mono', monospace; font-size: 13px; line-height: 20px; color: #5B5347;">For you to choose, before any code is written</p>
+<h2 id="pick-h" style="margin: 0; font-size: 24px; line-height: 30px; font-weight: 600;">Iris’s picture, tag colour and name</h2>
+</div>
+
+<fieldset style="border: 0; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 12px;">
+<legend style="font-size: 18px; line-height: 24px; font-weight: 600; padding: 0; margin-bottom: 8px;">Picture</legend>
+<div style="display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 16px;">
+<sc-for list="{{pics}}" as="p" hint-placeholder-count="5">
+<button type="button" aria-pressed="{{p.on}}" disabled="{{p.taken}}" onClick="{{p.pick}}" aria-label="{{p.aria}}" style="font-family: inherit; text-align: left; background: #FBF6EC; color: #161616; border: {{p.border}}; border-radius: 8px; padding: {{p.pad}}; cursor: {{p.cursor}}; display: flex; flex-direction: column; gap: 10px;">
+<img class="px" src="{{p.src}}" alt="" style="width: 100%; aspect-ratio: 1; filter: {{p.filter}}; opacity: {{p.opacity}};">
+<span style="display: flex; align-items: baseline; gap: 10px;"><span style="font-family: 'JetBrains Mono', monospace; font-size: 22px; font-weight: 600;">{{p.letter}}</span><span style="font-size: 14px; color: #5B5347;">{{p.note}}</span></span>
+</button>
+</sc-for>
+</div>
+</fieldset>
+
+<fieldset style="border: 0; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 12px;">
+<legend style="font-size: 18px; line-height: 24px; font-weight: 600; padding: 0; margin-bottom: 8px;">Tag colour</legend>
+<div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px;">
+<sc-for list="{{cols}}" as="c" hint-placeholder-count="3">
+<button type="button" aria-pressed="{{c.on}}" onClick="{{c.pick}}" aria-label="{{c.aria}}" style="font-family: inherit; text-align: left; background: #FBF6EC; color: #161616; border: {{c.border}}; border-radius: 8px; padding: {{c.pad}}; cursor: pointer; display: flex; flex-direction: column; gap: 12px;">
+<span aria-hidden="true" style="height: 56px; background: {{c.hex}};"></span>
+<span style="display: flex; align-items: baseline; gap: 10px;"><span style="font-family: 'JetBrains Mono', monospace; font-size: 22px; font-weight: 600;">{{c.letter}}</span><span style="font-size: 16px; font-weight: 600;">{{c.name}}</span><span style="font-family: 'JetBrains Mono', monospace; font-size: 13px; color: #5B5347;">{{c.hex}}</span></span>
+<span style="font-size: 14px; line-height: 20px; color: #5B5347;">Text on it: {{c.ratio}} to 1. The floor is 4.5.</span>
+<span style="display: flex; gap: 6px; flex-wrap: wrap;" aria-hidden="true"><span style="font-family: 'JetBrains Mono', monospace; font-size: 11px; font-weight: 600; background: #C9A0A6; color: #161616; padding: 1px 6px;">PM</span><span style="font-family: 'JetBrains Mono', monospace; font-size: 11px; font-weight: 600; background: #A3B8A0; color: #161616; padding: 1px 6px;">SM</span><span style="font-family: 'JetBrains Mono', monospace; font-size: 11px; font-weight: 600; background: #D6B77A; color: #161616; padding: 1px 6px;">ARCH</span><span style="font-family: 'JetBrains Mono', monospace; font-size: 11px; font-weight: 600; background: #B7C7DA; color: #161616; padding: 1px 6px;">DEV</span><span style="font-family: 'JetBrains Mono', monospace; font-size: 11px; font-weight: 600; background: #B3A9CF; color: #161616; padding: 1px 6px;">MKT</span><span style="font-family: 'JetBrains Mono', monospace; font-size: 11px; font-weight: 600; background: {{c.hex}}; color: #161616; padding: 1px 6px; outline: 1px solid #161616;">UX</span></span>
+</button>
+</sc-for>
+</div>
+</fieldset>
+
+<div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; align-items: stretch;">
+<div style="display: flex; flex-direction: column; gap: 14px;">
+<div style="display: flex; flex-direction: column; gap: 6px;">
+<label for="nm" style="font-size: 16px; font-weight: 600;">Name</label>
+<input id="nm" type="text" value="Iris" style="font-family: inherit; font-size: 16px; border: 1px solid #8A7F6E; border-radius: 4px; padding: 10px 12px; background: #FBF6EC; color: #161616;">
+</div>
+<div style="display: flex; flex-direction: column; gap: 6px;">
+<label for="ps" style="font-size: 16px; font-weight: 600;">How Iris talks</label>
+<input id="ps" type="text" value="Makes it clear, calm and easy to use." style="font-family: inherit; font-size: 16px; border: 1px solid #8A7F6E; border-radius: 4px; padding: 10px 12px; background: #FBF6EC; color: #161616;">
+</div>
+</div>
+<div style="display: flex; flex-direction: column; gap: 8px;">
+<span style="font-size: 14px; color: #5B5347;">How it looks, light theme</span>
+<div style="flex-grow: 1; background: #F3E7D3; border: 1px solid #8A7F6E; border-radius: 8px; padding: 16px; display: flex; gap: 14px; align-items: center;">
+<img class="px" src="{{picSrc}}" alt="" style="width: 64px; height: 64px; border: 3px solid {{colHex}};">
+<span style="display: flex; flex-direction: column; gap: 6px;"><span style="display: flex; align-items: center; gap: 8px;"><span style="font-size: 18px; font-weight: 600;">Iris</span><span style="font-family: 'JetBrains Mono', monospace; font-size: 11px; font-weight: 600; background: {{colHex}}; color: #161616; padding: 1px 6px;">UX</span></span><span style="font-size: 14px; color: #5B5347;">UI/UX Designer</span></span>
+</div>
+</div>
+<div style="display: flex; flex-direction: column; gap: 8px;">
+<span style="font-size: 14px; color: #5B5347;">How it looks, dark theme</span>
+<div style="flex-grow: 1; background: #161616; color: #F3E7D3; border-radius: 8px; padding: 16px; display: flex; gap: 14px; align-items: center;">
+<img class="px" src="{{picSrc}}" alt="" style="width: 64px; height: 64px; border: 3px solid {{colHex}};">
+<span style="display: flex; flex-direction: column; gap: 6px;"><span style="display: flex; align-items: center; gap: 8px;"><span style="font-size: 18px; font-weight: 600;">Iris</span><span style="font-family: 'JetBrains Mono', monospace; font-size: 11px; font-weight: 600; background: {{colHex}}; color: #161616; padding: 1px 6px;">UX</span></span><span style="font-size: 14px; color: #B9AE9C;">UI/UX Designer</span></span>
+</div>
+</div>
+</div>
+</section>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":2600}}'>
+class Component extends DCLogic {
+constructor(props) { super(props); this.state = { pic: 'A', col: 'A', pw: true }; }
+renderVals() {
+    var self = this, s = this.state;
+    var picList = [
+      { letter: 'A', src: '/_blob/96fd70a6ba3c33c0c1f22ba8c032b059', note: 'Extra 1' },
+      { letter: 'B', src: '/_blob/b2d6123cd426ce1460060379db9fa6d8', note: 'Extra 2' },
+      { letter: 'C', src: '/_blob/fb83920347550d7836134399359f226f', note: 'Extra 3' },
+      { letter: 'D', src: '/_blob/7662fe4b8568ddad07620bb0dacfe013', note: 'Used by the Finance Specialist', taken: true },
+      { letter: 'E', src: '/_blob/2a660f54adf4d758a1bf70889c90c933', note: 'Extra 5' }
+    ];
+    var pics = picList.map(function (p) {
+      var on = p.letter === s.pic, taken = !!p.taken;
+      return { letter: p.letter, src: p.src, note: p.note, on: on, taken: taken,
+        aria: taken ? 'Picture ' + p.letter + ', used by the Finance Specialist' : 'Picture ' + p.letter,
+        border: on ? '3px solid #161616' : (taken ? '1px dashed #8A7F6E' : '1px solid #8A7F6E'), pad: on ? '12px' : '14px',
+        cursor: taken ? 'not-allowed' : 'pointer', filter: taken ? 'grayscale(1)' : 'none', opacity: taken ? '0.45' : '1',
+        pick: function () { if (!taken) self.setState({ pic: p.letter }); } };
+    });
+    var colList = [
+      { letter: 'A', name: 'Dusty teal', hex: '#9EC3BE', ratio: '9.48' },
+      { letter: 'B', name: 'Soft peach', hex: '#E3B89A', ratio: '9.99' },
+      { letter: 'C', name: 'Pale clay', hex: '#CDB29C', ratio: '9.00' }
+    ];
+    var cols = colList.map(function (c) {
+      var on = c.letter === s.col;
+      return { letter: c.letter, name: c.name, hex: c.hex, ratio: c.ratio, on: on, aria: 'Tag colour ' + c.letter + ', ' + c.name,
+        border: on ? '3px solid #161616' : '1px solid #8A7F6E', pad: on ? '12px' : '14px',
+        pick: function () { self.setState({ col: c.letter }); } };
+    });
+    var picSrc = picList.filter(function (p) { return p.letter === s.pic; })[0].src;
+    var colHex = colList.filter(function (c) { return c.letter === s.col; })[0].hex;
+    function a(name, role, tag, tagFill, av, persona, model, status, statusColor, edit) {
+      return { name: name, role: role, tag: tag, tagFill: tagFill, av: av, persona: persona, model: model, status: status, statusColor: statusColor, edit: edit || '#' };
+    }
+    return {
+      pics: pics, cols: cols, picSrc: picSrc, colHex: colHex,
+      pw: s.pw, pwOff: !s.pw, pwLabel: s.pw ? 'On' : 'Off', pwBg: s.pw ? '#536C59' : '#8A7F6E', pwKnob: s.pw ? '22px' : '2px',
+      togglePw: function () { self.setState({ pw: !s.pw }); },
+      agents: [
+        a('Mira', 'Product Manager', 'PM', '#C9A0A6', '/_blob/9bb5279ccb2c1912098a3a1b2c486aee', 'Asks the question behind the question.', 'Strongest model, thinks hard', 'Reading Iris\u2019s plan for the menu page', '#44607F'),
+        a('Sol', 'Scrum Master', 'SM', '#A3B8A0', '/_blob/50d64e70d63028a36a09a3b10dd330bb', 'Short updates, never a surprise.', 'Everyday model', 'Posted this morning\u2019s standup', '#5B5347'),
+        a('Ada', 'Architect', 'ARCH', '#D6B77A', '/_blob/ad487f8d4aefebda16a64e156d704fdb', 'Prefers boring, proven choices.', 'Strongest model, thinks hard', 'Resting until 3:40 pm. It reached its usage limit.', '#5B5347'),
+        a('Theo', 'Developer', 'DEV', '#B7C7DA', '/_blob/b3a8b1467a4f9ce051ca665a72525186', 'Terse. Shows rather than tells.', 'Strongest model, thinks hard', 'Waiting on you: the checkout page is finished', '#96533A', 'AgentEdit.dc.html'),
+        a('Iris', 'UI/UX Designer', 'UX', colHex, picSrc, 'Makes it clear, calm and easy to use.', 'Strongest model, thinks hard', 'Waiting for Mira to approve a plan', '#44607F', '#iris-editor'),
+        a('Kai', 'Marketing Specialist', 'MKT', '#B3A9CF', '/_blob/d639a95a4e1c0d33f55ba49d10828138', 'Writes like a friendly neighbour.', 'Everyday model', 'Drafting the launch post for gift cards', '#44607F')
+      ]
+    };
+}
+}
+</script>
+</body>
+</html>

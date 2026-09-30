@@ -22,7 +22,8 @@ Also out of scope: chats (step 13) and templates (step 14).
 
 The ADR's and the design's decisions hold as written. This plan decides only what they left open.
 
-- **The founder's gate (standing rule of 2026-09-26).** Task 1's mockups are approved by the founder before Task 2 starts, here and in step 12. The approval is recorded in this section in Task 1's commit, with the character, tag colour and name he chose. A choice other than the defaults below changes only data (`role.yaml`, `tokens.json`, the avatar key), never a task.
+- **The founder's gate (standing rule of 2026-09-26).** Task 1's mockups are approved by the founder before Task 2 starts, here and in step 12. The approval is recorded in this section in Task 1's commit, with the character, tag colour and name the founder chose.
+- **Approved by the founder, 2026-09-30:** the seven boards on the canvas's "UI/UX Designer" page (DesignerTeam, SettingsPreview, DesignPlan, GateDesignReview, and the phone boards for the last three). Choices: picture A (`extra-1`), tag colour C, pale clay `#CDB29C` (9.00:1 with Midnight Terminal text), name Iris with the line "Makes it clear, calm and easy to use", tag "UX". The boards sit on their own canvas page, `designer`, rather than on the team, settings, daily and gates pages. A choice other than the defaults below changes only data (`role.yaml`, `tokens.json`, the avatar key), never a task.
 - **Name and persona**, the defaults the mockup offers: Iris, "Makes it clear, calm and easy to use". Its id is `iris`. The pool of extra names (Noor, Ivo, Lena, Sami, Rui) stays for extra agents.
 - **Character options:** the existing `extra-1` to `extra-5` (`docs/brand/assets/characters/`). No new art. Once the founder chooses one, extra agents' avatars are drawn from the other four extras, so no two agents look alike (F10).
 - **Tag colour options:** dusty teal `#9EC3BE`, soft peach `#E3B89A`, pale clay `#CDB29C`. Each is muted, light, distinct from the five role colours, and passes the contrast test against `role-ink` #161616. The chosen one becomes the token `role-ui-ux-designer` in both themes.
@@ -86,7 +87,7 @@ Files: created `docs/design/mockups/{DesignerTeam,SettingsPreview,DesignPlan,Gat
 
 **Gate: the founder approves these mockups, with the character, the tag colour and the name, before Task 2 starts.** The approval is recorded in Decisions in this task's commit. Nothing later starts without it, here or in step 12.
 
-- [ ] `docs(design): mock up the UI/UX Designer's team, preview, plan and review screens`
+- [x] `docs(design): mock up the UI/UX Designer's team, preview, plan and review screens`
 
 ### Task 2: The role and its plan gate in core, and the schemas
 

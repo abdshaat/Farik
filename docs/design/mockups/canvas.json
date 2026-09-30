@@ -286,6 +286,69 @@
       "w": 1440,
       "x": 3040,
       "y": 0
+    },
+    "DesignerTeam.dc.html": {
+      "x": 0,
+      "y": 0,
+      "w": 1440,
+      "h": 2600,
+      "title": "Iris on your team: picture, colour, connector",
+      "page": "designer",
+      "is_interactive": true
+    },
+    "SettingsPreview.dc.html": {
+      "x": 1520,
+      "y": 0,
+      "w": 1440,
+      "h": 2200,
+      "title": "How to open your app",
+      "page": "designer",
+      "is_interactive": true
+    },
+    "DesignPlan.dc.html": {
+      "x": 3040,
+      "y": 0,
+      "w": 1440,
+      "h": 2080,
+      "title": "Iris’s plan, and checking the screens",
+      "page": "designer",
+      "is_interactive": true
+    },
+    "GateDesignReview.dc.html": {
+      "x": 4560,
+      "y": 0,
+      "w": 1440,
+      "h": 2200,
+      "title": "Accept work, with Iris’s check",
+      "page": "designer",
+      "is_interactive": true
+    },
+    "SettingsPreviewPhone.dc.html": {
+      "x": 0,
+      "y": 2720,
+      "w": 390,
+      "h": 844,
+      "title": "Open your app, on a phone",
+      "page": "designer",
+      "is_interactive": true
+    },
+    "DesignPlanPhone.dc.html": {
+      "x": 470,
+      "y": 2720,
+      "w": 390,
+      "h": 844,
+      "title": "Board on a phone, with Iris",
+      "page": "designer",
+      "is_interactive": true
+    },
+    "GateDesignReviewPhone.dc.html": {
+      "x": 940,
+      "y": 2720,
+      "w": 390,
+      "h": 844,
+      "title": "Accept work on a phone, with Iris",
+      "page": "designer",
+      "is_interactive": true
     }
   },
   "createdOnFiles": {
@@ -351,6 +414,15 @@
       "w": 240,
       "x": 0,
       "y": -300
+    },
+    "t_designer": {
+      "kind": "title1",
+      "maxW": 6000,
+      "page": "designer",
+      "text": "UI/UX Designer",
+      "w": 240,
+      "x": 0,
+      "y": -300
     }
   },
   "order": [
@@ -385,7 +457,14 @@
     "PhoneGate.dc.html",
     "PhoneBoard.dc.html",
     "PhoneChannel.dc.html",
-    "Site.dc.html"
+    "Site.dc.html",
+    "DesignerTeam.dc.html",
+    "SettingsPreview.dc.html",
+    "DesignPlan.dc.html",
+    "GateDesignReview.dc.html",
+    "SettingsPreviewPhone.dc.html",
+    "DesignPlanPhone.dc.html",
+    "GateDesignReviewPhone.dc.html"
   ],
   "pages": [
     {
@@ -411,6 +490,10 @@
     {
       "id": "site",
       "name": "Website"
+    },
+    {
+      "id": "designer",
+      "name": "UI/UX Designer"
     }
   ],
   "title": "Farik web UI mockup"
