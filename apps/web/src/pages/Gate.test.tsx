@@ -89,7 +89,7 @@ describe("acceptance gate", () => {
 	});
 
 	it("says_one_changed_file_in_the_singular", async () => {
-		await openedGate("/tasks/FRK-1/accept", GATE, TASK, [], {
+		await openedGate("/tasks/FRK-1/accept", GATE, TASK, undefined, {
 			"task.diff": { diff: "", files: ["done.txt"], added: 1, removed: 0 },
 		});
 		expect(
@@ -146,6 +146,19 @@ describe("acceptance gate", () => {
 				},
 			},
 		});
+		await expectNoAxeViolations(container);
+	});
+
+	it("offers_no_answer_when_nothing_waits_on_you", async () => {
+		// Verifying, but the review is not in: the result does not wait on the human yet.
+		const { container } = await opened(TASK, []);
+		expect(
+			await screen.findByText(
+				"This does not wait on you now. Where it is: Review.",
+			),
+		).toBeTruthy();
+		for (const name of ["Accept the work", "Send back with a note"])
+			expect(screen.queryByRole("button", { name })).toBeNull();
 		await expectNoAxeViolations(container);
 	});
 

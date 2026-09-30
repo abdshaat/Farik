@@ -3,6 +3,7 @@ import { useState } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 import { useConnection } from "../app/connection.tsx";
 import { useQuery } from "../app/store.ts";
+import { statusWord } from "../app/words.ts";
 import { t } from "../strings/t.ts";
 import gate from "./Gate.module.css";
 import own from "./PlanPage.module.css";
@@ -83,9 +84,9 @@ export function Gate() {
 	const events = history.events;
 	const agents = team.team.agents;
 	const epic = contract.kind === "epic";
-	const integration = waiting.waiting.some(
-		(w) => w.taskId === id && w.kind === "integration",
-	);
+	const waits = (kind: string) =>
+		waiting.waiting.some((w) => w.taskId === id && w.kind === kind);
+	const integration = waits("integration");
 	const builder = agents.find(
 		(a) => a.role === contract.assigneeRole && a.status !== "retired",
 	);
@@ -216,42 +217,44 @@ export function Gate() {
 						{t("gateAdd")}
 					</Button>
 				</div>
+			) : !waits("acceptance") ? (
+				<p className={styles.muted}>
+					{t("notWaiting").replace("{status}", statusWord(contract.status))}
+				</p>
 			) : (
-				contract.status === "verifying" && (
-					<>
-						{epic && (
-							<TextArea
-								id="what-you-checked"
-								label={t("gateWhatChecked")}
-								value={what}
-								onChange={setWhat}
-								required
-							/>
-						)}
-						<div className={styles.actions}>
-							<Button
-								kind="primary"
-								busy={busy}
-								disabled={epic && what.trim() === ""}
-								onClick={() =>
-									send({
-										command: "human_accept",
-										body: {
-											taskId: id,
-											subject: "result",
-											...(epic ? { message: what.trim() } : {}),
-										},
-									})
-								}
-							>
-								{t("gateAccept")}
-							</Button>
-							<Button busy={busy} onClick={() => setSending(true)}>
-								{t("gateSendBack")}
-							</Button>
-						</div>
-					</>
-				)
+				<>
+					{epic && (
+						<TextArea
+							id="what-you-checked"
+							label={t("gateWhatChecked")}
+							value={what}
+							onChange={setWhat}
+							required
+						/>
+					)}
+					<div className={styles.actions}>
+						<Button
+							kind="primary"
+							busy={busy}
+							disabled={epic && what.trim() === ""}
+							onClick={() =>
+								send({
+									command: "human_accept",
+									body: {
+										taskId: id,
+										subject: "result",
+										...(epic ? { message: what.trim() } : {}),
+									},
+								})
+							}
+						>
+							{t("gateAccept")}
+						</Button>
+						<Button busy={busy} onClick={() => setSending(true)}>
+							{t("gateSendBack")}
+						</Button>
+					</div>
+				</>
 			)}
 			<SendBackDialog
 				open={sending}

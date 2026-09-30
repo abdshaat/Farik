@@ -96,12 +96,23 @@ export const TASK = {
 	created_at: "2026-09-23T09:00:00Z",
 };
 
+/** The acceptance row `waiting.list` answers for FRK-1 while its result waits on the human. */
+export const ACCEPTING = [
+	{
+		task_id: "FRK-1",
+		kind: "acceptance",
+		agent_id: "theo",
+		title: "Gift cards",
+		line: "Theo finished it and Ada reviewed it.",
+	},
+];
+
 /** `path` for FRK-1, with each of `names` answered: the team, `contract`, its history, checks, diff, tries, `waiting` and choices, or what `overrides` gives. */
 export async function openedGate(
 	path: string,
 	names: string[],
 	contract: object = TASK,
-	waiting: object[] = [],
+	waiting: object[] = ACCEPTING,
 	overrides: Record<string, unknown> = {},
 ) {
 	const { container, socket } = await renderApp(path);

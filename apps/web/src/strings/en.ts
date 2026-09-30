@@ -567,6 +567,7 @@ export const en = {
 	gateHistory: "See the whole history",
 	gateWhatChecked: "What you checked",
 	gateAccept: "Accept the work",
+	notWaiting: "This does not wait on you now. Where it is: {status}.",
 	gateSendBack: "Send back with a note",
 	gateAdd: "Add to project",
 	sendBackTitle: "Send {title} back to {name}",

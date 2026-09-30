@@ -11,8 +11,19 @@ import type { FakeSocket } from "../test/fake-socket.ts";
 import { CONTRACT, SUMMARY, TEAM } from "../test/plan.ts";
 import { answerQuery, answerStatus, renderApp } from "../test/render-app.tsx";
 
+/** The approval row `waiting.list` answers while FRK-1's plan waits on the human. */
+const APPROVING = [
+	{
+		task_id: "FRK-1",
+		kind: "approval",
+		agent_id: "mira",
+		title: "Gift cards",
+		line: "Mira wrote a plan for you to approve",
+	},
+];
+
 /** The plan page for FRK-1, with the team, the plan, its checks and its questions answered. */
-async function opened() {
+async function opened(waiting: object[] = APPROVING) {
 	const { container, socket } = await renderApp("/tasks/FRK-1/plan");
 	const s = socket as FakeSocket;
 	await answerStatus(s, false);
@@ -28,6 +39,7 @@ async function opened() {
 			},
 		],
 	});
+	await answerQuery(s, "waiting.list", { waiting });
 	await answerQuery(s, "questions.list", {
 		questions: [
 			{
@@ -127,6 +139,19 @@ describe("plan page", () => {
 				.getByRole("link", { name: "Edit the plan yourself" })
 				.getAttribute("href"),
 		).toBe("/tasks/FRK-1/plan/edit");
+		await expectNoAxeViolations(container);
+	});
+
+	it("offers_no_answer_when_the_plan_does_not_wait_on_you", async () => {
+		// Escalated for another reason (tries, spending): the plan is not waiting for approval.
+		const { container } = await opened([]);
+		expect(
+			await screen.findByText(
+				"This does not wait on you now. Where it is: Needs your help.",
+			),
+		).toBeTruthy();
+		for (const name of ["Approve the plan", "Ask for changes"])
+			expect(screen.queryByRole("button", { name })).toBeNull();
 		await expectNoAxeViolations(container);
 	});
 

@@ -4,7 +4,7 @@ import { useState } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 import { useConnection } from "../app/connection.tsx";
 import { useQuery } from "../app/store.ts";
-import type { TaskStatus } from "../app/words.ts";
+import { statusWord, type TaskStatus } from "../app/words.ts";
 import { t } from "../strings/t.ts";
 import own from "./PlanPage.module.css";
 import styles from "./pages.module.css";
@@ -99,6 +99,9 @@ export function PlanPage() {
 	const { data: checked } = useQuery<{ checks: Check[] }>("task.checks", {
 		task_id: id,
 	});
+	const { data: waiting } = useQuery<{
+		waiting: { taskId: string; kind: string }[];
+	}>("waiting.list", {});
 	const { data: asked } = useQuery<{ questions: { answer: string | null }[] }>(
 		"questions.list",
 		{ task_id: id },
@@ -107,7 +110,7 @@ export function PlanPage() {
 	const [refusal, setRefusal] = useState<string>();
 	const [asking, setAsking] = useState(false);
 	const [note, setNote] = useState("");
-	if (!team || !plan || !checked || !asked) return null;
+	if (!team || !plan || !checked || !waiting || !asked) return null;
 
 	const contract = plan.contract;
 	const agents = team.team.agents;
@@ -115,6 +118,10 @@ export function PlanPage() {
 	const pmName = pm?.displayName ?? uiStrings.roleName.product_manager;
 	const breaker = active(agents, "scrum_master") ?? pm;
 	const epic = contract.kind === "epic";
+	// The board, not the file, says what waits on the human (SPEC 5.7's approval).
+	const awaiting = waiting.waiting.some(
+		(w) => w.taskId === id && w.kind === "approval",
+	);
 	const loose = contract.exitCriteria.filter((c) => !c.satisfies?.length);
 	const doneWhen = (c: Criterion) =>
 		t("planDoneWhen").replace(
@@ -251,7 +258,7 @@ export function PlanPage() {
 			)}
 			<div className={styles.actions}>
 				<Link to={`/tasks/${id}/plan/edit`}>{t("planEdit")}</Link>
-				{contract.status === "escalated" && (
+				{awaiting && (
 					<>
 						<Button
 							kind="primary"
@@ -271,7 +278,12 @@ export function PlanPage() {
 					</>
 				)}
 			</div>
-			{epic && contract.status === "escalated" && (
+			{!awaiting && (
+				<p className={styles.muted}>
+					{t("notWaiting").replace("{status}", statusWord(contract.status))}
+				</p>
+			)}
+			{epic && awaiting && (
 				<p className={styles.muted}>
 					{t("planApproveNote").replace(
 						"{breaker}",
