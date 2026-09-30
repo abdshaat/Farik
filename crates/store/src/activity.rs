@@ -237,15 +237,16 @@ pub fn moved_since(
         .iter()
         .filter(|event| event.envelope.recorded_at > since)
         .filter_map(|event| {
+            // Quoted, and without its own full stop, so that the line reads as one sentence.
             let title = || {
-                event
+                let title = event
                     .envelope
                     .ids
                     .task_id
                     .as_ref()
                     .and_then(|task| titles.get(task))
-                    .cloned()
-                    .unwrap_or_default()
+                    .map_or("", String::as_str);
+                format!("“{}”", title.trim_end().trim_end_matches('.'))
             };
             let line = match &event.body {
                 EventBody::TaskTransitioned(body) => {
@@ -487,7 +488,8 @@ mod tests {
     fn says_what_moved_since() {
         let board = Board::new("moved-since");
         let team = five();
-        board.file("FRK-1", "Login form", |_| {});
+        // A request's first line often ends in a full stop, which the sentence drops.
+        board.file("FRK-1", "Add a login form.", |_| {});
         // Before `since`, and not shown.
         board.moved(
             at(9, 0),
@@ -556,10 +558,10 @@ mod tests {
         assert_eq!(
             lines,
             vec![
-                (at(10, 1), "Linus moved Login form to In progress"),
-                (at(10, 2), "You moved Login form to Being reworked"),
-                (at(10, 3), "You accepted Login form"),
-                (at(10, 4), "Login form was added to the project"),
+                (at(10, 1), "Linus moved “Add a login form” to In progress"),
+                (at(10, 2), "You moved “Add a login form” to Being reworked"),
+                (at(10, 3), "You accepted “Add a login form”"),
+                (at(10, 4), "“Add a login form” was added to the project"),
                 (
                     at(10, 5),
                     "Grace reached its usage limit and will pick up again at 14:30"
