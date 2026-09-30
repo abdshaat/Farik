@@ -457,6 +457,7 @@ export const en = {
 	laterQuestion: "{agent} shows this once you answer question {n}.",
 	suggests: "{agent} suggests",
 	ownWordsMany: "Or say it in your own words",
+	wordsWin: "Your own words are sent instead of the choice.",
 	ownWordsOne: "Or answer in your own words",
 	sendAnswer: "Send answer",
 	letDecide: "Let {agent} decide",

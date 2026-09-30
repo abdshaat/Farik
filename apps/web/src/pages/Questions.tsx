@@ -171,6 +171,7 @@ function Answer({
 				value={words}
 				onChange={setWords}
 				rows={3}
+				{...(choice && words.trim() ? { hint: t("wordsWin") } : {})}
 			/>
 			{refusal && (
 				<p role="alert" className={own.alert}>

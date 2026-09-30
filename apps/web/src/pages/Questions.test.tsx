@@ -89,17 +89,33 @@ describe("questions page", () => {
 		});
 		act(() => s.reply(byChoice, { said: "answered", events: [20] }));
 
-		fireEvent.change(screen.getByRole("textbox", { name: en.ownWordsMany }), {
-			target: { value: "Only after five years." },
-		});
+		const words = screen.getByRole("textbox", { name: en.ownWordsMany });
+		expect(screen.queryByText(en.wordsWin)).toBeNull();
+		fireEvent.change(words, { target: { value: "Only after five years." } });
+		// The choice is still picked: the page says the words go instead.
+		expect(words.getAttribute("aria-describedby")).toBeTruthy();
+		expect(screen.getByText(en.wordsWin)).toBeTruthy();
 		// Once the first answer is taken, the button is free again.
 		fireEvent.click(await screen.findByRole("button", { name: en.sendAnswer }));
-		expect((await command(s, 1)).params).toEqual({
+		const byWords = await command(s, 1);
+		expect(byWords.params).toEqual({
 			command: {
 				command: "question_answer",
 				body: { question_id: 12, answer: "Only after five years." },
 			},
 		});
+		// A refused answer is said, in a sentence.
+		act(() =>
+			s.reply(byWords, {
+				error: {
+					kind: "refused",
+					detail: "already_answered: the question has an answer already",
+				},
+			}),
+		);
+		expect((await screen.findByRole("alert")).textContent).toBe(
+			"The question has an answer already",
+		);
 	});
 
 	it("lets_the_agent_decide", async () => {
