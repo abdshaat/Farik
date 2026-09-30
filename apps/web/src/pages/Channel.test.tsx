@@ -124,6 +124,17 @@ describe("channel", () => {
 		const list = screen.getByRole("list", { name: en.channelMessages });
 		const row = (text: string) =>
 			within(list).getByText(text).closest("li") as HTMLElement;
+		// Oldest first, as the page came.
+		expect(
+			within(list)
+				.getAllByRole("listitem")
+				.map((li) => li.textContent),
+		).toEqual([
+			expect.stringContaining("Started on the menu page."),
+			expect.stringContaining("Sprint 2 started."),
+			expect.stringContaining("Thanks, all."),
+			expect.stringContaining("Glad to."),
+		]);
 
 		// An agent's post: its avatar, name, role tag and time.
 		const theo = row("Started on the menu page.");
@@ -342,6 +353,25 @@ describe("channel", () => {
 			"li",
 		) as HTMLElement;
 		expect(within(row).getByText("Replying to You")).toBeTruthy();
+
+		// One heard out of order still takes its place by seq.
+		live(s, 89, "message.posted", {
+			author: "mira",
+			kind: "ambient",
+			text: "Before that.",
+			mentions: [],
+		});
+		await screen.findByText("Before that.");
+		const list = screen.getByRole("list", { name: en.channelMessages });
+		expect(
+			within(list)
+				.getAllByRole("listitem")
+				.map((li) => li.textContent),
+		).toEqual([
+			expect.stringContaining("can you look?"),
+			expect.stringContaining("Before that."),
+			expect.stringContaining("On it."),
+		]);
 		expect(
 			s.calls("query").filter((f) => f.params.name === "channel.messages"),
 		).toHaveLength(1);
