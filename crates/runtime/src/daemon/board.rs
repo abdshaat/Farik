@@ -282,8 +282,8 @@ fn channel_messages(deps: &ToolDeps, params: &Value) -> Result<Value, Failure> {
     Ok(json!({ "messages": messages }))
 }
 
-/// `costs.summary {}`: today's spending (UTC) and the daily limit, the open sprint's, and each
-/// agent's that is not retired, in the team's order.
+/// `costs.summary {}`: today's spending (UTC) and the daily limit, the last sprint's (the open one
+/// while one is), and each agent's that is not retired, in the team's order.
 fn costs_summary(deps: &ToolDeps) -> Result<Value, Failure> {
     let day = deps.clock.now().date_naive();
     let team = deps.files.read_team().map_err(|e| internal(&e))?;
@@ -298,21 +298,21 @@ fn costs_summary(deps: &ToolDeps) -> Result<Value, Failure> {
     };
     let today = sum_by(CostScope::Day, CostWindow::Day(day))?;
     let agents_today = sum_by(CostScope::Agent, CostWindow::Day(day))?;
-    let open = deps.projections.open_sprint().map_err(|e| internal(&e))?;
-    let (sprint, agents_sprint) = match &open {
+    // The open sprint, else the last one, so that its figures do not read $0.00 once it ends.
+    let last = deps.files.list_sprints().map_err(|e| internal(&e))?.pop();
+    let (sprint, agents_sprint) = match &last {
         None => (Value::Null, BTreeMap::new()),
-        Some(open) => {
-            let spent = sum_by(
-                CostScope::Sprint,
-                CostWindow::Sprint(open.sprint_id.clone()),
-            )?;
+        Some(last) => {
+            let window = || CostWindow::Sprint(last.id.as_str().to_string());
+            let spent = sum_by(CostScope::Sprint, window())?;
             (
                 json!({
-                    "sprint_id": open.sprint_id,
+                    "sprint_id": last.id,
+                    "status": last.status,
                     "spent_usd": spent.values().sum::<f64>(),
-                    "budget_usd": open.budget_usd,
+                    "budget_usd": last.budget_usd,
                 }),
-                sum_by(CostScope::Agent, CostWindow::Sprint(open.sprint_id.clone()))?,
+                sum_by(CostScope::Agent, window())?,
             )
         }
     };
@@ -714,7 +714,7 @@ mod tests {
             json!({
                 "today_usd": 7.5,
                 "daily_limit_usd": 10.0,
-                "sprint": { "sprint_id": "S1", "spent_usd": 23.25, "budget_usd": 20.0 },
+                "sprint": { "sprint_id": "S1", "status": "open", "spent_usd": 23.25, "budget_usd": 20.0 },
                 "agents": [
                     { "agent_id": "pm", "today_usd": 0.0, "sprint_usd": 0.0 },
                     { "agent_id": "dev-a", "today_usd": 3.5, "sprint_usd": 3.0 },
@@ -770,6 +770,16 @@ mod tests {
         ] {
             assert_eq!(none[rate], Value::Null, "{rate}: {none}");
         }
+
+        // Once the sprint ends, the summary keeps its figures and says it ended, until the next.
+        end_sprint(deps, EndedBy::Human).expect("the sprint ends");
+        let ended = summary(&harness);
+        assert_eq!(
+            ended["sprint"],
+            json!({ "sprint_id": "S1", "status": "ended", "spent_usd": 23.25, "budget_usd": 20.0 }),
+            "{ended}"
+        );
+        assert_eq!(ended["agents"][2]["sprint_usd"], 20.0, "{ended}");
 
         // With no daily limit set, the summary says so.
         let mut team = deps.files.read_team().expect("the team reads");

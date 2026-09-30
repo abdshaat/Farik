@@ -2562,7 +2562,7 @@
       ]
     },
     "costsSummaryResult": {
-      "description": "Today's spending (UTC) and the team's daily limit, the open sprint's, and each agent's that is not retired, in the team's order.",
+      "description": "Today's spending (UTC) and the team's daily limit, the last sprint's (the open one while one is), and each agent's that is not retired, in the team's order.",
       "type": "object",
       "additionalProperties": false,
       "properties": {
@@ -2594,6 +2594,13 @@
                   "type": "string",
                   "pattern": "^S[1-9][0-9]{0,5}$"
                 },
+                "status": {
+                  "type": "string",
+                  "enum": [
+                    "open",
+                    "ended"
+                  ]
+                },
                 "spent_usd": {
                   "type": "number",
                   "minimum": 0
@@ -2612,6 +2619,7 @@
               },
               "required": [
                 "sprint_id",
+                "status",
                 "spent_usd",
                 "budget_usd"
               ]
