@@ -192,6 +192,7 @@ mod tests {
 
     use farik_core::contract::TaskStatus;
     use farik_core::governor::permissions::PermissionTier;
+    use farik_protocol::command::Command;
     use farik_protocol::event::{EscalationRaisedBodyReason, EventBody, EventKind};
     use serde_json::{Value, json};
 
@@ -431,6 +432,46 @@ mod tests {
             adapter.started().len(),
             1,
             "no session after the third return"
+        );
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn explores_again_once_the_human_grants_more_tries() {
+        let harness = a_designers_task("design-flow-extra-tries", |wire| {
+            wire["budget"]["max_iterations"] = json!(3);
+        });
+        let plan = json!({ "plan": "A plan." });
+        let returned = json!({ "reason": "Not yet." });
+        for _ in 0..3 {
+            harness
+                .project
+                .record("FRK-1", "design_plan.proposed", &plan);
+            harness
+                .project
+                .record("FRK-1", "design_plan.returned", &returned);
+        }
+        let adapter = harness.recorded(vec![explore_plans_frk_1()]);
+        let orchestrator = harness.orchestrator(adapter.clone());
+        orchestrator.tick().await.expect("the tick runs");
+        assert_eq!(harness.row("FRK-1").status, TaskStatus::Escalated);
+        assert!(adapter.started().is_empty());
+
+        orchestrator
+            .handle(Command::EscalationResolve {
+                task_id: "FRK-1".parse().expect("a task id"),
+                to: TaskStatus::InProgress,
+                message: "Two more plans, then.".to_string(),
+                extra_tries: Some(2),
+            })
+            .await
+            .expect("the escalation is resolved with more tries");
+        orchestrator.tick().await.expect("the tick runs");
+
+        assert_eq!(who(&adapter.started()), [("iris", SessionPurpose::Explore)]);
+        assert_eq!(
+            escalation_reasons(&harness),
+            [EscalationRaisedBodyReason::Iterations]
         );
     }
 
