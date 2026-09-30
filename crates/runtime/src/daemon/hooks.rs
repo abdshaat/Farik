@@ -1048,6 +1048,26 @@ mod tests {
                 detail: "this session has no sandbox to run a command in".to_string()
             })
         );
+
+        // A Designer's session about no task has no plan, so its commands are held, even while a
+        // task's plan is approved.
+        daemon.register("session-iris-none", "iris", None, DEFAULT_SESSION_LIMITS);
+        let none = |tool: &str, input: &Value| {
+            decide_pre_tool_use(
+                &daemon.call("session-iris-none", tool, input),
+                &daemon.state,
+            )
+        };
+        // (Its `Edit` is refused before the gate: a session with no task has no allowed paths.)
+        denied_for(
+            &none("mcp__farik__farik_exec", &exec),
+            "design_plan_not_approved",
+        );
+        let no_task = daemon
+            .state
+            .tool_context("session-iris-none")
+            .expect("the session is registered");
+        not_approved(crate::tools::fixtures::run(&no_task, "farik_exec", exec));
     }
 
     #[test]

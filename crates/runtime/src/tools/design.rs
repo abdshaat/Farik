@@ -378,6 +378,13 @@ mod tests {
             )),
             outside
         );
+        // The Designer never decides its own plan, in whatever session.
+        for purpose in [SessionPurpose::Explore, SessionPurpose::Verify] {
+            assert_eq!(
+                refused(decide(&project, "iris", Some("FRK-1"), purpose)),
+                outside
+            );
+        }
         assert_eq!(
             refused(decide(
                 &project,
@@ -413,14 +420,23 @@ mod tests {
             )),
             "design_plan_refused: the task has no plan waiting for a decision"
         );
-        call(
-            &project,
-            "pm",
-            Some("FRK-1"),
-            SessionPurpose::Verify,
-            "farik_decide_design_plan",
-            json!({ "approve": false, "reason": " " }),
-        )
-        .expect_err("a blank reason is refused");
+        // With the next plan waiting, a blank reason is still refused.
+        project.record(
+            "FRK-1",
+            "design_plan.proposed",
+            &json!({ "plan": a_plan(40, 400) }),
+        );
+        assert_eq!(
+            refused(call(
+                &project,
+                "pm",
+                Some("FRK-1"),
+                SessionPurpose::Verify,
+                "farik_decide_design_plan",
+                json!({ "approve": false, "reason": " " }),
+            )),
+            "blank_reason: a reason is recorded, and the log is where somebody reads it back"
+        );
+        assert!(project.events(&[EventKind::DesignPlanReturned]).is_empty());
     }
 }
