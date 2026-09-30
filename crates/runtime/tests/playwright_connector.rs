@@ -615,3 +615,47 @@ fn checks_a_page_on_the_pinned_image() {
     );
     let _ = std::fs::remove_dir_all(&root);
 }
+
+#[test]
+#[ignore = "needs docker"]
+fn a_page_cannot_hide_its_violations_from_the_check() {
+    let root = worktree("tamper");
+    // The page fakes axe and the DOM call it reads, as a change under check could.
+    std::fs::write(
+        root.join("site/index.html"),
+        "<!doctype html><html lang=\"en\"><title>Preview</title>\
+         <script>Object.defineProperty(window, 'axe', { value: { run: async () => \
+         ({ violations: [] }) }, writable: false });\
+         Element.prototype.getAttribute = () => 'fine';</script>\
+         <main><h1>Settings</h1><button class=\"menu\"></button></main>\n",
+    )
+    .expect("the page is written");
+    let project = project("tamper");
+    let _cleanup = Cleanup(project.clone());
+    let output = root.join("screenshots");
+    std::fs::create_dir_all(&output).expect("the output folder is made");
+    let preview = DockerPreviewFactory {
+        image: ALPINE.to_owned(),
+    }
+    .start(&project, &task(), &root, &serving(), "tree")
+    .unwrap_or_else(|error| panic!("the preview did not start: {error}"));
+    let checked = check_page(
+        &playwright(),
+        preview.as_ref(),
+        "/",
+        CheckWidth::Phone,
+        CheckTheme::Light,
+        &output.join("phone-light.png"),
+    );
+    preview.stop("the test ended").expect("stopped");
+    let checked = checked.unwrap_or_else(|error| panic!("the page was not checked: {error}"));
+    assert!(
+        checked
+            .violations
+            .iter()
+            .any(|violation| violation.rule == "button-name"),
+        "{:?}",
+        checked.violations
+    );
+    let _ = std::fs::remove_dir_all(&root);
+}

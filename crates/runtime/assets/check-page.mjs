@@ -45,13 +45,25 @@ try {
 		throw new Error(`${values.url} answered ${response ? response.status() : "nothing"}`);
 	}
 	await page.screenshot({ path: values.screenshot });
-	// ponytail: axe runs in the page's own world, so a page that rewrites `axe` could hide its
-	// violations; an isolated world would stop that.
-	await page.addScriptTag({ content: AXE_SOURCE });
-	const results = await page.evaluate(
-		(tags) => window.axe.run(document, { runOnly: { type: "tag", values: tags }, resultTypes: ["violations"] }),
-		values.tags.split(","),
-	);
+	// axe runs in a world of its own, which the page's scripts cannot reach: a page that fakes
+	// `window.axe` or the DOM's prototypes still has its violations found.
+	const cdp = await context.newCDPSession(page);
+	const { frameTree } = await cdp.send("Page.getFrameTree");
+	const { executionContextId } = await cdp.send("Page.createIsolatedWorld", {
+		frameId: frameTree.frame.id,
+		worldName: "farik-axe",
+	});
+	const options = { runOnly: { type: "tag", values: values.tags.split(",") }, resultTypes: ["violations"] };
+	const evaluated = await cdp.send("Runtime.evaluate", {
+		expression: `${AXE_SOURCE};\naxe.run(document, ${JSON.stringify(options)})`,
+		contextId: executionContextId,
+		awaitPromise: true,
+		returnByValue: true,
+	});
+	if (evaluated.exceptionDetails) {
+		throw new Error(`axe failed: ${evaluated.exceptionDetails.exception?.description ?? evaluated.exceptionDetails.text}`);
+	}
+	const results = evaluated.result.value;
 	const violations = results.violations.flatMap((rule) =>
 		rule.nodes.map((node) => ({
 			rule: rule.id,
