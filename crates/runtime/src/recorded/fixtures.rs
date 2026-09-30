@@ -284,6 +284,58 @@ pub fn retro() -> Transcript {
     Transcript::from_jsonl(include_str!("transcripts/retro.jsonl"))
 }
 
+// Step 08's journeys, on a team of Mira (Product Manager), Ada (Architect) and Theo (Developer).
+
+/// The Product Manager's triage of FRK-1, with no Scrum Master: `farik_triage_request` of size
+/// `small`, "One file and its check: a task.". Hand-written.
+#[must_use]
+pub fn triage_frk_1_small_by_pm() -> Transcript {
+    Transcript::from_jsonl(include_str!("transcripts/triage_frk_1_small_by_pm.jsonl"))
+}
+
+/// The Product Manager's refine session of FRK-1 that asks "What should done.txt say?" with two
+/// choices, "Leave it empty" and "The date of the run", each with a hint. Hand-written.
+#[must_use]
+pub fn ask_with_choices_frk_1() -> Transcript {
+    Transcript::from_jsonl(include_str!("transcripts/ask_with_choices_frk_1.jsonl"))
+}
+
+/// The Product Manager's refine session of FRK-1 as a `low` risk task for a Developer, reviewed by
+/// the Architect: `done.txt` its one allowed path, C1 (`command`, `test -f done.txt`), a summary,
+/// and a budget of 5 dollars. Hand-written.
+#[must_use]
+pub fn refine_writes_task_for_theo_frk_1() -> Transcript {
+    Transcript::from_jsonl(include_str!(
+        "transcripts/refine_writes_task_for_theo_frk_1.jsonl"
+    ))
+}
+
+/// As `refine_writes_task_for_theo_frk_1`, but `high` risk, so the human approves the plan.
+/// Hand-written.
+#[must_use]
+pub fn refine_writes_high_risk_frk_1() -> Transcript {
+    Transcript::from_jsonl(include_str!(
+        "transcripts/refine_writes_high_risk_frk_1.jsonl"
+    ))
+}
+
+/// The Product Manager's plan session: `farik_assign_task` of FRK-1 to `theo`, reviewed by `ada`.
+/// Hand-written.
+#[must_use]
+pub fn plan_assigns_frk_1_to_theo() -> Transcript {
+    Transcript::from_jsonl(include_str!("transcripts/plan_assigns_frk_1_to_theo.jsonl"))
+}
+
+/// The Developer's implement session of FRK-1 after the human sent it back: the run's date written
+/// to done.txt, a commit of it, C1 recorded as passed, a completion note, and `verifying` asked
+/// for. Hand-written.
+#[must_use]
+pub fn implement_after_send_back_frk_1() -> Transcript {
+    Transcript::from_jsonl(include_str!(
+        "transcripts/implement_after_send_back_frk_1.jsonl"
+    ))
+}
+
 /// An adapter whose every session reports `usage` at once and then either ends `completed` at
 /// once or waits for `abort` and ends `aborted`, or, when its abort fails, waits for ever: the
 /// shapes a recorded transcript, which reports usage only on its last line, cannot show.

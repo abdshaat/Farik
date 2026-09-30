@@ -50,7 +50,7 @@ Out of scope: the board and task detail (step 09); the channel preview on Today 
   - integration: `accept`, "Add". There the page shows only "Add to project" (`task_integrate`), with Accept and Send back hidden.
 
   AnswerQuestion's layout is the one question's view of `/tasks/:id/questions` when the task has a single open question.
-- **The rail's places:** Today, then Settings, with Events kept at the bottom of Settings as "Events (for testing)". Steps 09 and 10 add Board, Channel, Team, and Costs where the mockups put them.
+- **The rail's places:** Today, Team (step 06 shipped it), then Settings, with Events kept at the bottom of Settings as "Events (for testing)". Steps 09 and 10 add Board, Channel, and Costs where the mockups put them.
 - **Today.**
   - **Team band.** It comes from `team.activity`. Each agent shows its avatar, name, role tag, and `line`, dark (`band`) in both themes.
   - **Request box.** The label is "What should the team do next?" and the hint is "<PM name> reads every request and asks you if anything is unclear." It has a `>` prompt and a blinking block cursor (the only idle motion, stopped under reduced motion). "Send to the team" calls `request.file` and opens `/requests/:id`.
@@ -138,8 +138,9 @@ Out of scope: the board and task detail (step 09); the channel preview on Today 
 apps/web/src/pages/{Today,RequestFiled,Questions,PlanPage,PlanEditor,Gate,HelpNeeded}.tsx (+ .module.css, .test.tsx)   creates (T1–T4)
 apps/web/src/pages/SendBackDialog.tsx (+ test)                    creates (T4)
 apps/web/src/app/{App.tsx,landing.ts,landing.test.ts,words.ts,words.test.ts,store.ts,connection.test.tsx}, shell/{Shell.tsx,Shell.module.css,Shell.test.tsx}, pages/Settings.tsx, strings/en.ts   modifies / creates (T1)
-crates/cli/src/bin/farik-e2e-serve.rs                              modifies: name map (T5)
-apps/web/e2e/{request,approve,accept}.spec.ts, e2e/connect.spec.ts (its `/events` expectations become Today), e2e/fixtures/serve.ts (the `team` option)   creates / modifies (T5)
+crates/cli/src/bin/farik-e2e-serve.rs                              modifies: name map; once the named sessions are played, a session waits until aborted (T5)
+crates/runtime/src/recorded/{fixtures.rs,transcripts/*.jsonl}      creates: the six new synthetic transcripts (T5)
+apps/web/e2e/{request,approve,accept}.spec.ts, e2e/connect.spec.ts (its `/events` expectations become Today), e2e/fixtures/serve.ts (the `team` option, `events`, a two-press stop), e2e/fixtures/shots.ts   creates / modifies (T5)
 docs/plans/project-plan.md (step 08 line)                          modifies (T5)
 ```
 
@@ -196,12 +197,12 @@ Produces: the routes above; `statusWord(status: TaskStatus, reason?: EscalationR
 - `request.spec.ts`, `approve.spec.ts`, `accept.spec.ts`, as in the Tests decision, with screenshots at 360 and 1280 px.
 - The project plan's step 08 line.
 
-- [ ] `test(web): walk a request from asking to acceptance through the real server and browser`
+- [x] `test(web): walk a request from asking to acceptance through the real server and browser`
 
 ## Verification
 
 ```
 cargo xtask check --integration
-# expected: cargo 0 failed; @farik/web: step 06's landed web count plus 21 (T1 6, T2 5, T3 4, T4 6);
+# expected: cargo 0 failed; @farik/web: step 06's landed web count plus 23 (T1 6, T2 5, T3 5, T4 6, T5's fix 1);
 #   playwright: step 06's 4 plus 3 = 7 passed; last line: xtask check: ok
 ```

@@ -3,7 +3,7 @@ import {
 	execFileSync,
 	spawn,
 } from "node:child_process";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { type AddressInfo, createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -26,6 +26,16 @@ export function farik(project: string, args: string[]): string {
 		env,
 		encoding: "utf8",
 	});
+}
+
+/** The project's events, as `farik --json log` prints them. */
+export function events(
+	project: string,
+): { kind: string; body: Record<string, unknown> }[] {
+	return farik(project, ["--json", "log"])
+		.trim()
+		.split("\n")
+		.map((line) => JSON.parse(line));
 }
 
 function freePort(): Promise<number> {
@@ -85,6 +95,8 @@ export async function startServe(o: {
 	/** A paused project that still waits for the team's setup, as a fresh take-on leaves it. */
 	setupPending?: boolean;
 	home?: string;
+	/** The team to write in place of `farik init`'s two. */
+	team?: "pm-architect-developer";
 }): Promise<{
 	url: string;
 	port: number;
@@ -107,7 +119,10 @@ export async function startServe(o: {
 			PATH: `${resolve(import.meta.dirname, "fake-bin")}:${process.env.PATH}`,
 		};
 		args.push("--no-keychain");
-	} else setUp(project, o.setupPending === true);
+	} else {
+		setUp(project, o.setupPending === true);
+		if (o.team) writeTeam(project);
+	}
 
 	const port = await freePort();
 	args.push("--port", String(port));
@@ -125,8 +140,12 @@ export async function startServe(o: {
 		port,
 		project,
 		async stop() {
+			// The first Ctrl-C waits for the session running now; once the named sessions are
+			// played it never ends, and the second aborts it.
 			server.kill("SIGINT");
+			const settled = setTimeout(() => server.kill("SIGINT"), 2000);
 			await exited;
+			clearTimeout(settled);
 		},
 	};
 }
@@ -145,4 +164,20 @@ function setUp(project: string, setupPending: boolean): void {
 		farik(project, ["pause"]);
 		writeFileSync(join(project, ".farik/local/setup-pending"), "");
 	}
+}
+
+/** Mira (Product Manager), Ada (Architect, who checks plans and reviews Theo) and Theo (Developer). */
+function writeTeam(project: string): void {
+	const agent = (id: string, name: string, role: string) =>
+		`- display_name: ${name}\n  id: ${id}\n  model:\n    effort: high\n    id: claude-opus-5\n  persona: ${name}.\n  role: ${role}\n  status: active\n`;
+	const path = join(project, ".farik/team.yaml");
+	const yaml = readFileSync(path, "utf8");
+	const agents =
+		agent("mira", "Mira", "product_manager") +
+		agent("ada", "Ada", "architect") +
+		agent("theo", "Theo", "software_developer");
+	writeFileSync(
+		path,
+		yaml.replace(/^agents:\n[\s\S]*?(?=^budgets:)/m, `agents:\n${agents}`),
+	);
 }
