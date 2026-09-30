@@ -24,7 +24,8 @@ type Scan = {
 /** "What it is": the language and toolchain, and the workspace when there is one. */
 function what({ facts }: Scan): string {
 	const parts = [facts.language, facts.toolchain].filter(Boolean);
-	if (facts.workspace)
+	// One package is no workspace to speak of.
+	if (facts.workspace && facts.packages > 1)
 		parts.push(t("scanWorkspace").replace("{count}", String(facts.packages)));
 	return parts.length ? parts.join(", ") : t("scanUnknown");
 }

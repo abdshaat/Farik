@@ -175,7 +175,7 @@ export const en = {
 	scanPrivate: "Kept private",
 	scanWorkspace: "a workspace of {count} packages",
 	scanUnknown: "Farik could not tell",
-	scanTestsIn: "Tests in {location}",
+	scanTestsIn: "Tested with {location}",
 	scanNoTests: "No tests found",
 	scanNoChecks: "No checks found",
 	scanNoCommits: "No changes yet",
@@ -192,7 +192,7 @@ export const en = {
 	scanRight: "That's right",
 	teamTitle: "Who should be on your team?",
 	teamLead:
-		"We suggest five, one for each job. You can rename them and change their pictures now or later. To add a second developer, choose “Add someone”.",
+		"We suggest five, one for each job. You can rename them now or later. To add a second developer, choose “Add someone”.",
 	teamMembers: "Your team",
 	teamInclude: "Include {role}",
 	teamName: "Name for the {role}",

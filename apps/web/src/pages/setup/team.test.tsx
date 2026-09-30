@@ -145,7 +145,7 @@ describe("team setup", () => {
 		expect(await row(en.scanWhat)).toBe(
 			"TypeScript, pnpm, a workspace of 3 packages",
 		);
-		expect(await row(en.scanTested)).toBe("Tests in vitest");
+		expect(await row(en.scanTested)).toBe("Tested with vitest");
 		expect(await row(en.scanChecked)).toContain(
 			"Every test passes: pnpm test.",
 		);
@@ -166,8 +166,26 @@ describe("team setup", () => {
 		act(() => s.reply(note, {}));
 		expect(await screen.findByText(en.scanWrongSaved)).toBeTruthy();
 
+		// One package is no workspace to speak of.
+		cleanup();
+		const one = await renderApp("/setup/scan");
+		await answerQuery(one.socket as FakeSocket, "project.scan", {
+			facts: {
+				language: "TypeScript",
+				toolchain: "pnpm",
+				workspace: true,
+				packages: 1,
+				tests_in: null,
+				tracked_files: 3,
+				last_commit: null,
+			},
+			checks: [],
+			kept_private: [],
+		});
+		expect(await row(en.scanWhat)).toBe("TypeScript, pnpm");
+		const t2 = one.socket as FakeSocket;
 		fireEvent.click(screen.getByRole("button", { name: en.scanRight }));
-		await answerQuery(s, "team.propose", proposed());
+		await answerQuery(t2, "team.propose", proposed());
 		expect(
 			await screen.findByRole("heading", { name: en.teamTitle }),
 		).toBeTruthy();
