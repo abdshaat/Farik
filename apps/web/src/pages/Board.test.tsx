@@ -269,7 +269,10 @@ describe("board", () => {
 		};
 		const tasks = [
 			...TASKS,
-			task(22, "The Order again button", "verifying", { assignee_id: "theo" }),
+			task(22, "The Order again button", "verifying", {
+				assignee_id: "theo",
+				design_review_state: "waiting_on_designer",
+			}),
 			task(23, "A bigger basket", "verifying", { assignee_id: "theo" }),
 		];
 		const checking = {
@@ -295,20 +298,13 @@ describe("board", () => {
 		expect(
 			within(row("A bigger basket")).getByText(en.designChecking),
 		).toBeTruthy();
-		// A card with nothing else to say asks the task where its design review stands.
-		const asked = s.calls("query").filter((q) => q.params.name === "task.get");
-		expect(asked.map((q) => q.params.params)).toEqual([{ task_id: "FRK-22" }]);
-		await answerQuery(s, "task.get", {
-			task: {},
-			design_plan: null,
-			ui_change: true,
-			design_review: { state: "waiting_on_designer", checks: [] },
-		});
+		// A card with nothing else to say reads its design review's state from the list itself.
 		expect(
-			await within(row("The Order again button")).findByText(
-				en.designOnDesigner,
-			),
+			within(row("The Order again button")).getByText(en.designOnDesigner),
 		).toBeTruthy();
+		expect(
+			s.calls("query").filter((q) => q.params.name === "task.get"),
+		).toEqual([]);
 		await expectNoAxeViolations(container);
 	});
 

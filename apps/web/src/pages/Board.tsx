@@ -172,7 +172,9 @@ export function Board() {
 					{mark ? (
 						<StatusWord tone={mark.tone}>{mark.word}</StatusWord>
 					) : (
-						task.status === "verifying" && <DesignMark taskId={task.taskId} />
+						task.designReviewState === "waiting_on_designer" && (
+							<StatusWord tone="waiting">{t("designOnDesigner")}</StatusWord>
+						)
 					)}
 				</div>
 			</li>
@@ -331,14 +333,4 @@ export function plannerOf(agents: Agent[]): string {
 	const of = (role: Agent["role"]) =>
 		agents.find((a) => a.role === role)?.displayName;
 	return of("scrum_master") ?? of("product_manager") ?? "";
-}
-
-/** "Waiting on the Designer" on a card in review whose design review waits for a paused Designer. */
-function DesignMark({ taskId }: { taskId: string }) {
-	const { data } = useQuery<{ designReview: { state: string } | null }>(
-		"task.get",
-		{ task_id: taskId },
-	);
-	if (data?.designReview?.state !== "waiting_on_designer") return null;
-	return <StatusWord tone="waiting">{t("designOnDesigner")}</StatusWord>;
 }

@@ -19,6 +19,8 @@ export type TaskRow = {
 	parent?: string;
 	assigneeId?: string;
 	sprint?: string;
+	/** A UI change in review: where its design review stands (step 12). */
+	designReviewState?: string;
 };
 
 /** The board's lanes, in the mockup's order. */

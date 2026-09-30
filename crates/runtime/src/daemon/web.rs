@@ -15,7 +15,7 @@ use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use axum::{Extension, Json};
 use chrono::{DateTime, Utc};
-use farik_core::contract::TaskId;
+use farik_core::contract::{TaskId, TaskStatus};
 use farik_protocol::clock::Clock;
 use farik_protocol::command::{Command, command_from_value, reply_to_value};
 use farik_protocol::event::{EventBody, event_to_value};
@@ -712,7 +712,23 @@ fn query(state: &DaemonState, name: &str, params: &Value) -> Result<Value, Failu
         }
         "tasks.list" => {
             let board = deps.projections.board().map_err(|error| internal(&error))?;
-            Ok(json!({ "tasks": board.iter().map(task_wire).collect::<Vec<_>>() }))
+            let team = deps.files.read_team().map_err(|error| internal(&error))?;
+            let mut tasks = Vec::with_capacity(board.len());
+            for task in &board {
+                let mut wire = task_wire(task);
+                // A UI change in review says where its design review stands, for the board's card.
+                if task.status == TaskStatus::Verifying {
+                    let (ui_change, review) = deps
+                        .transitions
+                        .design_review(&team, &task.task_id)
+                        .map_err(|error| internal(&error))?;
+                    if ui_change {
+                        wire["design_review_state"] = json!(review.state);
+                    }
+                }
+                tasks.push(wire);
+            }
+            Ok(json!({ "tasks": tasks }))
         }
         "task.get" => {
             let asked = params["task_id"].as_str().unwrap_or_default();
@@ -1961,6 +1977,26 @@ mod tests {
                 }]
             }),
         );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn lists_the_design_review_state_with_the_tasks() {
+        let harness = a_ui_change("rpc-board-design-review");
+        let (handle, mut socket) = driven(&harness).await;
+        let listed = query(&mut socket, 1, "tasks.list", &json!({}), "tasksListResult").await;
+        let row = |id: &str| {
+            listed["tasks"]
+                .as_array()
+                .and_then(|tasks| tasks.iter().find(|task| task["task_id"] == id))
+                .cloned()
+                .unwrap_or_else(|| panic!("{id} is listed: {listed}"))
+        };
+        // A UI change in review says where its design review stands, so the board need not ask.
+        assert_eq!(row("FRK-2")["design_review_state"], "waiting", "{listed}");
+        assert_eq!(row("FRK-1").get("design_review_state"), None, "{listed}");
+        drop(socket);
+        handle.shutdown().await.expect("the daemon stops");
     }
 
     #[tokio::test(flavor = "multi_thread")]
