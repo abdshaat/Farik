@@ -264,9 +264,9 @@ mod tests {
     use super::StreamParser;
     use crate::recorded::Transcript;
     use crate::recorded::fixtures::{
-        credential_refused, hits_the_turn_limit, hook_denies_a_write, provider_limit_429,
-        provider_limit_rejected, provider_limit_text, reads_a_file, success_with_is_error,
-        write_denied,
+        credential_refused, credential_refused_api_key, hits_the_turn_limit, hook_denies_a_write,
+        provider_limit_429, provider_limit_rejected, provider_limit_text, reads_a_file,
+        success_with_is_error, write_denied,
     };
     use crate::session::{EndReason, RuntimeError, SessionEvent};
 
@@ -591,6 +591,8 @@ mod tests {
     fn reads_a_401_as_the_credential_refused() {
         let events = events_of(&credential_refused());
         assert_eq!(end_of(&events), (EndReason::CredentialRefused, None));
+        let api_key = events_of(&credential_refused_api_key());
+        assert_eq!(end_of(&api_key), (EndReason::CredentialRefused, None));
         let refused_twice = one_line(
             r#"{"type":"result","subtype":"error_during_execution","is_error":true,"api_error_status":401,"errors":["Invalid API key"],"usage":{"input_tokens":0,"output_tokens":0,"cache_read_input_tokens":0,"cache_creation_input_tokens":0}}"#,
         )

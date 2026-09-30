@@ -99,6 +99,14 @@ pub fn credential_refused() -> Transcript {
     Transcript::from_jsonl(include_str!("transcripts/credential_refused.jsonl"))
 }
 
+/// Recorded from `claude` 2.1.285 on 2026-09-30, run with an API key that is not valid: ten
+/// `api_retry` lines with `error_status` 401 over about three minutes, then a `success` result
+/// that is an error with `api_error_status` 401. Paths are replaced as in `credential_refused`.
+#[must_use]
+pub fn credential_refused_api_key() -> Transcript {
+    Transcript::from_jsonl(include_str!("transcripts/credential_refused_api_key.jsonl"))
+}
+
 /// An `allowed` rate-limit event, then a `success` result that is an error: a 500.
 #[must_use]
 pub fn success_with_is_error() -> Transcript {
