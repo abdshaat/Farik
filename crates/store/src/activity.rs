@@ -237,16 +237,23 @@ pub fn moved_since(
         .iter()
         .filter(|event| event.envelope.recorded_at > since)
         .filter_map(|event| {
-            // Quoted, and without its own full stop, so that the line reads as one sentence.
+            // Quoted, and without its own full stop, so that the line reads as one sentence; a
+            // task with no title is named by its id.
             let title = || {
-                let title = event
-                    .envelope
-                    .ids
-                    .task_id
-                    .as_ref()
+                let task = event.envelope.ids.task_id.as_ref();
+                let title = task
                     .and_then(|task| titles.get(task))
-                    .map_or("", String::as_str);
-                format!("“{}”", title.trim_end().trim_end_matches('.'))
+                    .map_or("", |t| t.trim_end());
+                if title.is_empty() {
+                    return task
+                        .map(|task| task.as_str().to_string())
+                        .unwrap_or_default();
+                }
+                let title = match title.strip_suffix('.') {
+                    Some(stripped) if !stripped.ends_with('.') => stripped,
+                    _ => title,
+                };
+                format!("“{title}”")
             };
             let line = match &event.body {
                 EventBody::TaskTransitioned(body) => {
@@ -488,8 +495,10 @@ mod tests {
     fn says_what_moved_since() {
         let board = Board::new("moved-since");
         let team = five();
-        // A request's first line often ends in a full stop, which the sentence drops.
+        // A request's first line often ends in a full stop, which the sentence drops; an
+        // ellipsis stays.
         board.file("FRK-1", "Add a login form.", |_| {});
+        board.file("FRK-2", "More photos...", |_| {});
         // Before `since`, and not shown.
         board.moved(
             at(9, 0),
@@ -540,6 +549,21 @@ mod tests {
             "message.posted",
             json!({ "author": "mira", "kind": "ceremony", "text": "Yesterday, today.", "mentions": [], "thread": "standup" }),
         );
+        board.put(
+            at(10, 6),
+            Some("FRK-2"),
+            None,
+            "human.accepted",
+            json!({ "subject": "result", "accepted_by": "human" }),
+        );
+        // A task the board has no title for is named by its id.
+        board.put(
+            at(10, 6),
+            Some("FRK-9"),
+            None,
+            "task.integrated",
+            json!({ "sha": "abc", "into": "main", "integrated_by": "governor" }),
+        );
         // A plain message is not a move.
         board.put(
             at(10, 7),
@@ -567,6 +591,8 @@ mod tests {
                     "Grace reached its usage limit and will pick up again at 14:30"
                 ),
                 (at(10, 6), "Mira posted the standup"),
+                (at(10, 6), "You accepted “More photos...”"),
+                (at(10, 6), "FRK-9 was added to the project"),
             ]
         );
     }
