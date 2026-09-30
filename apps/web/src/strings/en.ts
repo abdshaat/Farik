@@ -814,6 +814,8 @@ export const en = {
 	channelTooLong:
 		"A message is at most 2000 characters, and this one is {length}.",
 	channelMentionList: "People to mention",
+	channelMentionCount:
+		"People to mention: {n}. Use the arrow keys, then Enter.",
 	channelMeetings: "Meetings in this sprint",
 	channelMeetingLink: "{thread}, {weekday}",
 	channelMeetingGone: "That meeting is older than the channel keeps.",

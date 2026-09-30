@@ -300,6 +300,12 @@ describe("channel", () => {
 		const options = within(
 			screen.getByRole("listbox", { name: en.channelMentionList }),
 		).getAllByRole("option");
+		// A screen reader hears that the list opened.
+		expect(
+			screen
+				.getByText("People to mention: 3. Use the arrow keys, then Enter.")
+				.closest("[aria-live=polite]"),
+		).toBeTruthy();
 		// A retired agent is not offered.
 		expect(options.map((o) => o.textContent)).toEqual(["Mira", "Sol", "Theo"]);
 		await expectNoAxeViolations(container);

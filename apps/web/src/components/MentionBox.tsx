@@ -84,6 +84,10 @@ export function MentionBox({
 				onSelect={(e) => setCaret(e.currentTarget.selectionStart)}
 				onKeyDown={onKeyDown}
 			/>
+			{/* A textarea cannot say that its list opened, so this line does. */}
+			<p aria-live="polite" className={styles.hidden}>
+				{open && t("channelMentionCount", { n: options.length })}
+			</p>
 			{open && (
 				<div
 					role="listbox"
