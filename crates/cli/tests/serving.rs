@@ -989,6 +989,7 @@ fn goes_back_to_setup_when_the_driver_cannot_start() {
             serve_status_across_a_restart(serving.port_now(), &serving.cookie).unwrap_or_default();
         status["take_on_error"].is_string()
     });
+    let port = serving.port;
     let (ran, out, err) = serving.interrupted();
     assert_eq!(status["project_root"], Value::Null, "{status}");
     assert!(
@@ -998,52 +999,20 @@ fn goes_back_to_setup_when_the_driver_cannot_start() {
         "{status}"
     );
     assert!(!state.join("farik/state.json").exists());
-    assert_eq!(ran.code, 130, "{out}\n{err}");
-}
-
-#[test]
-#[ignore = "needs the git program: cargo xtask check --integration"]
-fn keeps_its_port_when_something_holds_it_as_setup_comes_back() {
-    let repository = a_team("setup-keeps-port");
-    std::fs::write(repository.path.join(".farik/prices.json"), "not JSON").expect("written");
-    let home = repository.path.parent().expect("a parent").to_path_buf();
-    let (cwd, state) = setup_folders("setup-keeps-port");
-    let serving = serving_setup(&cwd, &home, &state);
-
-    let opened = call(
-        serving.port,
-        &serving.cookie,
-        "project.open",
-        json!({ "path": name_of(&repository.path), "no_sandbox": false }),
-    );
-    assert!(opened["result"]["project_root"].is_string(), "{opened}");
-    // Something else holds the port for a second once the setup daemon lets it go, as another
-    // program's connection can: the browser's tab is on that port, so serve waits it out.
-    let mut held = None;
-    until("the setup daemon lets the port go", || {
-        held = std::net::TcpListener::bind(("127.0.0.1", serving.port)).ok();
-        held.is_some()
-    });
-    std::thread::sleep(Duration::from_secs(1));
-    drop(held);
-    let mut status = Value::Null;
-    until("serve is back in setup mode with the reason", || {
-        status =
-            serve_status_across_a_restart(serving.port_now(), &serving.cookie).unwrap_or_default();
-        status["take_on_error"].is_string()
-    });
-    let (ran, out, err) = serving.interrupted();
-    let ports: Vec<u16> = links(&out).iter().map(|(port, _)| *port).collect();
+    // Back on the port the browser's tab is on, with no second link (serve.rs's own test holds
+    // the port while it comes back).
+    let setups: Vec<&str> = out
+        .lines()
+        .filter(|line| line.starts_with("no project yet"))
+        .collect();
+    assert_eq!(setups.len(), 2, "{out}");
     assert!(
-        ports.iter().all(|port| *port == ports[0]),
-        "serve moved to another port: {ports:?}\n{out}"
-    );
-    assert!(
-        out.lines()
-            .filter(|line| line.starts_with("no project yet"))
-            .all(|line| line.ends_with(&format!("127.0.0.1:{}", ports[0]))),
+        setups
+            .iter()
+            .all(|line| line.ends_with(&format!("127.0.0.1:{port}"))),
         "{out}"
     );
+    assert_eq!(links(&out).len(), 1, "{out}");
     assert_eq!(ran.code, 130, "{out}\n{err}");
 }
 

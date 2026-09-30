@@ -293,3 +293,29 @@ async fn drive(
     .await;
     Ok(finish(&project, driver, &mut printer, ended, presses).await)
 }
+
+#[cfg(test)]
+mod tests {
+    use std::net::{Ipv4Addr, TcpListener};
+    use std::time::Duration;
+
+    use farik_runtime::daemon::PortChoice;
+
+    use super::free_port_soon;
+
+    #[tokio::test]
+    async fn waits_for_its_exact_port_while_something_holds_it() {
+        let held = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).expect("a port");
+        let port = held.local_addr().expect("an address").port();
+        let mut finding = Box::pin(free_port_soon(PortChoice::Exact(port)));
+        // Its first look finds the port held, and it waits rather than giving up.
+        assert!(
+            tokio::time::timeout(Duration::from_millis(1), &mut finding)
+                .await
+                .is_err(),
+            "it gave up on a held port at once"
+        );
+        drop(held);
+        assert_eq!(finding.await, Ok(port));
+    }
+}
