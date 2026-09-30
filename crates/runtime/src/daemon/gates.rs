@@ -22,8 +22,8 @@ use farik_store::EventQuery;
 use farik_store::activity::{ActivityState, activity, moved_since};
 use farik_store::diff::diff_of;
 use farik_store::requests::{
-    RequestError, contract_write, file_request, placeholder_budget_usd, request_from_text,
-    summary_of,
+    RequestError, TOO_SHORT, contract_write, file_request, placeholder_budget_usd,
+    request_from_text, summary_of,
 };
 use farik_store::waiting::{name_of, waiting};
 use serde_json::{Value, json};
@@ -414,8 +414,17 @@ async fn off_the_worker<T: Send + 'static>(
 /// `request.file`: the person's words filed as a draft request of the human's.
 fn file_words(deps: &ToolDeps, text: &str) -> Result<Value, Failure> {
     let team = deps.files.read_team().map_err(|e| internal(&e))?;
-    let request = request_from_text(text, placeholder_budget_usd(&team.rules()))
-        .map_err(|sentence| Failure::new(REFUSED, sentence))?;
+    let request =
+        request_from_text(text, placeholder_budget_usd(&team.rules())).map_err(|sentence| {
+            let mut refused = Failure::new(REFUSED, sentence.clone());
+            // Coded as team.save's refusals are, so the page words it without matching words.
+            if sentence == TOO_SHORT {
+                refused.data = Some(json!({ "errors": [{
+                    "path": "/text", "message": sentence, "code": "too_short",
+                }] }));
+            }
+            refused
+        })?;
     let filed = file_request(
         &deps.files,
         &deps.log,
@@ -718,6 +727,15 @@ pub(super) mod tests {
         assert_eq!(
             short["error"]["message"],
             "say a little more: at least 20 characters"
+        );
+        // The page words the refusal by its code, not by its message.
+        assert_eq!(
+            short["error"]["data"],
+            json!({ "errors": [{
+                "path": "/text",
+                "message": "say a little more: at least 20 characters",
+                "code": "too_short",
+            }] })
         );
         call(
             &harness.daemon,

@@ -1712,6 +1712,7 @@
     },
     "requestFileRequest": {
       "title": "Request File Request",
+      "description": "Files the person's words as a draft request. Answers requestFileResult; a refusal of words under 20 characters carries data with errors, each a path, a message and a code, the code too_short, as team.validate answers them.",
       "type": "object",
       "additionalProperties": false,
       "required": [
