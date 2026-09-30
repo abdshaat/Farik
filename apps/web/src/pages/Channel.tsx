@@ -4,7 +4,7 @@ import { type FormEvent, useEffect, useState } from "react";
 import { Link, useLocation } from "react-router";
 import { useConnection } from "../app/connection.tsx";
 import { useEvents, useQuery } from "../app/store.ts";
-import { sentence } from "../app/words.ts";
+import { isStatus, movedWords, sentence } from "../app/words.ts";
 import { MentionBox } from "../components/MentionBox.tsx";
 import {
 	renderMessageText,
@@ -67,6 +67,20 @@ function nameOf(author: string, agents: Agent[]) {
 	if (author === "human") return t("channelYou");
 	if (author === "farik") return t("brand");
 	return agents.find((a) => a.id === author)?.displayName ?? author;
+}
+
+/** A move's line as the runtime writes it (SPEC 5.9): `<task> <from> → <to> (by <who>)[: <reason>]`. */
+const MOVE = /^(\S+) (\w+) → (\w+) \(by ([^)]+)\)(?:: ([\s\S]*))?$/;
+
+/** A move's line in the History tab's words, with its reason; none for a line of another shape. */
+function movedLine(text: string, agents: Agent[]): string | undefined {
+	const [, task, from, to, by, reason] = text.match(MOVE) ?? [];
+	if (!task || !from || !to || !by || !isStatus(from) || !isStatus(to))
+		return undefined;
+	const who =
+		by === "the governor" ? "farik" : by === "the human" ? "human" : by;
+	const said = movedWords(nameOf(who, agents), to, task);
+	return reason ? `${said} ${t("channelWhy", { reason })}` : said;
 }
 
 type Item =
@@ -311,6 +325,14 @@ function MessageRow({
 			{time(message.at)}
 		</time>
 	);
+	const moved =
+		message.kind === "system" ? movedLine(message.text, agents) : undefined;
+	if (moved)
+		return (
+			<li className={styles.system}>
+				{renderMessageText(moved, agents, waiting)} {stamp}
+			</li>
+		);
 	if (message.kind === "system")
 		return (
 			<li className={styles.system}>

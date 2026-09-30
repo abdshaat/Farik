@@ -2,7 +2,7 @@ import { Button, DiffView, StatusWord } from "@farik/ui";
 import { type KeyboardEvent, type ReactNode, useState } from "react";
 import { Link, useParams } from "react-router";
 import { useQuery } from "../app/store.ts";
-import { statusWord } from "../app/words.ts";
+import { movedWords, statusWord } from "../app/words.ts";
 import type { en } from "../strings/en.ts";
 import { t } from "../strings/t.ts";
 import { CancelTask } from "./dialogs/CancelTask.tsx";
@@ -61,7 +61,6 @@ const TAB_WORDS: Record<Tab, keyof typeof en> = {
 /** Each history kind's plain words, `{who}` its actor (step 07's `moved.since` phrasing). */
 const TOLD: Record<string, keyof typeof en> = {
 	"task.created": "toldCreated",
-	"task.transitioned": "toldMoved",
 	"note.written": "toldNote",
 	"review.recorded": "toldReview",
 	"criterion.recorded": "toldCheck",
@@ -200,17 +199,17 @@ export function TaskDetail() {
 			: `docs/${id}`;
 
 	const told = (e: Event) => {
+		const actor =
+			ACTORS.map((field) => e.body[field]).find(Boolean) ??
+			(e.kind.startsWith("human.") ? "human" : e.agentId);
+		if (e.kind === "task.transitioned" && e.body.to)
+			return movedWords(nameOf(actor), e.body.to as Contract["status"]);
 		const key =
 			e.kind === "human.accepted"
 				? e.body.subject === "contract"
 					? "toldApproved"
 					: "toldAccepted"
-				: e.kind === "task.transitioned" && e.body.to === "rejected"
-					? "toldSentBack"
-					: (TOLD[e.kind] ?? "toldOther");
-		const actor =
-			ACTORS.map((field) => e.body[field]).find(Boolean) ??
-			(e.kind.startsWith("human.") ? "human" : e.agentId);
+				: (TOLD[e.kind] ?? "toldOther");
 		return t(key)
 			.replace("{who}", nameOf(actor))
 			.replace(

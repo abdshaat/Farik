@@ -170,6 +170,41 @@ describe("channel", () => {
 		await expectNoAxeViolations(container);
 	});
 
+	it("words_farik_move_lines_as_the_history_tab_does", async () => {
+		await channel([
+			message("farik", "system", "FRK-1 refining → ready (by the governor)"),
+			message(
+				"farik",
+				"system",
+				"FRK-2 verifying → rejected (by theo): C1 failed: <b>no</b> file",
+			),
+			message(
+				"farik",
+				"system",
+				"FRK-3 escalated → in_progress (by the human): go on",
+			),
+			message("farik", "system", "FRK-4 dreaming → flying (by theo)"),
+		]);
+		const list = await screen.findByRole("list", { name: en.channelMessages });
+		const rows = within(list).getAllByRole("listitem");
+		expect(rows.map((li) => li.textContent?.replace(/\d\d:\d\d$/, ""))).toEqual(
+			[
+				"Farik moved FRK-1 to To do. ",
+				"Theo sent FRK-2 back. Why: C1 failed: <b>no</b> file ",
+				"You moved FRK-3 to In progress. Why: go on ",
+				// A line of another shape stays as Farik wrote it.
+				"Farik FRK-4 dreaming → flying (by theo) ",
+			],
+		);
+		// The task is a link to it; the agent's words stay words, never markup.
+		expect(
+			within(rows[0] as HTMLElement)
+				.getByRole("link", { name: "FRK-1" })
+				.getAttribute("href"),
+		).toBe("/tasks/FRK-1");
+		expect(list.querySelector("b")).toBeNull();
+	});
+
 	it("groups_ceremonies_into_threads", async () => {
 		const [yesterday, today] = [day(-1), day(0)];
 		const at = (date: string, time: string) => `${date}T${time}:00Z`;

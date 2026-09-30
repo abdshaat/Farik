@@ -46,6 +46,17 @@ const WORDS: Record<TaskStatus, keyof typeof en> = {
 	cancelled: "statusCancelled",
 };
 
+/** Whether `word` is one of the lifecycle's statuses. */
+export const isStatus = (word: string): word is TaskStatus => word in WORDS;
+
+/** A move as the task's History tab words it: "Mira moved it to Done.", "Ada sent FRK-2 back." */
+export const movedWords = (who: string, to: TaskStatus, task = t("toldIt")) =>
+	t(to === "rejected" ? "toldSentBack" : "toldMoved", {
+		who,
+		task,
+		status: statusWord(to),
+	});
+
 /** The plain word for a status, from web-ui.md's lifecycle table. */
 export function statusWord(
 	status: TaskStatus,
