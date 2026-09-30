@@ -231,7 +231,7 @@ RPC:
 - `replaces_an_agent`: Retire, then Add someone of the same role.
 - `shows_and_disconnects_the_account`: the row, and the paused note after Disconnect.
 
-- [ ] `feat(web): add the team page and the agent editor, and the account row`
+- [x] `feat(web): add the team page and the agent editor, and the account row`
 
 ### Task 7: The team journey (Playwright)
 

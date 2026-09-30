@@ -1,4 +1,5 @@
 import { Navigate, Route, Routes } from "react-router";
+import { AgentEdit } from "../pages/AgentEdit.tsx";
 import { Connect } from "../pages/Connect.tsx";
 import { Events } from "../pages/Events.tsx";
 import { NotFound } from "../pages/NotFound.tsx";
@@ -13,6 +14,7 @@ import { SetupScan } from "../pages/setup/SetupScan.tsx";
 import { SetupSpending } from "../pages/setup/SetupSpending.tsx";
 import { SetupTeam } from "../pages/setup/SetupTeam.tsx";
 import { TeamSetup } from "../pages/setup/TeamSetup.tsx";
+import { Team } from "../pages/Team.tsx";
 import { Shell } from "../shell/Shell.tsx";
 import { useConnection } from "./connection.tsx";
 import { type ServeStatus, useQuery } from "./store.ts";
@@ -64,6 +66,8 @@ export function App() {
 			</Route>
 			<Route element={<Shell />}>
 				<Route path="/events" element={<Events />} />
+				<Route path="/team" element={<Team />} />
+				<Route path="/team/:id" element={<AgentEdit />} />
 				<Route
 					path="/settings"
 					element={<Settings theme={theme} onTheme={setTheme} />}

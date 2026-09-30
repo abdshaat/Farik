@@ -29,6 +29,9 @@ export function Shell() {
 				<NavLink to="/events">{t("events")}</NavLink>
 			</li>
 			<li>
+				<NavLink to="/team">{t("team")}</NavLink>
+			</li>
+			<li>
 				<NavLink to="/settings">{t("settings")}</NavLink>
 			</li>
 		</ul>

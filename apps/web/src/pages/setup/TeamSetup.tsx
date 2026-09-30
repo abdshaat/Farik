@@ -73,12 +73,11 @@ export function teamOf(draft: Draft): Team {
 	return { ...draft.team, agents };
 }
 
-/** A second agent of `role`, named from the spare names nobody uses yet. */
-export function someone(draft: Draft, like: Agent): Agent {
-	const used = new Set(draft.members.map((m) => m.agent.displayName));
+/** Another agent like `like`, named from the spare names none of `agents` uses yet. */
+export function someone(agents: Agent[], like: Agent): Agent {
+	const used = new Set(agents.map((a) => a.displayName));
 	const index = SPARE.findIndex((name) => !used.has(name));
-	const name =
-		SPARE[index] ?? `${like.displayName} ${draft.members.length + 1}`;
+	const name = SPARE[index] ?? `${like.displayName} ${agents.length + 1}`;
 	return {
 		...like,
 		id: slug(name),

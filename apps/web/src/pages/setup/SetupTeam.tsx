@@ -51,7 +51,13 @@ export function SetupTeam() {
 			...draft,
 			members: [
 				...draft.members,
-				{ agent: someone(draft, developer), on: true },
+				{
+					agent: someone(
+						draft.members.map((m) => m.agent),
+						developer,
+					),
+					on: true,
+				},
 			],
 		});
 	};

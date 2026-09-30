@@ -17,6 +17,18 @@ function readAdvanced(): boolean {
 	}
 }
 
+/** The Advanced switch, shared by every page that shows detailed settings. */
+export function useAdvanced(): [boolean, (on: boolean) => void] {
+	const [advanced, setAdvanced] = useState(readAdvanced);
+	const toggle = (on: boolean) => {
+		try {
+			localStorage.setItem(ADVANCED, String(on));
+		} catch {}
+		setAdvanced(on);
+	};
+	return [advanced, toggle];
+}
+
 export function Settings({
 	theme,
 	onTheme,
@@ -26,14 +38,8 @@ export function Settings({
 }) {
 	const { disconnect } = useConnection();
 	const { data } = useQuery<ServeStatus>("serve.status", {});
-	const [advanced, setAdvanced] = useState(readAdvanced);
+	const [advanced, toggle] = useAdvanced();
 	const [leaving, setLeaving] = useState(false);
-	const toggle = (on: boolean) => {
-		try {
-			localStorage.setItem(ADVANCED, String(on));
-		} catch {}
-		setAdvanced(on);
-	};
 	const leave = async () => {
 		setLeaving(true);
 		try {
@@ -100,11 +106,89 @@ export function Settings({
 					</Button>
 				</div>
 			</section>
+			<Account />
 			<section className={styles.section} aria-labelledby="language-heading">
 				<h2 id="language-heading">{t("language")}</h2>
 				<p>{t("english")}</p>
 				<p className={styles.muted}>{t("englishOnly")}</p>
 			</section>
 		</div>
+	);
+}
+
+type AccountStatus = {
+	provider: string | null;
+	kind: "api_key" | "subscription_token" | null;
+	source: "environment" | "keychain" | "file" | null;
+};
+type Disconnected = {
+	removedFrom: string[];
+	paused: boolean;
+	environmentVariable?: string;
+};
+
+/** The AI account's row: what is connected and where it is kept, and Disconnect. */
+function Account() {
+	const { client } = useConnection();
+	const { data } = useQuery<AccountStatus>("account.status", {});
+	const [busy, setBusy] = useState(false);
+	const [said, setSaid] = useState<string>();
+	const disconnect = async () => {
+		if (!client) return;
+		setBusy(true);
+		try {
+			const gone = (await client.call(
+				"account.disconnect",
+				{},
+			)) as Disconnected;
+			setSaid(
+				gone.environmentVariable
+					? t("accountKept").replace("{variable}", gone.environmentVariable)
+					: t("accountGone"),
+			);
+		} catch (e) {
+			setSaid((e as Error).message);
+		}
+		setBusy(false);
+	};
+	return (
+		<section className={styles.section} aria-labelledby="account-heading">
+			<h2 id="account-heading">{t("accountRow")}</h2>
+			{data?.source && data.kind ? (
+				<>
+					<p>
+						{t("accountConnected").replace(
+							"{kind}",
+							t(
+								data.kind === "api_key"
+									? "accountApiKey"
+									: "accountSubscription",
+							),
+						)}
+					</p>
+					<p className={styles.muted}>
+						{t(
+							(
+								{
+									keychain: "accountKeychain",
+									file: "accountFile",
+									environment: "accountEnvironment",
+								} as const
+							)[data.source],
+						)}
+					</p>
+					{!said && (
+						<div>
+							<Button busy={busy} onClick={disconnect}>
+								{t("accountDisconnect")}
+							</Button>
+						</div>
+					)}
+				</>
+			) : (
+				data && <p>{t("accountNone")}</p>
+			)}
+			{said && <p role="status">{said}</p>}
+		</section>
 	);
 }

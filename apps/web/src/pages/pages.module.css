@@ -121,3 +121,95 @@
 .retry {
 	font-family: var(--farik-type-code-family);
 }
+
+.alert {
+	margin: 0;
+	padding: var(--farik-space-2) var(--farik-space-3);
+	border-left: 3px solid var(--farik-color-status-waiting);
+}
+
+/* The Team page's cards: one column on a phone, as many as fit after. */
+.cards {
+	display: grid;
+	grid-template-columns: repeat(auto-fill, minmax(min(100%, 16rem), 1fr));
+	gap: var(--farik-space-4);
+	margin: 0;
+	padding: 0;
+	list-style: none;
+}
+
+.card {
+	display: grid;
+	align-content: start;
+	gap: var(--farik-space-2);
+	padding: var(--farik-space-4);
+	background: var(--farik-color-surface);
+	border: 1px solid var(--farik-color-rule);
+	border-radius: var(--farik-radius-control);
+}
+
+.card p {
+	margin: 0;
+}
+
+.cardHead {
+	display: flex;
+	align-items: center;
+	gap: var(--farik-space-3);
+}
+
+.face {
+	width: 48px;
+	height: 48px;
+	image-rendering: pixelated;
+}
+
+.actions {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: var(--farik-space-3);
+}
+
+.field {
+	display: grid;
+	gap: var(--farik-space-1);
+	font-weight: 600;
+}
+
+.select {
+	font: inherit;
+	min-width: 0;
+	max-width: 100%;
+	padding: var(--farik-space-2);
+	color: var(--farik-color-ink);
+	background: var(--farik-color-surface);
+	border: 1px solid var(--farik-color-control-border);
+	border-radius: var(--farik-radius-control);
+}
+
+.select:focus-visible {
+	outline: 2px solid var(--farik-color-focus);
+	outline-offset: 2px;
+}
+
+.tiers {
+	display: grid;
+	gap: var(--farik-space-3);
+	margin: 0;
+	padding: 0;
+	list-style: none;
+}
+
+.place {
+	display: grid;
+	grid-template-columns: max-content 1fr;
+	align-items: center;
+	gap: var(--farik-space-3);
+}
+
+@media (max-width: 40rem) {
+	.place {
+		grid-template-columns: 1fr;
+	}
+}
