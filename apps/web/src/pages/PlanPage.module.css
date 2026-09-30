@@ -1,0 +1,76 @@
+.letter {
+	display: grid;
+	gap: var(--farik-space-2);
+	padding: var(--farik-space-4);
+	background: var(--farik-color-surface);
+	border: 1px solid var(--farik-color-rule);
+	border-radius: var(--farik-radius-raised);
+}
+
+.letter p,
+.parts p {
+	margin: 0;
+	overflow-wrap: anywhere;
+}
+
+.parts {
+	display: grid;
+	gap: var(--farik-space-3);
+	margin: 0;
+	padding-left: var(--farik-space-5);
+}
+
+.parts li {
+	display: grid;
+	gap: var(--farik-space-1);
+}
+
+/* The line under each part: how Farik will know it is done. */
+.done {
+	padding-left: var(--farik-space-3);
+	border-left: 3px solid var(--farik-color-status-done);
+	color: var(--farik-color-ink-muted);
+}
+
+.checks {
+	display: grid;
+	gap: var(--farik-space-2);
+	margin: 0;
+	padding: 0;
+	list-style: none;
+}
+
+.checks li {
+	display: flex;
+	flex-wrap: wrap;
+	justify-content: space-between;
+	gap: var(--farik-space-3);
+}
+
+.written pre {
+	overflow-x: auto;
+	max-width: 100%;
+	padding: var(--farik-space-3);
+	background: var(--farik-color-surface);
+	border: 1px solid var(--farik-color-rule);
+	border-radius: var(--farik-radius-control);
+	font:
+		var(--farik-type-code-weight) var(--farik-type-code-size) /
+		var(--farik-type-code-line-height) var(--farik-type-code-family);
+}
+
+.facts {
+	display: grid;
+	grid-template-columns: max-content minmax(0, 1fr);
+	gap: var(--farik-space-1) var(--farik-space-4);
+	margin: 0;
+}
+
+.facts dt {
+	color: var(--farik-color-ink-muted);
+}
+
+.facts dd {
+	margin: 0;
+	overflow-wrap: anywhere;
+}

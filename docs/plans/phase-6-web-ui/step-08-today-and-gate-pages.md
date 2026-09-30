@@ -178,7 +178,7 @@ Produces: the routes above; `statusWord(status: TaskStatus, reason?: EscalationR
 - `checks_as_you_type`: `contract.check` runs once, 400 ms after the last keystroke, and the count and plain sentence appear.
 - `locks_and_saves_back_to_refining`: the lock and unlock commands, and the save message.
 
-- [ ] `feat(web): add the plan page and the plan editor`
+- [x] `feat(web): add the plan page and the plan editor`
 
 ### Task 4: The acceptance gate, sending back, and help
 

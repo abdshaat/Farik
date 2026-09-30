@@ -3,6 +3,8 @@ import { AgentEdit } from "../pages/AgentEdit.tsx";
 import { Connect } from "../pages/Connect.tsx";
 import { Events } from "../pages/Events.tsx";
 import { NotFound } from "../pages/NotFound.tsx";
+import { PlanEditor } from "../pages/PlanEditor.tsx";
+import { PlanPage } from "../pages/PlanPage.tsx";
 import { Questions } from "../pages/Questions.tsx";
 import { RequestFiled } from "../pages/RequestFiled.tsx";
 import { Settings } from "../pages/Settings.tsx";
@@ -53,6 +55,8 @@ export function App() {
 				<Route path="/events" element={<Events />} />
 				<Route path="/requests/:id" element={<RequestFiled />} />
 				<Route path="/tasks/:id/questions" element={<Questions />} />
+				<Route path="/tasks/:id/plan" element={<PlanPage />} />
+				<Route path="/tasks/:id/plan/edit" element={<PlanEditor />} />
 				<Route path="/team" element={<Team />} />
 				<Route path="/team/:id" element={<AgentEdit />} />
 				<Route
