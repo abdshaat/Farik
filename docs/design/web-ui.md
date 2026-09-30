@@ -117,7 +117,7 @@ The screens map to phase 6's steps as follows:
 
 | Screen | Step | What it shows |
 |---|---|---|
-| Welcome and first-run wizard | 05, 06 | One question per screen, as a numbered sequence (it is one), with a safe default already chosen and one line on why Farik asks. Back and Continue. The welcome uses the office scene and the display face. The team builder shows the five characters with their suggested names. Phase 8 step 02 adds the Finance Specialist to it as an optional sixth (ADR 0019). |
+| Welcome and first-run wizard | 05, 06 | One question per screen, as a numbered sequence (it is one), with a safe default already chosen and one line on why Farik asks. Back and Continue. The welcome uses the office scene and the display face. The team builder shows the six characters with their suggested names, the UI/UX Designer among them (`designer-chats-templates.md`). Phase 8 step 02 adds the Finance Specialist to it as an optional sixth (ADR 0019). |
 | Today | 08 | The team band, the request box, "Waiting on you", and "What moved". |
 | A human gate: approve a plan, or accept work | 08 | The agent's summary as a short letter signed by the agent's avatar. Then "What Farik checked": each exit criterion in plain words, marked passed or failed. Then "See the code changes" (collapsed). A decision bar with the primary action ("Accept the work" or "Approve the plan") and "Send back with a note". |
 | A question from an agent | 08 | The question with its avatar, the choices the agent offered, and a free-text answer. |

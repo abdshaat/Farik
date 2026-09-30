@@ -50,13 +50,15 @@ The task stays `in_progress` from step 1 to step 4. The plan gate adds events, n
 ### Reviews
 
 - **Who reviews the Designer.** The Architect, because the author never accepts its own work (5.1). With no active Architect, a Developer reviews it (decided here, on the pattern of the Developer's own rule). F1 means a team always has a Developer, so a Designer's task always has a reviewer.
-- **The Designer reviews the Developer's interface changes.** This is a design review, added after the code review, not in place of it (decided here: a mixed change keeps the Architect's review of its code). When a Developer's task is a UI change and the team has a Designer who is not retired:
-  1. the reviewer's review runs as today (5.4);
-  2. once it passes, Farik starts the Designer's `verify` session on the task's worktree, in a fresh sandbox as for any criterion run;
-  3. the Designer opens the preview at phone width (360 px) and desktop width (1280 px), in the light and dark themes, and runs `farik_check_page` for each of the four, which is the accessibility check;
-  4. it ends with `farik_record_design_review { pass, reasons }`, which records `design_review.recorded`. A fail files the rejection in the Designer's name, with its reasons, as a failed review does; a pass lets acceptance go on.
+- **The Designer checks the Developer's interface changes first** (the founder, 2026-09-30: "The UI designer checks it in the browser before sending it to the architect for approval"). The design review comes before the code review, and only a change the Designer passed goes to the Architect. When a Developer's task is a UI change and the team has a Designer who is not retired:
+  1. when the task enters `verifying`, Farik starts the Designer's `verify` session on the task's worktree, in a fresh sandbox as for any criterion run;
+  2. the Designer opens the preview at phone width (360 px) and desktop width (1280 px), in the light and dark themes, and runs `farik_check_page` for each of the four, which is the accessibility check;
+  3. it ends with `farik_record_design_review { pass, reasons }`, which records `design_review.recorded`. A fail sends the change back to the Developer with its reasons: the rejection is filed in the Designer's name, as a failed review does, and the Architect never sees the change. A pass sends it on;
+  4. only when a passing `design_review.recorded` exists since the task last entered `verifying` does Farik start the reviewer's session (5.4), which then runs as today.
 
-  While the only Designer is paused, the task waits in `verifying`, and the board shows "waiting on the Designer". The Definition of Done (5.4) gains an item: a UI change on such a team needs the Designer's pass since the task last entered `verifying`. The transition table's `verifying → rejected` row names the reviewer or, for a UI change, the Designer.
+  How this maps onto the reviewer mechanics (decided here, so that the design changes nothing about who a contract names): the contract still names the Architect as its reviewer (5.4, 5.16), and the Designer is never named in a contract as a reviewer. The Designer's pass is the event `design_review.recorded { pass: true }`, a gate on the start of the reviewer's session, in the way a passing criterion run gates it, and not a lifecycle state: the task stays in `verifying` throughout. The transition table gains no row; its `verifying → rejected` row names the reviewer or, for a UI change, the Designer, whoever fails it first. The board shows "waiting on the Designer" while the only Designer is paused. The Definition of Done (5.4) gains an item: a UI change on such a team needs the Designer's pass since the task last entered `verifying`, and the reviewer's review is not started before it. A send-back that returns the task to `verifying` runs both again, in the same order.
+
+  The Architect still reviews the Designer's own tasks (above), and still reviews a Developer's non-UI work as before. With no Designer on the team, none added or all retired, no design review exists and the Architect reviews alone, as today. A change that is both UI and code gets both: the Designer's pass first, then the Architect's review of the whole diff.
 - **What counts as a UI change** (decided here: both, paths and a field). A Developer's task is a UI change when either holds:
   - **its diff touches a UI path.** A new team rule, `ui_paths` (globs, 5.12), matched against the task's diff by the governor when the task enters `verifying`. Its default, when the key is left out, is `**/*.tsx`, `**/*.jsx`, `**/*.vue`, `**/*.svelte`, `**/*.css`, `**/*.scss`, `**/*.html`. Settings shows it in the advanced view, as it shows `document_paths`.
   - **its contract says so.** A new optional boolean contract field, `ui_change`, which the Product Manager or the Scrum Master sets for interface work the globs do not see, such as the words in a strings file.
@@ -240,19 +242,18 @@ Nothing step 11 builds is replaced; each later step widens it.
 
 - **A heavier machine.** The Designer needs Docker, which the sandbox needs anyway, and two more images: the Playwright server's, some hundreds of megabytes, and the preview's. The computer check gains a row for the browser image when the team has a Designer, and builds or pulls it as it builds the sandbox image.
 - **Previews differ by project.** A preview that needs a database, secrets, or a network the sandbox does not give will not start, and the user who set the command may not know why. The session fails with the preview's output tail, and the Designer's task escalates rather than guessing. No-sandbox mode runs it on the host, with the warning.
-- **Two reviews cost more.** A UI change now takes a code review and a design review, and a Designer's task takes a plan session and the Product Manager's decision before any code. Both are `verify` and `explore` costs the Costs page shows. A team that finds this too slow can untick the Designer.
+- **Two reviews cost more.** A UI change now takes a design review and then a code review, and a Designer's task takes a plan session and the Product Manager's decision before any code. Both are `verify` and `explore` costs the Costs page shows. A team that finds this too slow can untick the Designer.
 - **The `ui_paths` defaults are a guess.** They catch React, Vue, Svelte and plain web projects, and miss others (a native app's layout files). Settings' advanced view is the fix, and the step plan checks the defaults against the scan's detected stacks.
 - **A third-party server.** The Playwright MCP server is Microsoft's, and its tools change between versions. The pin, the drift test, and denying any tool a person has not tagged are the defence. Every pin update re-reviews the tags (role-kits).
 - **Emulating the colour scheme and the width** depends on what the pinned image supports. `farik_check_page` is Farik's own script in the Playwright image, not the MCP server's tools, so this depends on Playwright's library, which supports both. The step plan confirms it on the pinned image.
 - **Chats cost money in the background.** A user who chats a lot while the team is paused is still spending. The daily budget still stops chats, and "Conversations" on the Costs page shows it.
 - **Privacy is local, not secret.** A chat is kept out of the channel and away from other agents, but it lives in the event log like everything else, and `farik log` shows it to anyone at the machine.
 - **Templates and providers.** A template saved with a model the project's provider cannot run (phase 7) falls back to the role's default, and the before-and-after dialog says so.
-- **Milestone runbook.** Step 14 was written for six agents in the five launch roles. Whether the recorded team sprint adds the Designer is open, below.
+- **Milestone runbook.** Step 14's team sprint uses seven agents, the six of phase 4 and the Designer, the cap (decided by the founder, 2026-09-30). Its two requests are CLI work, so the Designer's review of UI changes occurs only if the run touches UI files.
 
 ## Open items
 
 - **The Designer's character and tag colour.** The founder chooses both in the step 11 mockups.
 - **The rail's label** for the chat list ("Chats" proposed), in the step 12 mockups.
 - **Farik's own preview command**, proposed as the `farik-e2e-serve` binary over a recorded team; the founder confirms it in step 11's plan.
-- **Whether step 14's team sprint includes the Designer**, and a UI change for it to review.
 - **Every point marked "decided here"**, which ADR 0026 lists for the founder to confirm.

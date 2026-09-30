@@ -1,7 +1,7 @@
 # 0026. A UI/UX Designer, chats and team templates in phase 6
 
 Date: 2026-09-30
-Status: proposed
+Status: accepted. The founder approved it on 2026-09-30, with one change: the Designer checks a Developer's UI change in the browser before it goes to the Architect for approval (A4).
 
 ## Context
 
@@ -33,7 +33,7 @@ The questions, the options, and the choice for each. Where the founder did not r
 
 **A4. Reviews.**
 - The Architect reviews the Designer's work, because the author never accepts its own. **The founder's choice.** Design: with no active Architect, a Developer reviews it.
-- The Designer reviews every UI change the Developer makes: at phone and desktop sizes, in both themes, with an accessibility check, passing it or sending it back with reasons. **The founder's choice.** Design: this is a second review after the code review, not a replacement for it, so a mixed change keeps its code review. It applies when the team has a Designer who is not retired.
+- The Designer checks every UI change the Developer makes, in the browser, before the Architect sees it: at phone and desktop sizes, in both themes, with an accessibility check, passing it on or sending it back to the Developer with reasons. Only a change the Designer passed goes to the Architect for approval. **The founder's choice, in his words of 2026-09-30:** "The UI designer checks it in the browser before sending it to the architect for approval." Design: the contract still names the Architect as reviewer; the Designer's pass is the event `design_review.recorded`, which gates the start of the Architect's review, and no state is added. The design review is in addition to the code review, not a replacement, so a mixed change gets both, the Designer's first. It applies when the team has a Designer who is not retired; without one, the Architect reviews alone, as before.
 - What counts as a UI change. Paths alone would miss wording changes. A contract field alone would trust the author to remember. Overlapping `allowed_paths` with UI globs at readiness cannot be computed exactly. Design: both. A Developer's task is a UI change when its diff touches the new team rule `ui_paths`, judged by the governor at `verifying`, or when its contract sets the new field `ui_change`.
 
 **A5. The Designer's skills.** **The founder's choice**, in the Agent Skills format: UX review heuristics, WCAG 2.2 accessibility checks, the project's brand and design tokens, plain-language interface wording, writing mockups, and responsive and phone-width checks.
@@ -71,7 +71,7 @@ The questions, the options, and the choice for each. Where the founder did not r
 ## Decision
 
 Phase 6 gains three steps before its milestone runs:
-- **11:** a sixth suggested role, the UI/UX Designer (`ui_ux_designer`). It changes code on its own tasks after exploring the app and having its plan approved by the Product Manager. The Architect reviews its work, and it reviews the Developer's interface changes. It uses a built-in Playwright connector confined to the project's preview.
+- **11:** a sixth suggested role, the UI/UX Designer (`ui_ux_designer`). It changes code on its own tasks after exploring the app and having its plan approved by the Product Manager. The Architect reviews the Designer's work. The Designer checks the Developer's interface changes first, in the browser, and only a change it passed goes to the Architect. It uses a built-in Playwright connector confined to the project's preview.
 - **12:** private, read-only one-to-one chats beside the team channel.
 - **13:** machine-local team templates.
 
@@ -80,15 +80,16 @@ The milestone runbook becomes step 14. `docs/design/designer-chats-templates.md`
 ## Consequences
 
 Easier:
-- The interface gets an owner who looks at the running app, and every screen a Developer ships is checked at two sizes, in two themes, for accessibility, before the user sees it.
+- The interface gets an owner who looks at the running app, and every screen a Developer ships is checked at two sizes, in two themes, for accessibility, before the Architect and the user see it.
 - The user can ask one agent a question without the team hearing, and turn the answer into work with one button, under the same triage as any request.
 - A tuned team is saved once and used in every project.
 - Phase 8 starts from a working, governed connector base instead of a blank one, and phase 9's kit format has its first connector and its first drift test already.
 
 Harder:
+- Step 14's team sprint runs seven agents, the six of phase 4 and the Designer (the cap).
 - Phase 6 grows from eleven steps to fourteen, and the milestone runs wait for three more steps and their mockups.
 - The rule "only the Developer changes code" now has two roles in it, and every place that says it changes: spec 5.3, 5.12, 6.1 to 6.5, and the roles' prompts.
-- A Designer's task costs more before any code: an exploration, a plan, and the Product Manager's decision. A UI change costs a second review. A team that finds this slow can untick the Designer.
+- A Designer's task costs more before any code: an exploration, a plan, and the Product Manager's decision. A UI change costs a design review before its code review. A team that finds this slow can untick the Designer.
 - The Designer needs Docker and two more images (the preview and the Playwright server), and a preview command that works in the sandbox. A project whose app needs a database or secrets to start will not preview until the user makes that work.
 - Farik now ships a third-party MCP server's image, and a pinned tool list that each update must re-tag by hand.
 - Chats spend money while the team is paused. The daily budget still bounds them.

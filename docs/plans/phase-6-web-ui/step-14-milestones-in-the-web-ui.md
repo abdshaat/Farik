@@ -16,7 +16,7 @@ The agent never acts in the human's name in the browser or on the command line. 
 
 Two recorded runs that close Milestones 0 and 1 (spec 11).
 
-1. **The team sprint** (phase 4 step 08's decisions, driven from the browser). It uses a fresh copy of Farik's own repository, six agents in the five launch roles, and one sprint started by the founder in the browser. It carries two requests, a small one and a large one, through triage, plan checking, the Product Manager's questions and plans, the founder's approval, the breakdown, the building, the Architect's review, the Marketing Specialist's CHANGELOG entry, acceptance, and integration. The channel carries reactions and meetings throughout, and the sprint ends with a review and a look back. The founder reads the gates, the diffs, the channel, and the log in the browser, and writes whether each task was done as its plan said.
+1. **The team sprint** (phase 4 step 08's decisions, driven from the browser). It uses a fresh copy of Farik's own repository, seven agents (phase 4's six and the UI/UX Designer, the cap), and one sprint started by the founder in the browser. It carries two requests, a small one and a large one, through triage, plan checking, the Product Manager's questions and plans, the founder's approval, the breakdown, the building, the Architect's review (after the Designer's check, for any UI change), the Marketing Specialist's CHANGELOG entry, acceptance, and integration. The channel carries reactions and meetings throughout, and the sprint ends with a review and a look back. The founder reads the gates, the diffs, the channel, and the log in the browser, and writes whether each task was done as its plan said.
 2. **The thirty-minute test.** Five test users, at least three of them non-technical. Each starts at `farik serve` on a machine prepared with Farik, Claude Code, git, and Docker installed (the phase's "Ends with"). Each must reach an accepted task on their own repository within thirty minutes, with no help.
 
 The records are `docs/milestones/m1-team-exit.md`, `docs/milestones/m1-web-exit.md`, and their event log exports.
@@ -24,12 +24,14 @@ The records are `docs/milestones/m1-team-exit.md`, `docs/milestones/m1-web-exit.
 ## Decisions
 
 - **The team sprint keeps phase 4 step 08's decisions**, except as below:
-  - its team of six on the founder's models;
+  - its team of six on the founder's models, plus the UI/UX Designer as the seventh agent, which is the cap (ADR 0026, approved 2026-09-30);
   - no dollar limit;
   - the founder's subscription token;
   - its loop limits and rules;
   - its two requests, word for word;
   - `auto_merge` into `test/m1-exit` in a bare clone.
+
+  The Designer's review of UI changes will occur only if the run touches UI files. Phase 4 step 08's two requests are CLI work, so the run may never touch one, and the Designer may sit idle. The record says so rather than counting it a failure, and this step adds no request for it: the requests stay word for word.
 
   The changes:
   - **Driving and records.** Every human action is taken in the browser: the request box, questions, plan approval, sprint start, channel posts, acceptance, and help. The command line is used only by [A], for the record's readings (`farik metrics`, `farik log --json`, `farik channel`).
@@ -67,7 +69,7 @@ docs/plans/phase-3-runtime/step-18-milestone-0-exit.md, docs/plans/phase-4-team/
 This is phase 4 step 08's stage 1, in `~/farik-m1/`:
 - the bare clone, `test/m1-exit`, the run's clone, and the sandbox image with its smoke test;
 - the release build;
-- `team.yaml`, written with the six agents and `judgment` left at its defaults, so the Architect checks plans;
+- `team.yaml`, written with the seven agents and `judgment` left at its defaults, so the Architect checks plans;
 - the two briefs, saved to paste into the request box.
 
 [A] then hands over to [F] with the one command, `cd ~/farik-m1/farik && farik serve`, after the founder has exported the token.
