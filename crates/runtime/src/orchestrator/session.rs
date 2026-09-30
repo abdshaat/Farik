@@ -109,7 +109,13 @@ pub(super) async fn run_session(
         executor: ask.executor,
         limits: spec.limits,
         farik_tools: spec.farik_tools.clone(),
-        tiers: ask.agent.tiers(&team.permissions()),
+        // An explore session reads, whatever the agent's grants (ADR 0026); step 12 adds the
+        // network its browser needs.
+        tiers: if ask.purpose == SessionPurpose::Explore {
+            vec![PermissionTier::Read]
+        } else {
+            ask.agent.tiers(&team.permissions())
+        },
     });
     let ended = drive(
         deps,

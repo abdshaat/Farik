@@ -197,7 +197,7 @@ mod tests {
     use serde_json::{Value, json};
 
     use crate::claude::allowed_builtins;
-    use crate::orchestrator::fixtures::Harness;
+    use crate::orchestrator::fixtures::{ExecutorWitness, Harness};
     use crate::prompt::DESIGN_DECISION_INSTRUCTION;
     use crate::recorded::Transcript;
     use crate::recorded::fixtures::{
@@ -336,6 +336,31 @@ mod tests {
         assert_eq!(harness.events(&[EventKind::DesignPlanProposed]).len(), 1);
         assert_eq!(harness.events(&[EventKind::DesignPlanApproved]).len(), 1);
         assert_eq!(harness.row("FRK-1").status, TaskStatus::InProgress);
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn holds_the_explore_session_to_the_read_tier() {
+        // The hook judges every call by the registration's tiers, so an explore session is held
+        // to reading there too, not by its offered tools alone, whatever the Designer's grants.
+        let harness = a_designers_task_in(
+            "design-flow-explore-tiers",
+            |wire| {
+                with_the_designer(wire);
+                wire["agents"][3]["grants"] = json!(["network", "git_remote"]);
+            },
+            |_| {},
+        );
+        let adapter = harness.recorded(vec![explore_plans_frk_1()]);
+        let witness = std::sync::Arc::new(ExecutorWitness::new(
+            adapter.clone(),
+            std::sync::Arc::clone(&harness.daemon),
+        ));
+        let orchestrator = harness.orchestrator(witness.clone());
+        orchestrator.tick().await.expect("the tick runs");
+
+        assert_eq!(who(&adapter.started()), [("iris", SessionPurpose::Explore)]);
+        assert_eq!(witness.given_tiers(), [vec![PermissionTier::Read]]);
     }
 
     #[tokio::test]
