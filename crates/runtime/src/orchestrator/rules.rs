@@ -5289,8 +5289,13 @@ mod tests {
         let adapter = harness.recorded(vec![credential_refused(), reads_a_file()]);
         let orchestrator = harness.orchestrator(adapter.clone());
 
-        orchestrator.tick().await.expect("the tick runs");
+        let first = orchestrator.tick().await.expect("the tick runs");
         let second = orchestrator.tick().await.expect("the tick runs");
+        assert!(
+            matches!(&first, TickReport::Acted { what, .. }
+                if what.contains("which was refused: the AI account's key did not work")),
+            "{first:?}"
+        );
 
         let pauses: Vec<serde_json::Value> = harness
             .events(&[EventKind::TeamPaused])
