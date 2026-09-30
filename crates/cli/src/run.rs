@@ -237,7 +237,9 @@ pub(crate) async fn ticks(
                 );
                 after(printer);
             }
-            Ok(TickReport::Conversation { agent_id, what }) => {
+            Ok(
+                TickReport::Conversation { agent_id, what } | TickReport::Chat { agent_id, what },
+            ) => {
                 last_idle = None;
                 printer.line(
                     &format!("{agent_id}: {what}"),

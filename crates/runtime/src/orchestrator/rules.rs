@@ -59,6 +59,10 @@ pub(super) struct Waiting {
 
 /// One tick within `scope`: the first rule of the scope's set that acts on a task in scope, or
 /// `Idle`. A rule outside the set passes its tasks over, as a spent budget does.
+#[allow(
+    clippy::too_many_lines,
+    reason = "one block per rule, in the order of work"
+)]
 pub(super) async fn tick(
     orchestrator: &Orchestrator,
     scope: &TickScope,
@@ -73,6 +77,9 @@ pub(super) async fn tick(
     let in_scope = in_scope(scope);
     let runs = |rule: u8| rule_runs(scope.rules, rule);
     let mut waiting = Waiting::default();
+    if let Some(report) = chat(deps, scope, &team, &mut waiting).await? {
+        return Ok(report);
+    }
     if let Some(report) = sprint_rules(deps, scope, &team, &board, &mut waiting).await? {
         return Ok(report);
     }
@@ -587,6 +594,85 @@ const CONVERSATION_TOOLS: &[&str] = &[
     "farik_write_memory",
     "farik_read_decisions",
 ];
+
+/// The Farik tools a chat session is offered (ADR 0026): the reading tools and its one reply.
+pub(super) const CHAT_TOOLS: &[&str] = &[
+    "farik_read_task",
+    "farik_read_board",
+    "farik_read_rules",
+    "farik_read_criteria",
+    "farik_read_decisions",
+    "farik_chat_reply",
+];
+
+/// The chat rule, first of all (ADR 0026): the oldest pending chat of an active agent, awake, on a
+/// day whose budget is not spent, gets one `chat` session about no task, on the read tier alone
+/// and `CHAT_TOOLS`, to answer the user's newest message. It is about no one task, so it runs only
+/// under `All` in a tick scoped to none.
+async fn chat(
+    deps: &OrchestratorDeps,
+    scope: &TickScope,
+    team: &Team,
+    waiting: &mut Waiting,
+) -> Result<Option<TickReport>, OrchestratorError> {
+    if scope.rules != TickRules::All || scope.task_id.is_some() {
+        return Ok(None);
+    }
+    let log = &deps.tools.log;
+    let mut pending = Vec::new();
+    for agent in team.active_agents() {
+        if let Some(seq) = crate::chat::pending_chat(log, agent.id.as_str())? {
+            pending.push((seq, agent));
+        }
+    }
+    pending.sort_by_key(|(seq, _)| *seq);
+    for (seq, agent) in pending {
+        if day_is_spent(deps, team, Role::from(agent.role), &mut waiting.day_spent)?
+            | asleep(deps, agent, &mut waiting.slept)?
+        {
+            continue;
+        }
+        let text = log
+            .read(&EventQuery {
+                after_seq: Some(seq - 1),
+                limit: Some(1),
+                ..EventQuery::default()
+            })?
+            .into_iter()
+            .find_map(|event| match event.body {
+                EventBody::ChatMessagePosted(body) => Some(body.text),
+                _ => None,
+            })
+            .unwrap_or_default();
+        let end = run_session(
+            deps,
+            team,
+            SessionAsk {
+                agent,
+                contract: None,
+                purpose: SessionPurpose::Chat,
+                cwd: deps.tools.files.root().to_path_buf(),
+                executor: None,
+                read_only: true,
+                only_tool: None,
+                tools: Some(CHAT_TOOLS),
+                in_reply_to: Some(seq),
+                thread: None,
+                initial_prompt: format!(
+                    "{}, the user wrote to you in your one-to-one chat. Answer the newest \
+                     message.\n\n{text}",
+                    agent.display_name.as_str()
+                ),
+            },
+        )
+        .await?;
+        return Ok(Some(TickReport::Chat {
+            agent_id: agent.id.to_string(),
+            what: ran(agent, "chat", &end),
+        }));
+    }
+    Ok(None)
+}
 
 /// The channel rule, between the budget rule and rule 3 (5.9): the first active agent in team
 /// order with a pending mention, awake, on a day whose budget is not spent, gets one
@@ -1347,10 +1433,11 @@ mod tests {
     };
     use crate::orchestrator::{OrchestratorError, TickReport, TickRules, TickScope};
     use crate::recorded::fixtures::{
-        accept_frk_1, credential_refused, hits_the_turn_limit, implement_finishes_frk_1,
-        implement_stops_early, plan_assigns_frk_1, planning_ceremony_frk_1, provider_limit_429,
-        provider_limit_rejected, reads_a_file, replays_farik_read_board, reply_to_a_mention, retro,
-        review, review_answers_nothing, review_writes_note, standup, success_with_is_error,
+        accept_frk_1, chat_answers_with_a_request, credential_refused, hits_the_turn_limit,
+        implement_finishes_frk_1, implement_stops_early, plan_assigns_frk_1,
+        planning_ceremony_frk_1, provider_limit_429, provider_limit_rejected, reads_a_file,
+        replays_farik_read_board, reply_to_a_mention, retro, review, review_answers_nothing,
+        review_writes_note, standup, success_with_is_error,
     };
     use crate::recorded::{RecordedAdapter, Transcript};
     use crate::session::SessionPurpose;
@@ -1364,7 +1451,8 @@ mod tests {
             TickReport::Acted { task_id, .. } => Some(task_id.as_str()),
             TickReport::Idle { .. }
             | TickReport::Sprint { .. }
-            | TickReport::Conversation { .. } => None,
+            | TickReport::Conversation { .. }
+            | TickReport::Chat { .. } => None,
         }
     }
 
@@ -4285,11 +4373,19 @@ mod tests {
 
         let spec = &adapter.started()[0];
         let tiers = default_tiers(Role::ProductManager);
-        // The Designer's page check and design review are offered in its own sessions alone.
+        // The Designer's page check and design review are offered in its own sessions alone, and a
+        // chat's reply in a chat alone.
         let expected: Vec<String> = tool_descriptors()
             .iter()
             .filter(|tool| tiers.contains(&tool.tier))
-            .filter(|tool| !["farik_check_page", "farik_record_design_review"].contains(&tool.name))
+            .filter(|tool| {
+                ![
+                    "farik_check_page",
+                    "farik_record_design_review",
+                    "farik_chat_reply",
+                ]
+                .contains(&tool.name)
+            })
             .map(|tool| tool.name.to_string())
             .collect();
         assert_eq!(spec.farik_tools, expected);
@@ -6671,6 +6767,457 @@ mod tests {
             ceremonies(&harness).is_empty(),
             "{:?}",
             ceremonies(&harness)
+        );
+    }
+
+    /// Records `text` in `agent`'s chat as `author`, and answers its seq.
+    fn chatted(
+        harness: &Harness,
+        agent: &str,
+        author: &str,
+        text: &str,
+        in_reply_to: Option<u64>,
+    ) -> u64 {
+        let deps = &harness.project.deps;
+        crate::chat::post_chat(
+            &deps.log,
+            deps.clock.as_ref(),
+            &deps.ids,
+            crate::chat::NewChatMessage {
+                chat: agent.to_string(),
+                author: author.to_string(),
+                text: text.to_string(),
+                in_reply_to,
+                request: None,
+                session_id: None,
+            },
+        )
+        .expect("the chat message is recorded")
+    }
+
+    /// Every `session.started` of a chat, as (its agent, its `in_reply_to`, its `chat`).
+    fn chat_starts(harness: &Harness) -> Vec<(Option<String>, Option<u64>, Option<String>)> {
+        harness
+            .events(&[EventKind::SessionStarted])
+            .into_iter()
+            .filter_map(|event| match event.body {
+                EventBody::SessionStarted(body)
+                    if body.purpose == SessionStartedBodyPurpose::Chat =>
+                {
+                    Some((
+                        event.envelope.ids.agent_id,
+                        body.in_reply_to.map(NonZeroU64::get),
+                        body.chat.map(|chat| chat.to_string()),
+                    ))
+                }
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn starts_a_chat_for_the_oldest_pending() {
+        // A sprint whose planning is due: the chat rule comes before every sprint rule.
+        let harness = Harness::new("orch-chat-oldest", |wire| {
+            with_a_scrum_master(wire);
+            wire["agents"][2]["model"] = json!({ "id": "claude-opus-5", "effort": "high" });
+        });
+        harness.ready("FRK-1");
+        harness.open_sprint("S1", &[]);
+        let older = chatted(&harness, "dev-b", "human", "What are you on?", None);
+        chatted(&harness, "dev-a", "human", "And you?", None);
+        let adapter = harness.recorded(vec![chat_answers_with_a_request()]);
+
+        let report = harness
+            .orchestrator(adapter.clone())
+            .tick()
+            .await
+            .expect("the tick runs");
+
+        assert!(
+            matches!(&report, TickReport::Chat { agent_id, .. } if agent_id == "dev-b"),
+            "{report:?}"
+        );
+        let started = adapter.started();
+        assert_eq!(started.len(), 1, "{started:?}");
+        let spec = &started[0];
+        assert_eq!(
+            (spec.agent_id.as_str(), spec.purpose, spec.task_id.as_ref()),
+            ("dev-b", SessionPurpose::Chat, None)
+        );
+        // Its own model, at low effort.
+        assert_eq!(
+            (spec.model.as_str(), spec.effort),
+            ("claude-opus-5", Effort::Low)
+        );
+        assert!(
+            spec.initial_prompt.starts_with(
+                "dev-b, the user wrote to you in your one-to-one chat. Answer the newest message."
+            ) && spec.initial_prompt.ends_with("What are you on?"),
+            "{}",
+            spec.initial_prompt
+        );
+        assert_eq!(
+            chat_starts(&harness),
+            [(
+                Some("dev-b".to_string()),
+                Some(older),
+                Some("dev-b".to_string())
+            )]
+        );
+        starts_a_chat_once_and_again_for_a_later_message().await;
+    }
+
+    /// The second half of `starts_a_chat_for_the_oldest_pending`: a chat answered starts no
+    /// second session, a message sent while one ran does, and a scoped tick starts none.
+    async fn starts_a_chat_once_and_again_for_a_later_message() {
+        let harness = Harness::new("orch-chat-once", |_| {});
+        let asked = chatted(&harness, "dev-a", "human", "Status?", None);
+        let adapter = harness.recorded(vec![
+            chat_answers_with_a_request(),
+            chat_answers_with_a_request(),
+        ]);
+        let orchestrator = harness.orchestrator(adapter.clone());
+
+        let first = orchestrator.tick().await.expect("the tick runs");
+        assert!(matches!(&first, TickReport::Chat { .. }), "{first:?}");
+        // A chat already answered starts none.
+        let second = orchestrator.tick().await.expect("the tick runs");
+        assert!(matches!(&second, TickReport::Idle { .. }), "{second:?}");
+
+        // A message sent while a session ran is answered after it, though the agent wrote last.
+        let during = chatted(&harness, "dev-a", "human", "One more thing.", None);
+        harness.project.record_by(
+            Some("dev-a"),
+            at(),
+            "",
+            "session.started",
+            &json!({ "purpose": "chat", "model": "claude-opus-5", "effort": "low", "in_reply_to": during, "chat": "dev-a" }),
+        );
+        let while_it_ran = chatted(&harness, "dev-a", "human", "And another.", None);
+        chatted(&harness, "dev-a", "dev-a", "Noted.", Some(during));
+        harness.project.record_by(
+            Some("dev-a"),
+            at(),
+            "",
+            "session.ended",
+            &json!({ "reason": "completed", "detail": "" }),
+        );
+        // A tick scoped to a task answers no chat.
+        let scoped = orchestrator
+            .tick_within(&TickScope {
+                task_id: Some("FRK-1".parse().expect("a task id")),
+                rules: TickRules::All,
+            })
+            .await
+            .expect("the tick runs");
+        assert!(!matches!(&scoped, TickReport::Chat { .. }), "{scoped:?}");
+        assert_eq!(adapter.started().len(), 1, "{:?}", adapter.started());
+
+        let third = orchestrator.tick().await.expect("the tick runs");
+
+        assert!(matches!(&third, TickReport::Chat { .. }), "{third:?}");
+        let answered: Vec<Option<u64>> = chat_starts(&harness)
+            .into_iter()
+            .map(|(_, in_reply_to, _)| in_reply_to)
+            .collect();
+        assert_eq!(answered, [Some(asked), Some(during), Some(while_it_ran)]);
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn gives_a_chat_the_read_tier_alone() {
+        // dev-a holds every tier the team can grant.
+        let harness = Harness::new("orch-chat-tiers", |wire| {
+            wire["policy"]["permissions"] = json!({ "run_commands": true, "push": true });
+            wire["agents"][1]["grants"] = json!(["network"]);
+        });
+        chatted(&harness, "dev-a", "human", "Status?", None);
+        let adapter = harness.recorded(vec![chat_answers_with_a_request()]);
+        let witness = Arc::new(ExecutorWitness::new(
+            adapter.clone(),
+            Arc::clone(&harness.daemon),
+        ));
+
+        harness
+            .orchestrator(witness.clone())
+            .tick()
+            .await
+            .expect("the tick runs");
+
+        let team = harness.project.deps.files.read_team().expect("the team");
+        let dev_a = team
+            .agents
+            .iter()
+            .find(|agent| agent.id.as_str() == "dev-a")
+            .expect("dev-a");
+        assert_eq!(
+            dev_a
+                .tiers(&team.permissions())
+                .into_iter()
+                .collect::<BTreeSet<_>>(),
+            BTreeSet::from([
+                PermissionTier::Read,
+                PermissionTier::WriteWorkspace,
+                PermissionTier::Execute,
+                PermissionTier::Network,
+                PermissionTier::GitLocal,
+                PermissionTier::GitRemote,
+            ]),
+            "dev-a holds every tier"
+        );
+        let spec = &adapter.started()[0];
+        assert_eq!(spec.purpose, SessionPurpose::Chat);
+        assert_eq!(spec.farik_tools, super::CHAT_TOOLS);
+        assert_eq!(
+            spec.builtin_tools,
+            allowed_builtins(&BTreeSet::from([PermissionTier::Read]))
+        );
+        assert!(spec.mcp_servers.is_empty(), "{:?}", spec.mcp_servers);
+        assert_eq!(witness.given_tiers(), [vec![PermissionTier::Read]]);
+        assert_eq!(
+            witness.given_tools(),
+            [super::CHAT_TOOLS
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()]
+        );
+    }
+
+    /// Each hook decision a probed session saw, as (tool, `allow` or the refusal's kind), and how
+    /// many connectors it was given.
+    type Probed = (Vec<(String, String)>, usize);
+
+    /// An adapter that, for each session it starts, asks the hook about each of `calls` while the
+    /// session is registered, and keeps each decision and the connectors the session was given.
+    struct HookProbe {
+        inner: Arc<RecordedAdapter>,
+        daemon: Arc<crate::daemon::DaemonState>,
+        calls: Vec<(&'static str, serde_json::Value)>,
+        seen: std::sync::Mutex<Vec<Probed>>,
+    }
+
+    impl crate::session::RuntimeAdapter for HookProbe {
+        fn start_session(
+            &self,
+            spec: crate::session::SessionSpec,
+        ) -> Result<Box<dyn crate::session::SessionHandle>, crate::session::RuntimeError> {
+            let decisions = self
+                .calls
+                .iter()
+                .map(|(tool, input)| {
+                    let decision = crate::daemon::decide_pre_tool_use(
+                        &crate::daemon::HookRequest {
+                            session_id: spec.session_id.clone(),
+                            cwd: std::path::PathBuf::new(),
+                            hook_event_name: "PreToolUse".to_string(),
+                            tool_name: (*tool).to_string(),
+                            tool_input: input.clone(),
+                            tool_use_id: None,
+                            tool_response: None,
+                            duration_ms: None,
+                        },
+                        &self.daemon,
+                    );
+                    let verdict = if decision.allow {
+                        "allow".to_string()
+                    } else {
+                        decision
+                            .reason
+                            .split(':')
+                            .next()
+                            .unwrap_or_default()
+                            .to_string()
+                    };
+                    ((*tool).to_string(), verdict)
+                })
+                .collect();
+            let connectors = self
+                .daemon
+                .tool_context(&spec.session_id)
+                .expect("registered before it starts")
+                .connectors
+                .len();
+            self.seen
+                .lock()
+                .expect("no test panics holding it")
+                .push((decisions, connectors));
+            self.inner.start_session(spec)
+        }
+
+        fn resume(
+            &self,
+            session_id: &str,
+            prompt: &str,
+        ) -> Result<Box<dyn crate::session::SessionHandle>, crate::session::RuntimeError> {
+            self.inner.resume(session_id, prompt)
+        }
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn denies_a_chat_everything_else() {
+        // The Designer iris has Playwright on and every tier; a preview is set.
+        let harness = Harness::new("orch-chat-denied", |wire| {
+            crate::tools::fixtures::browsing(wire);
+            wire["policy"]["permissions"] = json!({ "run_commands": true, "push": true });
+            wire["agents"][3]["grants"] = json!(["network"]);
+        });
+        chatted(&harness, "iris", "human", "How does checkout look?", None);
+        let root = harness.project.repo.path.display().to_string();
+        let probe = Arc::new(HookProbe {
+            inner: harness.recorded(vec![chat_answers_with_a_request()]),
+            daemon: Arc::clone(&harness.daemon),
+            calls: vec![
+                ("Read", json!({ "file_path": format!("{root}/README.md") })),
+                (
+                    "Read",
+                    json!({ "file_path": format!("{root}/.farik/local/farik.db") }),
+                ),
+                (
+                    "Edit",
+                    json!({ "file_path": format!("{root}/README.md"), "old_string": "the", "new_string": "a" }),
+                ),
+                ("Bash", json!({ "command": "true" })),
+                (
+                    "WebFetch",
+                    json!({ "url": "https://example.com", "prompt": "read" }),
+                ),
+                (
+                    "mcp__farik__farik_create_task",
+                    json!({ "text": "Pay with Apple Pay at checkout." }),
+                ),
+                (
+                    "mcp__farik__farik_post_message",
+                    json!({ "text": "Hello team." }),
+                ),
+                (
+                    "mcp__farik__farik_write_memory",
+                    json!({ "text": "Remember this." }),
+                ),
+                (
+                    "mcp__playwright__browser_navigate",
+                    json!({ "url": "http://127.0.0.1:4401/" }),
+                ),
+            ],
+            seen: std::sync::Mutex::new(Vec::new()),
+        });
+
+        harness
+            .orchestrator(probe.clone())
+            .tick()
+            .await
+            .expect("the tick runs");
+
+        let seen = probe
+            .seen
+            .lock()
+            .expect("no test panics holding it")
+            .clone();
+        assert_eq!(seen.len(), 1, "one chat session: {seen:?}");
+        let (decisions, connectors) = &seen[0];
+        assert_eq!(*connectors, 0);
+        let verdicts: Vec<(&str, &str)> = decisions
+            .iter()
+            .map(|(tool, verdict)| (tool.as_str(), verdict.as_str()))
+            .collect();
+        assert_eq!(
+            verdicts,
+            [
+                ("Read", "allow"),
+                ("Read", "path_protected"),
+                ("Edit", "tier_not_granted"),
+                ("Bash", "tool_not_allowed"),
+                ("WebFetch", "tier_not_granted"),
+                ("mcp__farik__farik_create_task", "tool_not_in_session"),
+                ("mcp__farik__farik_post_message", "tool_not_in_session"),
+                ("mcp__farik__farik_write_memory", "tool_not_in_session"),
+                (
+                    "mcp__playwright__browser_navigate",
+                    "connector_not_in_session"
+                ),
+            ]
+        );
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn answers_through_the_recorded_transcript() {
+        let harness = Harness::new("orch-chat-transcript", |_| {});
+        let asked = chatted(
+            &harness,
+            "pm",
+            "human",
+            "Could customers also pay with Apple Pay?",
+            None,
+        );
+        let adapter = harness.recorded(vec![chat_answers_with_a_request()]);
+        let before = harness.events(&[]).len();
+
+        let report = harness
+            .orchestrator(adapter.clone())
+            .tick()
+            .await
+            .expect("the tick runs");
+
+        assert!(
+            matches!(&report, TickReport::Chat { agent_id, what } if agent_id == "pm" && what.contains("completed")),
+            "{report:?}"
+        );
+        let replies: Vec<_> = harness
+            .events(&[EventKind::ChatMessagePosted])
+            .into_iter()
+            .filter_map(|event| match event.body {
+                EventBody::ChatMessagePosted(body) if body.author == "pm" => {
+                    Some((event.envelope.ids.session_id, body))
+                }
+                _ => None,
+            })
+            .collect();
+        assert_eq!(replies.len(), 1, "{replies:?}");
+        let (session, reply) = &replies[0];
+        assert_eq!(
+            session.as_deref(),
+            Some(adapter.started()[0].session_id.as_str())
+        );
+        assert_eq!(reply.chat, "pm");
+        assert_eq!(reply.in_reply_to.map(NonZeroU64::get), Some(asked));
+        assert_eq!(
+            reply.request.as_ref().map(|request| request.title.as_str()),
+            Some("Let customers pay with Apple Pay")
+        );
+        // Nothing else was written: no task, no channel message, no memory.
+        let written: BTreeSet<EventKind> = harness.events(&[])[before..]
+            .iter()
+            .map(|event| event.body.kind())
+            .collect();
+        for kind in [
+            EventKind::TaskCreated,
+            EventKind::MessagePosted,
+            EventKind::MemoryWritten,
+            EventKind::DecisionWritten,
+            EventKind::NoteWritten,
+        ] {
+            assert!(!written.contains(&kind), "{kind:?} in {written:?}");
+        }
+        assert!(
+            harness
+                .project
+                .deps
+                .projections
+                .board()
+                .expect("the board")
+                .is_empty()
+        );
+        assert!(
+            harness
+                .project
+                .deps
+                .files
+                .read_memory(&"pm".parse().expect("an agent id"))
+                .expect("the notebook reads")
+                .is_empty()
         );
     }
 }

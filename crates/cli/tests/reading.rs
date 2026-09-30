@@ -854,6 +854,7 @@ fn prints_the_harness_metrics() {
             "  verify: $0.50",
             "  ceremony: $0.00",
             "  conversation: $0.00",
+            "  chat: $0.00",
             "criteria verified by command, test, or artifact: 66.7%",
             "active weeks: 3",
             "messages: reaction 0, ambient 0, reply 0, ceremony 0, system 0, human 0",
@@ -907,7 +908,8 @@ fn prints_the_harness_metrics_as_json() {
                     "implement": 0.25,
                     "verify": 0.5,
                     "ceremony": 0.0,
-                    "conversation": 0.0
+                    "conversation": 0.0,
+                    "chat": 0.0
                 }
             },
             "mechanically_verified_criteria_share": 2.0 / 3.0,
@@ -1041,6 +1043,7 @@ fn prints_the_metrics_of_a_sprint() {
             "  verify: $0.00",
             "  ceremony: $0.00",
             "  conversation: $0.00",
+            "  chat: $0.00",
             "criteria verified by command, test, or artifact: 100.0%",
             "active weeks: 1",
             "messages: reaction 0, ambient 0, reply 0, ceremony 0, system 0, human 0",
@@ -1066,7 +1069,8 @@ fn prints_the_metrics_of_a_sprint() {
                     "implement": 1.0,
                     "verify": 0.0,
                     "ceremony": 0.0,
-                    "conversation": 0.0
+                    "conversation": 0.0,
+                    "chat": 0.0
                 }
             },
             "mechanically_verified_criteria_share": 1.0,

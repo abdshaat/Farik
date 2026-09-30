@@ -1055,19 +1055,27 @@ mod tests {
                 "{agent}"
             );
         }
-        // `@dev-b` in a chat to dev-a starts no conversation.
-        let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
+        // `@dev-b` in a chat to dev-a starts no conversation: dev-a's chat session answers it.
+        let orchestrator = harness.orchestrator(harness.recorded(vec![
+            crate::recorded::fixtures::chat_answers_with_a_request(),
+        ]));
         tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()
             .expect("a runtime is made")
             .block_on(orchestrator.tick())
             .expect("the tick runs");
-        assert!(
-            harness.events(&[EventKind::SessionStarted]).is_empty(),
-            "{:?}",
-            harness.events(&[EventKind::SessionStarted])
-        );
+        let started: Vec<_> = harness
+            .events(&[EventKind::SessionStarted])
+            .into_iter()
+            .map(|event| match event.body {
+                farik_protocol::event::EventBody::SessionStarted(body) => {
+                    (event.envelope.ids.agent_id, body.purpose.to_string())
+                }
+                other => panic!("a session's start, not {other:?}"),
+            })
+            .collect();
+        assert_eq!(started, [(Some("dev-a".to_string()), "chat".to_string())]);
     }
 
     #[test]

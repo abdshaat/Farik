@@ -67,7 +67,7 @@ pub const PROMPT_SECTIONS: [&str; 11] = [
 ];
 
 /// The `This session` section of each purpose: what the session is for and the tool it ends with.
-pub const CLOSING_INSTRUCTIONS: [(SessionPurpose, &str); 8] = [
+pub const CLOSING_INSTRUCTIONS: [(SessionPurpose, &str); 9] = [
     (
         SessionPurpose::Triage,
         "This session sizes the request you were given. Decide whether it is large (an epic) or \
@@ -128,6 +128,14 @@ pub const CLOSING_INSTRUCTIONS: [(SessionPurpose, &str); 8] = [
          once, in one post with `farik_post_message`, in your persona's voice. Nothing said in \
          the channel is work: file any work it asks for as a request with `farik_create_task`, \
          without a parent. Then end the session.",
+    ),
+    (
+        SessionPurpose::Chat,
+        "This session answers the user in your one-to-one chat: the newest of their messages in \
+         `From the human`, with the chat before it. Answer once with `farik_chat_reply`, in your \
+         persona's voice. You can read the project and change nothing. When work is needed, put a \
+         request in your reply, a title and what it asks for, for the user to send. Then end the \
+         session.",
     ),
 ];
 
@@ -1114,6 +1122,7 @@ mod tests {
             SessionPurpose::Verify,
             SessionPurpose::Ceremony,
             SessionPurpose::Conversation,
+            SessionPurpose::Chat,
         ] {
             let entries = CLOSING_INSTRUCTIONS
                 .iter()

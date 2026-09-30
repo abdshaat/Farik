@@ -377,6 +377,7 @@ fn purpose_wire(purpose: SessionPurpose) -> CostRecordedBodyPurpose {
         SessionPurpose::Verify => CostRecordedBodyPurpose::Verify,
         SessionPurpose::Ceremony => CostRecordedBodyPurpose::Ceremony,
         SessionPurpose::Conversation => CostRecordedBodyPurpose::Conversation,
+        SessionPurpose::Chat => CostRecordedBodyPurpose::Chat,
     }
 }
 
@@ -563,6 +564,7 @@ mod tests {
             SessionPurpose::Verify,
             SessionPurpose::Ceremony,
             SessionPurpose::Conversation,
+            SessionPurpose::Chat,
         ] {
             assert_eq!(
                 serde_json::to_value(purpose_wire(purpose)).expect("serializes"),

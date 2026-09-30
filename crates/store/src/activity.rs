@@ -238,6 +238,8 @@ fn at_work(
                 .map(|thread| thread.to_string())
                 .unwrap_or_default()
         ),
+        // A chat's words are the user's and the agent's alone: the line names none of them.
+        "chat" => "Answering your chat".to_string(),
         _ => "Answering in the channel".to_string(),
     };
     Some((line, task, session, body.purpose))

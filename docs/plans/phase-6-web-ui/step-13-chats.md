@@ -14,6 +14,11 @@ As built (Task 2, 2026-09-30):
 - Refusals: an unknown agent is `NotFound`, a blank or too long text `Invalid`, a retired agent `Refused` (`agent_retired`). `chat::ProposedRequest` is its own type (Task 3's tool input), mapped to the generated one.
 - Envelope readers checked: `farik log` has no agent filter; activity, `pending_mentions` and `farik_post_message`'s allowance read by kind. The Team page's removal check counts any event naming the agent, so an agent the user chatted with is retired, not deleted, which keeps its chat under "Past teammates": kept.
 
+As built (Task 3, 2026-09-30):
+- The chat's history is the prompt's `From the human` section (`chat::chat_history`: the user's lines as "The user:", the agent's as "You:" inside `untrusted source="chat"`, a proposal's title and text with them), and its closing is `CLOSING_INSTRUCTIONS`' `Chat` entry. `farik_chat_reply` answers `{ seq, said: "Sent. Your turn is over." }`; a second reply is found by the session's own `chat_message.posted` after its `in_reply_to`.
+- `session.started`'s `chat` is `sessions.rs`' own, from the spec's purpose and agent; `team.activity`'s line is `farik-store`'s `activity.rs`, where every line is worded.
+- The daily budget and sleep are checked by the rule as the conversation's are; their tests are Task 4's `says_why_a_chat_waits`.
+
 Signatures, not bodies; test names and what each asserts, not test code; around 300 lines at most (ADR 0008).
 
 ## Goal
@@ -175,7 +180,7 @@ Consumes `post_chat`, `pending_chat` from Task 2. Tests:
 - `prompts_with_the_chat_alone` — the prompt holds this chat's last 16 KiB oldest first, the agent's lines inside `untrusted`, the closing instruction, and no line of another agent's chat; the same agent's `implement` prompt holds none of its chats.
 - `answers_through_the_recorded_transcript` — with `chat_answers_with_a_request`, a posted question ends in Mira's reply carrying the Apple Pay request, and no task, message or memory write.
 
-- [ ] `feat(runtime): answer a chat in a read-only session`
+- [x] `feat(runtime): answer a chat in a read-only session`
 
 ### Task 4: Answering while paused, and why not
 

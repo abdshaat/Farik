@@ -233,6 +233,13 @@ pub enum TickReport {
         /// What was done.
         what: String,
     },
+    /// An agent answered the user in its one-to-one chat.
+    Chat {
+        /// The agent.
+        agent_id: String,
+        /// What was done.
+        what: String,
+    },
 }
 
 /// How a wait for a sleeping agent ended.
@@ -476,7 +483,8 @@ impl Orchestrator {
                 TickReport::Idle { until: None, .. } => break,
                 TickReport::Acted { .. }
                 | TickReport::Sprint { .. }
-                | TickReport::Conversation { .. } => {}
+                | TickReport::Conversation { .. }
+                | TickReport::Chat { .. } => {}
             }
         }
         Ok(())

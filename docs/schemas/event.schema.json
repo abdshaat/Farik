@@ -285,7 +285,7 @@
       "additionalProperties": false,
       "required": ["purpose", "model_id", "usage", "cost_usd"],
       "properties": {
-        "purpose": { "type": "string", "enum": ["triage", "refine", "plan", "explore", "implement", "verify", "ceremony", "conversation"] },
+        "purpose": { "type": "string", "enum": ["triage", "refine", "plan", "explore", "implement", "verify", "ceremony", "conversation", "chat"] },
         "model_id": { "type": "string", "minLength": 1 },
         "usage": { "$ref": "#/$defs/tokenUsage" },
         "cost_usd": { "type": "number", "minimum": 0 },
@@ -919,16 +919,17 @@
     },
     "sessionStartedBody": {
       "title": "Session Started Body",
-      "description": "A Claude Code session started (docs/SPEC.md sections 8.2 and 8.5): why, on which model, and how hard it thinks. The envelope names the session, the agent, and the task when the session has one; the exact system prompt it was given is kept in .farik/local/sessions/<session_id>/system-prompt.md. A conversation's in_reply_to is the seq of the latest message it was shown: the mentions up to it are answered, and one posted after it is still pending, even one posted before this event. A ceremony's thread says which ceremony it was.",
+      "description": "A Claude Code session started (docs/SPEC.md sections 8.2 and 8.5): why, on which model, and how hard it thinks. The envelope names the session, the agent, and the task when the session has one; the exact system prompt it was given is kept in .farik/local/sessions/<session_id>/system-prompt.md. A conversation's in_reply_to is the seq of the latest message it was shown: the mentions up to it are answered, and one posted after it is still pending, even one posted before this event. A ceremony's thread says which ceremony it was. A chat session's in_reply_to is the user's message it answers, and its chat is the chat's agent (ADR 0026).",
       "type": "object",
       "additionalProperties": false,
       "required": ["purpose", "model", "effort"],
       "properties": {
-        "purpose": { "type": "string", "enum": ["triage", "refine", "plan", "explore", "implement", "verify", "ceremony", "conversation"] },
+        "purpose": { "type": "string", "enum": ["triage", "refine", "plan", "explore", "implement", "verify", "ceremony", "conversation", "chat"] },
         "model": { "type": "string", "minLength": 1 },
         "effort": { "type": "string", "enum": ["low", "medium", "high"] },
         "in_reply_to": { "type": "integer", "minimum": 1, "maximum": 18446744073709551615 },
-        "thread": { "$ref": "#/$defs/thread" }
+        "thread": { "$ref": "#/$defs/thread" },
+        "chat": { "type": "string", "minLength": 1, "description": "The agent whose one-to-one chat a chat session answers, which the envelope also names; only on purpose chat." }
       }
     },
     "sessionEndedBody": {

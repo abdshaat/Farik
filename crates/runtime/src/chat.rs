@@ -5,7 +5,8 @@ use std::num::NonZeroU64;
 
 use farik_protocol::clock::Clock;
 use farik_protocol::event::{
-    ChatMessagePostedBody, EventBody, EventIds, EventKind, FarikEvent, new_event,
+    ChatMessagePostedBody, EventBody, EventIds, EventKind, FarikEvent, SessionStartedBodyPurpose,
+    new_event,
 };
 use farik_store::{EventLog, EventQuery, StoreError};
 use schemars::JsonSchema;
@@ -161,6 +162,103 @@ pub fn chat_page(
     })?;
     page.reverse();
     Ok(page)
+}
+
+/// The seq of the user's message `agent_id`'s chat waits to have answered: the user's newest,
+/// when it is past the `in_reply_to` of every chat session of that agent, whoever wrote last. A
+/// message sent while a session ran is past that session's, so it is answered next; a failed
+/// session is not retried, since its `in_reply_to` answers the message it was started for.
+///
+/// # Errors
+///
+/// `StoreError` when the log cannot be read.
+pub fn pending_chat(log: &EventLog, agent_id: &str) -> Result<Option<u64>, StoreError> {
+    // ponytail: reads the agent's chat and its sessions' starts whole; a projection of each
+    // chat's newest user message and answered seq when chats grow long.
+    let newest = log
+        .read(&EventQuery {
+            agent_id: Some(agent_id.to_string()),
+            kinds: vec![EventKind::ChatMessagePosted],
+            newest_first: true,
+            ..EventQuery::default()
+        })?
+        .into_iter()
+        .find(|event| {
+            matches!(&event.body, EventBody::ChatMessagePosted(body) if body.author == HUMAN)
+        })
+        .map(|event| event.envelope.seq);
+    let Some(newest) = newest else {
+        return Ok(None);
+    };
+    let answered = log
+        .read(&EventQuery {
+            agent_id: Some(agent_id.to_string()),
+            kinds: vec![EventKind::SessionStarted],
+            ..EventQuery::default()
+        })?
+        .iter()
+        .filter_map(|event| match &event.body {
+            EventBody::SessionStarted(body) if body.purpose == SessionStartedBodyPurpose::Chat => {
+                body.in_reply_to.map(NonZeroU64::get)
+            }
+            _ => None,
+        })
+        .max();
+    Ok(answered
+        .is_none_or(|answered| newest > answered)
+        .then_some(newest))
+}
+
+/// Who the user is in a chat.
+const HUMAN: &str = "human";
+
+/// The most of a chat a chat session's prompt is shown, in bytes.
+const HISTORY_BYTES: usize = 16 * 1024;
+
+/// `agent_id`'s chat as its chat session is shown it (ADR 0026): the newest messages that fit in
+/// 16 KiB, oldest first, the newest always. The user's lines are the user's own; the agent's are
+/// wrapped `untrusted`, as agent-written text is (ADR 0011). `None` for a chat with nothing in it.
+///
+/// # Errors
+///
+/// `StoreError` when the log cannot be read.
+pub fn chat_history(log: &EventLog, agent_id: &str) -> Result<Option<String>, StoreError> {
+    let mut lines = Vec::new();
+    let mut used = 0;
+    // ponytail: reads the whole chat newest first to keep its last 16 KiB; page with
+    // `before_seq` when chats grow long.
+    for event in log.read(&EventQuery {
+        agent_id: Some(agent_id.to_string()),
+        kinds: vec![EventKind::ChatMessagePosted],
+        newest_first: true,
+        ..EventQuery::default()
+    })? {
+        let EventBody::ChatMessagePosted(body) = event.body else {
+            continue;
+        };
+        let line = if body.author == HUMAN {
+            format!("The user:\n{}", body.text)
+        } else {
+            let said = match &body.request {
+                Some(request) => format!(
+                    "{}\n\nProposed request: {}\n{}",
+                    body.text, request.title, request.text
+                ),
+                None => body.text,
+            };
+            format!(
+                "You:\n{}",
+                crate::prompt::untrusted_block("chat", &said, HISTORY_BYTES)
+            )
+        };
+        used += line.len() + 2;
+        if used > HISTORY_BYTES && !lines.is_empty() {
+            break;
+        }
+        lines.push(line);
+    }
+    lines.reverse();
+    Ok((!lines.is_empty()).then(|| lines.join("\n\n")))
 }
 
 #[cfg(test)]

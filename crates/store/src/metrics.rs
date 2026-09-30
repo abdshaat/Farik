@@ -90,8 +90,8 @@ impl From<rusqlite::Error> for MetricsError {
 }
 
 /// Every session purpose the wire names, in the schema's order, so that a split always has all
-/// eight and they add up to its total.
-const PURPOSES: [CostRecordedBodyPurpose; 8] = [
+/// nine and they add up to its total.
+const PURPOSES: [CostRecordedBodyPurpose; 9] = [
     CostRecordedBodyPurpose::Triage,
     CostRecordedBodyPurpose::Refine,
     CostRecordedBodyPurpose::Plan,
@@ -100,6 +100,7 @@ const PURPOSES: [CostRecordedBodyPurpose; 8] = [
     CostRecordedBodyPurpose::Verify,
     CostRecordedBodyPurpose::Ceremony,
     CostRecordedBodyPurpose::Conversation,
+    CostRecordedBodyPurpose::Chat,
 ];
 
 /// What the board says, counted in one query.

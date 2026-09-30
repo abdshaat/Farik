@@ -36,6 +36,8 @@ pub enum SessionPurpose {
     Ceremony,
     /// Talking with the human.
     Conversation,
+    /// Answering the user in the agent's one-to-one chat, on the read tier alone (ADR 0026).
+    Chat,
 }
 
 /// How a session reaches an MCP server.

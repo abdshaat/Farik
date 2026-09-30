@@ -359,6 +359,7 @@ fn measures_cost_per_accepted_task_by_purpose() {
             (CostRecordedBodyPurpose::Verify, 0.25),
             (CostRecordedBodyPurpose::Ceremony, 0.0),
             (CostRecordedBodyPurpose::Conversation, 0.0625),
+            (CostRecordedBodyPurpose::Chat, 0.0),
         ]
     );
 }

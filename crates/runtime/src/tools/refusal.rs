@@ -108,6 +108,8 @@ pub(crate) enum Refusal {
     DesignReviewRefused { detail: String },
     /// A design review recorded before the session checked a page at each width in each theme.
     DesignReviewIncomplete { missing: String },
+    /// A chat reply outside a chat session, a second one, or one out of its limits (ADR 0026).
+    ChatReplyRefused { detail: String },
     /// A commit named a directory, which git would stage whole, files the path checks never saw
     /// among it.
     PathIsADirectory { path: String },
@@ -207,6 +209,7 @@ impl Refusal {
             Self::DesignPlanRefused { detail } => ("design_plan_refused", detail.clone()),
             Self::CheckPageRefused { detail } => ("check_page_refused", detail.clone()),
             Self::DesignReviewRefused { detail } => ("design_review_refused", detail.clone()),
+            Self::ChatReplyRefused { detail } => ("chat_reply_refused", detail.clone()),
             Self::DesignReviewIncomplete { missing } => (
                 "design_review_incomplete",
                 format!("check each page at both widths in both themes first; missing: {missing}"),

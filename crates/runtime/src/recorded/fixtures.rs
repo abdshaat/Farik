@@ -156,6 +156,16 @@ pub fn reply_to_a_mention() -> Transcript {
     Transcript::from_jsonl(include_str!("transcripts/reply_to_a_mention.jsonl"))
 }
 
+/// Mira's chat session answering "Could customers also pay with Apple Pay?": a
+/// `farik_read_board`, then one `farik_chat_reply` proposing the request "Let customers pay with
+/// Apple Pay", and a successful end. Hand-written.
+#[must_use]
+pub fn chat_answers_with_a_request() -> Transcript {
+    Transcript::from_jsonl(include_str!(
+        "transcripts/chat_answers_with_a_request.jsonl"
+    ))
+}
+
 /// `dev-b`'s verify session of FRK-1: a review note, and nothing else. Hand-written.
 #[must_use]
 pub fn review_writes_note() -> Transcript {

@@ -1636,4 +1636,101 @@ pub(super) mod tests {
         assert!(offered("integration").is_empty());
         assert!(offered("risk_gate").is_empty());
     }
+
+    #[tokio::test(flavor = "multi_thread")]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn records_a_chat_cost_as_chat() {
+        use farik_core::budget::SessionLedger;
+        use farik_core::contract::Role;
+        use farik_protocol::event::{CostRecordedBodyPurpose, EventBody};
+
+        let harness = Harness::new("gates-chat-cost", |_| {});
+        let deps = &harness.project.deps;
+        crate::chat::post_chat(
+            &deps.log,
+            deps.clock.as_ref(),
+            &deps.ids,
+            crate::chat::NewChatMessage {
+                chat: "pm".to_string(),
+                author: "human".to_string(),
+                text: "Could customers also pay with Apple Pay?".to_string(),
+                in_reply_to: None,
+                request: None,
+                session_id: None,
+            },
+        )
+        .expect("recorded");
+        let adapter = harness.recorded(vec![
+            crate::recorded::fixtures::chat_answers_with_a_request(),
+        ]);
+        harness
+            .orchestrator(adapter)
+            .tick()
+            .await
+            .expect("the chat runs");
+
+        let costs: Vec<_> = harness
+            .events(&[EventKind::CostRecorded])
+            .into_iter()
+            .filter_map(|event| match event.body {
+                EventBody::CostRecorded(body) => Some((event.envelope.ids.task_id, body)),
+                _ => None,
+            })
+            .collect();
+        assert!(!costs.is_empty(), "the chat's usage is costed");
+        for (task, body) in &costs {
+            assert_eq!(body.purpose, CostRecordedBodyPurpose::Chat, "{body:?}");
+            assert_eq!(*task, None);
+        }
+        let spent: f64 = costs.iter().map(|(_, body)| body.cost_usd).sum();
+        assert!(spent > 0.0, "{costs:?}");
+        // It counts toward the day that `check_budgets` reads.
+        let team = deps.files.read_team().expect("the team");
+        let day = crate::cost::budget_state(
+            &deps.projections,
+            &team,
+            Role::SoftwareDeveloper,
+            None,
+            &SessionLedger::default(),
+            at(),
+        )
+        .expect("the budgets read")
+        .day_spent_usd;
+        assert!((day - spent).abs() < 1e-9, "{day} against {spent}");
+
+        // While a chat runs, the agent is answering it, and no chat text is shown.
+        let running = farik_protocol::event::event_from_value(&json!({
+            "seq": 1,
+            "recorded_at": at().to_rfc3339(),
+            "team_id": "farik",
+            "project_id": "farik",
+            "agent_id": "dev-a",
+            "session_id": "chat-session",
+            "kind": "session.started",
+            "body": { "purpose": "chat", "model": "claude-opus-5", "effort": "low", "in_reply_to": 1, "chat": "dev-a" },
+        }))
+        .expect("the fixture is schema-valid");
+        deps.log
+            .append(&farik_protocol::event::NewEvent {
+                recorded_at: running.envelope.recorded_at,
+                ids: running.envelope.ids,
+                body: running.body,
+            })
+            .expect("appends");
+        let activity = tokio::task::spawn_blocking({
+            let daemon = Arc::clone(&harness.daemon);
+            move || query(&daemon, "team.activity", &json!({}), "teamActivityResult")
+        })
+        .await
+        .expect("the query runs");
+        let dev_a = activity["activity"]
+            .as_array()
+            .expect("activity")
+            .iter()
+            .find(|one| one["agent_id"] == "dev-a")
+            .expect("dev-a")
+            .clone();
+        assert_eq!(dev_a["line"], "Answering your chat", "{dev_a}");
+        assert_eq!(dev_a["purpose"], "chat", "{dev_a}");
+    }
 }
