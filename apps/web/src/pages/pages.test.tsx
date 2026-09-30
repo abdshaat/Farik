@@ -4,6 +4,7 @@ import {
 	cleanup,
 	fireEvent,
 	screen,
+	waitFor,
 	within,
 } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -108,6 +109,31 @@ describe("pages", () => {
 		expect(screen.getByRole("heading", { name: en.noPage })).toBeTruthy();
 		expect(
 			screen.getByRole("link", { name: en.noPageHome }).getAttribute("href"),
+		).toBe("/");
+		await expectNoAxeViolations(container);
+	});
+
+	it.each([
+		"/requests/FRK-99",
+		"/tasks/FRK-99/questions",
+		"/tasks/FRK-99/plan",
+		"/tasks/FRK-99/plan/edit",
+		"/tasks/FRK-99/accept",
+		"/tasks/FRK-99/help",
+	])("says_a_task_it_cannot_read_at_%s", async (path) => {
+		const { container, socket } = await renderApp(path);
+		if (!socket) throw new Error("no socket");
+		await answerStatus(socket, false);
+		const asked = () =>
+			socket.calls("query").filter((q) => q.params.name !== "serve.status");
+		await waitFor(() => expect(asked().length).toBeGreaterThan(0));
+		for (const q of asked())
+			act(() => socket.fail(q, -32002, "there is no task FRK-99"));
+		expect((await screen.findByRole("alert")).textContent).toBe(
+			"There is no task FRK-99",
+		);
+		expect(
+			screen.getByRole("link", { name: en.backToToday }).getAttribute("href"),
 		).toBe("/");
 		await expectNoAxeViolations(container);
 	});

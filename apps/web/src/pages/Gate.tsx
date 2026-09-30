@@ -5,6 +5,7 @@ import { useConnection } from "../app/connection.tsx";
 import { useQuery } from "../app/store.ts";
 import { sentence, statusWord } from "../app/words.ts";
 import { t } from "../strings/t.ts";
+import { Failed } from "./Failed.tsx";
 import gate from "./Gate.module.css";
 import own from "./PlanPage.module.css";
 import { type Contract, day } from "./PlanPage.tsx";
@@ -57,16 +58,22 @@ export function Gate() {
 	const { client } = useConnection();
 	const navigate = useNavigate();
 	const task = { task_id: id };
-	const { data: team } = useQuery<{ team: Team }>("team.get", {});
-	const { data: plan } = useQuery<{ contract: Contract }>("contract.get", task);
-	const { data: history } = useQuery<{ events: HistoryEvent[] }>(
+	const { data: team, error: e1 } = useQuery<{ team: Team }>("team.get", {});
+	const { data: plan, error: e2 } = useQuery<{ contract: Contract }>(
+		"contract.get",
+		task,
+	);
+	const { data: history, error: e3 } = useQuery<{ events: HistoryEvent[] }>(
 		"task.history",
 		task,
 	);
-	const { data: checked } = useQuery<{ checks: Check[] }>("task.checks", task);
-	const { data: diff } = useQuery<Diff>("task.diff", task);
-	const { data: tries } = useQuery<Tries>("task.tries", task);
-	const { data: waiting } = useQuery<{ waiting: Waiting[] }>(
+	const { data: checked, error: e4 } = useQuery<{ checks: Check[] }>(
+		"task.checks",
+		task,
+	);
+	const { data: diff, error: e5 } = useQuery<Diff>("task.diff", task);
+	const { data: tries, error: e6 } = useQuery<Tries>("task.tries", task);
+	const { data: waiting, error: e7 } = useQuery<{ waiting: Waiting[] }>(
 		"waiting.list",
 		{},
 	);
@@ -75,8 +82,10 @@ export function Gate() {
 	const [showDiff, setShowDiff] = useState(false);
 	const [sending, setSending] = useState(false);
 	const [what, setWhat] = useState("");
+	const failed = e1 ?? e2 ?? e3 ?? e4 ?? e5 ?? e6 ?? e7;
+	// A read refused before the page has what it needs: say why (a task that is not there).
 	if (!team || !plan || !history || !checked || !diff || !tries || !waiting)
-		return null;
+		return failed ? <Failed error={failed} /> : null;
 
 	const contract = plan.contract;
 	const events = history.events;

@@ -5,6 +5,7 @@ import { useConnection } from "../app/connection.tsx";
 import { useQuery } from "../app/store.ts";
 import { active, sentence } from "../app/words.ts";
 import { t } from "../strings/t.ts";
+import { Failed } from "./Failed.tsx";
 import {
 	dollars,
 	type HistoryEvent,
@@ -32,22 +33,27 @@ export function HelpNeeded() {
 	const { client } = useConnection();
 	const navigate = useNavigate();
 	const task = { task_id: id };
-	const { data: team } = useQuery<{ team: Team }>("team.get", {});
-	const { data: plan } = useQuery<{ contract: Contract }>("contract.get", task);
-	const { data: history } = useQuery<{ events: HistoryEvent[] }>(
+	const { data: team, error: e1 } = useQuery<{ team: Team }>("team.get", {});
+	const { data: plan, error: e2 } = useQuery<{ contract: Contract }>(
+		"contract.get",
+		task,
+	);
+	const { data: history, error: e3 } = useQuery<{ events: HistoryEvent[] }>(
 		"task.history",
 		task,
 	);
-	const { data: tries } = useQuery<Tries>("task.tries", task);
-	const { data: offered } = useQuery<{ choices: EscalationChoice[] }>(
-		"escalation.choices",
-		task,
-	);
+	const { data: tries, error: e4 } = useQuery<Tries>("task.tries", task);
+	const { data: offered, error: e5 } = useQuery<{
+		choices: EscalationChoice[];
+	}>("escalation.choices", task);
 	const [picked, setPicked] = useState("0");
 	const [note, setNote] = useState("");
 	const [busy, setBusy] = useState(false);
 	const [refusal, setRefusal] = useState<string>();
-	if (!team || !plan || !history || !tries || !offered) return null;
+	const failed = e1 ?? e2 ?? e3 ?? e4 ?? e5;
+	// A read refused before the page has what it needs: say why (a task that is not there).
+	if (!team || !plan || !history || !tries || !offered)
+		return failed ? <Failed error={failed} /> : null;
 
 	const contract = plan.contract;
 	const events = history.events;

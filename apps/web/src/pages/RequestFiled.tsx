@@ -5,6 +5,7 @@ import { useConnection } from "../app/connection.tsx";
 import { useQuery } from "../app/store.ts";
 import { active, sentence, statusWord, type TaskStatus } from "../app/words.ts";
 import { t } from "../strings/t.ts";
+import { Failed } from "./Failed.tsx";
 import styles from "./pages.module.css";
 import own from "./RequestFiled.module.css";
 import type { Agent, Team } from "./setup/TeamSetup.tsx";
@@ -20,17 +21,20 @@ type HistoryEvent = {
 export function RequestFiled() {
 	const { id = "" } = useParams();
 	const { client } = useConnection();
-	const { data: team } = useQuery<{ team: Team }>("team.get", {});
-	const { data: contract } = useQuery<{
+	const { data: team, error: e1 } = useQuery<{ team: Team }>("team.get", {});
+	const { data: contract, error: e2 } = useQuery<{
 		contract: { intent: string; status: TaskStatus };
 	}>("contract.get", { task_id: id });
-	const { data: history } = useQuery<{ events: HistoryEvent[] }>(
+	const { data: history, error: e3 } = useQuery<{ events: HistoryEvent[] }>(
 		"task.history",
 		{ task_id: id },
 	);
 	const [busy, setBusy] = useState(false);
 	const [refusal, setRefusal] = useState<string>();
-	if (!team || !contract || !history) return null;
+	const failed = e1 ?? e2 ?? e3;
+	// A read refused before the page has what it needs: say why (a task that is not there).
+	if (!team || !contract || !history)
+		return failed ? <Failed error={failed} /> : null;
 
 	const agents = team.team.agents;
 	const pm = active(agents, "product_manager");

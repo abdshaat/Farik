@@ -6,6 +6,7 @@ import { useConnection } from "../app/connection.tsx";
 import { useQuery } from "../app/store.ts";
 import { active, sentence, statusWord, type TaskStatus } from "../app/words.ts";
 import { t } from "../strings/t.ts";
+import { Failed } from "./Failed.tsx";
 import own from "./PlanPage.module.css";
 import styles from "./pages.module.css";
 import type { Agent, Team } from "./setup/TeamSetup.tsx";
@@ -91,25 +92,33 @@ export function PlanPage() {
 	const { id = "" } = useParams();
 	const { client } = useConnection();
 	const navigate = useNavigate();
-	const { data: team } = useQuery<{ team: Team }>("team.get", {});
-	const { data: plan } = useQuery<{ contract: Contract }>("contract.get", {
-		task_id: id,
-	});
-	const { data: checked } = useQuery<{ checks: Check[] }>("task.checks", {
-		task_id: id,
-	});
-	const { data: waiting } = useQuery<{
+	const { data: team, error: e1 } = useQuery<{ team: Team }>("team.get", {});
+	const { data: plan, error: e2 } = useQuery<{ contract: Contract }>(
+		"contract.get",
+		{
+			task_id: id,
+		},
+	);
+	const { data: checked, error: e3 } = useQuery<{ checks: Check[] }>(
+		"task.checks",
+		{
+			task_id: id,
+		},
+	);
+	const { data: waiting, error: e4 } = useQuery<{
 		waiting: { taskId: string; kind: string }[];
 	}>("waiting.list", {});
-	const { data: asked } = useQuery<{ questions: { answer: string | null }[] }>(
-		"questions.list",
-		{ task_id: id },
-	);
+	const { data: asked, error: e5 } = useQuery<{
+		questions: { answer: string | null }[];
+	}>("questions.list", { task_id: id });
 	const [busy, setBusy] = useState(false);
 	const [refusal, setRefusal] = useState<string>();
 	const [asking, setAsking] = useState(false);
 	const [note, setNote] = useState("");
-	if (!team || !plan || !checked || !waiting || !asked) return null;
+	const failed = e1 ?? e2 ?? e3 ?? e4 ?? e5;
+	// A read refused before the page has what it needs: say why (a task that is not there).
+	if (!team || !plan || !checked || !waiting || !asked)
+		return failed ? <Failed error={failed} /> : null;
 
 	const contract = plan.contract;
 	const agents = team.team.agents;

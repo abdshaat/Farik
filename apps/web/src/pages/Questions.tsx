@@ -5,6 +5,7 @@ import { useConnection } from "../app/connection.tsx";
 import { useQuery } from "../app/store.ts";
 import { sentence } from "../app/words.ts";
 import { t } from "../strings/t.ts";
+import { Failed } from "./Failed.tsx";
 import styles from "./pages.module.css";
 import own from "./Questions.module.css";
 import type { Agent, Team } from "./setup/TeamSetup.tsx";
@@ -20,11 +21,16 @@ type Question = {
 /** A task's questions: the answered ones, the one to answer now, and the rest hidden until then. */
 export function Questions() {
 	const { id = "" } = useParams();
-	const { data: team } = useQuery<{ team: Team }>("team.get", {});
-	const { data } = useQuery<{ questions: Question[] }>("questions.list", {
-		task_id: id,
-	});
-	if (!team || !data) return null;
+	const { data: team, error: e1 } = useQuery<{ team: Team }>("team.get", {});
+	const { data, error: e2 } = useQuery<{ questions: Question[] }>(
+		"questions.list",
+		{
+			task_id: id,
+		},
+	);
+	const failed = e1 ?? e2;
+	// A read refused before the page has what it needs: say why (a task that is not there).
+	if (!team || !data) return failed ? <Failed error={failed} /> : null;
 	const questions = data.questions;
 	const current = questions.findIndex((q) => q.answer === null);
 	const lead = questions[current] ?? questions[0];

@@ -12,6 +12,7 @@ import { useConnection } from "../app/connection.tsx";
 import { useQuery } from "../app/store.ts";
 import { active, sentence } from "../app/words.ts";
 import { t } from "../strings/t.ts";
+import { Failed } from "./Failed.tsx";
 import own from "./PlanEditor.module.css";
 import type { Contract, Criterion } from "./PlanPage.tsx";
 import { riskWord } from "./PlanPage.tsx";
@@ -67,13 +68,16 @@ function Keyed({ name, children }: { name: string; children: ReactNode }) {
 /** The plan editor: plain fields, Farik's check as you type, the lock, and Save. */
 export function PlanEditor() {
 	const { id = "" } = useParams();
-	const { data: team } = useQuery<{ team: Team }>("team.get", {});
-	const { data: plan, again } = useQuery<{ contract: Contract }>(
-		"contract.get",
-		{ task_id: id },
-	);
+	const { data: team, error: e1 } = useQuery<{ team: Team }>("team.get", {});
+	const {
+		data: plan,
+		again,
+		error: e2,
+	} = useQuery<{ contract: Contract }>("contract.get", { task_id: id });
 	const [said, setSaid] = useState<string>();
-	if (!team || !plan) return null;
+	const failed = e1 ?? e2;
+	// A read refused before the page has what it needs: say why (a task that is not there).
+	if (!team || !plan) return failed ? <Failed error={failed} /> : null;
 	const pm = active(team.team.agents, "product_manager");
 	const pmName = pm?.displayName ?? uiStrings.roleName.product_manager;
 	// One draft per plan: a fresh read updates what the person has not changed (I3).
