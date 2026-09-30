@@ -6,15 +6,21 @@ export function Choice<V extends string>({
 	options,
 	value,
 	onChange,
+	error,
 }: {
 	name: string;
 	legend: string;
 	options: { value: V; label: string; description?: string }[];
 	value: V;
 	onChange: (value: V) => void;
+	/** Why the choice is refused, said under it and tied to the group. */
+	error?: string;
 }) {
 	return (
-		<fieldset className={styles.group}>
+		<fieldset
+			className={styles.group}
+			aria-describedby={error ? `${name}-error` : undefined}
+		>
 			<legend className={styles.legend}>{legend}</legend>
 			{options.map((o) => (
 				<label key={o.value} className={styles.card}>
@@ -34,6 +40,11 @@ export function Choice<V extends string>({
 					</span>
 				</label>
 			))}
+			{error ? (
+				<p id={`${name}-error`} className={styles.error}>
+					{error}
+				</p>
+			) : null}
 		</fieldset>
 	);
 }

@@ -46,4 +46,22 @@ describe("Choice", () => {
 		expect(screen.getByRole("group", { name: "Pick one" })).toBeTruthy();
 		await expectNoAxeViolations(container);
 	});
+	it("says why a choice is refused, tied to the group", async () => {
+		const { container } = render(
+			<Choice
+				name="pick"
+				legend="Pick one"
+				options={options}
+				value="one"
+				onChange={() => {}}
+				error="Nobody holds that one."
+			/>,
+		);
+		const group = screen.getByRole("group", { name: "Pick one" });
+		expect(group.getAttribute("aria-describedby")).toBe("pick-error");
+		expect(document.getElementById("pick-error")?.textContent).toBe(
+			"Nobody holds that one.",
+		);
+		await expectNoAxeViolations(container);
+	});
 });

@@ -62,3 +62,11 @@
 .radio {
 	accent-color: var(--farik-color-ink);
 }
+
+.error {
+	margin: 0;
+	font:
+		600 var(--farik-type-small-size) / var(--farik-type-small-line-height)
+		var(--farik-type-small-family);
+	color: var(--farik-color-ink);
+}
