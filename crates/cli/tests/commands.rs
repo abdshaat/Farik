@@ -280,10 +280,23 @@ fn a_second_init_rescans_and_keeps_the_team() {
     files_of(&repository)
         .write_team(&team)
         .expect("the team is written");
+    files_of(&repository)
+        .append_project_note(
+            "It is a shop, not a game.",
+            chrono::NaiveDate::from_ymd_opt(2026, 9, 22).expect("a date"),
+        )
+        .expect("the note is kept");
 
     let ran = run_in(&repository.path, &["init"]);
 
     assert_eq!(ran.code, 0, "{}", ran.err);
+    assert!(
+        files_of(&repository)
+            .read_project_scan()
+            .expect("project.md")
+            .contains("2026-09-22: It is a shop, not a game."),
+        "the user's words outlive the rescan"
+    );
     assert!(
         ran.out
             .contains("kept the team already in .farik/team.yaml"),
