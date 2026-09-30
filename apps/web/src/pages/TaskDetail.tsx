@@ -122,6 +122,9 @@ export function TaskDetail() {
 	const agents = team.team.agents;
 	const agentOf = (who?: string) =>
 		agents.find((a) => a.id === who || a.displayName === who);
+	// Agents write notes as log events; the contract's own notes are hand-written ones.
+	const noteOf = (kind: (typeof NOTES)[number][0]) =>
+		latestNote(events, kind)?.body.text ?? contract.notes?.[kind];
 	const nameOf = (who?: string) =>
 		who === "human"
 			? t("you")
@@ -312,15 +315,17 @@ export function TaskDetail() {
 		notes: (
 			<>
 				<h2>{t("tabNotes")}</h2>
-				{NOTES.some(([kind]) => contract.notes?.[kind]) ? (
+				{NOTES.some(([kind]) => noteOf(kind)) ? (
 					NOTES.map(([kind, key]) => {
-						const text = contract.notes?.[kind];
+						const text = noteOf(kind);
 						const by = agentOf(latestNote(events, kind)?.body.writtenBy);
 						if (!text) return null;
 						return (
 							<div key={kind} className={own.letter}>
 								{by && <p className={styles.muted}>{signed(key, by)}</p>}
-								<p>{text}</p>
+								{text.split(/\n\s*\n/).map((part) => (
+									<p key={part}>{part}</p>
+								))}
 							</div>
 						);
 					})

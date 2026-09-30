@@ -7,7 +7,14 @@ import {
 	within,
 } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { HISTORY, openedGate, sentCommand, TASK } from "../test/gate.ts";
+import {
+	COMPLETION,
+	HISTORY,
+	openedGate,
+	REVIEW,
+	sentCommand,
+	TASK,
+} from "../test/gate.ts";
 
 const PAGE = [
 	"team.get",
@@ -157,15 +164,18 @@ describe("task detail", () => {
 			within(panel()).getAllByText(/src\/gift\.ts/).length,
 		).toBeGreaterThan(0);
 
-		// Notes: each of the contract's notes, signed by who wrote it.
+		// Notes: the latest note of each kind the team wrote in the log, signed by who wrote it,
+		// over the contract's own (the agents' notes are events; the contract's are hand-written).
 		fireEvent.click(screen.getByRole("tab", { name: "Notes" }));
 		expect(
 			within(panel()).getByText("Theo, your Developer, wrote this for you"),
 		).toBeTruthy();
+		expect(within(panel()).getByText(COMPLETION)).toBeTruthy();
 		expect(
-			within(panel()).getByText("Made the cards and the receipt."),
+			within(panel()).getByText("I did not change how prices are worked out."),
 		).toBeTruthy();
-		expect(within(panel()).getByText("Checked each amount.")).toBeTruthy();
+		expect(within(panel()).getByText(REVIEW)).toBeTruthy();
+		expect(within(panel()).queryByText("Checked each amount.")).toBeNull();
 		await expectNoAxeViolations(container);
 	});
 
