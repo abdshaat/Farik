@@ -21,6 +21,7 @@ import { SetupScan } from "../pages/setup/SetupScan.tsx";
 import { SetupSpending } from "../pages/setup/SetupSpending.tsx";
 import { SetupTeam } from "../pages/setup/SetupTeam.tsx";
 import { TeamSetup } from "../pages/setup/TeamSetup.tsx";
+import { TaskDetail } from "../pages/TaskDetail.tsx";
 import { Team } from "../pages/Team.tsx";
 import { Today } from "../pages/Today.tsx";
 import { Shell } from "../shell/Shell.tsx";
@@ -58,6 +59,7 @@ export function App() {
 				<Route path="/board" element={<Board />} />
 				<Route path="/events" element={<Events />} />
 				<Route path="/requests/:id" element={<RequestFiled />} />
+				<Route path="/tasks/:id" element={<TaskDetail />} />
 				<Route path="/tasks/:id/questions" element={<Questions />} />
 				<Route path="/tasks/:id/plan" element={<PlanPage />} />
 				<Route path="/tasks/:id/plan/edit" element={<PlanEditor />} />

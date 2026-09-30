@@ -153,7 +153,7 @@ RPC queries: `task.costs`, `sprints.list`, `sprint.get`, `costs.summary`, `metri
 - `shows_cost_by_purpose`: the words and the limit.
 - `offers_add_stop_and_cancel_when_they_apply`: each button appears only in its state, and sends its command; cancel requires a reason; an `escalated` task cancels through `escalation_resolve`.
 
-- [ ] `feat(web): add the task page`
+- [x] `feat(web): add the task page`
 
 ### Task 4: Sprints and costs
 
