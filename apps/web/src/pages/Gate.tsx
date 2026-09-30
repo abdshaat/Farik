@@ -47,10 +47,7 @@ export const latestNote = (events: HistoryEvent[], kind: string) =>
 export const signed = (
 	key: "gateWrote" | "gateReviewed" | "helpExplains",
 	agent: Agent,
-) =>
-	t(key)
-		.replace("{name}", agent.displayName)
-		.replace("{role}", uiStrings.roleName[agent.role]);
+) => t(key, { name: agent.displayName, role: uiStrings.roleName[agent.role] });
 
 /** The acceptance gate: the two summaries, Farik's checks, and the code one click away. */
 export function Gate() {
@@ -120,7 +117,7 @@ export function Gate() {
 			<Link to="/">{t("backToToday")}</Link>
 			<div className={styles.section}>
 				<h1 className={styles.title}>
-					{t("gateTitle").replace("{title}", contract.title)}
+					{t("gateTitle", { title: contract.title })}
 				</h1>
 				<p className={styles.muted}>{id}</p>
 			</div>
@@ -162,12 +159,7 @@ export function Gate() {
 					aria-expanded={showDiff}
 					onClick={() => setShowDiff((open) => !open)}
 				>
-					{`${t(showDiff ? "gateHideChanges" : "gateSeeChanges")} · ${t(
-						diff.files.length === 1 ? "gateSizeOne" : "gateSize",
-					)
-						.replace("{n}", String(diff.files.length))
-						.replace("{added}", String(diff.added))
-						.replace("{removed}", String(diff.removed))}`}
+					{`${t(showDiff ? "gateHideChanges" : "gateSeeChanges")} · ${t(diff.files.length === 1 ? "gateSizeOne" : "gateSize", { n: String(diff.files.length), added: String(diff.added), removed: String(diff.removed) })}`}
 				</button>
 				{showDiff && <DiffView diff={diff.diff} label={t("gateChanges")} />}
 			</div>
@@ -180,9 +172,7 @@ export function Gate() {
 					<dd>{day(approved?.recordedAt)}</dd>
 					<dt>{t("gateTries")}</dt>
 					<dd>
-						{t("triesOf")
-							.replace("{try}", String(tries.try))
-							.replace("{of}", String(tries.of))}
+						{t("triesOf", { try: String(tries.try), of: String(tries.of) })}
 					</dd>
 					<dt>{t("gateCost")}</dt>
 					<dd>{dollars(spent(events))}</dd>
@@ -218,7 +208,7 @@ export function Gate() {
 				</div>
 			) : !waits("acceptance") ? (
 				<p className={styles.muted}>
-					{t("notWaiting").replace("{status}", statusWord(contract.status))}
+					{t("notWaiting", { status: statusWord(contract.status) })}
 				</p>
 			) : (
 				<>

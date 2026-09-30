@@ -33,9 +33,7 @@ export function SendBackDialog({
 	return (
 		<Dialog
 			open={open}
-			title={t("sendBackTitle")
-				.replace("{title}", title)
-				.replace("{name}", builder)}
+			title={t("sendBackTitle", { title, name: builder })}
 			onClose={onClose}
 			actions={
 				<>
@@ -52,7 +50,7 @@ export function SendBackDialog({
 							)
 						}
 					>
-						{t("sendBackSend").replace("{name}", builder)}
+						{t("sendBackSend", { name: builder })}
 					</Button>
 				</>
 			}
@@ -76,15 +74,13 @@ export function SendBackDialog({
 			</fieldset>
 			<TextArea
 				id="send-back-note"
-				label={t("sendBackNote").replace("{name}", builder)}
+				label={t("sendBackNote", { name: builder })}
 				value={note}
 				onChange={setNote}
 				required
 			/>
 			<p className={styles.muted}>
-				{t("sendBackTry")
-					.replace("{try}", String(tries.try))
-					.replace("{of}", String(tries.of))}
+				{t("sendBackTry", { try: String(tries.try), of: String(tries.of) })}
 			</p>
 		</Dialog>
 	);

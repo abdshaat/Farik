@@ -46,15 +46,12 @@ export function RequestFiled() {
 	const byName = byHuman ? t("you") : (by?.displayName ?? sizerName);
 	const nameRole = (a: Agent | undefined) =>
 		a
-			? t("nameRole")
-					.replace("{name}", a.displayName)
-					.replace("{role}", uiStrings.roleName[a.role])
+			? t("nameRole", { name: a.displayName, role: uiStrings.roleName[a.role] })
 			: t("notYet");
-	const fill = (s: string) =>
-		s.replace("{pm}", pmName).replace("{breaker}", sizerName);
+	const names = { pm: pmName, breaker: sizerName };
 	const chosen = byHuman
 		? t("sizeChosenByYou")
-		: t("sizeChosen").replace("{name}", byName);
+		: t("sizeChosen", { name: byName });
 
 	const resize = async (to: Size) => {
 		if (!client) return;
@@ -80,9 +77,7 @@ export function RequestFiled() {
 				<h1 className={styles.title}>{t("requestTitle")}</h1>
 				{created && (
 					<p className={styles.muted}>
-						{t("requestSent")
-							.replace("{id}", id)
-							.replace("{time}", created.recordedAt.slice(11, 16))}
+						{t("requestSent", { id, time: created.recordedAt.slice(11, 16) })}
 					</p>
 				)}
 			</div>
@@ -93,18 +88,17 @@ export function RequestFiled() {
 			{size ? (
 				<section className={styles.section} aria-labelledby="sized">
 					<h2 id="sized">
-						{t(byHuman ? "youSizedAs" : "sizedAs")
-							.replace("{name}", byName)
-							.replace(
-								"{size}",
-								t(size === "large" ? "sizeLarge" : "sizeSmall"),
-							)}
+						{t(byHuman ? "youSizedAs" : "sizedAs", {
+							name: byName,
+							size: t(size === "large" ? "sizeLarge" : "sizeSmall"),
+						})}
 					</h2>
 					{by && (
 						<p className={styles.muted}>
-							{t("decided")
-								.replace("{name}", by.displayName)
-								.replace("{role}", uiStrings.roleName[by.role])}
+							{t("decided", {
+								name: by.displayName,
+								role: uiStrings.roleName[by.role],
+							})}
 						</p>
 					)}
 					<p>{triage.body.reason}</p>
@@ -115,7 +109,10 @@ export function RequestFiled() {
 									{t(one === "large" ? "sizeLargeCard" : "sizeSmallCard")}
 								</h3>
 								<p>
-									{fill(t(one === "large" ? "sizeLargeBody" : "sizeSmallBody"))}
+									{t(
+										one === "large" ? "sizeLargeBody" : "sizeSmallBody",
+										names,
+									)}
 								</p>
 								{one === size && <p>{chosen}</p>}
 							</div>
@@ -139,7 +136,7 @@ export function RequestFiled() {
 					)}
 				</section>
 			) : (
-				<p>{t("sizing").replace("{name}", sizerName)}</p>
+				<p>{t("sizing", { name: sizerName })}</p>
 			)}
 			{size && (
 				<section className={styles.section} aria-labelledby="next">
@@ -147,8 +144,9 @@ export function RequestFiled() {
 					<ol aria-labelledby="next">
 						{([1, 2, 3, 4] as const).map((n) => (
 							<li key={n}>
-								{fill(
-									t(`next${size === "large" ? "Large" : "Small"}${n}` as const),
+								{t(
+									`next${size === "large" ? "Large" : "Small"}${n}` as const,
+									names,
 								)}
 							</li>
 						))}

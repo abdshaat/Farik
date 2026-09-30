@@ -208,9 +208,7 @@ function Editor({
 			})) as { backToRefining: boolean };
 			setClash(false);
 			onSaid(
-				reply.backToRefining
-					? t("savedBack").replace("{pm}", pmName)
-					: t("saved"),
+				reply.backToRefining ? t("savedBack", { pm: pmName }) : t("saved"),
 			);
 		});
 
@@ -245,7 +243,7 @@ function Editor({
 			<Link to={`/tasks/${id}/plan`}>{t("editBack")}</Link>
 			<div className={styles.section}>
 				<h1 className={styles.title}>
-					{t("editTitle").replace("{title}", contract.title)}
+					{t("editTitle", { title: contract.title })}
 				</h1>
 				<p className={styles.muted}>{id}</p>
 			</div>
@@ -261,16 +259,12 @@ function Editor({
 				<div className={own.banner}>
 					<div>
 						<strong>
-							{t(contract.locked ? "lockClosed" : "lockOpen").replace(
-								"{pm}",
-								pmName,
-							)}
+							{t(contract.locked ? "lockClosed" : "lockOpen", { pm: pmName })}
 						</strong>
 						<p className={styles.muted}>
-							{t(contract.locked ? "lockClosedHint" : "lockOpenHint").replace(
-								"{pm}",
-								pmName,
-							)}
+							{t(contract.locked ? "lockClosedHint" : "lockOpenHint", {
+								pm: pmName,
+							})}
 						</p>
 					</div>
 					<Button
@@ -330,7 +324,7 @@ function Editor({
 						<TextField
 							key={r.id}
 							id={`plan-${r.id}`}
-							label={t("fieldPart").replace("{n}", String(i + 1))}
+							label={t("fieldPart", { n: String(i + 1) })}
 							value={r.text}
 							onChange={(text) =>
 								setDraft((d) => ({
@@ -382,7 +376,7 @@ function Editor({
 							<div key={c.id} className={own.criterion}>
 								<TextField
 									id={`plan-${c.id}`}
-									label={t("fieldCriterion").replace("{n}", c.id)}
+									label={t("fieldCriterion", { n: c.id })}
 									value={c.text}
 									onChange={(text) =>
 										setCriterion(i, (one) => withText(one, text))
@@ -495,16 +489,14 @@ function Editor({
 				<h2 id="verdict">{t("verdictTitle")}</h2>
 				{verdict && (
 					<p>
-						{t("verdictCount")
-							.replace(
-								"{n}",
-								String(
-									verdict.total - new Set(failures.map((f) => f.rule)).size,
-								),
-							)
-							.replace("{total}", String(verdict.total))}
+						{t("verdictCount", {
+							n: String(
+								verdict.total - new Set(failures.map((f) => f.rule)).size,
+							),
+							total: String(verdict.total),
+						})}
 						{failures.length === 1 &&
-							` ${t("verdictOne").replace("{plain}", first.charAt(0).toLowerCase() + first.slice(1))}`}
+							` ${t("verdictOne", { plain: first.charAt(0).toLowerCase() + first.slice(1) })}`}
 					</p>
 				)}
 				{failures.length > 1 && (
@@ -527,7 +519,7 @@ function Editor({
 			{said && <p role="status">{said}</p>}
 			{clash && (
 				<div className={own.banner} role="status">
-					<p>{t("editClash").replace("{pm}", pmName)}</p>
+					<p>{t("editClash", { pm: pmName })}</p>
 					<Button
 						onClick={() => {
 							setClash(false);

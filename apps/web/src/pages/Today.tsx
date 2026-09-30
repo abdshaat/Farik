@@ -76,10 +76,11 @@ export function Today() {
 			<div className={styles.band}>
 				{sprint && (
 					<p>
-						{t("sprintLine")
-							.replace("{n}", sprint.sprintId.replace(/^S/, ""))
-							.replace("{done}", String(sprint.done))
-							.replace("{total}", String(sprint.total))}
+						{t("sprintLine", {
+							n: sprint.sprintId.replace(/^S/, ""),
+							done: String(sprint.done),
+							total: String(sprint.total),
+						})}
 					</p>
 				)}
 				<ul className={styles.agents} aria-label={t("teamBand")}>
@@ -98,10 +99,7 @@ export function Today() {
 			{waiting && (
 				<section className={styles.section} aria-labelledby="waiting-heading">
 					<h2 id="waiting-heading">
-						{t("waitingTitle").replace(
-							"{count}",
-							String(waiting.waiting.length),
-						)}
+						{t("waitingTitle", { count: String(waiting.waiting.length) })}
 					</h2>
 					{waiting.waiting.length === 0 ? (
 						<p className={styles.muted}>{t("waitingNone")}</p>
@@ -206,7 +204,7 @@ function RequestBox({ pmName }: { pmName: string }) {
 				{text === "" && <span className={styles.cursor} aria-hidden="true" />}
 			</div>
 			<p id="request-hint" className={styles.muted}>
-				{t("requestHint").replace("{name}", pmName)}
+				{t("requestHint", { name: pmName })}
 			</p>
 			{refusal && (
 				<p role="alert" className={styles.alert}>
@@ -239,9 +237,7 @@ function WaitingRow({
 			)}
 			<div className={styles.rowText}>
 				<strong id={titleId}>
-					{t(kind.title)
-						.replace("{title}", item.title)
-						.replace("{agent}", name)}
+					{t(kind.title, { title: item.title, agent: name })}
 				</strong>
 				<span>{item.line}</span>
 				{item.kind === "acceptance" && <ChecksPassed taskId={item.taskId} />}
@@ -264,7 +260,5 @@ function ChecksPassed({ taskId }: { taskId: string }) {
 	});
 	const checks = data?.checks ?? [];
 	if (checks.length === 0 || !checks.every((c) => c.passed)) return null;
-	return (
-		<span>{t("checksPassed").replace("{count}", String(checks.length))}</span>
-	);
+	return <span>{t("checksPassed", { count: String(checks.length) })}</span>;
 }

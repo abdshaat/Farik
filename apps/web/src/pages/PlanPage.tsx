@@ -123,10 +123,9 @@ export function PlanPage() {
 	);
 	const loose = contract.exitCriteria.filter((c) => !c.satisfies?.length);
 	const doneWhen = (c: Criterion) =>
-		t("planDoneWhen").replace(
-			"{text}",
-			c.text.charAt(0).toLowerCase() + c.text.slice(1),
-		);
+		t("planDoneWhen", {
+			text: c.text.charAt(0).toLowerCase() + c.text.slice(1),
+		});
 
 	const send = async (
 		body:
@@ -153,21 +152,21 @@ export function PlanPage() {
 			<Link to="/">{t("backToToday")}</Link>
 			<div className={styles.section}>
 				<h1 className={styles.title}>
-					{t("approveTitle").replace("{title}", contract.title)}
+					{t("approveTitle", { title: contract.title })}
 				</h1>
 				<p className={styles.muted}>
-					{t(epic ? "approveLeadEpic" : "approveLead").replace("{id}", id)}
+					{t(epic ? "approveLeadEpic" : "approveLead", { id })}
 				</p>
 			</div>
 			<section className={own.letter} aria-labelledby="signed">
 				<p id="signed" className={styles.muted}>
-					{t("planSigned").replace("{name}", pmName)}
+					{t("planSigned", { name: pmName })}
 				</p>
 				<p>{contract.summary ?? contract.intent}</p>
 			</section>
 			<section className={styles.section}>
 				<h2 id="parts">
-					{t("planParts").replace("{n}", String(contract.requirements.length))}
+					{t("planParts", { n: String(contract.requirements.length) })}
 				</h2>
 				<p className={styles.muted}>{t("planPartsHint")}</p>
 				<ol aria-labelledby="parts" className={own.parts}>
@@ -231,10 +230,11 @@ export function PlanPage() {
 					<dd>{day(contract.createdAt)}</dd>
 					<dt>{t("approveQuestions")}</dt>
 					<dd>
-						{t("planAnswered").replace(
-							"{n}",
-							String(asked.questions.filter((q) => q.answer !== null).length),
-						)}
+						{t("planAnswered", {
+							n: String(
+								asked.questions.filter((q) => q.answer !== null).length,
+							),
+						})}
 					</dd>
 					<dt>{t("planRisk")}</dt>
 					<dd>{riskWord(contract.risk)}</dd>
@@ -279,20 +279,17 @@ export function PlanPage() {
 			</div>
 			{!awaiting && (
 				<p className={styles.muted}>
-					{t("notWaiting").replace("{status}", statusWord(contract.status))}
+					{t("notWaiting", { status: statusWord(contract.status) })}
 				</p>
 			)}
 			{epic && awaiting && (
 				<p className={styles.muted}>
-					{t("planApproveNote").replace(
-						"{breaker}",
-						breaker?.displayName ?? pmName,
-					)}
+					{t("planApproveNote", { breaker: breaker?.displayName ?? pmName })}
 				</p>
 			)}
 			<Dialog
 				open={asking}
-				title={t("planAskTitle").replace("{pm}", pmName)}
+				title={t("planAskTitle", { pm: pmName })}
 				onClose={() => setAsking(false)}
 				actions={
 					<Button

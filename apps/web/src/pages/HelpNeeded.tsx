@@ -85,9 +85,7 @@ export function HelpNeeded() {
 			<Link to="/">{t("backToToday")}</Link>
 			<div className={styles.section}>
 				<h1 className={styles.title}>
-					{t("helpTitle")
-						.replace("{name}", name)
-						.replace("{title}", contract.title)}
+					{t("helpTitle", { name, title: contract.title })}
 				</h1>
 				<p className={styles.muted}>{id}</p>
 			</div>
@@ -101,7 +99,7 @@ export function HelpNeeded() {
 			)}
 			{tried.length > 0 && (
 				<section className={styles.section}>
-					<h2 id="tried">{t("helpTried").replace("{name}", name)}</h2>
+					<h2 id="tried">{t("helpTried", { name })}</h2>
 					<ul aria-labelledby="tried">
 						{tried.map((e) => (
 							<li key={e.seq}>{e.body.text}</li>
@@ -123,7 +121,7 @@ export function HelpNeeded() {
 			)}
 			<TextArea
 				id="help-note"
-				label={t("helpNote").replace("{name}", name)}
+				label={t("helpNote", { name })}
 				value={note}
 				onChange={setNote}
 			/>
@@ -148,22 +146,22 @@ export function HelpNeeded() {
 					</dd>
 					<dt>{t("gateTries")}</dt>
 					<dd>
-						{t("triesOf")
-							.replace("{try}", String(tries.try))
-							.replace("{of}", String(tries.of))}
+						{t("triesOf", { try: String(tries.try), of: String(tries.of) })}
 					</dd>
 					<dt>{t("helpSpent")}</dt>
 					<dd>
-						{t("helpSpentOf")
-							.replace("{spent}", dollars(spent(events)))
-							.replace("{max}", dollars(contract.budget.maxCostUsd))}
+						{t("helpSpentOf", {
+							spent: dollars(spent(events)),
+							max: dollars(contract.budget.maxCostUsd),
+						})}
 					</dd>
 					<dt>{t("helpReviewer")}</dt>
 					<dd>
 						{reviewer
-							? t("nameRole")
-									.replace("{name}", reviewer.displayName)
-									.replace("{role}", uiStrings.roleName[reviewer.role])
+							? t("nameRole", {
+									name: reviewer.displayName,
+									role: uiStrings.roleName[reviewer.role],
+								})
 							: t("notYet")}
 					</dd>
 				</dl>

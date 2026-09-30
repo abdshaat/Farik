@@ -36,7 +36,7 @@ export function Questions() {
 		return (
 			<div className={styles.page}>
 				{back}
-				<p>{t("questionsNone").replace("{id}", id)}</p>
+				<p>{t("questionsNone", { id })}</p>
 			</div>
 		);
 
@@ -47,10 +47,10 @@ export function Questions() {
 				{back}
 				<div className={styles.section}>
 					<h1 className={styles.title}>
-						{t("oneQuestionTitle").replace("{agent}", name)}
+						{t("oneQuestionTitle", { agent: name })}
 					</h1>
 					<p className={styles.muted}>
-						{t("oneQuestionLead").replace("{id}", id).replace("{agent}", name)}
+						{t("oneQuestionLead", { id, agent: name })}
 					</p>
 				</div>
 				<section className={own.question} aria-labelledby="asks">
@@ -61,8 +61,8 @@ export function Questions() {
 				</section>
 				<section className={styles.section} aria-labelledby="about">
 					<h2 id="about">{t("aboutQuestions")}</h2>
-					<p>{t("aboutQuestionsBody").replace("{agent}", name)}</p>
-					<p>{t("aboutQuestionsNext").replace("{agent}", name)}</p>
+					<p>{t("aboutQuestionsBody", { agent: name })}</p>
+					<p>{t("aboutQuestionsNext", { agent: name })}</p>
 				</section>
 			</div>
 		);
@@ -71,11 +71,9 @@ export function Questions() {
 		<div className={styles.page}>
 			{back}
 			<div className={styles.section}>
-				<h1 className={styles.title}>
-					{t("questionsTitle").replace("{agent}", name)}
-				</h1>
+				<h1 className={styles.title}>{t("questionsTitle", { agent: name })}</h1>
 				<p className={styles.muted}>
-					{t("questionsLead").replace("{id}", id).replace("{agent}", name)}
+					{t("questionsLead", { id, agent: name })}
 				</p>
 			</div>
 			<ol className={own.list}>
@@ -101,9 +99,7 @@ export function Questions() {
 							</div>
 						) : (
 							<p className={styles.muted}>
-								{t("laterQuestion")
-									.replace("{agent}", name)
-									.replace("{n}", String(current + 1))}
+								{t("laterQuestion", { agent: name, n: String(current + 1) })}
 							</p>
 						)}
 					</li>
@@ -114,9 +110,10 @@ export function Questions() {
 }
 
 function asks(name: string, agent: Agent | undefined) {
-	return t("asks")
-		.replace("{agent}", name)
-		.replace("{role}", agent ? uiStrings.roleName[agent.role] : "");
+	return t("asks", {
+		agent: name,
+		role: agent ? uiStrings.roleName[agent.role] : "",
+	});
 }
 
 /** The question to answer now: its choices, the person's own words, or the agent's call. */
@@ -158,7 +155,7 @@ function Answer({
 			{question.choices.length > 0 && (
 				<Choice<string>
 					name={`question-${question.questionId}`}
-					legend={t("suggests").replace("{agent}", name)}
+					legend={t("suggests", { agent: name })}
 					options={question.choices.map((c) => ({
 						value: c.label,
 						label: c.label,
@@ -190,7 +187,7 @@ function Answer({
 					{t("sendAnswer")}
 				</Button>
 				<Button busy={busy} onClick={() => send(t("decideText"))}>
-					{t("letDecide").replace("{agent}", name)}
+					{t("letDecide", { agent: name })}
 				</Button>
 			</div>
 		</>
