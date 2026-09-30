@@ -376,5 +376,17 @@ describe("board", () => {
 				command: { command: "sprint_end", body: {} },
 			}),
 		);
+		cleanup();
+
+		// One unfinished task is said in the singular.
+		await board({ sprint_id: "S2", done: 2, total: 3 });
+		fireEvent.click(screen.getByRole("button", { name: en.sprintEndEarly }));
+		expect(
+			within(
+				screen.getByRole("dialog", { name: "End sprint 2 early?" }),
+			).getByText(
+				"1 task is not finished. It leaves the sprint and goes back on the board exactly as it is. Nothing is lost, and work in progress keeps going. Sol will still run the review and the look back.",
+			),
+		).toBeTruthy();
 	});
 });
