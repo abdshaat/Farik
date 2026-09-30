@@ -51,7 +51,8 @@
         "sprint.get",
         "costs.summary",
         "metrics",
-        "settings.defaults"
+        "settings.defaults",
+        "channel.messages"
       ]
     },
     "subscribeRequest": {
@@ -263,6 +264,9 @@
             },
             {
               "$ref": "#/$defs/settingsDefaultsQuery"
+            },
+            {
+              "$ref": "#/$defs/channelMessagesQuery"
             }
           ]
         }
@@ -3505,6 +3509,139 @@
         "rules": {
           "type": "object",
           "description": "The rules the team adds to Farik's; none by default."
+        }
+      }
+    },
+    "channelMessagesQuery": {
+      "title": "Channel Messages Query",
+      "description": "The team channel's newest page of messages before before_seq, or the newest of all without it (spec 5.9).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "params"
+      ],
+      "properties": {
+        "name": {
+          "const": "channel.messages"
+        },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "before_seq": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 18446744073709551615
+            },
+            "limit": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 200,
+              "default": 100
+            }
+          }
+        }
+      }
+    },
+    "channelMessagesResult": {
+      "description": "One page of message.posted, oldest first within the page: seq and at from the envelope, task_id the task the message is about, and the body's fields, thread and in_reply_to null when it has none.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "messages"
+      ],
+      "properties": {
+        "messages": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "seq",
+              "at",
+              "author",
+              "kind",
+              "text",
+              "mentions",
+              "thread",
+              "in_reply_to",
+              "task_id"
+            ],
+            "properties": {
+              "seq": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 18446744073709551615
+              },
+              "at": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "author": {
+                "type": "string"
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "reaction",
+                  "ambient",
+                  "reply",
+                  "ceremony",
+                  "system",
+                  "human"
+                ]
+              },
+              "text": {
+                "type": "string"
+              },
+              "mentions": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "thread": {
+                "oneOf": [
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "type": "string",
+                    "enum": [
+                      "planning",
+                      "standup",
+                      "review",
+                      "retro"
+                    ]
+                  }
+                ]
+              },
+              "in_reply_to": {
+                "oneOf": [
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 18446744073709551615
+                  }
+                ]
+              },
+              "task_id": {
+                "oneOf": [
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "type": "string",
+                    "pattern": "^FRK-[0-9]{1,6}$"
+                  }
+                ]
+              }
+            }
+          }
         }
       }
     }

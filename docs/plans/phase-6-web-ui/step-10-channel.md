@@ -71,7 +71,7 @@ Produces: the RPC query `channel.messages`; `renderMessageText(text: string, tea
 - `pages_the_channel`: the newest page first, oldest first within it; `before_seq` gives the page before; limit bounds.
 - `carries_each_messages_links`: task_id, thread, in_reply_to, and mentions.
 
-- [ ] `feat(runtime): answer the channel a page at a time`
+- [x] `feat(runtime): answer the channel a page at a time`
 
 ### Task 2: The channel page, the preview, and the meeting links
 

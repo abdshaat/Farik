@@ -1,6 +1,7 @@
-//! The board's, the sprints' and the costs' queries for the browser (`docs/SPEC.md` 5.5, F17): what
-//! a task cost by purpose, each sprint with its meetings, today's and this sprint's spending per
-//! agent, and the harness metrics. `web.rs` answers the frames; this module answers what they ask.
+//! The board's, the sprints', the costs' and the channel's queries for the browser (`docs/SPEC.md`
+//! 5.5, 5.9, F17): what a task cost by purpose, each sprint with its meetings, today's and this
+//! sprint's spending per agent, the harness metrics, and the channel a page at a time. `web.rs`
+//! answers the frames; this module answers what they ask.
 
 use std::collections::BTreeMap;
 use std::fmt::Display;
@@ -16,12 +17,13 @@ use super::web::{Failure, INTERNAL_ERROR, NOT_FOUND, UNKNOWN_QUERY};
 use crate::tools::ToolDeps;
 
 /// The queries this module answers.
-pub(super) const QUERIES: [&str; 5] = [
+pub(super) const QUERIES: [&str; 6] = [
     "task.costs",
     "sprints.list",
     "sprint.get",
     "costs.summary",
     "metrics",
+    "channel.messages",
 ];
 
 /// The purposes' plain words, in the order the pages show them.
@@ -42,6 +44,7 @@ pub(super) fn query(deps: &ToolDeps, name: &str, params: &Value) -> Result<Value
         }
         "sprint.get" => sprint_get(deps, params["sprint_id"].as_str().unwrap_or_default()),
         "costs.summary" => costs_summary(deps),
+        "channel.messages" => channel_messages(deps, params),
         "metrics" => {
             let metrics = match params["sprint_id"].as_str() {
                 Some(sprint) => deps.projections.metrics_for_sprint(&deps.files, sprint),
@@ -238,6 +241,45 @@ fn meetings(events: &[FarikEvent], id: &str) -> Vec<Value> {
         }
     }
     held.into_iter().map(|(_, meeting)| meeting).collect()
+}
+
+/// `channel.messages { before_seq?, limit }`: the newest page of the channel before `before_seq`,
+/// oldest first within it.
+fn channel_messages(deps: &ToolDeps, params: &Value) -> Result<Value, Failure> {
+    let mut page = deps
+        .log
+        .read(&EventQuery {
+            kinds: vec![EventKind::MessagePosted],
+            before_seq: params["before_seq"].as_u64(),
+            newest_first: true,
+            limit: Some(
+                params["limit"]
+                    .as_u64()
+                    .and_then(|limit| usize::try_from(limit).ok())
+                    .unwrap_or(100),
+            ),
+            ..EventQuery::default()
+        })
+        .map_err(|e| internal(&e))?;
+    page.reverse();
+    let messages: Vec<Value> = page
+        .iter()
+        .filter_map(|event| match &event.body {
+            EventBody::MessagePosted(body) => Some(json!({
+                "seq": event.envelope.seq,
+                "at": event.envelope.recorded_at,
+                "author": body.author,
+                "kind": body.kind,
+                "text": body.text,
+                "mentions": body.mentions,
+                "thread": body.thread,
+                "in_reply_to": body.in_reply_to,
+                "task_id": event.envelope.ids.task_id,
+            })),
+            _ => None,
+        })
+        .collect();
+    Ok(json!({ "messages": messages }))
 }
 
 /// `costs.summary {}`: today's spending (UTC) and the daily limit, the open sprint's, and each
@@ -690,5 +732,108 @@ mod tests {
         team.budgets.daily_usd = None;
         deps.files.write_team(&team).expect("the team is written");
         assert_eq!(summary(&harness)["daily_limit_usd"], Value::Null);
+    }
+
+    /// A message by `author` of `kind` saying `text`, with `extra` merged over the event's wire.
+    fn said(harness: &Harness, author: &str, kind: &str, text: &str, extra: &Value) -> u64 {
+        let mut wire = json!({
+            "seq": 1,
+            "recorded_at": at().to_rfc3339(),
+            "team_id": "farik",
+            "project_id": "farik",
+            "kind": "message.posted",
+            "body": { "author": author, "kind": kind, "text": text, "mentions": [] },
+        });
+        for (key, value) in extra.as_object().expect("an object") {
+            if key == "body" {
+                for (field, one) in value.as_object().expect("an object") {
+                    wire["body"][field] = one.clone();
+                }
+            } else {
+                wire[key] = value.clone();
+            }
+        }
+        put(harness, &wire)
+    }
+
+    fn page(harness: &Harness, params: &Value) -> Vec<u64> {
+        query(
+            &harness.daemon,
+            "channel.messages",
+            params,
+            "channelMessagesResult",
+        )["messages"]
+            .as_array()
+            .expect("messages")
+            .iter()
+            .map(|message| message["seq"].as_u64().expect("a seq"))
+            .collect()
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn pages_the_channel() {
+        let harness = Harness::new("board-channel-pages", |_| {});
+        let first = said(&harness, "human", "human", "One.", &json!({}));
+        // Events that are not messages are not the channel's.
+        harness.ready("FRK-1");
+        let second = said(&harness, "human", "human", "Two.", &json!({}));
+        let third = said(&harness, "farik", "system", "Three.", &json!({}));
+
+        assert_eq!(page(&harness, &json!({ "limit": 2 })), [second, third]);
+        let before = page(&harness, &json!({ "before_seq": second, "limit": 2 }));
+        assert_eq!(before.last(), Some(&first), "{before:?}");
+        assert!(before.len() <= 2, "{before:?}");
+        let all = page(&harness, &json!({}));
+        assert_eq!(all[all.len() - 3..], [first, second, third], "{all:?}");
+        for limit in [0, 201] {
+            let refused = super::super::gates::tests::rpc(
+                &harness.daemon,
+                "query",
+                &json!({ "name": "channel.messages", "params": { "limit": limit } }),
+            );
+            assert_eq!(refused["error"]["code"], -32602, "{refused}");
+        }
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn carries_each_messages_links() {
+        let harness = Harness::new("board-channel-links", |_| {});
+        let asked = said(&harness, "human", "human", "@dev-a look?", &json!({}));
+        let reply = said(
+            &harness,
+            "dev-a",
+            "reply",
+            "On FRK-1 now.",
+            &json!({
+                "agent_id": "dev-a",
+                "task_id": "FRK-1",
+                "body": { "mentions": ["pm"], "thread": "standup", "in_reply_to": asked },
+            }),
+        );
+        let messages = query(
+            &harness.daemon,
+            "channel.messages",
+            &json!({ "limit": 2 }),
+            "channelMessagesResult",
+        )["messages"]
+            .clone();
+        let at_now = at().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+        assert_eq!(
+            messages,
+            json!([
+                {
+                    "seq": asked, "at": at_now, "author": "human", "kind": "human",
+                    "text": "@dev-a look?", "mentions": [], "thread": null,
+                    "in_reply_to": null, "task_id": null,
+                },
+                {
+                    "seq": reply, "at": at_now, "author": "dev-a", "kind": "reply",
+                    "text": "On FRK-1 now.", "mentions": ["pm"], "thread": "standup",
+                    "in_reply_to": asked, "task_id": "FRK-1",
+                },
+            ])
+        );
     }
 }

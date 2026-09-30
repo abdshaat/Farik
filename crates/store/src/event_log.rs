@@ -66,8 +66,13 @@ pub struct EventQuery {
     pub agent_id: Option<String>,
     /// Only these kinds; an empty list is every kind.
     pub kinds: Vec<EventKind>,
-    /// At most this many, taken from the lowest sequence number up.
+    /// At most this many, taken from the lowest sequence number up, or from the highest down with
+    /// `newest_first`.
     pub limit: Option<usize>,
+    /// Only events before this sequence number, exclusive, which is how a reader pages back.
+    pub before_seq: Option<u64>,
+    /// Newest first: the answer runs from the highest sequence number down.
+    pub newest_first: bool,
 }
 
 /// Opens the log at `path`, making its directory and bringing its shape up to date, and returns it
@@ -427,6 +432,12 @@ fn statement_of(query: &EventQuery) -> (String, Vec<SqlValue>) {
         conditions.push(format!("seq > ?{}", parameters.len() + 1));
         parameters.push(SqlValue::Integer(after_seq));
     }
+    if let Some(before_seq) = query.before_seq {
+        // Past every row the log can hold is every row.
+        let before_seq = i64::try_from(before_seq).unwrap_or(i64::MAX);
+        conditions.push(format!("seq < ?{}", parameters.len() + 1));
+        parameters.push(SqlValue::Integer(before_seq));
+    }
     if let Some(task_id) = &query.task_id {
         conditions.push(format!("task_id = ?{}", parameters.len() + 1));
         parameters.push(SqlValue::Text(task_id.to_string()));
@@ -452,6 +463,9 @@ fn statement_of(query: &EventQuery) -> (String, Vec<SqlValue>) {
         sql.push_str(&conditions.join(" AND "));
     }
     sql.push_str(" ORDER BY seq");
+    if query.newest_first {
+        sql.push_str(" DESC");
+    }
     if let Some(limit) = query.limit {
         let _ = write!(sql, " LIMIT ?{}", parameters.len() + 1);
         parameters.push(SqlValue::Integer(i64::try_from(limit).unwrap_or(i64::MAX)));
@@ -702,6 +716,7 @@ mod tests {
             agent_id: None,
             kinds: vec![EventKind::ContractWritten],
             limit: Some(10),
+            ..EventQuery::default()
         };
         assert_eq!(
             kinds_of(&log.read(&everything).expect("reads")),
@@ -719,6 +734,40 @@ mod tests {
             ..EventQuery::default()
         };
         assert_eq!(log.read(&more_than_there_are).expect("reads").len(), 4);
+    }
+
+    #[test]
+    fn reads_the_newest_page_before_a_seq() {
+        let log = a_log();
+        for _ in 0..5 {
+            log.append(&an_event(EventKind::TaskCreated))
+                .expect("appends");
+        }
+        let seqs = |query: &EventQuery| -> Vec<u64> {
+            log.read(query)
+                .expect("reads")
+                .iter()
+                .map(|event| event.envelope.seq)
+                .collect()
+        };
+        let newest = EventQuery {
+            newest_first: true,
+            limit: Some(2),
+            ..EventQuery::default()
+        };
+        assert_eq!(seqs(&newest), [5, 4]);
+        let before = EventQuery {
+            before_seq: Some(4),
+            ..newest.clone()
+        };
+        assert_eq!(seqs(&before), [3, 2]);
+        // Oldest first without `newest_first`, and a `before_seq` no row can reach is every row.
+        let oldest = EventQuery {
+            before_seq: Some(u64::MAX),
+            limit: Some(2),
+            ..EventQuery::default()
+        };
+        assert_eq!(seqs(&oldest), [1, 2]);
     }
 
     #[test]
