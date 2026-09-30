@@ -702,7 +702,11 @@ fn serve_status(state: &DaemonState) -> Result<Value, Failure> {
             json!(web.project_root.display().to_string()),
             crate::pause::paused(&deps.log)
                 .map_err(|error| Failure::new(INTERNAL_ERROR, error.to_string()))?,
-            web.credential,
+            // The key in use, which connecting the account again may have replaced.
+            web.in_use
+                .as_ref()
+                .map(|in_use| crate::locked(in_use).kind())
+                .or(web.credential),
         ),
         None => (
             Value::Null,

@@ -1488,6 +1488,16 @@ mod tests {
         let new = ClaudeCredential::OauthToken(Secret::new("sk-ant-oat01-new".to_string()));
         assert_eq!(store.load().expect("reads"), Some(new.clone()));
         assert_eq!(*in_use.lock().expect("not poisoned"), new);
+        // The page is told the kind the sessions now run on.
+        assert_eq!(
+            query(
+                &harness.daemon,
+                "serve.status",
+                &json!({}),
+                "serveStatusResult"
+            )["credential"],
+            json!("subscription_token")
+        );
         assert!(!paused(&harness.project.deps.log).expect("reads"));
         assert_eq!(status().get("key_refused"), None);
 
