@@ -105,6 +105,10 @@ export const en = {
 		"Or continue without it: your agents’ commands then run directly on this computer.",
 	imageMissing: "Farik prepares it once. It takes a few minutes.",
 	prepare: "Prepare it",
+	computerBrowser: "Browser for the UI/UX Designer",
+	browserMissing:
+		"Your UI/UX Designer opens your app in this browser, inside the safe box. Farik fetches it once. It takes a few minutes.",
+	fetchIt: "Fetch it",
 	noDockerWarning:
 		"Without Docker, a mistaken or tricked agent command can reach any file you can. Farik reminds you of this every time it starts.",
 	checkAgain: "Check again",

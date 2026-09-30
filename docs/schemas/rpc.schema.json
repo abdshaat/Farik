@@ -419,6 +419,9 @@
           "$ref": "#/$defs/sandboxBuildRequest"
         },
         {
+          "$ref": "#/$defs/browserPullRequest"
+        },
+        {
           "$ref": "#/$defs/requestFileRequest"
         },
         {
@@ -462,7 +465,7 @@
         },
         "result": {
           "type": "object",
-          "description": "emptyResult for subscribe and unsubscribe, commandReply for command, the query's own result def for query, and the method's own result def (projectOpenResult, projectCreateResult, accountConnectResult, sandboxBuildResult) for a setup method, and each other method's own result def."
+          "description": "emptyResult for subscribe and unsubscribe, commandReply for command, the query's own result def for query, and the method's own result def (projectOpenResult, projectCreateResult, accountConnectResult, sandboxBuildResult, browserPullResult) for a setup method, and each other method's own result def."
         }
       }
     },
@@ -1199,6 +1202,10 @@
         },
         "sandbox_image": {
           "$ref": "#/$defs/computerItem"
+        },
+        "designer_browser": {
+          "$ref": "#/$defs/computerItem",
+          "description": "The UI/UX Designer's browser, the Playwright connector's pinned image; present only for a team with a Designer, which setup's suggested team has (step 12)."
         }
       },
       "required": [
@@ -1309,6 +1316,46 @@
       "required": [
         "stored_in",
         "taking_on"
+      ]
+    },
+    "browserPullRequest": {
+      "title": "Browser Pull Request",
+      "description": "Setup pulls the UI/UX Designer's browser, the Playwright connector's image, by its pinned digest (step 12).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "jsonrpc",
+        "id",
+        "method",
+        "params"
+      ],
+      "properties": {
+        "jsonrpc": {
+          "const": "2.0"
+        },
+        "id": {
+          "$ref": "#/$defs/requestId"
+        },
+        "method": {
+          "const": "browser.pull"
+        },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {}
+        }
+      }
+    },
+    "browserPullResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "image": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "image"
       ]
     },
     "sandboxBuildResult": {
@@ -3039,11 +3086,34 @@
         "criteria": {
           "type": "object",
           "description": "A criterion library as criteria.schema.json shapes it; the daemon validates it."
+        },
+        "unavailable": {
+          "type": "array",
+          "description": "The proposed agents this computer cannot run, which setup shows unticked: the UI/UX Designer, with designer_needs_sandbox, where Farik runs without Docker's sandbox (step 12, D3).",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "agent_id",
+              "reason"
+            ],
+            "properties": {
+              "agent_id": {
+                "type": "string"
+              },
+              "reason": {
+                "enum": [
+                  "designer_needs_sandbox"
+                ]
+              }
+            }
+          }
         }
       },
       "required": [
         "team",
-        "criteria"
+        "criteria",
+        "unavailable"
       ]
     },
     "teamValidateResult": {

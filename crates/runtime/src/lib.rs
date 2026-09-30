@@ -30,6 +30,8 @@ pub mod forge;
 pub mod orchestrator;
 /// Whether the human has paused the team.
 pub mod pause;
+/// The project's preview, and the confined browser beside it.
+pub mod preview;
 /// A session's system prompt, assembled in one fixed order.
 pub mod prompt;
 /// Sessions replayed from recorded transcripts.
@@ -82,6 +84,12 @@ pub fn write_private(path: &std::path::Path, bytes: &[u8]) -> std::io::Result<()
 }
 
 pub use exec::{ExecError, ExecResult, Executor, OUTPUT_LIMIT_BYTES};
+#[cfg(unix)]
+pub use preview::docker::DockerPreviewFactory;
+pub use preview::{
+    BLACKHOLE_PROXY, NoPreviews, PreviewError, PreviewFactory, RunningPreview, browser_container,
+    connector_server, disallowed_tools,
+};
 pub use recorded::{RecordedAdapter, Transcript};
 #[cfg(unix)]
 pub use sandbox::docker::{DockerSandbox, DockerSandboxFactory};

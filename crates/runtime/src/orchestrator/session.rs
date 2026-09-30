@@ -6,17 +6,23 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use chrono::{DateTime, Utc};
+use farik_core::branch::task_branch;
 use farik_core::budget::{BudgetScope, BudgetState, SessionLedger, add_usage};
-use farik_core::contract::{Role, TaskContract};
-use farik_core::governor::permissions::PermissionTier;
+use farik_core::contract::{Role, TaskContract, TaskStatus};
+use farik_core::governor::gates::DesignerBrowser;
+use farik_core::governor::permissions::{PermissionTier, SessionConnector};
+use farik_core::governor::transition::TransitionRequest;
+use farik_core::governor::transition_table::TransitionActor;
 use farik_core::pricing::Usage;
-use farik_core::team::{Agent, Effort, Team};
+use farik_core::team::{Agent, Effort, Preview, RoleWire, Team};
 use farik_protocol::event::{
     AgentSleptBody, EventBody, EventIds, EventKind, NoteWrittenBody, NoteWrittenBodyKind,
-    TeamPausedBody, TeamPausedBodyBy, TeamPausedBodyReason, Thread,
+    PreviewPreparedBody, PreviewStartedBody, ReasonBody, TeamPausedBody, TeamPausedBodyBy,
+    TeamPausedBodyReason, Thread,
 };
-use farik_roles::load_role;
+use farik_roles::{ConnectorDefinition, builtin_connector, load_role};
 use farik_store::EventQuery;
+use sha2::{Digest as _, Sha256};
 
 use super::design::DECIDE_TOOL;
 use super::messages::human_message;
@@ -27,6 +33,9 @@ use crate::claude::allowed_builtins;
 use crate::cost::{CostError, CostSource, budget_state, record_exhaustion, record_session_cost};
 use crate::daemon::SessionRegistration;
 use crate::exec::Executor;
+use crate::preview::{
+    PreviewError, RunningPreview, connector_server, designer_browser, disallowed_tools,
+};
 use crate::prompt::{
     CEREMONY_INSTRUCTIONS, DESIGN_DECISION_INSTRUCTION, JUDGMENT_INSTRUCTION, PromptInput,
     assemble_system_prompt,
@@ -36,6 +45,7 @@ use crate::session::{
 };
 use crate::sessions::{record_session_ended, record_session_started};
 use crate::tools::{FarikTool, tool_descriptors};
+use crate::transitions::TransitionAsk;
 
 /// The one tool a triage session is given.
 pub(super) const TRIAGE_TOOL: &str = "farik_triage_request";
@@ -96,8 +106,26 @@ pub(super) async fn run_session(
     team: &Team,
     ask: SessionAsk<'_>,
 ) -> Result<SessionEnd, OrchestratorError> {
-    let spec = session_spec(deps, team, &ask)?;
+    let mut spec = session_spec(deps, team, &ask)?;
     let role = Role::from(ask.agent.role);
+    let ids = EventIds {
+        task_id: spec.task_id.clone(),
+        agent_id: Some(spec.agent_id.clone()),
+        session_id: Some(spec.session_id.clone()),
+        ..deps.tools.ids.clone()
+    };
+    let (browser, connectors) = match give_browser(deps, team, &ask, &mut spec, &ids).await? {
+        Ok(Some((browser, connector))) => (Some(browser), vec![connector]),
+        Ok(None) => (None, Vec::new()),
+        Err(failed) => return Ok(failed),
+    };
+    // An explore session reads, whatever the agent's grants (ADR 0026), and browses the preview
+    // when it has the connector: browsing before approval is for explore alone (step 11's m8).
+    let explore_tiers = if connectors.is_empty() {
+        vec![PermissionTier::Read]
+    } else {
+        vec![PermissionTier::Read, PermissionTier::Network]
+    };
     deps.daemon.register_session(SessionRegistration {
         session_id: spec.session_id.clone(),
         agent_id: spec.agent_id.clone(),
@@ -109,13 +137,13 @@ pub(super) async fn run_session(
         executor: ask.executor,
         limits: spec.limits,
         farik_tools: spec.farik_tools.clone(),
-        // An explore session reads, whatever the agent's grants (ADR 0026); step 12 adds the
-        // network its browser needs.
         tiers: if ask.purpose == SessionPurpose::Explore {
-            vec![PermissionTier::Read]
+            explore_tiers
         } else {
             ask.agent.tiers(&team.permissions())
         },
+        connectors,
+        preview: browser.clone(),
     });
     let ended = drive(
         deps,
@@ -128,7 +156,11 @@ pub(super) async fn run_session(
     )
     .await;
     deps.daemon.end_session(&spec.session_id);
+    let closed = browser.map_or(Ok(()), |browser| {
+        close_preview(deps, &ids, browser.as_ref(), "the session ended")
+    });
     let end = ended?;
+    closed?;
     // The sleep first: an agent not put to sleep is started again into its provider's refusal.
     if end.reason == EndReason::ProviderLimit {
         sleep(deps, ask.agent, &end)?;
@@ -153,6 +185,235 @@ pub(super) async fn run_session(
         leave_note(deps, contract, ask.agent, &end)?;
     }
     Ok(end)
+}
+
+/// The connector a session is given, when it is given one (step 12): the agent has it on, and
+/// the session explores, implements, or is the Designer's design review, on a team whose Designer
+/// can have its browser.
+pub(super) fn offered_connector(
+    agent: &Agent,
+    purpose: SessionPurpose,
+    browser: DesignerBrowser,
+) -> Option<ConnectorDefinition> {
+    let on = agent
+        .mcp_servers
+        .iter()
+        .flatten()
+        .any(|server| server.name.as_str() == PLAYWRIGHT);
+    let in_its_sessions = match purpose {
+        SessionPurpose::Explore | SessionPurpose::Implement => true,
+        // A Designer reviews no one's work but in its design review of a UI change (D9).
+        SessionPurpose::Verify => agent.role == RoleWire::UiUxDesigner,
+        _ => false,
+    };
+    if on && in_its_sessions && browser == DesignerBrowser::Ready {
+        builtin_connector(PLAYWRIGHT)
+    } else {
+        None
+    }
+}
+
+/// The browser a session is given, when `offered_connector` offers one: the task's preview
+/// opened, and the connector added to `spec`. A preview that fails ends the session before it
+/// starts, as `preview_failed` answers.
+async fn give_browser(
+    deps: &OrchestratorDeps,
+    team: &Team,
+    ask: &SessionAsk<'_>,
+    spec: &mut SessionSpec,
+    ids: &EventIds,
+) -> Result<
+    Result<Option<(Arc<dyn RunningPreview>, SessionConnector)>, SessionEnd>,
+    OrchestratorError,
+> {
+    let offered = offered_connector(
+        ask.agent,
+        ask.purpose,
+        designer_browser(team, deps.previews.as_ref()),
+    );
+    let (Some(definition), Some(contract), Some(preview)) = (offered, ask.contract, team.preview())
+    else {
+        return Ok(Ok(None));
+    };
+    let running = match open_preview(deps, contract, ids, &ask.cwd, &preview).await? {
+        Ok(running) => running,
+        Err(error) => return preview_failed(deps, team, contract, spec, ids, &error).map(Err),
+    };
+    let output = deps
+        .tools
+        .files
+        .root()
+        .join(".farik/local/screenshots")
+        .join(contract.id.as_str());
+    if let Err(error) = std::fs::create_dir_all(&output) {
+        let why = format!("{} cannot be made: {error}", output.display());
+        close_preview(deps, ids, running.as_ref(), &why)?;
+        return Err(OrchestratorError::Refused {
+            reason: format!("preview_failed: {why}"),
+        });
+    }
+    spec.mcp_servers
+        .push(connector_server(&definition, running.as_ref(), &output));
+    spec.disallowed_tools = disallowed_tools(&definition);
+    let connector = SessionConnector {
+        server: definition.name.clone(),
+        origin: running.origin(),
+        tools: definition.tools.clone(),
+    };
+    Ok(Ok(Some((running, connector))))
+}
+
+/// The one connector Farik ships.
+const PLAYWRIGHT: &str = "playwright";
+
+/// What the preview's `prepare` is cached by (step 12): the task branch's tree and the command.
+#[derive(serde::Serialize, serde::Deserialize)]
+struct Prepared {
+    key: String,
+}
+
+/// Prepares and starts the task's preview for a session, off the async workers: `prepare` is
+/// skipped while the key of the task branch's tree and the command is the one last prepared, and
+/// `preview.prepared` and `preview.started` are recorded. A preview that fails is the inner error.
+async fn open_preview(
+    deps: &OrchestratorDeps,
+    contract: &TaskContract,
+    ids: &EventIds,
+    worktree: &std::path::Path,
+    preview: &Preview,
+) -> Result<Result<Arc<dyn RunningPreview>, PreviewError>, OrchestratorError> {
+    let tools = &deps.tools;
+    let tree = tools.git.tree(&task_branch(contract))?;
+    let cache = tools
+        .files
+        .root()
+        .join(".farik/local/previews")
+        .join(format!("{}.json", contract.id.as_str()));
+    let key = preview.prepare.as_ref().map(|prepare| {
+        crate::daemon::hex(&Sha256::digest(format!("{tree}\n{prepare}").as_bytes()))
+    });
+    let cached = std::fs::read(&cache)
+        .ok()
+        .and_then(|bytes| serde_json::from_slice::<Prepared>(&bytes).ok())
+        .map(|prepared| prepared.key);
+    let prepares = key.is_some() && key != cached;
+    let asked = Preview {
+        prepare: if prepares {
+            preview.prepare.clone()
+        } else {
+            None
+        },
+        ..preview.clone()
+    };
+    let (previews, project, task, worktree_owned, tree_owned) = (
+        Arc::clone(&deps.previews),
+        tools.ids.project_id.clone(),
+        contract.id.clone(),
+        worktree.to_path_buf(),
+        tree.clone(),
+    );
+    let started = std::time::Instant::now();
+    let running = tokio::task::spawn_blocking(move || {
+        previews.start(&project, &task, &worktree_owned, &asked, &tree_owned)
+    })
+    .await
+    .map_err(|error| OrchestratorError::Refused {
+        reason: format!("preview_failed: the preview's start did not finish: {error}"),
+    })?;
+    let running: Arc<dyn RunningPreview> = match running {
+        Ok(running) => Arc::from(running),
+        Err(error) => return Ok(Err(error)),
+    };
+    if let (true, Some(key)) = (prepares, key) {
+        let io = |error: std::io::Error| OrchestratorError::Refused {
+            reason: format!(
+                "preview_unrecorded: {} cannot be written: {error}",
+                cache.display()
+            ),
+        };
+        if let Some(folder) = cache.parent() {
+            std::fs::create_dir_all(folder).map_err(io)?;
+        }
+        let text = serde_json::to_vec(&Prepared { key }).unwrap_or_default();
+        std::fs::write(&cache, text).map_err(io)?;
+        append_stamped(
+            tools,
+            ids.clone(),
+            EventBody::PreviewPrepared(PreviewPreparedBody {
+                tree: tree
+                    .try_into()
+                    .map_err(|error| OrchestratorError::Refused {
+                        reason: format!("preview_unrecorded: {error}"),
+                    })?,
+                seconds: started.elapsed().as_secs().try_into().unwrap_or(u32::MAX),
+            }),
+        )?;
+    }
+    append_stamped(
+        tools,
+        ids.clone(),
+        EventBody::PreviewStarted(PreviewStartedBody {
+            port: preview.port.into(),
+        }),
+    )?;
+    Ok(Ok(running))
+}
+
+/// Stops the preview and its browser, and records why.
+fn close_preview(
+    deps: &OrchestratorDeps,
+    ids: &EventIds,
+    running: &dyn RunningPreview,
+    reason: &str,
+) -> Result<(), OrchestratorError> {
+    // A preview docker cannot remove now is removed with the task's sandbox, by name.
+    let _ = running.stop(reason);
+    stopped(deps, ids, reason)
+}
+
+fn stopped(deps: &OrchestratorDeps, ids: &EventIds, reason: &str) -> Result<(), OrchestratorError> {
+    append_stamped(
+        &deps.tools,
+        ids.clone(),
+        EventBody::PreviewStopped(ReasonBody {
+            reason: reason.to_string(),
+        }),
+    )
+}
+
+/// A preview that could not be made ready (step 12): `preview.stopped` with why, and the task
+/// escalated by the governor with reason `preview`, the output's last lines its detail. No session
+/// starts; the end answers with the error.
+fn preview_failed(
+    deps: &OrchestratorDeps,
+    team: &Team,
+    contract: &TaskContract,
+    spec: &SessionSpec,
+    ids: &EventIds,
+    error: &PreviewError,
+) -> Result<SessionEnd, OrchestratorError> {
+    let why = error.to_string();
+    stopped(deps, ids, &why)?;
+    deps.tools.transitions.request(
+        &TransitionRequest {
+            task_id: contract.id.clone(),
+            to: TaskStatus::Escalated,
+            actor: TransitionActor::Governor,
+            agent_id: None,
+        },
+        &TransitionAsk {
+            preview_failed: Some(why.clone()),
+            ..TransitionAsk::default()
+        },
+        team,
+    )?;
+    Ok(SessionEnd {
+        session_id: spec.session_id.clone(),
+        reason: EndReason::Error,
+        detail: why,
+        resets_at: None,
+        crossed: Vec::new(),
+    })
 }
 
 /// How long an agent sleeps when its model provider said no time its limit resets, or a time
@@ -394,6 +655,7 @@ fn session_spec(
         farik_tools,
         builtin_tools,
         mcp_servers: Vec::new(),
+        disallowed_tools: Vec::new(),
         cwd: ask.cwd.clone(),
         limits,
         initial_prompt: ask.initial_prompt.clone(),
@@ -626,7 +888,9 @@ mod tests {
     use farik_core::team::Effort;
     use farik_protocol::event::{EventBody, EventKind, MessageKind, Thread};
 
-    use super::{SessionAsk, SessionEnd, TRIAGE_TOOL, run_session, session_spec, sleep};
+    use super::{
+        SessionAsk, SessionEnd, TRIAGE_TOOL, offered_connector, run_session, session_spec, sleep,
+    };
     use crate::prompt::{CEREMONY_INSTRUCTIONS, CLOSING_INSTRUCTIONS};
     use crate::recorded::fixtures::reply_to_a_mention;
     use crate::session::EndReason;
@@ -656,6 +920,249 @@ mod tests {
             witness.given_tiers().remove(0),
             started[0].farik_tools.clone(),
         )
+    }
+
+    /// The Designer `iris` and the Architect `ada` added, both with the Playwright connector on,
+    /// and a preview set.
+    fn browsing(wire: &mut serde_json::Value) {
+        crate::tools::fixtures::with_the_designer(wire);
+        let on = json!([{ "name": "playwright", "source": "builtin" }]);
+        wire["agents"][3]["mcp_servers"] = on.clone();
+        wire["agents"][4]["mcp_servers"] = on;
+        wire["preview"] = json!({
+            "prepare": "make site",
+            "start": "busybox httpd -f -p 4401 -h site",
+            "port": 4401
+        });
+    }
+
+    fn agent<'a>(team: &'a farik_core::team::Team, id: &str) -> &'a farik_core::team::Agent {
+        team.agents
+            .iter()
+            .find(|agent| agent.id.as_str() == id)
+            .expect("the agent is on the team")
+    }
+
+    #[test]
+    fn offers_the_connector_only_where_the_design_says() {
+        use farik_core::governor::gates::DesignerBrowser;
+
+        let team = crate::tools::fixtures::a_team_of_three(browsing);
+        let (iris, ada, dev) = (
+            agent(&team, "iris"),
+            agent(&team, "ada"),
+            agent(&team, "dev-a"),
+        );
+        let offered = |agent, purpose, browser| {
+            offered_connector(agent, purpose, browser).map(|definition| definition.name)
+        };
+        let ready = DesignerBrowser::Ready;
+        for purpose in [SessionPurpose::Explore, SessionPurpose::Implement] {
+            assert_eq!(offered(iris, purpose, ready).as_deref(), Some("playwright"));
+        }
+        // The Designer's own `verify` session is its design review.
+        assert_eq!(
+            offered(iris, SessionPurpose::Verify, ready).as_deref(),
+            Some("playwright")
+        );
+        // Any agent may have it, and it is not the Architect's in its review.
+        assert_eq!(
+            offered(ada, SessionPurpose::Implement, ready).as_deref(),
+            Some("playwright")
+        );
+        assert_eq!(offered(ada, SessionPurpose::Verify, ready), None);
+        for purpose in [
+            SessionPurpose::Triage,
+            SessionPurpose::Refine,
+            SessionPurpose::Plan,
+            SessionPurpose::Ceremony,
+            SessionPurpose::Conversation,
+        ] {
+            assert_eq!(offered(iris, purpose, ready), None, "{purpose:?}");
+        }
+        // Not for an agent without it on, nor while the Designer cannot have its browser.
+        assert_eq!(offered(dev, SessionPurpose::Implement, ready), None);
+        for browser in [DesignerBrowser::NoPreview, DesignerBrowser::NoSandbox] {
+            assert_eq!(offered(iris, SessionPurpose::Explore, browser), None);
+            assert_eq!(offered(ada, SessionPurpose::Implement, browser), None);
+        }
+    }
+
+    /// Iris's explore session of FRK-1, in its worktree.
+    fn exploring<'a>(
+        harness: &Harness,
+        team: &'a farik_core::team::Team,
+        contract: &'a farik_core::contract::TaskContract,
+    ) -> SessionAsk<'a> {
+        SessionAsk {
+            agent: agent(team, "iris"),
+            contract: Some(contract),
+            purpose: SessionPurpose::Explore,
+            cwd: harness.worktree("FRK-1"),
+            executor: None,
+            read_only: true,
+            only_tool: None,
+            tools: None,
+            in_reply_to: None,
+            thread: None,
+            initial_prompt: "Look at the app.".to_string(),
+        }
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn prepares_once_per_tree_then_starts() {
+        use crate::preview::fixtures::FakePreviews;
+
+        let mut harness = Harness::new("preview-once-per-tree", browsing);
+        let previews = Arc::new(FakePreviews::ready());
+        harness.previews = previews.clone();
+        harness.in_progress("FRK-1", "iris", "ada");
+        let adapter = harness.recorded(vec![
+            crate::recorded::fixtures::reads_a_file(),
+            crate::recorded::fixtures::reads_a_file(),
+            crate::recorded::fixtures::reads_a_file(),
+        ]);
+        let witness = Arc::new(ExecutorWitness::new(
+            adapter.clone(),
+            Arc::clone(&harness.daemon),
+        ));
+        let orchestrator = harness.orchestrator(witness.clone());
+        let deps = &orchestrator.deps;
+        let team = deps.tools.files.read_team().expect("the team");
+        let contract = deps
+            .tools
+            .files
+            .read_contract(&"FRK-1".parse().expect("an id"))
+            .expect("the contract");
+
+        for _ in 0..2 {
+            run_session(deps, &team, exploring(&harness, &team, &contract))
+                .await
+                .expect("the session runs");
+        }
+        let worktree = harness.worktree("FRK-1");
+        std::fs::write(worktree.join("site.txt"), "two").expect("written");
+        farik_store::git::fixtures::git_in(&worktree, &["add", "site.txt"]);
+        farik_store::git::fixtures::git_in(&worktree, &["commit", "-q", "-m", "A new page"]);
+        run_session(deps, &team, exploring(&harness, &team, &contract))
+            .await
+            .expect("the session runs");
+
+        let make = Some("make site".to_string());
+        assert_eq!(
+            *crate::locked(&previews.prepared),
+            [make.clone(), None, make]
+        );
+        let events = harness.events(&[
+            EventKind::PreviewPrepared,
+            EventKind::PreviewStarted,
+            EventKind::PreviewStopped,
+        ]);
+        let kinds: Vec<EventKind> = events.iter().map(|event| event.body.kind()).collect();
+        let session = [EventKind::PreviewStarted, EventKind::PreviewStopped];
+        let prepared = [EventKind::PreviewPrepared];
+        assert_eq!(
+            kinds,
+            [&prepared[..], &session, &session, &prepared, &session].concat()
+        );
+        let trees: Vec<String> = events
+            .iter()
+            .filter_map(|event| match &event.body {
+                EventBody::PreviewPrepared(body) => Some(body.tree.to_string()),
+                _ => None,
+            })
+            .collect();
+        assert_ne!(trees[0], trees[1]);
+        for event in &events {
+            if let EventBody::PreviewStarted(body) = &event.body {
+                assert_eq!(body.port, 4401);
+            }
+            assert_eq!(event.envelope.ids.agent_id.as_deref(), Some("iris"));
+        }
+        // Each session had the browser, and its explore session may browse.
+        for spec in adapter.started() {
+            let servers: Vec<&str> = spec.mcp_servers.iter().map(|s| s.name.as_str()).collect();
+            assert_eq!(servers, ["playwright"]);
+            assert!(
+                spec.disallowed_tools
+                    .contains(&"mcp__playwright__browser_evaluate".to_string()),
+                "{:?}",
+                spec.disallowed_tools
+            );
+        }
+        assert_eq!(
+            witness.given_tiers(),
+            vec![vec![PermissionTier::Read, PermissionTier::Network]; 3]
+        );
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn escalates_a_preview_that_fails() {
+        use farik_protocol::event::EscalationRaisedBodyReason;
+
+        use crate::preview::PreviewError;
+        use crate::preview::fixtures::FakePreviews;
+
+        for (name, error, tail) in [
+            (
+                "preview-prepare-fails",
+                PreviewError::Prepare {
+                    tail: "ERR_PNPM_OUTDATED_LOCKFILE".to_string(),
+                },
+                "ERR_PNPM_OUTDATED_LOCKFILE",
+            ),
+            (
+                "preview-never-answers",
+                PreviewError::NeverAnswered {
+                    tail: "listening on 0.0.0.0:3000".to_string(),
+                },
+                "listening on 0.0.0.0:3000",
+            ),
+            (
+                "preview-no-docker",
+                PreviewError::DockerUnavailable {
+                    detail: "Cannot connect to the Docker daemon".to_string(),
+                },
+                "Cannot connect to the Docker daemon",
+            ),
+        ] {
+            let mut harness = Harness::new(name, browsing);
+            harness.previews = Arc::new(FakePreviews::failing(error));
+            harness.in_progress("FRK-1", "iris", "ada");
+            let adapter = harness.recorded(Vec::new());
+            let orchestrator = harness.orchestrator(adapter.clone());
+            let deps = &orchestrator.deps;
+            let team = deps.tools.files.read_team().expect("the team");
+            let contract = deps
+                .tools
+                .files
+                .read_contract(&"FRK-1".parse().expect("an id"))
+                .expect("the contract");
+
+            run_session(deps, &team, exploring(&harness, &team, &contract))
+                .await
+                .expect("a preview that fails is an answer");
+
+            assert!(adapter.started().is_empty(), "{name}: no session starts");
+            assert_eq!(
+                harness.row("FRK-1").status,
+                farik_core::contract::TaskStatus::Escalated,
+                "{name}"
+            );
+            let raised = harness.events(&[EventKind::EscalationRaised]);
+            let EventBody::EscalationRaised(body) = &raised[0].body else {
+                panic!("an escalation");
+            };
+            assert_eq!(body.reason, EscalationRaisedBodyReason::Preview, "{name}");
+            assert!(body.detail.contains(tail), "{name}: {}", body.detail);
+            let stopped = harness.events(&[EventKind::PreviewStopped]);
+            let EventBody::PreviewStopped(body) = &stopped[0].body else {
+                panic!("the preview's stop");
+            };
+            assert!(body.reason.contains(tail), "{name}: {}", body.reason);
+        }
     }
 
     #[tokio::test]

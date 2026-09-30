@@ -72,11 +72,16 @@ pub struct ComputerCheck {
     pub docker: Item,
     /// Farik's sandbox image, `SANDBOX_IMAGE`; missing whenever Docker is not ready.
     pub sandbox_image: Item,
+    /// The UI/UX Designer's browser, the Playwright connector's pinned image; only for a team with
+    /// a Designer, and missing whenever Docker is not ready.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub designer_browser: Option<Item>,
 }
 
-/// Checks the computer, with the programs looked for on `env`'s `PATH` and run in `env` alone.
+/// Checks the computer, with the programs looked for on `env`'s `PATH` and run in `env` alone;
+/// `designer` says whether the team has a UI/UX Designer, whose browser is then checked too.
 #[must_use]
-pub fn check_computer(env: &BTreeMap<String, String>) -> ComputerCheck {
+pub fn check_computer(env: &BTreeMap<String, String>, designer: bool) -> ComputerCheck {
     let claude = match run(env, "claude", &["--version"]) {
         Some((true, output)) => {
             let version = output.split_whitespace().next().map(str::to_string);
@@ -106,18 +111,51 @@ pub fn check_computer(env: &BTreeMap<String, String>) -> ComputerCheck {
         Some((false, _)) => Item::bare(ItemState::NotRunning),
         None => Item::missing(),
     };
-    let sandbox_image = match docker.state {
-        ItemState::Ready => match run(env, "docker", &["image", "inspect", SANDBOX_IMAGE]) {
+    let image = |name: &str| match docker.state {
+        ItemState::Ready => match run(env, "docker", &["image", "inspect", name]) {
             Some((true, _)) => Item::bare(ItemState::Ready),
             _ => Item::missing(),
         },
         _ => Item::missing(),
     };
+    let sandbox_image = image(SANDBOX_IMAGE);
+    let designer_browser = designer.then(|| image(&browser_image()));
     ComputerCheck {
         claude,
         git,
         docker,
         sandbox_image,
+        designer_browser,
+    }
+}
+
+/// The Designer's browser image, the Playwright connector's, pinned by digest.
+fn browser_image() -> String {
+    farik_roles::builtin_connector("playwright").map_or_else(String::new, |shipped| shipped.image)
+}
+
+/// Pulls the Designer's browser image by its digest, and answers it.
+///
+/// # Errors
+///
+/// The sentence to show when docker is missing or the pull fails.
+pub fn pull_browser_image(env: &BTreeMap<String, String>) -> Result<String, String> {
+    let docker = on_path("docker", env).ok_or("Docker is not installed")?;
+    let image = browser_image();
+    let failed = |why: String| format!("the browser could not be fetched: {why}");
+    let output = std::process::Command::new(docker)
+        .args(["pull", "--quiet", &image])
+        .env_clear()
+        .envs(env)
+        .stdin(Stdio::null())
+        .output()
+        .map_err(|error| failed(error.to_string()))?;
+    if output.status.success() {
+        Ok(image)
+    } else {
+        Err(failed(
+            String::from_utf8_lossy(&output.stderr).trim().to_string(),
+        ))
     }
 }
 
@@ -229,7 +267,61 @@ mod tests {
     use std::os::unix::fs::OpenOptionsExt as _;
     use std::time::Duration;
 
-    use super::run;
+    use super::{ItemState, check_computer, run};
+
+    /// A folder of programs, each a shell script, as the `PATH` of an environment.
+    fn programs(test: &str, scripts: &[(&str, &str)]) -> BTreeMap<String, String> {
+        let bin =
+            std::env::temp_dir().join(format!("farik-computer-{test}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&bin);
+        std::fs::create_dir_all(&bin).expect("the folder is made");
+        for (name, body) in scripts {
+            let mut file = std::fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .mode(0o755)
+                .open(bin.join(name))
+                .expect("the file is made");
+            file.write_all(format!("#!/bin/sh\n{body}\n").as_bytes())
+                .expect("written");
+        }
+        BTreeMap::from([(
+            "PATH".to_string(),
+            format!("{}:/usr/bin:/bin", bin.display()),
+        )])
+    }
+
+    #[test]
+    fn lists_the_designer_browser_row_only_with_a_designer() {
+        let image = farik_roles::builtin_connector("playwright")
+            .expect("shipped")
+            .image;
+        let pulled = programs(
+            "browser-ready",
+            &[(
+                "docker",
+                &format!(
+                    "case \"$*\" in\n  version) exit 0 ;;\n  'image inspect {image}') exit 0 ;;\n  *) exit 1 ;;\nesac"
+                ),
+            )],
+        );
+        assert_eq!(check_computer(&pulled, false).designer_browser, None);
+        let row = check_computer(&pulled, true).designer_browser;
+        assert_eq!(row.map(|item| item.state), Some(ItemState::Ready));
+
+        let not_pulled = programs(
+            "browser-missing",
+            &[(
+                "docker",
+                "case \"$1\" in\n  version) exit 0 ;;\n  *) exit 1 ;;\nesac",
+            )],
+        );
+        let row = check_computer(&not_pulled, true).designer_browser;
+        assert_eq!(row.map(|item| item.state), Some(ItemState::Missing));
+        let serialised =
+            serde_json::to_value(check_computer(&not_pulled, false)).expect("serialises");
+        assert!(serialised.get("designer_browser").is_none(), "{serialised}");
+    }
 
     #[test]
     fn retries_a_program_that_is_busy_being_written() {

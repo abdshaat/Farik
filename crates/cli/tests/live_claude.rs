@@ -177,6 +177,8 @@ impl Project {
             limits: DEFAULT_SESSION_LIMITS,
             farik_tools: vec![FARIK_TOOL.to_string()],
             tiers: tiers.iter().copied().collect(),
+            connectors: Vec::new(),
+            preview: None,
             purpose: SessionPurpose::Implement,
             in_reply_to: None,
             thread: None,
@@ -204,6 +206,7 @@ impl Project {
             farik_tools: vec![FARIK_TOOL.to_string()],
             builtin_tools: allowed_builtins(&self.tiers),
             mcp_servers: Vec::new(),
+            disallowed_tools: Vec::new(),
             cwd: self.repo.path.clone(),
             limits: DEFAULT_SESSION_LIMITS,
             initial_prompt: format!(

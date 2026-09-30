@@ -12,7 +12,14 @@ type Item = {
 	state: "ready" | "missing" | "too_old" | "not_running";
 	version?: string;
 };
-type Check = { claude: Item; git: Item; docker: Item; sandboxImage: Item };
+type Check = {
+	claude: Item;
+	git: Item;
+	docker: Item;
+	sandboxImage: Item;
+	/** Only for a team with a UI/UX Designer. */
+	designerBrowser?: Item;
+};
 type Key = keyof typeof en;
 
 const WORD: Record<Item["state"], Key> = {
@@ -63,6 +70,8 @@ export function SetupComputer() {
 	const { data, again } = useQuery<Check>("computer.check", {});
 	const [building, setBuilding] = useState(false);
 	const [buildError, setBuildError] = useState<string>();
+	const [fetching, setFetching] = useState(false);
+	const [fetchError, setFetchError] = useState<string>();
 
 	const basics = data?.claude.state === "ready" && data.git.state === "ready";
 	const docker = data?.docker.state === "ready";
@@ -81,6 +90,20 @@ export function SetupComputer() {
 			setBuildError((e as Error).message);
 		} finally {
 			setBuilding(false);
+			again();
+		}
+	};
+
+	const fetchBrowser = async () => {
+		if (!client) return;
+		setFetching(true);
+		setFetchError(undefined);
+		try {
+			await client.call("browser.pull", {});
+		} catch (e) {
+			setFetchError((e as Error).message);
+		} finally {
+			setFetching(false);
 			again();
 		}
 	};
@@ -117,6 +140,20 @@ export function SetupComputer() {
 							</Button>
 						)}
 						{buildError && <p role="alert">{buildError}</p>}
+					</Row>
+				)}
+				{docker && data?.designerBrowser && (
+					<Row
+						what="computerBrowser"
+						item={data.designerBrowser}
+						fix={{ missing: "browserMissing" }}
+					>
+						{data.designerBrowser.state !== "ready" && (
+							<Button busy={fetching} onClick={fetchBrowser}>
+								{t("fetchIt")}
+							</Button>
+						)}
+						{fetchError && <p role="alert">{fetchError}</p>}
 					</Row>
 				)}
 			</ul>

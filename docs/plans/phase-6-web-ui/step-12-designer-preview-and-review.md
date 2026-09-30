@@ -51,7 +51,7 @@ The ADR and the design hold as written. The founder's decisions of 2026-09-30 (D
 - **No port collisions** (D5). Every preview has its own network namespace with the network off, so two previews on one port never collide, and a host server on that port is unreachable from the browser. They cannot happen, so no rule is needed.
 - **Confinement** (the founder, D3):
   - The browser container is `farik-browser-<project>-<task>`, labelled as the sandbox is, run with `--user <uid>:<gid>` and `--network container:farik-preview-<project>-<task>`. It sees only the preview's loopback.
-  - Chromium runs with `--proxy-server http://127.0.0.1:9`, a dead port, and Chromium's default loopback bypass. No click, redirect or page script can leave, whatever the namespace.
+  - Chromium runs with `--proxy-server http://127.0.0.1:9`, a dead port, and Chromium's default loopback bypass. No click, redirect or page script can leave, whatever the namespace. (Task 2 found that Playwright turns Chromium's own loopback bypass off once a proxy is set, so the connector also passes `--proxy-bypass localhost`.)
   - `--allowed-origins http://localhost:<port>` is also set.
   - The governor checks every `url` argument (below).
   - These are four barriers. The integration test proves the first three, each on its own. The governor's `url` check is proved by `evaluates_connector_calls`, not in Docker.
@@ -64,7 +64,7 @@ The ADR and the design hold as written. The founder's decisions of 2026-09-30 (D
   - `denied`: `browser_evaluate`, `browser_run_code`, `browser_file_upload`, `browser_install`, `browser_pdf_save`, `browser_network_requests`, and any tool the image lists that the table does not;
   - `external_effect` is denied until phase 8;
   - denied tools also go into `--disallowedTools`.
-- **The pin.** `mcr.microsoft.com/playwright/mcp` is pinned by digest at its newest release on the day Task 2 starts. The tag, the digest and the Node module root are recorded in `playwright.yaml`. The drift test reconciles the table with the image: a tool the image adds goes in as `denied` in the same commit. CI pulls it by digest (F7).
+- **The pin.** `mcr.microsoft.com/playwright/mcp` is pinned by digest at its newest release on the day Task 2 starts. The tag, the digest and the Node module root are recorded in `playwright.yaml`. The drift test reconciles the table with the image: a tool the image adds goes in as `denied` in the same commit. CI pulls it by digest (F7). Task 2 pinned `@playwright/mcp` 0.0.82 (tag `v0.0.82`, the newest on 2026-09-30), digest `sha256:77dccc5ce9e94cb8ae7ebea87ddbb6cd54b05760c4d63c54e16accf2726b8734`, module root `/app/node_modules`. It lists five tools the table above does not (`browser_drop`, `browser_emulate_media`, `browser_find`, `browser_network_request`, `browser_run_code_unsafe`), which went in as `denied`.
 - **Which sessions get the connector.** Those of an agent with it in `mcp_servers` (any agent may have it; `validate_team` checks every agent's list, F8), with purpose `explore`, `implement` or the design review, on a team whose Designer is `Ready`. Farik starts the preview for each such session.
 - **The explore session's tiers** (carried from step 11's landing review, m8 and m11). Step 11 registers an explore session with `[read]` alone, whatever the Designer's grants, so the hook holds each of its calls to reading. The connector's tools are tagged `network`, so this step registers `[read, network]` for an explore session that has the connector. Browsing before the plan is approved is intended, for explore only; `check_design_plan` keeps holding only `write_workspace`, `execute`, `git_local` and `git_remote` before approval.
 - **The design review session** (D9) is `read_only`. It has the read tier's built-ins, the five reading tools, the connector, `farik_check_page` and `farik_record_design_review`, and no `farik_exec`. Its container exists for the preview alone.
@@ -207,7 +207,7 @@ Tests:
     - (c) `bridge` plus `--allowed-origins` alone: the direct navigation fails; the redirect is recorded as reaching `example.com`, since the server's README says `--allowed-origins` does not affect redirects. That is why the proxy exists.
   - `stop_leaves_no_container`: after `stop`, neither container name exists.
 
-- [ ] `feat(runtime): prepare and start a preview in the sandbox, and a confined Playwright connector per agent`
+- [x] `feat(runtime): prepare and start a preview in the sandbox, and a confined Playwright connector per agent`
 
 ### Task 3: `farik_check_page`
 

@@ -5,7 +5,7 @@
 use std::collections::BTreeMap;
 use std::fmt;
 use std::str::FromStr;
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::{Arc, Mutex, OnceLock, PoisonError};
 use std::time::Duration;
 
 use chrono::{DateTime, Utc};
@@ -46,6 +46,7 @@ use farik_store::{EventLog, EventQuery, Git, GitError, Projections, StoreError, 
 
 use crate::channel::{ChannelError, post_system};
 use crate::cost::{CostError, budget_state, extra_tries};
+use crate::preview::PreviewFactory;
 
 /// The governor's door: everything a transition is judged on and recorded in.
 pub struct Transitions {
@@ -59,6 +60,8 @@ pub struct Transitions {
     /// event is a read-check-write, and the tools and the orchestrator ask at once. It covers one
     /// process, which is what phase 3 runs.
     requests: Mutex<()>,
+    /// What says whether a preview can run here, once the driver sets it (D4).
+    previews: OnceLock<Arc<dyn PreviewFactory>>,
 }
 
 /// What the requester brings to a transition, and nothing else: every other fact is read from the
@@ -82,6 +85,9 @@ pub struct TransitionAsk {
     /// Why Farik could not run one of the task's criteria for its reviewer, for a reason that is
     /// not the work's: the words of the governor's escalation (5.4).
     pub criterion_unrunnable: Option<String>,
+    /// Why the task's preview could not be made ready: the words of the governor's `preview`
+    /// escalation, the output's last 40 lines among them (step 12).
+    pub preview_failed: Option<String>,
     /// The human's words for a move they asked for, recorded on the move; into `escalated` they
     /// are also the escalation's.
     pub reason: Option<String>,
@@ -205,7 +211,25 @@ impl Transitions {
             clock,
             ids,
             requests: Mutex::new(()),
+            previews: OnceLock::new(),
         }
+    }
+
+    /// Sets what says whether a preview can run here, which decides whether the team's Designer
+    /// may be assigned (D4); the first set holds.
+    pub fn set_previews(&self, previews: Arc<dyn PreviewFactory>) {
+        let _ = self.previews.set(previews);
+    }
+
+    /// Whether the team's Designer can have its browser: `Ready` until the driver has said what
+    /// runs previews, as for a command handled in its own process.
+    #[must_use]
+    pub fn designer_browser(&self, team: &Team) -> DesignerBrowser {
+        self.previews
+            .get()
+            .map_or(DesignerBrowser::Ready, |previews| {
+                crate::preview::designer_browser(team, previews.as_ref())
+            })
     }
 
     /// Judges one request on the store's facts and records the answer: a move writes the contract
@@ -368,7 +392,8 @@ impl Transitions {
                     .map(|blocker| blocker.description.clone())
             })
             .or_else(|| ask.reason.clone())
-            .or_else(|| ask.criterion_unrunnable.clone());
+            .or_else(|| ask.criterion_unrunnable.clone())
+            .or_else(|| ask.preview_failed.clone());
         if words.is_none() && decision.from == TaskStatus::Blocked {
             let history = self.log.read(&EventQuery {
                 task_id: Some(request.task_id.clone()),
@@ -500,6 +525,7 @@ impl Transitions {
             budget,
             permission_denied: ask.permission_denied,
             criterion_unrunnable: ask.criterion_unrunnable.is_some(),
+            preview_failed: ask.preview_failed.is_some(),
             result_awaits_human: result_awaits_human(&contract),
             review_passed: review_passed(&history),
             extra_iterations: extra_tries(&history),
@@ -687,6 +713,7 @@ fn move_line(
             .or_else(|| ask.blocker_resolution.clone())
             .or_else(|| ask.reason.clone())
             .or_else(|| ask.criterion_unrunnable.clone())
+            .or_else(|| ask.preview_failed.clone())
     });
     if let Some(reason) = reason.as_deref().map(str::trim).filter(|r| !r.is_empty()) {
         line.push_str(": ");
@@ -960,6 +987,7 @@ fn reason_wire(reason: EscalationReason) -> EscalationRaisedBodyReason {
         EscalationReason::ReadinessFailures => EscalationRaisedBodyReason::ReadinessFailures,
         EscalationReason::Integration => EscalationRaisedBodyReason::Integration,
         EscalationReason::ExplicitRequest => EscalationRaisedBodyReason::ExplicitRequest,
+        EscalationReason::Preview => EscalationRaisedBodyReason::Preview,
     }
 }
 
@@ -1032,7 +1060,8 @@ fn assignment(
                 .and_then(|epic| epic.sprint.clone())
         }),
         dependencies,
-        // Step 12's Task 2 reads the preview and the sandbox.
+        // Not yet `Transitions::designer_browser`: step 11's journey assigns Iris in no-sandbox
+        // mode with no preview, and Task 6 moves it into Docker's sandbox with one.
         designer_browser: DesignerBrowser::Ready,
     })
 }

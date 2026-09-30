@@ -6,12 +6,13 @@ use std::path::{Component, Path, PathBuf};
 
 use farik_core::contract::Role;
 use farik_core::governor::permissions::{
-    AgentGrants, PermissionTier, ToolCallContext, ToolCallRequest, ToolDescriptor,
-    evaluate_tool_call,
+    AgentGrants, ConnectorRefusal, ConnectorTag, PermissionTier, ToolCallContext, ToolCallRequest,
+    ToolDescriptor, evaluate_connector_call, evaluate_tool_call,
 };
-use farik_core::team::{AgentStatus, Team};
+use farik_core::team::{AgentStatus, BUILTIN_CONNECTORS, Team};
 use farik_protocol::event::{
-    EventBody, EventIds, ToolCalledBody, ToolDeniedBody, ToolReturnedBody, new_event,
+    ConnectorTagWire, EventBody, EventIds, ToolCalledBody, ToolDeniedBody, ToolReturnedBody,
+    new_event,
 };
 use serde::{Deserialize, Serialize, Serializer};
 use serde_json::{Value, json};
@@ -124,7 +125,7 @@ pub fn decide_pre_tool_use(request: &HookRequest, state: &DaemonState) -> HookDe
             session_id: Some(request.session_id.clone()),
             ..deps.ids.clone()
         };
-        return record_decision(deps, ids, request, Err(reason));
+        return record_decision(deps, ids, request, None, Err(reason));
     };
     let verdict = match &session.stop_reason {
         Some(reason) => Err(Denial::from(format!("{SESSION_STOPPED}: {reason}"))),
@@ -137,7 +138,14 @@ pub fn decide_pre_tool_use(request: &HookRequest, state: &DaemonState) -> HookDe
         }
         denial.reason
     });
-    let decision = record_decision(deps, ids_of(deps, &session.registration), request, verdict);
+    let connector = connector_of(request, &session.registration);
+    let decision = record_decision(
+        deps,
+        ids_of(deps, &session.registration),
+        request,
+        connector,
+        verdict,
+    );
     if decision.allow {
         session.tool_calls += 1;
     }
@@ -258,6 +266,9 @@ fn judge_call(
             Some(tool) => (tool.tier, Vec::new()),
             None => return Err(not_allowed(&request.tool_name)),
         },
+        None if connector_tool(&request.tool_name).is_some() => {
+            (judge_connector(request, registration)?, Vec::new())
+        }
         None => match builtin_tool_tier(&request.tool_name) {
             Some(tier) => (
                 tier,
@@ -308,6 +319,62 @@ fn judge_call(
             other => format!("design_plan_unreadable: {other}"),
         }
     })
+}
+
+/// A shipped connector's tool name, `mcp__<server>__<tool>`, as its server and its tool; `None`
+/// for any other name, which no session is served.
+fn connector_tool(name: &str) -> Option<(&str, &str)> {
+    name.strip_prefix("mcp__")?
+        .split_once("__")
+        .filter(|(server, _)| BUILTIN_CONNECTORS.contains(server))
+}
+
+/// The server and the tag a connector's call is recorded with: its server whenever the name is a
+/// connector's, and its tag when the session's list of that server tags it.
+fn connector_of(
+    request: &HookRequest,
+    registration: &SessionRegistration,
+) -> Option<(String, Option<ConnectorTag>)> {
+    let (server, tool) = connector_tool(&request.tool_name)?;
+    let tag = registration
+        .connectors
+        .iter()
+        .find(|connector| connector.server == server)
+        .and_then(|connector| connector.tools.get(tool).copied());
+    Some((server.to_string(), tag))
+}
+
+/// The tier a connector's call needs, `network`, once `evaluate_connector_call` passes it (5.6).
+fn judge_connector(
+    request: &HookRequest,
+    registration: &SessionRegistration,
+) -> Result<PermissionTier, String> {
+    let Some((server, tool)) = connector_tool(&request.tool_name) else {
+        return Err(not_allowed(&request.tool_name));
+    };
+    let connector = registration
+        .connectors
+        .iter()
+        .find(|connector| connector.server == server);
+    evaluate_connector_call(tool, &request.tool_input, connector)
+        .map(|_| PermissionTier::Network)
+        .map_err(|refusal| match refusal {
+            ConnectorRefusal::ConnectorNotInSession => format!(
+                "connector_not_in_session: {server} is not a connector this session was given"
+            ),
+            ConnectorRefusal::ToolNotTagged => format!(
+                "tool_not_tagged: {tool} is not in {server}'s pinned list of tools, so it is not \
+                 offered"
+            ),
+            ConnectorRefusal::ToolDenied => format!(
+                "tool_denied: {tool} of {server} reaches beyond the preview or changes something \
+                 outside the sandbox, and no session may call it"
+            ),
+            ConnectorRefusal::UrlOutsidePreview { url } => format!(
+                "url_outside_preview: {url} is not the project's preview; open pages under {}",
+                connector.map_or("", |connector| connector.origin.as_str())
+            ),
+        })
 }
 
 fn not_allowed(tool: &str) -> String {
@@ -408,8 +475,13 @@ fn record_decision(
     deps: &ToolDeps,
     ids: EventIds,
     request: &HookRequest,
+    connector: Option<(String, Option<ConnectorTag>)>,
     verdict: Result<(), String>,
 ) -> HookDecision {
+    let (server, tag) = match connector {
+        Some((server, tag)) => (Some(server), tag.map(tag_wire)),
+        None => (None, None),
+    };
     let tool = request.tool_name.clone();
     let tool_use_id = request.tool_use_id.clone();
     let (body, decision) = match verdict {
@@ -418,8 +490,8 @@ fn record_decision(
                 tool,
                 tool_use_id,
                 input: cut(request.tool_input.to_string()),
-                server: None,
-                tag: None,
+                server: server.and_then(|name| name.try_into().ok()),
+                tag,
             }),
             HookDecision {
                 allow: true,
@@ -431,8 +503,8 @@ fn record_decision(
                 tool,
                 tool_use_id,
                 reason: reason.clone(),
-                server: None,
-                tag: None,
+                server: server.and_then(|name| name.try_into().ok()),
+                tag,
             }),
             HookDecision::deny(reason),
         ),
@@ -440,6 +512,14 @@ fn record_decision(
     match append(deps, ids, body) {
         Ok(()) => decision,
         Err(detail) => HookDecision::deny(format!("record_failed: {detail}")),
+    }
+}
+
+fn tag_wire(tag: ConnectorTag) -> ConnectorTagWire {
+    match tag {
+        ConnectorTag::Network => ConnectorTagWire::Network,
+        ConnectorTag::ExternalEffect => ConnectorTagWire::ExternalEffect,
+        ConnectorTag::Denied => ConnectorTagWire::Denied,
     }
 }
 
@@ -959,6 +1039,110 @@ mod tests {
             &daemon.state,
         );
         denied_for(&next, "tier_not_granted");
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn denies_a_connector_call_outside_the_rules() {
+        use farik_core::governor::permissions::{PermissionTier, SessionConnector};
+        use farik_protocol::event::ConnectorTagWire;
+
+        use crate::daemon::SessionRegistration;
+        use crate::session::SessionPurpose;
+
+        let daemon = TestDaemon::new("hook-connector", |_| {});
+        let definition = farik_roles::builtin_connector("playwright").expect("shipped");
+        daemon.state.register_session(SessionRegistration {
+            session_id: "session-browser".to_string(),
+            agent_id: "dev-a".to_string(),
+            task_id: Some("FRK-1".parse().expect("a task id")),
+            purpose: SessionPurpose::Implement,
+            in_reply_to: None,
+            thread: None,
+            cwd: daemon.worktree.clone(),
+            executor: None,
+            limits: DEFAULT_SESSION_LIMITS,
+            farik_tools: Vec::new(),
+            tiers: vec![PermissionTier::Read, PermissionTier::Network],
+            connectors: vec![SessionConnector {
+                server: "playwright".to_string(),
+                origin: "http://localhost:4400".to_string(),
+                tools: definition.tools,
+            }],
+            preview: None,
+        });
+        let hook = |tool: &str, input: Value| {
+            decide_pre_tool_use(&daemon.call("session-browser", tool, &input), &daemon.state)
+        };
+        let navigate = "mcp__playwright__browser_navigate";
+
+        let allowed = hook(navigate, json!({ "url": "http://localhost:4400/cart" }));
+        assert!(allowed.allow, "{allowed:?}");
+        let called = daemon.events(EventKind::ToolCalled);
+        let EventBody::ToolCalled(body) = &called.last().expect("recorded").body else {
+            panic!("a tool.called body");
+        };
+        assert_eq!(body.tool, navigate);
+        assert_eq!(
+            body.server.as_deref().map(String::as_str),
+            Some("playwright")
+        );
+        assert_eq!(body.tag, Some(ConnectorTagWire::Network));
+
+        for (tool, input, kind, server, tag) in [
+            (
+                navigate,
+                json!({ "url": "http://example.com/" }),
+                "url_outside_preview",
+                "playwright",
+                Some(ConnectorTagWire::Network),
+            ),
+            (
+                "mcp__playwright__browser_evaluate",
+                json!({ "function": "() => 1" }),
+                "tool_denied",
+                "playwright",
+                Some(ConnectorTagWire::Denied),
+            ),
+            (
+                "mcp__playwright__browser_teleport",
+                json!({}),
+                "tool_not_tagged",
+                "playwright",
+                None,
+            ),
+        ] {
+            let decision = hook(tool, input);
+            denied_for(&decision, kind);
+            let denied = daemon.events(EventKind::ToolDenied);
+            let EventBody::ToolDenied(body) = &denied.last().expect("recorded").body else {
+                panic!("a tool.denied body");
+            };
+            assert_eq!(body.tool, tool);
+            assert_eq!(body.reason, decision.reason);
+            assert_eq!(
+                body.server.as_deref().map(String::as_str),
+                Some(server),
+                "{tool}"
+            );
+            assert_eq!(body.tag, tag, "{tool}");
+        }
+        // A shipped connector that dev-a's own session was not given.
+        let decision = decide_pre_tool_use(
+            &daemon.dev_call(navigate, &json!({ "url": "http://localhost:4400" })),
+            &daemon.state,
+        );
+        denied_for(&decision, "connector_not_in_session");
+        let denied = daemon.events(EventKind::ToolDenied);
+        let EventBody::ToolDenied(body) = &denied.last().expect("recorded").body else {
+            panic!("a tool.denied body");
+        };
+        assert_eq!(
+            body.server.as_deref().map(String::as_str),
+            Some("playwright")
+        );
+        assert_eq!(body.tag, None);
+        assert_eq!(daemon.events(EventKind::ToolCalled).len(), 1);
     }
 
     #[test]

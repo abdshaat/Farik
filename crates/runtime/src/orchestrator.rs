@@ -22,6 +22,7 @@ use crate::channel::ChannelError;
 use crate::cost::CostError;
 use crate::daemon::{CommandHandler, DaemonState};
 use crate::forge::{Forge, ForgeError};
+use crate::preview::PreviewFactory;
 use crate::sandbox::{Sandbox, SandboxError, SandboxFactory};
 use crate::session::{RuntimeAdapter, RuntimeError};
 use crate::sleep::Sleeper;
@@ -54,6 +55,8 @@ pub struct OrchestratorDeps {
     pub adapter: Arc<dyn RuntimeAdapter>,
     /// What makes a task's sandbox.
     pub sandboxes: Arc<dyn SandboxFactory>,
+    /// What prepares and starts a task's preview, for a session given a connector.
+    pub previews: Arc<dyn PreviewFactory>,
     /// Where session ids come from.
     pub session_ids: Arc<dyn IdSource + Send + Sync>,
     /// The forge pull requests are opened on, under the `pull_request` policy.

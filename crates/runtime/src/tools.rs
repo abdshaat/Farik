@@ -9,8 +9,8 @@ use std::sync::{Arc, LazyLock};
 
 use farik_core::contract::{Role, TaskContract, TaskId};
 use farik_core::governor::permissions::{
-    AgentGrants, PermissionTier, ToolCallContext, ToolCallRequest, ToolDescriptor,
-    evaluate_tool_call,
+    AgentGrants, PermissionTier, SessionConnector, ToolCallContext, ToolCallRequest,
+    ToolDescriptor, evaluate_tool_call,
 };
 use farik_core::team::{Agent, AgentStatus, Team};
 use farik_protocol::clock::Clock;
@@ -22,6 +22,7 @@ use serde::de::DeserializeOwned;
 use serde_json::Value;
 
 use crate::exec::Executor;
+use crate::preview::RunningPreview;
 use crate::session::SessionPurpose;
 use crate::transitions::Transitions;
 
@@ -113,6 +114,10 @@ pub struct ToolContext {
     /// The agent's tiers when the session started (spec 4.4): a grant or a revoke waits for the
     /// agent's next session.
     pub tiers: Vec<PermissionTier>,
+    /// The connectors the session was given.
+    pub connectors: Vec<SessionConnector>,
+    /// The task's preview while the session runs, when it was given a connector.
+    pub preview: Option<Arc<dyn RunningPreview>>,
     /// The project's store, files, and repository.
     pub deps: Arc<ToolDeps>,
 }

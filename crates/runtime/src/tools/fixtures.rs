@@ -109,6 +109,8 @@ impl TestProject {
             thread: None,
             executor: None,
             tiers: tiers_of(&self.deps, agent),
+            connectors: Vec::new(),
+            preview: None,
             deps: Arc::clone(&self.deps),
         }
     }

@@ -20,8 +20,8 @@ use farik_runtime::orchestrator::{
 };
 use farik_runtime::sleep::{Sleeper, TokioSleeper};
 use farik_runtime::{
-    DockerSandboxFactory, HostSandboxFactory, RuntimeAdapter, RuntimeError, SANDBOX_IMAGE,
-    SandboxFactory, SessionHandle, SessionSpec,
+    DockerPreviewFactory, DockerSandboxFactory, HostSandboxFactory, NoPreviews, PreviewFactory,
+    RuntimeAdapter, RuntimeError, SANDBOX_IMAGE, SandboxFactory, SessionHandle, SessionSpec,
 };
 use farik_store::files::Sandbox;
 use serde_json::Value;
@@ -200,6 +200,7 @@ pub(crate) fn command_orchestrator(
             command: name.to_string(),
         }),
         sandboxes: Arc::new(HostSandboxFactory),
+        previews: Arc::new(NoPreviews),
         session_ids: Arc::clone(&io.session_ids),
         forge: Arc::new(forge(&project.root, io)),
         sleeper: sleeper(io),
@@ -447,17 +448,14 @@ async fn start_listening(
             return Err(error);
         }
     };
-    let sandboxes: Arc<dyn SandboxFactory> = match settings.sandbox {
-        Sandbox::Docker => Arc::new(DockerSandboxFactory {
-            image: SANDBOX_IMAGE.to_string(),
-        }),
-        Sandbox::None => Arc::new(HostSandboxFactory),
-    };
+    let (sandboxes, previews) = factories(settings.sandbox);
+    tools.transitions.set_previews(Arc::clone(&previews));
     let orchestrator = Arc::new(Orchestrator::new(OrchestratorDeps {
         tools,
         daemon: Arc::clone(&daemon),
         adapter,
         sandboxes,
+        previews,
         session_ids: Arc::clone(&io.session_ids),
         forge: Arc::new(forge(&project.root, io)),
         sleeper: sleeper(io),
@@ -486,6 +484,22 @@ async fn start_listening(
         handle,
         _lock: lock,
     })
+}
+
+/// What makes a task's sandbox and its preview, by the project's sandbox setting: the Designer
+/// has no browser without Docker's sandbox (D3).
+fn factories(sandbox: Sandbox) -> (Arc<dyn SandboxFactory>, Arc<dyn PreviewFactory>) {
+    match sandbox {
+        Sandbox::Docker => (
+            Arc::new(DockerSandboxFactory {
+                image: SANDBOX_IMAGE.to_string(),
+            }),
+            Arc::new(DockerPreviewFactory {
+                image: SANDBOX_IMAGE.to_string(),
+            }),
+        ),
+        Sandbox::None => (Arc::new(HostSandboxFactory), Arc::new(NoPreviews)),
+    }
 }
 
 /// What the browser routes need but the port, and the first connect code, issued. `in_use` is the

@@ -19,7 +19,7 @@ use axum::routing::{get, post};
 use axum::{Extension, Json, Router};
 use farik_core::budget::SessionLimits;
 use farik_core::contract::TaskId;
-use farik_core::governor::permissions::PermissionTier;
+use farik_core::governor::permissions::{PermissionTier, SessionConnector};
 use rmcp::transport::streamable_http_server::session::local::LocalSessionManager;
 use rmcp::transport::streamable_http_server::{StreamableHttpServerConfig, StreamableHttpService};
 use tokio::net::TcpListener;
@@ -37,6 +37,7 @@ use self::mcp::FarikMcp;
 
 use crate::exec::Executor;
 use crate::orchestrator::{CommandError, CommandReport, reply_of};
+use crate::preview::RunningPreview;
 use crate::session::SessionPurpose;
 use crate::tools::{ToolContext, ToolDeps};
 
@@ -116,6 +117,11 @@ pub struct SessionRegistration {
     /// The agent's tiers when the session started (spec 4.4): a grant or a revoke waits for the
     /// agent's next session, while a pause or a retirement stops this one at once.
     pub tiers: Vec<PermissionTier>,
+    /// The connectors it was given (5.6): the hook refuses a connector's call unless it is one of
+    /// these and passes `evaluate_connector_call`.
+    pub connectors: Vec<SessionConnector>,
+    /// The task's preview while the session runs, when it was given a connector.
+    pub preview: Option<Arc<dyn RunningPreview>>,
 }
 
 /// A registration, the tool calls the hook has allowed it, and why it was told to stop, once it
@@ -298,6 +304,8 @@ impl DaemonState {
             thread: session.registration.thread,
             executor: session.registration.executor.clone(),
             tiers: session.registration.tiers.clone(),
+            connectors: session.registration.connectors.clone(),
+            preview: session.registration.preview.clone(),
             deps: Arc::clone(deps),
         })
     }
@@ -522,7 +530,7 @@ pub(crate) fn random_token() -> Result<String, DaemonError> {
 }
 
 /// `bytes` in lowercase hex.
-fn hex(bytes: &[u8]) -> String {
+pub(crate) fn hex(bytes: &[u8]) -> String {
     bytes
         .iter()
         .fold(String::with_capacity(bytes.len() * 2), |mut hex, byte| {
@@ -919,6 +927,8 @@ mod tests {
             limits: DEFAULT_SESSION_LIMITS,
             farik_tools: Vec::new(),
             tiers: Vec::new(),
+            connectors: Vec::new(),
+            preview: None,
             purpose: SessionPurpose::Implement,
             in_reply_to: None,
             thread: None,
@@ -1087,6 +1097,8 @@ mod tests {
                 limits: DEFAULT_SESSION_LIMITS,
                 farik_tools: Vec::new(),
                 tiers: Vec::new(),
+                connectors: Vec::new(),
+                preview: None,
                 purpose: SessionPurpose::Implement,
                 in_reply_to: None,
                 thread: None,

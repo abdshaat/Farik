@@ -616,6 +616,10 @@ pub fn claude_args(
     refuse_an_unexpressible_glob(&protected)?;
     let settings = settings_json(config, &protected);
     let session_flag = if resume { "--resume" } else { "--session-id" };
+    let disallowed = std::iter::once(REFUSED_BUILTIN)
+        .chain(spec.disallowed_tools.iter().map(String::as_str))
+        .collect::<Vec<_>>()
+        .join(",");
     let args = [
         "-p",
         "--output-format",
@@ -634,7 +638,7 @@ pub fn claude_args(
         "--tools",
         &spec.builtin_tools.join(","),
         "--disallowedTools",
-        REFUSED_BUILTIN,
+        &disallowed,
         "--mcp-config",
         &session_dir.join(MCP_CONFIG_FILE).display().to_string(),
         "--strict-mcp-config",
@@ -1007,6 +1011,39 @@ mod tests {
         assert!(
             args.iter().all(|arg| !arg.contains(TOKEN)),
             "the token is on the command line: {args:?}"
+        );
+    }
+
+    #[test]
+    fn lists_the_denied_tools_as_disallowed() {
+        let project = a_project("claude-disallowed");
+        let config = config(&project);
+        let definition = farik_roles::builtin_connector("playwright").expect("shipped");
+        let spec = SessionSpec {
+            disallowed_tools: crate::preview::disallowed_tools(&definition),
+            ..spec()
+        };
+        let dir = session_dir(&config, &spec);
+        let args = claude_args(&spec, &config, &dir, false).expect("the args are built");
+        let disallowed: Vec<&str> = value_after(&args, "--disallowedTools").split(',').collect();
+        assert_eq!(disallowed[0], "Bash");
+        for tool in [
+            "browser_evaluate",
+            "browser_run_code",
+            "browser_file_upload",
+            "browser_install",
+            "browser_pdf_save",
+            "browser_network_requests",
+        ] {
+            let named = format!("mcp__playwright__{tool}");
+            assert!(
+                disallowed.contains(&named.as_str()),
+                "{named}: {disallowed:?}"
+            );
+        }
+        assert!(
+            !disallowed.contains(&"mcp__playwright__browser_navigate"),
+            "{disallowed:?}"
         );
     }
 

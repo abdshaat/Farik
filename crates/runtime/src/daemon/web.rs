@@ -30,7 +30,7 @@ use super::setup::list_folders;
 use super::{DaemonError, DaemonState, SetupError, SetupHost, hex, random_token, same_token};
 use super::{board, gates, team};
 use crate::claude::CredentialKind;
-use crate::computer::{build_sandbox_image, check_computer};
+use crate::computer::{build_sandbox_image, check_computer, pull_browser_image};
 use crate::credential::CredentialStore;
 use crate::locked;
 
@@ -511,11 +511,12 @@ pub(super) const NO_PROJECT: i64 = -32004;
 pub(super) const REFUSED: i64 = -32005;
 
 /// The methods the first-run wizard calls, which setup mode's host answers.
-const SETUP_METHODS: [&str; 4] = [
+const SETUP_METHODS: [&str; 5] = [
     "project.open",
     "project.create",
     "account.connect",
     "sandbox.build",
+    "browser.pull",
 ];
 /// The methods whose params hold a secret, whose refusal never quotes them: the schema's errors
 /// quote the whole frame.
@@ -746,7 +747,8 @@ fn setup_query(host: &Arc<dyn SetupHost>, name: &str, params: &Value) -> Result<
     match name {
         "folders.list" => list_folders(&host.home(), params["path"].as_str().unwrap_or_default())
             .map_err(|sentence| Failure::new(REFUSED, sentence)),
-        "computer.check" => serde_json::to_value(check_computer(&host.env()))
+        // Setup proposes the six, the UI/UX Designer among them, so its browser is checked.
+        "computer.check" => serde_json::to_value(check_computer(&host.env(), true))
             .map_err(|error| Failure::new(INTERNAL_ERROR, error.to_string())),
         _ => Ok(match host.account() {
             Some((kind, source)) => {
@@ -773,6 +775,11 @@ async fn setup_call(state: &DaemonState, method: &str, params: &Value) -> Result
         let no_sandbox = params["no_sandbox"].as_bool().unwrap_or_default();
         let root = |root: PathBuf| json!({ "project_root": root.display().to_string() });
         let answered = match method.as_str() {
+            "browser.pull" => {
+                return pull_browser_image(&host.env())
+                    .map(|image| json!({ "image": image }))
+                    .map_err(|sentence| Failure::new(REFUSED, sentence));
+            }
             "project.open" => host.open(text("path"), no_sandbox).map(root),
             "project.create" => host
                 .create(
@@ -2300,6 +2307,39 @@ mod tests {
         assert_eq!(
             stopped["result"]["sandbox_image"]["state"], "missing",
             "{stopped}"
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn pulls_the_designer_browser_on_request() {
+        let bin = scratch("setup-browser-pull");
+        let recorded = bin.join("recorded");
+        std::fs::create_dir_all(&recorded).expect("the folder is made");
+        script(
+            &bin,
+            "docker",
+            &format!("echo \"$@\" > '{}/args'", recorded.display()),
+        );
+        let (state, _) = in_setup(&bin, &format!("{}:/usr/bin:/bin", bin.display()));
+        let image = farik_roles::builtin_connector("playwright")
+            .expect("shipped")
+            .image;
+
+        let (_, pulled) = asked(&state, "browser.pull", &json!({})).await;
+        conforms(&pulled["result"], "browserPullResult");
+        assert_eq!(pulled["result"], json!({ "image": image }), "{pulled}");
+        assert_eq!(
+            std::fs::read_to_string(recorded.join("args")).expect("docker was run"),
+            format!("pull --quiet {image}\n")
+        );
+
+        script(&bin, "docker", "echo 'pull access denied' >&2; exit 1");
+        let (_, refused) = asked(&state, "browser.pull", &json!({})).await;
+        assert!(
+            refused["error"]["message"]
+                .as_str()
+                .is_some_and(|message| message.contains("pull access denied")),
+            "{refused}"
         );
     }
 

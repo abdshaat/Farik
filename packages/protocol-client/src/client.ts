@@ -32,6 +32,7 @@ export type MethodName =
 	| "project.create"
 	| "account.connect"
 	| "sandbox.build"
+	| "browser.pull"
 	| "request.file"
 	| "contract.save"
 	| "team.save"

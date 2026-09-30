@@ -114,6 +114,9 @@ pub struct TransitionContext {
     /// Whether Farik could not run one of the task's criteria for its reviewer, for a reason that
     /// is not the work's (5.4): the task goes to the human rather than back to its assignee.
     pub criterion_unrunnable: bool,
+    /// Whether the task's preview could not be prepared or started for a session that needed it
+    /// (step 12): the task goes to the human, who fixes the commands.
+    pub preview_failed: bool,
     /// Whether the task's result waits on the human's acceptance: it is `verifying`, and it is an
     /// epic, risk `high`, or has a `human` criterion (5.4).
     pub result_awaits_human: bool,
@@ -594,9 +597,9 @@ fn rejection_outcome(context: &TransitionContext) -> RejectionOutcome {
 /// Why the governor's own `any -> escalated` row is open, or `None` when it is not. The task's
 /// sessions are their own reason (5.7); every other exhausted budget is `budget`; then design plans
 /// returned as often as the task may be tried, `iterations` (ADR 0026); then a denied
-/// permission; then a criterion Farik could not run for the reviewer, which asks the human and so
-/// is `explicit_request`. A user's `stop` reaches the table as the human's own row instead, which
-/// needs no gate.
+/// permission; then a preview that could not be made ready, `preview`; then a criterion Farik could
+/// not run for the reviewer, which asks the human and so is `explicit_request`. A user's `stop`
+/// reaches the table as the human's own row instead, which needs no gate.
 fn governor_escalation_reason(context: &TransitionContext) -> Option<EscalationReason> {
     for exhausted in check_budgets(&context.budget) {
         if exhausted.consequence != BudgetConsequence::EscalateTask {
@@ -622,6 +625,9 @@ fn governor_escalation_reason(context: &TransitionContext) -> Option<EscalationR
     }
     if context.permission_denied {
         return Some(EscalationReason::Permission);
+    }
+    if context.preview_failed {
+        return Some(EscalationReason::Preview);
     }
     if context.criterion_unrunnable {
         return Some(EscalationReason::ExplicitRequest);
@@ -812,6 +818,7 @@ mod tests {
             budget: a_budget(),
             permission_denied: false,
             criterion_unrunnable: false,
+            preview_failed: false,
             result_awaits_human: true,
             review_passed: true,
             extra_iterations: 0,

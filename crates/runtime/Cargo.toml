@@ -7,6 +7,11 @@ license.workspace = true
 repository.workspace = true
 rust-version.workspace = true
 
+[features]
+# The end-to-end server's `--preview` admission (step 12, D1), switched on only by `farik`'s `e2e`,
+# so that the release binary does not have it.
+e2e = []
+
 [dependencies]
 axum.workspace = true
 chrono.workspace = true

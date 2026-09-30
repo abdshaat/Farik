@@ -39,6 +39,7 @@ pub fn a_session_spec() -> SessionSpec {
             .map(str::to_string)
             .to_vec(),
         mcp_servers: Vec::new(),
+        disallowed_tools: Vec::new(),
         cwd: PathBuf::from("/workspace"),
         limits: DEFAULT_SESSION_LIMITS,
         initial_prompt: "Read note.txt.".to_string(),

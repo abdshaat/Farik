@@ -224,6 +224,17 @@ impl Git {
         self.at_root(&["merge-base", a, b])
     }
 
+    /// The id of the tree `rev` points at, `<rev>^{tree}`: what a commit's files are, whatever
+    /// its message or parents.
+    ///
+    /// # Errors
+    ///
+    /// `CommandFailed` when `rev` names nothing.
+    pub fn tree(&self, rev: &str) -> Result<String, GitError> {
+        self.require_repository()?;
+        self.at_root(&["rev-parse", "--verify", &format!("{rev}^{{tree}}")])
+    }
+
     /// The file at `path` as `rev` has it, byte for byte (read as UTF-8 with replacement).
     ///
     /// # Errors

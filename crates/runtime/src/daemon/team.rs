@@ -10,6 +10,7 @@ use std::sync::Arc;
 
 use farik_core::contract::Role;
 use farik_core::criteria::validate_criteria;
+use farik_core::governor::gates::DesignerBrowser;
 use farik_core::governor::paths::{PathRefusal, check_protected_paths};
 use farik_core::team::{Team, ValidationError, describe_change, validate_team};
 use farik_protocol::command::{Command, CommandReply};
@@ -181,29 +182,41 @@ fn web_of(state: &DaemonState) -> Result<&super::web::WebState, Failure> {
         .ok_or_else(|| Failure::new(INTERNAL_ERROR, "the browser routes are off"))
 }
 
-/// `team.propose`: the team as it is, with the six in place of its agents, and the criteria.
+/// `team.propose`: the team as it is, with the six in place of its agents, and the criteria. The
+/// Designer comes with its Playwright connector on, and is listed `unavailable` where it cannot
+/// have its browser for want of Docker's sandbox, which the page shows unticked (D3).
 fn propose(deps: &ToolDeps) -> Result<Value, Failure> {
-    let mut team = serde_json::to_value(deps.files.read_team().map_err(|e| internal(&e))?)
-        .map_err(|e| internal(&e))?;
+    let current = deps.files.read_team().map_err(|e| internal(&e))?;
+    let no_sandbox = deps.transitions.designer_browser(&current) == DesignerBrowser::NoSandbox;
+    let mut team = serde_json::to_value(current).map_err(|e| internal(&e))?;
+    let mut unavailable = Vec::new();
     let agents = SIX
         .iter()
         .map(|(name, role, avatar)| {
             let shipped = load_role(*role).map_err(|e| internal(&e))?;
-            Ok(json!({
-                "id": name.to_lowercase(),
+            let id = name.to_lowercase();
+            let mut agent = json!({
+                "id": id,
                 "display_name": name,
                 "role": role,
                 "avatar": avatar,
                 "persona": shipped.persona,
                 "status": "active",
                 "model": { "id": shipped.model, "effort": shipped.effort },
-            }))
+            });
+            if *role == Role::UiUxDesigner {
+                agent["mcp_servers"] = json!([{ "name": "playwright", "source": "builtin" }]);
+                if no_sandbox {
+                    unavailable.push(json!({ "agent_id": id, "reason": "designer_needs_sandbox" }));
+                }
+            }
+            Ok(agent)
         })
         .collect::<Result<Vec<_>, Failure>>()?;
     team["agents"] = json!(agents);
     let criteria = serde_json::to_value(deps.files.read_criteria().map_err(|e| internal(&e))?)
         .map_err(|e| internal(&e))?;
-    Ok(json!({ "team": team, "criteria": criteria }))
+    Ok(json!({ "team": team, "criteria": criteria, "unavailable": unavailable }))
 }
 
 /// `models.list`: the newest model of each family the prices name.
@@ -792,6 +805,54 @@ mod tests {
                 .unwrap_or_else(|| panic!("an error: {reply}"))
                 .to_string(),
         )
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn proposes_the_designer_with_its_connector() {
+        use crate::preview::NoPreviews;
+        use crate::preview::fixtures::FakePreviews;
+
+        let proposed_with = |name: &str, previews: Arc<dyn crate::preview::PreviewFactory>| {
+            let harness = driven(name);
+            harness.project.deps.transitions.set_previews(previews);
+            query(
+                &harness.daemon,
+                "team.propose",
+                &json!({}),
+                "teamProposeResult",
+            )
+        };
+        let connectors = |proposed: &Value| -> Vec<(String, Value)> {
+            proposed["team"]["agents"]
+                .as_array()
+                .expect("agents")
+                .iter()
+                .filter_map(|agent| {
+                    agent.get("mcp_servers").map(|servers| {
+                        (
+                            agent["id"].as_str().unwrap_or_default().to_string(),
+                            servers.clone(),
+                        )
+                    })
+                })
+                .collect()
+        };
+        let playwright = json!([{ "name": "playwright", "source": "builtin" }]);
+
+        let ticked = proposed_with("team-propose-browser", Arc::new(FakePreviews::ready()));
+        assert_eq!(
+            connectors(&ticked),
+            [("iris".to_string(), playwright.clone())]
+        );
+        assert_eq!(ticked["unavailable"], json!([]));
+
+        let unticked = proposed_with("team-propose-no-sandbox", Arc::new(NoPreviews));
+        assert_eq!(connectors(&unticked), [("iris".to_string(), playwright)]);
+        assert_eq!(
+            unticked["unavailable"],
+            json!([{ "agent_id": "iris", "reason": "designer_needs_sandbox" }])
+        );
     }
 
     #[test]

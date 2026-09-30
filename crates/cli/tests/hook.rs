@@ -130,6 +130,8 @@ impl Served {
             limits: DEFAULT_SESSION_LIMITS,
             farik_tools: Vec::new(),
             tiers: team.agents[1].tiers(&team.permissions()),
+            connectors: Vec::new(),
+            preview: None,
             purpose: SessionPurpose::Implement,
             in_reply_to: None,
             thread: None,

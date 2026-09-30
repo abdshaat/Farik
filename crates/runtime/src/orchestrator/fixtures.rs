@@ -22,6 +22,7 @@ use super::{Orchestrator, OrchestratorDeps, OrchestratorError, TickReport};
 use crate::daemon::DaemonState;
 use crate::exec::{ExecError, ExecResult, Executor};
 use crate::forge::Forge;
+use crate::preview::{NoPreviews, PreviewFactory};
 use crate::recorded::{RecordedAdapter, Transcript};
 use crate::sandbox::host::HostSandboxFactory;
 use crate::sandbox::{Sandbox, SandboxError, SandboxFactory};
@@ -39,6 +40,9 @@ pub(crate) struct Harness {
     pub(crate) daemon: Arc<DaemonState>,
     /// The `gh` every orchestrator of this harness drives, answering nothing until told.
     pub(crate) gh: FakeGh,
+    /// What every orchestrator of this harness starts previews with: none can run, as in
+    /// no-sandbox mode, until a test sets its own.
+    pub(crate) previews: Arc<dyn PreviewFactory>,
 }
 
 impl Harness {
@@ -56,6 +60,7 @@ impl Harness {
             project,
             daemon,
             gh,
+            previews: Arc::new(NoPreviews),
         }
     }
 
@@ -106,6 +111,7 @@ impl Harness {
             daemon: Arc::clone(&self.daemon),
             adapter,
             sandboxes,
+            previews: Arc::clone(&self.previews),
             session_ids,
             forge: Arc::new(forge),
             sleeper: Arc::new(NeverWakes),
@@ -151,6 +157,7 @@ impl Harness {
             daemon: Arc::clone(&self.daemon),
             adapter,
             sandboxes: Arc::new(HostSandboxFactory),
+            previews: Arc::clone(&self.previews),
             session_ids: Arc::new(LaterIds(SequentialIds::new())),
             forge: Arc::new(self.gh.forge(&self.project.repo.path)),
             sleeper: Arc::new(MovingSleeper(clock)),

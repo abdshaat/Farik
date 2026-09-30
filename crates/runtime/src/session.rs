@@ -92,6 +92,9 @@ pub struct SessionSpec {
     /// The MCP servers it is given besides Farik's own, which the runtime adds itself; a server
     /// here named `farik` is refused.
     pub mcp_servers: Vec<McpServerConfig>,
+    /// The connector tools it may never call, as `mcp__<server>__<tool>`: refused by the program
+    /// beside `Bash`, and by the hook whatever the program does.
+    pub disallowed_tools: Vec<String>,
     /// The directory it works in.
     pub cwd: PathBuf,
     /// When it is stopped.

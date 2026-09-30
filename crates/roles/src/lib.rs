@@ -14,11 +14,14 @@ use serde_json::Value;
 
 use crate::generated::role::{FarikRole, FarikRoleModelEffort};
 
+/// The connectors Farik ships.
+mod connectors;
 /// Types generated from `docs/schemas/role.schema.json`.
 pub mod generated;
 /// Which role reviews a task (D7).
 mod reviewer;
 
+pub use connectors::{ConnectorDefinition, builtin_connector};
 pub use reviewer::{REVIEWER_ROLE_FOR, default_reviewer_role};
 
 const SCHEMA_JSON: &str = include_str!("../../../docs/schemas/role.schema.json");
