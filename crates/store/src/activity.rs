@@ -5,7 +5,7 @@ use std::collections::BTreeMap;
 use std::str::FromStr as _;
 
 use chrono::{DateTime, Utc};
-use farik_core::contract::{TaskId, TaskStatus};
+use farik_core::contract::{Role, TaskId, TaskStatus};
 use farik_core::team::{AgentStatus, Team};
 use farik_protocol::event::{
     EventBody, EventKind, FarikEvent, MessageKind, SessionStartedBodyPurpose,
@@ -13,7 +13,7 @@ use farik_protocol::event::{
 
 use crate::files::ProjectFiles;
 use crate::waiting::name_of;
-use crate::{EventLog, EventQuery, Projections, StoreError};
+use crate::{EventLog, EventQuery, Projections, StoreError, TaskProjection};
 
 /// What an agent is doing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -82,6 +82,15 @@ pub fn activity(
         })
         .unwrap_or(false);
     let titles = titles(projections)?;
+    let board = projections.board()?;
+    let plans = log.read(&EventQuery {
+        kinds: vec![
+            EventKind::DesignPlanProposed,
+            EventKind::DesignPlanApproved,
+            EventKind::DesignPlanReturned,
+        ],
+        ..EventQuery::default()
+    })?;
     let waiting = crate::waiting::waiting(projections, log, files, team)?;
     let mut all = Vec::new();
     for agent in team
@@ -141,6 +150,15 @@ pub fn activity(
             ));
             continue;
         }
+        if let Some(task) = plan_waiting(&plans, &board, id) {
+            let pm = team
+                .active_agents()
+                .find(|agent| Role::from(agent.role) == Role::ProductManager)
+                .map_or("the Product Manager", |agent| agent.display_name.as_str());
+            let line = format!("Waiting for {pm} to approve a plan");
+            all.push(one(ActivityState::Idle, line, Some(task), None));
+            continue;
+        }
         all.push(one(
             ActivityState::Idle,
             "Nothing to do right now".to_string(),
@@ -149,6 +167,24 @@ pub fn activity(
         ));
     }
     Ok(all)
+}
+
+/// The task in progress whose latest design plan `agent` proposed and nobody decided yet.
+fn plan_waiting(plans: &[FarikEvent], board: &[TaskProjection], agent: &str) -> Option<TaskId> {
+    board
+        .iter()
+        .filter(|row| row.status == TaskStatus::InProgress)
+        .find(|row| {
+            plans
+                .iter()
+                .rev()
+                .find(|event| event.envelope.ids.task_id.as_ref() == Some(&row.task_id))
+                .is_some_and(|latest| {
+                    latest.body.kind() == EventKind::DesignPlanProposed
+                        && latest.envelope.ids.agent_id.as_deref() == Some(agent)
+                })
+        })
+        .map(|row| row.task_id.clone())
 }
 
 /// What `agent` is doing in its session that has started and not ended, on which task, in which
@@ -182,7 +218,7 @@ fn at_work(
     let line = match body.purpose.to_string().as_str() {
         "triage" => "Sizing a request".to_string(),
         "refine" => format!("Writing the plan for {title}"),
-        "plan" => format!("Planning {title}"),
+        "plan" | "explore" => format!("Planning {title}"),
         "implement" => format!("Building {title}"),
         "verify" => format!("Reviewing {title}"),
         "ceremony" => format!(
@@ -489,6 +525,82 @@ mod tests {
                 .all(|one| one.1 == ActivityState::Paused && one.2 == "Paused"),
             "{paused:?}"
         );
+    }
+
+    #[test]
+    fn says_a_designer_explores_then_waits_for_its_plans_decision() {
+        let board = Board::new("activity-designer");
+        let mut wire = farik_core::team::fixtures::a_team_wire();
+        wire["agents"] = json!([
+            { "id": "mira", "display_name": "Mira", "role": "product_manager", "status": "active" },
+            { "id": "theo", "display_name": "Theo", "role": "software_developer", "status": "active" },
+            { "id": "iris", "display_name": "Iris", "role": "ui_ux_designer", "status": "active" },
+        ]);
+        let team = validate_team(&wire).expect("the fixture is a team");
+        board.file("FRK-1", "A calmer menu page", |_| {});
+        board.moved(
+            at(9, 1),
+            "FRK-1",
+            ("draft", "in_progress"),
+            "sol",
+            (Some("iris"), Some("ada")),
+        );
+        let iris = |board: &Board| {
+            let all = activity(
+                &board.log,
+                &board.projections,
+                &board.files,
+                &team,
+                at(12, 0),
+            )
+            .expect("the store reads");
+            let one = all
+                .into_iter()
+                .find(|one| one.agent_id == "iris")
+                .expect("iris");
+            (one.state, one.line, one.task_id.map(|id| id.to_string()))
+        };
+        board.session(
+            at(9, 2),
+            Some("FRK-1"),
+            "iris",
+            "session-1",
+            "session.started",
+            json!({ "purpose": "explore", "model": "claude-opus-5", "effort": "high" }),
+        );
+        assert_eq!(iris(&board).1, "Planning A calmer menu page");
+        board.session(
+            at(9, 3),
+            Some("FRK-1"),
+            "iris",
+            "session-1",
+            "session.ended",
+            json!({ "reason": "completed", "detail": "done" }),
+        );
+        board.put(
+            at(9, 3),
+            Some("FRK-1"),
+            Some("iris"),
+            "design_plan.proposed",
+            json!({ "plan": "A plan." }),
+        );
+        assert_eq!(
+            iris(&board),
+            (
+                ActivityState::Idle,
+                "Waiting for Mira to approve a plan".to_string(),
+                Some("FRK-1".to_string())
+            )
+        );
+        // Once decided, the plan waits no more.
+        board.put(
+            at(9, 4),
+            Some("FRK-1"),
+            Some("mira"),
+            "design_plan.returned",
+            json!({ "reason": "Not yet." }),
+        );
+        assert_eq!(iris(&board).1, "Nothing to do right now");
     }
 
     #[test]
