@@ -99,6 +99,10 @@ const live = (s: FakeSocket, seq: number, kind: string, body: object = {}) =>
 		}),
 	);
 
+/** Each `channel.messages` query the page asked, in order. */
+const pages = (s: FakeSocket) =>
+	s.calls("query").filter((f) => f.params.name === "channel.messages");
+
 const day = (offset: number) =>
 	new Date(Date.now() + offset * 86_400_000).toISOString().slice(0, 10);
 const weekday = (date: string) =>
@@ -403,6 +407,69 @@ describe("channel", () => {
 			mentions: [],
 		});
 		expect(screen.getAllByText("Only once.")).toHaveLength(1);
+	});
+
+	it("shows_earlier_messages", async () => {
+		const page = Array.from({ length: 100 }, (_, i) =>
+			message("theo", "ambient", `Newer ${i}.`, { seq: 1001 + i }),
+		);
+		const { s } = await channel(page);
+		const more = await screen.findByRole("button", { name: en.channelEarlier });
+		fireEvent.click(more);
+		const asked = await waitFor(() => {
+			const f = pages(s)[1];
+			if (!f) throw new Error("no second page was asked");
+			return f;
+		});
+		expect(asked.params.params).toEqual({ before_seq: 1001, limit: 100 });
+		// One page at a time.
+		expect((more as HTMLButtonElement).disabled).toBe(true);
+		act(() =>
+			s.reply(asked, {
+				messages: [998, 999, 1000].map((n) =>
+					message("mira", "ambient", `Older ${n}.`, { seq: n }),
+				),
+			}),
+		);
+		await screen.findByText("Older 998.");
+		const list = screen.getByRole("list", { name: en.channelMessages });
+		expect(
+			within(list)
+				.getAllByRole("listitem")
+				.slice(0, 4)
+				.map((li) => li.textContent),
+		).toEqual([
+			expect.stringContaining("Older 998."),
+			expect.stringContaining("Older 999."),
+			expect.stringContaining("Older 1000."),
+			expect.stringContaining("Newer 0."),
+		]);
+		// Fewer than a page: there is nothing earlier.
+		expect(
+			screen.queryByRole("button", { name: en.channelEarlier }),
+		).toBeNull();
+	});
+
+	it("says_when_earlier_messages_cannot_be_read", async () => {
+		const page = Array.from({ length: 100 }, (_, i) =>
+			message("theo", "ambient", `Newer ${i}.`, { seq: 1001 + i }),
+		);
+		const { s } = await channel(page);
+		fireEvent.click(
+			await screen.findByRole("button", { name: en.channelEarlier }),
+		);
+		const asked = await waitFor(() => {
+			const f = pages(s)[1];
+			if (!f) throw new Error("no second page was asked");
+			return f;
+		});
+		act(() => s.fail(asked, -32000, "the store is busy"));
+		expect((await screen.findByRole("alert")).textContent).toBe(
+			en.channelEarlierFailed,
+		);
+		expect(
+			screen.getByRole("button", { name: en.channelEarlier }),
+		).toBeTruthy();
 	});
 
 	it("previews_the_channel_on_today", async () => {

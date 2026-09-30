@@ -162,20 +162,27 @@ export function Channel() {
 		document.getElementById(hash.slice(1))?.scrollIntoView?.();
 	}, [loaded, hash]);
 
+	const [paging, setPaging] = useState<"busy" | "failed">();
 	const earlier = async () => {
 		if (!client || !loaded) return;
-		const answer = (await client.query("channel.messages", {
-			beforeSeq: messages[0]?.seq,
-			limit: PAGE,
-		})) as { messages: Message[] };
-		setLoaded(
-			(l) =>
-				l && {
-					...l,
-					messages: merge(answer.messages, l.messages),
-					more: answer.messages.length === PAGE,
-				},
-		);
+		setPaging("busy");
+		try {
+			const answer = (await client.query("channel.messages", {
+				beforeSeq: messages[0]?.seq,
+				limit: PAGE,
+			})) as { messages: Message[] };
+			setLoaded(
+				(l) =>
+					l && {
+						...l,
+						messages: merge(answer.messages, l.messages),
+						more: answer.messages.length === PAGE,
+					},
+			);
+			setPaging(undefined);
+		} catch {
+			setPaging("failed");
+		}
 	};
 
 	const agents = team?.team.agents ?? [];
@@ -196,8 +203,15 @@ export function Channel() {
 				</div>
 				{loaded?.more && (
 					<div>
-						<Button onClick={earlier}>{t("channelEarlier")}</Button>
+						<Button onClick={earlier} busy={paging === "busy"}>
+							{t("channelEarlier")}
+						</Button>
 					</div>
+				)}
+				{paging === "failed" && (
+					<p role="alert" className={styles.alert}>
+						{t("channelEarlierFailed")}
+					</p>
 				)}
 				<ol className={styles.messages} aria-label={t("channelMessages")}>
 					{group(messages).map((item) =>

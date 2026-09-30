@@ -817,6 +817,8 @@ export const en = {
 	channelMeetings: "Meetings in this sprint",
 	channelMeetingLink: "{thread}, {weekday}",
 	channelEarlier: "Show earlier messages",
+	channelEarlierFailed:
+		"Farik could not read the earlier messages. Try again in a moment.",
 	channelPreview: "In the channel",
 	channelOpen: "Open the channel",
 	sprintReadIt: "Read it",
