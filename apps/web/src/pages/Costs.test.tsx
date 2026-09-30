@@ -224,6 +224,12 @@ describe("costs page", () => {
 				}) as HTMLInputElement
 			).checked,
 		).toBe(true);
+		// Save stays off until there is a change and a clean check.
+		const saveButton = () =>
+			within(dialog).getByRole("button", {
+				name: en.limitSave,
+			}) as HTMLButtonElement;
+		expect(saveButton().disabled).toBe(true);
 		// "Put back the default" puts back the defaults' limit.
 		const putBack = within(dialog).getByRole("button", {
 			name: en.putBack,
@@ -233,31 +239,45 @@ describe("costs page", () => {
 		expect(
 			(within(dialog).getByLabelText(en.spendAmount) as HTMLInputElement).value,
 		).toBe("15");
+		// A check the daemon refuses keeps Save off.
+		const checkOf = (usd: number) =>
+			waitFor(() => {
+				const f = s
+					.calls("query")
+					.filter((q) => q.params.name === "team.validate")
+					.at(-1);
+				const team = (
+					f?.params.params as
+						| { team?: { budgets: { daily_usd?: number } } }
+						| undefined
+				)?.team;
+				if (!f || team?.budgets.daily_usd !== usd)
+					throw new Error(`a limit of ${usd} was not checked`);
+				return f;
+			});
+		await s.reply(await checkOf(15), {
+			errors: [
+				{
+					path: "/budgets/daily_usd",
+					message: "/budgets/daily_usd is too large",
+					code: "other",
+				},
+			],
+			effects: [],
+		});
+		expect(saveButton().disabled).toBe(true);
 		fireEvent.change(within(dialog).getByLabelText(en.spendAmount), {
 			target: { value: "7.50" },
 		});
 		// What the new limit does is shown before it is saved, as in Settings.
-		const check = await waitFor(() => {
-			const f = s
-				.calls("query")
-				.filter((q) => q.params.name === "team.validate")
-				.at(-1);
-			const team = (
-				f?.params.params as
-					| { team?: { budgets: { daily_usd?: number } } }
-					| undefined
-			)?.team;
-			if (!f || team?.budgets.daily_usd !== 7.5)
-				throw new Error("the new limit was not checked");
-			return f;
-		});
-		await s.reply(check, {
+		await s.reply(await checkOf(7.5), {
 			errors: [],
 			effects: ["The team may spend up to $7.50 a day."],
 		});
 		expect(
 			await within(dialog).findByText("The team may spend up to $7.50 a day."),
 		).toBeTruthy();
+		expect(saveButton().disabled).toBe(false);
 		await expectNoAxeViolations(container);
 		// A refused save is said in plain words, and the dialog stays.
 		fireEvent.click(within(dialog).getByRole("button", { name: en.limitSave }));
