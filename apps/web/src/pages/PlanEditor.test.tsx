@@ -26,8 +26,8 @@ const checks = (s: FakeSocket) =>
 	s.calls("query").filter((q) => q.params.name === "contract.check");
 const gets = (s: FakeSocket) =>
 	s.calls("query").filter((q) => q.params.name === "contract.get");
-const pause = (ms: number) =>
-	act(() => new Promise((done) => setTimeout(done, ms)));
+/** Moves the faked clock on by `ms`, running what falls due inside `act`. */
+const tick = (ms: number) => act(() => vi.advanceTimersByTimeAsync(ms));
 
 /** The command the page sent, once it has sent `count`. */
 const sent = (s: FakeSocket, count = 1) =>
@@ -38,7 +38,10 @@ const sent = (s: FakeSocket, count = 1) =>
 	});
 
 describe("plan editor", () => {
-	afterEach(() => vi.unstubAllGlobals());
+	afterEach(() => {
+		vi.useRealTimers();
+		vi.unstubAllGlobals();
+	});
 
 	it("checks_as_you_type", async () => {
 		const { container, s } = await opened();
@@ -63,13 +66,16 @@ describe("plan editor", () => {
 			),
 		);
 
-		// Three keystrokes: one check, 400 ms after the last.
+		// Three keystrokes: one check, 400 ms after the last. The clock is the test's, so a
+		// loaded machine neither stretches the wait nor fires the check early.
+		vi.useFakeTimers();
 		const intent = screen.getByLabelText("Why you want it");
 		for (const value of ["C", "Cu", "Cus"])
 			fireEvent.change(intent, { target: { value } });
-		await pause(300);
+		await tick(399);
 		expect(checks(s)).toHaveLength(1);
-		await waitFor(() => expect(checks(s)).toHaveLength(2));
+		await tick(1);
+		expect(checks(s)).toHaveLength(2);
 		const asked = checks(s)[1]?.params.params as {
 			task_id: string;
 			contract: { intent: string; exit_criteria: unknown[] };
@@ -77,8 +83,9 @@ describe("plan editor", () => {
 		expect(asked.task_id).toBe("FRK-1");
 		expect(asked.contract.intent).toBe("Cus");
 		expect(asked.contract.exit_criteria).toHaveLength(2);
-		await pause(500);
+		await tick(500);
 		expect(checks(s)).toHaveLength(2);
+		vi.useRealTimers();
 		await s.reply(checks(s)[1] as never, {
 			failures: [
 				{
