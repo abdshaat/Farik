@@ -237,11 +237,46 @@ describe("costs page", () => {
 		fireEvent.change(within(dialog).getByLabelText(en.spendAmount), {
 			target: { value: "7.50" },
 		});
+		// What the new limit does is shown before it is saved, as in Settings.
+		const check = await waitFor(() => {
+			const f = s
+				.calls("query")
+				.filter((q) => q.params.name === "team.validate")
+				.at(-1);
+			const team = (
+				f?.params.params as
+					| { team?: { budgets: { daily_usd?: number } } }
+					| undefined
+			)?.team;
+			if (!f || team?.budgets.daily_usd !== 7.5)
+				throw new Error("the new limit was not checked");
+			return f;
+		});
+		act(() =>
+			s.reply(check, {
+				errors: [],
+				effects: ["The team may spend up to $7.50 a day."],
+			}),
+		);
+		expect(
+			await within(dialog).findByText("The team may spend up to $7.50 a day."),
+		).toBeTruthy();
 		await expectNoAxeViolations(container);
+		// A refused save is said in plain words, and the dialog stays.
+		fireEvent.click(within(dialog).getByRole("button", { name: en.limitSave }));
+		const refused = await waitFor(() => {
+			const f = s.calls("team.save").at(-1);
+			if (!f) throw new Error("no team.save was sent");
+			return f;
+		});
+		act(() => s.fail(refused, -32602, "/budgets/daily_usd is not a number"));
+		expect((await within(dialog).findByRole("alert")).textContent).toBe(
+			en.refuseOther,
+		);
 		fireEvent.click(within(dialog).getByRole("button", { name: en.limitSave }));
 		const frame = await waitFor(() => {
 			const f = s.calls("team.save").at(-1);
-			if (!f) throw new Error("no team.save was sent");
+			if (!f || f === refused) throw new Error("no second team.save was sent");
 			return f;
 		});
 		const team = (frame.params as { team: typeof TEAM }).team;

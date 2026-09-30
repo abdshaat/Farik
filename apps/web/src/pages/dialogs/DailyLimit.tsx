@@ -1,12 +1,13 @@
 import { Button, Dialog } from "@farik/ui";
-import { useState } from "react";
-import { useConnection } from "../../app/connection.tsx";
-import { saidAll } from "../../app/refusals.ts";
 import { t } from "../../strings/t.ts";
 import { useDailyLimit } from "../setup/SetupSpending.tsx";
 import type { Team } from "../setup/TeamSetup.tsx";
+import { useChange } from "../TeamRules.tsx";
 
-/** "Set a daily limit": setup's own control, saved as `budgets.daily_usd` through `team.save`. */
+/**
+ * "Set a daily limit": setup's own control, saved as `budgets.daily_usd` through `team.save`,
+ * with its effect shown first, as Settings' part shows it.
+ */
 export function DailyLimit({
 	team,
 	onClose,
@@ -14,24 +15,13 @@ export function DailyLimit({
 	team: Team;
 	onClose: () => void;
 }) {
-	const { client } = useConnection();
 	const { wrong, budgets, fields } = useDailyLimit(team.budgets.dailyUsd);
-	const [busy, setBusy] = useState(false);
-	const [refused, setRefused] = useState<string>();
-	const save = async () => {
-		if (!client) return;
-		setBusy(true);
-		setRefused(undefined);
-		try {
-			await client.call("team.save", {
-				team: { ...team, budgets: budgets(team.budgets) },
-			});
-			onClose();
-		} catch (e) {
-			setRefused(saidAll(e));
-			setBusy(false);
-		}
-	};
+	const next = { ...team, budgets: budgets(team.budgets) };
+	const { preview, save, busy, blocked } = useChange(
+		{ saved: team, base: undefined, done: onClose },
+		next.budgets.dailyUsd === team.budgets.dailyUsd ? team : next,
+		{ wrong },
+	);
 	return (
 		<Dialog
 			open
@@ -40,14 +30,14 @@ export function DailyLimit({
 			actions={
 				<>
 					<Button onClick={onClose}>{t("sprintNotNow")}</Button>
-					<Button kind="primary" busy={busy} disabled={wrong} onClick={save}>
+					<Button kind="primary" busy={busy} disabled={blocked} onClick={save}>
 						{t("limitSave")}
 					</Button>
 				</>
 			}
 		>
 			{fields}
-			{refused && <p role="alert">{refused}</p>}
+			{preview}
 		</Dialog>
 	);
 }
