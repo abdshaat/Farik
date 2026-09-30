@@ -140,10 +140,9 @@ export function TaskDetail() {
 					.replace("{n}", contract.sprint.slice(1))
 			: `${id}.`,
 		who && `${who}.`,
-		tries.used > 0 &&
-			t("taskTry")
-				.replace("{used}", String(tries.used))
-				.replace("{allowed}", String(tries.allowed)),
+		t("taskTry")
+			.replace("{try}", String(tries.try))
+			.replace("{of}", String(tries.of)),
 	]
 		.filter(Boolean)
 		.join(" ");

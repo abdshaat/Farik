@@ -681,7 +681,7 @@ export const en = {
 	taskInSprint: "{id} in sprint {n}.",
 	taskDoing: "{name} is doing it",
 	taskReviews: "{name} reviews it",
-	taskTry: "Try {used} of {allowed}.",
+	taskTry: "Try {try} of {of}.",
 	taskTabs: "About this task",
 	tabSummary: "Summary and checks",
 	tabHistory: "History",

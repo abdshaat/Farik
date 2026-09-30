@@ -99,7 +99,7 @@ describe("task detail", () => {
 		).toBeTruthy();
 		expect(
 			screen.getByText(
-				"FRK-1 in sprint 2. Theo is doing it, and Ada reviews it. Try 1 of 3.",
+				"FRK-1 in sprint 2. Theo is doing it, and Ada reviews it. Try 1 of 4.",
 			),
 		).toBeTruthy();
 		const tabs = screen.getAllByRole("tab");
@@ -161,7 +161,7 @@ describe("task detail", () => {
 		fireEvent.click(screen.getByRole("tab", { name: "Notes" }));
 		expect(
 			within(panel()).getByText(
-				"Theo, your Software Developer, wrote this for you",
+				"Theo, your Developer, wrote this for you",
 			),
 		).toBeTruthy();
 		expect(
