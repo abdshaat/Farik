@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 import { events, startServe } from "./fixtures/serve.ts";
-import { screenshots } from "./fixtures/shots.ts";
+import { narrow, screenshots } from "./fixtures/shots.ts";
 
 test("a request is sized, its question answered by choice, and it becomes a task to do", async ({
 	page,
@@ -33,6 +33,36 @@ test("a request is sized, its question answered by choice, and it becomes a task
 		await page.getByRole("link", { name: "Today" }).first().click();
 		await expect(page.getByText("Mira has a question")).toBeVisible();
 		await screenshots(page, "today-waiting");
+		// The row's button is a full-size target: centred on its row and at its right end on a
+		// desktop, below the words and across the row on a phone.
+		const answer = page.getByRole("link", { name: "Answer" });
+		const row = page.getByRole("listitem").filter({ has: answer });
+		const box = async () => {
+			const [a, r, words] = await Promise.all([
+				answer.boundingBox(),
+				row.boundingBox(),
+				row.locator("strong").boundingBox(),
+			]);
+			if (!a || !r || !words) throw new Error("the Answer row is not laid out");
+			return { a, r, words };
+		};
+		const wide = await box();
+		expect(wide.a.height).toBeGreaterThanOrEqual(44);
+		expect(wide.r.x + wide.r.width - (wide.a.x + wide.a.width)).toBeLessThan(
+			16,
+		);
+		expect(
+			Math.abs(wide.a.y + wide.a.height / 2 - (wide.r.y + wide.r.height / 2)),
+		).toBeLessThanOrEqual(1);
+		await narrow(page);
+		const phone = await box();
+		expect(phone.a.height).toBeGreaterThanOrEqual(44);
+		expect(phone.a.width).toBeGreaterThanOrEqual(0.9 * phone.r.width);
+		expect(phone.a.y).toBeGreaterThanOrEqual(
+			phone.words.y + phone.words.height,
+		);
+		await page.setViewportSize({ width: 1280, height: 800 });
+
 		// The render before the shell trades its rail for the bars, held: the shell is told the
 		// window is wide at a phone's width. The user testing found the page 133 px too wide there.
 		const stale = await page.context().newPage();

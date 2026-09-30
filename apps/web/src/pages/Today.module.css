@@ -143,9 +143,11 @@
 	list-style: none;
 }
 
+/* A row's button sits at its right end, centred on it; when the words need the room (a phone),
+it drops below them and runs the row's width. Rows without an avatar line up the same. */
 .row {
-	display: grid;
-	grid-template-columns: auto minmax(0, 1fr) auto;
+	display: flex;
+	flex-wrap: wrap;
 	align-items: center;
 	gap: var(--farik-space-3);
 	padding: var(--farik-space-3);
@@ -155,19 +157,36 @@
 }
 
 .rowText {
+	flex: 1 1 16rem;
+	min-width: 0;
 	display: grid;
 	gap: var(--farik-space-1);
 	overflow-wrap: anywhere;
 }
 
 .action {
+	box-sizing: border-box;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	min-height: 44px;
+	margin-inline-start: auto;
 	padding: var(--farik-space-2) var(--farik-space-4);
+	font:
+		var(--farik-type-body-weight) var(--farik-type-body-size) /
+		var(--farik-type-body-line-height) var(--farik-type-body-family);
 	border: 1px solid var(--farik-color-control-border);
 	border-radius: var(--farik-radius-control);
 	background: var(--farik-color-surface);
 	color: var(--farik-color-ink);
 	text-decoration: none;
 	white-space: nowrap;
+}
+
+@media not (min-width: 640px) {
+	.action {
+		flex-basis: 100%;
+	}
 }
 
 .moved li {

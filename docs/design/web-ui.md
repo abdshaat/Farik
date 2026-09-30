@@ -85,6 +85,8 @@ The main area is a single left-aligned column, 720 px at most for reading screen
 
 On a phone (360 px), the rail becomes a bottom bar of five places, with Settings under Team. The team band scrolls sideways, with the agents waiting on the user first, and the request box stays at the top of Today.
 
+Each "Waiting on you" row's button (Answer, Review, Help, Add, Connect again) is a full-size button, at least 44 px tall, centred on its row and at the row's right end, whether or not the row has an avatar. Below 640 px it drops under the row's words and runs the row's width (founder, 2026-09-30).
+
 ### Principles
 
 1. **The team is the interface.** Every piece of work has a face on it: the avatar of the agent who did it or who is asking. The user deals with people, not with records.
