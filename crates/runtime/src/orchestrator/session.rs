@@ -126,8 +126,8 @@ pub(super) async fn run_session(
         sleep(deps, ask.agent, &end)?;
     }
     // A key the provider refused fails every session alike, so no other starts until the human
-    // connects the account again or resumes (5.5).
-    if end.reason == EndReason::CredentialRefused {
+    // connects the account again or resumes (5.5). A team the human paused meanwhile stays theirs.
+    if end.reason == EndReason::CredentialRefused && !crate::pause::paused(&deps.tools.log)? {
         let body = TeamPausedBody {
             by: TeamPausedBodyBy::Farik,
             reason: Some(TeamPausedBodyReason::CredentialRefused),
@@ -909,6 +909,28 @@ mod tests {
             (post.kind, post.thread),
             (MessageKind::Ceremony, Some(Thread::Standup))
         );
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn keeps_the_humans_pause_when_a_session_ending_after_it_is_refused_its_key() {
+        let harness = Harness::new("session-key-refused-paused", |_| {});
+        let orchestrator = harness
+            .orchestrator(harness.recorded(vec![crate::recorded::fixtures::credential_refused()]));
+        let deps = &orchestrator.deps;
+        orchestrator
+            .handle(farik_protocol::command::Command::TeamPause)
+            .await
+            .expect("the pause is handled");
+        let team = deps.tools.files.read_team().expect("the team");
+        let pm = team.active_agents().next().expect("an agent");
+
+        run_session(deps, &team, a_ceremony(deps, pm, Thread::Standup))
+            .await
+            .expect("the session runs");
+
+        assert_eq!(harness.events(&[EventKind::TeamPaused]).len(), 1);
+        assert!(!crate::pause::key_refused(&deps.tools.log).expect("reads"));
     }
 
     #[test]
