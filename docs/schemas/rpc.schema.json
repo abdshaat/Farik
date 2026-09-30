@@ -1972,21 +1972,22 @@
       ]
     },
     "taskTriesResult": {
+      "description": "The try in progress, iteration + 1, of max_iterations + 1 plus the extra tries granted: the limit bounds returns, and the pass after the last return is a try too.",
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "used": {
+        "try": {
           "type": "integer",
-          "minimum": 0
+          "minimum": 1
         },
-        "allowed": {
+        "of": {
           "type": "integer",
-          "minimum": 0
+          "minimum": 1
         }
       },
       "required": [
-        "used",
-        "allowed"
+        "try",
+        "of"
       ]
     },
     "sprintCurrentResult": {

@@ -119,12 +119,15 @@ pub(super) fn query(deps: &ToolDeps, name: &str, params: &Value) -> Result<Value
                 "task.diff" => task_diff(deps, &team()?, &task_id),
                 "task.checks" => task_checks(deps, &team()?, &task_id),
                 "task.tries" => {
+                    // `iteration` counts returns, and the limit bounds them (5.2), so the try in
+                    // progress is one more than the returns, of one more than the limit.
                     let row = row(deps, &task_id)?;
                     let contract = contract_of(deps, &task_id)?;
-                    let allowed = u32::try_from(contract.budget.max_iterations.get())
+                    let of = u32::try_from(contract.budget.max_iterations.get())
                         .unwrap_or(u32::MAX)
-                        .saturating_add(extra_tries(&history(deps, &task_id)?));
-                    Ok(json!({ "used": row.iteration, "allowed": allowed }))
+                        .saturating_add(extra_tries(&history(deps, &task_id)?))
+                        .saturating_add(1);
+                    Ok(json!({ "try": row.iteration.saturating_add(1), "of": of }))
                 }
                 "escalation.choices" => escalation_choices(deps, &team()?, &task_id),
                 _ => Err(Failure::new(
@@ -1232,6 +1235,16 @@ pub(super) mod tests {
             "escalation.raised",
             &json!({ "reason": "iterations", "detail": "three tries" }),
         );
+        let tries = |task: &str| {
+            query(
+                &harness.daemon,
+                "task.tries",
+                &json!({ "task_id": task }),
+                "taskTriesResult",
+            )
+        };
+        // Three returns are allowed, so four tries: the fourth, sent back, escalated.
+        assert_eq!(tries("FRK-1"), json!({ "try": 4, "of": 4 }));
         let offered = query(
             &harness.daemon,
             "escalation.choices",
@@ -1251,13 +1264,7 @@ pub(super) mod tests {
         command["body"]["message"] = json!("Try once more, smaller.");
         let reply = rpc(&harness.daemon, "command", &json!({ "command": command }));
         assert!(reply["result"]["said"].is_string(), "{reply}");
-        let tries = query(
-            &harness.daemon,
-            "task.tries",
-            &json!({ "task_id": "FRK-1" }),
-            "taskTriesResult",
-        );
-        assert_eq!(tries, json!({ "used": 4, "allowed": 5 }));
+        assert_eq!(tries("FRK-1"), json!({ "try": 5, "of": 6 }));
 
         let none = query(
             &harness.daemon,
@@ -1268,6 +1275,8 @@ pub(super) mod tests {
         assert_eq!(none, Value::Null);
         harness.accepted("FRK-2");
         harness.ready("FRK-3");
+        // Nothing sent back yet: the first try.
+        assert_eq!(tries("FRK-3"), json!({ "try": 1, "of": 4 }));
         // A cancelled task is done with, as an accepted one is.
         harness.file("FRK-5", "refining", |_| {});
         harness

@@ -80,7 +80,7 @@ The runtime gives step 08's pages what spec 5.4 and 5.16 ask of a human gate. It
   - **`task.diff { task_id }`** answers `{ diff, files, added, removed }`. For an epic it joins its tasks' integrated diffs in id order, each under a `# FRK-n` line, which is new.
   - **`task.checks { task_id }`** answers `[{ criterion_id, text, passed, evidence }]` from `criterion.recorded` since the task last entered `verifying`. For a contract awaiting approval it answers the readiness results.
   - **`questions.list { task_id? }`** answers `[{ question_id (the seq of its question.asked), task_id, agent_id, text, choices: [{ label, hint? }], answer: string | null }]`, oldest first.
-  - **`task.tries { task_id }`** answers `{ used: iteration, allowed: max_iterations + extra_iterations }`.
+  - **`task.tries { task_id }`** answers `{ try: iteration + 1, of: max_iterations + 1 + extra_iterations }` (changed by step 08's landing review: it answered `{ used: iteration, allowed: max_iterations + extra_iterations }`, which read "try 0 of 3" on a first try).
   - **`sprint.current {}`** answers `{ sprint_id, done, total } | null`, from `Projections::open_sprint` and the sprint's tasks (done = accepted or cancelled).
   - **`escalation.choices`** is described above.
   - **`team.activity {}`** answers `[{ agent_id, state, line, task_id?, until? }]`.
