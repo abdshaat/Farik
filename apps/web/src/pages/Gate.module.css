@@ -29,3 +29,8 @@
 	gap: var(--farik-space-2);
 	align-items: baseline;
 }
+
+/* The palette's ink, as Choice's radios, not the browser's blue. */
+.criteria input {
+	accent-color: var(--farik-color-ink);
+}
