@@ -5,6 +5,7 @@ Branch: `phase/6-web-ui`
 Spec: `docs/SPEC.md` sections 3, 4.3, 4.4, 5.1, 5.2, 5.5, 5.9, 8.2, 8.4, 8.5, F7, F8
 Depends on: steps 01 to 12 of this phase (renumbered from step 12 by the project plan's revision 23); ADR 0026 and `docs/design/designer-chats-templates.md` (section B), both binding
 Readiness confirmed by: fresh-session reviewer, 2026-09-30, ready with findings, folded in
+Mockups approved by: the founder, 2026-09-30 (Chats, PhoneChats, OneOnOne and Costs on the canvas's Chats page; Sol included in the list, as every agent not retired has a chat)
 
 Signatures, not bodies; test names and what each asserts, not test code; around 300 lines at most (ADR 0008).
 
@@ -48,8 +49,7 @@ Design and ADR 0026 decide the what. These are the points they leave open, each 
 - **Envelope exception.** SPEC 8.5 gains that a `chat_message.posted` envelope names the chat's agent even on the user's message, as `agent.slept` is an exception. `farik log --agent` and every reader of the envelope's agent as the actor are checked in Task 2: those that must not count the user's message as the agent's filter on `author`.
 - **Waits for step 12.** Step 12's plan (`step-12-designer-preview-and-review.md`) produces `SessionRegistration.connectors`, `ToolContext.connectors` and the hook's connector check (`evaluate_connector_call`, refusal `connector_not_in_session`). This plan names them, and `denies_a_chat_everything_else` runs with a Designer whose `mcp_servers` holds `playwright`. When step 12 lands, these names are re-checked against its commits before Task 2 starts.
 - **Decided by the founder, 2026-09-30:** Enter sends and Shift+Enter makes a new line, in both composers; the rail label is "Chats"; "Conversations" means one-to-one chats only, and the channel's `conversation` purpose stays under "Meetings and talk".
-- **Open for the founder at the gate** (Task 1), recorded in this plan when settled:
-  - ADR 0026's "decided here" points this step builds: a paused agent answers, a spent day stops chats, the agent's own model at `low`.
+- **Decided by the founder at the gate, 2026-09-30:** ADR 0026's "decided here" points, as this step builds them: a paused agent answers, a spent day stops chats (the message is kept), and a chat runs on the agent's own model at `low`.
 - **Live.** A `chat_message.posted` from `useEvents` whose `chat` is the open one is appended without a query, as step 10 appends channel messages; a `task.created` with `from_chat_message` turns that reply's box into "Sent as FRK-n".
 - **Command line.** `farik chat <agent> <text>` sends `chat_message_post`; `farik chat <agent>` prints the chat, one message per block, oldest first.
 - **Transcript.** `chat_answers_with_a_request`: Mira reads the board and calls `farik_chat_reply` with a text and a request titled "Let customers pay with Apple Pay", the OneOnOne mockup's words.
@@ -140,7 +140,7 @@ No test: this task is a design, checked by the founder. `canvas.json` stays vali
 
 **Gate: no later task starts until the founder approves these mockups, recorded in this plan's header.**
 
-- [ ] `docs(design): mock up the chats`
+- [x] `docs(design): mock up the chats`
 
 ### Task 2: The chat record, its queries and the command
 
