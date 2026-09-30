@@ -37,8 +37,16 @@ describe("landing", () => {
 		expect(await screen.findByRole("heading", { name: en.today })).toBeTruthy();
 		cleanup();
 
-		// During setup, a deep link goes where "/" would.
-		const deep = await renderApp("/settings");
+		// A deep link, too, asks nothing of the project before serve.status answers.
+		const deep = await renderApp("/team");
+		const d = deep.socket as FakeSocket;
+		await waitFor(() => expect(d.calls("query").length).toBeGreaterThan(0));
+		await new Promise((done) => setTimeout(done, 20));
+		expect(d.calls("query").map((q) => q.params.name as string)).toEqual([
+			"serve.status",
+		]);
+		expect(deep.container.textContent).toBe("");
+		// During setup, it goes where "/" would.
 		await answerStatus(deep.socket as FakeSocket, false, 1, {
 			setup_pending: true,
 		});

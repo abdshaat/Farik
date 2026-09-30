@@ -23,7 +23,9 @@ describe("pages", () => {
 			"POST /disconnect": 204,
 		});
 		if (!socket) throw new Error("no socket");
+		// The shell asks first, then the page itself.
 		await answerStatus(socket, false);
+		await answerStatus(socket, false, 2);
 		expect(await screen.findByText("/home/me/corner-bakery")).toBeTruthy();
 		expect(screen.getByText("127.0.0.1:7420")).toBeTruthy();
 		await expectNoAxeViolations(container);
@@ -73,6 +75,7 @@ describe("pages", () => {
 
 	it("lists_the_newest_events_first", async () => {
 		const { container, socket } = await renderApp("/events");
+		await answerStatus(socket as never, false);
 		act(() => {
 			for (const seq of [1, 2, 3]) socket?.event(seq);
 		});
@@ -93,6 +96,7 @@ describe("pages", () => {
 
 	it("lists_the_last_hundred_events", async () => {
 		const { socket } = await renderApp("/events");
+		await answerStatus(socket as never, false);
 		act(() => {
 			for (let seq = 1; seq <= 101; seq++) socket?.event(seq);
 		});
@@ -105,8 +109,11 @@ describe("pages", () => {
 	});
 
 	it("says_there_is_no_page_here", async () => {
-		const { container } = await renderApp("/nowhere");
-		expect(screen.getByRole("heading", { name: en.noPage })).toBeTruthy();
+		const { container, socket } = await renderApp("/nowhere");
+		await answerStatus(socket as never, false);
+		expect(
+			await screen.findByRole("heading", { name: en.noPage }),
+		).toBeTruthy();
 		expect(
 			screen.getByRole("link", { name: en.noPageHome }).getAttribute("href"),
 		).toBe("/");

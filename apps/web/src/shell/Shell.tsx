@@ -34,12 +34,10 @@ export function Shell() {
 	const { status } = useConnection();
 	const { data } = useQuery<ServeStatus>("serve.status", {});
 	const path = useLocation().pathname;
-	const home = path === "/";
-	// "/" shows nothing, and asks nothing of the project, until Farik says where it stands.
-	if (!data && home) return null;
+	// Nothing shows, and nothing is asked of the project, until Farik says where it stands.
+	if (!data) return null;
 	// During setup, every path goes where "/" would.
-	if (data && landing(data) !== "/")
-		return <Navigate to={landing(data)} replace />;
+	if (landing(data) !== "/") return <Navigate to={landing(data)} replace />;
 	// Settings sits under Team on a phone (web-ui.md), so the bar has four places.
 	const places = (
 		<ul className={styles.places}>

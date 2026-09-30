@@ -18,8 +18,9 @@ describe("shell", () => {
 
 	it("shows_the_rail_on_a_wide_screen_and_a_bar_on_a_phone", async () => {
 		media.set(WIDE, true);
-		const { container } = await renderApp("/settings");
-		const rail = screen.getByRole("navigation", { name: en.navRail });
+		const { container, socket } = await renderApp("/settings");
+		await answerStatus(socket as never, false);
+		const rail = await screen.findByRole("navigation", { name: en.navRail });
 		const places = within(rail).getAllByRole("link");
 		expect(places[0]?.textContent).toBe(en.today);
 		expect(places.at(-1)?.textContent).toBe(en.settings);

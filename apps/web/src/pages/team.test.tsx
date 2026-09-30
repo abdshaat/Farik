@@ -77,6 +77,7 @@ const MODELS = {
 async function opened(path: string) {
 	const { container, socket } = await renderApp(path);
 	const s = socket as FakeSocket;
+	await answerStatus(s, false);
 	await answerQuery(s, "team.get", {
 		team: TEAM,
 		agents: EFFECTIVE,
@@ -167,6 +168,7 @@ describe("team page", () => {
 		// Seven not retired is a full team: Add someone says why it is off.
 		const full = await renderApp("/team");
 		const f = full.socket as FakeSocket;
+		await answerStatus(f, false);
 		const seven = {
 			...TEAM,
 			agents: [
@@ -191,6 +193,7 @@ describe("team page", () => {
 	it("resumes_a_paused_agent_from_its_card", async () => {
 		const { container, socket } = await renderApp("/team");
 		const s = socket as FakeSocket;
+		await answerStatus(s, false);
 		const paused = {
 			...TEAM,
 			agents: TEAM.agents.map((a) =>
