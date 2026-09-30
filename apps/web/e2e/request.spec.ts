@@ -46,21 +46,33 @@ test("a request is sized, its question answered by choice, and it becomes a task
 			if (!a || !r || !words) throw new Error("the Answer row is not laid out");
 			return { a, r, words };
 		};
-		const wide = await box();
-		expect(wide.a.height).toBeGreaterThanOrEqual(44);
-		expect(wide.r.x + wide.r.width - (wide.a.x + wide.a.width)).toBeLessThan(
-			16,
-		);
-		expect(
-			Math.abs(wide.a.y + wide.a.height / 2 - (wide.r.y + wide.r.height / 2)),
-		).toBeLessThanOrEqual(1);
-		await narrow(page);
-		const phone = await box();
-		expect(phone.a.height).toBeGreaterThanOrEqual(44);
-		expect(phone.a.width).toBeGreaterThanOrEqual(0.9 * phone.r.width);
-		expect(phone.a.y).toBeGreaterThanOrEqual(
-			phone.words.y + phone.words.height,
-		);
+		const measure = async () => {
+			await page.setViewportSize({ width: 1280, height: 800 });
+			const wide = await box();
+			expect(wide.a.height).toBeGreaterThanOrEqual(44);
+			expect(wide.r.x + wide.r.width - (wide.a.x + wide.a.width)).toBeLessThan(
+				16,
+			);
+			expect(
+				Math.abs(wide.a.y + wide.a.height / 2 - (wide.r.y + wide.r.height / 2)),
+			).toBeLessThanOrEqual(1);
+			await narrow(page);
+			const phone = await box();
+			expect(phone.a.height).toBeGreaterThanOrEqual(44);
+			expect(phone.a.width).toBeGreaterThanOrEqual(0.9 * phone.r.width);
+			expect(phone.a.y).toBeGreaterThanOrEqual(
+				phone.words.y + phone.words.height,
+			);
+		};
+		await measure();
+		// The same row without its avatar, where a grid put the button in the wide middle
+		// column (the founder's bug): the avatar is taken out and the row measured again.
+		await row.evaluate((li) => {
+			const first = li.firstElementChild;
+			if (first && first.tagName !== "DIV") first.remove();
+		});
+		await expect(row.locator("> :not(div):not(a)")).toHaveCount(0);
+		await measure();
 		await page.setViewportSize({ width: 1280, height: 800 });
 
 		// While connected, the rail's dot breathes; under reduced motion it holds still.
