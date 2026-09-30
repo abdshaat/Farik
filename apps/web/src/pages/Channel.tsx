@@ -48,11 +48,9 @@ function fromEvent(e: Event): Message | undefined {
 	};
 }
 
-/** Messages by seq, oldest first: a message both paged and heard live is one. */
+/** Two runs of messages, by seq, oldest first. */
 const merge = (a: Message[], b: Message[]) =>
-	[...new Map([...a, ...b].map((m) => [m.seq, m])).values()].sort(
-		(x, y) => x.seq - y.seq,
-	);
+	[...a, ...b].sort((x, y) => x.seq - y.seq);
 
 const time = (at: string) => at.slice(11, 16);
 const weekday = (at: string) =>
@@ -140,7 +138,8 @@ export function Channel() {
 		};
 	}, [client]);
 
-	// Kept in state, so a message stays once the event buffer has moved past it.
+	// Kept in state, so a message stays once the event buffer has moved past it; one the page
+	// already holds is not added twice.
 	useEffect(() => {
 		if (!loaded) return;
 		const have = new Set(loaded.messages.map((m) => m.seq));
