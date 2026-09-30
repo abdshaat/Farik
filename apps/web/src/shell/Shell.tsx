@@ -1,6 +1,7 @@
 import { useSyncExternalStore } from "react";
-import { NavLink, Outlet } from "react-router";
+import { Navigate, NavLink, Outlet, useLocation } from "react-router";
 import { useConnection } from "../app/connection.tsx";
+import { landing } from "../app/landing.ts";
 import { type ServeStatus, useQuery } from "../app/store.ts";
 import { t } from "../strings/t.ts";
 import { PauseControl } from "./PauseControl.tsx";
@@ -23,10 +24,18 @@ export function Shell() {
 	const wide = useWide();
 	const { status } = useConnection();
 	const { data } = useQuery<ServeStatus>("serve.status", {});
+	const home = useLocation().pathname === "/";
+	// "/" shows nothing, and asks nothing of the project, until Farik says where it stands.
+	if (!data && home) return null;
+	// During setup, every path goes where "/" would.
+	if (data && landing(data) !== "/")
+		return <Navigate to={landing(data)} replace />;
 	const places = (
 		<ul className={styles.places}>
 			<li>
-				<NavLink to="/events">{t("events")}</NavLink>
+				<NavLink to="/" end>
+					{t("today")}
+				</NavLink>
 			</li>
 			<li>
 				<NavLink to="/team">{t("team")}</NavLink>

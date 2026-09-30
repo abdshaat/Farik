@@ -67,12 +67,9 @@ test("a first run checks the computer, keeps the key, and takes the project on",
 		).toBeVisible();
 		await expect(page.getByText("What it is")).toBeVisible();
 		await screenshots(page, "setup-opened");
+		// Until the team is set up, a deep link goes back to where setup stands.
 		await page.goto(`http://127.0.0.1:${serve.port}/settings`);
-		await expect(page.getByText("Connected", { exact: true })).toBeVisible();
-		await expect(
-			page.getByText("Nothing new starts until you resume."),
-		).toBeVisible();
-		await expect(page.getByText(project, { exact: true })).toBeVisible();
+		await expect(page).toHaveURL(`http://127.0.0.1:${serve.port}/setup/scan`);
 		const kinds = farik(project, ["--json", "log"])
 			.trim()
 			.split("\n")

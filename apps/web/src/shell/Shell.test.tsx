@@ -18,16 +18,24 @@ describe("shell", () => {
 
 	it("shows_the_rail_on_a_wide_screen_and_a_bar_on_a_phone", async () => {
 		media.set(WIDE, true);
-		const { container } = await renderApp("/events");
+		const { container } = await renderApp("/settings");
 		const rail = screen.getByRole("navigation", { name: en.navRail });
-		for (const name of [en.events, en.settings])
-			expect(within(rail).getByRole("link", { name })).toBeTruthy();
+		const places = within(rail).getAllByRole("link");
+		expect(places[0]?.textContent).toBe(en.today);
+		expect(places.at(-1)?.textContent).toBe(en.settings);
+		expect(within(rail).queryByRole("link", { name: en.events })).toBeNull();
+		// The event list stays, at the bottom of Settings.
+		expect(
+			screen
+				.getByRole("link", { name: en.eventsForTesting })
+				.getAttribute("href"),
+		).toBe("/events");
 		expect(screen.queryByRole("navigation", { name: en.navBar })).toBeNull();
 		await expectNoAxeViolations(container);
 
 		act(() => media.set(WIDE, false));
 		const bar = screen.getByRole("navigation", { name: en.navBar });
-		for (const name of [en.events, en.settings])
+		for (const name of [en.today, en.settings])
 			expect(within(bar).getByRole("link", { name })).toBeTruthy();
 		expect(screen.queryByRole("navigation", { name: en.navRail })).toBeNull();
 		await expectNoAxeViolations(container);

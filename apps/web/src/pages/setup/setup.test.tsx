@@ -175,9 +175,7 @@ describe("setup", () => {
 		const next = sockets[1] as FakeSocket;
 		act(() => next.emit("open", {}));
 		await answerStatus(next, true);
-		expect(
-			await screen.findByRole("heading", { name: en.events }),
-		).toBeTruthy();
+		expect(await screen.findByRole("heading", { name: en.today })).toBeTruthy();
 	});
 
 	it("browses_folders_and_uses_one", async () => {
@@ -275,12 +273,9 @@ describe("setup", () => {
 		expect(fetch).toHaveBeenCalledTimes(2);
 		const next = sockets[1] as FakeSocket;
 		act(() => next.emit("open", {}));
-		// "/" asks first, then the shell of the page it sends the user to.
+		// "/" is Today's shell, which shows once Farik answers.
 		await answerStatus(next, true);
-		expect(
-			await screen.findByRole("heading", { name: en.events }),
-		).toBeTruthy();
-		await answerStatus(next, true);
+		expect(await screen.findByRole("heading", { name: en.today })).toBeTruthy();
 		expect(
 			await screen.findByText(en.pausedNothingNew, { exact: false }),
 		).toBeTruthy();

@@ -43,9 +43,10 @@ describe("connection", () => {
 			return s;
 		});
 		act(() => socket.emit("open", {}));
-		// "/" redirects to the event list, once Farik says it has a project, until Today exists.
+		// "/" is Today, once Farik says it has a project and its team.
 		await answerStatus(socket, false);
-		await waitFor(() => expect(location.pathname).toBe("/events"));
+		expect(await screen.findByRole("heading", { name: en.today })).toBeTruthy();
+		expect(location.pathname).toBe("/");
 		expect(fetch).toHaveBeenCalledWith(
 			"/connect",
 			expect.objectContaining({

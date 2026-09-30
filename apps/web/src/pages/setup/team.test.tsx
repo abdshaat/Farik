@@ -119,9 +119,7 @@ describe("team setup", () => {
 		await answerStatus(second.socket as FakeSocket, false, 1, {
 			setup_pending: false,
 		});
-		expect(
-			await screen.findByRole("heading", { name: en.events }),
-		).toBeTruthy();
+		expect(await screen.findByRole("heading", { name: en.today })).toBeTruthy();
 	});
 
 	it("reads_the_scan_back_in_rows", async () => {
@@ -465,8 +463,6 @@ describe("team setup", () => {
 		await waitFor(() => expect(s.calls("team.start")).toHaveLength(2));
 		act(() => s.reply(s.calls("team.start")[1] as never, {}));
 		await answerStatus(s, false, 1, { setup_pending: false });
-		expect(
-			await screen.findByRole("heading", { name: en.events }),
-		).toBeTruthy();
+		expect(await screen.findByRole("heading", { name: en.today })).toBeTruthy();
 	});
 });

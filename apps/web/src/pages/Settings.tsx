@@ -1,5 +1,6 @@
 import { Button, Choice, Switch } from "@farik/ui";
 import { useState } from "react";
+import { Link } from "react-router";
 import { useConnection } from "../app/connection.tsx";
 import { type ServeStatus, useQuery } from "../app/store.ts";
 import type { ThemeChoice } from "../app/theme.ts";
@@ -112,6 +113,9 @@ export function Settings({
 				<p>{t("english")}</p>
 				<p className={styles.muted}>{t("englishOnly")}</p>
 			</section>
+			<p>
+				<Link to="/events">{t("eventsForTesting")}</Link>
+			</p>
 		</div>
 	);
 }

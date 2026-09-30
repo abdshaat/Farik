@@ -28,7 +28,7 @@ test("the start link opens the app and pause works end to end", async ({
 	const serve = await startServe({ transcripts: [] });
 	try {
 		await page.goto(serve.url);
-		await expect(page).toHaveURL(/\/events$/);
+		await expect(page).toHaveURL(`http://127.0.0.1:${serve.port}/`);
 		await expect(page.getByText("Connected", { exact: true })).toBeVisible();
 		await screenshots(page, "connected");
 
@@ -49,7 +49,7 @@ test("the start link opens the app and pause works end to end", async ({
 		await expect(banner).toBeHidden();
 
 		await page.reload();
-		await expect(page).toHaveURL(`http://127.0.0.1:${serve.port}/events`);
+		await expect(page).toHaveURL(`http://127.0.0.1:${serve.port}/`);
 		await expect(page.getByText("Connected", { exact: true })).toBeVisible();
 	} finally {
 		await serve.stop();

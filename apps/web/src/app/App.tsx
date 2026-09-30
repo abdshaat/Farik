@@ -15,27 +15,10 @@ import { SetupSpending } from "../pages/setup/SetupSpending.tsx";
 import { SetupTeam } from "../pages/setup/SetupTeam.tsx";
 import { TeamSetup } from "../pages/setup/TeamSetup.tsx";
 import { Team } from "../pages/Team.tsx";
+import { Today } from "../pages/Today.tsx";
 import { Shell } from "../shell/Shell.tsx";
 import { useConnection } from "./connection.tsx";
-import { type ServeStatus, useQuery } from "./store.ts";
 import { useTheme } from "./theme.ts";
-
-/** The start page: setup until Farik has a project and its team, the event list after. */
-function Home() {
-	const { data } = useQuery<ServeStatus>("serve.status", {});
-	if (!data) return null;
-	if (data.projectRoot !== null)
-		return (
-			<Navigate to={data.setupPending ? "/setup/scan" : "/events"} replace />
-		);
-	// A project was chosen but could not be taken on: its screen says why.
-	return (
-		<Navigate
-			to={data.takeOnError ? "/setup/project" : "/setup/computer"}
-			replace
-		/>
-	);
-}
 
 export function App() {
 	const { status } = useConnection();
@@ -50,7 +33,6 @@ export function App() {
 				path="/connect"
 				element={status === "open" ? <Navigate to="/" replace /> : <Connect />}
 			/>
-			<Route path="/" element={<Home />} />
 			{/* Setup has its own two-panel layout, without the rail and bars. */}
 			<Route path="/setup/computer" element={<SetupComputer />} />
 			<Route path="/setup/account" element={<SetupAccount />} />
@@ -65,6 +47,7 @@ export function App() {
 				<Route path="/setup/advanced" element={<SetupAdvanced />} />
 			</Route>
 			<Route element={<Shell />}>
+				<Route index element={<Today />} />
 				<Route path="/events" element={<Events />} />
 				<Route path="/team" element={<Team />} />
 				<Route path="/team/:id" element={<AgentEdit />} />

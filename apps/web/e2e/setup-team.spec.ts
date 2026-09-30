@@ -51,7 +51,7 @@ test("the team's setup keeps the five, sets the rules, and starts them", async (
 		await expect(page).toHaveURL(/\/setup\/finish$/);
 		await page.getByLabel(/^Farik adds it for me/).check();
 		await page.getByRole("button", { name: "Start the team" }).click();
-		await expect(page).toHaveURL(/\/events$/);
+		await expect(page).toHaveURL(/:\d+\/$/);
 
 		const yaml = readFileSync(join(serve.project, ".farik/team.yaml"), "utf8");
 		for (const id of ["mira", "sol", "ada", "theo", "kai"])

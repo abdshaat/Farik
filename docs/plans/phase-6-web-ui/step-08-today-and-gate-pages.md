@@ -160,7 +160,7 @@ Produces: the routes above; `statusWord(status: TaskStatus, reason?: EscalationR
 - `lists_what_waits_on_you`: the count heading, and each kind's title, button word, and route.
 - `says_what_moved`: the time and the line.
 
-- [ ] `feat(web): add Today, with the team band, the request box and what waits on you`
+- [x] `feat(web): add Today, with the team band, the request box and what waits on you`
 
 ### Task 2: The request and the questions
 
