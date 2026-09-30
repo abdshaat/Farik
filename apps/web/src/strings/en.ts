@@ -620,4 +620,7 @@ export const en = {
 	mayGitRemote: "sends its work to its own branches online",
 	mayExternal: "acts outside your computer, with your approval",
 	putBack: "Put back the default",
+	accountConfirm:
+		"Disconnecting pauses your team until you start Farik again and connect an account.",
+	accountDisconnectYes: "Disconnect and pause the team",
 };

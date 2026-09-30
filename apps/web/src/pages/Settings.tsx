@@ -125,37 +125,31 @@ type AccountStatus = {
 	provider: string | null;
 	kind: "api_key" | "subscription_token" | null;
 	source: "environment" | "keychain" | "file" | null;
-};
-type Disconnected = {
-	removedFrom: string[];
-	paused: boolean;
+	/** The variable a credential from the environment comes from, which Farik cannot remove. */
 	environmentVariable?: string;
 };
 
-/** The AI account's row: what is connected and where it is kept, and Disconnect. */
+/** The AI account's row: what is connected and where it is kept, and Disconnect, asked twice. */
 function Account() {
 	const { client } = useConnection();
-	const { data } = useQuery<AccountStatus>("account.status", {});
+	const { data, again } = useQuery<AccountStatus>("account.status", {});
+	const [asking, setAsking] = useState(false);
 	const [busy, setBusy] = useState(false);
 	const [said, setSaid] = useState<string>();
 	const disconnect = async () => {
 		if (!client) return;
 		setBusy(true);
 		try {
-			const gone = (await client.call(
-				"account.disconnect",
-				{},
-			)) as Disconnected;
-			setSaid(
-				gone.environmentVariable
-					? t("accountKept").replace("{variable}", gone.environmentVariable)
-					: t("accountGone"),
-			);
+			await client.call("account.disconnect", {});
+			setSaid(t("accountGone"));
+			again();
 		} catch (e) {
 			setSaid(saidAll(e));
 		}
+		setAsking(false);
 		setBusy(false);
 	};
+	const variable = data?.environmentVariable;
 	return (
 		<section className={styles.section} aria-labelledby="account-heading">
 			<h2 id="account-heading">{t("accountRow")}</h2>
@@ -172,22 +166,37 @@ function Account() {
 						)}
 					</p>
 					<p className={styles.muted}>
-						{t(
-							(
-								{
-									keychain: "accountKeychain",
-									file: "accountFile",
-									environment: "accountEnvironment",
-								} as const
-							)[data.source],
-						)}
+						{variable
+							? t("accountKept").replace("{variable}", variable)
+							: t(
+									(
+										{
+											keychain: "accountKeychain",
+											file: "accountFile",
+											environment: "accountEnvironment",
+										} as const
+									)[data.source],
+								)}
 					</p>
-					{!said && (
+					{!variable && !said && !asking && (
 						<div>
-							<Button busy={busy} onClick={disconnect}>
+							<Button onClick={() => setAsking(true)}>
 								{t("accountDisconnect")}
 							</Button>
 						</div>
+					)}
+					{asking && (
+						<>
+							<p>{t("accountConfirm")}</p>
+							<div className={styles.actions}>
+								<Button busy={busy} onClick={disconnect}>
+									{t("accountDisconnectYes")}
+								</Button>
+								<Button kind="quiet" onClick={() => setAsking(false)}>
+									{t("agentCancel")}
+								</Button>
+							</div>
+						</>
 					)}
 				</>
 			) : (

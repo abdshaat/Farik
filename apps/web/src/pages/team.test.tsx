@@ -324,13 +324,51 @@ describe("team page", () => {
 		expect(within(row).getByText(en.accountKeychain)).toBeTruthy();
 		await expectNoAxeViolations(container);
 
+		// Disconnecting pauses the team, so it is asked once more first.
 		fireEvent.click(
 			within(row).getByRole("button", { name: en.accountDisconnect }),
+		);
+		expect(within(row).getByText(en.accountConfirm)).toBeTruthy();
+		expect(s.calls("account.disconnect")).toHaveLength(0);
+		fireEvent.click(
+			within(row).getByRole("button", { name: en.accountDisconnectYes }),
 		);
 		const gone = await sent(s, "account.disconnect");
 		expect(gone.params).toEqual({});
 		act(() => s.reply(gone, { removed_from: ["keychain"], paused: true }));
 		expect(await within(row).findByText(en.accountGone)).toBeTruthy();
+		// The row reads the account again rather than saying it is still kept.
+		const again = await waitFor(() => {
+			const asked = s
+				.calls("query")
+				.filter((q) => q.params.name === "account.status");
+			if (asked.length < 2) throw new Error("the account was not asked again");
+			return asked.at(-1) as never;
+		});
+		act(() => s.reply(again, { provider: null, kind: null, source: null }));
+		expect(await within(row).findByText(en.accountNone)).toBeTruthy();
+		expect(within(row).queryByText(en.accountKeychain)).toBeNull();
 		await expectNoAxeViolations(container);
+	});
+
+	it("names_the_variable_a_key_from_the_environment_comes_from", async () => {
+		const { socket } = await renderApp("/settings");
+		const s = socket as FakeSocket;
+		await answerStatus(s, false);
+		await answerQuery(s, "account.status", {
+			provider: "anthropic",
+			kind: "api_key",
+			source: "environment",
+			environment_variable: "ANTHROPIC_API_KEY",
+		});
+		const row = await screen.findByRole("region", { name: en.accountRow });
+		expect(
+			await within(row).findByText(
+				en.accountKept.replace("{variable}", "ANTHROPIC_API_KEY"),
+			),
+		).toBeTruthy();
+		expect(
+			within(row).queryByRole("button", { name: en.accountDisconnect }),
+		).toBeNull();
 	});
 });
