@@ -247,17 +247,27 @@ describe("today", () => {
 	});
 
 	it("says_what_moved", async () => {
+		const now = new Date().toISOString().replace(/\.\d+Z$/, "Z");
 		const { container, s } = await today({
 			moved: [
 				{
-					at: "2026-09-29T08:05:00Z",
+					at: now,
 					line: "Theo finished the checkout page and asked Ada to review it.",
+				},
+				{
+					at: "2026-01-01T21:40:00Z",
+					line: "The menu page's new photos were accepted and merged.",
 				},
 			],
 		});
 		const list = await screen.findByRole("list", { name: en.movedTitle });
-		const time = within(list).getByText("08:05");
-		expect(time.getAttribute("datetime")).toBe("2026-09-29T08:05:00Z");
+		const time = within(list).getByText(now.slice(11, 16));
+		expect(time.getAttribute("datetime")).toBe(now);
+		// What moved on an earlier day says so, as the mockup's "Yday".
+		const [, older] = within(list).getAllByRole("listitem");
+		expect(
+			within(older as HTMLElement).getByTitle("Yesterday").textContent,
+		).toBe("Yday");
 		expect(
 			within(list).getByText(
 				"Theo finished the checkout page and asked Ada to review it.",

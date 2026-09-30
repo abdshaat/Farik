@@ -9,7 +9,6 @@ import styles from "./pages.module.css";
 /** Sending finished work back: what is not right, a required note, and which try this is. */
 export function SendBackDialog({
 	open,
-	title,
 	builder,
 	criteria,
 	tries,
@@ -18,7 +17,6 @@ export function SendBackDialog({
 	onSend,
 }: {
 	open: boolean;
-	title: string;
 	builder: string;
 	criteria: Criterion[];
 	tries: Tries;
@@ -33,7 +31,7 @@ export function SendBackDialog({
 	return (
 		<Dialog
 			open={open}
-			title={t("sendBackTitle", { title, name: builder })}
+			title={t("sendBackTitle", { name: builder })}
 			onClose={onClose}
 			actions={
 				<>

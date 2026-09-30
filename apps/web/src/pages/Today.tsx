@@ -61,6 +61,7 @@ export function Today() {
 	);
 	// Once, so the query's key stays the same between renders.
 	const [since] = useState(() => new Date(Date.now() - DAY_MS).toISOString());
+	const today = new Date().toISOString().slice(0, 10);
 	const { data: moved } = useQuery<{ moved: Moved[] }>("moved.since", {
 		since,
 	});
@@ -125,8 +126,15 @@ export function Today() {
 						<ul className={styles.moved} aria-label={t("movedTitle")}>
 							{moved.moved.map((one) => (
 								<li key={`${one.at}-${one.line}`}>
-									{/* Times are HH:MM UTC, as the team's own lines say them. */}
-									<time dateTime={one.at}>{one.at.slice(11, 16)}</time>
+									{/* Times are HH:MM UTC, as the team's own lines say them; the
+									list holds a day, so an earlier date is yesterday's. */}
+									<time dateTime={one.at}>
+										{one.at.slice(0, 10) === today ? (
+											one.at.slice(11, 16)
+										) : (
+											<abbr title={t("yesterday")}>{t("yesterdayShort")}</abbr>
+										)}
+									</time>
 									<span>{one.line}</span>
 								</li>
 							))}

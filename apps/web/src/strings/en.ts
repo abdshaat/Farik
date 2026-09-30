@@ -407,6 +407,8 @@ export const en = {
 	waitingAdd: "Add",
 	checksPassed: "All {count} of Farik’s checks passed.",
 	movedTitle: "What moved since yesterday",
+	yesterday: "Yesterday",
+	yesterdayShort: "Yday",
 	movedNone: "Nothing moved since yesterday.",
 	backToToday: "Back to Today",
 	requestTitle: "Your request is with the team",
@@ -471,6 +473,8 @@ export const en = {
 	aboutQuestionsNext: "Your answer goes straight into {agent}’s next session.",
 	approveTitle: "Approve the plan for {title}",
 	approveLead: "Plan {id}.",
+	approveLeadTask:
+		"Plan {id}. It waits for your approval before anyone builds it.",
 	approveLeadEpic:
 		"Plan {id}. Every plan with parts waits for your approval before anyone builds it.",
 	planSigned: "{name}, your Product Manager, wrote this for you",
@@ -554,6 +558,7 @@ export const en = {
 		"{pm} changed this plan while you were editing. Your changes are kept.",
 	editTakeNew: "Take the new version",
 	gateTitle: "Accept {title}",
+	gateLead: "{id}. The work waits for you to accept it.",
 	gateWrote: "{name}, your {role}, wrote this for you",
 	gateReviewed: "{name}, your {role}, reviewed it",
 	gateCheckedHint:
@@ -574,7 +579,7 @@ export const en = {
 	notWaiting: "This does not wait on you now. Where it is: {status}.",
 	gateSendBack: "Send back with a note",
 	gateAdd: "Add to project",
-	sendBackTitle: "Send {title} back to {name}",
+	sendBackTitle: "Send the work back to {name}",
 	sendBackWhat: "What is not right? Choose any that apply.",
 	sendBackElse: "Something else",
 	sendBackNote: "Your note to {name}",

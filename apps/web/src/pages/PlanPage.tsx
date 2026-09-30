@@ -170,7 +170,14 @@ export function PlanPage() {
 					{t("approveTitle", { title: contract.title })}
 				</h1>
 				<p className={styles.muted}>
-					{t(epic ? "approveLeadEpic" : "approveLead", { id })}
+					{t(
+						!awaiting
+							? "approveLead"
+							: epic
+								? "approveLeadEpic"
+								: "approveLeadTask",
+						{ id },
+					)}
 				</p>
 			</div>
 			<section className={own.letter} aria-labelledby="signed">

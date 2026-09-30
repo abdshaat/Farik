@@ -20,7 +20,7 @@ describe("send back dialog", () => {
 			await screen.findByRole("button", { name: "Send back with a note" }),
 		);
 		const dialog = await screen.findByRole("dialog", {
-			name: "Send Gift cards back to Theo",
+			name: "Send the work back to Theo",
 		});
 		const what = within(dialog).getByRole("group", {
 			name: "What is not right? Choose any that apply.",

@@ -130,7 +130,9 @@ export function Gate() {
 				<h1 className={styles.title}>
 					{t("gateTitle", { title: contract.title })}
 				</h1>
-				<p className={styles.muted}>{id}</p>
+				<p className={styles.muted}>
+					{waits("acceptance") ? t("gateLead", { id }) : id}
+				</p>
 			</div>
 			{letters.map(([kind, key]) => {
 				const note = latestNote(events, kind);
@@ -258,7 +260,6 @@ export function Gate() {
 			)}
 			<SendBackDialog
 				open={sending}
-				title={contract.title}
 				builder={builder?.displayName ?? t("you")}
 				criteria={contract.exitCriteria}
 				tries={tries}

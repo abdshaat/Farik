@@ -29,6 +29,9 @@ describe("acceptance gate", () => {
 		expect(
 			await screen.findByRole("heading", { name: "Accept Gift cards" }),
 		).toBeTruthy();
+		expect(
+			screen.getByText("FRK-1. The work waits for you to accept it."),
+		).toBeTruthy();
 
 		// The two signed summaries, the builder's first, each its note's first paragraph.
 		const letters = screen.getAllByRole("region", {
