@@ -160,9 +160,7 @@ describe("task detail", () => {
 		// Notes: each of the contract's notes, signed by who wrote it.
 		fireEvent.click(screen.getByRole("tab", { name: "Notes" }));
 		expect(
-			within(panel()).getByText(
-				"Theo, your Developer, wrote this for you",
-			),
+			within(panel()).getByText("Theo, your Developer, wrote this for you"),
 		).toBeTruthy();
 		expect(
 			within(panel()).getByText("Made the cards and the receipt."),
