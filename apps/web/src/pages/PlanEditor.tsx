@@ -153,10 +153,10 @@ function Editor({
 		if (!keep.includes("allowedPaths")) setPaths(c.allowedPaths.join("\n"));
 	};
 	// A fresh read: what the person has not changed follows it, what they have is kept, and a
-	// field someone else changed too is said.
-	// biome-ignore lint/correctness/useExhaustiveDependencies: only a fresh read brings the draft up to date
-	useEffect(() => {
-		if (contract === base) return;
+	// field someone else changed too is said. This happens while rendering, not in an effect:
+	// an effect would run after the read is on screen, with `ours` as it was before a keystroke
+	// typed in between, and so drop that keystroke.
+	if (contract !== base) {
 		if (
 			ours.some(
 				(k) => !same(contract[k], base[k]) && !same(contract[k], mine[k]),
@@ -164,7 +164,7 @@ function Editor({
 		)
 			setClash(true);
 		takeUp(contract, ours);
-	}, [contract]);
+	}
 
 	useEffect(() => {
 		if (!client) return;

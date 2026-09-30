@@ -165,6 +165,53 @@ describe("plan editor", () => {
 		await expectNoAxeViolations(container);
 	});
 
+	it("keeps_what_is_typed_as_a_fresh_read_lands", async () => {
+		const { s } = await opened();
+		fireEvent.click(
+			await screen.findByRole("button", { name: "Lock the plan" }),
+		);
+		await s.reply(await sent(s), { said: "locked", events: [30] });
+		await waitFor(() => expect(gets(s)).toHaveLength(2));
+		await s.reply(gets(s)[1] as never, {
+			contract: { ...CONTRACT, locked: true },
+		});
+		fireEvent.click(await screen.findByRole("button", { name: "Unlock" }));
+		await s.reply(await sent(s, 2), { said: "unlocked", events: [31] });
+		await waitFor(() => expect(gets(s)).toHaveLength(3));
+		// The person types the moment the unlocked read shows, before React's effects have run:
+		// the read is answered outside `act`, and the keystroke comes from the observer that
+		// first sees it on the page.
+		const mine = "Customers can send a gift card to a friend by email.";
+		const typed = new Promise<void>((done) => {
+			const seen = new MutationObserver(() => {
+				if (!screen.queryByText("Mira can still change this plan")) return;
+				seen.disconnect();
+				fireEvent.change(screen.getByLabelText("Why you want it"), {
+					target: { value: mine },
+				});
+				done();
+			});
+			seen.observe(document.body, {
+				childList: true,
+				characterData: true,
+				subtree: true,
+			});
+		});
+		const read = gets(s)[2] as { id: number };
+		s.emit("message", {
+			data: JSON.stringify({
+				jsonrpc: "2.0",
+				id: read.id,
+				result: { contract: CONTRACT },
+			}),
+		});
+		await typed;
+		await act(async () => {});
+		expect(
+			(screen.getByLabelText("Why you want it") as HTMLTextAreaElement).value,
+		).toBe(mine);
+	});
+
 	it("holds_the_work_before_changing_a_plan_the_team_works_to", async () => {
 		const { s } = await opened({ ...CONTRACT, status: "in_progress" });
 		fireEvent.click(await screen.findByRole("button", { name: "Save" }));
