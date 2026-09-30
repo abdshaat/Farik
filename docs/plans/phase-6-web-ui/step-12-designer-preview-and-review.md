@@ -1,6 +1,6 @@
 # Phase 6, step 12: The Designer's preview, Playwright connector and design review
 
-Status: built 2026-09-30 (Tasks 1 to 7), awaiting its landing review
+Status: done (landed and landing-reviewed 2026-09-30; one fix wave, a scoped re-review and its follow-up, fixes A to E)
 Branch: `phase/6-web-ui`
 Spec: `docs/SPEC.md` sections 4.1 (the preview commands), 5.4 (the design review), 5.6 (connectors), 5.7 (the `preview` escalation), 5.12 (`ui_paths`), 6.7, 8.2 (the hook's connector check), 8.3 (the preview and browser containers), 8.5, 8.6, F9
 Depends on: step 11 of this phase (the Designer, its plan gate, and the mockups the founder approved in its Task 1, which cover this step's screens); ADR 0026 and `docs/design/designer-chats-templates.md`
