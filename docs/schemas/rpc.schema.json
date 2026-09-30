@@ -259,7 +259,9 @@
               "$ref": "#/$defs/costsSummaryQuery"
             },
             {
-              "$ref": "#/$defs/metricsQuery",
+              "$ref": "#/$defs/metricsQuery"
+            },
+            {
               "$ref": "#/$defs/settingsDefaultsQuery"
             }
           ]
