@@ -1,6 +1,6 @@
 # Farik: instructions for Claude Code sessions
 
-Farik is an operating system for small teams of AI agents with a governance harness at its core. Read `docs/SPEC.md` before touching anything; section 5 is the product.
+Farik is a production-grade harness system for multi-agent systems: it runs its own team of AI agents under a governance harness, not other agent systems. Read `docs/SPEC.md` before touching anything; section 5 is the product.
 
 ## Standards (mandatory)
 

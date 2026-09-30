@@ -4,7 +4,7 @@
 
 <br>
 
-**A team of AI agents for your product, held to contracts in code.**
+**A production-grade harness system for multi-agent systems.**
 
 [![check](https://github.com/abdshaat/Farik/actions/workflows/check.yml/badge.svg)](https://github.com/abdshaat/Farik/actions/workflows/check.yml)
 [![license](https://img.shields.io/badge/license-Apache--2.0-6E8F76.svg)](LICENSE)
@@ -15,7 +15,7 @@
 
 </div>
 
-Farik runs a small team of AI agents (a Product Manager, a Scrum Master, an Architect, a Developer and a Marketing Specialist) against one git repository. They plan, build, review and ship together. A governance harness sits between every agent and every tool and decides, in code, what each of them may do. Your agents don't need more autonomy. They need a contract.
+Farik is a production-grade harness system for multi-agent systems: it runs its own small team of AI agents (a Product Manager, a Scrum Master, an Architect, a Developer and a Marketing Specialist) against one git repository. They plan, build, review and ship together. A governance harness sits between every agent and every tool and decides, in code, what each of them may do. Your agents don't need more autonomy. They need a contract.
 
 ## Status
 
