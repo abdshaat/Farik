@@ -249,7 +249,7 @@ Tests:
 - `answers_the_task_with_its_review`: `task.get`'s fields, `task.screenshot`, and `settings.defaults.ui_paths`.
 - `refuses_a_screenshot_the_task_did_not_take`: `../x.png` and another task's file each give `not_found`.
 
-- [ ] `feat(runtime): check a Developer's UI change in the browser before the Architect reviews it`
+- [x] `feat(runtime): check a Developer's UI change in the browser before the Architect reviews it`
 
 ### Task 5: The pages
 

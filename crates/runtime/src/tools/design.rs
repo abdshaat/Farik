@@ -6,12 +6,16 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use farik_core::contract::{Role, TaskId};
+use farik_core::contract::{Role, TaskId, TaskStatus};
+use farik_core::governor::gates::DesignerBrowser;
 use farik_core::governor::permissions::{PermissionTier, check_design_plan};
+use farik_core::team::Team;
 use farik_protocol::event::{
-    DesignPlanProposedBody, EventBody, EventKind, FarikEvent, PageCheckedBody, ReasonBody,
+    DesignPlanProposedBody, DesignReviewCheck, DesignReviewRecordedBody, EventBody, EventKind,
+    FarikEvent, PageCheckedBody, ReasonBody,
 };
 use farik_roles::builtin_connector;
+use farik_store::waiting::last_move_into;
 use farik_store::{EventLog, EventQuery, StoreError};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -306,6 +310,191 @@ pub(super) async fn check(call: &Call<'_>, input: CheckPageInput) -> Result<Valu
     }))
 }
 
+/// `farik_record_design_review`'s input.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct RecordDesignReviewInput {
+    /// True when the change reads well at both widths in both themes, false to send it back to
+    /// the Developer.
+    pass: bool,
+    /// Why: what you saw, and for a fail, what the Developer is to change.
+    reasons: String,
+}
+
+/// The four checks a design review needs, in the order it records them.
+const REVIEW_CHECKS: [(&str, &str); 4] = [
+    ("phone", "light"),
+    ("phone", "dark"),
+    ("desktop", "light"),
+    ("desktop", "dark"),
+];
+
+/// Records `design_review.recorded`, from the UI/UX Designer's design review of the task (its
+/// `verify` session), once the session has checked a page at each width in each theme: the
+/// session's latest check of each is copied into the review, so that what the review says it saw
+/// is Farik's own measurement.
+pub(super) fn record_review(
+    call: &Call<'_>,
+    input: RecordDesignReviewInput,
+) -> Result<Value, ToolError> {
+    let task = match &call.context.task_id {
+        Some(task)
+            if call.role() == Role::UiUxDesigner
+                && call.context.purpose == SessionPurpose::Verify =>
+        {
+            task
+        }
+        _ => {
+            return Err(Refusal::DesignReviewRefused {
+                detail: "only the UI/UX Designer records a design review, in its review of the \
+                         task"
+                    .to_string(),
+            }
+            .into());
+        }
+    };
+    if input.reasons.trim().is_empty() {
+        return Err(Refusal::BlankReason.into());
+    }
+    let checked = call
+        .deps()
+        .log
+        .read(&EventQuery {
+            task_id: Some(task.clone()),
+            kinds: vec![EventKind::PageChecked],
+            ..EventQuery::default()
+        })
+        .map_err(super::failed)?;
+    let mut checks = Vec::new();
+    let mut missing = Vec::new();
+    for (width, theme) in REVIEW_CHECKS {
+        let latest = checked.iter().rev().find_map(|event| match &event.body {
+            EventBody::PageChecked(body)
+                if event.envelope.ids.session_id.as_deref()
+                    == Some(call.context.session_id.as_str())
+                    && body.width.to_string() == width
+                    && body.theme.to_string() == theme =>
+            {
+                Some(body)
+            }
+            _ => None,
+        });
+        match latest {
+            Some(body) => checks.push(DesignReviewCheck {
+                width: body.width,
+                theme: body.theme,
+                violations: body.violations.clone(),
+            }),
+            None => missing.push(format!("{width} {theme}")),
+        }
+    }
+    if !missing.is_empty() {
+        return Err(Refusal::DesignReviewIncomplete {
+            missing: missing.join(", "),
+        }
+        .into());
+    }
+    let event = call.append(
+        Some(task),
+        EventBody::DesignReviewRecorded(DesignReviewRecordedBody {
+            pass: input.pass,
+            reasons: input.reasons,
+            checks,
+        }),
+    )?;
+    Ok(json!({ "seq": event.envelope.seq }))
+}
+
+/// Where a UI change's design review stands (step 12), as `task.get` words it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum ReviewState {
+    /// Not a UI change, or no Designer on the team.
+    NotNeeded,
+    /// The Designer's review is due.
+    Waiting,
+    /// The team's only Designer is paused.
+    WaitingOnDesigner,
+    /// The team has not said how to open its app.
+    PreviewMissing,
+    /// The Designer cannot have its browser: no Docker sandbox.
+    DesignerNeedsSandbox,
+    /// The Designer passed the change since the task last entered `verifying`.
+    Passed,
+    /// The Designer failed it.
+    Failed,
+}
+
+/// A task's design review: where it stands, and the latest one recorded since the task last
+/// entered `verifying`, when there is one.
+#[derive(Debug, Clone, Serialize)]
+pub(crate) struct DesignReview {
+    pub(crate) state: ReviewState,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) reasons: Option<String>,
+    pub(crate) checks: Vec<DesignReviewCheck>,
+    /// The Designer that recorded it, and its session.
+    #[serde(skip)]
+    pub(crate) recorded_by: Option<(String, Option<String>)>,
+}
+
+/// The design review of a task whose change is `ui_change` or not, read from its `history`
+/// (oldest first) and the team as it is now. A review recorded since the task last entered
+/// `verifying` answers first, whatever has changed since; without one, the team's preview, the
+/// Designer's browser, and a Designer that is not paused are each waited for, in that order.
+pub(crate) fn design_review(
+    team: &Team,
+    ui_change: bool,
+    history: &[FarikEvent],
+    browser: DesignerBrowser,
+) -> DesignReview {
+    let waiting = |state| DesignReview {
+        state,
+        reasons: None,
+        checks: Vec::new(),
+        recorded_by: None,
+    };
+    if !ui_change || !team.has_designer() {
+        return waiting(ReviewState::NotNeeded);
+    }
+    let since =
+        last_move_into(history, TaskStatus::Verifying).map_or(0, |event| event.envelope.seq);
+    let recorded = history
+        .iter()
+        .rev()
+        .take_while(|event| event.envelope.seq > since)
+        .find_map(|event| match &event.body {
+            EventBody::DesignReviewRecorded(body) => Some((event, body)),
+            _ => None,
+        });
+    if let Some((event, body)) = recorded {
+        return DesignReview {
+            state: if body.pass {
+                ReviewState::Passed
+            } else {
+                ReviewState::Failed
+            },
+            reasons: Some(body.reasons.clone()),
+            checks: body.checks.clone(),
+            recorded_by: event
+                .envelope
+                .ids
+                .agent_id
+                .clone()
+                .map(|agent| (agent, event.envelope.ids.session_id.clone())),
+        };
+    }
+    waiting(if team.preview().is_none() {
+        ReviewState::PreviewMissing
+    } else if browser != DesignerBrowser::Ready {
+        ReviewState::DesignerNeedsSandbox
+    } else if team.designer().is_none() {
+        ReviewState::WaitingOnDesigner
+    } else {
+        ReviewState::Waiting
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;
@@ -534,6 +723,103 @@ mod tests {
 
         assert!(preview.runs().is_empty(), "nothing was checked");
         assert!(project.events(&[EventKind::PageChecked]).is_empty());
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn refuses_an_incomplete_design_review() {
+        let project = a_project("tools-design-review");
+        let preview = Arc::new(CheckedPreview::printing(A_VIOLATION));
+        let mut context = project.context("iris", Some("FRK-1"));
+        context.purpose = SessionPurpose::Verify;
+        context.preview = Some(preview);
+        let review = json!({ "pass": false, "reasons": "The menu button has no name." });
+        let check = |width: &str, theme: &str| {
+            run(
+                &context,
+                "farik_check_page",
+                json!({ "path": "/", "width": width, "theme": theme }),
+            )
+            .expect("the Designer checks a page");
+        };
+        // A check of another session is not this review's.
+        project.record(
+            "FRK-1",
+            "page.checked",
+            &json!({
+                "width": "desktop", "theme": "dark", "path": "/", "violations": [],
+                "screenshot": "earlier-desktop-dark.png"
+            }),
+        );
+
+        check("phone", "light");
+        check("phone", "dark");
+        check("desktop", "light");
+        check("phone", "light");
+        assert_eq!(
+            refused(run(&context, "farik_record_design_review", review.clone())),
+            "design_review_incomplete: check each page at both widths in both themes first; \
+             missing: desktop dark"
+        );
+        assert!(
+            project
+                .events(&[EventKind::DesignReviewRecorded])
+                .is_empty()
+        );
+
+        check("desktop", "dark");
+        run(&context, "farik_record_design_review", review)
+            .expect("all four checks are in: the review records");
+
+        let recorded = project.events(&[EventKind::DesignReviewRecorded]);
+        assert_eq!(recorded.len(), 1);
+        let violations = json!([{
+            "rule": "button-name",
+            "impact": "critical",
+            "target": "button.menu",
+            "help": "Buttons must have discernible text"
+        }]);
+        let check_of = |width: &str, theme: &str| json!({ "width": width, "theme": theme, "violations": violations });
+        assert_eq!(
+            serde_json::to_value(&recorded[0].body).expect("a body")["body"],
+            json!({
+                "pass": false,
+                "reasons": "The menu button has no name.",
+                "checks": [
+                    check_of("phone", "light"),
+                    check_of("phone", "dark"),
+                    check_of("desktop", "light"),
+                    check_of("desktop", "dark"),
+                ]
+            })
+        );
+        let ids = &recorded[0].envelope.ids;
+        assert_eq!(ids.agent_id.as_deref(), Some("iris"));
+        assert_eq!(ids.session_id.as_deref(), Some("session-1"));
+
+        // Only the Designer records one, in its design review of the task.
+        let mut implementing = project.context("iris", Some("FRK-1"));
+        implementing.purpose = SessionPurpose::Implement;
+        let mut architect = project.context("ada", Some("FRK-1"));
+        architect.purpose = SessionPurpose::Verify;
+        for outside in [implementing, architect] {
+            assert!(
+                refused(run(
+                    &outside,
+                    "farik_record_design_review",
+                    json!({ "pass": true, "reasons": "Fine." })
+                ))
+                .starts_with("design_review_refused: "),
+            );
+        }
+        assert_eq!(
+            refused(run(
+                &context,
+                "farik_record_design_review",
+                json!({ "pass": true, "reasons": " " })
+            )),
+            "blank_reason: a reason is recorded, and the log is where somebody reads it back"
+        );
     }
 
     #[test]

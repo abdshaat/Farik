@@ -16,8 +16,8 @@ use crate::session::SessionPurpose;
 use crate::tools::design::{DesignPlan, PlanState, design_plan, plan_history, returns};
 use crate::transitions::TransitionOutcome;
 
-/// The Farik tools an explore session is offered: the five reading tools and the plan. Step 12
-/// adds the browser's.
+/// The Farik tools an explore session is offered: the five reading tools, the plan, and the page
+/// check when the preview is open for it (step 12).
 pub(super) const EXPLORE_TOOLS: &[&str] = &[
     "farik_read_task",
     "farik_read_board",
@@ -25,7 +25,23 @@ pub(super) const EXPLORE_TOOLS: &[&str] = &[
     "farik_read_criteria",
     "farik_read_decisions",
     "farik_propose_design_plan",
+    "farik_check_page",
 ];
+
+/// The Farik tools the Designer's design review of a Developer's UI change is offered (D9): the
+/// five reading tools, the page check, and its one answer.
+pub(super) const DESIGN_REVIEW_TOOLS: &[&str] = &[
+    "farik_read_task",
+    "farik_read_board",
+    "farik_read_rules",
+    "farik_read_criteria",
+    "farik_read_decisions",
+    "farik_check_page",
+    RECORD_DESIGN_REVIEW_TOOL,
+];
+
+/// The design review's one answer, offered to that session alone.
+pub(super) const RECORD_DESIGN_REVIEW_TOOL: &str = "farik_record_design_review";
 
 /// The one tool the Product Manager's decision session is given.
 pub(super) const DECIDE_TOOL: &str = "farik_decide_design_plan";
@@ -198,6 +214,7 @@ mod tests {
 
     use crate::claude::allowed_builtins;
     use crate::orchestrator::fixtures::{ExecutorWitness, Harness};
+    use crate::preview::fixtures::FakePreviews;
     use crate::prompt::DESIGN_DECISION_INSTRUCTION;
     use crate::recorded::Transcript;
     use crate::recorded::fixtures::{
@@ -205,7 +222,7 @@ mod tests {
         implement_by_iris_frk_1, replays_farik_read_board, review_writes_note,
     };
     use crate::session::{SessionPurpose, SessionSpec};
-    use crate::tools::fixtures::with_the_designer;
+    use crate::tools::fixtures::{browsing, with_the_designer};
 
     /// What the explore session's plan says, which the implement session is given.
     const PLAN_WORDS: &str = "the label goes above its field";
@@ -311,11 +328,6 @@ mod tests {
             allowed_builtins(&BTreeSet::from([PermissionTier::Read]))
         );
         assert_eq!(explore.cwd, harness.worktree("FRK-1"));
-        assert!(
-            explore.initial_prompt.contains("no browser yet"),
-            "{}",
-            explore.initial_prompt
-        );
         let decision = &started[1];
         assert_eq!(decision.farik_tools, ["farik_decide_design_plan"]);
         assert!(
@@ -336,6 +348,45 @@ mod tests {
         assert_eq!(harness.events(&[EventKind::DesignPlanProposed]).len(), 1);
         assert_eq!(harness.events(&[EventKind::DesignPlanApproved]).len(), 1);
         assert_eq!(harness.row("FRK-1").status, TaskStatus::InProgress);
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn explores_with_the_browser() {
+        let mut harness = a_designers_task_in("design-flow-browser", browsing, |_| {});
+        harness.previews = std::sync::Arc::new(FakePreviews::ready());
+        let started = ticked(&harness, vec![explore_plans_frk_1()], 1).await;
+
+        assert_eq!(who(&started), [("iris", SessionPurpose::Explore)]);
+        let explore = &started[0];
+        assert_eq!(
+            explore.farik_tools,
+            [
+                "farik_read_task",
+                "farik_read_board",
+                "farik_read_rules",
+                "farik_read_criteria",
+                "farik_read_decisions",
+                "farik_propose_design_plan",
+                "farik_check_page",
+            ]
+        );
+        let servers: Vec<&str> = explore
+            .mcp_servers
+            .iter()
+            .map(|s| s.name.as_str())
+            .collect();
+        assert_eq!(servers, ["playwright"]);
+        assert!(
+            !explore.initial_prompt.contains("no browser yet"),
+            "{}",
+            explore.initial_prompt
+        );
+        assert!(
+            explore.initial_prompt.contains("`farik_check_page`"),
+            "{}",
+            explore.initial_prompt
+        );
     }
 
     #[tokio::test]

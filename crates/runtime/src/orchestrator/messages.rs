@@ -553,8 +553,9 @@ pub(super) fn implement_message(contract: &TaskContract, resume: &Resume) -> Str
 pub(super) fn explore_message(contract: &TaskContract, returned: Option<&str>) -> String {
     let message = format!(
         "Explore {task} before you change anything, in this worktree, on the branch {branch}: \
-         work out what its screens show now and what should change. There is no browser yet: \
-         read the code and the files that make the screens. Then end the session with your plan \
+         work out what its screens show now and what should change. Read the code and the files \
+         that make the screens, and when the app's preview is open for you, look at them in the \
+         browser and check them with `farik_check_page`. Then end the session with your plan \
          through `farik_propose_design_plan`: a summary for the user, a blank line, then what \
          you saw, what you will change, which screens and sizes, and what you will leave alone. \
          The Product Manager approves it before you change anything.",
@@ -568,6 +569,23 @@ pub(super) fn explore_message(contract: &TaskContract, returned: Option<&str>) -
         ),
         None => message,
     }
+}
+
+/// The UI/UX Designer's design review's message (step 12): the Developer's change, the
+/// repository's words and so untrusted, the page the preview opens on, and the one answer to give.
+pub(super) fn design_review_message(contract: &TaskContract, diff: &str, page: &str) -> String {
+    format!(
+        "The Software Developer changed the interface of {task}, whose contract is above. Before \
+         the reviewer reads it, check it in the browser: the app's preview opens at {page}. Look \
+         at the pages the change touches at phone width (360 px) and desktop width (1280 px), in \
+         the light and the dark theme, and run `farik_check_page` on each at both widths in both \
+         themes. You change nothing. End the session with `farik_record_design_review`: pass it, \
+         or fail it with what the Developer is to change.\n\nThe diff from the integration \
+         branch to {branch}: {diff}",
+        task = contract.id.as_str(),
+        branch = task_branch(contract),
+        diff = untrusted_block("diff", diff, DIFF_CAP_BYTES)
+    )
 }
 
 /// The Product Manager's decision session's message: the Designer's plan, an agent's words and so

@@ -332,6 +332,28 @@ impl Harness {
         self.project.moved(task, "in_progress", "verifying", &body);
     }
 
+    /// Files `task`, `dev-a`'s, reviewed by `ada`, and moves it to `verifying` with
+    /// `site/style.css` committed on its branch: a UI change under the default `ui_paths`.
+    pub(crate) fn verifying_a_ui_change(&self, task: &str) {
+        self.file(task, "in_progress", |wire| {
+            wire["allowed_paths"] = json!(["site/style.css"]);
+        });
+        let worktree = self.worktree(task);
+        let git = &self.project.deps.git;
+        git.create_worktree(&worktree, &self.branch(task), "main")
+            .expect("the task's worktree is made");
+        std::fs::create_dir_all(worktree.join("site")).expect("made");
+        std::fs::write(worktree.join("site/style.css"), "h1 {}\n").expect("written");
+        git.commit(&worktree, "Style", &["site/style.css".to_string()])
+            .expect("committed");
+        self.project.moved(
+            task,
+            "in_progress",
+            "verifying",
+            &json!({ "assignee": "dev-a", "reviewer": "ada" }),
+        );
+    }
+
     /// `verifying_with` `done.txt` committed, the note written, and no change.
     pub(crate) fn verifying(&self, task: &str) {
         self.verifying_with(task, true, true, |_| {});

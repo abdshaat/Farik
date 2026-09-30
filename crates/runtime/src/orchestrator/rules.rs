@@ -4275,9 +4275,11 @@ mod tests {
 
         let spec = &adapter.started()[0];
         let tiers = default_tiers(Role::ProductManager);
+        // The Designer's page check and design review are offered in its own sessions alone.
         let expected: Vec<String> = tool_descriptors()
             .iter()
             .filter(|tool| tiers.contains(&tool.tier))
+            .filter(|tool| !["farik_check_page", "farik_record_design_review"].contains(&tool.name))
             .map(|tool| tool.name.to_string())
             .collect();
         assert_eq!(spec.farik_tools, expected);

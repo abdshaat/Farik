@@ -24,7 +24,7 @@ use farik_roles::{ConnectorDefinition, builtin_connector, load_role};
 use farik_store::EventQuery;
 use sha2::{Digest as _, Sha256};
 
-use super::design::DECIDE_TOOL;
+use super::design::{DECIDE_TOOL, RECORD_DESIGN_REVIEW_TOOL};
 use super::messages::human_message;
 use super::verify::{append, append_stamped};
 use super::{OrchestratorDeps, OrchestratorError, TRIAGE_MODEL};
@@ -119,13 +119,17 @@ pub(super) async fn run_session(
         Ok(None) => (None, Vec::new()),
         Err(failed) => return Ok(failed),
     };
-    // An explore session reads, whatever the agent's grants (ADR 0026), and browses the preview
-    // when it has the connector: browsing before approval is for explore alone (step 11's m8).
-    let explore_tiers = if connectors.is_empty() {
+    // An explore session reads, whatever the agent's grants (ADR 0026). A session given the
+    // connector browses the preview, whose tools are tagged `network`: browsing before approval is
+    // for explore alone (step 11's m8), and the plan gate holds nothing at `network`.
+    let mut tiers = if ask.purpose == SessionPurpose::Explore {
         vec![PermissionTier::Read]
     } else {
-        vec![PermissionTier::Read, PermissionTier::Network]
+        ask.agent.tiers(&team.permissions())
     };
+    if !connectors.is_empty() && !tiers.contains(&PermissionTier::Network) {
+        tiers.push(PermissionTier::Network);
+    }
     deps.daemon.register_session(SessionRegistration {
         session_id: spec.session_id.clone(),
         agent_id: spec.agent_id.clone(),
@@ -137,11 +141,7 @@ pub(super) async fn run_session(
         executor: ask.executor,
         limits: spec.limits,
         farik_tools: spec.farik_tools.clone(),
-        tiers: if ask.purpose == SessionPurpose::Explore {
-            explore_tiers
-        } else {
-            ask.agent.tiers(&team.permissions())
-        },
+        tiers,
         connectors,
         preview: browser.clone(),
     });
@@ -549,9 +549,36 @@ fn leave_note(
     )
 }
 
+/// The tool that checks a page of the task's preview.
+pub(super) const CHECK_PAGE_TOOL: &str = "farik_check_page";
+
 /// The Farik tools a read-only session is not offered: the command runner, which has no
 /// executor there, and the git writes, which only the assignee may make.
 const NOT_FOR_READ_ONLY: [&str; 3] = ["farik_exec", "farik_git_commit", "farik_git_push"];
+
+/// The Farik tools `ask`'s session is offered, before its tiers are applied.
+fn offered_tools(deps: &OrchestratorDeps, team: &Team, ask: &SessionAsk<'_>) -> Vec<FarikTool> {
+    // The page check is the Designer's, in a session that has the preview open (step 12).
+    let checks_pages = ask.agent.role == RoleWire::UiUxDesigner
+        && ask.contract.is_some()
+        && offered_connector(
+            ask.agent,
+            ask.purpose,
+            designer_browser(team, deps.previews.as_ref()),
+        )
+        .is_some();
+    tool_descriptors()
+        .into_iter()
+        // A verify session judges the work and does not change it (step 12): it has no executor,
+        // and the git writes are refused to all but the assignee, so it is not offered them.
+        .filter(|tool| !(ask.read_only && NOT_FOR_READ_ONLY.contains(&tool.name)))
+        .filter(|tool| checks_pages || tool.name != CHECK_PAGE_TOOL)
+        // The design review's answer is its session's alone, which lists it.
+        .filter(|tool| tool.name != RECORD_DESIGN_REVIEW_TOOL || ask.tools.is_some())
+        .filter(|tool| ask.only_tool.is_none_or(|only| tool.name == only))
+        .filter(|tool| ask.tools.is_none_or(|listed| listed.contains(&tool.name)))
+        .collect()
+}
 
 /// The spec of the session `ask` describes, its prompt assembled from the files as they are now,
 /// with what the human said about its task since its last session started. A triage session and a
@@ -587,14 +614,7 @@ fn session_spec(
     } else {
         allowed_builtins(&tiers)
     };
-    // A verify session judges the work and does not change it (step 12): it has no executor, and
-    // the git writes are refused to all but the assignee, so it is not offered them.
-    let tools: Vec<FarikTool> = tool_descriptors()
-        .into_iter()
-        .filter(|tool| !(ask.read_only && NOT_FOR_READ_ONLY.contains(&tool.name)))
-        .filter(|tool| ask.only_tool.is_none_or(|only| tool.name == only))
-        .filter(|tool| ask.tools.is_none_or(|listed| listed.contains(&tool.name)))
-        .collect();
+    let tools = offered_tools(deps, team, ask);
     // A session given one tool has it whatever the agent's tiers.
     let farik_tools = tools
         .iter()
@@ -922,19 +942,7 @@ mod tests {
         )
     }
 
-    /// The Designer `iris` and the Architect `ada` added, both with the Playwright connector on,
-    /// and a preview set.
-    fn browsing(wire: &mut serde_json::Value) {
-        crate::tools::fixtures::with_the_designer(wire);
-        let on = json!([{ "name": "playwright", "source": "builtin" }]);
-        wire["agents"][3]["mcp_servers"] = on.clone();
-        wire["agents"][4]["mcp_servers"] = on;
-        wire["preview"] = json!({
-            "prepare": "make site",
-            "start": "busybox httpd -f -p 4401 -h site",
-            "port": 4401
-        });
-    }
+    use crate::tools::fixtures::browsing;
 
     fn agent<'a>(team: &'a farik_core::team::Team, id: &str) -> &'a farik_core::team::Agent {
         team.agents
@@ -1094,6 +1102,121 @@ mod tests {
         assert_eq!(
             witness.given_tiers(),
             vec![vec![PermissionTier::Read, PermissionTier::Network]; 3]
+        );
+    }
+
+    /// `agent`'s session of FRK-1 for `purpose`, in its worktree.
+    fn a_session<'a>(
+        harness: &Harness,
+        team: &'a farik_core::team::Team,
+        contract: &'a farik_core::contract::TaskContract,
+        agent_id: &str,
+        purpose: SessionPurpose,
+    ) -> SessionAsk<'a> {
+        SessionAsk {
+            agent: agent(team, agent_id),
+            purpose,
+            read_only: purpose == SessionPurpose::Verify,
+            ..exploring(harness, team, contract)
+        }
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn registers_the_network_tier_with_the_connector() {
+        // The connector's tools are tagged `network`, so a session given it is held to that tier
+        // too; without it every browser call is `tier_not_granted: network`.
+        use crate::preview::fixtures::FakePreviews;
+
+        let mut harness = Harness::new("preview-network-tier", browsing);
+        harness.previews = Arc::new(FakePreviews::ready());
+        harness.in_progress("FRK-1", "iris", "ada");
+        let adapter = harness.recorded(vec![
+            crate::recorded::fixtures::reads_a_file(),
+            crate::recorded::fixtures::reads_a_file(),
+            crate::recorded::fixtures::reads_a_file(),
+        ]);
+        let witness = Arc::new(ExecutorWitness::new(
+            adapter.clone(),
+            Arc::clone(&harness.daemon),
+        ));
+        let orchestrator = harness.orchestrator(witness.clone());
+        let deps = &orchestrator.deps;
+        let team = deps.tools.files.read_team().expect("the team");
+        let contract = deps
+            .tools
+            .files
+            .read_contract(&"FRK-1".parse().expect("an id"))
+            .expect("the contract");
+
+        for (who, purpose) in [
+            ("iris", SessionPurpose::Implement),
+            ("iris", SessionPurpose::Verify),
+            ("dev-a", SessionPurpose::Implement),
+        ] {
+            run_session(
+                deps,
+                &team,
+                a_session(&harness, &team, &contract, who, purpose),
+            )
+            .await
+            .expect("the session runs");
+        }
+
+        let tiers = witness.given_tiers();
+        assert!(tiers[0].contains(&PermissionTier::Network), "{tiers:?}");
+        assert!(tiers[1].contains(&PermissionTier::Network), "{tiers:?}");
+        assert!(!tiers[2].contains(&PermissionTier::Network), "{tiers:?}");
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn offers_the_page_check_only_to_a_designer_with_the_browser() {
+        use crate::preview::fixtures::FakePreviews;
+
+        let checks = |name: &str, previews: Arc<dyn crate::preview::PreviewFactory>| {
+            let mut harness = Harness::new(name, browsing);
+            harness.previews = previews;
+            harness.in_progress("FRK-1", "iris", "ada");
+            let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
+            let deps = &orchestrator.deps;
+            let team = deps.tools.files.read_team().expect("the team");
+            let contract = deps
+                .tools
+                .files
+                .read_contract(&"FRK-1".parse().expect("an id"))
+                .expect("the contract");
+            [
+                ("iris", SessionPurpose::Implement),
+                ("iris", SessionPurpose::Verify),
+                ("ada", SessionPurpose::Implement),
+                ("ada", SessionPurpose::Verify),
+                ("dev-a", SessionPurpose::Implement),
+            ]
+            .map(|(who, purpose)| {
+                session_spec(
+                    deps,
+                    &team,
+                    &a_session(&harness, &team, &contract, who, purpose),
+                )
+                .expect("the spec")
+                .farik_tools
+                .iter()
+                .any(|tool| tool == "farik_check_page")
+            })
+        };
+
+        assert_eq!(
+            checks("session-check-page", Arc::new(FakePreviews::ready())),
+            [true, true, false, false, false]
+        );
+        assert_eq!(
+            checks(
+                "session-check-page-none",
+                Arc::new(crate::preview::NoPreviews)
+            ),
+            [false; 5],
+            "no sandbox, no browser, no page check"
         );
     }
 

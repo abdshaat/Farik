@@ -25,6 +25,7 @@ use farik_core::governor::gates::{
 use farik_core::governor::readiness::{
     JudgmentAnswer, JudgmentReview, ParentState, ReadinessContext,
 };
+use farik_core::governor::team_rules::is_ui_change;
 use farik_core::governor::transition::{
     ContractAcceptance, GateFailure, TransitionContext, TransitionDecision, TransitionEffect,
     TransitionRefusal, TransitionRequest, evaluate_transition,
@@ -47,6 +48,7 @@ use farik_store::{EventLog, EventQuery, Git, GitError, Projections, StoreError, 
 use crate::channel::{ChannelError, post_system};
 use crate::cost::{CostError, budget_state, extra_tries};
 use crate::preview::PreviewFactory;
+use crate::tools::design::{DesignReview, ReviewState, design_review};
 
 /// The governor's door: everything a transition is judged on and recorded in.
 pub struct Transitions {
@@ -486,6 +488,7 @@ impl Transitions {
             dependency_states(&contract, &board),
         );
 
+        let review = self.review_of(team, &contract, &changed_paths, &history).1;
         let (results, completion_note, review_note) = evidence_since_work_began(&history);
         let done = with_the_humans_acceptance(
             &contract,
@@ -497,8 +500,11 @@ impl Transitions {
                 review_note,
                 human_accepted: false,
                 protected_paths: team.rules().protected_paths,
-                // Step 12's Task 4 reads the design review from the log.
-                design_review: DesignReviewNeed::NotNeeded,
+                design_review: match review.state {
+                    ReviewState::NotNeeded => DesignReviewNeed::NotNeeded,
+                    ReviewState::Passed => DesignReviewNeed::Passed,
+                    _ => DesignReviewNeed::Missing,
+                },
             },
         );
         let hours = team.policy.blocked_limit_hours.get();
@@ -530,10 +536,52 @@ impl Transitions {
             review_passed: review_passed(&history),
             extra_iterations: extra_tries(&history),
             design_plan_returns: crate::tools::design::returns(&history),
-            // Step 12's Task 4 names the Designer whose design review failed.
-            design_reviewer: None,
+            design_reviewer: match (review.state, review.recorded_by) {
+                (ReviewState::Failed, Some((designer, _))) => Some(designer),
+                _ => None,
+            },
             contract,
         })
+    }
+
+    /// Whether the task's change touches the interface, and its design review (step 12), read
+    /// from the store and the task branch as `context` reads them.
+    ///
+    /// # Errors
+    ///
+    /// As `context`'s.
+    pub(crate) fn design_review(
+        &self,
+        team: &Team,
+        task_id: &TaskId,
+    ) -> Result<(bool, DesignReview), TransitionError> {
+        let history = self.log.read(&EventQuery {
+            task_id: Some(task_id.clone()),
+            ..EventQuery::default()
+        })?;
+        let contract = self.files.read_contract(task_id)?;
+        let (_, changed_paths) = self.work(&contract, team)?;
+        Ok(self.review_of(team, &contract, &changed_paths, &history))
+    }
+
+    /// `design_review` on what was read.
+    fn review_of(
+        &self,
+        team: &Team,
+        contract: &TaskContract,
+        changed_paths: &[String],
+        history: &[FarikEvent],
+    ) -> (bool, DesignReview) {
+        let ui_change = is_ui_change(
+            contract,
+            contract.assignee_role,
+            changed_paths,
+            &team.rules().ui_paths,
+        );
+        (
+            ui_change,
+            design_review(team, ui_change, history, self.designer_browser(team)),
+        )
     }
 
     /// The Definition of Ready's context for `contract` as it is given, which need not be the

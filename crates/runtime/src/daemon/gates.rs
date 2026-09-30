@@ -33,6 +33,7 @@ use super::web::{Failure, INTERNAL_ERROR, NOT_FOUND, REFUSED, UNKNOWN_QUERY};
 use crate::cost::extra_tries;
 use crate::tools::ToolDeps;
 use crate::tools::contracts::changed_fields;
+use crate::tools::design::ReviewState;
 use crate::transitions::last_move_into;
 
 /// The methods this module answers.
@@ -49,21 +50,76 @@ fn internal(error: &dyn Display) -> Failure {
     Failure::new(INTERNAL_ERROR, error.to_string())
 }
 
+/// The UI changes in `verifying` whose design review waits on the human (step 12): for the
+/// team's preview, or for Docker's sandbox.
+fn design_reviews_waiting(deps: &ToolDeps, team: &Team) -> Result<Vec<Value>, Failure> {
+    let board = deps.projections.board().map_err(|e| internal(&e))?;
+    let designer = team
+        .agents
+        .iter()
+        .find(|agent| agent.role == farik_core::team::RoleWire::UiUxDesigner)
+        .map(|agent| agent.id.to_string());
+    let mut rows = Vec::new();
+    for row in board
+        .iter()
+        .filter(|row| row.status == TaskStatus::Verifying)
+    {
+        let (kind, line) = match deps
+            .transitions
+            .design_review(team, &row.task_id)
+            .map_err(|e| internal(&e))?
+            .1
+            .state
+        {
+            ReviewState::PreviewMissing => (
+                "preview_missing",
+                format!(
+                    "{} needs to know how to open your app",
+                    name_of(team, designer.as_deref().unwrap_or("The UI/UX Designer"))
+                ),
+            ),
+            ReviewState::DesignerNeedsSandbox => (
+                "designer_needs_sandbox",
+                "The UI/UX Designer needs Docker's sandbox to open your app. Turn the sandbox on, \
+                 or retire the Designer"
+                    .to_string(),
+            ),
+            _ => continue,
+        };
+        rows.push(json!({
+            "task_id": row.task_id,
+            "kind": kind,
+            "agent_id": designer,
+            "title": row.title,
+            "line": line,
+        }));
+    }
+    Ok(rows)
+}
+
 /// The gates' queries, whose params the schema already passed.
 pub(super) fn query(deps: &ToolDeps, name: &str, params: &Value) -> Result<Value, Failure> {
     deps.projections.catch_up().map_err(|e| internal(&e))?;
     let team = || deps.files.read_team().map_err(|e| internal(&e));
     match name {
         "waiting.list" => {
-            let listed = waiting(&deps.projections, &deps.log, &deps.files, &team()?)
+            let team = team()?;
+            let listed = waiting(&deps.projections, &deps.log, &deps.files, &team)
                 .map_err(|e| internal(&e))?;
-            Ok(json!({ "waiting": listed.iter().map(|item| json!({
-                "task_id": item.task_id,
-                "kind": item.kind.as_str(),
-                "agent_id": item.agent_id,
-                "title": item.title,
-                "line": item.line,
-            })).collect::<Vec<_>>() }))
+            let mut rows: Vec<Value> = listed
+                .iter()
+                .map(|item| {
+                    json!({
+                        "task_id": item.task_id,
+                        "kind": item.kind.as_str(),
+                        "agent_id": item.agent_id,
+                        "title": item.title,
+                        "line": item.line,
+                    })
+                })
+                .collect();
+            rows.extend(design_reviews_waiting(deps, &team)?);
+            Ok(json!({ "waiting": rows }))
         }
         "team.activity" => {
             let now = deps.clock.now();
@@ -701,6 +757,55 @@ pub(super) mod tests {
                 .set_command_handler(command_handler(orchestrator))
         );
         harness
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn lists_a_design_review_that_waits_on_the_human() {
+        let harness = Harness::new("gates-design-review-waits", |wire| {
+            crate::tools::fixtures::browsing(wire);
+            wire.as_object_mut().expect("a team").remove("preview");
+        });
+        harness.verifying_a_ui_change("FRK-1");
+        let waiting = query(
+            &harness.daemon,
+            "waiting.list",
+            &json!({}),
+            "waitingListResult",
+        );
+        assert_eq!(
+            waiting["waiting"],
+            json!([{
+                "task_id": "FRK-1", "kind": "preview_missing", "agent_id": "iris",
+                "title": "Add a login page", "line": "iris needs to know how to open your app"
+            }])
+        );
+
+        let harness = Harness::new(
+            "gates-design-review-sandbox",
+            crate::tools::fixtures::browsing,
+        );
+        harness
+            .project
+            .deps
+            .transitions
+            .set_previews(Arc::new(crate::preview::NoPreviews));
+        harness.verifying_a_ui_change("FRK-1");
+        let waiting = query(
+            &harness.daemon,
+            "waiting.list",
+            &json!({}),
+            "waitingListResult",
+        );
+        assert_eq!(
+            waiting["waiting"],
+            json!([{
+                "task_id": "FRK-1", "kind": "designer_needs_sandbox", "agent_id": "iris",
+                "title": "Add a login page",
+                "line": "The UI/UX Designer needs Docker's sandbox to open your app. Turn the \
+                         sandbox on, or retire the Designer"
+            }])
+        );
     }
 
     #[test]

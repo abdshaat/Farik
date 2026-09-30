@@ -53,6 +53,20 @@ pub(crate) fn with_the_designer(wire: &mut Value) {
     agents.push(an_agent_wire("ada", "architect"));
 }
 
+/// The Designer `iris` and the Architect `ada` added, both with the Playwright connector on,
+/// and a preview set.
+pub(crate) fn browsing(wire: &mut Value) {
+    with_the_designer(wire);
+    let on = json!([{ "name": "playwright", "source": "builtin" }]);
+    wire["agents"][3]["mcp_servers"] = on.clone();
+    wire["agents"][4]["mcp_servers"] = on;
+    wire["preview"] = json!({
+        "prepare": "make site",
+        "start": "busybox httpd -f -p 4401 -h site",
+        "port": 4401
+    });
+}
+
 /// A project the tools run on.
 pub(crate) struct TestProject {
     pub(crate) repo: TempRepo,

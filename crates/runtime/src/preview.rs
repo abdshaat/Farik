@@ -543,21 +543,26 @@ pub(crate) mod fixtures {
 
         fn run_check(&self, args: &[String], _stdin: &str) -> Result<String, CheckError> {
             crate::locked(&self.runs).push(args.to_vec());
-            let mounted = after(args, "--mount")
-                .iter()
-                .find_map(|mount| {
-                    mount
-                        .strip_prefix("type=bind,src=")?
-                        .strip_suffix(",dst=/output")
-                })
-                .expect("the output folder is mounted");
-            let file = after(args, "--screenshot")[0]
-                .strip_prefix("/output/")
-                .expect("the screenshot is saved in the output folder");
-            std::fs::write(Path::new(mounted).join(file), SCREENSHOT)
-                .expect("the screenshot is written");
+            save_screenshot(args);
             Ok(self.printed.clone())
         }
+    }
+
+    /// Writes `SCREENSHOT` where a check's arguments say its screenshot goes.
+    fn save_screenshot(args: &[String]) {
+        let mounted = after(args, "--mount")
+            .iter()
+            .find_map(|mount| {
+                mount
+                    .strip_prefix("type=bind,src=")?
+                    .strip_suffix(",dst=/output")
+            })
+            .expect("the output folder is mounted");
+        let file = after(args, "--screenshot")[0]
+            .strip_prefix("/output/")
+            .expect("the screenshot is saved in the output folder");
+        std::fs::write(Path::new(mounted).join(file), SCREENSHOT)
+            .expect("the screenshot is written");
     }
 
     /// What `CheckedPreview` saves as a screenshot: a PNG's signature.
@@ -590,6 +595,12 @@ pub(crate) mod fixtures {
 
         fn stop(&self, _reason: &str) -> Result<(), PreviewError> {
             Ok(())
+        }
+
+        /// A page with nothing wrong on it.
+        fn run_check(&self, args: &[String], _stdin: &str) -> Result<String, CheckError> {
+            save_screenshot(args);
+            Ok(r#"{"violations":[]}"#.to_string())
         }
     }
 }

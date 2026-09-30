@@ -104,6 +104,10 @@ pub(crate) enum Refusal {
     /// A page check asked outside a UI/UX Designer's session of its task with the preview open,
     /// or of a path that is not the preview's (step 12).
     CheckPageRefused { detail: String },
+    /// A design review recorded outside the UI/UX Designer's review of its task (step 12).
+    DesignReviewRefused { detail: String },
+    /// A design review recorded before the session checked a page at each width in each theme.
+    DesignReviewIncomplete { missing: String },
     /// A commit named a directory, which git would stage whole, files the path checks never saw
     /// among it.
     PathIsADirectory { path: String },
@@ -111,6 +115,7 @@ pub(crate) enum Refusal {
 
 impl Refusal {
     /// The kind, then what it says.
+    #[allow(clippy::too_many_lines, reason = "one arm per kind of refusal")]
     pub(crate) fn reason(&self) -> String {
         let (kind, detail) = match self {
             Self::AgentNotActive { agent_id, status } => (
@@ -201,6 +206,11 @@ impl Refusal {
             Self::NoSuchDecision { number } => ("no_such_decision", number.to_string()),
             Self::DesignPlanRefused { detail } => ("design_plan_refused", detail.clone()),
             Self::CheckPageRefused { detail } => ("check_page_refused", detail.clone()),
+            Self::DesignReviewRefused { detail } => ("design_review_refused", detail.clone()),
+            Self::DesignReviewIncomplete { missing } => (
+                "design_review_incomplete",
+                format!("check each page at both widths in both themes first; missing: {missing}"),
+            ),
             Self::SummaryMissing => (
                 "summary_missing",
                 "open the note with two or three plain sentences for the user, then a blank line"

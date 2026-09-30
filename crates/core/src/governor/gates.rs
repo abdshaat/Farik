@@ -659,6 +659,32 @@ pub fn check_rejection_reasons(
     verdict(reasons)
 }
 
+/// The `RejectionReasons` gate for the UI/UX Designer's rejection of a UI change it failed (F9):
+/// its written reasons, which need name no criterion, since a design review fails none, and any it
+/// does name the contract has.
+///
+/// # Errors
+///
+/// No rejection, no written reasons, or a named criterion this contract does not have.
+pub fn check_design_rejection(
+    contract: &TaskContract,
+    rejection: Option<&Rejection>,
+) -> GateResult {
+    let Some(rejection) = rejection else {
+        return Err(vec![
+            "work is rejected with written reasons mapped to the criteria that failed".to_string(),
+        ]);
+    };
+    let mut reasons = Vec::new();
+    if let Err(mut named) = check_failed_criterion_ids(contract, &rejection.failed_criterion_ids) {
+        reasons.append(&mut named);
+    }
+    if !is_written(&rejection.reasons) {
+        reasons.push("the rejection says nothing about why the criteria failed".to_string());
+    }
+    verdict(reasons)
+}
+
 /// The failed criteria a rejection names, the reviewer's or the human's: each has an id, and the
 /// contract has a criterion of that id. Naming none is the caller's to judge.
 ///

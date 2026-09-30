@@ -25,7 +25,8 @@ use crate::governor::escalation::{
 use crate::governor::gates::{
     AssignmentInput, AssignmentRequester, Blocker, ChildState, GateResult, Rejection, WorkState,
     check_assignment, check_blocker_resolved, check_blocker_written, check_children_done,
-    check_criteria_recorded, check_failed_criterion_ids, check_rejection_reasons,
+    check_criteria_recorded, check_design_rejection, check_failed_criterion_ids,
+    check_rejection_reasons,
 };
 use crate::governor::readiness::{ReadinessContext, evaluate_readiness};
 use crate::governor::transition_table::{GateId, TransitionActor, TransitionRow, find_transitions};
@@ -255,15 +256,15 @@ pub fn evaluate_transition(
             allowed: allowed_actors(&rows),
         });
     }
+    let asked = trimmed(request.agent_id.as_deref());
+    // F9: a UI change's Designer rejects it as the reviewer does, and does nothing else.
+    let the_designer_rejects = request.actor == TransitionActor::Reviewer
+        && request.to == TaskStatus::Rejected
+        && asked.is_some()
+        && trimmed(context.design_reviewer.as_deref()) == asked;
     if is_named_by_the_contract(request.actor) {
         let named = named_agent(request.actor, &context.contract);
         let named_id = trimmed(named);
-        let asked = trimmed(request.agent_id.as_deref());
-        // F9: a UI change's Designer rejects it as the reviewer does, and does nothing else.
-        let the_designer_rejects = request.actor == TransitionActor::Reviewer
-            && request.to == TaskStatus::Rejected
-            && asked.is_some()
-            && trimmed(context.design_reviewer.as_deref()) == asked;
         if !the_designer_rejects && (named_id.is_none() || named_id != asked) {
             return Err(TransitionRefusal::NotTheNamedAgent {
                 actor: request.actor,
@@ -274,7 +275,12 @@ pub fn evaluate_transition(
     }
     let mut failures = Vec::new();
     for row in mine {
-        match check_gate(row.gate, request.actor, context) {
+        let checked = if the_designer_rejects && row.gate == GateId::RejectionReasons {
+            check_design_rejection(&context.contract, context.rejection.as_ref())
+        } else {
+            check_gate(row.gate, request.actor, context)
+        };
+        match checked {
             Ok(()) => {
                 return Ok(TransitionDecision {
                     from: context.contract.status,
@@ -1028,6 +1034,53 @@ mod tests {
                 ]
             )
         );
+    }
+
+    #[test]
+    fn lets_the_designer_reject_without_naming_a_criterion() {
+        // A failed design review fails no exit criterion: the Designer's reasons are the rejection.
+        let mut context = a_context();
+        context.contract.status = TaskStatus::Verifying;
+        context.design_reviewer = Some("iris".to_string());
+        context.rejection = Some(Rejection {
+            failed_criterion_ids: Vec::new(),
+            reasons: "The menu button has no name at 360 px.".to_string(),
+        });
+        let by_iris = ask(TaskStatus::Rejected, A::Reviewer, Some("iris"));
+        assert_eq!(effects(&by_iris, &context), []);
+        // The reviewer the contract names still maps its rejection to criteria.
+        assert_eq!(
+            one_gate(
+                &ask(TaskStatus::Rejected, A::Reviewer, Some("arch-1")),
+                &context
+            ),
+            (
+                GateId::RejectionReasons,
+                vec!["the rejection names no failed criterion".to_string()]
+            )
+        );
+        // The Designer still says why, and names only criteria the contract has.
+        for (failed, reasons, said) in [
+            (
+                Vec::new(),
+                " ",
+                "the rejection says nothing about why the criteria failed",
+            ),
+            (
+                vec!["C9".to_string()],
+                "No name.",
+                "this contract has no criterion C9",
+            ),
+        ] {
+            context.rejection = Some(Rejection {
+                failed_criterion_ids: failed,
+                reasons: reasons.to_string(),
+            });
+            assert_eq!(
+                one_gate(&by_iris, &context),
+                (GateId::RejectionReasons, vec![said.to_string()])
+            );
+        }
     }
 
     #[test]

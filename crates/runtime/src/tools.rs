@@ -279,6 +279,11 @@ static TOOLS: LazyLock<Vec<FarikTool>> = LazyLock::new(|| {
             Read,
             "Check a page of the task's preview for accessibility (axe-core, WCAG 2.2 A and AA) at one width, phone (360 px) or desktop (1280 px), in one theme, light or dark. Answers what it found and a screenshot.",
         ),
+        tool::<design::RecordDesignReviewInput>(
+            "farik_record_design_review",
+            Read,
+            "End your design review with your answer: pass, or fail with what the Developer is to change. Check the task's pages at both widths in both themes first.",
+        ),
         tool::<exec::ExecInput>(
             "farik_exec",
             Execute,
@@ -385,6 +390,7 @@ pub async fn call_tool(
         "farik_propose_design_plan" => design::propose(&call, parse(input)?),
         "farik_decide_design_plan" => design::decide(&call, parse(input)?),
         "farik_check_page" => design::check(&call, parse(input)?).await,
+        "farik_record_design_review" => design::record_review(&call, parse(input)?),
         "farik_exec" => exec::exec(&call, parse(input)?).await,
         "farik_git_status" => nothing_in(input).and_then(|()| git::status(&call)),
         "farik_git_diff" => nothing_in(input).and_then(|()| git::diff(&call)),
@@ -596,6 +602,7 @@ mod tests {
             "farik_propose_design_plan",
             "farik_decide_design_plan",
             "farik_check_page",
+            "farik_record_design_review",
             "farik_exec",
             "farik_git_status",
             "farik_git_diff",
@@ -614,7 +621,7 @@ mod tests {
         assert_eq!(tier("farik_git_diff"), Some(PermissionTier::GitLocal));
         assert_eq!(tier("farik_git_commit"), Some(PermissionTier::GitLocal));
         assert_eq!(tier("farik_git_push"), Some(PermissionTier::GitRemote));
-        for tool in &tools[..24] {
+        for tool in &tools[..25] {
             assert_eq!(tool.tier, PermissionTier::Read, "{}", tool.name);
         }
         for tool in &tools {

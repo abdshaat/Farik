@@ -11,6 +11,7 @@ use farik_core::branch::task_branch;
 use farik_core::contract::{ExitCriterion, TaskContract, TaskId, TaskStatus, wire_method};
 use farik_core::governor::done::{CriterionResult, RunBy, requires_human_acceptance};
 use farik_core::governor::gates::Rejection;
+use farik_core::governor::team_rules::is_ui_change;
 use farik_core::governor::transition::{TransitionContext, TransitionRequest};
 use farik_core::governor::transition_table::TransitionActor;
 use farik_core::team::{Agent, Team};
@@ -20,15 +21,18 @@ use farik_protocol::event::{
 };
 use farik_store::{EventQuery, Git, TaskProjection};
 
-use super::messages::{ReviewBrief, accept_message, review_message};
+use super::design::DESIGN_REVIEW_TOOLS;
+use super::messages::{ReviewBrief, accept_message, design_review_message, review_message};
 use super::requests;
 use super::rules::{Waiting, acted, active, asleep, spent};
 use super::session::{SessionAsk, run_session};
 use super::{Orchestrator, OrchestratorDeps, OrchestratorError, TickReport, worktree};
 use crate::criteria::{CriterionError, CriterionOutcome, NewTestsInput, run_criteria};
 use crate::exec::ExecError;
+use crate::preview::designer_browser;
 use crate::session::SessionPurpose;
 use crate::tools::ToolDeps;
+use crate::tools::design::{ReviewState, design_review};
 use crate::transitions::{
     TransitionAsk, TransitionError, TransitionOutcome, integration_branch, last_move_into,
     refusal_details,
@@ -80,6 +84,20 @@ pub(super) async fn verifying(
         FarikRan::Unrunnable(why) => return escalate(deps, team, row, &why),
     };
     let context = context(deps, team, &row.task_id)?;
+    if let Some(handled) = design_review_first(
+        orchestrator,
+        team,
+        row,
+        &contract,
+        &context.done.changed_paths,
+        &history,
+        waiting,
+        ran,
+    )
+    .await?
+    {
+        return Ok(handled);
+    }
     let answers = reviewer_results(&context);
     let Some(review_note) = context.done.review_note.clone() else {
         return review(orchestrator, team, row, reviewer, &[], waiting, ran).await;
@@ -267,6 +285,121 @@ pub(super) fn escalate(
             what: format!("escalated it: {why}"),
         }),
         TransitionOutcome::Refused(_) => None,
+    })
+}
+
+/// Step 12's design review, before the reviewer's session: for a Software Developer's UI change on
+/// a team with a UI/UX Designer, the task waits for the team's preview, the Designer's browser, and
+/// a Designer that is not paused; the change the Designer failed since the task last entered
+/// `verifying` is rejected in its name, with its reasons; and with no review since then, the
+/// Designer's read-only session reviews it. Nothing, when the reviewer's turn has come.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "rule 5's own state, handed on as it stands"
+)]
+async fn design_review_first(
+    orchestrator: &Orchestrator,
+    team: &Team,
+    row: &TaskProjection,
+    contract: &TaskContract,
+    changed_paths: &[String],
+    history: &[FarikEvent],
+    waiting: &mut Waiting,
+    ran: usize,
+) -> Result<Option<Option<TickReport>>, OrchestratorError> {
+    let deps = &orchestrator.deps;
+    let ui_change = is_ui_change(
+        contract,
+        contract.assignee_role,
+        changed_paths,
+        &team.rules().ui_paths,
+    );
+    let review = design_review(
+        team,
+        ui_change,
+        history,
+        designer_browser(team, deps.previews.as_ref()),
+    );
+    let designer = match (review.state, &review.recorded_by) {
+        (ReviewState::NotNeeded | ReviewState::Passed, _) => return Ok(None),
+        (ReviewState::Failed, Some((designer, session_id))) => {
+            let reasons = review.reasons.unwrap_or_default();
+            return reject_as_designer(deps, team, row, designer, session_id.clone(), reasons)
+                .map(|report| Some(Some(report)));
+        }
+        (ReviewState::Waiting, _) => team.designer(),
+        _ => None,
+    };
+    let Some(designer) = designer else {
+        return Ok(Some(ran_criteria(row, ran)));
+    };
+    if spent(deps, team, contract, &mut waiting.day_spent)?
+        | asleep(deps, designer, &mut waiting.slept)?
+    {
+        return Ok(Some(ran_criteria(row, ran)));
+    }
+    let git = &deps.tools.git;
+    let diff = git.diff(&integration_branch(team, git)?, &task_branch(contract))?;
+    let page = team.preview().map_or_else(String::new, |preview| {
+        format!("http://localhost:{}{}", preview.port, preview.path)
+    });
+    let end = run_session(
+        deps,
+        team,
+        SessionAsk {
+            tools: Some(DESIGN_REVIEW_TOOLS),
+            ..read_only(
+                contract,
+                designer,
+                worktree(deps, &row.task_id),
+                design_review_message(contract, &diff, &page),
+            )
+        },
+    )
+    .await?;
+    Ok(Some(Some(acted(row, designer, "design review", &end))))
+}
+
+/// Files `verifying -> rejected` in the name of the Designer whose design review failed, with its
+/// reasons, from the session that recorded it (F9): a design review fails no exit criterion.
+fn reject_as_designer(
+    deps: &OrchestratorDeps,
+    team: &Team,
+    row: &TaskProjection,
+    designer: &str,
+    session_id: Option<String>,
+    reasons: String,
+) -> Result<TickReport, OrchestratorError> {
+    let outcome = deps.tools.transitions.request(
+        &TransitionRequest {
+            task_id: row.task_id.clone(),
+            to: TaskStatus::Rejected,
+            actor: TransitionActor::Reviewer,
+            agent_id: Some(designer.to_string()),
+        },
+        &TransitionAsk {
+            rejection: Some(Rejection {
+                failed_criterion_ids: Vec::new(),
+                reasons,
+            }),
+            session_id,
+            filed_by_farik: true,
+            ..TransitionAsk::default()
+        },
+        team,
+    )?;
+    let what = match outcome {
+        TransitionOutcome::Moved(_) => {
+            format!("rejected it, as {designer}'s design review says")
+        }
+        TransitionOutcome::Refused(refusal) => format!(
+            "the governor would not reject it: {}",
+            refusal_details(&refusal).join("; ")
+        ),
+    };
+    Ok(TickReport::Acted {
+        task_id: row.task_id.clone(),
+        what,
     })
 }
 
@@ -601,12 +734,376 @@ pub(super) fn append_stamped(
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeSet;
+    use std::sync::Arc;
+
+    use farik_core::contract::TaskStatus;
+    use farik_core::governor::permissions::PermissionTier;
+    use farik_protocol::event::{EscalationRaisedBodyReason, EventBody, EventKind};
     use farik_store::GitError;
+    use serde_json::{Value, json};
 
     use super::fails_the_criterion;
+    use crate::claude::allowed_builtins;
     use crate::criteria::CriterionError;
     use crate::exec::ExecError;
+    use crate::orchestrator::fixtures::{ExecutorWitness, Harness};
+    use crate::preview::fixtures::FakePreviews;
+    use crate::recorded::Transcript;
+    use crate::recorded::fixtures::{
+        design_review_fails_frk_2, design_review_passes_frk_2, implement_css_frk_2,
+        replays_farik_read_board, review_writes_note,
+    };
     use crate::sandbox::SandboxError;
+    use crate::session::{SessionPurpose, SessionSpec};
+    use crate::tools::design::ReviewState;
+    use crate::tools::fixtures::browsing;
+
+    /// What the failing design review says.
+    const TOO_FAINT: &str =
+        "The heading is too faint to read in the dark theme at 360 px. Make it lighter there.";
+
+    /// A harness on `team`, whose previews all start.
+    fn a_harness(name: &str, team: impl FnOnce(&mut Value)) -> Harness {
+        let mut harness = Harness::new(name, team);
+        harness.previews = Arc::new(FakePreviews::ready());
+        harness
+    }
+
+    /// FRK-2, the Software Developer `dev-a`'s task, reviewed by the Architect `ada`, in progress
+    /// with its worktree made: its one allowed path and its criterion C1 are `path`.
+    fn a_developers_task(harness: &Harness, path: &str) {
+        harness.file("FRK-2", "ready", |wire| {
+            wire["reviewer_role"] = json!("architect");
+            wire["allowed_paths"] = json!([path]);
+            wire["exit_criteria"][0]["text"] = json!(format!("{path} exists."));
+            wire["exit_criteria"][0]["verification"]["command"] = json!(format!("test -f {path}"));
+        });
+        let people = json!({ "assignee": "dev-a", "reviewer": "ada" });
+        harness.project.moved("FRK-2", "ready", "assigned", &people);
+        harness
+            .project
+            .moved("FRK-2", "assigned", "in_progress", &people);
+        harness
+            .project
+            .deps
+            .git
+            .create_worktree(&harness.worktree("FRK-2"), &harness.branch("FRK-2"), "main")
+            .expect("the task's worktree is made");
+    }
+
+    /// `a_developers_task`, with `path` committed on its branch, its completion note written, and
+    /// moved to `verifying`.
+    fn a_developers_change(harness: &Harness, path: &str) {
+        a_developers_task(harness, path);
+        let worktree = harness.worktree("FRK-2");
+        let file = worktree.join(path);
+        std::fs::create_dir_all(file.parent().expect("a folder")).expect("made");
+        std::fs::write(&file, "h1 { color: #3b4a5c; }\n").expect("written");
+        harness
+            .project
+            .deps
+            .git
+            .commit(&worktree, "The change", &[path.to_string()])
+            .expect("committed");
+        harness.project.record(
+            "FRK-2",
+            "note.written",
+            &json!({ "kind": "completion", "text": "Changed it.\n\nChanged it.", "written_by": "dev-a" }),
+        );
+        let people = json!({ "assignee": "dev-a", "reviewer": "ada", "actor": "assignee", "requested_by": "dev-a" });
+        harness
+            .project
+            .moved("FRK-2", "in_progress", "verifying", &people);
+    }
+
+    /// Ticks `count` times with `transcripts`; the sessions started, and the tiers each was held to.
+    async fn ticked(
+        harness: &Harness,
+        transcripts: Vec<Transcript>,
+        count: usize,
+    ) -> (Vec<SessionSpec>, Vec<Vec<PermissionTier>>) {
+        let adapter = harness.recorded(transcripts);
+        let witness = Arc::new(ExecutorWitness::new(
+            adapter.clone(),
+            Arc::clone(&harness.daemon),
+        ));
+        let orchestrator = harness.orchestrator(witness.clone());
+        for _ in 0..count {
+            orchestrator.tick().await.expect("the tick runs");
+        }
+        (adapter.started(), witness.given_tiers())
+    }
+
+    fn who(started: &[SessionSpec]) -> Vec<(&str, SessionPurpose)> {
+        started
+            .iter()
+            .map(|spec| (spec.agent_id.as_str(), spec.purpose))
+            .collect()
+    }
+
+    /// The design review of FRK-2 as `task.get` reads it.
+    fn state(harness: &Harness) -> ReviewState {
+        let deps = &harness.project.deps;
+        let team = deps.files.read_team().expect("the team");
+        deps.transitions
+            .design_review(&team, &"FRK-2".parse().expect("an id"))
+            .expect("read")
+            .1
+            .state
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn checks_a_ui_change_before_the_architect() {
+        let harness = a_harness("design-review-first", browsing);
+        a_developers_task(&harness, "site/style.css");
+        let (started, tiers) = ticked(
+            &harness,
+            vec![
+                implement_css_frk_2(),
+                design_review_passes_frk_2(),
+                review_writes_note(),
+            ],
+            3,
+        )
+        .await;
+
+        assert_eq!(
+            who(&started),
+            [
+                ("dev-a", SessionPurpose::Implement),
+                ("iris", SessionPurpose::Verify),
+                ("ada", SessionPurpose::Verify),
+            ]
+        );
+        let review = &started[1];
+        assert_eq!(
+            review.farik_tools,
+            [
+                "farik_read_task",
+                "farik_read_board",
+                "farik_read_rules",
+                "farik_read_criteria",
+                "farik_read_decisions",
+                "farik_check_page",
+                "farik_record_design_review",
+            ]
+        );
+        assert_eq!(
+            review.builtin_tools,
+            allowed_builtins(&BTreeSet::from([PermissionTier::Read]))
+        );
+        let servers: Vec<&str> = review.mcp_servers.iter().map(|s| s.name.as_str()).collect();
+        assert_eq!(servers, ["playwright"]);
+        assert!(tiers[1].contains(&PermissionTier::Network), "{tiers:?}");
+        assert!(
+            review.initial_prompt.contains("site/style.css"),
+            "the Designer is shown the change: {}",
+            review.initial_prompt
+        );
+        // The Architect's review is not the Designer's: no browser, no page check.
+        assert!(started[2].mcp_servers.is_empty());
+        assert!(!started[2].farik_tools.iter().any(
+            |tool| tool.starts_with("farik_check_page") || tool == "farik_record_design_review"
+        ));
+        assert_eq!(harness.events(&[EventKind::PageChecked]).len(), 4);
+        let recorded = harness.events(&[EventKind::DesignReviewRecorded]);
+        assert_eq!(recorded.len(), 1);
+        let EventBody::DesignReviewRecorded(body) = &recorded[0].body else {
+            panic!("a design review");
+        };
+        assert!(body.pass);
+        assert_eq!(body.checks.len(), 4);
+        assert_eq!(harness.events(&[EventKind::ReviewRecorded]).len(), 1);
+        assert_eq!(state(&harness), ReviewState::Passed);
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn sends_a_failed_design_review_back_to_the_developer() {
+        let harness = a_harness("design-review-fails", browsing);
+        a_developers_task(&harness, "site/style.css");
+        let (started, _) = ticked(
+            &harness,
+            vec![implement_css_frk_2(), design_review_fails_frk_2()],
+            3,
+        )
+        .await;
+
+        assert_eq!(
+            who(&started),
+            [
+                ("dev-a", SessionPurpose::Implement),
+                ("iris", SessionPurpose::Verify),
+            ]
+        );
+        assert_eq!(harness.row("FRK-2").status, TaskStatus::Rejected);
+        let moves = harness.events(&[EventKind::TaskTransitioned]);
+        let rejected = moves.last().expect("a move");
+        let EventBody::TaskTransitioned(body) = &rejected.body else {
+            panic!("a move");
+        };
+        assert_eq!(body.requested_by, "iris");
+        let rejection = body.rejection.as_ref().expect("its reasons");
+        assert_eq!(rejection.reasons, TOO_FAINT);
+        assert_eq!(rejected.envelope.ids.agent_id.as_deref(), Some("iris"));
+        assert!(harness.events(&[EventKind::ReviewRecorded]).is_empty());
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn leaves_a_non_ui_change_to_the_architect() {
+        let harness = a_harness("design-review-not-ui", browsing);
+        a_developers_change(&harness, "done.txt");
+        let (started, _) = ticked(&harness, vec![review_writes_note()], 1).await;
+
+        assert_eq!(who(&started), [("ada", SessionPurpose::Verify)]);
+        assert_eq!(state(&harness), ReviewState::NotNeeded);
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn reviews_alone_without_a_designer() {
+        let harness = a_harness("design-review-no-designer", |wire| {
+            browsing(wire);
+            wire["agents"][3]["status"] = json!("retired");
+        });
+        a_developers_change(&harness, "site/style.css");
+        let (started, _) = ticked(&harness, vec![review_writes_note()], 1).await;
+
+        assert_eq!(who(&started), [("ada", SessionPurpose::Verify)]);
+        assert_eq!(state(&harness), ReviewState::NotNeeded);
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn waits_on_a_paused_designer() {
+        let harness = a_harness("design-review-paused", |wire| {
+            browsing(wire);
+            wire["agents"][3]["status"] = json!("paused");
+        });
+        a_developers_change(&harness, "site/style.css");
+        let (started, _) = ticked(&harness, Vec::new(), 2).await;
+
+        assert!(started.is_empty(), "{:?}", who(&started));
+        assert_eq!(harness.row("FRK-2").status, TaskStatus::Verifying);
+        assert_eq!(state(&harness), ReviewState::WaitingOnDesigner);
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn waits_for_a_missing_preview() {
+        let harness = a_harness("design-review-no-preview", |wire| {
+            browsing(wire);
+            wire.as_object_mut().expect("a team").remove("preview");
+        });
+        a_developers_change(&harness, "site/style.css");
+        let (started, _) = ticked(&harness, Vec::new(), 2).await;
+
+        assert!(started.is_empty(), "{:?}", who(&started));
+        assert_eq!(harness.row("FRK-2").status, TaskStatus::Verifying);
+        assert_eq!(state(&harness), ReviewState::PreviewMissing);
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn waits_for_the_designers_sandbox() {
+        let mut harness = a_harness("design-review-no-sandbox", browsing);
+        harness.previews = Arc::new(crate::preview::NoPreviews);
+        a_developers_change(&harness, "site/style.css");
+        let (started, _) = ticked(&harness, Vec::new(), 2).await;
+
+        assert!(started.is_empty(), "{:?}", who(&started));
+        assert_eq!(harness.row("FRK-2").status, TaskStatus::Verifying);
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn starts_the_design_review_again_without_an_answer() {
+        let harness = a_harness("design-review-unanswered", |wire| {
+            browsing(wire);
+        });
+        a_developers_change(&harness, "site/style.css");
+        let mut contract = harness
+            .project
+            .deps
+            .files
+            .read_contract(&"FRK-2".parse().expect("an id"))
+            .expect("the contract");
+        contract.budget.max_sessions = std::num::NonZeroU64::new(2).expect("two");
+        harness
+            .project
+            .deps
+            .files
+            .write_contract(&contract)
+            .expect("written");
+        let (started, _) = ticked(
+            &harness,
+            vec![replays_farik_read_board(), replays_farik_read_board()],
+            3,
+        )
+        .await;
+
+        assert_eq!(
+            who(&started),
+            [
+                ("iris", SessionPurpose::Verify),
+                ("iris", SessionPurpose::Verify),
+            ]
+        );
+        assert_eq!(harness.row("FRK-2").status, TaskStatus::Escalated);
+        let reasons: Vec<EscalationRaisedBodyReason> = harness
+            .events(&[EventKind::EscalationRaised])
+            .iter()
+            .filter_map(|event| match &event.body {
+                EventBody::EscalationRaised(body) => Some(body.reason),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(reasons, [EscalationRaisedBodyReason::Sessions]);
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn runs_both_again_after_a_send_back() {
+        let harness = a_harness("design-review-again", browsing);
+        a_developers_change(&harness, "site/style.css");
+        // The last round: the Designer passed it, and the Architect sent it back.
+        harness.project.record(
+            "FRK-2",
+            "design_review.recorded",
+            &json!({ "pass": true, "reasons": "Fine.", "checks": [] }),
+        );
+        let back = json!({ "actor": "reviewer", "requested_by": "ada", "assignee": "dev-a", "reviewer": "ada" });
+        harness
+            .project
+            .moved("FRK-2", "verifying", "rejected", &back);
+        harness
+            .project
+            .moved("FRK-2", "rejected", "in_progress", &back);
+        let people = json!({ "actor": "assignee", "requested_by": "dev-a", "assignee": "dev-a", "reviewer": "ada" });
+        harness
+            .project
+            .moved("FRK-2", "in_progress", "verifying", &people);
+        assert_eq!(state(&harness), ReviewState::Waiting);
+
+        let (started, _) = ticked(
+            &harness,
+            vec![design_review_passes_frk_2(), review_writes_note()],
+            2,
+        )
+        .await;
+
+        assert_eq!(
+            who(&started),
+            [
+                ("iris", SessionPurpose::Verify),
+                ("ada", SessionPurpose::Verify),
+            ]
+        );
+        assert_eq!(harness.events(&[EventKind::DesignReviewRecorded]).len(), 2);
+    }
 
     #[test]
     fn fails_a_criterion_only_when_its_container_went() {

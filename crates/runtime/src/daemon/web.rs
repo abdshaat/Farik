@@ -681,16 +681,57 @@ fn query(state: &DaemonState, name: &str, params: &Value) -> Result<Value, Failu
                 Some(task) => {
                     let plan = crate::tools::design::read_design_plan(&deps.log, &task_id)
                         .map_err(|error| internal(&error))?;
-                    Ok(json!({ "task": task_wire(&task), "design_plan": plan }))
+                    let team = deps.files.read_team().map_err(|error| internal(&error))?;
+                    let (ui_change, review) = deps
+                        .transitions
+                        .design_review(&team, &task_id)
+                        .map_err(|error| internal(&error))?;
+                    Ok(json!({
+                        "task": task_wire(&task),
+                        "design_plan": plan,
+                        "ui_change": ui_change,
+                        "design_review": ui_change.then_some(review),
+                    }))
                 }
                 None => Err(missing()),
             }
         }
+        "task.screenshot" => screenshot(deps, params),
         "team.get" | "team.propose" | "team.validate" | "models.list" | "project.scan"
         | "settings.defaults" => team::query(deps, name, params),
         name if board::QUERIES.contains(&name) => board::query(deps, name, params),
         _ => gates::query(deps, name, params),
     }
+}
+
+/// `task.screenshot { task_id, file }`: the screenshot `file` of the task, in base64, when one of
+/// the task's `page.checked` events names it; any other name, one that climbs out of the task's
+/// folder among them, is `not_found` (F4).
+fn screenshot(deps: &crate::tools::ToolDeps, params: &Value) -> Result<Value, Failure> {
+    use base64::Engine as _;
+
+    let asked = params["task_id"].as_str().unwrap_or_default();
+    let file = params["file"].as_str().unwrap_or_default();
+    let missing = || Failure::new(NOT_FOUND, format!("{asked} has no screenshot {file}"));
+    let task_id: TaskId = asked.parse().map_err(|_| missing())?;
+    let checked = deps
+        .log
+        .read(&EventQuery {
+            task_id: Some(task_id.clone()),
+            kinds: vec![farik_protocol::event::EventKind::PageChecked],
+            ..EventQuery::default()
+        })
+        .map_err(|error| Failure::new(INTERNAL_ERROR, error.to_string()))?;
+    let named = checked.iter().any(|event| {
+        matches!(&event.body, farik_protocol::event::EventBody::PageChecked(body)
+            if body.screenshot.as_str() == file)
+    });
+    if !named || file.contains(['/', '\\']) || file.starts_with('.') {
+        return Err(missing());
+    }
+    let path = crate::tools::design::screenshots(deps.files.root(), &task_id).join(file);
+    let png = std::fs::read(path).map_err(|_| missing())?;
+    Ok(json!({ "png_base64": base64::engine::general_purpose::STANDARD.encode(png) }))
 }
 
 /// `serve.status`: the project and whether its team is paused, or in setup mode no project and the
@@ -1824,6 +1865,152 @@ mod tests {
             plan_of(&mut socket).await,
             json!({ "plan": "The second plan.", "state": "approved", "reason": "Go ahead." })
         );
+        drop(socket);
+        handle.shutdown().await.expect("the daemon stops");
+    }
+
+    /// FRK-2, `dev-a`'s change to `site/style.css` on a team with the Designer, in `verifying`;
+    /// and FRK-1, a task with no change.
+    fn a_ui_change(name: &str) -> Harness {
+        let harness = Harness::new(name, crate::tools::fixtures::browsing);
+        harness.file("FRK-1", "in_progress", |_| {});
+        harness.verifying_a_ui_change("FRK-2");
+        harness
+    }
+
+    /// A `page.checked` of `task`'s page at `width` and `theme`, its screenshot `file`.
+    fn checked(harness: &Harness, task: &str, width: &str, theme: &str, file: &str) {
+        harness.project.record(
+            task,
+            "page.checked",
+            &json!({
+                "width": width, "theme": theme, "path": "/", "screenshot": file,
+                "violations": [{
+                    "rule": "color-contrast", "impact": "serious", "target": "h1",
+                    "help": "Elements must meet minimum color contrast ratio thresholds"
+                }]
+            }),
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn answers_the_task_with_its_review() {
+        use base64::Engine as _;
+
+        let harness = a_ui_change("rpc-design-review");
+        let (handle, mut socket) = driven(&harness).await;
+        let get = async |socket: &mut Socket, id: u64, task: &str| {
+            query(
+                socket,
+                id,
+                "task.get",
+                &json!({ "task_id": task }),
+                "taskGetResult",
+            )
+            .await
+        };
+
+        let plain = get(&mut socket, 1, "FRK-1").await;
+        assert_eq!(plain["ui_change"], false, "{plain}");
+        assert_eq!(plain["design_review"], Value::Null, "{plain}");
+        let waiting = get(&mut socket, 2, "FRK-2").await;
+        assert_eq!(waiting["ui_change"], true, "{waiting}");
+        assert_eq!(
+            waiting["design_review"],
+            json!({ "state": "waiting", "checks": [] })
+        );
+
+        checked(&harness, "FRK-2", "phone", "dark", "s-1-phone-dark.png");
+        let violation = json!({
+            "rule": "color-contrast", "impact": "serious", "target": "h1",
+            "help": "Elements must meet minimum color contrast ratio thresholds"
+        });
+        harness.project.record(
+            "FRK-2",
+            "design_review.recorded",
+            &json!({
+                "pass": false,
+                "reasons": "The heading is too faint.",
+                "checks": [{ "width": "phone", "theme": "dark", "violations": [violation] }]
+            }),
+        );
+        let failed = get(&mut socket, 3, "FRK-2").await;
+        assert_eq!(
+            failed["design_review"],
+            json!({
+                "state": "failed",
+                "reasons": "The heading is too faint.",
+                "checks": [{ "width": "phone", "theme": "dark", "violations": [violation] }]
+            })
+        );
+
+        let png = b"\x89PNG\r\n\x1a\nthe phone in the dark";
+        let folder = harness
+            .project
+            .repo
+            .path
+            .join(".farik/local/screenshots/FRK-2");
+        std::fs::create_dir_all(&folder).expect("made");
+        std::fs::write(folder.join("s-1-phone-dark.png"), png).expect("written");
+        let shot = query(
+            &mut socket,
+            4,
+            "task.screenshot",
+            &json!({ "task_id": "FRK-2", "file": "s-1-phone-dark.png" }),
+            "taskScreenshotResult",
+        )
+        .await;
+        assert_eq!(
+            shot["png_base64"],
+            base64::engine::general_purpose::STANDARD.encode(png)
+        );
+
+        let defaults = query(
+            &mut socket,
+            5,
+            "settings.defaults",
+            &json!({}),
+            "settingsDefaultsResult",
+        )
+        .await;
+        assert_eq!(
+            defaults["ui_paths"],
+            json!(farik_core::governor::team_rules::DEFAULT_UI_PATHS)
+        );
+        drop(socket);
+        handle.shutdown().await.expect("the daemon stops");
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn refuses_a_screenshot_the_task_did_not_take() {
+        let harness = a_ui_change("rpc-screenshot-refused");
+        checked(&harness, "FRK-1", "phone", "light", "s-1-phone-light.png");
+        let root = &harness.project.repo.path;
+        for task in ["FRK-1", "FRK-2"] {
+            let folder = root.join(".farik/local/screenshots").join(task);
+            std::fs::create_dir_all(&folder).expect("made");
+            std::fs::write(folder.join("s-1-phone-light.png"), b"png").expect("written");
+        }
+        std::fs::write(root.join(".farik/local/screenshots/x.png"), b"png").expect("written");
+        let (handle, mut socket) = driven(&harness).await;
+
+        for (id, file) in [(1, "../x.png"), (2, "s-1-phone-light.png")] {
+            let answer = call(
+                &mut socket,
+                id,
+                "query",
+                &json!({ "name": "task.screenshot", "params": { "task_id": "FRK-2", "file": file } }),
+            )
+            .await;
+            assert_eq!(
+                answer["error"]["code"],
+                super::NOT_FOUND,
+                "{file}: {answer}"
+            );
+            conforms(&answer, "rpcFailure");
+        }
         drop(socket);
         handle.shutdown().await.expect("the daemon stops");
     }

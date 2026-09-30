@@ -35,6 +35,7 @@
         "contract.check",
         "task.history",
         "task.diff",
+        "task.screenshot",
         "task.checks",
         "task.tries",
         "sprint.current",
@@ -213,6 +214,9 @@
             },
             {
               "$ref": "#/$defs/taskDiffQuery"
+            },
+            {
+              "$ref": "#/$defs/taskScreenshotQuery"
             },
             {
               "$ref": "#/$defs/taskChecksQuery"
@@ -695,11 +699,62 @@
               "required": ["plan", "state"]
             }
           ]
+        },
+        "ui_change": {
+          "type": "boolean",
+          "description": "Whether the task's change touches the interface (ADR 0026): a Software Developer's task whose contract sets ui_change, or whose branch changes a path the team's ui_paths match."
+        },
+        "design_review": {
+          "description": "The UI/UX Designer's design review of the change (step 12), or null when it is not a UI change. state says where it stands; reasons and checks are the latest design_review.recorded since the task last entered verifying, when there is one.",
+          "oneOf": [
+            { "type": "null" },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "state": {
+                  "type": "string",
+                  "enum": ["not_needed", "waiting", "waiting_on_designer", "preview_missing", "designer_needs_sandbox", "passed", "failed"]
+                },
+                "reasons": { "type": "string" },
+                "checks": {
+                  "type": "array",
+                  "maxItems": 4,
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "width": { "type": "string", "enum": ["phone", "desktop"] },
+                      "theme": { "type": "string", "enum": ["light", "dark"] },
+                      "violations": {
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "properties": {
+                            "rule": { "type": "string" },
+                            "impact": { "type": "string" },
+                            "target": { "type": "string" },
+                            "help": { "type": "string" }
+                          },
+                          "required": ["rule", "impact", "target", "help"]
+                        }
+                      }
+                    },
+                    "required": ["width", "theme", "violations"]
+                  }
+                }
+              },
+              "required": ["state", "checks"]
+            }
+          ]
         }
       },
       "required": [
         "task",
-        "design_plan"
+        "design_plan",
+        "ui_change",
+        "design_review"
       ]
     },
     "teamGetResult": {
@@ -1502,6 +1557,39 @@
         }
       }
     },
+    "taskScreenshotQuery": {
+      "title": "Task Screenshot Query",
+      "description": "A screenshot farik_check_page took of the task's preview (step 12): file is the name one of the task's page.checked events gives, and any other name is not_found.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "params"
+      ],
+      "properties": {
+        "name": {
+          "const": "task.screenshot"
+        },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "task_id": {
+              "type": "string",
+              "pattern": "^FRK-[0-9]{1,6}$"
+            },
+            "file": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "required": [
+            "task_id",
+            "file"
+          ]
+        }
+      }
+    },
     "taskChecksQuery": {
       "title": "Task Checks Query",
       "type": "object",
@@ -1866,7 +1954,7 @@
       }
     },
     "waitingListResult": {
-      "description": "What waits on the human, questions first, then approvals, other escalations, acceptances, and integrations.",
+      "description": "What waits on the human, questions first, then approvals, other escalations, acceptances, and integrations; then the UI changes whose design review waits for the team's preview (preview_missing) or for Docker's sandbox (designer_needs_sandbox).",
       "type": "object",
       "additionalProperties": false,
       "properties": {
@@ -1887,7 +1975,9 @@
                   "acceptance",
                   "question",
                   "help",
-                  "integration"
+                  "integration",
+                  "preview_missing",
+                  "designer_needs_sandbox"
                 ]
               },
               "agent_id": {
@@ -1981,6 +2071,19 @@
       },
       "required": [
         "events"
+      ]
+    },
+    "taskScreenshotResult": {
+      "description": "The screenshot's PNG, in base64.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "png_base64": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "png_base64"
       ]
     },
     "taskDiffResult": {
@@ -3595,7 +3698,8 @@
       "required": [
         "budgets",
         "policy",
-        "rules"
+        "rules",
+        "ui_paths"
       ],
       "properties": {
         "budgets": {
@@ -3609,6 +3713,13 @@
         "rules": {
           "type": "object",
           "description": "The rules the team adds to Farik's; none by default."
+        },
+        "ui_paths": {
+          "type": "array",
+          "description": "The UI paths every team starts with (spec 5.12): a Software Developer's change that touches one is design-reviewed.",
+          "items": {
+            "type": "string"
+          }
         }
       }
     },

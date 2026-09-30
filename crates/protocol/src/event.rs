@@ -198,6 +198,9 @@ pub fn is_about_one_contract(kind: EventKind) -> bool {
 /// Nor for `escalation.aged`: the human left it waiting, and nobody acted. `team.paused` and
 /// `team.resumed` name the human in a closed vocabulary, which cannot be blank. The three
 /// `design_plan.` kinds name no one in the body: their envelope names the agent and the session.
+/// Nor do the five kinds of step 12: `design_review.recorded` and `page.checked`, whose envelope
+/// names the Designer and the session, and `preview.prepared`, `preview.started` and
+/// `preview.stopped`, which record what Farik itself did with the task's preview.
 fn attribution(body: &mut EventBody) -> Option<(&'static str, &mut String)> {
     match body {
         EventBody::TaskCreated(body) => Some(("created_by", &mut body.created_by)),

@@ -108,6 +108,7 @@ pub(super) fn query(deps: &ToolDeps, name: &str, params: &Value) -> Result<Value
                 "budgets": serde_json::to_value(defaults.budgets).map_err(|e| internal(&e))?,
                 "policy": serde_json::to_value(defaults.policy).map_err(|e| internal(&e))?,
                 "rules": {},
+                "ui_paths": farik_core::governor::team_rules::DEFAULT_UI_PATHS,
             }))
         }
         "project.scan" => scanned(deps),
