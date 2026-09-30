@@ -98,6 +98,7 @@ describe("task detail", () => {
 	afterEach(() => {
 		cleanup();
 		vi.unstubAllGlobals();
+		vi.useRealTimers();
 	});
 
 	it("shows_the_five_tabs", async () => {
@@ -255,6 +256,9 @@ describe("task detail", () => {
 	});
 
 	it("shows_the_plan_waiting_for_the_product_manager", async () => {
+		// The plan was written the day the page is read, so the page says "today".
+		vi.useFakeTimers({ toFake: ["Date"] });
+		vi.setSystemTime(new Date("2026-09-30T12:00:00Z"));
 		const PLAN =
 			"The menu is hard to use on a phone. I will make the prices easy to see.\n\nWhat I will leave alone: the order page.";
 		const proposed = event(
@@ -266,7 +270,11 @@ describe("task detail", () => {
 		);
 		const decided = (kind: string, reason: string, seq = 12) =>
 			event(seq, kind, { reason }, "2026-09-30T10:14:00Z", "mira");
-		const open = (designPlan: object, extra: object[] = []) =>
+		const open = (
+			designPlan: object,
+			extra: object[] = [],
+			agents: object[] = TEAM.agents,
+		) =>
 			opened(
 				{
 					...CONTRACT,
@@ -280,7 +288,7 @@ describe("task detail", () => {
 						team: {
 							...TEAM,
 							agents: [
-								...TEAM.agents,
+								...agents,
 								{
 									id: "iris",
 									display_name: "Iris",
@@ -312,6 +320,12 @@ describe("task detail", () => {
 				"Waiting for Mira to approve the plan",
 			),
 		).toBeTruthy();
+		// The lead counts the Designer's plans, in place of the tries.
+		expect(
+			screen.getByText(
+				"FRK-1 in sprint 2. Iris is doing it, and Ada reviews it. First plan.",
+			),
+		).toBeTruthy();
 		let plan = await toPlan();
 		expect(
 			within(plan).getByText(
@@ -324,9 +338,7 @@ describe("task detail", () => {
 			),
 		).toBeTruthy();
 		expect(
-			within(plan).getByText(
-				"Iris wrote this plan on Wednesday 30 September at 09:52",
-			),
+			within(plan).getByText("Iris wrote this plan today at 09:52"),
 		).toBeTruthy();
 		expect(
 			within(plan).getByText(
@@ -360,8 +372,11 @@ describe("task detail", () => {
 		expect(await screen.findByText(en.designBeingBuilt)).toBeTruthy();
 		plan = await toPlan();
 		expect(
+			within(plan).getByText("Mira approved the plan today at 10:14"),
+		).toBeTruthy();
+		expect(
 			within(plan).getByText(
-				"Mira approved the plan on Wednesday 30 September at 10:14",
+				"Iris is changing the page now, as the plan says.",
 			),
 		).toBeTruthy();
 		expect(
@@ -385,8 +400,11 @@ describe("task detail", () => {
 		expect(await screen.findByText(en.designSentBack)).toBeTruthy();
 		plan = await toPlan();
 		expect(
+			within(plan).getByText("Mira sent the plan back today at 10:14"),
+		).toBeTruthy();
+		expect(
 			within(plan).getByText(
-				"Mira sent the plan back on Wednesday 30 September at 10:14",
+				"Iris is looking at the page again and will write a new plan.",
 			),
 		).toBeTruthy();
 		expect(
@@ -394,7 +412,7 @@ describe("task detail", () => {
 		).toBeTruthy();
 		expect(
 			within(plan).getByText(
-				"Plans sent back: 1 of 3. If 3 are sent back, Farik stops the task and asks you.",
+				"Plans sent back: 1 of 3. If a third is sent back, Farik stops the task and asks you.",
 			),
 		).toBeTruthy();
 		await expectNoAxeViolations(returned.container);
@@ -402,6 +420,57 @@ describe("task detail", () => {
 		expect(
 			within(panel()).getByText("Mira sent Iris’s plan back."),
 		).toBeTruthy();
+		cleanup();
+
+		// A second plan, on a later day, with two paragraphs alike; and a paused Mira beside
+		// an active Product Manager, who is the one that decides.
+		vi.setSystemTime(new Date("2026-10-02T12:00:00Z"));
+		const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+		const twice = "Same words.\n\nSame words.";
+		await open(
+			{ plan: twice, state: "proposed" },
+			[
+				decided("design_plan.returned", "Keep the descriptions whole."),
+				event(
+					13,
+					"design_plan.proposed",
+					{ plan: twice },
+					"2026-10-01T09:00:00Z",
+					"iris",
+				),
+			],
+			[
+				{ ...(TEAM.agents[0] as object), status: "paused" },
+				...TEAM.agents.slice(1),
+				{
+					id: "pat",
+					display_name: "Pat",
+					role: "product_manager",
+					avatar: "extra-3",
+					status: "active",
+				},
+			],
+		);
+		expect(
+			await screen.findByText(
+				"FRK-1 in sprint 2. Iris is doing it, and Ada reviews it. Second plan.",
+			),
+		).toBeTruthy();
+		plan = await toPlan();
+		expect(
+			within(plan).getByText("Waiting for Pat to approve the plan"),
+		).toBeTruthy();
+		expect(
+			within(plan).getByText(
+				"Iris wrote this plan on Thursday 1 October at 09:00",
+			),
+		).toBeTruthy();
+		expect(within(plan).getAllByText("Same words.")).toHaveLength(2);
+		expect(
+			errors.mock.calls.some((call) => String(call[0]).includes("same key")),
+		).toBe(false);
+		errors.mockRestore();
+		vi.useRealTimers();
 	});
 
 	it("says_what_each_risk_means", async () => {

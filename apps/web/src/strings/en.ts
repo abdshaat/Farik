@@ -757,12 +757,22 @@ export const en = {
 	designWaitingNote:
 		"{pm} checks that the plan does what the task asks, and nothing more. You do not need to do anything.",
 	designBeingBuilt: "Being built",
+	designBeingBuiltNote:
+		"{designer} is changing the page now, as the plan says.",
 	designSentBack: "Plan sent back",
-	designApproved: "{pm} approved the plan on {day} at {time}",
-	designReturned: "{pm} sent the plan back on {day} at {time}",
+	designSentBackNote:
+		"{designer} is looking at the page again and will write a new plan.",
+	designApproved: "{pm} approved the plan {day} at {time}",
+	designReturned: "{pm} sent the plan back {day} at {time}",
 	designReturns:
+		"Plans sent back: {n} of {of}. If a {nth} is sent back, Farik stops the task and asks you.",
+	designReturnsMany:
 		"Plans sent back: {n} of {of}. If {of} are sent back, Farik stops the task and asks you.",
-	designWrote: "{designer} wrote this plan on {day} at {time}",
+	designWrote: "{designer} wrote this plan {day} at {time}",
+	designToday: "today",
+	designOnDay: "on {day}",
+	designPlanCount: "{Nth} plan.",
+	designPlanCountMany: "Plan {n}.",
 	taskPlanApproved: "Approved on {day}.",
 	taskPlanNotApproved: "Not approved yet.",
 	taskPlanLocked: "It is locked, so nobody can change it while the work runs.",

@@ -110,6 +110,20 @@ const ACTORS = [
 	"author",
 ] as const;
 
+/** Ordinals for the plan count and the returns limit, as the approved mockup words them. */
+const NTH = [
+	"first",
+	"second",
+	"third",
+	"fourth",
+	"fifth",
+	"sixth",
+	"seventh",
+	"eighth",
+	"ninth",
+	"tenth",
+];
+
 const NOTES = [
 	["completion", "gateWrote"],
 	["review", "gateReviewed"],
@@ -171,6 +185,11 @@ export function TaskDetail() {
 				? "Farik"
 				: (agentOf(who)?.displayName ?? who);
 
+	// A Designer's task in progress counts its plans in place of its tries (the approved mockup).
+	const plans =
+		detail.designPlan && contract.status === "in_progress"
+			? events.filter((e) => e.kind === "design_plan.proposed").length
+			: 0;
 	const assignee = contract.assignee && nameOf(contract.assignee);
 	const reviewer = contract.reviewer && nameOf(contract.reviewer);
 	const doing = assignee && t("taskDoing").replace("{name}", assignee);
@@ -183,9 +202,13 @@ export function TaskDetail() {
 					.replace("{n}", contract.sprint.slice(1))
 			: `${id}.`,
 		who && `${who}.`,
-		t("taskTry")
-			.replace("{try}", String(tries.try))
-			.replace("{of}", String(tries.of)),
+		plans
+			? plans <= NTH.length
+				? t("designPlanCount", { Nth: capital(NTH[plans - 1] ?? "") })
+				: t("designPlanCountMany", { n: plans })
+			: t("taskTry")
+					.replace("{try}", String(tries.try))
+					.replace("{of}", String(tries.of)),
 	]
 		.filter(Boolean)
 		.join(" ");
@@ -215,9 +238,12 @@ export function TaskDetail() {
 
 	const design = detail.designPlan;
 	const proposal = events.findLast((e) => e.kind === "design_plan.proposed");
+	// The decision on the latest plan, never one on a plan before it.
 	const decision = events.findLast(
 		(e) =>
-			e.kind === "design_plan.approved" || e.kind === "design_plan.returned",
+			(e.kind === "design_plan.approved" ||
+				e.kind === "design_plan.returned") &&
+			e.seq > (proposal?.seq ?? 0),
 	);
 	const designer = nameOf(proposal?.agentId ?? contract.assignee);
 	const pm = nameOf(
@@ -225,8 +251,21 @@ export function TaskDetail() {
 			agents.find((a) => a.role === "product_manager" && a.status === "active")
 				?.id,
 	);
+	// "today", or "on Wednesday 30 September", in UTC as the times are.
 	const when = (e?: Event) =>
-		e ? { day: day(e.recordedAt), time: e.recordedAt.slice(11, 16) } : {};
+		e
+			? {
+					day:
+						e.recordedAt.slice(0, 10) === new Date().toISOString().slice(0, 10)
+							? t("designToday")
+							: t("designOnDay", { day: day(e.recordedAt) }),
+					time: e.recordedAt.slice(11, 16),
+				}
+			: {};
+	const returns = events.filter(
+		(e) => e.kind === "design_plan.returned",
+	).length;
+	const limit = tries.of - 1;
 	// The plan's state stands for the task's while the Designer's task is being worked on.
 	const designWord =
 		design &&
@@ -352,15 +391,23 @@ export function TaskDetail() {
 											)}
 										</strong>
 									</p>
+									<p>
+										{t(
+											design.state === "approved"
+												? "designBeingBuiltNote"
+												: "designSentBackNote",
+											{ designer },
+										)}
+									</p>
 									{design.reason && <p>{`“${design.reason}”`}</p>}
 									{design.state === "returned" && (
 										<p>
-											{t("designReturns", {
-												n: events.filter(
-													(e) => e.kind === "design_plan.returned",
-												).length,
-												of: tries.of - 1,
-											})}
+											{t(
+												limit <= NTH.length
+													? "designReturns"
+													: "designReturnsMany",
+												{ n: returns, of: limit, nth: NTH[limit - 1] ?? "" },
+											)}
 										</p>
 									)}
 								</>
@@ -370,8 +417,10 @@ export function TaskDetail() {
 							<p className={styles.muted}>
 								{t("designWrote", { designer, ...when(proposal) })}
 							</p>
-							{design.plan.split(/\n\s*\n/).map((part) => (
-								<p key={part}>{part}</p>
+							{design.plan.split(/\n\s*\n/).map((part, at) => (
+								// Two paragraphs of a plan may say the same words.
+								// biome-ignore lint/suspicious/noArrayIndexKey: the plan's paragraphs never reorder
+								<p key={at}>{part}</p>
 							))}
 						</article>
 					</>
@@ -604,3 +653,5 @@ export function TaskDetail() {
 		</div>
 	);
 }
+
+const capital = (word: string) => word.charAt(0).toUpperCase() + word.slice(1);
