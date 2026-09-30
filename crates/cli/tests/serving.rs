@@ -1092,11 +1092,26 @@ fn stays_in_setup_when_the_project_is_busy() {
 #[test]
 #[ignore = "needs the git program: cargo xtask check --integration"]
 fn goes_back_to_setup_when_the_driver_cannot_start() {
-    let repository = a_team("setup-cannot-start");
+    driver_cannot_start("setup-cannot-start", false);
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn follows_serve_to_its_new_port_when_the_driver_cannot_start() {
+    // The flake's cause, made certain: something holds serve's port past its 5 s wait once the
+    // take-on lets it go, so setup comes back on another port with a link of its own.
+    driver_cannot_start("setup-cannot-start-moves", true);
+}
+
+/// A project chosen in setup whose driver cannot start, then setup again; with `hold`, its old
+/// port is taken as soon as it is let go, for 8 s.
+fn driver_cannot_start(name: &str, hold: bool) {
+    let repository = a_team(name);
     std::fs::write(repository.path.join(".farik/prices.json"), "not JSON").expect("written");
     let home = repository.path.parent().expect("a parent").to_path_buf();
-    let (cwd, state) = setup_folders("setup-cannot-start");
+    let (cwd, state) = setup_folders(name);
     let serving = serving_setup(&cwd, &home, &state);
+    let holder = hold.then(|| hold_once_free(serving.port));
 
     let opened = call(
         serving.port,
@@ -1113,7 +1128,7 @@ fn goes_back_to_setup_when_the_driver_cannot_start() {
             serve_status_across_a_restart(serving.port_now(), &serving.cookie).unwrap_or_default();
         status["take_on_error"].is_string()
     });
-    let port = serving.port;
+    let (port, now) = (serving.port, serving.port_now());
     let (ran, out, err) = serving.interrupted();
     assert_eq!(status["project_root"], Value::Null, "{status}");
     assert!(
@@ -1123,21 +1138,28 @@ fn goes_back_to_setup_when_the_driver_cannot_start() {
         "{status}"
     );
     assert!(!state.join("farik/state.json").exists());
-    // Back on the port the browser's tab is on, with no second link (serve.rs's own test holds
-    // the port while it comes back).
+    // Back on the port the browser's tab is on with no second link, or, when something held that
+    // port past serve's wait, on another port with its own link (serve.rs's own test holds the
+    // port while it comes back).
     let setups: Vec<&str> = out
         .lines()
         .filter(|line| line.starts_with("no project yet"))
         .collect();
     assert_eq!(setups.len(), 2, "{out}");
-    assert!(
-        setups
-            .iter()
-            .all(|line| line.ends_with(&format!("127.0.0.1:{port}"))),
-        "{out}"
-    );
-    assert_eq!(links(&out).len(), 1, "{out}");
+    assert!(setups[0].ends_with(&format!("127.0.0.1:{port}")), "{out}");
+    assert!(setups[1].ends_with(&format!("127.0.0.1:{now}")), "{out}");
+    let ports: Vec<u16> = links(&out).iter().map(|(port, _)| *port).collect();
+    let expected = if now == port {
+        vec![port]
+    } else {
+        vec![port, now]
+    };
+    assert_eq!(ports, expected, "{out}");
     assert_eq!(ran.code, 130, "{out}\n{err}");
+    if let Some(holder) = holder {
+        assert!(holder.join().expect("the holder ends"), "the port was held");
+        assert_ne!(now, port, "serve came back on another port\n{out}");
+    }
 }
 
 #[test]
@@ -1306,6 +1328,21 @@ fn follows_serve_to_its_new_port_after_a_failed_take_on() {
     failed_take_on("setup-moves-port", true);
 }
 
+/// Holds `port` for 8 s as soon as it is free, answering whether it was ever held.
+fn hold_once_free(port: u16) -> std::thread::JoinHandle<bool> {
+    std::thread::spawn(move || {
+        let deadline = Instant::now() + Duration::from_secs(60);
+        while Instant::now() < deadline {
+            if let Ok(held) = std::net::TcpListener::bind(("127.0.0.1", port)) {
+                std::thread::sleep(Duration::from_secs(8));
+                drop(held);
+                return true;
+            }
+        }
+        false
+    })
+}
+
 /// A take-on that fails, then serve's setup waiting on the same project; with `hold`, its old
 /// port is taken as soon as it is let go, for 8 s.
 fn failed_take_on(name: &str, hold: bool) {
@@ -1317,20 +1354,7 @@ fn failed_take_on(name: &str, hold: bool) {
     env.insert("PATH".to_string(), path);
     let serving = serving_in(&repository.path, env, false);
     let connect = json!({ "kind": "api_key", "secret": "sk-ant-api03-test" });
-    let holder = hold.then(|| {
-        let port = serving.port;
-        std::thread::spawn(move || {
-            let deadline = Instant::now() + Duration::from_secs(60);
-            while Instant::now() < deadline {
-                if let Ok(held) = std::net::TcpListener::bind(("127.0.0.1", port)) {
-                    std::thread::sleep(Duration::from_secs(8));
-                    drop(held);
-                    return true;
-                }
-            }
-            false
-        })
-    });
+    let holder = hold.then(|| hold_once_free(serving.port));
 
     let first = call(
         serving.port,
