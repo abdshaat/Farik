@@ -1082,6 +1082,17 @@ mod tests {
             refused(&harness, "team.save", &json!({ "team": without })),
             (-32005, "dev-b has done work; retire it instead".to_string())
         );
+        // Validating says so first, so the page never offers a save that is then refused.
+        let checked = query(
+            &harness.daemon,
+            "team.validate",
+            &json!({ "team": without }),
+            "teamValidateResult",
+        );
+        assert_eq!(
+            checked["errors"][0]["message"],
+            "dev-b has done work; retire it instead"
+        );
         assert_eq!(team_file(&harness), before);
         // An agent that did nothing yet may go.
         let mut without_a = before.clone();
@@ -1520,6 +1531,32 @@ mod tests {
 
     #[test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn does_not_follow_a_link_out_of_the_project() {
+        let harness = driven("project-scan-link");
+        let root = &harness.project.repo.path;
+        let outside = root.with_extension("outside");
+        std::fs::create_dir_all(&outside).expect("made");
+        std::fs::write(outside.join("x.key"), "x").expect("written");
+        std::os::unix::fs::symlink(&outside, root.join("elsewhere")).expect("linked");
+        let scanned = query(
+            &harness.daemon,
+            "project.scan",
+            &json!({}),
+            "projectScanResult",
+        );
+        std::fs::remove_dir_all(&outside).expect("removed");
+        assert!(
+            !scanned["kept_private"]
+                .as_array()
+                .expect("a list")
+                .contains(&json!("**/*.key")),
+            "{}",
+            scanned["kept_private"]
+        );
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
     fn keeps_the_user_note_from_the_browser() {
         let harness = driven("project-note");
         call(
@@ -1536,6 +1573,23 @@ mod tests {
             .expect("project.md reads");
         assert!(
             document.contains("## The user says\n\n2026-09-22: It is a shop, not a game.\n"),
+            "{document}"
+        );
+        // The words are kept without the space around them.
+        call(
+            &harness.daemon,
+            "project.note",
+            &json!({ "text": "  It sells bread.\n " }),
+            "emptyResult",
+        );
+        let document = harness
+            .project
+            .deps
+            .files
+            .read_project_scan()
+            .expect("project.md reads");
+        assert!(
+            document.ends_with("\n2026-09-22: It sells bread.\n"),
             "{document}"
         );
         for text in [String::new(), "   ".to_string(), "x".repeat(2001)] {

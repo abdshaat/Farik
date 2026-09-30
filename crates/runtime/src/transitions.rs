@@ -3011,6 +3011,22 @@ mod tests {
                 );
             }
         }
+        // A judgment with neither answers nor the old booleans passes nothing.
+        let project = Project::new("judged-empty", a_team_with_a_scrum_master(), at(12));
+        project.file("FRK-1", |_| {});
+        project.created("FRK-1", "refining");
+        written(&project, "FRK-1");
+        project.record(
+            "FRK-1",
+            "contract.judged",
+            &json!({ "judged_by": "sam", "reason": "Looks fine." }),
+            at(10),
+        );
+        let outcome = readying(&project, "FRK-1");
+        assert!(
+            !matches!(outcome, TransitionOutcome::Moved(_)),
+            "{outcome:?}"
+        );
     }
 
     #[test]
