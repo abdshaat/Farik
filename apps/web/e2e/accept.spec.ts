@@ -47,7 +47,7 @@ test("a high-risk plan is approved, its work sent back once, then accepted", asy
 			),
 		).toBeVisible();
 		await expect(
-			page.getByText("Theo, your Software Developer, wrote this for you"),
+			page.getByText("Theo, your Developer, wrote this for you"),
 		).toBeVisible();
 		await expect(
 			page.getByText(
