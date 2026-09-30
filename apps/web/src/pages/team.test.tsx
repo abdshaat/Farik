@@ -662,7 +662,8 @@ describe("team page", () => {
 			source: "keychain",
 		});
 		const row = await screen.findByRole("region", { name: en.accountRow });
-		expect(within(row).getByText(/an API key/)).toBeTruthy();
+		// The row is there before the account's answer is drawn in it.
+		expect(await within(row).findByText(/an API key/)).toBeTruthy();
 		expect(within(row).getByText(en.accountKeychain)).toBeTruthy();
 		await expectNoAxeViolations(container);
 
