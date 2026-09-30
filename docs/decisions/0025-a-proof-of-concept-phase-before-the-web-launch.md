@@ -2,6 +2,7 @@
 
 Date: 2026-09-30
 Status: accepted
+Amended 2026-09-30 by ADR 0026: the phase order is unchanged, but the role kits, and so the single agent's union of them, now include the UI/UX Designer's.
 
 ## Context
 
