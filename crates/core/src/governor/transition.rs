@@ -1714,6 +1714,36 @@ mod tests {
     }
 
     #[test]
+    fn escalates_a_designers_task_whose_plans_were_returned_as_often_as_it_may_be_tried() {
+        // ADR 0026: returned design plans count against `max_iterations` plus the tries the human
+        // granted, and read after an exhausted budget and before a denied permission.
+        let mut context = a_context();
+        let request = ask(TaskStatus::Escalated, A::Governor, None);
+        context.extra_iterations = 2;
+        let limit =
+            u32::try_from(context.contract.budget.max_iterations.get()).expect("a small limit") + 2;
+        context.design_plan_returns = limit - 1;
+        assert_eq!(one_gate(&request, &context).0, GateId::GovernorEscalation);
+        context.design_plan_returns = limit;
+        assert_eq!(
+            effects(&request, &context),
+            [TransitionEffect::RaiseEscalation(Why::Iterations)]
+        );
+        // Read before a denied permission.
+        context.permission_denied = true;
+        assert_eq!(
+            effects(&request, &context),
+            [TransitionEffect::RaiseEscalation(Why::Iterations)]
+        );
+        // And after an exhausted budget.
+        context.budget.task_spent_usd = context.budget.task_max_usd;
+        assert_eq!(
+            effects(&request, &context),
+            [TransitionEffect::RaiseEscalation(Why::Budget)]
+        );
+    }
+
+    #[test]
     fn lets_the_human_escalate_or_cancel_anything_and_move_an_escalated_task() {
         let mut context = a_context();
         assert_eq!(
