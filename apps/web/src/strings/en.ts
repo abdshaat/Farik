@@ -689,8 +689,6 @@ export const en = {
 		"When the limit is reached, work already started may finish. You can leave it empty and watch spending on the Costs page.",
 	sprintNotNow: "Not now",
 	sprintEndTitle: "End sprint {n} early?",
-	sprintEndUnfinished:
-		"{count} of its tasks are not finished. They go back on the board.",
 	sprintEnd: "End sprint {n}",
 	sprintEndLeaves:
 		"{count} tasks are not finished. They leave the sprint and go back on the board exactly as they are. Nothing is lost, and work in progress keeps going. {name} will still run the review and the look back.",
