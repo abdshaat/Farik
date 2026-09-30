@@ -20,7 +20,7 @@ forbidden:
   - run the test suite as a reviewer of its own contracts
   - accept a task without a reviewer's verification event
 model:
-  id: claude-opus-5
+  id: claude-opus-5-5
   effort: high
 skills:
   - writing-task-contracts

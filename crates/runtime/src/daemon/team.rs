@@ -829,7 +829,7 @@ mod tests {
                     "Mira",
                     "product_manager",
                     "product-manager",
-                    "claude-opus-5",
+                    "claude-opus-5-5",
                     "high",
                     "Asks the questions that decide what to build",
                     "active"
@@ -839,7 +839,7 @@ mod tests {
                     "Sol",
                     "scrum_master",
                     "scrum-master",
-                    "claude-sonnet-5",
+                    "claude-sonnet-5-5",
                     "medium",
                     "Keeps the work moving and nobody stuck",
                     "active"
@@ -849,7 +849,7 @@ mod tests {
                     "Ada",
                     "architect",
                     "architect",
-                    "claude-opus-5",
+                    "claude-opus-5-5",
                     "high",
                     "Thinks about how it all fits together",
                     "active"
@@ -859,7 +859,7 @@ mod tests {
                     "Theo",
                     "software_developer",
                     "developer",
-                    "claude-opus-5",
+                    "claude-opus-5-5",
                     "high",
                     "Builds it and tests it",
                     "active"
@@ -869,7 +869,7 @@ mod tests {
                     "Iris",
                     "ui_ux_designer",
                     "extra-1",
-                    "claude-opus-5",
+                    "claude-opus-5-5",
                     "high",
                     "Makes it clear, calm and easy to use",
                     "active"
@@ -879,7 +879,7 @@ mod tests {
                     "Kai",
                     "marketing_specialist",
                     "marketing-specialist",
-                    "claude-sonnet-5",
+                    "claude-sonnet-5-5",
                     "medium",
                     "Tells people about what you made",
                     "active"
@@ -987,25 +987,25 @@ mod tests {
             json!([
                 {
                     "id": "pm",
-                    "model": { "id": "claude-opus-5", "label": "Strongest model, thinks hard (older)", "effort": "high" },
+                    "model": { "id": "claude-opus-5-5", "label": "Strongest model, thinks hard", "effort": "high" },
                     "tiers": ["read", "network"],
                     "base_tiers": ["read", "network"],
                 },
                 {
                     "id": "dev-a",
-                    "model": { "id": "claude-opus-5", "label": "Strongest model, thinks hard (older)", "effort": "high" },
+                    "model": { "id": "claude-opus-5-5", "label": "Strongest model, thinks hard", "effort": "high" },
                     "tiers": ["read", "write_workspace", "git_remote"],
                     "base_tiers": ["read", "write_workspace", "git_local", "git_remote"],
                 },
                 {
                     "id": "dev-b",
-                    "model": { "id": "claude-sonnet-5", "label": "Everyday model", "effort": "low" },
+                    "model": { "id": "claude-sonnet-5", "label": "Everyday model (older)", "effort": "low" },
                     "tiers": ["read", "write_workspace", "git_local", "git_remote"],
                     "base_tiers": ["read", "write_workspace", "git_local", "git_remote"],
                 },
                 {
                     "id": "ada",
-                    "model": { "id": "claude-opus-5", "label": "Strongest model, thinks hard (older)", "effort": "high" },
+                    "model": { "id": "claude-opus-5-5", "label": "Strongest model, thinks hard", "effort": "high" },
                     "tiers": ["read", "write_workspace", "network", "git_local"],
                     "base_tiers": ["read", "write_workspace", "network", "git_local"],
                 },
@@ -1595,7 +1595,7 @@ mod tests {
             json!({ "models": [
                 { "id": "claude-fable-5-1", "label": "Most capable model" },
                 { "id": "claude-opus-5-5", "label": "Strongest model, thinks hard" },
-                { "id": "claude-sonnet-5", "label": "Everyday model" },
+                { "id": "claude-sonnet-5-5", "label": "Everyday model" },
                 { "id": "claude-haiku-4-5", "label": "Quick model" },
             ] })
         );

@@ -20,7 +20,7 @@ const agent = (id: string, name: string, role: string, avatar: string) => ({
 	avatar,
 	persona: `${name} persona`,
 	status: "active",
-	model: { id: "claude-opus-5", effort: "high" },
+	model: { id: "claude-opus-5-5", effort: "high" },
 });
 const TEAM = {
 	name: "Corner Bakery",
@@ -42,8 +42,8 @@ const TEAM = {
 	rules: {},
 };
 const OPUS = {
-	id: "claude-opus-5",
-	label: "Strongest model, thinks hard (older)",
+	id: "claude-opus-5-5",
+	label: "Strongest model, thinks hard",
 };
 /** What the daemon works out for each agent: here, the team said No to commands. */
 const EFFECTIVE = [
@@ -53,7 +53,7 @@ const EFFECTIVE = [
 	["theo", OPUS, ["read", "write_workspace", "git_local"]],
 	[
 		"kai",
-		{ id: "claude-sonnet-5", label: "Everyday model" },
+		{ id: "claude-sonnet-5-5", label: "Everyday model" },
 		["read", "network", "write_workspace", "git_local"],
 	],
 ].map(([id, model, tiers]) => ({
@@ -69,8 +69,8 @@ const JUDGES = {
 };
 const MODELS = {
 	models: [
-		{ id: "claude-opus-5", label: "Strongest model, thinks hard" },
-		{ id: "claude-sonnet-5", label: "Everyday model" },
+		{ id: "claude-opus-5-5", label: "Strongest model, thinks hard" },
+		{ id: "claude-sonnet-5-5", label: "Everyday model" },
 	],
 };
 
@@ -171,7 +171,7 @@ describe("team page", () => {
 		expect(within(list).getByText("Ada persona")).toBeTruthy();
 		// Every agent's model in words, its own or its role's, never an id.
 		expect(
-			within(list).getAllByText("Strongest model, thinks hard (older)"),
+			within(list).getAllByText("Strongest model, thinks hard"),
 		).toHaveLength(4);
 		expect(within(list).getByText("Everyday model")).toBeTruthy();
 		expect(within(list).queryByText(/claude-/)).toBeNull();
@@ -358,7 +358,7 @@ describe("team page", () => {
 		fireEvent.click(screen.getByRole("radio", { name: /^Quick/ }));
 		const checked = await validated(s, ["Theo now thinks with low effort."]);
 		expect(one(checked, "theo").model).toEqual({
-			id: "claude-opus-5",
+			id: "claude-opus-5-5",
 			effort: "low",
 		});
 		expect(
@@ -368,7 +368,7 @@ describe("team page", () => {
 
 		fireEvent.click(screen.getByRole("button", { name: en.agentSave }));
 		expect(one(await saved(s), "theo").model).toEqual({
-			id: "claude-opus-5",
+			id: "claude-opus-5-5",
 			effort: "low",
 		});
 	});

@@ -244,7 +244,7 @@ pub trait RuntimeAdapter: Send + Sync {
 /// The model a triage session runs on, whatever the agent's own: 5.16 runs triage on the cheaper
 /// model, and 8.2 names it. It lives here rather than in the orchestrator, which re-exports it, so
 /// that `cost::unpriced_models` can name it where the orchestrator is not built.
-pub const TRIAGE_MODEL: &str = "claude-sonnet-5";
+pub const TRIAGE_MODEL: &str = "claude-sonnet-5-5";
 
 /// The model and effort an agent's sessions run on: its own `model.id` when it has one and
 /// otherwise its role's model, with its own effort when it has one and otherwise its role's. A triage session
@@ -288,14 +288,14 @@ mod tests {
         );
         assert_eq!(
             session_model(
-                &an_agent(Some(json!({ "id": "claude-sonnet-5", "effort": "low" }))),
+                &an_agent(Some(json!({ "id": "claude-sonnet-5-5", "effort": "low" }))),
                 &role
             ),
-            ("claude-sonnet-5".to_string(), Effort::Low)
+            ("claude-sonnet-5-5".to_string(), Effort::Low)
         );
         assert_eq!(
-            session_model(&an_agent(Some(json!({ "id": "claude-sonnet-5" }))), &role),
-            ("claude-sonnet-5".to_string(), role.effort)
+            session_model(&an_agent(Some(json!({ "id": "claude-sonnet-5-5" }))), &role),
+            ("claude-sonnet-5-5".to_string(), role.effort)
         );
         assert_eq!(
             session_model(&an_agent(None), &role),
@@ -316,8 +316,8 @@ mod tests {
         let mut role = load_role(Role::SoftwareDeveloper).expect("Farik ships the role");
         role.effort = Effort::Medium;
         assert_eq!(
-            session_model(&an_agent(Some(json!({ "id": "claude-sonnet-5" }))), &role),
-            ("claude-sonnet-5".to_string(), Effort::Medium)
+            session_model(&an_agent(Some(json!({ "id": "claude-sonnet-5-5" }))), &role),
+            ("claude-sonnet-5-5".to_string(), Effort::Medium)
         );
         assert_eq!(
             session_model(&an_agent(None), &role),

@@ -170,7 +170,7 @@ fn absent_or<T>(read: Result<T, FilesError>) -> Result<Option<T>, String> {
 /// (D18), named after their roles because the person has not named them yet.
 ///
 /// The team editor (F1) is how a person renames them, adds the other roles, and changes the models.
-/// Both get `claude-opus-5` at `high`, which is what `docs/SPEC.md` 8.2 ships as the default for the
+/// Both get `claude-opus-5-5` at `high`, which is what `docs/SPEC.md` 8.2 ships as the default for the
 /// Product Manager, the Architect and the Developer. It sets no dollar limit, which is the user's
 /// to set (ADR 0015).
 ///
@@ -189,7 +189,7 @@ fn starter_team(project: &str) -> Result<Team, String> {
                 "role": "product_manager",
                 "persona": "Owns the backlog and turns every request into a contract.",
                 "status": "active",
-                "model": { "id": "claude-opus-5", "effort": "high" }
+                "model": { "id": "claude-opus-5-5", "effort": "high" }
             },
             {
                 "id": "developer",
@@ -197,7 +197,7 @@ fn starter_team(project: &str) -> Result<Team, String> {
                 "role": "software_developer",
                 "persona": "Writes the code and the tests that hold it.",
                 "status": "active",
-                "model": { "id": "claude-opus-5", "effort": "high" }
+                "model": { "id": "claude-opus-5-5", "effort": "high" }
             }
         ],
         "budgets": defaults.budgets,
@@ -250,8 +250,8 @@ mod tests {
                 )))
                 .collect::<Vec<_>>(),
             [
-                Some(("claude-opus-5".to_string(), Some("high".to_string()))),
-                Some(("claude-opus-5".to_string(), Some("high".to_string())))
+                Some(("claude-opus-5-5".to_string(), Some("high".to_string()))),
+                Some(("claude-opus-5-5".to_string(), Some("high".to_string())))
             ],
             "8.2 ships Opus 5 at high for the Product Manager, the Architect and the Developer, and \
              this team is two of those three"

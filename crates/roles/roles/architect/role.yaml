@@ -16,7 +16,7 @@ forbidden:
   - merge or push a shared branch
   - accept work
 model:
-  id: claude-opus-5
+  id: claude-opus-5-5
   effort: high
 skills:
   - reviewing-for-design

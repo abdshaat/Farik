@@ -16,7 +16,7 @@ forbidden:
   - push to shared branches without the git_remote grant
   - touch files outside the contract's allowed paths
 model:
-  id: claude-opus-5
+  id: claude-opus-5-5
   effort: high
 skills:
   - implementing-a-contract

@@ -190,8 +190,8 @@ test("a sprint runs on the board by itself, from its planning to its look back",
 			page.getByRole("columnheader", { name: "Sprint 1" }),
 		).toBeVisible();
 		await expect(theo.getByRole("cell")).toHaveText([
-			"$0.04",
-			"$0.04",
+			"$0.03",
+			"$0.03",
 			"Nothing to do right now",
 		]);
 		await expect(page.getByText("1 of 1", { exact: true })).toBeVisible();

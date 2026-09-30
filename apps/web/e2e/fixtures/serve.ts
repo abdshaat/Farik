@@ -175,7 +175,7 @@ function setUp(project: string, setupPending: boolean): void {
  */
 function writeTeam(project: string, designer: boolean): void {
 	const agent = (id: string, name: string, role: string) =>
-		`- display_name: ${name}\n  id: ${id}\n  model:\n    effort: high\n    id: claude-opus-5\n  persona: ${name}.\n  role: ${role}\n  status: active\n`;
+		`- display_name: ${name}\n  id: ${id}\n  model:\n    effort: high\n    id: claude-opus-5-5\n  persona: ${name}.\n  role: ${role}\n  status: active\n`;
 	const path = join(project, ".farik/team.yaml");
 	const yaml = readFileSync(path, "utf8");
 	const agents =

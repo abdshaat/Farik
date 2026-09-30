@@ -28,7 +28,7 @@ const agent = (id: string, name: string, role: string, avatar: string) => ({
 	avatar,
 	persona: `${name} persona`,
 	status: "active",
-	model: { id: "claude-opus-5", effort: "high" },
+	model: { id: "claude-opus-5-5", effort: "high" },
 });
 const FIVE = [
 	agent("mira", "Mira", "product_manager", "product-manager"),

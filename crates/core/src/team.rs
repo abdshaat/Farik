@@ -552,7 +552,7 @@ mod tests {
                 .as_ref()
                 .and_then(|model| model.id.as_deref())
                 .map(String::as_str),
-            Some("claude-opus-5")
+            Some("claude-opus-5-5")
         );
         assert_eq!(
             ada.preauthorized_external_tools

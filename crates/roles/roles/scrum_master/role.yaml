@@ -22,7 +22,7 @@ forbidden:
   - change a frozen contract
   - accept work
 model:
-  id: claude-sonnet-5
+  id: claude-sonnet-5-5
   effort: medium
 skills:
   - keeping-work-flowing

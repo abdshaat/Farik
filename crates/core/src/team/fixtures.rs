@@ -46,7 +46,7 @@ pub fn a_full_team_wire() -> Value {
                 "persona": "Asks the question nobody asked.",
                 "avatar": "ada.png",
                 "status": "active",
-                "model": { "id": "claude-opus-5", "effort": "high" },
+                "model": { "id": "claude-opus-5-5", "effort": "high" },
                 "grants": ["execute"],
                 "revokes": ["network"],
                 "preauthorized_external_tools": ["mcp__linear__create_issue"],
@@ -57,7 +57,7 @@ pub fn a_full_team_wire() -> Value {
                 "display_name": "Linus",
                 "role": "software_developer",
                 "status": "active",
-                "model": { "id": "claude-opus-5" }
+                "model": { "id": "claude-opus-5-5" }
             }
         ],
         "budgets": {

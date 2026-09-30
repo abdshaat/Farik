@@ -16,7 +16,7 @@ forbidden:
   - write application code
   - publish anywhere
 model:
-  id: claude-sonnet-5
+  id: claude-sonnet-5-5
   effort: medium
 skills:
   - marketing-what-ships

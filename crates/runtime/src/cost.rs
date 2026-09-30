@@ -682,7 +682,7 @@ mod tests {
         let mut wire = a_team_wire();
         wire["agents"] = json!([
             // Its own model is the one its triage sessions run on: named once, not twice.
-            on("pm", "product_manager", Some("claude-sonnet-5")),
+            on("pm", "product_manager", Some("claude-sonnet-5-5")),
             on("dev-a", "software_developer", Some("claude-unknown-9")),
             on("dev-b", "software_developer", Some("claude-unknown-9")),
             paused,
@@ -690,12 +690,12 @@ mod tests {
             on("arch-2", "architect", Some("claude-other-2")),
         ]);
         let team = validate_team(&wire).expect("a team");
-        let only_opus_5 = validate_price_table(&json!({
+        let only_opus_5_5 = validate_price_table(&json!({
             "version": 1,
             "source_url": "https://example.com/prices",
             "retrieved_at": "2026-09-23",
             "prices": {
-                "claude-opus-5": {
+                "claude-opus-5-5": {
                     "input_usd_per_mtok": 5.0,
                     "output_usd_per_mtok": 25.0,
                     "cache_read_usd_per_mtok": 0.5,
@@ -716,14 +716,14 @@ mod tests {
                 .collect()
         };
         assert_eq!(
-            unpriced_models(&team, &only_opus_5)
+            unpriced_models(&team, &only_opus_5_5)
                 .expect("an Architect with no model uses its role's shipped model"),
             // Every active agent's conversations, and the ceremony runner's ceremonies, run on
-            // Claude Sonnet 5 whatever its own model.
+            // Claude Sonnet 5.5 whatever its own model.
             named(&[
                 ("claude-other-2", &["arch-2"]),
                 (
-                    "claude-sonnet-5",
+                    "claude-sonnet-5-5",
                     &["pm", "dev-a", "dev-b", "arch", "arch-2"]
                 ),
                 ("claude-unknown-9", &["dev-a", "dev-b"]),

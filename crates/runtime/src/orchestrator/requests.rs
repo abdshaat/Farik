@@ -1352,7 +1352,7 @@ mod tests {
         // The Scrum Master's own model and effort, not triage's.
         assert_eq!(
             (spec.model.as_str(), spec.effort),
-            ("claude-sonnet-5", Effort::Medium)
+            ("claude-sonnet-5-5", Effort::Medium)
         );
         assert!(
             spec.system_prompt.contains(JUDGMENT_INSTRUCTION),

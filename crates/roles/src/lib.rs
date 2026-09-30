@@ -355,7 +355,7 @@ mod tests {
         assert!(!definition.mandate.trim().is_empty());
         assert!(!definition.produces.is_empty());
         assert!(!definition.forbidden.is_empty());
-        assert_eq!(definition.model, "claude-opus-5");
+        assert_eq!(definition.model, "claude-opus-5-5");
         assert_eq!(definition.effort, Effort::High);
         assert_eq!(definition.default_tiers, default_tiers(role));
         assert_eq!(definition.skills.len(), 1);
@@ -395,7 +395,7 @@ mod tests {
         let definition = loaded(Role::UiUxDesigner);
         assert_eq!(definition.id, Role::UiUxDesigner);
         assert_eq!(definition.persona, "Makes it clear, calm and easy to use");
-        assert_eq!(definition.model, "claude-opus-5");
+        assert_eq!(definition.model, "claude-opus-5-5");
         assert_eq!(definition.effort, Effort::High);
         assert_eq!(definition.default_tiers, default_tiers(Role::UiUxDesigner));
         assert!(definition.system_prompt.contains("untrusted"));
@@ -472,7 +472,7 @@ mod tests {
     fn loads_the_scrum_master() {
         let definition = loaded(Role::ScrumMaster);
         assert_eq!(definition.id, Role::ScrumMaster);
-        assert_eq!(definition.model, "claude-sonnet-5");
+        assert_eq!(definition.model, "claude-sonnet-5-5");
         assert_eq!(definition.effort, Effort::Medium);
         assert_eq!(definition.default_tiers, default_tiers(Role::ScrumMaster));
         assert_eq!(definition.skills.len(), 1);
@@ -505,7 +505,7 @@ mod tests {
     fn loads_the_architect() {
         let definition = loaded(Role::Architect);
         assert_eq!(definition.id, Role::Architect);
-        assert_eq!(definition.model, "claude-opus-5");
+        assert_eq!(definition.model, "claude-opus-5-5");
         assert_eq!(definition.effort, Effort::High);
         assert_eq!(definition.default_tiers, default_tiers(Role::Architect));
         assert_eq!(definition.skills.len(), 1);
@@ -537,7 +537,7 @@ mod tests {
     fn loads_the_marketing_specialist() {
         let definition = loaded(Role::MarketingSpecialist);
         assert_eq!(definition.id, Role::MarketingSpecialist);
-        assert_eq!(definition.model, "claude-sonnet-5");
+        assert_eq!(definition.model, "claude-sonnet-5-5");
         assert_eq!(definition.effort, Effort::Medium);
         assert_eq!(
             definition.default_tiers,

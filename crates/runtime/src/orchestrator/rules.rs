@@ -5760,7 +5760,7 @@ mod tests {
         let spec = &started[0];
         assert_eq!(spec.agent_id, "dev-a");
         assert_eq!(spec.purpose, SessionPurpose::Conversation);
-        assert_eq!(spec.model, "claude-sonnet-5");
+        assert_eq!(spec.model, "claude-sonnet-5-5");
         assert_eq!(spec.effort, Effort::Low);
         assert_eq!(spec.task_id, None);
         assert_eq!(
