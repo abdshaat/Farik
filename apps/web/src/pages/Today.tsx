@@ -2,6 +2,7 @@ import { Avatar, type AvatarKey, Button, RoleTag, uiStrings } from "@farik/ui";
 import { type FormEvent, useState } from "react";
 import { Link, useNavigate } from "react-router";
 import { useConnection } from "../app/connection.tsx";
+import { saidAll } from "../app/refusals.ts";
 import { useQuery } from "../app/store.ts";
 import { codeOf, sentence } from "../app/words.ts";
 import type { en } from "../strings/en.ts";
@@ -185,11 +186,9 @@ function RequestBox({ pmName }: { pmName: string }) {
 			};
 			navigate(`/requests/${filed.taskId}`);
 		} catch (error) {
-			// The length refusal is known by its code, and said in the page's own sentence.
+			// A coded refusal (the length one) is worded by its code; the store's own sentences as they are.
 			setRefusal(
-				codeOf(error) === "too_short"
-					? t("requestTooShort")
-					: sentence((error as Error).message),
+				codeOf(error) ? saidAll(error) : sentence((error as Error).message),
 			);
 			setBusy(false);
 		}

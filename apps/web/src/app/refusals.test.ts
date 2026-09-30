@@ -6,6 +6,7 @@ import { commandSaid, refusalsOf, said } from "./refusals.ts";
 describe("refusals", () => {
 	it("words_each_refusal_by_its_code_and_nothing_raw", () => {
 		expect(said("too_many")).toBe(en.refuseTooMany);
+		expect(said("too_short")).toBe(en.requestTooShort);
 		expect(said("judge_not_held", { role: "Architect" })).toBe(
 			en.refuseJudge.replaceAll("{role}", "Architect"),
 		);

@@ -20,6 +20,7 @@ const WORDS: Record<string, keyof typeof en> = {
 	question_length: "refuseQuestionLength",
 	last_of_role: "refuseLastOfRole",
 	last_judge: "refuseLastJudge",
+	too_short: "requestTooShort",
 };
 
 /** A refusal in plain words, `{key}` filled from `fill`: its code's sentence, or a plain one for any other. */

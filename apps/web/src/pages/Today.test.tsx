@@ -88,9 +88,7 @@ describe("today", () => {
 		expect(
 			within(ada as HTMLElement).getByText("Resting until 15:40 UTC"),
 		).toBeTruthy();
-		expect(
-			within(theo as HTMLElement).getByTitle("Developer"),
-		).toBeTruthy();
+		expect(within(theo as HTMLElement).getByTitle("Developer")).toBeTruthy();
 		expect(
 			screen.getByText("Sprint 2 is running: 4 of 7 tasks done"),
 		).toBeTruthy();
