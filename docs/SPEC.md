@@ -440,7 +440,7 @@ Default tools: read, write_workspace, execute, network, git_local, so that it co
 
 ### 6.4 Software Developer
 
-Mandate: implement contracts. With the UI/UX Designer, the only role that writes application code (added in 0.11; changed in 0.31). Works on a task branch, `feature/FRK-<n>` or `fix/FRK-<n>` by the contract's `change` (5.14; changed in 0.11), runs the exit criteria before declaring done, writes a completion note.
+Mandate: implement contracts. With the UI/UX Designer, the only role that writes application code, beside the DevOps Engineer's incident fixes (6.9) (added in 0.11; changed in 0.31 and 0.32). Works on a task branch, `feature/FRK-<n>` or `fix/FRK-<n>` by the contract's `change` (5.14; changed in 0.11), runs the exit criteria before declaring done, writes a completion note.
 
 Produces: diffs, commits on task branches, completion notes.
 
@@ -488,7 +488,7 @@ The built-in connector (added in 0.33; ADR 0026). Before any kit, Farik ships on
 
 ### 6.8 UI/UX Designer (added in 0.31)
 
-Mandate: a developer focused on the interface (ADR 0026; `docs/design/designer-chats-templates.md`). It explores the app, plans a change to it, and implements the change once the Product Manager approves the plan. With the Software Developer it is the only role that changes code: its tasks are not held to the team's `document_paths` (5.3), and they work on `feature/FRK-<n>` or `fix/FRK-<n>` by the contract's `change` (5.14). The team builder suggests one (4.1), named Iris, "Makes it clear, calm and easy to use", with the `extra-1` picture and the tag "UX" in its own colour, pale clay; the user may untick it (the founder's choices of 2026-09-30).
+Mandate: a developer focused on the interface (ADR 0026; `docs/design/designer-chats-templates.md`). It explores the app, plans a change to it, and implements the change once the Product Manager approves the plan. With the Software Developer it is the only role that changes code, beside the DevOps Engineer's incident fixes (6.9; changed in 0.32): its tasks are not held to the team's `document_paths` (5.3), and they work on `feature/FRK-<n>` or `fix/FRK-<n>` by the contract's `change` (5.14). The team builder suggests one (4.1), named Iris, "Makes it clear, calm and easy to use", with the `extra-1` picture and the tag "UX" in its own colour, pale clay; the user may untick it (the founder's choices of 2026-09-30).
 
 Produces: design plans, diffs, commits on task branches, completion notes.
 
