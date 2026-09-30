@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { render } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { RoleTag } from "./RoleTag.tsx";
@@ -39,6 +41,14 @@ describe("RoleTag", () => {
 			return tone;
 		});
 		expect(new Set(tones).size).toBe(roles.length);
+		// And the Designer's class is drawn in the Designer's own token, pale clay.
+		const css = readFileSync(
+			join(import.meta.dirname, "RoleTag.module.css"),
+			"utf8",
+		);
+		expect(css).toMatch(
+			/\.uiUxDesigner \{\s*background: var\(--farik-color-role-ui-ux-designer\);\s*\}/,
+		);
 	});
 
 	it("says_developer_as_the_mockups_do", () => {
