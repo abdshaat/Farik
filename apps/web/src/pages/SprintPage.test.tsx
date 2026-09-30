@@ -41,7 +41,7 @@ const SPRINT = {
 	],
 	meetings: [
 		{ thread: "planning", first_seq: 40, at: "2026-09-21T09:05:00Z", posts: 3 },
-		{ thread: "standup", first_seq: 61, at: "2026-09-22T00:01:00Z", posts: 2 },
+		{ thread: "standup", first_seq: 61, at: "2026-09-22T00:01:00Z", posts: 1 },
 	],
 };
 
@@ -102,6 +102,9 @@ describe("sprint page", () => {
 		expect(within(meetings).getByText(en.meetingStandup)).toBeTruthy();
 		expect(
 			within(meetings).getByText("3 posts on Monday 21 September"),
+		).toBeTruthy();
+		expect(
+			within(meetings).getByText("1 post on Tuesday 22 September"),
 		).toBeTruthy();
 
 		// The spending, and the way to the costs by agent.

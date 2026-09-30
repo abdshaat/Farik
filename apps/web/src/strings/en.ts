@@ -758,6 +758,7 @@ export const en = {
 	meetingReview: "Review",
 	meetingRetro: "Looking back",
 	meetingPosts: "{posts} posts on {day}",
+	meetingPostsOne: "1 post on {day}",
 	sprintSpending: "Spending",
 	sprintSpentOf: "{spent} so far, of the {budget} you set for this sprint.",
 	sprintSpentNoLimit: "{spent} so far, with no limit set for this sprint.",

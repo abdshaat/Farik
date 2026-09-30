@@ -116,7 +116,7 @@ export function SprintPage() {
 									<div className={board.rowText}>
 										<span>{word ? t(word) : m.thread}</span>
 										<span className={board.small}>
-											{t("meetingPosts")
+											{t(m.posts === 1 ? "meetingPostsOne" : "meetingPosts")
 												.replace("{posts}", String(m.posts))
 												.replace("{day}", day(m.at))}
 										</span>
