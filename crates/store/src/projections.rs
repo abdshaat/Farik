@@ -657,7 +657,8 @@ fn apply_to(transaction: &Transaction<'_>, event: &FarikEvent) -> Result<(), Sto
         | EventBody::PreviewPrepared(_)
         | EventBody::PreviewStarted(_)
         | EventBody::PreviewStopped(_)
-        | EventBody::PageChecked(_) => Ok(()),
+        | EventBody::PageChecked(_)
+        | EventBody::ChatMessagePosted(_) => Ok(()),
     }
 }
 

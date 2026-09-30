@@ -14,10 +14,11 @@ pub use farik_core::contract::{TaskContract, TaskId, ValidationError};
 
 pub use crate::generated::command::CommandName;
 use crate::generated::command::{
-    AgentUpdateBody, EmptyBody, EscalationResolveBody, FarikCommand as CommandWire,
-    HumanAcceptBody, HumanAcceptBodySubject, HumanSendBackBody, HumanSendBackBodySubject,
-    MessagePostBody, QuestionAnswerBody, RequestTriageBody, RequestTriageBodySize, SessionStopBody,
-    SprintStartBody, TaskCreateBody, TaskIdBody, TaskTransitionBody,
+    AgentUpdateBody, ChatMessagePostBody, EmptyBody, EscalationResolveBody,
+    FarikCommand as CommandWire, HumanAcceptBody, HumanAcceptBodySubject, HumanSendBackBody,
+    HumanSendBackBodySubject, MessagePostBody, QuestionAnswerBody, RequestTriageBody,
+    RequestTriageBodySize, SessionStopBody, SprintStartBody, TaskCreateBody, TaskIdBody,
+    TaskTransitionBody,
 };
 
 const SCHEMA_JSON: &str = include_str!("../../../docs/schemas/command.schema.json");
@@ -187,6 +188,13 @@ pub enum Command {
         /// What the human says.
         text: String,
     },
+    /// Say something in the human's one-to-one chat with one agent.
+    ChatMessagePost {
+        /// The agent whose chat it is.
+        agent_id: String,
+        /// What the human says, its line breaks kept.
+        text: String,
+    },
 }
 
 /// Checks a value against `docs/schemas/command.schema.json` and, when it conforms, returns the
@@ -334,6 +342,13 @@ fn human_command(name: CommandName, body: &Value) -> Result<Command, Vec<Validat
             let body: MessagePostBody = read_body(body, name)?;
             Ok(Command::MessagePost { text: body.text })
         }
+        CommandName::ChatMessagePost => {
+            let body: ChatMessagePostBody = read_body(body, name)?;
+            Ok(Command::ChatMessagePost {
+                agent_id: body.agent_id,
+                text: body.text,
+            })
+        }
     }
 }
 
@@ -451,6 +466,10 @@ pub fn command_to_value(command: &Command) -> Value {
         Command::TeamPause => (CommandName::TeamPause, json!({})),
         Command::TeamResume => (CommandName::TeamResume, json!({})),
         Command::MessagePost { text } => (CommandName::MessagePost, json!({ "text": text })),
+        Command::ChatMessagePost { agent_id, text } => (
+            CommandName::ChatMessagePost,
+            json!({ "agent_id": agent_id, "text": text }),
+        ),
     };
     json!({ "command": name.to_string(), "body": body })
 }
@@ -948,6 +967,7 @@ mod tests {
             json!({ "command": "sprint_start", "body": { "budget_usd": null } }),
             json!({ "command": "sprint_end", "body": {} }),
             json!({ "command": "message_post", "body": { "text": "hello @dev-a" } }),
+            json!({ "command": "chat_message_post", "body": { "agent_id": "mira", "text": "Apple Pay?\nOr not." } }),
         ];
         for wire in wires {
             let command = command_from_value(&wire).expect("the wire reads");

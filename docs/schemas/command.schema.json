@@ -30,6 +30,7 @@
         "sprint_start",
         "sprint_end",
         "message_post",
+        "chat_message_post",
         "team_pause",
         "team_resume"
       ]
@@ -50,6 +51,7 @@
         { "$ref": "#/$defs/sessionStopBody" },
         { "$ref": "#/$defs/sprintStartBody" },
         { "$ref": "#/$defs/messagePostBody" },
+        { "$ref": "#/$defs/chatMessagePostBody" },
         { "$ref": "#/$defs/emptyBody" }
       ]
     },
@@ -185,6 +187,17 @@
       "additionalProperties": false,
       "required": ["text"],
       "properties": {
+        "text": { "type": "string" }
+      }
+    },
+    "chatMessagePostBody": {
+      "title": "Chat Message Post Body",
+      "description": "The human says something in their one-to-one chat with the agent agent_id (docs/SPEC.md 4.3; ADR 0026). There is no author: Farik writes human. Whether the agent exists and is not retired, and whether text is blank or longer than 4,000 code points, is the handler's to say, with the rule's own words.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["agent_id", "text"],
+      "properties": {
+        "agent_id": { "type": "string" },
         "text": { "type": "string" }
       }
     },

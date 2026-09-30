@@ -10,6 +10,8 @@
 pub mod board;
 /// The team's channel.
 pub mod channel;
+/// The human's one-to-one chats.
+pub mod chat;
 /// Taking a contract from the team, and giving it back.
 pub mod contract;
 /// Writing a contract with the Product Manager at the terminal.
@@ -408,6 +410,14 @@ enum Commands {
         #[arg(required = true, trailing_var_arg = true, allow_hyphen_values = true)]
         text: Vec<String>,
     },
+    /// Say something to one agent in your one-to-one chat, or with no text show the chat (4.3).
+    Chat {
+        /// The agent's id.
+        agent: String,
+        /// What you say; nothing shows the chat, oldest first.
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        text: Vec<String>,
+    },
     /// Show the team's channel, oldest first (5.9).
     Channel {
         /// How many of the latest messages.
@@ -576,6 +586,7 @@ impl From<SizeArgument> for farik_protocol::command::RequestSize {
 ///
 /// `args` is the whole invocation, program name first, as `std::env::args` gives it.
 #[must_use]
+#[allow(clippy::too_many_lines, reason = "one arm per command")]
 pub fn run_cli(args: &[String], io: &mut CliIo<'_>) -> i32 {
     let parsed = match Cli::try_parse_from(args) {
         Ok(parsed) => parsed,
@@ -615,7 +626,11 @@ pub fn run_cli(args: &[String], io: &mut CliIo<'_>) -> i32 {
             command: ContractCommands::Lock { .. } | ContractCommands::Unlock { .. },
         } => open_project(&io.cwd, now)
             .and_then(|project| phase_two_write(&parsed.command, &project, now)),
+        Commands::Chat { agent, text } if text.is_empty() => {
+            open_project(&io.cwd, now).and_then(|project| chat::chat(&project, agent))
+        }
         Commands::Approve { .. }
+        | Commands::Chat { .. }
         | Commands::Accept { .. }
         | Commands::SendBack { .. }
         | Commands::Answer { .. }
@@ -812,6 +827,13 @@ fn humans(command: &Commands) -> Result<(&'static str, Command), String> {
         Commands::Say { text } => (
             "say",
             Command::MessagePost {
+                text: text.join(" "),
+            },
+        ),
+        Commands::Chat { agent, text } => (
+            "chat",
+            Command::ChatMessagePost {
+                agent_id: agent.clone(),
                 text: text.join(" "),
             },
         ),

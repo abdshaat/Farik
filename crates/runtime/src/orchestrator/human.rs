@@ -23,6 +23,7 @@ use super::requests::HUMAN;
 use super::verify::{governor_results, is_mechanical, since_verifying};
 use super::{CommandError, CommandReport, IntegrationOutcome, Orchestrator, OrchestratorError};
 use crate::channel::{ChannelError, NewMessage, mentions_in, post};
+use crate::chat::{ChatError, NewChatMessage, post_chat};
 use crate::daemon::DaemonState;
 use crate::pause::paused;
 use crate::sprints::{EndedBy, SprintError, end_sprint, start_sprint};
@@ -116,6 +117,7 @@ pub(super) async fn handle(
         Command::TeamPause => pause(tools, true),
         Command::TeamResume => pause(tools, false),
         Command::MessagePost { text } => post_message(tools, text),
+        Command::ChatMessagePost { agent_id, text } => post_chat_message(tools, &agent_id, text),
         Command::RunStop => {
             orchestrator.stop();
             Ok(CommandReport {
@@ -179,6 +181,54 @@ fn post_message(tools: &ToolDeps, text: String) -> Result<CommandReport, Command
     })?;
     Ok(CommandReport {
         said: "posted in the channel".to_string(),
+        events: vec![seq],
+    })
+}
+
+/// The human's message in their one-to-one chat with `agent_id` (4.3), which is refused for an
+/// agent not on the team or retired.
+fn post_chat_message(
+    tools: &ToolDeps,
+    agent_id: &str,
+    text: String,
+) -> Result<CommandReport, CommandError> {
+    let team = tools.files.read_team().map_err(failed)?;
+    let Some(agent) = team
+        .agents
+        .iter()
+        .find(|agent| agent.id.as_str() == agent_id)
+    else {
+        return Err(CommandError::NotFound {
+            what: format!("agent {agent_id}, who is not on the team"),
+        });
+    };
+    if agent.status == AgentStatus::Retired {
+        return Err(CommandError::Refused {
+            reason: format!(
+                "agent_retired: {} has retired, and a past teammate's chat is read-only",
+                agent.display_name.as_str()
+            ),
+        });
+    }
+    let seq = post_chat(
+        &tools.log,
+        tools.clock.as_ref(),
+        &tools.ids,
+        NewChatMessage {
+            chat: agent_id.to_string(),
+            author: HUMAN.to_string(),
+            text,
+            in_reply_to: None,
+            request: None,
+            session_id: None,
+        },
+    )
+    .map_err(|error| match error {
+        ChatError::Refused { reason } => CommandError::Invalid { detail: reason },
+        ChatError::Store(error) => failed(error),
+    })?;
+    Ok(CommandReport {
+        said: format!("sent to {}", agent.display_name.as_str()),
         events: vec![seq],
     })
 }
@@ -2268,6 +2318,92 @@ mod tests {
         said_in_the_channel(&orchestrator, &"é".repeat(2_000))
             .await
             .expect("2,000 characters are posted");
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn refuses_a_chat_message_out_of_bounds() {
+        let harness = Harness::new("human-chat-bounds", |wire| {
+            wire["agents"]
+                .as_array_mut()
+                .expect("agents")
+                .push(json!({ "id": "old", "display_name": "Old", "role": "software_developer", "status": "retired" }));
+        });
+        let orchestrator = an_orchestrator(&harness);
+        let chat = |agent: &str, text: String| Command::ChatMessagePost {
+            agent_id: agent.to_string(),
+            text,
+        };
+
+        for (agent, text) in [
+            ("dev-a", " \n\t ".to_string()),
+            ("dev-a", "é".repeat(4_001)),
+            ("nobody", "Hello?".to_string()),
+            ("old", "Hello?".to_string()),
+        ] {
+            let said = orchestrator.handle(chat(agent, text)).await;
+            let sentence = match &said {
+                Err(
+                    CommandError::Invalid { detail: sentence }
+                    | CommandError::Refused { reason: sentence }
+                    | CommandError::NotFound { what: sentence },
+                ) => sentence.clone(),
+                other => panic!("{agent}'s chat is refused, not {other:?}"),
+            };
+            assert!(sentence.trim().contains(' '), "a sentence: {sentence}");
+        }
+        assert!(harness.events(&[EventKind::ChatMessagePosted]).is_empty());
+
+        // A proposed request out of its limits is refused too, and nothing is recorded.
+        let deps = &harness.project.deps;
+        for (title, text) in [
+            (
+                "t".repeat(121),
+                "Add Apple Pay at checkout, beside the card.".to_string(),
+            ),
+            (
+                "Two\nlines".to_string(),
+                "Add Apple Pay at checkout, beside the card.".to_string(),
+            ),
+            ("Apple Pay".to_string(), "Too short, 19 chars".to_string()),
+            ("Apple Pay".to_string(), "a".repeat(4_001)),
+        ] {
+            let proposed = crate::chat::post_chat(
+                &deps.log,
+                deps.clock.as_ref(),
+                &deps.ids,
+                crate::chat::NewChatMessage {
+                    chat: "dev-a".to_string(),
+                    author: "dev-a".to_string(),
+                    text: "Here is a request.".to_string(),
+                    in_reply_to: None,
+                    request: Some(crate::chat::ProposedRequest { title, text }),
+                    session_id: None,
+                },
+            );
+            assert!(
+                matches!(proposed, Err(crate::chat::ChatError::Refused { .. })),
+                "{proposed:?}"
+            );
+        }
+        assert!(harness.events(&[EventKind::ChatMessagePosted]).is_empty());
+
+        // The limit counts code points, not bytes, and line breaks are kept.
+        let text = format!("{}\n", "é".repeat(3_999));
+        let report = orchestrator
+            .handle(chat("dev-a", text.clone()))
+            .await
+            .expect("4,000 code points are sent");
+        let posted = harness.events(&[EventKind::ChatMessagePosted]);
+        assert_eq!(report.events, [posted[0].envelope.seq]);
+        assert_eq!(posted[0].envelope.ids.agent_id.as_deref(), Some("dev-a"));
+        let EventBody::ChatMessagePosted(body) = &posted[0].body else {
+            panic!("a chat message");
+        };
+        assert_eq!(
+            (body.chat.as_str(), body.author.as_str(), body.text.as_str()),
+            ("dev-a", "human", text.as_str())
+        );
     }
 
     fn send_back(id: &str, subject: AcceptSubject, criteria: &[&str]) -> Command {

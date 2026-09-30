@@ -13,8 +13,8 @@ pub use farik_core::contract::{TaskId, ValidationError};
 
 pub use crate::generated::event::{
     AgentSleptBody, AgentUpdatedBody, AgentUpdatedBodyStatus, BudgetExhaustedBody,
-    BudgetExhaustedBodyConsequence, BudgetExhaustedBodyScope, CheckTheme, CheckWidth,
-    ConnectorTag as ConnectorTagWire, ContractEvaluatedBody, ContractEvaluatedBodyGate,
+    BudgetExhaustedBodyConsequence, BudgetExhaustedBodyScope, ChatMessagePostedBody, CheckTheme,
+    CheckWidth, ConnectorTag as ConnectorTagWire, ContractEvaluatedBody, ContractEvaluatedBodyGate,
     ContractJudgedBody, ContractLockedBody, ContractSummary, ContractSummaryKind,
     ContractSummaryParent, ContractSummaryRisk, ContractSummaryStatus, ContractUnlockedBody,
     ContractWrittenBody, CostRecordedBody, CostRecordedBodyModelId, CostRecordedBodyPurpose,
@@ -24,15 +24,15 @@ pub use crate::generated::event::{
     EscalationResolvedBody, EventKind, HumanAcceptedBody, HumanAcceptedBodySubject, JudgmentAnswer,
     MemoryWrittenBody, MessagePostedBody, NoteWrittenBody, NoteWrittenBodyKind, PageCheckedBody,
     PreviewPreparedBody, PreviewStartedBody, ProductDocWrittenBody, ProjectScannedBody,
-    PullRequestOpenedBody, QuestionAnsweredBody, QuestionAskedBody, QuestionChoice, ReasonBody,
-    RequestTriagedBody, RequestTriagedBodySize, RetroAppendedBody, ReviewRecordedBody,
-    SessionEndedBody, SessionEndedBodyReason, SessionStartedBody, SessionStartedBodyEffort,
-    SessionStartedBodyModel, SessionStartedBodyPurpose, SprintEndedBody, SprintEndedBodyEndedBy,
-    SprintPlannedBody, SprintStartedBody, TaskCreatedBody, TaskIntegratedBody,
-    TaskIntegratedBodyIntegratedBy, TaskTransitionedBody, TaskTransitionedBodyEffectsItem,
-    TeamPausedBody, TeamPausedBodyBy, TeamPausedBodyReason, TeamUpdatedBody, TokenUsage,
-    ToolCalledBody, ToolDeniedBody, ToolReturnedBody, TransitionRefusedBody,
-    TransitionRefusedBodyRefusal, Violation,
+    ProposedRequest, PullRequestOpenedBody, QuestionAnsweredBody, QuestionAskedBody,
+    QuestionChoice, ReasonBody, RequestTriagedBody, RequestTriagedBodySize, RetroAppendedBody,
+    ReviewRecordedBody, SessionEndedBody, SessionEndedBodyReason, SessionStartedBody,
+    SessionStartedBodyEffort, SessionStartedBodyModel, SessionStartedBodyPurpose, SprintEndedBody,
+    SprintEndedBodyEndedBy, SprintPlannedBody, SprintStartedBody, TaskCreatedBody,
+    TaskIntegratedBody, TaskIntegratedBodyIntegratedBy, TaskTransitionedBody,
+    TaskTransitionedBodyEffectsItem, TeamPausedBody, TeamPausedBodyBy, TeamPausedBodyReason,
+    TeamUpdatedBody, TokenUsage, ToolCalledBody, ToolDeniedBody, ToolReturnedBody,
+    TransitionRefusedBody, TransitionRefusedBodyRefusal, Violation,
 };
 /// The generated names of the vocabularies the governor's events repeat, renamed at the edge so
 /// that they cannot be mistaken for `farik-core`'s own types of the same name.
@@ -148,6 +148,7 @@ fn body_def_name(kind: EventKind) -> &'static str {
         EventKind::PreviewPrepared => "previewPreparedBody",
         EventKind::PreviewStarted => "previewStartedBody",
         EventKind::PageChecked => "pageCheckedBody",
+        EventKind::ChatMessagePosted => "chatMessagePostedBody",
     }
 }
 
@@ -228,6 +229,7 @@ fn attribution(body: &mut EventBody) -> Option<(&'static str, &mut String)> {
         EventBody::RetroAppended(body) => Some(("appended_by", &mut body.appended_by)),
         EventBody::MemoryWritten(body) => Some(("written_by", &mut body.written_by)),
         EventBody::DecisionWritten(body) => Some(("written_by", &mut body.written_by)),
+        EventBody::ChatMessagePosted(body) => Some(("author", &mut body.author)),
         EventBody::DriftDetected(_)
         | EventBody::ProjectScanned(_)
         | EventBody::CostRecorded(_)
@@ -259,7 +261,7 @@ fn attribution(body: &mut EventBody) -> Option<(&'static str, &mut String)> {
 
 /// Every kind the log holds in this phase, in the order `docs/schemas/event.schema.json` lists
 /// them. The step that adds a kind adds it here.
-pub const EVERY_KIND: [EventKind; 51] = [
+pub const EVERY_KIND: [EventKind; 52] = [
     EventKind::TaskCreated,
     EventKind::RequestTriaged,
     EventKind::ContractWritten,
@@ -311,6 +313,7 @@ pub const EVERY_KIND: [EventKind; 51] = [
     EventKind::PreviewStarted,
     EventKind::PreviewStopped,
     EventKind::PageChecked,
+    EventKind::ChatMessagePosted,
 ];
 
 /// The ids an event is stamped with: which team and project it belongs to, and the contract, agent
@@ -503,6 +506,9 @@ pub enum EventBody {
     /// `farik_check_page` checked one page at one width and theme.
     #[serde(rename = "page.checked")]
     PageChecked(PageCheckedBody),
+    /// The user or an agent said something in their one-to-one chat.
+    #[serde(rename = "chat_message.posted")]
+    ChatMessagePosted(ChatMessagePostedBody),
 }
 
 impl EventBody {
@@ -561,6 +567,7 @@ impl EventBody {
             Self::PreviewStarted(_) => EventKind::PreviewStarted,
             Self::PreviewStopped(_) => EventKind::PreviewStopped,
             Self::PageChecked(_) => EventKind::PageChecked,
+            Self::ChatMessagePosted(_) => EventKind::ChatMessagePosted,
         }
     }
 }
@@ -1438,7 +1445,7 @@ mod tests {
 
     #[test]
     fn reads_a_team_paused_and_resumed_by_the_human() {
-        assert_eq!(EVERY_KIND.len(), 51);
+        assert_eq!(EVERY_KIND.len(), 52);
         for kind in [EventKind::TeamPaused, EventKind::TeamResumed] {
             assert_eq!(a_body_wire(kind), json!({ "by": "human" }));
             let input = an_event_wire(kind);

@@ -6,6 +6,13 @@ Spec: `docs/SPEC.md` sections 3, 4.3, 4.4, 5.1, 5.2, 5.5, 5.9, 8.2, 8.4, 8.5, F7
 Depends on: steps 01 to 12 of this phase (renumbered from step 12 by the project plan's revision 23); ADR 0026 and `docs/design/designer-chats-templates.md` (section B), both binding
 Readiness confirmed by: fresh-session reviewer, 2026-09-30, ready with findings, folded in
 Mockups approved by: the founder, 2026-09-30 (Chats, PhoneChats, OneOnOne and Costs on the canvas's Chats page; Sol included in the list, as every agent not retired has a chat)
+As built (Task 2, 2026-09-30):
+- Step 12's names hold: `SessionRegistration.connectors` and `ToolContext.connectors` (`Vec<SessionConnector>`), `evaluate_connector_call` (`farik_core::governor::permissions`), `connector_not_in_session` (`daemon/hooks.rs`). Since this plan was written, `offered_connector` gives Playwright only to explore, implement and a Designer's verify sessions with a task, and `run_session` adds `network` to the tiers only when a connector is given; a `chat` session gets neither, and Task 3 sets its tiers to `[Read]` as explore's are set. `designer_browser`, `NoConnector` and `has_playwright` do not touch chats.
+- `pending_chat` moves to Task 3: it reads `session.started { purpose: chat }`, which Task 3 adds, and no Task 2 test drives it.
+- `chat.messages` answers `{ messages: [{ seq, at, author, text, in_reply_to, request }] }`; Task 4 adds `waiting`, Task 6 `sent_as`.
+- `farik chat` is in `crates/cli/src/lib.rs` (the commands live there) and `chat.rs`. The `farik channel` part of `keeps_chats_out_of_the_channel` is asserted in `chats_from_the_command_line`, since a runtime test cannot run the command line.
+- Refusals: an unknown agent is `NotFound`, a blank or too long text `Invalid`, a retired agent `Refused` (`agent_retired`). `chat::ProposedRequest` is its own type (Task 3's tool input), mapped to the generated one.
+- Envelope readers checked: `farik log` has no agent filter; activity, `pending_mentions` and `farik_post_message`'s allowance read by kind. The Team page's removal check counts any event naming the agent, so an agent the user chatted with is retired, not deleted, which keeps its chat under "Past teammates": kept.
 
 Signatures, not bodies; test names and what each asserts, not test code; around 300 lines at most (ADR 0008).
 
@@ -153,7 +160,7 @@ Consumes nothing from later tasks. Tests:
 - `lists_the_chats` — `chats.list` gives every agent in team order with its last message (null when none), `retired` set for a retired one, and `team_last` skipping system lines.
 - `chats_from_the_command_line` — `farik chat mira "<text>"` sends `chat_message_post` and records the user's message; `farik chat mira` prints it.
 
-- [ ] `feat(runtime): record one-to-one chats apart from the channel`
+- [x] `feat(runtime): record one-to-one chats apart from the channel`
 
 ### Task 3: The chat session under the read tier
 

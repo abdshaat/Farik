@@ -1,7 +1,7 @@
-//! The board's, the sprints', the costs' and the channel's queries for the browser (`docs/SPEC.md`
-//! 5.5, 5.9, F17): what a task cost by purpose, each sprint with its meetings, today's and this
-//! sprint's spending per agent, the harness metrics, and the channel a page at a time. `web.rs`
-//! answers the frames; this module answers what they ask.
+//! The board's, the sprints', the costs', the channel's and the chats' queries for the browser
+//! (`docs/SPEC.md` 4.3, 5.5, 5.9, F17): what a task cost by purpose, each sprint with its meetings,
+//! today's and this sprint's spending per agent, the harness metrics, and the channel and each
+//! chat a page at a time. `web.rs` answers the frames; this module answers what they ask.
 
 use std::collections::BTreeMap;
 use std::fmt::Display;
@@ -14,16 +14,19 @@ use farik_store::{CostScope, CostWindow, EventQuery, HarnessMetrics, TaskProject
 use serde_json::{Value, json};
 
 use super::web::{Failure, INTERNAL_ERROR, NOT_FOUND, UNKNOWN_QUERY};
+use crate::chat::chat_page;
 use crate::tools::ToolDeps;
 
 /// The queries this module answers.
-pub(super) const QUERIES: [&str; 6] = [
+pub(super) const QUERIES: [&str; 8] = [
     "task.costs",
     "sprints.list",
     "sprint.get",
     "costs.summary",
     "metrics",
     "channel.messages",
+    "chats.list",
+    "chat.messages",
 ];
 
 /// The purposes' plain words, in the order the pages show them.
@@ -45,6 +48,8 @@ pub(super) fn query(deps: &ToolDeps, name: &str, params: &Value) -> Result<Value
         "sprint.get" => sprint_get(deps, params["sprint_id"].as_str().unwrap_or_default()),
         "costs.summary" => costs_summary(deps),
         "channel.messages" => channel_messages(deps, params),
+        "chats.list" => chats_list(deps),
+        "chat.messages" => chat_messages(deps, params),
         "metrics" => {
             let metrics = match params["sprint_id"].as_str() {
                 Some(sprint) => deps.projections.metrics_for_sprint(&deps.files, sprint),
@@ -282,6 +287,78 @@ fn channel_messages(deps: &ToolDeps, params: &Value) -> Result<Value, Failure> {
     Ok(json!({ "messages": messages }))
 }
 
+/// `chat.messages { agent_id, before_seq?, limit }`: the newest page of one agent's chat before
+/// `before_seq`, oldest first within it.
+fn chat_messages(deps: &ToolDeps, params: &Value) -> Result<Value, Failure> {
+    let page = chat_page(
+        &deps.log,
+        params["agent_id"].as_str().unwrap_or_default(),
+        params["before_seq"].as_u64(),
+        params["limit"]
+            .as_u64()
+            .and_then(|limit| usize::try_from(limit).ok())
+            .unwrap_or(100),
+    )
+    .map_err(|e| internal(&e))?;
+    let messages: Vec<Value> = page
+        .iter()
+        .filter_map(|event| match &event.body {
+            EventBody::ChatMessagePosted(body) => Some(json!({
+                "seq": event.envelope.seq,
+                "at": event.envelope.recorded_at,
+                "author": body.author,
+                "text": body.text,
+                "in_reply_to": body.in_reply_to,
+                "request": body.request,
+            })),
+            _ => None,
+        })
+        .collect();
+    Ok(json!({ "messages": messages }))
+}
+
+/// `{ seq, at, author, text }` of a message in the channel or in a chat.
+fn last_line(event: &FarikEvent) -> Value {
+    let (author, text) = match &event.body {
+        EventBody::MessagePosted(body) => (&body.author, &body.text),
+        EventBody::ChatMessagePosted(body) => (&body.author, &body.text),
+        _ => return Value::Null,
+    };
+    json!({ "seq": event.envelope.seq, "at": event.envelope.recorded_at, "author": author, "text": text })
+}
+
+/// `chats.list {}`: the channel's newest line that is not Farik's own, then every agent's chat in
+/// the team's order, with its newest message.
+fn chats_list(deps: &ToolDeps) -> Result<Value, Failure> {
+    let team = deps.files.read_team().map_err(|e| internal(&e))?;
+    // ponytail: reads the whole channel newest first to skip Farik's lines. Upgrade: a channel
+    // projection holding its newest line that is not a system one.
+    let channel = deps
+        .log
+        .read(&EventQuery {
+            kinds: vec![EventKind::MessagePosted],
+            newest_first: true,
+            ..EventQuery::default()
+        })
+        .map_err(|e| internal(&e))?;
+    let team_last = channel
+        .iter()
+        .find(|event| {
+            matches!(&event.body, EventBody::MessagePosted(body) if body.kind != MessageKind::System)
+        })
+        .map_or(Value::Null, last_line);
+    let mut chats = Vec::new();
+    for agent in &team.agents {
+        let last = chat_page(&deps.log, agent.id.as_str(), None, 1).map_err(|e| internal(&e))?;
+        chats.push(json!({
+            "agent_id": agent.id,
+            "retired": agent.status == AgentStatus::Retired,
+            "last": last.first().map_or(Value::Null, last_line),
+        }));
+    }
+    Ok(json!({ "team_last": team_last, "chats": chats }))
+}
+
 /// `costs.summary {}`: today's spending (UTC) and the daily limit, the last sprint's (the open one
 /// while one is), and each agent's that is not retired, in the team's order.
 fn costs_summary(deps: &ToolDeps) -> Result<Value, Failure> {
@@ -365,7 +442,7 @@ fn metrics_wire(metrics: &HarnessMetrics) -> Value {
 
 #[cfg(test)]
 mod tests {
-    use farik_protocol::event::{NewEvent, event_from_value};
+    use farik_protocol::event::{EventKind, NewEvent, event_from_value};
     use serde_json::{Value, json};
 
     use super::super::gates::tests::query;
@@ -901,6 +978,215 @@ mod tests {
                     "in_reply_to": asked, "task_id": "FRK-1",
                 },
             ])
+        );
+    }
+
+    /// A chat message in `agent`'s chat by `author`, answering `in_reply_to` when it is a reply.
+    fn chatted(
+        harness: &Harness,
+        agent: &str,
+        author: &str,
+        text: &str,
+        in_reply_to: Option<u64>,
+    ) -> u64 {
+        let deps = &harness.project.deps;
+        crate::chat::post_chat(
+            &deps.log,
+            deps.clock.as_ref(),
+            &deps.ids,
+            crate::chat::NewChatMessage {
+                chat: agent.to_string(),
+                author: author.to_string(),
+                text: text.to_string(),
+                in_reply_to,
+                request: None,
+                session_id: None,
+            },
+        )
+        .expect("the chat message is recorded")
+    }
+
+    fn chat_page(harness: &Harness, params: &Value) -> Vec<u64> {
+        query(
+            &harness.daemon,
+            "chat.messages",
+            params,
+            "chatMessagesResult",
+        )["messages"]
+            .as_array()
+            .expect("messages")
+            .iter()
+            .map(|message| message["seq"].as_u64().expect("a seq"))
+            .collect()
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn keeps_chats_out_of_the_channel() {
+        let harness = Harness::new("board-chats-apart", |_| {});
+        let deps = &harness.project.deps;
+        let morning = said(&harness, "human", "human", "Morning.", &json!({}));
+        let asked = chatted(
+            &harness,
+            "dev-a",
+            "human",
+            "@dev-b could you look?\nThanks.",
+            None,
+        );
+        let answered = chatted(&harness, "dev-a", "dev-a", "On it, privately.", Some(asked));
+
+        let channel = page(&harness, &json!({}));
+        assert!(channel.contains(&morning), "{channel:?}");
+        assert!(
+            !channel.contains(&asked) && !channel.contains(&answered),
+            "{channel:?}"
+        );
+        let summary = crate::channel::channel_summary(&deps.log, &deps.files).expect("summarised");
+        assert!(summary.contains("Morning."), "{summary}");
+        assert!(
+            !summary.contains("could you look") && !summary.contains("privately"),
+            "{summary}"
+        );
+        for agent in ["dev-a", "dev-b"] {
+            assert!(
+                crate::channel::pending_mentions(&deps.log, agent)
+                    .expect("the log reads")
+                    .is_empty(),
+                "{agent}"
+            );
+        }
+        // `@dev-b` in a chat to dev-a starts no conversation.
+        let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("a runtime is made")
+            .block_on(orchestrator.tick())
+            .expect("the tick runs");
+        assert!(
+            harness.events(&[EventKind::SessionStarted]).is_empty(),
+            "{:?}",
+            harness.events(&[EventKind::SessionStarted])
+        );
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn pages_one_chat() {
+        let harness = Harness::new("board-chat-pages", |_| {});
+        let one = chatted(&harness, "dev-a", "human", "One.", None);
+        chatted(&harness, "dev-b", "human", "Another chat.", None);
+        said(&harness, "human", "human", "The channel.", &json!({}));
+        let deps = &harness.project.deps;
+        let two = crate::chat::post_chat(
+            &deps.log,
+            deps.clock.as_ref(),
+            &deps.ids,
+            crate::chat::NewChatMessage {
+                chat: "dev-a".to_string(),
+                author: "dev-a".to_string(),
+                text: "Two.\nLines kept.".to_string(),
+                in_reply_to: Some(one),
+                request: Some(crate::chat::ProposedRequest {
+                    title: "Let customers pay with Apple Pay".to_string(),
+                    text: "Add Apple Pay at checkout, beside the card form.".to_string(),
+                }),
+                session_id: Some("session-1".to_string()),
+            },
+        )
+        .expect("the reply is recorded");
+        let three = chatted(&harness, "dev-a", "human", "Three.", None);
+
+        assert_eq!(
+            chat_page(&harness, &json!({ "agent_id": "dev-a" })),
+            [one, two, three]
+        );
+        assert_eq!(
+            chat_page(
+                &harness,
+                &json!({ "agent_id": "dev-a", "before_seq": three, "limit": 1 })
+            ),
+            [two]
+        );
+        assert_eq!(
+            chat_page(&harness, &json!({ "agent_id": "dev-a", "before_seq": two })),
+            [one]
+        );
+        assert_eq!(
+            chat_page(&harness, &json!({ "agent_id": "pm" })),
+            Vec::<u64>::new()
+        );
+        let messages = query(
+            &harness.daemon,
+            "chat.messages",
+            &json!({ "agent_id": "dev-a", "limit": 2 }),
+            "chatMessagesResult",
+        )["messages"]
+            .clone();
+        let at_now = at().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+        assert_eq!(
+            messages,
+            json!([
+                {
+                    "seq": two, "at": at_now, "author": "dev-a", "text": "Two.\nLines kept.",
+                    "in_reply_to": one,
+                    "request": {
+                        "title": "Let customers pay with Apple Pay",
+                        "text": "Add Apple Pay at checkout, beside the card form."
+                    },
+                },
+                {
+                    "seq": three, "at": at_now, "author": "human", "text": "Three.",
+                    "in_reply_to": null, "request": null,
+                },
+            ])
+        );
+        for params in [
+            json!({ "agent_id": "dev-a", "limit": 0 }),
+            json!({ "agent_id": "dev-a", "limit": 201 }),
+            json!({}),
+        ] {
+            let refused = super::super::gates::tests::rpc(
+                &harness.daemon,
+                "query",
+                &json!({ "name": "chat.messages", "params": params }),
+            );
+            assert_eq!(refused["error"]["code"], -32602, "{refused}");
+        }
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn lists_the_chats() {
+        let harness = Harness::new("board-chats-list", |wire| {
+            wire["agents"]
+                .as_array_mut()
+                .expect("agents")
+                .push(json!({ "id": "old", "display_name": "Old", "role": "software_developer", "status": "retired" }));
+        });
+        let empty = query(&harness.daemon, "chats.list", &json!({}), "chatsListResult");
+        assert_eq!(empty["team_last"], Value::Null, "{empty}");
+        let asked = chatted(&harness, "dev-a", "human", "One.", None);
+        let answered = chatted(&harness, "dev-a", "dev-a", "Two.", Some(asked));
+        let past = chatted(&harness, "old", "human", "Still there?", None);
+        let hi = said(&harness, "human", "human", "Hi team.", &json!({}));
+        said(&harness, "farik", "system", "FRK-1 moved.", &json!({}));
+
+        let listed = query(&harness.daemon, "chats.list", &json!({}), "chatsListResult");
+
+        let at_now = at().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+        let last = |seq: u64, author: &str, text: &str| json!({ "seq": seq, "at": at_now, "author": author, "text": text });
+        assert_eq!(
+            listed,
+            json!({
+                "team_last": last(hi, "human", "Hi team."),
+                "chats": [
+                    { "agent_id": "pm", "retired": false, "last": null },
+                    { "agent_id": "dev-a", "retired": false, "last": last(answered, "dev-a", "Two.") },
+                    { "agent_id": "dev-b", "retired": false, "last": null },
+                    { "agent_id": "old", "retired": true, "last": last(past, "human", "Still there?") },
+                ],
+            })
         );
     }
 }

@@ -5,6 +5,8 @@
 pub mod ceremonies;
 /// The team's channel: messages, and whom they mention.
 pub mod channel;
+/// The user's one-to-one chats with each agent, kept apart from the channel.
+pub mod chat;
 /// The Claude Code program as a runtime: its command line, credential, and version.
 #[cfg(unix)]
 pub mod claude;

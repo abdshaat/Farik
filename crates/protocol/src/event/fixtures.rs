@@ -131,7 +131,8 @@ pub fn a_body_wire(kind: EventKind) -> Value {
         | EventKind::QuestionAnswered
         | EventKind::HumanAccepted
         | EventKind::EscalationResolved
-        | EventKind::MessagePosted => a_human_body_wire(kind),
+        | EventKind::MessagePosted
+        | EventKind::ChatMessagePosted => a_human_body_wire(kind),
         EventKind::AgentUpdated | EventKind::AgentSlept => an_agent_body_wire(kind),
         EventKind::TeamPaused | EventKind::TeamResumed => json!({ "by": "human" }),
         EventKind::DesignPlanProposed
@@ -264,8 +265,8 @@ fn a_record_body_wire(kind: EventKind) -> Value {
 }
 
 /// A body of a question to the human or of the human's own acts: a question, an answer to question
-/// 3, an acceptance of a result with its words, a resolution back to `refining`, and a message
-/// in the channel mentioning `dev-a`.
+/// 3, an acceptance of a result with its words, a resolution back to `refining`, a message
+/// in the channel mentioning `dev-a`, and the human's message in dev-a's chat.
 fn a_human_body_wire(kind: EventKind) -> Value {
     match kind {
         EventKind::QuestionAsked => json!({
@@ -277,6 +278,9 @@ fn a_human_body_wire(kind: EventKind) -> Value {
         }
         EventKind::HumanAccepted => {
             json!({ "subject": "result", "accepted_by": "human", "message": "Both look right." })
+        }
+        EventKind::ChatMessagePosted => {
+            json!({ "chat": "dev-a", "author": "human", "text": "How is FRK-1?\nNo rush." })
         }
         EventKind::MessagePosted => json!({
             "author": "human",

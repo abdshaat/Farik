@@ -692,3 +692,70 @@ fn shows_the_last_messages_of_the_channel() {
         .collect();
     assert_eq!(texts, ["two", "three"], "{}", shown.out);
 }
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn chats_from_the_command_line() {
+    let repository = a_team("human-chat");
+
+    let sent = run(
+        &repository.path,
+        &[
+            "chat",
+            "dev-a",
+            "Could",
+            "customers",
+            "pay",
+            "with",
+            "Apple",
+            "Pay?",
+        ],
+    );
+    assert_eq!(sent.code, 0, "{}", sent.err);
+    let chats = events(&repository, &[EventKind::ChatMessagePosted]);
+    assert_eq!(chats.len(), 1);
+    assert_eq!(chats[0].envelope.ids.agent_id.as_deref(), Some("dev-a"));
+    let EventBody::ChatMessagePosted(body) = &chats[0].body else {
+        panic!("a chat message");
+    };
+    assert_eq!(
+        (body.chat.as_str(), body.author.as_str(), body.text.as_str()),
+        ("dev-a", "human", "Could customers pay with Apple Pay?")
+    );
+    record_as(
+        &repository,
+        "",
+        Some(("dev-a", "session-1")),
+        "chat_message.posted",
+        &json!({
+            "chat": "dev-a",
+            "author": "dev-a",
+            "text": "Not yet.\nShall I \u{1b}[31mpropose it?",
+            "in_reply_to": chats[0].envelope.seq,
+            "request": { "title": "Let customers pay with Apple Pay", "text": "Add Apple Pay at checkout, beside the card form." }
+        }),
+    );
+
+    let shown = run(&repository.path, &["chat", "dev-a"]);
+
+    assert_eq!(shown.code, 0, "{}", shown.err);
+    let asked = shown
+        .out
+        .find("Could customers pay with Apple Pay?")
+        .expect("the user's message is shown");
+    let answered = shown
+        .out
+        .find("Not yet.\n")
+        .expect("the reply is shown, lines kept");
+    assert!(asked < answered, "oldest first: {}", shown.out);
+    assert!(
+        shown.out.contains("Let customers pay with Apple Pay"),
+        "{}",
+        shown.out
+    );
+    assert!(!shown.out.contains('\u{1b}'), "{:?}", shown.out);
+    // The chat is not the channel's.
+    let channel = run(&repository.path, &["channel"]);
+    assert_eq!(channel.code, 0, "{}", channel.err);
+    assert!(!channel.out.contains("Apple Pay"), "{}", channel.out);
+}

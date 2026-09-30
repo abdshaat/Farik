@@ -107,7 +107,8 @@
         "preview.prepared",
         "preview.started",
         "preview.stopped",
-        "page.checked"
+        "page.checked",
+        "chat_message.posted"
       ]
     },
     "eventBodyWire": {
@@ -161,7 +162,8 @@
         { "$ref": "#/$defs/designReviewRecordedBody" },
         { "$ref": "#/$defs/previewPreparedBody" },
         { "$ref": "#/$defs/previewStartedBody" },
-        { "$ref": "#/$defs/pageCheckedBody" }
+        { "$ref": "#/$defs/pageCheckedBody" },
+        { "$ref": "#/$defs/chatMessagePostedBody" }
       ]
     },
     "contractSummary": {
@@ -790,6 +792,31 @@
       "required": ["port"],
       "properties": {
         "port": { "type": "integer", "minimum": 1024, "maximum": 65535 }
+      }
+    },
+    "chatMessagePostedBody": {
+      "title": "Chat Message Posted Body",
+      "description": "A message in the user's one-to-one chat with one agent (docs/SPEC.md 4.3, 5.9; ADR 0026), which is never the team's channel: nothing that reads message.posted reads it. chat is the agent's id, and the envelope names that agent on the user's message too, so one chat is read by the envelope's agent alone; author is human or that agent. text is 1 to 4,000 code points, not blank, its line breaks kept; the limits are checked when the message is posted, so that reading the log never fails on an old one. An agent's reply names the user's message it answers in in_reply_to, and may carry a proposed request, title 1 to 120 code points on one line and text 20 to 4,000, which only the user files.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["chat", "author", "text"],
+      "properties": {
+        "chat": { "type": "string" },
+        "author": { "type": "string" },
+        "text": { "type": "string" },
+        "in_reply_to": { "type": "integer", "minimum": 1, "maximum": 18446744073709551615 },
+        "request": { "$ref": "#/$defs/proposedRequest" }
+      }
+    },
+    "proposedRequest": {
+      "title": "Proposed Request",
+      "description": "The request an agent proposes in a chat reply, for the user to edit and send with request.file.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["title", "text"],
+      "properties": {
+        "title": { "type": "string" },
+        "text": { "type": "string" }
       }
     },
     "pageCheckedBody": {

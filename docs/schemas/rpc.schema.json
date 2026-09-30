@@ -53,7 +53,9 @@
         "costs.summary",
         "metrics",
         "settings.defaults",
-        "channel.messages"
+        "channel.messages",
+        "chats.list",
+        "chat.messages"
       ]
     },
     "subscribeRequest": {
@@ -271,6 +273,12 @@
             },
             {
               "$ref": "#/$defs/channelMessagesQuery"
+            },
+            {
+              "$ref": "#/$defs/chatsListQuery"
+            },
+            {
+              "$ref": "#/$defs/chatMessagesQuery"
             }
           ]
         }
@@ -3772,6 +3780,114 @@
               "minimum": 1,
               "maximum": 200,
               "default": 100
+            }
+          }
+        }
+      }
+    },
+    "chatsListQuery": {
+      "title": "Chats List Query",
+      "description": "The chat list (spec 4.3, 5.9): Team's newest line, then each agent's one-to-one chat.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "params"],
+      "properties": {
+        "name": { "const": "chats.list" },
+        "params": { "type": "object", "additionalProperties": false }
+      }
+    },
+    "chatLine": {
+      "title": "Chat Line",
+      "description": "A chat's or the channel's newest message.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["seq", "at", "author", "text"],
+      "properties": {
+        "seq": { "type": "integer", "minimum": 1, "maximum": 18446744073709551615 },
+        "at": { "type": "string", "format": "date-time" },
+        "author": { "type": "string" },
+        "text": { "type": "string" }
+      }
+    },
+    "chatsListResult": {
+      "description": "team_last is the channel's newest message.posted that is not Farik's system line; chats holds every agent of the team in the team's order, retired ones too with retired true, each with its chat's newest chat_message.posted.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["team_last", "chats"],
+      "properties": {
+        "team_last": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/chatLine" }] },
+        "chats": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["agent_id", "retired", "last"],
+            "properties": {
+              "agent_id": { "type": "string" },
+              "retired": { "type": "boolean" },
+              "last": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/chatLine" }] }
+            }
+          }
+        }
+      }
+    },
+    "chatMessagesQuery": {
+      "title": "Chat Messages Query",
+      "description": "One agent's one-to-one chat, its newest page of messages before before_seq, or the newest of all without it (spec 4.3).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "params"],
+      "properties": {
+        "name": { "const": "chat.messages" },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["agent_id"],
+          "properties": {
+            "agent_id": { "type": "string" },
+            "before_seq": { "type": "integer", "minimum": 1, "maximum": 18446744073709551615 },
+            "limit": { "type": "integer", "minimum": 1, "maximum": 200, "default": 100 }
+          }
+        }
+      }
+    },
+    "chatMessagesResult": {
+      "description": "One page of the agent's chat_message.posted, oldest first within the page: seq and at from the envelope, and the body's author, text (line breaks kept), in_reply_to and request, null when it has none.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["messages"],
+      "properties": {
+        "messages": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["seq", "at", "author", "text", "in_reply_to", "request"],
+            "properties": {
+              "seq": { "type": "integer", "minimum": 1, "maximum": 18446744073709551615 },
+              "at": { "type": "string", "format": "date-time" },
+              "author": { "type": "string" },
+              "text": { "type": "string" },
+              "in_reply_to": {
+                "oneOf": [
+                  { "type": "null" },
+                  { "type": "integer", "minimum": 1, "maximum": 18446744073709551615 }
+                ]
+              },
+              "request": {
+                "oneOf": [
+                  { "type": "null" },
+                  {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": ["title", "text"],
+                    "properties": {
+                      "title": { "type": "string" },
+                      "text": { "type": "string" }
+                    }
+                  }
+                ]
+              }
             }
           }
         }
