@@ -4,6 +4,18 @@
 	min-height: 100vh;
 }
 
+/* The shell trades the rail for the bars a render after the window narrows; until then the
+content alone fills the window, rather than a rail beside it too wide for a phone. */
+@media not (min-width: 1024px) {
+	.wide {
+		grid-template-columns: minmax(0, 1fr);
+	}
+
+	.wide > .rail {
+		display: none;
+	}
+}
+
 .narrow {
 	display: grid;
 	grid-template-rows: auto 1fr auto;

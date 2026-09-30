@@ -33,6 +33,13 @@ test("a request is sized, its question answered by choice, and it becomes a task
 		await page.getByRole("link", { name: "Today" }).first().click();
 		await expect(page.getByText("Mira has a question")).toBeVisible();
 		await screenshots(page, "today-waiting");
+		// Shrunk to a phone's width, the page fits even in the render before the shell trades its
+		// rail for the bars: the user testing found it 133 px too wide there.
+		await page.setViewportSize({ width: 360, height: 780 });
+		expect(
+			await page.evaluate(() => document.documentElement.scrollWidth),
+		).toBeLessThanOrEqual(360);
+		await page.setViewportSize({ width: 1280, height: 800 });
 		await page.getByRole("link", { name: "Answer" }).click();
 
 		await expect(page).toHaveURL(/\/tasks\/FRK-1\/questions$/);
