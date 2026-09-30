@@ -439,6 +439,8 @@ describe("team setup", () => {
 				.checked,
 		).toBe(true);
 		expect(screen.getByText(en.firstDay)).toBeTruthy();
+		// The first-day figure is an estimate, for the six setup suggests.
+		expect(en.firstDay).toMatch(/^We estimate .* suggested team of six /);
 		fireEvent.click(screen.getByRole("radio", { name: /^Stop the team/ }));
 		const amount = screen.getByLabelText(en.spendAmount) as HTMLInputElement;
 		expect(amount.value).toBe("10");

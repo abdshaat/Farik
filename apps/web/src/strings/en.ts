@@ -244,7 +244,7 @@ export const en = {
 	spendFixed:
 		"Some limits are always on, whatever you choose. No agent works on one thing for more than 30 minutes at a time, and a piece of work sent back three times comes to you.",
 	firstDay:
-		"A first full day for a team of five costs under twenty dollars on your own key at today’s prices.",
+		"We estimate that a first full day for the suggested team of six costs under twenty-five dollars on your own key at today’s prices.",
 	finishTitle: "When you accept a piece of work, what happens to it?",
 	finishLead:
 		"Accepted work has to be added to your project. Choose how much you want to do by hand.",

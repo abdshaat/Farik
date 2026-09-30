@@ -1,6 +1,6 @@
 # Phase 6, step 11: The UI/UX Designer and its plan gate
 
-Status: draft
+Status: in progress (Tasks 1 to 6 landed 2026-09-30; the landing review is next)
 Branch: `phase/6-web-ui`
 Spec: `docs/SPEC.md` sections 3, 4.1, 5.1 to 5.4, 5.6 (the Designer's tiers), 5.12 (`document_paths`), 6 (6.1 to 6.5, a new 6.8), 8.2 (the `explore` session), 8.5, F1. The same list is in the project plan's step 11 row and the design's placement table.
 Depends on: steps 01 to 10 of this phase (landed); ADR 0026 and `docs/design/designer-chats-templates.md` (accepted 2026-09-30), whose decisions are binding and not restated here
@@ -74,6 +74,15 @@ Wire:
 - events: `design_plan.proposed { plan }`, `design_plan.approved { reason }`, `design_plan.returned { reason }`;
 - tools: `farik_propose_design_plan { plan }`, `farik_decide_design_plan { approve, reason }`;
 - RPC: `task.get` gains `design_plan: { plan, state: proposed|approved|returned, reason? } | null`; `team.propose` answers six.
+
+As built (recorded 2026-09-30 by Task 6 from the reports of Tasks 2 to 5; spec 0.31 describes this, not the first plan's guesses):
+- Core: `TransitionContext` gains `design_plan_returns: u32`; the governor's `any -> escalated` row answers `iterations` when the returns reach `max_iterations` plus extra tries, after the budgets and before a denied permission. `check_design_plan` also withholds `git_remote` (the ledger's ruling).
+- Schemas: `design_plan.approved` and `.returned` share `designPlanDecidedBody { reason }`; `explore` joins `session.started`'s and `cost.recorded`'s purpose enums and `team.activity`'s; metrics count eight purposes; the board words `explore` as "Planning".
+- The Designer's picture `extra-1` lives in `team.propose`'s list (the role schema has no avatar key); added agents take `extra-2`, `extra-3`, `extra-5`, never `extra-1` or `extra-4`.
+- The decision tool refuses a blank reason and a task with no plan waiting; a Designer's task waits while the team has no active Product Manager; an explore session has the read tier's built-ins and no executor whatever the agent's tiers; a Designer's session about no task is held as not approved.
+- Web: faces ringed in their role's colour; the Team page's Designer cost line links to Costs; the task page's plan tab, status card and heading word read `task.get`'s `design_plan`, the returns shown against `tries.of - 1`.
+- The first-day sentence (`firstDay`, SPEC 10) covers the suggested six as an estimate, under twenty-five dollars: the old figure scaled by six agents to five, since no derivation of the twenty dollars is recorded (Task 6).
+- Not built, parked for the landing review or step 12: the task page's "How Iris works" aside and the setup row's "Checks every screen Theo builds" (step 12, browser); the Team card's "Waiting for Mira to approve a plan"; setup rows show the persona rather than the mockup's role description; copy drifts ("on {day} at {time}", "If {of} are sent back", "Include UI/UX Designer"); a Designer's task passed over while the Product Manager is paused says nothing on the board.
 
 ## Tasks
 
@@ -184,7 +193,7 @@ The header gains "Revision 0.31 (<date>) …", from phase 6 step 11, in the form
 
 `docs/plans/project-plan.md`: step 11's line gains "Built <date> (spec 0.31): …" with the founder's choices.
 
-- [ ] `docs(spec): the UI/UX Designer and the Product Manager's plan gate`
+- [x] `docs(spec): the UI/UX Designer and the Product Manager's plan gate`
 
 ## Verification
 
@@ -195,4 +204,7 @@ cargo xtask check --integration
 #   @farik/web: the count at this step's start plus 3 (T5);
 #   playwright: the count at this step's start, unchanged;
 #   last line: xtask check: ok
+# landed 2026-09-30 (Task 6): cargo 1630 passed, 0 failed (step start 1610, plus T2 6, T3 4, T4 10);
+#   protocol-client 8, brand 30 (unchanged), ui 43 (step start 42, plus T3's RoleTag test),
+#   @farik/web 133 (step start 129, plus T5's 3 and its Board test); playwright 9 passed; xtask check: ok
 ```
