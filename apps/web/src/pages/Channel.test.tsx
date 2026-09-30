@@ -25,6 +25,7 @@ const TEAM = {
 		agent("mira", "Mira", "product_manager", "product-manager"),
 		agent("sol", "Sol", "scrum_master", "scrum-master"),
 		agent("theo", "Theo", "software_developer", "developer"),
+		{ ...agent("ada", "Ada", "architect", "architect"), status: "retired" },
 	],
 	budgets: {},
 	policy: { integration: "auto_merge" },
@@ -82,27 +83,29 @@ async function channel(
 	return { container, s };
 }
 
-/** Plays one recorded event to the page, as the daemon's subscription would. */
-const live = (s: FakeSocket, seq: number, kind: string, body: object = {}) =>
-	act(() =>
-		s.emit("message", {
-			data: JSON.stringify({
-				jsonrpc: "2.0",
-				method: "event",
-				params: {
-					event: {
-						seq,
-						recorded_at: "2026-09-28T09:03:00Z",
-						team_id: "t",
-						project_id: "p",
-						agent_id: "theo",
-						kind,
-						body,
-					},
+/** One recorded event, as the daemon's subscription sends it. */
+const play = (s: FakeSocket, seq: number, kind: string, body: object = {}) =>
+	s.emit("message", {
+		data: JSON.stringify({
+			jsonrpc: "2.0",
+			method: "event",
+			params: {
+				event: {
+					seq,
+					recorded_at: "2026-09-28T09:03:00Z",
+					team_id: "t",
+					project_id: "p",
+					agent_id: "theo",
+					kind,
+					body,
 				},
-			}),
+			},
 		}),
-	);
+	});
+
+/** Plays one recorded event to the page. */
+const live = (s: FakeSocket, seq: number, kind: string, body: object = {}) =>
+	act(() => play(s, seq, kind, body));
 
 /** Each `channel.messages` query the page asked, in order. */
 const pages = (s: FakeSocket) =>
@@ -297,16 +300,34 @@ describe("channel", () => {
 		const options = within(
 			screen.getByRole("listbox", { name: en.channelMentionList }),
 		).getAllByRole("option");
+		// A retired agent is not offered.
 		expect(options.map((o) => o.textContent)).toEqual(["Mira", "Sol", "Theo"]);
 		await expectNoAxeViolations(container);
+		const active = () =>
+			options.findIndex(
+				(o) => o.id === box.getAttribute("aria-activedescendant"),
+			);
+		expect(active()).toBe(0);
+		// The arrows wrap at both ends.
+		fireEvent.keyDown(box, { key: "ArrowUp" });
+		expect(active()).toBe(2);
 		fireEvent.keyDown(box, { key: "ArrowDown" });
+		expect(active()).toBe(0);
+		fireEvent.keyDown(box, { key: "ArrowUp" });
+		fireEvent.keyDown(box, { key: "ArrowUp" });
+		expect(active()).toBe(1);
 		fireEvent.keyDown(box, { key: "ArrowDown" });
-		expect(box.getAttribute("aria-activedescendant")).toBe(
-			options[2]?.getAttribute("id"),
-		);
+		expect(active()).toBe(2);
 		fireEvent.keyDown(box, { key: "Enter" });
 		expect(box.value).toBe("@theo ");
 		expect(screen.queryByRole("listbox")).toBeNull();
+
+		// Escape closes the list and leaves the words as typed.
+		fireEvent.change(box, { target: { value: "@m" } });
+		expect(screen.getByRole("listbox")).toBeTruthy();
+		fireEvent.keyDown(box, { key: "Escape" });
+		expect(screen.queryByRole("listbox")).toBeNull();
+		expect(box.value).toBe("@m");
 
 		// Post sends the words.
 		const text = "@theo can you look at the menu page?";
@@ -396,7 +417,9 @@ describe("channel", () => {
 			mentions: [],
 		});
 		await screen.findByText("Started.");
-		for (let n = 1001; n <= 1501; n++) live(s, n, "task.created");
+		act(() => {
+			for (let n = 1001; n <= 1501; n++) play(s, n, "task.created");
+		});
 		expect(screen.getByText("Started.")).toBeTruthy();
 	});
 
