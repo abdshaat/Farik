@@ -1,9 +1,9 @@
-# Phase 6, step 13: Team templates
+# Phase 6, step 14: Team templates
 
 Status: draft
 Branch: `phase/6-web-ui`
 Spec: `docs/SPEC.md` sections 1 (the "one team" non-goal), 3 (team), 4.1 (three starts), 4.4, 8.4 (the state folder), F1
-Depends on: steps 01 to 12 of this phase (step 06's team setup, step 11's `ui_ux_designer` role and per-agent connectors, step 12's chats)
+Depends on: steps 01 to 13 of this phase (step 06's team setup, step 11's `ui_ux_designer` role, step 12's per-agent connectors, step 13's chats; renumbered from step 13 by the project plan's revision 23)
 Readiness confirmed by: fresh-session reviewer, 2026-09-30, ready with findings, folded in
 Mockups approved by: (pending; Task 1's gate)
 
@@ -49,7 +49,7 @@ Binding inputs: ADR 0026 (C), and "C. Team templates" in `docs/design/designer-c
   1. an agent of the template whose `id` and `role` match a project agent that is not retired is **kept**: it takes the template's name, and its persona, avatar and model where the template has them (a field the template leaves out, an uploaded picture among them, keeps the project's value), and keeps its status, grants, revokes and connectors. A paused match stays paused (the design says "active"; matching only active agents would retire a paused Mira to add a second Mira, and a status is the card's to change, step 06);
   2. every other agent that is not retired and has **worked**, meaning the log has an event whose agent is its id (step 06's test in `checked`), is **retired**;
   3. every other agent that never worked is **removed** from the file;
-  4. every template agent not kept is **added**, `active`, with no grants or revokes, its role's persona, shipped avatar and model where the template has none, and its role's connectors as `team.propose` gives them (step 11); its id takes `-2`, `-3`… when a retired or kept agent holds it (step 06's rule);
+  4. every template agent not kept is **added**, `active`, with no grants or revokes, its role's persona, shipped avatar and model where the template has none, and its role's connectors as `team.propose` gives them (step 12); its id takes `-2`, `-3`… when a retired or kept agent holds it (step 06's rule);
   5. the team takes the template's `permissions`, `judgment`, `integration` and `daily_usd` (absent clears the limit);
   6. the result is held to `validate_team`, and its errors are returned with the lists, not instead of them. It can fail: a kept match that is paused leaves its role, or a named judge, without an active agent (a paused Developer `theo` kept while the active Developer is retired). `template.preview` then answers the errors (`errors_wire`, the step 06 codes such as `needs_developer`), the dialog shows them from `en.ts` with "Use this team" disabled, and `template.apply` refuses with -32005 and the same `data.errors`, writing nothing.
   Already retired agents are untouched.
@@ -57,9 +57,9 @@ Binding inputs: ADR 0026 (C), and "C. Team templates" in `docs/design/designer-c
 - **RPC shape.** The brief's five, following the codebase's query/method split (`team.validate` is a query, `team.save` a method), so the preview is its own query rather than a flag on a write:
   - query `templates.list {}`, query `template.preview { slug }`;
   - methods `template.save { name, replace? }`, `template.apply { slug }`, `template.rename { slug, name }`, `template.delete { slug }`.
-  This replaces the design's `template.get` and `team.propose`'s `from`: `templates.list` answers each template whole, setup fills its screens from that, and "from scratch" is the page's own. The project plan's step 13 interface line changes to match (Task 8).
+  This replaces the design's `template.get` and `team.propose`'s `from`: `templates.list` answers each template whole, setup fills its screens from that, and "from scratch" is the page's own. The project plan's step 14 interface line changes to match (Task 8).
 - **The preview is recomputed on apply**, not handed back: one user, one browser, and the apply answers the changes it made, which the page shows. A stale preview costs a second look, not a wrong save.
-- **Setup with a saved team** does not use the switching rules: `team.start` replaces the starter team under the setup marker, even one that has recorded work (step 06's `starts_the_team_from_setup`), so `template.preview` would wrongly retire it. Setup takes the chosen template from `templates.list`: its agents fill the builder, `active`, with the role defaults `team.propose` gives for any field the template leaves out; Spending, Finishing work and SetupAdvanced's plan check (`policy.judgment`) open with the template's answers. **What they may do still opens with nothing selected** (open for the founder, below).
+- **Setup with a saved team** does not use the switching rules: `team.start` replaces the starter team under the setup marker, even one that has recorded work (step 06's `starts_the_team_from_setup`), so `template.preview` would wrongly retire it. Setup takes the chosen template from `templates.list`: its agents fill the builder, `active`, with the role defaults `team.propose` gives for any field the template leaves out; Spending, Finishing work and SetupAdvanced's plan check (`policy.judgment`) open with the template's answers. **The permission answers carry over** (the founder, 2026-09-30): the template's `run_commands` and `push` are applied and What they may do is not shown again; the Finish screen lists them in words, and Settings changes them later.
 - **From scratch** is two rows, a Product Manager and a Developer, with their roles fixed and names empty, and "Add someone"; Continue stays disabled until both are named. Models, pictures and personas are the roles' defaults from `team.propose`.
 - **Renaming** writes the template under the new slug with the new name and the same `saved_at`, then removes the old file; a new slug another template holds is refused with `template_exists`; a name that only changes case keeps the file. **Deleting** removes the file. Neither records an event. An unknown slug is `-32002`, "There is no saved team <slug>."
 - **An unreadable file** in `templates/` (not YAML, or failing `validate_template`) is not listed as a template; `templates.list` names it under `unreadable: [{ slug }]`, and Settings shows it with Delete only and `en.ts`'s fixed line "This saved team cannot be read. Delete it, or fix the file by hand." Previewing or applying it is refused with `template_unreadable`.
@@ -76,8 +76,8 @@ Binding inputs: ADR 0026 (C), and "C. Team templates" in `docs/design/designer-c
   | `NotFound` | -32002 | (none) | (none) |
 
   A result `validate_team` refuses carries step 06's codes through `errors_wire`. The daemon's `message` is for the log and the command line; **the page words every refusal from `en.ts` by its code, never from the daemon's text.**
-- **Open for the founder at the Task 1 gate:** (a) whether setup still asks the permission questions when a saved team is chosen; the default is yes, asked afresh, because step 06 and spec 4.1 ask an explicit yes for each project and a template's answer was given for another project's code; (b) whether `template.rename` is in scope, since it goes beyond the founder's list; without it, Settings offers Delete only and Task 4's and Task 5's rename tests and the method go.
-- **Step 11's names** (`ui_ux_designer`, `mcp_servers`, `team.propose`'s six and its per-role connectors) come from the design, not landed code. Re-check them here when step 11 lands; the schema-copy test catches a drift in the role enum.
+- **Decided by the founder, 2026-09-30:** a saved team's permission answers carry over with no re-asking (above), and `template.rename` is in scope.
+- **Steps 11 and 12's names** (`ui_ux_designer` and `team.propose`'s six from step 11; `mcp_servers` and its per-role connectors from step 12) come from their plans, not landed code. Re-check them here when those steps land; the schema-copy test catches a drift in the role enum.
 
 ## File map
 
@@ -94,17 +94,17 @@ crates/runtime/src/daemon/templates.rs (+ tests), daemon/web.rs, daemon/team.rs 
 crates/runtime/src/orchestrator/human.rs                                  modifies (T5: the retirement's effects shared)
 crates/cli/src/start.rs                                                   modifies (T5: WebState's templates folder)
 crates/protocol/src/{event.rs,rpc.rs}, packages/protocol-client/src/client.ts   modifies (T5)
-apps/web/src/pages/setup/{SetupTeam,TeamSetup,SetupPermissions}.tsx, setup/team.test.tsx   modifies (T6)
+apps/web/src/pages/setup/{SetupTeam,TeamSetup,SetupFinish}.tsx, setup/team.test.tsx   modifies (T6)
 apps/web/src/pages/dialogs/{SaveTemplate,UseTemplate}.tsx (+ tests), pages/SavedTeams.tsx (+ test)   creates (T6)
 apps/web/src/pages/{Team,Settings}.tsx, pages/team.test.tsx, strings/en.ts   modifies (T6)
 apps/web/e2e/templates.spec.ts, apps/web/e2e/fixtures/pair-template.yaml  creates (T7)
 apps/web/e2e/fixtures/serve.ts                                            modifies (T7: exports stateFolder)
-docs/SPEC.md (1, 3, 4.1, 4.4, 8.4, 8.5, F1), docs/plans/project-plan.md (step 13 line and interface line)   modifies (T8)
+docs/SPEC.md (1, 3, 4.1, 4.4, 8.4, 8.5, F1), docs/plans/project-plan.md (step 14 line and interface line)   modifies (T8)
 ```
 
 ## Interfaces
 
-Consumes: `validate_team`, `Team`, `Agent`, `MAX_AGENTS`, `defaults()`, `describe_change` (`farik-core`, step 06); `write_private` (`farik-runtime`); `yaml_value` (`farik-store::files`); `state_dir` (`crates/cli/src/state.rs`); `update_agent_with`'s retirement (`orchestrator/human.rs`, phase 4 and step 06); `team.propose`'s per-role connector default (step 11); `Refused`, `errors_wire`, `code_of` (`daemon/team.rs`, step 06); `Dialog`, `Choice`, `TextField`, `List` (`@farik/ui`, step 03).
+Consumes: `validate_team`, `Team`, `Agent`, `MAX_AGENTS`, `defaults()`, `describe_change` (`farik-core`, step 06); `write_private` (`farik-runtime`); `yaml_value` (`farik-store::files`); `state_dir` (`crates/cli/src/state.rs`); `update_agent_with`'s retirement (`orchestrator/human.rs`, phase 4 and step 06); `team.propose`'s per-role connector default (step 12); `Refused`, `errors_wire`, `code_of` (`daemon/team.rs`, step 06); `Dialog`, `Choice`, `TextField`, `List` (`@farik/ui`, step 03).
 
 Produces:
 
@@ -145,11 +145,11 @@ Wire (`rpc.schema.json`; `snake_case`, camelCase in `protocol-client`):
 ### Task 1: Mockups, approved by the founder
 
 Files: created `docs/design/mockups/{SetupTeamStarts,SaveTemplate,UseTemplate,PhoneUseTemplate,SavedTeams}.dc.html`, modified `canvas.json` and the design canvas artifact (`docs/design/web-ui.md`'s link), with a new canvas page "Team templates".
-- `SetupTeamStarts`: "Your team" with three `Choice` cards (the suggested six; a saved team, with its picker of names and faces; from scratch), then the builder filled from the choice.
+- `SetupTeamStarts`: "Your team" with three `Choice` cards (the suggested six; a saved team, with its picker of names and faces; from scratch), then the builder filled from the choice, and the Finish screen of a saved team listing its carried-over permission answers in words.
 - `SaveTemplate`: the Team page's dialog, a name field, Save, and the `template_exists` state with Replace.
 - `UseTemplate`: pick a saved team, then the preview: four groups (Stays, Joins, Retired, Removed), each agent with face, name and role; the effects in words; "Use this team"; and the refused state, the errors in words with "Use this team" disabled. `PhoneUseTemplate` is the same at 360 px, the densest of the five.
 - `SavedTeams`: Settings' section, each saved team with its faces, Rename (inline) and Delete (confirm), an unreadable file's row with Delete only, and the no-state-folder line.
-Colours from `@farik/brand`'s tokens only, muted and light, one colour per job (`docs/brand/brand.md`). The founder also rules on the two open points in the Decisions. No test; the gate is the founder's approval, recorded in this plan's header in the same commit.
+Colours from `@farik/brand`'s tokens only, muted and light, one colour per job (`docs/brand/brand.md`). No test; the gate is the founder's approval, recorded in this plan's header in the same commit.
 
 - [ ] `docs(design): mock up team templates for the founder's approval`
 
@@ -222,7 +222,7 @@ Consumes: Tasks 3 and 4.
 Files as the file map says. Every test also runs axe (step 06's rule).
 
 - `offers_three_starts`: "Your team" shows the three choices; the suggested one is selected and fills six rows (step 11's six).
-- `starts_from_a_saved_team`: choosing "Three of us" from `templates.list` fills the builder with its agents and never calls `template.preview`; Spending, Finishing work and the plan check open with its answers; What they may do opens with nothing selected.
+- `starts_from_a_saved_team`: choosing "Three of us" from `templates.list` fills the builder with its agents and never calls `template.preview`; Spending, Finishing work and the plan check open with its answers; What they may do is skipped, and `team.start` carries the template's `run_commands` and `push`; the Finish screen lists both in words.
 - `starts_from_scratch`: two rows, Product Manager and Developer, names empty, Continue disabled until both are named.
 - `disables_saved_with_no_state_folder_or_none_saved`, with the mockup's line for each.
 - `saves_the_team_as_a_template`: the dialog sends `template.save { name }`; `template_exists` shows the mockup's sentence and Replace sends `replace: true`.
@@ -244,15 +244,15 @@ Screenshots of "Your team" with the three starts and of the preview, at 360 and 
 
 ### Task 8: Spec and plan
 
-Under the next free spec revision when this step lands (0.33 if steps 11 and 12 take 0.31 and 0.32), each change marked "added in 0.NN":
+Under the next free spec revision when this step lands (0.34 if steps 11, 12 and 13 take 0.31 to 0.33), each change marked "added in 0.NN":
 - section 1's non-goal: "One human, one team, for now. Team templates are reuse, not several live teams.";
 - section 3: **Team template**, a saved team kept on the machine, what it holds and leaves out;
-- 4.1: "Your team" offers three starts, and a template still asks the permission questions;
+- 4.1: "Your team" offers three starts, and a saved team's permission answers carry over without being asked again;
 - 4.4: "Save as a template" and "Use a saved team", the switching rules and the preview;
 - 8.4: `templates/<slug>.yaml` in the state folder, 0700 and 0600, no event;
 - 8.5: `team.updated`'s `template`;
 - F1: a template must hold a Product Manager and a Developer, at most seven;
-- the project plan: step 13's line, "Built <date> (spec 0.NN)", and its interface line as the Decisions' RPC shape.
+- the project plan: step 14's line, "Built <date> (spec 0.NN)", and its interface line as the Decisions' RPC shape.
 
 - [ ] `docs(spec): team templates kept on the machine, and the one-team non-goal`
 
@@ -261,7 +261,7 @@ Under the next free spec revision when this step lands (0.33 if steps 11 and 12 
 ```
 cargo xtask check --integration
 # expected: cargo 0 failed (farik-core +21 from T2 (11) and T3 (10), farik-runtime +13 from T4 (6) and T5 (7));
-#   @farik/web: step 12's landed count plus 8 (T6); @farik/protocol-client plus 1;
-#   playwright: step 12's landed count plus 1 (templates.spec.ts);
+#   @farik/web: step 13's landed count plus 8 (T6); @farik/protocol-client plus 1;
+#   playwright: step 13's landed count plus 1 (templates.spec.ts);
 #   last line: xtask check: ok
 ```

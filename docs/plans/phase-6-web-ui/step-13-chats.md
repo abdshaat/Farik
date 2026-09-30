@@ -1,9 +1,9 @@
-# Phase 6, step 12: Chats
+# Phase 6, step 13: Chats
 
 Status: draft
 Branch: `phase/6-web-ui`
 Spec: `docs/SPEC.md` sections 3, 4.3, 4.4, 5.1, 5.2, 5.5, 5.9, 8.2, 8.4, 8.5, F7, F8
-Depends on: steps 01 to 11 of this phase; ADR 0026 and `docs/design/designer-chats-templates.md` (section B), both binding
+Depends on: steps 01 to 12 of this phase (renumbered from step 12 by the project plan's revision 23); ADR 0026 and `docs/design/designer-chats-templates.md` (section B), both binding
 Readiness confirmed by: fresh-session reviewer, 2026-09-30, ready with findings, folded in
 
 Signatures, not bodies; test names and what each asserts, not test code; around 300 lines at most (ADR 0008).
@@ -18,12 +18,12 @@ Out of scope: phase 8 step 04's memory history with revert and the decisions vie
 
 Design and ADR 0026 decide the what. These are the points they leave open, each decided here.
 
-- **Gate.** Task 1's mockups are approved by the founder before Task 2 starts. The approval is recorded in this header ("Mockups approved by: the founder, <date>"), and any change the founder asks for at the gate is written into this plan in the same commit. The rail label is "Chats" (the design's proposal) unless the founder names another there.
+- **Gate.** Task 1's mockups are approved by the founder before Task 2 starts. The approval is recorded in this header ("Mockups approved by: the founder, <date>"), and any change the founder asks for at the gate is written into this plan in the same commit. The rail label is "Chats" (the founder, 2026-09-30).
 - **Task order.** The event and its queries (Task 2) come before the session (Task 3), because the reply the session writes is that event: the no-forward-dependency rule orders them, not the brief.
 - **Envelope.** A `chat_message.posted` envelope names the chat's agent on both the user's message and the reply (the channel names none on the human's), so `EventQuery { agent_id, kinds: [chat_message.posted], before_seq, newest_first }` reads one chat a page at a time with no filtering after the limit. The body's `chat` repeats it, as the design writes.
 - **Pending.** A chat is pending when the seq of its newest message by the user is above the `in_reply_to` of every `session.started { purpose: chat }` of that agent, whoever wrote last. A message sent while a session runs is answered next, with the reply in its history. The session's `in_reply_to` is that message's seq, as a conversation's is (8.5), so a failed session is not retried in a loop: the user asks again.
 - **The rule's place.** The chat rule runs first in `rules::tick`, before `sprint_rules`, and only in an unscoped `TickRules::All` tick, as `conversation` does: `farik run FRK-n` answers no chat.
-- **Session shape.** `SessionAsk { agent, purpose: Chat, contract: None, cwd: project root, executor: None, read_only: true, only_tool: None, tools: Some(CHAT_TOOLS), in_reply_to: Some(seq), thread: None, initial_prompt }`, where `initial_prompt` is "<Name>, the user wrote to you in your one-to-one chat. Answer the newest message." followed by that message's text; the history and the closing instruction are in the system prompt. The agent's own model (`session_model`), effort `low`; the conversation's limits. The session's tiers (`ToolContext::tiers`, `SessionRegistration`) are `[Read]` whatever the agent's grants: the governor, not the prompt, bounds it. It is given no connector: step 11's `SessionRegistration.connectors` and `ToolContext.connectors` are empty for a `chat` session.
+- **Session shape.** `SessionAsk { agent, purpose: Chat, contract: None, cwd: project root, executor: None, read_only: true, only_tool: None, tools: Some(CHAT_TOOLS), in_reply_to: Some(seq), thread: None, initial_prompt }`, where `initial_prompt` is "<Name>, the user wrote to you in your one-to-one chat. Answer the newest message." followed by that message's text; the history and the closing instruction are in the system prompt. The agent's own model (`session_model`), effort `low`; the conversation's limits. The session's tiers (`ToolContext::tiers`, `SessionRegistration`) are `[Read]` whatever the agent's grants: the governor, not the prompt, bounds it. It is given no connector: step 12's `SessionRegistration.connectors` and `ToolContext.connectors` are empty for a `chat` session.
 - **The reply tool.** `farik_chat_reply` is tier `Read`, as every Farik write tool is, so `session_spec`'s and `permit`'s tier filters keep it. It is offered only in `chat` sessions: `session_spec` drops it from every other session's list, as `CONVERSATION_TOOLS` narrows conversations, and `call_tool` refuses it outside a chat (`chat_reply_refused`).
 - **`session.started` names the chat.** It gains `chat: <agent_id>`, as the design writes, on `purpose: chat` alone; it repeats the envelope's agent, and keeps the event readable without the envelope.
 - **Ending.** `farik_chat_reply` records the reply and answers "Sent. Your turn is over."; a second call is refused `chat_reply_refused`, and the model's turn ends the session. A call refused for its limits does not use up the one reply. Rejected: aborting the session from inside a tool, which no tool does today and which the refusal makes unnecessary.
@@ -44,13 +44,11 @@ Design and ADR 0026 decide the what. These are the points they leave open, each 
 - **Costs.** `SessionPurpose::Chat` is recorded as `chat` (session and cost purpose enums). `CostScope::Purpose` sums by purpose; `costs.summary` gains `conversations_today_usd`, and the Costs page shows "Conversations today: $x.xx. Your chats with the team; they count toward the daily limit." under the table. Agents' rows already include it, as costs by agent.
 - **Chat list.** `chats.list {}` answers `{ team_last, chats: [{ agent_id, retired, last }] }` in team order, `last` and `team_last` `{ seq, at, author, text } | null` (`team_last`: the newest `message.posted` that is not `system`).
 - **Addresses and layout.** `/channel` is Team (so step 10's `#thread-…` anchors keep working) and `/channel/<agent_id>` a one-to-one. On a wide screen the list is a left column beside the open chat; on a phone it is one row of avatars above the chat, Team first. A retired agent's chat is under "Past teammates", read-only, with no box. An id that names no agent shows "No such teammate" beside the list.
-- **Composer.** "Message <Name>", a textarea: Enter sends, Shift+Enter makes a new line, as the reviewer proposed to match the Team composer, and "Send" sends. Over 4,000 code points is refused before sending.
+- **Composer.** "Message <Name>", a textarea: Enter sends, Shift+Enter makes a new line (the founder, 2026-09-30), in both composers, and "Send" sends. Over 4,000 code points is refused before sending.
 - **Envelope exception.** SPEC 8.5 gains that a `chat_message.posted` envelope names the chat's agent even on the user's message, as `agent.slept` is an exception. `farik log --agent` and every reader of the envelope's agent as the actor are checked in Task 2: those that must not count the user's message as the agent's filter on `author`.
-- **Waits for step 11.** Step 11's plan (50d2fa8) produces `SessionRegistration.connectors`, `ToolContext.connectors` and the hook's connector check (`evaluate_connector_call`, refusal `connector_not_in_session`). This plan names them, and `denies_a_chat_everything_else` runs with a Designer whose `mcp_servers` holds `playwright`. When step 11 lands, these names are re-checked against its commits before Task 2 starts.
-- **Open for the founder at the gate** (Task 1), each recorded in this plan when settled:
-  - Enter sends and Shift+Enter makes a line, in both composers, or Ctrl+Enter sends;
-  - the rail label "Chats";
-  - that "Conversations" means one-to-one chats only: the channel's `conversation` purpose stays under "Meetings and talk";
+- **Waits for step 12.** Step 12's plan (`step-12-designer-preview-and-review.md`) produces `SessionRegistration.connectors`, `ToolContext.connectors` and the hook's connector check (`evaluate_connector_call`, refusal `connector_not_in_session`). This plan names them, and `denies_a_chat_everything_else` runs with a Designer whose `mcp_servers` holds `playwright`. When step 12 lands, these names are re-checked against its commits before Task 2 starts.
+- **Decided by the founder, 2026-09-30:** Enter sends and Shift+Enter makes a new line, in both composers; the rail label is "Chats"; "Conversations" means one-to-one chats only, and the channel's `conversation` purpose stays under "Meetings and talk".
+- **Open for the founder at the gate** (Task 1), recorded in this plan when settled:
   - ADR 0026's "decided here" points this step builds: a paused agent answers, a spent day stops chats, the agent's own model at `low`.
 - **Live.** A `chat_message.posted` from `useEvents` whose `chat` is the open one is appended without a query, as step 10 appends channel messages; a `task.created` with `from_chat_message` turns that reply's box into "Sent as FRK-n".
 - **Command line.** `farik chat <agent> <text>` sends `chat_message_post`; `farik chat <agent>` prints the chat, one message per block, oldest first.
@@ -93,7 +91,7 @@ docs/SPEC.md, docs/plans/project-plan.md  (T9)
 
 ## Interfaces
 
-Consumes: `useEvents`, `useQuery` (step 04); `renderMessageText` and `channel.messages` (step 10); `team.get`, `waiting.list`; `request.file` (step 07); `EventQuery { agent_id, before_seq, newest_first }` (step 10); `session_model`, `run_session`, `SessionAsk`, `day_is_spent`, `asleep`, `allowed_builtins` (phases 3 and 4); `pause::paused`, `pause::key_refused`; `SessionPurpose`, `SessionRegistration.connectors`, `ToolContext.connectors` and `evaluate_connector_call` from step 11, whose plan is 50d2fa8 and which must land first (re-checked then).
+Consumes: `useEvents`, `useQuery` (step 04); `renderMessageText` and `channel.messages` (step 10); `team.get`, `waiting.list`; `request.file` (step 07); `EventQuery { agent_id, before_seq, newest_first }` (step 10); `session_model`, `run_session`, `SessionAsk`, `day_is_spent`, `asleep`, `allowed_builtins` (phases 3 and 4); `pause::paused`, `pause::key_refused`; `SessionPurpose`, `SessionRegistration.connectors`, `ToolContext.connectors` and `evaluate_connector_call` from step 12 (`step-12-designer-preview-and-review.md`), which must land first (re-checked then).
 
 Produces:
 
@@ -237,7 +235,7 @@ Vitest and axe. Tests:
 
 ### Task 9: The spec and the plan
 
-`docs/SPEC.md`, in the next revision after 0.30, as the design's table lists: 3 (the channel and chats), 4.3 (the one-to-one as built), 5.1 (chat is not command), 5.2 (the chat rule runs while paused), 4.4 (a paused agent still answers its chat), 5.5 (a chat's cost, the daily limit), 5.9 (chats apart from the channel; their privacy depends on `.farik/local/**` staying protected), 8.2 (the `chat` session and its tools), 8.4 (chats in the log), 8.5 (`chat_message.posted`, `from_chat_message`, purpose `chat`, `session.started`'s `chat`, and the attribution exception: the envelope names the chat's agent on the user's message too), F7 and F8. The project plan's step 12 line records the landing.
+`docs/SPEC.md`, in the next free revision when this step lands (0.33 if steps 11 and 12 take 0.31 and 0.32), as the design's table lists: 3 (the channel and chats), 4.3 (the one-to-one as built), 5.1 (chat is not command), 5.2 (the chat rule runs while paused), 4.4 (a paused agent still answers its chat), 5.5 (a chat's cost, the daily limit), 5.9 (chats apart from the channel; their privacy depends on `.farik/local/**` staying protected), 8.2 (the `chat` session and its tools), 8.4 (chats in the log), 8.5 (`chat_message.posted`, `from_chat_message`, purpose `chat`, `session.started`'s `chat`, and the attribution exception: the envelope names the chat's agent on the user's message too), F7 and F8. The project plan's step 13 line records the landing.
 
 - [ ] `docs(spec): specify one-to-one chats`
 
@@ -246,6 +244,6 @@ Vitest and axe. Tests:
 ```
 cargo xtask check --integration
 # expected: cargo 0 failed, with 24 new tests (T2 6, T3 8, T4 5, T5 2, T6 4);
-#   @farik/web: step 11's landed count plus 11; playwright: step 11's count plus 1;
+#   @farik/web: step 12's landed count plus 11; playwright: step 12's count plus 1;
 #   last line: xtask check: ok
 ```

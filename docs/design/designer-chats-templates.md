@@ -1,6 +1,6 @@
 # A UI/UX Designer, one-to-one chats and team templates
 
-Status: the founder's decisions of 2026-09-30, written down for the founder's review before any step plan is written. ADR 0026 records the decision. It is the design input to phase 6 steps 11, 12 and 13; the milestone runbook moves to step 14. Where this document says "decided here", the founder did not rule on the point and this design chose; ADR 0026 lists those points for the founder to confirm.
+Status: the founder's decisions of 2026-09-30, written down for the founder's review before any step plan is written. ADR 0026 records the decision. It is the design input to phase 6 steps 11 to 14; the milestone runbook moves to step 15 (revision 23 of the project plan split the Designer into steps 11 and 12). Where this document says "decided here", the founder did not rule on the point and this design chose; ADR 0026 lists those points for the founder to confirm.
 
 Three small fixes landed on the phase branch before this design: the Ready pill on the computer check, the waiting rows' buttons, and the rail's breathing Connected dot (`docs/design/web-ui.md`).
 
@@ -12,14 +12,15 @@ Three small fixes landed on the phase branch before this design: the Ready pill 
 
 ## Placement
 
-Three steps join phase 6 before the milestone runs. Each starts with mockups the founder approves before any code, as every page did (the founder's standing gate, 2026-09-26).
+Four steps join phase 6 before the milestone runs (three in revision 22; revision 23 split the Designer in two). Each starts with mockups the founder approves before any code, as every page did (the founder's standing gate, 2026-09-26).
 
 | Step | Delivers | SPEC sections it changes |
 |---|---|---|
-| 11 | The UI/UX Designer and the Playwright connector | 3 (agent, role), 4.1 (the suggested six; the preview command), 5.1, 5.2, 5.3, 5.4 (the Designer's reviewer, the plan gate, the design review), 5.6 (the Designer's tiers; connectors), 5.12 (`document_paths`; `ui_paths`), 6 (a new 6.8, and "only the Developer and the UI/UX Designer" in 6.1 to 6.5), 6.7, 8.2 (the `explore` session; the hook's connector check), 8.3 (the preview and browser containers), 8.5 (events), 8.6 (browsing only the preview), F1, F9 |
-| 12 | One-to-one chats | 3 (channel), 4.3, 5.1 (chat is not command), 5.5 (what a chat costs), 5.9, 8.2 (the `chat` session), 8.4, 8.5, F7, F8 |
-| 13 | Team templates | 1 (the non-goal stays true), 3 (team), 4.1 (three starts), 4.4, 8.4 (the state folder), F1 |
-| 14 | The milestone runbook, formerly step 11, unchanged in scope | none |
+| 11 | The UI/UX Designer and its plan gate | 3 (agent, role), 4.1 (the suggested six), 5.1, 5.2, 5.3, 5.4 (the Designer's reviewer, the plan gate), 5.6 (the Designer's tiers), 5.12 (`document_paths`), 6 (a new 6.8, and "only the Developer and the UI/UX Designer" in 6.1 to 6.5), 8.2 (the `explore` session), 8.5 (events), F1 |
+| 12 | The Designer's preview, Playwright connector and design review | 4.1 (the preview commands), 5.4 (the design review), 5.6 (connectors), 5.12 (`ui_paths`), 6.7, 8.2 (the hook's connector check), 8.3 (the preview and browser containers), 8.5 (events), 8.6 (browsing only the preview), F9 |
+| 13 | One-to-one chats | 3 (channel), 4.3, 5.1 (chat is not command), 5.5 (what a chat costs), 5.9, 8.2 (the `chat` session), 8.4, 8.5, F7, F8 |
+| 14 | Team templates | 1 (the non-goal stays true), 3 (team), 4.1 (three starts), 4.4, 8.4 (the state folder), F1 |
+| 15 | The milestone runbook, formerly step 11, unchanged in scope | none |
 
 ## A. The UI/UX Designer
 
@@ -80,7 +81,7 @@ The task stays `in_progress` from step 1 to step 4. The plan gate adds events, n
 
 "Just enough, built to grow": the base phase 8 extends, not a special case it replaces.
 
-- **Per agent in the team file.** An agent gains `mcp_servers: [{ name, source }]`. Step 11 accepts one `source`, `builtin`, and one built-in, `playwright`. `team.propose` gives it to the Designer. The agent editor lists an agent's connectors with a switch for each built-in. It is on by default for the Designer only, and any agent may have it.
+- **Per agent in the team file.** An agent gains `mcp_servers: [{ name, source }]`. Step 12 accepts one `source`, `builtin`, and one built-in, `playwright`. `team.propose` gives it to the Designer. The agent editor lists an agent's connectors with a switch for each built-in. It is on by default for the Designer only, and any agent may have it.
 - **The built-in's definition** ships in the `farik` binary, at `crates/roles/connectors/playwright.yaml`:
   - the server: the official Playwright MCP server's container image, pinned by digest;
   - its arguments: headless, isolated, `--allowed-origins` set to the preview's origin, and an output folder in the session's folder;
@@ -117,7 +118,7 @@ Skills, in the Agent Skills format, under `roles/ui_ux_designer/skills/`:
 
 Connector: the Playwright connector above. Phase 9 moves both into `roles/ui_ux_designer/kit.yaml` (step 01), and its kit check (step 06) gains a seventh task, a Designer's: a screen explored, planned, approved and changed, and a Developer's change design-reviewed.
 
-### Events, tools and queries (step 11)
+### Events, tools and queries (steps 11 and 12)
 
 - **Events**, `<entity>.<past_tense_verb>`, each about one task:
   - `design_plan.proposed { plan }`, by the Designer;
@@ -135,7 +136,7 @@ Connector: the Playwright connector above. Phase 9 moves both into `roles/ui_ux_
 
 ### What the user sees
 
-- The Channel page becomes a chat list. The first chat is **Team**, today's group channel, unchanged. Below it is one private chat per agent who is not retired, each with its avatar, name, role and last line. A retired agent's chat keeps its history, read-only, under "Past teammates". The rail's label is settled in the step 12 mockups ("Chats" is proposed), and the address `/channel` stays, with `/channel/<agent_id>` for a one-to-one.
+- The Channel page becomes a chat list. The first chat is **Team**, today's group channel, unchanged. Below it is one private chat per agent who is not retired, each with its avatar, name, role and last line. A retired agent's chat keeps its history, read-only, under "Past teammates". The rail's label is settled in the step 13 mockups ("Chats", confirmed by the founder on 2026-09-30), and the address `/channel` stays, with `/channel/<agent_id>` for a one-to-one.
 - **A one-to-one follows spec 4.3's read-only rule.** The agent answers from its memory and read access to the project, and changes nothing.
 - **"Send as a request".** When the agent thinks work is needed, its reply carries a proposed request, shown under the reply as the request's words with a "Send as a request" button. The user may edit the words first. Pressing it files a request through the existing `request.file`, triaged and contracted like any other (5.16). The chat then shows "Sent as FRK-12" with a link. Nothing is filed without the user.
 - **Private.** A chat is never posted to the team channel, never in the channel summary, and never shown to another agent. The agent itself sees its own chat's history only in its later chats, never in its task sessions (decided here).
@@ -215,7 +216,7 @@ Every project on the machine sees every template. Saving and deleting a template
   - the result must have an active Product Manager and Developer and at most seven active agents, and a refusal says what to change, as `team.validate` does.
 - **One team per project stays true.** A template is reuse, not a second live team (spec 1, "One human, one team"; spec 3).
 
-### RPC (step 13)
+### RPC (step 14)
 
 - query `templates.list` → `[{ name, saved_at, agents: [{ display_name, role, avatar }] }]`;
 - query `template.get { name }` → the template;
@@ -227,14 +228,14 @@ Mockups first: the three starts in `SetupTeam`, "Save as a template" and "Use a 
 
 ## How phase 8 extends the connector base
 
-Nothing step 11 builds is replaced; each later step widens it.
+Nothing step 12 builds is replaced; each later step widens it.
 
 | Later step | Extends |
 |---|---|
 | Phase 7 | Runs the Playwright connector and `farik_check_page` on each engine; an engine without a pre-tool hook reaches connector tools only through Farik's own server (ADR 0023) |
-| Phase 8 step 01, MCP per agent | `mcp_servers` gains `source: custom`, with `transport`, `command` or `url`, `args`, `env_keys` and the user's `tool_tiers`; credentials in the keychain (8.6); tool listing with `rmcp`; per-call approval of `external_effect` (`tool.approve`). The hook's server-and-tag check, `tool.called`'s `server` and `tag`, and the per-agent list are step 11's, unchanged. The note on this step in the project plan says so |
+| Phase 8 step 01, MCP per agent | `mcp_servers` gains `source: custom`, with `transport`, `command` or `url`, `args`, `env_keys` and the user's `tool_tiers`; credentials in the keychain (8.6); tool listing with `rmcp`; per-call approval of `external_effect` (`tool.approve`). The hook's server-and-tag check, `tool.called`'s `server` and `tag`, and the per-agent list are step 12's, unchanged. The note on this step in the project plan says so |
 | Phase 8 step 03, skills per agent | The Designer's skills load at the role level as every role's do; agent and team levels are added around them |
-| Phase 8 step 04, memory and decisions view | Keeps the memory history with revert and the decisions view; the chat is step 12's |
+| Phase 8 step 04, memory and decisions view | Keeps the memory history with revert and the decisions view; the chat is step 13's |
 | Phase 9 step 01, kit format | `source: kit`; the built-in's definition moves into `roles/ui_ux_designer/kit.yaml`; allowances; the connector screens; the drift test becomes the kits' |
 | Phase 9 step 03, Developer kit | The Developer's browser testing reuses the Playwright connector and the preview, on the Developer's own task |
 
@@ -254,6 +255,6 @@ Nothing step 11 builds is replaced; each later step widens it.
 ## Open items
 
 - **The Designer's character and tag colour.** The founder chooses both in the step 11 mockups.
-- **The rail's label** for the chat list ("Chats" proposed), in the step 12 mockups.
-- **Farik's own preview command**, proposed as the `farik-e2e-serve` binary over a recorded team; the founder confirms it in step 11's plan.
+- **The rail's label** for the chat list: "Chats" (the founder, 2026-09-30).
+- **Farik's own preview command**: a `prepare` and a `start` command, both in the sandbox (the founder, 2026-09-30), written out in step 12's plan.
 - **Every point marked "decided here"**, which ADR 0026 lists for the founder to confirm.

@@ -1,7 +1,7 @@
 # 0026. A UI/UX Designer, chats and team templates in phase 6
 
 Date: 2026-09-30
-Status: accepted. The founder approved it on 2026-09-30, with one change: the Designer checks a Developer's UI change in the browser before it goes to the Architect for approval (A4).
+Status: accepted. The founder approved it on 2026-09-30, with one change: the Designer checks a Developer's UI change in the browser before it goes to the Architect for approval (A4). Amended 2026-09-30 (project plan revision 23), on step 11's readiness review: step 11 is split in two, 11 the Designer and its plan gate, 12 the preview, the connector and the design review; chats become step 13, templates step 14, and the milestone runbook step 15. The founder also decided that the preview runs as a `prepare` and a `start` command, both in the sandbox, and that the Designer works only with Docker's sandbox on, its browser reaching only the preview. The step numbers below are the ones before the split.
 
 ## Context
 

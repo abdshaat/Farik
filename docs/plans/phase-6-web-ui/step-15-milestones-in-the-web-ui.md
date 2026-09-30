@@ -1,10 +1,10 @@
-# Phase 6, step 14: Milestones 0 and 1 in the web UI
+# Phase 6, step 15: Milestones 0 and 1 in the web UI
 
-Status: draft, waits on steps 01 to 13 landing. The founder runs it (the founder, 2026-09-29: "I will run step 10", then step 11 after the split of step 07, and step 14 since revision 22 added steps 11 to 13, ADR 0026).
+Status: draft, waits on steps 01 to 14 landing. The founder runs it (the founder, 2026-09-29: "I will run step 10", then step 11 after the split of step 07, step 14 since revision 22 added steps 11 to 13, ADR 0026, and step 15 since revision 23 split step 11).
 Branch: `phase/6-web-ui`
 Spec: `docs/SPEC.md` section 11 (Milestones 0 and 1), F17; the flow it exercises is 4.1, 5.2 to 5.9, 5.14, and 5.16
-Depends on: steps 01 to 13 of this phase, landed. A start gate applies: stage 1 does not begin until step 13 has landed and `cargo xtask check --integration` passes on the phase branch.
-Readiness confirmed by: (pending, once step 13 lands)
+Depends on: steps 01 to 14 of this phase, landed. A start gate applies: stage 1 does not begin until step 14 has landed and `cargo xtask check --integration` passes on the phase branch.
+Readiness confirmed by: (pending, once step 14 lands)
 
 This step writes no product code. It is a runbook, like phase 3's step 18 and phase 4's step 08, and it keeps their roles:
 - **[A]** is the agent preparing and recording the run.
