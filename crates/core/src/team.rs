@@ -56,7 +56,7 @@ const REQUIRED_ROLES: [(RoleWire, &str); 2] = [
 
 /// The most agents a team has that are not retired (spec 4.1). A retired agent stays in the file
 /// so that its past events still name someone, so it is not one of them.
-const MAX_AGENTS: usize = 7;
+pub const MAX_AGENTS: usize = 7;
 
 /// The role a team named to check plans; `None` for `auto`.
 fn named_judge(choice: JudgeChoice) -> Option<Role> {

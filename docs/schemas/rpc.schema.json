@@ -694,12 +694,18 @@
         },
         "judges": {
           "$ref": "#/$defs/planJudges"
+        },
+        "max_agents": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "The most agents a team may have that are not retired (spec 4.1)."
         }
       },
       "required": [
         "team",
         "agents",
-        "judges"
+        "judges",
+        "max_agents"
       ]
     },
     "serveStatusResult": {

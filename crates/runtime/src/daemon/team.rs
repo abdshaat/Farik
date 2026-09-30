@@ -79,6 +79,7 @@ pub(super) fn query(deps: &ToolDeps, name: &str, params: &Value) -> Result<Value
             let team = deps.files.read_team().map_err(|e| internal(&e))?;
             let mut answer = effective(deps, &team)?;
             answer["team"] = serde_json::to_value(team).map_err(|e| internal(&e))?;
+            answer["max_agents"] = json!(farik_core::team::MAX_AGENTS);
             Ok(answer)
         }
         "team.propose" => propose(deps),
@@ -915,6 +916,8 @@ mod tests {
         );
 
         let got = query(&harness.daemon, "team.get", &json!({}), "teamGetResult");
+        // The most agents a team may have is core's, so the page never keeps its own copy.
+        assert_eq!(got["max_agents"], json!(7), "{got}");
         assert_eq!(
             got["agents"],
             json!([
