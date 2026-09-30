@@ -6,7 +6,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use chrono::{DateTime, Utc};
-use farik_core::budget::{BudgetScope, SessionLedger, add_usage};
+use farik_core::budget::{BudgetScope, BudgetState, SessionLedger, add_usage};
 use farik_core::contract::{Role, TaskContract};
 use farik_core::governor::permissions::PermissionTier;
 use farik_core::pricing::Usage;
@@ -524,6 +524,12 @@ async fn read_to_end(
     };
     let mut ledger = SessionLedger::default();
     let mut stopped = false;
+    // The task's sessions crossed by this session, recorded once its end is known: a session the
+    // provider refused the key of is not the task's (5.5), and its end comes after its usage.
+    let mut sessions_crossed = None;
+    let record = |from: &BudgetState, to: &BudgetState| {
+        record_exhaustion(&tools.log, &tools.projections, from, to, ids, clock)
+    };
     loop {
         // Taken before the stop is read, so that a stop requested between the two still wakes
         // the wait below.
@@ -552,8 +558,14 @@ async fn read_to_end(
                     ..add_usage(&ledger, &usage, cost_usd)
                 };
                 let after = state(&ledger)?;
-                let now =
-                    record_exhaustion(&tools.log, &tools.projections, &before, &after, ids, clock)?;
+                let held = BudgetState {
+                    task_sessions: before.task_sessions,
+                    ..after
+                };
+                if held != after && sessions_crossed.is_none() {
+                    sessions_crossed = Some((held, after));
+                }
+                let now = record(&before, &held)?;
                 crossed.extend(now.iter().map(|exhausted| exhausted.scope));
                 // A task's last session and in-progress work past the sprint's budget may finish
                 // (5.5): what those stop is the next session and the next assignment.
@@ -570,7 +582,15 @@ async fn read_to_end(
                 reason,
                 detail,
                 resets_at,
-            }) => return Ok((reason, detail, resets_at)),
+            }) => {
+                if let Some((held, after)) = sessions_crossed
+                    && reason != EndReason::CredentialRefused
+                {
+                    let now = record(&held, &after)?;
+                    crossed.extend(now.iter().map(|exhausted| exhausted.scope));
+                }
+                return Ok((reason, detail, resets_at));
+            }
             Some(_) => {}
             None => {
                 return Ok((

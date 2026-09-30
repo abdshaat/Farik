@@ -5317,6 +5317,19 @@ mod tests {
 
     #[tokio::test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn says_no_session_was_spent_when_the_last_one_is_refused_its_key() {
+        let harness = Harness::new("orch-key-refused-last", |_| {});
+        in_progress_with_sessions(&harness, 2, 1);
+        let orchestrator = harness.orchestrator(harness.recorded(vec![credential_refused()]));
+
+        orchestrator.tick().await.expect("the tick runs");
+
+        assert_eq!(scopes_exhausted(&harness), vec![]);
+        assert_eq!(harness.row("FRK-1").status, TaskStatus::InProgress);
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn sleeps_an_hour_without_a_reset_time() {
         let harness = Harness::new("orch-sleep-hour", |_| {});
         harness.in_progress("FRK-1", "dev-a", "dev-b");
