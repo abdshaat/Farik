@@ -17,6 +17,7 @@ import {
 	sentCommand,
 	TASK,
 } from "../test/gate.ts";
+import { TEAM } from "../test/plan.ts";
 
 const PAGE = [
 	"team.get",
@@ -120,6 +121,16 @@ describe("task detail", () => {
 			"Notes",
 		]);
 		const panel = () => screen.getByRole("tabpanel");
+		// The tabs' keys: Home and End go to the first and the last.
+		fireEvent.keyDown(tabs[0] as HTMLElement, { key: "End" });
+		expect(screen.getByRole("tab", { selected: true }).textContent).toBe(
+			"Notes",
+		);
+		expect(document.activeElement?.textContent).toBe("Notes");
+		fireEvent.keyDown(tabs[4] as HTMLElement, { key: "Home" });
+		expect(screen.getByRole("tab", { selected: true }).textContent).toBe(
+			"Summary and checks",
+		);
 
 		// Summary and checks: what it is for, the latest summary signed, and each check's word.
 		expect(within(panel()).getByText(TASK.intent)).toBeTruthy();
@@ -152,7 +163,11 @@ describe("task detail", () => {
 		expect(within(panel()).getByText(/not locked yet/)).toBeTruthy();
 		expect(within(panel()).getByText("Gift cards bought online")).toBeTruthy();
 		expect(within(panel()).getByText("Printed gift cards")).toBeTruthy();
-		expect(within(panel()).getByText("Medium")).toBeTruthy();
+		expect(
+			within(panel()).getByText(
+				"Medium. The team may still accept it without you.",
+			),
+		).toBeTruthy();
 		expect(within(panel()).getByText("$14.00 for this task")).toBeTruthy();
 
 		// Code changes: the size, the branch, and the diff.
@@ -253,8 +268,22 @@ describe("task detail", () => {
 	});
 
 	it("offers_add_stop_and_cancel_when_they_apply", async () => {
-		// In review, with nobody working: no add, no stop; cancel asks for a reason.
-		let page = await opened();
+		// In review, with someone working on another task and a call for help on this one: no
+		// add, no stop; cancel asks for a reason.
+		let page = await opened(CONTRACT, [{ ...integration, kind: "help" }], {
+			"team.activity": {
+				activity: [
+					{
+						agent_id: "theo",
+						state: "working",
+						line: "Theo is building Receipts",
+						task_id: "FRK-9",
+						session_id: "s-9",
+						purpose: "implement",
+					},
+				],
+			},
+		});
 		const adding = await screen.findByRole("region", {
 			name: "Adding it to your project",
 		});
@@ -272,6 +301,10 @@ describe("task detail", () => {
 		const cancel = within(dialog).getByRole("button", {
 			name: "Cancel this task",
 		}) as HTMLButtonElement;
+		expect(cancel.disabled).toBe(true);
+		fireEvent.change(within(dialog).getByLabelText(/Why/), {
+			target: { value: "   " },
+		});
 		expect(cancel.disabled).toBe(true);
 		fireEvent.change(within(dialog).getByLabelText(/Why/), {
 			target: { value: "Not needed any more." },
@@ -325,6 +358,26 @@ describe("task detail", () => {
 		expect((await sentCommand(page.s)).params).toEqual({
 			command: { command: "task_integrate", body: { task_id: "FRK-1" } },
 		});
+		cleanup();
+
+		// Accepted and being added by Farik on its own, or through a pull request.
+		await opened({ ...CONTRACT, status: "accepted" });
+		expect(
+			await screen.findByText(
+				"Accepted. Farik adds it to your project on its own.",
+			),
+		).toBeTruthy();
+		cleanup();
+		await opened({ ...CONTRACT, status: "accepted" }, [], {
+			"team.get": {
+				team: { ...TEAM, policy: { integration: "pull_request" } },
+			},
+		});
+		expect(
+			await screen.findByText(
+				"Accepted. Farik opens a pull request for it, for you to merge.",
+			),
+		).toBeTruthy();
 		cleanup();
 
 		// Added already: the day it was added.

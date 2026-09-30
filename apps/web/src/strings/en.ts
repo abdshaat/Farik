@@ -756,6 +756,13 @@ export const en = {
 		"Once the task is accepted, Farik adds its changes to your main branch, one task at a time.",
 	taskAdd: "Add to the project",
 	taskAddNotYet: "Not yet: the task has not been accepted.",
+	taskAddOnItsOwn: "Accepted. Farik adds it to your project on its own.",
+	taskAddByPullRequest:
+		"Accepted. Farik opens a pull request for it, for you to merge.",
+	taskAddByHand: "Accepted. It waits for you to add it.",
+	riskLowWhy: "Low. The team may accept it without you.",
+	riskMediumWhy: "Medium. The team may still accept it without you.",
+	riskHighWhy: "High. You approve its plan, and you accept the work yourself.",
 	taskAdded: "Added on {day}.",
 	taskStop: "Stop work on this task",
 	taskCancel: "Cancel this task",

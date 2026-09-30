@@ -16,7 +16,7 @@ import {
 	type Tries,
 } from "./Gate.tsx";
 import own from "./PlanPage.module.css";
-import { type Contract, day, riskWord } from "./PlanPage.tsx";
+import { type Contract, day } from "./PlanPage.tsx";
 import styles from "./pages.module.css";
 import type { Team } from "./setup/TeamSetup.tsx";
 import page from "./TaskDetail.module.css";
@@ -221,10 +221,16 @@ export function TaskDetail() {
 	};
 
 	const onKey = (e: KeyboardEvent) => {
-		const step = { ArrowRight: 1, ArrowLeft: -1 }[e.key];
-		if (!step) return;
-		const next =
-			TABS[(TABS.indexOf(tab) + step + TABS.length) % TABS.length] ?? tab;
+		const at = TABS.indexOf(tab);
+		const to = {
+			ArrowRight: at + 1,
+			ArrowLeft: at - 1,
+			Home: 0,
+			End: TABS.length - 1,
+		}[e.key];
+		if (to === undefined) return;
+		e.preventDefault();
+		const next = TABS[(to + TABS.length) % TABS.length] ?? tab;
 		setTab(next);
 		document.getElementById(`tab-${next}`)?.focus();
 	};
@@ -311,7 +317,15 @@ export function TaskDetail() {
 						</ul>
 					</dd>
 					<dt>{t("taskRisk")}</dt>
-					<dd>{riskWord(contract.risk)}</dd>
+					<dd>
+						{t(
+							contract.risk === "low"
+								? "riskLowWhy"
+								: contract.risk === "high"
+									? "riskHighWhy"
+									: "riskMediumWhy",
+						)}
+					</dd>
 					<dt>{t("taskLimit")}</dt>
 					<dd>
 						{t("taskLimitFor").replace(
@@ -455,7 +469,17 @@ export function TaskDetail() {
 							</Button>
 						</div>
 					) : (
-						<p>{t("taskAddNotYet")}</p>
+						<p>
+							{t(
+								contract.status !== "accepted"
+									? "taskAddNotYet"
+									: team.team.policy.integration === "auto_merge"
+										? "taskAddOnItsOwn"
+										: team.team.policy.integration === "pull_request"
+											? "taskAddByPullRequest"
+											: "taskAddByHand",
+							)}
+						</p>
 					)}
 				</section>
 				{(session || cancellable) && (
