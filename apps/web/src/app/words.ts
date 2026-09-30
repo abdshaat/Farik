@@ -14,9 +14,8 @@ export function sentence(detail: string): string {
 export const codeOf = (e: unknown): string | undefined =>
 	(e as { data?: { errors?: { code?: string }[] } }).data?.errors?.[0]?.code;
 
-/** A role as a letter says it: the mockups' "Developer", every other role by its name. */
-export const roleWord = (role: Agent["role"]) =>
-	role === "software_developer" ? t("roleDeveloper") : uiStrings.roleName[role];
+/** A role as a letter says it (the mockups' "Developer"). */
+export const roleWord = (role: Agent["role"]) => uiStrings.roleName[role];
 
 /** The active agent in `role`, if the team has one. */
 export function active(agents: Agent[], role: Agent["role"]) {

@@ -24,4 +24,8 @@ describe("RoleTag", () => {
 			unmount();
 		}
 	});
+
+	it("says_developer_as_the_mockups_do", () => {
+		expect(uiStrings.roleName.software_developer).toBe("Developer");
+	});
 });

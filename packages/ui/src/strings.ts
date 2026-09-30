@@ -12,7 +12,7 @@ const roleName: Record<Role, string> = {
 	product_manager: "Product Manager",
 	scrum_master: "Scrum Master",
 	architect: "Architect",
-	software_developer: "Software Developer",
+	software_developer: "Developer",
 	marketing_specialist: "Marketing Specialist",
 };
 
