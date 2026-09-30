@@ -373,6 +373,8 @@ export const en = {
 	accountKeyRefused:
 		"The key did not work, so your team is paused. Connect your AI account again with a new key.",
 	accountConnectAgain: "Connect again",
+	accountKeyRefusedEnvironment:
+		"The key in {variable} did not work, so your team is paused. Change it where Farik runs, start Farik again, then press Resume.",
 	accountDisconnect: "Disconnect this account",
 	accountGone:
 		"Disconnected. The team is paused; start Farik again to connect another account.",

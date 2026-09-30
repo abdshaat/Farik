@@ -158,7 +158,17 @@ function Account() {
 	return (
 		<section className={styles.section} aria-labelledby="account-heading">
 			<h2 id="account-heading">{t("accountRow")}</h2>
-			{data?.keyRefused && <ConnectAgain onConnected={again} />}
+			{data?.keyRefused &&
+				(data.environmentVariable ? (
+					<p role="alert">
+						{t("accountKeyRefusedEnvironment").replace(
+							"{variable}",
+							data.environmentVariable,
+						)}
+					</p>
+				) : (
+					<ConnectAgain onConnected={again} />
+				))}
 			{data?.source && data.kind ? (
 				<>
 					<p>

@@ -765,6 +765,31 @@ describe("team page", () => {
 		expect(within(row).getByText(/your Claude subscription/)).toBeTruthy();
 	});
 
+	it("says_a_refused_key_from_the_environment_is_changed_where_farik_runs", async () => {
+		const { socket } = await renderApp("/settings");
+		const s = socket as FakeSocket;
+		await answerStatus(s, true);
+		await answerQuery(s, "account.status", {
+			provider: "anthropic",
+			kind: "api_key",
+			source: "environment",
+			environment_variable: "ANTHROPIC_API_KEY",
+			key_refused: true,
+		});
+		const row = await screen.findByRole("region", { name: en.accountRow });
+		expect(
+			await within(row).findByText(
+				en.accountKeyRefusedEnvironment.replace(
+					"{variable}",
+					"ANTHROPIC_API_KEY",
+				),
+			),
+		).toBeTruthy();
+		expect(
+			within(row).queryByRole("button", { name: en.accountConnectAgain }),
+		).toBeNull();
+	});
+
 	it("names_the_variable_a_key_from_the_environment_comes_from", async () => {
 		const { socket } = await renderApp("/settings");
 		const s = socket as FakeSocket;
