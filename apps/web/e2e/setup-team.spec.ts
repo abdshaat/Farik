@@ -43,8 +43,7 @@ test("the team's setup keeps the six, sets the rules, and starts them", async ({
 
 		await expect(page).toHaveURL(/\/setup\/team$/);
 		await screenshots(page, "setup-team");
-		// Six reads the general words until step 11 task 5 gives six its own.
-		await page.getByRole("button", { name: "Continue with this team" }).click();
+		await page.getByRole("button", { name: "Continue with these six" }).click();
 
 		await expect(page).toHaveURL(/\/setup\/permissions$/);
 		await page.getByLabel(/^Yes, the Developer and Architect may/).check();

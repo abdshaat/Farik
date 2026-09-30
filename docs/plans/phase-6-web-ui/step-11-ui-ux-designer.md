@@ -163,7 +163,7 @@ Tests, each also running axe:
 - `shows_the_designer_card_in_its_colour`: the card's role tag uses `--role-ui-ux-designer`, with the chosen avatar.
 - `shows_the_plan_waiting_for_the_product_manager`, then approved, then returned with its reason.
 
-- [ ] `feat(web): add the Designer to setup and the Team page, and show its plan`
+- [x] `feat(web): add the Designer to setup and the Team page, and show its plan`
 
 ### Task 6: Spec and plan
 

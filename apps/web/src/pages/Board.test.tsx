@@ -142,6 +142,7 @@ const SPRINTS = {
 async function board(
 	sprint: unknown = { sprint_id: "S2", done: 1, total: 3 },
 	tasks: object[] = TASKS,
+	activity: object = ACTIVITY,
 ) {
 	const { container, socket } = await renderApp("/board");
 	const s = socket as FakeSocket;
@@ -149,7 +150,7 @@ async function board(
 	await answerQuery(s, "team.get", { team: TEAM });
 	await answerQuery(s, "tasks.list", { tasks });
 	await answerQuery(s, "waiting.list", { waiting: WAITING });
-	await answerQuery(s, "team.activity", ACTIVITY);
+	await answerQuery(s, "team.activity", activity);
 	await answerQuery(s, "sprint.current", sprint);
 	// Until the sprints are listed, the next sprint's number is not known: nothing is drawn.
 	await act(async () => {});
@@ -238,6 +239,22 @@ describe("board", () => {
 		fireEvent.click(chip("Kai"));
 		expect(screen.getByText(en.laneEmpty)).toBeTruthy();
 		await expectNoAxeViolations(container);
+	});
+
+	it("says_planning_while_the_designer_explores", async () => {
+		media.set(WIDE, true);
+		const exploring = {
+			activity: [
+				{ ...ACTIVITY.activity[0], line: "Planning FRK-7", purpose: "explore" },
+			],
+		};
+		await board(undefined, TASKS, exploring);
+		const row = within(
+			screen.getByRole("region", { name: en.statusInProgress }),
+		)
+			.getByRole("link", { name: "Launch post" })
+			.closest("li") as HTMLElement;
+		expect(within(row).getByText(en.markPlanning)).toBeTruthy();
 	});
 
 	it("filters_the_board", async () => {

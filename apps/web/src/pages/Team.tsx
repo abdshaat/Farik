@@ -8,6 +8,7 @@ import { t } from "../strings/t.ts";
 import styles from "./pages.module.css";
 import {
 	type Agent,
+	ringOf,
 	roleName,
 	someone,
 	type Team as TeamFile,
@@ -19,6 +20,7 @@ const ROLES: Agent["role"][] = [
 	"product_manager",
 	"scrum_master",
 	"architect",
+	"ui_ux_designer",
 	"marketing_specialist",
 ];
 
@@ -102,6 +104,8 @@ export function Team() {
 	const status = useStatus();
 	if (!team) return null;
 	const agents = team.agents.filter((a) => a.status !== "retired");
+	const designer = agents.find((a) => a.role === "ui_ux_designer");
+	const developer = agents.find((a) => a.role === "software_developer");
 	return (
 		<div className={styles.page}>
 			<h1 className={styles.title}>{t("teamMembers")}</h1>
@@ -123,7 +127,14 @@ export function Team() {
 					return (
 						<li key={agent.id} className={styles.card}>
 							<div className={styles.cardHead}>
-								{avatar && <img className={styles.face} src={avatar} alt="" />}
+								{avatar && (
+									<img
+										className={styles.face}
+										style={ringOf(agent.role)}
+										src={avatar}
+										alt=""
+									/>
+								)}
 								<span>
 									<strong>{name}</strong> <RoleTag role={agent.role} />
 								</span>
@@ -165,9 +176,21 @@ export function Team() {
 			</section>
 			<section className={styles.section} aria-labelledby="cost-heading">
 				<h2 id="cost-heading">{t("teamCostTitle")}</h2>
-				<p>
-					{t("firstDay")} {t("teamCostNote")}
-				</p>
+				{designer && developer ? (
+					<p>
+						{t("teamCostDesigner", {
+							designer: designer.displayName,
+							developer: developer.displayName,
+						})}{" "}
+						{t("teamCostLimitBefore")}
+						<Link to="/costs">{t("costs")}</Link>
+						{t("teamCostLimitAfter")}
+					</p>
+				) : (
+					<p>
+						{t("firstDay")} {t("teamCostNote")}
+					</p>
+				)}
 			</section>
 		</div>
 	);

@@ -21,6 +21,7 @@ import { TEAM } from "../test/plan.ts";
 
 const PAGE = [
 	"team.get",
+	"task.get",
 	"contract.get",
 	"task.history",
 	"task.checks",
@@ -89,6 +90,7 @@ const opened = (
 		},
 		"team.activity": { activity: [] },
 		"task.costs": COSTS,
+		"task.get": { task: {}, design_plan: null },
 		...overrides,
 	});
 
@@ -250,6 +252,156 @@ describe("task detail", () => {
 		expect(told).toContain("Farik stopped a step Theo tried.");
 		expect(told).toContain("Ada sent it back.");
 		expect(new Set(told).size).toBe(KINDS.length);
+	});
+
+	it("shows_the_plan_waiting_for_the_product_manager", async () => {
+		const PLAN =
+			"The menu is hard to use on a phone. I will make the prices easy to see.\n\nWhat I will leave alone: the order page.";
+		const proposed = event(
+			11,
+			"design_plan.proposed",
+			{ plan: PLAN },
+			"2026-09-30T09:52:00Z",
+			"iris",
+		);
+		const decided = (kind: string, reason: string, seq = 12) =>
+			event(seq, kind, { reason }, "2026-09-30T10:14:00Z", "mira");
+		const open = (designPlan: object, extra: object[] = []) =>
+			opened(
+				{
+					...CONTRACT,
+					status: "in_progress",
+					assignee: "iris",
+					assignee_role: "ui_ux_designer",
+				},
+				[],
+				{
+					"team.get": {
+						team: {
+							...TEAM,
+							agents: [
+								...TEAM.agents,
+								{
+									id: "iris",
+									display_name: "Iris",
+									role: "ui_ux_designer",
+									avatar: "extra-1",
+									status: "active",
+								},
+							],
+						},
+					},
+					"task.history": { events: [...HISTORY, proposed, ...extra] },
+					"task.get": { task: {}, design_plan: designPlan },
+				},
+			);
+		const panel = () => screen.getByRole("tabpanel");
+		const toPlan = async () => {
+			fireEvent.click(await screen.findByRole("tab", { name: "The plan" }));
+			return panel();
+		};
+
+		// Proposed: the Product Manager decides; the person need do nothing.
+		const first = await open({ plan: PLAN, state: "proposed" });
+		const heading = await screen.findByRole("heading", {
+			level: 1,
+			name: "Gift cards",
+		});
+		expect(
+			within(heading.parentElement as HTMLElement).getByText(
+				"Waiting for Mira to approve the plan",
+			),
+		).toBeTruthy();
+		let plan = await toPlan();
+		expect(
+			within(plan).getByText(
+				"Iris looked at your app and wrote this. Iris changes nothing until Mira approves it.",
+			),
+		).toBeTruthy();
+		expect(
+			within(plan).getByText(
+				"Mira checks that the plan does what the task asks, and nothing more. You do not need to do anything.",
+			),
+		).toBeTruthy();
+		expect(
+			within(plan).getByText(
+				"Iris wrote this plan on Wednesday 30 September at 09:52",
+			),
+		).toBeTruthy();
+		expect(
+			within(plan).getByText(
+				"The menu is hard to use on a phone. I will make the prices easy to see.",
+			),
+		).toBeTruthy();
+		expect(
+			within(plan).getByText("What I will leave alone: the order page."),
+		).toBeTruthy();
+		// The task's own plan is still there, under the Designer's.
+		expect(within(plan).getByText("Gift cards bought online")).toBeTruthy();
+		await expectNoAxeViolations(first.container);
+		// The history says it in words, and a Designer's work is on a feature branch.
+		fireEvent.click(screen.getByRole("tab", { name: "History" }));
+		expect(within(panel()).getByText("Iris wrote a plan.")).toBeTruthy();
+		fireEvent.click(screen.getByRole("tab", { name: "Code changes" }));
+		expect(
+			within(panel()).getByText(/on the branch feature\/FRK-1\./),
+		).toBeTruthy();
+		cleanup();
+
+		// Approved: being built, with the Product Manager's reason.
+		await open(
+			{
+				plan: PLAN,
+				state: "approved",
+				reason: "It keeps to the task. Go ahead.",
+			},
+			[decided("design_plan.approved", "It keeps to the task. Go ahead.")],
+		);
+		expect(await screen.findByText(en.designBeingBuilt)).toBeTruthy();
+		plan = await toPlan();
+		expect(
+			within(plan).getByText(
+				"Mira approved the plan on Wednesday 30 September at 10:14",
+			),
+		).toBeTruthy();
+		expect(
+			within(plan).getByText("“It keeps to the task. Go ahead.”"),
+		).toBeTruthy();
+		fireEvent.click(screen.getByRole("tab", { name: "History" }));
+		expect(
+			within(panel()).getByText("Mira approved Iris’s plan."),
+		).toBeTruthy();
+		cleanup();
+
+		// Returned: its reason, and how many more may be sent back.
+		const returned = await open(
+			{
+				plan: PLAN,
+				state: "returned",
+				reason: "Keep the descriptions whole.",
+			},
+			[decided("design_plan.returned", "Keep the descriptions whole.")],
+		);
+		expect(await screen.findByText(en.designSentBack)).toBeTruthy();
+		plan = await toPlan();
+		expect(
+			within(plan).getByText(
+				"Mira sent the plan back on Wednesday 30 September at 10:14",
+			),
+		).toBeTruthy();
+		expect(
+			within(plan).getByText("“Keep the descriptions whole.”"),
+		).toBeTruthy();
+		expect(
+			within(plan).getByText(
+				"Plans sent back: 1 of 3. If 3 are sent back, Farik stops the task and asks you.",
+			),
+		).toBeTruthy();
+		await expectNoAxeViolations(returned.container);
+		fireEvent.click(screen.getByRole("tab", { name: "History" }));
+		expect(
+			within(panel()).getByText("Mira sent Iris’s plan back."),
+		).toBeTruthy();
 	});
 
 	it("says_what_each_risk_means", async () => {

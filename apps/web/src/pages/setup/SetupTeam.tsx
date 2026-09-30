@@ -5,12 +5,12 @@ import { useConnection } from "../../app/connection.tsx";
 import { type Refusal, refusalsOf, said } from "../../app/refusals.ts";
 import { t } from "../../strings/t.ts";
 import styles from "./setup.module.css";
-import { roleName, someone, teamOf, useSetup } from "./TeamSetup.tsx";
+import { ringOf, roleName, someone, teamOf, useSetup } from "./TeamSetup.tsx";
 import { Wizard } from "./Wizard.tsx";
 
 type Checked = { errors: Refusal[] };
 
-/** Setup's fifth step: the five suggested agents, named, and any second Developer. */
+/** Setup's fifth step: the six suggested agents, named, and any second Developer. */
 export function SetupTeam() {
 	const { client } = useConnection();
 	const navigate = useNavigate();
@@ -98,7 +98,14 @@ export function SetupTeam() {
 								aria-label={t("teamInclude").replace("{role}", role)}
 								onChange={(e) => set(index, { on: e.target.checked })}
 							/>
-							{avatar && <img className={styles.face} src={avatar} alt="" />}
+							{avatar && (
+								<img
+									className={styles.face}
+									style={ringOf(agent.role)}
+									src={avatar}
+									alt=""
+								/>
+							)}
 							<span className={styles.who}>
 								<label htmlFor={nameId}>{role}</label>
 								<input
@@ -139,7 +146,7 @@ export function SetupTeam() {
 					disabled={on.length === 0}
 					onClick={onward}
 				>
-					{t(on.length === 5 ? "teamContinueFive" : "teamContinue")}
+					{t(on.length === 6 ? "teamContinueSix" : "teamContinue")}
 				</Button>
 			</div>
 		</Wizard>

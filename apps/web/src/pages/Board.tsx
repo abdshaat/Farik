@@ -42,6 +42,7 @@ const DOING: Record<string, keyof typeof en> = {
 	refine: "markWriting",
 	implement: "markBuilding",
 	verify: "markReviewing",
+	explore: "markPlanning",
 };
 
 type SprintPick = "all" | "this" | "none";

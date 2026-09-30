@@ -42,6 +42,12 @@ type Activity = {
 	taskId?: string;
 	sessionId?: string;
 };
+/** The Designer's latest plan and the Product Manager's decision on it, as `task.get` answers it. */
+type DesignPlan = {
+	plan: string;
+	state: "proposed" | "approved" | "returned";
+	reason?: string;
+};
 type Costs = {
 	byPurpose: { words: string; usd: number }[];
 	totalUsd: number;
@@ -86,6 +92,9 @@ const TOLD: Record<string, keyof typeof en> = {
 	"drift.detected": "toldDrift",
 	"message.posted": "toldSaid",
 	"tool.denied": "toldDenied",
+	"design_plan.proposed": "toldDesignProposed",
+	"design_plan.approved": "toldDesignApproved",
+	"design_plan.returned": "toldDesignReturned",
 };
 
 /** The body fields that name who did it, one per kind that has one. */
@@ -126,6 +135,10 @@ export function TaskDetail() {
 		{},
 	);
 	const { data: costs } = useQuery<Costs>("task.costs", task);
+	const { data: detail } = useQuery<{ designPlan: DesignPlan | null }>(
+		"task.get",
+		task,
+	);
 	const [tab, setTab] = useState<Tab>("summary");
 	const [cancelling, setCancelling] = useState(false);
 	const { busy, refusal, send } = useCommand(() => {});
@@ -138,7 +151,8 @@ export function TaskDetail() {
 		!tries ||
 		!waiting ||
 		!activity ||
-		!costs
+		!costs ||
+		!detail
 	)
 		return null;
 
@@ -194,9 +208,32 @@ export function TaskDetail() {
 		contract.status !== "accepted" && contract.status !== "cancelled";
 	// The branch as `farik_core::branch::task_branch` names it.
 	const branch =
-		contract.assigneeRole === "software_developer"
+		contract.assigneeRole === "software_developer" ||
+		contract.assigneeRole === "ui_ux_designer"
 			? `${contract.change === "fix" ? "fix" : "feature"}/${id}`
 			: `docs/${id}`;
+
+	const design = detail.designPlan;
+	const proposal = events.findLast((e) => e.kind === "design_plan.proposed");
+	const decision = events.findLast(
+		(e) =>
+			e.kind === "design_plan.approved" || e.kind === "design_plan.returned",
+	);
+	const designer = nameOf(proposal?.agentId ?? contract.assignee);
+	const pm = nameOf(
+		decision?.agentId ??
+			agents.find((a) => a.role === "product_manager" && a.status === "active")
+				?.id,
+	);
+	const when = (e?: Event) =>
+		e ? { day: day(e.recordedAt), time: e.recordedAt.slice(11, 16) } : {};
+	// The plan's state stands for the task's while the Designer's task is being worked on.
+	const designWord =
+		design &&
+		contract.status === "in_progress" &&
+		(design.state === "proposed"
+			? t("designWaiting", { pm })
+			: t(design.state === "approved" ? "designBeingBuilt" : "designSentBack"));
 
 	const told = (e: Event) => {
 		const actor =
@@ -210,7 +247,7 @@ export function TaskDetail() {
 					? "toldApproved"
 					: "toldAccepted"
 				: (TOLD[e.kind] ?? "toldOther");
-		return t(key)
+		return t(key, { designer: nameOf(proposal?.agentId) })
 			.replace("{who}", nameOf(actor))
 			.replace(
 				"{status}",
@@ -292,6 +329,53 @@ export function TaskDetail() {
 		plan: (
 			<>
 				<h2>{t("tabPlan")}</h2>
+				{design && (
+					<>
+						<p className={styles.muted}>{t("designLead", { designer, pm })}</p>
+						<article className={own.letter}>
+							{design.state === "proposed" ? (
+								<>
+									<p>
+										<strong>{t("designWaiting", { pm })}</strong>
+									</p>
+									<p>{t("designWaitingNote", { pm })}</p>
+								</>
+							) : (
+								<>
+									<p>
+										<strong>
+											{t(
+												design.state === "approved"
+													? "designApproved"
+													: "designReturned",
+												{ pm, ...when(decision) },
+											)}
+										</strong>
+									</p>
+									{design.reason && <p>{`“${design.reason}”`}</p>}
+									{design.state === "returned" && (
+										<p>
+											{t("designReturns", {
+												n: events.filter(
+													(e) => e.kind === "design_plan.returned",
+												).length,
+												of: tries.of - 1,
+											})}
+										</p>
+									)}
+								</>
+							)}
+						</article>
+						<article className={own.letter}>
+							<p className={styles.muted}>
+								{t("designWrote", { designer, ...when(proposal) })}
+							</p>
+							{design.plan.split(/\n\s*\n/).map((part) => (
+								<p key={part}>{part}</p>
+							))}
+						</article>
+					</>
+				)}
 				<p>
 					{approved
 						? t("taskPlanApproved").replace("{day}", day(approved.recordedAt))
@@ -392,7 +476,7 @@ export function TaskDetail() {
 									: "working"
 						}
 					>
-						{statusWord(contract.status)}
+						{designWord || statusWord(contract.status)}
 					</StatusWord>
 					<p className={styles.muted}>{lead}</p>
 				</div>

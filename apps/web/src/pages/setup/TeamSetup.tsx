@@ -1,5 +1,5 @@
 import { Button, type Role } from "@farik/ui";
-import { useState } from "react";
+import { type CSSProperties, useState } from "react";
 import { Outlet, useNavigate, useOutletContext } from "react-router";
 import { useConnection } from "../../app/connection.tsx";
 import { saidAll } from "../../app/refusals.ts";
@@ -58,6 +58,8 @@ type Setup = { draft: Draft; change: (next: Draft) => void };
 
 /** The names "Add someone" suggests, in order, each with its picture. */
 const SPARE = ["Noor", "Ivo", "Lena", "Sami", "Rui"];
+/** The pictures added agents draw from: extra-1 is Iris's and extra-4 the Finance Specialist's (F10). */
+const EXTRAS = ["extra-2", "extra-3", "extra-5"];
 
 /** The team the draft stands for: the agents on it, each with an id from its name. */
 export function teamOf(draft: Draft): Team {
@@ -83,7 +85,10 @@ export function someone(agents: Agent[], like: Agent): Agent {
 		...like,
 		id: slug(name),
 		displayName: name,
-		avatar: `extra-${(index < 0 ? 0 : index) + 1}`,
+		// Once all three are taken, they are shared again (the team holds seven at most).
+		avatar:
+			EXTRAS.find((key) => !agents.some((a) => a.avatar === key)) ??
+			`extra-${[2, 3, 5][agents.length % 3]}`,
 	};
 }
 
@@ -179,4 +184,12 @@ export function roleName(role: Role): string {
 			} as const
 		)[role],
 	);
+}
+
+/** A face's ring in its role's tag colour, as the mockups draw it: the CSS reads `--ring`. */
+export function ringOf(role: Role): CSSProperties {
+	const token = role === "software_developer" ? "developer" : role;
+	return {
+		"--ring": `var(--farik-color-role-${token.replaceAll("_", "-")})`,
+	} as CSSProperties;
 }

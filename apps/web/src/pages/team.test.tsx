@@ -1,3 +1,4 @@
+import { AVATAR_URLS } from "@farik/ui";
 import { expectNoAxeViolations } from "@farik/ui/test";
 import {
 	act,
@@ -73,13 +74,13 @@ const MODELS = {
 	],
 };
 
-/** Opens `path` with the team and the models answered. */
-async function opened(path: string) {
+/** Opens `path` with `team` and the models answered. */
+async function opened(path: string, team: object = TEAM) {
 	const { container, socket } = await renderApp(path);
 	const s = socket as FakeSocket;
 	await answerStatus(s, false);
 	await answerQuery(s, "team.get", {
-		team: TEAM,
+		team,
 		agents: EFFECTIVE,
 		judges: JUDGES,
 		max_agents: 7,
@@ -188,6 +189,53 @@ describe("team page", () => {
 				command: "agent_update",
 				body: { agent_id: "theo", status: "paused" },
 			},
+		});
+	});
+
+	it("shows_the_designer_card_in_its_colour", async () => {
+		const { container, s } = await opened("/team", {
+			...TEAM,
+			agents: [
+				...TEAM.agents.slice(0, 4),
+				agent("iris", "Iris", "ui_ux_designer", "extra-1"),
+				...TEAM.agents.slice(4),
+			],
+		});
+		const list = await screen.findByRole("list", { name: en.teamMembers });
+		const card = within(list)
+			.getByText("Iris persona")
+			.closest("li") as HTMLElement;
+		const tag = within(card).getByTitle("UI/UX Designer");
+		expect(tag.textContent).toBe("UX");
+		expect(tag.className).toMatch(/uiUxDesigner/);
+		const face = card.querySelector("img") as HTMLImageElement;
+		expect(face.getAttribute("src")).toBe(AVATAR_URLS["extra-1"]);
+		expect(face.style.getPropertyValue("--ring")).toBe(
+			"var(--farik-color-role-ui-ux-designer)",
+		);
+		// The cost section says what a sixth agent, and its plans, add.
+		expect(
+			screen.getByText(
+				"Iris uses the same model as Theo, so a sixth agent adds to what a day costs. Before Iris changes a screen, Iris looks at it and writes a plan, and that costs a little too.",
+				{ exact: false },
+			),
+		).toBeTruthy();
+		const cost = screen.getByRole("region", { name: en.teamCostTitle });
+		expect(
+			within(cost).getByRole("link", { name: "Costs" }).getAttribute("href"),
+		).toBe("/costs");
+		await expectNoAxeViolations(container);
+
+		// Add someone offers the Designer, with a picture nobody on the team has.
+		fireEvent.change(screen.getByLabelText(en.teamAddRole), {
+			target: { value: "ui_ux_designer" },
+		});
+		fireEvent.click(screen.getByRole("button", { name: en.teamAdd }));
+		const team = await saved(s);
+		expect(team.agents.at(-1)).toMatchObject({
+			display_name: "Noor",
+			role: "ui_ux_designer",
+			avatar: "extra-2",
 		});
 	});
 

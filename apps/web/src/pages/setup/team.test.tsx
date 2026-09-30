@@ -1,3 +1,4 @@
+import { AVATAR_URLS } from "@farik/ui";
 import { expectNoAxeViolations } from "@farik/ui/test";
 import {
 	cleanup,
@@ -36,6 +37,7 @@ const FIVE = [
 	agent("theo", "Theo", "software_developer", "developer"),
 	agent("kai", "Kai", "marketing_specialist", "marketing-specialist"),
 ];
+const IRIS = agent("iris", "Iris", "ui_ux_designer", "extra-1");
 const TESTS_PASS = {
 	name: "the-tests-pass",
 	text: "Every test passes: pnpm test.",
@@ -217,7 +219,7 @@ describe("team setup", () => {
 			}),
 			{ target: { value: "Theo" } },
 		);
-		fireEvent.click(screen.getByRole("button", { name: en.teamContinueFive }));
+		fireEvent.click(screen.getByRole("button", { name: en.teamContinue }));
 		const validate = await asked(s, "team.validate");
 		const team = (validate.params.params as { team: { agents: never[] } }).team;
 		expect(
@@ -254,7 +256,7 @@ describe("team setup", () => {
 		expect(ada?.contains(why)).toBe(true);
 		expect(screen.queryByRole("heading", { name: en.mayTitle })).toBeNull();
 
-		fireEvent.click(screen.getByRole("button", { name: en.teamContinueFive }));
+		fireEvent.click(screen.getByRole("button", { name: en.teamContinue }));
 		await waitFor(() =>
 			expect(
 				s.calls("query").filter((f) => f.params.name === "team.validate"),
@@ -269,6 +271,73 @@ describe("team setup", () => {
 		expect(
 			await screen.findByRole("heading", { name: en.mayTitle }),
 		).toBeTruthy();
+	});
+
+	it("offers_the_designer_among_the_six", async () => {
+		const { container, socket } = await renderApp("/setup/team");
+		const s = socket as FakeSocket;
+		await answerQuery(
+			s,
+			"team.propose",
+			proposed((team) => {
+				team.agents = [...FIVE.slice(0, 4), IRIS, ...FIVE.slice(4)];
+			}),
+		);
+		expect(await screen.findByText(en.teamLead)).toBeTruthy();
+		expect(en.teamLead).toMatch(/^We suggest six, one for each job\./);
+		const list = await screen.findByRole("list", { name: en.teamMembers });
+		expect(within(list).getAllByRole("listitem")).toHaveLength(6);
+		const include = screen.getByRole("checkbox", {
+			name: "Include UI/UX Designer",
+		}) as HTMLInputElement;
+		expect(include.checked).toBe(true);
+		expect(
+			(
+				screen.getByRole("textbox", {
+					name: "Name for the UI/UX Designer",
+				}) as HTMLInputElement
+			).value,
+		).toBe("Iris");
+		const face = include.closest("li")?.querySelector("img") as HTMLElement;
+		expect(face.getAttribute("src")).toBe(AVATAR_URLS["extra-1"]);
+		expect(face.style.getPropertyValue("--ring")).toBe(
+			"var(--farik-color-role-ui-ux-designer)",
+		);
+		await expectNoAxeViolations(container);
+
+		// Added agents never take Iris's picture, nor the Finance Specialist's.
+		fireEvent.click(screen.getByRole("button", { name: en.teamAdd }));
+		fireEvent.click(screen.getByRole("button", { name: en.teamAdd }));
+		fireEvent.click(screen.getByRole("button", { name: en.teamAdd }));
+		fireEvent.click(screen.getByRole("button", { name: en.teamAdd }));
+		const faces = within(list)
+			.getAllByRole("listitem")
+			.slice(6)
+			.map((row) => row.querySelector("img")?.getAttribute("src"));
+		expect(faces.slice(0, 3)).toEqual([
+			AVATAR_URLS["extra-2"],
+			AVATAR_URLS["extra-3"],
+			AVATAR_URLS["extra-5"],
+		]);
+		for (const taken of ["extra-1", "extra-4"] as const)
+			expect(faces).not.toContain(AVATAR_URLS[taken]);
+		for (const added of within(list).getAllByRole("checkbox").slice(6))
+			fireEvent.click(added);
+
+		expect(
+			screen.getByRole("button", { name: "Continue with these six" }),
+		).toBeTruthy();
+		fireEvent.click(include);
+		fireEvent.click(screen.getByRole("button", { name: en.teamContinue }));
+		const validate = await asked(s, "team.validate");
+		const team = (validate.params.params as { team: { agents: never[] } }).team;
+		expect(team.agents.map((a: { id: string }) => a.id)).toEqual([
+			"mira",
+			"sol",
+			"ada",
+			"theo",
+			"kai",
+		]);
 	});
 
 	it("adds_from_the_spare_names_without_mixing_rows_up", async () => {
