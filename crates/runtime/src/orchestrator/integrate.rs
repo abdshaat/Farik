@@ -680,7 +680,7 @@ pub(super) fn cleanup(
 
 /// Removes a finished task's sandbox and worktrees when either worktree is still there, and says
 /// whether it removed them. The containers go by name, since after a restart no handle reaches
-/// them; then the base worktree; then the task's own worktree last, so that a run stopped in
+/// them; then the browser's folder and the base worktree; then the task's own worktree last, so that a run stopped in
 /// between leaves it, which is what brings this back.
 ///
 /// Containers that cannot be removed (docker is down) leave the worktrees as they are, so that
@@ -704,6 +704,22 @@ pub(super) fn remove_workspace(
     {
         // ponytail: nothing reports the failure; the board shows the task's worktree kept.
         return Ok(false);
+    }
+    // What the task's browser sessions saved (step 12), before the worktree that brings this back.
+    let browser = deps
+        .tools
+        .files
+        .root()
+        .join(".farik/local/browser")
+        .join(task_id.as_str());
+    match std::fs::remove_dir_all(&browser) {
+        Err(error) if error.kind() != std::io::ErrorKind::NotFound => {
+            return Err(OrchestratorError::Files(FilesError::Io {
+                path: browser.display().to_string(),
+                detail: error.to_string(),
+            }));
+        }
+        _ => {}
     }
     remove_worktree(&deps.tools.git, &base)?;
     remove_worktree(&deps.tools.git, &own)?;

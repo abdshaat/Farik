@@ -1783,6 +1783,15 @@ mod tests {
         orchestrator
             .sandbox_for(&"FRK-1".parse().expect("a task id"), &team)
             .expect("a sandbox is made");
+        // What the task's browser sessions saved goes with the task.
+        let browser = harness
+            .project
+            .deps
+            .files
+            .root()
+            .join(".farik/local/browser/FRK-1");
+        std::fs::create_dir_all(browser.join("s-1/.cache")).expect("the folder is made");
+        std::fs::write(browser.join("s-1/page.png"), "png").expect("written");
 
         let report = orchestrator.tick().await.expect("the tick runs");
 
@@ -1790,6 +1799,7 @@ mod tests {
         assert_eq!(sandboxes.removed("FRK-1"), 1);
         assert!(!harness.worktree("FRK-1").exists());
         assert!(!base.exists());
+        assert!(!browser.exists());
         let listed = worktrees_listed(&harness);
         assert!(!listed.contains("FRK-1"), "{listed}");
         assert_eq!(
