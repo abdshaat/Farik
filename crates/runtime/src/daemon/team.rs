@@ -190,7 +190,7 @@ fn newest(deps: &ToolDeps) -> Result<Vec<(String, &'static str)>, Failure> {
                     Some((version, id))
                 })
                 .max()
-                .map(|(_, id)| (id.to_string(), *label))
+                .map(|(_, id)| (id.clone(), *label))
         })
         .collect())
 }
@@ -218,8 +218,8 @@ fn effective(deps: &ToolDeps, team: &Team) -> Result<Value, Failure> {
             let role = load_role(Role::from(agent.role)).map_err(|e| internal(&e))?;
             let (model, effort) = session_model(agent, &role);
             let mut bare = agent.clone();
-            bare.grants = Default::default();
-            bare.revokes = Default::default();
+            bare.grants = None;
+            bare.revokes = None;
             Ok(json!({
                 "id": agent.id,
                 "model": { "id": model, "label": model_label(&model, &newest), "effort": effort },
