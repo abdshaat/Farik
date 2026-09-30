@@ -7,6 +7,7 @@ import {
 	within,
 } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { en } from "../strings/en.ts";
 import type { FakeSocket } from "../test/fake-socket.ts";
 import { CONTRACT, TEAM } from "../test/plan.ts";
 import { answerQuery, answerStatus, renderApp } from "../test/render-app.tsx";
@@ -292,5 +293,32 @@ describe("plan editor", () => {
 		).toBe("Customers can give a gift card and use it.");
 		expect(screen.queryByText(/while you were editing/)).toBeNull();
 		await expectNoAxeViolations(container);
+	});
+
+	it("saves_in_place_while_refining", async () => {
+		const { s } = await opened({ ...CONTRACT, status: "refining" });
+		// Without Advanced, no check can become a command Farik runs.
+		expect(
+			await screen.findAllByRole("radio", { name: en.criterionReview }),
+		).not.toHaveLength(0);
+		expect(
+			screen.queryByRole("radio", { name: en.criterionCommand }),
+		).toBeNull();
+
+		fireEvent.change(screen.getByLabelText(en.fieldBudget), {
+			target: { value: "20" },
+		});
+		fireEvent.click(screen.getByRole("button", { name: "Save" }));
+		const save = await waitFor(() => {
+			const c = s.calls("contract.save")[0];
+			if (!c) throw new Error("nothing was saved");
+			return c;
+		});
+		// The budget goes as a number.
+		expect(
+			(save.params as { contract: { budget: object } }).contract.budget,
+		).toEqual({ max_cost_usd: 20 });
+		act(() => s.reply(save, { saved: true, back_to_refining: false }));
+		expect((await screen.findByRole("status")).textContent).toBe(en.saved);
 	});
 });

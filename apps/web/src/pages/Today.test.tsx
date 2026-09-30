@@ -225,6 +225,24 @@ describe("today", () => {
 				.filter((q) => q.params.name === "task.checks")
 				.map((q) => q.params.params),
 		).toEqual([{ task_id: "FRK-2" }]);
+		// Once one check fails, the row no longer says they passed.
+		act(() => s.event(40));
+		const checks = () =>
+			s.calls("query").filter((q) => q.params.name === "task.checks");
+		await waitFor(() => expect(checks()).toHaveLength(2));
+		act(() =>
+			s.reply(checks()[1] as never, {
+				checks: [
+					{ criterion_id: "c1", text: "check 1", passed: true },
+					{ criterion_id: "c2", text: "check 2", passed: false },
+				],
+			}),
+		);
+		await waitFor(() =>
+			expect(
+				within(rows[1] as HTMLElement).queryByText(/checks passed/),
+			).toBeNull(),
+		);
 		await expectNoAxeViolations(container);
 	});
 

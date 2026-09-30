@@ -79,4 +79,39 @@ describe("send back dialog", () => {
 		);
 		await expectNoAxeViolations(container);
 	});
+
+	it("sends_something_else_as_no_criterion", async () => {
+		const { s } = await openedGate("/tasks/FRK-1/accept", [
+			"team.get",
+			"contract.get",
+			"task.history",
+			"task.checks",
+			"task.diff",
+			"task.tries",
+			"waiting.list",
+		]);
+		fireEvent.click(
+			await screen.findByRole("button", { name: "Send back with a note" }),
+		);
+		const dialog = await screen.findByRole("dialog");
+		fireEvent.click(within(dialog).getByLabelText("Something else"));
+		fireEvent.change(within(dialog).getByLabelText(/Your note to Theo/), {
+			target: { value: "The colours are wrong." },
+		});
+		fireEvent.click(
+			within(dialog).getByRole("button", { name: "Send back to Theo" }),
+		);
+		// The schema needs the list, empty or not.
+		expect((await sentCommand(s)).params).toEqual({
+			command: {
+				command: "human_send_back",
+				body: {
+					task_id: "FRK-1",
+					subject: "result",
+					message: "The colours are wrong.",
+					failed_criteria: [],
+				},
+			},
+		});
+	});
 });
