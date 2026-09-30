@@ -145,7 +145,7 @@ RPC queries: `task.costs`, `sprints.list`, `sprint.get`, `costs.summary`, `metri
 - `starts_and_ends_a_sprint_from_the_board`: the dialogs send their commands; the budget is null for "No limit".
 - `orders_the_rail`: the five places, and the phone's four.
 
-- [ ] `feat(web): add the board, with lanes, filters and sprint controls`
+- [x] `feat(web): add the board, with lanes, filters and sprint controls`
 
 ### Task 3: Task detail
 

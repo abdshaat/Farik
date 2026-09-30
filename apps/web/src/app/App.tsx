@@ -1,5 +1,6 @@
 import { Navigate, Route, Routes } from "react-router";
 import { AgentEdit } from "../pages/AgentEdit.tsx";
+import { Board } from "../pages/Board.tsx";
 import { Connect } from "../pages/Connect.tsx";
 import { Events } from "../pages/Events.tsx";
 import { Gate } from "../pages/Gate.tsx";
@@ -54,6 +55,7 @@ export function App() {
 			</Route>
 			<Route element={<Shell />}>
 				<Route index element={<Today />} />
+				<Route path="/board" element={<Board />} />
 				<Route path="/events" element={<Events />} />
 				<Route path="/requests/:id" element={<RequestFiled />} />
 				<Route path="/tasks/:id/questions" element={<Questions />} />

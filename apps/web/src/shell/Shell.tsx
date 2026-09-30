@@ -1,5 +1,5 @@
 import { useSyncExternalStore } from "react";
-import { Navigate, NavLink, Outlet, useLocation } from "react-router";
+import { Link, Navigate, NavLink, Outlet, useLocation } from "react-router";
 import { useConnection } from "../app/connection.tsx";
 import { landing } from "../app/landing.ts";
 import { type ServeStatus, useQuery } from "../app/store.ts";
@@ -15,8 +15,17 @@ function subscribe(changed: () => void) {
 	return () => query.removeEventListener("change", changed);
 }
 
+/** The rail's places, in order (step 09's plan; step 10 adds Channel after Board). */
+const PLACES = [
+	["/", "today"],
+	["/board", "board"],
+	["/team", "team"],
+	["/costs", "costs"],
+	["/settings", "settings"],
+] as const;
+
 /** Whether the screen is 1024 px or wider: the rail, else the top and bottom bars. */
-function useWide(): boolean {
+export function useWide(): boolean {
 	return useSyncExternalStore(subscribe, () => matchMedia(WIDE).matches);
 }
 
@@ -24,25 +33,23 @@ export function Shell() {
 	const wide = useWide();
 	const { status } = useConnection();
 	const { data } = useQuery<ServeStatus>("serve.status", {});
-	const home = useLocation().pathname === "/";
+	const path = useLocation().pathname;
+	const home = path === "/";
 	// "/" shows nothing, and asks nothing of the project, until Farik says where it stands.
 	if (!data && home) return null;
 	// During setup, every path goes where "/" would.
 	if (data && landing(data) !== "/")
 		return <Navigate to={landing(data)} replace />;
+	// Settings sits under Team on a phone (web-ui.md), so the bar has four places.
 	const places = (
 		<ul className={styles.places}>
-			<li>
-				<NavLink to="/" end>
-					{t("today")}
-				</NavLink>
-			</li>
-			<li>
-				<NavLink to="/team">{t("team")}</NavLink>
-			</li>
-			<li>
-				<NavLink to="/settings">{t("settings")}</NavLink>
-			</li>
+			{PLACES.filter(([to]) => wide || to !== "/settings").map(([to, word]) => (
+				<li key={to}>
+					<NavLink to={to} end={to === "/"}>
+						{t(word)}
+					</NavLink>
+				</li>
+			))}
 		</ul>
 	);
 	const pause = data && <PauseControl paused={data.paused} short={!wide} />;
@@ -75,6 +82,9 @@ export function Shell() {
 					</p>
 				)}
 				<Outlet />
+				{!wide && path.startsWith("/team") && (
+					<Link to="/settings">{t("settings")}</Link>
+				)}
 			</main>
 			{!wide && (
 				<nav aria-label={t("navBar")} className={styles.bar}>

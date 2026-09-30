@@ -35,9 +35,43 @@ describe("shell", () => {
 
 		act(() => media.set(WIDE, false));
 		const bar = screen.getByRole("navigation", { name: en.navBar });
-		for (const name of [en.today, en.settings])
+		for (const name of [en.today, en.team])
 			expect(within(bar).getByRole("link", { name })).toBeTruthy();
 		expect(screen.queryByRole("navigation", { name: en.navRail })).toBeNull();
+		await expectNoAxeViolations(container);
+	});
+
+	it("orders_the_rail", async () => {
+		media.set(WIDE, true);
+		const { container, socket } = await renderApp("/team");
+		if (!socket) throw new Error("no socket");
+		await answerStatus(socket, false);
+		const rail = await screen.findByRole("navigation", { name: en.navRail });
+		const words = (nav: HTMLElement) =>
+			within(nav)
+				.getAllByRole("link")
+				.map((a) => [a.textContent, a.getAttribute("href")]);
+		expect(words(rail)).toEqual([
+			[en.today, "/"],
+			[en.board, "/board"],
+			[en.team, "/team"],
+			[en.costs, "/costs"],
+			[en.settings, "/settings"],
+		]);
+		await expectNoAxeViolations(container);
+
+		// On a phone, the bar has four places, and Settings sits under Team.
+		act(() => media.set(WIDE, false));
+		const bar = screen.getByRole("navigation", { name: en.navBar });
+		expect(words(bar)).toEqual([
+			[en.today, "/"],
+			[en.board, "/board"],
+			[en.team, "/team"],
+			[en.costs, "/costs"],
+		]);
+		expect(
+			screen.getByRole("link", { name: en.settings }).getAttribute("href"),
+		).toBe("/settings");
 		await expectNoAxeViolations(container);
 	});
 
