@@ -14,7 +14,7 @@ use farik_store::{CostScope, CostWindow, EventQuery, HarnessMetrics, TaskProject
 use serde_json::{Value, json};
 
 use super::web::{Failure, INTERNAL_ERROR, NOT_FOUND, UNKNOWN_QUERY};
-use crate::chat::chat_page;
+use crate::chat::{ChatWaiting, chat_page, chat_waiting};
 use crate::tools::ToolDeps;
 
 /// The queries this module answers.
@@ -314,7 +314,20 @@ fn chat_messages(deps: &ToolDeps, params: &Value) -> Result<Value, Failure> {
             _ => None,
         })
         .collect();
-    Ok(json!({ "messages": messages }))
+    let team = deps.files.read_team().map_err(|e| internal(&e))?;
+    let waiting = chat_waiting(
+        &deps.log,
+        &deps.projections,
+        &team,
+        params["agent_id"].as_str().unwrap_or_default(),
+        deps.clock.now(),
+    )
+    .map_err(|e| internal(&e))?
+    .map(|waiting| match waiting {
+        ChatWaiting::Asleep { until } => json!({ "because": waiting.because(), "until": until }),
+        _ => json!({ "because": waiting.because() }),
+    });
+    Ok(json!({ "messages": messages, "waiting": waiting }))
 }
 
 /// `{ seq, at, author, text }` of a message in the channel or in a chat.
@@ -442,6 +455,7 @@ fn metrics_wire(metrics: &HarnessMetrics) -> Value {
 
 #[cfg(test)]
 mod tests {
+    use farik_core::team::AgentStatus;
     use farik_protocol::event::{EventKind, NewEvent, event_from_value};
     use serde_json::{Value, json};
 
@@ -1196,5 +1210,142 @@ mod tests {
                 ],
             })
         );
+    }
+
+    /// What `chat.messages` says `agent`'s chat waits on.
+    fn waiting(harness: &Harness, agent: &str) -> Value {
+        query(
+            &harness.daemon,
+            "chat.messages",
+            &json!({ "agent_id": agent }),
+            "chatMessagesResult",
+        )["waiting"]
+            .clone()
+    }
+
+    /// `agent`'s chat session `session` answering `in_reply_to`: its start, and its end when it
+    /// ended.
+    fn chat_session(harness: &Harness, agent: &str, session: &str, in_reply_to: u64, ended: bool) {
+        let envelope = json!({
+            "seq": 1, "recorded_at": at().to_rfc3339(), "team_id": "farik", "project_id": "farik",
+            "agent_id": agent, "session_id": session,
+        });
+        let mut started = envelope.clone();
+        started["kind"] = json!("session.started");
+        started["body"] = json!({
+            "purpose": "chat", "model": "claude-opus-5", "effort": "low",
+            "in_reply_to": in_reply_to, "chat": agent,
+        });
+        put(harness, &started);
+        if ended {
+            let mut end = envelope;
+            end["kind"] = json!("session.ended");
+            end["body"] = json!({ "reason": "completed", "detail": "" });
+            put(harness, &end);
+        }
+    }
+
+    /// Runs one tick with `transcripts` and answers how many sessions it started.
+    fn tick_with(harness: &Harness, transcripts: Vec<crate::recorded::Transcript>) -> usize {
+        let adapter = harness.recorded(transcripts);
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("a runtime is made")
+            .block_on(harness.orchestrator(adapter.clone()).tick())
+            .expect("the tick runs");
+        adapter.started().len()
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn says_why_a_chat_waits() {
+        let harness = Harness::new("board-chat-waits", |_| {});
+        assert_eq!(waiting(&harness, "dev-a"), Value::Null);
+        let asked = chatted(&harness, "dev-a", "human", "Status?", None);
+        let answering = json!({ "because": "answering" });
+        assert_eq!(waiting(&harness, "dev-a"), answering);
+        // While its session runs, and until the reply.
+        chat_session(&harness, "dev-a", "session-1", asked, false);
+        assert_eq!(waiting(&harness, "dev-a"), answering);
+        chatted(&harness, "dev-a", "dev-a", "On it.", Some(asked));
+        assert_eq!(waiting(&harness, "dev-a"), Value::Null);
+        chat_session(&harness, "dev-a", "session-1", asked, true);
+        assert_eq!(waiting(&harness, "dev-a"), Value::Null);
+
+        // Each reason in turn, the later ones first in precedence.
+        chatted(&harness, "dev-a", "human", "And now?", None);
+        assert_eq!(waiting(&harness, "dev-a"), answering);
+        harness.asleep("dev-a", at() + chrono::Duration::hours(1));
+        assert_eq!(
+            waiting(&harness, "dev-a"),
+            json!({ "because": "asleep", "until": "2026-09-22T13:00:00Z" })
+        );
+        // Asleep, its chat starts no session.
+        assert_eq!(
+            tick_with(
+                &harness,
+                vec![crate::recorded::fixtures::chat_answers_with_a_request()]
+            ),
+            0
+        );
+        harness.spent(None, "s-0", 20.0);
+        assert_eq!(
+            waiting(&harness, "dev-a"),
+            json!({ "because": "day_spent" })
+        );
+        // dev-b is awake: the spent day alone keeps its chat from starting a session.
+        chatted(&harness, "dev-b", "human", "Status?", None);
+        assert_eq!(
+            waiting(&harness, "dev-b"),
+            json!({ "because": "day_spent" })
+        );
+        assert_eq!(
+            tick_with(
+                &harness,
+                vec![crate::recorded::fixtures::chat_answers_with_a_request()]
+            ),
+            0
+        );
+        harness.project.record(
+            "",
+            "team.paused",
+            &json!({ "by": "farik", "reason": "credential_refused", "detail": "401" }),
+        );
+        assert_eq!(
+            waiting(&harness, "dev-a"),
+            json!({ "because": "key_refused" })
+        );
+        let files = &harness.project.deps.files;
+        let mut team = files.read_team().expect("the team");
+        for agent in &mut team.agents {
+            if agent.id.as_str() == "dev-a" {
+                agent.status = AgentStatus::Retired;
+            }
+        }
+        files.write_team(&team).expect("the team is written");
+        assert_eq!(waiting(&harness, "dev-a"), json!({ "because": "retired" }));
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn says_no_answer_after_a_failed_session() {
+        let harness = Harness::new("board-chat-no-answer", |_| {});
+        chatted(&harness, "dev-a", "human", "Status?", None);
+        // A session that ends without farik_chat_reply: its note is not one of a chat's tools.
+        let answer_nothing = crate::recorded::fixtures::review_answers_nothing;
+        assert_eq!(tick_with(&harness, vec![answer_nothing()]), 1);
+        assert_eq!(
+            waiting(&harness, "dev-a"),
+            json!({ "because": "no_answer" })
+        );
+        // No second session until the user writes again.
+        assert_eq!(tick_with(&harness, vec![answer_nothing()]), 0);
+        chatted(&harness, "dev-a", "human", "Status, please?", None);
+        assert_eq!(
+            waiting(&harness, "dev-a"),
+            json!({ "because": "answering" })
+        );
+        assert_eq!(tick_with(&harness, vec![answer_nothing()]), 1);
     }
 }

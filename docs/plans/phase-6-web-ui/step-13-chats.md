@@ -19,6 +19,12 @@ As built (Task 3, 2026-09-30):
 - `session.started`'s `chat` is `sessions.rs`' own, from the spec's purpose and agent; `team.activity`'s line is `farik-store`'s `activity.rs`, where every line is worded.
 - The daily budget and sleep are checked by the rule as the conversation's are; their tests are Task 4's `says_why_a_chat_waits`.
 
+As built (Task 4, 2026-09-30):
+- `tools::may_work(status, purpose)` is the one active check the hook's `judge` and `call_tool` share: `active`, or `paused` in a `chat` session. The chat rule reads every agent not retired. `rules::chat_alone` is the chat rule as `tick_within` runs it while the team is paused and `pause::key_refused` is false.
+- `ChatWaiting` gains `NoAnswer`; `chat::chat_waiting(log, projections, team, agent_id, now)` answers it when the user wrote last, and `cost::day_spent` is the spent-day check it shares with the rules' `day_is_spent`. A session is running while its `chat` `session.started` has no `session.ended` of its session id.
+- Pausing an agent still stops every session of its, a chat session among them (`update_agent_with`): the message is then `no_answer`, and the user asks again. Kept, as 4.4's "at once" reads.
+- `wakes_serve_on_a_chat` is in `daemon.rs` (`POST /command`), with the team paused, so "within one tick" is the next tick answering.
+
 Signatures, not bodies; test names and what each asserts, not test code; around 300 lines at most (ADR 0008).
 
 ## Goal
@@ -192,7 +198,7 @@ Consumes Task 3's rule. Tests:
 - `says_no_answer_after_a_failed_session` — a chat session that ends without `farik_chat_reply` leaves `waiting: no_answer`, and no second session starts until the user writes again.
 - `wakes_serve_on_a_chat` — `chat_message_post` through the daemon wakes a waiting `farik serve` loop within one tick.
 
-- [ ] `feat(runtime): answer chats while the team is paused`
+- [x] `feat(runtime): answer chats while the team is paused`
 
 ### Task 5: Conversations on the Costs page's figures
 

@@ -219,7 +219,7 @@ fn judge(
         .iter()
         .find(|agent| agent.id.as_str() == registration.agent_id)
     {
-        Some(agent) if agent.status == AgentStatus::Active => {}
+        Some(agent) if crate::tools::may_work(agent.status, registration.purpose) => {}
         found => {
             let status = found.map(|agent| agent.status);
             return Err(Denial {

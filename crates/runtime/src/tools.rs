@@ -329,6 +329,13 @@ pub fn tool_descriptors() -> Vec<FarikTool> {
     TOOLS.clone()
 }
 
+/// Whether an agent of `status` works in a session for `purpose`: an active agent in any, and a
+/// paused one in its chat alone, since a paused agent still answers its chat (ADR 0026).
+pub(crate) fn may_work(status: AgentStatus, purpose: SessionPurpose) -> bool {
+    status == AgentStatus::Active
+        || (status == AgentStatus::Paused && purpose == SessionPurpose::Chat)
+}
+
 /// Runs one tool for the session `context` names. The agent must be an active agent of the team,
 /// hold the tool's tier with the paths the call touches allowed (`evaluate_tool_call`, asked here
 /// as well as in the hook because the endpoint is reachable by anything holding the daemon's
@@ -356,7 +363,7 @@ pub async fn call_tool(
         .iter()
         .find(|agent| agent.id.as_str() == context.agent_id)
     {
-        Some(agent) if agent.status == AgentStatus::Active => agent.clone(),
+        Some(agent) if may_work(agent.status, context.purpose) => agent.clone(),
         found => {
             return Err(Refusal::AgentNotActive {
                 agent_id: context.agent_id.clone(),

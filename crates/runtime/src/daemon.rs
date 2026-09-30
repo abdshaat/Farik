@@ -1036,6 +1036,57 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn wakes_serve_on_a_chat() {
+        use crate::orchestrator::{TickReport, Waited};
+        use crate::tools::fixtures::at;
+
+        let harness = Harness::new("daemon-chat-wakes", |_| {});
+        // Paused by the human: `farik serve` waits, and a chat is answered all the same.
+        harness
+            .project
+            .record("", "team.paused", &json!({ "by": "human" }));
+        let orchestrator = Arc::new(harness.orchestrator(harness.recorded(vec![
+            crate::recorded::fixtures::chat_answers_with_a_request(),
+        ])));
+        assert!(
+            harness
+                .daemon
+                .set_command_handler(command_handler(Arc::clone(&orchestrator)))
+        );
+        let idle = orchestrator.tick().await.expect("the tick runs");
+        assert!(matches!(idle, TickReport::Idle { .. }), "{idle:?}");
+
+        let (ended, answer) = tokio::join!(
+            tokio::time::timeout(
+                std::time::Duration::from_secs(5),
+                orchestrator.wait_until(at() + chrono::Duration::hours(1)),
+            ),
+            async {
+                tokio::task::yield_now().await;
+                router(harness.daemon.clone(), TOKEN, CancellationToken::new())
+                    .oneshot(post(
+                        "/command",
+                        Some(TOKEN),
+                        &json!({ "command": "chat_message_post",
+                                 "body": { "agent_id": "dev-a", "text": "Status?" } }),
+                    ))
+                    .await
+                    .expect("the router answers")
+            }
+        );
+
+        let body = body_of(answer).await;
+        assert!(body["said"].is_string(), "{body}");
+        assert_eq!(ended.expect("the wait ends"), Waited::Woken);
+        let next = orchestrator.tick().await.expect("the tick runs");
+        assert!(
+            matches!(&next, TickReport::Chat { agent_id, .. } if agent_id == "dev-a"),
+            "{next:?}"
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn finishes_a_command_whose_client_went_away() {
         use std::sync::atomic::{AtomicBool, Ordering};
         use std::time::{Duration, Instant};

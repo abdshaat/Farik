@@ -12,7 +12,7 @@ use farik_core::governor::gates::fits_the_open_sprint;
 use farik_core::governor::task_status::is_terminal;
 use farik_core::governor::transition::TransitionRequest;
 use farik_core::governor::transition_table::TransitionActor;
-use farik_core::team::{Agent, Team};
+use farik_core::team::{Agent, AgentStatus, Team};
 use farik_protocol::event::{
     EscalationAgedBody, EventBody, EventIds, EventKind, FarikEvent, Thread, new_event,
 };
@@ -567,17 +567,8 @@ fn day_is_spent(
     role: Role,
     day_spent: &mut bool,
 ) -> Result<bool, OrchestratorError> {
-    let state = budget_state(
-        &deps.tools.projections,
-        team,
-        role,
-        None,
-        &SessionLedger::default(),
-        deps.tools.clock.now(),
-    )?;
-    let spent = check_budgets(&state)
-        .iter()
-        .any(|exhausted| exhausted.scope == BudgetScope::DayUsd);
+    let spent =
+        crate::cost::day_spent(&deps.tools.projections, team, role, deps.tools.clock.now())?;
     *day_spent |= spent;
     Ok(spent)
 }
@@ -605,10 +596,22 @@ pub(super) const CHAT_TOOLS: &[&str] = &[
     "farik_chat_reply",
 ];
 
-/// The chat rule, first of all (ADR 0026): the oldest pending chat of an active agent, awake, on a
-/// day whose budget is not spent, gets one `chat` session about no task, on the read tier alone
-/// and `CHAT_TOOLS`, to answer the user's newest message. It is about no one task, so it runs only
-/// under `All` in a tick scoped to none.
+/// The chat rule alone, as a paused team runs it (ADR 0026): a chat is answered while the team is
+/// paused.
+pub(super) async fn chat_alone(
+    orchestrator: &Orchestrator,
+    scope: &TickScope,
+) -> Result<Option<TickReport>, OrchestratorError> {
+    let deps = &orchestrator.deps;
+    deps.tools.projections.catch_up()?;
+    let team = deps.tools.files.read_team()?;
+    chat(deps, scope, &team, &mut Waiting::default()).await
+}
+
+/// The chat rule, first of all (ADR 0026): the oldest pending chat of an agent not retired (a
+/// paused agent still answers its chat), awake, on a day whose budget is not spent, gets one
+/// `chat` session about no task, on the read tier alone and `CHAT_TOOLS`, to answer the user's
+/// newest message. It is about no one task, so it runs only under `All` in a tick scoped to none.
 async fn chat(
     deps: &OrchestratorDeps,
     scope: &TickScope,
@@ -620,7 +623,11 @@ async fn chat(
     }
     let log = &deps.tools.log;
     let mut pending = Vec::new();
-    for agent in team.active_agents() {
+    for agent in team
+        .agents
+        .iter()
+        .filter(|agent| agent.status != AgentStatus::Retired)
+    {
         if let Some(seq) = crate::chat::pending_chat(log, agent.id.as_str())? {
             pending.push((seq, agent));
         }
@@ -7219,5 +7226,140 @@ mod tests {
                 .expect("the notebook reads")
                 .is_empty()
         );
+    }
+
+    /// Every chat reply `agent` wrote.
+    fn replies_of(harness: &Harness, agent: &str) -> usize {
+        harness
+            .events(&[EventKind::ChatMessagePosted])
+            .into_iter()
+            .filter(|event| {
+                matches!(&event.body, EventBody::ChatMessagePosted(body) if body.author == agent)
+            })
+            .count()
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn answers_while_the_team_is_paused() {
+        let harness = Harness::new("orch-chat-paused-team", |_| {});
+        // Planning would run first on a team at work: a paused one runs the chat rule alone.
+        harness.ready("FRK-1");
+        chatted(&harness, "dev-a", "human", "Status?", None);
+        let adapter = harness.recorded(vec![chat_answers_with_a_request(), plan_assigns_frk_1()]);
+        let orchestrator = harness.orchestrator(adapter.clone());
+        orchestrator
+            .handle(Command::TeamPause)
+            .await
+            .expect("the pause is handled");
+
+        let first = orchestrator.tick().await.expect("the tick runs");
+
+        assert!(
+            matches!(&first, TickReport::Chat { agent_id, .. } if agent_id == "dev-a"),
+            "{first:?}"
+        );
+        assert_eq!(replies_of(&harness, "dev-a"), 1);
+        let second = orchestrator.tick().await.expect("the tick runs");
+        assert_eq!(
+            second,
+            TickReport::Idle {
+                why: "the team is paused; farik resume starts it again".to_string(),
+                until: None
+            }
+        );
+        assert_eq!(adapter.started().len(), 1, "{:?}", adapter.started());
+
+        // A key the provider refused answers no chat either.
+        harness.project.record(
+            "",
+            "team.paused",
+            &json!({ "by": "farik", "reason": "credential_refused", "detail": "401" }),
+        );
+        chatted(&harness, "dev-a", "human", "Still there?", None);
+        let refused = orchestrator.tick().await.expect("the tick runs");
+        assert!(matches!(&refused, TickReport::Idle { .. }), "{refused:?}");
+        assert_eq!(adapter.started().len(), 1, "{:?}", adapter.started());
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn a_paused_agent_answers_its_chat() {
+        use crate::daemon::{HookRequest, SessionRegistration, decide_pre_tool_use};
+
+        let harness = Harness::new("orch-chat-paused-agent", |wire| {
+            wire["agents"][1]["status"] = json!("paused");
+            wire["agents"].as_array_mut().expect("agents").push(json!({
+                "id": "old", "display_name": "Old", "role": "software_developer",
+                "status": "retired",
+            }));
+        });
+        // The retired agent's message is the older, so it would be answered first if it could be.
+        chatted(&harness, "old", "human", "Still there?", None);
+        chatted(&harness, "dev-a", "human", "Status?", None);
+        let adapter = harness.recorded(vec![
+            chat_answers_with_a_request(),
+            chat_answers_with_a_request(),
+        ]);
+        let orchestrator = harness.orchestrator(adapter.clone());
+
+        let report = orchestrator.tick().await.expect("the tick runs");
+
+        // The reply went through the hook and `call_tool`, both of which let it by.
+        assert!(
+            matches!(&report, TickReport::Chat { agent_id, .. } if agent_id == "dev-a"),
+            "{report:?}"
+        );
+        assert_eq!(replies_of(&harness, "dev-a"), 1);
+        // The retired agent's chat starts no session.
+        let again = orchestrator.tick().await.expect("the tick runs");
+        assert!(!matches!(&again, TickReport::Chat { .. }), "{again:?}");
+        assert_eq!(adapter.started().len(), 1, "{:?}", adapter.started());
+        assert_eq!(replies_of(&harness, "old"), 0);
+
+        // Any other session of the paused agent is still refused, by the hook and by the tool.
+        harness.daemon.register_session(SessionRegistration {
+            session_id: "session-implement".to_string(),
+            agent_id: "dev-a".to_string(),
+            task_id: None,
+            purpose: SessionPurpose::Implement,
+            in_reply_to: None,
+            thread: None,
+            cwd: harness.project.repo.path.clone(),
+            executor: None,
+            limits: farik_core::budget::DEFAULT_SESSION_LIMITS,
+            farik_tools: vec!["farik_read_board".to_string()],
+            tiers: vec![PermissionTier::Read],
+            connectors: Vec::new(),
+            preview: None,
+        });
+        let decision = decide_pre_tool_use(
+            &HookRequest {
+                session_id: "session-implement".to_string(),
+                cwd: harness.project.repo.path.clone(),
+                hook_event_name: "PreToolUse".to_string(),
+                tool_name: "mcp__farik__farik_read_board".to_string(),
+                tool_input: json!({}),
+                tool_use_id: None,
+                tool_response: None,
+                duration_ms: None,
+            },
+            &harness.daemon,
+        );
+        assert!(
+            !decision.allow && decision.reason.starts_with("agent_not_active"),
+            "{decision:?}"
+        );
+        let mut context = harness.project.context("dev-a", None);
+        let refused = crate::tools::call_tool(&context, "farik_read_board", json!({}))
+            .await
+            .expect_err("a paused agent's implement session is refused");
+        assert!(
+            refused.to_string().contains("agent_not_active"),
+            "{refused:?}"
+        );
+        context.purpose = SessionPurpose::Chat;
+        let read = crate::tools::call_tool(&context, "farik_read_board", json!({})).await;
+        assert!(read.is_ok(), "{read:?}");
     }
 }

@@ -3853,11 +3853,28 @@
       }
     },
     "chatMessagesResult": {
-      "description": "One page of the agent's chat_message.posted, oldest first within the page: seq and at from the envelope, and the body's author, text (line breaks kept), in_reply_to and request, null when it has none.",
+      "description": "One page of the agent's chat_message.posted, oldest first within the page: seq and at from the envelope, and the body's author, text (line breaks kept), in_reply_to and request, null when it has none. waiting says why the user's newest message has no answer yet, null when the agent answered or nobody wrote; when several reasons apply the first wins: retired, key_refused (the team is paused because the provider refused the key), day_spent (the team's daily budget; the message is kept), asleep with until, answering (a session answers or is about to), no_answer (a session ended without a reply: the user asks again). No event is written for a chat that did not run (ADR 0026).",
       "type": "object",
       "additionalProperties": false,
-      "required": ["messages"],
+      "required": ["messages", "waiting"],
       "properties": {
+        "waiting": {
+          "oneOf": [
+            { "type": "null" },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["because"],
+              "properties": {
+                "because": {
+                  "type": "string",
+                  "enum": ["retired", "key_refused", "day_spent", "asleep", "answering", "no_answer"]
+                },
+                "until": { "type": "string", "format": "date-time" }
+              }
+            }
+          ]
+        },
         "messages": {
           "type": "array",
           "items": {

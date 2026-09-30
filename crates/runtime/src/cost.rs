@@ -187,6 +187,30 @@ pub fn unpriced_models(
     Ok(unpriced)
 }
 
+/// Whether the team's daily budget is spent at `now`, for a session of `role` about no task.
+///
+/// # Errors
+///
+/// `Store` when the costs cannot be read.
+pub fn day_spent(
+    projections: &Projections,
+    team: &Team,
+    role: Role,
+    now: DateTime<Utc>,
+) -> Result<bool, CostError> {
+    let state = budget_state(
+        projections,
+        team,
+        role,
+        None,
+        &SessionLedger::default(),
+        now,
+    )?;
+    Ok(check_budgets(&state)
+        .iter()
+        .any(|exhausted| exhausted.scope == BudgetScope::DayUsd))
+}
+
 /// Everything `check_budgets` needs for one session, read from the projections at `now`.
 ///
 /// The session limits are the role's defaults with each field `team.budgets.session` sets put in

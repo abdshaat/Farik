@@ -1,16 +1,23 @@
 //! One-to-one chats (`docs/SPEC.md` 4.3, 5.9; ADR 0026): what the user and one agent said to each
 //! other, kept in the log as `chat_message.posted` and never in the team's channel.
 
+use std::collections::BTreeSet;
 use std::num::NonZeroU64;
+
+use chrono::{DateTime, Utc};
+use farik_core::contract::Role;
+use farik_core::team::{AgentStatus, Team};
 
 use farik_protocol::clock::Clock;
 use farik_protocol::event::{
     ChatMessagePostedBody, EventBody, EventIds, EventKind, FarikEvent, SessionStartedBodyPurpose,
     new_event,
 };
-use farik_store::{EventLog, EventQuery, StoreError};
+use farik_store::{EventLog, EventQuery, Projections, StoreError};
 use schemars::JsonSchema;
 use serde::Deserialize;
+
+use crate::cost::CostError;
 
 /// The most a chat message's text or a proposed request's text holds, in code points.
 pub const CHAT_TEXT_MAX: usize = 4_000;
@@ -207,6 +214,116 @@ pub fn pending_chat(log: &EventLog, agent_id: &str) -> Result<Option<u64>, Store
     Ok(answered
         .is_none_or(|answered| newest > answered)
         .then_some(newest))
+}
+
+/// Why the user's newest message in a chat has no answer yet (ADR 0026).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ChatWaiting {
+    /// The agent has retired; its chat is read-only.
+    Retired,
+    /// The model provider refused the AI account's key, and the team is paused for it.
+    KeyRefused,
+    /// The team's daily budget is spent: the message is kept, and answered another day.
+    DaySpent,
+    /// The agent sleeps until its model provider's limit resets.
+    Asleep {
+        /// When it wakes.
+        until: DateTime<Utc>,
+    },
+    /// A session is answering, or is about to.
+    Answering,
+    /// A session ran and ended without a reply: the user asks again.
+    NoAnswer,
+}
+
+impl ChatWaiting {
+    /// The reason as the wire words it.
+    #[must_use]
+    pub fn because(&self) -> &'static str {
+        match self {
+            Self::Retired => "retired",
+            Self::KeyRefused => "key_refused",
+            Self::DaySpent => "day_spent",
+            Self::Asleep { .. } => "asleep",
+            Self::Answering => "answering",
+            Self::NoAnswer => "no_answer",
+        }
+    }
+}
+
+/// Why `agent_id`'s chat waits, when the user wrote last; the first reason that applies, in the
+/// order of `ChatWaiting`. `None` when the agent answered, or nobody wrote.
+///
+/// # Errors
+///
+/// `CostError` when the log or the costs cannot be read.
+pub fn chat_waiting(
+    log: &EventLog,
+    projections: &Projections,
+    team: &Team,
+    agent_id: &str,
+    now: DateTime<Utc>,
+) -> Result<Option<ChatWaiting>, CostError> {
+    let newest = log
+        .read(&EventQuery {
+            agent_id: Some(agent_id.to_string()),
+            kinds: vec![EventKind::ChatMessagePosted],
+            newest_first: true,
+            limit: Some(1),
+            ..EventQuery::default()
+        })?
+        .into_iter()
+        .next();
+    let user_wrote_last = newest.is_some_and(
+        |event| matches!(&event.body, EventBody::ChatMessagePosted(body) if body.author == HUMAN),
+    );
+    let Some(agent) = team
+        .agents
+        .iter()
+        .find(|agent| agent.id.as_str() == agent_id)
+    else {
+        return Ok(None);
+    };
+    if !user_wrote_last {
+        return Ok(None);
+    }
+    if agent.status == AgentStatus::Retired {
+        return Ok(Some(ChatWaiting::Retired));
+    }
+    if crate::pause::key_refused(log)? {
+        return Ok(Some(ChatWaiting::KeyRefused));
+    }
+    if crate::cost::day_spent(projections, team, Role::from(agent.role), now)? {
+        return Ok(Some(ChatWaiting::DaySpent));
+    }
+    if let Some(until) = crate::sleep::asleep_until(log, agent_id, now)? {
+        return Ok(Some(ChatWaiting::Asleep { until }));
+    }
+    if pending_chat(log, agent_id)?.is_some() || chat_session_runs(log, agent_id)? {
+        return Ok(Some(ChatWaiting::Answering));
+    }
+    Ok(Some(ChatWaiting::NoAnswer))
+}
+
+/// Whether a chat session of `agent_id` started and has not ended.
+fn chat_session_runs(log: &EventLog, agent_id: &str) -> Result<bool, StoreError> {
+    let mut running = BTreeSet::new();
+    for event in log.read(&EventQuery {
+        agent_id: Some(agent_id.to_string()),
+        kinds: vec![EventKind::SessionStarted, EventKind::SessionEnded],
+        ..EventQuery::default()
+    })? {
+        match &event.body {
+            EventBody::SessionStarted(body) if body.purpose == SessionStartedBodyPurpose::Chat => {
+                running.insert(event.envelope.ids.session_id);
+            }
+            EventBody::SessionEnded(_) => {
+                running.remove(&event.envelope.ids.session_id);
+            }
+            _ => {}
+        }
+    }
+    Ok(!running.is_empty())
 }
 
 /// Who the user is in a chat.

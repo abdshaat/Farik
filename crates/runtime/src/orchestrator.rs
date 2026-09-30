@@ -451,7 +451,15 @@ impl Orchestrator {
     ///
     /// As `tick`.
     pub async fn tick_within(&self, scope: &TickScope) -> Result<TickReport, OrchestratorError> {
-        if crate::pause::paused(&self.deps.tools.log)? {
+        let log = &self.deps.tools.log;
+        if crate::pause::paused(log)? {
+            // A paused team still answers its chats (ADR 0026), unless the provider refused the
+            // key, with which no chat can be answered either.
+            if !crate::pause::key_refused(log)?
+                && let Some(report) = rules::chat_alone(self, scope).await?
+            {
+                return Ok(report);
+            }
             return Ok(TickReport::Idle {
                 why: "the team is paused; farik resume starts it again".to_string(),
                 until: None,
