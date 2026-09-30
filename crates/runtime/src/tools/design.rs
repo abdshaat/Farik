@@ -5,9 +5,7 @@
 
 use farik_core::contract::{Role, TaskId};
 use farik_core::governor::permissions::{PermissionTier, check_design_plan};
-use farik_protocol::event::{
-    DesignPlanDecidedBody, DesignPlanProposedBody, EventBody, EventKind, FarikEvent,
-};
+use farik_protocol::event::{DesignPlanProposedBody, EventBody, EventKind, FarikEvent, ReasonBody};
 use farik_store::{EventLog, EventQuery, StoreError};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -205,7 +203,7 @@ pub(super) fn decide(call: &Call<'_>, input: DecideDesignPlanInput) -> Result<Va
     if !waiting {
         return Err(refused("the task has no plan waiting for a decision"));
     }
-    let body = DesignPlanDecidedBody {
+    let body = ReasonBody {
         reason: input.reason,
     };
     let event = call.append(

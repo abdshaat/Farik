@@ -184,7 +184,7 @@ Tests:
 - `validates_the_preview_and_the_connectors`: the bounds on `prepare`, `start`, `port` and `path`; `unknown_connector: selenium` on any agent's list; every existing fixture still validates.
 - `reads_the_new_events`: each new body, and the `preview` reason, round-trips through `event.schema.json`.
 
-- [ ] `feat(core): add previews, ui changes, connector checks and the design review rule`
+- [x] `feat(core): add previews, ui changes, connector checks and the design review rule`
 
 ### Task 2: The connector base: definition, preview, launch, and the hook
 

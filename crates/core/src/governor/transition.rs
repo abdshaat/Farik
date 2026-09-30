@@ -124,6 +124,10 @@ pub struct TransitionContext {
     /// How many times the Product Manager returned the task's design plans (ADR 0026), which count
     /// against the same limit as rejections.
     pub design_plan_returns: u32,
+    /// The UI/UX Designer whose latest design review since the task entered `verifying` failed
+    /// (F9), set by the runtime only then: that agent may ask for `verifying -> rejected` as the
+    /// reviewer does.
+    pub design_reviewer: Option<String>,
 }
 
 /// What the runtime must record along with the move.
@@ -251,7 +255,13 @@ pub fn evaluate_transition(
     if is_named_by_the_contract(request.actor) {
         let named = named_agent(request.actor, &context.contract);
         let named_id = trimmed(named);
-        if named_id.is_none() || named_id != trimmed(request.agent_id.as_deref()) {
+        let asked = trimmed(request.agent_id.as_deref());
+        // F9: a UI change's Designer rejects it as the reviewer does, and does nothing else.
+        let the_designer_rejects = request.actor == TransitionActor::Reviewer
+            && request.to == TaskStatus::Rejected
+            && asked.is_some()
+            && trimmed(context.design_reviewer.as_deref()) == asked;
+        if !the_designer_rejects && (named_id.is_none() || named_id != asked) {
             return Err(TransitionRefusal::NotTheNamedAgent {
                 actor: request.actor,
                 named: named.map(str::to_string),
@@ -695,12 +705,13 @@ mod tests {
     use crate::contract::{Role, TaskStatus};
     use crate::generated::task_contract::FarikTaskContractKind as Kind;
     use crate::generated::task_contract::FarikTaskContractRisk as Risk;
-    use crate::governor::done::{CriterionResult, DoneEvidence, RunBy};
+    use crate::governor::done::{CriterionResult, DesignReviewNeed, DoneEvidence, RunBy};
     use crate::governor::escalation::{
         DEFAULT_BLOCKED_LIMIT, EscalationReason as Why, RejectionOutcome,
     };
     use crate::governor::gates::{
-        AssignmentInput, AssignmentRequester, Blocker, ChildState, Rejection, WorkState,
+        AssignmentInput, AssignmentRequester, Blocker, ChildState, DesignerBrowser, Rejection,
+        WorkState,
     };
     use crate::governor::readiness::fixtures::{a_contract, a_ready_context};
     use crate::governor::transition_table::{
@@ -728,6 +739,7 @@ mod tests {
             task_sprint: None,
             parent_sprint: None,
             dependencies: Vec::new(),
+            designer_browser: DesignerBrowser::Ready,
         }
     }
 
@@ -791,6 +803,7 @@ mod tests {
                 review_note: Some("C1: cargo test, 11 passed.".to_string()),
                 human_accepted: false,
                 protected_paths: Vec::new(),
+                design_review: DesignReviewNeed::NotNeeded,
             },
             rejection: Some(Rejection {
                 failed_criterion_ids: vec!["C1".to_string()],
@@ -803,6 +816,7 @@ mod tests {
             review_passed: true,
             extra_iterations: 0,
             design_plan_returns: 0,
+            design_reviewer: None,
         }
     }
 
@@ -949,6 +963,64 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn lets_the_designer_reject_a_ui_change() {
+        // F9: the runtime names the Designer only when its latest design review since the task
+        // entered verifying failed; core compares that id with the requester's.
+        let mut context = a_context();
+        context.contract.status = TaskStatus::Verifying;
+        let by_iris = ask(TaskStatus::Rejected, A::Reviewer, Some("iris"));
+        assert_eq!(
+            decide(&by_iris, &context),
+            Err(TransitionRefusal::NotTheNamedAgent {
+                actor: A::Reviewer,
+                named: Some("arch-1".to_string()),
+                asked: Some("iris".to_string())
+            }),
+            "no failed design review, no Designer's rejection"
+        );
+        context.design_reviewer = Some("iris".to_string());
+        assert_eq!(effects(&by_iris, &context), []);
+        assert_eq!(
+            effects(
+                &ask(TaskStatus::Rejected, A::Reviewer, Some(" iris ")),
+                &context
+            ),
+            []
+        );
+        // The reviewer the contract names still may, and anyone else still may not.
+        assert_eq!(
+            effects(
+                &ask(TaskStatus::Rejected, A::Reviewer, Some("arch-1")),
+                &context
+            ),
+            []
+        );
+        assert_eq!(
+            decide(
+                &ask(TaskStatus::Rejected, A::Reviewer, Some("dev-1")),
+                &context
+            ),
+            Err(TransitionRefusal::NotTheNamedAgent {
+                actor: A::Reviewer,
+                named: Some("arch-1".to_string()),
+                asked: Some("dev-1".to_string())
+            })
+        );
+        // The Designer's rejection carries its reasons, as a reviewer's does.
+        context.rejection = None;
+        assert_eq!(
+            one_gate(&by_iris, &context),
+            (
+                GateId::RejectionReasons,
+                vec![
+                    "work is rejected with written reasons mapped to the criteria that failed"
+                        .to_string()
+                ]
+            )
+        );
     }
 
     #[test]

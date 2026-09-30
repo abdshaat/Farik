@@ -14,11 +14,13 @@ use farik_core::budget::{BudgetState, SessionLedger};
 use farik_core::contract::{Role, TaskContract, TaskId, TaskKind, TaskStatus, wire_method};
 use farik_core::generated::team::Judgment;
 pub(crate) use farik_core::governor::done::result_awaits_human;
-use farik_core::governor::done::{CriterionResult, DoneEvidence, RunBy, requires_human_acceptance};
+use farik_core::governor::done::{
+    CriterionResult, DesignReviewNeed, DoneEvidence, RunBy, requires_human_acceptance,
+};
 use farik_core::governor::escalation::EscalationReason;
 use farik_core::governor::gates::{
-    AssignmentInput, AssignmentRequester, Blocker, ChildState, DependencyState, Rejection,
-    WorkState,
+    AssignmentInput, AssignmentRequester, Blocker, ChildState, DependencyState, DesignerBrowser,
+    Rejection, WorkState,
 };
 use farik_core::governor::readiness::{
     JudgmentAnswer, JudgmentReview, ParentState, ReadinessContext,
@@ -470,6 +472,8 @@ impl Transitions {
                 review_note,
                 human_accepted: false,
                 protected_paths: team.rules().protected_paths,
+                // Step 12's Task 4 reads the design review from the log.
+                design_review: DesignReviewNeed::NotNeeded,
             },
         );
         let hours = team.policy.blocked_limit_hours.get();
@@ -500,6 +504,8 @@ impl Transitions {
             review_passed: review_passed(&history),
             extra_iterations: extra_tries(&history),
             design_plan_returns: crate::tools::design::returns(&history),
+            // Step 12's Task 4 names the Designer whose design review failed.
+            design_reviewer: None,
             contract,
         })
     }
@@ -1026,6 +1032,8 @@ fn assignment(
                 .and_then(|epic| epic.sprint.clone())
         }),
         dependencies,
+        // Step 12's Task 2 reads the preview and the sandbox.
+        designer_browser: DesignerBrowser::Ready,
     })
 }
 

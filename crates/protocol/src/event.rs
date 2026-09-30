@@ -13,17 +13,18 @@ pub use farik_core::contract::{TaskId, ValidationError};
 
 pub use crate::generated::event::{
     AgentSleptBody, AgentUpdatedBody, AgentUpdatedBodyStatus, BudgetExhaustedBody,
-    BudgetExhaustedBodyConsequence, BudgetExhaustedBodyScope, ContractEvaluatedBody,
-    ContractEvaluatedBodyGate, ContractJudgedBody, ContractLockedBody, ContractSummary,
-    ContractSummaryKind, ContractSummaryParent, ContractSummaryRisk, ContractSummaryStatus,
-    ContractUnlockedBody, ContractWrittenBody, CostRecordedBody, CostRecordedBodyModelId,
-    CostRecordedBodyPurpose, CriteriaUpdatedBody, CriterionRecordedBody,
-    CriterionRecordedBodyRunBy, DecisionWrittenBody, DesignPlanDecidedBody, DesignPlanProposedBody,
-    DriftDetectedBody, DriftDetectedBodyDrift, EscalationAgedBody, EscalationRaisedBody,
-    EscalationRaisedBodyReason, EscalationResolvedBody, EventKind, HumanAcceptedBody,
-    HumanAcceptedBodySubject, JudgmentAnswer, MemoryWrittenBody, MessagePostedBody,
-    NoteWrittenBody, NoteWrittenBodyKind, ProductDocWrittenBody, ProjectScannedBody,
-    PullRequestOpenedBody, QuestionAnsweredBody, QuestionAskedBody, QuestionChoice,
+    BudgetExhaustedBodyConsequence, BudgetExhaustedBodyScope, CheckTheme, CheckWidth,
+    ConnectorTag as ConnectorTagWire, ContractEvaluatedBody, ContractEvaluatedBodyGate,
+    ContractJudgedBody, ContractLockedBody, ContractSummary, ContractSummaryKind,
+    ContractSummaryParent, ContractSummaryRisk, ContractSummaryStatus, ContractUnlockedBody,
+    ContractWrittenBody, CostRecordedBody, CostRecordedBodyModelId, CostRecordedBodyPurpose,
+    CriteriaUpdatedBody, CriterionRecordedBody, CriterionRecordedBodyRunBy, DecisionWrittenBody,
+    DesignPlanProposedBody, DesignReviewCheck, DesignReviewRecordedBody, DriftDetectedBody,
+    DriftDetectedBodyDrift, EscalationAgedBody, EscalationRaisedBody, EscalationRaisedBodyReason,
+    EscalationResolvedBody, EventKind, HumanAcceptedBody, HumanAcceptedBodySubject, JudgmentAnswer,
+    MemoryWrittenBody, MessagePostedBody, NoteWrittenBody, NoteWrittenBodyKind, PageCheckedBody,
+    PreviewPreparedBody, PreviewStartedBody, ProductDocWrittenBody, ProjectScannedBody,
+    PullRequestOpenedBody, QuestionAnsweredBody, QuestionAskedBody, QuestionChoice, ReasonBody,
     RequestTriagedBody, RequestTriagedBodySize, RetroAppendedBody, ReviewRecordedBody,
     SessionEndedBody, SessionEndedBodyReason, SessionStartedBody, SessionStartedBodyEffort,
     SessionStartedBodyModel, SessionStartedBodyPurpose, SprintEndedBody, SprintEndedBodyEndedBy,
@@ -31,7 +32,7 @@ pub use crate::generated::event::{
     TaskIntegratedBodyIntegratedBy, TaskTransitionedBody, TaskTransitionedBodyEffectsItem,
     TeamPausedBody, TeamPausedBodyBy, TeamPausedBodyReason, TeamUpdatedBody, TokenUsage,
     ToolCalledBody, ToolDeniedBody, ToolReturnedBody, TransitionRefusedBody,
-    TransitionRefusedBodyRefusal,
+    TransitionRefusedBodyRefusal, Violation,
 };
 /// The generated names of the vocabularies the governor's events repeat, renamed at the edge so
 /// that they cannot be mistaken for `farik-core`'s own types of the same name.
@@ -140,7 +141,13 @@ fn body_def_name(kind: EventKind) -> &'static str {
         EventKind::DecisionWritten => "decisionWrittenBody",
         EventKind::TeamPaused | EventKind::TeamResumed => "teamPausedBody",
         EventKind::DesignPlanProposed => "designPlanProposedBody",
-        EventKind::DesignPlanApproved | EventKind::DesignPlanReturned => "designPlanDecidedBody",
+        EventKind::DesignPlanApproved
+        | EventKind::DesignPlanReturned
+        | EventKind::PreviewStopped => "reasonBody",
+        EventKind::DesignReviewRecorded => "designReviewRecordedBody",
+        EventKind::PreviewPrepared => "previewPreparedBody",
+        EventKind::PreviewStarted => "previewStartedBody",
+        EventKind::PageChecked => "pageCheckedBody",
     }
 }
 
@@ -173,6 +180,11 @@ pub fn is_about_one_contract(kind: EventKind) -> bool {
             | EventKind::DesignPlanProposed
             | EventKind::DesignPlanApproved
             | EventKind::DesignPlanReturned
+            | EventKind::DesignReviewRecorded
+            | EventKind::PreviewPrepared
+            | EventKind::PreviewStarted
+            | EventKind::PreviewStopped
+            | EventKind::PageChecked
     )
 }
 
@@ -233,13 +245,18 @@ fn attribution(body: &mut EventBody) -> Option<(&'static str, &mut String)> {
         | EventBody::TeamResumed(_)
         | EventBody::DesignPlanProposed(_)
         | EventBody::DesignPlanApproved(_)
-        | EventBody::DesignPlanReturned(_) => None,
+        | EventBody::DesignPlanReturned(_)
+        | EventBody::DesignReviewRecorded(_)
+        | EventBody::PreviewPrepared(_)
+        | EventBody::PreviewStarted(_)
+        | EventBody::PreviewStopped(_)
+        | EventBody::PageChecked(_) => None,
     }
 }
 
 /// Every kind the log holds in this phase, in the order `docs/schemas/event.schema.json` lists
 /// them. The step that adds a kind adds it here.
-pub const EVERY_KIND: [EventKind; 46] = [
+pub const EVERY_KIND: [EventKind; 51] = [
     EventKind::TaskCreated,
     EventKind::RequestTriaged,
     EventKind::ContractWritten,
@@ -286,6 +303,11 @@ pub const EVERY_KIND: [EventKind; 46] = [
     EventKind::DesignPlanProposed,
     EventKind::DesignPlanApproved,
     EventKind::DesignPlanReturned,
+    EventKind::DesignReviewRecorded,
+    EventKind::PreviewPrepared,
+    EventKind::PreviewStarted,
+    EventKind::PreviewStopped,
+    EventKind::PageChecked,
 ];
 
 /// The ids an event is stamped with: which team and project it belongs to, and the contract, agent
@@ -459,10 +481,25 @@ pub enum EventBody {
     DesignPlanProposed(DesignPlanProposedBody),
     /// The Product Manager approved the task's design plan.
     #[serde(rename = "design_plan.approved")]
-    DesignPlanApproved(DesignPlanDecidedBody),
+    DesignPlanApproved(ReasonBody),
     /// The Product Manager returned the task's design plan with a reason.
     #[serde(rename = "design_plan.returned")]
-    DesignPlanReturned(DesignPlanDecidedBody),
+    DesignPlanReturned(ReasonBody),
+    /// The UI/UX Designer recorded its design review of a Developer's UI change.
+    #[serde(rename = "design_review.recorded")]
+    DesignReviewRecorded(DesignReviewRecordedBody),
+    /// Farik ran the preview's `prepare` for the task.
+    #[serde(rename = "preview.prepared")]
+    PreviewPrepared(PreviewPreparedBody),
+    /// Farik started the task's preview and it answered.
+    #[serde(rename = "preview.started")]
+    PreviewStarted(PreviewStartedBody),
+    /// Farik stopped the task's preview.
+    #[serde(rename = "preview.stopped")]
+    PreviewStopped(ReasonBody),
+    /// `farik_check_page` checked one page at one width and theme.
+    #[serde(rename = "page.checked")]
+    PageChecked(PageCheckedBody),
 }
 
 impl EventBody {
@@ -516,6 +553,11 @@ impl EventBody {
             Self::DesignPlanProposed(_) => EventKind::DesignPlanProposed,
             Self::DesignPlanApproved(_) => EventKind::DesignPlanApproved,
             Self::DesignPlanReturned(_) => EventKind::DesignPlanReturned,
+            Self::DesignReviewRecorded(_) => EventKind::DesignReviewRecorded,
+            Self::PreviewPrepared(_) => EventKind::PreviewPrepared,
+            Self::PreviewStarted(_) => EventKind::PreviewStarted,
+            Self::PreviewStopped(_) => EventKind::PreviewStopped,
+            Self::PageChecked(_) => EventKind::PageChecked,
         }
     }
 }
@@ -840,11 +882,15 @@ mod tests {
         for kind in EVERY_KIND {
             for other in EVERY_KIND {
                 // team.paused and team.resumed share one body, so each carries the other's, and so
-                // do design_plan.approved and design_plan.returned; no other pair does, and a
-                // fixture that made one equal must not hide it.
-                let shared = [
-                    [EventKind::TeamPaused, EventKind::TeamResumed],
-                    [EventKind::DesignPlanApproved, EventKind::DesignPlanReturned],
+                // do design_plan.approved, design_plan.returned and preview.stopped; no others do,
+                // and a fixture that made one equal must not hide it.
+                let shared: [&[EventKind]; 2] = [
+                    &[EventKind::TeamPaused, EventKind::TeamResumed],
+                    &[
+                        EventKind::DesignPlanApproved,
+                        EventKind::DesignPlanReturned,
+                        EventKind::PreviewStopped,
+                    ],
                 ];
                 if other == kind
                     || shared
@@ -866,6 +912,97 @@ mod tests {
                     errors[0].message
                 );
             }
+        }
+    }
+
+    #[test]
+    fn reads_the_new_events() {
+        let violation = json!({
+            "rule": "color-contrast",
+            "impact": "serious",
+            "target": "#save",
+            "help": "Elements must meet minimum color contrast ratio thresholds"
+        });
+        for (kind, body) in [
+            (
+                "design_review.recorded",
+                json!({
+                    "pass": false,
+                    "reasons": "The save button fails contrast in the dark theme.",
+                    "checks": [
+                        { "width": "phone", "theme": "light", "violations": [] },
+                        { "width": "phone", "theme": "dark", "violations": [violation] },
+                        { "width": "desktop", "theme": "light", "violations": [] },
+                        { "width": "desktop", "theme": "dark", "violations": [violation] }
+                    ]
+                }),
+            ),
+            (
+                "preview.prepared",
+                json!({ "tree": "4b825dc642cb6eb9a060e54bf8d69288fbee4904", "seconds": 212 }),
+            ),
+            ("preview.started", json!({ "port": 4400 })),
+            ("preview.stopped", json!({ "reason": "The session ended." })),
+            (
+                "page.checked",
+                json!({
+                    "width": "desktop",
+                    "theme": "dark",
+                    "path": "/settings",
+                    "violations": [violation],
+                    "screenshot": "session-1-desktop-dark.png"
+                }),
+            ),
+            (
+                "tool.called",
+                json!({
+                    "tool": "mcp__playwright__browser_navigate",
+                    "input": "{\"url\":\"http://localhost:4400/\"}",
+                    "server": "playwright",
+                    "tag": "network"
+                }),
+            ),
+            (
+                "tool.denied",
+                json!({
+                    "tool": "mcp__playwright__browser_evaluate",
+                    "reason": "tool_denied: browser_evaluate runs script in the page",
+                    "server": "playwright",
+                    "tag": "denied"
+                }),
+            ),
+            (
+                "escalation.raised",
+                json!({ "reason": "preview", "detail": "npm ERR! missing script: dev" }),
+            ),
+        ] {
+            let mut wire = an_event_wire(EventKind::NoteWritten);
+            wire["kind"] = json!(kind);
+            wire["body"] = body;
+            let event =
+                event_from_value(&wire).unwrap_or_else(|errors| panic!("{kind}: {errors:?}"));
+            assert_eq!(event.body.kind().to_string(), kind);
+            assert_eq!(event_to_value(&event), wire, "{kind}");
+        }
+        for (kind, body) in [
+            (
+                "page.checked",
+                json!({ "width": "tablet", "theme": "dark", "path": "/", "violations": [], "screenshot": "s.png" }),
+            ),
+            (
+                "page.checked",
+                json!({ "width": "phone", "theme": "sepia", "path": "/", "violations": [], "screenshot": "s.png" }),
+            ),
+            (
+                "tool.called",
+                json!({ "tool": "t", "input": "{}", "server": "playwright", "tag": "loud" }),
+            ),
+            ("preview.started", json!({ "port": 0 })),
+        ] {
+            let mut wire = an_event_wire(EventKind::NoteWritten);
+            wire["kind"] = json!(kind);
+            wire["body"] = body;
+            assert!(event_from_value(&wire).is_err(), "{kind}: {}", wire["body"]);
         }
     }
 
@@ -1298,7 +1435,7 @@ mod tests {
 
     #[test]
     fn reads_a_team_paused_and_resumed_by_the_human() {
-        assert_eq!(EVERY_KIND.len(), 46);
+        assert_eq!(EVERY_KIND.len(), 51);
         for kind in [EventKind::TeamPaused, EventKind::TeamResumed] {
             assert_eq!(a_body_wire(kind), json!({ "by": "human" }));
             let input = an_event_wire(kind);

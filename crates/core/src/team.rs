@@ -54,6 +54,9 @@ const REQUIRED_ROLES: [(RoleWire, &str); 2] = [
     (RoleWire::SoftwareDeveloper, "do the work"),
 ];
 
+/// The connectors Farik ships, by name (spec 5.6); `farik-roles` holds their definitions.
+pub const BUILTIN_CONNECTORS: [&str; 1] = ["playwright"];
+
 /// The most agents a team has that are not retired (spec 4.1). A retired agent stays in the file
 /// so that its past events still name someone, so it is not one of them.
 pub const MAX_AGENTS: usize = 7;
@@ -173,6 +176,7 @@ pub fn validate_team(input: &Value) -> Result<Team, Vec<ValidationError>> {
             });
         }
     }
+    errors.extend(unknown_connectors(&team));
     let judgment = team.judgment();
     if let Some(role) = named_judge(judgment.judge)
         && !team.has_active(role)
@@ -209,6 +213,27 @@ pub fn validate_team(input: &Value) -> Result<Team, Vec<ValidationError>> {
     }
 }
 
+/// One `unknown_connector` refusal per connector, on any agent's list, that Farik does not ship
+/// (F8).
+fn unknown_connectors(team: &Team) -> Vec<ValidationError> {
+    let mut errors = Vec::new();
+    for (index, agent) in team.agents.iter().enumerate() {
+        for (at, server) in agent.mcp_servers.iter().flatten().enumerate() {
+            let name = server.name.as_str();
+            if !BUILTIN_CONNECTORS.contains(&name) {
+                errors.push(ValidationError {
+                    path: format!("/agents/{index}/mcp_servers/{at}/name"),
+                    message: format!(
+                        "unknown_connector: {name} is not a connector Farik ships; the one it \
+                         ships is playwright."
+                    ),
+                });
+            }
+        }
+    }
+    errors
+}
+
 /// The plan check (`docs/SPEC.md` section 5.3), with what the team left out filled in.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct JudgmentPolicy {
@@ -220,7 +245,49 @@ pub struct JudgmentPolicy {
     pub judge: JudgeChoice,
 }
 
+/// How Farik opens the project's app for the UI/UX Designer (the founder's D2): `prepare` installs
+/// and builds with the network on, `start` serves on `port` with it off, and `path` is the first
+/// page.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Preview {
+    /// Installs and builds; left out, skipped.
+    pub prepare: Option<String>,
+    /// Starts the app.
+    pub start: String,
+    /// The port it serves on.
+    pub port: u16,
+    /// The page to open first, starting with `/`.
+    pub path: String,
+}
+
 impl Team {
+    /// The team's preview, if it set one, with `path` defaulted to `/`.
+    #[must_use]
+    pub fn preview(&self) -> Option<Preview> {
+        self.preview.as_ref().map(|wire| Preview {
+            prepare: wire.prepare.as_deref().cloned(),
+            start: wire.start.to_string(),
+            port: u16::try_from(wire.port).unwrap_or(u16::MAX),
+            path: wire.path.to_string(),
+        })
+    }
+
+    /// The first active UI/UX Designer, the one a design review names.
+    #[must_use]
+    pub fn designer(&self) -> Option<&Agent> {
+        self.active_agents()
+            .find(|agent| agent.role == RoleWire::UiUxDesigner)
+    }
+
+    /// Whether a UI/UX Designer is on the team and not retired: a paused one still holds a UI
+    /// change in `verifying`, waiting on it.
+    #[must_use]
+    pub fn has_designer(&self) -> bool {
+        self.agents.iter().any(|agent| {
+            agent.role == RoleWire::UiUxDesigner && agent.status != AgentStatus::Retired
+        })
+    }
+
     /// The plan check this team runs: its `policy.judgment`, or the schema's defaults where it
     /// left something out.
     #[must_use]
@@ -302,6 +369,12 @@ impl Team {
             document_paths: self
                 .rules
                 .document_paths
+                .iter()
+                .map(|glob| glob.to_string())
+                .collect(),
+            ui_paths: self
+                .rules
+                .ui_paths
                 .iter()
                 .map(|glob| glob.to_string())
                 .collect(),
@@ -410,11 +483,13 @@ mod tests {
     use super::fixtures::{a_full_team_wire, a_team_wire, an_agent_wire};
     use super::{
         AgentStatus, HumanAcceptsContracts, Integration, JudgeChoice, JudgmentPolicy,
-        JudgmentRequired, PermissionTier, PermissionTierWire, Role, RoleWire,
+        JudgmentRequired, PermissionTier, PermissionTierWire, Preview, Role, RoleWire,
         SMALL_ENOUGH_QUESTION, Team, TeamPermissions, TeamPolicy, changes_code, defaults,
         validate_team,
     };
-    use crate::governor::team_rules::{DEFAULT_DOCUMENT_PATHS, DEFAULT_PROTECTED_PATHS};
+    use crate::governor::team_rules::{
+        DEFAULT_DOCUMENT_PATHS, DEFAULT_PROTECTED_PATHS, DEFAULT_UI_PATHS, TeamRules,
+    };
 
     fn team(wire: &Value) -> Team {
         validate_team(wire).expect("the fixture is a team")
@@ -683,6 +758,134 @@ mod tests {
         assert_eq!(team(&wire).rules().document_paths, ["notes/**"]);
         wire["rules"]["document_paths"] = json!([]);
         assert!(team(&wire).rules().document_paths.is_empty());
+    }
+
+    #[test]
+    fn defaults_the_ui_paths_when_left_out() {
+        // The seven design globs of ADR 0026 fill a key left out; a team's own list replaces them,
+        // and an explicit `[]` is kept, which leaves only the contract's `ui_change` to say so.
+        assert_eq!(
+            team(&a_team_wire()).rules().ui_paths,
+            [
+                "**/*.tsx",
+                "**/*.jsx",
+                "**/*.vue",
+                "**/*.svelte",
+                "**/*.css",
+                "**/*.scss",
+                "**/*.html"
+            ]
+        );
+        assert_eq!(
+            TeamRules::default().ui_paths,
+            DEFAULT_UI_PATHS.map(str::to_string)
+        );
+        let mut wire = a_team_wire();
+        wire["rules"]["ui_paths"] = json!(["app/**"]);
+        assert_eq!(team(&wire).rules().ui_paths, ["app/**"]);
+        wire["rules"]["ui_paths"] = json!([]);
+        assert!(team(&wire).rules().ui_paths.is_empty());
+    }
+
+    #[test]
+    fn validates_the_preview_and_the_connectors() {
+        // Every existing fixture still validates, the full one with a preview and a connector.
+        assert!(team(&a_team_wire()).preview().is_none());
+        let full = team(&a_full_team_wire());
+        assert_eq!(
+            full.preview(),
+            Some(Preview {
+                prepare: Some("pnpm install --frozen-lockfile".to_string()),
+                start: "pnpm dev --port 4400".to_string(),
+                port: 4400,
+                path: "/app".to_string(),
+            })
+        );
+
+        let mut wire = a_team_wire();
+        wire["preview"] = json!({ "start": "npm start", "port": 3000 });
+        assert_eq!(
+            team(&wire).preview(),
+            Some(Preview {
+                prepare: None,
+                start: "npm start".to_string(),
+                port: 3000,
+                path: "/".to_string(),
+            }),
+            "prepare left out is skipped, and path defaults to /"
+        );
+        let long = "x".repeat(501);
+        for (field, value) in [
+            ("prepare", json!("")),
+            ("prepare", json!(long)),
+            ("start", json!("")),
+            ("start", json!(long)),
+            ("port", json!(1023)),
+            ("port", json!(65536)),
+            ("path", json!("app")),
+        ] {
+            let mut wire = a_team_wire();
+            wire["preview"] = json!({ "start": "npm start", "port": 3000 });
+            wire["preview"][field] = value;
+            assert_eq!(paths(&wire), [format!("/preview/{field}")], "{field}");
+        }
+        for (field, value) in [
+            ("prepare", json!("x".repeat(500))),
+            ("start", json!("x".repeat(500))),
+            ("port", json!(1024)),
+            ("port", json!(65535)),
+        ] {
+            let mut wire = a_team_wire();
+            wire["preview"] = json!({ "start": "npm start", "port": 3000 });
+            wire["preview"][field] = value;
+            assert!(validate_team(&wire).is_ok(), "{field}");
+        }
+        let mut wire = a_team_wire();
+        wire["preview"] = json!({ "port": 3000 });
+        assert_eq!(paths(&wire), ["/preview"], "start is required");
+
+        // Any agent may have a connector, and every agent's list is checked (F8).
+        let mut wire = a_team_wire();
+        wire["agents"][0]["mcp_servers"] = json!([{ "name": "playwright", "source": "builtin" }]);
+        wire["agents"][1]["mcp_servers"] = json!([
+            { "name": "playwright", "source": "builtin" },
+            { "name": "selenium", "source": "builtin" }
+        ]);
+        assert_eq!(
+            refusals(&wire),
+            [(
+                "/agents/1/mcp_servers/1/name".to_string(),
+                "unknown_connector: selenium is not a connector Farik ships; the one it ships is playwright."
+                    .to_string()
+            )]
+        );
+        wire["agents"][1]["mcp_servers"][1] = json!({ "name": "playwright", "source": "npm" });
+        assert_eq!(paths(&wire), ["/agents/1/mcp_servers/1/source"]);
+
+        // The Designer: the first active one, and whether any is not retired.
+        let mut wire = a_team_wire();
+        assert!(team(&wire).designer().is_none());
+        assert!(!team(&wire).has_designer());
+        let mut paused = an_agent_wire("iris", "ui_ux_designer");
+        paused["status"] = json!("paused");
+        wire["agents"]
+            .as_array_mut()
+            .expect("the fixture's agents are a list")
+            .extend([paused, an_agent_wire("vera", "ui_ux_designer")]);
+        let designers = team(&wire);
+        assert_eq!(
+            designers.designer().map(|agent| agent.id.as_str()),
+            Some("vera")
+        );
+        assert!(designers.has_designer());
+        wire["agents"][3]["status"] = json!("retired");
+        assert!(team(&wire).designer().is_none());
+        assert!(
+            team(&wire).has_designer(),
+            "a paused Designer is still the team's"
+        );
+        wire["agents"][2]["status"] = json!("retired");
+        assert!(!team(&wire).has_designer());
     }
 
     #[test]

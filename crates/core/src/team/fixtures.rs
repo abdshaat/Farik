@@ -49,7 +49,8 @@ pub fn a_full_team_wire() -> Value {
                 "model": { "id": "claude-opus-5", "effort": "high" },
                 "grants": ["execute"],
                 "revokes": ["network"],
-                "preauthorized_external_tools": ["mcp__linear__create_issue"]
+                "preauthorized_external_tools": ["mcp__linear__create_issue"],
+                "mcp_servers": [{ "name": "playwright", "source": "builtin" }]
             },
             {
                 "id": "linus",
@@ -90,7 +91,15 @@ pub fn a_full_team_wire() -> Value {
             "required_criteria": ["test", "review"],
             "require_new_tests": true,
             "max_task_budget_usd": 12.5,
-            "forbidden_commands": ["^rm -rf /"]
+            "forbidden_commands": ["^rm -rf /"],
+            "document_paths": ["docs/**"],
+            "ui_paths": ["app/**"]
+        },
+        "preview": {
+            "prepare": "pnpm install --frozen-lockfile",
+            "start": "pnpm dev --port 4400",
+            "port": 4400,
+            "path": "/app"
         }
     })
 }

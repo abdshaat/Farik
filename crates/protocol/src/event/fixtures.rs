@@ -59,14 +59,7 @@ pub fn a_body_wire(kind: EventKind) -> Value {
             "triaged_by": "sam-ortiz"
         }),
         EventKind::ContractLocked | EventKind::ContractUnlocked => a_hold_body_wire(kind),
-        EventKind::DriftDetected => json!({
-            "drift": "contract_without_events",
-            "detail": "FRK-1 has a contract file and no events."
-        }),
-        EventKind::ProjectScanned => json!({
-            "read_back": "A Rust workspace with one crate and a check command.",
-            "detected_criteria": ["cargo xtask check"]
-        }),
+        EventKind::DriftDetected | EventKind::ProjectScanned => a_project_body_wire(kind),
         EventKind::TeamUpdated => json!({
             "team_name": "Farik",
             "agent_ids": ["maya-chen", "sam-ortiz"],
@@ -143,7 +136,12 @@ pub fn a_body_wire(kind: EventKind) -> Value {
         EventKind::TeamPaused | EventKind::TeamResumed => json!({ "by": "human" }),
         EventKind::DesignPlanProposed
         | EventKind::DesignPlanApproved
-        | EventKind::DesignPlanReturned => a_design_plan_body_wire(kind),
+        | EventKind::DesignPlanReturned
+        | EventKind::DesignReviewRecorded
+        | EventKind::PreviewPrepared
+        | EventKind::PreviewStarted
+        | EventKind::PreviewStopped
+        | EventKind::PageChecked => a_design_body_wire(kind),
         EventKind::SprintStarted
         | EventKind::SprintPlanned
         | EventKind::SprintEnded
@@ -184,12 +182,55 @@ fn an_escalation_body_wire(kind: EventKind) -> Value {
     }
 }
 
-/// A Designer's plan, or the Product Manager's decision on it.
+/// A Designer's plan, or the Product Manager's decision on it; a stopped preview's reason has the
+/// decision's shape.
 fn a_design_plan_body_wire(kind: EventKind) -> Value {
     if kind == EventKind::DesignPlanProposed {
         json!({ "plan": "Make the sign-in page calm.\n\nOne button leads; the header stays." })
     } else {
         json!({ "reason": "It keeps to the contract." })
+    }
+}
+
+/// A design plan or its decision, a design review, a preview's life, or a page check.
+fn a_design_body_wire(kind: EventKind) -> Value {
+    match kind {
+        EventKind::DesignPlanProposed
+        | EventKind::DesignPlanApproved
+        | EventKind::DesignPlanReturned
+        | EventKind::PreviewStopped => a_design_plan_body_wire(kind),
+        EventKind::DesignReviewRecorded => json!({
+            "pass": true,
+            "reasons": "Both widths read well in both themes.",
+            "checks": [{ "width": "phone", "theme": "light", "violations": [] }]
+        }),
+        EventKind::PreviewPrepared => {
+            json!({ "tree": "4b825dc642cb6eb9a060e54bf8d69288fbee4904", "seconds": 212 })
+        }
+        EventKind::PageChecked => json!({
+            "width": "phone",
+            "theme": "light",
+            "path": "/",
+            "violations": [],
+            "screenshot": "session-1-phone-light.png"
+        }),
+        // preview.started
+        _ => json!({ "port": 4400 }),
+    }
+}
+
+/// A drift report, or the project scan's read-back.
+fn a_project_body_wire(kind: EventKind) -> Value {
+    if kind == EventKind::DriftDetected {
+        json!({
+            "drift": "contract_without_events",
+            "detail": "FRK-1 has a contract file and no events."
+        })
+    } else {
+        json!({
+            "read_back": "A Rust workspace with one crate and a check command.",
+            "detected_criteria": ["cargo xtask check"]
+        })
     }
 }
 

@@ -58,6 +58,18 @@ pub struct DependencyState {
     pub integrated: bool,
 }
 
+/// Whether the UI/UX Designer can open the project's app (the founder's D3 and D4): the team
+/// has a preview, and Docker's sandbox is there to run it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DesignerBrowser {
+    /// A preview is set and the sandbox is available.
+    Ready,
+    /// The team has no `preview`.
+    NoPreview,
+    /// The sandbox is off, or Docker is not there.
+    NoSandbox,
+}
+
 /// Everything the assignment gate needs from the world.
 #[derive(Debug, Clone, PartialEq)]
 pub struct AssignmentInput {
@@ -94,6 +106,8 @@ pub struct AssignmentInput {
     pub parent_sprint: Option<Option<String>>,
     /// The state of every dependency the contract lists, in any order.
     pub dependencies: Vec<DependencyState>,
+    /// Whether a UI/UX Designer assignee could open the app; read for no other role.
+    pub designer_browser: DesignerBrowser,
 }
 
 /// Whether the open sprint lets the task be assigned (`docs/SPEC.md` section 5.5): with none open,
@@ -121,7 +135,8 @@ pub fn fits_the_open_sprint(contract: &TaskContract, input: &AssignmentInput) ->
 
 /// The `Assignment` gate of `ready -> assigned` (`docs/SPEC.md` sections 5.2, 5.14, 5.16): who may
 /// ask, whether the pair of agents fits the contract, whether the agent has room, whether the
-/// sprint can pay for it, and whether every dependency is accepted and integrated.
+/// sprint can pay for it, whether a UI/UX Designer can open the app (`preview_not_set`,
+/// `designer_needs_sandbox`), and whether every dependency is accepted and integrated.
 ///
 /// # Errors
 ///
@@ -219,8 +234,27 @@ pub fn check_assignment(contract: &TaskContract, input: &AssignmentInput) -> Gat
             contract.budget.max_cost_usd, input.remaining_sprint_budget_usd
         ));
     }
+    reasons.extend(without_a_browser(input));
     reasons.extend(unready_dependencies(contract, input));
     verdict(reasons)
+}
+
+/// Why a UI/UX Designer cannot be assigned for want of its browser (D3, D4), if it cannot.
+fn without_a_browser(input: &AssignmentInput) -> Option<String> {
+    if input.assignee_role != Role::UiUxDesigner {
+        return None;
+    }
+    match input.designer_browser {
+        DesignerBrowser::Ready => None,
+        DesignerBrowser::NoPreview => Some(
+            "preview_not_set: the UI/UX Designer opens your app to work, and Farik has not been told how; set it in Settings, under How to open your app"
+                .to_string(),
+        ),
+        DesignerBrowser::NoSandbox => Some(
+            "designer_needs_sandbox: The UI/UX Designer needs Docker's sandbox to open your app. Turn the sandbox on, or retire the Designer"
+                .to_string(),
+        ),
+    }
 }
 
 fn unready_dependencies(contract: &TaskContract, input: &AssignmentInput) -> Vec<String> {
@@ -761,7 +795,7 @@ pub const FIELDS_FIXED_AT_CREATION: [&str; 2] = ["kind", "parent"];
 /// assignee writing the tasks under it, and by the human. Written out rather than left as
 /// whatever is not in the other sets, so that a field added to the schema is refused until
 /// somebody says who writes it.
-pub const FIELDS_OF_THE_CONTENT: [&str; 15] = [
+pub const FIELDS_OF_THE_CONTENT: [&str; 16] = [
     "title",
     "intent",
     "summary",
@@ -777,6 +811,7 @@ pub const FIELDS_OF_THE_CONTENT: [&str; 15] = [
     "change",
     "budget",
     "allowed_paths",
+    "ui_change",
 ];
 
 /// The fields the note tools write, which stay open whatever the contract's status: its notes,
@@ -938,12 +973,12 @@ mod tests {
 
     use super::{
         AssignmentInput, AssignmentRequester, Blocker, ChildState, ContractWriteActor,
-        ContractWriteOutcome, ContractWriteRefusal, DependencyState, FIELDS_AFTER_FREEZE,
-        FIELDS_ALWAYS_WRITABLE, FIELDS_FIXED_AT_CREATION, FIELDS_OF_THE_CONTENT,
-        FIELDS_ONLY_THE_HUMAN_WRITES, FIELDS_THE_GOVERNOR_WRITES, FIELDS_THE_STORE_OWNS,
-        ParentEpic, Rejection, WorkState, check_assignment, check_blocker_resolved,
-        check_blocker_written, check_child_creation, check_children_done, check_contract_write,
-        check_criteria_recorded, check_human_triage, check_product_doc_write,
+        ContractWriteOutcome, ContractWriteRefusal, DependencyState, DesignerBrowser,
+        FIELDS_AFTER_FREEZE, FIELDS_ALWAYS_WRITABLE, FIELDS_FIXED_AT_CREATION,
+        FIELDS_OF_THE_CONTENT, FIELDS_ONLY_THE_HUMAN_WRITES, FIELDS_THE_GOVERNOR_WRITES,
+        FIELDS_THE_STORE_OWNS, ParentEpic, Rejection, WorkState, check_assignment,
+        check_blocker_resolved, check_blocker_written, check_child_creation, check_children_done,
+        check_contract_write, check_criteria_recorded, check_human_triage, check_product_doc_write,
         check_rejection_reasons,
     };
     use crate::contract::{Role, TaskContract, TaskStatus, VerificationWire};
@@ -969,6 +1004,7 @@ mod tests {
             task_sprint: None,
             parent_sprint: None,
             dependencies: Vec::new(),
+            designer_browser: DesignerBrowser::Ready,
         }
     }
 
@@ -1006,6 +1042,40 @@ mod tests {
         );
         input.has_active_scrum_master = false;
         assert_eq!(check_assignment(&a_contract(), &input), Ok(()));
+    }
+
+    #[test]
+    fn refuses_to_assign_a_designer_without_its_browser() {
+        let mut designers = a_contract();
+        designers.assignee_role = Role::UiUxDesigner;
+        let mut input = an_assignment();
+        input.assignee_id = "iris".to_string();
+        input.assignee_role = Role::UiUxDesigner;
+        assert_eq!(check_assignment(&designers, &input), Ok(()), "Ready");
+        input.designer_browser = DesignerBrowser::NoPreview;
+        assert_eq!(
+            reasons(check_assignment(&designers, &input)),
+            [
+                "preview_not_set: the UI/UX Designer opens your app to work, and Farik has not been told how; set it in Settings, under How to open your app"
+            ]
+        );
+        input.designer_browser = DesignerBrowser::NoSandbox;
+        assert_eq!(
+            reasons(check_assignment(&designers, &input)),
+            [
+                "designer_needs_sandbox: The UI/UX Designer needs Docker's sandbox to open your app. Turn the sandbox on, or retire the Designer"
+            ]
+        );
+        // The browser is the Designer's alone: a Developer is assigned whatever it says.
+        let mut developers = an_assignment();
+        for browser in [DesignerBrowser::NoPreview, DesignerBrowser::NoSandbox] {
+            developers.designer_browser = browser;
+            assert_eq!(
+                check_assignment(&a_contract(), &developers),
+                Ok(()),
+                "{browser:?}"
+            );
+        }
     }
 
     #[test]

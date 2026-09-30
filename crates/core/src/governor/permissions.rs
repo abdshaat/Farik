@@ -144,6 +144,98 @@ pub enum ToolRefusal {
     DesignPlanNotApproved,
 }
 
+/// A connector tool's tag (`docs/SPEC.md` section 5.6, role-kits' vocabulary), in `snake_case` as
+/// in a connector's definition and on `tool.called` and `tool.denied`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ConnectorTag {
+    /// Reaches only the preview and changes nothing outside the sandbox.
+    Network,
+    /// Changes state outside the sandbox; denied until phase 8.
+    ExternalEffect,
+    /// Never offered and always refused.
+    Denied,
+}
+
+/// A connector a session was given: its server's name, the one origin its calls may name, and
+/// each tool's tag.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SessionConnector {
+    /// The server's name, as in `mcp__<server>__<tool>`.
+    pub server: String,
+    /// The preview's origin, `http://localhost:<port>`.
+    pub origin: String,
+    /// Every tool the connector's pinned list tags.
+    pub tools: std::collections::BTreeMap<String, ConnectorTag>,
+}
+
+/// Why a connector call is refused.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ConnectorRefusal {
+    /// The session was given no such connector.
+    ConnectorNotInSession,
+    /// The connector's pinned list does not tag the tool.
+    ToolNotTagged,
+    /// The tool is tagged `denied`, or `external_effect`, which is denied until phase 8.
+    ToolDenied,
+    /// A `url` field names something other than the preview.
+    UrlOutsidePreview {
+        /// The field's value: the string, or the JSON of a value that is not one.
+        url: String,
+    },
+}
+
+/// Decides one connector call (`docs/SPEC.md` sections 5.6 and 8.6): the session must have the
+/// connector, the tool must be tagged `network`, and every field named `url`, at any depth of the
+/// input, must be a string naming the preview: its origin exactly, or followed by `/`, `?` or `#`.
+/// `tool` is the bare tool name, without `mcp__<server>__`.
+///
+/// # Errors
+///
+/// `ConnectorNotInSession`, then `ToolNotTagged`, then `ToolDenied` for a `denied` or an
+/// `external_effect` tool, then `UrlOutsidePreview` with the first `url` found outside it.
+pub fn evaluate_connector_call(
+    tool: &str,
+    input: &serde_json::Value,
+    connector: Option<&SessionConnector>,
+) -> Result<ConnectorTag, ConnectorRefusal> {
+    let connector = connector.ok_or(ConnectorRefusal::ConnectorNotInSession)?;
+    match connector.tools.get(tool) {
+        None => Err(ConnectorRefusal::ToolNotTagged),
+        Some(ConnectorTag::Denied | ConnectorTag::ExternalEffect) => {
+            Err(ConnectorRefusal::ToolDenied)
+        }
+        Some(ConnectorTag::Network) => {
+            check_urls(input, &connector.origin)?;
+            Ok(ConnectorTag::Network)
+        }
+    }
+}
+
+fn check_urls(value: &serde_json::Value, origin: &str) -> Result<(), ConnectorRefusal> {
+    use serde_json::Value;
+    match value {
+        Value::Object(fields) => fields.iter().try_for_each(|(key, field)| {
+            if key == "url" {
+                let inside = field.as_str().is_some_and(|url| {
+                    url.strip_prefix(origin)
+                        .is_some_and(|rest| rest.is_empty() || rest.starts_with(['/', '?', '#']))
+                });
+                if !inside {
+                    return Err(ConnectorRefusal::UrlOutsidePreview {
+                        url: field
+                            .as_str()
+                            .map_or_else(|| field.to_string(), str::to_string),
+                    });
+                }
+            }
+            check_urls(field, origin)
+        }),
+        Value::Array(items) => items.iter().try_for_each(|item| check_urls(item, origin)),
+        _ => Ok(()),
+    }
+}
+
 /// The Product Manager's plan gate (ADR 0026): a UI/UX Designer changes nothing before its
 /// task's latest design plan is approved. `approved` is what the log says at the call.
 ///
@@ -349,15 +441,113 @@ mod tests {
     use serde_json::json;
 
     use super::{
-        AgentGrants, ApprovedCall, CommandRefusal, PermissionTier as T, ToolCallContext,
-        ToolCallRequest, ToolDescriptor, ToolRefusal, check_design_plan, default_tiers,
-        evaluate_command, evaluate_tool_call,
+        AgentGrants, ApprovedCall, CommandRefusal, ConnectorRefusal as Refused, ConnectorTag,
+        PermissionTier as T, SessionConnector, ToolCallContext, ToolCallRequest, ToolDescriptor,
+        ToolRefusal, check_design_plan, default_tiers, evaluate_command, evaluate_connector_call,
+        evaluate_tool_call,
     };
     use crate::contract::Role;
     use crate::governor::team_rules::TeamRules;
 
     fn strings(items: &[&str]) -> Vec<String> {
         items.iter().map(|item| (*item).to_string()).collect()
+    }
+
+    fn playwright() -> SessionConnector {
+        SessionConnector {
+            server: "playwright".to_string(),
+            origin: "http://localhost:4400".to_string(),
+            tools: [
+                ("browser_navigate", ConnectorTag::Network),
+                ("browser_click", ConnectorTag::Network),
+                ("browser_evaluate", ConnectorTag::Denied),
+                ("browser_send_email", ConnectorTag::ExternalEffect),
+            ]
+            .into_iter()
+            .map(|(tool, tag)| (tool.to_string(), tag))
+            .collect(),
+        }
+    }
+
+    #[test]
+    fn evaluates_connector_calls() {
+        let connector = playwright();
+        let navigate = |input: serde_json::Value| {
+            evaluate_connector_call("browser_navigate", &input, Some(&connector))
+        };
+        assert_eq!(
+            navigate(json!({ "url": "http://localhost:4400/x" })),
+            Ok(ConnectorTag::Network)
+        );
+        assert_eq!(
+            navigate(json!({ "url": "http://localhost:4400" })),
+            Ok(ConnectorTag::Network)
+        );
+        assert_eq!(
+            navigate(json!({ "url": "http://localhost:4400?q=1#top" })),
+            Ok(ConnectorTag::Network)
+        );
+        assert_eq!(
+            evaluate_connector_call("browser_click", &json!({ "ref": "e3" }), Some(&connector)),
+            Ok(ConnectorTag::Network),
+            "a call with no url is judged by its tag alone"
+        );
+        // F2: only the preview's origin, exactly, followed by nothing or by `/`, `?` or `#`.
+        for url in [
+            "http://localhost:44001",
+            "http://localhost:440",
+            "http://localhost:4400@evil.test",
+            "http://localhost:4400.evil.test/",
+            "http://127.0.0.1:4400",
+            "https://localhost:4400",
+            "HTTP://localhost:4400",
+            "/x",
+        ] {
+            assert_eq!(
+                navigate(json!({ "url": url })),
+                Err(Refused::UrlOutsidePreview {
+                    url: url.to_string()
+                }),
+                "{url}"
+            );
+        }
+        assert_eq!(
+            navigate(
+                json!({ "url": "http://localhost:4400/", "then": [{ "step": { "url": "http://evil.test/" } }] })
+            ),
+            Err(Refused::UrlOutsidePreview {
+                url: "http://evil.test/".to_string()
+            }),
+            "every url, at any depth"
+        );
+        assert_eq!(
+            navigate(json!({ "url": ["http://localhost:4400/"] })),
+            Err(Refused::UrlOutsidePreview {
+                url: r#"["http://localhost:4400/"]"#.to_string()
+            }),
+            "a url that is not a string"
+        );
+        assert_eq!(
+            evaluate_connector_call("browser_evaluate", &json!({}), Some(&connector)),
+            Err(Refused::ToolDenied)
+        );
+        assert_eq!(
+            evaluate_connector_call("browser_install", &json!({}), Some(&connector)),
+            Err(Refused::ToolNotTagged)
+        );
+        assert_eq!(
+            evaluate_connector_call(
+                "browser_navigate",
+                &json!({ "url": "http://localhost:4400/" }),
+                None
+            ),
+            Err(Refused::ConnectorNotInSession)
+        );
+        assert_eq!(
+            evaluate_connector_call("browser_send_email", &json!({}), Some(&connector)),
+            Err(Refused::ToolDenied),
+            "external_effect is denied until phase 8"
+        );
     }
 
     fn a_call(name: &str, tier: T, paths: &[&str]) -> ToolCallRequest {

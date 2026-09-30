@@ -102,7 +102,12 @@
         "team.resumed",
         "design_plan.proposed",
         "design_plan.approved",
-        "design_plan.returned"
+        "design_plan.returned",
+        "design_review.recorded",
+        "preview.prepared",
+        "preview.started",
+        "preview.stopped",
+        "page.checked"
       ]
     },
     "eventBodyWire": {
@@ -152,7 +157,11 @@
         { "$ref": "#/$defs/decisionWrittenBody" },
         { "$ref": "#/$defs/teamPausedBody" },
         { "$ref": "#/$defs/designPlanProposedBody" },
-        { "$ref": "#/$defs/designPlanDecidedBody" }
+        { "$ref": "#/$defs/reasonBody" },
+        { "$ref": "#/$defs/designReviewRecordedBody" },
+        { "$ref": "#/$defs/previewPreparedBody" },
+        { "$ref": "#/$defs/previewStartedBody" },
+        { "$ref": "#/$defs/pageCheckedBody" }
       ]
     },
     "contractSummary": {
@@ -393,12 +402,12 @@
     },
     "escalationRaisedBody": {
       "title": "Escalation Raised Body",
-      "description": "A move sent a contract to the human (docs/SPEC.md section 5.7), or an accepted contract's integration could not land (5.14), which moves nothing: the contract stays accepted. detail names the gate that opened the move and, when there are any, the words it was about; for reason integration, what failed in git's or gh's words.",
+      "description": "A move sent a contract to the human (docs/SPEC.md section 5.7), or an accepted contract's integration could not land (5.14), which moves nothing: the contract stays accepted. detail names the gate that opened the move and, when there are any, the words it was about; for reason integration, what failed in git's or gh's words; for reason preview, the last 40 lines of the output of the preview's prepare or start, or why Docker could not run it.",
       "type": "object",
       "additionalProperties": false,
       "required": ["reason", "detail"],
       "properties": {
-        "reason": { "type": "string", "enum": ["budget", "sessions", "iterations", "blocker_age", "permission", "risk_gate", "approval", "readiness_failures", "integration", "explicit_request"] },
+        "reason": { "type": "string", "enum": ["budget", "sessions", "iterations", "blocker_age", "permission", "risk_gate", "approval", "readiness_failures", "integration", "explicit_request", "preview"] },
         "detail": { "type": "string" }
       }
     },
@@ -705,15 +714,102 @@
         "plan": { "type": "string" }
       }
     },
-    "designPlanDecidedBody": {
-      "title": "Design Plan Decided Body",
-      "description": "The body of both design_plan.approved and design_plan.returned: the Product Manager's decision on the task's latest design plan, through farik_decide_design_plan (ADR 0026), and why. The two share one shape, so the one branch of the body choice serves both and the event's kind says which it is. The envelope names the task, the Product Manager and the session. A returned plan starts a new explore session with reason.",
+    "reasonBody": {
+      "title": "Reason Body",
+      "description": "The body of design_plan.approved, design_plan.returned and preview.stopped, which share one shape, so the one branch of the body choice serves all three and the event's kind says which it is. For design_plan.approved and design_plan.returned: the Product Manager's decision on the task's latest design plan, through farik_decide_design_plan (ADR 0026), and why; the envelope names the task, the Product Manager and the session, and a returned plan starts a new explore session with reason. For preview.stopped: Farik stopped the task's preview and its browser, and why, in plain words: the session ended, or the preview failed, with the output's last 40 lines (step 12's plan).",
       "type": "object",
       "additionalProperties": false,
       "required": ["reason"],
       "properties": {
         "reason": { "type": "string" }
       }
+    },
+    "checkWidth": {
+      "type": "string",
+      "enum": ["phone", "desktop"],
+      "description": "The width farik_check_page opens a page at: phone is 360 CSS px, desktop 1280."
+    },
+    "checkTheme": {
+      "type": "string",
+      "enum": ["light", "dark"],
+      "description": "The colour scheme farik_check_page emulates."
+    },
+    "violation": {
+      "title": "Violation",
+      "description": "One axe-core violation of WCAG 2.2 A or AA: the rule's id, its impact, the element's selector, and the rule's help text.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["rule", "impact", "target", "help"],
+      "properties": {
+        "rule": { "type": "string" },
+        "impact": { "type": "string" },
+        "target": { "type": "string" },
+        "help": { "type": "string" }
+      }
+    },
+    "designReviewCheck": {
+      "title": "Design Review Check",
+      "description": "One of the four checks a design review carries, copied from the session's latest page.checked of that width and theme.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["width", "theme", "violations"],
+      "properties": {
+        "width": { "$ref": "#/$defs/checkWidth" },
+        "theme": { "$ref": "#/$defs/checkTheme" },
+        "violations": { "type": "array", "items": { "$ref": "#/$defs/violation" } }
+      }
+    },
+    "designReviewRecordedBody": {
+      "title": "Design Review Recorded Body",
+      "description": "The UI/UX Designer's design review of a Software Developer's UI change, through farik_record_design_review (ADR 0026, step 12): whether it passes, the Designer's reasons, and the session's four latest checks, one per width and theme. A fail sends the change back in the Designer's name; only a pass since the task last entered verifying lets the reviewer's session start. The envelope names the task, the Designer and the session.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["pass", "reasons", "checks"],
+      "properties": {
+        "pass": { "type": "boolean" },
+        "reasons": { "type": "string" },
+        "checks": { "type": "array", "maxItems": 4, "items": { "$ref": "#/$defs/designReviewCheck" } }
+      }
+    },
+    "previewPreparedBody": {
+      "title": "Preview Prepared Body",
+      "description": "Farik ran the team's preview.prepare for the task, in the sandbox with the network on: tree is the task branch's HEAD^{tree} id the run was keyed on, and seconds how long it took. A later preview of the same tree and command reuses it.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["tree", "seconds"],
+      "properties": {
+        "tree": { "type": "string", "minLength": 1 },
+        "seconds": { "type": "integer", "minimum": 0, "maximum": 4294967295 }
+      }
+    },
+    "previewStartedBody": {
+      "title": "Preview Started Body",
+      "description": "Farik started the task's preview in its own container, with the network off, and it answered on port.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["port"],
+      "properties": {
+        "port": { "type": "integer", "minimum": 1024, "maximum": 65535 }
+      }
+    },
+    "pageCheckedBody": {
+      "title": "Page Checked Body",
+      "description": "One run of farik_check_page: the page at path, opened at a width and in a theme, checked with axe-core for WCAG 2.2 A and AA, and its violations. screenshot is the file's name under .farik/local/screenshots/<task>/, which task.screenshot serves. The envelope names the task, the agent and the session.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["width", "theme", "path", "violations", "screenshot"],
+      "properties": {
+        "width": { "$ref": "#/$defs/checkWidth" },
+        "theme": { "$ref": "#/$defs/checkTheme" },
+        "path": { "type": "string", "pattern": "^/" },
+        "violations": { "type": "array", "items": { "$ref": "#/$defs/violation" } },
+        "screenshot": { "type": "string", "minLength": 1 }
+      }
+    },
+    "connectorTag": {
+      "type": "string",
+      "enum": ["network", "external_effect", "denied"],
+      "description": "A connector tool's tag (docs/SPEC.md section 5.6)."
     },
     "questionAskedBody": {
       "title": "Question Asked Body",
@@ -755,26 +851,30 @@
     },
     "toolCalledBody": {
       "title": "Tool Called Body",
-      "description": "The PreToolUse hook allowed a tool call (docs/SPEC.md sections 5.6 and 8.2). input is the compact JSON of the call's input, cut to at most 4 KiB, ending in [cut at 4 KiB] when it was cut. The envelope names the session, the agent, and the task when the session has one.",
+      "description": "The PreToolUse hook allowed a tool call (docs/SPEC.md sections 5.6 and 8.2). input is the compact JSON of the call's input, cut to at most 4 KiB, ending in [cut at 4 KiB] when it was cut. The envelope names the session, the agent, and the task when the session has one. A connector's call also names its server and the tool's tag.",
       "type": "object",
       "additionalProperties": false,
       "required": ["tool", "input"],
       "properties": {
         "tool": { "type": "string" },
         "tool_use_id": { "type": "string" },
-        "input": { "type": "string" }
+        "input": { "type": "string" },
+        "server": { "type": "string", "minLength": 1 },
+        "tag": { "$ref": "#/$defs/connectorTag" }
       }
     },
     "toolDeniedBody": {
       "title": "Tool Denied Body",
-      "description": "The PreToolUse hook denied a tool call (docs/SPEC.md sections 5.6 and 8.2). reason starts with the refusal's kind in snake_case, then a colon, then what it says.",
+      "description": "The PreToolUse hook denied a tool call (docs/SPEC.md sections 5.6 and 8.2). reason starts with the refusal's kind in snake_case, then a colon, then what it says. A connector's call also names its server and, when its list tags the tool, the tag.",
       "type": "object",
       "additionalProperties": false,
       "required": ["tool", "reason"],
       "properties": {
         "tool": { "type": "string" },
         "tool_use_id": { "type": "string" },
-        "reason": { "type": "string" }
+        "reason": { "type": "string" },
+        "server": { "type": "string", "minLength": 1 },
+        "tag": { "$ref": "#/$defs/connectorTag" }
       }
     },
     "toolReturnedBody": {

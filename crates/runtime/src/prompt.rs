@@ -1008,6 +1008,7 @@ mod tests {
             max_task_budget_usd: None,
             forbidden_commands: Vec::new(),
             document_paths: Vec::new(),
+            ui_paths: Vec::new(),
         };
         let prompt = assembled(&inputs.full(SessionPurpose::Refine));
         assert_eq!(
@@ -1026,6 +1027,7 @@ mod tests {
             max_task_budget_usd: Some(12.5),
             forbidden_commands: vec!["^rm -rf /".to_string()],
             document_paths: TeamRules::default().document_paths,
+            ui_paths: Vec::new(),
         };
         let prompt = assembled(&inputs.full(SessionPurpose::Refine));
         assert_eq!(

@@ -418,6 +418,8 @@ fn record_decision(
                 tool,
                 tool_use_id,
                 input: cut(request.tool_input.to_string()),
+                server: None,
+                tag: None,
             }),
             HookDecision {
                 allow: true,
@@ -429,6 +431,8 @@ fn record_decision(
                 tool,
                 tool_use_id,
                 reason: reason.clone(),
+                server: None,
+                tag: None,
             }),
             HookDecision::deny(reason),
         ),

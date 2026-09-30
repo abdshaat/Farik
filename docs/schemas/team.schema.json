@@ -35,9 +35,70 @@
     },
     "rules": {
       "$ref": "#/$defs/rules"
+    },
+    "preview": {
+      "$ref": "#/$defs/preview"
     }
   },
   "$defs": {
+    "preview": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "start",
+        "port"
+      ],
+      "properties": {
+        "prepare": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500,
+          "description": "Installs and builds, in the sandbox image with the task's worktree mounted and the network on, for at most 15 minutes; reused while the task branch's committed tree and this text are unchanged. Left out, skipped."
+        },
+        "start": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500,
+          "description": "Starts the app, in a preview container of the sandbox image with the task's worktree mounted and the network off."
+        },
+        "port": {
+          "type": "integer",
+          "minimum": 1024,
+          "maximum": 65535,
+          "description": "The port the app serves on inside its container."
+        },
+        "path": {
+          "type": "string",
+          "pattern": "^/",
+          "default": "/",
+          "description": "The page to open first. Left out, /."
+        }
+      },
+      "description": "How Farik opens the project's app for the ui_ux_designer (ADR 0026, the founder's D2): set once in Settings, under How to open your app. Without it a Designer's task is not assigned and a design review waits. Templates leave it out."
+    },
+    "mcpServer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "source"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "description": "The connector's name. validate_team refuses one Farik does not ship with unknown_connector; the one it ships is playwright."
+        },
+        "source": {
+          "type": "string",
+          "enum": [
+            "builtin"
+          ],
+          "description": "Where the connector's definition comes from: builtin, shipped in the farik binary."
+        }
+      }
+    },
     "role": {
       "type": "string",
       "enum": [
@@ -122,6 +183,15 @@
             "$ref": "#/$defs/permissionTier"
           },
           "description": "Permission tiers this agent does not hold, whatever its role's defaults say (spec 5.6: a role's tiers are the user's to override, which means taking one away as well as adding one). Taking away wins over granting."
+        },
+        "mcp_servers": {
+          "type": "array",
+          "maxItems": 20,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/mcpServer"
+          },
+          "description": "The connectors this agent's explore, implement and design review sessions get (spec 5.6). Any agent may have one; team.propose gives the ui_ux_designer playwright."
         }
       }
     },
@@ -403,6 +473,16 @@
           },
           "default": ["docs/**", "**/*.md", "CHANGELOG.md"],
           "description": "Globs every allowed path of a task not assigned to the software_developer or the ui_ux_designer must fall within: only the Developer and the UI/UX Designer change code (spec 5.12). Left out, docs/**, **/*.md and CHANGELOG.md; an empty list means no task but a Developer's or a Designer's can be ready."
+        },
+        "ui_paths": {
+          "type": "array",
+          "maxItems": 100,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "default": ["**/*.tsx", "**/*.jsx", "**/*.vue", "**/*.svelte", "**/*.css", "**/*.scss", "**/*.html"],
+          "description": "Globs a software_developer's task diff is matched against when it enters verifying: a match makes it a UI change, which the ui_ux_designer design-reviews before the reviewer (ADR 0026, spec 5.12). Left out, the seven design globs; an empty list leaves only the contract's ui_change to say so."
         }
       }
     }
