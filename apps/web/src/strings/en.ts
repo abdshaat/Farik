@@ -334,7 +334,7 @@ export const en = {
 	teamCostTitle: "What a team like this costs",
 	teamCostNote: "It is a guide, not a limit.",
 	teamCostDesigner:
-		"{designer} uses the same model as {developer}, so a sixth agent adds to what a day costs. Before {designer} changes a screen, {designer} looks at it and writes a plan, and that costs a little too.",
+		"{designer} uses the same model as {developer}, so {designer} adds to what a day costs. Before {designer} changes a screen, {designer} looks at it and writes a plan, and that costs a little too.",
 	teamCostLimitBefore: "Set a limit in ",
 	teamCostLimitAfter: ".",
 	agentBack: "Back to your team",

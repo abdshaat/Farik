@@ -215,6 +215,26 @@ describe("team page", () => {
 		});
 	});
 
+	it("counts_no_agents_in_the_designer_cost_line_of_a_small_team", async () => {
+		await opened("/team", {
+			...TEAM,
+			agents: [
+				agent("mira", "Mira", "product_manager", "product_manager"),
+				agent("ada", "Ada", "architect", "architect"),
+				agent("theo", "Theo", "software_developer", "software_developer"),
+				agent("iris", "Iris", "ui_ux_designer", "extra-1"),
+			],
+		});
+		const cost = await screen.findByRole("region", { name: en.teamCostTitle });
+		// A team of four has no sixth agent.
+		expect(cost.textContent).not.toMatch(/sixth/);
+		expect(
+			within(cost).getByText("so Iris adds to what a day costs", {
+				exact: false,
+			}),
+		).toBeTruthy();
+	});
+
 	it("shows_the_designer_card_in_its_colour", async () => {
 		const { container, s } = await opened("/team", {
 			...TEAM,
@@ -251,10 +271,10 @@ describe("team page", () => {
 		expect(face.style.getPropertyValue("--ring")).toBe(
 			"var(--farik-color-role-ui-ux-designer)",
 		);
-		// The cost section says what a sixth agent, and its plans, add.
+		// The cost section says what the Designer, and its plans, add.
 		expect(
 			screen.getByText(
-				"Iris uses the same model as Theo, so a sixth agent adds to what a day costs. Before Iris changes a screen, Iris looks at it and writes a plan, and that costs a little too.",
+				"Iris uses the same model as Theo, so Iris adds to what a day costs. Before Iris changes a screen, Iris looks at it and writes a plan, and that costs a little too.",
 				{ exact: false },
 			),
 		).toBeTruthy();
