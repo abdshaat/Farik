@@ -1,6 +1,6 @@
 # Phase 6, step 12: The Designer's preview, Playwright connector and design review
 
-Status: draft
+Status: built 2026-09-30 (Tasks 1 to 7), awaiting its landing review
 Branch: `phase/6-web-ui`
 Spec: `docs/SPEC.md` sections 4.1 (the preview commands), 5.4 (the design review), 5.6 (connectors), 5.7 (the `preview` escalation), 5.12 (`ui_paths`), 6.7, 8.2 (the hook's connector check), 8.3 (the preview and browser containers), 8.5, 8.6, F9
 Depends on: step 11 of this phase (the Designer, its plan gate, and the mockups the founder approved in its Task 1, which cover this step's screens); ADR 0026 and `docs/design/designer-chats-templates.md`
@@ -42,7 +42,7 @@ The ADR and the design hold as written. The founder's decisions of 2026-09-30 (D
   - With it on, `own_host` also accepts `Host: localhost:<port>` exactly, and `from_own_page` also accepts `Origin: http://localhost:<port>` exactly. Any other host, `localhost` with another port among them, is still refused, so DNS rebinding and cross-site requests stay out.
   - `GET /` with that Host issues a browser session and sets its cookie as `POST /connect` does, then serves the app. The WebSocket and RPC paths are unchanged.
   - `--preview` implies `--no-keychain`, a temporary `XDG_CONFIG_HOME`, and a temporary copy of step 08's recorded team as the project, so a code-free browser never shares a daemon with a real credential store.
-  - The knob is `CliIo.admit_local_preview` (under `e2e`), passed to `WebConfig::admit_local_preview`.
+  - The knob is `CliIo.admit_local_preview` (under `e2e`), passed to `WebState.admit_local_preview` (as built: no `WebConfig` exists, and `WebState` is what the browser routes read).
 - **The Designer needs Docker's sandbox** (the founder, D3). The Designer is unavailable in no-sandbox mode and without Docker, and there is no host path. When unavailable:
   - `team.propose` lists it unticked with "Needs Docker's sandbox";
   - its tasks are not assigned;
@@ -142,7 +142,7 @@ pub enum CheckWidth { Phone, Desktop }  pub enum CheckTheme { Light, Dark }
 pub struct PageCheck { pub width: CheckWidth, pub theme: CheckTheme, pub path: String, pub violations: Vec<Violation>, pub screenshot: PathBuf }
 pub struct Violation { pub rule: String, pub impact: String, pub target: String, pub help: String }
 pub fn check_page(definition: &ConnectorDefinition, preview: &dyn RunningPreview, path: &str, width: CheckWidth, theme: CheckTheme, out: &Path) -> Result<PageCheck, CheckError>;
-#[cfg(feature = "e2e")] WebConfig::admit_local_preview: bool
+#[cfg(feature = "e2e")] WebState.admit_local_preview: bool   // as built; the plan said WebConfig
 ```
 
 Wire:
@@ -159,6 +159,17 @@ Wire:
   - `settings.defaults.ui_paths`;
   - `waiting.list` gains `preview_missing` and `designer_needs_sandbox`;
   - `team.propose` gives the Designer `mcp_servers: [{ name: playwright, source: builtin }]`, unticked when the Designer is not `Ready` for want of a sandbox.
+
+As built (recorded 2026-09-30 by Task 7 from the reports of Tasks 1 to 6; spec 0.33 describes this, not the first plan's guesses):
+- Core: `designPlanDecidedBody` is renamed `reasonBody` (`ReasonBody`), shared with `preview.stopped`, the wire unchanged. `EscalationReason::Preview` and `TransitionContext.preview_failed` came in with Task 2 (eleven reasons). New `gates::check_design_rejection` (Task 4, outside the file map): the rejection gate required a failed criterion, which a design review never names, so without it the governor refused every Designer rejection (F9).
+- Rule 5's order (Task 4, a deviation): a design review recorded since the task entered `verifying` is acted on first, a pass going to the Architect and a fail rejected, before the waits (preview, then sandbox, then paused Designer), since a recorded answer needs neither the preview nor the Designer. The plan listed the waits first.
+- Tiers: every session given the connector (explore, the Designer's implement, the design review) is registered with `network` added, not only explore, or every browser call would be denied `tier_not_granted` (Task 3's finding, Task 4). `farik_check_page` is at tier `read`, offered only to a Designer's session with a task and the connector, and guarded by its own check.
+- The connector: `--proxy-bypass localhost` beside the dead proxy, because Playwright turns Chromium's loopback bypass off once a proxy is set; five tools the 0.0.82 image lists and the table did not are `denied`. The check script launches `channel: "chromium"` (no headless shell in the image), takes viewport screenshots only, has a 90 s watchdog and no host-side deadline, and runs axe in the page's own world (a `ponytail:` note; SPEC 8.6 names the residual).
+- New interfaces: `RunningPreview::{labels, user, run_check}`; `CheckError { detail }`; `check_page`'s `out` is the screenshot file; `Violation` is the protocol's; `Git::tree`; `SessionSpec.disallowed_tools`; the setup method `browser.pull`; `team.propose`'s required `unavailable: [{ agent_id, reason }]`; `Transitions::{set_previews, designer_browser, design_review}`; `farik_record_design_review` and its refusals `design_review_refused`, `blank_reason`, `design_review_incomplete`; `own_host` and `from_own_page` take `&WebState`; `farik-e2e-serve --sandbox-image`; workspace dependency `base64 =0.23.1`, already in the lock.
+- `preview.prepared.seconds` counts prepare and start together, since the factory reports no split. `task.get`'s `design_review` is `null` for a change that is not to the interface, so `not_needed` shows only for a UI change on a team with no Designer.
+- The journey: `./busybox httpd` (above); FRK-2 is high risk so that it reaches the human gate for the screenshots; step 11's `design.spec.ts` now runs in Docker with a preview, since wiring D4's refusal refused its Iris; `setup-team.spec.ts` keeps five agents in no-sandbox setup, Iris unticked. Flakes root-caused: a container already being removed counts as removed (`sandbox::docker::removed`), and `serving.rs` reads the port again on each try.
+- Outside the file map: `transitions.rs`, `sandbox/docker.rs`, `cli/src/start.rs`, `daemon/app.rs`, `daemon/team.rs`, `core/governor/gates.rs`'s `check_design_rejection`, `design.spec.ts`, `setup-team.spec.ts`, `setup/PreviewFields.tsx`, `DesignReview.tsx`.
+- Found by Task 7, not changed: the daemon's `preview_missing` waiting line names the agent's id ("iris needs…"), not its name; the Designer's letter is signed by the first active Designer, not the review event's agent; the approved mockup's history of earlier design reviews, "Who looked at it, in order" and the "Screens checked" date are not built (no wire gives earlier reviews); the board asks `task.get` per card in review; the agent page's words "so Farik gives Iris no work" when Playwright is off are not enforced, since the assignment checks the preview and the sandbox, not the agent's `mcp_servers`; D2's own-preview commands for Farik are in no committed file, and `farik-e2e-serve --preview` is exercised only by `serving.rs`.
 
 ## Tasks
 
@@ -199,7 +210,7 @@ Tests:
 - `launches_the_browser_confined`: `connector_server`'s arguments carry the container name, the label, `--user`, `--network container:<preview>`, `--proxy-server http://127.0.0.1:9` and `--allowed-origins`.
 - `proposes_the_designer_with_its_connector`, including unticked when there is no sandbox.
 - `lists_the_designer_browser_row_only_with_a_designer` (R6): `check_computer` has the row "Browser for the UI/UX Designer" only when the team has a Designer. Its state is ready when `docker image inspect <image@digest>` succeeds and missing when it fails. `SetupComputer.test.tsx`'s `shows_the_designer_browser_row` shows the row and its pull button.
-- Integration (`#[ignore = "needs docker"]`), with `alpine:3.22` serving a page with `busybox httpd` (F3):
+- Integration (`#[ignore = "needs docker"]`), with `alpine:3.22` serving a page with busybox-extras' `httpd` (F3; as built: Alpine 3.22's busybox has no `httpd` applet, so the tests fetch busybox-extras once with `apk add`, network on, and run `./busybox httpd …`):
   - `the_pinned_image_lists_the_pinned_tools`: the drift test;
   - `the_browser_reaches_only_the_preview` (R2). Navigating to the preview passes. The redirect is a busybox `httpd` CGI, `/cgi-bin/away`, answering `302` with `Location: http://example.com/`. It runs three times, each with one barrier:
     - (a) `--network none` alone: both the direct navigation to `http://example.com/` and the redirect fail;
@@ -275,7 +286,7 @@ Produces: the `e2e` admit branch, and `designer.spec.ts`. Consumes: everything a
 
 The journey:
 - runs in Docker sandbox mode on `alpine:3.22`, with the fixture team `pm-architect-developer-designer` (Mira, Ada, Theo and Iris, with `judgment.required: never`);
-- has `preview: { start: "busybox httpd -f -p 4401 -h site", port: 4401 }` over a two-file `site/`;
+- has `preview: { start: "./busybox httpd -f -p 4401 -h site", port: 4401 }` over a two-file `site/`, the project carrying busybox-extras' binary, which the fixture fetches once per machine with `apk add` (so the first run on a machine needs the network; CI has it);
 - has review-only criteria.
 
 Steps:
@@ -299,7 +310,7 @@ In `xtask/src/check.rs`:
 
 ### Task 7: Spec and plan
 
-`docs/SPEC.md`, under revision 0.32 (<date>), "from phase 6 step 12":
+`docs/SPEC.md`, under revision 0.33 (2026-09-30; 0.32 is the DevOps Engineer, ADR 0027), "from phase 6 step 12":
 - 4.1: the preview commands, and the Designer needing Docker's sandbox;
 - 5.4: the design review, and the Definition of Done item;
 - 5.6: connectors, tags and `url_outside_preview`;
@@ -312,9 +323,9 @@ In `xtask/src/check.rs`:
 - 8.6: "The Designer's browsing is limited to the project's preview. `prepare` runs the project's install and build with the network on, as the founder decided, and the browser's confinement does not cover it." (R14);
 - F9.
 
-The project plan: step 12's line gains "Built <date> (spec 0.32): …".
+The project plan: step 12's line gains "Built 2026-09-30 (spec 0.33): …".
 
-- [ ] `docs(spec): the Designer's preview, connector and design review`
+- [x] `docs(spec): record the Designer's preview, page check and design review`
 
 ## Verification
 
@@ -324,6 +335,10 @@ cargo xtask check --integration
 #   @farik/web: step 11's landed count plus 9 (T5 8, T2 1);
 #   playwright: step 11's landed count plus 1 (designer.spec.ts) passed;
 #   last line: xtask check: ok
+# built 2026-09-30 (Task 6's run): cargo 1685 passed, 0 failed (step 11's landed 1637, plus 48: the
+#   named tests, extras and guards of Tasks 1 to 4 and 6); protocol-client 8, brand 30, ui 43,
+#   @farik/web 145 (133 plus 12: T5's 8 and 3 extras, T2's 1); playwright 11 passed (10 plus
+#   designer.spec.ts); xtask check: ok. Task 7 (docs only) ran `cargo xtask check`.
 ```
 
 The integration run needs Docker with `alpine:3.22` and the pinned Playwright image pulled, which CI's workflow does.

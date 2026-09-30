@@ -235,7 +235,7 @@ Vitest and axe. Tests:
 
 ### Task 9: The spec and the plan
 
-`docs/SPEC.md`, in the next free revision when this step lands (0.33 if steps 11 and 12 take 0.31 and 0.32), as the design's table lists: 3 (the channel and chats), 4.3 (the one-to-one as built), 5.1 (chat is not command), 5.2 (the chat rule runs while paused), 4.4 (a paused agent still answers its chat), 5.5 (a chat's cost, the daily limit), 5.9 (chats apart from the channel; their privacy depends on `.farik/local/**` staying protected), 8.2 (the `chat` session and its tools), 8.4 (chats in the log), 8.5 (`chat_message.posted`, `from_chat_message`, purpose `chat`, `session.started`'s `chat`, and the attribution exception: the envelope names the chat's agent on the user's message too), F7 and F8. The project plan's step 13 line records the landing.
+`docs/SPEC.md`, in the next free revision when this step lands (0.34: 0.31 is step 11, 0.32 the DevOps Engineer, 0.33 step 12), as the design's table lists: 3 (the channel and chats), 4.3 (the one-to-one as built), 5.1 (chat is not command), 5.2 (the chat rule runs while paused), 4.4 (a paused agent still answers its chat), 5.5 (a chat's cost, the daily limit), 5.9 (chats apart from the channel; their privacy depends on `.farik/local/**` staying protected), 8.2 (the `chat` session and its tools), 8.4 (chats in the log), 8.5 (`chat_message.posted`, `from_chat_message`, purpose `chat`, `session.started`'s `chat`, and the attribution exception: the envelope names the chat's agent on the user's message too), F7 and F8. The project plan's step 13 line records the landing.
 
 - [ ] `docs(spec): specify one-to-one chats`
 
