@@ -90,12 +90,14 @@ Produces: the RPC query `channel.messages`; `renderMessageText(text: string, tea
 - Spec F7: the channel in the web app.
 - The project plan's step 10 line.
 
-- [ ] `test(web): talk to the team through the real server and browser`
+- [x] `test(web): talk to the team through the real server and browser`
 
 ## Verification
 
 ```
 cargo xtask check --integration
-# expected: cargo 0 failed (T1 3 new); @farik/web: step 09's landed count plus 6; playwright: step 09's 8 plus 1 = 9 passed;
+# expected: cargo 0 failed (T1 3 new); @farik/web: step 09's landed 101 plus 6 = 107; playwright: step 09's 8 plus 1 = 9 passed;
 #   last line: xtask check: ok
+# landed 2026-09-30: cargo 1601 passed, 0 failed; protocol-client 8, brand 30, ui 41, @farik/web 107;
+#   playwright 9 passed; xtask check: ok
 ```

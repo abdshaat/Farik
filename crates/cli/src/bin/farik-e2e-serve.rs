@@ -18,8 +18,8 @@ use farik_runtime::recorded::fixtures::{
     UsageThenWaitAdapter, accept_frk_1, ask_with_choices_frk_1, implement_after_send_back_frk_1,
     implement_finishes_frk_1, judge_frk_1_by_architect, plan_assigns_frk_1_to_theo,
     planning_ceremony_frk_1, refine_writes_epic_frk_1, refine_writes_high_risk_frk_1,
-    refine_writes_task_for_theo_frk_1, retro, review, review_writes_note, tool_runner,
-    triage_frk_1_large, triage_frk_1_small_by_pm,
+    refine_writes_task_for_theo_frk_1, reply_to_a_mention, retro, review, review_writes_note,
+    tool_runner, triage_frk_1_large, triage_frk_1_small_by_pm,
 };
 use farik_runtime::{
     RecordedAdapter, RuntimeAdapter, RuntimeError, SessionHandle, SessionSpec, Transcript,
@@ -43,6 +43,7 @@ fn transcript(name: &str) -> Option<Transcript> {
         "accept_frk_1" => Some(accept_frk_1()),
         "review" => Some(review()),
         "retro" => Some(retro()),
+        "reply_to_a_mention" => Some(reply_to_a_mention()),
         _ => None,
     }
 }
