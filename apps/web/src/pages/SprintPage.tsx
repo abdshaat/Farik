@@ -127,6 +127,7 @@ export function SprintPage() {
 										</span>
 									</div>
 									<Link
+										className={board.rowLink}
 										to={`/channel#${threadAnchor(m.thread, m.at)}`}
 										aria-describedby={`meeting-${m.firstSeq}`}
 									>

@@ -34,3 +34,25 @@ export async function screenshots(page: Page, name: string): Promise<void> {
 	await page.setViewportSize({ width: 1280, height: 800 });
 	await page.screenshot({ path: `${shots}${name}-1280.png`, fullPage: true });
 }
+
+/**
+ * Each link `selector` finds that is shorter than WCAG 2.2's 24 px target, or whose words break
+ * onto a second line, by its text and height; none, when every one is a whole, big enough target.
+ */
+export function smallLinks(page: Page, selector: string): Promise<string[]> {
+	return page.evaluate(
+		(selector) =>
+			Array.from(document.querySelectorAll(selector)).flatMap((link) => {
+				const range = document.createRange();
+				range.selectNodeContents(link);
+				const lines = new Set(
+					Array.from(range.getClientRects()).map((r) => Math.round(r.top)),
+				).size;
+				const height = link.getBoundingClientRect().height;
+				return height < 24 || lines > 1
+					? [`${link.textContent}: ${height} px, ${lines} lines`]
+					: [];
+			}),
+		selector,
+	);
+}

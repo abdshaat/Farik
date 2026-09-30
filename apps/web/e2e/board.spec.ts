@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 import { events, startServe } from "./fixtures/serve.ts";
-import { screenshots } from "./fixtures/shots.ts";
+import { screenshots, smallLinks } from "./fixtures/shots.ts";
 
 /** The lanes, as the board names their headings (`lane-<lane>-title`), in the order a task moves. */
 const LANES = ["planning", "todo", "in_progress", "stuck", "review", "done"];
@@ -170,6 +170,14 @@ test("a sprint runs on the board by itself, from its planning to its look back",
 			/^Review1 post on /,
 			/^Looking back1 post on /,
 		]);
+		// On a phone each meeting's "Read it" is a 24 px target on one line (WCAG 2.2 target size).
+		await expect(meetings.getByRole("link", { name: "Read it" })).toHaveCount(
+			3,
+		);
+		await page.setViewportSize({ width: 360, height: 780 });
+		await expect
+			.poll(() => smallLinks(page, 'a[href^="/channel#thread-"]'))
+			.toEqual([]);
 		await screenshots(page, "sprint");
 
 		// 6. The Costs page's row for each agent, with what Theo spent building.

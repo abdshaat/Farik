@@ -116,6 +116,16 @@
 	font-weight: 600;
 }
 
+/* A row's own link beside its words ("Read it"): whole, on one line, and a 24 px target. */
+.rowLink {
+	flex: none;
+	display: inline-flex;
+	align-items: center;
+	min-height: 24px;
+	margin-left: auto;
+	white-space: nowrap;
+}
+
 .small {
 	margin: 0;
 	color: var(--farik-color-ink-muted);
