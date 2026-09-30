@@ -239,7 +239,8 @@ pub enum Waited {
     Reached,
     /// `stop` was called first.
     Stopped,
-    /// A command the human gave was handled first, which may have made work for an agent awake.
+    /// A command the human gave was handled first, or a request was filed in the browser, which
+    /// may have made work for an agent awake.
     Woken,
 }
 
@@ -492,6 +493,7 @@ impl Orchestrator {
             () = self.deps.sleeper.sleep_until(capped) => Waited::Reached,
             () = stopped => Waited::Stopped,
             () = self.commands.notified() => Waited::Woken,
+            () = self.deps.daemon.wakes().notified() => Waited::Woken,
         }
     }
 

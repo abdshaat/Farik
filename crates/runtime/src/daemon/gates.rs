@@ -388,7 +388,9 @@ pub(super) async fn call(
     };
     if method == "request.file" {
         let text = params["text"].as_str().unwrap_or_default().to_string();
-        return off_the_worker(move || file_words(&deps, &text)).await;
+        let filed = off_the_worker(move || file_words(&deps, &text)).await?;
+        state.wakes().notify_one();
+        return Ok(filed);
     }
     save(state, &deps, params).await
 }
@@ -600,8 +602,9 @@ pub(super) mod tests {
 
     use super::choices;
     use crate::daemon::DaemonState;
-    use crate::orchestrator::command_handler;
     use crate::orchestrator::fixtures::Harness;
+    use crate::orchestrator::{Waited, command_handler};
+    use crate::tools::fixtures::at;
 
     /// The reply frame to `method` with `params`, answered on a runtime of its own.
     pub(crate) fn rpc(state: &Arc<DaemonState>, method: &str, params: &Value) -> Value {
@@ -712,6 +715,32 @@ pub(super) mod tests {
             "requestFileResult",
         );
         assert_eq!(harness.project.events(&[EventKind::TaskCreated]).len(), 2);
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn wakes_the_team_when_a_request_is_filed() {
+        let harness = Harness::new("gates-file-wakes", |_| {});
+        let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
+
+        let (ended, filed) = tokio::join!(
+            tokio::time::timeout(
+                std::time::Duration::from_secs(5),
+                orchestrator.wait_until(at() + chrono::Duration::hours(1)),
+            ),
+            async {
+                tokio::task::yield_now().await;
+                super::call(
+                    &harness.daemon,
+                    "request.file",
+                    &json!({ "text": "Add a done.txt at the root of the project" }),
+                )
+                .await
+            }
+        );
+
+        assert!(filed.is_ok(), "the request is filed");
+        assert_eq!(ended.expect("the wait ends"), Waited::Woken);
     }
 
     #[test]

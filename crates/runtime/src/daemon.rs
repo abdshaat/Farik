@@ -141,6 +141,7 @@ pub struct DaemonState {
     host: Option<Arc<dyn SetupHost>>,
     sessions: Mutex<BTreeMap<String, Session>>,
     stops: tokio::sync::Notify,
+    wakes: tokio::sync::Notify,
     commands: OnceLock<CommandHandler>,
     web: OnceLock<web::WebState>,
 }
@@ -154,6 +155,7 @@ impl DaemonState {
             host: None,
             sessions: Mutex::new(BTreeMap::new()),
             stops: tokio::sync::Notify::new(),
+            wakes: tokio::sync::Notify::new(),
             commands: OnceLock::new(),
             web: OnceLock::new(),
         }
@@ -168,6 +170,7 @@ impl DaemonState {
             host: Some(host),
             sessions: Mutex::new(BTreeMap::new()),
             stops: tokio::sync::Notify::new(),
+            wakes: tokio::sync::Notify::new(),
             commands: OnceLock::new(),
             web: OnceLock::from(web),
         }
@@ -258,6 +261,11 @@ impl DaemonState {
     /// `stop_reason`, so that no stop falls between the two.
     pub(crate) fn stops(&self) -> &tokio::sync::Notify {
         &self.stops
+    }
+
+    /// The notice a request filed in the browser wakes, so that the team's wait ends at once.
+    pub(crate) fn wakes(&self) -> &tokio::sync::Notify {
+        &self.wakes
     }
 
     /// Stops answering for a session: every later hook of it is `unknown_session`.
