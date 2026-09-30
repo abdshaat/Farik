@@ -47,12 +47,12 @@ export class FakeSocket implements SocketLike {
 		});
 	}
 	/** Refuses a request the client sent, as the daemon would. */
-	fail(frame: Frame, code: number, message: string) {
+	fail(frame: Frame, code: number, message: string, data?: unknown) {
 		this.emit("message", {
 			data: JSON.stringify({
 				jsonrpc: "2.0",
 				id: frame.id,
-				error: { code, message },
+				error: { code, message, ...(data === undefined ? {} : { data }) },
 			}),
 		});
 	}

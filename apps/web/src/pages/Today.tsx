@@ -3,6 +3,7 @@ import { type FormEvent, useState } from "react";
 import { Link, useNavigate } from "react-router";
 import { useConnection } from "../app/connection.tsx";
 import { useQuery } from "../app/store.ts";
+import { codeOf, sentence } from "../app/words.ts";
 import type { en } from "../strings/en.ts";
 import { t } from "../strings/t.ts";
 import type { Agent, Team } from "./setup/TeamSetup.tsx";
@@ -178,12 +179,11 @@ function RequestBox({ pmName }: { pmName: string }) {
 			};
 			navigate(`/requests/${filed.taskId}`);
 		} catch (error) {
-			const said = (error as Error).message;
-			// The length refusal is a fragment (the store's TOO_SHORT); say it as a sentence.
+			// The length refusal is known by its code, and said in the page's own sentence.
 			setRefusal(
-				said.includes("say a little more")
+				codeOf(error) === "too_short"
 					? t("requestTooShort")
-					: said.charAt(0).toUpperCase() + said.slice(1),
+					: sentence((error as Error).message),
 			);
 			setBusy(false);
 		}

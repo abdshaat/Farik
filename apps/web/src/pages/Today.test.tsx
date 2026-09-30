@@ -117,9 +117,17 @@ describe("today", () => {
 			return f;
 		});
 		expect(refused.params).toEqual({ text: "hi" });
-		// The daemon's refusal is a fragment; the page says it in its own sentence.
+		// The page words the refusal by its code, whatever the daemon's words are.
 		act(() =>
-			s.fail(refused, -32005, "say a little more: at least 20 characters"),
+			s.fail(refused, -32005, "write at least 20 characters", {
+				errors: [
+					{
+						path: "/text",
+						message: "write at least 20 characters",
+						code: "too_short",
+					},
+				],
+			}),
 		);
 		expect((await screen.findByRole("alert")).textContent).toBe(
 			en.requestTooShort,

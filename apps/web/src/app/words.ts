@@ -9,6 +9,10 @@ export function sentence(detail: string): string {
 	return said.charAt(0).toUpperCase() + said.slice(1);
 }
 
+/** The code a refused call carries in its data (`errors[0].code`), if it carries one. */
+export const codeOf = (e: unknown): string | undefined =>
+	(e as { data?: { errors?: { code?: string }[] } }).data?.errors?.[0]?.code;
+
 /** The active agent in `role`, if the team has one. */
 export function active(agents: Agent[], role: Agent["role"]) {
 	return agents.find((a) => a.role === role && a.status !== "retired");
