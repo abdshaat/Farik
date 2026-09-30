@@ -80,7 +80,7 @@ describe("acceptance gate", () => {
 		for (const text of [
 			"Wednesday 23 September",
 			"Thursday 24 September",
-			"1 of 3",
+			"1 of 4",
 			"$1.82",
 		])
 			expect(within(about).getByText(text)).toBeTruthy();

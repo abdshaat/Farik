@@ -127,7 +127,7 @@ export async function openedGate(
 			added: 142,
 			removed: 18,
 		},
-		"task.tries": { used: 1, allowed: 3 },
+		"task.tries": { try: 1, of: 4 },
 		"waiting.list": { waiting },
 		"escalation.choices": {
 			choices: [

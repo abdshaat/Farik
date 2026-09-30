@@ -562,7 +562,7 @@ export const en = {
 	gateAbout: "About this task",
 	gatePlanApproved: "Plan approved",
 	gateTries: "Tries",
-	triesOf: "{used} of {allowed}",
+	triesOf: "{try} of {of}",
 	gateCost: "Cost",
 	gateHistory: "See the whole history",
 	gateWhatChecked: "What you checked",
@@ -574,7 +574,7 @@ export const en = {
 	sendBackElse: "Something else",
 	sendBackNote: "Your note to {name}",
 	sendBackTry:
-		"This is try {used} of {allowed}. After the last, Farik stops and asks you.",
+		"This is try {try} of {of}. After the last, Farik stops and asks you what to do.",
 	sendBackCancel: "Cancel",
 	sendBackSend: "Send back to {name}",
 	helpTitle: "{name} needs your help with “{title}”",

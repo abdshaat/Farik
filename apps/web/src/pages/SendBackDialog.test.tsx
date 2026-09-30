@@ -36,7 +36,7 @@ describe("send back dialog", () => {
 		]);
 		expect(
 			within(dialog).getByText(
-				"This is try 1 of 3. After the last, Farik stops and asks you.",
+				"This is try 1 of 4. After the last, Farik stops and asks you what to do.",
 			),
 		).toBeTruthy();
 

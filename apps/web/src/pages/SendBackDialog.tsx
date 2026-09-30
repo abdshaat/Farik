@@ -2,6 +2,7 @@ import { Button, Dialog, TextArea } from "@farik/ui";
 import { useState } from "react";
 import { t } from "../strings/t.ts";
 import gate from "./Gate.module.css";
+import type { Tries } from "./Gate.tsx";
 import type { Criterion } from "./PlanPage.tsx";
 import styles from "./pages.module.css";
 
@@ -20,7 +21,7 @@ export function SendBackDialog({
 	title: string;
 	builder: string;
 	criteria: Criterion[];
-	tries: { used: number; allowed: number };
+	tries: Tries;
 	busy: boolean;
 	onClose: () => void;
 	onSend: (failedCriteria: string[], message: string) => void;
@@ -82,8 +83,8 @@ export function SendBackDialog({
 			/>
 			<p className={styles.muted}>
 				{t("sendBackTry")
-					.replace("{used}", String(tries.used))
-					.replace("{allowed}", String(tries.allowed))}
+					.replace("{try}", String(tries.try))
+					.replace("{of}", String(tries.of))}
 			</p>
 		</Dialog>
 	);

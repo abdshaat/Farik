@@ -149,8 +149,8 @@ export function HelpNeeded() {
 					<dt>{t("gateTries")}</dt>
 					<dd>
 						{t("triesOf")
-							.replace("{used}", String(tries.used))
-							.replace("{allowed}", String(tries.allowed))}
+							.replace("{try}", String(tries.try))
+							.replace("{of}", String(tries.of))}
 					</dd>
 					<dt>{t("helpSpent")}</dt>
 					<dd>

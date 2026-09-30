@@ -27,7 +27,8 @@ export type HistoryEvent = {
 		detail?: string;
 	};
 };
-export type Tries = { used: number; allowed: number };
+/** The try in progress, of all the task gets, as `task.tries` works them out. */
+export type Tries = { try: number; of: number };
 type Check = { criterionId: string; text: string; passed: boolean };
 type Diff = { diff: string; files: string[]; added: number; removed: number };
 type Waiting = { taskId: string; kind: string };
@@ -180,8 +181,8 @@ export function Gate() {
 					<dt>{t("gateTries")}</dt>
 					<dd>
 						{t("triesOf")
-							.replace("{used}", String(tries.used))
-							.replace("{allowed}", String(tries.allowed))}
+							.replace("{try}", String(tries.try))
+							.replace("{of}", String(tries.of))}
 					</dd>
 					<dt>{t("gateCost")}</dt>
 					<dd>{dollars(spent(events))}</dd>

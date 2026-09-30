@@ -102,7 +102,7 @@ describe("help page", () => {
 		const about = screen.getByRole("region", { name: "About this task" });
 		for (const text of [
 			"07:52 UTC",
-			"1 of 3",
+			"1 of 4",
 			"$1.82 of $14.00",
 			"Ada, Architect",
 		])
