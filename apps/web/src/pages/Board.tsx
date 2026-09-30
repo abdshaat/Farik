@@ -74,7 +74,14 @@ export function Board() {
 	const [lane, setLane] = useState<Lane>("planning");
 	const [dialog, setDialog] = useState<"start" | "end">();
 
-	if (!team || !list || !waiting || !activity || sprint === undefined)
+	if (
+		!team ||
+		!list ||
+		!waiting ||
+		!activity ||
+		sprint === undefined ||
+		!sprints
+	)
 		return null;
 	const agents = team.team.agents.filter((a) => a.status !== "retired");
 	const tasks = list.tasks;
@@ -126,9 +133,7 @@ export function Board() {
 			(risk === "any" || task.risk === risk),
 	);
 	const inLane = (l: Lane) => shown.filter((task) => laneOf(task) === l);
-	const n = (
-		sprint?.sprintId ?? `S${(sprints?.sprints.length ?? 0) + 1}`
-	).slice(1);
+	const n = (sprint?.sprintId ?? `S${sprints.sprints.length + 1}`).slice(1);
 
 	const row = (task: TaskRow) => {
 		const who = agents.find((a) => a.id === task.assigneeId);
@@ -303,6 +308,7 @@ export function Board() {
 				<EndSprint
 					n={n}
 					unfinished={sprint.total - sprint.done}
+					planner={plannerOf(agents)}
 					onClose={() => setDialog(undefined)}
 				/>
 			)}

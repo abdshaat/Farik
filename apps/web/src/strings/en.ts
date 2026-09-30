@@ -691,6 +691,10 @@ export const en = {
 	sprintEndUnfinished:
 		"{count} of its tasks are not finished. They go back on the board.",
 	sprintEnd: "End sprint {n}",
+	sprintEndLeaves:
+		"{count} tasks are not finished. They leave the sprint and go back on the board exactly as they are. Nothing is lost, and work in progress keeps going. {name} will still run the review and the look back.",
+	sprintEndLeavesOne:
+		"1 task is not finished. It leaves the sprint and goes back on the board exactly as it is. Nothing is lost, and work in progress keeps going. {name} will still run the review and the look back.",
 	sprintKeep: "Keep it running",
 	taskBack: "Back to the board",
 	taskInSprint: "{id} in sprint {n}.",

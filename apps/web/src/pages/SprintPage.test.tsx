@@ -133,8 +133,35 @@ describe("sprint page", () => {
 			within(
 				screen.getByRole("dialog", { name: "End sprint 2 early?" }),
 			).getByText(
-				"2 of its tasks are not finished. They go back on the board.",
+				"2 tasks are not finished. They leave the sprint and go back on the board exactly as they are. Nothing is lost, and work in progress keeps going. Sol will still run the review and the look back.",
 			),
 		).toBeTruthy();
+	});
+
+	it("shows_an_ended_sprint_with_no_limit", async () => {
+		const { socket } = await renderApp("/sprints/S2");
+		const s = socket as FakeSocket;
+		await answerStatus(s, false);
+		await answerQuery(s, "team.get", { team: TEAM });
+		await answerQuery(s, "sprint.get", {
+			...SPRINT,
+			status: "ended",
+			ended_at: "2026-09-25T16:00:00Z",
+			budget_usd: null,
+			task_count: 1,
+			tasks: [SPRINT.tasks[0]],
+		});
+		expect(
+			await screen.findByText(
+				"Started Monday 21 September by you. Planned by Sol. Ended Friday 25 September.",
+			),
+		).toBeTruthy();
+		expect(
+			screen.queryByRole("button", { name: en.sprintEndEarly }),
+		).toBeNull();
+		expect(
+			screen.getByText("$11.84 so far, with no limit set for this sprint."),
+		).toBeTruthy();
+		expect(screen.getByText(en.costsSprintWhy)).toBeTruthy();
 	});
 });

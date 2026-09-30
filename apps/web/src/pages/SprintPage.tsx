@@ -147,12 +147,14 @@ export function SprintPage() {
 								.replace("{budget}", dollars(sprint.budgetUsd))
 						: t("sprintSpentNoLimit").replace("{spent}", spent)}
 				</p>
+				<p className={styles.muted}>{t("costsSprintWhy")}</p>
 				<Link to="/costs">{t("sprintSeeCosts")}</Link>
 			</section>
 			{ending && (
 				<EndSprint
 					n={n}
 					unfinished={sprint.taskCount - sprint.doneCount}
+					planner={plannerOf(agents)}
 					onClose={() => setEnding(false)}
 				/>
 			)}

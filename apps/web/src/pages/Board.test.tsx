@@ -139,15 +139,21 @@ const SPRINTS = {
 };
 
 /** The board, with each query answered. */
-async function board(sprint: unknown = { sprint_id: "S2", done: 1, total: 3 }) {
+async function board(
+	sprint: unknown = { sprint_id: "S2", done: 1, total: 3 },
+	tasks: object[] = TASKS,
+) {
 	const { container, socket } = await renderApp("/board");
 	const s = socket as FakeSocket;
 	await answerStatus(s, false);
 	await answerQuery(s, "team.get", { team: TEAM });
-	await answerQuery(s, "tasks.list", { tasks: TASKS });
+	await answerQuery(s, "tasks.list", { tasks });
 	await answerQuery(s, "waiting.list", { waiting: WAITING });
 	await answerQuery(s, "team.activity", ACTIVITY);
 	await answerQuery(s, "sprint.current", sprint);
+	// Until the sprints are listed, the next sprint's number is not known: nothing is drawn.
+	await act(async () => {});
+	expect(screen.queryByRole("link", { name: "Loyalty stamps" })).toBeNull();
 	await answerQuery(s, "sprints.list", SPRINTS);
 	await screen.findByRole("link", { name: "Loyalty stamps" });
 	return { container, s };
@@ -296,7 +302,11 @@ describe("board", () => {
 
 	it("starts_and_ends_a_sprint_from_the_board", async () => {
 		media.set(WIDE, true);
-		const first = await board(null);
+		// A ready part of an epic is planned with its epic, not picked into a sprint.
+		const first = await board(null, [
+			...TASKS,
+			task(15, "Gift card email", "ready", { parent: "FRK-3" }),
+		]);
 		expect(screen.getByText(en.sprintNone)).toBeTruthy();
 		fireEvent.click(screen.getByRole("button", { name: en.sprintStart }));
 		const dialog = screen.getByRole("dialog", { name: "Start sprint 3" });
@@ -358,7 +368,7 @@ describe("board", () => {
 		const end = screen.getByRole("dialog", { name: "End sprint 2 early?" });
 		expect(
 			within(end).getByText(
-				"2 of its tasks are not finished. They go back on the board.",
+				"2 tasks are not finished. They leave the sprint and go back on the board exactly as they are. Nothing is lost, and work in progress keeps going. Sol will still run the review and the look back.",
 			),
 		).toBeTruthy();
 		await expectNoAxeViolations(second.container);
