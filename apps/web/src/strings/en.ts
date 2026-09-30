@@ -816,6 +816,7 @@ export const en = {
 	channelMentionList: "People to mention",
 	channelMeetings: "Meetings in this sprint",
 	channelMeetingLink: "{thread}, {weekday}",
+	channelMeetingGone: "That meeting is older than the channel keeps.",
 	channelEarlier: "Show earlier messages",
 	channelEarlierFailed:
 		"Farik could not read the earlier messages. Try again in a moment.",

@@ -1,6 +1,6 @@
 import type { Event } from "@farik/protocol-client";
 import { Avatar, type AvatarKey, Button, RoleTag } from "@farik/ui";
-import { type FormEvent, useEffect, useRef, useState } from "react";
+import { type FormEvent, useEffect, useState } from "react";
 import { Link, useLocation } from "react-router";
 import { useConnection } from "../app/connection.tsx";
 import { useEvents, useQuery } from "../app/store.ts";
@@ -154,14 +154,6 @@ export function Channel() {
 	const messages = loaded?.messages ?? [];
 	const all = new Map(messages.map((m) => [m.seq, m]));
 
-	// A "Read it" link opens its thread and brings it into view, once it is there.
-	const scrolled = useRef(false);
-	useEffect(() => {
-		if (!loaded || scrolled.current || !hash) return;
-		scrolled.current = true;
-		document.getElementById(hash.slice(1))?.scrollIntoView?.();
-	}, [loaded, hash]);
-
 	const [paging, setPaging] = useState<"busy" | "failed">();
 	const earlier = async () => {
 		if (!client || !loaded) return;
@@ -185,12 +177,33 @@ export function Channel() {
 		}
 	};
 
+	// A meeting link, from the address or the side panel: its thread is opened and brought into
+	// view, paging back while the pages read so far are no older than its day.
+	const [target, setTarget] = useState(() =>
+		hash.startsWith("#thread-") ? hash.slice(1) : undefined,
+	);
+	const [gone, setGone] = useState(false);
+	useEffect(() => {
+		if (!loaded || !target || paging) return;
+		const block = document.getElementById(target);
+		if (block) {
+			setOpened((o) => ({ ...o, [target]: true }));
+			block.scrollIntoView?.();
+		} else if (
+			loaded.more &&
+			(messages[0]?.at.slice(0, 10) ?? "") >= target.slice(-10)
+		) {
+			void earlier();
+			return;
+		} else setGone(true);
+		setTarget(undefined);
+	});
+
 	const agents = team?.team.agents ?? [];
 	const rows = waiting?.waiting ?? [];
 	const today = new Date().toISOString().slice(0, 10);
 	const isOpen = (anchor: string) =>
-		opened[anchor] ??
-		(anchor === `thread-standup-${today}` || `#${anchor}` === hash);
+		opened[anchor] ?? anchor === `thread-standup-${today}`;
 	const open = (anchor: string, to: boolean) =>
 		setOpened((o) => ({ ...o, [anchor]: to }));
 
@@ -207,6 +220,11 @@ export function Channel() {
 							{t("channelEarlier")}
 						</Button>
 					</div>
+				)}
+				{gone && (
+					<p role="status" className={styles.muted}>
+						{t("channelMeetingGone")}
+					</p>
 				)}
 				{paging === "failed" && (
 					<p role="alert" className={styles.alert}>
@@ -246,7 +264,11 @@ export function Channel() {
 			{sprint && (
 				<Meetings
 					sprintId={sprint.sprintId}
-					onOpen={(anchor) => open(anchor, true)}
+					onOpen={(anchor) => {
+						setGone(false);
+						setPaging(undefined);
+						setTarget(anchor);
+					}}
 				/>
 			)}
 		</div>

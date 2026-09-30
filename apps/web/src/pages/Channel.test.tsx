@@ -6,7 +6,7 @@ import {
 	waitFor,
 	within,
 } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { en } from "../strings/en.ts";
 import type { FakeSocket } from "../test/fake-socket.ts";
 import { media } from "../test/media.ts";
@@ -54,9 +54,14 @@ const message = (
 /** The channel page, with the team, the messages and each list answered. */
 async function channel(
 	messages: unknown[],
-	fields: { waiting?: unknown[]; sprint?: unknown; meetings?: unknown[] } = {},
+	fields: {
+		waiting?: unknown[];
+		sprint?: unknown;
+		meetings?: unknown[];
+		path?: string;
+	} = {},
 ) {
-	const { container, socket } = await renderApp("/channel");
+	const { container, socket } = await renderApp(fields.path ?? "/channel");
 	const s = socket as FakeSocket;
 	await answerStatus(s, false);
 	await answerQuery(s, "team.get", { team: TEAM });
@@ -470,6 +475,100 @@ describe("channel", () => {
 		expect(
 			screen.getByRole("button", { name: en.channelEarlier }),
 		).toBeTruthy();
+	});
+
+	describe("a meeting link", () => {
+		const old = day(-3);
+		const today = `${day(0)}T09:00:00Z`;
+		const anchor = `thread-planning-${old}`;
+		const full = () =>
+			Array.from({ length: 100 }, (_, i) =>
+				message("theo", "ambient", `Newer ${i}.`, { seq: 1001 + i, at: today }),
+			);
+		const planning = [1, 2].map((n) =>
+			message("sol", "ceremony", `Plan ${n}.`, {
+				seq: n,
+				thread: "planning",
+				at: `${old}T09:0${n}:00Z`,
+			}),
+		);
+		const scroll = vi.fn();
+		beforeEach(() => {
+			scroll.mockClear();
+			Element.prototype.scrollIntoView = scroll;
+		});
+		afterEach(() => {
+			delete (Element.prototype as Partial<Element>).scrollIntoView;
+		});
+		/** Answers the page before the loaded ones with `messages`. */
+		const answerEarlier = async (s: FakeSocket, messages: unknown[]) => {
+			const asked = await waitFor(() => {
+				const f = pages(s)[1];
+				if (!f) throw new Error("no earlier page was asked");
+				return f;
+			});
+			expect(asked.params.params).toEqual({ before_seq: 1001, limit: 100 });
+			act(() => s.reply(asked, { messages }));
+		};
+		const opened = async () => {
+			const block = await screen.findByRole("button", {
+				name: new RegExp(`^Planning, ${weekday(old)}`),
+			});
+			await waitFor(() =>
+				expect(block.getAttribute("aria-expanded")).toBe("true"),
+			);
+			expect(screen.getByText("Plan 1.")).toBeTruthy();
+			await waitFor(() => expect(scroll).toHaveBeenCalled());
+			expect(scroll.mock.contexts.at(-1)).toBe(document.getElementById(anchor));
+		};
+
+		it("pages_back_to_a_thread_older_than_the_loaded_page", async () => {
+			const { s } = await channel(full(), { path: `/channel#${anchor}` });
+			await answerEarlier(s, planning);
+			await opened();
+		});
+
+		it("opens_a_thread_from_the_side_panel", async () => {
+			const { s } = await channel(full(), {
+				sprint: { sprint_id: "S2", done: 0, total: 1 },
+				meetings: [
+					{
+						thread: "planning",
+						first_seq: 1,
+						at: `${old}T09:01:00Z`,
+						posts: 2,
+					},
+				],
+			});
+			const side = await screen.findByRole("complementary", {
+				name: en.channelMeetings,
+			});
+			fireEvent.click(
+				await within(side).findByRole("link", {
+					name: `Planning, ${weekday(old)}`,
+				}),
+			);
+			await answerEarlier(s, planning);
+			await opened();
+		});
+
+		it("stops_paging_once_the_pages_are_older_than_its_day", async () => {
+			const before = full().map((m) => ({ ...m, at: `${day(-5)}T09:00:00Z` }));
+			const { s } = await channel(before, { path: `/channel#${anchor}` });
+			expect((await screen.findByRole("status")).textContent).toBe(
+				en.channelMeetingGone,
+			);
+			expect(pages(s)).toHaveLength(1);
+		});
+
+		it("says_when_the_thread_is_no_longer_in_the_channel", async () => {
+			await channel([message("theo", "ambient", "Only this.", { at: today })], {
+				path: `/channel#${anchor}`,
+			});
+			expect((await screen.findByRole("status")).textContent).toBe(
+				en.channelMeetingGone,
+			);
+		});
 	});
 
 	it("previews_the_channel_on_today", async () => {
