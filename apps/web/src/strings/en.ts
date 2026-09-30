@@ -619,4 +619,7 @@ export const en = {
 		"{name} checks your plans. Let Farik choose who checks, or add another {role}, first.",
 	refuseOther:
 		"Farik could not make this change. Check what you changed, then try again.",
+	teamAddRole: "Their role",
+	teamFull:
+		"Your team has seven people, the most it can have. Retire someone to make room.",
 };

@@ -2,15 +2,27 @@ import { AVATAR_URLS, type AvatarKey, Button, RoleTag } from "@farik/ui";
 import { useState } from "react";
 import { Link } from "react-router";
 import { useConnection } from "../app/connection.tsx";
-import { commandSaid } from "../app/refusals.ts";
+import { commandSaid, saidAll } from "../app/refusals.ts";
 import { useQuery } from "../app/store.ts";
 import { t } from "../strings/t.ts";
 import styles from "./pages.module.css";
 import {
 	type Agent,
 	roleName,
+	someone,
 	type Team as TeamFile,
 } from "./setup/TeamSetup.tsx";
+
+/** The roles "Add someone" offers, in the order the team builder suggests them. */
+const ROLES: Agent["role"][] = [
+	"software_developer",
+	"product_manager",
+	"scrum_master",
+	"architect",
+	"marketing_specialist",
+];
+/** The most agents a team has that are not retired (SPEC F1). */
+const MOST = 7;
 
 export type Model = { id: string; label: string };
 export type Tier =
@@ -145,6 +157,7 @@ export function Team() {
 					);
 				})}
 			</ul>
+			<AddSomeone team={team} />
 			<section className={styles.section} aria-labelledby="changes-heading">
 				<h2 id="changes-heading">{t("teamChangesTitle")}</h2>
 				<p>{t("teamChangesBody")}</p>
@@ -156,5 +169,65 @@ export function Team() {
 				</p>
 			</section>
 		</div>
+	);
+}
+
+/** "Add someone": a role, and a name from the spare names, saved as a change to the team. */
+function AddSomeone({ team }: { team: TeamFile }) {
+	const { client } = useConnection();
+	const [role, setRole] = useState<Agent["role"]>("software_developer");
+	const [busy, setBusy] = useState(false);
+	const [refused, setRefused] = useState<string>();
+	const full = team.agents.filter((a) => a.status !== "retired").length >= MOST;
+	const add = async () => {
+		if (!client) return;
+		setBusy(true);
+		setRefused(undefined);
+		const newcomer = someone(team.agents, {
+			id: "",
+			displayName: "",
+			role,
+			status: "active",
+		});
+		try {
+			await client.call("team.save", {
+				team: { ...team, agents: [...team.agents, newcomer] },
+			});
+		} catch (e) {
+			setRefused(saidAll(e));
+		}
+		setBusy(false);
+	};
+	return (
+		<section className={styles.section} aria-labelledby="add-heading">
+			<h2 id="add-heading">{t("teamAdd")}</h2>
+			<div className={styles.field}>
+				<label htmlFor="add-role">{t("teamAddRole")}</label>
+				<select
+					id="add-role"
+					className={styles.select}
+					value={role}
+					disabled={full}
+					onChange={(e) => setRole(e.target.value as Agent["role"])}
+				>
+					{ROLES.map((r) => (
+						<option key={r} value={r}>
+							{roleName(r)}
+						</option>
+					))}
+				</select>
+			</div>
+			{full && <p className={styles.muted}>{t("teamFull")}</p>}
+			{refused && (
+				<p role="alert" className={styles.alert}>
+					{refused}
+				</p>
+			)}
+			<span>
+				<Button busy={busy} disabled={full} onClick={add}>
+					{t("teamAdd")}
+				</Button>
+			</span>
+		</section>
 	);
 }

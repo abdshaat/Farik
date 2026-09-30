@@ -1,6 +1,7 @@
 import { expectNoAxeViolations } from "@farik/ui/test";
 import {
 	act,
+	cleanup,
 	fireEvent,
 	screen,
 	waitFor,
@@ -145,6 +146,46 @@ describe("team page", () => {
 				body: { agent_id: "theo", status: "paused" },
 			},
 		});
+	});
+
+	it("adds_someone_to_the_team", async () => {
+		const { s } = await opened("/team");
+		fireEvent.change(await screen.findByLabelText(en.teamAddRole), {
+			target: { value: "software_developer" },
+		});
+		fireEvent.click(screen.getByRole("button", { name: en.teamAdd }));
+		const team = await saved(s);
+		expect(team.agents).toHaveLength(6);
+		expect(team.agents.at(-1)).toMatchObject({
+			id: "noor",
+			display_name: "Noor",
+			role: "software_developer",
+			status: "active",
+		});
+		cleanup();
+
+		// Seven not retired is a full team: Add someone says why it is off.
+		const full = await renderApp("/team");
+		const f = full.socket as FakeSocket;
+		const seven = {
+			...TEAM,
+			agents: [
+				...TEAM.agents,
+				agent("noor", "Noor", "software_developer", "extra-1"),
+				agent("ivo", "Ivo", "software_developer", "extra-2"),
+				{ ...agent("lena", "Lena", "architect", "extra-3"), status: "retired" },
+			],
+		};
+		await answerQuery(f, "team.get", {
+			team: seven,
+			agents: EFFECTIVE,
+			judges: JUDGES,
+		});
+		const add = (await screen.findByRole("button", {
+			name: en.teamAdd,
+		})) as HTMLButtonElement;
+		expect(add.disabled).toBe(true);
+		expect(screen.getByText(en.teamFull)).toBeTruthy();
 	});
 
 	it("says_a_refused_pause_in_plain_words", async () => {
