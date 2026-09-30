@@ -102,6 +102,9 @@ export function useStatus() {
 export function Team() {
 	const { team, effective, most } = useTeam();
 	const status = useStatus();
+	const { data: activity } = useQuery<{
+		activity: { agentId: string; line: string }[];
+	}>("team.activity", {});
 	if (!team) return null;
 	const agents = team.agents.filter((a) => a.status !== "retired");
 	const designer = agents.find((a) => a.role === "ui_ux_designer");
@@ -141,7 +144,10 @@ export function Team() {
 							</div>
 							<p>{agent.persona}</p>
 							<p className={styles.muted}>
-								{t(paused ? "agentPaused" : "agentActive")}
+								{paused
+									? t("agentPaused")
+									: (activity?.activity.find((a) => a.agentId === agent.id)
+											?.line ?? t("agentActive"))}
 							</p>
 							<dl className={styles.facts}>
 								<dt>{t("agentModel")}</dt>

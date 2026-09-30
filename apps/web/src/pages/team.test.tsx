@@ -210,6 +210,21 @@ describe("team page", () => {
 		expect(tag.className).toMatch(/uiUxDesigner/);
 		const face = card.querySelector("img") as HTMLImageElement;
 		expect(face.getAttribute("src")).toBe(AVATAR_URLS["extra-1"]);
+		// Each card says what its agent is doing, in the team's activity words.
+		await answerQuery(s, "team.activity", {
+			activity: [
+				{
+					agent_id: "iris",
+					state: "idle",
+					line: "Waiting for Mira to approve a plan",
+					task_id: "FRK-21",
+				},
+			],
+		});
+		expect(
+			await within(card).findByText("Waiting for Mira to approve a plan"),
+		).toBeTruthy();
+		expect(within(card).queryByText(en.agentActive)).toBeNull();
 		expect(face.style.getPropertyValue("--ring")).toBe(
 			"var(--farik-color-role-ui-ux-designer)",
 		);
