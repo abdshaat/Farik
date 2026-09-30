@@ -189,8 +189,8 @@ pub(super) async fn run_session(
 }
 
 /// The connector a session is given, when it is given one (step 12): the agent has it on, and
-/// the session explores, implements, or is the Designer's design review, on a team whose Designer
-/// can have its browser.
+/// the session explores, implements, or is the Designer's design review, on a team where a
+/// preview can open. The Designer's own connector being off (`NoConnector`) takes no one else's.
 pub(super) fn offered_connector(
     agent: &Agent,
     purpose: SessionPurpose,
@@ -203,7 +203,11 @@ pub(super) fn offered_connector(
         SessionPurpose::Verify => agent.role == RoleWire::UiUxDesigner,
         _ => false,
     };
-    if on && in_its_sessions && browser == DesignerBrowser::Ready {
+    let preview_ready = matches!(
+        browser,
+        DesignerBrowser::Ready | DesignerBrowser::NoConnector
+    );
+    if on && in_its_sessions && preview_ready {
         builtin_connector(PLAYWRIGHT)
     } else {
         None
@@ -990,6 +994,27 @@ mod tests {
             assert_eq!(offered(iris, SessionPurpose::Explore, browser), None);
             assert_eq!(offered(ada, SessionPurpose::Implement, browser), None);
         }
+    }
+
+    #[test]
+    fn gives_a_developer_its_browser_while_the_designer_has_it_off() {
+        use crate::preview::fixtures::FakePreviews;
+
+        let team = crate::tools::fixtures::a_team_of_three(|wire| {
+            browsing(wire);
+            wire["agents"][1]["mcp_servers"] = wire["agents"][3]["mcp_servers"].clone();
+            wire["agents"][3]["mcp_servers"] = serde_json::json!([]);
+        });
+        let (iris, dev) = (agent(&team, "iris"), agent(&team, "dev-a"));
+        let browser = crate::preview::designer_browser(&team, &FakePreviews::ready());
+        for purpose in [SessionPurpose::Explore, SessionPurpose::Implement] {
+            assert_eq!(
+                offered_connector(dev, purpose, browser).map(|definition| definition.name),
+                Some("playwright".to_string()),
+                "{purpose:?}"
+            );
+        }
+        assert!(offered_connector(iris, SessionPurpose::Verify, browser).is_none());
     }
 
     /// Iris's explore session of FRK-1, in its worktree.
