@@ -1,6 +1,6 @@
 # Phase 6, step 09: Board, sprints, task detail, and costs
 
-Status: ready
+Status: done (landed and landing-reviewed 2026-09-30)
 Branch: `phase/6-web-ui`
 Spec: `docs/SPEC.md` sections 5.2, 5.14, 5.16, F3, F17
 Depends on: steps 01 to 08 of this phase

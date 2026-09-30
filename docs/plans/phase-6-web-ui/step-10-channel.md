@@ -1,6 +1,6 @@
 # Phase 6, step 10: Channel
 
-Status: ready
+Status: done (landed and landing-reviewed 2026-09-30)
 Branch: `phase/6-web-ui`
 Spec: `docs/SPEC.md` section 5.9, F7
 Depends on: steps 01 to 09 of this phase
