@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { expectNoAxeViolations } from "@farik/ui/test";
 import {
 	cleanup,
@@ -19,6 +21,7 @@ import {
 } from "../test/gate.ts";
 import { TEAM } from "../test/plan.ts";
 import { answerQuery } from "../test/render-app.tsx";
+import gate from "./Gate.module.css";
 
 const IRIS = {
 	id: "iris",
@@ -561,6 +564,21 @@ describe("task detail", () => {
 		expect(pictures[0]?.getAttribute("src")).toBe(
 			"data:image/png;base64,iVBORw0KGgo=",
 		);
+		// A phone's tall picture is a thumbnail the mockup's size, cut from its top.
+		expect(pictures.map((img) => img.className === gate.phone)).toEqual([
+			true,
+			true,
+			false,
+			false,
+		]);
+		const css = readFileSync(
+			join(import.meta.dirname, "Gate.module.css"),
+			"utf8",
+		).replace(/\s+/g, " ");
+		expect(css).toMatch(
+			/\.shot img \{[^}]*max-height: 270px; object-fit: cover; object-position: top;/,
+		);
+		expect(css).toMatch(/\.shot \.phone \{[^}]*width: 150px; height: 270px;/);
 		// Each picture is the latest the task's own checks took at its width and theme.
 		expect(
 			s

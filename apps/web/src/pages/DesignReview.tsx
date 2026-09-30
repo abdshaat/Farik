@@ -164,6 +164,7 @@ function Shot({
 		<figure className={gate.shot}>
 			{data && (
 				<img
+					className={check.width === "phone" ? gate.phone : undefined}
 					src={`data:image/png;base64,${data.pngBase64}`}
 					alt={t("shotAlt", fill)}
 				/>

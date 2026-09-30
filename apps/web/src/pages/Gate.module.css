@@ -48,11 +48,22 @@
 	margin: 0;
 }
 
+/* A thumbnail of bounded height, cut from the page's top, as the mockup frames it. */
 .shot img {
 	width: 100%;
 	height: auto;
+	max-height: 270px;
+	object-fit: cover;
+	object-position: top;
 	border: 1px solid var(--farik-color-rule);
 	border-radius: var(--farik-radius-control);
+}
+
+/* A phone's tall picture sits in the mockup's 150 by 270 frame. */
+.shot .phone {
+	width: 150px;
+	height: 270px;
+	justify-self: center;
 }
 
 .shot figcaption,
