@@ -43,6 +43,10 @@ pub const SETUP_PENDING: &str = ".farik/local/setup-pending";
 const WALK_DEPTH: u32 = 4;
 const WALK_CAP: usize = 2000;
 
+/// Why a save does not change an agent's status, and why it does not remove one.
+const FROM_THE_CARD: &str = "pause, retire or resume an agent from its card";
+const WORKED: &str = " has done work; retire it instead";
+
 /// Who the human is in the log.
 const HUMAN: &str = "human";
 
@@ -335,8 +339,35 @@ impl From<Refused> for Failure {
 fn errors_wire(errors: &[ValidationError]) -> Vec<Value> {
     errors
         .iter()
-        .map(|error| json!({ "path": error.path, "message": error.message }))
+        .map(
+            |error| json!({ "path": error.path, "message": error.message, "code": code_of(error) }),
+        )
         .collect()
+}
+
+/// The refusal `error` is, as a code the page words for a person (spec 10, ADR 0016): the page
+/// never shows a schema's own text. `invalid` is any other.
+fn code_of(error: &ValidationError) -> &'static str {
+    let (path, message) = (error.path.as_str(), error.message.as_str());
+    let segments: Vec<&str> = path.split('/').skip(1).collect();
+    match segments.as_slice() {
+        ["agents"] if message.starts_with("A team has seven") => "too_many",
+        ["agents"] if message.starts_with("A team needs an active Product Manager") => {
+            "needs_product_manager"
+        }
+        ["agents"] if message.starts_with("A team needs an active Software Developer") => {
+            "needs_developer"
+        }
+        ["agents"] if message.starts_with("an agent id names") => "repeated_id",
+        ["agents"] if message.ends_with(WORKED) => "worked",
+        ["agents", _, "display_name"] => "name",
+        ["agents", _, "revokes"] => "keeps_read",
+        ["agents", _, "status"] if message == FROM_THE_CARD => "status_from_card",
+        ["policy", "judgment", "judge"] => "judge_not_held",
+        ["policy", "judgment", "questions"] => "no_questions",
+        ["policy", "judgment", "questions", _] => "question_length",
+        _ => "invalid",
+    }
 }
 
 /// The team as it is and `wire` as the team it would be, held to the schema's and the team's rules
@@ -358,7 +389,7 @@ fn checked(deps: &ToolDeps, wire: &Value, setup: bool) -> Result<(Team, Team), R
         {
             errors.push(ValidationError {
                 path: format!("/agents/{index}/status"),
-                message: "pause, retire or resume an agent from its card".to_string(),
+                message: FROM_THE_CARD.to_string(),
             });
         }
     }
@@ -379,10 +410,7 @@ fn checked(deps: &ToolDeps, wire: &Value, setup: bool) -> Result<(Team, Team), R
             if !seen.is_empty() {
                 errors.push(ValidationError {
                     path: "/agents".to_string(),
-                    message: format!(
-                        "{} has done work; retire it instead",
-                        gone.display_name.as_str()
-                    ),
+                    message: format!("{}{WORKED}", gone.display_name.as_str()),
                 });
             }
         }
@@ -935,6 +963,94 @@ mod tests {
         assert_eq!(
             checked["agents"][4]["tiers"],
             json!(["read", "write_workspace", "network", "git_local"])
+        );
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn names_each_refusal_by_a_code_the_page_words() {
+        let harness = driven("team-codes");
+        worked(&harness, "dev-b");
+        let before = team_file(&harness);
+        let codes = |change: &dyn Fn(&mut Value)| {
+            let mut team = before.clone();
+            change(&mut team);
+            let checked = query(
+                &harness.daemon,
+                "team.validate",
+                &json!({ "team": team }),
+                "teamValidateResult",
+            );
+            checked["errors"]
+                .as_array()
+                .expect("errors")
+                .iter()
+                .map(|error| {
+                    format!(
+                        "{} {}",
+                        error["path"].as_str().unwrap_or_default(),
+                        error["code"].as_str().unwrap_or_default()
+                    )
+                })
+                .collect::<Vec<_>>()
+        };
+        let agent = |id: &str, role: &str| json!({ "id": id, "display_name": id, "role": role, "status": "active" });
+        assert_eq!(
+            codes(&|team| team["agents"][0]["role"] = json!("architect")),
+            ["/agents needs_product_manager"]
+        );
+        assert_eq!(
+            codes(&|team| {
+                team["agents"][1]["role"] = json!("architect");
+                team["agents"][2]["role"] = json!("architect");
+            }),
+            ["/agents needs_developer"]
+        );
+        assert_eq!(
+            codes(&|team| {
+                let agents = team["agents"].as_array_mut().expect("agents");
+                agents.extend((0..5).map(|n| agent(&format!("x-{n}"), "architect")));
+            }),
+            ["/agents too_many"]
+        );
+        assert_eq!(
+            codes(&|team| team["agents"][1]["id"] = json!("pm")),
+            ["/agents repeated_id"]
+        );
+        assert_eq!(
+            codes(&|team| team["agents"][1]["display_name"] = json!("")),
+            ["/agents/1/display_name name"]
+        );
+        assert_eq!(
+            codes(&|team| team["agents"][1]["revokes"] = json!(["read"])),
+            ["/agents/1/revokes keeps_read"]
+        );
+        assert_eq!(
+            codes(&|team| team["agents"][1]["status"] = json!("paused")),
+            ["/agents/1/status status_from_card"]
+        );
+        assert_eq!(
+            codes(&|team| {
+                team["agents"].as_array_mut().expect("agents").remove(2);
+            }),
+            ["/agents worked"]
+        );
+        assert_eq!(
+            codes(&|team| team["policy"]["judgment"] = json!({ "judge": "architect" })),
+            ["/policy/judgment/judge judge_not_held"]
+        );
+        assert_eq!(
+            codes(&|team| team["policy"]["judgment"] =
+                json!({ "required": "always", "questions": [] })),
+            ["/policy/judgment/questions no_questions"]
+        );
+        assert_eq!(
+            codes(&|team| team["policy"]["judgment"] = json!({ "questions": ["short"] })),
+            ["/policy/judgment/questions/0 question_length"]
+        );
+        assert_eq!(
+            codes(&|team| team["policy"]["integration"] = json!("mail")),
+            ["/policy/integration invalid"]
         );
     }
 

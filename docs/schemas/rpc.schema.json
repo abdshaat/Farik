@@ -2841,7 +2841,7 @@
     },
     "teamSaveRequest": {
       "title": "Team Save Request",
-      "description": "Writes the team when it has no errors and appends team.updated. It refuses a status change (an agent is paused, retired or resumed from its card) and removing an agent the log has seen work from. Answers emptyResult; a refusal's data holds errors, each a path and a message.",
+      "description": "Writes the team when it has no errors and appends team.updated. It refuses a status change (an agent is paused, retired or resumed from its card) and removing an agent the log has seen work from. Answers emptyResult; a refusal's data holds errors, each a path, a message and a code, as team.validate answers them.",
       "type": "object",
       "additionalProperties": false,
       "required": [
@@ -3009,7 +3009,8 @@
             "additionalProperties": false,
             "required": [
               "path",
-              "message"
+              "message",
+              "code"
             ],
             "properties": {
               "path": {
@@ -3017,6 +3018,24 @@
               },
               "message": {
                 "type": "string"
+              },
+              "code": {
+                "type": "string",
+                "enum": [
+                  "too_many",
+                  "needs_product_manager",
+                  "needs_developer",
+                  "repeated_id",
+                  "worked",
+                  "name",
+                  "keeps_read",
+                  "status_from_card",
+                  "judge_not_held",
+                  "no_questions",
+                  "question_length",
+                  "invalid"
+                ],
+                "description": "The refusal as the page words it for a person; the message is for a log, and invalid is any refusal with no words of its own."
               }
             }
           }
@@ -3244,7 +3263,7 @@
     },
     "agentReplaceRequest": {
       "title": "Agent Replace Request",
-      "description": "Replace: the agent retired and a newcomer added, in one validated change to the team file, so that a team is never left without the role the agent held. Appends agent.updated, then team.updated. Answers emptyResult; a refusal's data holds errors, each a path and a message, as team.save's does.",
+      "description": "Replace: the agent retired and a newcomer added, in one validated change to the team file, so that a team is never left without the role the agent held. Appends agent.updated, then team.updated. Answers emptyResult; a refusal's data holds errors, each a path, a message and a code, as team.validate answers them, as team.save's does.",
       "type": "object",
       "additionalProperties": false,
       "required": [
