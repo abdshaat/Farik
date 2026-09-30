@@ -516,7 +516,7 @@ Decisions for this phase (ADR 0020; the landing review's questions decided by th
 - Made: kits are free forever, like the roles, MCP and skills (spec 9).
 - Made (the founder, 2026-09-30; ADR 0025): every kit, its skills and its connectors, is tested and works on every engine and provider phase 7 supports. This is an acceptance criterion of the phase, and step 06's kit check runs on each of them.
 - Open (the founder, to be made before step 02's plan; step 01 does not depend on it): the final contents of each kit; `docs/design/role-kits.md` holds the first cut.
-- Made (the founder, 2026-09-30; ADR 0025): every role is fully working and connected to all the services it needs before the launch, so every connector in the kits as the founder finalises them ships before `v0.1.0`. Rejected: the skills plus one read-only connector per role, with the rest after `v0.1.0`, which the landing review of revision 17 recommended for the launch's sake.
+- Made (the founder, 2026-09-30; ADR 0025): every role is fully working and connected to all the services it needs before the launch, so every connector and every skill in the kits as the founder finalises them ships before `v0.1.0` (confirmed by the founder the same day). Rejected: the skills plus one read-only connector per role, with the rest after `v0.1.0`, which the landing review of revision 17 recommended for the launch's sake.
 
 Steps:
 

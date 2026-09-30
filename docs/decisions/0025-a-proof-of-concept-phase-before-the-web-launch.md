@@ -50,7 +50,7 @@ The phase's own brainstorm plans its details. These principles bind it:
 - **More than one engine.** The benchmark runs on at least two engines or providers, which also tests that the kits work on every engine.
 - **Honesty.** Every result is published, losses included. The raw logs and exports are committed. Someone who did not run the analysis reviews it.
 
-The role kits phase gains an acceptance criterion: every kit is tested and works on every supported engine and provider. And because every role must be fully working and connected to all the services it needs before the launch, every connector in the kits as the founder finalises them ships before `v0.1.0`; the question ADR 0020 left open is closed.
+The role kits phase gains an acceptance criterion: every kit is tested and works on every supported engine and provider. And because every role must be fully working and connected to all the services it needs before the launch, every connector and every skill in the kits as the founder finalises them ships before `v0.1.0` (the founder confirmed this the same day); the question ADR 0020 left open is closed.
 
 The phases from the proof on are: 10 Proof of concept; 11 Web launch; 12 Desktop, whose first step is still the web release check (ADR 0018); 13 Native mobile; 14 Premium. Milestone 2 now includes the proof.
 
