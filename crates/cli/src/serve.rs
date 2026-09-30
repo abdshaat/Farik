@@ -23,6 +23,9 @@ use crate::{CliIo, Engine, Interrupts, say};
 const DEFAULT_PORT: u16 = 7420;
 /// How many more times the wizard's daemon tries a port after the one it found was taken.
 const BIND_TRIES: u32 = 3;
+/// How long the wizard waits for its exact port, the one the browser's tab is on, when it comes
+/// back after a failed take-on and something holds that port for a moment.
+const EXACT_PORT_WAIT: std::time::Duration = std::time::Duration::from_secs(5);
 
 /// What `serve` does next.
 enum Mode {
@@ -136,12 +139,16 @@ async fn set_up(
         waiting,
     });
     // The web state needs the port before the daemon binds it, so a free one is found first, and
-    // found again when something takes it in between. An exact port that cannot be had gives way
-    // to any, whose new link is printed.
+    // found again when something takes it in between. An exact port, the one the browser's tab is
+    // on, is waited for a while; one that still cannot be had gives way to any, whose new link is
+    // printed.
     let mut wanted = port;
     let mut tries = 0;
     let (handle, bound, code) = loop {
-        let bound = free_port(wanted).or_else(|_| free_port(PortChoice::Any))?;
+        let bound = match free_port_soon(wanted).await {
+            Ok(bound) => bound,
+            Err(_) => free_port(PortChoice::Any)?,
+        };
         let (mut web, code) = web(Path::new(""), io, None)?;
         web.port = bound;
         web.take_on_error = std::sync::Mutex::new(take_on_error.clone());
@@ -195,6 +202,23 @@ fn free_port(choice: PortChoice) -> Result<u16, String> {
             listener.local_addr().ok().map(|address| address.port())
         })
         .ok_or_else(|| "no port is free on 127.0.0.1 for farik serve".to_string())
+}
+
+/// `free_port`, but an exact port is asked again every 50 ms for up to `EXACT_PORT_WAIT` while
+/// something else holds it.
+async fn free_port_soon(choice: PortChoice) -> Result<u16, String> {
+    let deadline = std::time::Instant::now() + EXACT_PORT_WAIT;
+    loop {
+        match free_port(choice) {
+            Err(_)
+                if matches!(choice, PortChoice::Exact(_))
+                    && std::time::Instant::now() < deadline =>
+            {
+                tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+            }
+            found => return found,
+        }
+    }
 }
 
 /// Prints the browser's link, and opens it unless told not to.
