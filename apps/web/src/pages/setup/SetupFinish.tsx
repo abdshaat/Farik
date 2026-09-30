@@ -7,26 +7,24 @@ import { Wizard } from "./Wizard.tsx";
 
 type Integration = "auto_merge" | "pull_request" | "manual";
 
-/** Setup's last step: what happens to accepted work, then "Start the team". */
-export function SetupFinish() {
-	const navigate = useNavigate();
-	const { draft, change } = useSetup();
-	const { start, busy, refused } = useStart();
-	const defaults = useDefaults();
-	const integrate = (integration: string) =>
-		change({
-			...draft,
-			team: { ...draft.team, policy: { ...draft.team.policy, integration } },
-		});
-
+/** How accepted work is added, and "Put back the default": setup's and Settings'. */
+export function IntegrationChoice({
+	value,
+	onChange,
+	putBack,
+}: {
+	value: string;
+	onChange: (integration: string) => void;
+	putBack: (() => void) | undefined;
+}) {
 	return (
-		<Wizard step={7} title={t("finishTitle")} lead={t("finishLead")}>
+		<>
 			<div className={styles.card}>
 				<Choice<Integration>
 					name="integration"
 					legend={t("finishChoice")}
-					value={draft.team.policy.integration as Integration}
-					onChange={integrate}
+					value={value as Integration}
+					onChange={onChange}
 					options={[
 						{
 							value: "auto_merge",
@@ -46,8 +44,29 @@ export function SetupFinish() {
 					]}
 				/>
 			</div>
-			<PutBack
-				onClick={defaults && (() => integrate(defaults.policy.integration))}
+			<PutBack onClick={putBack} />
+		</>
+	);
+}
+
+/** Setup's last step: what happens to accepted work, then "Start the team". */
+export function SetupFinish() {
+	const navigate = useNavigate();
+	const { draft, change } = useSetup();
+	const { start, busy, refused } = useStart();
+	const defaults = useDefaults();
+	const integrate = (integration: string) =>
+		change({
+			...draft,
+			team: { ...draft.team, policy: { ...draft.team.policy, integration } },
+		});
+
+	return (
+		<Wizard step={7} title={t("finishTitle")} lead={t("finishLead")}>
+			<IntegrationChoice
+				value={draft.team.policy.integration}
+				onChange={integrate}
+				putBack={defaults && (() => integrate(defaults.policy.integration))}
 			/>
 			<p className={styles.note}>{t("finishSafe")}</p>
 			<Switch

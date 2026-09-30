@@ -85,6 +85,25 @@ test("the team's setup keeps the five, sets the rules, and starts them", async (
 			page.getByText("Nothing new starts until you resume."),
 		).toHaveCount(0);
 
+		// After setup, the same answers are changed from Settings, each effect shown first.
+		const finish = page.getByRole("region", {
+			name: "How finished work is added",
+		});
+		await finish.getByLabel(/^I will add each one myself/).check();
+		await expect(
+			finish.getByText("Finished work waits for you to merge it."),
+		).toBeVisible();
+		await screenshots(page, "settings");
+		await finish.getByRole("button", { name: "Save changes" }).click();
+		await expect
+			.poll(() => readFileSync(join(serve.project, ".farik/team.yaml"), "utf8"))
+			.toMatch(/integration: manual/);
+		await expect(
+			page
+				.getByRole("region", { name: "How finished work is added" })
+				.getByLabel(/^I will add each one myself/),
+		).toBeChecked();
+
 		// The pages the team lives on, on a phone and on a desktop.
 		await page.goto(`http://127.0.0.1:${serve.port}/team`);
 		await expect(page.getByText("Mira").first()).toBeVisible();

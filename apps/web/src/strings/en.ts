@@ -633,6 +633,12 @@ export const en = {
 	mayGitRemote: "sends its work to its own branches online",
 	mayExternal: "acts outside your computer, with your approval",
 	putBack: "Put back the default",
+	rulesArea: "Your team’s rules",
+	rulesNextSession:
+		"The answers you gave in setup, to change whenever you like. Each change starts with each agent’s next session, never in the middle of one.",
+	rulesMay: "What agents may do",
+	rulesSpend: "Daily spending limit",
+	rulesFinish: "How finished work is added",
 	accountConfirm:
 		"Disconnecting pauses your team until you start Farik again and connect an account.",
 	accountDisconnectYes: "Disconnect and pause the team",

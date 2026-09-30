@@ -7,6 +7,7 @@ import { type ServeStatus, useQuery } from "../app/store.ts";
 import type { ThemeChoice } from "../app/theme.ts";
 import { t } from "../strings/t.ts";
 import styles from "./pages.module.css";
+import { TeamRules } from "./TeamRules.tsx";
 
 const ADVANCED = "farik.advanced";
 
@@ -89,6 +90,7 @@ export function Settings({
 				/>
 				<p>{t("advancedSafe")}</p>
 			</section>
+			<TeamRules />
 			<section className={styles.section} aria-labelledby="computer-heading">
 				<h2 id="computer-heading">{t("thisComputer")}</h2>
 				<p>

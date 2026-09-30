@@ -6,6 +6,7 @@ import { t } from "../../strings/t.ts";
 import type { Tier } from "../Team.tsx";
 import styles from "./setup.module.css";
 import {
+	type Agent,
 	type Draft,
 	PutBack,
 	roleName,
@@ -40,6 +41,79 @@ export function mayOf(tiers: Tier[]): string {
 	return `${line.charAt(0).toUpperCase()}${line.slice(1)}.`;
 }
 
+/** The two permission questions, their notes, and "Put back the default": setup's and Settings'. */
+export function PermissionChoices({
+	commands,
+	push,
+	developers,
+	onAnswer,
+	putBack,
+}: {
+	commands: boolean | undefined;
+	push: boolean | undefined;
+	developers: Agent[];
+	onAnswer: (next: Draft["answers"]) => void;
+	putBack: (() => void) | undefined;
+}) {
+	return (
+		<>
+			<div className={styles.card}>
+				<Choice<Answer>
+					name="commands"
+					legend={t("mayCommands")}
+					value={word(commands)}
+					onChange={(v) => onAnswer({ commands: v === "yes" })}
+					options={[
+						{
+							value: "yes",
+							label: t("mayCommandsYes"),
+							description: t("mayCommandsYesNote"),
+						},
+						{
+							value: "no",
+							label: t("mayCommandsNo"),
+							description: t("mayCommandsNoNote"),
+						},
+					]}
+				/>
+				<p>{t("mayCommandsNote")}</p>
+				{commands === false && (
+					<p className={styles.warn}>{t("mayStillChecks")}</p>
+				)}
+			</div>
+			<div className={styles.card}>
+				<Choice<Answer>
+					name="push"
+					legend={t("mayPush")}
+					value={word(push)}
+					onChange={(v) => onAnswer({ push: v === "yes" })}
+					options={[
+						{
+							value: "yes",
+							label: t("mayPushYes"),
+							description: t("mayPushYesNote"),
+						},
+						{
+							value: "no",
+							label: t("mayPushNo"),
+							description: t("mayPushNoNote"),
+						},
+					]}
+				/>
+				<p>
+					{developers.length === 1
+						? t("mayPushNoteOne").replace(
+								"{name}",
+								developers[0]?.displayName ?? "",
+							)
+						: t("mayPushNoteMany")}
+				</p>
+			</div>
+			<PutBack onClick={putBack} />
+		</>
+	);
+}
+
 /** Setup's sixth step: the two questions Farik asks before anything runs. */
 export function SetupPermissions() {
 	const navigate = useNavigate();
@@ -72,60 +146,12 @@ export function SetupPermissions() {
 
 	return (
 		<Wizard step={5} title={t("mayTitle")} lead={t("mayLead")}>
-			<div className={styles.card}>
-				<Choice<Answer>
-					name="commands"
-					legend={t("mayCommands")}
-					value={word(commands)}
-					onChange={(v) => answer({ commands: v === "yes" })}
-					options={[
-						{
-							value: "yes",
-							label: t("mayCommandsYes"),
-							description: t("mayCommandsYesNote"),
-						},
-						{
-							value: "no",
-							label: t("mayCommandsNo"),
-							description: t("mayCommandsNoNote"),
-						},
-					]}
-				/>
-				<p>{t("mayCommandsNote")}</p>
-				{commands === false && (
-					<p className={styles.warn}>{t("mayStillChecks")}</p>
-				)}
-			</div>
-			<div className={styles.card}>
-				<Choice<Answer>
-					name="push"
-					legend={t("mayPush")}
-					value={word(push)}
-					onChange={(v) => answer({ push: v === "yes" })}
-					options={[
-						{
-							value: "yes",
-							label: t("mayPushYes"),
-							description: t("mayPushYesNote"),
-						},
-						{
-							value: "no",
-							label: t("mayPushNo"),
-							description: t("mayPushNoNote"),
-						},
-					]}
-				/>
-				<p>
-					{developers.length === 1
-						? t("mayPushNoteOne").replace(
-								"{name}",
-								developers[0]?.displayName ?? "",
-							)
-						: t("mayPushNoteMany")}
-				</p>
-			</div>
-			<PutBack
-				onClick={
+			<PermissionChoices
+				commands={commands}
+				push={push}
+				developers={developers}
+				onAnswer={answer}
+				putBack={
 					defaults &&
 					(() =>
 						answer({

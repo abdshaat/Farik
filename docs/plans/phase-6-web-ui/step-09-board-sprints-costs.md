@@ -93,6 +93,7 @@ Out of scope: the channel (step 10), one-on-ones (phase 8), notifications (phase
     7. take screenshots at 360 and 1280 px.
 
   "End the sprint early" is covered by its unit test, since the governor ends this sprint itself.
+- **Team settings after setup (Task 4b).** The controller ruled (step 06 ledger, 2026-09-29) that Settings gains setup's four questions, reusing the setup components and saving through `team.save`, because a non-technical user must be able to change them without a text file; the carried items from steps 06 and 08 (N1, N2, "Developer", `too_short`, M10, the Gate's history link and the shared plan-approved rule) go with it.
 
 ## File map
 
@@ -164,6 +165,15 @@ RPC queries: `task.costs`, `sprints.list`, `sprint.get`, `costs.summary`, `metri
 
 - [x] `feat(web): add the sprint and costs pages`
 
+### Task 4b: Team settings after setup
+
+- `changes_what_agents_may_do_and_the_limit_from_settings`: the team's own answers, the effect before Save, a failed save in plain words, "Put back the default", `team.save` with the permissions, then with `daily_usd` from the Costs page's control.
+- `changes_how_work_is_added_and_how_plans_are_checked_from_settings`: integration and its put back, the questions and the judge with their effects, a plan check with no questions refused at the questions, and the saved judgment.
+- `setup-team.spec.ts` gains Settings: "How finished work is added" changed, its effect shown, saved to `team.yaml`, and Settings screenshotted at 360 and 1280 px.
+- Carried: `says_developer_as_the_mockups_do`; `said("too_short")`; a deep link asks nothing before `serve.status` (M10); the Gate's history links to `/tasks/:id`; `team.get` answers `max_agents` and Add someone reads it (N2); the five `saidAll` catch sites each say plain words (N1).
+
+- [x] `feat(web): change the team's rules from Settings after setup`
+
 ### Task 5: The journey, the spec and the plan
 
 - `board.spec.ts`, as in the Tests decision.
@@ -176,6 +186,7 @@ RPC queries: `task.costs`, `sprints.list`, `sprint.get`, `costs.summary`, `metri
 
 ```
 cargo xtask check --integration
-# expected: cargo 0 failed (T1 5 new); @farik/web: step 08's landed count plus 12 (T2 5, T3 3, T4 4);
+# expected: cargo 0 failed (T1 5 new); @farik/web: step 08's landed count plus 12 (T2 5, T3 3, T4 4)
+#   plus Task 4b's 5 (two Settings tests, three N1 tests); @farik/ui plus 1 (Developer);
 #   playwright: step 08's 7 plus 1 = 8 passed; last line: xtask check: ok
 ```

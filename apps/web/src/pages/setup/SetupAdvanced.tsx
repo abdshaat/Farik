@@ -1,6 +1,6 @@
 import { toCamel, toSnake } from "@farik/protocol-client";
 import { Button, Choice, Switch, TextArea, TextField } from "@farik/ui";
-import { useRef, useState } from "react";
+import { type ReactNode, useRef, useState } from "react";
 import { useNavigate } from "react-router";
 import { useConnection } from "../../app/connection.tsx";
 import { type Refusal, said, saidAll } from "../../app/refusals.ts";
@@ -54,6 +54,114 @@ function holder(who: Holder | null | undefined): string | undefined {
 		: undefined;
 }
 
+/** The refusals whose path starts with `prefix`. */
+const at = (errors: Refusal[], prefix: string) =>
+	errors.filter((e) => e.path.startsWith(prefix));
+
+/** How plans are checked: whether, against which questions, and by whom; setup's and Settings'. */
+export function PlanCheck({
+	judgment: kept,
+	onChange,
+	judges,
+	errors,
+	putBack,
+	children,
+}: {
+	judgment: Judgment | undefined;
+	onChange: (judgment: Judgment) => void;
+	/** Who checks plans under each choice, as the daemon answers it. */
+	judges: Judges | undefined;
+	/** The daemon's refusals for the team; each one about the plan check is said at its group. */
+	errors: Refusal[];
+	putBack: (() => void) | undefined;
+	children?: ReactNode;
+}) {
+	const judgment: Required<Judgment> = {
+		required: "always",
+		questions: QUESTIONS.slice(0, 2).map((q) => q.text),
+		judge: "auto",
+		...kept,
+	};
+	const setJudgment = (next: Partial<Judgment>) =>
+		onChange({ ...judgment, ...next });
+	const toggle = (text: string) => {
+		const on = new Set(judgment.questions);
+		if (on.has(text)) on.delete(text);
+		else on.add(text);
+		const pinned: string[] = QUESTIONS.map((q) => q.text);
+		setJudgment({
+			questions: [
+				...pinned.filter((q) => on.has(q)),
+				...judgment.questions.filter((q) => !pinned.includes(q)),
+			],
+		});
+	};
+	const questionsWrong = at(errors, "/policy/judgment/questions");
+	const auto = holder(judges?.auto) ?? "";
+	const named = (role: "architect" | "scrum_master") =>
+		holder(role === "architect" ? judges?.architect : judges?.scrumMaster) ??
+		t("planJudgeNone").replace("{role}", roleName(role));
+	return (
+		<section className={styles.card} aria-labelledby="plans">
+			<h2 id="plans" className={styles.heading}>
+				{t("planTitle")}
+			</h2>
+			<p>{t("planLead")}</p>
+			<Switch
+				id="plan-required"
+				label={t("planRequired")}
+				checked={judgment.required === "always"}
+				onChange={(on) => setJudgment({ required: on ? "always" : "never" })}
+			/>
+			<fieldset
+				className={styles.questions}
+				aria-describedby={questionsWrong.length ? "questions-error" : undefined}
+			>
+				<legend>{t("planQuestions")}</legend>
+				{QUESTIONS.map((q) => (
+					<label key={q.text} className={styles.question}>
+						<input
+							type="checkbox"
+							checked={judgment.questions.includes(q.text)}
+							onChange={() => toggle(q.text)}
+						/>
+						<span>
+							{t(q.label)}
+							<small>{t(q.note)}</small>
+						</span>
+					</label>
+				))}
+				{questionsWrong.length > 0 && (
+					<p id="questions-error" className={styles.error}>
+						{questionsWrong.map((e) => said(e.code)).join(" ")}
+					</p>
+				)}
+			</fieldset>
+			<Choice<Judge>
+				name="judge"
+				legend={t("planJudge")}
+				value={judgment.judge}
+				onChange={(judge) => setJudgment({ judge })}
+				{...(at(errors, "/policy/judgment/judge").length > 0 && {
+					error: said("judge_not_held", {
+						role:
+							judgment.judge === "auto"
+								? roleName("architect")
+								: roleName(judgment.judge),
+					}),
+				})}
+				options={[
+					{ value: "auto", label: t("planJudgeAuto").replace("{who}", auto) },
+					{ value: "architect", label: named("architect") },
+					{ value: "scrum_master", label: named("scrum_master") },
+				]}
+			/>
+			<PutBack onClick={putBack} />
+			{children}
+		</section>
+	);
+}
+
 /** The Advanced area of setup: team rules, the checks, and how plans are checked. */
 export function SetupAdvanced() {
 	const { client } = useConnection();
@@ -82,12 +190,6 @@ export function SetupAdvanced() {
 			),
 	);
 	const rules = draft.team.rules;
-	const judgment: Required<Judgment> = {
-		required: "always",
-		questions: QUESTIONS.slice(0, 2).map((q) => q.text),
-		judge: "auto",
-		...draft.team.policy.judgment,
-	};
 	const [maxCost, setMaxCost] = useState(String(rules.maxTaskBudgetUsd ?? ""));
 	const [asText, setAsText] = useState<string>();
 	const [textWrong, setTextWrong] = useState<string>();
@@ -100,24 +202,6 @@ export function SetupAdvanced() {
 		team: { ...draft.team, ...next },
 	});
 	const setRules = (next: Team["rules"]) => change(withTeam({ rules: next }));
-	const setJudgment = (next: Partial<Judgment>) =>
-		change(
-			withTeam({
-				policy: { ...draft.team.policy, judgment: { ...judgment, ...next } },
-			}),
-		);
-	const toggle = (text: string) => {
-		const on = new Set(judgment.questions);
-		if (on.has(text)) on.delete(text);
-		else on.add(text);
-		const pinned: string[] = QUESTIONS.map((q) => q.text);
-		setJudgment({
-			questions: [
-				...pinned.filter((q) => on.has(q)),
-				...judgment.questions.filter((q) => !pinned.includes(q)),
-			],
-		});
-	};
 	const cost = (value: string) => {
 		setMaxCost(value);
 		const { maxTaskBudgetUsd: _, ...rest } = rules;
@@ -161,10 +245,6 @@ export function SetupAdvanced() {
 		}
 		setAdding(false);
 	};
-	const auto = holder(judges?.auto) ?? "";
-	const named = (role: "architect" | "scrum_master") =>
-		holder(role === "architect" ? judges?.architect : judges?.scrumMaster) ??
-		t("planJudgeNone").replace("{role}", roleName(role));
 
 	return (
 		<Wizard step={7} title={t("advanced")} lead={t("advancedLead")}>
@@ -300,82 +380,26 @@ export function SetupAdvanced() {
 				</span>
 			</section>
 
-			<section className={styles.card} aria-labelledby="plans">
-				<h2 id="plans" className={styles.heading}>
-					{t("planTitle")}
-				</h2>
-				<p>{t("planLead")}</p>
-				<Switch
-					id="plan-required"
-					label={t("planRequired")}
-					checked={judgment.required === "always"}
-					onChange={(on) => setJudgment({ required: on ? "always" : "never" })}
-				/>
-				<fieldset
-					className={styles.questions}
-					aria-describedby={
-						under("/policy/judgment/questions").length
-							? "questions-error"
-							: undefined
-					}
-				>
-					<legend>{t("planQuestions")}</legend>
-					{QUESTIONS.map((q) => (
-						<label key={q.text} className={styles.question}>
-							<input
-								type="checkbox"
-								checked={judgment.questions.includes(q.text)}
-								onChange={() => toggle(q.text)}
-							/>
-							<span>
-								{t(q.label)}
-								<small>{t(q.note)}</small>
-							</span>
-						</label>
-					))}
-					{under("/policy/judgment/questions").length > 0 && (
-						<p id="questions-error" className={styles.error}>
-							{under("/policy/judgment/questions")
-								.map((e) => said(e.code))
-								.join(" ")}
-						</p>
-					)}
-				</fieldset>
-				<Choice<Judge>
-					name="judge"
-					legend={t("planJudge")}
-					value={judgment.judge}
-					onChange={(judge) => setJudgment({ judge })}
-					{...(under("/policy/judgment/judge").length > 0 && {
-						error: said("judge_not_held", {
-							role:
-								judgment.judge === "auto"
-									? roleName("architect")
-									: roleName(judgment.judge),
-						}),
-					})}
-					options={[
-						{ value: "auto", label: t("planJudgeAuto").replace("{who}", auto) },
-						{ value: "architect", label: named("architect") },
-						{ value: "scrum_master", label: named("scrum_master") },
-					]}
-				/>
-				<PutBack
-					onClick={
-						defaults &&
-						(() =>
-							change(
-								withTeam({
-									policy: {
-										...draft.team.policy,
-										judgment: defaults.policy.judgment ?? {},
-									},
-								}),
-							))
-					}
-				/>
-			</section>
-
+			<PlanCheck
+				judgment={draft.team.policy.judgment}
+				onChange={(judgment) =>
+					change(withTeam({ policy: { ...draft.team.policy, judgment } }))
+				}
+				judges={judges}
+				errors={errors}
+				putBack={
+					defaults &&
+					(() =>
+						change(
+							withTeam({
+								policy: {
+									...draft.team.policy,
+									judgment: defaults.policy.judgment ?? {},
+								},
+							}),
+						))
+				}
+			/>
 			{(elsewhere.length > 0 || refused) && (
 				<p role="alert" className={styles.alert}>
 					{[...elsewhere.map((e) => said(e.code)), refused]

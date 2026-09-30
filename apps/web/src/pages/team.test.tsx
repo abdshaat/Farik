@@ -119,6 +119,47 @@ const saved = async (s: FakeSocket) =>
 const one = (team: typeof TEAM, id: string) =>
 	team.agents.find((a) => a.id === id) as Record<string, unknown>;
 
+const BUDGET = "Does the task fit its budget?";
+const NOTICE =
+	"Would its checks notice if the work went wrong the way its intent worries about?";
+const SMALL = "Is it small enough to finish in one go?";
+/** What `farik init` writes, as settings.defaults answers it. */
+const DEFAULTS = {
+	budgets: {},
+	rules: {},
+	policy: {
+		integration: "auto_merge",
+		judgment: {
+			required: "always",
+			questions: [BUDGET, NOTICE],
+			judge: "auto",
+		},
+		permissions: { run_commands: true, push: false },
+	},
+};
+
+/** Settings, with the team and the defaults answered: its team's rules area. */
+async function settings() {
+	const { container, socket } = await renderApp("/settings");
+	const s = socket as FakeSocket;
+	// The shell asks first, then the page itself.
+	await answerStatus(s, false);
+	await answerStatus(s, false, 2);
+	await answerQuery(s, "team.get", {
+		team: TEAM,
+		agents: EFFECTIVE,
+		judges: JUDGES,
+		max_agents: 7,
+	});
+	await answerQuery(s, "settings.defaults", DEFAULTS);
+	const rules = await screen.findByRole("region", { name: en.rulesArea });
+	const part = (name: string) =>
+		within(rules).getByRole("region", { name }) as HTMLElement;
+	return { container, s, rules, part };
+}
+
+const picked = (el: HTMLElement) => (el as HTMLInputElement).checked;
+
 describe("team page", () => {
 	afterEach(() => localStorage.clear());
 
@@ -398,6 +439,217 @@ describe("team page", () => {
 		act(() => s.fail(gone, -32603, "keyring: platform secure storage failure"));
 		expect(await within(row).findByText(en.refuseOther)).toBeTruthy();
 		expect(within(row).queryByText(/keyring/)).toBeNull();
+	});
+
+	it("changes_what_agents_may_do_and_the_limit_from_settings", async () => {
+		const { container, s, rules, part } = await settings();
+		expect(within(rules).getByText(en.rulesNextSession)).toBeTruthy();
+		await expectNoAxeViolations(container);
+
+		// The team's own answers, not setup's blanks.
+		const may = part(en.rulesMay);
+		expect(
+			picked(within(may).getByRole("radio", { name: /^No, nobody may/ })),
+		).toBe(true);
+		const save = within(may).getByRole("button", {
+			name: en.agentSave,
+		}) as HTMLButtonElement;
+		expect(save.disabled).toBe(true);
+		fireEvent.click(
+			within(may).getByRole("radio", { name: /^Yes, on its own branches/ }),
+		);
+		const effect = "Developers may now push their work and open pull requests.";
+		const draft = await validated(s, [effect]);
+		expect(draft.policy.permissions).toEqual({
+			run_commands: false,
+			push: true,
+		});
+		// What changes is shown before anything is saved.
+		expect(await within(may).findByText(effect)).toBeTruthy();
+		expect(s.calls("team.save")).toHaveLength(0);
+		fireEvent.click(save);
+		const first = await sent(s, "team.save");
+		expect(
+			(first.params as { team: typeof TEAM }).team.policy.permissions,
+		).toEqual({ run_commands: false, push: true });
+		// A failed save is said in plain words, never the daemon's own text.
+		act(() =>
+			s.fail(first, -32602, "/policy/permissions has additional properties"),
+		);
+		expect((await within(may).findByRole("alert")).textContent).toBe(
+			en.refuseOther,
+		);
+
+		// Put back the default: the answers `farik init` writes.
+		fireEvent.click(within(may).getByRole("button", { name: en.putBack }));
+		expect(
+			picked(
+				within(may).getByRole("radio", {
+					name: /^Yes, the Developer and Architect may/,
+				}),
+			),
+		).toBe(true);
+		expect(
+			picked(within(may).getByRole("radio", { name: /^No, keep everything/ })),
+		).toBe(true);
+		fireEvent.click(within(may).getByRole("button", { name: en.agentSave }));
+		await waitFor(() => expect(s.calls("team.save")).toHaveLength(2));
+		act(() => s.reply(s.calls("team.save")[1] as never, {}));
+		// Saved: the page reads the team again.
+		await waitFor(() =>
+			expect(
+				s.calls("query").filter((q) => q.params.name === "team.get").length,
+			).toBeGreaterThan(1),
+		);
+
+		// The same daily limit as the Costs page's.
+		const spend = part(en.rulesSpend);
+		expect(
+			picked(within(spend).getByRole("radio", { name: /^No limit/ })),
+		).toBe(true);
+		fireEvent.click(
+			within(spend).getByRole("radio", {
+				name: new RegExp(`^${en.spendDaily}`),
+			}),
+		);
+		fireEvent.change(within(spend).getByLabelText(en.spendAmount), {
+			target: { value: "15" },
+		});
+		const limited = await validated(s, ["The team may spend up to $15 a day."]);
+		expect(limited.budgets).toEqual({ daily_usd: 15 });
+		expect(
+			await within(spend).findByText("The team may spend up to $15 a day."),
+		).toBeTruthy();
+		fireEvent.click(within(spend).getByRole("button", { name: en.agentSave }));
+		await waitFor(() => expect(s.calls("team.save")).toHaveLength(3));
+		expect((await saved(s)).budgets).toEqual({ daily_usd: 15 });
+	});
+
+	it("changes_how_work_is_added_and_how_plans_are_checked_from_settings", async () => {
+		const { container, s, part } = await settings();
+
+		const finish = part(en.rulesFinish);
+		expect(
+			picked(
+				within(finish).getByRole("radio", {
+					name: new RegExp(`^${en.finishAuto}`),
+				}),
+			),
+		).toBe(true);
+		fireEvent.click(
+			within(finish).getByRole("radio", {
+				name: new RegExp(`^${en.finishManual}`),
+			}),
+		);
+		const manual = await validated(s, [
+			"Finished work waits for you to merge it.",
+		]);
+		expect(manual.policy.integration).toBe("manual");
+		expect(
+			await within(finish).findByText(
+				"Finished work waits for you to merge it.",
+			),
+		).toBeTruthy();
+		fireEvent.click(within(finish).getByRole("button", { name: en.putBack }));
+		expect(
+			picked(
+				within(finish).getByRole("radio", {
+					name: new RegExp(`^${en.finishAuto}`),
+				}),
+			),
+		).toBe(true);
+		expect(
+			(
+				within(finish).getByRole("button", {
+					name: en.agentSave,
+				}) as HTMLButtonElement
+			).disabled,
+		).toBe(true);
+
+		const plans = part(en.planTitle);
+		const small = within(plans).getByRole("checkbox", {
+			name: new RegExp(`^${en.planSmall}`),
+		});
+		expect(picked(small)).toBe(false);
+		fireEvent.click(small);
+		fireEvent.click(within(plans).getByRole("radio", { name: /Scrum Master/ }));
+		const checked = await validated(s, [
+			"Plans are checked against 3 questions.",
+			"The Scrum Master checks every plan.",
+		]);
+		expect(checked.policy).toMatchObject({
+			judgment: {
+				required: "always",
+				questions: [BUDGET, NOTICE, SMALL],
+				judge: "scrum_master",
+			},
+		});
+		expect(
+			await within(plans).findByText("The Scrum Master checks every plan."),
+		).toBeTruthy();
+		await expectNoAxeViolations(container);
+
+		// A plan check with no questions is refused at the questions, in plain words.
+		for (const q of [
+			within(plans).getByRole("checkbox", {
+				name: new RegExp(`^${en.planBudget}`),
+			}),
+			within(plans).getByRole("checkbox", {
+				name: new RegExp(`^${en.planNotice}`),
+			}),
+			small,
+		])
+			fireEvent.click(q);
+		const frame = await waitFor(() => {
+			const f = s
+				.calls("query")
+				.filter((q) => q.params.name === "team.validate")
+				.at(-1);
+			const team = (f?.params.params as { team: typeof TEAM } | undefined)
+				?.team as
+				| { policy: { judgment?: { questions: string[] } } }
+				| undefined;
+			if (team?.policy.judgment?.questions.length !== 0)
+				throw new Error("the empty check was not asked");
+			return f as never;
+		});
+		act(() =>
+			s.reply(frame, {
+				errors: [
+					{
+						path: "/policy/judgment/questions",
+						message: "/policy/judgment/questions has fewer than 1 items",
+						code: "no_questions",
+					},
+				],
+				effects: [],
+			}),
+		);
+		expect(await within(plans).findByText(en.refuseNoQuestions)).toBeTruthy();
+		expect(within(plans).queryByText(/fewer than/)).toBeNull();
+		expect(
+			(
+				within(plans).getByRole("button", {
+					name: en.agentSave,
+				}) as HTMLButtonElement
+			).disabled,
+		).toBe(true);
+
+		fireEvent.click(within(plans).getByRole("button", { name: en.putBack }));
+		fireEvent.click(small);
+		await validated(s, ["Plans are checked against 3 questions."]);
+		expect(
+			await within(plans).findByText("Plans are checked against 3 questions."),
+		).toBeTruthy();
+		fireEvent.click(within(plans).getByRole("button", { name: en.agentSave }));
+		const saved_ = await saved(s);
+		expect(saved_.policy).toMatchObject({
+			judgment: {
+				required: "always",
+				questions: [BUDGET, NOTICE, SMALL],
+				judge: "auto",
+			},
+		});
 	});
 
 	it("shows_and_disconnects_the_account", async () => {
