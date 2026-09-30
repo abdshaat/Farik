@@ -3624,6 +3624,58 @@ mod tests {
 
     #[test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn accepts_a_ui_change_only_once_the_designer_passed_it() {
+        // The Definition of Done's sixth item, fed from the log: the core rule alone proves
+        // nothing if the runtime never tells it a review is missing.
+        // A Designer that can review, so the review is `waiting`, not held for its browser.
+        let team = a_team(|wire| {
+            let mut iris = an_agent_wire("iris", "ui_ux_designer");
+            iris["mcp_servers"] = json!([{ "name": "playwright", "source": "builtin" }]);
+            wire["agents"]
+                .as_array_mut()
+                .expect("a list of agents")
+                .push(iris);
+            wire["preview"] = json!({ "start": "make serve", "port": 4401 });
+        });
+        let project = Project::new("done-design-review", team, at(12));
+        project
+            .transitions
+            .set_previews(Arc::new(crate::preview::fixtures::FakePreviews::ready()));
+        project.file("FRK-1", |wire| wire["ui_change"] = json!(true));
+        project.created("FRK-1", "assigned");
+        let people = json!({ "assignee": "dev-a", "reviewer": "dev-b" });
+        project.moved("FRK-1", "assigned", "in_progress", &people, at(9));
+        governor_result(&project, "FRK-1", "C1");
+        note(&project, "FRK-1", "completion", "dev-a");
+        note(&project, "FRK-1", "review", "dev-b");
+        project.moved("FRK-1", "in_progress", "verifying", &people, at(10));
+
+        let outcome = project.ask(&accepting("FRK-1"), &TransitionAsk::default());
+        let TransitionOutcome::Refused(refusal) = outcome else {
+            panic!("a UI change whose design review waits: {outcome:?}");
+        };
+        assert!(
+            super::refusal_details(&refusal)
+                .iter()
+                .any(|detail| detail.contains("the UI/UX Designer has not passed it")),
+            "{refusal:?}"
+        );
+
+        project.record(
+            "FRK-1",
+            "design_review.recorded",
+            &json!({ "pass": true, "reasons": "Reads well.", "checks": [] }),
+            at(11),
+        );
+        let outcome = project.ask(&accepting("FRK-1"), &TransitionAsk::default());
+        assert!(
+            matches!(outcome, TransitionOutcome::Moved(_)),
+            "{outcome:?}"
+        );
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
     fn answers_every_human_criterion_with_one_acceptance() {
         let project = Project::new("human-criteria", a_team(|_| {}), at(12));
         project.file("FRK-1", |wire| {
