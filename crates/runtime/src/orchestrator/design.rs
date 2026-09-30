@@ -215,7 +215,16 @@ mod tests {
     /// FRK-1 in progress, held by the UI/UX Designer `iris` and reviewed by the Architect `ada`,
     /// with its worktree made, and `change` applied to its contract.
     fn a_designers_task(name: &str, change: impl FnOnce(&mut Value)) -> Harness {
-        let harness = Harness::new(name, with_the_designer);
+        a_designers_task_in(name, with_the_designer, change)
+    }
+
+    /// `a_designers_task`, with `team` making the team's wire.
+    fn a_designers_task_in(
+        name: &str,
+        team: impl FnOnce(&mut Value),
+        change: impl FnOnce(&mut Value),
+    ) -> Harness {
+        let harness = Harness::new(name, team);
         harness.file("FRK-1", "ready", |wire| {
             wire["assignee_role"] = json!("ui_ux_designer");
             wire["reviewer_role"] = json!("architect");
@@ -473,6 +482,41 @@ mod tests {
             escalation_reasons(&harness),
             [EscalationRaisedBodyReason::Iterations]
         );
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn asks_the_active_product_manager_not_a_paused_one() {
+        // A team always keeps an active Product Manager (pausing the last is refused), so a paused
+        // one is passed over for the one that is active.
+        let harness = a_designers_task_in(
+            "design-flow-pm-paused",
+            |wire| {
+                with_the_designer(wire);
+                wire["agents"][0]["status"] = json!("paused");
+                wire["agents"]
+                    .as_array_mut()
+                    .expect("a list of agents")
+                    .push(json!({
+                        "id": "pm-2",
+                        "display_name": "pm-2",
+                        "role": "product_manager",
+                        "status": "active"
+                    }));
+            },
+            |_| {},
+        );
+        harness.project.record(
+            "FRK-1",
+            "design_plan.proposed",
+            &json!({ "plan": "A plan." }),
+        );
+        let started = ticked(&harness, vec![decide_design_plan_approves_frk_1()], 1).await;
+
+        assert_eq!(who(&started), [("pm-2", SessionPurpose::Verify)]);
+        let approved = harness.events(&[EventKind::DesignPlanApproved]);
+        assert_eq!(approved.len(), 1);
+        assert_eq!(approved[0].envelope.ids.agent_id.as_deref(), Some("pm-2"));
     }
 
     #[tokio::test]
