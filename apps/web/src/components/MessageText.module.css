@@ -1,7 +1,7 @@
 .mention {
 	padding: 0 3px;
 	background: var(--farik-color-surface);
-	color: inherit;
+	color: var(--farik-color-ink);
 	font-weight: 600;
 	border-bottom: 2px solid var(--farik-color-status-waiting);
 }
