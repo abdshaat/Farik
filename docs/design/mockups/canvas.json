@@ -93,13 +93,13 @@
       "y": 0
     },
     "OneOnOne.dc.html": {
-      "h": 1000,
+      "h": 1720,
       "is_interactive": true,
-      "page": "daily",
+      "page": "chats",
       "title": "Talking with Mira",
       "w": 1440,
       "x": 1520,
-      "y": 2240
+      "y": 0
     },
     "Phone.dc.html": {
       "h": 844,
@@ -349,6 +349,24 @@
       "title": "Accept work on a phone, with Iris",
       "page": "designer",
       "is_interactive": true
+    },
+    "Chats.dc.html": {
+      "x": 0,
+      "y": 0,
+      "w": 1440,
+      "h": 1000,
+      "title": "Chats, with Team open",
+      "page": "chats",
+      "is_interactive": true
+    },
+    "PhoneChats.dc.html": {
+      "x": 3040,
+      "y": 0,
+      "w": 360,
+      "h": 844,
+      "title": "Chats on a phone",
+      "page": "chats",
+      "is_interactive": true
     }
   },
   "createdOnFiles": {
@@ -423,6 +441,15 @@
       "w": 240,
       "x": 0,
       "y": -300
+    },
+    "t_chats": {
+      "kind": "title1",
+      "maxW": 4400,
+      "page": "chats",
+      "text": "Chats",
+      "w": 240,
+      "x": 0,
+      "y": -300
     }
   },
   "order": [
@@ -433,6 +460,7 @@
     "SprintStart.dc.html",
     "SprintView.dc.html",
     "Channel.dc.html",
+    "Chats.dc.html",
     "OneOnOne.dc.html",
     "Costs.dc.html",
     "RequestFiled.dc.html",
@@ -464,7 +492,8 @@
     "GateDesignReview.dc.html",
     "SettingsPreviewPhone.dc.html",
     "DesignPlanPhone.dc.html",
-    "GateDesignReviewPhone.dc.html"
+    "GateDesignReviewPhone.dc.html",
+    "PhoneChats.dc.html"
   ],
   "pages": [
     {
@@ -494,6 +523,10 @@
     {
       "id": "designer",
       "name": "UI/UX Designer"
+    },
+    {
+      "id": "chats",
+      "name": "Chats"
     }
   ],
   "title": "Farik web UI mockup"
