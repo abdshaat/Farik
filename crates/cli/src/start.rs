@@ -507,6 +507,7 @@ fn factories(sandbox: Sandbox, image: &str) -> (Arc<dyn SandboxFactory>, Arc<dyn
             }),
             Arc::new(DockerPreviewFactory {
                 image: image.to_string(),
+                browser: farik_runtime::computer::browser_image(),
             }),
         ),
         Sandbox::None => (Arc::new(HostSandboxFactory), Arc::new(NoPreviews)),

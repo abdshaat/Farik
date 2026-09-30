@@ -39,6 +39,8 @@ static AVAILABLE: Mutex<Option<(Instant, bool)>> = Mutex::new(None);
 pub struct DockerPreviewFactory {
     /// The image `prepare` and `start` run in, `SANDBOX_IMAGE` outside tests.
     pub image: String,
+    /// The browser's image, the Playwright connector's pinned one outside tests.
+    pub browser: String,
 }
 
 impl PreviewFactory for DockerPreviewFactory {
@@ -80,6 +82,14 @@ impl PreviewFactory for DockerPreviewFactory {
             return Err(unavailable(format!(
                 "the sandbox image {} is not on this machine",
                 self.image
+            )));
+        }
+        // The browser runs `--pull never`: without its image every session would fail to browse.
+        if !run(&["image", "inspect", &self.browser])?.status.success() {
+            return Err(unavailable(format!(
+                "the Designer's browser {} is not on this computer. Open the computer check in Setup \
+                 and choose Fetch it",
+                self.browser
             )));
         }
         let name = container_name("preview", project_id, task_id);

@@ -449,6 +449,7 @@ fn the_browser_reaches_only_the_preview() {
     // (a) The preview's network is off, and the browser has neither the proxy nor the origins.
     let preview = DockerPreviewFactory {
         image: ALPINE.to_owned(),
+        browser: playwright().image,
     }
     .start(&project, &task(), &root, &serving(), "tree")
     .unwrap_or_else(|error| panic!("the preview did not start: {error}"));
@@ -509,6 +510,7 @@ fn stop_leaves_no_container() {
     std::fs::create_dir_all(&output).expect("the output folder is made");
     let factory = DockerPreviewFactory {
         image: ALPINE.to_owned(),
+        browser: playwright().image,
     };
     let preview = factory
         .start(&project, &task(), &root, &serving(), "tree")
@@ -544,6 +546,7 @@ fn the_task_cleanup_removes_the_preview() {
     let _cleanup = Cleanup(project.clone());
     let preview = DockerPreviewFactory {
         image: ALPINE.to_owned(),
+        browser: playwright().image,
     }
     .start(&project, &task(), &root, &serving(), "tree")
     .unwrap_or_else(|error| panic!("the preview did not start: {error}"));
@@ -579,6 +582,7 @@ fn checks_a_page_on_the_pinned_image() {
     std::fs::create_dir_all(&output).expect("the output folder is made");
     let preview = DockerPreviewFactory {
         image: ALPINE.to_owned(),
+        browser: playwright().image,
     }
     .start(&project, &task(), &root, &serving(), "tree")
     .unwrap_or_else(|error| panic!("the preview did not start: {error}"));
@@ -636,6 +640,7 @@ fn a_page_cannot_hide_its_violations_from_the_check() {
     std::fs::create_dir_all(&output).expect("the output folder is made");
     let preview = DockerPreviewFactory {
         image: ALPINE.to_owned(),
+        browser: playwright().image,
     }
     .start(&project, &task(), &root, &serving(), "tree")
     .unwrap_or_else(|error| panic!("the preview did not start: {error}"));
@@ -656,6 +661,34 @@ fn a_page_cannot_hide_its_violations_from_the_check() {
             .any(|violation| violation.rule == "button-name"),
         "{:?}",
         checked.violations
+    );
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+#[test]
+#[ignore = "needs docker"]
+fn refuses_to_start_without_the_browser_image() {
+    let root = worktree("no-browser");
+    let project = project("no-browser");
+    let _cleanup = Cleanup(project.clone());
+    let refused = DockerPreviewFactory {
+        image: ALPINE.to_owned(),
+        browser: "farik-test/no-such-browser:absent".to_owned(),
+    }
+    .start(&project, &task(), &root, &serving(), "tree")
+    .err()
+    .expect("no preview starts without the browser's image");
+
+    let said = refused.to_string();
+    assert!(said.contains("browser"), "{said}");
+    assert!(said.contains("Fetch it"), "{said}");
+    let filter = format!("label=farik.project={project}");
+    assert_eq!(
+        docker(&["ps", "-a", "-q", "--filter", &filter])
+            .1
+            .lines()
+            .count(),
+        0
     );
     let _ = std::fs::remove_dir_all(&root);
 }

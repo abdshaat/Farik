@@ -130,7 +130,8 @@ pub fn check_computer(env: &BTreeMap<String, String>, designer: bool) -> Compute
 }
 
 /// The Designer's browser image, the Playwright connector's, pinned by digest.
-fn browser_image() -> String {
+#[must_use]
+pub fn browser_image() -> String {
     farik_roles::builtin_connector("playwright").map_or_else(String::new, |shipped| shipped.image)
 }
 
