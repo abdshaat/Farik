@@ -170,9 +170,16 @@ describe("today", () => {
 				row("FRK-5", "integration", "the photos", "theo"),
 			],
 		});
+		// A key that works adds no row.
+		await answerQuery(s, "account.status", {
+			provider: "anthropic",
+			kind: "subscription_token",
+			source: "keychain",
+		});
 		expect(
 			await screen.findByRole("heading", { name: "Waiting on you (5)" }),
 		).toBeTruthy();
+		expect(screen.queryByText(en.waitingKeyRefused)).toBeNull();
 		const list = screen.getByRole("list", { name: en.waitingList });
 		const rows = within(list).getAllByRole("listitem") as HTMLElement[];
 		const expected = [
