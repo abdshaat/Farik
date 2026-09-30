@@ -44,7 +44,7 @@ Out of scope: the channel (step 10), one-on-ones (phase 8), notifications (phase
   - Rows show the assignee's avatar, the title, the id, and the mark. An epic is a row too, with its tasks' count ("3 parts, 1 done"). A task under an epic shows the epic's title in small text.
   - Filters are chips: Everyone and each agent; "Only what is waiting on me"; each open epic. Under "More filters": sprint (this sprint, no sprint, all), risk (low, medium, high), and "Show cancelled". The mockup has no risk or sprint chips; the phase plan asks for both, and they sit behind "More filters".
   - At the top: the sprint line and "End the sprint early", or "No sprint is running" and "Start a sprint".
-  - On a phone the lanes become tabs with counts, one lane shown, with "Nothing here right now" when empty.
+  - On a phone the lanes become lane buttons with counts (toggles, each labelled; the landing review found them acceptable under WCAG), one lane shown, with "Nothing here right now" when empty.
 - **Task detail** (`/tasks/:id`). The header reads "<id> in sprint N. <assignee> is doing it, and <reviewer> reviews it. <Try i of n>". It has five tabs:
   - **Summary and checks.** The latest review or completion summary (step 08's rule); `task.checks` with "Passed", "Failed last time", or "Not run yet".
   - **History.** `task.history`, newest first, each line in plain words from step 07's `moved.since` phrasing, with the raw kind in small grey text.
@@ -72,7 +72,7 @@ Out of scope: the channel (step 10), one-on-ones (phase 8), notifications (phase
 - **Costs** (`/costs`).
   - `Projections::costs_for(scope: CostScope, window: CostWindow) -> Result<Vec<CostProjection>, StoreError>`, with `CostWindow { Day(NaiveDate), Sprint(String), All }`, gives agent × day and agent × sprint.
   - `costs.summary {}` answers `{ today_usd, daily_limit_usd, sprint: { sprint_id, spent_usd, budget_usd } | null, agents: [{ agent_id, today_usd, sprint_usd }] }`.
-  - `metrics { sprint_id? }` answers this wire shape, built by the daemon from `HarnessMetrics` (no `Serialize` added): `{ accepted_tasks, first_pass_acceptance_rate: number | null, interventions_per_accepted_task: number | null, cost_per_accepted_task: { total_usd, by_purpose: [{ words, usd }] } | null, mechanically_verified_criteria_share: number | null, active_weeks, messages: { reaction, ambient, reply, ceremony, system, human } }`. The page shows the five rate lines, then "Active weeks: N" and one messages line ("Messages: N reactions, N replies, N from meetings, N from you").
+  - `metrics { sprint_id? }` answers this wire shape, built by the daemon from `HarnessMetrics` (no `Serialize` added): `{ accepted_tasks, first_pass_acceptance_rate: number | null, interventions_per_accepted_task: number | null, cost_per_accepted_task: { total_usd, by_purpose: [{ words, usd }] } | null, mechanically_verified_criteria_share: number | null, active_weeks, messages: { reaction, ambient, reply, ceremony, system, human } }`. The page shows the four rate lines (the wire has four rates), then "Active weeks: N" and one messages line ("Messages: N reactions, N replies, N from meetings, N from you").
   - Differences from the mockup: SprintView's "See costs by agent" is the link to `/costs`; the board's empty lane reads "Nothing here right now" everywhere, not "Nobody is stuck."
   - The page reads "Today the team has spent $X" and either "with no daily limit set" or "of $L a day". Beside it:
     - the sprint line;
