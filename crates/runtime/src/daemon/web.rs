@@ -18,7 +18,7 @@ use chrono::{DateTime, Utc};
 use farik_core::contract::TaskId;
 use farik_protocol::clock::Clock;
 use farik_protocol::command::{Command, command_from_value, reply_to_value};
-use farik_protocol::event::event_to_value;
+use farik_protocol::event::{EventBody, event_to_value};
 use farik_protocol::rpc::{QueryName, rpc_request_from_value};
 use farik_store::EventQuery;
 use farik_store::projections::TaskProjection;
@@ -731,11 +731,31 @@ fn query(state: &DaemonState, name: &str, params: &Value) -> Result<Value, Failu
                         .transitions
                         .design_review(&team, &task_id)
                         .map_err(|error| internal(&error))?;
+                    let history = deps
+                        .log
+                        .read(&EventQuery {
+                            task_id: Some(task_id.clone()),
+                            ..EventQuery::default()
+                        })
+                        .map_err(|error| internal(&error))?;
+                    let reviews: Vec<Value> = history
+                        .iter()
+                        .filter_map(|event| match &event.body {
+                            EventBody::DesignReviewRecorded(body) => Some(json!({
+                                "agent_id": event.envelope.ids.agent_id,
+                                "pass": body.pass,
+                                "reasons": body.reasons,
+                                "recorded_at": event.envelope.recorded_at,
+                            })),
+                            _ => None,
+                        })
+                        .collect();
                     Ok(json!({
                         "task": task_wire(&task),
                         "design_plan": plan,
                         "ui_change": ui_change,
                         "design_review": ui_change.then_some(review),
+                        "design_reviews": reviews,
                     }))
                 }
                 None => Err(missing()),
@@ -1945,6 +1965,10 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     #[ignore = "needs the git program: cargo xtask check --integration"]
+    #[allow(
+        clippy::too_many_lines,
+        reason = "one walk through the design review's queries"
+    )]
     async fn answers_the_task_with_its_review() {
         use base64::Engine as _;
 
@@ -1976,7 +2000,10 @@ mod tests {
             "rule": "color-contrast", "impact": "serious", "target": "h1",
             "help": "Elements must meet minimum color contrast ratio thresholds"
         });
-        harness.project.record(
+        let at = crate::tools::fixtures::at();
+        harness.project.record_by(
+            Some("iris"),
+            at,
             "FRK-2",
             "design_review.recorded",
             &json!({
@@ -1993,6 +2020,29 @@ mod tests {
                 "reasons": "The heading is too faint.",
                 "checks": [{ "width": "phone", "theme": "dark", "violations": [violation] }]
             })
+        );
+        // Every design review of the task, oldest first, whoever recorded it.
+        assert_eq!(plain["design_reviews"], json!([]), "{plain}");
+        let first = json!({
+            "agent_id": "iris", "pass": false, "reasons": "The heading is too faint.",
+            "recorded_at": "2026-09-22T12:00:00Z"
+        });
+        assert_eq!(failed["design_reviews"], json!([first]), "{failed}");
+        harness.project.record_by(
+            Some("iris"),
+            at + chrono::Duration::hours(1),
+            "FRK-2",
+            "design_review.recorded",
+            &json!({ "pass": true, "reasons": "Darker now.", "checks": [] }),
+        );
+        let both = get(&mut socket, 6, "FRK-2").await;
+        assert_eq!(
+            both["design_reviews"],
+            json!([first, {
+                "agent_id": "iris", "pass": true, "reasons": "Darker now.",
+                "recorded_at": "2026-09-22T13:00:00Z"
+            }]),
+            "{both}"
         );
 
         let png = b"\x89PNG\r\n\x1a\nthe phone in the dark";

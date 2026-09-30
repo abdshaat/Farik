@@ -748,13 +748,29 @@
               "required": ["state", "checks"]
             }
           ]
+        },
+        "design_reviews": {
+          "description": "Every design_review.recorded of the task, oldest first: the Designer that recorded it, whether it passed, its reasons, and when (step 12). The gate reads the earlier ones as the Designer's send-backs, and the latest as who signed the letter.",
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "agent_id": { "type": ["string", "null"] },
+              "pass": { "type": "boolean" },
+              "reasons": { "type": "string" },
+              "recorded_at": { "type": "string", "format": "date-time" }
+            },
+            "required": ["agent_id", "pass", "reasons", "recorded_at"]
+          }
         }
       },
       "required": [
         "task",
         "design_plan",
         "ui_change",
-        "design_review"
+        "design_review",
+        "design_reviews"
       ]
     },
     "teamGetResult": {

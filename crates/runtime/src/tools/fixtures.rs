@@ -317,6 +317,18 @@ impl TestProject {
         kind: &str,
         body: &Value,
     ) -> FarikEvent {
+        self.record_by(None, recorded_at, task, kind, body)
+    }
+
+    /// `record_at`, by `agent` when there is one.
+    pub(crate) fn record_by(
+        &self,
+        agent: Option<&str>,
+        recorded_at: DateTime<Utc>,
+        task: &str,
+        kind: &str,
+        body: &Value,
+    ) -> FarikEvent {
         let mut wire = json!({
             "seq": 1,
             "recorded_at": recorded_at.to_rfc3339(),
@@ -327,6 +339,9 @@ impl TestProject {
         });
         if !task.is_empty() {
             wire["task_id"] = json!(task);
+        }
+        if let Some(agent) = agent {
+            wire["agent_id"] = json!(agent);
         }
         let event = event_from_value(&wire).expect("the fixture is schema-valid");
         let appended = self
