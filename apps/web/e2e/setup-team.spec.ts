@@ -2,6 +2,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { expect, type Page, test } from "@playwright/test";
 import { farik, startServe } from "./fixtures/serve.ts";
+import { narrow } from "./fixtures/shots.ts";
 
 const shots = new URL("./screenshots/", import.meta.url).pathname;
 
@@ -17,11 +18,8 @@ async function pictured(page: Page) {
 /** The screen as it is, at a desktop's size and a phone's, for the landing review. */
 async function screenshots(page: Page, name: string) {
 	await pictured(page);
-	await page.setViewportSize({ width: 360, height: 780 });
+	await narrow(page);
 	await pictured(page);
-	expect(
-		await page.evaluate(() => document.documentElement.scrollWidth),
-	).toBeLessThanOrEqual(360);
 	await page.screenshot({ path: `${shots}${name}-360.png`, fullPage: true });
 	await page.setViewportSize({ width: 1280, height: 800 });
 	await pictured(page);

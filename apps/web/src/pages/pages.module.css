@@ -15,6 +15,8 @@
 
 .section {
 	display: grid;
+	/* As `.page`: a wide child must not widen the section, nested or not, past a phone's screen. */
+	grid-template-columns: minmax(0, 1fr);
 	gap: var(--farik-space-2);
 }
 
