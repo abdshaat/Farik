@@ -200,10 +200,12 @@ export function Board() {
 				<h1 className={styles.title}>{t("board")}</h1>
 				{sprint ? (
 					<p>
-						{t("sprintLine")
-							.replace("{n}", n)
-							.replace("{done}", String(sprint.done))
-							.replace("{total}", String(sprint.total))}
+						<Link to={`/sprints/${sprint.sprintId}`}>
+							{t("sprintLine")
+								.replace("{n}", n)
+								.replace("{done}", String(sprint.done))
+								.replace("{total}", String(sprint.total))}
+						</Link>
 					</p>
 				) : (
 					<p>{t("sprintNone")}</p>

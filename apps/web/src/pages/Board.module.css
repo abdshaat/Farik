@@ -17,6 +17,10 @@
 	color: var(--farik-color-ink-muted);
 }
 
+.head a {
+	color: var(--farik-color-ink-muted);
+}
+
 .title {
 	margin: 0;
 	flex-basis: 100%;

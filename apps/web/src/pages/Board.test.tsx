@@ -348,9 +348,12 @@ describe("board", () => {
 		cleanup();
 
 		const second = await board({ sprint_id: "S2", done: 1, total: 3 });
+		// The sprint line opens the sprint's page.
 		expect(
-			screen.getByText("Sprint 2 is running: 1 of 3 tasks done"),
-		).toBeTruthy();
+			screen
+				.getByRole("link", { name: "Sprint 2 is running: 1 of 3 tasks done" })
+				.getAttribute("href"),
+		).toBe("/sprints/S2");
 		fireEvent.click(screen.getByRole("button", { name: en.sprintEndEarly }));
 		const end = screen.getByRole("dialog", { name: "End sprint 2 early?" });
 		expect(

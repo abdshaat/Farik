@@ -97,6 +97,8 @@ export async function startServe(o: {
 	home?: string;
 	/** The team to write in place of `farik init`'s two. */
 	team?: "pm-architect-developer";
+	/** How long each recorded session waits before it plays, so a page sees each state it leaves. */
+	paceMs?: number;
 }): Promise<{
 	url: string;
 	port: number;
@@ -128,6 +130,7 @@ export async function startServe(o: {
 	args.push("--port", String(port));
 	if (o.transcripts.length > 0)
 		args.push("--transcripts", o.transcripts.join(","));
+	if (o.paceMs) args.push("--pace", String(o.paceMs));
 	const server = spawn(join(target, "farik-e2e-serve"), args, {
 		cwd: project,
 		env: serveEnv,

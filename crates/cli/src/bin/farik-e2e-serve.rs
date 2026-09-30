@@ -1,21 +1,25 @@
 //! `farik serve` on recorded sessions, for the browser suites: `farik-e2e-serve --port <p>
-//! [--transcripts <name>,...] [--no-keychain]`, run in a project directory, or anywhere else for
-//! the first-run wizard. `--no-keychain` keeps the credential in the state folder's file alone. Once
+//! [--transcripts <name>,...] [--pace <ms>] [--no-keychain]`, run in a project directory, or
+//! anywhere else for the first-run wizard. `--no-keychain` keeps the credential in the state
+//! folder's file alone. `--pace` holds each recorded session that long before it plays, as a live
+//! one takes time, so that a page sees every state a task passes through. Once
 //! the named sessions are played, each new session waits until it is aborted, which the second
 //! Ctrl-C does. Built only with the `e2e` feature, so
 //! the shipped `farik` has no path to replay.
 
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::Duration;
 
 use farik::ids::SystemClock;
 use farik::{CliIo, Engine, Interrupts, run_cli};
 use farik_core::pricing::Usage;
 use farik_runtime::recorded::fixtures::{
-    UsageThenWaitAdapter, ask_with_choices_frk_1, implement_after_send_back_frk_1,
+    UsageThenWaitAdapter, accept_frk_1, ask_with_choices_frk_1, implement_after_send_back_frk_1,
     implement_finishes_frk_1, judge_frk_1_by_architect, plan_assigns_frk_1_to_theo,
-    refine_writes_epic_frk_1, refine_writes_high_risk_frk_1, refine_writes_task_for_theo_frk_1,
-    review_writes_note, tool_runner, triage_frk_1_large, triage_frk_1_small_by_pm,
+    planning_ceremony_frk_1, refine_writes_epic_frk_1, refine_writes_high_risk_frk_1,
+    refine_writes_task_for_theo_frk_1, retro, review, review_writes_note, tool_runner,
+    triage_frk_1_large, triage_frk_1_small_by_pm,
 };
 use farik_runtime::{
     RecordedAdapter, RuntimeAdapter, RuntimeError, SessionHandle, SessionSpec, Transcript,
@@ -35,13 +39,17 @@ fn transcript(name: &str) -> Option<Transcript> {
         "implement_finishes_frk_1" => Some(implement_finishes_frk_1()),
         "review_writes_note" => Some(review_writes_note()),
         "implement_after_send_back_frk_1" => Some(implement_after_send_back_frk_1()),
+        "planning_ceremony_frk_1" => Some(planning_ceremony_frk_1()),
+        "accept_frk_1" => Some(accept_frk_1()),
+        "review" => Some(review()),
+        "retro" => Some(retro()),
         _ => None,
     }
 }
 
 fn main() -> std::process::ExitCode {
     let mut arguments = std::env::args().skip(1);
-    let (mut port, mut names, mut keychain) = (None, String::new(), true);
+    let (mut port, mut names, mut keychain, mut pace) = (None, String::new(), true, 0);
     while let Some(flag) = arguments.next() {
         if flag == "--no-keychain" {
             keychain = false;
@@ -50,6 +58,10 @@ fn main() -> std::process::ExitCode {
         match (flag.as_str(), arguments.next()) {
             ("--port", Some(value)) => port = Some(value),
             ("--transcripts", Some(value)) => names = value,
+            ("--pace", Some(value)) => match value.parse() {
+                Ok(ms) => pace = ms,
+                Err(_) => return usage(),
+            },
             _ => return usage(),
         }
     }
@@ -83,6 +95,7 @@ fn main() -> std::process::ExitCode {
         let adapter: Arc<dyn RuntimeAdapter> = Arc::new(ThenWaits {
             recorded: RecordedAdapter::with_tools(transcripts.clone(), tool_runner(daemon)),
             waits: UsageThenWaitAdapter::waiting(Usage::default()),
+            pace: Duration::from_millis(pace),
         });
         adapter
     }));
@@ -98,6 +111,7 @@ fn main() -> std::process::ExitCode {
 struct ThenWaits {
     recorded: RecordedAdapter,
     waits: UsageThenWaitAdapter,
+    pace: Duration,
 }
 
 impl RuntimeAdapter for ThenWaits {
@@ -105,6 +119,8 @@ impl RuntimeAdapter for ThenWaits {
         if self.recorded.transcripts_left() == 0 {
             self.waits.start_session(spec)
         } else {
+            // The daemon's runtime has other workers, so its queries go on being answered.
+            std::thread::sleep(self.pace);
             self.recorded.start_session(spec)
         }
     }
@@ -119,6 +135,8 @@ impl RuntimeAdapter for ThenWaits {
 }
 
 fn usage() -> std::process::ExitCode {
-    eprintln!("usage: farik-e2e-serve --port <p> [--transcripts <name>,...] [--no-keychain]");
+    eprintln!(
+        "usage: farik-e2e-serve --port <p> [--transcripts <name>,...] [--pace <ms>] [--no-keychain]"
+    );
     std::process::ExitCode::from(2)
 }

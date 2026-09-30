@@ -2,7 +2,8 @@
 .table {
 	width: 100%;
 	border-collapse: collapse;
-	overflow-wrap: anywhere;
+	/* Breaks only a word too long for any column, never an amount to fit a narrower one. */
+	overflow-wrap: break-word;
 }
 
 .table caption {

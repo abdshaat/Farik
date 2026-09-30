@@ -180,7 +180,7 @@ RPC queries: `task.costs`, `sprints.list`, `sprint.get`, `costs.summary`, `metri
 - Spec F3 and F17: the board's lanes and filters, and the costs page.
 - The project plan's step 09 line.
 
-- [ ] `test(web): run a sprint on the board through the real server and browser`
+- [x] `test(web): run a sprint on the board through the real server and browser`
 
 ## Verification
 
@@ -190,3 +190,10 @@ cargo xtask check --integration
 #   plus Task 4b's 5 (two Settings tests, three N1 tests); @farik/ui plus 1 (Developer);
 #   playwright: step 08's 7 plus 1 = 8 passed; last line: xtask check: ok
 ```
+
+Built (2026-09-30): @farik/web 101 passed (Task 4b's run; Task 5 adds no test file, it extends three:
+the board's sprint line is a link, the task page's notes come from the log, and one post reads "1 post");
+@farik/ui 41; playwright 8 passed, `board.spec.ts` the eighth, which also screenshots the board, the task
+page, a sprint page, the Costs page and Settings' team rules at 360 and 1280 px, each with no sideways
+scroll at 360; its `farik-e2e-serve --pace 600` holds each recorded session so the board redraws in every
+lane the task passes.
