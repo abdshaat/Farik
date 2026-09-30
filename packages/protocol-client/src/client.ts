@@ -35,6 +35,7 @@ export type MethodName =
 	| "request.file"
 	| "contract.save"
 	| "team.save"
+	| "agent.replace"
 	| "team.start"
 	| "criteria.save"
 	| "account.disconnect"
