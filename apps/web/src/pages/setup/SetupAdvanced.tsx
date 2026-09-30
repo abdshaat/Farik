@@ -13,9 +13,11 @@ import {
 	type Criterion,
 	type Draft,
 	type Judgment,
+	PutBack,
 	roleName,
 	type Team,
 	teamOf,
+	useDefaults,
 	useSetup,
 	useStart,
 } from "./TeamSetup.tsx";
@@ -58,6 +60,7 @@ export function SetupAdvanced() {
 	const navigate = useNavigate();
 	const { draft, change } = useSetup();
 	const { start, busy, refused } = useStart();
+	const defaults = useDefaults();
 	const team = teamOf(draft);
 	// Every change is checked as it is made (spec 10); the daemon's refusal shows here.
 	const { data: checked } = useQuery<{ errors: Refusal[]; judges?: Judges }>(
@@ -243,6 +246,16 @@ export function SetupAdvanced() {
 						/>
 					</>
 				)}
+				<PutBack
+					onClick={
+						defaults &&
+						(() => {
+							setRules(defaults.rules);
+							setMaxCost(String(defaults.rules.maxTaskBudgetUsd ?? ""));
+							setAsText(undefined);
+						})
+					}
+				/>
 			</section>
 
 			<section className={styles.card} aria-labelledby="checks">
@@ -346,6 +359,20 @@ export function SetupAdvanced() {
 						{ value: "architect", label: named("architect") },
 						{ value: "scrum_master", label: named("scrum_master") },
 					]}
+				/>
+				<PutBack
+					onClick={
+						defaults &&
+						(() =>
+							change(
+								withTeam({
+									policy: {
+										...draft.team.policy,
+										judgment: defaults.policy.judgment ?? {},
+									},
+								}),
+							))
+					}
 				/>
 			</section>
 

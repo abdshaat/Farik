@@ -5,7 +5,14 @@ import type { en } from "../../strings/en.ts";
 import { t } from "../../strings/t.ts";
 import type { Tier } from "../Team.tsx";
 import styles from "./setup.module.css";
-import { type Draft, roleName, teamOf, useSetup } from "./TeamSetup.tsx";
+import {
+	type Draft,
+	PutBack,
+	roleName,
+	teamOf,
+	useDefaults,
+	useSetup,
+} from "./TeamSetup.tsx";
 import { Wizard } from "./Wizard.tsx";
 
 type Answer = "" | "yes" | "no";
@@ -37,6 +44,7 @@ export function mayOf(tiers: Tier[]): string {
 export function SetupPermissions() {
 	const navigate = useNavigate();
 	const { draft, change } = useSetup();
+	const defaults = useDefaults()?.policy.permissions;
 	const { commands, push } = draft.answers;
 	const answered = commands !== undefined && push !== undefined;
 	const team = teamOf(draft);
@@ -116,6 +124,16 @@ export function SetupPermissions() {
 						: t("mayPushNoteMany")}
 				</p>
 			</div>
+			<PutBack
+				onClick={
+					defaults &&
+					(() =>
+						answer({
+							commands: defaults.runCommands ?? true,
+							push: defaults.push ?? false,
+						}))
+				}
+			/>
 			<section className={styles.card} aria-labelledby="may-already">
 				<h2 id="may-already" className={styles.heading}>
 					{t("mayAlready")}

@@ -3,7 +3,7 @@ import { useState } from "react";
 import { useNavigate } from "react-router";
 import { t } from "../../strings/t.ts";
 import styles from "./setup.module.css";
-import { useSetup } from "./TeamSetup.tsx";
+import { PutBack, useDefaults, useSetup } from "./TeamSetup.tsx";
 import { Wizard } from "./Wizard.tsx";
 
 type Limit = "none" | "daily";
@@ -12,6 +12,7 @@ type Limit = "none" | "daily";
 export function SetupSpending() {
 	const navigate = useNavigate();
 	const { draft, change } = useSetup();
+	const defaults = useDefaults();
 	const kept = draft.team.budgets.dailyUsd;
 	const [limit, setLimit] = useState<Limit>(kept ? "daily" : "none");
 	const [amount, setAmount] = useState(String(kept ?? 10));
@@ -64,6 +65,16 @@ export function SetupSpending() {
 					/>
 				</div>
 			)}
+			<PutBack
+				onClick={
+					defaults &&
+					(() => {
+						const usd = defaults.budgets.dailyUsd;
+						setLimit(usd ? "daily" : "none");
+						setAmount(String(usd ?? 10));
+					})
+				}
+			/>
 			<p className={styles.note}>{t("spendFixed")}</p>
 			<p className={styles.note}>{t("firstDay")}</p>
 			<div className={styles.foot}>

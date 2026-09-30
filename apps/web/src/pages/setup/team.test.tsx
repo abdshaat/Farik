@@ -531,6 +531,108 @@ describe("team setup", () => {
 		expect(start.criteria).toEqual({ criteria: [TESTS_PASS, added] });
 	});
 
+	it("puts_each_setting_back_to_its_default", async () => {
+		const DEFAULTS = {
+			budgets: {},
+			rules: {},
+			policy: {
+				integration: "auto_merge",
+				judgment: {
+					required: "always",
+					questions: [BUDGET, NOTICE],
+					judge: "auto",
+				},
+				permissions: { run_commands: true, push: false },
+			},
+		};
+		const changed = proposed((team) => {
+			team.budgets = { daily_usd: 25 };
+			team.rules = { require_new_tests: true };
+			const policy = team.policy as Record<string, unknown>;
+			policy.integration = "manual";
+			policy.judgment = {
+				required: "never",
+				questions: [SMALL],
+				judge: "auto",
+			};
+		});
+		const { socket } = await renderApp("/setup/permissions");
+		const s = socket as FakeSocket;
+		await answerQuery(s, "team.propose", changed);
+		/** Answers the defaults once the screen asked for them `n` times in all. */
+		const answerDefaults = async (n: number) => {
+			const asked = () =>
+				s.calls("query").filter((f) => f.params.name === "settings.defaults");
+			await waitFor(() => expect(asked().length).toBeGreaterThanOrEqual(n));
+			for (const frame of asked()) act(() => s.reply(frame, DEFAULTS));
+			await waitFor(() =>
+				expect(
+					screen
+						.getAllByRole("button", { name: en.putBack })
+						.every((b) => !(b as HTMLButtonElement).disabled),
+				).toBe(true),
+			);
+		};
+		await answerDefaults(1);
+		const back = () => screen.getByRole("button", { name: en.putBack });
+
+		await screen.findByRole("heading", { name: en.mayTitle });
+		fireEvent.click(back());
+		expect(
+			(
+				screen.getByRole("radio", {
+					name: /^Yes, the Developer/,
+				}) as HTMLInputElement
+			).checked,
+		).toBe(true);
+		expect(
+			(
+				screen.getByRole("radio", {
+					name: /^No, keep everything/,
+				}) as HTMLInputElement
+			).checked,
+		).toBe(true);
+		fireEvent.click(screen.getByRole("button", { name: en.continue }));
+
+		await screen.findByRole("heading", { name: en.spendTitle });
+		await answerDefaults(2);
+		fireEvent.click(back());
+		expect(
+			(screen.getByRole("radio", { name: /^No limit/ }) as HTMLInputElement)
+				.checked,
+		).toBe(true);
+		fireEvent.click(screen.getByRole("button", { name: en.continue }));
+
+		await screen.findByRole("heading", { name: en.finishTitle });
+		await answerDefaults(3);
+		fireEvent.click(back());
+		expect(
+			(
+				screen.getByRole("radio", {
+					name: /^Farik adds it/,
+				}) as HTMLInputElement
+			).checked,
+		).toBe(true);
+
+		fireEvent.click(screen.getByRole("switch", { name: en.advancedSwitch }));
+		await screen.findByRole("button", { name: en.advancedHide });
+		await answerDefaults(4);
+		const backs = screen.getAllByRole("button", { name: en.putBack });
+		expect(backs).toHaveLength(2);
+		for (const one of backs) fireEvent.click(one);
+		fireEvent.click(screen.getByRole("button", { name: en.startTeam }));
+		const start = (await sent(s, "team.start")).params as {
+			team: {
+				budgets: unknown;
+				rules: unknown;
+				policy: Record<string, unknown>;
+			};
+		};
+		expect(start.team.budgets).toEqual({});
+		expect(start.team.rules).toEqual({});
+		expect(start.team.policy).toMatchObject(DEFAULTS.policy);
+	});
+
 	it("starts_the_team", async () => {
 		const { socket } = await renderApp("/setup/finish");
 		const s = socket as FakeSocket;

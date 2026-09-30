@@ -1,4 +1,4 @@
-import type { Role } from "@farik/ui";
+import { Button, type Role } from "@farik/ui";
 import { useState } from "react";
 import { Outlet, useNavigate, useOutletContext } from "react-router";
 import { useConnection } from "../../app/connection.tsx";
@@ -133,6 +133,29 @@ export function useStart() {
 		}
 	};
 	return { start, busy, refused };
+}
+
+/** What putting a setting back puts back (SPEC 10): the values `farik init` writes. */
+export type Defaults = {
+	budgets: Team["budgets"];
+	policy: Team["policy"];
+	rules: Team["rules"];
+};
+
+/** The defaults, once the daemon has answered them. */
+export function useDefaults(): Defaults | undefined {
+	return useQuery<Defaults>("settings.defaults", {}).data;
+}
+
+/** "Put back the default", beside the setting it puts back. */
+export function PutBack({ onClick }: { onClick?: (() => void) | undefined }) {
+	return (
+		<span>
+			<Button kind="quiet" disabled={!onClick} onClick={() => onClick?.()}>
+				{t("putBack")}
+			</Button>
+		</span>
+	);
 }
 
 /** Each role's name as the setup screens say it. */

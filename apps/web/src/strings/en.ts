@@ -619,4 +619,5 @@ export const en = {
 	mayNetwork: "looks things up on the web",
 	mayGitRemote: "sends its work to its own branches online",
 	mayExternal: "acts outside your computer, with your approval",
+	putBack: "Put back the default",
 };

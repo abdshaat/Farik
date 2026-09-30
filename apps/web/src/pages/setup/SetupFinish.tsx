@@ -2,7 +2,7 @@ import { Button, Choice, Switch } from "@farik/ui";
 import { useNavigate } from "react-router";
 import { t } from "../../strings/t.ts";
 import styles from "./setup.module.css";
-import { useSetup, useStart } from "./TeamSetup.tsx";
+import { PutBack, useDefaults, useSetup, useStart } from "./TeamSetup.tsx";
 import { Wizard } from "./Wizard.tsx";
 
 type Integration = "auto_merge" | "pull_request" | "manual";
@@ -12,6 +12,12 @@ export function SetupFinish() {
 	const navigate = useNavigate();
 	const { draft, change } = useSetup();
 	const { start, busy, refused } = useStart();
+	const defaults = useDefaults();
+	const integrate = (integration: string) =>
+		change({
+			...draft,
+			team: { ...draft.team, policy: { ...draft.team.policy, integration } },
+		});
 
 	return (
 		<Wizard step={7} title={t("finishTitle")} lead={t("finishLead")}>
@@ -20,15 +26,7 @@ export function SetupFinish() {
 					name="integration"
 					legend={t("finishChoice")}
 					value={draft.team.policy.integration as Integration}
-					onChange={(integration) =>
-						change({
-							...draft,
-							team: {
-								...draft.team,
-								policy: { ...draft.team.policy, integration },
-							},
-						})
-					}
+					onChange={integrate}
 					options={[
 						{
 							value: "auto_merge",
@@ -48,6 +46,9 @@ export function SetupFinish() {
 					]}
 				/>
 			</div>
+			<PutBack
+				onClick={defaults && (() => integrate(defaults.policy.integration))}
+			/>
 			<p className={styles.note}>{t("finishSafe")}</p>
 			<Switch
 				id="advanced"
