@@ -135,7 +135,7 @@ describe("pages", () => {
 			socket.calls("query").filter((q) => q.params.name !== "serve.status");
 		await waitFor(() => expect(asked().length).toBeGreaterThan(0));
 		for (const q of asked())
-			act(() => socket.fail(q, -32002, "there is no task FRK-99"));
+			await socket.fail(q, -32002, "there is no task FRK-99");
 		expect((await screen.findByRole("alert")).textContent).toBe(
 			"There is no task FRK-99",
 		);

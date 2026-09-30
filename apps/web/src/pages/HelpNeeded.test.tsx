@@ -1,5 +1,5 @@
 import { expectNoAxeViolations } from "@farik/ui/test";
-import { act, fireEvent, screen, within } from "@testing-library/react";
+import { fireEvent, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { event, note, openedGate, sentCommand, TASK } from "../test/gate.ts";
 
@@ -86,14 +86,12 @@ describe("help page", () => {
 			},
 		});
 
-		act(() =>
-			s.reply(more, {
-				error: {
-					kind: "refused",
-					detail: "extra_tries_only_for_tries: more tries resume the work",
-				},
-			}),
-		);
+		await s.reply(more, {
+			error: {
+				kind: "refused",
+				detail: "extra_tries_only_for_tries: more tries resume the work",
+			},
+		});
 		expect((await screen.findByRole("alert")).textContent).toBe(
 			"More tries resume the work",
 		);

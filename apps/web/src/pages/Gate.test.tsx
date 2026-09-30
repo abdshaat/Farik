@@ -1,5 +1,5 @@
 import { expectNoAxeViolations } from "@farik/ui/test";
-import { act, fireEvent, screen, within } from "@testing-library/react";
+import { fireEvent, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
 	COMPLETION,
@@ -117,15 +117,13 @@ describe("acceptance gate", () => {
 				body: { task_id: "FRK-1", subject: "result" },
 			},
 		});
-		act(() =>
-			s.reply(accept, {
-				error: {
-					kind: "refused",
-					detail:
-						"not_waiting_for_the_human: FRK-1 is done, and its result does not wait for the human",
-				},
-			}),
-		);
+		await s.reply(accept, {
+			error: {
+				kind: "refused",
+				detail:
+					"not_waiting_for_the_human: FRK-1 is done, and its result does not wait for the human",
+			},
+		});
 		expect((await screen.findByRole("alert")).textContent).toBe(
 			"FRK-1 is done, and its result does not wait for the human",
 		);

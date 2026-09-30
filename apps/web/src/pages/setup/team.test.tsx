@@ -1,6 +1,5 @@
 import { expectNoAxeViolations } from "@farik/ui/test";
 import {
-	act,
 	cleanup,
 	fireEvent,
 	screen,
@@ -163,7 +162,7 @@ describe("team setup", () => {
 		fireEvent.click(screen.getByRole("button", { name: en.scanWrongSave }));
 		const note = await sent(s, "project.note");
 		expect(note.params).toEqual({ text: "It is a shop, not a game." });
-		act(() => s.reply(note, {}));
+		await s.reply(note, {});
 		expect(await screen.findByText(en.scanWrongSaved)).toBeTruthy();
 
 		// One package is no workspace to speak of.
@@ -236,18 +235,16 @@ describe("team setup", () => {
 			["theo-2", "Theo", "marketing_specialist"],
 			["noor", "Noor", "software_developer"],
 		]);
-		act(() =>
-			s.reply(validate, {
-				errors: [
-					{
-						path: "/agents/1/display_name",
-						message: '"" is shorter than 1 character',
-						code: "name",
-					},
-				],
-				effects: [],
-			}),
-		);
+		await s.reply(validate, {
+			errors: [
+				{
+					path: "/agents/1/display_name",
+					message: '"" is shorter than 1 character',
+					code: "name",
+				},
+			],
+			effects: [],
+		});
 		// In plain words at its row, never the schema's own.
 		const why = await screen.findByText(en.refuseName);
 		expect(screen.queryByText(/shorter than/)).toBeNull();
@@ -263,13 +260,11 @@ describe("team setup", () => {
 				s.calls("query").filter((f) => f.params.name === "team.validate"),
 			).toHaveLength(2),
 		);
-		act(() =>
-			s.reply(
-				s
-					.calls("query")
-					.filter((f) => f.params.name === "team.validate")[1] as never,
-				{ errors: [], effects: [] },
-			),
+		await s.reply(
+			s
+				.calls("query")
+				.filter((f) => f.params.name === "team.validate")[1] as never,
+			{ errors: [], effects: [] },
 		);
 		expect(
 			await screen.findByRole("heading", { name: en.mayTitle }),
@@ -318,14 +313,9 @@ describe("team setup", () => {
 			effects: [],
 			agents: [{ id: "theo", tiers }],
 		});
-		act(() =>
-			s.reply(
-				s
-					.calls("query")
-					.filter((f) => f.params.name === "team.validate")
-					.at(-1) as never,
-				theo(["read", "write_workspace", "execute", "git_local"]),
-			),
+		await s.reply(
+			await asked(s, "team.validate"),
+			theo(["read", "write_workspace", "execute", "git_local"]),
 		);
 		expect(
 			await screen.findByText(
@@ -336,7 +326,7 @@ describe("team setup", () => {
 
 		fireEvent.click(screen.getByRole("radio", { name: /^No, nobody may/ }));
 		expect(screen.getByText(en.mayStillChecks)).toBeTruthy();
-		const asked = await waitFor(() => {
+		const noCommands = await waitFor(() => {
 			const frame = s
 				.calls("query")
 				.filter((f) => f.params.name === "team.validate")
@@ -351,7 +341,7 @@ describe("team setup", () => {
 				throw new Error("the answer was not asked about yet");
 			return frame as never;
 		});
-		act(() => s.reply(asked, theo(["read", "write_workspace", "git_local"])));
+		await s.reply(noCommands, theo(["read", "write_workspace", "git_local"]));
 		expect(
 			await screen.findByText(
 				"Reads the project, changes the files of its task and saves its work on its own branch.",
@@ -501,7 +491,7 @@ describe("team setup", () => {
 		expect(save.params).toEqual({
 			criteria: { criteria: [TESTS_PASS, added] },
 		});
-		act(() => s.reply(save, {}));
+		await s.reply(save, {});
 		expect(await within(checks).findByText(text)).toBeTruthy();
 
 		const small = screen.getByRole("checkbox", {
@@ -522,24 +512,16 @@ describe("team setup", () => {
 			expect(team.policy.judgment.judge).toBe("architect");
 		});
 		const refusal = "No active Architect can check plans.";
-		act(() =>
-			s.reply(
-				s
-					.calls("query")
-					.filter((f) => f.params.name === "team.validate")
-					.at(-1) as never,
+		await s.reply(await asked(s, "team.validate"), {
+			errors: [
 				{
-					errors: [
-						{
-							path: "/policy/judgment/judge",
-							message: refusal,
-							code: "judge_not_held",
-						},
-					],
-					effects: [],
+					path: "/policy/judgment/judge",
+					message: refusal,
+					code: "judge_not_held",
 				},
-			),
-		);
+			],
+			effects: [],
+		});
 		// Said at the choice it concerns, in the page's own words.
 		const who = screen.getByRole("group", { name: en.planJudge });
 		expect(
@@ -585,7 +567,7 @@ describe("team setup", () => {
 			target: { value: "The page loads in under two seconds." },
 		});
 		fireEvent.click(screen.getByRole("button", { name: en.checkAdd }));
-		act(() => s.fail(s.calls("criteria.save")[0] as never, -32602, RAW));
+		await s.fail(await sent(s, "criteria.save"), -32602, RAW);
 		expect(await screen.findByText(en.refuseOther)).toBeTruthy();
 		expect(screen.queryByText(/does not match/)).toBeNull();
 		cleanup();
@@ -598,9 +580,7 @@ describe("team setup", () => {
 		});
 		fireEvent.click(screen.getByRole("button", { name: en.scanWrongSave }));
 		const note = await sent(n, "project.note");
-		act(() =>
-			n.fail(note, -32603, "io error: permission denied (os error 13)"),
-		);
+		await n.fail(note, -32603, "io error: permission denied (os error 13)");
 		expect(await screen.findByText(en.refuseOther)).toBeTruthy();
 		expect(screen.queryByText(/os error/)).toBeNull();
 	});
@@ -638,7 +618,7 @@ describe("team setup", () => {
 			const asked = () =>
 				s.calls("query").filter((f) => f.params.name === "settings.defaults");
 			await waitFor(() => expect(asked().length).toBeGreaterThanOrEqual(n));
-			for (const frame of asked()) act(() => s.reply(frame, DEFAULTS));
+			for (const frame of asked()) await s.reply(frame, DEFAULTS);
 			await waitFor(() =>
 				expect(
 					screen
@@ -715,7 +695,7 @@ describe("team setup", () => {
 		fireEvent.click(await screen.findByRole("button", { name: en.startTeam }));
 		const refused = await sent(s, "team.start");
 		expect(refused.params).toEqual(wire);
-		act(() => s.fail(refused, -32005, "the team could not start"));
+		await s.fail(refused, -32005, "the team could not start");
 		expect((await screen.findByRole("alert")).textContent).toContain(
 			en.refuseOther,
 		);
@@ -723,7 +703,7 @@ describe("team setup", () => {
 
 		fireEvent.click(screen.getByRole("button", { name: en.startTeam }));
 		await waitFor(() => expect(s.calls("team.start")).toHaveLength(2));
-		act(() => s.reply(s.calls("team.start")[1] as never, {}));
+		await s.reply(s.calls("team.start")[1] as never, {});
 		await answerStatus(s, false, 1, { setup_pending: false });
 		expect(await screen.findByRole("heading", { name: en.today })).toBeTruthy();
 	});

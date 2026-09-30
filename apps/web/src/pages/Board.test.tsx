@@ -331,11 +331,9 @@ describe("board", () => {
 			command: { command: "sprint_start", body: { budget_usd: null } },
 		});
 		// A refusal is said in words, and the dialog stays.
-		act(() =>
-			first.s.reply(sent, {
-				error: { kind: "refused", detail: "sprint_open: a sprint is open" },
-			}),
-		);
+		await first.s.reply(sent, {
+			error: { kind: "refused", detail: "sprint_open: a sprint is open" },
+		});
 		expect(await within(dialog).findByText(en.refuseOther)).toBeTruthy();
 
 		// With a limit, the budget is sent in dollars.

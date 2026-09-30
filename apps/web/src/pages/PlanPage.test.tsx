@@ -1,11 +1,5 @@
 import { expectNoAxeViolations } from "@farik/ui/test";
-import {
-	act,
-	fireEvent,
-	screen,
-	waitFor,
-	within,
-} from "@testing-library/react";
+import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { FakeSocket } from "../test/fake-socket.ts";
 import { CONTRACT, SUMMARY, TEAM } from "../test/plan.ts";
@@ -167,14 +161,12 @@ describe("plan page", () => {
 				body: { task_id: "FRK-1", subject: "contract" },
 			},
 		});
-		act(() =>
-			s.reply(approve, {
-				error: {
-					kind: "refused",
-					detail: "not_awaiting_approval: the plan is not waiting for you",
-				},
-			}),
-		);
+		await s.reply(approve, {
+			error: {
+				kind: "refused",
+				detail: "not_awaiting_approval: the plan is not waiting for you",
+			},
+		});
 		expect((await screen.findByRole("alert")).textContent).toBe(
 			"The plan is not waiting for you",
 		);

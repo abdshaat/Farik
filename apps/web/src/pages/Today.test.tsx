@@ -116,17 +116,15 @@ describe("today", () => {
 		});
 		expect(refused.params).toEqual({ text: "hi" });
 		// The page words the refusal by its code, whatever the daemon's words are.
-		act(() =>
-			s.fail(refused, -32005, "write at least 20 characters", {
-				errors: [
-					{
-						path: "/text",
-						message: "write at least 20 characters",
-						code: "too_short",
-					},
-				],
-			}),
-		);
+		await s.fail(refused, -32005, "write at least 20 characters", {
+			errors: [
+				{
+					path: "/text",
+					message: "write at least 20 characters",
+					code: "too_short",
+				},
+			],
+		});
 		expect((await screen.findByRole("alert")).textContent).toBe(
 			en.requestTooShort,
 		);
@@ -136,9 +134,7 @@ describe("today", () => {
 		});
 		fireEvent.click(screen.getByRole("button", { name: en.requestSend }));
 		await waitFor(() => expect(s.calls("request.file")).toHaveLength(2));
-		act(() =>
-			s.reply(s.calls("request.file")[1] as never, { task_id: "FRK-3" }),
-		);
+		await s.reply(s.calls("request.file")[1] as never, { task_id: "FRK-3" });
 		// The request's own page asks for FRK-3.
 		await waitFor(() =>
 			expect(
@@ -235,14 +231,12 @@ describe("today", () => {
 		const checks = () =>
 			s.calls("query").filter((q) => q.params.name === "task.checks");
 		await waitFor(() => expect(checks()).toHaveLength(2));
-		act(() =>
-			s.reply(checks()[1] as never, {
-				checks: [
-					{ criterion_id: "c1", text: "check 1", passed: true },
-					{ criterion_id: "c2", text: "check 2", passed: false },
-				],
-			}),
-		);
+		await s.reply(checks()[1] as never, {
+			checks: [
+				{ criterion_id: "c1", text: "check 1", passed: true },
+				{ criterion_id: "c2", text: "check 2", passed: false },
+			],
+		});
 		await waitFor(() =>
 			expect(
 				within(rows[1] as HTMLElement).queryByText(/checks passed/),

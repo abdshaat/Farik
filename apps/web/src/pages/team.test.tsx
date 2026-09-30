@@ -1,6 +1,5 @@
 import { expectNoAxeViolations } from "@farik/ui/test";
 import {
-	act,
 	cleanup,
 	fireEvent,
 	screen,
@@ -107,7 +106,7 @@ async function validated(s: FakeSocket, effects: string[]) {
 		if (!f) throw new Error("no team.validate was asked");
 		return f;
 	});
-	act(() => s.reply(frame, { errors: [], effects }));
+	await s.reply(frame, { errors: [], effects });
 	return (frame.params.params as { team: typeof TEAM }).team;
 }
 
@@ -273,15 +272,13 @@ describe("team page", () => {
 	it("says_a_refused_pause_in_plain_words", async () => {
 		const { s } = await opened("/team");
 		fireEvent.click(await screen.findByRole("button", { name: "Pause Theo" }));
-		act(() =>
-			s.reply(sent_(s), {
-				error: {
-					kind: "refused",
-					detail:
-						"last_of_role: Theo is your only Software Developer; add another before Theo stops.",
-				},
-			}),
-		);
+		await s.reply(sent_(s), {
+			error: {
+				kind: "refused",
+				detail:
+					"last_of_role: Theo is your only Software Developer; add another before Theo stops.",
+			},
+		});
 		expect((await screen.findByRole("alert")).textContent).toBe(
 			"Theo is your only Developer, so add another Developer first.",
 		);
@@ -377,16 +374,14 @@ describe("team page", () => {
 		});
 		expect(s.calls("command")).toHaveLength(0);
 		expect(s.calls("team.save")).toHaveLength(0);
-		act(() => s.reply(replace, {}));
+		await s.reply(replace, {});
 		// The Team page asks for the team again.
 		const again = await waitFor(() => {
 			const f = s.calls("query").filter((q) => q.params.name === "team.get");
 			if (f.length < 2) throw new Error("the team was not asked again");
 			return f.at(-1) as never;
 		});
-		act(() =>
-			s.reply(again, { team: TEAM, agents: EFFECTIVE, judges: JUDGES }),
-		);
+		await s.reply(again, { team: TEAM, agents: EFFECTIVE, judges: JUDGES });
 		expect(
 			await screen.findByRole("heading", { name: en.teamMembers }),
 		).toBeTruthy();
@@ -396,7 +391,7 @@ describe("team page", () => {
 		const RAW = "/agents/3 has additional properties";
 		/** The page's alert, once `method`'s call failed with raw words. */
 		const failed = async (s: FakeSocket, method: string) => {
-			act(() => s.fail(s.calls(method).at(-1) as never, -32602, RAW));
+			await s.fail(await sent(s, method), -32602, RAW);
 			const alert = await screen.findByRole("alert");
 			expect(alert.textContent).toContain(en.refuseOther);
 			expect(screen.queryByText(new RegExp(RAW))).toBeNull();
@@ -436,7 +431,7 @@ describe("team page", () => {
 			within(row).getByRole("button", { name: en.accountDisconnectYes }),
 		);
 		const gone = await sent(s, "account.disconnect");
-		act(() => s.fail(gone, -32603, "keyring: platform secure storage failure"));
+		await s.fail(gone, -32603, "keyring: platform secure storage failure");
 		expect(await within(row).findByText(en.refuseOther)).toBeTruthy();
 		expect(within(row).queryByText(/keyring/)).toBeNull();
 	});
@@ -473,8 +468,10 @@ describe("team page", () => {
 			(first.params as { team: typeof TEAM }).team.policy.permissions,
 		).toEqual({ run_commands: false, push: true });
 		// A failed save is said in plain words, never the daemon's own text.
-		act(() =>
-			s.fail(first, -32602, "/policy/permissions has additional properties"),
+		await s.fail(
+			first,
+			-32602,
+			"/policy/permissions has additional properties",
 		);
 		expect((await within(may).findByRole("alert")).textContent).toBe(
 			en.refuseOther,
@@ -494,7 +491,7 @@ describe("team page", () => {
 		).toBe(true);
 		fireEvent.click(within(may).getByRole("button", { name: en.agentSave }));
 		await waitFor(() => expect(s.calls("team.save")).toHaveLength(2));
-		act(() => s.reply(s.calls("team.save")[1] as never, {}));
+		await s.reply(s.calls("team.save")[1] as never, {});
 		// Saved: the page reads the team again.
 		await waitFor(() =>
 			expect(
@@ -613,18 +610,16 @@ describe("team page", () => {
 				throw new Error("the empty check was not asked");
 			return f as never;
 		});
-		act(() =>
-			s.reply(frame, {
-				errors: [
-					{
-						path: "/policy/judgment/questions",
-						message: "/policy/judgment/questions has fewer than 1 items",
-						code: "no_questions",
-					},
-				],
-				effects: [],
-			}),
-		);
+		await s.reply(frame, {
+			errors: [
+				{
+					path: "/policy/judgment/questions",
+					message: "/policy/judgment/questions has fewer than 1 items",
+					code: "no_questions",
+				},
+			],
+			effects: [],
+		});
 		expect(await within(plans).findByText(en.refuseNoQuestions)).toBeTruthy();
 		expect(within(plans).queryByText(/fewer than/)).toBeNull();
 		expect(
@@ -801,7 +796,7 @@ describe("team page", () => {
 		);
 		const gone = await sent(s, "account.disconnect");
 		expect(gone.params).toEqual({});
-		act(() => s.reply(gone, { removed_from: ["keychain"], paused: true }));
+		await s.reply(gone, { removed_from: ["keychain"], paused: true });
 		expect(await within(row).findByText(en.accountGone)).toBeTruthy();
 		// The row reads the account again rather than saying it is still kept.
 		const again = await waitFor(() => {
@@ -811,7 +806,7 @@ describe("team page", () => {
 			if (asked.length < 2) throw new Error("the account was not asked again");
 			return asked.at(-1) as never;
 		});
-		act(() => s.reply(again, { provider: null, kind: null, source: null }));
+		await s.reply(again, { provider: null, kind: null, source: null });
 		expect(await within(row).findByText(en.accountNone)).toBeTruthy();
 		expect(within(row).queryByText(en.accountKeychain)).toBeNull();
 		await expectNoAxeViolations(container);

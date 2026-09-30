@@ -44,18 +44,16 @@ describe("plan editor", () => {
 		const { container, s } = await opened();
 		// The plan as it is, checked once on opening.
 		await waitFor(() => expect(checks(s)).toHaveLength(1));
-		act(() =>
-			s.reply(checks(s)[0] as never, {
-				failures: [
-					{
-						rule: "out_of_scope_present",
-						message: "scope.out_of_scope is empty",
-						plain: "The plan does not say what it leaves out.",
-					},
-				],
-				total: 6,
-			}),
-		);
+		await s.reply(checks(s)[0] as never, {
+			failures: [
+				{
+					rule: "out_of_scope_present",
+					message: "scope.out_of_scope is empty",
+					plain: "The plan does not say what it leaves out.",
+				},
+			],
+			total: 6,
+		});
 		const verdict = await screen.findByRole("region", {
 			name: "Ready to approve?",
 		});
@@ -81,23 +79,21 @@ describe("plan editor", () => {
 		expect(asked.contract.exit_criteria).toHaveLength(2);
 		await pause(500);
 		expect(checks(s)).toHaveLength(2);
-		act(() =>
-			s.reply(checks(s)[1] as never, {
-				failures: [
-					{
-						rule: "schema",
-						message: "intent is too short",
-						plain: '"Cus" is shorter than 20 characters',
-					},
-					{
-						rule: "schema",
-						message: "summary is too short",
-						plain: '"x" is shorter than 20 characters',
-					},
-				],
-				total: 1,
-			}),
-		);
+		await s.reply(checks(s)[1] as never, {
+			failures: [
+				{
+					rule: "schema",
+					message: "intent is too short",
+					plain: '"Cus" is shorter than 20 characters',
+				},
+				{
+					rule: "schema",
+					message: "summary is too short",
+					plain: '"x" is shorter than 20 characters',
+				},
+			],
+			total: 1,
+		});
 		await waitFor(() =>
 			expect(verdict.textContent).toContain("0 of 1 checks pass."),
 		);
@@ -115,31 +111,27 @@ describe("plan editor", () => {
 		expect(lock.params).toEqual({
 			command: { command: "contract_lock", body: { task_id: "FRK-1" } },
 		});
-		act(() => s.reply(lock, { said: "locked", events: [30] }));
+		await s.reply(lock, { said: "locked", events: [30] });
 		// The page reads the plan again, now locked.
 		await waitFor(() => expect(gets(s)).toHaveLength(2));
-		act(() =>
-			s.reply(gets(s)[1] as never, {
-				contract: {
-					...CONTRACT,
-					locked: true,
-					updated_at: "2026-09-24T10:05:00Z",
-				},
-			}),
-		);
+		await s.reply(gets(s)[1] as never, {
+			contract: {
+				...CONTRACT,
+				locked: true,
+				updated_at: "2026-09-24T10:05:00Z",
+			},
+		});
 		expect(await screen.findByText("You have locked this plan")).toBeTruthy();
 		fireEvent.click(screen.getByRole("button", { name: "Unlock" }));
 		const unlock = await sent(s, 2);
 		expect(unlock.params).toEqual({
 			command: { command: "contract_unlock", body: { task_id: "FRK-1" } },
 		});
-		act(() => s.reply(unlock, { said: "unlocked", events: [31] }));
+		await s.reply(unlock, { said: "unlocked", events: [31] });
 		await waitFor(() => expect(gets(s)).toHaveLength(3));
-		act(() =>
-			s.reply(gets(s)[2] as never, {
-				contract: { ...CONTRACT, updated_at: "2026-09-24T10:06:00Z" },
-			}),
-		);
+		await s.reply(gets(s)[2] as never, {
+			contract: { ...CONTRACT, updated_at: "2026-09-24T10:06:00Z" },
+		});
 		await screen.findByText("Mira can still change this plan");
 
 		// Saving sends the plan as edited; a frozen plan goes back to refining.
@@ -162,7 +154,7 @@ describe("plan editor", () => {
 		);
 		expect(params.contract.locked).toBe(false);
 		expect(params.contract.budget).toEqual({ max_cost_usd: 14 });
-		act(() => s.reply(save, { saved: true, back_to_refining: true }));
+		await s.reply(save, { saved: true, back_to_refining: true });
 		expect(
 			await screen.findByText(
 				"Saved. Mira checks the plan again, then it comes back to you to approve.",
@@ -181,12 +173,10 @@ describe("plan editor", () => {
 			if (!c) throw new Error("nothing was saved");
 			return c;
 		});
-		act(() =>
-			s.fail(
-				save,
-				-32005,
-				"the team is working to this plan; hold the work first, then change it",
-			),
+		await s.fail(
+			save,
+			-32005,
+			"the team is working to this plan; hold the work first, then change it",
 		);
 		expect((await screen.findByRole("alert")).textContent).toBe(
 			"The team is working to this plan; hold the work first, then change it",
@@ -216,19 +206,18 @@ describe("plan editor", () => {
 		});
 		// Holding the work moves the task, which stamps the file: the page reads it again.
 		fireEvent.click(screen.getByRole("button", { name: "Hold the work" }));
-		act(() =>
-			s.reply(s.calls("command")[0] as never, { said: "held", events: [30] }),
-		);
+		await s.reply(await sent(s), {
+			said: "held",
+			events: [30],
+		});
 		await waitFor(() => expect(gets(s)).toHaveLength(2));
-		act(() =>
-			s.reply(gets(s)[1] as never, {
-				contract: {
-					...CONTRACT,
-					status: "escalated",
-					updated_at: "2026-09-24T10:05:00Z",
-				},
-			}),
-		);
+		await s.reply(gets(s)[1] as never, {
+			contract: {
+				...CONTRACT,
+				status: "escalated",
+				updated_at: "2026-09-24T10:05:00Z",
+			},
+		});
 		await screen.findByText("Mira can still change this plan");
 		expect(
 			(screen.getByLabelText("Why you want it") as HTMLTextAreaElement).value,
@@ -242,17 +231,15 @@ describe("plan editor", () => {
 		const hers = "Customers will be able to buy a gift card and send it on.";
 		act(() => s.event(31));
 		await waitFor(() => expect(gets(s)).toHaveLength(3));
-		act(() =>
-			s.reply(gets(s)[2] as never, {
-				contract: {
-					...CONTRACT,
-					status: "escalated",
-					intent: "Customers can give a gift card and use it.",
-					summary: hers,
-					updated_at: "2026-09-24T10:07:00Z",
-				},
-			}),
-		);
+		await s.reply(gets(s)[2] as never, {
+			contract: {
+				...CONTRACT,
+				status: "escalated",
+				intent: "Customers can give a gift card and use it.",
+				summary: hers,
+				updated_at: "2026-09-24T10:07:00Z",
+			},
+		});
 		expect(
 			await screen.findByText(
 				"Mira changed this plan while you were editing. Your changes are kept.",
@@ -276,9 +263,9 @@ describe("plan editor", () => {
 			if (!c) throw new Error("nothing was saved");
 			return c;
 		});
-		const sent = (save.params as { contract: Record<string, unknown> })
+		const saved = (save.params as { contract: Record<string, unknown> })
 			.contract;
-		expect([sent.intent, sent.summary, sent.status]).toEqual([
+		expect([saved.intent, saved.summary, saved.status]).toEqual([
 			mine,
 			hers,
 			"escalated",
@@ -318,7 +305,7 @@ describe("plan editor", () => {
 		expect(
 			(save.params as { contract: { budget: object } }).contract.budget,
 		).toEqual({ max_cost_usd: 20 });
-		act(() => s.reply(save, { saved: true, back_to_refining: false }));
+		await s.reply(save, { saved: true, back_to_refining: false });
 		expect((await screen.findByRole("status")).textContent).toBe(en.saved);
 	});
 });

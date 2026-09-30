@@ -45,7 +45,7 @@ export async function answerQuery(
 	const asked = () =>
 		socket.calls("query").filter((f) => f.params.name === name);
 	await waitFor(() => expect(asked().length).toBeGreaterThan(0));
-	for (const frame of asked()) act(() => socket.reply(frame, result));
+	for (const frame of asked()) await socket.reply(frame, result);
 }
 
 /** Answers the latest `serve.status` query, once it has been asked `count` times in all. */
@@ -59,14 +59,12 @@ export async function answerStatus(
 		socket.calls("query").filter((f) => f.params.name === "serve.status");
 	await waitFor(() => expect(asked().length).toBeGreaterThanOrEqual(count));
 	for (const frame of asked())
-		act(() =>
-			socket.reply(frame, {
-				project_root: "/home/me/corner-bakery",
-				paused,
-				credential: "api_key",
-				port: 7420,
-				take_on_error: null,
-				...fields,
-			}),
-		);
+		await socket.reply(frame, {
+			project_root: "/home/me/corner-bakery",
+			paused,
+			credential: "api_key",
+			port: 7420,
+			take_on_error: null,
+			...fields,
+		});
 }

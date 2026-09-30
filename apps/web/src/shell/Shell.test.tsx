@@ -97,7 +97,7 @@ describe("shell", () => {
 			screen.queryByText(/Nothing new starts until you resume/),
 		).toBeNull();
 
-		act(() => socket.reply(sent, { said: "paused the team", events: [1] }));
+		await socket.reply(sent, { said: "paused the team", events: [1] });
 		act(() => socket.event(1)); // team.paused
 		await answerStatus(socket, true, 2);
 		expect(
@@ -125,14 +125,12 @@ describe("shell", () => {
 		fireEvent.click(await screen.findByRole("button", { name: en.resume }));
 		const sent = socket.calls("command")[0];
 		if (!sent) throw new Error("no command was sent");
-		act(() =>
-			socket.reply(sent, {
-				error: {
-					kind: "refused",
-					detail: "not_paused: the team is not paused",
-				},
-			}),
-		);
+		await socket.reply(sent, {
+			error: {
+				kind: "refused",
+				detail: "not_paused: the team is not paused",
+			},
+		});
 		expect(await screen.findByText("The team is not paused")).toBeTruthy();
 		await expectNoAxeViolations(container);
 	});

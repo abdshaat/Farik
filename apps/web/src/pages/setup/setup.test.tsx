@@ -84,7 +84,7 @@ describe("setup", () => {
 				.getByRole("button", { name: new RegExp(en.prepare) })
 				.getAttribute("aria-busy"),
 		).toBe("true");
-		act(() => again.reply(build, { image: "farik/sandbox:1" }));
+		await again.reply(build, { image: "farik/sandbox:1" });
 		// The image is looked for again once it is built.
 		await waitFor(() =>
 			expect(
@@ -107,9 +107,7 @@ describe("setup", () => {
 		fireEvent.change(field, { target: { value: "sk-ant-api01-wrong" } });
 		fireEvent.click(screen.getByRole("button", { name: en.saveContinue }));
 		const refused = await sent(s, "account.connect");
-		act(() =>
-			s.fail(refused, -32005, "a subscription key starts with sk-ant-oat"),
-		);
+		await s.fail(refused, -32005, "a subscription key starts with sk-ant-oat");
 		const why = await screen.findByText(
 			"a subscription key starts with sk-ant-oat",
 		);
@@ -124,7 +122,7 @@ describe("setup", () => {
 			kind: "subscription_token",
 			secret: "sk-ant-oat01-test",
 		});
-		act(() => s.reply(call, { stored_in: "file", taking_on: false }));
+		await s.reply(call, { stored_in: "file", taking_on: false });
 		expect(await screen.findByText(en.storedFile)).toBeTruthy();
 		expect(
 			await screen.findByRole("heading", { name: en.projectTitle }),
@@ -143,7 +141,7 @@ describe("setup", () => {
 		});
 		fireEvent.click(screen.getByRole("button", { name: en.saveContinue }));
 		const kept = await sent(again, "account.connect");
-		act(() => again.reply(kept, { stored_in: "keychain", taking_on: false }));
+		await again.reply(kept, { stored_in: "keychain", taking_on: false });
 		expect(await screen.findByText(en.storedKeychain)).toBeTruthy();
 		expect(screen.queryByText(en.storedFile)).toBeNull();
 	});
@@ -164,7 +162,7 @@ describe("setup", () => {
 		fireEvent.change(field, { target: { value: "sk-ant-oat01-test" } });
 		fireEvent.click(screen.getByRole("button", { name: en.saveContinue }));
 		const call = await sent(s, "account.connect");
-		act(() => s.reply(call, { stored_in: "file", taking_on: true }));
+		await s.reply(call, { stored_in: "file", taking_on: true });
 		expect(await screen.findByText(en.opening)).toBeTruthy();
 		expect(screen.getByTestId("status").textContent).toBe("reopening");
 
@@ -262,7 +260,7 @@ describe("setup", () => {
 			description: "An ordering site for my bakery, where customers pick up.",
 			no_sandbox: false,
 		});
-		act(() => s.reply(create, { project_root: "/home/me/corner-bakery" }));
+		await s.reply(create, { project_root: "/home/me/corner-bakery" });
 		expect(await screen.findByText(en.opening)).toBeTruthy();
 		expect(screen.getByTestId("status").textContent).toBe("reopening");
 

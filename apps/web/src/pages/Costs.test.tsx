@@ -1,6 +1,5 @@
 import { expectNoAxeViolations } from "@farik/ui/test";
 import {
-	act,
 	cleanup,
 	fireEvent,
 	screen,
@@ -282,7 +281,7 @@ describe("costs page", () => {
 		const team = (frame.params as { team: typeof TEAM }).team;
 		expect(team.budgets).toEqual({ max_task_usd: 5, daily_usd: 7.5 });
 		expect(team.agents).toHaveLength(2);
-		act(() => s.reply(frame, {}));
+		await s.reply(frame, {});
 		await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
 	});
 

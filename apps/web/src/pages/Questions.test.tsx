@@ -1,5 +1,5 @@
 import { expectNoAxeViolations } from "@farik/ui/test";
-import { act, fireEvent, screen, waitFor } from "@testing-library/react";
+import { fireEvent, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { en } from "../strings/en.ts";
 import type { FakeSocket } from "../test/fake-socket.ts";
@@ -87,7 +87,7 @@ describe("questions page", () => {
 				body: { question_id: 12, answer: "After a year" },
 			},
 		});
-		act(() => s.reply(byChoice, { said: "answered", events: [20] }));
+		await s.reply(byChoice, { said: "answered", events: [20] });
 
 		const words = screen.getByRole("textbox", { name: en.ownWordsMany });
 		expect(screen.queryByText(en.wordsWin)).toBeNull();
@@ -105,14 +105,12 @@ describe("questions page", () => {
 			},
 		});
 		// A refused answer is said, in a sentence.
-		act(() =>
-			s.reply(byWords, {
-				error: {
-					kind: "refused",
-					detail: "already_answered: the question has an answer already",
-				},
-			}),
-		);
+		await s.reply(byWords, {
+			error: {
+				kind: "refused",
+				detail: "already_answered: the question has an answer already",
+			},
+		});
 		expect((await screen.findByRole("alert")).textContent).toBe(
 			"The question has an answer already",
 		);

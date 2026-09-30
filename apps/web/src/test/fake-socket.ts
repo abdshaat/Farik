@@ -1,4 +1,5 @@
 import type { SocketLike } from "@farik/protocol-client";
+import { act } from "@testing-library/react";
 
 type Frame = { id: number; method: string; params: Record<string, unknown> };
 
@@ -40,20 +41,29 @@ export class FakeSocket implements SocketLike {
 			}),
 		});
 	}
-	/** Answers a request the client sent, as the daemon would. */
+	/** Answers a request the client sent, as the daemon would, once the page has taken the answer in. */
 	reply(frame: Frame, result: unknown) {
-		this.emit("message", {
-			data: JSON.stringify({ jsonrpc: "2.0", id: frame.id, result }),
+		return this.settle({ jsonrpc: "2.0", id: frame.id, result });
+	}
+	/** Refuses a request the client sent, as the daemon would, once the page has taken the refusal in. */
+	fail(frame: Frame, code: number, message: string, data?: unknown) {
+		return this.settle({
+			jsonrpc: "2.0",
+			id: frame.id,
+			error: { code, message, ...(data === undefined ? {} : { data }) },
 		});
 	}
-	/** Refuses a request the client sent, as the daemon would. */
-	fail(frame: Frame, code: number, message: string, data?: unknown) {
-		this.emit("message", {
-			data: JSON.stringify({
-				jsonrpc: "2.0",
-				id: frame.id,
-				error: { code, message, ...(data === undefined ? {} : { data }) },
-			}),
+	/**
+	 * Sends a response and waits until every render and effect it causes has run.
+	 * A response resolves the client's promise, so the page's update comes a microtask later:
+	 * a synchronous `act` has already returned by then, and React renders it on its own
+	 * scheduler, where the DOM can show the answer before the effects that follow it have run.
+	 * An async `act` holds every such update inside itself: it flushes React's work, then
+	 * waits a macrotask and flushes again, until nothing is left.
+	 */
+	private async settle(response: object) {
+		await act(async () => {
+			this.emit("message", { data: JSON.stringify(response) });
 		});
 	}
 	calls(method: string): Frame[] {

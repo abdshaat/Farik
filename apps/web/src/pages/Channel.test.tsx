@@ -358,18 +358,16 @@ describe("channel", () => {
 		expect(sent.params).toEqual({
 			command: { command: "message_post", body: { text } },
 		});
-		act(() => s.reply(sent, { said: "posted", events: [5] }));
+		await s.reply(sent, { said: "posted", events: [5] });
 		await waitFor(() => expect(box.value).toBe(""));
 
 		// The length is counted in characters, as Farik counts it: 2000 emoji pass.
 		fireEvent.change(box, { target: { value: "😀".repeat(2000) } });
 		fireEvent.click(screen.getByRole("button", { name: en.channelPost }));
 		await waitFor(() => expect(s.calls("command")).toHaveLength(2));
-		act(() =>
-			s.reply(s.calls("command")[1] as never, {
-				error: { kind: "refused", detail: "paused: the team is paused" },
-			}),
-		);
+		await s.reply(s.calls("command")[1] as never, {
+			error: { kind: "refused", detail: "paused: the team is paused" },
+		});
 		expect((await screen.findByRole("alert")).textContent).toBe(
 			"The team is paused",
 		);

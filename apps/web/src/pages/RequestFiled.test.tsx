@@ -136,14 +136,12 @@ describe("request page", () => {
 				body: { task_id: "FRK-7", size: "small", reason: "Changed by you" },
 			},
 		});
-		act(() =>
-			s.reply(sent, {
-				error: {
-					kind: "refused",
-					detail: "triage_closed: the request is already being planned",
-				},
-			}),
-		);
+		await s.reply(sent, {
+			error: {
+				kind: "refused",
+				detail: "triage_closed: the request is already being planned",
+			},
+		});
 		expect((await screen.findByRole("alert")).textContent).toBe(
 			"The request is already being planned",
 		);
