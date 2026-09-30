@@ -13,19 +13,41 @@ import {
 } from "./setup/TeamSetup.tsx";
 
 export type Model = { id: string; label: string };
+export type Tier =
+	| "read"
+	| "write_workspace"
+	| "execute"
+	| "git_local"
+	| "network"
+	| "git_remote"
+	| "external_effect";
+/** What the daemon works out for an agent: its model as its sessions run it, in words, and its tiers. */
+export type Effective = {
+	id: string;
+	model: Model & { effort: "low" | "medium" | "high" };
+	tiers: Tier[];
+	baseTiers: Tier[];
+};
+type Holder = { agentId: string; displayName: string; role: Agent["role"] };
+/** Who checks plans under each choice of judge, or null where nobody active holds it. */
+export type Judges = {
+	auto: Holder | null;
+	architect: Holder | null;
+	scrumMaster: Holder | null;
+};
 
-/** The team file and the models the price table knows, as the Team pages read them. */
+/** The team file, what the daemon works out for each agent, and the models the price table knows. */
 export function useTeam() {
-	const { data } = useQuery<{ team: TeamFile }>("team.get", {});
+	const { data } = useQuery<{ team: TeamFile; agents: Effective[] }>(
+		"team.get",
+		{},
+	);
 	const { data: models } = useQuery<{ models: Model[] }>("models.list", {});
-	return { team: data?.team, models: models?.models ?? [] };
-}
-
-/** The words for an agent's model, or its id when the price table has no newer label for it. */
-export function modelLabel(agent: Agent, models: Model[]): string {
-	const id = (agent.model as { id?: string } | undefined)?.id;
-	if (!id) return t("agentModelRole");
-	return models.find((m) => m.id === id)?.label ?? id;
+	return {
+		team: data?.team,
+		effective: data?.agents ?? [],
+		models: models?.models ?? [],
+	};
 }
 
 /** Pause, resume or retire an agent through `agent_update`; answers the refusal, if any, in words. */
@@ -63,7 +85,7 @@ export function useStatus() {
 
 /** The Team page: each agent on a card, with its model and a Pause or Resume. */
 export function Team() {
-	const { team, models } = useTeam();
+	const { team, effective } = useTeam();
 	const status = useStatus();
 	if (!team) return null;
 	const agents = team.agents.filter((a) => a.status !== "retired");
@@ -99,7 +121,10 @@ export function Team() {
 							</p>
 							<dl className={styles.facts}>
 								<dt>{t("agentModel")}</dt>
-								<dd>{modelLabel(agent, models)}</dd>
+								<dd>
+									{effective.find((e) => e.id === agent.id)?.model.label ??
+										t("agentModelRole")}
+								</dd>
 							</dl>
 							<div className={styles.actions}>
 								<Link to={`/team/${agent.id}`}>

@@ -13,19 +13,17 @@ import {
 	someone,
 	type Team as TeamFile,
 } from "./setup/TeamSetup.tsx";
-import { type Model, useStatus, useTeam } from "./Team.tsx";
+import {
+	type Effective,
+	type Model,
+	type Tier,
+	useStatus,
+	useTeam,
+} from "./Team.tsx";
 
 type Effort = "low" | "medium" | "high";
-type Tier =
-	| "read"
-	| "write_workspace"
-	| "execute"
-	| "git_local"
-	| "network"
-	| "git_remote"
-	| "external_effect";
 type Edited = Omit<Agent, "model"> & {
-	model?: { id: string; effort?: Effort } | undefined;
+	model?: { id?: string; effort?: Effort } | undefined;
 	grants?: Tier[] | undefined;
 	revokes?: Tier[] | undefined;
 };
@@ -45,28 +43,6 @@ const TIERS = [
 	["external_effect", "tierExternal", "tierExternalNote"],
 ] as const;
 
-// ponytail: mirrors farik_core::governor::permissions::default_tiers; a tiers query replaces it.
-const ROLE_TIERS: Record<Agent["role"], Tier[]> = {
-	software_developer: ["read", "write_workspace", "execute", "git_local"],
-	architect: ["read", "write_workspace", "execute", "network", "git_local"],
-	product_manager: ["read", "network"],
-	marketing_specialist: ["read", "network", "write_workspace", "git_local"],
-	scrum_master: ["read"],
-};
-
-/** The tiers the role and the team's two permission answers give, before the agent's own changes. */
-function baseTiers(agent: Edited, team: TeamFile): Tier[] {
-	const { runCommands = true, push = false } = team.policy.permissions ?? {};
-	const coder = agent.role === "software_developer";
-	const tiers = ROLE_TIERS[agent.role].filter(
-		(tier) =>
-			runCommands ||
-			tier !== "execute" ||
-			!(coder || agent.role === "architect"),
-	);
-	return push && coder ? [...tiers, "git_remote"] : tiers;
-}
-
 /** The agent with `tier` on or off: a grant or revoke only where it differs from the base. */
 function withTier(agent: Edited, base: Tier[], tier: Tier, on: boolean) {
 	const grants = (agent.grants ?? []).filter((g) => g !== tier);
@@ -83,10 +59,11 @@ function withTier(agent: Edited, base: Tier[], tier: Tier, on: boolean) {
 /** One agent's page, once the team has loaded. */
 export function AgentEdit() {
 	const { id } = useParams();
-	const { team, models } = useTeam();
+	const { team, effective, models } = useTeam();
 	if (!team) return null;
 	const saved = team.agents.find((a) => a.id === id);
-	if (!saved)
+	const known = effective.find((e) => e.id === id);
+	if (!saved || !known)
 		return (
 			<div className={styles.page}>
 				<p>{t("agentMissing").replace("{id}", id ?? "")}</p>
@@ -98,6 +75,7 @@ export function AgentEdit() {
 			key={saved.id}
 			team={team}
 			saved={saved as Edited}
+			known={known}
 			models={models}
 		/>
 	);
@@ -107,10 +85,13 @@ export function AgentEdit() {
 function Editor({
 	team,
 	saved,
+	known,
 	models,
 }: {
 	team: TeamFile;
 	saved: Edited;
+	/** The daemon's answer for the saved agent: its model in words, and its tiers before its own changes. */
+	known: Effective;
 	models: Model[];
 }) {
 	const { client } = useConnection();
@@ -133,15 +114,22 @@ function Editor({
 	const changed = JSON.stringify(agent) !== JSON.stringify(saved);
 	const errors = changed ? (checked?.errors ?? []) : [];
 	const effects = changed ? (checked?.effects ?? []) : [];
-	const base = baseTiers(agent, team);
+	const base = known.baseTiers;
 	const tiers = new Set<Tier>([...base, ...(agent.grants ?? [])]);
 	for (const r of agent.revokes ?? []) tiers.delete(r);
-	const effort = agent.model?.effort ?? "medium";
+	const effort = agent.model?.effort ?? known.model.effort;
 	const modelId = agent.model?.id ?? "";
+	// The agent's own model in words when the list has no newer label for it, never its id.
 	const options =
 		models.some((m) => m.id === modelId) || !modelId
 			? models
-			: [{ id: modelId, label: modelId }, ...models];
+			: [
+					{
+						id: modelId,
+						label: modelId === known.model.id ? known.model.label : modelId,
+					},
+					...models,
+				];
 
 	const save = async (team: TeamFile) => {
 		if (!client) return;
@@ -156,17 +144,20 @@ function Editor({
 		}
 	};
 	const replace = async () => {
-		if (!(await status.set(saved, "retired"))) return;
-		const newcomer = someone(team.agents, saved);
-		await save({
-			...team,
-			agents: [
-				...team.agents.map((a) =>
-					a.id === saved.id ? { ...a, status: "retired" } : a,
-				),
-				{ ...newcomer, status: "active" },
-			],
-		});
+		if (!client) return;
+		setBusy(true);
+		setRefused(undefined);
+		try {
+			// One call: the team is never without the role, even for a moment.
+			await client.call("agent.replace", {
+				agentId: saved.id,
+				newcomer: { ...someone(team.agents, saved), status: "active" },
+			});
+			navigate("/team");
+		} catch (e) {
+			setRefused(saidAll(e));
+			setBusy(false);
+		}
 	};
 	const retire = async () => {
 		if (await status.set(saved, "retired")) navigate("/team");
@@ -195,9 +186,10 @@ function Editor({
 				legend={say("agentEffort")}
 				value={effort}
 				onChange={(e) =>
+					// How carefully an agent works never changes what it runs on.
 					setDraft({
 						...agent,
-						model: { id: modelId || (models[0]?.id ?? ""), effort: e },
+						model: { ...(modelId && { id: modelId }), effort: e },
 					})
 				}
 				options={[
@@ -225,10 +217,18 @@ function Editor({
 					className={styles.select}
 					value={modelId}
 					onChange={(e) =>
-						setDraft({ ...agent, model: { id: e.target.value, effort } })
+						setDraft({
+							...agent,
+							model: {
+								...(e.target.value && { id: e.target.value }),
+								...(agent.model?.effort && { effort: agent.model.effort }),
+							},
+						})
 					}
 				>
-					{!modelId && <option value="">{t("agentModelRole")}</option>}
+					{!modelId && (
+						<option value="">{`${t("agentModelRole")}: ${known.model.label}`}</option>
+					)}
 					{options.map((m) => (
 						<option key={m.id} value={m.id}>
 							{advanced ? `${m.label} (${m.id})` : m.label}
