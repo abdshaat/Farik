@@ -494,7 +494,7 @@ fn judged(deps: &ToolDeps, params: &Value) -> Result<(TaskId, Vec<String>, Value
     if back && row.status != TaskStatus::Escalated {
         return Err(Failure::new(
             REFUSED,
-            "the team is working to this plan; stop the task before you change it",
+            "the team is working to this plan; hold the work first, then change it",
         ));
     }
     Ok((task_id, changed, after, back))
@@ -900,7 +900,7 @@ pub(super) mod tests {
         );
         assert_eq!(harness.project.file("FRK-1"), before);
 
-        // A plan the team works to changes only once the task is stopped, in plain words.
+        // A plan the team works to changes only once the work is held (escalated), in plain words.
         harness.ready("FRK-2");
         let before = harness.project.file("FRK-2");
         let mut edited = before.clone();
@@ -913,9 +913,28 @@ pub(super) mod tests {
         assert_eq!(refused["error"]["code"], -32005, "{refused}");
         assert_eq!(
             refused["error"]["message"],
-            "the team is working to this plan; stop the task before you change it"
+            "the team is working to this plan; hold the work first, then change it"
         );
         assert_eq!(harness.project.file("FRK-2"), before);
+
+        // Holding the work is the human's move into `escalated` (5.2); the same edit then saves.
+        let held = rpc(
+            &harness.daemon,
+            "command",
+            &json!({ "command": { "command": "task_transition", "body": {
+                "task_id": "FRK-2", "to": "escalated", "reason": "Held by you to change the plan"
+            } } }),
+        );
+        assert!(held["result"].get("said").is_some(), "{held}");
+        let mut edited = harness.project.file("FRK-2");
+        edited["intent"] = json!("A person signs in with an email and a password, and signs out.");
+        let saved = call(
+            &harness.daemon,
+            "contract.save",
+            &json!({ "task_id": "FRK-2", "contract": edited }),
+            "contractSaveResult",
+        );
+        assert_eq!(saved, json!({ "saved": true, "back_to_refining": true }));
 
         // A plan awaiting approval that the edit would break stays where it is.
         harness.file("FRK-3", "refining", |_| {});
