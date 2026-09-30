@@ -9,7 +9,7 @@ import { t } from "../strings/t.ts";
 import own from "./PlanPage.module.css";
 import styles from "./pages.module.css";
 import { active, sentence } from "./RequestFiled.tsx";
-import type { Team } from "./setup/TeamSetup.tsx";
+import type { Agent, Team } from "./setup/TeamSetup.tsx";
 
 type Verification = {
 	method: string;
@@ -34,6 +34,7 @@ export type Contract = {
 	requirements: { id: string; text: string }[];
 	exitCriteria: Criterion[];
 	assigneeRole: string;
+	reviewerRole?: Agent["role"];
 	risk: "low" | "medium" | "high";
 	budget: { maxCostUsd: number };
 	allowedPaths: string[];
@@ -46,6 +47,17 @@ type Check = { criterionId: string; text: string; passed: boolean };
 
 export const riskWord = (risk: Contract["risk"]) =>
 	t(risk === "low" ? "riskLow" : risk === "high" ? "riskHigh" : "riskMedium");
+
+/** "Thursday 24 September", in UTC, or "Not yet" without a time. */
+export const day = (iso?: string) =>
+	iso
+		? new Date(iso).toLocaleDateString("en-GB", {
+				weekday: "long",
+				day: "numeric",
+				month: "long",
+				timeZone: "UTC",
+			})
+		: t("notYet");
 
 /** A JSON value as YAML, for reading only: strings are quoted where YAML would misread them. */
 export function yaml(value: unknown, pad = ""): string {
@@ -210,16 +222,7 @@ export function PlanPage() {
 				<h2 id="about">{t("planAbout")}</h2>
 				<dl className={own.facts}>
 					<dt>{t("youAsked")}</dt>
-					<dd>
-						{contract.createdAt
-							? new Date(contract.createdAt).toLocaleDateString("en-GB", {
-									weekday: "long",
-									day: "numeric",
-									month: "long",
-									timeZone: "UTC",
-								})
-							: t("notYet")}
-					</dd>
+					<dd>{day(contract.createdAt)}</dd>
 					<dt>{t("approveQuestions")}</dt>
 					<dd>
 						{t("planAnswered").replace(

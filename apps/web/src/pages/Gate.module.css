@@ -1,0 +1,31 @@
+/* "See the code changes": a link-like toggle, as in the Gate mockup. */
+.toggle {
+	justify-self: start;
+	padding: 0;
+	font: inherit;
+	text-align: left;
+	color: var(--farik-color-link);
+	background: none;
+	border: 0;
+	text-decoration: underline;
+	cursor: pointer;
+}
+
+.toggle:focus-visible {
+	outline: 2px solid var(--farik-color-focus);
+	outline-offset: 2px;
+}
+
+.criteria {
+	display: grid;
+	gap: var(--farik-space-2);
+	margin: 0;
+	padding: 0;
+	border: 0;
+}
+
+.criteria label {
+	display: flex;
+	gap: var(--farik-space-2);
+	align-items: baseline;
+}

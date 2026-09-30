@@ -189,7 +189,7 @@ Produces: the routes above; `statusWord(status: TaskStatus, reason?: EscalationR
 - `offers_the_choices_for_the_reason`: renders `escalation.choices` and sends the chosen body, with the note or the label as `message`; the About panel shows the spend and the tries.
 - `adds_accepted_work_to_the_project`: the integration kind's "Add to project" sends `task_integrate`.
 
-- [ ] `feat(web): add the acceptance gate, sending back, and the help page`
+- [x] `feat(web): add the acceptance gate, sending back, and the help page`
 
 ### Task 5: The journeys
 

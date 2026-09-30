@@ -2,6 +2,8 @@ import { Navigate, Route, Routes } from "react-router";
 import { AgentEdit } from "../pages/AgentEdit.tsx";
 import { Connect } from "../pages/Connect.tsx";
 import { Events } from "../pages/Events.tsx";
+import { Gate } from "../pages/Gate.tsx";
+import { HelpNeeded } from "../pages/HelpNeeded.tsx";
 import { NotFound } from "../pages/NotFound.tsx";
 import { PlanEditor } from "../pages/PlanEditor.tsx";
 import { PlanPage } from "../pages/PlanPage.tsx";
@@ -57,6 +59,8 @@ export function App() {
 				<Route path="/tasks/:id/questions" element={<Questions />} />
 				<Route path="/tasks/:id/plan" element={<PlanPage />} />
 				<Route path="/tasks/:id/plan/edit" element={<PlanEditor />} />
+				<Route path="/tasks/:id/accept" element={<Gate />} />
+				<Route path="/tasks/:id/help" element={<HelpNeeded />} />
 				<Route path="/team" element={<Team />} />
 				<Route path="/team/:id" element={<AgentEdit />} />
 				<Route
