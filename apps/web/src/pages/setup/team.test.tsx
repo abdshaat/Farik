@@ -221,12 +221,18 @@ describe("team setup", () => {
 		act(() =>
 			s.reply(validate, {
 				errors: [
-					{ path: "/agents/1/display_name", message: "pick another name" },
+					{
+						path: "/agents/1/display_name",
+						message: '"" is shorter than 1 character',
+						code: "name",
+					},
 				],
 				effects: [],
 			}),
 		);
-		const why = await screen.findByText("pick another name");
+		// In plain words at its row, never the schema's own.
+		const why = await screen.findByText(en.refuseName);
+		expect(screen.queryByText(/shorter than/)).toBeNull();
 		const ada = screen
 			.getByRole("textbox", { name: "Name for the Architect" })
 			.closest("li");
@@ -410,8 +416,7 @@ describe("team setup", () => {
 			).team;
 			expect(team.policy.judgment.judge).toBe("architect");
 		});
-		const refusal =
-			"no active architect can check plans; choose auto or add one";
+		const refusal = "No active Architect can check plans.";
 		act(() =>
 			s.reply(
 				s
@@ -419,12 +424,26 @@ describe("team setup", () => {
 					.filter((f) => f.params.name === "team.validate")
 					.at(-1) as never,
 				{
-					errors: [{ path: "/policy/judgment/judge", message: refusal }],
+					errors: [
+						{
+							path: "/policy/judgment/judge",
+							message: refusal,
+							code: "judge_not_held",
+						},
+					],
 					effects: [],
 				},
 			),
 		);
-		expect((await screen.findByRole("alert")).textContent).toContain(refusal);
+		// Said at the choice it concerns, in the page's own words.
+		const who = screen.getByRole("group", { name: en.planJudge });
+		expect(
+			await within(who).findByText(
+				en.refuseJudge.replaceAll("{role}", en.roleArchitect),
+			),
+		).toBeTruthy();
+		expect(who.getAttribute("aria-describedby")).toBeTruthy();
+		expect(screen.queryByText(refusal)).toBeNull();
 		expect(
 			(screen.getByRole("button", { name: en.startTeam }) as HTMLButtonElement)
 				.disabled,
@@ -432,7 +451,13 @@ describe("team setup", () => {
 
 		fireEvent.click(screen.getByRole("radio", { name: /^Farik chooses/ }));
 		await answerQuery(s, "team.validate", { errors: [], effects: [] });
-		await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
+		await waitFor(() =>
+			expect(
+				screen.queryByText(
+					en.refuseJudge.replaceAll("{role}", en.roleArchitect),
+				),
+			).toBeNull(),
+		);
 		fireEvent.click(screen.getByRole("button", { name: en.startTeam }));
 		const start = (await sent(s, "team.start")).params as {
 			team: { policy: { judgment: unknown } };
@@ -456,8 +481,9 @@ describe("team setup", () => {
 		expect(refused.params).toEqual(wire);
 		act(() => s.fail(refused, -32005, "the team could not start"));
 		expect((await screen.findByRole("alert")).textContent).toContain(
-			"the team could not start",
+			en.refuseOther,
 		);
+		expect(screen.queryByText(/could not start/)).toBeNull();
 
 		fireEvent.click(screen.getByRole("button", { name: en.startTeam }));
 		await waitFor(() => expect(s.calls("team.start")).toHaveLength(2));

@@ -596,4 +596,27 @@ export const en = {
 	helpSpent: "Spent",
 	helpSpentOf: "{spent} of {max}",
 	helpReviewer: "Reviewer",
+	refuseTooMany:
+		"A team has seven people at most. Retire someone before adding another.",
+	refuseNeedsProductManager:
+		"Your team needs a Product Manager to write its plans. Include one.",
+	refuseNeedsDeveloper:
+		"Your team needs a Developer to do the work. Include one.",
+	refuseRepeatedId: "Two people on the team have the same name. Rename one.",
+	refuseWorked:
+		"Someone you took off the team has already done work. Retire them from their card instead.",
+	refuseName: "Give everyone a name.",
+	refuseKeepsRead:
+		"Every agent reads the project. Pause the agent instead of taking reading away.",
+	refuseStatusFromCard: "Pause, retire or resume someone from their card.",
+	refuseJudge:
+		"Nobody on the team is an active {role}. Let Farik choose who checks, or add a {role}.",
+	refuseNoQuestions:
+		"Checking plans needs at least one question. Tick one, or stop checking plans.",
+	refuseQuestionLength: "A question is 10 to 200 characters long.",
+	refuseLastOfRole: "{name} is your only {role}, so add another {role} first.",
+	refuseLastJudge:
+		"{name} checks your plans. Let Farik choose who checks, or add another {role}, first.",
+	refuseOther:
+		"Farik could not make this change. Check what you changed, then try again.",
 };

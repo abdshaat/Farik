@@ -2,6 +2,7 @@ import { Button, TextArea } from "@farik/ui";
 import { useState } from "react";
 import { useNavigate } from "react-router";
 import { useConnection } from "../../app/connection.tsx";
+import { saidAll } from "../../app/refusals.ts";
 import { type ServeStatus, useQuery } from "../../app/store.ts";
 import { t } from "../../strings/t.ts";
 import styles from "./setup.module.css";
@@ -50,7 +51,7 @@ export function SetupScan() {
 			setWrong(false);
 			setNote("");
 		} catch (e) {
-			setRefused((e as Error).message);
+			setRefused(saidAll(e));
 		}
 		setSaving(false);
 	};

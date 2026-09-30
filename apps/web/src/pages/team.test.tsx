@@ -75,6 +75,9 @@ async function validated(s: FakeSocket, effects: string[]) {
 	return (frame.params.params as { team: typeof TEAM }).team;
 }
 
+/** The latest command the page sent, already sent. */
+const sent_ = (s: FakeSocket) => s.calls("command").at(-1) as never;
+
 const saved = async (s: FakeSocket) =>
 	((await sent(s, "team.save")).params as { team: typeof TEAM }).team;
 const one = (team: typeof TEAM, id: string) =>
@@ -106,6 +109,23 @@ describe("team page", () => {
 				body: { agent_id: "theo", status: "paused" },
 			},
 		});
+	});
+
+	it("says_a_refused_pause_in_plain_words", async () => {
+		const { s } = await opened("/team");
+		fireEvent.click(await screen.findByRole("button", { name: "Pause Theo" }));
+		act(() =>
+			s.reply(sent_(s), {
+				error: {
+					kind: "refused",
+					detail:
+						"last_of_role: Theo is your only Software Developer; add another before Theo stops.",
+				},
+			}),
+		);
+		expect((await screen.findByRole("alert")).textContent).toBe(
+			"Theo is your only Developer, so add another Developer first.",
+		);
 	});
 
 	it("edits_an_agent_and_shows_the_effect_first", async () => {

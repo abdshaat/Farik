@@ -2,10 +2,15 @@ import { AVATAR_URLS, type AvatarKey, Button, RoleTag } from "@farik/ui";
 import { useState } from "react";
 import { Link } from "react-router";
 import { useConnection } from "../app/connection.tsx";
+import { commandSaid } from "../app/refusals.ts";
 import { useQuery } from "../app/store.ts";
 import { t } from "../strings/t.ts";
 import styles from "./pages.module.css";
-import type { Agent, Team as TeamFile } from "./setup/TeamSetup.tsx";
+import {
+	type Agent,
+	roleName,
+	type Team as TeamFile,
+} from "./setup/TeamSetup.tsx";
 
 export type Model = { id: string; label: string };
 
@@ -28,7 +33,7 @@ export function useStatus() {
 	const { client } = useConnection();
 	const [refusal, setRefusal] = useState<string>();
 	const set = async (
-		agentId: string,
+		agent: Agent,
 		status: "active" | "paused" | "retired",
 	): Promise<boolean> => {
 		if (!client) return false;
@@ -36,10 +41,15 @@ export function useStatus() {
 		try {
 			const reply = await client.command({
 				command: "agent_update",
-				body: { agentId, status },
+				body: { agentId: agent.id, status },
 			});
 			if ("error" in reply) {
-				setRefusal(reply.error.detail);
+				setRefusal(
+					commandSaid(reply.error.detail, {
+						name: agent.displayName,
+						role: roleName(agent.role),
+					}),
+				);
 				return false;
 			}
 			return true;
@@ -97,7 +107,7 @@ export function Team() {
 								</Link>
 								<Button
 									onClick={() =>
-										status.set(agent.id, paused ? "active" : "paused")
+										status.set(agent, paused ? "active" : "paused")
 									}
 								>
 									{t(paused ? "agentResume" : "agentPause").replace(

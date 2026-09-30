@@ -2,6 +2,7 @@ import { Button, Choice, Switch, TextField } from "@farik/ui";
 import { useState } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 import { useConnection } from "../app/connection.tsx";
+import { type Refusal, said, saidAll } from "../app/refusals.ts";
 import { useQuery } from "../app/store.ts";
 import { t } from "../strings/t.ts";
 import styles from "./pages.module.css";
@@ -29,7 +30,7 @@ type Edited = Omit<Agent, "model"> & {
 	revokes?: Tier[] | undefined;
 };
 type Checked = {
-	errors: { path: string; message: string }[];
+	errors: Refusal[];
 	effects: string[];
 };
 
@@ -150,12 +151,12 @@ function Editor({
 			await client.call("team.save", { team });
 			navigate("/team");
 		} catch (e) {
-			setRefused((e as Error).message);
+			setRefused(saidAll(e));
 			setBusy(false);
 		}
 	};
 	const replace = async () => {
-		if (!(await status.set(saved.id, "retired"))) return;
+		if (!(await status.set(saved, "retired"))) return;
 		const newcomer = someone(team.agents, saved);
 		await save({
 			...team,
@@ -168,7 +169,7 @@ function Editor({
 		});
 	};
 	const retire = async () => {
-		if (await status.set(saved.id, "retired")) navigate("/team");
+		if (await status.set(saved, "retired")) navigate("/team");
 	};
 	const paused = saved.status === "paused";
 
@@ -292,7 +293,7 @@ function Editor({
 			)}
 			{(errors.length > 0 || refused || status.refusal) && (
 				<p role="alert" className={styles.alert}>
-					{[...errors.map((e) => e.message), refused, status.refusal]
+					{[...errors.map((e) => said(e.code)), refused, status.refusal]
 						.filter(Boolean)
 						.join(" ")}
 				</p>
@@ -315,7 +316,7 @@ function Editor({
 				<h2 id="place-heading">{say("agentPlace")}</h2>
 				<div className={styles.place}>
 					<Button
-						onClick={() => status.set(saved.id, paused ? "active" : "paused")}
+						onClick={() => status.set(saved, paused ? "active" : "paused")}
 					>
 						{say(paused ? "agentResume" : "agentPause")}
 					</Button>

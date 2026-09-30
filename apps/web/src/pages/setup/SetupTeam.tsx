@@ -2,12 +2,13 @@ import { AVATAR_URLS, type AvatarKey, Button } from "@farik/ui";
 import { useState } from "react";
 import { useNavigate } from "react-router";
 import { useConnection } from "../../app/connection.tsx";
+import { type Refusal, refusalsOf, said } from "../../app/refusals.ts";
 import { t } from "../../strings/t.ts";
 import styles from "./setup.module.css";
 import { roleName, someone, teamOf, useSetup } from "./TeamSetup.tsx";
 import { Wizard } from "./Wizard.tsx";
 
-type Checked = { errors: { path: string; message: string }[] };
+type Checked = { errors: Refusal[] };
 
 /** Setup's fifth step: the five suggested agents, named, and any second Developer. */
 export function SetupTeam() {
@@ -71,7 +72,7 @@ export function SetupTeam() {
 			setErrors(checked.errors);
 			if (checked.errors.length === 0) navigate("/setup/permissions");
 		} catch (e) {
-			setErrors([{ path: "", message: (e as Error).message }]);
+			setErrors(refusalsOf(e));
 		}
 		setBusy(false);
 	};
@@ -110,7 +111,7 @@ export function SetupTeam() {
 							<span className={styles.persona}>{agent.persona}</span>
 							{why.length > 0 && (
 								<span id={whyId} className={styles.error}>
-									{why.map((e) => e.message).join(" ")}
+									{why.map((e) => said(e.code)).join(" ")}
 								</span>
 							)}
 						</li>
@@ -124,7 +125,7 @@ export function SetupTeam() {
 			</span>
 			{loose.length > 0 && (
 				<p role="alert" className={styles.alert}>
-					{loose.map((e) => e.message).join(" ")}
+					{loose.map((e) => said(e.code)).join(" ")}
 				</p>
 			)}
 			<div className={styles.foot}>

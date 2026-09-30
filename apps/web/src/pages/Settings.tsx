@@ -2,6 +2,7 @@ import { Button, Choice, Switch } from "@farik/ui";
 import { useState } from "react";
 import { Link } from "react-router";
 import { useConnection } from "../app/connection.tsx";
+import { saidAll } from "../app/refusals.ts";
 import { type ServeStatus, useQuery } from "../app/store.ts";
 import type { ThemeChoice } from "../app/theme.ts";
 import { t } from "../strings/t.ts";
@@ -151,7 +152,7 @@ function Account() {
 					: t("accountGone"),
 			);
 		} catch (e) {
-			setSaid((e as Error).message);
+			setSaid(saidAll(e));
 		}
 		setBusy(false);
 	};

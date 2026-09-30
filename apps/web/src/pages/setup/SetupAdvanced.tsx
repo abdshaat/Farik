@@ -3,6 +3,7 @@ import { Button, Choice, Switch, TextArea, TextField } from "@farik/ui";
 import { useState } from "react";
 import { useNavigate } from "react-router";
 import { useConnection } from "../../app/connection.tsx";
+import { type Refusal, said, saidAll } from "../../app/refusals.ts";
 import { useQuery } from "../../app/store.ts";
 import { t } from "../../strings/t.ts";
 import { slug } from "./SetupProject.tsx";
@@ -61,11 +62,19 @@ export function SetupAdvanced() {
 	const { start, busy, refused } = useStart();
 	const team = teamOf(draft);
 	// Every change is checked as it is made (spec 10); the daemon's refusal shows here.
-	const { data: checked } = useQuery<{ errors: { message: string }[] }>(
-		"team.validate",
-		{ team },
-	);
+	const { data: checked } = useQuery<{ errors: Refusal[] }>("team.validate", {
+		team,
+	});
 	const errors = checked?.errors ?? [];
+	// Each refusal is said at the group it concerns (SPEC 4.1); the rest at the foot.
+	const under = (prefix: string) =>
+		errors.filter((e) => e.path.startsWith(prefix));
+	const elsewhere = errors.filter(
+		(e) =>
+			!["/rules", "/policy/judgment/judge", "/policy/judgment/questions"].some(
+				(p) => e.path.startsWith(p),
+			),
+	);
 	const rules = draft.team.rules;
 	const judgment: Required<Judgment> = {
 		required: "always",
@@ -142,7 +151,7 @@ export function SetupAdvanced() {
 			change({ ...draft, criteria });
 			setCheck("");
 		} catch (e) {
-			setCheckRefused((e as Error).message);
+			setCheckRefused(saidAll(e));
 		}
 		setAdding(false);
 	};
@@ -177,6 +186,13 @@ export function SetupAdvanced() {
 					</Button>
 				</span>
 				<p>{t("rulesLead")}</p>
+				{under("/rules").length > 0 && (
+					<p className={styles.alert}>
+						{under("/rules")
+							.map((e) => said(e.code))
+							.join(" ")}
+					</p>
+				)}
 				{asText !== undefined ? (
 					<>
 						<TextArea
@@ -278,7 +294,14 @@ export function SetupAdvanced() {
 					checked={judgment.required === "always"}
 					onChange={(on) => setJudgment({ required: on ? "always" : "never" })}
 				/>
-				<fieldset className={styles.questions}>
+				<fieldset
+					className={styles.questions}
+					aria-describedby={
+						under("/policy/judgment/questions").length
+							? "questions-error"
+							: undefined
+					}
+				>
 					<legend>{t("planQuestions")}</legend>
 					{QUESTIONS.map((q) => (
 						<label key={q.text} className={styles.question}>
@@ -293,12 +316,27 @@ export function SetupAdvanced() {
 							</span>
 						</label>
 					))}
+					{under("/policy/judgment/questions").length > 0 && (
+						<p id="questions-error" className={styles.error}>
+							{under("/policy/judgment/questions")
+								.map((e) => said(e.code))
+								.join(" ")}
+						</p>
+					)}
 				</fieldset>
 				<Choice<Judge>
 					name="judge"
 					legend={t("planJudge")}
 					value={judgment.judge}
 					onChange={(judge) => setJudgment({ judge })}
+					{...(under("/policy/judgment/judge").length > 0 && {
+						error: said("judge_not_held", {
+							role:
+								judgment.judge === "auto"
+									? roleName("architect")
+									: roleName(judgment.judge),
+						}),
+					})}
 					options={[
 						{ value: "auto", label: t("planJudgeAuto").replace("{who}", auto) },
 						{ value: "architect", label: named("architect") },
@@ -307,9 +345,11 @@ export function SetupAdvanced() {
 				/>
 			</section>
 
-			{(errors.length > 0 || refused) && (
+			{(elsewhere.length > 0 || refused) && (
 				<p role="alert" className={styles.alert}>
-					{[...errors.map((e) => e.message), refused].filter(Boolean).join(" ")}
+					{[...elsewhere.map((e) => said(e.code)), refused]
+						.filter(Boolean)
+						.join(" ")}
 				</p>
 			)}
 			<div className={styles.foot}>

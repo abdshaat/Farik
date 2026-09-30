@@ -2,6 +2,7 @@ import type { Role } from "@farik/ui";
 import { useState } from "react";
 import { Outlet, useNavigate, useOutletContext } from "react-router";
 import { useConnection } from "../../app/connection.tsx";
+import { saidAll } from "../../app/refusals.ts";
 import { useQuery } from "../../app/store.ts";
 import { t } from "../../strings/t.ts";
 import { slug } from "./SetupProject.tsx";
@@ -127,7 +128,7 @@ export function useStart() {
 			});
 			navigate("/", { replace: true });
 		} catch (e) {
-			setRefused((e as Error).message);
+			setRefused(saidAll(e));
 			setBusy(false);
 		}
 	};
