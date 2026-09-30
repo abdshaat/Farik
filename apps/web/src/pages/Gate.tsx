@@ -142,6 +142,14 @@ export function Gate() {
 	const latestReview = designReviews.at(-1);
 	const screens =
 		detail?.designReview?.state === "passed" ? latestReview : undefined;
+	// The code was reviewed by the latest review that passed it.
+	const codeReview = events.findLast(
+		(e) =>
+			e.kind === "review.recorded" &&
+			(e.body as { passed?: boolean }).passed === true,
+	);
+	const codeReviewer = (codeReview?.body as { reviewer?: string } | undefined)
+		?.reviewer;
 	// Farik's checks, then each Designer's and reviewer's look in time order, then the person.
 	const looks = [
 		...designReviews.map((r) => ({
@@ -205,7 +213,17 @@ export function Gate() {
 						{kind === "review" && review}
 						<section className={own.letter} aria-labelledby={`${kind}-signed`}>
 							<p id={`${kind}-signed`} className={styles.muted}>
-								{signed(key, by)}
+								{kind === "review" && detail?.designReview?.state === "passed"
+									? t("gateReviewedAfter", {
+											name: by.displayName,
+											role: roleWord(by.role),
+											designer: nameIn(
+												agents,
+												latestReview?.agentId ?? null,
+												designerName,
+											),
+										})
+									: signed(key, by)}
 							</p>
 							<p>{note.body.text?.split(/\n\s*\n/)[0]}</p>
 						</section>
@@ -253,6 +271,15 @@ export function Gate() {
 									? t("gateScreensCheckedBy", {
 											day: day(screens.recordedAt),
 											name: nameIn(agents, screens.agentId, designerName),
+										})
+									: day()}
+							</dd>
+							<dt>{t("gateCodeReviewed")}</dt>
+							<dd>
+								{codeReview
+									? t("gateScreensCheckedBy", {
+											day: day(codeReview.recordedAt),
+											name: nameIn(agents, codeReviewer ?? null, ""),
 										})
 									: day()}
 							</dd>

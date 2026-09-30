@@ -121,6 +121,9 @@ export function DesignReview({
 					{backs.map((r) => (
 						<p key={r.recordedAt}>{r.reasons}</p>
 					))}
+					{review.state === "passed" && builder && (
+						<p>{t("designBackThen", { builder })}</p>
+					)}
 				</details>
 			)}
 		</>

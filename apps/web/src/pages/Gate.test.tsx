@@ -300,7 +300,7 @@ describe("acceptance gate", () => {
 			name: "Theo, your Developer, wrote this for you",
 		});
 		const ada = screen.getByRole("region", {
-			name: "Ada, your Architect, reviewed it",
+			name: "Ada, your Architect, reviewed the code after Iris passed the screens",
 		});
 		// The builder's letter, then the Designer's, then the Architect's review.
 		expect(
@@ -407,6 +407,28 @@ describe("acceptance gate", () => {
 			"Ada reviewed the code",
 			"Now you decide",
 		]);
+		await expectNoAxeViolations(container);
+	});
+
+	it("says_the_architect_reviewed_the_code_after_the_screens_passed", async () => {
+		const { container } = await reviewedTwice();
+		// The approved mockup: the reviewer's letter says it came after the Designer's pass.
+		const ada = await screen.findByRole("region", {
+			name: "Ada, your Architect, reviewed the code after Kai passed the screens",
+		});
+		expect(within(ada).getByText(REVIEW)).toBeTruthy();
+		const about = screen.getByRole("region", { name: "About this task" });
+		await within(about).findByText("Code reviewed");
+		expect(within(about).getByText("Friday 25 September, by Ada")).toBeTruthy();
+		// The send-back ends with what came of it.
+		const back = screen.getByText(
+			"Iris sent it back once, on Tuesday 22 September",
+		);
+		expect(
+			within(back.closest("details") as HTMLElement).getByText(
+				"Theo changed it, and the next look passed.",
+			),
+		).toBeTruthy();
 		await expectNoAxeViolations(container);
 	});
 });

@@ -588,6 +588,8 @@ export const en = {
 	gateLead: "{id}. The work waits for you to accept it.",
 	gateWrote: "{name}, your {role}, wrote this for you",
 	gateReviewed: "{name}, your {role}, reviewed it",
+	gateReviewedAfter:
+		"{name}, your {role}, reviewed the code after {designer} passed the screens",
 	gateCheckedHint:
 		"Farik ran these checks itself. It did not take the team’s word for them.",
 	gateSeeChanges: "See the code changes",
@@ -603,6 +605,7 @@ export const en = {
 	gateHistory: "See the whole history",
 	gateScreensChecked: "Screens checked",
 	gateScreensCheckedBy: "{day}, by {name}",
+	gateCodeReviewed: "Code reviewed",
 	gateWhoLooked: "Who looked at it, in order",
 	gateLookedFarik: "Farik ran its checks",
 	gateLookedScreens: "{name} checked the screens",
@@ -964,6 +967,7 @@ export const en = {
 	designFailed: "Sent back to {builder}",
 	designBackOnce: "{name} sent it back once, on {day}",
 	designBackMany: "{name} sent it back {n} times, last on {day}",
+	designBackThen: "{builder} changed it, and the next look passed.",
 	designChecksTitle: "The four checks",
 	designChecksLead:
 		"Farik took each picture and ran the accessibility check itself, against WCAG 2.2 AA, the usual standard for pages everyone can use.",
