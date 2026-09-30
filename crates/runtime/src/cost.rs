@@ -823,15 +823,18 @@ mod tests {
             )
             .expect("recorded");
         }
-        crate::sessions::record_session_ended(
-            &log,
-            "b",
-            crate::session::EndReason::CredentialRefused,
-            "Failed to authenticate. API Error: 401 OAuth access token is invalid.",
-            &ids(Some("FRK-1"), "b"),
-            &clock(),
-        )
-        .expect("recorded");
+        // Another task's refused session is not this task's to leave out.
+        for (task, session) in [("FRK-1", "b"), ("FRK-2", "c")] {
+            crate::sessions::record_session_ended(
+                &log,
+                session,
+                crate::session::EndReason::CredentialRefused,
+                "Failed to authenticate. API Error: 401 OAuth access token is invalid.",
+                &ids(Some(task), session),
+                &clock(),
+            )
+            .expect("recorded");
+        }
         let contract = a_contract("FRK-1", 5.0, 3);
         let read = state(
             &projections,
