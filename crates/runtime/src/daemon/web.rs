@@ -28,7 +28,7 @@ use tokio_util::sync::CancellationToken;
 
 use super::setup::list_folders;
 use super::{DaemonError, DaemonState, SetupError, SetupHost, hex, random_token, same_token};
-use super::{gates, team};
+use super::{board, gates, team};
 use crate::claude::CredentialKind;
 use crate::computer::{build_sandbox_image, check_computer};
 use crate::credential::CredentialStore;
@@ -685,6 +685,7 @@ fn query(state: &DaemonState, name: &str, params: &Value) -> Result<Value, Failu
         "team.propose" | "team.validate" | "models.list" | "project.scan" => {
             team::query(deps, name, params)
         }
+        name if board::QUERIES.contains(&name) => board::query(deps, name, params),
         _ => gates::query(deps, name, params),
     }
 }

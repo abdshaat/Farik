@@ -41,6 +41,7 @@ use crate::session::SessionPurpose;
 use crate::tools::{ToolContext, ToolDeps};
 
 mod app;
+mod board;
 #[cfg(test)]
 pub(crate) mod fixtures;
 mod gates;

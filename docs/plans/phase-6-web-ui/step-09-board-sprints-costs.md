@@ -135,7 +135,7 @@ RPC queries: `task.costs`, `sprints.list`, `sprint.get`, `costs.summary`, `metri
 - `says_which_session_an_agent_is_in`: `team.activity` answers `session_id` and `purpose` while a session runs, and neither when idle.
 - `answers_the_cost_summary_and_the_metrics`, with a daily limit set and without one.
 
-- [ ] `feat(runtime): answer the board's, the sprints' and the costs' queries`
+- [x] `feat(runtime): answer the board's, the sprints' and the costs' queries`
 
 ### Task 2: Lanes, the board, and the rail
 

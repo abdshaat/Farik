@@ -7,7 +7,9 @@ use std::str::FromStr as _;
 use chrono::{DateTime, Utc};
 use farik_core::contract::{TaskId, TaskStatus};
 use farik_core::team::{AgentStatus, Team};
-use farik_protocol::event::{EventBody, EventKind, FarikEvent, MessageKind};
+use farik_protocol::event::{
+    EventBody, EventKind, FarikEvent, MessageKind, SessionStartedBodyPurpose,
+};
 
 use crate::files::ProjectFiles;
 use crate::waiting::name_of;
@@ -41,6 +43,10 @@ pub struct AgentActivity {
     pub task_id: Option<TaskId>,
     /// When a resting agent picks up again.
     pub until: Option<DateTime<Utc>>,
+    /// The session a working agent is in.
+    pub session_id: Option<String>,
+    /// Why that session runs.
+    pub purpose: Option<SessionStartedBodyPurpose>,
 }
 
 /// Each active or paused agent's activity, in the team's order: paused, else working, else
@@ -91,13 +97,19 @@ pub fn activity(
             line,
             task_id,
             until,
+            session_id: None,
+            purpose: None,
         };
         if team_paused || agent.status == AgentStatus::Paused {
             all.push(one(ActivityState::Paused, "Paused".to_string(), None, None));
             continue;
         }
-        if let Some((line, task)) = at_work(&events, id, &titles) {
-            all.push(one(ActivityState::Working, line, task, None));
+        if let Some((line, task, session_id, purpose)) = at_work(&events, id, &titles) {
+            all.push(AgentActivity {
+                session_id: Some(session_id),
+                purpose: Some(purpose),
+                ..one(ActivityState::Working, line, task, None)
+            });
             continue;
         }
         let asleep = events
@@ -139,13 +151,14 @@ pub fn activity(
     Ok(all)
 }
 
-/// What `agent` is doing in its session that has started and not ended, and on which task.
+/// What `agent` is doing in its session that has started and not ended, on which task, in which
+/// session, and why.
 fn at_work(
     events: &[FarikEvent],
     agent: &str,
     titles: &BTreeMap<TaskId, String>,
-) -> Option<(String, Option<TaskId>)> {
-    let (event, body) = events
+) -> Option<(String, Option<TaskId>, String, SessionStartedBodyPurpose)> {
+    let (event, body, session) = events
         .iter()
         .rev()
         .filter(|event| event.envelope.ids.agent_id.as_deref() == Some(agent))
@@ -158,7 +171,7 @@ fn at_work(
                 later.body.kind() == EventKind::SessionEnded
                     && later.envelope.ids.session_id.as_ref() == Some(session)
             });
-            (!ended).then_some((event, body))
+            (!ended).then_some((event, body, session.clone()))
         })?;
     let task = event.envelope.ids.task_id.clone();
     let title = task
@@ -180,7 +193,7 @@ fn at_work(
         ),
         _ => "Answering in the channel".to_string(),
     };
-    Some((line, task))
+    Some((line, task, session, body.purpose))
 }
 
 /// One thing that moved.

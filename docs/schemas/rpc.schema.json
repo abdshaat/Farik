@@ -45,7 +45,12 @@
         "team.propose",
         "team.validate",
         "models.list",
-        "project.scan"
+        "project.scan",
+        "task.costs",
+        "sprints.list",
+        "sprint.get",
+        "costs.summary",
+        "metrics"
       ]
     },
     "subscribeRequest": {
@@ -239,6 +244,21 @@
             },
             {
               "$ref": "#/$defs/projectScanQuery"
+            },
+            {
+              "$ref": "#/$defs/taskCostsQuery"
+            },
+            {
+              "$ref": "#/$defs/sprintsListQuery"
+            },
+            {
+              "$ref": "#/$defs/sprintGetQuery"
+            },
+            {
+              "$ref": "#/$defs/costsSummaryQuery"
+            },
+            {
+              "$ref": "#/$defs/metricsQuery"
             }
           ]
         }
@@ -1552,6 +1572,122 @@
         }
       }
     },
+    "taskCostsQuery": {
+      "title": "Task Costs Query",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "params"
+      ],
+      "properties": {
+        "name": {
+          "const": "task.costs"
+        },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "task_id": {
+              "type": "string",
+              "pattern": "^FRK-[0-9]{1,6}$"
+            }
+          },
+          "required": [
+            "task_id"
+          ]
+        }
+      }
+    },
+    "sprintsListQuery": {
+      "title": "Sprints List Query",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "params"
+      ],
+      "properties": {
+        "name": {
+          "const": "sprints.list"
+        },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {}
+        }
+      }
+    },
+    "sprintGetQuery": {
+      "title": "Sprint Get Query",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "params"
+      ],
+      "properties": {
+        "name": {
+          "const": "sprint.get"
+        },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "sprint_id": {
+              "type": "string",
+              "pattern": "^S[1-9][0-9]{0,5}$"
+            }
+          },
+          "required": [
+            "sprint_id"
+          ]
+        }
+      }
+    },
+    "costsSummaryQuery": {
+      "title": "Costs Summary Query",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "params"
+      ],
+      "properties": {
+        "name": {
+          "const": "costs.summary"
+        },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {}
+        }
+      }
+    },
+    "metricsQuery": {
+      "title": "Metrics Query",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "params"
+      ],
+      "properties": {
+        "name": {
+          "const": "metrics"
+        },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "sprint_id": {
+              "type": "string",
+              "pattern": "^S[1-9][0-9]{0,5}$"
+            }
+          }
+        }
+      }
+    },
     "requestFileRequest": {
       "title": "Request File Request",
       "type": "object",
@@ -1978,6 +2114,21 @@
               "until": {
                 "type": "string",
                 "format": "date-time"
+              },
+              "session_id": {
+                "type": "string"
+              },
+              "purpose": {
+                "type": "string",
+                "enum": [
+                  "triage",
+                  "refine",
+                  "plan",
+                  "implement",
+                  "verify",
+                  "ceremony",
+                  "conversation"
+                ]
               }
             },
             "required": [
@@ -2071,6 +2222,537 @@
         "sprint_id",
         "done",
         "total"
+      ]
+    },
+    "taskCostsResult": {
+      "description": "What a task has spent, by the purposes' plain words (Planning: triage, refine, plan; Building: implement; Checking: verify; Meetings and talk: ceremony, conversation), each word that has spent anything, and its contract's limit.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "by_purpose": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "words": {
+                "type": "string",
+                "enum": [
+                  "Planning",
+                  "Building",
+                  "Checking",
+                  "Meetings and talk"
+                ]
+              },
+              "usd": {
+                "type": "number",
+                "minimum": 0
+              }
+            },
+            "required": [
+              "words",
+              "usd"
+            ]
+          }
+        },
+        "total_usd": {
+          "type": "number",
+          "minimum": 0
+        },
+        "limit_usd": {
+          "type": "number",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "by_purpose",
+        "total_usd",
+        "limit_usd"
+      ]
+    },
+    "sprintRow": {
+      "description": "A sprint: its file, who started it (sprint.started), the first assigner that planned it (null when only Farik did), what it spent, and how many of its tasks are done (accepted or cancelled).",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "sprint_id": {
+          "type": "string",
+          "pattern": "^S[1-9][0-9]{0,5}$"
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "open",
+            "ended"
+          ]
+        },
+        "started_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "started_by": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "string"
+            }
+          ]
+        },
+        "ended_at": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "string",
+              "format": "date-time"
+            }
+          ]
+        },
+        "budget_usd": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "number",
+              "minimum": 0
+            }
+          ]
+        },
+        "spent_usd": {
+          "type": "number",
+          "minimum": 0
+        },
+        "planned_by": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "string"
+            }
+          ]
+        },
+        "task_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "done_count": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "sprint_id",
+        "status",
+        "started_at",
+        "started_by",
+        "ended_at",
+        "budget_usd",
+        "spent_usd",
+        "planned_by",
+        "task_count",
+        "done_count"
+      ]
+    },
+    "sprintsListResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "sprints": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/sprintRow"
+          }
+        }
+      },
+      "required": [
+        "sprints"
+      ]
+    },
+    "sprintGetResult": {
+      "description": "sprintRow's fields, its tasks, and its meetings: the ceremony posts from its start until the next sprint starts, one meeting per ceremony session, oldest first.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "sprint_id": {
+          "type": "string",
+          "pattern": "^S[1-9][0-9]{0,5}$"
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "open",
+            "ended"
+          ]
+        },
+        "started_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "started_by": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "string"
+            }
+          ]
+        },
+        "ended_at": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "string",
+              "format": "date-time"
+            }
+          ]
+        },
+        "budget_usd": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "number",
+              "minimum": 0
+            }
+          ]
+        },
+        "spent_usd": {
+          "type": "number",
+          "minimum": 0
+        },
+        "planned_by": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "string"
+            }
+          ]
+        },
+        "task_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "done_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "tasks": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "task_id": {
+                "type": "string",
+                "pattern": "^FRK-[0-9]{1,6}$"
+              },
+              "title": {
+                "type": "string"
+              },
+              "status": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "task_id",
+              "title",
+              "status"
+            ]
+          }
+        },
+        "meetings": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "thread": {
+                "type": "string",
+                "enum": [
+                  "standup",
+                  "planning",
+                  "review",
+                  "retro"
+                ]
+              },
+              "first_seq": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "at": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "posts": {
+                "type": "integer",
+                "minimum": 1
+              }
+            },
+            "required": [
+              "thread",
+              "first_seq",
+              "at",
+              "posts"
+            ]
+          }
+        }
+      },
+      "required": [
+        "sprint_id",
+        "status",
+        "started_at",
+        "started_by",
+        "ended_at",
+        "budget_usd",
+        "spent_usd",
+        "planned_by",
+        "task_count",
+        "done_count",
+        "tasks",
+        "meetings"
+      ]
+    },
+    "costsSummaryResult": {
+      "description": "Today's spending (UTC) and the team's daily limit, the open sprint's, and each agent's that is not retired, in the team's order.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "today_usd": {
+          "type": "number",
+          "minimum": 0
+        },
+        "daily_limit_usd": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "number",
+              "minimum": 0
+            }
+          ]
+        },
+        "sprint": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "sprint_id": {
+                  "type": "string",
+                  "pattern": "^S[1-9][0-9]{0,5}$"
+                },
+                "spent_usd": {
+                  "type": "number",
+                  "minimum": 0
+                },
+                "budget_usd": {
+                  "oneOf": [
+                    {
+                      "type": "null"
+                    },
+                    {
+                      "type": "number",
+                      "minimum": 0
+                    }
+                  ]
+                }
+              },
+              "required": [
+                "sprint_id",
+                "spent_usd",
+                "budget_usd"
+              ]
+            }
+          ]
+        },
+        "agents": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "agent_id": {
+                "type": "string"
+              },
+              "today_usd": {
+                "type": "number",
+                "minimum": 0
+              },
+              "sprint_usd": {
+                "type": "number",
+                "minimum": 0
+              }
+            },
+            "required": [
+              "agent_id",
+              "today_usd",
+              "sprint_usd"
+            ]
+          }
+        }
+      },
+      "required": [
+        "today_usd",
+        "daily_limit_usd",
+        "sprint",
+        "agents"
+      ]
+    },
+    "metricsResult": {
+      "description": "The harness metrics of F17, over the project or one sprint; a rate is null while no task is accepted.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "accepted_tasks": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "first_pass_acceptance_rate": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "number",
+              "minimum": 0
+            }
+          ]
+        },
+        "interventions_per_accepted_task": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "number",
+              "minimum": 0
+            }
+          ]
+        },
+        "cost_per_accepted_task": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "total_usd": {
+                  "type": "number",
+                  "minimum": 0
+                },
+                "by_purpose": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "words": {
+                        "type": "string",
+                        "enum": [
+                          "Planning",
+                          "Building",
+                          "Checking",
+                          "Meetings and talk"
+                        ]
+                      },
+                      "usd": {
+                        "type": "number",
+                        "minimum": 0
+                      }
+                    },
+                    "required": [
+                      "words",
+                      "usd"
+                    ]
+                  }
+                }
+              },
+              "required": [
+                "total_usd",
+                "by_purpose"
+              ]
+            }
+          ]
+        },
+        "mechanically_verified_criteria_share": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "number",
+              "minimum": 0
+            }
+          ]
+        },
+        "active_weeks": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "messages": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "reaction": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "ambient": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "reply": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "ceremony": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "system": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "human": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          "required": [
+            "reaction",
+            "ambient",
+            "reply",
+            "ceremony",
+            "system",
+            "human"
+          ]
+        }
+      },
+      "required": [
+        "accepted_tasks",
+        "first_pass_acceptance_rate",
+        "interventions_per_accepted_task",
+        "cost_per_accepted_task",
+        "mechanically_verified_criteria_share",
+        "active_weeks",
+        "messages"
       ]
     },
     "teamProposeQuery": {

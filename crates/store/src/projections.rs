@@ -1,8 +1,10 @@
 //! The board, read from the log rather than scanned out of it (`docs/SPEC.md` sections 8.4 and 10).
 
+use std::collections::BTreeMap;
 use std::str::FromStr;
 use std::sync::Arc;
 
+use chrono::NaiveDate;
 use farik_core::contract::{Risk, TaskId, TaskKind, TaskStatus};
 use farik_protocol::event::{
     ContractSummary, ContractSummaryKind, ContractSummaryRisk, ContractSummaryStatus,
@@ -88,6 +90,17 @@ pub enum CostScope {
     /// By the sprint the cost's task was in when the cost was recorded. A cost with no task, or of
     /// a task in no sprint, is in no sprint's row.
     Sprint,
+}
+
+/// Which costs a sum reads: one UTC day's, one sprint's, or all of them.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CostWindow {
+    /// The costs recorded on this UTC day.
+    Day(NaiveDate),
+    /// The costs whose task was in this sprint when they were recorded.
+    Sprint(String),
+    /// Every cost.
+    All,
 }
 
 /// A sprint, as its `sprint.started` and `sprint.ended` left it.
@@ -256,6 +269,19 @@ impl Projections {
     ///
     /// `Sqlite` when the read fails; `InvalidEvent` when a sum cannot be read back as a count.
     pub fn costs(&self, scope: CostScope) -> Result<Vec<CostProjection>, StoreError> {
+        self.costs_for(scope, CostWindow::All)
+    }
+
+    /// `costs`, over only the costs `window` reads.
+    ///
+    /// # Errors
+    ///
+    /// As `costs`.
+    pub fn costs_for(
+        &self,
+        scope: CostScope,
+        window: CostWindow,
+    ) -> Result<Vec<CostProjection>, StoreError> {
         let (column, order) = match scope {
             CostScope::Task => ("task_id", BY_NUMBER),
             CostScope::Agent => ("agent_id", "agent_id"),
@@ -263,18 +289,27 @@ impl Projections {
             CostScope::Day => ("day", "day"),
             CostScope::Sprint => ("sprint", "sprint"),
         };
+        // The task order holds `?1`, so the window's parameter follows it there.
+        let slot = if scope == CostScope::Task { "?2" } else { "?1" };
+        let (within, bound) = match window {
+            CostWindow::Day(day) => (format!("day = {slot}"), Some(day.to_string())),
+            CostWindow::Sprint(sprint) => (format!("sprint = {slot}"), Some(sprint)),
+            CostWindow::All => ("1".to_string(), None),
+        };
+        let bound = bound.map(rusqlite::types::Value::from);
         let connection = self.connection();
         let mut statement = connection.prepare(&format!(
             "SELECT {column}, SUM(cost_usd), SUM(input_tokens), SUM(output_tokens),
                     COUNT(DISTINCT session_id)
-             FROM cost_records WHERE {column} IS NOT NULL
+             FROM cost_records WHERE {column} IS NOT NULL AND {within}
              GROUP BY {column} ORDER BY {order}"
         ))?;
-        // Only the task order has a parameter; SQLite refuses one bound to nothing.
-        let parameters: Vec<i64> = match scope {
-            CostScope::Task => vec![number_offset()],
+        // Only the task order and the window have parameters; SQLite refuses one bound to nothing.
+        let mut parameters: Vec<rusqlite::types::Value> = match scope {
+            CostScope::Task => vec![number_offset().into()],
             _ => Vec::new(),
         };
+        parameters.extend(bound);
         let rows = statement.query_map(rusqlite::params_from_iter(parameters), |row| {
             Ok((
                 row.get::<_, String>(0)?,
@@ -302,6 +337,22 @@ impl Projections {
             });
         }
         Ok(costs)
+    }
+
+    /// What `task_id` has spent on each session purpose, by the purpose as the log writes it.
+    ///
+    /// # Errors
+    ///
+    /// `Sqlite` when the read fails.
+    pub fn costs_by_purpose(&self, task_id: &TaskId) -> Result<BTreeMap<String, f64>, StoreError> {
+        let connection = self.connection();
+        let mut statement = connection.prepare(
+            "SELECT purpose, SUM(cost_usd) FROM cost_records WHERE task_id = ?1 GROUP BY purpose",
+        )?;
+        let rows = statement.query_map((task_id.to_string(),), |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, f64>(1)?))
+        })?;
+        Ok(rows.collect::<Result<_, _>>()?)
     }
 
     /// The sprint that is open, or nothing when none is.
@@ -2430,5 +2481,86 @@ mod tests {
             "a stale row left in cost_records would collide with the replayed one"
         );
         let _ = std::fs::remove_dir_all(&directory);
+    }
+
+    #[test]
+    fn splits_a_tasks_cost_by_purpose() {
+        use farik_protocol::event::{CostRecordedBodyPurpose, EventBody};
+        let (log, projections) = a_board();
+        for task_id in ["FRK-1", "FRK-2"] {
+            record(&log, &projections, &about(EventKind::TaskCreated, task_id));
+        }
+        let with = |purpose, task_id, usd| {
+            let mut spent = cost(Some(task_id), "a", "s1", "2026-09-22", (usd, 1, 1));
+            if let EventBody::CostRecorded(body) = &mut spent.body {
+                body.purpose = purpose;
+            }
+            spent
+        };
+        for spent in [
+            with(CostRecordedBodyPurpose::Implement, "FRK-1", 1.0),
+            with(CostRecordedBodyPurpose::Implement, "FRK-1", 2.0),
+            with(CostRecordedBodyPurpose::Verify, "FRK-1", 4.0),
+            with(CostRecordedBodyPurpose::Verify, "FRK-2", 8.0),
+        ] {
+            record(&log, &projections, &spent);
+        }
+        let split = projections
+            .costs_by_purpose(&"FRK-1".parse().expect("a task id"))
+            .expect("the costs read");
+        assert_eq!(
+            split.into_iter().collect::<Vec<_>>(),
+            vec![("implement".to_string(), 3.0), ("verify".to_string(), 4.0)]
+        );
+    }
+
+    #[test]
+    fn costs_each_agent_by_day_and_sprint() {
+        use super::CostWindow;
+        let (log, projections) = a_board();
+        record(&log, &projections, &about(EventKind::TaskCreated, "FRK-1"));
+        record(&log, &projections, &started("S1", None));
+        record(&log, &projections, &planned("S1", &["FRK-1"]));
+        for spent in [
+            cost(Some("FRK-1"), "a", "s1", "2026-09-21", (1.0, 1, 1)),
+            cost(Some("FRK-1"), "a", "s2", "2026-09-22", (2.0, 1, 1)),
+            cost(Some("FRK-1"), "b", "s3", "2026-09-22", (4.0, 1, 1)),
+            // No task, so no sprint; still the day's.
+            cost(None, "b", "s4", "2026-09-22", (8.0, 1, 1)),
+        ] {
+            record(&log, &projections, &spent);
+        }
+        let agents = |window| {
+            projections
+                .costs_for(CostScope::Agent, window)
+                .expect("the costs read")
+        };
+        let day = chrono::NaiveDate::from_ymd_opt(2026, 9, 22).expect("a real day");
+        assert_eq!(
+            agents(CostWindow::Day(day)),
+            vec![
+                row(CostScope::Agent, "a", (2.0, 1, 1, 1)),
+                row(CostScope::Agent, "b", (12.0, 2, 2, 2)),
+            ]
+        );
+        assert_eq!(
+            agents(CostWindow::Sprint("S1".to_string())),
+            vec![
+                row(CostScope::Agent, "a", (3.0, 2, 2, 2)),
+                row(CostScope::Agent, "b", (4.0, 1, 1, 1)),
+            ]
+        );
+        assert!(agents(CostWindow::Sprint("S2".to_string())).is_empty());
+        // The task order's own parameter and the window's are bound together.
+        assert_eq!(
+            projections
+                .costs_for(CostScope::Task, CostWindow::Day(day))
+                .expect("the costs read"),
+            vec![row(CostScope::Task, "FRK-1", (6.0, 2, 2, 2))]
+        );
+        assert_eq!(
+            agents(CostWindow::All),
+            projections.costs(CostScope::Agent).expect("the costs read")
+        );
     }
 }

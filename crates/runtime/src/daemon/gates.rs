@@ -87,6 +87,10 @@ pub(super) fn query(deps: &ToolDeps, name: &str, params: &Value) -> Result<Value
                 if let Some(until) = one.until {
                     wire["until"] = json!(until);
                 }
+                if let (Some(session), Some(purpose)) = (&one.session_id, one.purpose) {
+                    wire["session_id"] = json!(session);
+                    wire["purpose"] = json!(purpose.to_string());
+                }
                 wire
             }).collect::<Vec<_>>() }))
         }
