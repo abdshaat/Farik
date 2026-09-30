@@ -169,7 +169,7 @@ Produces: the routes above; `statusWord(status: TaskStatus, reason?: EscalationR
 - `lets_the_agent_decide`: sends the pinned text.
 - `hides_later_questions`.
 
-- [ ] `feat(web): add the request and question pages`
+- [x] `feat(web): add the request and question pages`
 
 ### Task 3: The plan and its editor
 

@@ -179,7 +179,12 @@ function RequestBox({ pmName }: { pmName: string }) {
 			navigate(`/requests/${filed.taskId}`);
 		} catch (error) {
 			const said = (error as Error).message;
-			setRefusal(said.charAt(0).toUpperCase() + said.slice(1));
+			// The length refusal is a fragment (the store's TOO_SHORT); say it as a sentence.
+			setRefusal(
+				said.includes("say a little more")
+					? t("requestTooShort")
+					: said.charAt(0).toUpperCase() + said.slice(1),
+			);
 			setBusy(false);
 		}
 	};

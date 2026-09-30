@@ -3,6 +3,8 @@ import { AgentEdit } from "../pages/AgentEdit.tsx";
 import { Connect } from "../pages/Connect.tsx";
 import { Events } from "../pages/Events.tsx";
 import { NotFound } from "../pages/NotFound.tsx";
+import { Questions } from "../pages/Questions.tsx";
+import { RequestFiled } from "../pages/RequestFiled.tsx";
 import { Settings } from "../pages/Settings.tsx";
 import { SetupAccount } from "../pages/setup/SetupAccount.tsx";
 import { SetupAdvanced } from "../pages/setup/SetupAdvanced.tsx";
@@ -49,6 +51,8 @@ export function App() {
 			<Route element={<Shell />}>
 				<Route index element={<Today />} />
 				<Route path="/events" element={<Events />} />
+				<Route path="/requests/:id" element={<RequestFiled />} />
+				<Route path="/tasks/:id/questions" element={<Questions />} />
 				<Route path="/team" element={<Team />} />
 				<Route path="/team/:id" element={<AgentEdit />} />
 				<Route

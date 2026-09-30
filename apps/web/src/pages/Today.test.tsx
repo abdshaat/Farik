@@ -117,15 +117,12 @@ describe("today", () => {
 			return f;
 		});
 		expect(refused.params).toEqual({ text: "hi" });
+		// The daemon's refusal is a fragment; the page says it in its own sentence.
 		act(() =>
-			s.fail(
-				refused,
-				-32005,
-				"the request say a little more: at least 20 characters",
-			),
+			s.fail(refused, -32005, "say a little more: at least 20 characters"),
 		);
 		expect((await screen.findByRole("alert")).textContent).toBe(
-			"The request say a little more: at least 20 characters",
+			en.requestTooShort,
 		);
 
 		fireEvent.change(box, {
@@ -136,10 +133,13 @@ describe("today", () => {
 		act(() =>
 			s.reply(s.calls("request.file")[1] as never, { task_id: "FRK-3" }),
 		);
-		// The request page is task 2's; until then the path shows no page.
-		expect(
-			await screen.findByRole("heading", { name: en.noPage }),
-		).toBeTruthy();
+		// The request's own page asks for FRK-3.
+		await waitFor(() =>
+			expect(
+				s.calls("query").find((q) => q.params.name === "contract.get")?.params
+					.params,
+			).toEqual({ task_id: "FRK-3" }),
+		);
 	});
 
 	it("lists_what_waits_on_you", async () => {
