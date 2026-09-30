@@ -774,6 +774,7 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     fn pages_the_channel() {
         let harness = Harness::new("board-channel-pages", |_| {});
+        let zero = said(&harness, "human", "human", "Zero.", &json!({}));
         let first = said(&harness, "human", "human", "One.", &json!({}));
         // Events that are not messages are not the channel's.
         harness.ready("FRK-1");
@@ -781,11 +782,15 @@ mod tests {
         let third = said(&harness, "farik", "system", "Three.", &json!({}));
 
         assert_eq!(page(&harness, &json!({ "limit": 2 })), [second, third]);
+        // The page counts messages only, however many other events stand between them.
         let before = page(&harness, &json!({ "before_seq": second, "limit": 2 }));
-        assert_eq!(before.last(), Some(&first), "{before:?}");
-        assert!(before.len() <= 2, "{before:?}");
+        assert_eq!(before, [zero, first]);
         let all = page(&harness, &json!({}));
-        assert_eq!(all[all.len() - 3..], [first, second, third], "{all:?}");
+        assert_eq!(
+            all[all.len() - 4..],
+            [zero, first, second, third],
+            "{all:?}"
+        );
         for limit in [0, 201] {
             let refused = super::super::gates::tests::rpc(
                 &harness.daemon,
