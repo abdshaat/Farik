@@ -36,6 +36,21 @@ export async function renderApp(
 	return { container, fetch, socket, sockets };
 }
 
+/**
+ * Records event `seq`, then moves a faked clock past the 250 ms after which the page's queries
+ * ask again (`REFETCH_MS` in `app/store.ts`), so the query is asked again without the test
+ * waiting on a real clock that a loaded machine can stretch.
+ */
+export async function eventArrives(socket: FakeSocket, seq: number) {
+	vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+	try {
+		act(() => socket.event(seq));
+		await act(() => vi.advanceTimersByTimeAsync(250));
+	} finally {
+		vi.useRealTimers();
+	}
+}
+
 /** Answers every `name` query asked so far with `result`, once one has been asked. */
 export async function answerQuery(
 	socket: FakeSocket,

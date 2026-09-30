@@ -9,7 +9,7 @@ import {
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { en } from "../strings/en.ts";
 import { media } from "../test/media.ts";
-import { answerStatus, renderApp } from "../test/render-app.tsx";
+import { answerStatus, eventArrives, renderApp } from "../test/render-app.tsx";
 
 const WIDE = "(min-width: 1024px)";
 
@@ -98,7 +98,7 @@ describe("shell", () => {
 		).toBeNull();
 
 		await socket.reply(sent, { said: "paused the team", events: [1] });
-		act(() => socket.event(1)); // team.paused
+		await eventArrives(socket, 1); // team.paused
 		await answerStatus(socket, true, 2);
 		expect(
 			await screen.findByRole("button", { name: en.resumeTeam }),

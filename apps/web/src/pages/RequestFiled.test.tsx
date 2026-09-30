@@ -1,15 +1,14 @@
 import { expectNoAxeViolations } from "@farik/ui/test";
-import {
-	act,
-	fireEvent,
-	screen,
-	waitFor,
-	within,
-} from "@testing-library/react";
+import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { en } from "../strings/en.ts";
 import type { FakeSocket } from "../test/fake-socket.ts";
-import { answerQuery, answerStatus, renderApp } from "../test/render-app.tsx";
+import {
+	answerQuery,
+	answerStatus,
+	eventArrives,
+	renderApp,
+} from "../test/render-app.tsx";
 
 const agent = (id: string, name: string, role: string) => ({
 	id,
@@ -86,7 +85,7 @@ describe("request page", () => {
 		});
 
 		// The triage arrives; the page asks again and shows the size.
-		act(() => s.event(5));
+		await eventArrives(s, 5);
 		await waitFor(() => expect(asked(s, "task.history")).toHaveLength(2));
 		await answerQuery(s, "task.history", { events: [CREATED, TRIAGED] });
 		expect(
@@ -148,7 +147,7 @@ describe("request page", () => {
 		await expectNoAxeViolations(container);
 
 		// Once refining starts, the size is the team's: no button.
-		act(() => s.event(6));
+		await eventArrives(s, 6);
 		await waitFor(() => expect(asked(s, "contract.get")).toHaveLength(2));
 		await answerQuery(s, "contract.get", {
 			contract: {

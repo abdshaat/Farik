@@ -10,7 +10,12 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { en } from "../strings/en.ts";
 import type { FakeSocket } from "../test/fake-socket.ts";
 import { CONTRACT, TEAM } from "../test/plan.ts";
-import { answerQuery, answerStatus, renderApp } from "../test/render-app.tsx";
+import {
+	answerQuery,
+	answerStatus,
+	eventArrives,
+	renderApp,
+} from "../test/render-app.tsx";
 
 /** The editor for FRK-1, with the team and the plan answered. */
 async function opened(contract: object = CONTRACT) {
@@ -283,7 +288,7 @@ describe("plan editor", () => {
 		// Mira writes the plan while you type: a field only she changed is hers, one you both
 		// changed stays yours, and the page says so.
 		const hers = "Customers will be able to buy a gift card and send it on.";
-		act(() => s.event(31));
+		await eventArrives(s, 31);
 		await waitFor(() => expect(gets(s)).toHaveLength(3));
 		await s.reply(gets(s)[2] as never, {
 			contract: {
