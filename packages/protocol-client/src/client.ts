@@ -51,10 +51,13 @@ export interface SocketLike {
 
 export class RpcError extends Error {
 	code: number;
-	constructor(code: number, message: string) {
+	/** What the daemon gave with a refusal, as it gave it: `errors`, each a path, a message and a code. */
+	data: unknown;
+	constructor(code: number, message: string, data?: unknown) {
 		super(message);
 		this.name = "RpcError";
 		this.code = code;
+		this.data = data;
 	}
 }
 
@@ -96,7 +99,7 @@ export function connect(url: string, socket?: SocketLike): DaemonClient {
 		const frame = JSON.parse(String(e.data)) as {
 			id?: number | null;
 			result?: unknown;
-			error?: { code: number; message: string };
+			error?: { code: number; message: string; data?: unknown };
 			method?: string;
 			params?: { event: unknown };
 		};
@@ -109,7 +112,9 @@ export function connect(url: string, socket?: SocketLike): DaemonClient {
 		if (!p || frame.id == null) return;
 		pending.delete(frame.id);
 		if (frame.error)
-			p.reject(new RpcError(frame.error.code, frame.error.message));
+			p.reject(
+				new RpcError(frame.error.code, frame.error.message, frame.error.data),
+			);
 		else p.resolve(toCamel(frame.result));
 	});
 

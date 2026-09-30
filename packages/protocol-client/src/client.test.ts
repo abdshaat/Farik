@@ -61,6 +61,21 @@ describe("client", () => {
 		expect((err as RpcError).message).toBe("no such method");
 	});
 
+	it("keeps_a_refusals_data_on_the_error", async () => {
+		const ws = new FakeSocket();
+		const client = connect("ws://x/rpc", ws);
+		const p = client.call("team.save", { team: {} });
+		await tick();
+		const errors = [{ path: "/agents", message: "m", code: "too_many" }];
+		ws.receive({
+			jsonrpc: "2.0",
+			id: 1,
+			error: { code: -32005, message: "m", data: { errors } },
+		});
+		const err = (await p.catch((e: unknown) => e)) as RpcError;
+		expect(err.data).toEqual({ errors });
+	});
+
 	it("delivers_event_notifications_in_camel_case", async () => {
 		const ws = new FakeSocket();
 		const client = connect("ws://x/rpc", ws);
