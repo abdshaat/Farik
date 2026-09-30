@@ -25,6 +25,9 @@ As built (Task 4, 2026-09-30):
 - Pausing an agent still stops every session of its, a chat session among them (`update_agent_with`): the message is then `no_answer`, and the user asks again. Kept, as 4.4's "at once" reads.
 - `wakes_serve_on_a_chat` is in `daemon.rs` (`POST /command`), with the team paused, so "within one tick" is the next tick answering.
 
+As built (Task 5, 2026-09-30):
+- `CostScope::Purpose` groups `cost_records` by its `purpose` column; `costs.summary`'s `conversations_today_usd` is today's `chat` row, 0 with none, and `rpc.schema.json` requires it. The web's line is Task 7's.
+
 Signatures, not bodies; test names and what each asserts, not test code; around 300 lines at most (ADR 0008).
 
 ## Goal
@@ -207,7 +210,7 @@ Tests:
 - `sums_costs_by_purpose` — `costs_for(CostScope::Purpose, CostWindow::Day(d))` sums one day's rows by purpose.
 - `answers_the_conversations` — `costs.summary`'s `conversations_today_usd` is today's `chat` spending and 0 with none.
 
-- [ ] `feat(runtime): count chats as conversations`
+- [x] `feat(runtime): count chats as conversations`
 
 ### Task 6: Sending a proposal as a request
 

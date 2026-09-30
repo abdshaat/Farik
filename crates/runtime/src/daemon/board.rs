@@ -372,8 +372,9 @@ fn chats_list(deps: &ToolDeps) -> Result<Value, Failure> {
     Ok(json!({ "team_last": team_last, "chats": chats }))
 }
 
-/// `costs.summary {}`: today's spending (UTC) and the daily limit, the last sprint's (the open one
-/// while one is), and each agent's that is not retired, in the team's order.
+/// `costs.summary {}`: today's spending (UTC) and the daily limit, today's one-to-one chats, the
+/// last sprint's (the open one while one is), and each agent's that is not retired, in the team's
+/// order.
 fn costs_summary(deps: &ToolDeps) -> Result<Value, Failure> {
     let day = deps.clock.now().date_naive();
     let team = deps.files.read_team().map_err(|e| internal(&e))?;
@@ -388,6 +389,7 @@ fn costs_summary(deps: &ToolDeps) -> Result<Value, Failure> {
     };
     let today = sum_by(CostScope::Day, CostWindow::Day(day))?;
     let agents_today = sum_by(CostScope::Agent, CostWindow::Day(day))?;
+    let purposes_today = sum_by(CostScope::Purpose, CostWindow::Day(day))?;
     // The open sprint, else the last one, so that its figures do not read $0.00 once it ends.
     let last = deps.files.list_sprints().map_err(|e| internal(&e))?.pop();
     let (sprint, agents_sprint) = match &last {
@@ -410,6 +412,7 @@ fn costs_summary(deps: &ToolDeps) -> Result<Value, Failure> {
     Ok(json!({
         "today_usd": today.values().sum::<f64>(),
         "daily_limit_usd": team.budgets.daily_usd,
+        "conversations_today_usd": of(&purposes_today, "chat"),
         "sprint": sprint,
         "agents": team
             .agents
@@ -718,6 +721,44 @@ mod tests {
 
     #[test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn answers_the_conversations() {
+        let harness = Harness::new("board-conversations", |_| {});
+        let conversations = |harness: &Harness| {
+            query(
+                &harness.daemon,
+                "costs.summary",
+                &json!({}),
+                "costsSummaryResult",
+            )["conversations_today_usd"]
+                .clone()
+        };
+        assert_eq!(conversations(&harness), json!(0.0));
+
+        let today = at().to_rfc3339();
+        spent(&harness, (None, "pm", "c1"), "chat", 0.25, &today);
+        spent(&harness, (None, "dev-a", "c2"), "chat", 0.125, &today);
+        // Channel talk, yesterday's chat and today's work are not today's conversations.
+        spent(&harness, (None, "pm", "t1"), "conversation", 1.0, &today);
+        spent(
+            &harness,
+            (None, "pm", "c0"),
+            "chat",
+            2.0,
+            "2026-09-21T12:00:00Z",
+        );
+        harness.ready("FRK-1");
+        spent(
+            &harness,
+            (Some("FRK-1"), "dev-a", "s1"),
+            "plan",
+            4.0,
+            &today,
+        );
+        assert_eq!(conversations(&harness), json!(0.375));
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
     #[allow(
         clippy::too_many_lines,
         reason = "a task's costs, the summary with and without a limit, and three metrics scopes"
@@ -813,6 +854,7 @@ mod tests {
             json!({
                 "today_usd": 7.5,
                 "daily_limit_usd": 10.0,
+                "conversations_today_usd": 0.0,
                 "sprint": { "sprint_id": "S1", "status": "open", "spent_usd": 23.25, "budget_usd": 20.0 },
                 "agents": [
                     { "agent_id": "pm", "today_usd": 0.0, "sprint_usd": 0.0 },

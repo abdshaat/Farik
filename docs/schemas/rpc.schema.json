@@ -2761,7 +2761,7 @@
       ]
     },
     "costsSummaryResult": {
-      "description": "Today's spending (UTC) and the team's daily limit, the last sprint's (the open one while one is), and each agent's that is not retired, in the team's order.",
+      "description": "Today's spending (UTC) and the team's daily limit, today's one-to-one chats (purpose chat), the last sprint's (the open one while one is), and each agent's that is not retired, in the team's order.",
       "type": "object",
       "additionalProperties": false,
       "properties": {
@@ -2779,6 +2779,10 @@
               "minimum": 0
             }
           ]
+        },
+        "conversations_today_usd": {
+          "type": "number",
+          "minimum": 0
         },
         "sprint": {
           "oneOf": [
@@ -2854,6 +2858,7 @@
       "required": [
         "today_usd",
         "daily_limit_usd",
+        "conversations_today_usd",
         "sprint",
         "agents"
       ]

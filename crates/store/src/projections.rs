@@ -90,6 +90,8 @@ pub enum CostScope {
     /// By the sprint the cost's task was in when the cost was recorded. A cost with no task, or of
     /// a task in no sprint, is in no sprint's row.
     Sprint,
+    /// By the session purpose, as the log writes it (`chat`, `implement`, ...).
+    Purpose,
 }
 
 /// Which costs a sum reads: one UTC day's, one sprint's, or all of them.
@@ -288,6 +290,7 @@ impl Projections {
             CostScope::Session => ("session_id", "session_id"),
             CostScope::Day => ("day", "day"),
             CostScope::Sprint => ("sprint", "sprint"),
+            CostScope::Purpose => ("purpose", "purpose"),
         };
         // The task order holds `?1`, so the window's parameter follows it there.
         let slot = if scope == CostScope::Task { "?2" } else { "?1" };
@@ -2570,6 +2573,52 @@ mod tests {
         assert_eq!(
             agents(CostWindow::All),
             projections.costs(CostScope::Agent).expect("the costs read")
+        );
+    }
+
+    #[test]
+    fn sums_costs_by_purpose() {
+        use super::CostWindow;
+        use farik_protocol::event::{CostRecordedBodyPurpose, EventBody};
+        let (log, projections) = a_board();
+        record(&log, &projections, &about(EventKind::TaskCreated, "FRK-1"));
+        let with = |purpose, task_id, session, day, usd| {
+            let mut spent = cost(task_id, "a", session, day, (usd, 1, 1));
+            if let EventBody::CostRecorded(body) = &mut spent.body {
+                body.purpose = purpose;
+            }
+            spent
+        };
+        for spent in [
+            with(
+                CostRecordedBodyPurpose::Chat,
+                None,
+                "s1",
+                "2026-09-22",
+                0.25,
+            ),
+            with(CostRecordedBodyPurpose::Chat, None, "s2", "2026-09-22", 0.5),
+            with(
+                CostRecordedBodyPurpose::Implement,
+                Some("FRK-1"),
+                "s3",
+                "2026-09-22",
+                2.0,
+            ),
+            // Another day's chat is not this day's.
+            with(CostRecordedBodyPurpose::Chat, None, "s4", "2026-09-21", 8.0),
+        ] {
+            record(&log, &projections, &spent);
+        }
+        let day = chrono::NaiveDate::from_ymd_opt(2026, 9, 22).expect("a real day");
+        assert_eq!(
+            projections
+                .costs_for(CostScope::Purpose, CostWindow::Day(day))
+                .expect("the costs read"),
+            vec![
+                row(CostScope::Purpose, "chat", (0.75, 2, 2, 2)),
+                row(CostScope::Purpose, "implement", (2.0, 1, 1, 1)),
+            ]
         );
     }
 }
