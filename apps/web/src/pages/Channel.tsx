@@ -48,6 +48,12 @@ function fromEvent(e: Event): Message | undefined {
 	};
 }
 
+/** Messages by seq, oldest first: a message both paged and heard live is one. */
+const merge = (a: Message[], b: Message[]) =>
+	[...new Map([...a, ...b].map((m) => [m.seq, m])).values()].sort(
+		(x, y) => x.seq - y.seq,
+	);
+
 const time = (at: string) => at.slice(11, 16);
 const weekday = (at: string) =>
 	new Date(at).toLocaleDateString("en-GB", {
@@ -105,7 +111,8 @@ export function Channel() {
 		"sprint.current",
 		{},
 	);
-	// The pages read, and the newest seq of the first: live events after it are appended.
+	// The pages read and each live message since, by seq; the newest seq of the first page, after
+	// which live events are appended.
 	const [loaded, setLoaded] = useState<{
 		messages: Message[];
 		floor: number;
@@ -122,7 +129,7 @@ export function Channel() {
 				const { messages } = answer as { messages: Message[] };
 				if (live)
 					setLoaded({
-						messages,
+						messages: merge([], messages),
 						floor: messages.at(-1)?.seq ?? 0,
 						more: messages.length === PAGE,
 					});
@@ -133,14 +140,20 @@ export function Channel() {
 		};
 	}, [client]);
 
-	const all = new Map<number, Message>();
-	for (const m of loaded?.messages ?? []) all.set(m.seq, m);
-	for (const e of events)
-		if (loaded && e.seq > loaded.floor) {
-			const m = fromEvent(e);
-			if (m) all.set(m.seq, m);
-		}
-	const messages = [...all.values()].sort((a, b) => a.seq - b.seq);
+	// Kept in state, so a message stays once the event buffer has moved past it.
+	useEffect(() => {
+		if (!loaded) return;
+		const have = new Set(loaded.messages.map((m) => m.seq));
+		const fresh = events.flatMap((e) => {
+			const m = e.seq > loaded.floor && !have.has(e.seq) && fromEvent(e);
+			return m ? [m] : [];
+		});
+		if (fresh.length)
+			setLoaded((l) => l && { ...l, messages: merge(l.messages, fresh) });
+	}, [events, loaded]);
+
+	const messages = loaded?.messages ?? [];
+	const all = new Map(messages.map((m) => [m.seq, m]));
 
 	// A "Read it" link opens its thread and brings it into view, once it is there.
 	const scrolled = useRef(false);
@@ -156,11 +169,14 @@ export function Channel() {
 			beforeSeq: messages[0]?.seq,
 			limit: PAGE,
 		})) as { messages: Message[] };
-		setLoaded({
-			...loaded,
-			messages: [...answer.messages, ...loaded.messages],
-			more: answer.messages.length === PAGE,
-		});
+		setLoaded(
+			(l) =>
+				l && {
+					...l,
+					messages: merge(answer.messages, l.messages),
+					more: answer.messages.length === PAGE,
+				},
+		);
 	};
 
 	const agents = team?.team.agents ?? [];

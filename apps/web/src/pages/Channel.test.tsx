@@ -77,6 +77,28 @@ async function channel(
 	return { container, s };
 }
 
+/** Plays one recorded event to the page, as the daemon's subscription would. */
+const live = (s: FakeSocket, seq: number, kind: string, body: object = {}) =>
+	act(() =>
+		s.emit("message", {
+			data: JSON.stringify({
+				jsonrpc: "2.0",
+				method: "event",
+				params: {
+					event: {
+						seq,
+						recorded_at: "2026-09-28T09:03:00Z",
+						team_id: "t",
+						project_id: "p",
+						agent_id: "theo",
+						kind,
+						body,
+					},
+				},
+			}),
+		}),
+	);
+
 const day = (offset: number) =>
 	new Date(Date.now() + offset * 86_400_000).toISOString().slice(0, 10);
 const weekday = (date: string) =>
@@ -309,31 +331,13 @@ describe("channel", () => {
 		]);
 		const first = seq;
 		await screen.findByText("can you look?", { exact: false });
-		act(() =>
-			s.emit("message", {
-				data: JSON.stringify({
-					jsonrpc: "2.0",
-					method: "event",
-					params: {
-						event: {
-							seq: 90,
-							recorded_at: "2026-09-28T09:03:00Z",
-							team_id: "t",
-							project_id: "p",
-							agent_id: "theo",
-							kind: "message.posted",
-							body: {
-								author: "theo",
-								kind: "reply",
-								text: "On it.",
-								mentions: [],
-								in_reply_to: first,
-							},
-						},
-					},
-				}),
-			}),
-		);
+		live(s, 90, "message.posted", {
+			author: "theo",
+			kind: "reply",
+			text: "On it.",
+			mentions: [],
+			in_reply_to: first,
+		});
 		const row = (await screen.findByText("On it.")).closest(
 			"li",
 		) as HTMLElement;
@@ -341,6 +345,34 @@ describe("channel", () => {
 		expect(
 			s.calls("query").filter((f) => f.params.name === "channel.messages"),
 		).toHaveLength(1);
+	});
+
+	it("keeps_a_live_message_after_500_other_events", async () => {
+		const { s } = await channel([message("human", "human", "Morning.")]);
+		await screen.findByText("Morning.");
+		live(s, 1000, "message.posted", {
+			author: "theo",
+			kind: "reaction",
+			text: "Started.",
+			mentions: [],
+		});
+		await screen.findByText("Started.");
+		for (let n = 1001; n <= 1501; n++) live(s, n, "task.created");
+		expect(screen.getByText("Started.")).toBeTruthy();
+	});
+
+	it("shows_a_message_once_when_its_page_and_its_event_both_hold_it", async () => {
+		const { s } = await channel([
+			message("theo", "reaction", "Only once.", { seq: 5 }),
+		]);
+		await screen.findByText("Only once.");
+		live(s, 5, "message.posted", {
+			author: "theo",
+			kind: "reaction",
+			text: "Only once.",
+			mentions: [],
+		});
+		expect(screen.getAllByText("Only once.")).toHaveLength(1);
 	});
 
 	it("previews_the_channel_on_today", async () => {
