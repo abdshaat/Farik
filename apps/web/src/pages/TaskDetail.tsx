@@ -31,7 +31,7 @@ type Detail = Contract & {
 };
 type Event = HistoryEvent & {
 	agentId?: string;
-	body: HistoryEvent["body"] & { createdBy?: string; requestedBy?: string };
+	body: HistoryEvent["body"] & Partial<Record<(typeof ACTORS)[number], string>>;
 };
 type Check = { criterionId: string; passed: boolean };
 type Diff = { diff: string; files: string[]; added: number; removed: number };
@@ -74,7 +74,33 @@ const TOLD: Record<string, keyof typeof en> = {
 	"contract.written": "toldPlan",
 	"contract.evaluated": "toldPlan",
 	"contract.judged": "toldPlan",
+	"contract.locked": "toldLocked",
+	"contract.unlocked": "toldUnlocked",
+	"question.asked": "toldAsked",
+	"question.answered": "toldAnswered",
+	"request.triaged": "toldTriaged",
+	"budget.exhausted": "toldLimit",
+	"transition.refused": "toldRefused",
+	"escalation.aged": "toldAged",
+	"pull_request.opened": "toldPullRequest",
+	"sprint.planned": "toldPlanned",
+	"drift.detected": "toldDrift",
+	"message.posted": "toldSaid",
+	"tool.denied": "toldDenied",
 };
+
+/** The body fields that name who did it, one per kind that has one. */
+const ACTORS = [
+	"requestedBy",
+	"createdBy",
+	"lockedBy",
+	"unlockedBy",
+	"askedBy",
+	"answeredBy",
+	"triagedBy",
+	"plannedBy",
+	"author",
+] as const;
 
 const NOTES = [
 	["completion", "gateWrote"],
@@ -179,10 +205,11 @@ export function TaskDetail() {
 				? e.body.subject === "contract"
 					? "toldApproved"
 					: "toldAccepted"
-				: (TOLD[e.kind] ?? "toldOther");
+				: e.kind === "task.transitioned" && e.body.to === "rejected"
+					? "toldSentBack"
+					: (TOLD[e.kind] ?? "toldOther");
 		const actor =
-			e.body.requestedBy ??
-			e.body.createdBy ??
+			ACTORS.map((field) => e.body[field]).find(Boolean) ??
 			(e.kind.startsWith("human.") ? "human" : e.agentId);
 		return t(key)
 			.replace("{who}", nameOf(actor))

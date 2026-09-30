@@ -7,8 +7,10 @@ import {
 	within,
 } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { en } from "../strings/en.ts";
 import {
 	COMPLETION,
+	event,
 	HISTORY,
 	openedGate,
 	REVIEW,
@@ -177,6 +179,62 @@ describe("task detail", () => {
 		expect(within(panel()).getByText(REVIEW)).toBeTruthy();
 		expect(within(panel()).queryByText("Checked each amount.")).toBeNull();
 		await expectNoAxeViolations(container);
+		cleanup();
+
+		// Every kind the log records against a task has its own words.
+		const at = "2026-09-25T10:00:00Z";
+		const KINDS: [string, object, string?][] = [
+			["contract.locked", { locked_by: "human" }],
+			["contract.unlocked", { unlocked_by: "mira" }],
+			["question.asked", { question: "Which amounts?", asked_by: "mira" }],
+			[
+				"question.answered",
+				{ question_id: 1, answer: "Three.", answered_by: "human" },
+			],
+			[
+				"request.triaged",
+				{ size: "small", reason: "One page.", triaged_by: "mira" },
+			],
+			["budget.exhausted", { scope: "task", consequence: "escalated" }],
+			[
+				"transition.refused",
+				{ from: "ready", to: "in_progress", actor: "governor" },
+			],
+			["escalation.aged", { raised_seq: 10, hours: 24 }],
+			["pull_request.opened", { url: "u", number: 3, branch: "feature/FRK-1" }],
+			[
+				"sprint.planned",
+				{ sprint_id: "S2", task_ids: ["FRK-1"], planned_by: "mira" },
+			],
+			["drift.detected", { drift: "lock_mismatch", detail: "d" }],
+			[
+				"message.posted",
+				{ author: "theo", kind: "reply", text: "On it.", mentions: [] },
+			],
+			["tool.denied", { tool: "Bash", reason: "not allowed" }, "theo"],
+			[
+				"task.transitioned",
+				{ from: "verifying", to: "rejected", requested_by: "ada" },
+			],
+		];
+		await opened(CONTRACT, [], {
+			"task.history": {
+				events: KINDS.map(([kind, body, by], i) =>
+					event(20 + i, kind, body, at, by),
+				),
+			},
+		});
+		await screen.findByRole("heading", { level: 1, name: "Gift cards" });
+		fireEvent.click(screen.getByRole("tab", { name: "History" }));
+		const told = within(panel())
+			.getAllByRole("listitem")
+			.map((line) => line.querySelector("span")?.textContent);
+		expect(told).toHaveLength(KINDS.length);
+		expect(told).not.toContain(en.toldOther);
+		expect(told).toContain("You locked the plan.");
+		expect(told).toContain("Farik stopped a step Theo tried.");
+		expect(told).toContain("Ada sent it back.");
+		expect(new Set(told).size).toBe(KINDS.length);
 	});
 
 	it("shows_cost_by_purpose", async () => {
