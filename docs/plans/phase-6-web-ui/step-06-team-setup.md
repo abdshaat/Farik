@@ -1,6 +1,6 @@
 # Phase 6, step 06: Team setup
 
-Status: ready
+Status: done (landed and landing-reviewed 2026-09-30)
 Branch: `phase/6-web-ui`
 Spec: `docs/SPEC.md` sections 4.1, 4.4, 5.1, 5.3 (the configurable judgment), 5.6, 5.12, 10 (foolproof configuration), F1, F2, F15, F16
 Depends on: steps 01 to 05 of this phase (landed)
