@@ -1,9 +1,9 @@
-import { Button, Choice, TextArea, uiStrings } from "@farik/ui";
+import { Button, Choice, TextArea } from "@farik/ui";
 import { useState } from "react";
 import { Link, useParams } from "react-router";
 import { useConnection } from "../app/connection.tsx";
 import { useQuery } from "../app/store.ts";
-import { sentence } from "../app/words.ts";
+import { roleWord, sentence } from "../app/words.ts";
 import { t } from "../strings/t.ts";
 import { Failed } from "./Failed.tsx";
 import styles from "./pages.module.css";
@@ -118,7 +118,7 @@ export function Questions() {
 function asks(name: string, agent: Agent | undefined) {
 	return t("asks", {
 		agent: name,
-		role: agent ? uiStrings.roleName[agent.role] : "",
+		role: agent ? roleWord(agent.role) : "",
 	});
 }
 

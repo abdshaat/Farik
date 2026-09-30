@@ -1,9 +1,9 @@
-import { Button, DiffView, TextArea, uiStrings } from "@farik/ui";
+import { Button, DiffView, TextArea } from "@farik/ui";
 import { useState } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 import { useConnection } from "../app/connection.tsx";
 import { useQuery } from "../app/store.ts";
-import { sentence, statusWord } from "../app/words.ts";
+import { roleWord, sentence, statusWord } from "../app/words.ts";
 import { t } from "../strings/t.ts";
 import { Failed } from "./Failed.tsx";
 import gate from "./Gate.module.css";
@@ -50,7 +50,7 @@ export const latestNote = (events: HistoryEvent[], kind: string) =>
 export const signed = (
 	key: "gateWrote" | "gateReviewed" | "helpExplains",
 	agent: Agent,
-) => t(key, { name: agent.displayName, role: uiStrings.roleName[agent.role] });
+) => t(key, { name: agent.displayName, role: roleWord(agent.role) });
 
 /** The acceptance gate: the two summaries, Farik's checks, and the code one click away. */
 export function Gate() {

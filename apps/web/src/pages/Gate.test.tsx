@@ -37,9 +37,7 @@ describe("acceptance gate", () => {
 		expect(letters).toHaveLength(2);
 		const [built, reviewed] = letters as [HTMLElement, HTMLElement];
 		expect(
-			within(built).getByText(
-				"Theo, your Software Developer, wrote this for you",
-			),
+			within(built).getByText("Theo, your Developer, wrote this for you"),
 		).toBeTruthy();
 		expect(within(built).getByText(COMPLETION)).toBeTruthy();
 		expect(within(built).queryByText(/earlier try/)).toBeNull();

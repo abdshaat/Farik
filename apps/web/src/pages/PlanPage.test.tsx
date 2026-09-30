@@ -131,7 +131,7 @@ describe("plan page", () => {
 			"1 answered",
 			"Medium",
 			"$14.00",
-			"Software Developer",
+			"Theo",
 		])
 			expect(within(about).getByText(text)).toBeTruthy();
 		expect(

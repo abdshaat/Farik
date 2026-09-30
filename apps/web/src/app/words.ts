@@ -1,4 +1,5 @@
 import type { Command, Event } from "@farik/protocol-client";
+import { uiStrings } from "@farik/ui";
 import type { Agent } from "../pages/setup/TeamSetup.tsx";
 import type { en } from "../strings/en.ts";
 import { t } from "../strings/t.ts";
@@ -12,6 +13,10 @@ export function sentence(detail: string): string {
 /** The code a refused call carries in its data (`errors[0].code`), if it carries one. */
 export const codeOf = (e: unknown): string | undefined =>
 	(e as { data?: { errors?: { code?: string }[] } }).data?.errors?.[0]?.code;
+
+/** A role as a letter says it: the mockups' "Developer", every other role by its name. */
+export const roleWord = (role: Agent["role"]) =>
+	role === "software_developer" ? t("roleDeveloper") : uiStrings.roleName[role];
 
 /** The active agent in `role`, if the team has one. */
 export function active(agents: Agent[], role: Agent["role"]) {

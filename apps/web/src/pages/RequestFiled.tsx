@@ -6,6 +6,7 @@ import { useQuery } from "../app/store.ts";
 import {
 	active,
 	type EscalationReason,
+	roleWord,
 	sentence,
 	statusWord,
 	type TaskStatus,
@@ -56,7 +57,7 @@ export function RequestFiled() {
 	const byName = byHuman ? t("you") : (by?.displayName ?? sizerName);
 	const nameRole = (a: Agent | undefined) =>
 		a
-			? t("nameRole", { name: a.displayName, role: uiStrings.roleName[a.role] })
+			? t("nameRole", { name: a.displayName, role: roleWord(a.role) })
 			: t("notYet");
 	const names = { pm: pmName, breaker: sizerName };
 	const chosen = byHuman
@@ -107,7 +108,7 @@ export function RequestFiled() {
 						<p className={styles.muted}>
 							{t("decided", {
 								name: by.displayName,
-								role: uiStrings.roleName[by.role],
+								role: roleWord(by.role),
 							})}
 						</p>
 					)}

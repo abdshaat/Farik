@@ -150,7 +150,7 @@ describe("help page", () => {
 			},
 		});
 		const said = await screen.findByRole("region", {
-			name: "Theo, your Software Developer, explains what happened",
+			name: "Theo, your Developer, explains what happened",
 		});
 		expect(
 			within(said).getByText("I need the payment key to go on."),

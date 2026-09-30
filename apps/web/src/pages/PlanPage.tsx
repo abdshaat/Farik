@@ -4,7 +4,13 @@ import { useState } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 import { useConnection } from "../app/connection.tsx";
 import { useQuery } from "../app/store.ts";
-import { active, sentence, statusWord, type TaskStatus } from "../app/words.ts";
+import {
+	active,
+	roleWord,
+	sentence,
+	statusWord,
+	type TaskStatus,
+} from "../app/words.ts";
 import { t } from "../strings/t.ts";
 import { Failed } from "./Failed.tsx";
 import own from "./PlanPage.module.css";
@@ -253,9 +259,9 @@ export function PlanPage() {
 					<dd>
 						{contract.assigneeRole === "human"
 							? t("you")
-							: uiStrings.roleName[
-									contract.assigneeRole as keyof typeof uiStrings.roleName
-								]}
+							: (active(agents, contract.assigneeRole as Agent["role"])
+									?.displayName ??
+								roleWord(contract.assigneeRole as Agent["role"]))}
 					</dd>
 				</dl>
 			</section>

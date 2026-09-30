@@ -1,9 +1,9 @@
-import { Button, Choice, TextArea, uiStrings } from "@farik/ui";
+import { Button, Choice, TextArea } from "@farik/ui";
 import { useState } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 import { useConnection } from "../app/connection.tsx";
 import { useQuery } from "../app/store.ts";
-import { active, sentence } from "../app/words.ts";
+import { active, roleWord, sentence } from "../app/words.ts";
 import { t } from "../strings/t.ts";
 import { Failed } from "./Failed.tsx";
 import {
@@ -184,7 +184,7 @@ export function HelpNeeded() {
 						{reviewer
 							? t("nameRole", {
 									name: reviewer.displayName,
-									role: uiStrings.roleName[reviewer.role],
+									role: roleWord(reviewer.role),
 								})
 							: t("notYet")}
 					</dd>
