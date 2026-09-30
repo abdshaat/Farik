@@ -725,8 +725,63 @@ mod tests {
             outside
         );
 
+        // The path is the page's on the preview: anything else could name another host.
+        let mut designer = project.context("iris", Some("FRK-1"));
+        designer.preview = Some(preview.clone());
+        for path in ["@evil.test", "x"] {
+            assert_eq!(
+                refused(run(
+                    &designer,
+                    "farik_check_page",
+                    json!({ "path": path, "width": "phone", "theme": "light" })
+                )),
+                format!("check_page_refused: a page's path starts with /, and {path:?} does not")
+            );
+        }
+
         assert!(preview.runs().is_empty(), "nothing was checked");
         assert!(project.events(&[EventKind::PageChecked]).is_empty());
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn copies_the_latest_check_of_each_into_the_review() {
+        let project = a_project("tools-design-review-latest");
+        let mut context = project.context("iris", Some("FRK-1"));
+        context.purpose = SessionPurpose::Verify;
+        let check = |context: &crate::tools::ToolContext, width: &str, theme: &str| {
+            run(
+                context,
+                "farik_check_page",
+                json!({ "path": "/", "width": width, "theme": theme }),
+            )
+            .expect("the Designer checks a page");
+        };
+        // Phone light first with a problem, then again once it is fixed.
+        context.preview = Some(Arc::new(CheckedPreview::printing(A_VIOLATION)));
+        check(&context, "phone", "light");
+        context.preview = Some(Arc::new(CheckedPreview::printing(r#"{"violations":[]}"#)));
+        for (width, theme) in [
+            ("phone", "light"),
+            ("phone", "dark"),
+            ("desktop", "light"),
+            ("desktop", "dark"),
+        ] {
+            check(&context, width, theme);
+        }
+        run(
+            &context,
+            "farik_record_design_review",
+            json!({ "pass": true, "reasons": "Reads well now." }),
+        )
+        .expect("the review records");
+
+        let recorded = project.events(&[EventKind::DesignReviewRecorded]);
+        let body = serde_json::to_value(&recorded[0].body).expect("a body");
+        assert_eq!(
+            body["body"]["checks"][0],
+            json!({ "width": "phone", "theme": "light", "violations": [] })
+        );
     }
 
     #[test]

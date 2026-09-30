@@ -1026,6 +1026,42 @@ mod tests {
 
     #[tokio::test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn acts_on_a_recorded_review_before_any_wait() {
+        // A recorded pass needs no live preview: the Architect reviews though it has gone since.
+        let harness = a_harness("design-review-recorded-first", browsing);
+        a_developers_change(&harness, "site/style.css");
+        harness.project.record(
+            "FRK-2",
+            "design_review.recorded",
+            &json!({ "pass": true, "reasons": "Fine.", "checks": [] }),
+        );
+        let files = &harness.project.deps.files;
+        let mut team = files.read_team().expect("the team");
+        team.preview = None;
+        files.write_team(&team).expect("written");
+        let (started, _) = ticked(&harness, vec![review_writes_note()], 1).await;
+
+        assert_eq!(who(&started), [("ada", SessionPurpose::Verify)]);
+        assert_eq!(state(&harness), ReviewState::Passed);
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn counts_the_latest_of_two_recorded_reviews() {
+        let harness = a_harness("design-review-latest", browsing);
+        a_developers_change(&harness, "site/style.css");
+        for pass in [false, true] {
+            harness.project.record(
+                "FRK-2",
+                "design_review.recorded",
+                &json!({ "pass": pass, "reasons": "Looked again.", "checks": [] }),
+            );
+        }
+        assert_eq!(state(&harness), ReviewState::Passed);
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn waits_on_a_designer_without_its_browser() {
         // Playwright switched off for Iris: Farik gives her no work, so no design review starts.
         let harness = a_harness("design-review-no-connector", |wire| {

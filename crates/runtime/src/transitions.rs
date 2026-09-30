@@ -3676,6 +3676,41 @@ mod tests {
 
     #[test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn names_the_designer_as_reviewer_only_on_a_fail() {
+        let team = a_team(|wire| {
+            wire["agents"]
+                .as_array_mut()
+                .expect("a list of agents")
+                .push(an_agent_wire("iris", "ui_ux_designer"));
+        });
+        let project = Project::new("design-reviewer", team, at(12));
+        project.file("FRK-1", |wire| wire["ui_change"] = json!(true));
+        project.created("FRK-1", "assigned");
+        let people = json!({ "assignee": "dev-a", "reviewer": "dev-b" });
+        project.moved("FRK-1", "assigned", "in_progress", &people, at(9));
+        project.moved("FRK-1", "in_progress", "verifying", &people, at(10));
+        let reviewed = |pass: bool| {
+            project.append_wire(&json!({
+                "seq": 1,
+                "recorded_at": at(11).to_rfc3339(),
+                "team_id": "farik",
+                "project_id": "farik",
+                "task_id": "FRK-1",
+                "agent_id": "iris",
+                "session_id": "s-1",
+                "kind": "design_review.recorded",
+                "body": { "pass": pass, "reasons": "Looked.", "checks": [] },
+            }));
+            project
+                .context(&accepting("FRK-1"), &TransitionAsk::default())
+                .design_reviewer
+        };
+        assert_eq!(reviewed(true), None, "a pass rejects nothing");
+        assert_eq!(reviewed(false).as_deref(), Some("iris"));
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
     fn answers_every_human_criterion_with_one_acceptance() {
         let project = Project::new("human-criteria", a_team(|_| {}), at(12));
         project.file("FRK-1", |wire| {
