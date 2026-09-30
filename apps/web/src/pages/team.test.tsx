@@ -351,6 +351,55 @@ describe("team page", () => {
 		).toBeTruthy();
 	});
 
+	it("says_a_failed_save_replace_or_add_in_plain_words", async () => {
+		const RAW = "/agents/3 has additional properties";
+		/** The page's alert, once `method`'s call failed with raw words. */
+		const failed = async (s: FakeSocket, method: string) => {
+			act(() => s.fail(s.calls(method).at(-1) as never, -32602, RAW));
+			const alert = await screen.findByRole("alert");
+			expect(alert.textContent).toContain(en.refuseOther);
+			expect(screen.queryByText(new RegExp(RAW))).toBeNull();
+		};
+
+		const edit = await opened("/team/theo");
+		fireEvent.click(await screen.findByRole("radio", { name: /^Quick/ }));
+		await validated(edit.s, []);
+		fireEvent.click(screen.getByRole("button", { name: en.agentSave }));
+		await sent(edit.s, "team.save");
+		await failed(edit.s, "team.save");
+		fireEvent.click(screen.getByRole("button", { name: "Replace Theo" }));
+		await sent(edit.s, "agent.replace");
+		await failed(edit.s, "agent.replace");
+		cleanup();
+
+		const team = await opened("/team");
+		fireEvent.click(await screen.findByRole("button", { name: en.teamAdd }));
+		await sent(team.s, "team.save");
+		await failed(team.s, "team.save");
+	});
+
+	it("says_a_failed_disconnect_in_plain_words", async () => {
+		const { socket } = await renderApp("/settings");
+		const s = socket as FakeSocket;
+		await answerStatus(s, false);
+		await answerQuery(s, "account.status", {
+			provider: "anthropic",
+			kind: "api_key",
+			source: "keychain",
+		});
+		const row = await screen.findByRole("region", { name: en.accountRow });
+		fireEvent.click(
+			within(row).getByRole("button", { name: en.accountDisconnect }),
+		);
+		fireEvent.click(
+			within(row).getByRole("button", { name: en.accountDisconnectYes }),
+		);
+		const gone = await sent(s, "account.disconnect");
+		act(() => s.fail(gone, -32603, "keyring: platform secure storage failure"));
+		expect(await within(row).findByText(en.refuseOther)).toBeTruthy();
+		expect(within(row).queryByText(/keyring/)).toBeNull();
+	});
+
 	it("shows_and_disconnects_the_account", async () => {
 		const { container, socket } = await renderApp("/settings");
 		const s = socket as FakeSocket;

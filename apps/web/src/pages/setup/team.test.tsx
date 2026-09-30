@@ -576,6 +576,35 @@ describe("team setup", () => {
 		expect(start.criteria).toEqual({ criteria: [TESTS_PASS, added] });
 	});
 
+	it("says_a_refused_check_or_note_in_plain_words", async () => {
+		const RAW = "/criteria/1/name does not match ^[a-z0-9-]+$";
+		const { socket } = await renderApp("/setup/advanced");
+		const s = socket as FakeSocket;
+		await answerQuery(s, "team.propose", proposed());
+		fireEvent.change(await screen.findByLabelText(en.checkNew), {
+			target: { value: "The page loads in under two seconds." },
+		});
+		fireEvent.click(screen.getByRole("button", { name: en.checkAdd }));
+		act(() => s.fail(s.calls("criteria.save")[0] as never, -32602, RAW));
+		expect(await screen.findByText(en.refuseOther)).toBeTruthy();
+		expect(screen.queryByText(/does not match/)).toBeNull();
+		cleanup();
+
+		const scan = await renderApp("/setup/scan");
+		const n = scan.socket as FakeSocket;
+		fireEvent.click(await screen.findByRole("button", { name: en.scanWrong }));
+		fireEvent.change(screen.getByLabelText(en.scanWrongField), {
+			target: { value: "It is a shop, not a game." },
+		});
+		fireEvent.click(screen.getByRole("button", { name: en.scanWrongSave }));
+		const note = await sent(n, "project.note");
+		act(() =>
+			n.fail(note, -32603, "io error: permission denied (os error 13)"),
+		);
+		expect(await screen.findByText(en.refuseOther)).toBeTruthy();
+		expect(screen.queryByText(/os error/)).toBeNull();
+	});
+
 	it("puts_each_setting_back_to_its_default", async () => {
 		const DEFAULTS = {
 			budgets: {},
