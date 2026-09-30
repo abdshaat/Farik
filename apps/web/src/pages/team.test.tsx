@@ -188,6 +188,43 @@ describe("team page", () => {
 		expect(screen.getByText(en.teamFull)).toBeTruthy();
 	});
 
+	it("resumes_a_paused_agent_from_its_card", async () => {
+		const { container, socket } = await renderApp("/team");
+		const s = socket as FakeSocket;
+		const paused = {
+			...TEAM,
+			agents: TEAM.agents.map((a) =>
+				a.id === "theo" ? { ...a, status: "paused" } : a,
+			),
+		};
+		await answerQuery(s, "team.get", {
+			team: paused,
+			agents: EFFECTIVE,
+			judges: JUDGES,
+		});
+		fireEvent.click(await screen.findByRole("button", { name: "Resume Theo" }));
+		expect((await sent(s, "command")).params).toEqual({
+			command: {
+				command: "agent_update",
+				body: { agent_id: "theo", status: "active" },
+			},
+		});
+		expect(screen.getByRole("button", { name: "Pause Ada" })).toBeTruthy();
+		await expectNoAxeViolations(container);
+	});
+
+	it("offers_save_only_once_something_changed", async () => {
+		await opened("/team/theo");
+		const save = (await screen.findByRole("button", {
+			name: en.agentSave,
+		})) as HTMLButtonElement;
+		expect(save.disabled).toBe(true);
+		fireEvent.click(screen.getByRole("radio", { name: /^Quick/ }));
+		expect(save.disabled).toBe(false);
+		fireEvent.click(screen.getByRole("button", { name: en.agentCancel }));
+		expect(save.disabled).toBe(true);
+	});
+
 	it("says_a_refused_pause_in_plain_words", async () => {
 		const { s } = await opened("/team");
 		fireEvent.click(await screen.findByRole("button", { name: "Pause Theo" }));

@@ -33,6 +33,7 @@ export function SetupTeam() {
 				i !== index
 					? m
 					: {
+							key: m.key,
 							on: next.on ?? m.on,
 							agent: {
 								...m.agent,
@@ -58,6 +59,8 @@ export function SetupTeam() {
 						developer,
 					),
 					on: true,
+					// An id is handed out again once its name changes; a row's key is its own.
+					key: draft.members.length,
 				},
 			],
 		});
@@ -88,7 +91,7 @@ export function SetupTeam() {
 					const why = included ? at(on.indexOf(member)) : [];
 					const whyId = `why-${index}`;
 					return (
-						<li key={agent.id} className={styles.member}>
+						<li key={member.key} className={styles.member}>
 							<input
 								type="checkbox"
 								checked={included}

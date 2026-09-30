@@ -48,8 +48,8 @@ export type Library = { criteria: Criterion[] };
 /** What the wizard's screens 5 to 8 build, kept until "Start the team" sends it. */
 export type Draft = {
 	team: Team;
-	/** Every suggested or added agent, and whether it is on the team. */
-	members: { agent: Agent; on: boolean }[];
+	/** Every suggested or added agent, whether it is on the team, and its row's own key. */
+	members: { agent: Agent; on: boolean; key: number }[];
 	criteria: Library;
 	/** The two permission questions, unanswered until the user answers them. */
 	answers: { commands?: boolean; push?: boolean };
@@ -98,7 +98,11 @@ export function TeamSetup() {
 		mine ??
 		(data && {
 			team: data.team,
-			members: data.team.agents.map((agent) => ({ agent, on: true })),
+			members: data.team.agents.map((agent, key) => ({
+				agent,
+				on: true,
+				key,
+			})),
 			criteria: data.criteria,
 			answers: {},
 		});

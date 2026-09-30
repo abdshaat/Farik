@@ -7,7 +7,7 @@ import {
 	waitFor,
 	within,
 } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { en } from "../../strings/en.ts";
 import type { FakeSocket } from "../../test/fake-socket.ts";
 import {
@@ -274,6 +274,33 @@ describe("team setup", () => {
 		expect(
 			await screen.findByRole("heading", { name: en.mayTitle }),
 		).toBeTruthy();
+	});
+
+	it("adds_from_the_spare_names_without_mixing_rows_up", async () => {
+		const warned = vi.spyOn(console, "error").mockImplementation(() => {});
+		const { socket } = await renderApp("/setup/team");
+		await answerQuery(socket as FakeSocket, "team.propose", proposed());
+		const list = await screen.findByRole("list", { name: en.teamMembers });
+		const developers = () =>
+			within(list)
+				.getAllByRole("textbox", { name: "Name for the Developer" })
+				.map((n) => (n as HTMLInputElement).value);
+		fireEvent.click(screen.getByRole("button", { name: en.teamAdd }));
+		fireEvent.click(screen.getByRole("button", { name: en.teamAdd }));
+		expect(developers()).toEqual(["Theo", "Noor", "Ivo"]);
+		// A renamed newcomer frees its spare name, which the next one takes.
+		fireEvent.change(
+			within(list).getAllByRole("textbox", {
+				name: "Name for the Developer",
+			})[1] as HTMLElement,
+			{ target: { value: "Zed" } },
+		);
+		fireEvent.click(screen.getByRole("button", { name: en.teamAdd }));
+		expect(developers()).toEqual(["Theo", "Zed", "Ivo", "Noor"]);
+		expect(
+			warned.mock.calls.some((call) => String(call[0]).includes("same key")),
+		).toBe(false);
+		warned.mockRestore();
 	});
 
 	it("asks_both_permission_questions", async () => {
