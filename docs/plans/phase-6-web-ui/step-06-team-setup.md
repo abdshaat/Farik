@@ -148,24 +148,41 @@ docs/SPEC.md (4.1, 4.4, 5.1, 5.3, 8.5, 10), docs/plans/project-plan.md (step 06 
 
 ## Interfaces
 
+As built (corrected 2026-09-29 by Task 8 from the seven tasks' reports; the first plan's names differed in the places listed under the wire).
+
 ```rust
 pub struct JudgmentPolicy { pub required: JudgmentRequired, pub questions: Vec<String>, pub judge: JudgeChoice }
-pub enum JudgmentRequired { Always, Never }  pub enum JudgeChoice { Auto, Architect, ScrumMaster }
-impl Team { pub fn judgment(&self) -> JudgmentPolicy; pub fn judge(&self) -> Role; }   // resolved: Architect, else Scrum Master, else PM
+pub enum JudgmentRequired { Always, Never }  pub enum JudgeChoice { Auto, Architect, ScrumMaster }   // JudgeChoice is the generated JudgmentJudge, re-exported
+impl Team { pub fn judgment(&self) -> JudgmentPolicy; pub fn judge(&self) -> Role; pub fn permissions(&self) -> TeamPermissions; }
+    // judge(): the named role, else Architect, else Scrum Master, else Product Manager (only active agents count; the founder, 2026-09-29)
 pub struct JudgmentAnswer { pub question: String, pub pass: bool, pub reason: String }
 pub struct JudgmentReview { pub answers: Vec<JudgmentAnswer>, pub reason: String }
-pub struct TeamPermissions { pub run_commands: bool, pub push: bool }
+pub struct TeamPermissions { pub run_commands: bool, pub push: bool }   // defaults: true, false
 impl Agent { pub fn tiers(&self, permissions: &TeamPermissions) -> Vec<PermissionTier>; }   // was tiers(&self); callers pass team.permissions()
-pub fn describe_change(old: &Team, new: &Team) -> Vec<String>;  pub fn defaults() -> TeamDefaults;
-pub struct ScanFacts { pub language: Option<String>, pub toolchain: Option<String>, pub workspace: bool, pub packages: u32, pub tests_in: Option<String>, pub tracked_files: u32, pub last_commit: Option<DateTime<Utc>> }
-CredentialStore::delete(&self) -> Result<(), CredentialError>;
-SessionRegistration.tiers / ToolContext.tiers: Vec<PermissionTier>
+pub fn describe_change(old: &Team, new: &Team) -> Vec<String>;  pub fn defaults() -> TeamDefaults { budgets, policy }
+pub const SMALL_ENOUGH_QUESTION: &str;   // the optional third question
+pub struct ScanFacts { pub language: Option<String>, pub toolchain: Option<String>, pub workspace: bool, pub packages: u32, pub tests_in: Option<String>, pub tracked_files: u32, pub last_commit: Option<String> }   // last_commit is words ("4 days ago")
+ProjectFiles::project_document(.., previous: Option<&str>)   // carries "The user says" across a rescan; append_project_note(text, date)
+CredentialStore::delete(&self) -> Result<(), CredentialError>;   // keychain, file and memory stores
+farik_runtime::daemon::SETUP_PENDING: &str = ".farik/local/setup-pending";   // moved from the CLI
+SessionRegistration.tiers / ToolContext.tiers: Vec<PermissionTier>   // taken when the session starts
 ```
 
-RPC:
-- queries: `project.scan`, `team.propose`, `team.validate`, `models.list`;
-- methods: `team.save`, `team.start`, `criteria.save`, `account.disconnect`;
-- `serve.status.setup_pending`.
+Wire (`docs/schemas/rpc.schema.json`; the daemon's module is `crates/runtime/src/daemon/team.rs`):
+
+- queries:
+  - `project.scan {}` answers `{ facts, checks: [string], kept_private: [string] }`; `kept_private` leaves out Farik's own `.farik/local/**`;
+  - `team.propose {}` answers `{ team, criteria }`: the team as it is with the five in place of its agents, and the criterion library (the plan first had only the team);
+  - `team.validate { team }` answers `{ errors: [{ path, message }], effects: [string] }`;
+  - `models.list {}` answers `{ models: [{ id, label }] }`;
+- methods, each answering `{}` unless said:
+  - `team.save { team }`, refused when it changes an agent's status ("pause, retire or resume an agent from its card") or removes an agent the log has an event from;
+  - `team.start { team, criteria }`, which saves both, removes the marker and resumes the team;
+  - `criteria.save { criteria }` (not in the first plan's list of tests, built with Task 4);
+  - `project.note { text }` (1 to 2000 characters, not blank) appends to `.farik/project.md` under "The user says" (a plan gap, decided in Task 4's ruling);
+  - `account.disconnect {}` answers `{ removed_from: [source], paused: bool, environment_variable?: string }`. A key that comes from the environment cannot be removed: nothing is, `paused` is false and the variable is named. `paused` is true whenever a credential was removed, including when the team was already paused;
+- `serve.status.setup_pending: boolean` (required), which follows the marker;
+- a refusal is -32005 with the joined sentences and `data.errors` (path, message) for the rows.
 
 ## Tasks
 
@@ -250,7 +267,7 @@ RPC:
 - The project plan: the step 06 line, and D2's row updated with the founder's 2026-09-29 rule.
 - The step 05 plan: a line recording the marker the host gained.
 
-- [ ] `docs(spec): the plan check's judge and questions, and team changes that wait for the next session`
+- [x] `docs(spec): the plan check's judge and questions, and team changes that wait for the next session`
 
 ## Verification
 
