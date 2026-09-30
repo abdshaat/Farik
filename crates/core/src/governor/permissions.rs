@@ -38,7 +38,9 @@ pub enum PermissionTier {
 pub fn default_tiers(role: Role) -> &'static [PermissionTier] {
     use PermissionTier as T;
     match role {
-        Role::SoftwareDeveloper => &[T::Read, T::WriteWorkspace, T::Execute, T::GitLocal],
+        Role::SoftwareDeveloper | Role::UiUxDesigner => {
+            &[T::Read, T::WriteWorkspace, T::Execute, T::GitLocal]
+        }
         Role::Architect => &[
             T::Read,
             T::WriteWorkspace,
@@ -137,6 +139,31 @@ pub enum ToolRefusal {
         /// The tool's name.
         tool: String,
     },
+    /// A UI/UX Designer's `write_workspace`, `execute` or `git_local` call on a task whose design
+    /// plan the Product Manager has not approved.
+    DesignPlanNotApproved,
+}
+
+/// The Product Manager's plan gate (ADR 0026): a UI/UX Designer changes nothing before its
+/// task's latest design plan is approved. `approved` is what the log says at the call.
+///
+/// # Errors
+///
+/// `DesignPlanNotApproved` for a Designer's `write_workspace`, `execute` or `git_local` call while
+/// the plan is not approved.
+pub fn check_design_plan(
+    role: Role,
+    tier: PermissionTier,
+    approved: bool,
+) -> Result<(), ToolRefusal> {
+    let writes = matches!(
+        tier,
+        PermissionTier::WriteWorkspace | PermissionTier::Execute | PermissionTier::GitLocal
+    );
+    if role == Role::UiUxDesigner && writes && !approved {
+        return Err(ToolRefusal::DesignPlanNotApproved);
+    }
+    Ok(())
 }
 
 /// Decides one tool call (`docs/SPEC.md` section 5.6): the agent must hold the tool's tier;
@@ -319,8 +346,8 @@ mod tests {
 
     use super::{
         AgentGrants, ApprovedCall, CommandRefusal, PermissionTier as T, ToolCallContext,
-        ToolCallRequest, ToolDescriptor, ToolRefusal, default_tiers, evaluate_command,
-        evaluate_tool_call,
+        ToolCallRequest, ToolDescriptor, ToolRefusal, check_design_plan, default_tiers,
+        evaluate_command, evaluate_tool_call,
     };
     use crate::contract::Role;
     use crate::governor::team_rules::TeamRules;
@@ -392,6 +419,10 @@ mod tests {
                 Role::MarketingSpecialist,
                 vec![T::Read, T::Network, T::WriteWorkspace, T::GitLocal],
             ),
+            (
+                Role::UiUxDesigner,
+                vec![T::Read, T::WriteWorkspace, T::Execute, T::GitLocal],
+            ),
             (Role::ScrumMaster, vec![T::Read]),
             (Role::Human, vec![T::Read]),
         ];
@@ -408,11 +439,41 @@ mod tests {
             Role::Architect,
             Role::SoftwareDeveloper,
             Role::MarketingSpecialist,
+            Role::UiUxDesigner,
             Role::Human,
         ] {
             let tiers = default_tiers(role);
             assert!(!tiers.contains(&T::GitRemote), "{role}");
             assert!(!tiers.contains(&T::ExternalEffect), "{role}");
+        }
+    }
+
+    #[test]
+    fn refuses_a_write_before_the_plan_is_approved() {
+        let designer = Role::UiUxDesigner;
+        for tier in [T::WriteWorkspace, T::Execute, T::GitLocal] {
+            assert_eq!(
+                check_design_plan(designer, tier, false),
+                Err(ToolRefusal::DesignPlanNotApproved),
+                "{tier:?}"
+            );
+            assert_eq!(check_design_plan(designer, tier, true), Ok(()), "{tier:?}");
+        }
+        assert_eq!(check_design_plan(designer, T::Read, false), Ok(()));
+        for tier in [
+            T::Read,
+            T::WriteWorkspace,
+            T::Execute,
+            T::Network,
+            T::GitLocal,
+            T::GitRemote,
+            T::ExternalEffect,
+        ] {
+            assert_eq!(
+                check_design_plan(Role::SoftwareDeveloper, tier, false),
+                Ok(()),
+                "{tier:?}"
+            );
         }
     }
 

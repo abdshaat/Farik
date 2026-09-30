@@ -290,6 +290,11 @@ fn tool(refusal: &ToolRefusal) -> (&'static str, String) {
             "invalid_glob",
             format!("{pattern} does not compile: {detail}"),
         ),
+        ToolRefusal::DesignPlanNotApproved => (
+            "design_plan_not_approved",
+            "the Product Manager has not approved this task's design plan, so nothing changes yet"
+                .to_string(),
+        ),
         ToolRefusal::RequiresHumanApproval { tool } => (
             "requires_human_approval",
             format!(

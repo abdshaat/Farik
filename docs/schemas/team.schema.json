@@ -45,7 +45,8 @@
         "scrum_master",
         "architect",
         "software_developer",
-        "marketing_specialist"
+        "marketing_specialist",
+        "ui_ux_designer"
       ],
       "description": "The role an agent is instantiated from. `human` is a role a contract may name as a reviewer, never a role an agent holds."
     },
@@ -401,7 +402,7 @@
             "minLength": 1
           },
           "default": ["docs/**", "**/*.md", "CHANGELOG.md"],
-          "description": "Globs every allowed path of a task not assigned to the software_developer must fall within: only the Developer changes code (spec 5.12). Left out, docs/**, **/*.md and CHANGELOG.md; an empty list means no task but a Developer's can be ready."
+          "description": "Globs every allowed path of a task not assigned to the software_developer or the ui_ux_designer must fall within: only the Developer and the UI/UX Designer change code (spec 5.12). Left out, docs/**, **/*.md and CHANGELOG.md; an empty list means no task but a Developer's or a Designer's can be ready."
         }
       }
     }

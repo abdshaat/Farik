@@ -101,7 +101,7 @@ Tests, in each module's `mod tests`:
 - `refuses_a_write_before_the_plan_is_approved`: `check_design_plan` refuses a Designer's `write_workspace`, `execute` and `git_local` while the plan is not approved (`design_plan_not_approved`). It allows `read`, allows all three once approved, and allows a Developer anything.
 - `reads_the_design_plan_events`: each of the three bodies round-trips through `event.schema.json`.
 
-- [ ] `feat(core): add the UI/UX Designer and its plan gate`
+- [x] `feat(core): add the UI/UX Designer and its plan gate`
 
 ### Task 3: The role's content, its reviewer, and the suggested six
 

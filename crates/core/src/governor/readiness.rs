@@ -10,6 +10,7 @@ use crate::contract::{
     Role, TaskContract, TaskStatus, Verification, VerificationWire, wire_method,
 };
 use crate::generated::task_contract::FarikTaskContractKind as Kind;
+use crate::team::changes_code;
 use crate::text::listed;
 
 /// Builders for readiness contexts and typed contracts, usable by every crate's tests.
@@ -561,7 +562,7 @@ fn document_paths_only(
     contract: &TaskContract,
     context: &ReadinessContext,
 ) -> Option<ReadinessFailure> {
-    if contract.kind != Kind::Task || contract.assignee_role == Role::SoftwareDeveloper {
+    if contract.kind != Kind::Task || changes_code(contract.assignee_role) {
         return None;
     }
     let documents = &context.rules.document_paths;
@@ -1220,6 +1221,18 @@ mod tests {
             failed_rules(&task, &a_ready_context()),
             [R::DocumentPathsOnly]
         );
+    }
+
+    #[test]
+    fn holds_neither_the_developer_nor_the_designer_to_the_document_paths() {
+        let mut context = a_ready_context();
+        context.active_agents_by_role.insert(Role::UiUxDesigner, 1);
+        for role in [Role::SoftwareDeveloper, Role::UiUxDesigner] {
+            let task = a_task_for(role, &["src/**"]);
+            assert_eq!(evaluate_readiness(&task, &context), Ok(()), "{role}");
+        }
+        let task = a_task_for(Role::MarketingSpecialist, &["src/**"]);
+        assert_eq!(failed_rules(&task, &context), [R::DocumentPathsOnly]);
     }
 
     #[test]

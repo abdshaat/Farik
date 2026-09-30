@@ -18,19 +18,20 @@ pub use crate::generated::event::{
     ContractSummaryKind, ContractSummaryParent, ContractSummaryRisk, ContractSummaryStatus,
     ContractUnlockedBody, ContractWrittenBody, CostRecordedBody, CostRecordedBodyModelId,
     CostRecordedBodyPurpose, CriteriaUpdatedBody, CriterionRecordedBody,
-    CriterionRecordedBodyRunBy, DecisionWrittenBody, DriftDetectedBody, DriftDetectedBodyDrift,
-    EscalationAgedBody, EscalationRaisedBody, EscalationRaisedBodyReason, EscalationResolvedBody,
-    EventKind, HumanAcceptedBody, HumanAcceptedBodySubject, JudgmentAnswer, MemoryWrittenBody,
-    MessagePostedBody, NoteWrittenBody, NoteWrittenBodyKind, ProductDocWrittenBody,
-    ProjectScannedBody, PullRequestOpenedBody, QuestionAnsweredBody, QuestionAskedBody,
-    QuestionChoice, RequestTriagedBody, RequestTriagedBodySize, RetroAppendedBody,
-    ReviewRecordedBody, SessionEndedBody, SessionEndedBodyReason, SessionStartedBody,
-    SessionStartedBodyEffort, SessionStartedBodyModel, SessionStartedBodyPurpose, SprintEndedBody,
-    SprintEndedBodyEndedBy, SprintPlannedBody, SprintStartedBody, TaskCreatedBody,
-    TaskIntegratedBody, TaskIntegratedBodyIntegratedBy, TaskTransitionedBody,
-    TaskTransitionedBodyEffectsItem, TeamPausedBody, TeamPausedBodyBy, TeamPausedBodyReason,
-    TeamUpdatedBody, TokenUsage, ToolCalledBody, ToolDeniedBody, ToolReturnedBody,
-    TransitionRefusedBody, TransitionRefusedBodyRefusal,
+    CriterionRecordedBodyRunBy, DecisionWrittenBody, DesignPlanDecidedBody, DesignPlanProposedBody,
+    DriftDetectedBody, DriftDetectedBodyDrift, EscalationAgedBody, EscalationRaisedBody,
+    EscalationRaisedBodyReason, EscalationResolvedBody, EventKind, HumanAcceptedBody,
+    HumanAcceptedBodySubject, JudgmentAnswer, MemoryWrittenBody, MessagePostedBody,
+    NoteWrittenBody, NoteWrittenBodyKind, ProductDocWrittenBody, ProjectScannedBody,
+    PullRequestOpenedBody, QuestionAnsweredBody, QuestionAskedBody, QuestionChoice,
+    RequestTriagedBody, RequestTriagedBodySize, RetroAppendedBody, ReviewRecordedBody,
+    SessionEndedBody, SessionEndedBodyReason, SessionStartedBody, SessionStartedBodyEffort,
+    SessionStartedBodyModel, SessionStartedBodyPurpose, SprintEndedBody, SprintEndedBodyEndedBy,
+    SprintPlannedBody, SprintStartedBody, TaskCreatedBody, TaskIntegratedBody,
+    TaskIntegratedBodyIntegratedBy, TaskTransitionedBody, TaskTransitionedBodyEffectsItem,
+    TeamPausedBody, TeamPausedBodyBy, TeamPausedBodyReason, TeamUpdatedBody, TokenUsage,
+    ToolCalledBody, ToolDeniedBody, ToolReturnedBody, TransitionRefusedBody,
+    TransitionRefusedBodyRefusal,
 };
 /// The generated names of the vocabularies the governor's events repeat, renamed at the edge so
 /// that they cannot be mistaken for `farik-core`'s own types of the same name.
@@ -138,6 +139,8 @@ fn body_def_name(kind: EventKind) -> &'static str {
         EventKind::MemoryWritten => "memoryWrittenBody",
         EventKind::DecisionWritten => "decisionWrittenBody",
         EventKind::TeamPaused | EventKind::TeamResumed => "teamPausedBody",
+        EventKind::DesignPlanProposed => "designPlanProposedBody",
+        EventKind::DesignPlanApproved | EventKind::DesignPlanReturned => "designPlanDecidedBody",
     }
 }
 
@@ -167,6 +170,9 @@ pub fn is_about_one_contract(kind: EventKind) -> bool {
             | EventKind::HumanAccepted
             | EventKind::EscalationResolved
             | EventKind::EscalationAged
+            | EventKind::DesignPlanProposed
+            | EventKind::DesignPlanApproved
+            | EventKind::DesignPlanReturned
     )
 }
 
@@ -178,7 +184,8 @@ pub fn is_about_one_contract(kind: EventKind) -> bool {
 /// blank. Nor for the three `tool.` kinds, the two `session.` kinds, and `agent.slept`, whose
 /// envelope names the agent and the session; Farik observed the sleep, and nobody asked for it.
 /// Nor for `escalation.aged`: the human left it waiting, and nobody acted. `team.paused` and
-/// `team.resumed` name the human in a closed vocabulary, which cannot be blank.
+/// `team.resumed` name the human in a closed vocabulary, which cannot be blank. The three
+/// `design_plan.` kinds name no one in the body: their envelope names the agent and the session.
 fn attribution(body: &mut EventBody) -> Option<(&'static str, &mut String)> {
     match body {
         EventBody::TaskCreated(body) => Some(("created_by", &mut body.created_by)),
@@ -223,13 +230,16 @@ fn attribution(body: &mut EventBody) -> Option<(&'static str, &mut String)> {
         | EventBody::PullRequestOpened(_)
         | EventBody::EscalationAged(_)
         | EventBody::TeamPaused(_)
-        | EventBody::TeamResumed(_) => None,
+        | EventBody::TeamResumed(_)
+        | EventBody::DesignPlanProposed(_)
+        | EventBody::DesignPlanApproved(_)
+        | EventBody::DesignPlanReturned(_) => None,
     }
 }
 
 /// Every kind the log holds in this phase, in the order `docs/schemas/event.schema.json` lists
 /// them. The step that adds a kind adds it here.
-pub const EVERY_KIND: [EventKind; 43] = [
+pub const EVERY_KIND: [EventKind; 46] = [
     EventKind::TaskCreated,
     EventKind::RequestTriaged,
     EventKind::ContractWritten,
@@ -273,6 +283,9 @@ pub const EVERY_KIND: [EventKind; 43] = [
     EventKind::DecisionWritten,
     EventKind::TeamPaused,
     EventKind::TeamResumed,
+    EventKind::DesignPlanProposed,
+    EventKind::DesignPlanApproved,
+    EventKind::DesignPlanReturned,
 ];
 
 /// The ids an event is stamped with: which team and project it belongs to, and the contract, agent
@@ -441,6 +454,15 @@ pub enum EventBody {
     /// The human resumed the team.
     #[serde(rename = "team.resumed")]
     TeamResumed(TeamPausedBody),
+    /// The UI/UX Designer proposed its plan for the task.
+    #[serde(rename = "design_plan.proposed")]
+    DesignPlanProposed(DesignPlanProposedBody),
+    /// The Product Manager approved the task's design plan.
+    #[serde(rename = "design_plan.approved")]
+    DesignPlanApproved(DesignPlanDecidedBody),
+    /// The Product Manager returned the task's design plan with a reason.
+    #[serde(rename = "design_plan.returned")]
+    DesignPlanReturned(DesignPlanDecidedBody),
 }
 
 impl EventBody {
@@ -491,6 +513,9 @@ impl EventBody {
             Self::DecisionWritten(_) => EventKind::DecisionWritten,
             Self::TeamPaused(_) => EventKind::TeamPaused,
             Self::TeamResumed(_) => EventKind::TeamResumed,
+            Self::DesignPlanProposed(_) => EventKind::DesignPlanProposed,
+            Self::DesignPlanApproved(_) => EventKind::DesignPlanApproved,
+            Self::DesignPlanReturned(_) => EventKind::DesignPlanReturned,
         }
     }
 }
@@ -814,10 +839,18 @@ mod tests {
         // after it would have to guess which one to believe.
         for kind in EVERY_KIND {
             for other in EVERY_KIND {
-                // team.paused and team.resumed share one body, so each carries the other's; no
-                // other pair does, and a fixture that made one equal must not hide it.
-                let shared = [EventKind::TeamPaused, EventKind::TeamResumed];
-                if other == kind || (shared.contains(&kind) && shared.contains(&other)) {
+                // team.paused and team.resumed share one body, so each carries the other's, and so
+                // do design_plan.approved and design_plan.returned; no other pair does, and a
+                // fixture that made one equal must not hide it.
+                let shared = [
+                    [EventKind::TeamPaused, EventKind::TeamResumed],
+                    [EventKind::DesignPlanApproved, EventKind::DesignPlanReturned],
+                ];
+                if other == kind
+                    || shared
+                        .iter()
+                        .any(|pair| pair.contains(&kind) && pair.contains(&other))
+                {
                     continue;
                 }
                 let mut input = an_event_wire(kind);
@@ -834,6 +867,34 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn reads_the_design_plan_events() {
+        let plan = "Make the sign-in page calm.\n\nI saw two buttons fighting for attention.";
+        for (kind, body) in [
+            ("design_plan.proposed", json!({ "plan": plan })),
+            (
+                "design_plan.approved",
+                json!({ "reason": "It keeps to the contract." }),
+            ),
+            (
+                "design_plan.returned",
+                json!({ "reason": "Leave the header alone." }),
+            ),
+        ] {
+            let mut wire = an_event_wire(EventKind::NoteWritten);
+            wire["kind"] = json!(kind);
+            wire["body"] = body;
+            let event =
+                event_from_value(&wire).unwrap_or_else(|errors| panic!("{kind}: {errors:?}"));
+            assert_eq!(event.body.kind().to_string(), kind);
+            assert_eq!(event_to_value(&event), wire, "{kind}");
+        }
+        let mut wire = an_event_wire(EventKind::NoteWritten);
+        wire["kind"] = json!("design_plan.proposed");
+        wire["body"] = json!({ "reason": "a decision is not a plan" });
+        assert_eq!(refusal(&wire)[0].path, "/body");
     }
 
     #[test]
@@ -1237,7 +1298,7 @@ mod tests {
 
     #[test]
     fn reads_a_team_paused_and_resumed_by_the_human() {
-        assert_eq!(EVERY_KIND.len(), 43);
+        assert_eq!(EVERY_KIND.len(), 46);
         for kind in [EventKind::TeamPaused, EventKind::TeamResumed] {
             assert_eq!(a_body_wire(kind), json!({ "by": "human" }));
             let input = an_event_wire(kind);

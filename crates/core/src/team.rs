@@ -76,8 +76,17 @@ pub fn plain_role(role: Role) -> &'static str {
         Role::Architect => "Architect",
         Role::SoftwareDeveloper => "Software Developer",
         Role::MarketingSpecialist => "Marketing Specialist",
+        Role::UiUxDesigner => "UI/UX Designer",
         Role::Human => "human",
     }
+}
+
+/// Whether a role's tasks change code: the Software Developer's and the UI/UX Designer's
+/// (`docs/SPEC.md` sections 5.12 and 5.14). Every other role's task is held to the document paths
+/// and works on a `docs/` branch.
+#[must_use]
+pub fn changes_code(role: Role) -> bool {
+    matches!(role, Role::SoftwareDeveloper | Role::UiUxDesigner)
 }
 
 /// Checks a value against `docs/schemas/team.schema.json` and, when it conforms, returns the typed
@@ -320,8 +329,8 @@ impl Team {
 
 impl Agent {
     /// Every permission tier this agent holds: its role's defaults, then the team's answers
-    /// (without `execute` for Developers and Architects when `run_commands` is false, with
-    /// `git_remote` for Developers when `push` is true), widened by what it was granted and
+    /// (without `execute` for Developers, Designers and Architects when `run_commands` is false,
+    /// with `git_remote` for Developers and Designers when `push` is true), widened by what it was granted and
     /// narrowed by what was taken away. The team's answers apply to every agent of the role, so an
     /// agent added later follows them.
     ///
@@ -334,10 +343,10 @@ impl Agent {
     pub fn tiers(&self, permissions: &TeamPermissions) -> Vec<PermissionTier> {
         let role = Role::from(self.role);
         let mut tiers = default_tiers(role).to_vec();
-        if !permissions.run_commands && matches!(role, Role::SoftwareDeveloper | Role::Architect) {
+        if !permissions.run_commands && (changes_code(role) || role == Role::Architect) {
             tiers.retain(|tier| *tier != PermissionTier::Execute);
         }
-        if permissions.push && role == Role::SoftwareDeveloper {
+        if permissions.push && changes_code(role) {
             tiers.push(PermissionTier::GitRemote);
         }
         for granted in self
@@ -374,6 +383,7 @@ impl From<RoleWire> for Role {
             RoleWire::Architect => Self::Architect,
             RoleWire::SoftwareDeveloper => Self::SoftwareDeveloper,
             RoleWire::MarketingSpecialist => Self::MarketingSpecialist,
+            RoleWire::UiUxDesigner => Self::UiUxDesigner,
         }
     }
 }
@@ -401,7 +411,8 @@ mod tests {
     use super::{
         AgentStatus, HumanAcceptsContracts, Integration, JudgeChoice, JudgmentPolicy,
         JudgmentRequired, PermissionTier, PermissionTierWire, Role, RoleWire,
-        SMALL_ENOUGH_QUESTION, Team, TeamPermissions, TeamPolicy, defaults, validate_team,
+        SMALL_ENOUGH_QUESTION, Team, TeamPermissions, TeamPolicy, changes_code, defaults,
+        validate_team,
     };
     use crate::governor::team_rules::{DEFAULT_DOCUMENT_PATHS, DEFAULT_PROTECTED_PATHS};
 
@@ -1132,6 +1143,56 @@ mod tests {
     }
 
     #[test]
+    fn changes_code_for_the_developer_and_the_designer_only() {
+        assert!(changes_code(Role::SoftwareDeveloper));
+        assert!(changes_code(Role::UiUxDesigner));
+        for role in [
+            Role::ProductManager,
+            Role::ScrumMaster,
+            Role::Architect,
+            Role::MarketingSpecialist,
+            Role::Human,
+        ] {
+            assert!(!changes_code(role), "{role}");
+        }
+    }
+
+    #[test]
+    fn gives_the_designer_the_developers_tiers_and_permission_answers() {
+        let mut wire = a_team_wire();
+        wire["agents"]
+            .as_array_mut()
+            .expect("the fixture's agents are a list")
+            .push(an_agent_wire("iris", "ui_ux_designer"));
+        let before = team(&wire);
+        let full = [
+            PermissionTier::Read,
+            PermissionTier::WriteWorkspace,
+            PermissionTier::Execute,
+            PermissionTier::GitLocal,
+        ];
+        for index in [1, 2] {
+            assert_eq!(before.agents[index].tiers(&before.permissions()), full);
+        }
+
+        wire["policy"]["permissions"] = json!({ "run_commands": false, "push": true });
+        let after = team(&wire);
+        let answered = [
+            PermissionTier::Read,
+            PermissionTier::WriteWorkspace,
+            PermissionTier::GitLocal,
+            PermissionTier::GitRemote,
+        ];
+        for index in [1, 2] {
+            assert_eq!(
+                after.agents[index].tiers(&after.permissions()),
+                answered,
+                "a Designer as a Developer"
+            );
+        }
+    }
+
+    #[test]
     fn names_every_role_an_agent_can_hold() {
         assert_eq!(
             [
@@ -1140,6 +1201,7 @@ mod tests {
                 RoleWire::Architect,
                 RoleWire::SoftwareDeveloper,
                 RoleWire::MarketingSpecialist,
+                RoleWire::UiUxDesigner,
             ]
             .map(Role::from),
             [
@@ -1148,6 +1210,7 @@ mod tests {
                 Role::Architect,
                 Role::SoftwareDeveloper,
                 Role::MarketingSpecialist,
+                Role::UiUxDesigner,
             ]
         );
     }

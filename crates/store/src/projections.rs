@@ -649,7 +649,10 @@ fn apply_to(transaction: &Transaction<'_>, event: &FarikEvent) -> Result<(), Sto
         | EventBody::MemoryWritten(_)
         | EventBody::DecisionWritten(_)
         | EventBody::TeamPaused(_)
-        | EventBody::TeamResumed(_) => Ok(()),
+        | EventBody::TeamResumed(_)
+        | EventBody::DesignPlanProposed(_)
+        | EventBody::DesignPlanApproved(_)
+        | EventBody::DesignPlanReturned(_) => Ok(()),
     }
 }
 

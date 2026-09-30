@@ -156,7 +156,8 @@ pub fn load_role(role: Role) -> Result<RoleDefinition, RoleError> {
                 include_str!("../roles/marketing_specialist/skills/marketing-what-ships/SKILL.md"),
             )],
         ),
-        Role::Human => Err(RoleError::NotFound {
+        // The UI/UX Designer's definition ships in phase 6 step 11's next task.
+        Role::UiUxDesigner | Role::Human => Err(RoleError::NotFound {
             role_id: role.to_string(),
         }),
     }

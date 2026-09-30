@@ -108,11 +108,7 @@ pub fn a_body_wire(kind: EventKind) -> Value {
             "refusal": "gate_failed",
             "details": ["the reviewer is the assignee"]
         }),
-        EventKind::EscalationRaised => json!({
-            "reason": "blocker_age",
-            "detail": "blocked_age: no key"
-        }),
-        EventKind::EscalationAged => json!({ "raised_seq": 1, "hours": 25 }),
+        EventKind::EscalationRaised | EventKind::EscalationAged => an_escalation_body_wire(kind),
         EventKind::MemoryWritten | EventKind::DecisionWritten => a_kept_body_wire(kind),
         EventKind::ContractEvaluated => json!({
             "gate": "definition_of_ready",
@@ -145,6 +141,9 @@ pub fn a_body_wire(kind: EventKind) -> Value {
         | EventKind::MessagePosted => a_human_body_wire(kind),
         EventKind::AgentUpdated | EventKind::AgentSlept => an_agent_body_wire(kind),
         EventKind::TeamPaused | EventKind::TeamResumed => json!({ "by": "human" }),
+        EventKind::DesignPlanProposed
+        | EventKind::DesignPlanApproved
+        | EventKind::DesignPlanReturned => a_design_plan_body_wire(kind),
         EventKind::SprintStarted
         | EventKind::SprintPlanned
         | EventKind::SprintEnded
@@ -173,6 +172,24 @@ fn a_kept_body_wire(kind: EventKind) -> Value {
             "title": "Use SQLite for the log",
             "written_by": "maya-chen"
         })
+    }
+}
+
+/// An escalation raised for a blocker's age, or one that has waited 25 hours on the human.
+fn an_escalation_body_wire(kind: EventKind) -> Value {
+    if kind == EventKind::EscalationRaised {
+        json!({ "reason": "blocker_age", "detail": "blocked_age: no key" })
+    } else {
+        json!({ "raised_seq": 1, "hours": 25 })
+    }
+}
+
+/// A Designer's plan, or the Product Manager's decision on it.
+fn a_design_plan_body_wire(kind: EventKind) -> Value {
+    if kind == EventKind::DesignPlanProposed {
+        json!({ "plan": "Make the sign-in page calm.\n\nOne button leads; the header stays." })
+    } else {
+        json!({ "reason": "It keeps to the contract." })
     }
 }
 

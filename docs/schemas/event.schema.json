@@ -99,7 +99,10 @@
         "memory.written",
         "decision.written",
         "team.paused",
-        "team.resumed"
+        "team.resumed",
+        "design_plan.proposed",
+        "design_plan.approved",
+        "design_plan.returned"
       ]
     },
     "eventBodyWire": {
@@ -147,7 +150,9 @@
         { "$ref": "#/$defs/escalationAgedBody" },
         { "$ref": "#/$defs/memoryWrittenBody" },
         { "$ref": "#/$defs/decisionWrittenBody" },
-        { "$ref": "#/$defs/teamPausedBody" }
+        { "$ref": "#/$defs/teamPausedBody" },
+        { "$ref": "#/$defs/designPlanProposedBody" },
+        { "$ref": "#/$defs/designPlanDecidedBody" }
       ]
     },
     "contractSummary": {
@@ -688,6 +693,26 @@
         "by": { "type": "string", "enum": ["human", "farik"] },
         "reason": { "type": "string", "enum": ["credential_refused"] },
         "detail": { "type": "string" }
+      }
+    },
+    "designPlanProposedBody": {
+      "title": "Design Plan Proposed Body",
+      "description": "The UI/UX Designer ended its explore session with its plan for the task through farik_propose_design_plan (ADR 0026): plain text that opens with a summary for the user, then says what it saw, what it will change, which screens and sizes, and what it leaves alone. The envelope names the task, the Designer and the session. Until a later design_plan.approved, the governor denies the Designer's write_workspace, execute and git_local calls on the task with design_plan_not_approved.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["plan"],
+      "properties": {
+        "plan": { "type": "string" }
+      }
+    },
+    "designPlanDecidedBody": {
+      "title": "Design Plan Decided Body",
+      "description": "The body of both design_plan.approved and design_plan.returned: the Product Manager's decision on the task's latest design plan, through farik_decide_design_plan (ADR 0026), and why. The two share one shape, so the one branch of the body choice serves both and the event's kind says which it is. The envelope names the task, the Product Manager and the session. A returned plan starts a new explore session with reason.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["reason"],
+      "properties": {
+        "reason": { "type": "string" }
       }
     },
     "questionAskedBody": {
