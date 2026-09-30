@@ -2,9 +2,9 @@
 
 Status: draft
 Branch: `phase/6-web-ui`
-Spec: `docs/SPEC.md` sections 3, 4.3, 5.1, 5.2, 5.5, 5.9, 8.2, 8.4, 8.5, F7, F8
+Spec: `docs/SPEC.md` sections 3, 4.3, 4.4, 5.1, 5.2, 5.5, 5.9, 8.2, 8.4, 8.5, F7, F8
 Depends on: steps 01 to 11 of this phase; ADR 0026 and `docs/design/designer-chats-templates.md` (section B), both binding
-Readiness confirmed by: (pending)
+Readiness confirmed by: fresh-session reviewer, 2026-09-30, ready with findings, folded in
 
 Signatures, not bodies; test names and what each asserts, not test code; around 300 lines at most (ADR 0008).
 
@@ -21,27 +21,47 @@ Design and ADR 0026 decide the what. These are the points they leave open, each 
 - **Gate.** Task 1's mockups are approved by the founder before Task 2 starts. The approval is recorded in this header ("Mockups approved by: the founder, <date>"), and any change the founder asks for at the gate is written into this plan in the same commit. The rail label is "Chats" (the design's proposal) unless the founder names another there.
 - **Task order.** The event and its queries (Task 2) come before the session (Task 3), because the reply the session writes is that event: the no-forward-dependency rule orders them, not the brief.
 - **Envelope.** A `chat_message.posted` envelope names the chat's agent on both the user's message and the reply (the channel names none on the human's), so `EventQuery { agent_id, kinds: [chat_message.posted], before_seq, newest_first }` reads one chat a page at a time with no filtering after the limit. The body's `chat` repeats it, as the design writes.
-- **Pending.** A chat is pending when its newest message is the user's and its seq is above the `in_reply_to` of every `session.started { purpose: chat }` of that agent. The session's `in_reply_to` is that message's seq, as a conversation's is (8.5), so a failed session is not retried in a loop: the user asks again.
-- **Session shape.** `SessionAsk { purpose: Chat, contract: None, read_only: true, tools: Some(CHAT_TOOLS), in_reply_to: Some(seq), cwd: project root, executor: None }`; the agent's own model (`session_model`), effort `low`; the conversation's limits. The session's tiers (`CallContext::tiers`, `SessionRegistration`) are `[Read]` whatever the agent's grants: the governor, not the prompt, bounds it.
-- **Ending.** `farik_chat_reply` records the reply and answers "Sent. Your turn is over."; a second call is refused `chat_reply_refused`, and the model's turn ends the session. Rejected: aborting the session from inside a tool, which no tool does today and which the refusal makes unnecessary.
-- **Paused agent.** The hook's and `dispatch`'s `agent_not_active` check lets a `chat` session's agent be `active` or `paused`; `retired` is refused. Every other purpose is unchanged, so pausing still stops work at once (4.4).
+- **Pending.** A chat is pending when the seq of its newest message by the user is above the `in_reply_to` of every `session.started { purpose: chat }` of that agent, whoever wrote last. A message sent while a session runs is answered next, with the reply in its history. The session's `in_reply_to` is that message's seq, as a conversation's is (8.5), so a failed session is not retried in a loop: the user asks again.
+- **The rule's place.** The chat rule runs first in `rules::tick`, before `sprint_rules`, and only in an unscoped `TickRules::All` tick, as `conversation` does: `farik run FRK-n` answers no chat.
+- **Session shape.** `SessionAsk { agent, purpose: Chat, contract: None, cwd: project root, executor: None, read_only: true, only_tool: None, tools: Some(CHAT_TOOLS), in_reply_to: Some(seq), thread: None, initial_prompt }`, where `initial_prompt` is "<Name>, the user wrote to you in your one-to-one chat. Answer the newest message." followed by that message's text; the history and the closing instruction are in the system prompt. The agent's own model (`session_model`), effort `low`; the conversation's limits. The session's tiers (`ToolContext::tiers`, `SessionRegistration`) are `[Read]` whatever the agent's grants: the governor, not the prompt, bounds it. It is given no connector: step 11's `SessionRegistration.connectors` and `ToolContext.connectors` are empty for a `chat` session.
+- **The reply tool.** `farik_chat_reply` is tier `Read`, as every Farik write tool is, so `session_spec`'s and `permit`'s tier filters keep it. It is offered only in `chat` sessions: `session_spec` drops it from every other session's list, as `CONVERSATION_TOOLS` narrows conversations, and `call_tool` refuses it outside a chat (`chat_reply_refused`).
+- **`session.started` names the chat.** It gains `chat: <agent_id>`, as the design writes, on `purpose: chat` alone; it repeats the envelope's agent, and keeps the event readable without the envelope.
+- **Ending.** `farik_chat_reply` records the reply and answers "Sent. Your turn is over."; a second call is refused `chat_reply_refused`, and the model's turn ends the session. A call refused for its limits does not use up the one reply. Rejected: aborting the session from inside a tool, which no tool does today and which the refusal makes unnecessary.
+- **Paused agent.** The hook's and `call_tool`'s `agent_not_active` check lets a `chat` session's agent be `active` or `paused`; `retired` is refused. Every other purpose is unchanged, so pausing still stops work at once (4.4).
 - **Paused team.** `tick_within` runs the chat rule alone while the team is paused, except when the pause is `credential_refused`: a key the provider refuses cannot answer either.
-- **Why no answer.** `chat.messages` answers `waiting: null | { because, until? }`, `because` one of `answering`, `day_spent`, `asleep` (with `until`), `key_refused`, `retired`. No event is written for a chat that did not run; the page words the reason (the design's "the chat then says so").
+- **Why no answer.** `chat.messages` answers `waiting: null | { because, until? }`. No event is written for a chat that did not run; the page words the reason (the design's "the chat then says so"). When several apply, the first wins:
+  - `retired`;
+  - `key_refused`;
+  - `day_spent`;
+  - `asleep`, with `until`;
+  - `answering`: pending, or a `chat` `session.started` of that agent with no `session.ended` yet ("Mira is thinking…");
+  - `no_answer`: the user's newest message is at or below an ended `chat` session's `in_reply_to` and no reply followed ("Mira could not answer. Ask again."). It also covers a key refused while the human had paused the team, which records no `credential_refused` pause.
+- **Live `waiting`.** The open chat re-queries `chat.messages` on its agent's `session.started` and `session.ended` with purpose `chat`, and on its reply.
+- **`team.activity`.** `rpc.schema.json`'s activity `purpose` enum gains `chat`, and the line is "Answering your chat", with no chat text; a paused agent answering shows the same line.
 - **Limits.** A message's and a reply's text: 1 to 4,000 code points, not blank, line breaks kept. A proposed request: `title` 1 to 120 code points, one line; `text` 20 to 4,000 (the `request.file` floor).
-- **Sending a proposal.** The box under the reply is prefilled `<title>\n\n<text>` and editable; "Send as a request" calls `request.file { text, from_chat_message }`. `from_chat_message` must be the seq of an agent's `chat_message.posted` that carries `request`, and not one already sent; otherwise `REFUSED` with a sentence. `task.created` gains `from_chat_message`, and `created_by` stays `human`: the user sent it.
+- **Sending a proposal.** The box under the reply is prefilled `<title>\n\n<text>` and editable; "Send as a request" calls `request.file { text, from_chat_message }`. `from_chat_message` must be the seq of an agent's `chat_message.posted` that carries `request`, and not one already sent; otherwise `REFUSED` with a sentence. The check and the write run under the lock `file_request` writes in, so two tabs cannot file one proposal twice. `task.created` gains `from_chat_message`, and `created_by` stays `human`: the user sent it.
 - **Store change.** `file_request` gains a trailing `from_chat_message: Option<u64>` parameter; its callers pass `None`.
 - **Costs.** `SessionPurpose::Chat` is recorded as `chat` (session and cost purpose enums). `CostScope::Purpose` sums by purpose; `costs.summary` gains `conversations_today_usd`, and the Costs page shows "Conversations today: $x.xx. Your chats with the team; they count toward the daily limit." under the table. Agents' rows already include it, as costs by agent.
 - **Chat list.** `chats.list {}` answers `{ team_last, chats: [{ agent_id, retired, last }] }` in team order, `last` and `team_last` `{ seq, at, author, text } | null` (`team_last`: the newest `message.posted` that is not `system`).
-- **Addresses and layout.** `/channel` is Team (so step 10's `#thread-…` anchors keep working) and `/channel/<agent_id>` a one-to-one. On a wide screen the list is a left column beside the open chat; on a phone it is one row of avatars above the chat, Team first. A retired agent's chat is under "Past teammates", read-only, with no box.
-- **Composer.** "Message <Name>", a textarea: Enter makes a new line, Ctrl or Cmd+Enter and "Send" send. Over 4,000 code points is refused before sending.
+- **Addresses and layout.** `/channel` is Team (so step 10's `#thread-…` anchors keep working) and `/channel/<agent_id>` a one-to-one. On a wide screen the list is a left column beside the open chat; on a phone it is one row of avatars above the chat, Team first. A retired agent's chat is under "Past teammates", read-only, with no box. An id that names no agent shows "No such teammate" beside the list.
+- **Composer.** "Message <Name>", a textarea: Enter sends, Shift+Enter makes a new line, as the reviewer proposed to match the Team composer, and "Send" sends. Over 4,000 code points is refused before sending.
+- **Envelope exception.** SPEC 8.5 gains that a `chat_message.posted` envelope names the chat's agent even on the user's message, as `agent.slept` is an exception. `farik log --agent` and every reader of the envelope's agent as the actor are checked in Task 2: those that must not count the user's message as the agent's filter on `author`.
+- **Waits for step 11.** Step 11's plan (50d2fa8) produces `SessionRegistration.connectors`, `ToolContext.connectors` and the hook's connector check (`evaluate_connector_call`, refusal `connector_not_in_session`). This plan names them, and `denies_a_chat_everything_else` runs with a Designer whose `mcp_servers` holds `playwright`. When step 11 lands, these names are re-checked against its commits before Task 2 starts.
+- **Open for the founder at the gate** (Task 1), each recorded in this plan when settled:
+  - Enter sends and Shift+Enter makes a line, in both composers, or Ctrl+Enter sends;
+  - the rail label "Chats";
+  - that "Conversations" means one-to-one chats only: the channel's `conversation` purpose stays under "Meetings and talk";
+  - ADR 0026's "decided here" points this step builds: a paused agent answers, a spent day stops chats, the agent's own model at `low`.
 - **Live.** A `chat_message.posted` from `useEvents` whose `chat` is the open one is appended without a query, as step 10 appends channel messages; a `task.created` with `from_chat_message` turns that reply's box into "Sent as FRK-n".
 - **Command line.** `farik chat <agent> <text>` sends `chat_message_post`; `farik chat <agent>` prints the chat, one message per block, oldest first.
 - **Transcript.** `chat_answers_with_a_request`: Mira reads the board and calls `farik_chat_reply` with a text and a request titled "Let customers pay with Apple Pay", the OneOnOne mockup's words.
 
 ## Security
 
-- **Agent text is never HTML.** Replies and proposals render through `renderMessageText` (React text and elements), with `white-space: pre-wrap` for line breaks. No `dangerouslySetInnerHTML` anywhere in the step; the test `renders_agent_text_as_text` pins it.
+- **Agent text is never HTML.** Replies and proposals render through `renderMessageText` (React text and elements), with `white-space: pre-wrap` for line breaks. No `dangerouslySetInnerHTML` anywhere in the step; the test `renders_agent_text_as_text` pins it for the reply, the proposal's title and the chat list's last line.
 - **A chat never files a request.** The session is registered with `CHAT_TOOLS` alone, so `farik_create_task`, `farik_post_message`, `farik_write_memory` and any connector or web tool are denied by the hook (`tool_not_in_session`, `tool_not_allowed`); `farik_chat_reply` writes only a `chat_message.posted` and refuses outside a chat. The one path to work is `request.file`, a browser method only a signed-in human session reaches; `from_chat_message` only links.
+- **The log stays unread.** Chat privacy rests on `.farik/local/**` staying protected: the log `.farik/local/farik.db` lives there, and a chat's `Read`, `Grep` and `Glob` run in the project root. `denies_a_chat_everything_else` names that file, and SPEC 5.9 says privacy depends on that default.
+- **The terminal.** `farik chat <agent>` prints through `printable`, as `farik channel` does, so agent text cannot send escape sequences.
 - **Prompt.** The agent's own earlier lines return wrapped `untrusted`, as agent-written text is (ADR 0011).
 - **The author is fixed.** `chat_message_post` has no author field: Farik writes `human`.
 
@@ -51,15 +71,16 @@ Design and ADR 0026 decide the what. These are the points they leave open, each 
 docs/design/mockups/{Chats,PhoneChats}.dc.html, OneOnOne.dc.html, Costs.dc.html, canvas.json   creates / modifies (T1)
 docs/schemas/event.schema.json            chat_message.posted; purpose chat; task.created from_chat_message (T2, T3, T6)
 docs/schemas/command.schema.json          chat_message_post (T2)
-docs/schemas/rpc.schema.json              chats.list, chat.messages, costs.summary, request.file (T2, T4, T5, T6)
+docs/schemas/rpc.schema.json              chats.list, chat.messages, team.activity's chat (T2, T3, T4, T5, T6)
 crates/runtime/src/chat.rs (+ tests), lib.rs                creates: the chat record, pending, the waiting reason (T2, T4)
 crates/runtime/src/orchestrator/human.rs                    modifies: Command::ChatMessagePost (T2)
 crates/runtime/src/daemon/board.rs                          modifies: chats.list, chat.messages, costs.summary (T2, T4, T5)
-crates/cli/src/{main.rs,chat.rs}                            modifies / creates: `farik chat` (T2)
+crates/cli/src/{main.rs,chat.rs}                            modifies / creates: `farik chat`, through printable.rs (T2)
 crates/runtime/src/session.rs, sessions.rs, cost.rs, orchestrator/recover.rs, crates/store/src/metrics.rs   SessionPurpose::Chat (T3)
 crates/runtime/src/tools.rs, tools/chat.rs, tools/refusal.rs                  farik_chat_reply, chat_reply_refused (T3)
 crates/runtime/src/orchestrator/{rules.rs,session.rs}, orchestrator.rs, prompt.rs   the chat rule, TickReport::Chat, prompt (T3, T4)
-crates/runtime/src/daemon/hooks.rs, daemon.rs               a chat session's paused agent (T4)
+crates/runtime/src/daemon/hooks.rs, daemon.rs, tools.rs     a chat session's paused agent (T4)
+crates/runtime/src/daemon/gates.rs                          team.activity's line for a chat (T3)
 crates/runtime/src/recorded/fixtures.rs, transcripts/chat_answers_with_a_request.jsonl   (T3)
 crates/cli/src/run.rs                                       prints TickReport::Chat (T3)
 crates/store/src/projections.rs                             CostScope::Purpose (T5)
@@ -72,7 +93,7 @@ docs/SPEC.md, docs/plans/project-plan.md  (T9)
 
 ## Interfaces
 
-Consumes: `useEvents`, `useQuery` (step 04); `renderMessageText` and `channel.messages` (step 10); `team.get`, `waiting.list`; `request.file` (step 07); `EventQuery { agent_id, before_seq, newest_first }` (step 10); `session_model`, `run_session`, `SessionAsk`, `day_is_spent`, `asleep`, `allowed_builtins` (phases 3 and 4); `pause::paused`, `pause::key_refused`; `SessionPurpose` as step 11 left it.
+Consumes: `useEvents`, `useQuery` (step 04); `renderMessageText` and `channel.messages` (step 10); `team.get`, `waiting.list`; `request.file` (step 07); `EventQuery { agent_id, before_seq, newest_first }` (step 10); `session_model`, `run_session`, `SessionAsk`, `day_is_spent`, `asleep`, `allowed_builtins` (phases 3 and 4); `pause::paused`, `pause::key_refused`; `SessionPurpose`, `SessionRegistration.connectors`, `ToolContext.connectors` and `evaluate_connector_call` from step 11, whose plan is 50d2fa8 and which must land first (re-checked then).
 
 Produces:
 
@@ -140,10 +161,12 @@ Consumes nothing from later tasks. Tests:
 
 Consumes `post_chat`, `pending_chat` from Task 2. Tests:
 
-- `starts_a_chat_for_the_oldest_pending` — with two pending chats, one tick starts one `chat` session, for the older, with the agent's own model, effort `low`, `in_reply_to` the user's message, and reports `TickReport::Chat`; a chat already answered starts none.
+- `starts_a_chat_for_the_oldest_pending` — with two pending chats, one tick starts one `chat` session, for the older, before any sprint rule, with the agent's own model, effort `low`, `in_reply_to` the user's message and `chat` on `session.started`, and reports `TickReport::Chat`; a chat already answered starts none; a message sent while a session ran is pending after it; a tick scoped to FRK-1 starts none.
+- `records_a_chat_cost_as_chat` — a chat session's `cost.recorded` has purpose `chat`, no task, and counts toward the day's spending that `check_budgets` reads; `team.activity` reads "Answering your chat" and validates.
 - `gives_a_chat_the_read_tier_alone` — for a Developer granted every tier, the spec's `farik_tools` are exactly `CHAT_TOOLS`, its built-ins exactly `allowed_builtins({Read})`, no MCP server besides Farik's, and the registration's tiers `[Read]`.
-- `denies_a_chat_everything_else` — through the hook, a chat session's `Edit`, `Bash`, `WebFetch`, `farik_create_task`, `farik_post_message`, `farik_write_memory` and an `mcp__playwright__` tool are denied; `Read` inside the project is allowed and a protected path is denied.
-- `records_the_reply` — `farik_chat_reply` appends one `chat_message.posted` by the agent with `in_reply_to` and `request`; a second call, a call from a non-chat session, and a request outside its limits are refused `chat_reply_refused`.
+- `denies_a_chat_everything_else` — for a Designer with `playwright` in its `mcp_servers`, through the hook, a chat session's `Edit`, `Bash`, `WebFetch`, `farik_create_task`, `farik_post_message`, `farik_write_memory` and an `mcp__playwright__` tool are denied, and its connectors are empty; `Read` inside the project is allowed and `Read` of `.farik/local/farik.db` is denied.
+- `offers_the_reply_only_in_a_chat` — `farik_chat_reply` is in no `implement`, `verify` or conversation session's tools.
+- `records_the_reply` — `farik_chat_reply` appends one `chat_message.posted` by the agent with `in_reply_to` and `request`; a second call, a call from a non-chat session, and a request outside its limits are refused `chat_reply_refused`; after the last, a good call still records.
 - `prompts_with_the_chat_alone` — the prompt holds this chat's last 16 KiB oldest first, the agent's lines inside `untrusted`, the closing instruction, and no line of another agent's chat; the same agent's `implement` prompt holds none of its chats.
 - `answers_through_the_recorded_transcript` — with `chat_answers_with_a_request`, a posted question ends in Mira's reply carrying the Apple Pay request, and no task, message or memory write.
 
@@ -154,8 +177,9 @@ Consumes `post_chat`, `pending_chat` from Task 2. Tests:
 Consumes Task 3's rule. Tests:
 
 - `answers_while_the_team_is_paused` — with the team paused, a tick starts the chat's session and no other rule runs; with the pause `credential_refused`, it starts none.
-- `a_paused_agent_answers_its_chat` — a paused agent's chat session passes the hook's and `dispatch`'s active check; its `implement` session is still refused `agent_not_active`; a retired agent's chat starts no session.
-- `says_why_a_chat_waits` — `chat.messages`' `waiting` is `answering` when pending, `day_spent` when the daily limit is spent (and no session starts), `asleep` with `until`, `key_refused`, `retired`, and null when answered.
+- `a_paused_agent_answers_its_chat` — a paused agent's chat session passes the hook's and `call_tool`'s active check; its `implement` session is still refused `agent_not_active`; a retired agent's chat starts no session.
+- `says_why_a_chat_waits` — `chat.messages`' `waiting` is `answering` when pending, `day_spent` when the daily limit is spent (and no session starts), `asleep` with `until`, `key_refused`, `retired`, in that precedence, `answering` while a session runs, and null when answered.
+- `says_no_answer_after_a_failed_session` — a chat session that ends without `farik_chat_reply` leaves `waiting: no_answer`, and no second session starts until the user writes again.
 - `wakes_serve_on_a_chat` — `chat_message_post` through the daemon wakes a waiting `farik serve` loop within one tick.
 
 - [ ] `feat(runtime): answer chats while the team is paused`
@@ -164,7 +188,6 @@ Consumes Task 3's rule. Tests:
 
 Tests:
 
-- `records_a_chat_cost_as_chat` — a chat session's `cost.recorded` has purpose `chat`, no task, and counts toward the day's spending that `check_budgets` reads.
 - `sums_costs_by_purpose` — `costs_for(CostScope::Purpose, CostWindow::Day(d))` sums one day's rows by purpose.
 - `answers_the_conversations` — `costs.summary`'s `conversations_today_usd` is today's `chat` spending and 0 with none.
 
@@ -176,6 +199,7 @@ Tests:
 
 - `files_a_chat_proposal` — `request.file { text, from_chat_message }` files a draft with `created_by: human` and `task.created`'s `from_chat_message` set; the edited words are the ones filed.
 - `refuses_a_bad_proposal_link` — a seq that is not a chat reply, a reply without `request`, and a reply already sent are refused with a sentence, and nothing is filed.
+- `files_a_proposal_once` — two `request.file` calls with one `from_chat_message`, raced on two threads, file one task; the other is refused as already sent.
 - `shows_what_was_sent` — `chat.messages` gives that reply `sent_as: "FRK-1"` and null for others.
 
 - [ ] `feat(runtime): file a chat's proposed request by the human's hand`
@@ -186,12 +210,13 @@ Vitest and axe. Tests:
 
 - `lists_the_chats` — Team first, then each agent with avatar, name, role and last line, and "Past teammates" for a retired one; the rail reads the approved label.
 - `opens_a_one_to_one` — `/channel/mira` shows the history with your lines labelled You and line breaks kept, and "Back to Team".
-- `sends_a_chat` — Send and Ctrl+Enter send `chat_message_post`; Enter makes a line; 4,001 code points are refused before sending.
+- `sends_a_chat` — Send and Enter send `chat_message_post`; Shift+Enter makes a line; 4,001 code points are refused before sending.
+- `shows_no_such_teammate` — `/channel/nobody` shows "No such teammate" beside the list.
 - `appends_chat_replies_live` — a `chat_message.posted` event for Mira is appended without a query; one for Theo is not.
 - `sends_a_proposal_as_a_request` — the box holds the title and text, editable; the button calls `request.file` with `fromChatMessage`; then "Sent as FRK-12" links to its request.
-- `says_why_no_answer` — each `waiting` reason shows its sentence.
+- `says_why_no_answer` — each `waiting` reason shows its sentence, `no_answer` among them; a `session.started` or `session.ended` of the open chat's agent with purpose `chat` re-queries it.
 - `keeps_a_past_teammate_read_only` — a retired agent's chat has no box.
-- `renders_agent_text_as_text` — a reply `<img src=x onerror=alert(1)>` shows as those characters and adds no `img`.
+- `renders_agent_text_as_text` — `<img src=x onerror=alert(1)>` as a reply, a proposal's title and a list's last line shows as those characters and adds no `img`.
 - `shows_conversations_on_costs` — the Costs page's line with `conversationsTodayUsd`.
 - `passes_axe_on_the_chats` — the list and a one-to-one have no axe violations.
 
@@ -203,16 +228,16 @@ Vitest and axe. Tests:
 
 1. open the chat list and Mira's chat;
 2. ask "Could customers also pay with Apple Pay?";
-3. see Mira's reply appear by itself, with the proposed request;
+3. see Mira's reply appear by itself, with the proposed request, and assert no `message.posted` was recorded so far;
 4. press "Send as a request", see "Sent as FRK-1";
 5. open Today and find FRK-1 there ("Mira has a question" about it);
-6. assert no `message.posted` was recorded; take screenshots at 360 and 1280 px.
+6. take screenshots at 360 and 1280 px.
 
 - [ ] `test(web): chat with an agent through the real server and browser`
 
 ### Task 9: The spec and the plan
 
-`docs/SPEC.md`, in the next revision after 0.30, as the design's table lists: 3 (the channel and chats), 4.3 (the one-to-one as built), 5.1 (chat is not command), 5.2 (the chat rule runs while paused), 5.5 (a chat's cost, the daily limit), 5.9 (chats apart from the channel), 8.2 (the `chat` session and its tools), 8.4 (chats in the log), 8.5 (`chat_message.posted`, `from_chat_message`, purpose `chat`), F7 and F8. The project plan's step 12 line records the landing.
+`docs/SPEC.md`, in the next revision after 0.30, as the design's table lists: 3 (the channel and chats), 4.3 (the one-to-one as built), 5.1 (chat is not command), 5.2 (the chat rule runs while paused), 4.4 (a paused agent still answers its chat), 5.5 (a chat's cost, the daily limit), 5.9 (chats apart from the channel; their privacy depends on `.farik/local/**` staying protected), 8.2 (the `chat` session and its tools), 8.4 (chats in the log), 8.5 (`chat_message.posted`, `from_chat_message`, purpose `chat`, `session.started`'s `chat`, and the attribution exception: the envelope names the chat's agent on the user's message too), F7 and F8. The project plan's step 12 line records the landing.
 
 - [ ] `docs(spec): specify one-to-one chats`
 
@@ -220,7 +245,7 @@ Vitest and axe. Tests:
 
 ```
 cargo xtask check --integration
-# expected: cargo 0 failed, with 22 new tests (T2 6, T3 6, T4 4, T5 3, T6 3);
-#   @farik/web: step 11's landed count plus 10; playwright: step 11's count plus 1;
+# expected: cargo 0 failed, with 24 new tests (T2 6, T3 8, T4 5, T5 2, T6 4);
+#   @farik/web: step 11's landed count plus 11; playwright: step 11's count plus 1;
 #   last line: xtask check: ok
 ```
