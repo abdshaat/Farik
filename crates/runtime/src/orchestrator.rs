@@ -32,6 +32,7 @@ use crate::transitions::TransitionError;
 #[cfg(test)]
 pub(crate) mod fixtures;
 mod human;
+pub(crate) use human::update_agent_with;
 mod integrate;
 mod messages;
 mod recover;

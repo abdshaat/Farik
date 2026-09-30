@@ -430,6 +430,9 @@
         },
         {
           "$ref": "#/$defs/projectNoteRequest"
+        },
+        {
+          "$ref": "#/$defs/agentReplaceRequest"
         }
       ]
     },
@@ -3212,6 +3215,47 @@
             "type": "string"
           },
           "description": "The protected-path globs that match something on disk, walked four folders deep without .git and node_modules, over at most 2000 entries."
+        }
+      }
+    },
+    "agentReplaceRequest": {
+      "title": "Agent Replace Request",
+      "description": "Replace: the agent retired and a newcomer added, in one validated change to the team file, so that a team is never left without the role the agent held. Appends agent.updated, then team.updated. Answers emptyResult; a refusal's data holds errors, each a path and a message, as team.save's does.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "jsonrpc",
+        "id",
+        "method",
+        "params"
+      ],
+      "properties": {
+        "jsonrpc": {
+          "const": "2.0"
+        },
+        "id": {
+          "$ref": "#/$defs/requestId"
+        },
+        "method": {
+          "const": "agent.replace"
+        },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "agent_id",
+            "newcomer"
+          ],
+          "properties": {
+            "agent_id": {
+              "type": "string",
+              "description": "The agent to retire."
+            },
+            "newcomer": {
+              "type": "object",
+              "description": "The agent that joins, as team.schema.json shapes an agent; the daemon validates the team it makes."
+            }
+          }
         }
       }
     }

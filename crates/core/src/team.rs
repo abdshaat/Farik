@@ -68,7 +68,8 @@ fn named_judge(choice: JudgeChoice) -> Option<Role> {
 }
 
 /// A role as a person reads it.
-fn plain_role(role: Role) -> &'static str {
+#[must_use]
+pub fn plain_role(role: Role) -> &'static str {
     match role {
         Role::ProductManager => "Product Manager",
         Role::ScrumMaster => "Scrum Master",

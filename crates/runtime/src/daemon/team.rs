@@ -26,8 +26,9 @@ use crate::pause::paused;
 use crate::tools::ToolDeps;
 
 /// The methods this module answers.
-pub(super) const METHODS: [&str; 5] = [
+pub(super) const METHODS: [&str; 6] = [
     "team.save",
+    "agent.replace",
     "team.start",
     "criteria.save",
     "account.disconnect",
@@ -313,6 +314,46 @@ fn checked(deps: &ToolDeps, wire: &Value, setup: bool) -> Result<(Team, Team), R
     }
 }
 
+/// `agent.replace`: the agent retired and the newcomer added in one write, checked as a save is,
+/// then `agent.updated` and `team.updated`.
+fn replace(deps: &ToolDeps, state: &DaemonState, params: &Value) -> Result<(), Failure> {
+    let agent_id = params["agent_id"].as_str().unwrap_or_default();
+    let team = deps.files.read_team().map_err(|e| internal(&e))?;
+    let mut wire = serde_json::to_value(&team).map_err(|e| internal(&e))?;
+    let Some(at) = team
+        .agents
+        .iter()
+        .position(|agent| agent.id.as_str() == agent_id)
+    else {
+        return Err(Failure::new(
+            super::web::NOT_FOUND,
+            format!("there is no agent {agent_id}"),
+        ));
+    };
+    wire["agents"][at]["status"] = json!("retired");
+    if let Some(agents) = wire["agents"].as_array_mut() {
+        agents.push(params["newcomer"].clone());
+    }
+    let after = validate_team(&wire).map_err(|errors| Failure::from(Refused::Errors(errors)))?;
+    let newcomer = after.agents.last().cloned();
+    let report = crate::orchestrator::update_agent_with(
+        deps,
+        state,
+        agent_id,
+        farik_core::team::AgentStatus::Retired,
+        newcomer,
+    );
+    match report {
+        Ok(_) => {}
+        Err(crate::orchestrator::CommandError::Refused { reason }) => {
+            return Err(Failure::new(REFUSED, reason));
+        }
+        Err(error) => return Err(internal(&format!("{error:?}"))),
+    }
+    let written = deps.files.read_team().map_err(|e| internal(&e))?;
+    append(deps, team_updated(&written))
+}
+
 /// Appends `body` as the human's and projects it.
 fn append(deps: &ToolDeps, body: EventBody) -> Result<(), Failure> {
     let event = new_event(body, deps.clock.now(), deps.ids.clone())
@@ -327,18 +368,20 @@ fn append(deps: &ToolDeps, body: EventBody) -> Result<(), Failure> {
 /// Writes `team` and records `team.updated`.
 fn write_team(deps: &ToolDeps, team: &Team) -> Result<(), Failure> {
     deps.files.write_team(team).map_err(|e| internal(&e))?;
-    append(
-        deps,
-        EventBody::TeamUpdated(TeamUpdatedBody {
-            team_name: team.name.to_string(),
-            agent_ids: team
-                .agents
-                .iter()
-                .map(|agent| agent.id.to_string())
-                .collect(),
-            updated_by: HUMAN.to_string(),
-        }),
-    )
+    append(deps, team_updated(team))
+}
+
+/// `team.updated` for `team`, as the human's.
+fn team_updated(team: &Team) -> EventBody {
+    EventBody::TeamUpdated(TeamUpdatedBody {
+        team_name: team.name.to_string(),
+        agent_ids: team
+            .agents
+            .iter()
+            .map(|agent| agent.id.to_string())
+            .collect(),
+        updated_by: HUMAN.to_string(),
+    })
 }
 
 /// The criterion library `wire` is, or the refusal with the schema's errors.
@@ -365,7 +408,7 @@ fn write_criteria(
 
 /// The methods of this module, whose params the schema already passed.
 pub(super) async fn call(
-    state: &DaemonState,
+    state: &Arc<DaemonState>,
     method: &str,
     params: &Value,
 ) -> Result<Value, Failure> {
@@ -393,6 +436,12 @@ pub(super) async fn call(
         })
         .await
         .map(|()| json!({})),
+        "agent.replace" => {
+            let state = Arc::clone(state);
+            off_the_worker(move || replace(&deps, &state, &params))
+                .await
+                .map(|()| json!({}))
+        }
         "criteria.save" => {
             off_the_worker(move || write_criteria(&deps, &library(&params["criteria"])?))
                 .await
@@ -766,6 +815,62 @@ mod tests {
         assert_eq!(
             team_file(&harness)["agents"].as_array().map(Vec::len),
             Some(2)
+        );
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn replaces_the_only_developer_in_one_change() {
+        let harness = driven("team-replace");
+        let retired = rpc(
+            &harness.daemon,
+            "command",
+            &json!({ "command": { "command": "agent_update", "body": { "agent_id": "dev-b", "status": "retired" } } }),
+        );
+        assert!(retired["result"]["said"].is_string(), "{retired}");
+        let before = team_file(&harness);
+        let newcomer = json!({
+            "id": "noor", "display_name": "Noor", "role": "software_developer",
+            "avatar": "extra-1", "status": "active",
+        });
+
+        // Another role in the only Developer's place leaves the team with none: nothing changes.
+        let mut wrong = newcomer.clone();
+        wrong["role"] = json!("architect");
+        let reply = rpc(
+            &harness.daemon,
+            "agent.replace",
+            &json!({ "agent_id": "dev-a", "newcomer": wrong }),
+        );
+        assert_eq!(reply["error"]["code"], -32005, "{reply}");
+        assert_eq!(reply["error"]["data"]["errors"][0]["path"], "/agents");
+        assert_eq!(team_file(&harness), before);
+
+        let seen = harness.project.events(&[]).len();
+        call(
+            &harness.daemon,
+            "agent.replace",
+            &json!({ "agent_id": "dev-a", "newcomer": newcomer }),
+            "emptyResult",
+        );
+        let agents: Vec<Value> = team_file(&harness)["agents"]
+            .as_array()
+            .expect("agents")
+            .iter()
+            .map(|agent| json!([agent["id"], agent["status"]]))
+            .collect();
+        assert_eq!(
+            agents,
+            [
+                json!(["pm", "active"]),
+                json!(["dev-a", "retired"]),
+                json!(["dev-b", "retired"]),
+                json!(["noor", "active"]),
+            ]
+        );
+        assert_eq!(
+            kinds(&harness)[seen..],
+            [EventKind::AgentUpdated, EventKind::TeamUpdated]
         );
     }
 

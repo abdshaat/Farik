@@ -4,12 +4,12 @@
 
 use std::num::NonZeroU64;
 
-use farik_core::contract::{TaskContract, TaskId, TaskKind, TaskStatus};
+use farik_core::contract::{Role, TaskContract, TaskId, TaskKind, TaskStatus};
 use farik_core::governor::gates::{Blocker, Rejection};
 use farik_core::governor::transition::TransitionRequest;
 use farik_core::governor::transition_table::TransitionActor;
 use farik_core::sprint::{Sprint, SprintStatus};
-use farik_core::team::{AgentStatus, Team};
+use farik_core::team::{Agent, AgentStatus, Team, plain_role};
 use farik_protocol::command::{AcceptSubject, Command, RequestSize};
 use farik_protocol::event::{
     AgentUpdatedBody, EscalationRaisedBodyReason, EscalationResolvedBody, EventBody, EventIds,
@@ -23,6 +23,7 @@ use super::requests::HUMAN;
 use super::verify::{governor_results, is_mechanical, since_verifying};
 use super::{CommandError, CommandReport, IntegrationOutcome, Orchestrator, OrchestratorError};
 use crate::channel::{ChannelError, NewMessage, mentions_in, post};
+use crate::daemon::DaemonState;
 use crate::pause::paused;
 use crate::sprints::{EndedBy, SprintError, end_sprint, start_sprint};
 use crate::tools::ToolDeps;
@@ -772,7 +773,24 @@ fn update_agent(
     agent_id: &str,
     status: AgentStatus,
 ) -> Result<CommandReport, CommandError> {
-    let tools = &orchestrator.deps.tools;
+    update_agent_with(
+        &orchestrator.deps.tools,
+        &orchestrator.deps.daemon,
+        agent_id,
+        status,
+        None,
+    )
+}
+
+/// `update_agent`, with `newcomer` added to the team in the same write when there is one: a
+/// replacement, which never leaves the team without the role the agent held, even for a moment.
+pub(crate) fn update_agent_with(
+    tools: &ToolDeps,
+    daemon: &DaemonState,
+    agent_id: &str,
+    status: AgentStatus,
+    newcomer: Option<Agent>,
+) -> Result<CommandReport, CommandError> {
     let mut team = tools.files.read_team().map_err(failed)?;
     let Some(agent) = team
         .agents
@@ -788,7 +806,12 @@ fn update_agent(
             reason: format!("same_status: {agent_id} is already {status}"),
         });
     }
+    let (name, role) = (agent.display_name.to_string(), Role::from(agent.role));
     agent.status = status;
+    team.agents.extend(newcomer);
+    if let Some(reason) = leaves_a_gap(&team, &name, role, status) {
+        return Err(CommandError::Refused { reason });
+    }
     tools.files.write_team(&team).map_err(failed)?;
     let mut events = vec![append(
         tools,
@@ -815,8 +838,8 @@ fn update_agent(
             } else {
                 (RETIRED, "the human reassigns the task".to_string())
             };
-            for session_id in orchestrator.deps.daemon.sessions_of(agent_id) {
-                orchestrator.deps.daemon.request_stop(&session_id, words);
+            for session_id in daemon.sessions_of(agent_id) {
+                daemon.request_stop(&session_id, words);
             }
             for row in held.filter(|row| row.status == TaskStatus::InProgress) {
                 events.extend(moved_for(
@@ -864,6 +887,35 @@ fn update_agent(
         said: format!("{agent_id} is {status}"),
         events,
     })
+}
+
+/// Why `name`, of `role`, may not be paused or retired, in `team` as it would be after: it was the
+/// last active agent of a role the team cannot work without (D18), or of the role the team named
+/// to check plans (spec 5.3). Section 10's foolproof configuration: the refusal says what to do.
+fn leaves_a_gap(team: &Team, name: &str, role: Role, status: AgentStatus) -> Option<String> {
+    if status == AgentStatus::Active || team.has_active(role) {
+        return None;
+    }
+    let (plain, verb) = (
+        plain_role(role),
+        if status == AgentStatus::Paused {
+            "stops"
+        } else {
+            "leaves"
+        },
+    );
+    if matches!(role, Role::ProductManager | Role::SoftwareDeveloper) {
+        Some(format!(
+            "last_of_role: {name} is your only {plain}; add another before {name} {verb}."
+        ))
+    } else if team.judge() == role {
+        Some(format!(
+            "last_judge: {name} checks your plans; let Farik choose who checks, or add another \
+             {plain}, before {name} {verb}."
+        ))
+    } else {
+        None
+    }
 }
 
 /// Stops a session registered in this process, and escalates its task as the human unless the
@@ -1819,6 +1871,36 @@ mod tests {
             orchestrator.tick().await.expect("the tick runs"),
             crate::orchestrator::TickReport::Idle { .. }
         ));
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn refuses_leaving_the_team_without_a_role_it_needs() {
+        let harness = Harness::new("human-last-of-role", |wire| {
+            wire["agents"]
+                .as_array_mut()
+                .expect("agents")
+                .push(json!({ "id": "ada", "display_name": "Ada", "role": "architect", "status": "active" }));
+            wire["policy"]["judgment"] = json!({ "required": "always", "judge": "architect" });
+        });
+        let orchestrator = an_orchestrator(&harness);
+        let before = harness.project.deps.files.read_team().expect("reads");
+        assert_eq!(
+            refused(&orchestrator, a_pause("pm", AgentStatus::Retired)).await,
+            "last_of_role: pm is your only Product Manager; add another before pm leaves."
+        );
+        assert_eq!(
+            refused(&orchestrator, a_pause("ada", AgentStatus::Paused)).await,
+            "last_judge: Ada checks your plans; let Farik choose who checks, or add another \
+             Architect, before Ada stops."
+        );
+        assert_eq!(
+            harness.project.deps.files.read_team().expect("reads"),
+            before
+        );
+        assert!(last(&harness, EventKind::AgentUpdated).is_none());
+        // One of two Developers may go.
+        handled(&orchestrator, a_pause("dev-b", AgentStatus::Retired)).await;
     }
 
     #[tokio::test]
