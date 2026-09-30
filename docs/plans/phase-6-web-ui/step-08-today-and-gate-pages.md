@@ -1,6 +1,6 @@
 # Phase 6, step 08: Today and the gate pages
 
-Status: ready
+Status: done (landed and landing-reviewed 2026-09-30)
 Branch: `phase/6-web-ui`
 Spec: `docs/SPEC.md` sections 5.4 (what a human gate shows), 5.7, 5.11, 5.13, 5.16, 10, F4, F14
 Depends on: steps 01 to 07 of this phase (step 07 supplies every query, method and command these pages use)
