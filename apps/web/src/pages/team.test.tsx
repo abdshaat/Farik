@@ -82,6 +82,7 @@ async function opened(path: string) {
 		team: TEAM,
 		agents: EFFECTIVE,
 		judges: JUDGES,
+		max_agents: 7,
 	});
 	await answerQuery(s, "models.list", MODELS);
 	return { container, s };
@@ -165,23 +166,23 @@ describe("team page", () => {
 		});
 		cleanup();
 
-		// Seven not retired is a full team: Add someone says why it is off.
+		// As many not retired as the daemon allows is a full team: Add someone says why it is off.
 		const full = await renderApp("/team");
 		const f = full.socket as FakeSocket;
 		await answerStatus(f, false);
-		const seven = {
+		const six = {
 			...TEAM,
 			agents: [
 				...TEAM.agents,
 				agent("noor", "Noor", "software_developer", "extra-1"),
-				agent("ivo", "Ivo", "software_developer", "extra-2"),
 				{ ...agent("lena", "Lena", "architect", "extra-3"), status: "retired" },
 			],
 		};
 		await answerQuery(f, "team.get", {
-			team: seven,
+			team: six,
 			agents: EFFECTIVE,
 			judges: JUDGES,
+			max_agents: 6,
 		});
 		const add = (await screen.findByRole("button", {
 			name: en.teamAdd,

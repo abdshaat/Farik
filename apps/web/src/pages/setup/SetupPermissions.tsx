@@ -129,8 +129,8 @@ export function SetupPermissions() {
 					defaults &&
 					(() =>
 						answer({
-							commands: defaults.runCommands ?? true,
-							push: defaults.push ?? false,
+							commands: defaults.runCommands,
+							push: defaults.push,
 						}))
 				}
 			/>

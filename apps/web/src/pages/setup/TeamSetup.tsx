@@ -142,7 +142,10 @@ export function useStart() {
 /** What putting a setting back puts back (SPEC 10): the values `farik init` writes. */
 export type Defaults = {
 	budgets: Team["budgets"];
-	policy: Team["policy"];
+	/** The permission answers always come with the defaults, so the page keeps no fallback of its own. */
+	policy: Team["policy"] & {
+		permissions: { runCommands: boolean; push: boolean };
+	};
 	rules: Team["rules"];
 };
 

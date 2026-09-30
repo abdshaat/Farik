@@ -21,8 +21,6 @@ const ROLES: Agent["role"][] = [
 	"architect",
 	"marketing_specialist",
 ];
-/** The most agents a team has that are not retired (SPEC F1). */
-const MOST = 7;
 
 export type Model = { id: string; label: string };
 export type Tier =
@@ -50,14 +48,17 @@ export type Judges = {
 
 /** The team file, what the daemon works out for each agent, and the models the price table knows. */
 export function useTeam() {
-	const { data } = useQuery<{ team: TeamFile; agents: Effective[] }>(
-		"team.get",
-		{},
-	);
+	const { data } = useQuery<{
+		team: TeamFile;
+		agents: Effective[];
+		maxAgents: number;
+	}>("team.get", {});
 	const { data: models } = useQuery<{ models: Model[] }>("models.list", {});
 	return {
 		team: data?.team,
 		effective: data?.agents ?? [],
+		/** The most agents a team has that are not retired (SPEC F1), as the daemon says. */
+		most: data?.maxAgents,
 		models: models?.models ?? [],
 	};
 }
@@ -97,7 +98,7 @@ export function useStatus() {
 
 /** The Team page: each agent on a card, with its model and a Pause or Resume. */
 export function Team() {
-	const { team, effective } = useTeam();
+	const { team, effective, most } = useTeam();
 	const status = useStatus();
 	if (!team) return null;
 	const agents = team.agents.filter((a) => a.status !== "retired");
@@ -157,7 +158,7 @@ export function Team() {
 					);
 				})}
 			</ul>
-			<AddSomeone team={team} />
+			<AddSomeone team={team} most={most ?? 0} />
 			<section className={styles.section} aria-labelledby="changes-heading">
 				<h2 id="changes-heading">{t("teamChangesTitle")}</h2>
 				<p>{t("teamChangesBody")}</p>
@@ -173,12 +174,12 @@ export function Team() {
 }
 
 /** "Add someone": a role, and a name from the spare names, saved as a change to the team. */
-function AddSomeone({ team }: { team: TeamFile }) {
+function AddSomeone({ team, most }: { team: TeamFile; most: number }) {
 	const { client } = useConnection();
 	const [role, setRole] = useState<Agent["role"]>("software_developer");
 	const [busy, setBusy] = useState(false);
 	const [refused, setRefused] = useState<string>();
-	const full = team.agents.filter((a) => a.status !== "retired").length >= MOST;
+	const full = team.agents.filter((a) => a.status !== "retired").length >= most;
 	const add = async () => {
 		if (!client) return;
 		setBusy(true);
