@@ -3,7 +3,13 @@ import { useState } from "react";
 import { Link, useParams } from "react-router";
 import { useConnection } from "../app/connection.tsx";
 import { useQuery } from "../app/store.ts";
-import { active, sentence, statusWord, type TaskStatus } from "../app/words.ts";
+import {
+	active,
+	type EscalationReason,
+	sentence,
+	statusWord,
+	type TaskStatus,
+} from "../app/words.ts";
 import { t } from "../strings/t.ts";
 import { Failed } from "./Failed.tsx";
 import styles from "./pages.module.css";
@@ -178,7 +184,13 @@ export function RequestFiled() {
 					<dt>{t("aboutPlanId")}</dt>
 					<dd>{id}</dd>
 					<dt>{t("aboutStatus")}</dt>
-					<dd>{statusWord(contract.contract.status)}</dd>
+					<dd>
+						{statusWord(
+							contract.contract.status,
+							history.events.findLast((e) => e.kind === "escalation.raised")
+								?.body.reason as EscalationReason | undefined,
+						)}
+					</dd>
 				</dl>
 			</section>
 		</div>

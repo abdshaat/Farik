@@ -166,4 +166,19 @@ describe("request page", () => {
 			),
 		);
 	});
+
+	it("says_a_plan_waiting_for_approval_waits_on_you", async () => {
+		await opened("escalated", [
+			CREATED,
+			TRIAGED,
+			event(
+				9,
+				"escalation.raised",
+				{ reason: "approval", detail: "The plan waits." },
+				"2026-09-26T10:00:00Z",
+			),
+		]);
+		const about = await screen.findByRole("region", { name: en.aboutRequest });
+		expect(within(about).getByText("Waiting on you")).toBeTruthy();
+	});
 });
