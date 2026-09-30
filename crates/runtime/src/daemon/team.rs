@@ -173,6 +173,8 @@ fn scanned(deps: &ToolDeps) -> Result<Value, Failure> {
     walk(deps.files.root(), "", 1, &mut on_disk);
     let kept_private: Vec<&String> = globs
         .iter()
+        // Farik's own local folder is not the user's private file.
+        .filter(|glob| !glob.starts_with(".farik/local"))
         .filter(|glob| {
             matches!(
                 check_protected_paths(&on_disk, std::slice::from_ref(glob)),
@@ -1000,10 +1002,7 @@ mod tests {
                     .collect::<Vec<_>>()
             )
         );
-        assert_eq!(
-            scanned["kept_private"],
-            json!([".env", "**/*.pem", ".farik/local/**"])
-        );
+        assert_eq!(scanned["kept_private"], json!([".env", "**/*.pem"]));
 
         // The walk stops after 2000 entries: a key file met after them is not seen.
         for n in 0..2000 {
@@ -1016,10 +1015,7 @@ mod tests {
             &json!({}),
             "projectScanResult",
         );
-        assert_eq!(
-            capped["kept_private"],
-            json!([".env", "**/*.pem", ".farik/local/**"])
-        );
+        assert_eq!(capped["kept_private"], json!([".env", "**/*.pem"]));
         std::fs::remove_dir_all(root.join("many")).expect("removed");
         let uncapped = query(
             &harness.daemon,
@@ -1029,7 +1025,30 @@ mod tests {
         );
         assert_eq!(
             uncapped["kept_private"],
-            json!([".env", "**/*.pem", "**/*.key", ".farik/local/**"])
+            json!([".env", "**/*.pem", "**/*.key"])
+        );
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn leaves_farik_own_folder_out_of_kept_private() {
+        let harness = driven("project-scan-own");
+        let local = harness.project.repo.path.join(".farik/local/x");
+        std::fs::create_dir_all(local.parent().expect("a parent")).expect("made");
+        std::fs::write(local, "x").expect("written");
+        let scanned = query(
+            &harness.daemon,
+            "project.scan",
+            &json!({}),
+            "projectScanResult",
+        );
+        assert!(
+            !scanned["kept_private"]
+                .as_array()
+                .expect("a list")
+                .contains(&json!(".farik/local/**")),
+            "{}",
+            scanned["kept_private"]
         );
     }
 
