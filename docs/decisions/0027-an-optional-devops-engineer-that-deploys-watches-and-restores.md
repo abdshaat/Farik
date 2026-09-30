@@ -38,6 +38,8 @@ Add an eighth role, the DevOps Engineer (`devops_engineer`). It is optional: the
 
 A deployment is a deploy task in a sprint; starting the sprint approves its deploys. Farik watches production with a watch tick that uses no model. A failed deploy or an unhealthy service opens an incident, which restarts the service once, rolls back to the last healthy deployment once if the restart does not restore it, and files a fix that skips planning, is reviewed by one agent, and is deployed by the DevOps Engineer. A second restart or rollback, a spent budget, or any production change outside these paths asks the human.
 
+The three Farik tools are `external_effect`, approved by the human's start of a sprint for its deploy tasks, and pre-approved once each by an open incident for the restart and the rollback; this amends spec 5.6's tier table. The incident's fix skips triage and sprint planning, but the Definition of Ready and the human's gates of spec 5.4 still apply, so a `high` risk fix waits for the human.
+
 The agent never calls a platform's write tools. Farik's `farik_deploy`, `farik_restart` and `farik_roll_back` do, with arguments Farik chooses; the platform's read tools are `network`, and everything else is `denied`.
 
 The role and its incident flow are phase 9 step 06; its four platform connectors are phase 9 step 07; the kit check becomes step 08 and gains a DevOps task.

@@ -35,7 +35,7 @@ Skills, first cut: `deployment-checklists`, `reading-production-logs`, `incident
 
 ## Planned deploys
 
-A deployment is a deploy task, a contract whose `change` is `deploy`, planned into a sprint like any other. Starting the sprint is the human's approval of its deploys.
+A deployment is a deploy task, a contract whose `change` is `deploy` (a value step 06 adds to the field), planned into a sprint like any other. Starting the sprint is the human's approval of its deploys.
 
 The deploy task depends on the tasks whose work it ships. It is assigned once they are all integrated. Its session may call `farik_deploy`, which takes no version: Farik deploys the commit the default branch holds after the last of those integrations, to the service the connector names.
 
@@ -59,7 +59,7 @@ A failed deploy or an unhealthy service opens an incident, `incident.opened`. Fa
 1. Restart. Farik starts a DevOps Engineer session whose first allowed production call is `farik_restart`: the service's pods, or a redeploy of the same version where the platform has no pods. Pre-approved once per incident.
 2. Roll back. If the service is not healthy within the settling period after the restart, `farik_roll_back` becomes callable: it returns the service to the last deployment Farik recorded as healthy, and to no other. Pre-approved once per incident.
 3. Investigate. The session reads the logs, the deployment, and the diff that went out, and writes an incident note.
-4. Fix. It files a fix task with `farik_create_task`. The task joins the open sprint without planning, or runs outside one when none is open. The spending limits apply as to any task.
+4. Fix. It files a fix task with `farik_create_task`. In an incident session, that files a standalone task with the incident as its request, skipping triage. The Definition of Ready, the judgment when the team has it on, and the human's gates still apply: a `high` risk fix waits for the human's acceptance. The task joins the open sprint without planning, or runs outside one when none is open. The spending limits apply as to any task.
 5. Review. One agent reviews the fix: the Architect, or the Developer.
 6. Deploy. Once the fix is accepted and integrated, the DevOps Engineer deploys it with `farik_deploy`, and the settling period watches it again. A healthy deploy resolves the incident, `incident.resolved`.
 
@@ -72,6 +72,8 @@ Anything outside these steps asks the human, as an `external_effect` does:
 The human may stop any step. A stopped incident waits on Today.
 
 ## Safety
+
+The three Farik tools are `external_effect` (spec 5.6). Their approval comes only from the human's start of a sprint, for its deploy tasks, and from an open incident, for one restart and one rollback; every other call asks the human.
 
 The agent never calls a platform's write tool. The kit tags the platform's read tools (status, deployments, logs, metrics) `network`, and every other tool `denied`. Farik's own three tools call the platform's write tools with arguments Farik chooses: the service from the connection, the version from the log. The agent cannot name a different version or service, because the tools take neither.
 
