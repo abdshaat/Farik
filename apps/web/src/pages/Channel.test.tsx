@@ -467,13 +467,11 @@ describe("channel", () => {
 		expect(asked.params.params).toEqual({ before_seq: 1001, limit: 100 });
 		// One page at a time.
 		expect((more as HTMLButtonElement).disabled).toBe(true);
-		act(() =>
-			s.reply(asked, {
-				messages: [998, 999, 1000].map((n) =>
-					message("mira", "ambient", `Older ${n}.`, { seq: n }),
-				),
-			}),
-		);
+		await s.reply(asked, {
+			messages: [998, 999, 1000].map((n) =>
+				message("mira", "ambient", `Older ${n}.`, { seq: n }),
+			),
+		});
 		await screen.findByText("Older 998.");
 		const list = screen.getByRole("list", { name: en.channelMessages });
 		expect(
@@ -506,7 +504,7 @@ describe("channel", () => {
 			if (!f) throw new Error("no second page was asked");
 			return f;
 		});
-		act(() => s.fail(asked, -32000, "the store is busy"));
+		await s.fail(asked, -32000, "the store is busy");
 		expect((await screen.findByRole("alert")).textContent).toBe(
 			en.channelEarlierFailed,
 		);
@@ -546,7 +544,7 @@ describe("channel", () => {
 				return f;
 			});
 			expect(asked.params.params).toEqual({ before_seq: 1001, limit: 100 });
-			act(() => s.reply(asked, { messages }));
+			await s.reply(asked, { messages });
 		};
 		const opened = async () => {
 			const block = await screen.findByRole("button", {

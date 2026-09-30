@@ -1,5 +1,6 @@
 import { expectNoAxeViolations } from "@farik/ui/test";
 import {
+	act,
 	cleanup,
 	fireEvent,
 	screen,
@@ -669,7 +670,7 @@ describe("team page", () => {
 		);
 		await validated(s, ["Finished work waits for you to merge it."]);
 		fireEvent.click(within(finish).getByRole("button", { name: en.agentSave }));
-		act(() => s.reply(s.calls("team.save").at(-1) as never, {}));
+		await s.reply(await sent(s, "team.save"), {});
 		const reread = await waitFor(() => {
 			const f = s
 				.calls("query")
@@ -679,14 +680,12 @@ describe("team page", () => {
 				throw new Error("the team was not read again");
 			return f as never;
 		});
-		act(() =>
-			s.reply(reread, {
-				team: { ...TEAM, policy: { ...TEAM.policy, integration: "manual" } },
-				agents: EFFECTIVE,
-				judges: JUDGES,
-				max_agents: 7,
-			}),
-		);
+		await s.reply(reread, {
+			team: { ...TEAM, policy: { ...TEAM.policy, integration: "manual" } },
+			agents: EFFECTIVE,
+			judges: JUDGES,
+			max_agents: 7,
+		});
 		await waitFor(() =>
 			expect(
 				picked(
@@ -728,20 +727,19 @@ describe("team page", () => {
 		fireEvent.click(
 			within(spend()).getByRole("button", { name: en.agentSave }),
 		);
-		act(() => s.reply(s.calls("team.save").at(-1) as never, {}));
+		await waitFor(() => expect(s.calls("team.save")).toHaveLength(2));
+		await s.reply(s.calls("team.save")[1] as never, {});
 		const again = await waitFor(() => {
 			const all = s.calls("query").filter((q) => q.params.name === "team.get");
 			if (all.length === reads) throw new Error("the team was not read again");
 			return all.at(-1) as never;
 		});
-		act(() =>
-			s.reply(again, {
-				team: { ...TEAM, budgets: { daily_usd: 15 } },
-				agents: EFFECTIVE,
-				judges: JUDGES,
-				max_agents: 7,
-			}),
-		);
+		await s.reply(again, {
+			team: { ...TEAM, budgets: { daily_usd: 15 } },
+			agents: EFFECTIVE,
+			judges: JUDGES,
+			max_agents: 7,
+		});
 		await waitFor(() =>
 			expect(
 				(within(spend()).getByLabelText(en.spendAmount) as HTMLInputElement)
@@ -836,12 +834,10 @@ describe("team page", () => {
 		fireEvent.click(button);
 		// The daemon's refusal is the sentence to show.
 		const wrong = await sent(s, "account.connect");
-		act(() =>
-			s.fail(
-				wrong,
-				-32005,
-				"that is not a subscription key: it starts with sk-ant-oat",
-			),
+		await s.fail(
+			wrong,
+			-32005,
+			"that is not a subscription key: it starts with sk-ant-oat",
 		);
 		expect(
 			await within(row).findByText(
@@ -862,7 +858,7 @@ describe("team page", () => {
 			kind: "subscription_token",
 			secret: "sk-ant-oat01-new",
 		});
-		act(() => s.reply(connect, { stored_in: "keychain", taking_on: false }));
+		await s.reply(connect, { stored_in: "keychain", taking_on: false });
 		// The row reads the account again, and the key works now.
 		const again = await waitFor(() => {
 			const asked = s
@@ -871,13 +867,11 @@ describe("team page", () => {
 			if (asked.length < 2) throw new Error("the account was not asked again");
 			return asked.at(-1) as never;
 		});
-		act(() =>
-			s.reply(again, {
-				provider: "anthropic",
-				kind: "subscription_token",
-				source: "keychain",
-			}),
-		);
+		await s.reply(again, {
+			provider: "anthropic",
+			kind: "subscription_token",
+			source: "keychain",
+		});
 		await waitFor(() =>
 			expect(within(row).queryByText(en.accountKeyRefused)).toBeNull(),
 		);

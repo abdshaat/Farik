@@ -251,12 +251,10 @@ describe("costs page", () => {
 				throw new Error("the new limit was not checked");
 			return f;
 		});
-		act(() =>
-			s.reply(check, {
-				errors: [],
-				effects: ["The team may spend up to $7.50 a day."],
-			}),
-		);
+		await s.reply(check, {
+			errors: [],
+			effects: ["The team may spend up to $7.50 a day."],
+		});
 		expect(
 			await within(dialog).findByText("The team may spend up to $7.50 a day."),
 		).toBeTruthy();
@@ -268,7 +266,7 @@ describe("costs page", () => {
 			if (!f) throw new Error("no team.save was sent");
 			return f;
 		});
-		act(() => s.fail(refused, -32602, "/budgets/daily_usd is not a number"));
+		await s.fail(refused, -32602, "/budgets/daily_usd is not a number");
 		expect((await within(dialog).findByRole("alert")).textContent).toBe(
 			en.refuseOther,
 		);
