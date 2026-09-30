@@ -647,6 +647,7 @@ export const en = {
 		"The answers you gave in setup, to change whenever you like. Each change starts with each agent’s next session, never in the middle of one.",
 	rulesMay: "What agents may do",
 	rulesSpend: "Daily spending limit",
+	rulesSpendTitle: "What the team may spend",
 	rulesFinish: "How finished work is added",
 	accountConfirm:
 		"Disconnecting pauses your team until you start Farik again and connect an account.",

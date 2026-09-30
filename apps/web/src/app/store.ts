@@ -22,10 +22,14 @@ export function useEvents(): Event[] {
 	return useConnection().events;
 }
 
-/** Queries on mount and on a new connection, and again after events, at most once per 250 ms, or on `again()`. */
+/**
+ * Queries on mount and on a new connection, and again after events, at most once per 250 ms, or
+ * on `again()`; never while `skip`, keeping what it last answered.
+ */
 export function useQuery<T>(
 	name: QueryName,
 	params: object,
+	skip = false,
 ): { data: T | undefined; error: RpcError | undefined; again: () => void } {
 	const { client, events } = useConnection();
 	const [result, setResult] = useState<{
@@ -49,7 +53,7 @@ export function useQuery<T>(
 
 	// biome-ignore lint/correctness/useExhaustiveDependencies: round asks for the query again
 	useEffect(() => {
-		if (!client) return;
+		if (!client || skip) return;
 		let live = true;
 		client.query(name, JSON.parse(key)).then(
 			(data) => live && setResult({ data: data as T, error: undefined }),
@@ -58,7 +62,7 @@ export function useQuery<T>(
 		return () => {
 			live = false;
 		};
-	}, [client, name, key, round]);
+	}, [client, name, key, round, skip]);
 
 	return { ...result, again: () => setRound((n) => n + 1) };
 }

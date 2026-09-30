@@ -503,7 +503,7 @@ describe("team page", () => {
 		);
 
 		// The same daily limit as the Costs page's.
-		const spend = part(en.rulesSpend);
+		const spend = part(en.rulesSpendTitle);
 		expect(
 			picked(within(spend).getByRole("radio", { name: /^No limit/ })),
 		).toBe(true);
@@ -650,6 +650,129 @@ describe("team page", () => {
 				judge: "auto",
 			},
 		});
+	});
+
+	it("keeps_each_rules_draft_until_it_is_saved_or_cancelled", async () => {
+		const { s, part } = await settings();
+		// The saved team is checked once on load, not once for each part.
+		await act(async () => {});
+		expect(
+			s.calls("query").filter((q) => q.params.name === "team.validate"),
+		).toHaveLength(1);
+
+		// A draft in one part survives another part's save and the page's re-read.
+		const branches = () =>
+			within(part(en.rulesMay)).getByRole("radio", {
+				name: /^Yes, on its own branches/,
+			});
+		fireEvent.click(branches());
+		const finish = part(en.rulesFinish);
+		fireEvent.click(
+			within(finish).getByRole("radio", {
+				name: new RegExp(`^${en.finishManual}`),
+			}),
+		);
+		await validated(s, ["Finished work waits for you to merge it."]);
+		fireEvent.click(within(finish).getByRole("button", { name: en.agentSave }));
+		act(() => s.reply(s.calls("team.save").at(-1) as never, {}));
+		const reread = await waitFor(() => {
+			const f = s
+				.calls("query")
+				.filter((q) => q.params.name === "team.get")
+				.at(-1);
+			if (f === s.calls("query").find((q) => q.params.name === "team.get"))
+				throw new Error("the team was not read again");
+			return f as never;
+		});
+		act(() =>
+			s.reply(reread, {
+				team: { ...TEAM, policy: { ...TEAM.policy, integration: "manual" } },
+				agents: EFFECTIVE,
+				judges: JUDGES,
+				max_agents: 7,
+			}),
+		);
+		await waitFor(() =>
+			expect(
+				picked(
+					within(part(en.rulesFinish)).getByRole("radio", {
+						name: new RegExp(`^${en.finishManual}`),
+					}),
+				),
+			).toBe(true),
+		);
+		expect(picked(branches())).toBe(true);
+
+		// Cancel drops the draft: the part shows the team's own answer again.
+		fireEvent.click(
+			within(part(en.rulesMay)).getByRole("button", { name: en.agentCancel }),
+		);
+		await waitFor(() => expect(picked(branches())).toBe(false));
+		expect(
+			picked(
+				within(part(en.rulesMay)).getByRole("radio", {
+					name: /^No, nobody may/,
+				}),
+			),
+		).toBe(true);
+
+		// A saved limit is what the part shows once the team is read again.
+		const spend = () => part(en.rulesSpendTitle);
+		fireEvent.click(
+			within(spend()).getByRole("radio", {
+				name: new RegExp(`^${en.spendDaily}`),
+			}),
+		);
+		fireEvent.change(within(spend()).getByLabelText(en.spendAmount), {
+			target: { value: "15" },
+		});
+		await validated(s, ["The team may spend up to $15 a day."]);
+		const reads = s
+			.calls("query")
+			.filter((q) => q.params.name === "team.get").length;
+		fireEvent.click(
+			within(spend()).getByRole("button", { name: en.agentSave }),
+		);
+		act(() => s.reply(s.calls("team.save").at(-1) as never, {}));
+		const again = await waitFor(() => {
+			const all = s.calls("query").filter((q) => q.params.name === "team.get");
+			if (all.length === reads) throw new Error("the team was not read again");
+			return all.at(-1) as never;
+		});
+		act(() =>
+			s.reply(again, {
+				team: { ...TEAM, budgets: { daily_usd: 15 } },
+				agents: EFFECTIVE,
+				judges: JUDGES,
+				max_agents: 7,
+			}),
+		);
+		await waitFor(() =>
+			expect(
+				(within(spend()).getByLabelText(en.spendAmount) as HTMLInputElement)
+					.value,
+			).toBe("15"),
+		);
+		expect(
+			(
+				within(spend()).getByRole("button", {
+					name: en.agentSave,
+				}) as HTMLButtonElement
+			).disabled,
+		).toBe(true);
+
+		// An amount that is not above zero is never saved, whatever the check says.
+		fireEvent.change(within(spend()).getByLabelText(en.spendAmount), {
+			target: { value: "0" },
+		});
+		await validated(s, ["The team may spend up to $0 a day."]);
+		expect(
+			(
+				within(spend()).getByRole("button", {
+					name: en.agentSave,
+				}) as HTMLButtonElement
+			).disabled,
+		).toBe(true);
 	});
 
 	it("shows_and_disconnects_the_account", async () => {

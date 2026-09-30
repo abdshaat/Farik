@@ -13,7 +13,13 @@ import { type Defaults, type Team, useDefaults } from "./setup/TeamSetup.tsx";
 import type { Judges } from "./Team.tsx";
 
 type Checked = { errors: Refusal[]; effects: string[]; judges?: Judges };
-type Part = { saved: Team; defaults: Defaults | undefined; done: () => void };
+type Part = {
+	saved: Team;
+	defaults: Defaults | undefined;
+	/** The saved team's own check, which a part shows until it has a draft. */
+	base: Checked | undefined;
+	done: () => void;
+};
 
 /**
  * Settings' "Your team's rules": setup's four questions after setup, each saved on its own
@@ -22,36 +28,54 @@ type Part = { saved: Team; defaults: Defaults | undefined; done: () => void };
 export function TeamRules() {
 	const { data, again } = useQuery<{ team: Team }>("team.get", {});
 	const defaults = useDefaults();
-	const [round, setRound] = useState(0);
+	const { data: base } = useQuery<Checked>(
+		"team.validate",
+		{ team: data?.team },
+		!data,
+	);
+	// Each part's round: saving or cancelling one starts that one again, and no other, so the
+	// others keep their drafts over the team as the daemon reads it again.
+	const [rounds, setRounds] = useState<Record<string, number>>({});
 	if (!data) return null;
-	// Saved or cancelled: each part starts again from the team as the daemon reads it.
-	const done = () => {
-		setRound((n) => n + 1);
-		again();
-	};
-	const part: Part = { saved: data.team, defaults, done };
-	const key = `${round}:${JSON.stringify(data.team)}`;
+	const part = (name: string) => ({
+		saved: data.team,
+		defaults,
+		base,
+		done: () => {
+			setRounds((r) => ({ ...r, [name]: (r[name] ?? 0) + 1 }));
+			again();
+		},
+	});
 	return (
 		<section className={styles.section} aria-labelledby="rules-area">
 			<h2 id="rules-area">{t("rulesArea")}</h2>
 			<p className={styles.muted}>{t("rulesNextSession")}</p>
-			<May key={`may-${key}`} {...part} />
-			<Spend key={`spend-${key}`} {...part} />
-			<Finish key={`finish-${key}`} {...part} />
-			<Plans key={`plans-${key}`} {...part} />
+			<May key={`may-${rounds.may ?? 0}`} {...part("may")} />
+			{/* Its fields keep their own state, so a newly saved limit starts it again. */}
+			<Spend
+				key={`spend-${rounds.spend ?? 0}-${data.team.budgets.dailyUsd}`}
+				{...part("spend")}
+			/>
+			<Finish key={`finish-${rounds.finish ?? 0}`} {...part("finish")} />
+			<Plans key={`plans-${rounds.plans ?? 0}`} {...part("plans")} />
 		</section>
 	);
 }
 
-/** A part's change: checked by the daemon, its effects listed, then Save or Cancel. */
-function useChange(
-	{ saved, done }: Part,
+/** A change: checked by the daemon, its effects listed, then Save or Cancel. */
+export function useChange(
+	{ saved, base, done }: Omit<Part, "defaults">,
 	next: Team,
 	options: { wrong?: boolean; shownAbove?: string } = {},
 ) {
 	const { client } = useConnection();
 	const changed = JSON.stringify(next) !== JSON.stringify(saved);
-	const { data: checked } = useQuery<Checked>("team.validate", { team: next });
+	const { data: drafted } = useQuery<Checked>(
+		"team.validate",
+		{ team: next },
+		!changed,
+	);
+	const checked = changed ? drafted : base;
 	const errors = changed ? (checked?.errors ?? []) : [];
 	const effects = changed ? (checked?.effects ?? []) : [];
 	const [busy, setBusy] = useState(false);
@@ -72,7 +96,8 @@ function useChange(
 	const below = errors.filter(
 		(e) => !shownAbove || !e.path.startsWith(shownAbove),
 	);
-	const foot = (
+	const blocked = !changed || errors.length > 0 || Boolean(options.wrong);
+	const preview = (
 		<>
 			{effects.length > 0 && (
 				<div aria-live="polite">
@@ -93,13 +118,13 @@ function useChange(
 						.join(" ")}
 				</p>
 			)}
+		</>
+	);
+	const foot = (
+		<>
+			{preview}
 			<div className={styles.actions}>
-				<Button
-					kind="primary"
-					busy={busy}
-					disabled={!changed || errors.length > 0 || Boolean(options.wrong)}
-					onClick={save}
-				>
+				<Button kind="primary" busy={busy} disabled={blocked} onClick={save}>
 					{t("agentSave")}
 				</Button>
 				<Button disabled={!changed} onClick={done}>
@@ -108,7 +133,7 @@ function useChange(
 			</div>
 		</>
 	);
-	return { checked, errors, foot };
+	return { checked, errors, foot, preview, save, busy, blocked };
 }
 
 /** One part of the area, under its heading. */
@@ -172,7 +197,7 @@ function Spend(part: Part) {
 			: { ...saved, budgets: budgets(saved.budgets) };
 	const { foot } = useChange(part, next, { wrong });
 	return (
-		<Part id="rules-spend" title={t("rulesSpend")}>
+		<Part id="rules-spend" title={t("rulesSpendTitle")}>
 			{fields}
 			{foot}
 		</Part>
