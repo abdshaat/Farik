@@ -706,13 +706,39 @@ describe("team page", () => {
 		const row = await screen.findByRole("region", { name: en.accountRow });
 		expect(await within(row).findByText(en.accountKeyRefused)).toBeTruthy();
 		await expectNoAxeViolations(container);
+		const button = within(row).getByRole("button", {
+			name: en.accountConnectAgain,
+		}) as HTMLButtonElement;
+		// Nothing to send until a key is typed.
+		expect(button.disabled).toBe(true);
+		fireEvent.change(within(row).getByLabelText(en.subscriptionKey), {
+			target: { value: "sk-ant-api-wrong" },
+		});
+		fireEvent.click(button);
+		// The daemon's refusal is the sentence to show.
+		const wrong = await sent(s, "account.connect");
+		act(() =>
+			s.fail(
+				wrong,
+				-32005,
+				"that is not a subscription key: it starts with sk-ant-oat",
+			),
+		);
+		expect(
+			await within(row).findByText(
+				"that is not a subscription key: it starts with sk-ant-oat",
+			),
+		).toBeTruthy();
 		fireEvent.change(within(row).getByLabelText(en.subscriptionKey), {
 			target: { value: "sk-ant-oat01-new" },
 		});
-		fireEvent.click(
-			within(row).getByRole("button", { name: en.accountConnectAgain }),
-		);
-		const connect = await sent(s, "account.connect");
+		fireEvent.click(button);
+		const connect = await waitFor(() => {
+			const all = s.calls("account.connect");
+			const second = all[1];
+			if (!second) throw new Error("no second account.connect");
+			return second;
+		});
 		expect(connect.params).toEqual({
 			kind: "subscription_token",
 			secret: "sk-ant-oat01-new",

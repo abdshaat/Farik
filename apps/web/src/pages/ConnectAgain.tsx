@@ -1,7 +1,6 @@
 import { Button, Choice, TextField } from "@farik/ui";
 import { useState } from "react";
 import { useConnection } from "../app/connection.tsx";
-import { saidAll } from "../app/refusals.ts";
 import { t } from "../strings/t.ts";
 import styles from "./pages.module.css";
 
@@ -24,7 +23,8 @@ export function ConnectAgain({ onConnected }: { onConnected: () => void }) {
 			setSecret("");
 			onConnected();
 		} catch (e) {
-			setRefused(saidAll(e));
+			// The daemon refuses a key in the sentence to show, as setup does.
+			setRefused((e as Error).message);
 		}
 		setBusy(false);
 	};
