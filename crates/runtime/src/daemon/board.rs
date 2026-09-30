@@ -447,11 +447,23 @@ mod tests {
         let deps = &harness.project.deps;
         harness.accepted("FRK-1");
         harness.ready("FRK-2");
+        harness.file("FRK-4", "cancelled", |_| {});
         harness
             .project
-            .open_sprint("S1", Some(20.0), &["FRK-1", "FRK-2"]);
+            .open_sprint("S1", Some(20.0), &["FRK-1", "FRK-2", "FRK-4"]);
         let planning = posted(&harness, "pm", "c1", "planning");
         posted(&harness, "pm", "c1", "planning");
+        // A reply in the planning thread is talk, not the meeting.
+        said(
+            &harness,
+            "dev-a",
+            "reply",
+            "Sounds right.",
+            &json!({ "session_id": "c1", "body": { "thread": "planning" } }),
+        );
+        // Each day's standup is a meeting of its own, in the same thread.
+        let monday = posted(&harness, "pm", "c5", "standup");
+        let tuesday = posted(&harness, "pm", "c6", "standup");
         spent(
             &harness,
             (Some("FRK-1"), "dev-a", "s1"),
@@ -487,7 +499,7 @@ mod tests {
                 {
                     "sprint_id": "S1", "status": "ended", "started_at": "2026-09-24T00:00:00Z",
                     "started_by": "human", "ended_at": at_now, "budget_usd": 20.0,
-                    "spent_usd": 1.5, "planned_by": "pm", "task_count": 2, "done_count": 1,
+                    "spent_usd": 1.5, "planned_by": "pm", "task_count": 3, "done_count": 2,
                 },
                 {
                     "sprint_id": "S2", "status": "open", "started_at": "2026-09-24T00:00:00Z",
@@ -514,7 +526,8 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec![
                 (json!("FRK-1"), json!("accepted")),
-                (json!("FRK-2"), json!("ready"))
+                (json!("FRK-2"), json!("ready")),
+                (json!("FRK-4"), json!("cancelled")),
             ],
             "{one}"
         );
@@ -522,6 +535,8 @@ mod tests {
             one["meetings"],
             json!([
                 { "thread": "planning", "first_seq": planning, "at": at_now, "posts": 2 },
+                { "thread": "standup", "first_seq": monday, "at": at_now, "posts": 1 },
+                { "thread": "standup", "first_seq": tuesday, "at": at_now, "posts": 1 },
                 { "thread": "review", "first_seq": review, "at": at_now, "posts": 1 },
                 { "thread": "retro", "first_seq": retro, "at": at_now, "posts": 1 },
             ]),
