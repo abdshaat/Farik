@@ -3,6 +3,7 @@ import { useState } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 import { useConnection } from "../app/connection.tsx";
 import { useQuery } from "../app/store.ts";
+import { active, sentence } from "../app/words.ts";
 import { t } from "../strings/t.ts";
 import {
 	dollars,
@@ -14,7 +15,6 @@ import {
 import own from "./PlanPage.module.css";
 import type { Contract } from "./PlanPage.tsx";
 import styles from "./pages.module.css";
-import { active, sentence } from "./RequestFiled.tsx";
 import type { Team } from "./setup/TeamSetup.tsx";
 
 /** One of `escalation.choices`: its label, and the command sent with the message added. */

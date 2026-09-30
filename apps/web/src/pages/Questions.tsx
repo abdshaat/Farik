@@ -3,10 +3,10 @@ import { useState } from "react";
 import { Link, useParams } from "react-router";
 import { useConnection } from "../app/connection.tsx";
 import { useQuery } from "../app/store.ts";
+import { sentence } from "../app/words.ts";
 import { t } from "../strings/t.ts";
 import styles from "./pages.module.css";
 import own from "./Questions.module.css";
-import { sentence } from "./RequestFiled.tsx";
 import type { Agent, Team } from "./setup/TeamSetup.tsx";
 
 type Question = {

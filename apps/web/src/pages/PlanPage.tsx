@@ -4,11 +4,10 @@ import { useState } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 import { useConnection } from "../app/connection.tsx";
 import { useQuery } from "../app/store.ts";
-import { statusWord, type TaskStatus } from "../app/words.ts";
+import { active, sentence, statusWord, type TaskStatus } from "../app/words.ts";
 import { t } from "../strings/t.ts";
 import own from "./PlanPage.module.css";
 import styles from "./pages.module.css";
-import { active, sentence } from "./RequestFiled.tsx";
 import type { Agent, Team } from "./setup/TeamSetup.tsx";
 
 type Verification = {

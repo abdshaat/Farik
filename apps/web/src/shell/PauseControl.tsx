@@ -1,14 +1,9 @@
 import { Button } from "@farik/ui";
 import { useState } from "react";
 import { useConnection } from "../app/connection.tsx";
+import { sentence } from "../app/words.ts";
 import { t } from "../strings/t.ts";
 import styles from "./Shell.module.css";
-
-/** "already_paused: the team is already paused" -> "The team is already paused". */
-function sentence(detail: string): string {
-	const said = detail.replace(/^[a-z_]+: /, "");
-	return said.charAt(0).toUpperCase() + said.slice(1);
-}
 
 /** Pause or Resume the team; the state itself comes from `serve.status`, refreshed by the event. */
 export function PauseControl({

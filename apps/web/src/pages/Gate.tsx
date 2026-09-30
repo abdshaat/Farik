@@ -3,13 +3,12 @@ import { useState } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 import { useConnection } from "../app/connection.tsx";
 import { useQuery } from "../app/store.ts";
-import { statusWord } from "../app/words.ts";
+import { sentence, statusWord } from "../app/words.ts";
 import { t } from "../strings/t.ts";
 import gate from "./Gate.module.css";
 import own from "./PlanPage.module.css";
 import { type Contract, day } from "./PlanPage.tsx";
 import styles from "./pages.module.css";
-import { sentence } from "./RequestFiled.tsx";
 import { SendBackDialog } from "./SendBackDialog.tsx";
 import type { Agent, Team } from "./setup/TeamSetup.tsx";
 

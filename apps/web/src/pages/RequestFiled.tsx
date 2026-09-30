@@ -3,7 +3,7 @@ import { useState } from "react";
 import { Link, useParams } from "react-router";
 import { useConnection } from "../app/connection.tsx";
 import { useQuery } from "../app/store.ts";
-import { statusWord, type TaskStatus } from "../app/words.ts";
+import { active, sentence, statusWord, type TaskStatus } from "../app/words.ts";
 import { t } from "../strings/t.ts";
 import styles from "./pages.module.css";
 import own from "./RequestFiled.module.css";
@@ -15,17 +15,6 @@ type HistoryEvent = {
 	kind: string;
 	body: { size?: Size; reason?: string; triagedBy?: string };
 };
-
-/** "triage_closed: the request is already being planned" -> "The request is already being planned". */
-export function sentence(detail: string): string {
-	const said = detail.replace(/^[a-z_]+: /, "");
-	return said.charAt(0).toUpperCase() + said.slice(1);
-}
-
-/** The active agent in `role`, if the team has one. */
-export function active(agents: Agent[], role: Agent["role"]) {
-	return agents.find((a) => a.role === role && a.status !== "retired");
-}
 
 /** A request's page: what was asked, how it was sized, and the other size one click away. */
 export function RequestFiled() {
