@@ -54,6 +54,10 @@ const REQUIRED_ROLES: [(RoleWire, &str); 2] = [
     (RoleWire::SoftwareDeveloper, "do the work"),
 ];
 
+/// The most agents a team has that are not retired (spec 4.1). A retired agent stays in the file
+/// so that its past events still name someone, so it is not one of them.
+const MAX_AGENTS: usize = 7;
+
 /// The role a team named to check plans; `None` for `auto`.
 fn named_judge(choice: JudgeChoice) -> Option<Role> {
     match choice {
@@ -119,6 +123,19 @@ pub fn validate_team(input: &Value) -> Result<Team, Vec<ValidationError>> {
             }]
         })?;
     let mut errors = Vec::new();
+    if team
+        .agents
+        .iter()
+        .filter(|agent| agent.status != AgentStatus::Retired)
+        .count()
+        > MAX_AGENTS
+    {
+        errors.push(ValidationError {
+            path: "/agents".to_string(),
+            message: "A team has seven agents at most. Retire one before adding another."
+                .to_string(),
+        });
+    }
     let repeated = repeated_ids(team.agents.iter().map(|agent| agent.id.as_str()));
     if !repeated.is_empty() {
         errors.push(ValidationError {
@@ -485,11 +502,29 @@ mod tests {
 
         let mut eight = a_team_wire();
         eight["agents"] = Value::Array(
-            (0..8)
-                .map(|n| an_agent_wire(&format!("agent-{n}"), "software_developer"))
+            std::iter::once(an_agent_wire("ada", "product_manager"))
+                .chain((0..7).map(|n| an_agent_wire(&format!("agent-{n}"), "software_developer")))
                 .collect(),
         );
-        assert_eq!(paths(&eight), ["/agents"], "and seven at most");
+        assert_eq!(
+            refusals(&eight),
+            [(
+                "/agents".to_string(),
+                "A team has seven agents at most. Retire one before adding another.".to_string()
+            )],
+            "and seven at most"
+        );
+
+        // A retired agent stays in the file so its past work still names someone, and is not one
+        // of the seven: replacing an agent a third time still leaves room.
+        let mut retired = eight.clone();
+        for n in 0..3 {
+            retired["agents"][n + 1]["status"] = json!("retired");
+        }
+        let mut more = retired["agents"].as_array().expect("agents").clone();
+        more.extend((7..9).map(|n| an_agent_wire(&format!("agent-{n}"), "software_developer")));
+        retired["agents"] = Value::Array(more);
+        validate_team(&retired).expect("seven not retired, three retired, is a team");
     }
 
     #[test]
