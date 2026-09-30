@@ -24,11 +24,13 @@ The ADR's and the design's decisions hold as written. This plan decides only wha
 
 - **The founder's gate (standing rule of 2026-09-26).** Task 1's mockups are approved by the founder before Task 2 starts, here and in step 12. The approval is recorded in this section in Task 1's commit, with the character, tag colour and name he chose. A choice other than the defaults below changes only data (`role.yaml`, `tokens.json`, the avatar key), never a task.
 - **Name and persona**, the defaults the mockup offers: Iris, "Makes it clear, calm and easy to use". Its id is `iris`. The pool of extra names (Noor, Ivo, Lena, Sami, Rui) stays for extra agents.
-- **Character options:** the existing `extra-1` to `extra-5` (`docs/brand/assets/characters/`). No new art.
+- **Character options:** the existing `extra-1` to `extra-5` (`docs/brand/assets/characters/`). No new art. Once the founder chooses one, extra agents' avatars are drawn from the other four extras, so no two agents look alike (F10).
 - **Tag colour options:** dusty teal `#9EC3BE`, soft peach `#E3B89A`, pale clay `#CDB29C`. Each is muted, light, distinct from the five role colours, and passes the contrast test against `role-ink` #161616. The chosen one becomes the token `role-ui-ux-designer` in both themes.
 - **The plan gate is read from the log at each call.** The gate is the latest `design_plan.*` event of the session's task. The hook and `call_tool` both judge it, and refuse the Designer's `write_workspace`, `execute` and `git_local` calls with `design_plan_not_approved`. Rejected: fixing the gate at session start, because a plan proposed after the session started must close it.
 - **The tools' tiers.** `farik_propose_design_plan` and `farik_decide_design_plan` are `read`: they write only the log. Each also checks its session's purpose and role, and is refused with `design_plan_refused` outside the session that gives it.
 - **The explore session in this step:** the read tier's built-ins in the task's worktree, and five Farik tools: `farik_read_task`, `farik_read_board`, `farik_read_rules`, `farik_read_criteria` and `farik_read_decisions`. Plus `farik_propose_design_plan`. Step 12 adds the connector and `farik_check_page`.
+- **A session that ends without its one answer** (D6). An `explore` session that ends with no `farik_propose_design_plan` is started again, and so is a Product Manager's decision session that ends with no `farik_decide_design_plan`. This is what `verify.rs` does for a reviewer who wrote no note. Each restart counts toward the contract's sessions allowance, which escalates with `sessions` as today.
+- **Without Docker's sandbox** (the founder, 2026-09-30, D3), the Designer is unavailable: `team.propose` lists it unticked with "Needs Docker's sandbox". Step 12 adds the rule that enforces this for assignment, since the browser is step 12's; until step 12 lands, an explore session needs no Docker.
 - **The mockups are new files**, so the approved ones stay untouched: `DesignerTeam`, `SettingsPreview`, `DesignPlan` and `GateDesignReview`. They are registered in `canvas.json` under the pages `team`, `settings`, `daily` and `gates`.
 
 ## File map
@@ -76,8 +78,8 @@ Wire:
 ### Task 1: Mockups, and the founder's approval
 
 Files: created `docs/design/mockups/{DesignerTeam,SettingsPreview,DesignPlan,GateDesignReview}.dc.html`; modified `canvas.json`. In the style of the existing boards: the rail, the palette, Space Grotesk, the 1440 px frame, and a phone frame where a screen has one.
-- `DesignerTeam`: the "Your team" row for the Designer, ticked, and its unticked "Needs Docker" variant; the Designer's Team card; the five characters and the three tag colours side by side, labelled for the founder to choose; the agent editor's "Connectors" list with the Playwright switch.
-- `SettingsPreview`: Settings' "How to open your app", the Designer's setup card asking for it, and the Today waiting row "Tell Farik how to open your app".
+- `DesignerTeam`: the "Your team" row for the Designer, ticked, and its unticked "Needs Docker's sandbox" variant; the Designer's Team card; the five characters and the three tag colours side by side, labelled for the founder to choose; the agent editor's "Connectors" list with the Playwright switch.
+- `SettingsPreview`: Settings' "How to open your app" (a prepare command, a start command, a port and a first page), the Designer's setup card asking for it, and the Today waiting row "Tell Farik how to open your app".
 - `DesignPlan`: the task page's "The plan", "Waiting for Mira to approve the plan", then approved, then returned with the reason; the board card and task page with "Waiting on the Designer" (paused) and "Checking the screens" (in review).
 - `GateDesignReview`: the gate's review letter from the Designer, with its four checks (phone and desktop, light and dark), each with its screenshot and violations, and the Architect's review below it.
 
@@ -144,6 +146,7 @@ Tests:
 - `refuses_the_plan_outside_explore`: `design_plan_refused` in `implement` and for a Developer; the plan's length and summary bounds are each refused with their sentence.
 - `refuses_the_decision_but_from_the_product_manager`: `design_plan_refused` for the Architect, and for the Product Manager outside a `verify` session about the task.
 - `refuses_a_designer_write_before_approval` (hook and `call_tool`): `Edit` and `farik_exec` are denied with `design_plan_not_approved`.
+- `starts_again_without_an_answer`: an explore session with no plan is followed by a new explore session, and a decision session with no decision by a new decision session; at the sessions allowance, the task escalates with `sessions`.
 - `sends_the_designers_work_to_the_architect`: after the completion, the reviewer's session is the Architect's.
 - `answers_the_task_with_its_plan`: `task.get`'s `design_plan`, in each state.
 
@@ -184,7 +187,7 @@ The header gains "Revision 0.31 (<date>) …", from phase 6 step 11, in the form
 
 ```
 cargo xtask check --integration
-# expected: cargo 0 failed (T2 6 new, T3 4, T4 9);
+# expected: cargo 0 failed (T2 6 new, T3 4, T4 10);
 #   @farik/brand: the count at this step's start (one pair added to an existing test);
 #   @farik/web: the count at this step's start plus 4 (T5);
 #   playwright: the count at this step's start, unchanged;
