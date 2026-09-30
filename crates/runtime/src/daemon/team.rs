@@ -94,6 +94,14 @@ pub(super) fn query(deps: &ToolDeps, name: &str, params: &Value) -> Result<Value
             }
         }
         "models.list" => models(deps),
+        "settings.defaults" => {
+            let defaults = farik_core::team::defaults();
+            Ok(json!({
+                "budgets": serde_json::to_value(defaults.budgets).map_err(|e| internal(&e))?,
+                "policy": serde_json::to_value(defaults.policy).map_err(|e| internal(&e))?,
+                "rules": {},
+            }))
+        }
         "project.scan" => scanned(deps),
         _ => Err(Failure::new(
             super::web::UNKNOWN_QUERY,
@@ -1192,6 +1200,42 @@ mod tests {
             json!({ "removed_from": [], "paused": false, "environment_variable": "ANTHROPIC_API_KEY" })
         );
         assert!(harness.project.events(&[EventKind::TeamPaused]).is_empty());
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn answers_the_defaults_a_setting_is_put_back_to() {
+        let harness = driven("team-defaults");
+        let defaults = query(
+            &harness.daemon,
+            "settings.defaults",
+            &json!({}),
+            "settingsDefaultsResult",
+        );
+        assert_eq!(defaults["budgets"], json!({}), "no daily limit (ADR 0015)");
+        assert_eq!(defaults["rules"], json!({}), "the rules Farik ships");
+        assert_eq!(
+            defaults["policy"],
+            json!({
+                "human_accepts_contracts": "high_risk",
+                "wip_limit_per_agent": 1,
+                "blocked_limit_hours": 24,
+                "max_iterations": 3,
+                "integration": "auto_merge",
+                "ambient_messages_per_sprint": 1,
+                "escalation_age_hours": 24,
+                "memory_cap_tokens": 8000,
+                "judgment": {
+                    "required": "always",
+                    "questions": [
+                        "Does the task fit its budget?",
+                        "Would its checks notice if the work went wrong the way its intent worries about?"
+                    ],
+                    "judge": "auto"
+                },
+                "permissions": { "run_commands": true, "push": false }
+            })
+        );
     }
 
     #[test]

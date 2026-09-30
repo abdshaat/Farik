@@ -50,7 +50,8 @@
         "sprints.list",
         "sprint.get",
         "costs.summary",
-        "metrics"
+        "metrics",
+        "settings.defaults"
       ]
     },
     "subscribeRequest": {
@@ -258,7 +259,8 @@
               "$ref": "#/$defs/costsSummaryQuery"
             },
             {
-              "$ref": "#/$defs/metricsQuery"
+              "$ref": "#/$defs/metricsQuery",
+              "$ref": "#/$defs/settingsDefaultsQuery"
             }
           ]
         }
@@ -3427,6 +3429,49 @@
               "type": "null"
             }
           ]
+        }
+      }
+    },
+    "settingsDefaultsQuery": {
+      "title": "Settings Defaults Query",
+      "description": "What putting a setting back puts back (spec 10): farik_core::team::defaults(), the same values farik init writes.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "params"
+      ],
+      "properties": {
+        "name": {
+          "const": "settings.defaults"
+        },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {}
+        }
+      }
+    },
+    "settingsDefaultsResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "budgets",
+        "policy",
+        "rules"
+      ],
+      "properties": {
+        "budgets": {
+          "type": "object",
+          "description": "The team's budgets as team.schema.json shapes them, with no daily limit."
+        },
+        "policy": {
+          "type": "object",
+          "description": "The starter policy, with the plan check and the permission answers written out."
+        },
+        "rules": {
+          "type": "object",
+          "description": "The rules the team adds to Farik's; none by default."
         }
       }
     }

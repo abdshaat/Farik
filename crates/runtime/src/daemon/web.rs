@@ -677,9 +677,8 @@ fn query(state: &DaemonState, name: &str, params: &Value) -> Result<Value, Failu
                 None => Err(missing()),
             }
         }
-        "team.get" | "team.propose" | "team.validate" | "models.list" | "project.scan" => {
-            team::query(deps, name, params)
-        }
+        "team.get" | "team.propose" | "team.validate" | "models.list" | "project.scan"
+        | "settings.defaults" => team::query(deps, name, params),
         name if board::QUERIES.contains(&name) => board::query(deps, name, params),
         _ => gates::query(deps, name, params),
     }
