@@ -590,6 +590,8 @@ mod tests {
             after(args, "--label"),
             ["farik.project=p", "farik.task=FRK-1"]
         );
+        // A missing image fails the check at once rather than pulling gigabytes unseen.
+        assert_eq!(after(args, "--pull"), ["never"]);
         assert_eq!(after(args, "--entrypoint"), ["node"]);
         let definition = farik_roles::builtin_connector("playwright").expect("shipped");
         let image = args

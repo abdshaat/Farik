@@ -4,9 +4,8 @@
 
 use std::collections::BTreeMap;
 use std::fmt;
-use std::io::Write as _;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::Command;
 
 use farik_core::contract::TaskId;
 use farik_core::governor::gates::DesignerBrowser;
@@ -221,6 +220,8 @@ pub fn connector_server(
         "--rm",
         "-i",
         "--init",
+        "--pull",
+        "never",
         "--name",
         &browser_container(&container),
     ]
@@ -351,7 +352,10 @@ pub fn check_page(
     let (Some(folder), Some(file)) = (out.parent(), out.file_name()) else {
         return Err(error(format!("{} names no file", out.display())));
     };
-    let mut args: Vec<String> = ["run", "--rm", "-i", "--init"].map(String::from).to_vec();
+    // `--pull never`: a missing image fails the check at once, not after gigabytes pulled unseen.
+    let mut args: Vec<String> = ["run", "--rm", "-i", "--init", "--pull", "never"]
+        .map(String::from)
+        .to_vec();
     for label in preview.labels() {
         args.extend(["--label".to_string(), label]);
     }
@@ -419,34 +423,45 @@ struct Printed {
 /// How many lines of a failed check's output are kept.
 const CHECK_TAIL_LINES: usize = 40;
 
+/// How long a page check may take on the host's clock: the script's own 90 seconds, and time for
+/// docker to start and remove the container.
+const CHECK_LIMIT: std::time::Duration = std::time::Duration::from_secs(150);
+
 /// Runs `docker` with `args` and `stdin`, and answers its standard output.
-// ponytail: no host-side deadline; the script's own watchdog ends the container within 90 s.
 fn run_docker(args: &[String], stdin: &str) -> Result<String, CheckError> {
+    let mut docker = Command::new("docker");
+    docker.args(args);
+    run_within(docker, stdin, CHECK_LIMIT)
+}
+
+/// Runs `command` with `stdin` on its input, killed once it runs past `limit`, and answers its
+/// standard output.
+fn run_within(
+    mut command: Command,
+    stdin: &str,
+    limit: std::time::Duration,
+) -> Result<String, CheckError> {
     let error = |detail: String| CheckError { detail };
-    let mut child = Command::new("docker")
-        .args(args)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .map_err(|failed| error(format!("docker could not be run: {failed}")))?;
-    // Node reads the whole program before it prints anything, so writing first cannot block.
-    if let Some(mut input) = child.stdin.take() {
-        input.write_all(stdin.as_bytes()).map_err(|failed| {
-            error(format!("the check could not be given its script: {failed}"))
-        })?;
+    let finished = crate::exec::supervise_with_input(
+        &mut command,
+        stdin.as_bytes().to_vec(),
+        limit,
+        |child| {
+            let _ = child.kill();
+        },
+        |_| {},
+    )
+    .map_err(|failed| error(format!("docker could not be run: {failed:?}")))?;
+    if finished.killed {
+        return Err(error(format!(
+            "the check ran past its {} seconds",
+            limit.as_secs_f64()
+        )));
     }
-    let output = child
-        .wait_with_output()
-        .map_err(|failed| error(format!("docker did not finish: {failed}")))?;
-    if output.status.success() {
-        return Ok(String::from_utf8_lossy(&output.stdout).into_owned());
+    if finished.exit_code == 0 {
+        return Ok(finished.stdout);
     }
-    let said = format!(
-        "{}{}",
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
-    );
+    let said = format!("{}{}", finished.stdout, finished.stderr);
     let lines: Vec<&str> = said.trim_end().lines().collect();
     Err(error(
         lines[lines.len().saturating_sub(CHECK_TAIL_LINES)..].join("\n"),
@@ -660,6 +675,26 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
+    fn ends_a_check_that_runs_past_its_deadline() {
+        // A wedged docker client ends the tool call by Farik's own clock, not the script's.
+        let started = std::time::Instant::now();
+        let mut sleeping = std::process::Command::new("sleep");
+        sleeping.arg("30");
+        let error = super::run_within(sleeping, "", std::time::Duration::from_millis(200))
+            .expect_err("the check ran out of time");
+        assert!(started.elapsed() < std::time::Duration::from_secs(5));
+        assert!(error.detail.contains("ran past"), "{error}");
+        // Its input still reaches it.
+        let mut echoing = std::process::Command::new("cat");
+        echoing.arg("-");
+        assert_eq!(
+            super::run_within(echoing, "{}\n", std::time::Duration::from_secs(5)),
+            Ok("{}\n".to_string())
+        );
+    }
+
+    #[test]
     fn launches_the_browser_confined() {
         let definition = builtin_connector("playwright").expect("shipped");
         let server = connector_server(
@@ -683,6 +718,7 @@ mod tests {
             after(&args, "--network"),
             ["container:farik-preview-p-frk-1"]
         );
+        assert_eq!(after(&args, "--pull"), ["never"]);
         assert_eq!(
             after(&args, "--mount"),
             ["type=bind,src=/p/.farik/local/browser/FRK-1/s-1,dst=/output"]
@@ -702,7 +738,14 @@ mod tests {
         assert_eq!(after(server_args, "--output-dir"), ["/output"]);
         assert!(server_args.contains(&"--isolated".to_string()), "{args:?}");
         // Docker's own options all come before the image.
-        for flag in ["--name", "--label", "--user", "--network", "--mount"] {
+        for flag in [
+            "--name",
+            "--label",
+            "--user",
+            "--network",
+            "--mount",
+            "--pull",
+        ] {
             assert!(!server_args.contains(&flag.to_string()), "{flag}: {args:?}");
         }
     }
