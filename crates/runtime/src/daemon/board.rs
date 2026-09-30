@@ -611,6 +611,10 @@ mod tests {
     fn answers_the_cost_summary_and_the_metrics() {
         let harness = Harness::new("board-costs", |wire| {
             wire["budgets"]["daily_usd"] = json!(10.0);
+            // A retired agent is left out of the summary.
+            wire["agents"].as_array_mut().expect("agents").push(json!({
+                "id": "dev-c", "display_name": "dev-c", "role": "software_developer", "status": "retired",
+            }));
         });
         let deps = &harness.project.deps;
         harness.accepted("FRK-1");
@@ -657,6 +661,31 @@ mod tests {
             })
         );
 
+        // Today's plan of a task in no sprint: today's and dev-a's, not the sprint's.
+        harness.ready("FRK-2");
+        spent(
+            &harness,
+            (Some("FRK-2"), "dev-a", "s5"),
+            "plan",
+            0.5,
+            &today,
+        );
+        // An earlier day's check of the sprint's task: the sprint's and dev-b's, not today's.
+        spent(
+            &harness,
+            (Some("FRK-1"), "dev-b", "s6"),
+            "verify",
+            16.0,
+            "2026-09-21T12:00:00Z",
+        );
+        spent(
+            &harness,
+            (Some("FRK-1"), "dev-c", "s7"),
+            "verify",
+            0.25,
+            "2026-09-21T12:00:00Z",
+        );
+
         let summary = |harness: &Harness| {
             query(
                 &harness.daemon,
@@ -668,13 +697,13 @@ mod tests {
         assert_eq!(
             summary(&harness),
             json!({
-                "today_usd": 7.0,
+                "today_usd": 7.5,
                 "daily_limit_usd": 10.0,
-                "sprint": { "sprint_id": "S1", "spent_usd": 7.0, "budget_usd": 20.0 },
+                "sprint": { "sprint_id": "S1", "spent_usd": 23.25, "budget_usd": 20.0 },
                 "agents": [
                     { "agent_id": "pm", "today_usd": 0.0, "sprint_usd": 0.0 },
-                    { "agent_id": "dev-a", "today_usd": 3.0, "sprint_usd": 3.0 },
-                    { "agent_id": "dev-b", "today_usd": 4.0, "sprint_usd": 4.0 },
+                    { "agent_id": "dev-a", "today_usd": 3.5, "sprint_usd": 3.0 },
+                    { "agent_id": "dev-b", "today_usd": 4.0, "sprint_usd": 20.0 },
                 ],
             })
         );
@@ -685,11 +714,11 @@ mod tests {
         assert_eq!(
             whole["cost_per_accepted_task"],
             json!({
-                "total_usd": 15.0,
+                "total_usd": 31.75,
                 "by_purpose": [
-                    { "words": "Planning", "usd": 0.0 },
+                    { "words": "Planning", "usd": 0.5 },
                     { "words": "Building", "usd": 3.0 },
-                    { "words": "Checking", "usd": 4.0 },
+                    { "words": "Checking", "usd": 20.25 },
                     { "words": "Meetings and talk", "usd": 8.0 },
                 ],
             }),
@@ -708,7 +737,7 @@ mod tests {
             "metricsResult",
         );
         assert_eq!(
-            sprint["cost_per_accepted_task"]["total_usd"], 7.0,
+            sprint["cost_per_accepted_task"]["total_usd"], 23.25,
             "{sprint}"
         );
         let none = query(
