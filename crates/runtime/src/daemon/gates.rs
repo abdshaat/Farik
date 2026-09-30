@@ -765,6 +765,8 @@ pub(super) mod tests {
         let harness = Harness::new("gates-design-review-waits", |wire| {
             crate::tools::fixtures::browsing(wire);
             wire.as_object_mut().expect("a team").remove("preview");
+            // The line names the Designer as the person named it, not by its id.
+            wire["agents"][3]["display_name"] = json!("Iris");
         });
         harness.verifying_a_ui_change("FRK-1");
         let waiting = query(
@@ -777,7 +779,7 @@ pub(super) mod tests {
             waiting["waiting"],
             json!([{
                 "task_id": "FRK-1", "kind": "preview_missing", "agent_id": "iris",
-                "title": "Add a login page", "line": "iris needs to know how to open your app"
+                "title": "Add a login page", "line": "Iris needs to know how to open your app"
             }])
         );
 
