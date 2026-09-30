@@ -105,7 +105,9 @@
 	text-align: left;
 }
 
-.mine .text a {
+/* Links and notes (a task waiting on you) take the bubble's ink; a mention sets its own. */
+.mine .text a,
+.mine .text span {
 	color: inherit;
 }
 
