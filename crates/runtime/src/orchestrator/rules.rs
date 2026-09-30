@@ -1335,7 +1335,7 @@ mod tests {
         accept_frk_1, credential_refused, hits_the_turn_limit, implement_finishes_frk_1,
         implement_stops_early, plan_assigns_frk_1, planning_ceremony_frk_1, provider_limit_429,
         provider_limit_rejected, reads_a_file, replays_farik_read_board, reply_to_a_mention, retro,
-        review, review_answers_nothing, review_writes_note, standup,
+        review, review_answers_nothing, review_writes_note, standup, success_with_is_error,
     };
     use crate::recorded::{RecordedAdapter, Transcript};
     use crate::session::SessionPurpose;
@@ -5313,6 +5313,22 @@ mod tests {
         assert!(farik_notes(&harness).is_empty());
         assert!(sleeps(&harness).is_empty());
         assert_eq!(harness.row("FRK-1").status, TaskStatus::InProgress);
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn pauses_the_team_for_no_other_error() {
+        let harness = Harness::new("orch-key-other-errors", |_| {});
+        harness.in_progress("FRK-1", "dev-a", "dev-b");
+        let adapter = harness.recorded(vec![success_with_is_error(), provider_limit_429()]);
+        let orchestrator = harness.orchestrator(adapter.clone());
+
+        orchestrator.tick().await.expect("the tick runs");
+        orchestrator.tick().await.expect("the tick runs");
+
+        // A 500, then a 429: neither is the key's fault.
+        assert_eq!(adapter.started().len(), 2);
+        assert!(harness.events(&[EventKind::TeamPaused]).is_empty());
     }
 
     #[tokio::test]
