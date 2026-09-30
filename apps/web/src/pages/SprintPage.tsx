@@ -28,12 +28,16 @@ type Sprint = {
 	meetings: { thread: string; firstSeq: number; at: string; posts: number }[];
 };
 
-const MEETINGS: Record<string, keyof typeof en | undefined> = {
+export const MEETINGS: Record<string, keyof typeof en | undefined> = {
 	planning: "meetingPlanning",
 	standup: "meetingStandup",
 	review: "meetingReview",
 	retro: "meetingRetro",
 };
+
+/** A ceremony's block in the channel: its thread and UTC day, which "Read it" opens. */
+export const threadAnchor = (thread: string, at: string) =>
+	`thread-${thread}-${at.slice(0, 10)}`;
 
 /** One sprint: who started and planned it, its tasks, its meetings, and its spending. */
 export function SprintPage() {
@@ -108,19 +112,26 @@ export function SprintPage() {
 					<p>{t("sprintNoMeetings")}</p>
 				) : (
 					<ul className={board.rows} aria-labelledby="sprint-meetings">
-						{/* "Read it" links to the channel thread once step 10 lands. */}
 						{sprint.meetings.map((m) => {
 							const word = MEETINGS[m.thread];
 							return (
 								<li key={m.firstSeq} className={board.row}>
 									<div className={board.rowText}>
-										<span>{word ? t(word) : m.thread}</span>
+										<span id={`meeting-${m.firstSeq}`}>
+											{word ? t(word) : m.thread}
+										</span>
 										<span className={board.small}>
 											{t(m.posts === 1 ? "meetingPostsOne" : "meetingPosts")
 												.replace("{posts}", String(m.posts))
 												.replace("{day}", day(m.at))}
 										</span>
 									</div>
+									<Link
+										to={`/channel#${threadAnchor(m.thread, m.at)}`}
+										aria-describedby={`meeting-${m.firstSeq}`}
+									>
+										{t("sprintReadIt")}
+									</Link>
 								</li>
 							);
 						})}

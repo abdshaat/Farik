@@ -7,6 +7,7 @@ import { useQuery } from "../app/store.ts";
 import { codeOf, sentence } from "../app/words.ts";
 import type { en } from "../strings/en.ts";
 import { t } from "../strings/t.ts";
+import { ChannelPreview } from "./Channel.tsx";
 import type { Agent, Team } from "./setup/TeamSetup.tsx";
 import styles from "./Today.module.css";
 
@@ -143,6 +144,7 @@ export function Today() {
 					)}
 				</section>
 			)}
+			<ChannelPreview agents={agents} />
 		</div>
 	);
 }

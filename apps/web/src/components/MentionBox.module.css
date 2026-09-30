@@ -1,0 +1,48 @@
+.box {
+	position: relative;
+	flex: 1;
+	min-width: 0;
+	display: grid;
+}
+
+.box textarea {
+	min-width: 0;
+	resize: vertical;
+	padding: var(--farik-space-2);
+	border: 1px solid var(--farik-color-control-border);
+	border-radius: var(--farik-radius-control);
+	background: var(--farik-color-page);
+	color: var(--farik-color-ink);
+	font: inherit;
+}
+
+.box textarea:focus-visible {
+	outline: 2px solid var(--farik-color-focus);
+	outline-offset: 2px;
+}
+
+/* Above the box, so it never runs under the phone's bar. */
+.list {
+	position: absolute;
+	bottom: 100%;
+	left: 0;
+	z-index: 1;
+	min-width: 12rem;
+	margin: 0 0 var(--farik-space-1);
+	padding: var(--farik-space-1) 0;
+	background: var(--farik-color-surface);
+	border: 1px solid var(--farik-color-control-border);
+	border-radius: var(--farik-radius-control);
+}
+
+.option {
+	padding: var(--farik-space-2) var(--farik-space-3);
+	min-height: 44px;
+	box-sizing: border-box;
+	cursor: pointer;
+}
+
+.option[aria-selected="true"] {
+	background: var(--farik-color-band);
+	color: var(--farik-color-band-ink);
+}

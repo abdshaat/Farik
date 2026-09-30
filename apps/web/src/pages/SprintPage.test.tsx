@@ -106,6 +106,15 @@ describe("sprint page", () => {
 		expect(
 			within(meetings).getByText("1 post on Tuesday 22 September"),
 		).toBeTruthy();
+		// Each meeting's "Read it" opens its thread in the channel.
+		expect(
+			within(meetings)
+				.getAllByRole("link", { name: en.sprintReadIt })
+				.map((a) => a.getAttribute("href")),
+		).toEqual([
+			"/channel#thread-planning-2026-09-21",
+			"/channel#thread-standup-2026-09-22",
+		]);
 
 		// The spending, and the way to the costs by agent.
 		expect(

@@ -15,10 +15,11 @@ function subscribe(changed: () => void) {
 	return () => query.removeEventListener("change", changed);
 }
 
-/** The rail's places, in order (step 09's plan; step 10 adds Channel after Board). */
+/** The rail's places, in order (steps 09 and 10). */
 const PLACES = [
 	["/", "today"],
 	["/board", "board"],
+	["/channel", "channel"],
 	["/team", "team"],
 	["/costs", "costs"],
 	["/settings", "settings"],
@@ -38,7 +39,7 @@ export function Shell() {
 	if (!data) return null;
 	// During setup, every path goes where "/" would.
 	if (landing(data) !== "/") return <Navigate to={landing(data)} replace />;
-	// Settings sits under Team on a phone (web-ui.md), so the bar has four places.
+	// Settings sits under Team on a phone (web-ui.md), so the bar has five places.
 	const places = (
 		<ul className={styles.places}>
 			{PLACES.filter(([to]) => wide || to !== "/settings").map(([to, word]) => (

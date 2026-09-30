@@ -82,7 +82,7 @@ Produces: the RPC query `channel.messages`; `renderMessageText(text: string, tea
 - `appends_new_messages_live`: a `message.posted` event adds a row without a query.
 - `previews_the_channel_on_today`: the last two non-system messages.
 
-- [ ] `feat(web): add the channel, with threads, mentions and live posts`
+- [x] `feat(web): add the channel, with threads, mentions and live posts`
 
 ### Task 3: The journey, the spec and the plan
 

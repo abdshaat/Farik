@@ -55,18 +55,20 @@ describe("shell", () => {
 		expect(words(rail)).toEqual([
 			[en.today, "/"],
 			[en.board, "/board"],
+			[en.channel, "/channel"],
 			[en.team, "/team"],
 			[en.costs, "/costs"],
 			[en.settings, "/settings"],
 		]);
 		await expectNoAxeViolations(container);
 
-		// On a phone, the bar has four places, and Settings sits under Team.
+		// On a phone, the bar has five places, and Settings sits under Team.
 		act(() => media.set(WIDE, false));
 		const bar = screen.getByRole("navigation", { name: en.navBar });
 		expect(words(bar)).toEqual([
 			[en.today, "/"],
 			[en.board, "/board"],
+			[en.channel, "/channel"],
 			[en.team, "/team"],
 			[en.costs, "/costs"],
 		]);
