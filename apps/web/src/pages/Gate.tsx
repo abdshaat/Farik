@@ -5,7 +5,12 @@ import { useConnection } from "../app/connection.tsx";
 import { useQuery } from "../app/store.ts";
 import { roleWord, sentence, statusWord } from "../app/words.ts";
 import { t } from "../strings/t.ts";
-import { DesignReview, type Review } from "./DesignReview.tsx";
+import {
+	DesignReview,
+	nameIn,
+	type Recorded,
+	type Review,
+} from "./DesignReview.tsx";
 import { Failed } from "./Failed.tsx";
 import gate from "./Gate.module.css";
 import own from "./PlanPage.module.css";
@@ -85,10 +90,10 @@ export function Gate() {
 		{},
 	);
 	// The design review is the Designer's letter; the page reads without it.
-	const { data: detail } = useQuery<{ designReview: Review | null }>(
-		"task.get",
-		task,
-	);
+	const { data: detail } = useQuery<{
+		designReview: Review | null;
+		designReviews?: Recorded[];
+	}>("task.get", task);
 	const [busy, setBusy] = useState(false);
 	const [refusal, setRefusal] = useState<string>();
 	const [showDiff, setShowDiff] = useState(false);
@@ -118,16 +123,50 @@ export function Gate() {
 	const nameOf = (role: string) =>
 		agents.find((a) => a.role === role && a.status !== "retired")
 			?.displayName ?? "";
+	const designReviews = detail?.designReviews ?? [];
 	const review = detail?.designReview && (
 		<DesignReview
 			taskId={id}
 			review={detail.designReview}
+			reviews={designReviews}
+			agents={agents}
 			events={events}
 			designer={nameOf("ui_ux_designer")}
 			reviewer={nameOf(contract.reviewerRole ?? "architect")}
 			builder={builder?.displayName ?? ""}
 		/>
 	);
+
+	// The screens were checked by the latest design review, when it passed.
+	const designerName = nameOf("ui_ux_designer");
+	const latestReview = designReviews.at(-1);
+	const screens =
+		detail?.designReview?.state === "passed" ? latestReview : undefined;
+	// Farik's checks, then each Designer's and reviewer's look in time order, then the person.
+	const looks = [
+		...designReviews.map((r) => ({
+			at: r.recordedAt,
+			line: t(r.pass ? "gateLookedScreens" : "gateLookedScreensBack", {
+				name: nameIn(agents, r.agentId, designerName),
+			}),
+		})),
+		...events
+			.filter((e) => e.kind === "review.recorded")
+			.map((e) => {
+				const body = e.body as { reviewer?: string; passed?: boolean };
+				return {
+					at: e.recordedAt,
+					line: t(body.passed ? "gateLookedCode" : "gateLookedCodeBack", {
+						name: nameIn(agents, body.reviewer ?? null, ""),
+					}),
+				};
+			}),
+	].sort((a, b) => a.at.localeCompare(b.at));
+	const looked = [
+		t("gateLookedFarik"),
+		...looks.map((l) => l.line),
+		...(waits("acceptance") ? [t("gateLookedYou")] : []),
+	];
 
 	const send = async (command: object) => {
 		if (!client) return;
@@ -206,6 +245,19 @@ export function Gate() {
 					<dd>{day(contract.createdAt)}</dd>
 					<dt>{t("gatePlanApproved")}</dt>
 					<dd>{day(approved?.recordedAt)}</dd>
+					{detail?.designReview && (
+						<>
+							<dt>{t("gateScreensChecked")}</dt>
+							<dd>
+								{screens
+									? t("gateScreensCheckedBy", {
+											day: day(screens.recordedAt),
+											name: nameIn(agents, screens.agentId, designerName),
+										})
+									: day()}
+							</dd>
+						</>
+					)}
 					<dt>{t("gateTries")}</dt>
 					<dd>
 						{t("triesOf", { try: String(tries.try), of: String(tries.of) })}
@@ -213,6 +265,18 @@ export function Gate() {
 					<dt>{t("gateCost")}</dt>
 					<dd>{dollars(spent(events))}</dd>
 				</dl>
+				{detail?.designReview && (
+					<>
+						<h3 id="who-looked">{t("gateWhoLooked")}</h3>
+						<ol className={gate.order} aria-labelledby="who-looked">
+							{looked.map((line, i) => (
+								// The same words can recur across tries, so the place keys them.
+								// biome-ignore lint/suspicious/noArrayIndexKey: the list is in time order and never reordered
+								<li key={i}>{line}</li>
+							))}
+						</ol>
+					</>
+				)}
 				<p>
 					<Link to={`/tasks/${id}`}>{t("gateHistory")}</Link>
 				</p>

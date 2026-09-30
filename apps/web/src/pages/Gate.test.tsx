@@ -4,6 +4,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
 	ACCEPTING,
 	COMPLETION,
+	event,
+	HISTORY,
 	openedGate,
 	REVIEW,
 	sentCommand,
@@ -22,6 +24,62 @@ const GATE = [
 ];
 const opened = (contract?: object, waiting?: object[]) =>
 	openedGate("/tasks/FRK-1/accept", GATE, contract, waiting);
+
+const designer = (id: string, name: string) => ({
+	id,
+	display_name: name,
+	role: "ui_ux_designer",
+	avatar: "extra-1",
+	status: "active",
+});
+const FAINT = "The prices were too faint to read on a phone in the dark.";
+const PASSED = "The prices read well now, in both themes.";
+/** A gate whose UI change Iris sent back on Tuesday and Kai, the team's second Designer, passed on Friday before Ada reviewed the code. */
+const reviewedTwice = () =>
+	openedGate("/tasks/FRK-1/accept", [...GATE, "task.get"], TASK, ACCEPTING, {
+		"team.get": {
+			team: {
+				...TEAM,
+				agents: [
+					...TEAM.agents,
+					designer("iris", "Iris"),
+					designer("kai", "Kai"),
+				],
+			},
+		},
+		"task.history": {
+			events: [
+				...HISTORY,
+				event(
+					11,
+					"review.recorded",
+					{ reviewer: "ada", criteria_run: 1, passed: true },
+					"2026-09-25T08:45:00Z",
+					"ada",
+				),
+			],
+		},
+		"task.get": {
+			task: {},
+			design_plan: null,
+			ui_change: true,
+			design_review: { state: "passed", reasons: PASSED, checks: [] },
+			design_reviews: [
+				{
+					agent_id: "iris",
+					pass: false,
+					reasons: FAINT,
+					recorded_at: "2026-09-22T15:00:00Z",
+				},
+				{
+					agent_id: "kai",
+					pass: true,
+					reasons: PASSED,
+					recorded_at: "2026-09-25T08:30:00Z",
+				},
+			],
+		},
+	});
 
 describe("acceptance gate", () => {
 	afterEach(() => vi.unstubAllGlobals());
@@ -246,6 +304,60 @@ describe("acceptance gate", () => {
 		expect(
 			iris.compareDocumentPosition(ada) & Node.DOCUMENT_POSITION_FOLLOWING,
 		).toBeTruthy();
+		await expectNoAxeViolations(container);
+	});
+
+	it("signs_the_letter_by_the_designer_who_reviewed", async () => {
+		const { container } = await reviewedTwice();
+		// Kai recorded the review, though Iris is the team's first Designer.
+		const kai = await screen.findByRole("region", {
+			name: "Kai, your UI/UX Designer, checked the screens first",
+		});
+		expect(within(kai).getByText(PASSED)).toBeTruthy();
+		expect(
+			screen.queryByRole("region", {
+				name: "Iris, your UI/UX Designer, checked the screens first",
+			}),
+		).toBeNull();
+		await expectNoAxeViolations(container);
+	});
+
+	it("tells_how_often_the_designer_sent_it_back", async () => {
+		const { container } = await reviewedTwice();
+		const back = await screen.findByText(
+			"Iris sent it back once, on Tuesday 22 September",
+		);
+		// Folded away until opened, with the Designer's reasons inside.
+		const details = back.closest("details");
+		expect(details).toBeTruthy();
+		expect(details?.open).toBe(false);
+		expect(within(details as HTMLElement).getByText(FAINT)).toBeTruthy();
+		// The passing review is the letter, not a send-back.
+		expect(within(details as HTMLElement).queryByText(PASSED)).toBeNull();
+		await expectNoAxeViolations(container);
+	});
+
+	it("says_who_looked_at_it_in_order", async () => {
+		const { container } = await reviewedTwice();
+		const about = await screen.findByRole("region", {
+			name: "About this task",
+		});
+		await within(about).findByText("Screens checked");
+		expect(within(about).getByText("Friday 25 September, by Kai")).toBeTruthy();
+		const order = within(about).getByRole("list", {
+			name: "Who looked at it, in order",
+		});
+		expect(
+			within(order)
+				.getAllByRole("listitem")
+				.map((li) => li.textContent),
+		).toEqual([
+			"Farik ran its checks",
+			"Iris sent the screens back",
+			"Kai checked the screens",
+			"Ada reviewed the code",
+			"Now you decide",
+		]);
 		await expectNoAxeViolations(container);
 	});
 });

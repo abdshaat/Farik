@@ -3,7 +3,9 @@ import { t } from "../strings/t.ts";
 import gate from "./Gate.module.css";
 import type { HistoryEvent } from "./Gate.tsx";
 import own from "./PlanPage.module.css";
+import { day } from "./PlanPage.tsx";
 import styles from "./pages.module.css";
+import type { Agent } from "./setup/TeamSetup.tsx";
 
 type Violation = { rule: string; impact: string; target: string; help: string };
 type Check = {
@@ -25,10 +27,24 @@ export type Review = {
 	checks: Check[];
 };
 
+/** One of `task.get`'s `design_reviews`: who recorded it, whether it passed, why, and when. */
+export type Recorded = {
+	agentId: string | null;
+	pass: boolean;
+	reasons: string;
+	recordedAt: string;
+};
+
+/** The name of the agent `id`, or `fallback` for one the team does not have. */
+export const nameIn = (agents: Agent[], id: string | null, fallback: string) =>
+	agents.find((a) => a.id === id)?.displayName ?? fallback;
+
 /** The Designer's letter and the four checks, as the gate's and the task page's mockups show them. */
 export function DesignReview({
 	taskId,
 	review,
+	reviews = [],
+	agents,
 	events,
 	designer,
 	reviewer,
@@ -36,18 +52,29 @@ export function DesignReview({
 }: {
 	taskId: string;
 	review: Review;
+	/** Every design review of the task, oldest first. */
+	reviews?: Recorded[];
+	agents: Agent[];
 	events: HistoryEvent[];
+	/** The team's Designer, for a review no record names. */
 	designer: string;
 	reviewer: string;
 	builder: string;
 }) {
 	const decided = review.state === "passed" || review.state === "failed";
+	// The latest record is the decided review; the Designer's send-backs are those before it.
+	const signer = decided
+		? nameIn(agents, reviews.at(-1)?.agentId ?? null, designer)
+		: designer;
+	const backs = (decided ? reviews.slice(0, -1) : reviews).filter(
+		(r) => !r.pass,
+	);
 	return (
 		<>
 			{decided && (
 				<section className={own.letter} aria-labelledby="design-signed">
 					<p id="design-signed" className={styles.muted}>
-						{t("designChecked", { name: designer })}
+						{t("designChecked", { name: signer })}
 					</p>
 					{review.reasons?.split(/\n\s*\n/).map((part) => (
 						<p key={part}>{part}</p>
@@ -76,6 +103,24 @@ export function DesignReview({
 						))}
 					</div>
 				</section>
+			)}
+			{backs.length > 0 && (
+				<details className={gate.backs}>
+					<summary>
+						{t(backs.length === 1 ? "designBackOnce" : "designBackMany", {
+							name: [
+								...new Set(
+									backs.map((r) => nameIn(agents, r.agentId, designer)),
+								),
+							].join(" and "),
+							n: backs.length,
+							day: day(backs.at(-1)?.recordedAt),
+						})}
+					</summary>
+					{backs.map((r) => (
+						<p key={r.recordedAt}>{r.reasons}</p>
+					))}
+				</details>
 			)}
 		</>
 	);

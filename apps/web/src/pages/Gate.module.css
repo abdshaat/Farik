@@ -65,3 +65,29 @@
 	margin: 0;
 	padding-left: var(--farik-space-4);
 }
+
+/* The Designer's earlier send-backs, folded away; the summary is a 44px target. */
+.backs {
+	padding-block: var(--farik-space-2);
+	border-block: 1px solid var(--farik-color-rule);
+}
+
+.backs summary {
+	min-height: 44px;
+	padding-block: 10px;
+	box-sizing: border-box;
+	font-weight: 600;
+	cursor: pointer;
+}
+
+.backs p {
+	margin: var(--farik-space-2) 0 0;
+}
+
+/* "Who looked at it, in order". */
+.order {
+	display: grid;
+	gap: var(--farik-space-1);
+	margin: 0;
+	padding-left: var(--farik-space-4);
+}

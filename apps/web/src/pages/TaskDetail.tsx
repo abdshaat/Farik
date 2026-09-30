@@ -5,7 +5,7 @@ import { useQuery } from "../app/store.ts";
 import { movedWords, statusWord } from "../app/words.ts";
 import type { en } from "../strings/en.ts";
 import { t } from "../strings/t.ts";
-import { DesignReview, type Review } from "./DesignReview.tsx";
+import { DesignReview, type Recorded, type Review } from "./DesignReview.tsx";
 import { CancelTask } from "./dialogs/CancelTask.tsx";
 import { useCommand } from "./dialogs/StartSprint.tsx";
 import {
@@ -153,6 +153,7 @@ export function TaskDetail() {
 	const { data: detail } = useQuery<{
 		designPlan: DesignPlan | null;
 		designReview?: Review | null;
+		designReviews?: Recorded[];
 	}>("task.get", task);
 	const [tab, setTab] = useState<Tab>("summary");
 	const [cancelling, setCancelling] = useState(false);
@@ -366,6 +367,8 @@ export function TaskDetail() {
 					<DesignReview
 						taskId={id}
 						review={review}
+						reviews={detail.designReviews ?? []}
+						agents={agents}
 						events={events}
 						designer={names.designer}
 						reviewer={names.reviewer}
