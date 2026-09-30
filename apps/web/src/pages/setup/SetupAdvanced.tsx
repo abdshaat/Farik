@@ -1,11 +1,12 @@
 import { toCamel, toSnake } from "@farik/protocol-client";
 import { Button, Choice, Switch, TextArea, TextField } from "@farik/ui";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useNavigate } from "react-router";
 import { useConnection } from "../../app/connection.tsx";
 import { type Refusal, said, saidAll } from "../../app/refusals.ts";
 import { useQuery } from "../../app/store.ts";
 import { t } from "../../strings/t.ts";
+import type { Judges } from "../Team.tsx";
 import { slug } from "./SetupProject.tsx";
 import styles from "./setup.module.css";
 import {
@@ -19,6 +20,8 @@ import {
 	useStart,
 } from "./TeamSetup.tsx";
 import { Wizard } from "./Wizard.tsx";
+
+type Holder = NonNullable<Judges["auto"]>;
 
 /** The questions a plan check may ask, as the team file pins them, and the words shown for each. */
 const QUESTIONS = [
@@ -38,20 +41,15 @@ const QUESTIONS = [
 		note: "planSmallNote",
 	},
 ] as const;
-const JUDGES = ["architect", "scrum_master", "product_manager"] as const;
 type Judge = NonNullable<Judgment["judge"]>;
 
-/** "Sol, the Scrum Master": the first active agent of `role`, or who it would be. */
-function holder(team: Team, role: (typeof JUDGES)[number]): string | undefined {
-	const agent = team.agents.find(
-		(a) => a.role === role && a.status === "active",
-	);
-	return (
-		agent &&
-		t("planJudgeNamed")
-			.replace("{name}", agent.displayName)
-			.replace("{role}", roleName(role))
-	);
+/** "Sol, the Scrum Master". */
+function holder(who: Holder | null | undefined): string | undefined {
+	return who
+		? t("planJudgeNamed")
+				.replace("{name}", who.displayName)
+				.replace("{role}", roleName(who.role))
+		: undefined;
 }
 
 /** The Advanced area of setup: team rules, the checks, and how plans are checked. */
@@ -62,9 +60,14 @@ export function SetupAdvanced() {
 	const { start, busy, refused } = useStart();
 	const team = teamOf(draft);
 	// Every change is checked as it is made (spec 10); the daemon's refusal shows here.
-	const { data: checked } = useQuery<{ errors: Refusal[] }>("team.validate", {
-		team,
-	});
+	const { data: checked } = useQuery<{ errors: Refusal[]; judges?: Judges }>(
+		"team.validate",
+		{ team },
+	);
+	// A refused draft has no answer for who checks: the last one stands meanwhile.
+	const lastJudges = useRef<Judges>(undefined);
+	if (checked?.judges) lastJudges.current = checked.judges;
+	const judges = lastJudges.current;
 	const errors = checked?.errors ?? [];
 	// Each refusal is said at the group it concerns (SPEC 4.1); the rest at the foot.
 	const under = (prefix: string) =>
@@ -155,9 +158,10 @@ export function SetupAdvanced() {
 		}
 		setAdding(false);
 	};
-	const auto = JUDGES.map((role) => holder(team, role)).find(Boolean) ?? "";
+	const auto = holder(judges?.auto) ?? "";
 	const named = (role: "architect" | "scrum_master") =>
-		holder(team, role) ?? t("planJudgeNone").replace("{role}", roleName(role));
+		holder(role === "architect" ? judges?.architect : judges?.scrumMaster) ??
+		t("planJudgeNone").replace("{role}", roleName(role));
 
 	return (
 		<Wizard step={7} title={t("advanced")} lead={t("advancedLead")}>

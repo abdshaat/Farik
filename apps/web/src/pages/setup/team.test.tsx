@@ -267,12 +267,51 @@ describe("team setup", () => {
 			screen.getByRole("button", { name: en.continue }) as HTMLButtonElement;
 		expect(onward().disabled).toBe(true);
 		expect(screen.getByText(en.mayAnswerBoth)).toBeTruthy();
-		expect(screen.getByText(en.mayDeveloper)).toBeTruthy();
+		// What each agent may do is the daemon's answer for the team as it stands.
+		const theo = (tiers: string[]) => ({
+			errors: [],
+			effects: [],
+			agents: [{ id: "theo", tiers }],
+		});
+		act(() =>
+			s.reply(
+				s
+					.calls("query")
+					.filter((f) => f.params.name === "team.validate")
+					.at(-1) as never,
+				theo(["read", "write_workspace", "execute", "git_local"]),
+			),
+		);
+		expect(
+			await screen.findByText(
+				"Reads the project, changes the files of its task, runs commands in a sealed box and saves its work on its own branch.",
+			),
+		).toBeTruthy();
 		await expectNoAxeViolations(container);
 
 		fireEvent.click(screen.getByRole("radio", { name: /^No, nobody may/ }));
 		expect(screen.getByText(en.mayStillChecks)).toBeTruthy();
-		expect(screen.getByText(en.mayDeveloperNoCommands)).toBeTruthy();
+		const asked = await waitFor(() => {
+			const frame = s
+				.calls("query")
+				.filter((f) => f.params.name === "team.validate")
+				.at(-1);
+			if (!frame) throw new Error("no team.validate was asked");
+			const team = (
+				frame.params.params as {
+					team: { policy: { permissions: { run_commands?: boolean } } };
+				}
+			).team;
+			if (team.policy.permissions.run_commands !== false)
+				throw new Error("the answer was not asked about yet");
+			return frame as never;
+		});
+		act(() => s.reply(asked, theo(["read", "write_workspace", "git_local"])));
+		expect(
+			await screen.findByText(
+				"Reads the project, changes the files of its task and saves its work on its own branch.",
+			),
+		).toBeTruthy();
 		expect(onward().disabled).toBe(true);
 		fireEvent.click(
 			screen.getByRole("radio", { name: /^No, keep everything/ }),
@@ -372,7 +411,28 @@ describe("team setup", () => {
 				team.agents = FIVE.filter((a) => a.role !== "architect");
 			}),
 		);
-		await answerQuery(s, "team.validate", { errors: [], effects: [] });
+		// Who checks plans is the daemon's answer, not the page's own reckoning.
+		const mira = {
+			agent_id: "mira",
+			display_name: "Mira",
+			role: "product_manager",
+		};
+		await answerQuery(s, "team.validate", {
+			errors: [],
+			effects: [],
+			agents: [],
+			judges: { auto: mira, architect: null, scrum_master: null },
+		});
+		expect(
+			await screen.findByRole("radio", {
+				name: "Farik chooses: Mira, the Product Manager",
+			}),
+		).toBeTruthy();
+		expect(
+			screen.getByRole("radio", {
+				name: "The Scrum Master, once the team has one",
+			}),
+		).toBeTruthy();
 		const checks = await screen.findByRole("list", { name: en.checksTitle });
 		expect(within(checks).getByText(TESTS_PASS.text)).toBeTruthy();
 		expect(

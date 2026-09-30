@@ -1,31 +1,36 @@
 import { Button, Choice } from "@farik/ui";
 import { useNavigate } from "react-router";
+import { useQuery } from "../../app/store.ts";
+import type { en } from "../../strings/en.ts";
 import { t } from "../../strings/t.ts";
+import type { Tier } from "../Team.tsx";
 import styles from "./setup.module.css";
-import { type Agent, type Draft, roleName, useSetup } from "./TeamSetup.tsx";
+import { type Draft, roleName, teamOf, useSetup } from "./TeamSetup.tsx";
 import { Wizard } from "./Wizard.tsx";
 
 type Answer = "" | "yes" | "no";
 const word = (on: boolean | undefined): Answer =>
 	on === undefined ? "" : on ? "yes" : "no";
 
-/** What `agent` may do with the answers given so far, in the setup's words. */
-function may(agent: Agent, draft: Draft): string {
-	const commands = draft.answers.commands !== false;
-	switch (agent.role) {
-		case "product_manager":
-			return t("mayProductManager");
-		case "scrum_master":
-			return t("mayScrumMaster");
-		case "architect":
-			return t(commands ? "mayArchitect" : "mayArchitectNoCommands");
-		case "software_developer": {
-			const line = t(commands ? "mayDeveloper" : "mayDeveloperNoCommands");
-			return draft.answers.push ? `${line} ${t("mayDeveloperPush")}` : line;
-		}
-		default:
-			return t("mayMarketing");
-	}
+/** Each tier, in the order it is said, and what it lets an agent do, after its name. */
+const MAY: [Tier, keyof typeof en][] = [
+	["read", "mayRead"],
+	["write_workspace", "mayWrite"],
+	["execute", "mayExecute"],
+	["git_local", "mayGitLocal"],
+	["network", "mayNetwork"],
+	["git_remote", "mayGitRemote"],
+	["external_effect", "mayExternal"],
+];
+
+/** What an agent holding `tiers` may do, in one sentence: "Reads the project and …". */
+export function mayOf(tiers: Tier[]): string {
+	const said = MAY.filter(([tier]) => tiers.includes(tier)).map(([, key]) =>
+		t(key),
+	);
+	const last = said.pop() ?? "";
+	const line = said.length ? `${said.join(", ")} and ${last}` : last;
+	return `${line.charAt(0).toUpperCase()}${line.slice(1)}.`;
 }
 
 /** Setup's sixth step: the two questions Farik asks before anything runs. */
@@ -34,8 +39,15 @@ export function SetupPermissions() {
 	const { draft, change } = useSetup();
 	const { commands, push } = draft.answers;
 	const answered = commands !== undefined && push !== undefined;
-	const agents = draft.members.filter((m) => m.on).map((m) => m.agent);
+	const team = teamOf(draft);
+	const agents = team.agents;
 	const developers = agents.filter((a) => a.role === "software_developer");
+	// What each agent may do is the daemon's answer for the team as the answers leave it.
+	const { data: checked } = useQuery<{
+		agents?: { id: string; tiers: Tier[] }[];
+	}>("team.validate", { team });
+	const tiersOf = (id: string) =>
+		checked?.agents?.find((a) => a.id === id)?.tiers;
 
 	const answer = (next: Draft["answers"]) => {
 		const answers = { ...draft.answers, ...next };
@@ -115,7 +127,7 @@ export function SetupPermissions() {
 								{agent.displayName}
 								<small>{roleName(agent.role)}</small>
 							</dt>
-							<dd>{may(agent, draft)}</dd>
+							<dd>{tiersOf(agent.id) ? mayOf(tiersOf(agent.id) ?? []) : ""}</dd>
 						</div>
 					))}
 				</dl>

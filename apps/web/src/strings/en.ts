@@ -227,16 +227,6 @@ export const en = {
 	mayPushNo: "No, keep everything on this computer",
 	mayPushNoNote: "The safer choice. You can change it later in Team.",
 	mayAlready: "What each agent may do already",
-	mayProductManager:
-		"Reads the project and looks things up on the web. Writes plans.",
-	mayScrumMaster: "Reads the project and the board. Hands out work.",
-	mayArchitect: "Reads, writes design documents, and can try things out.",
-	mayArchitectNoCommands: "Reads and writes design documents.",
-	mayDeveloper: "Writes and tests code, on its own copy of the project.",
-	mayDeveloperNoCommands:
-		"Writes code, on its own copy of the project. Farik runs the checks.",
-	mayDeveloperPush: "Sends its work to its own branches.",
-	mayMarketing: "Writes posts and plans, and looks things up on the web.",
 	mayAnswerBoth: "Answer both questions to continue.",
 	spendTitle: "Do you want a daily spending limit?",
 	spendLead:
@@ -622,4 +612,11 @@ export const en = {
 	teamAddRole: "Their role",
 	teamFull:
 		"Your team has seven people, the most it can have. Retire someone to make room.",
+	mayRead: "reads the project",
+	mayWrite: "changes the files of its task",
+	mayExecute: "runs commands in a sealed box",
+	mayGitLocal: "saves its work on its own branch",
+	mayNetwork: "looks things up on the web",
+	mayGitRemote: "sends its work to its own branches online",
+	mayExternal: "acts outside your computer, with your approval",
 };
