@@ -162,7 +162,7 @@ export function Gate() {
 					onClick={() => setShowDiff((open) => !open)}
 				>
 					{`${t(showDiff ? "gateHideChanges" : "gateSeeChanges")} · ${t(
-						"gateSize",
+						diff.files.length === 1 ? "gateSizeOne" : "gateSize",
 					)
 						.replace("{n}", String(diff.files.length))
 						.replace("{added}", String(diff.added))

@@ -88,6 +88,17 @@ describe("acceptance gate", () => {
 		await expectNoAxeViolations(container);
 	});
 
+	it("says_one_changed_file_in_the_singular", async () => {
+		await openedGate("/tasks/FRK-1/accept", GATE, TASK, [], {
+			"task.diff": { diff: "", files: ["done.txt"], added: 1, removed: 0 },
+		});
+		expect(
+			await screen.findByRole("button", {
+				name: "See the code changes · 1 file, +1 −0",
+			}),
+		).toBeTruthy();
+	});
+
 	it("accepts_the_work", async () => {
 		const { container, s } = await opened();
 		fireEvent.click(

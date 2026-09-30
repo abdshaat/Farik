@@ -567,6 +567,7 @@ export const en = {
 	gateSeeChanges: "See the code changes",
 	gateHideChanges: "Hide the code changes",
 	gateSize: "{n} files, +{added} −{removed}",
+	gateSizeOne: "1 file, +{added} −{removed}",
 	gateChanges: "The code changes",
 	gateAbout: "About this task",
 	gatePlanApproved: "Plan approved",

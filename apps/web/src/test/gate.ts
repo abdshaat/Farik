@@ -96,12 +96,13 @@ export const TASK = {
 	created_at: "2026-09-23T09:00:00Z",
 };
 
-/** `path` for FRK-1, with each of `names` answered: the team, `contract`, its history, checks, diff, tries, `waiting` and choices. */
+/** `path` for FRK-1, with each of `names` answered: the team, `contract`, its history, checks, diff, tries, `waiting` and choices, or what `overrides` gives. */
 export async function openedGate(
 	path: string,
 	names: string[],
 	contract: object = TASK,
 	waiting: object[] = [],
+	overrides: Record<string, unknown> = {},
 ) {
 	const { container, socket } = await renderApp(path);
 	const s = socket as FakeSocket;
@@ -147,6 +148,7 @@ export async function openedGate(
 			],
 		},
 	};
+	Object.assign(answers, overrides);
 	for (const name of names) await answerQuery(s, name, answers[name]);
 	return { container, s };
 }
