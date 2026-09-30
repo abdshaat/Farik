@@ -35,7 +35,11 @@ const designer = (id: string, name: string) => ({
 const FAINT = "The prices were too faint to read on a phone in the dark.";
 const PASSED = "The prices read well now, in both themes.";
 /** A gate whose UI change Iris sent back on Tuesday and Kai, the team's second Designer, passed on Friday before Ada reviewed the code. */
-const reviewedTwice = () =>
+const reviewedTwice = (
+	earlier: object[] = [],
+	designReview: object = { state: "passed", reasons: PASSED, checks: [] },
+	lastPasses = true,
+) =>
 	openedGate("/tasks/FRK-1/accept", [...GATE, "task.get"], TASK, ACCEPTING, {
 		"team.get": {
 			team: {
@@ -50,6 +54,7 @@ const reviewedTwice = () =>
 		"task.history": {
 			events: [
 				...HISTORY,
+				...earlier,
 				event(
 					11,
 					"review.recorded",
@@ -63,7 +68,7 @@ const reviewedTwice = () =>
 			task: {},
 			design_plan: null,
 			ui_change: true,
-			design_review: { state: "passed", reasons: PASSED, checks: [] },
+			design_review: designReview,
 			design_reviews: [
 				{
 					agent_id: "iris",
@@ -73,7 +78,7 @@ const reviewedTwice = () =>
 				},
 				{
 					agent_id: "kai",
-					pass: true,
+					pass: lastPasses,
 					reasons: PASSED,
 					recorded_at: "2026-09-25T08:30:00Z",
 				},
@@ -354,6 +359,50 @@ describe("acceptance gate", () => {
 		).toEqual([
 			"Farik ran its checks",
 			"Iris sent the screens back",
+			"Kai checked the screens",
+			"Ada reviewed the code",
+			"Now you decide",
+		]);
+		await expectNoAxeViolations(container);
+	});
+
+	it("keeps_the_latest_send_back_out_of_the_earlier_ones", async () => {
+		// Kai's latest review sent it back too: it is the letter, not an earlier send-back.
+		const { container } = await reviewedTwice(
+			[],
+			{ state: "failed", reasons: PASSED, checks: [] },
+			false,
+		);
+		const back = await screen.findByText(
+			"Iris sent it back once, on Tuesday 22 September",
+		);
+		const details = back.closest("details") as HTMLElement;
+		expect(within(details).queryByText(PASSED)).toBeNull();
+		await expectNoAxeViolations(container);
+	});
+
+	it("puts_an_earlier_code_review_in_its_place_in_time", async () => {
+		// Ada sent the code back on Wednesday, between Iris's send-back and Kai's pass.
+		const { container } = await reviewedTwice([
+			event(
+				10,
+				"review.recorded",
+				{ reviewer: "ada", criteria_run: 1, passed: false },
+				"2026-09-23T12:00:00Z",
+				"ada",
+			),
+		]);
+		const order = await screen.findByRole("list", {
+			name: "Who looked at it, in order",
+		});
+		expect(
+			within(order)
+				.getAllByRole("listitem")
+				.map((li) => li.textContent),
+		).toEqual([
+			"Farik ran its checks",
+			"Iris sent the screens back",
+			"Ada sent the code back",
 			"Kai checked the screens",
 			"Ada reviewed the code",
 			"Now you decide",
