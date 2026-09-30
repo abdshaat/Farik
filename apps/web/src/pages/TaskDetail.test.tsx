@@ -252,6 +252,21 @@ describe("task detail", () => {
 		expect(new Set(told).size).toBe(KINDS.length);
 	});
 
+	it("says_what_each_risk_means", async () => {
+		for (const [risk, words] of [
+			["low", en.riskLowWhy],
+			["high", en.riskHighWhy],
+		] as const) {
+			await opened({ ...CONTRACT, risk });
+			await screen.findByRole("heading", { level: 1, name: "Gift cards" });
+			fireEvent.click(screen.getByRole("tab", { name: "The plan" }));
+			expect(
+				within(screen.getByRole("tabpanel")).getByText(words),
+			).toBeTruthy();
+			cleanup();
+		}
+	});
+
 	it("shows_cost_by_purpose", async () => {
 		const { container } = await opened();
 		const cost = await screen.findByRole("region", { name: "Cost so far" });
