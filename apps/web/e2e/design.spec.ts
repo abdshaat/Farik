@@ -10,7 +10,6 @@ test("a Designer's plan waits for the Product Manager on its task page", async (
 		transcripts: [
 			"triage_frk_1_small_by_pm",
 			"refine_writes_task_for_iris_frk_1",
-			"judge_frk_1_by_architect",
 			"plan_assigns_frk_1_to_iris",
 			"explore_plans_frk_1",
 		],

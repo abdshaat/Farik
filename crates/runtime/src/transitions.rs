@@ -486,6 +486,7 @@ impl Transitions {
             row,
             (open_sprint, sprint_left),
             dependency_states(&contract, &board),
+            self.designer_browser(team),
         );
 
         let review = self.review_of(team, &contract, &changed_paths, &history).1;
@@ -1073,7 +1074,8 @@ fn dependency_states(contract: &TaskContract, board: &[TaskProjection]) -> Vec<D
 
 /// The pair an assignment would name, from the ask's ids and the team's roles, when the ask names
 /// an assignee, with the sprint `row` and its epic are in, beside the open sprint and what is left
-/// of its budget. `requested_by` is the governor's to set from the request's actor.
+/// of its budget, and whether the team's Designer can have its browser. `requested_by` is the
+/// governor's to set from the request's actor.
 fn assignment(
     ask: &TransitionAsk,
     team: &Team,
@@ -1081,6 +1083,7 @@ fn assignment(
     row: &TaskProjection,
     (open_sprint, sprint_left_usd): (Option<String>, f64),
     dependencies: Vec<DependencyState>,
+    designer_browser: DesignerBrowser,
 ) -> Option<AssignmentInput> {
     let assignee_id = ask.assignee_id.as_deref()?;
     let (reviewer_id, reviewer_role) = match ask.reviewer_id.as_deref() {
@@ -1108,9 +1111,7 @@ fn assignment(
                 .and_then(|epic| epic.sprint.clone())
         }),
         dependencies,
-        // Not yet `Transitions::designer_browser`: step 11's journey assigns Iris in no-sandbox
-        // mode with no preview, and Task 6 moves it into Docker's sandbox with one.
-        designer_browser: DesignerBrowser::Ready,
+        designer_browser,
     })
 }
 
@@ -2406,6 +2407,82 @@ mod tests {
         assert_eq!(row.status, TaskStatus::Assigned);
         assert_eq!(row.assignee_id.as_deref(), Some("dev-a"));
         assert_eq!(row.reviewer_id.as_deref(), Some("dev-b"));
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn refuses_to_assign_the_designer_without_its_browser() {
+        use crate::preview::fixtures::FakePreviews;
+        use crate::preview::{NoPreviews, PreviewFactory};
+
+        type Case = (
+            &'static str,
+            Team,
+            Arc<dyn PreviewFactory>,
+            Option<&'static str>,
+        );
+
+        let with_iris = |preview: bool| {
+            a_team(|wire| {
+                wire["agents"]
+                    .as_array_mut()
+                    .expect("a list of agents")
+                    .push(an_agent_wire("iris", "ui_ux_designer"));
+                if preview {
+                    wire["preview"] = json!({ "start": "make serve", "port": 4401 });
+                }
+            })
+        };
+        let cases: [Case; 3] = [
+            (
+                "assign-designer-no-sandbox",
+                with_iris(true),
+                Arc::new(NoPreviews),
+                Some("designer_needs_sandbox"),
+            ),
+            (
+                "assign-designer-no-preview",
+                with_iris(false),
+                Arc::new(FakePreviews::ready()),
+                Some("preview_not_set"),
+            ),
+            (
+                "assign-designer-ready",
+                with_iris(true),
+                Arc::new(FakePreviews::ready()),
+                None,
+            ),
+        ];
+        for (name, team, previews, refusal) in cases {
+            let project = Project::new(name, team, at(12));
+            project.transitions.set_previews(previews);
+            project.file("FRK-1", |wire| {
+                wire["assignee_role"] = json!("ui_ux_designer");
+            });
+            project.created("FRK-1", "ready");
+            let outcome = project.ask(
+                &a_request(
+                    "FRK-1",
+                    TaskStatus::Assigned,
+                    TransitionActor::ProductManager,
+                    Some("maya"),
+                ),
+                &assigning("iris", "dev-b"),
+            );
+            match refusal {
+                Some(refusal) => {
+                    let failures = assignment_failures(&outcome);
+                    assert!(
+                        failures.iter().any(|failure| failure.starts_with(refusal)),
+                        "{name}: {failures:?}"
+                    );
+                }
+                None => assert!(
+                    matches!(outcome, TransitionOutcome::Moved(_)),
+                    "{name}: {outcome:?}"
+                ),
+            }
+        }
     }
 
     #[test]

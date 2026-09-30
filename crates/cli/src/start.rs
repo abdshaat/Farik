@@ -448,7 +448,7 @@ async fn start_listening(
             return Err(error);
         }
     };
-    let (sandboxes, previews) = factories(settings.sandbox);
+    let (sandboxes, previews) = factories(settings.sandbox, sandbox_image(io));
     tools.transitions.set_previews(Arc::clone(&previews));
     let orchestrator = Arc::new(Orchestrator::new(OrchestratorDeps {
         tools,
@@ -486,16 +486,27 @@ async fn start_listening(
     })
 }
 
-/// What makes a task's sandbox and its preview, by the project's sandbox setting: the Designer
-/// has no browser without Docker's sandbox (D3).
-fn factories(sandbox: Sandbox) -> (Arc<dyn SandboxFactory>, Arc<dyn PreviewFactory>) {
+/// The image Docker's sandbox and the preview run in: `SANDBOX_IMAGE`, or the end-to-end
+/// server's `--sandbox-image`.
+fn sandbox_image<'a>(io: &'a CliIo<'_>) -> &'a str {
+    #[cfg(feature = "e2e")]
+    if let Some(image) = io.sandbox_image.as_deref() {
+        return image;
+    }
+    let _ = io;
+    SANDBOX_IMAGE
+}
+
+/// What makes a task's sandbox and its preview, by the project's sandbox setting, in `image`:
+/// the Designer has no browser without Docker's sandbox (D3).
+fn factories(sandbox: Sandbox, image: &str) -> (Arc<dyn SandboxFactory>, Arc<dyn PreviewFactory>) {
     match sandbox {
         Sandbox::Docker => (
             Arc::new(DockerSandboxFactory {
-                image: SANDBOX_IMAGE.to_string(),
+                image: image.to_string(),
             }),
             Arc::new(DockerPreviewFactory {
-                image: SANDBOX_IMAGE.to_string(),
+                image: image.to_string(),
             }),
         ),
         Sandbox::None => (Arc::new(HostSandboxFactory), Arc::new(NoPreviews)),
@@ -537,6 +548,8 @@ pub(crate) fn web(
         stores: (io.credential_stores)(),
         env: io.env.clone(),
         in_use,
+        #[cfg(feature = "e2e")]
+        admit_local_preview: io.admit_local_preview,
     };
     Ok((web, code))
 }

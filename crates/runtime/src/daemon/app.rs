@@ -25,9 +25,21 @@ pub(crate) async fn app_from<E: RustEmbed>(
     let Some(web) = state.web() else {
         return StatusCode::NOT_FOUND.into_response();
     };
-    if !own_host(&headers, web.port) {
+    if !own_host(&headers, web) {
         return StatusCode::FORBIDDEN.into_response();
     }
+    // The end-to-end server's `--preview` lets a code-free browser in at its first page.
+    #[cfg(feature = "e2e")]
+    let cookie = if uri.path() == "/" {
+        match super::web::local_preview_cookie(&headers, web) {
+            Ok(cookie) => cookie,
+            Err(error) => {
+                return (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()).into_response();
+            }
+        }
+    } else {
+        None
+    };
     let asked = uri.path().trim_start_matches('/');
     let (path, file) = match E::get(asked) {
         Some(file) if !asked.is_empty() => (asked, Some(file)),
@@ -58,7 +70,7 @@ pub(crate) async fn app_from<E: RustEmbed>(
         "default-src 'self'; connect-src 'self' ws://127.0.0.1:{}; img-src 'self' data:; font-src 'self' data:; style-src 'self'; frame-ancestors 'none'",
         web.port
     );
-    (
+    let response = (
         [
             (header::CONTENT_TYPE, mime),
             (header::CACHE_CONTROL, cache.to_string()),
@@ -67,8 +79,12 @@ pub(crate) async fn app_from<E: RustEmbed>(
             (header::REFERRER_POLICY, "no-referrer".to_string()),
         ],
         body,
-    )
-        .into_response()
+    );
+    #[cfg(feature = "e2e")]
+    if let Some(cookie) = cookie {
+        return ([(header::SET_COOKIE, cookie)], response).into_response();
+    }
+    response.into_response()
 }
 
 #[cfg(test)]

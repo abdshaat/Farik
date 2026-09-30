@@ -751,6 +751,8 @@ mod tests {
                     .map(|(name, value)| ((*name).to_string(), (*value).to_string()))
                     .collect::<BTreeMap<_, _>>(),
                 in_use: Some(Arc::clone(&in_use)),
+                #[cfg(feature = "e2e")]
+                admit_local_preview: false,
             })
         );
         in_use

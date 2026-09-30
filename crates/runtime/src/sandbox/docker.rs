@@ -168,9 +168,11 @@ impl Sandbox for DockerSandbox {
 
 /// What `docker rm -f` answering `output` means for `discard`: a container already gone is
 /// discarded, since that is all `discard` asks. Older dockers refuse a missing one; newer ones do
-/// not.
+/// not. So is one Docker is already removing, as it does a `--rm` container whose process ended.
 pub(crate) fn removed(output: &Output) -> Result<(), SandboxError> {
-    if !output.status.success() && !stderr_of(output).contains("No such container") {
+    let said = stderr_of(output);
+    let gone = said.contains("No such container") || said.contains("is already in progress");
+    if !output.status.success() && !gone {
         return Err(SandboxError::ContainerFailed {
             detail: stderr_of(output),
         });
@@ -323,6 +325,10 @@ mod tests {
         };
         let missing = "Error response from daemon: No such container: farik-p-frk-1\n";
         assert_eq!(removed(&answer(missing)), Ok(()));
+        // A `--rm` container whose process just ended is being removed by Docker itself.
+        let going = "Error response from daemon: removal of container farik-browser-p-frk-1 is \
+                     already in progress\n";
+        assert_eq!(removed(&answer(going)), Ok(()));
         let refused = "Error response from daemon: could not kill: permission denied\n";
         assert_eq!(
             removed(&answer(refused)),

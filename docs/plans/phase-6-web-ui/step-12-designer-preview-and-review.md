@@ -295,7 +295,7 @@ In `xtask/src/check.rs`:
 - `integration_steps` gains `cargo clippy -p farik-runtime --features e2e -- -D warnings`, since `cargo clippy -p farik --features e2e` does not lint `farik-runtime`'s `#[cfg(feature = "e2e")]` code. It is asserted by `integration_steps_lint_the_runtime_with_e2e`.
 - The release build never uses `--all-features`, which would switch the admit branch on (R13). This is enforced by `never_builds_with_all_features`, which fails when any xtask command or any `.github/workflows/*.yml` contains `--all-features`.
 
-- [ ] `test(web): walk a Designer's task and a design review through the real server and browser`
+- [x] `test(web): walk a Designer's task and a design review through the real server and browser`
 
 ### Task 7: Spec and plan
 

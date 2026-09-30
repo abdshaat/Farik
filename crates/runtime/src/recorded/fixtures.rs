@@ -426,6 +426,78 @@ pub fn design_review_fails_frk_2() -> Transcript {
     Transcript::from_jsonl(include_str!("transcripts/design_review_fails_frk_2.jsonl"))
 }
 
+// Step 12's Designer journey (`apps/web/e2e/designer.spec.ts`), on Mira, Ada, Theo and Iris, whose
+// criteria are all `review` ones.
+
+/// The Product Manager's contract for FRK-1, for the UI/UX Designer: say where to sign in on
+/// `site/index.html`, `low` risk, with one `review` criterion, C1. Hand-written.
+#[must_use]
+pub fn refine_writes_page_task_for_iris_frk_1() -> Transcript {
+    Transcript::from_jsonl(include_str!(
+        "transcripts/refine_writes_page_task_for_iris_frk_1.jsonl"
+    ))
+}
+
+/// `iris`'s explore session of FRK-1 with the browser: `farik_check_page` of `/` at phone width
+/// in the light theme, then `farik_propose_design_plan` of a plan that opens "The sign-in page
+/// never says where to sign in". Hand-written.
+#[must_use]
+pub fn explore_checks_and_plans_frk_1() -> Transcript {
+    Transcript::from_jsonl(include_str!(
+        "transcripts/explore_checks_and_plans_frk_1.jsonl"
+    ))
+}
+
+/// `iris`'s implement session of FRK-1: `site/index.html`'s greeting gains "Sign in below.",
+/// committed, a completion note, and `verifying` asked for. Hand-written.
+#[must_use]
+pub fn implement_by_iris_page_frk_1() -> Transcript {
+    Transcript::from_jsonl(include_str!(
+        "transcripts/implement_by_iris_page_frk_1.jsonl"
+    ))
+}
+
+/// The Architect's review of FRK-1: C1 recorded as passed and a review note that passes it.
+/// Hand-written.
+#[must_use]
+pub fn review_answers_the_rubric_frk_1() -> Transcript {
+    Transcript::from_jsonl(include_str!(
+        "transcripts/review_answers_the_rubric_frk_1.jsonl"
+    ))
+}
+
+/// The Product Manager's triage of FRK-2, with no Scrum Master: `farik_triage_request` of size
+/// `small`. Hand-written.
+#[must_use]
+pub fn triage_frk_2_small_by_pm() -> Transcript {
+    Transcript::from_jsonl(include_str!("transcripts/triage_frk_2_small_by_pm.jsonl"))
+}
+
+/// The Product Manager's contract for FRK-2, for the Software Developer: darken the heading in
+/// `site/style.css`, `high` risk, so the human approves the plan and accepts the work, with one
+/// `review` criterion, C1. Hand-written.
+#[must_use]
+pub fn refine_writes_css_task_for_theo_frk_2() -> Transcript {
+    Transcript::from_jsonl(include_str!(
+        "transcripts/refine_writes_css_task_for_theo_frk_2.jsonl"
+    ))
+}
+
+/// As `plan_assigns_frk_1_to_theo`, for FRK-2. Hand-written.
+#[must_use]
+pub fn plan_assigns_frk_2_to_theo() -> Transcript {
+    Transcript::from_jsonl(include_str!("transcripts/plan_assigns_frk_2_to_theo.jsonl"))
+}
+
+/// The Architect's review of FRK-2: C1 recorded as passed and a review note that passes it.
+/// Hand-written.
+#[must_use]
+pub fn review_answers_the_rubric_frk_2() -> Transcript {
+    Transcript::from_jsonl(include_str!(
+        "transcripts/review_answers_the_rubric_frk_2.jsonl"
+    ))
+}
+
 /// An adapter whose every session reports `usage` at once and then either ends `completed` at
 /// once or waits for `abort` and ends `aborted`, or, when its abort fails, waits for ever: the
 /// shapes a recorded transcript, which reports usage only on its last line, cannot show.

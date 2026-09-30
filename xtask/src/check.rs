@@ -83,6 +83,20 @@ pub fn integration_steps(tests: Tests) -> Vec<(&'static str, Vec<&'static str>)>
         Tests::All => vec![
             (
                 "cargo",
+                // `farik`'s lint below does not reach `farik-runtime`'s `#[cfg(feature = "e2e")]` code.
+                vec![
+                    "clippy",
+                    "-p",
+                    "farik-runtime",
+                    "--features",
+                    "e2e",
+                    "--",
+                    "-D",
+                    "warnings",
+                ],
+            ),
+            (
+                "cargo",
                 vec![
                     "clippy",
                     "-p",
@@ -217,6 +231,19 @@ mod tests {
                     vec![
                         "clippy",
                         "-p",
+                        "farik-runtime",
+                        "--features",
+                        "e2e",
+                        "--",
+                        "-D",
+                        "warnings",
+                    ]
+                ),
+                (
+                    "cargo",
+                    vec![
+                        "clippy",
+                        "-p",
                         "farik",
                         "--features",
                         "e2e",
@@ -257,5 +284,44 @@ mod tests {
             ]
         );
         assert!(integration_steps(Tests::WithoutTheOnesThatNeedAProgram).is_empty());
+    }
+
+    #[test]
+    fn integration_steps_lint_the_runtime_with_e2e() {
+        // `cargo clippy -p farik --features e2e` does not lint `farik-runtime`'s
+        // `#[cfg(feature = "e2e")]` code, the local preview's admission among it.
+        assert!(integration_steps(Tests::All).contains(&(
+            "cargo",
+            vec![
+                "clippy",
+                "-p",
+                "farik-runtime",
+                "--features",
+                "e2e",
+                "--",
+                "-D",
+                "warnings",
+            ]
+        )));
+    }
+
+    #[test]
+    fn never_builds_with_all_features() {
+        // It would switch the end-to-end server's code-free admission on in a release build. The
+        // flag is spelled in two halves, so this test is not a finding of its own.
+        let flag = ["--all", "-features"].concat();
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        let folders = [root.join("src"), root.join("../.github/workflows")];
+        let mut found = Vec::new();
+        for folder in folders {
+            for entry in std::fs::read_dir(&folder).expect("the folder is there") {
+                let path = entry.expect("an entry").path();
+                let text = std::fs::read_to_string(&path).unwrap_or_default();
+                if text.contains(&flag) {
+                    found.push(path.display().to_string());
+                }
+            }
+        }
+        assert!(found.is_empty(), "{flag} is used in {found:?}");
     }
 }

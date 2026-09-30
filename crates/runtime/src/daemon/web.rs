@@ -58,6 +58,11 @@ pub struct WebState {
     /// The credential the sessions start with, which connecting the account again replaces;
     /// `None` in setup mode or when the sessions are given one.
     pub in_use: Option<crate::claude::SharedCredential>,
+    /// Whether a browser at `http://localhost:<port>` is let in without a code, and given a
+    /// session by `GET /`: the end-to-end server's `--preview`, which runs as a project's preview
+    /// with a temporary team and credential store (step 12, D1). Absent from the release build.
+    #[cfg(feature = "e2e")]
+    pub admit_local_preview: bool,
 }
 
 /// The one live connect code: `issue` replaces it, and `redeem` spends it. It lives in memory, so
@@ -234,19 +239,66 @@ const USED_LINK: &str =
 /// Whether a browser request comes from the daemon's own page: `Host` is `127.0.0.1:<port>` and
 /// `Origin` is `http://127.0.0.1:<port>`, exactly. `localhost` is refused on purpose, since the
 /// link and the cookie are bound to `127.0.0.1`; the port counts, because a browser sends the
-/// cookie to every port of a host, and a page on another local port is another origin.
-fn from_own_page(headers: &HeaderMap, port: u16) -> bool {
-    own_host(headers, port) && named(headers, header::ORIGIN) == Some(own_origin(port).as_str())
+/// cookie to every port of a host, and a page on another local port is another origin. The one
+/// exception is the end-to-end server's `--preview` ([`local_preview`]).
+fn from_own_page(headers: &HeaderMap, web: &WebState) -> bool {
+    own_host(headers, web)
+        && named(headers, header::ORIGIN).is_some_and(|origin| own_origin(origin, web))
 }
 
 /// Whether `Host` is `127.0.0.1:<port>`, exactly: what a navigation, which sends no `Origin`, is
 /// checked by.
-pub(super) fn own_host(headers: &HeaderMap, port: u16) -> bool {
-    named(headers, header::HOST) == Some(format!("127.0.0.1:{port}").as_str())
+pub(super) fn own_host(headers: &HeaderMap, web: &WebState) -> bool {
+    named(headers, header::HOST)
+        .is_some_and(|host| host == format!("127.0.0.1:{}", web.port) || local_preview(web, host))
 }
 
-fn own_origin(port: u16) -> String {
-    format!("http://127.0.0.1:{port}")
+/// Whether `origin` is the daemon's own page's.
+fn own_origin(origin: &str, web: &WebState) -> bool {
+    origin == format!("http://127.0.0.1:{}", web.port)
+        || origin
+            .strip_prefix("http://")
+            .is_some_and(|host| local_preview(web, host))
+}
+
+/// Whether `host` is `localhost:<port>`, exactly, on a daemon that admits a local preview. Any
+/// other port or name is still refused, so DNS rebinding and cross-site requests stay out.
+#[cfg(feature = "e2e")]
+fn local_preview(web: &WebState, host: &str) -> bool {
+    web.admit_local_preview && host == format!("localhost:{}", web.port)
+}
+
+/// No build but the end-to-end server's admits a local preview.
+#[cfg(not(feature = "e2e"))]
+fn local_preview(_: &WebState, _: &str) -> bool {
+    false
+}
+
+/// The session cookie a new session's `secret` is set by.
+fn session_cookie(secret: &str) -> String {
+    format!(
+        "farik_session={secret}; HttpOnly; SameSite=Strict; Path=/; Max-Age={}",
+        SESSION_DAYS * 24 * 60 * 60
+    )
+}
+
+/// The cookie of a new session for a request whose `Host` is the local preview's, which needs no
+/// code; `None` for any other request.
+///
+/// # Errors
+///
+/// As `BrowserSessions::issue`.
+#[cfg(feature = "e2e")]
+pub(super) fn local_preview_cookie(
+    headers: &HeaderMap,
+    web: &WebState,
+) -> Result<Option<String>, DaemonError> {
+    if !named(headers, header::HOST).is_some_and(|host| local_preview(web, host)) {
+        return Ok(None);
+    }
+    web.sessions
+        .issue(web.clock.now())
+        .map(|secret| Some(session_cookie(&secret)))
 }
 
 /// The header `name`, when it is there and is text.
@@ -268,7 +320,7 @@ pub(super) async fn connect(
     let Some(web) = state.web() else {
         return StatusCode::NOT_FOUND.into_response();
     };
-    if !from_own_page(&headers, web.port) {
+    if !from_own_page(&headers, web) {
         return StatusCode::FORBIDDEN.into_response();
     }
     let code = serde_json::from_slice::<Value>(&body)
@@ -284,13 +336,7 @@ pub(super) async fn connect(
     match web.sessions.issue(web.clock.now()) {
         Ok(secret) => (
             StatusCode::NO_CONTENT,
-            [(
-                header::SET_COOKIE,
-                format!(
-                    "farik_session={secret}; HttpOnly; SameSite=Strict; Path=/; Max-Age={}",
-                    SESSION_DAYS * 24 * 60 * 60
-                ),
-            )],
+            [(header::SET_COOKIE, session_cookie(&secret))],
         )
             .into_response(),
         Err(error) => (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()).into_response(),
@@ -318,8 +364,7 @@ pub(super) async fn session(State(state): State<Arc<DaemonState>>, headers: Head
         return StatusCode::NOT_FOUND.into_response();
     };
     let origin = named(&headers, header::ORIGIN);
-    if !own_host(&headers, web.port) || origin.is_some_and(|origin| origin != own_origin(web.port))
-    {
+    if !own_host(&headers, web) || origin.is_some_and(|origin| !own_origin(origin, web)) {
         return StatusCode::FORBIDDEN.into_response();
     }
     let now = web.clock.now();
@@ -340,7 +385,7 @@ pub(super) async fn disconnect(
     let Some(web) = state.web() else {
         return StatusCode::NOT_FOUND.into_response();
     };
-    if !from_own_page(&headers, web.port) {
+    if !from_own_page(&headers, web) {
         return StatusCode::FORBIDDEN.into_response();
     }
     if let Err(error) = session_cookies(&headers).try_for_each(|secret| web.sessions.revoke(secret))
@@ -369,7 +414,7 @@ pub(super) async fn rpc(
     let Some(web) = state.web() else {
         return StatusCode::NOT_FOUND.into_response();
     };
-    if !from_own_page(&headers, web.port) {
+    if !from_own_page(&headers, web) {
         return StatusCode::FORBIDDEN.into_response();
     }
     let now = web.clock.now();
@@ -1038,6 +1083,8 @@ mod tests {
             stores: Vec::new(),
             env: std::collections::BTreeMap::new(),
             in_use: None,
+            #[cfg(feature = "e2e")]
+            admit_local_preview: false,
         }));
         (daemon, code)
     }
@@ -1451,6 +1498,8 @@ mod tests {
             stores: Vec::new(),
             env: std::collections::BTreeMap::new(),
             in_use: None,
+            #[cfg(feature = "e2e")]
+            admit_local_preview: false,
         }));
         (handle, secret)
     }
@@ -2304,6 +2353,8 @@ mod tests {
             stores: Vec::new(),
             env: std::collections::BTreeMap::new(),
             in_use: None,
+            #[cfg(feature = "e2e")]
+            admit_local_preview: false,
         };
         let state = Arc::new(DaemonState::setup(
             Arc::clone(&host) as Arc<dyn SetupHost>,

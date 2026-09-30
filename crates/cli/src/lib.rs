@@ -147,6 +147,14 @@ pub struct CliIo<'a> {
     /// real keychain, and the keychain then the file in `main`.
     #[cfg(unix)]
     pub credential_stores: CredentialStores,
+    /// Whether `farik serve` lets a browser at `http://localhost:<port>` in without a code: the
+    /// end-to-end server's `--preview` (step 12, D1). The release build has no such field.
+    #[cfg(feature = "e2e")]
+    pub admit_local_preview: bool,
+    /// The image Docker's sandbox and the preview run in, in place of `SANDBOX_IMAGE`: the
+    /// end-to-end server's `--sandbox-image`.
+    #[cfg(feature = "e2e")]
+    pub sandbox_image: Option<String>,
 }
 
 /// The places the model credential is kept, in the order they are tried.
@@ -207,6 +215,10 @@ impl<'a> CliIo<'a> {
                 let memory: Arc<dyn CredentialStore> = Arc::new(MemoryStore::default());
                 Arc::new(move || vec![Arc::clone(&memory)])
             },
+            #[cfg(feature = "e2e")]
+            admit_local_preview: false,
+            #[cfg(feature = "e2e")]
+            sandbox_image: None,
         }
     }
 }

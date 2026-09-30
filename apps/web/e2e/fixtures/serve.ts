@@ -3,9 +3,17 @@ import {
 	execFileSync,
 	spawn,
 } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import {
+	chmodSync,
+	copyFileSync,
+	existsSync,
+	mkdirSync,
+	mkdtempSync,
+	readFileSync,
+	writeFileSync,
+} from "node:fs";
 import { type AddressInfo, createServer } from "node:net";
-import { tmpdir } from "node:os";
+import { tmpdir, userInfo } from "node:os";
 import { join, resolve } from "node:path";
 import { createInterface } from "node:readline";
 import type { Readable } from "node:stream";
@@ -29,9 +37,12 @@ export function farik(project: string, args: string[]): string {
 }
 
 /** The project's events, as `farik --json log` prints them. */
-export function events(
-	project: string,
-): { kind: string; body: Record<string, unknown> }[] {
+export function events(project: string): {
+	kind: string;
+	task_id?: string;
+	agent_id?: string;
+	body: Record<string, unknown>;
+}[] {
 	return farik(project, ["--json", "log"])
 		.trim()
 		.split("\n")
@@ -65,13 +76,24 @@ function link(
 	});
 }
 
-/** Makes `folder` a git repository with one commit. */
-export function gitProject(folder: string): void {
+/**
+ * Makes `folder` a git repository with one commit, of `README.md`, `files` written, and `present`,
+ * files already in the folder.
+ */
+export function gitProject(
+	folder: string,
+	files: Record<string, string> = {},
+	present: string[] = [],
+): void {
 	mkdirSync(folder, { recursive: true });
 	const git = (...args: string[]) => execFileSync("git", args, { cwd: folder });
 	git("init", "-b", "main");
 	writeFileSync(join(folder, "README.md"), "the first line\n");
-	git("add", "README.md");
+	for (const [name, text] of Object.entries(files)) {
+		mkdirSync(join(folder, name, ".."), { recursive: true });
+		writeFileSync(join(folder, name), text);
+	}
+	git("add", "README.md", ...Object.keys(files), ...present);
 	git(
 		"-c",
 		"user.name=t",
@@ -107,6 +129,7 @@ export async function startServe(o: {
 }> {
 	const project = mkdtempSync(join(tmpdir(), "farik-e2e-project-"));
 	const args: string[] = [];
+	const docker = o.project !== false && o.team?.endsWith("-designer") === true;
 	let serveEnv: NodeJS.ProcessEnv = env;
 	if (o.project === false) {
 		const {
@@ -122,8 +145,10 @@ export async function startServe(o: {
 		};
 		args.push("--no-keychain");
 	} else {
-		setUp(project, o.setupPending === true);
-		if (o.team) writeTeam(project, o.team.endsWith("-designer"));
+		setUp(project, o.setupPending === true, docker);
+		if (o.team) writeTeam(project, docker);
+		// The Designer has no browser without Docker's sandbox (D3), so its team runs in it.
+		if (docker) args.push("--sandbox-image", SANDBOX_IMAGE);
 	}
 
 	const port = await freePort();
@@ -149,19 +174,33 @@ export async function startServe(o: {
 			const settled = setTimeout(() => server.kill("SIGINT"), 2000);
 			await exited;
 			clearTimeout(settled);
+			if (docker) removeContainers(project);
 		},
 	};
 }
 
-/** A project with its team, and sandboxing off, as `startServe` serves by default. */
-function setUp(project: string, setupPending: boolean): void {
-	gitProject(project);
+/**
+ * A project with its team, and sandboxing off, as `startServe` serves by default; with `designer`,
+ * in Docker's sandbox instead, and holding the two-file site its preview serves.
+ */
+function setUp(
+	project: string,
+	setupPending: boolean,
+	designer: boolean,
+): void {
+	if (designer) {
+		copyFileSync(busybox(), join(project, "busybox"));
+		chmodSync(join(project, "busybox"), 0o755);
+		gitProject(project, SITE, ["busybox"]);
+	} else {
+		gitProject(project);
+	}
 	farik(project, ["init"]);
 	// What the CLI tests' `no_sandbox` writes: this machine runs tasks without Docker.
 	mkdirSync(join(project, ".farik/local"), { recursive: true });
 	writeFileSync(
 		join(project, ".farik/local/settings.json"),
-		'{"sandbox":"none"}',
+		designer ? '{"sandbox":"docker"}' : '{"sandbox":"none"}',
 	);
 	if (setupPending) {
 		farik(project, ["pause"]);
@@ -171,20 +210,82 @@ function setUp(project: string, setupPending: boolean): void {
 
 /**
  * Mira (Product Manager), Ada (Architect, who checks plans and reviews Theo) and Theo (Developer),
- * and Iris (UI/UX Designer) when `designer`.
+ * and Iris (UI/UX Designer) when `designer`: with the Playwright connector, no plan checked
+ * before work starts, and the site's preview, busybox's `httpd` on port 4401.
  */
 function writeTeam(project: string, designer: boolean): void {
-	const agent = (id: string, name: string, role: string) =>
-		`- display_name: ${name}\n  id: ${id}\n  model:\n    effort: high\n    id: claude-opus-5-5\n  persona: ${name}.\n  role: ${role}\n  status: active\n`;
+	const agent = (id: string, name: string, role: string, extra = "") =>
+		`- display_name: ${name}\n  id: ${id}\n${extra}  model:\n    effort: high\n    id: claude-opus-5-5\n  persona: ${name}.\n  role: ${role}\n  status: active\n`;
 	const path = join(project, ".farik/team.yaml");
-	const yaml = readFileSync(path, "utf8");
+	let yaml = readFileSync(path, "utf8");
 	const agents =
 		agent("mira", "Mira", "product_manager") +
 		agent("ada", "Ada", "architect") +
 		agent("theo", "Theo", "software_developer") +
-		(designer ? agent("iris", "Iris", "ui_ux_designer") : "");
-	writeFileSync(
-		path,
-		yaml.replace(/^agents:\n[\s\S]*?(?=^budgets:)/m, `agents:\n${agents}`),
-	);
+		(designer
+			? agent(
+					"iris",
+					"Iris",
+					"ui_ux_designer",
+					"  mcp_servers:\n  - name: playwright\n    source: builtin\n",
+				)
+			: "");
+	yaml = yaml.replace(/^agents:\n[\s\S]*?(?=^budgets:)/m, `agents:\n${agents}`);
+	if (designer) {
+		yaml = yaml.replace("    required: always\n", "    required: never\n");
+		// Alpine's own busybox leaves `httpd` out; the project carries busybox-extras' as `busybox`.
+		yaml +=
+			"preview:\n  start: ./busybox httpd -f -p 4401 -h site\n  port: 4401\n";
+	}
+	writeFileSync(path, yaml);
+}
+
+/** The image the Designer's team's sandbox and preview run in. */
+const SANDBOX_IMAGE = "alpine:3.22";
+
+/** The site the Designer's preview serves. */
+const SITE = {
+	"site/index.html":
+		'<!doctype html>\n<html lang="en">\n<head>\n<meta charset="utf-8">\n<meta name="viewport" content="width=device-width, initial-scale=1">\n<title>Sign in</title>\n<link rel="stylesheet" href="style.css">\n</head>\n<body>\n<main>\n<h1>Sign in</h1>\n<p>Welcome back.</p>\n</main>\n</body>\n</html>\n',
+	"site/style.css":
+		"body { font-family: sans-serif; margin: 2rem; }\nh1 { color: #4a5a6c; }\n",
+};
+
+/**
+ * busybox-extras' binary, which has the `httpd` applet `alpine:3.22`'s own busybox leaves out,
+ * fetched once per machine by a container with the network on.
+ */
+function busybox(): string {
+	const file = join(tmpdir(), "farik-e2e-busybox-extras");
+	if (!existsSync(file)) {
+		const out = mkdtempSync(join(tmpdir(), "farik-e2e-busybox-"));
+		const { uid, gid } = userInfo();
+		execFileSync("docker", [
+			"run",
+			"--rm",
+			"--mount",
+			`type=bind,src=${out},dst=/out`,
+			SANDBOX_IMAGE,
+			"sh",
+			"-c",
+			`apk add -q --no-cache busybox-extras && cp /bin/busybox-extras /out/busybox && chown ${uid}:${gid} /out/busybox`,
+		]);
+		copyFileSync(join(out, "busybox"), file);
+	}
+	return file;
+}
+
+/** Removes every container Farik left for `project`: a task that still waits keeps its sandbox. */
+function removeContainers(project: string): void {
+	const first = farik(project, ["--json", "log"]).split("\n")[0];
+	const id = first ? JSON.parse(first).project_id : undefined;
+	if (!id) return;
+	const names = execFileSync(
+		"docker",
+		["ps", "-aq", "--filter", `label=farik.project=${id}`],
+		{ encoding: "utf8" },
+	)
+		.split("\n")
+		.filter(Boolean);
+	if (names.length > 0) execFileSync("docker", ["rm", "-f", ...names]);
 }

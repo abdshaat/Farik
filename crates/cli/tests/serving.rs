@@ -571,6 +571,118 @@ fn the_e2e_binary_serves_with_recorded_sessions() {
     assert!(status.success());
 }
 
+#[cfg(feature = "e2e")]
+/// The raw answer to `GET <path>` sent to the daemon on `port` with `Host: <host>`, and `cookie`
+/// when there is one.
+fn get_as(port: u16, host: &str, path: &str, cookie: Option<&str>) -> String {
+    use std::io::Read as _;
+
+    let mut stream = std::net::TcpStream::connect(("127.0.0.1", port)).expect("connects");
+    let cookie = cookie
+        .map(|cookie| format!("Cookie: {cookie}\r\n"))
+        .unwrap_or_default();
+    write!(
+        stream,
+        "GET {path} HTTP/1.1\r\nHost: {host}\r\n{cookie}Connection: close\r\n\r\n"
+    )
+    .expect("the request is sent");
+    let mut answer = String::new();
+    stream.read_to_string(&mut answer).expect("the answer");
+    answer
+}
+
+#[cfg(feature = "e2e")]
+/// The `name=value` of the session cookie an answer sets, if it sets one.
+fn cookie_set(answer: &str) -> Option<String> {
+    answer.lines().find_map(|line| {
+        let (name, value) = line.split_once(':')?;
+        name.eq_ignore_ascii_case("set-cookie")
+            .then(|| {
+                value
+                    .trim()
+                    .split(';')
+                    .next()
+                    .unwrap_or_default()
+                    .to_string()
+            })
+            .filter(|pair| {
+                pair.starts_with("farik_session=") && pair.len() > "farik_session=".len()
+            })
+    })
+}
+
+#[cfg(feature = "e2e")]
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn admits_a_local_browser_without_a_code_in_preview_mode() {
+    use std::io::{BufRead as _, BufReader};
+    use std::process::{Command, Stdio};
+
+    // Run outside any project: `--preview` makes its own.
+    let folder = scratch("serve-preview");
+    let port = free_port();
+    let mut child = Command::new(env!("CARGO_BIN_EXE_farik-e2e-serve"))
+        .args(["--preview", "--port", &port])
+        .current_dir(&folder)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("the binary starts");
+    let mut lines = BufReader::new(child.stdout.take().expect("stdout")).lines();
+    let port: u16 = loop {
+        let line = lines.next().expect("the link is printed").expect("a line");
+        if let Some((port, _)) = link_of(&line) {
+            break port;
+        }
+    };
+
+    let admitted = get_as(port, &format!("localhost:{port}"), "/", None);
+    let cookie = cookie_set(&admitted);
+    let session = cookie
+        .as_deref()
+        .map(|cookie| get_as(port, &format!("localhost:{port}"), "/session", Some(cookie)));
+    let other_port = get_as(port, &format!("localhost:{}", port + 1), "/", None);
+    let foreign = get_as(port, "evil.example", "/", None);
+    let interrupted = Command::new("kill")
+        .args(["-INT", &child.id().to_string()])
+        .status()
+        .expect("kill runs");
+    let status = child.wait().expect("the binary ends");
+
+    assert!(admitted.starts_with("HTTP/1.1 200"), "{admitted}");
+    assert!(
+        admitted
+            .to_ascii_lowercase()
+            .contains("content-type: text/html"),
+        "{admitted}"
+    );
+    assert!(cookie.is_some(), "no session cookie: {admitted}");
+    let session = session.unwrap_or_default();
+    assert!(session.starts_with("HTTP/1.1 204"), "{session}");
+    assert!(other_port.starts_with("HTTP/1.1 403"), "{other_port}");
+    assert!(cookie_set(&other_port).is_none(), "{other_port}");
+    assert!(foreign.starts_with("HTTP/1.1 403"), "{foreign}");
+    assert!(cookie_set(&foreign).is_none(), "{foreign}");
+    assert!(interrupted.success());
+    // What a serve that Ctrl-C ended exits with.
+    assert_eq!(status.code(), Some(130), "{status:?}");
+}
+
+#[cfg(not(feature = "e2e"))]
+#[test]
+fn refuses_preview_without_the_e2e_feature() {
+    let folder = scratch("serve-no-preview");
+    // A port no serve can take, so that a parser that took `--preview` refuses the port rather
+    // than serving for ever.
+    let ran = run(&folder, &["serve", "--preview", "--port", "none"]);
+    assert_eq!(ran.code, 2, "{}\n{}", ran.out, ran.err);
+    assert!(
+        ran.err.contains("unexpected argument '--preview'"),
+        "{}",
+        ran.err
+    );
+}
+
 type Socket =
     tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>;
 
@@ -585,27 +697,37 @@ fn a_runtime() -> tokio::runtime::Runtime {
 /// The browser's socket on `port`, with the session `cookie`; retried for 30 s, since across a
 /// take-on the daemon is briefly not there.
 async fn socket(port: u16, cookie: &str) -> Socket {
-    use tokio_tungstenite::tungstenite::client::IntoClientRequest as _;
-
     let deadline = Instant::now() + Duration::from_secs(30);
     loop {
-        let mut request = format!("ws://127.0.0.1:{port}/rpc")
-            .into_client_request()
-            .expect("a request");
-        let headers = request.headers_mut();
-        headers.insert(
-            "Origin",
-            format!("http://127.0.0.1:{port}")
-                .parse()
-                .expect("a header"),
-        );
-        headers.insert("Cookie", cookie.parse().expect("a header"));
-        match tokio_tungstenite::connect_async(request).await {
-            Ok((socket, _)) => return socket,
+        match try_socket(port, cookie).await {
+            Ok(socket) => return socket,
             Err(error) => assert!(Instant::now() < deadline, "the socket opens: {error}"),
         }
         tokio::time::sleep(Duration::from_millis(50)).await;
     }
+}
+
+/// The browser's socket on `port`, with the session `cookie`, tried once.
+async fn try_socket(
+    port: u16,
+    cookie: &str,
+) -> Result<Socket, tokio_tungstenite::tungstenite::Error> {
+    use tokio_tungstenite::tungstenite::client::IntoClientRequest as _;
+
+    let mut request = format!("ws://127.0.0.1:{port}/rpc")
+        .into_client_request()
+        .expect("a request");
+    let headers = request.headers_mut();
+    headers.insert(
+        "Origin",
+        format!("http://127.0.0.1:{port}")
+            .parse()
+            .expect("a header"),
+    );
+    headers.insert("Cookie", cookie.parse().expect("a header"));
+    tokio_tungstenite::connect_async(request)
+        .await
+        .map(|(socket, _)| socket)
 }
 
 /// Sends `method` with `params` and answers the reply.
@@ -651,11 +773,13 @@ fn serve_status(port: u16, cookie: &str) -> Value {
     })
 }
 
-/// `serve.status` while serve may be restarting: `None` when the daemon it reached was shutting
-/// down and cut the socket before it replied.
+/// `serve.status` while serve may be restarting: `None` when no daemon answers on `port` now, or
+/// the one it reached was shutting down and cut the socket before it replied. Tried once, since a
+/// serve that cannot have its port back prints a new link on another, which the caller's next try
+/// reads.
 fn serve_status_across_a_restart(port: u16, cookie: &str) -> Option<Value> {
     a_runtime().block_on(async {
-        let mut socket = socket(port, cookie).await;
+        let mut socket = try_socket(port, cookie).await.ok()?;
         let status = json!({ "name": "serve.status", "params": {} });
         let answer = try_ask(&mut socket, 1, "query", status).await.ok()?;
         Some(answer["result"].clone())
