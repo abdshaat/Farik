@@ -37,7 +37,8 @@ Out of scope: one-on-ones ("Talk to one person" is phase 8), notifications (phas
 - **Posting.** The composer is "Post to the team", with the mockup's hint, and "Post" sends `message_post { text }`. Typing `@` opens a listbox of the team's agents (arrow keys and Enter, `role="listbox"`), which inserts `@<id>`. Text over 2000 characters, counted in code points (`[...text].length`, as the runtime's `chars().count()`), is refused before sending, with the runtime's limit sentence. A refusal from the daemon shows under the box.
 - **Intro.** The Channel mockup's intro, word for word, at the top (spec 5.9: only a filed request starts work).
 - **Side panel.** "Meetings in this sprint" links to the open sprint's thread blocks, from `sprint.get`'s meetings. On a phone the side panel moves below the messages.
-- **Today's preview.** Today shows the last two messages whose kind is not `system`, then "Open the channel".
+- **Today's preview.** Today shows, from the newest 20 messages, the last two whose kind is not `system`, then "Open the channel" (the landing review accepted the window).
+- **Avatars** are 48 px on a post and 32 px in a thread and the preview, not the mockup's 40 and 24: `@farik/ui`'s Avatar takes 32, 48 or 64, as every other page uses, and other sizes would scale the pixel art unevenly (accepted at landing).
 - **The rail** gains Channel between Board and Team: six places on desktop, five on the phone bar.
 - **Tests.** Vitest and axe on the page. Playwright `channel.spec.ts`, with the step 08 team and transcript `reply_to_a_mention`:
   1. post "@theo can you look at the menu page?";
@@ -51,7 +52,7 @@ Out of scope: one-on-ones ("Talk to one person" is phase 8), notifications (phas
 ```
 crates/store/src/event_log.rs (+ tests): EventQuery before_seq and newest_first (T1)
 apps/web/src/app/App.tsx, shell/Shell.test.tsx: the /channel route, six places (T2)
-crates/runtime/src/daemon/web.rs, docs/schemas/rpc.schema.json, crates/protocol/src/rpc.rs, packages/protocol-client/src/client.ts   modifies: channel.messages (T1)
+crates/runtime/src/daemon/board.rs, docs/schemas/rpc.schema.json (the query's name and types come from the schema)   modifies: channel.messages (T1)
 apps/web/src/pages/{Channel,Today,SprintPage}.tsx, components/{MessageText,MentionBox}.tsx (+ css, tests), shell/Shell.tsx, strings/en.ts   creates / modifies (T2)
 crates/cli/src/bin/farik-e2e-serve.rs, apps/web/e2e/channel.spec.ts                                   modifies / creates (T3)
 docs/SPEC.md (F7), docs/plans/project-plan.md                                                          modifies (T3)
@@ -100,4 +101,6 @@ cargo xtask check --integration
 #   last line: xtask check: ok
 # landed 2026-09-30: cargo 1601 passed, 0 failed; protocol-client 8, brand 30, ui 41, @farik/web 107;
 #   playwright 9 passed; xtask check: ok
+# after the landing review's fix wave, 2026-09-30: cargo 1601 passed, 0 failed; protocol-client 8, brand 30,
+#   ui 41, @farik/web 116; playwright 9 passed; xtask check: ok
 ```
