@@ -11,6 +11,7 @@ import { en } from "../strings/en.ts";
 import type { FakeSocket } from "../test/fake-socket.ts";
 import { media } from "../test/media.ts";
 import { answerQuery, answerStatus, renderApp } from "../test/render-app.tsx";
+import styles from "./Channel.module.css";
 
 const agent = (id: string, name: string, role: string, avatar: string) => ({
 	id,
@@ -155,8 +156,9 @@ describe("channel", () => {
 		expect(within(theo).getByTitle("Developer")).toBeTruthy();
 		expect(within(theo).getByText("09:02")).toBeTruthy();
 
-		// Farik's line: no avatar.
+		// Farik's line: small and muted, with no avatar and no role.
 		const system = row("Sprint 2 started.");
+		expect(system.className).toBe(styles.system);
 		expect(within(system).queryByRole("img")).toBeNull();
 		expect(within(system).getByText(en.brand)).toBeTruthy();
 
