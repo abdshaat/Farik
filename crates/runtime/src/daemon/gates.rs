@@ -51,7 +51,7 @@ fn internal(error: &dyn Display) -> Failure {
 }
 
 /// The UI changes in `verifying` whose design review waits on the human (step 12): for the
-/// team's preview, or for Docker's sandbox.
+/// team's preview, for Docker's sandbox, or for the Designer's Playwright to be turned on.
 fn design_reviews_waiting(deps: &ToolDeps, team: &Team) -> Result<Vec<Value>, Failure> {
     let board = deps.projections.board().map_err(|e| internal(&e))?;
     let designer = team
@@ -64,6 +64,7 @@ fn design_reviews_waiting(deps: &ToolDeps, team: &Team) -> Result<Vec<Value>, Fa
         .iter()
         .filter(|row| row.status == TaskStatus::Verifying)
     {
+        let mut agent_id = designer.clone();
         let (kind, line) = match deps
             .transitions
             .design_review(team, &row.task_id)
@@ -84,12 +85,24 @@ fn design_reviews_waiting(deps: &ToolDeps, team: &Team) -> Result<Vec<Value>, Fa
                  or retire the Designer"
                     .to_string(),
             ),
+            ReviewState::DesignerNeedsBrowser => {
+                // The active Designer, whose connector is off; a paused first one is not it.
+                agent_id = team.designer().map(|agent| agent.id.to_string());
+                let name = name_of(team, agent_id.as_deref().unwrap_or("The UI/UX Designer"));
+                (
+                    "designer_needs_browser",
+                    format!(
+                        "{name} has Playwright off, so Farik gives {name} no work. Turn \
+                         Playwright on for {name} on the Team page"
+                    ),
+                )
+            }
             _ => continue,
         };
         rows.push(json!({
             "task_id": row.task_id,
             "kind": kind,
-            "agent_id": designer,
+            "agent_id": agent_id,
             "title": row.title,
             "line": line,
         }));
@@ -806,6 +819,37 @@ pub(super) mod tests {
                 "title": "Add a login page",
                 "line": "The UI/UX Designer needs Docker's sandbox to open your app. Turn the \
                          sandbox on, or retire the Designer"
+            }])
+        );
+
+        // Playwright off for Iris: she gets no work, and the row says how to turn it on.
+        let harness = Harness::new("gates-design-review-browser", |wire| {
+            crate::tools::fixtures::browsing(wire);
+            wire["agents"][3]["display_name"] = json!("Iris");
+            wire["agents"][3]
+                .as_object_mut()
+                .expect("an agent")
+                .remove("mcp_servers");
+        });
+        harness
+            .project
+            .deps
+            .transitions
+            .set_previews(Arc::new(crate::preview::fixtures::FakePreviews::ready()));
+        harness.verifying_a_ui_change("FRK-1");
+        let waiting = query(
+            &harness.daemon,
+            "waiting.list",
+            &json!({}),
+            "waitingListResult",
+        );
+        assert_eq!(
+            waiting["waiting"],
+            json!([{
+                "task_id": "FRK-1", "kind": "designer_needs_browser", "agent_id": "iris",
+                "title": "Add a login page",
+                "line": "Iris has Playwright off, so Farik gives Iris no work. Turn Playwright \
+                         on for Iris on the Team page"
             }])
         );
     }

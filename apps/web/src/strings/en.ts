@@ -984,6 +984,10 @@ export const en = {
 	designOnDesignerNote:
 		"{developer} changed a screen, and {designer} checks every screen before {reviewer} sees it. {designer} is paused.",
 	designResume: "Resume {designer} on the Team page",
+	designNoBrowser: "The Designer’s browser is off",
+	designNoBrowserNote:
+		"{developer} changed a screen, and {designer} checks every screen before {reviewer} sees it. {designer}’s browser is off.",
+	designTurnOnBrowser: "Turn Playwright on for {designer} on the Team page",
 	designerWorks: "How {designer} works",
 	designerStepLook: "Looks at your app in a browser",
 	designerStepPlan: "Writes a plan",
@@ -1002,4 +1006,7 @@ export const en = {
 	waitingNeedsSandboxLine:
 		"The UI/UX Designer needs Docker’s sandbox to open your app. Turn the sandbox on, or retire the Designer.",
 	waitingOpenTeam: "Open the Team page",
+	waitingNeedsBrowser: "{agent}’s browser is off",
+	waitingNeedsBrowserLine:
+		"{designer} opens your app with Playwright. Turn Playwright on for {designer} on the Team page; until then {designer} takes no work, and nobody checks the screens {developer} builds.",
 };

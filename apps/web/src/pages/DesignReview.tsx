@@ -21,6 +21,7 @@ export type Review = {
 		| "waiting_on_designer"
 		| "preview_missing"
 		| "designer_needs_sandbox"
+		| "designer_needs_browser"
 		| "passed"
 		| "failed";
 	reasons?: string;

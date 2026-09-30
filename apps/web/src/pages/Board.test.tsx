@@ -274,6 +274,10 @@ describe("board", () => {
 				design_review_state: "waiting_on_designer",
 			}),
 			task(23, "A bigger basket", "verifying", { assignee_id: "theo" }),
+			task(24, "A gift note", "verifying", {
+				assignee_id: "theo",
+				design_review_state: "designer_needs_browser",
+			}),
 		];
 		const checking = {
 			activity: [
@@ -302,6 +306,12 @@ describe("board", () => {
 		expect(
 			within(row("The Order again button")).getByText(en.designOnDesigner),
 		).toBeTruthy();
+		expect(
+			within(row("A gift note")).getByText(en.designNoBrowser),
+		).toBeTruthy();
+		expect(
+			within(row("A gift note")).queryByText(en.designOnDesigner),
+		).toBeNull();
 		expect(
 			s.calls("query").filter((q) => q.params.name === "task.get"),
 		).toEqual([]);

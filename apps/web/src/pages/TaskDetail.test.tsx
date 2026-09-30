@@ -636,6 +636,41 @@ describe("task detail", () => {
 		).toBeTruthy();
 	});
 
+	it("says_the_designers_browser_is_off", async () => {
+		const { container } = await opened(CONTRACT, [], {
+			"team.get": { team: { ...TEAM, agents: [...TEAM.agents, IRIS] } },
+			"task.get": {
+				task: {},
+				design_plan: null,
+				ui_change: true,
+				design_review: { state: "designer_needs_browser", checks: [] },
+			},
+		});
+		const heading = await screen.findByRole("heading", {
+			level: 1,
+			name: "Gift cards",
+		});
+		expect(
+			within(heading.parentElement as HTMLElement).getByText(
+				en.designNoBrowser,
+			),
+		).toBeTruthy();
+		expect(
+			screen.getByText(
+				"Theo changed a screen, and Iris checks every screen before Ada sees it. Iris’s browser is off.",
+			),
+		).toBeTruthy();
+		expect(screen.queryByText(/is paused/)).toBeNull();
+		expect(
+			screen
+				.getByRole("link", {
+					name: "Turn Playwright on for Iris on the Team page",
+				})
+				.getAttribute("href"),
+		).toBe("/team/iris");
+		await expectNoAxeViolations(container);
+	});
+
 	it("shows_how_the_designer_works_beside_its_task", async () => {
 		const { container } = await opened(
 			{

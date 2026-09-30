@@ -171,9 +171,11 @@ export function Board() {
 					)}
 					{mark ? (
 						<StatusWord tone={mark.tone}>{mark.word}</StatusWord>
+					) : task.designReviewState === "waiting_on_designer" ? (
+						<StatusWord tone="waiting">{t("designOnDesigner")}</StatusWord>
 					) : (
-						task.designReviewState === "waiting_on_designer" && (
-							<StatusWord tone="waiting">{t("designOnDesigner")}</StatusWord>
+						task.designReviewState === "designer_needs_browser" && (
+							<StatusWord tone="waiting">{t("designNoBrowser")}</StatusWord>
 						)
 					)}
 				</div>

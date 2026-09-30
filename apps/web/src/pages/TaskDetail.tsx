@@ -272,6 +272,7 @@ export function TaskDetail() {
 	const review = detail.designReview;
 	const checking = review?.state === "waiting";
 	const onDesigner = review?.state === "waiting_on_designer";
+	const noBrowser = review?.state === "designer_needs_browser";
 	const designWord =
 		(design &&
 			contract.status === "in_progress" &&
@@ -281,7 +282,8 @@ export function TaskDetail() {
 						design.state === "approved" ? "designBeingBuilt" : "designSentBack",
 					))) ||
 		(checking && t("designChecking")) ||
-		(onDesigner && t("designOnDesigner"));
+		(onDesigner && t("designOnDesigner")) ||
+		(noBrowser && t("designNoBrowser"));
 	// The team's Designer, who checks every screen a Developer changes.
 	const iris = agents.find(
 		(a) => a.role === "ui_ux_designer" && a.status !== "retired",
@@ -585,6 +587,18 @@ export function TaskDetail() {
 								<p>
 									<Link to={`/team/${iris.id}`}>
 										{t("designResume", names)}
+									</Link>
+								</p>
+							)}
+						</>
+					)}
+					{noBrowser && (
+						<>
+							<p>{t("designNoBrowserNote", names)}</p>
+							{iris && (
+								<p>
+									<Link to={`/team/${iris.id}`}>
+										{t("designTurnOnBrowser", names)}
 									</Link>
 								</p>
 							)}

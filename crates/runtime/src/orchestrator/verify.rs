@@ -1076,7 +1076,7 @@ mod tests {
 
         assert!(started.is_empty(), "{:?}", who(&started));
         assert_eq!(harness.row("FRK-2").status, TaskStatus::Verifying);
-        assert_eq!(state(&harness), ReviewState::WaitingOnDesigner);
+        assert_eq!(state(&harness), ReviewState::DesignerNeedsBrowser);
     }
 
     #[tokio::test]

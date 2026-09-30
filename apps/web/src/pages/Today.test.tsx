@@ -302,6 +302,43 @@ describe("today", () => {
 		await expectNoAxeViolations(container);
 	});
 
+	it("links_the_browser_row_to_the_designers_page", async () => {
+		const { container } = await today({
+			waiting: [
+				{
+					task_id: "FRK-24",
+					kind: "designer_needs_browser",
+					agent_id: "iris",
+					title: "A bigger basket",
+					line: "Iris has Playwright off, so Farik gives Iris no work. Turn Playwright on for Iris on the Team page",
+				},
+			],
+			team: {
+				...TEAM,
+				agents: [
+					...TEAM.agents,
+					agent("iris", "Iris", "ui_ux_designer", "extra-1"),
+				],
+			},
+		});
+		const list = await screen.findByRole("list", { name: en.waitingList });
+		const [row] = within(list).getAllByRole("listitem") as HTMLElement[];
+		expect(
+			within(row as HTMLElement).getByText("Iris’s browser is off"),
+		).toBeTruthy();
+		expect(
+			within(row as HTMLElement).getByText(
+				"Iris opens your app with Playwright. Turn Playwright on for Iris on the Team page; until then Iris takes no work, and nobody checks the screens Theo builds.",
+			),
+		).toBeTruthy();
+		expect(
+			within(row as HTMLElement)
+				.getByRole("link", { name: en.waitingOpenTeam })
+				.getAttribute("href"),
+		).toBe("/team/iris");
+		await expectNoAxeViolations(container);
+	});
+
 	it("says_the_key_did_not_work_and_links_to_settings", async () => {
 		const { container, s } = await today({});
 		await answerQuery(s, "account.status", {

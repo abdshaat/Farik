@@ -413,12 +413,14 @@ pub(crate) enum ReviewState {
     NotNeeded,
     /// The Designer's review is due.
     Waiting,
-    /// The team's only Designer is paused, or has Playwright off.
+    /// The team's only Designer is paused.
     WaitingOnDesigner,
     /// The team has not said how to open its app.
     PreviewMissing,
     /// The Designer cannot have its browser: no Docker sandbox.
     DesignerNeedsSandbox,
+    /// The active Designer has its Playwright connector off, so it gets no work.
+    DesignerNeedsBrowser,
     /// The Designer passed the change since the task last entered `verifying`.
     Passed,
     /// The Designer failed it.
@@ -484,7 +486,6 @@ pub(crate) fn design_review(
                 .map(|agent| (agent, event.envelope.ids.session_id.clone())),
         };
     }
-    // A Designer with Playwright off gets no work, as a paused one gets none.
     waiting(if team.preview().is_none() {
         ReviewState::PreviewMissing
     } else if matches!(
@@ -492,7 +493,9 @@ pub(crate) fn design_review(
         DesignerBrowser::NoSandbox | DesignerBrowser::NoPreview
     ) {
         ReviewState::DesignerNeedsSandbox
-    } else if team.designer().is_none() || browser == DesignerBrowser::NoConnector {
+    } else if browser == DesignerBrowser::NoConnector {
+        ReviewState::DesignerNeedsBrowser
+    } else if team.designer().is_none() {
         ReviewState::WaitingOnDesigner
     } else {
         ReviewState::Waiting

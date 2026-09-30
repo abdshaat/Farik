@@ -714,7 +714,7 @@
               "properties": {
                 "state": {
                   "type": "string",
-                  "enum": ["not_needed", "waiting", "waiting_on_designer", "preview_missing", "designer_needs_sandbox", "passed", "failed"]
+                  "enum": ["not_needed", "waiting", "waiting_on_designer", "preview_missing", "designer_needs_sandbox", "designer_needs_browser", "passed", "failed"]
                 },
                 "reasons": { "type": "string" },
                 "checks": {
@@ -872,7 +872,7 @@
         "design_review_state": {
           "description": "tasks.list only, for a task in verifying whose change is to the interface: task.get's design_review.state, so the board need not ask each card (step 12).",
           "type": "string",
-          "enum": ["not_needed", "waiting", "waiting_on_designer", "preview_missing", "designer_needs_sandbox", "passed", "failed"]
+          "enum": ["not_needed", "waiting", "waiting_on_designer", "preview_missing", "designer_needs_sandbox", "designer_needs_browser", "passed", "failed"]
         },
         "task_id": {
           "type": "string",
@@ -1975,7 +1975,7 @@
       }
     },
     "waitingListResult": {
-      "description": "What waits on the human, questions first, then approvals, other escalations, acceptances, and integrations; then the UI changes whose design review waits for the team's preview (preview_missing) or for Docker's sandbox (designer_needs_sandbox).",
+      "description": "What waits on the human, questions first, then approvals, other escalations, acceptances, and integrations; then the UI changes whose design review waits for the team's preview (preview_missing), for Docker's sandbox (designer_needs_sandbox), or for Playwright to be turned on for the Designer (designer_needs_browser).",
       "type": "object",
       "additionalProperties": false,
       "properties": {
@@ -1998,7 +1998,8 @@
                   "help",
                   "integration",
                   "preview_missing",
-                  "designer_needs_sandbox"
+                  "designer_needs_sandbox",
+                  "designer_needs_browser"
                 ]
               },
               "agent_id": {

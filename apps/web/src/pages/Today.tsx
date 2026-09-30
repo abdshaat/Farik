@@ -19,7 +19,8 @@ type Kind =
 	| "help"
 	| "integration"
 	| "preview_missing"
-	| "designer_needs_sandbox";
+	| "designer_needs_sandbox"
+	| "designer_needs_browser";
 type Waiting = {
 	taskId: string;
 	kind: Kind;
@@ -69,6 +70,13 @@ const KINDS: Record<
 		word: "waitingOpenTeam",
 		page: "/team",
 		line: "waitingNeedsSandboxLine",
+	},
+	// The Designer's own page on the Team page, where its Playwright is turned on.
+	designer_needs_browser: {
+		title: "waitingNeedsBrowser",
+		word: "waitingOpenTeam",
+		page: "/team/{agent}",
+		line: "waitingNeedsBrowserLine",
 	},
 };
 
@@ -299,7 +307,7 @@ function WaitingRow({
 				className={styles.action}
 				to={
 					kind.page.startsWith("/")
-						? kind.page
+						? kind.page.replace("{agent}", item.agentId ?? "")
 						: `/tasks/${item.taskId}/${kind.page}`
 				}
 				aria-describedby={titleId}
