@@ -1221,6 +1221,10 @@
               "type": "null"
             }
           ]
+        },
+        "environment_variable": {
+          "type": "string",
+          "description": "The variable the credential comes from, when it comes from the environment: Farik cannot remove it, so the page names it rather than offering Disconnect."
         }
       },
       "required": [
@@ -2877,7 +2881,7 @@
     },
     "teamStartRequest": {
       "title": "Team Start Request",
-      "description": "The setup form's Start the team: writes the team and the criteria, removes the setup marker, and appends team.updated, criteria.updated and, when the team is paused, team.resumed. While the marker is there it may replace the starter team's agents. Answers emptyResult.",
+      "description": "The setup form's Start the team: writes the team and the criteria, removes the setup marker, and appends team.updated, criteria.updated and, when the marker was there and the team is paused, team.resumed: without the marker a paused team stays paused. While the marker is there it may replace the starter team's agents. Answers emptyResult.",
       "type": "object",
       "additionalProperties": false,
       "required": [
@@ -3108,7 +3112,7 @@
         },
         "paused": {
           "type": "boolean",
-          "description": "Whether the team is paused now because the credential was removed."
+          "description": "Whether this call paused the team: true only when a credential was removed and the team was running. A team already paused stays paused and answers false."
         },
         "environment_variable": {
           "type": "string",

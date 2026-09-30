@@ -120,7 +120,12 @@ pub(super) fn account_status(state: &DaemonState) -> Result<Value, Failure> {
     let web = web_of(state)?;
     Ok(match load_credential(&web.env, &web.stores) {
         Some((credential, source)) => {
-            json!({ "provider": "anthropic", "kind": credential.kind(), "source": source })
+            let mut status =
+                json!({ "provider": "anthropic", "kind": credential.kind(), "source": source });
+            if let Some(variable) = credential_variable(&web.env) {
+                status["environment_variable"] = json!(variable);
+            }
+            status
         }
         None => json!({ "provider": null, "kind": null, "source": null }),
     })
@@ -557,9 +562,12 @@ pub(super) async fn call(
         }
         _ => {
             let held = Arc::clone(&deps);
-            off_the_worker(move || {
+            // Only setup's start resumes the team: without the marker, a team paused by a
+            // budget's stop or by a person stays paused.
+            let setup = off_the_worker(move || {
                 let marker = held.files.root().join(SETUP_PENDING);
-                let (_, team) = checked(&held, &params["team"], marker.exists())?;
+                let setup = marker.exists();
+                let (_, team) = checked(&held, &params["team"], setup)?;
                 let library = library(&params["criteria"])?;
                 write_team(&held, &team)?;
                 write_criteria(&held, &library)?;
@@ -567,11 +575,11 @@ pub(super) async fn call(
                     Err(error) if error.kind() != std::io::ErrorKind::NotFound => {
                         Err(internal(&error))
                     }
-                    _ => Ok(()),
+                    _ => Ok(setup),
                 }
             })
             .await?;
-            if paused(&deps.log).map_err(|e| internal(&e))? {
+            if setup && paused(&deps.log).map_err(|e| internal(&e))? {
                 handled(state, Command::TeamResume).await?;
             }
             Ok(json!({}))
@@ -588,7 +596,7 @@ async fn handled(state: &DaemonState, command: Command) -> Result<(), Failure> {
 }
 
 /// `account.disconnect`: the credential deleted from every store that holds it and, when one did,
-/// the team paused, since the driver keeps the key it already loaded. A credential from the
+/// the team paused if it was running, since the driver keeps the key it already loaded. A credential from the
 /// environment cannot be removed, so nothing is, and the answer names its variable.
 async fn disconnect(state: &DaemonState) -> Result<Value, Failure> {
     let web = web_of(state)?;
@@ -613,11 +621,10 @@ async fn disconnect(state: &DaemonState) -> Result<Value, Failure> {
         Ok(removed)
     })
     .await?;
+    // `paused` says whether this call paused the team, not whether it is paused.
     let paused_now = match state.deps() {
-        Some(deps) if !removed.is_empty() => {
-            if !paused(&deps.log).map_err(|e| internal(&e))? {
-                handled(state, Command::TeamPause).await?;
-            }
+        Some(deps) if !removed.is_empty() && !paused(&deps.log).map_err(|e| internal(&e))? => {
+            handled(state, Command::TeamPause).await?;
             true
         }
         _ => false,
@@ -1218,6 +1225,18 @@ mod tests {
             ]
         );
         assert!(!crate::pause::paused(&harness.project.deps.log).expect("reads"));
+
+        // Without the marker it is no setup: it saves, and leaves a team paused for any other
+        // reason, a budget's stop or a person's pause, paused.
+        let paused = rpc(
+            &harness.daemon,
+            "command",
+            &json!({ "command": { "command": "team_pause", "body": {} } }),
+        );
+        assert!(paused["result"]["said"].is_string(), "{paused}");
+        let again = json!({ "team": team_file(&harness), "criteria": criteria });
+        call(&harness.daemon, "team.start", &again, "emptyResult");
+        assert!(crate::pause::paused(&harness.project.deps.log).expect("reads"));
     }
 
     #[test]
@@ -1302,10 +1321,40 @@ mod tests {
             json!({ "provider": null, "kind": null, "source": null })
         );
 
-        // A key from the environment cannot be removed; the answer names where it is.
+        // On a team already paused, disconnecting pauses nothing, and says so.
+        store
+            .save(&ClaudeCredential::ApiKey(Secret::new(
+                "sk-ant-api-x".to_string(),
+            )))
+            .expect("kept");
+        assert_eq!(
+            call(
+                &harness.daemon,
+                "account.disconnect",
+                &json!({}),
+                "accountDisconnectResult"
+            ),
+            json!({ "removed_from": ["keychain"], "paused": false })
+        );
+        assert_eq!(harness.project.events(&[EventKind::TeamPaused]).len(), 1);
+
+        // A key from the environment cannot be removed; the answer names where it is, and so
+        // does the account's status, before anyone tries.
         let harness = driven("team-disconnect-env");
         let store = Arc::new(MemoryStore::default());
         served(&harness, &store, &[("ANTHROPIC_API_KEY", "sk-ant-api-y")]);
+        assert_eq!(
+            query(
+                &harness.daemon,
+                "account.status",
+                &json!({}),
+                "accountStatusResult"
+            ),
+            json!({
+                "provider": "anthropic", "kind": "api_key", "source": "environment",
+                "environment_variable": "ANTHROPIC_API_KEY",
+            })
+        );
         assert_eq!(
             call(
                 &harness.daemon,
