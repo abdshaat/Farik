@@ -66,7 +66,7 @@ fn in_words(spent: impl IntoIterator<Item = (String, f64)>) -> Vec<Value> {
     let mut summed: BTreeMap<usize, f64> = BTreeMap::new();
     for (purpose, usd) in spent {
         let word = match purpose.as_str() {
-            "triage" | "refine" | "plan" => 0,
+            "triage" | "refine" | "plan" | "explore" => 0,
             "implement" => 1,
             "verify" => 2,
             _ => 3,
@@ -372,6 +372,14 @@ mod tests {
     use crate::orchestrator::fixtures::Harness;
     use crate::sprints::{EndedBy, PlannedBy, end_sprint, plan_sprint};
     use crate::tools::fixtures::at;
+
+    #[test]
+    fn counts_exploring_as_planning() {
+        assert_eq!(
+            super::in_words([("explore".to_string(), 1.5), ("plan".to_string(), 0.5)]),
+            [json!({ "words": "Planning", "usd": 2.0 })]
+        );
+    }
 
     /// Appends one event of `wire`'s shape and projects it, and answers its seq.
     fn put(harness: &Harness, wire: &Value) -> u64 {

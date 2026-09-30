@@ -98,6 +98,9 @@ pub(crate) enum Refusal {
     DecisionRefused { detail: String },
     /// There is no decision with this number.
     NoSuchDecision { number: u32 },
+    /// A design plan proposed or decided outside the session that gives the tool, out of its
+    /// bounds, or with none waiting (ADR 0026).
+    DesignPlanRefused { detail: String },
     /// A commit named a directory, which git would stage whole, files the path checks never saw
     /// among it.
     PathIsADirectory { path: String },
@@ -193,6 +196,7 @@ impl Refusal {
             Self::MemoryRefused { detail } => ("memory_refused", detail.clone()),
             Self::DecisionRefused { detail } => ("decision_refused", detail.clone()),
             Self::NoSuchDecision { number } => ("no_such_decision", number.to_string()),
+            Self::DesignPlanRefused { detail } => ("design_plan_refused", detail.clone()),
             Self::SummaryMissing => (
                 "summary_missing",
                 "open the note with two or three plain sentences for the user, then a blank line"

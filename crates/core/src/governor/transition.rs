@@ -121,6 +121,9 @@ pub struct TransitionContext {
     pub review_passed: bool,
     /// The more tries the human granted, summed over the task's resolved escalations (ADR 0024).
     pub extra_iterations: u32,
+    /// How many times the Product Manager returned the task's design plans (ADR 0026), which count
+    /// against the same limit as rejections.
+    pub design_plan_returns: u32,
 }
 
 /// What the runtime must record along with the move.
@@ -579,7 +582,8 @@ fn rejection_outcome(context: &TransitionContext) -> RejectionOutcome {
 }
 
 /// Why the governor's own `any -> escalated` row is open, or `None` when it is not. The task's
-/// sessions are their own reason (5.7); every other exhausted budget is `budget`; then a denied
+/// sessions are their own reason (5.7); every other exhausted budget is `budget`; then design plans
+/// returned as often as the task may be tried, `iterations` (ADR 0026); then a denied
 /// permission; then a criterion Farik could not run for the reviewer, which asks the human and so
 /// is `explicit_request`. A user's `stop` reaches the table as the human's own row instead, which
 /// needs no gate.
@@ -601,6 +605,10 @@ fn governor_escalation_reason(context: &TransitionContext) -> Option<EscalationR
             | BudgetScope::SprintUsd
             | BudgetScope::DayUsd => EscalationReason::Budget,
         });
+    }
+    // A Designer whose plans were returned as often as the task may be tried is out of tries.
+    if context.design_plan_returns >= iteration_limit(context) {
+        return Some(EscalationReason::Iterations);
     }
     if context.permission_denied {
         return Some(EscalationReason::Permission);
@@ -794,6 +802,7 @@ mod tests {
             result_awaits_human: true,
             review_passed: true,
             extra_iterations: 0,
+            design_plan_returns: 0,
         }
     }
 

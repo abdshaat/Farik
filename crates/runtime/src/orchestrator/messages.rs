@@ -547,6 +547,49 @@ pub(super) fn implement_message(contract: &TaskContract, resume: &Resume) -> Str
     format!("{message}\n\nResuming: {commit}; {note}")
 }
 
+/// The UI/UX Designer's `explore` session's message (ADR 0026): read the task's screens, then
+/// propose a plan; with the Product Manager's reason, an agent's words and so untrusted, when the
+/// last plan was returned. Step 12 gives the session a browser and removes the line saying so.
+pub(super) fn explore_message(contract: &TaskContract, returned: Option<&str>) -> String {
+    let message = format!(
+        "Explore {task} before you change anything, in this worktree, on the branch {branch}: \
+         work out what its screens show now and what should change. There is no browser yet: \
+         read the code and the files that make the screens. Then end the session with your plan \
+         through `farik_propose_design_plan`: a summary for the user, a blank line, then what \
+         you saw, what you will change, which screens and sizes, and what you will leave alone. \
+         The Product Manager approves it before you change anything.",
+        task = contract.id.as_str(),
+        branch = task_branch(contract)
+    );
+    match returned {
+        Some(reason) => format!(
+            "{message}\n\nThe Product Manager returned your last plan: {}",
+            untrusted_block("reason", reason, NOTE_CAP_BYTES)
+        ),
+        None => message,
+    }
+}
+
+/// The Product Manager's decision session's message: the Designer's plan, an agent's words and so
+/// untrusted, and the decision to record.
+pub(super) fn decide_design_plan_message(contract: &TaskContract, plan: &str) -> String {
+    format!(
+        "The UI/UX Designer proposed this plan for {task}, whose contract is above: {plan}\n\n\
+         Approve it or return it with `farik_decide_design_plan`, with your reason.",
+        task = contract.id.as_str(),
+        plan = untrusted_block("plan", plan, NOTE_CAP_BYTES)
+    )
+}
+
+/// An implement session's message with the plan the Product Manager approved, an agent's words
+/// and so untrusted, after it.
+pub(super) fn with_the_approved_plan(message: &str, plan: &str) -> String {
+    format!(
+        "{message}\n\nThe Product Manager approved your plan. Do what it says: {}",
+        untrusted_block("plan", plan, NOTE_CAP_BYTES)
+    )
+}
+
 /// What the reviewer's first message is made of.
 pub(super) struct ReviewBrief<'a> {
     /// The task.

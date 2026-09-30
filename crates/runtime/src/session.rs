@@ -26,6 +26,8 @@ pub enum SessionPurpose {
     Refine,
     /// Breaking an epic into tasks and assigning them.
     Plan,
+    /// The UI/UX Designer reading the app before it plans a change to it (ADR 0026).
+    Explore,
     /// Doing a task's work.
     Implement,
     /// Reviewing a task's work against its contract.
@@ -344,6 +346,7 @@ mod tests {
             SessionPurpose::Triage,
             SessionPurpose::Refine,
             SessionPurpose::Plan,
+            SessionPurpose::Explore,
             SessionPurpose::Implement,
             SessionPurpose::Verify,
             SessionPurpose::Ceremony,

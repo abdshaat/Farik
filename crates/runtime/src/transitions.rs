@@ -499,6 +499,7 @@ impl Transitions {
             result_awaits_human: result_awaits_human(&contract),
             review_passed: review_passed(&history),
             extra_iterations: extra_tries(&history),
+            design_plan_returns: crate::tools::design::returns(&history),
             contract,
         })
     }

@@ -139,8 +139,8 @@ pub enum ToolRefusal {
         /// The tool's name.
         tool: String,
     },
-    /// A UI/UX Designer's `write_workspace`, `execute` or `git_local` call on a task whose design
-    /// plan the Product Manager has not approved.
+    /// A UI/UX Designer's `write_workspace`, `execute`, `git_local` or `git_remote` call on a task
+    /// whose design plan the Product Manager has not approved.
     DesignPlanNotApproved,
 }
 
@@ -149,8 +149,9 @@ pub enum ToolRefusal {
 ///
 /// # Errors
 ///
-/// `DesignPlanNotApproved` for a Designer's `write_workspace`, `execute` or `git_local` call while
-/// the plan is not approved.
+/// `DesignPlanNotApproved` for a Designer's `write_workspace`, `execute`, `git_local` or
+/// `git_remote` call while the plan is not approved: nothing to push without a commit, and the safe
+/// side all the same.
 pub fn check_design_plan(
     role: Role,
     tier: PermissionTier,
@@ -158,7 +159,10 @@ pub fn check_design_plan(
 ) -> Result<(), ToolRefusal> {
     let writes = matches!(
         tier,
-        PermissionTier::WriteWorkspace | PermissionTier::Execute | PermissionTier::GitLocal
+        PermissionTier::WriteWorkspace
+            | PermissionTier::Execute
+            | PermissionTier::GitLocal
+            | PermissionTier::GitRemote
     );
     if role == Role::UiUxDesigner && writes && !approved {
         return Err(ToolRefusal::DesignPlanNotApproved);
@@ -451,7 +455,7 @@ mod tests {
     #[test]
     fn refuses_a_write_before_the_plan_is_approved() {
         let designer = Role::UiUxDesigner;
-        for tier in [T::WriteWorkspace, T::Execute, T::GitLocal] {
+        for tier in [T::WriteWorkspace, T::Execute, T::GitLocal, T::GitRemote] {
             assert_eq!(
                 check_design_plan(designer, tier, false),
                 Err(ToolRefusal::DesignPlanNotApproved),

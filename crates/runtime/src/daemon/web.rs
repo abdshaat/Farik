@@ -677,7 +677,11 @@ fn query(state: &DaemonState, name: &str, params: &Value) -> Result<Value, Failu
                 .task(&task_id)
                 .map_err(|error| internal(&error))?
             {
-                Some(task) => Ok(json!({ "task": task_wire(&task) })),
+                Some(task) => {
+                    let plan = crate::tools::design::read_design_plan(&deps.log, &task_id)
+                        .map_err(|error| internal(&error))?;
+                    Ok(json!({ "task": task_wire(&task), "design_plan": plan }))
+                }
                 None => Err(missing()),
             }
         }
@@ -1762,6 +1766,57 @@ mod tests {
         let invalid = call(&mut socket, 3, "command", &json!({ "command": wrong })).await;
         assert_eq!(invalid["result"], posted(wrong).await, "{invalid}");
         assert_eq!(invalid["result"]["error"]["kind"], "invalid", "{invalid}");
+        drop(socket);
+        handle.shutdown().await.expect("the daemon stops");
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn answers_the_task_with_its_plan() {
+        let harness = Harness::new("rpc-design-plan", |_| {});
+        harness.file("FRK-1", "in_progress", |_| {});
+        let (handle, mut socket) = driven(&harness).await;
+        let mut id = 0;
+        let mut plan_of = async |socket: &mut Socket| {
+            id += 1;
+            let got = query(
+                socket,
+                id,
+                "task.get",
+                &json!({ "task_id": "FRK-1" }),
+                "taskGetResult",
+            )
+            .await;
+            got["design_plan"].clone()
+        };
+        let record = |kind: &str, body: Value| {
+            harness.project.record("FRK-1", kind, &body);
+        };
+
+        assert_eq!(plan_of(&mut socket).await, Value::Null);
+        record("design_plan.proposed", json!({ "plan": "The first plan." }));
+        assert_eq!(
+            plan_of(&mut socket).await,
+            json!({ "plan": "The first plan.", "state": "proposed" })
+        );
+        record("design_plan.returned", json!({ "reason": "Say more." }));
+        assert_eq!(
+            plan_of(&mut socket).await,
+            json!({ "plan": "The first plan.", "state": "returned", "reason": "Say more." })
+        );
+        record(
+            "design_plan.proposed",
+            json!({ "plan": "The second plan." }),
+        );
+        assert_eq!(
+            plan_of(&mut socket).await,
+            json!({ "plan": "The second plan.", "state": "proposed" })
+        );
+        record("design_plan.approved", json!({ "reason": "Go ahead." }));
+        assert_eq!(
+            plan_of(&mut socket).await,
+            json!({ "plan": "The second plan.", "state": "approved", "reason": "Go ahead." })
+        );
         drop(socket);
         handle.shutdown().await.expect("the daemon stops");
     }

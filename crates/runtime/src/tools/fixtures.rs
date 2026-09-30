@@ -46,6 +46,13 @@ pub(crate) fn a_team_of_three(change: impl FnOnce(&mut Value)) -> Team {
     validate_team(&wire).expect("the fixture is a team")
 }
 
+/// Adds the UI/UX Designer `iris` and the Architect `ada` to a team's wire.
+pub(crate) fn with_the_designer(wire: &mut Value) {
+    let agents = wire["agents"].as_array_mut().expect("a list of agents");
+    agents.push(an_agent_wire("iris", "ui_ux_designer"));
+    agents.push(an_agent_wire("ada", "architect"));
+}
+
 /// A project the tools run on.
 pub(crate) struct TestProject {
     pub(crate) repo: TempRepo,

@@ -354,6 +354,7 @@ fn measures_cost_per_accepted_task_by_purpose() {
             (CostRecordedBodyPurpose::Triage, 0.0625),
             (CostRecordedBodyPurpose::Refine, 0.25),
             (CostRecordedBodyPurpose::Plan, 0.125),
+            (CostRecordedBodyPurpose::Explore, 0.0),
             (CostRecordedBodyPurpose::Implement, 0.75),
             (CostRecordedBodyPurpose::Verify, 0.25),
             (CostRecordedBodyPurpose::Ceremony, 0.0),

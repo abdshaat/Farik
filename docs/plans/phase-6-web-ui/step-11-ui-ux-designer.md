@@ -152,7 +152,7 @@ Tests:
 - `sends_the_designers_work_to_the_architect`: after the completion, the reviewer's session is the Architect's.
 - `answers_the_task_with_its_plan`: `task.get`'s `design_plan`, in each state.
 
-- [ ] `feat(runtime): run the Designer's explore, plan, approval and implement flow`
+- [x] `feat(runtime): run the Designer's explore, plan, approval and implement flow`
 
 ### Task 5: The Designer in setup and on the Team page, and the plan on the task page
 

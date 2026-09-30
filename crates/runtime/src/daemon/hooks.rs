@@ -4,6 +4,7 @@
 use std::collections::BTreeSet;
 use std::path::{Component, Path, PathBuf};
 
+use farik_core::contract::Role;
 use farik_core::governor::permissions::{
     AgentGrants, PermissionTier, ToolCallContext, ToolCallRequest, ToolDescriptor,
     evaluate_tool_call,
@@ -16,8 +17,9 @@ use serde::{Deserialize, Serialize, Serializer};
 use serde_json::{Value, json};
 
 use super::{DaemonError, DaemonState, SessionRegistration};
+use crate::tools::design::design_plan_gate;
 use crate::tools::refusal::Refusal;
-use crate::tools::{ToolDeps, tool_descriptors};
+use crate::tools::{ToolDeps, ToolError, tool_descriptors};
 
 /// What Claude Code sends a hook on its standard input, the fields Farik reads.
 #[derive(Debug, Clone, PartialEq, Deserialize)]
@@ -294,7 +296,18 @@ fn judge_call(
             approved_calls: Vec::new(),
         },
     )
-    .map_err(|refusal| Refusal::Tool(refusal).reason())
+    .map_err(|refusal| Refusal::Tool(refusal).reason())?;
+    let role = team
+        .agents
+        .iter()
+        .find(|agent| agent.id.as_str() == registration.agent_id)
+        .map_or(Role::Human, |agent| Role::from(agent.role));
+    design_plan_gate(&deps.log, role, tier, registration.task_id.as_ref()).map_err(|error| {
+        match error {
+            ToolError::Refused { reason } => reason,
+            other => format!("design_plan_unreadable: {other}"),
+        }
+    })
 }
 
 fn not_allowed(tool: &str) -> String {
@@ -457,7 +470,7 @@ mod tests {
 
     use super::{HookDecision, HookRequest, cut, decide_pre_tool_use, record_post_tool_use};
     use crate::daemon::fixtures::{DEV_SESSION, POST_READ, PRE_READ, PRE_WRITE, TestDaemon};
-    use crate::tools::fixtures::a_team_of_three;
+    use crate::tools::fixtures::{a_team_of_three, with_the_designer};
 
     fn denied_for(decision: &HookDecision, kind: &str) {
         assert!(!decision.allow, "{decision:?}");
@@ -942,6 +955,99 @@ mod tests {
             &daemon.state,
         );
         denied_for(&next, "tier_not_granted");
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn refuses_a_designer_write_before_approval() {
+        let daemon = TestDaemon::new("hook-design-plan", |_| {});
+        daemon
+            .project
+            .deps
+            .files
+            .write_team(&a_team_of_three(|wire| {
+                with_the_designer(wire);
+                wire["agents"][3]["grants"] = json!(["git_remote"]);
+            }))
+            .expect("the team is written");
+        daemon.register(
+            "session-iris",
+            "iris",
+            Some("FRK-1"),
+            DEFAULT_SESSION_LIMITS,
+        );
+        let edit = json!({
+            "file_path": daemon.inside("src/a.rs"), "old_string": "a", "new_string": "b"
+        });
+        let exec = json!({ "command": "true" });
+        let hook = |tool: &str, input: &Value| {
+            decide_pre_tool_use(&daemon.call("session-iris", tool, input), &daemon.state)
+        };
+        let context = daemon
+            .state
+            .tool_context("session-iris")
+            .expect("the session is registered");
+        let called = |tool: &str, input: Value| crate::tools::fixtures::run(&context, tool, input);
+        let not_approved = |result| {
+            assert!(
+                matches!(&result, Err(crate::tools::ToolError::Refused { reason })
+                    if reason.starts_with("design_plan_not_approved: ")),
+                "{result:?}"
+            );
+        };
+
+        let proposed = json!({ "plan": "A plan." });
+        let returned = json!({ "reason": "Say what changes." });
+        for before in [
+            None,
+            Some(("design_plan.proposed", &proposed)),
+            Some(("design_plan.returned", &returned)),
+        ] {
+            if let Some((kind, body)) = before {
+                daemon.project.record("FRK-1", kind, body);
+            }
+            denied_for(&hook("Edit", &edit), "design_plan_not_approved");
+            denied_for(
+                &hook("mcp__farik__farik_exec", &exec),
+                "design_plan_not_approved",
+            );
+            denied_for(
+                &hook("mcp__farik__farik_git_status", &json!({})),
+                "design_plan_not_approved",
+            );
+            denied_for(
+                &hook("mcp__farik__farik_git_push", &json!({})),
+                "design_plan_not_approved",
+            );
+            not_approved(called("farik_exec", exec.clone()));
+            not_approved(called("farik_git_status", json!({})));
+            not_approved(called("farik_git_push", json!({})));
+            let read = hook("Read", &json!({ "file_path": daemon.inside("src/a.rs") }));
+            assert!(read.allow, "{read:?}");
+        }
+        // The dev's own session is not held to the Designer's plan.
+        let dev = decide_pre_tool_use(&daemon.dev_call("Edit", &edit), &daemon.state);
+        assert!(dev.allow, "{dev:?}");
+
+        daemon
+            .project
+            .record("FRK-1", "design_plan.proposed", &proposed);
+        daemon.project.record(
+            "FRK-1",
+            "design_plan.approved",
+            &json!({ "reason": "Go ahead." }),
+        );
+        let approved = hook("Edit", &edit);
+        assert!(approved.allow, "{approved:?}");
+        let exec_approved = hook("mcp__farik__farik_exec", &exec);
+        assert!(exec_approved.allow, "{exec_approved:?}");
+        // Past the plan gate: the fixture's session has no sandbox to run the command in.
+        assert_eq!(
+            called("farik_exec", exec.clone()),
+            Err(crate::tools::ToolError::Failed {
+                detail: "this session has no sandbox to run a command in".to_string()
+            })
+        );
     }
 
     #[test]

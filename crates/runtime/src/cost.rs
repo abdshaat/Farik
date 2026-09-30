@@ -372,6 +372,7 @@ fn purpose_wire(purpose: SessionPurpose) -> CostRecordedBodyPurpose {
         SessionPurpose::Triage => CostRecordedBodyPurpose::Triage,
         SessionPurpose::Refine => CostRecordedBodyPurpose::Refine,
         SessionPurpose::Plan => CostRecordedBodyPurpose::Plan,
+        SessionPurpose::Explore => CostRecordedBodyPurpose::Explore,
         SessionPurpose::Implement => CostRecordedBodyPurpose::Implement,
         SessionPurpose::Verify => CostRecordedBodyPurpose::Verify,
         SessionPurpose::Ceremony => CostRecordedBodyPurpose::Ceremony,

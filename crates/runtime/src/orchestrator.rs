@@ -29,6 +29,7 @@ use crate::sprints::SprintError;
 use crate::tools::ToolDeps;
 use crate::transitions::TransitionError;
 
+mod design;
 #[cfg(test)]
 pub(crate) mod fixtures;
 mod human;

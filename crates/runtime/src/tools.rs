@@ -27,6 +27,7 @@ use crate::transitions::Transitions;
 
 mod channel;
 pub(crate) mod contracts;
+pub(crate) mod design;
 mod exec;
 #[cfg(test)]
 pub(crate) mod fixtures;
@@ -258,6 +259,16 @@ static TOOLS: LazyLock<Vec<FarikTool>> = LazyLock::new(|| {
             Read,
             "List the project's decisions, oldest first, or read one whole by its number.",
         ),
+        tool::<design::ProposeDesignPlanInput>(
+            "farik_propose_design_plan",
+            Read,
+            "End your explore session with your plan for the task: a summary for the user, a blank line, then what you saw, what you will change, which screens and sizes, and what you will leave alone.",
+        ),
+        tool::<design::DecideDesignPlanInput>(
+            "farik_decide_design_plan",
+            Read,
+            "Approve the Designer's plan for this session's task, or return it, with your reason.",
+        ),
         tool::<exec::ExecInput>(
             "farik_exec",
             Execute,
@@ -361,6 +372,8 @@ pub async fn call_tool(
         "farik_write_memory" => memory::write_memory(&call, &parse(input)?),
         "farik_write_decision" => memory::write_decision(&call, &parse(input)?),
         "farik_read_decisions" => memory::read_decisions(&call, &parse(input)?),
+        "farik_propose_design_plan" => design::propose(&call, parse(input)?),
+        "farik_decide_design_plan" => design::decide(&call, parse(input)?),
         "farik_exec" => exec::exec(&call, parse(input)?).await,
         "farik_git_status" => nothing_in(input).and_then(|()| git::status(&call)),
         "farik_git_diff" => nothing_in(input).and_then(|()| git::diff(&call)),
@@ -501,7 +514,13 @@ impl Call<'_> {
                 approved_calls: Vec::new(),
             },
         )
-        .map_err(|refusal| Refusal::Tool(refusal).into())
+        .map_err(|refusal| -> ToolError { Refusal::Tool(refusal).into() })?;
+        design::design_plan_gate(
+            &self.deps().log,
+            self.role(),
+            tool.tier,
+            self.context.task_id.as_ref(),
+        )
     }
 
     /// The ids an event of this call is stamped with: the agent, the session, and `task`.
@@ -563,6 +582,8 @@ mod tests {
             "farik_write_memory",
             "farik_write_decision",
             "farik_read_decisions",
+            "farik_propose_design_plan",
+            "farik_decide_design_plan",
             "farik_exec",
             "farik_git_status",
             "farik_git_diff",
@@ -581,7 +602,7 @@ mod tests {
         assert_eq!(tier("farik_git_diff"), Some(PermissionTier::GitLocal));
         assert_eq!(tier("farik_git_commit"), Some(PermissionTier::GitLocal));
         assert_eq!(tier("farik_git_push"), Some(PermissionTier::GitRemote));
-        for tool in &tools[..21] {
+        for tool in &tools[..23] {
             assert_eq!(tool.tier, PermissionTier::Read, "{}", tool.name);
         }
         for tool in &tools {

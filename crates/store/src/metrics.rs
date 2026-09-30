@@ -90,11 +90,12 @@ impl From<rusqlite::Error> for MetricsError {
 }
 
 /// Every session purpose the wire names, in the schema's order, so that a split always has all
-/// seven and they add up to its total.
-const PURPOSES: [CostRecordedBodyPurpose; 7] = [
+/// eight and they add up to its total.
+const PURPOSES: [CostRecordedBodyPurpose; 8] = [
     CostRecordedBodyPurpose::Triage,
     CostRecordedBodyPurpose::Refine,
     CostRecordedBodyPurpose::Plan,
+    CostRecordedBodyPurpose::Explore,
     CostRecordedBodyPurpose::Implement,
     CostRecordedBodyPurpose::Verify,
     CostRecordedBodyPurpose::Ceremony,

@@ -353,6 +353,40 @@ pub fn implement_after_send_back_frk_1() -> Transcript {
     ))
 }
 
+// Step 11's Designer flow, on a team with the UI/UX Designer `iris`.
+
+/// `iris`'s explore session of FRK-1: `farik_propose_design_plan` of a plan for the sign-in page,
+/// which opens with its summary, and a successful end. Hand-written.
+#[must_use]
+pub fn explore_plans_frk_1() -> Transcript {
+    Transcript::from_jsonl(include_str!("transcripts/explore_plans_frk_1.jsonl"))
+}
+
+/// The Product Manager's decision on FRK-1's plan: `farik_decide_design_plan` approving it, "The
+/// plan keeps to the sign-in page and says what it leaves alone.". Hand-written.
+#[must_use]
+pub fn decide_design_plan_approves_frk_1() -> Transcript {
+    Transcript::from_jsonl(include_str!(
+        "transcripts/decide_design_plan_approves_frk_1.jsonl"
+    ))
+}
+
+/// The Product Manager's decision on FRK-1's plan: `farik_decide_design_plan` returning it, "Say
+/// what the page looks like in the dark theme too.". Hand-written.
+#[must_use]
+pub fn decide_design_plan_returns_frk_1() -> Transcript {
+    Transcript::from_jsonl(include_str!(
+        "transcripts/decide_design_plan_returns_frk_1.jsonl"
+    ))
+}
+
+/// `iris`'s implement session of FRK-1, as `implement_finishes_frk_1`: `touch done.txt`, a commit
+/// of it, C1 recorded as passed, a completion note, and `verifying` asked for. Hand-written.
+#[must_use]
+pub fn implement_by_iris_frk_1() -> Transcript {
+    Transcript::from_jsonl(include_str!("transcripts/implement_by_iris_frk_1.jsonl"))
+}
+
 /// An adapter whose every session reports `usage` at once and then either ends `completed` at
 /// once or waits for `abort` and ends `aborted`, or, when its abort fails, waits for ever: the
 /// shapes a recorded transcript, which reports usage only on its last line, cannot show.

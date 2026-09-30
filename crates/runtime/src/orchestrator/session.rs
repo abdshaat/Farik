@@ -18,6 +18,7 @@ use farik_protocol::event::{
 use farik_roles::load_role;
 use farik_store::EventQuery;
 
+use super::design::DECIDE_TOOL;
 use super::messages::human_message;
 use super::verify::{append, append_stamped};
 use super::{OrchestratorDeps, OrchestratorError, TRIAGE_MODEL};
@@ -27,7 +28,8 @@ use crate::cost::{CostError, CostSource, budget_state, record_exhaustion, record
 use crate::daemon::SessionRegistration;
 use crate::exec::Executor;
 use crate::prompt::{
-    CEREMONY_INSTRUCTIONS, JUDGMENT_INSTRUCTION, PromptInput, assemble_system_prompt,
+    CEREMONY_INSTRUCTIONS, DESIGN_DECISION_INSTRUCTION, JUDGMENT_INSTRUCTION, PromptInput,
+    assemble_system_prompt,
 };
 use crate::session::{
     EndReason, SessionEvent, SessionHandle, SessionPurpose, SessionSpec, session_model,
@@ -362,6 +364,7 @@ fn session_spec(
                 .find(|(named, _)| *named == thread)
                 .map(|(_, text)| *text),
             (None, Some(JUDGMENT_TOOL)) => Some(JUDGMENT_INSTRUCTION),
+            (None, Some(DECIDE_TOOL)) => Some(DESIGN_DECISION_INSTRUCTION),
             (None, _) => None,
         },
     })?;

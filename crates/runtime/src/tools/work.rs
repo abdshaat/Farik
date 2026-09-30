@@ -322,7 +322,7 @@ pub(super) fn write_note(call: &Call<'_>, input: WriteNoteInput) -> Result<Value
 
 /// Whether a note opens with the summary a human gate leads with (`docs/SPEC.md` section 5.4):
 /// its first paragraph, up to the first blank line, is 20 to 600 characters.
-fn opens_with_a_summary(text: &str) -> bool {
+pub(super) fn opens_with_a_summary(text: &str) -> bool {
     let first: Vec<&str> = text
         .lines()
         .take_while(|line| !line.trim().is_empty())

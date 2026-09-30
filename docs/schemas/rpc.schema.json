@@ -676,10 +676,27 @@
       "properties": {
         "task": {
           "$ref": "#/$defs/taskProjection"
+        },
+        "design_plan": {
+          "description": "The task's latest UI/UX Designer's plan and the Product Manager's decision on it (ADR 0026), or null when no plan was proposed. reason is the decision's, once there is one.",
+          "oneOf": [
+            { "type": "null" },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "plan": { "type": "string" },
+                "state": { "type": "string", "enum": ["proposed", "approved", "returned"] },
+                "reason": { "type": "string" }
+              },
+              "required": ["plan", "state"]
+            }
+          ]
         }
       },
       "required": [
-        "task"
+        "task",
+        "design_plan"
       ]
     },
     "teamGetResult": {
@@ -2162,6 +2179,7 @@
                   "triage",
                   "refine",
                   "plan",
+                  "explore",
                   "implement",
                   "verify",
                   "ceremony",

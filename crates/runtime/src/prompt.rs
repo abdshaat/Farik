@@ -67,7 +67,7 @@ pub const PROMPT_SECTIONS: [&str; 11] = [
 ];
 
 /// The `This session` section of each purpose: what the session is for and the tool it ends with.
-pub const CLOSING_INSTRUCTIONS: [(SessionPurpose, &str); 7] = [
+pub const CLOSING_INSTRUCTIONS: [(SessionPurpose, &str); 8] = [
     (
         SessionPurpose::Triage,
         "This session sizes the request you were given. Decide whether it is large (an epic) or \
@@ -90,6 +90,13 @@ pub const CLOSING_INSTRUCTIONS: [(SessionPurpose, &str); 7] = [
          `farik_write_note` of kind `completion` and request `verifying`. End the session when \
          there is nothing left to file or assign. After asking for a move, post one or two sentences \
          about it with `farik_post_message`, in your persona's voice, naming the task.",
+    ),
+    (
+        SessionPurpose::Explore,
+        "This session explores the task before anything changes: work out what its screens show \
+         now and what should change, and change nothing. End the session by calling \
+         `farik_propose_design_plan` with your plan; the Product Manager approves it before you \
+         change anything.",
     ),
     (
         SessionPurpose::Implement,
@@ -165,6 +172,13 @@ pub const JUDGMENT_INSTRUCTION: &str = "This session checks the plan of the cont
      End the session by calling `farik_record_judgment` with one answer to each question, in the \
      order they are numbered, and your overall reason, which the Product Manager rewrites from \
      when any answer is no.";
+
+/// The closing of the Product Manager's session given `farik_decide_design_plan` alone.
+pub const DESIGN_DECISION_INSTRUCTION: &str = "This session decides the UI/UX Designer's plan \
+     for the task above, which the message you were given holds. Approve it when it keeps to the \
+     contract and says what it will change and what it leaves alone; return it otherwise, saying \
+     what to change. End the session by calling `farik_decide_design_plan` with your decision \
+     and your reason.";
 
 /// The system prompt of one session: the sections of `PROMPT_SECTIONS`, in that order.
 ///
@@ -1093,6 +1107,7 @@ mod tests {
             SessionPurpose::Triage,
             SessionPurpose::Refine,
             SessionPurpose::Plan,
+            SessionPurpose::Explore,
             SessionPurpose::Implement,
             SessionPurpose::Verify,
             SessionPurpose::Ceremony,

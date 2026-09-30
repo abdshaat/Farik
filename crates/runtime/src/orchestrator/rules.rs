@@ -18,10 +18,12 @@ use farik_protocol::event::{
 };
 use farik_store::{CostScope, EventQuery, Git, TaskProjection};
 
+use super::design::{self, Stage};
 use super::integrate::{awaiting, cleanup};
 use super::messages::{
     Digest, Resume, SprintTask, ceremony_message, implement_message, mention_message, plan_message,
     planning_message, retro_message, sprint_review_message, standup_message,
+    with_the_approved_plan,
 };
 use super::requests;
 use super::session::{SessionAsk, SessionEnd, run_session};
@@ -875,7 +877,7 @@ fn escalate_if_spent(
 }
 
 /// Asks the governor, as itself, to move the task to `to`.
-fn governor_moves(
+pub(super) fn governor_moves(
     deps: &OrchestratorDeps,
     team: &Team,
     row: &TaskProjection,
@@ -1001,6 +1003,15 @@ async fn in_progress(
         return Ok(None);
     };
     let contract = deps.tools.files.read_contract(&row.task_id)?;
+    // A Designer implements only a plan the Product Manager approved (ADR 0026).
+    let approved = if Role::from(assignee.role) == Role::UiUxDesigner {
+        match design::stage(orchestrator, team, row, assignee, &contract, waiting).await? {
+            Stage::Approved(plan) => Some(plan),
+            Stage::Handled(report) => return Ok(report),
+        }
+    } else {
+        None
+    };
     if spent(deps, team, &contract, &mut waiting.day_spent)?
         | asleep(deps, assignee, &mut waiting.slept)?
     {
@@ -1008,6 +1019,7 @@ async fn in_progress(
     }
     let sandbox = orchestrator.sandbox_for(&row.task_id, team)?;
     let resume = resume(deps, team, &contract)?;
+    let message = implement_message(&contract, &resume);
     let executor: Arc<dyn Executor> = sandbox;
     let end = run_session(
         deps,
@@ -1023,7 +1035,10 @@ async fn in_progress(
             tools: None,
             in_reply_to: None,
             thread: None,
-            initial_prompt: implement_message(&contract, &resume),
+            initial_prompt: match &approved {
+                Some(plan) => with_the_approved_plan(&message, plan),
+                None => message,
+            },
         },
     )
     .await?;
