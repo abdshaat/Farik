@@ -681,10 +681,21 @@
         "team": {
           "type": "object",
           "description": "The team file as team.schema.json shapes it."
+        },
+        "agents": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/effectiveAgent"
+          }
+        },
+        "judges": {
+          "$ref": "#/$defs/planJudges"
         }
       },
       "required": [
-        "team"
+        "team",
+        "agents",
+        "judges"
       ]
     },
     "serveStatusResult": {
@@ -3014,6 +3025,17 @@
             "type": "string"
           },
           "description": "Each effect of the change in plain words; empty when there are errors."
+        },
+        "agents": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/effectiveAgent"
+          },
+          "description": "The team as it would be, as team.get answers it; left out when there are errors."
+        },
+        "judges": {
+          "$ref": "#/$defs/planJudges",
+          "description": "Left out when there are errors."
         }
       },
       "required": [
@@ -3256,6 +3278,155 @@
               "description": "The agent that joins, as team.schema.json shapes an agent; the daemon validates the team it makes."
             }
           }
+        }
+      }
+    },
+    "effectiveAgent": {
+      "title": "Effective Agent",
+      "description": "An agent as its sessions run: its model and effort (its own, or else its role's), the model's words, the tiers it holds, and base_tiers, those its role and the team's permission answers give it before its own grants and revokes.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "model",
+        "tiers",
+        "base_tiers"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "model": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "label",
+            "effort"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "label": {
+              "type": "string",
+              "description": "The family's words, with (older) when a newer one of the family is priced; the id when no family names it."
+            },
+            "effort": {
+              "type": "string",
+              "enum": [
+                "low",
+                "medium",
+                "high"
+              ]
+            }
+          }
+        },
+        "tiers": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "base_tiers": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "planJudges": {
+      "title": "Plan Judges",
+      "description": "Who checks plans under each choice of policy.judgment.judge: the first active agent of the role, and under auto the one Team::judge resolves (spec 5.3); null where no active agent holds it.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "auto",
+        "architect",
+        "scrum_master"
+      ],
+      "properties": {
+        "auto": {
+          "oneOf": [
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "agent_id",
+                "display_name",
+                "role"
+              ],
+              "properties": {
+                "agent_id": {
+                  "type": "string"
+                },
+                "display_name": {
+                  "type": "string"
+                },
+                "role": {
+                  "type": "string"
+                }
+              }
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "architect": {
+          "oneOf": [
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "agent_id",
+                "display_name",
+                "role"
+              ],
+              "properties": {
+                "agent_id": {
+                  "type": "string"
+                },
+                "display_name": {
+                  "type": "string"
+                },
+                "role": {
+                  "type": "string"
+                }
+              }
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "scrum_master": {
+          "oneOf": [
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "agent_id",
+                "display_name",
+                "role"
+              ],
+              "properties": {
+                "agent_id": {
+                  "type": "string"
+                },
+                "display_name": {
+                  "type": "string"
+                },
+                "role": {
+                  "type": "string"
+                }
+              }
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       }
     }

@@ -23,6 +23,7 @@ use super::web::{Failure, INTERNAL_ERROR, NO_PROJECT, REFUSED};
 use crate::claude::credential_variable;
 use crate::credential::{CredentialError, load_credential};
 use crate::pause::paused;
+use crate::session::session_model;
 use crate::tools::ToolDeps;
 
 /// The methods this module answers.
@@ -70,12 +71,21 @@ fn internal(error: &dyn Display) -> Failure {
 /// The queries of this module, whose params the schema already passed.
 pub(super) fn query(deps: &ToolDeps, name: &str, params: &Value) -> Result<Value, Failure> {
     match name {
+        "team.get" => {
+            let team = deps.files.read_team().map_err(|e| internal(&e))?;
+            let mut answer = effective(deps, &team)?;
+            answer["team"] = serde_json::to_value(team).map_err(|e| internal(&e))?;
+            Ok(answer)
+        }
         "team.propose" => propose(deps),
         "team.validate" => {
             let setup = deps.files.root().join(SETUP_PENDING).exists();
             match checked(deps, &params["team"], setup) {
                 Ok((before, after)) => {
-                    Ok(json!({ "errors": [], "effects": describe_change(&before, &after) }))
+                    let mut answer = effective(deps, &after)?;
+                    answer["errors"] = json!([]);
+                    answer["effects"] = json!(describe_change(&before, &after));
+                    Ok(answer)
                 }
                 Err(Refused::Errors(errors)) => {
                     Ok(json!({ "errors": errors_wire(&errors), "effects": [] }))
@@ -135,11 +145,20 @@ fn propose(deps: &ToolDeps) -> Result<Value, Failure> {
     Ok(json!({ "team": team, "criteria": criteria }))
 }
 
-/// `models.list`: the newest model of each family the prices name. A dated snapshot is the same
-/// model as its alias, so it is passed over.
+/// `models.list`: the newest model of each family the prices name.
 fn models(deps: &ToolDeps) -> Result<Value, Failure> {
+    let models: Vec<Value> = newest(deps)?
+        .into_iter()
+        .map(|(id, label)| json!({ "id": id, "label": label }))
+        .collect();
+    Ok(json!({ "models": models }))
+}
+
+/// The newest model of each family the prices name, with its words. A dated snapshot is the same
+/// model as its alias, so it is passed over.
+fn newest(deps: &ToolDeps) -> Result<Vec<(String, &'static str)>, Failure> {
     let prices = deps.files.effective_prices().map_err(|e| internal(&e))?;
-    let models: Vec<Value> = FAMILIES
+    Ok(FAMILIES
         .iter()
         .filter_map(|(prefix, label)| {
             prices
@@ -154,10 +173,63 @@ fn models(deps: &ToolDeps) -> Result<Value, Failure> {
                     Some((version, id))
                 })
                 .max()
-                .map(|(_, id)| json!({ "id": id, "label": label }))
+                .map(|(_, id)| (id.to_string(), *label))
         })
-        .collect();
-    Ok(json!({ "models": models }))
+        .collect())
+}
+
+/// The words for `id`: its family's, marked older when a newer one of the family is priced, or
+/// the id itself when no family Farik names it.
+fn model_label(id: &str, newest: &[(String, &str)]) -> String {
+    match FAMILIES.iter().find(|(prefix, _)| id.starts_with(prefix)) {
+        Some((_, label)) if newest.iter().any(|(new, _)| new == id) => (*label).to_string(),
+        Some((_, label)) => format!("{label} (older)"),
+        None => id.to_string(),
+    }
+}
+
+/// What the browser shows of `team` and does not work out itself: each agent's model and effort
+/// as its sessions run them, the tiers it holds and those its role and the team's answers give it
+/// before its own grants and revokes; and who checks plans under each choice.
+fn effective(deps: &ToolDeps, team: &Team) -> Result<Value, Failure> {
+    let newest = newest(deps)?;
+    let permissions = team.permissions();
+    let agents = team
+        .agents
+        .iter()
+        .map(|agent| {
+            let role = load_role(Role::from(agent.role)).map_err(|e| internal(&e))?;
+            let (model, effort) = session_model(agent, &role);
+            let mut bare = agent.clone();
+            bare.grants = Default::default();
+            bare.revokes = Default::default();
+            Ok(json!({
+                "id": agent.id,
+                "model": { "id": model, "label": model_label(&model, &newest), "effort": effort },
+                "tiers": agent.tiers(&permissions),
+                "base_tiers": bare.tiers(&permissions),
+            }))
+        })
+        .collect::<Result<Vec<_>, Failure>>()?;
+    let holder = |role: Role| {
+        team.active_agents()
+            .find(|agent| Role::from(agent.role) == role)
+            .map(|agent| {
+                json!({ "agent_id": agent.id, "display_name": agent.display_name, "role": agent.role })
+            })
+    };
+    let mut auto = team.clone();
+    if let Some(judgment) = auto.policy.judgment.as_mut() {
+        judgment.judge = farik_core::team::JudgeChoice::Auto;
+    }
+    Ok(json!({
+        "agents": agents,
+        "judges": {
+            "auto": holder(auto.judge()),
+            "architect": holder(Role::Architect),
+            "scrum_master": holder(Role::ScrumMaster),
+        },
+    }))
 }
 
 /// `project.scan`: the project scanned again, its facts for the rows, the checks it found, and the
@@ -732,7 +804,7 @@ mod tests {
             "teamValidateResult",
         );
         assert_eq!(
-            checked,
+            json!({ "errors": checked["errors"], "effects": checked["effects"] }),
             json!({
                 "errors": [],
                 "effects": ["dev-a now uses claude-opus-5.", "dev-a now thinks with low effort."],
@@ -775,6 +847,86 @@ mod tests {
         assert_eq!(
             farik_protocol::event::event_to_value(&updated[0])["body"],
             json!({ "team_name": "Farik", "agent_ids": ["pm", "dev-a", "dev-b"], "updated_by": "human" })
+        );
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn answers_what_each_agent_may_do_and_who_checks_plans() {
+        let harness = driven("team-effective");
+        let mut team = team_file(&harness);
+        team["policy"]["permissions"] = json!({ "run_commands": false, "push": true });
+        team["agents"][1]["revokes"] = json!(["git_local"]);
+        team["agents"][2]["model"] = json!({ "id": "claude-sonnet-5", "effort": "low" });
+        let mut paused =
+            json!({ "id": "ada", "display_name": "Ada", "role": "architect", "status": "paused" });
+        team["agents"]
+            .as_array_mut()
+            .expect("agents")
+            .push(paused.clone());
+        call(
+            &harness.daemon,
+            "team.save",
+            &json!({ "team": team }),
+            "emptyResult",
+        );
+
+        let got = query(&harness.daemon, "team.get", &json!({}), "teamGetResult");
+        assert_eq!(
+            got["agents"],
+            json!([
+                {
+                    "id": "pm",
+                    "model": { "id": "claude-opus-5", "label": "Strongest model, thinks hard (older)", "effort": "high" },
+                    "tiers": ["read", "network"],
+                    "base_tiers": ["read", "network"],
+                },
+                {
+                    "id": "dev-a",
+                    "model": { "id": "claude-opus-5", "label": "Strongest model, thinks hard (older)", "effort": "high" },
+                    "tiers": ["read", "write_workspace", "git_remote"],
+                    "base_tiers": ["read", "write_workspace", "git_local", "git_remote"],
+                },
+                {
+                    "id": "dev-b",
+                    "model": { "id": "claude-sonnet-5", "label": "Everyday model", "effort": "low" },
+                    "tiers": ["read", "write_workspace", "git_local", "git_remote"],
+                    "base_tiers": ["read", "write_workspace", "git_local", "git_remote"],
+                },
+                {
+                    "id": "ada",
+                    "model": { "id": "claude-opus-5", "label": "Strongest model, thinks hard (older)", "effort": "high" },
+                    "tiers": ["read", "write_workspace", "network", "git_local"],
+                    "base_tiers": ["read", "write_workspace", "network", "git_local"],
+                },
+            ])
+        );
+        // A paused Architect checks nothing: Farik's choice is the Product Manager.
+        let pm = json!({ "agent_id": "pm", "display_name": "pm", "role": "product_manager" });
+        assert_eq!(
+            got["judges"],
+            json!({ "auto": pm, "architect": null, "scrum_master": null })
+        );
+
+        // A draft is answered the same way, before it is saved.
+        paused["id"] = json!("ivo");
+        paused["display_name"] = json!("Ivo");
+        paused["status"] = json!("active");
+        team["agents"].as_array_mut().expect("agents").push(paused);
+        let checked = query(
+            &harness.daemon,
+            "team.validate",
+            &json!({ "team": team }),
+            "teamValidateResult",
+        );
+        let ivo = json!({ "agent_id": "ivo", "display_name": "Ivo", "role": "architect" });
+        assert_eq!(
+            checked["judges"],
+            json!({ "auto": ivo, "architect": ivo, "scrum_master": null })
+        );
+        assert_eq!(
+            checked["agents"][4]["tiers"],
+            json!(["read", "write_workspace", "network", "git_local"])
         );
     }
 

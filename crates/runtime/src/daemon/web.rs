@@ -677,12 +677,7 @@ fn query(state: &DaemonState, name: &str, params: &Value) -> Result<Value, Failu
                 None => Err(missing()),
             }
         }
-        "team.get" => {
-            let team = deps.files.read_team().map_err(|error| internal(&error))?;
-            let team = serde_json::to_value(team).map_err(|error| internal(&error))?;
-            Ok(json!({ "team": team }))
-        }
-        "team.propose" | "team.validate" | "models.list" | "project.scan" => {
+        "team.get" | "team.propose" | "team.validate" | "models.list" | "project.scan" => {
             team::query(deps, name, params)
         }
         name if board::QUERIES.contains(&name) => board::query(deps, name, params),
