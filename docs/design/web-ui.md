@@ -35,6 +35,7 @@ The five brand colours, the three text shades, and the light and dark themes are
 | `action` | Clay Coral `#D8896A`, with Midnight text | the same | The main button, and nothing else |
 | `role-*` | Dusty Rose `#C9A0A6` (Product Manager), Sage `#A3B8A0` (Scrum Master), Wheat `#D6B77A` (Architect), Sky `#B7C7DA` (Developer), Heather `#B3A9CF` (Marketing Specialist), with Midnight text | the same | Role tags only |
 | `status-*` | Moss Text `#536C59` (done), Slate Text `#44607F` (in progress), Clay Text `#96533A` (waiting on you) | Moss Grid `#6E8F76`, Slate `#8AA3C2`, Peach `#E0A68C` | Status words, always with a word, never colour alone |
+| `ready`, `ready-ink` | Added tint `#E3EBDF`, with Moss Text `#536C59` (4.71:1) | the same | The pale green pill behind "Ready" on the computer check, and only there; the Board's "Accepted" and the other done words stay plain (founder, 2026-09-30) |
 
 ### Type
 

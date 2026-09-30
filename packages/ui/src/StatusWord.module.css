@@ -13,3 +13,11 @@
 .waiting {
 	color: var(--farik-color-status-waiting);
 }
+
+/* The same pale pill, Moss Text on the Added tint, in both themes (4.71:1). */
+.pill {
+	padding: 0 var(--farik-space-2);
+	border-radius: 999px;
+	background: var(--farik-color-ready);
+	color: var(--farik-color-ready-ink);
+}

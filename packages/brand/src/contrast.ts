@@ -52,4 +52,5 @@ export const TEXT_PAIRS: readonly TextPair[] = [
 	...ROLES.map((r) => pair("role-ink", `role-${r}`, 4.5)),
 	pair("ink", "diff-added", 4.5),
 	pair("ink", "diff-removed", 4.5),
+	pair("ready-ink", "ready", 4.5),
 ];

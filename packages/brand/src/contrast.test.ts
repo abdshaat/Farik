@@ -127,6 +127,7 @@ describe("contrast", () => {
 			["role-ink", "role-marketing-specialist", 4.5],
 			["ink", "diff-added", 4.5],
 			["ink", "diff-removed", 4.5],
+			["ready-ink", "ready", 4.5],
 		]);
 	});
 });

@@ -34,7 +34,10 @@ function Row(props: {
 		<li className={styles.row}>
 			<span>{t(props.what)}</span>
 			{item ? (
-				<StatusWord tone={item.state === "ready" ? "done" : "waiting"}>
+				<StatusWord
+					tone={item.state === "ready" ? "done" : "waiting"}
+					pill={item.state === "ready"}
+				>
 					{t(WORD[item.state])}
 				</StatusWord>
 			) : (

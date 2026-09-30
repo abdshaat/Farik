@@ -53,6 +53,11 @@ describe("setup", () => {
 		if (!docker) throw new Error("no Docker row");
 		expect(within(docker).getByText(en.notFound)).toBeTruthy();
 		expect(within(docker).getByText(en.dockerMissing)).toBeTruthy();
+		// Only the ready word wears the pale green pill.
+		const claude = (await screen.findByText(en.computerClaude)).closest("li");
+		if (!claude) throw new Error("no Claude row");
+		expect(within(claude).getByText(en.ready).className).toMatch(/pill/);
+		expect(within(docker).getByText(en.notFound).className).not.toMatch(/pill/);
 		expect(screen.getByText(en.noDockerWarning)).toBeTruthy();
 		const onward = screen.getByRole("button", { name: en.continue });
 		expect((onward as HTMLButtonElement).disabled).toBe(true);

@@ -31,6 +31,11 @@ test("a first run checks the computer, keeps the key, and takes the project on",
 
 		// The fake claude is ready; the fake docker's daemon does not answer.
 		await expect(page.getByText("Version 2.1.300 found.")).toBeVisible();
+		// "Ready" sits on the pale green pill: the Added tint, in either theme.
+		await expect(page.getByText("Ready", { exact: true }).first()).toHaveCSS(
+			"background-color",
+			"rgb(227, 235, 223)",
+		);
 		await expect(page.getByText("Not running", { exact: true })).toBeVisible();
 		await expect(
 			page.getByRole("button", { name: "Continue", exact: true }),

@@ -55,6 +55,8 @@ The new colours, each with one job:
 | Added tint | `#E3EBDF` light, `#243029` dark | The background of an added line in the code-changes view, under ink (2026-09-28) |
 | Removed tint | `#F2DDD3` light, `#3A2822` dark | The background of a removed line in the code-changes view, under ink (2026-09-28) |
 
+The Added tint has a second job, fixed by the founder on 2026-09-30: the `ready` pill behind "Ready" on the computer check, with Moss Text (`ready-ink`) as the word. Both are the same in the light and dark themes, like the role tags, because Moss Grid on the dark tint measures 3.83:1 and fails AA; Moss Text on the Added tint is 4.71:1, and `packages/brand` tests that pair.
+
 The tags carry Midnight Terminal text, measured at 7.81 (Dusty Rose), 8.55 (Sage), 9.40 (Wheat), 10.51 (Sky) and 8.18 (Heather).
 
 **Text shades.** These are the same hues made darker, and are used only for text, status marks and the focus ring on light surfaces, because the lighter colours fall short of WCAG 2.2 AA there:
