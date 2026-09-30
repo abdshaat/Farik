@@ -5,14 +5,26 @@ import { farik, startServe } from "./fixtures/serve.ts";
 
 const shots = new URL("./screenshots/", import.meta.url).pathname;
 
+/** Every picture on the page has loaded, so a screenshot is not taken half-drawn. */
+async function pictured(page: Page) {
+	await page.waitForFunction(() =>
+		Array.from(document.images).every(
+			(img) => img.complete && img.naturalWidth > 0,
+		),
+	);
+}
+
 /** The screen as it is, at a desktop's size and a phone's, for the landing review. */
 async function screenshots(page: Page, name: string) {
+	await pictured(page);
 	await page.setViewportSize({ width: 360, height: 780 });
+	await pictured(page);
 	expect(
 		await page.evaluate(() => document.documentElement.scrollWidth),
 	).toBeLessThanOrEqual(360);
 	await page.screenshot({ path: `${shots}${name}-360.png`, fullPage: true });
 	await page.setViewportSize({ width: 1280, height: 800 });
+	await pictured(page);
 	await page.screenshot({ path: `${shots}${name}-1280.png`, fullPage: true });
 }
 
