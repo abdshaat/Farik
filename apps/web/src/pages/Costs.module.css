@@ -1,0 +1,57 @@
+/* The per-agent table and the metrics: plain rows that wrap at a phone's width. */
+.table {
+	width: 100%;
+	border-collapse: collapse;
+	overflow-wrap: anywhere;
+}
+
+.table caption {
+	text-align: left;
+	font:
+		var(--farik-type-heading-weight) var(--farik-type-heading-size) /
+		var(--farik-type-heading-line-height) var(--farik-type-heading-family);
+	padding-bottom: var(--farik-space-2);
+}
+
+.table th,
+.table td {
+	padding: var(--farik-space-2) var(--farik-space-2) var(--farik-space-2) 0;
+	text-align: left;
+	vertical-align: top;
+	border-bottom: 1px solid var(--farik-color-rule);
+}
+
+.table thead th {
+	color: var(--farik-color-ink-muted);
+	font-weight: 400;
+}
+
+.agent {
+	display: flex;
+	align-items: center;
+	gap: var(--farik-space-2);
+	font-weight: 600;
+}
+
+.metrics {
+	display: grid;
+	gap: var(--farik-space-3);
+	margin: 0;
+}
+
+.metrics div {
+	display: grid;
+	gap: var(--farik-space-1);
+}
+
+.metrics dt {
+	color: var(--farik-color-ink-muted);
+}
+
+.metrics dd {
+	margin: 0;
+}
+
+.value {
+	font-weight: 600;
+}

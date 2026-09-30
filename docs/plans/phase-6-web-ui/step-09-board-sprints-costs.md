@@ -162,7 +162,7 @@ RPC queries: `task.costs`, `sprints.list`, `sprint.get`, `costs.summary`, `metri
 - `sets_a_daily_limit`: `team.save` is called with `daily_usd`.
 - `shows_one_sprints_metrics`: the toggle passes `sprint_id`.
 
-- [ ] `feat(web): add the sprint and costs pages`
+- [x] `feat(web): add the sprint and costs pages`
 
 ### Task 5: The journey, the spec and the plan
 

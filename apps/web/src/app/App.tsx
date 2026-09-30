@@ -2,6 +2,7 @@ import { Navigate, Route, Routes } from "react-router";
 import { AgentEdit } from "../pages/AgentEdit.tsx";
 import { Board } from "../pages/Board.tsx";
 import { Connect } from "../pages/Connect.tsx";
+import { Costs } from "../pages/Costs.tsx";
 import { Events } from "../pages/Events.tsx";
 import { Gate } from "../pages/Gate.tsx";
 import { HelpNeeded } from "../pages/HelpNeeded.tsx";
@@ -11,6 +12,7 @@ import { PlanPage } from "../pages/PlanPage.tsx";
 import { Questions } from "../pages/Questions.tsx";
 import { RequestFiled } from "../pages/RequestFiled.tsx";
 import { Settings } from "../pages/Settings.tsx";
+import { SprintPage } from "../pages/SprintPage.tsx";
 import { SetupAccount } from "../pages/setup/SetupAccount.tsx";
 import { SetupAdvanced } from "../pages/setup/SetupAdvanced.tsx";
 import { SetupComputer } from "../pages/setup/SetupComputer.tsx";
@@ -57,6 +59,8 @@ export function App() {
 			<Route element={<Shell />}>
 				<Route index element={<Today />} />
 				<Route path="/board" element={<Board />} />
+				<Route path="/sprints/:id" element={<SprintPage />} />
+				<Route path="/costs" element={<Costs />} />
 				<Route path="/events" element={<Events />} />
 				<Route path="/requests/:id" element={<RequestFiled />} />
 				<Route path="/tasks/:id" element={<TaskDetail />} />

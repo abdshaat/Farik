@@ -309,7 +309,7 @@ export function Board() {
 }
 
 /** The sprint's planner: the Scrum Master, or the Product Manager when there is none (spec 5.9). */
-function plannerOf(agents: Agent[]): string {
+export function plannerOf(agents: Agent[]): string {
 	const of = (role: Agent["role"]) =>
 		agents.find((a) => a.role === role)?.displayName;
 	return of("scrum_master") ?? of("product_manager") ?? "";
