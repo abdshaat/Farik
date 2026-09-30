@@ -688,6 +688,7 @@ pub(crate) struct ExecutorWitness {
     seen: Mutex<Vec<bool>>,
     tools: Mutex<Vec<Vec<String>>>,
     listed: Mutex<Vec<Vec<String>>>,
+    tiers: Mutex<Vec<Vec<farik_core::governor::permissions::PermissionTier>>>,
 }
 
 impl ExecutorWitness {
@@ -699,7 +700,18 @@ impl ExecutorWitness {
             seen: Mutex::new(Vec::new()),
             tools: Mutex::new(Vec::new()),
             listed: Mutex::new(Vec::new()),
+            tiers: Mutex::new(Vec::new()),
         }
+    }
+
+    /// For each session started, in order, the tiers its registration holds it to.
+    pub(crate) fn given_tiers(
+        &self,
+    ) -> Vec<Vec<farik_core::governor::permissions::PermissionTier>> {
+        self.tiers
+            .lock()
+            .expect("no test panics holding it")
+            .clone()
     }
 
     /// For each session started, in order, the tools `tools/list` answered it with.
@@ -726,12 +738,15 @@ impl ExecutorWitness {
 
 impl RuntimeAdapter for ExecutorWitness {
     fn start_session(&self, spec: SessionSpec) -> Result<Box<dyn SessionHandle>, RuntimeError> {
-        let executor = self
+        let context = self
             .daemon
             .tool_context(&spec.session_id)
-            .expect("the session is registered before it starts")
-            .executor
-            .is_some();
+            .expect("the session is registered before it starts");
+        let executor = context.executor.is_some();
+        self.tiers
+            .lock()
+            .expect("no test panics holding it")
+            .push(context.tiers);
         self.seen
             .lock()
             .expect("no test panics holding it")

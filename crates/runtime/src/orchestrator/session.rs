@@ -566,7 +566,13 @@ async fn read_to_end(
 
 #[cfg(test)]
 mod tests {
-    use crate::orchestrator::fixtures::Harness;
+    use std::sync::Arc;
+
+    use farik_core::governor::permissions::PermissionTier;
+    use serde_json::json;
+
+    use crate::orchestrator::fixtures::{ExecutorWitness, Harness};
+    use crate::recorded::fixtures::implement_finishes_frk_1;
     use crate::session::SessionPurpose;
 
     use farik_core::team::Effort;
@@ -576,6 +582,60 @@ mod tests {
     use crate::prompt::{CEREMONY_INSTRUCTIONS, CLOSING_INSTRUCTIONS};
     use crate::recorded::fixtures::reply_to_a_mention;
     use crate::session::EndReason;
+
+    /// The tiers and Farik's tools the Developer's implement session of FRK-1 was given, on a team
+    /// whose permission answers `answers` sets. Commands and pushes go through Farik's tools
+    /// (`farik_exec`, `farik_git_push`); no built-in runs either.
+    async fn implementing_under(
+        name: &str,
+        answers: serde_json::Value,
+    ) -> (Vec<PermissionTier>, Vec<String>) {
+        let harness = Harness::new(name, |wire| {
+            wire["policy"]["permissions"] = answers.clone();
+        });
+        harness.assigned("FRK-1", "dev-a", "dev-b");
+        let adapter = harness.recorded(vec![implement_finishes_frk_1()]);
+        let witness = Arc::new(ExecutorWitness::new(
+            adapter.clone(),
+            Arc::clone(&harness.daemon),
+        ));
+        let orchestrator = harness.orchestrator(witness.clone());
+        orchestrator.tick().await.expect("the task starts");
+        orchestrator.tick().await.expect("the session runs");
+        let started = adapter.started();
+        assert_eq!(started[0].purpose, SessionPurpose::Implement);
+        (
+            witness.given_tiers().remove(0),
+            started[0].farik_tools.clone(),
+        )
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn holds_a_session_to_the_teams_permission_answers() {
+        // A "No" to commands reaches the session's registration, which every hook and tool call
+        // decides by, and the tools it is offered; a "Yes" to pushing does too.
+        let has = |tools: &[String], name: &str| tools.iter().any(|tool| tool == name);
+        let (tiers, tools) = implementing_under(
+            "session-answers-no",
+            json!({ "run_commands": false, "push": true }),
+        )
+        .await;
+        assert!(!tiers.contains(&PermissionTier::Execute), "{tiers:?}");
+        assert!(tiers.contains(&PermissionTier::GitRemote), "{tiers:?}");
+        assert!(!has(&tools, "farik_exec"), "{tools:?}");
+        assert!(has(&tools, "farik_git_push"), "{tools:?}");
+
+        let (tiers, tools) = implementing_under(
+            "session-answers-yes",
+            json!({ "run_commands": true, "push": false }),
+        )
+        .await;
+        assert!(tiers.contains(&PermissionTier::Execute), "{tiers:?}");
+        assert!(!tiers.contains(&PermissionTier::GitRemote), "{tiers:?}");
+        assert!(has(&tools, "farik_exec"), "{tools:?}");
+        assert!(!has(&tools, "farik_git_push"), "{tools:?}");
+    }
 
     #[test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
