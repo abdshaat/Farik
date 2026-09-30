@@ -56,6 +56,19 @@ function withTier(agent: Edited, base: Tier[], tier: Tier, on: boolean) {
 	};
 }
 
+/** The built-in browser connector (spec 5.6), as `team.yaml` names it. */
+const PLAYWRIGHT = { name: "playwright", source: "builtin" };
+
+/** The agent with the Playwright connector on or off, its other connectors kept. */
+function withPlaywright(agent: Edited, on: boolean): Edited {
+	const others = (agent.mcpServers ?? []).filter(
+		(c) => c.name !== PLAYWRIGHT.name,
+	);
+	const mcpServers = on ? [...others, PLAYWRIGHT] : others;
+	const { mcpServers: _, ...rest } = agent;
+	return mcpServers.length ? { ...rest, mcpServers } : rest;
+}
+
 /** One agent's page, once the team has loaded. */
 export function AgentEdit() {
 	const { id } = useParams();
@@ -163,6 +176,9 @@ function Editor({
 		if (await status.set(saved, "retired")) navigate("/team");
 	};
 	const paused = saved.status === "paused";
+	const browsing = (agent.mcpServers ?? []).some(
+		(c) => c.name === PLAYWRIGHT.name,
+	);
 
 	return (
 		<div className={styles.page}>
@@ -276,6 +292,25 @@ function Editor({
 						{t("agentDefaults")}
 					</Button>
 				</span>
+			</section>
+			<section className={styles.section} aria-labelledby="connectors-heading">
+				<h2 id="connectors-heading">
+					{t("connectors")}{" "}
+					<span className={styles.muted}>{t("connectorsLead", { name })}</span>
+				</h2>
+				<Switch
+					id="connector-playwright"
+					label={t("connectorPlaywright")}
+					description={t("connectorPlaywrightNote", { name })}
+					checked={browsing}
+					onChange={(on) => setDraft(withPlaywright(agent, on))}
+				/>
+				{!browsing && agent.role === "ui_ux_designer" && (
+					<p>
+						<strong>{t("connectorOff", { name })}</strong>
+					</p>
+				)}
+				<p className={styles.muted}>{t("connectorsNote")}</p>
 			</section>
 			{effects.length > 0 && (
 				<section

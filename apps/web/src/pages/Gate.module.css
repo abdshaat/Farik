@@ -34,3 +34,34 @@
 .criteria input {
 	accent-color: var(--farik-color-ink);
 }
+
+/* The design review's four screenshots: one column on a phone, two from a tablet up. */
+.shots {
+	display: grid;
+	grid-template-columns: repeat(auto-fit, minmax(min(100%, 16rem), 1fr));
+	gap: var(--farik-space-4);
+}
+
+.shot {
+	display: grid;
+	gap: var(--farik-space-2);
+	margin: 0;
+}
+
+.shot img {
+	width: 100%;
+	height: auto;
+	border: 1px solid var(--farik-color-rule);
+	border-radius: var(--farik-radius-control);
+}
+
+.shot figcaption,
+.shot li {
+	display: grid;
+	gap: var(--farik-space-1);
+}
+
+.shot ul {
+	margin: 0;
+	padding-left: var(--farik-space-4);
+}

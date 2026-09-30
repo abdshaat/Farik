@@ -218,3 +218,24 @@
 		grid-template-columns: 1fr;
 	}
 }
+
+/* Settings' UI paths: each glob with its Remove button. */
+.globs {
+	display: grid;
+	gap: var(--farik-space-1);
+	margin: 0;
+	padding: 0;
+	list-style: none;
+}
+
+.globs li {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: var(--farik-space-3);
+}
+
+.globs code {
+	font-family: var(--farik-type-code-family);
+	overflow-wrap: anywhere;
+}

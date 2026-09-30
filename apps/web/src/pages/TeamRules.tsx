@@ -1,15 +1,28 @@
-import { Button } from "@farik/ui";
-import { type ReactNode, useState } from "react";
+import { Button, TextField } from "@farik/ui";
+import { type ReactNode, useEffect, useRef, useState } from "react";
+import { useLocation } from "react-router";
 import { useConnection } from "../app/connection.tsx";
 import { type Refusal, said, saidAll } from "../app/refusals.ts";
 import { useQuery } from "../app/store.ts";
 import { t } from "../strings/t.ts";
 import styles from "./pages.module.css";
+import {
+	formOf,
+	PreviewFields,
+	type PreviewForm,
+	previewOf,
+} from "./setup/PreviewFields.tsx";
 import { PlanCheck } from "./setup/SetupAdvanced.tsx";
 import { IntegrationChoice } from "./setup/SetupFinish.tsx";
 import { PermissionChoices } from "./setup/SetupPermissions.tsx";
 import { useDailyLimit } from "./setup/SetupSpending.tsx";
-import { type Defaults, type Team, useDefaults } from "./setup/TeamSetup.tsx";
+import setup from "./setup/setup.module.css";
+import {
+	type Defaults,
+	PutBack,
+	type Team,
+	useDefaults,
+} from "./setup/TeamSetup.tsx";
 import type { Judges } from "./Team.tsx";
 
 type Checked = { errors: Refusal[]; effects: string[]; judges?: Judges };
@@ -25,7 +38,7 @@ type Part = {
  * Settings' "Your team's rules": setup's four questions after setup, each saved on its own
  * through `team.save`, its effect shown first (SPEC 4.4, 10).
  */
-export function TeamRules() {
+export function TeamRules({ advanced = false }: { advanced?: boolean }) {
 	const { data, again } = useQuery<{ team: Team }>("team.get", {});
 	const defaults = useDefaults();
 	const { data: base } = useQuery<Checked>(
@@ -58,6 +71,9 @@ export function TeamRules() {
 			/>
 			<Finish key={`finish-${rounds.finish ?? 0}`} {...part("finish")} />
 			<Plans key={`plans-${rounds.plans ?? 0}`} {...part("plans")} />
+			{advanced && (
+				<UiPaths key={`paths-${rounds.paths ?? 0}`} {...part("paths")} />
+			)}
 		</section>
 	);
 }
@@ -242,5 +258,126 @@ function Plans(part: Part) {
 		>
 			{foot}
 		</PlanCheck>
+	);
+}
+
+/**
+ * "How to open your app" (step 12, D2): the preview's two commands, its port and first page,
+ * asked only of a team with a UI/UX Designer, and saved on their own.
+ */
+export function HowToOpen() {
+	const { data, again } = useQuery<{ team: Team }>("team.get", {});
+	const [round, setRound] = useState(0);
+	const designer = data?.team.agents.find(
+		(a) => a.role === "ui_ux_designer" && a.status !== "retired",
+	);
+	if (!data || !designer) return null;
+	return (
+		<Preview
+			key={round}
+			saved={data.team}
+			designer={designer.displayName}
+			done={() => {
+				setRound((n) => n + 1);
+				again();
+			}}
+		/>
+	);
+}
+
+function Preview({
+	saved,
+	designer,
+	done,
+}: {
+	saved: Team;
+	designer: string;
+	done: () => void;
+}) {
+	const [mine, setMine] = useState<PreviewForm>();
+	const form = mine ?? formOf(saved.preview);
+	const next = mine ? withPreview(saved, previewOf(mine)) : saved;
+	const { errors, foot } = useChange({ saved, base: undefined, done }, next, {
+		shownAbove: "/preview",
+	});
+	// Today's "Open Settings" links here: the page goes to the section once it is drawn.
+	const { hash } = useLocation();
+	const here = useRef<HTMLElement>(null);
+	useEffect(() => {
+		if (hash === "#preview") here.current?.scrollIntoView();
+	}, [hash]);
+	return (
+		<section
+			ref={here}
+			id="preview"
+			className={styles.section}
+			aria-labelledby="preview-heading"
+		>
+			<h2 id="preview-heading">{t("previewTitle")}</h2>
+			<p>{t("previewLead", { designer })}</p>
+			<PreviewFields
+				id="preview"
+				form={form}
+				designer={designer}
+				errors={errors}
+				onChange={setMine}
+			/>
+			{foot}
+			<p className={styles.muted}>{t("previewNotSure")}</p>
+		</section>
+	);
+}
+
+/** The team with `preview`, or without one when the fields are all empty. */
+function withPreview(team: Team, preview: Team["preview"]): Team {
+	const { preview: _, ...rest } = team;
+	return preview ? { ...rest, preview } : rest;
+}
+
+/** Advanced: the globs that make a Developer's change one the Designer checks (spec 5.12). */
+function UiPaths(part: Part) {
+	const { saved, defaults } = part;
+	const [mine, setMine] = useState<string[]>();
+	const [adding, setAdding] = useState("");
+	const paths = mine ?? saved.rules.uiPaths ?? defaults?.uiPaths ?? [];
+	const next = mine
+		? { ...saved, rules: { ...saved.rules, uiPaths: mine } }
+		: saved;
+	const { foot } = useChange(part, next);
+	const add = () => {
+		const glob = adding.trim();
+		if (glob && !paths.includes(glob)) setMine([...paths, glob]);
+		setAdding("");
+	};
+	return (
+		<Part id="rules-paths" title={t("uiPathsTitle")}>
+			<p className={styles.muted}>{t("uiPathsLead")}</p>
+			<ul className={styles.globs}>
+				{paths.map((glob) => (
+					<li key={glob}>
+						<code>{glob}</code>
+						<Button
+							kind="quiet"
+							onClick={() => setMine(paths.filter((p) => p !== glob))}
+						>
+							{t("uiPathsRemove")} <span className={setup.hidden}>{glob}</span>
+						</Button>
+					</li>
+				))}
+			</ul>
+			<TextField
+				id="ui-path"
+				label={t("uiPathsAdd")}
+				value={adding}
+				onChange={setAdding}
+			/>
+			<div className={styles.actions}>
+				<Button onClick={add} disabled={adding.trim() === ""}>
+					{t("uiPathsAddButton")}
+				</Button>
+				<PutBack onClick={defaults && (() => setMine(defaults.uiPaths))} />
+			</div>
+			{foot}
+		</Part>
 	);
 }

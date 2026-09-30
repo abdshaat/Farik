@@ -102,6 +102,11 @@ export function Board() {
 		const doing = activity.activity.find(
 			(a) => a.state === "working" && a.taskId === task.taskId,
 		);
+		// The Designer's review session checks the screens (step 12's design review).
+		const designer =
+			doing?.purpose === "verify" &&
+			agents.find((a) => a.id === doing.agentId)?.role === "ui_ux_designer";
+		if (designer) return { word: t("designChecking"), tone: "working" };
 		const purpose = doing?.purpose && DOING[doing.purpose];
 		if (purpose) return { word: t(purpose), tone: "working" };
 		if (task.status === "accepted")
@@ -164,7 +169,11 @@ export function Board() {
 								)}
 						</span>
 					)}
-					{mark && <StatusWord tone={mark.tone}>{mark.word}</StatusWord>}
+					{mark ? (
+						<StatusWord tone={mark.tone}>{mark.word}</StatusWord>
+					) : (
+						task.status === "verifying" && <DesignMark taskId={task.taskId} />
+					)}
 				</div>
 			</li>
 		);
@@ -322,4 +331,14 @@ export function plannerOf(agents: Agent[]): string {
 	const of = (role: Agent["role"]) =>
 		agents.find((a) => a.role === role)?.displayName;
 	return of("scrum_master") ?? of("product_manager") ?? "";
+}
+
+/** "Waiting on the Designer" on a card in review whose design review waits for a paused Designer. */
+function DesignMark({ taskId }: { taskId: string }) {
+	const { data } = useQuery<{ designReview: { state: string } | null }>(
+		"task.get",
+		{ task_id: taskId },
+	);
+	if (data?.designReview?.state !== "waiting_on_designer") return null;
+	return <StatusWord tone="waiting">{t("designOnDesigner")}</StatusWord>;
 }

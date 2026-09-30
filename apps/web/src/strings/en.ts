@@ -207,7 +207,7 @@ export const en = {
 	jobDeveloper: "Builds and tests what the plan asks for.",
 	jobMarketing: "Writes posts, pages and a plan for getting the word out.",
 	jobDesigner:
-		"Looks at your app the way a customer does, plans changes to its screens, and makes them once {pm} agrees.",
+		"Looks at your app the way a customer does, plans changes to its screens, and makes them once {pm} agrees. Checks every screen {developer} builds.",
 	teamName: "Name for the {role}",
 	teamAdd: "Add someone",
 	teamContinueSix: "Continue with these six",
@@ -910,4 +910,85 @@ export const en = {
 	channelPreview: "In the channel",
 	channelOpen: "Open the channel",
 	sprintReadIt: "Read it",
+	previewTitle: "How to open your app",
+	previewLead:
+		"{designer}, your UI/UX Designer, looks at your app in a browser to check its screens. Tell Farik the commands you use to open it. Farik runs them inside Docker’s sandbox, never straight on your computer.",
+	previewSetupTitle: "{designer} needs to know how to open your app",
+	previewSetupLead:
+		"{designer} looks at your app in a browser. Tell Farik the commands you use to open it; Farik runs them inside Docker’s sandbox. Not sure? Leave them empty. You can add them in Settings later, and {designer} waits until you do.",
+	previewPrepare: "Get it ready (optional)",
+	previewPrepareHint:
+		"Installs what your app needs and builds it. This may use the internet, for up to 15 minutes.",
+	previewStart: "Start it",
+	previewStartHint: "Starts your app. The internet is off while it runs.",
+	previewPort: "Port",
+	previewPortHint: "The number your app answers on.",
+	previewPath: "First page",
+	previewPathHint: "The page {designer} opens first.",
+	previewNotSure:
+		"Not sure what to type? Whoever set up your app knows. Your README file often says too.",
+	refusePreviewPort: "Use a number from 1024 to 65535.",
+	refusePreview:
+		"Farik cannot use these. Starting your app needs a command and a port, each command is at most 500 characters, and the first page starts with /.",
+	teamNeedsSandbox: "Needs Docker’s sandbox",
+	teamNeedsSandboxNote:
+		"{designer} opens your app in a browser, and only inside Docker’s sandbox, a safe box that keeps it away from the rest of your computer. Farik did not find Docker here.",
+	teamCheckAgain: "Check again",
+	teamInstallDocker: "How to install Docker",
+	connectors: "Connectors",
+	connectorsLead: "let {name} use outside tools",
+	connectorPlaywright: "Playwright",
+	connectorPlaywrightNote:
+		"Comes with Farik. Opens your app in a browser inside Docker’s sandbox, so {name} can see its screens as a customer would. It reaches only your app, nothing else on the internet.",
+	connectorOff:
+		"Without it {name} cannot look at your app, so Farik gives {name} no work.",
+	connectorsNote:
+		"On for a UI/UX Designer. You can turn it on for anyone else. More connectors arrive in a later version.",
+	uiPathsTitle: "Which files are screens",
+	uiPathsLead:
+		"When a Developer’s change touches a file like these, the UI/UX Designer checks its screens before the Architect reviews the code.",
+	uiPathsAdd: "Add a file pattern",
+	uiPathsAddButton: "Add",
+	uiPathsRemove: "Remove",
+	designChecked: "{name}, your UI/UX Designer, checked the screens first",
+	designPassed: "Passed, and sent on to {reviewer}",
+	designFailed: "Sent back to {builder}",
+	designChecksTitle: "The four checks",
+	designChecksLead:
+		"Farik took each picture and ran the accessibility check itself, against WCAG 2.2 AA, the usual standard for pages everyone can use.",
+	shotPhone: "Phone",
+	shotComputer: "Computer",
+	shotLight: "light",
+	shotDark: "dark",
+	shotAlt: "{width}, {theme}",
+	shotCaption: "{width}, {theme} theme",
+	shotPhoneWide: "360 pixels wide",
+	shotComputerWide: "1280 pixels wide",
+	shotClean: "No problems found",
+	shotViolation: "{rule}, {impact}",
+	designChecking: "Checking the screens",
+	designCheckingNote:
+		"{designer} is looking at it on a phone and a computer, in the light and dark themes. {reviewer} reviews the code once {designer} passes it.",
+	designOnDesigner: "Waiting on the Designer",
+	designOnDesignerNote:
+		"{developer} changed a screen, and {designer} checks every screen before {reviewer} sees it. {designer} is paused.",
+	designResume: "Resume {designer} on the Team page",
+	designerWorks: "How {designer} works",
+	designerStepLook: "Looks at your app in a browser",
+	designerStepPlan: "Writes a plan",
+	designerStepApprove: "{pm} approves the plan",
+	designerStepChange: "{designer} changes the page",
+	designerStepReview: "{reviewer} reviews it, as for any task",
+	stepDone: "Done",
+	stepNow: "Now",
+	plansSentBack: "Plans sent back",
+	plansOf: "{n} of {of}",
+	waitingPreviewMissing: "Tell Farik how to open your app",
+	waitingPreviewMissingLine:
+		"{designer} needs it to look at your screens. Until then {designer} takes no work, and nobody checks the screens {developer} builds.",
+	waitingOpenSettings: "Open Settings",
+	waitingNeedsSandbox: "{agent} needs Docker’s sandbox",
+	waitingNeedsSandboxLine:
+		"The UI/UX Designer needs Docker’s sandbox to open your app. Turn the sandbox on, or retire the Designer.",
+	waitingOpenTeam: "Open the Team page",
 };

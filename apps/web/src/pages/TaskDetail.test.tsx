@@ -18,6 +18,15 @@ import {
 	TASK,
 } from "../test/gate.ts";
 import { TEAM } from "../test/plan.ts";
+import { answerQuery } from "../test/render-app.tsx";
+
+const IRIS = {
+	id: "iris",
+	display_name: "Iris",
+	role: "ui_ux_designer",
+	avatar: "extra-1",
+	status: "active",
+};
 
 const PAGE = [
 	"team.get",
@@ -471,6 +480,194 @@ describe("task detail", () => {
 		).toBe(false);
 		errors.mockRestore();
 		vi.useRealTimers();
+	});
+
+	it("shows_the_four_checks_with_their_screenshots", async () => {
+		const shot = (seq: number, width: string, theme: string, violations = []) =>
+			event(
+				seq,
+				"page.checked",
+				{
+					width,
+					theme,
+					path: "/",
+					violations,
+					screenshot: `s-${seq}-${width}-${theme}.png`,
+				},
+				"2026-09-25T08:30:00Z",
+				"iris",
+			);
+		const CONTRAST = {
+			rule: "color-contrast",
+			impact: "serious",
+			target: ".price",
+			help: "Elements must meet minimum color contrast ratio thresholds",
+		};
+		const REASONS =
+			"I opened the page on a phone and on a computer. The prices were too faint in the dark theme.";
+		const { container, s } = await opened(
+			{ ...CONTRACT, status: "rejected" },
+			[],
+			{
+				"team.get": { team: { ...TEAM, agents: [...TEAM.agents, IRIS] } },
+				"task.history": {
+					events: [
+						...HISTORY,
+						// An earlier check at the same width and theme is not the one shown.
+						shot(20, "phone", "light"),
+						shot(21, "phone", "light"),
+						shot(22, "phone", "dark", [CONTRAST] as never),
+						shot(23, "desktop", "light"),
+						shot(24, "desktop", "dark"),
+					],
+				},
+				"task.get": {
+					task: {},
+					design_plan: null,
+					ui_change: true,
+					design_review: {
+						state: "failed",
+						reasons: REASONS,
+						checks: [
+							{ width: "phone", theme: "light", violations: [] },
+							{ width: "phone", theme: "dark", violations: [CONTRAST] },
+							{ width: "desktop", theme: "light", violations: [] },
+							{ width: "desktop", theme: "dark", violations: [] },
+						],
+					},
+				},
+			},
+		);
+		const review = await screen.findByRole("region", {
+			name: "Iris, your UI/UX Designer, checked the screens first",
+		});
+		expect(within(review).getByText(REASONS)).toBeTruthy();
+		expect(within(review).getByText("Sent back to Theo")).toBeTruthy();
+		const checks = screen.getByRole("region", { name: en.designChecksTitle });
+		const figures = within(checks).getAllByRole("figure");
+		expect(figures).toHaveLength(4);
+		await answerQuery(s, "task.screenshot", { png_base64: "iVBORw0KGgo=" });
+		const pictures = await waitFor(() => {
+			const all = within(checks).getAllByRole("img");
+			if (all.length < 4) throw new Error("the screenshots are not shown");
+			return all;
+		});
+		expect(pictures.map((img) => img.getAttribute("alt"))).toEqual([
+			"Phone, light",
+			"Phone, dark",
+			"Computer, light",
+			"Computer, dark",
+		]);
+		expect(pictures[0]?.getAttribute("src")).toBe(
+			"data:image/png;base64,iVBORw0KGgo=",
+		);
+		// Each picture is the latest the task's own checks took at its width and theme.
+		expect(
+			s
+				.calls("query")
+				.filter((q) => q.params.name === "task.screenshot")
+				.map((q) => (q.params.params as { file: string }).file),
+		).toEqual([
+			"s-21-phone-light.png",
+			"s-22-phone-dark.png",
+			"s-23-desktop-light.png",
+			"s-24-desktop-dark.png",
+		]);
+		const dark = figures[1] as HTMLElement;
+		expect(within(dark).getByText("Phone, dark theme")).toBeTruthy();
+		expect(within(dark).getByText(CONTRAST.help)).toBeTruthy();
+		expect(within(dark).getByText("color-contrast, serious")).toBeTruthy();
+		expect(
+			within(figures[0] as HTMLElement).getByText(en.shotClean),
+		).toBeTruthy();
+		await expectNoAxeViolations(container);
+	});
+
+	it("says_a_ui_change_waits_on_the_designer", async () => {
+		await opened(CONTRACT, [], {
+			"team.get": {
+				team: {
+					...TEAM,
+					agents: [...TEAM.agents, { ...IRIS, status: "paused" }],
+				},
+			},
+			"task.get": {
+				task: {},
+				design_plan: null,
+				ui_change: true,
+				design_review: { state: "waiting_on_designer", checks: [] },
+			},
+		});
+		const heading = await screen.findByRole("heading", {
+			level: 1,
+			name: "Gift cards",
+		});
+		expect(
+			within(heading.parentElement as HTMLElement).getByText(
+				en.designOnDesigner,
+			),
+		).toBeTruthy();
+		expect(
+			screen.getByText(
+				"Theo changed a screen, and Iris checks every screen before Ada sees it. Iris is paused.",
+			),
+		).toBeTruthy();
+		expect(
+			screen
+				.getByRole("link", { name: "Resume Iris on the Team page" })
+				.getAttribute("href"),
+		).toBe("/team/iris");
+		cleanup();
+
+		await opened(CONTRACT, [], {
+			"team.get": { team: { ...TEAM, agents: [...TEAM.agents, IRIS] } },
+			"task.get": {
+				task: {},
+				design_plan: null,
+				ui_change: true,
+				design_review: { state: "waiting", checks: [] },
+			},
+		});
+		expect(await screen.findByText(en.designChecking)).toBeTruthy();
+		expect(
+			screen.getByText(
+				"Iris is looking at it on a phone and a computer, in the light and dark themes. Ada reviews the code once Iris passes it.",
+			),
+		).toBeTruthy();
+	});
+
+	it("shows_how_the_designer_works_beside_its_task", async () => {
+		const { container } = await opened(
+			{
+				...CONTRACT,
+				status: "in_progress",
+				assignee: "iris",
+				assignee_role: "ui_ux_designer",
+			},
+			[],
+			{
+				"team.get": { team: { ...TEAM, agents: [...TEAM.agents, IRIS] } },
+				"task.get": {
+					task: {},
+					design_plan: { plan: "A plan.", state: "proposed" },
+				},
+			},
+		);
+		const works = await screen.findByRole("region", {
+			name: "How Iris works",
+		});
+		const steps = within(works)
+			.getAllByRole("listitem")
+			.map((li) => li.textContent);
+		expect(steps).toEqual([
+			"Looks at your app in a browser Done",
+			"Writes a plan Done",
+			"Mira approves the plan Now",
+			"Iris changes the page",
+			"Ada reviews it, as for any task",
+		]);
+		expect(within(works).getByText("0 of 3")).toBeTruthy();
+		await expectNoAxeViolations(container);
 	});
 
 	it("says_what_each_risk_means", async () => {

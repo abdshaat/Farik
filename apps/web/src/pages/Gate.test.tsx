@@ -2,12 +2,14 @@ import { expectNoAxeViolations } from "@farik/ui/test";
 import { fireEvent, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+	ACCEPTING,
 	COMPLETION,
 	openedGate,
 	REVIEW,
 	sentCommand,
 	TASK,
 } from "../test/gate.ts";
+import { TEAM } from "../test/plan.ts";
 
 const GATE = [
 	"team.get",
@@ -187,6 +189,63 @@ describe("acceptance gate", () => {
 		expect((await sentCommand(s)).params).toEqual({
 			command: { command: "task_integrate", body: { task_id: "FRK-1" } },
 		});
+		await expectNoAxeViolations(container);
+	});
+
+	it("puts_the_designers_letter_first_on_the_gate", async () => {
+		const LOOKED =
+			"I opened the page on a phone and on a computer, in the light and dark themes. All four pass.";
+		const { container } = await openedGate(
+			"/tasks/FRK-1/accept",
+			[...GATE, "task.get"],
+			TASK,
+			ACCEPTING,
+			{
+				"team.get": {
+					team: {
+						...TEAM,
+						agents: [
+							...TEAM.agents,
+							{
+								id: "iris",
+								display_name: "Iris",
+								role: "ui_ux_designer",
+								avatar: "extra-1",
+								status: "active",
+							},
+						],
+					},
+				},
+				"task.get": {
+					task: {},
+					design_plan: null,
+					ui_change: true,
+					design_review: {
+						state: "passed",
+						reasons: LOOKED,
+						checks: [],
+					},
+				},
+			},
+		);
+		const iris = await screen.findByRole("region", {
+			name: "Iris, your UI/UX Designer, checked the screens first",
+		});
+		expect(within(iris).getByText(LOOKED)).toBeTruthy();
+		expect(within(iris).getByText("Passed, and sent on to Ada")).toBeTruthy();
+		const theo = screen.getByRole("region", {
+			name: "Theo, your Developer, wrote this for you",
+		});
+		const ada = screen.getByRole("region", {
+			name: "Ada, your Architect, reviewed it",
+		});
+		// The builder's letter, then the Designer's, then the Architect's review.
+		expect(
+			theo.compareDocumentPosition(iris) & Node.DOCUMENT_POSITION_FOLLOWING,
+		).toBeTruthy();
+		expect(
+			iris.compareDocumentPosition(ada) & Node.DOCUMENT_POSITION_FOLLOWING,
+		).toBeTruthy();
 		await expectNoAxeViolations(container);
 	});
 });

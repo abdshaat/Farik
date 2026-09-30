@@ -4,6 +4,7 @@ import { useNavigate } from "react-router";
 import { useConnection } from "../../app/connection.tsx";
 import { type Refusal, refusalsOf, said } from "../../app/refusals.ts";
 import { t } from "../../strings/t.ts";
+import { PreviewFields } from "./PreviewFields.tsx";
 import styles from "./setup.module.css";
 import { ringOf, roleName, someone, teamOf, useSetup } from "./TeamSetup.tsx";
 import { Wizard } from "./Wizard.tsx";
@@ -24,19 +25,24 @@ const JOBS = {
 export function SetupTeam() {
 	const { client } = useConnection();
 	const navigate = useNavigate();
-	const { draft, change } = useSetup();
+	const { draft, change, unavailable, checkAgain } = useSetup();
 	const [errors, setErrors] = useState<Checked["errors"]>([]);
 	const [busy, setBusy] = useState(false);
 	const on = draft.members.filter((m) => m.on);
 	const pm =
 		draft.members.find((m) => m.agent.role === "product_manager")?.agent
 			.displayName ?? roleName("product_manager");
+	const developer =
+		draft.members.find((m) => m.agent.role === "software_developer")?.agent
+			.displayName ?? roleName("software_developer");
 	// An error's path names the agent by its place on the team, which leaves out the unticked.
 	const at = (spot: number) =>
 		errors.filter(
 			(e) => e.path.split("/").slice(1, 3).join("/") === `agents/${spot}`,
 		);
-	const loose = errors.filter((e) => !/^\/agents\/\d+/.test(e.path));
+	const loose = errors.filter(
+		(e) => !/^\/agents\/\d+/.test(e.path) && !e.path.startsWith("/preview"),
+	);
 
 	const set = (index: number, next: Partial<{ on: boolean; name: string }>) => {
 		setErrors([]);
@@ -103,11 +109,14 @@ export function SetupTeam() {
 					const nameId = `name-${index}`;
 					const why = included ? at(on.indexOf(member)) : [];
 					const whyId = `why-${index}`;
+					const designer = agent.role === "ui_ux_designer";
+					const cannot = unavailable.includes(agent.id);
 					return (
 						<li key={member.key} className={styles.member}>
 							<input
 								type="checkbox"
 								checked={included}
+								disabled={cannot}
 								aria-label={t("teamInclude").replace("{role}", role)}
 								onChange={(e) => set(index, { on: e.target.checked })}
 							/>
@@ -132,12 +141,57 @@ export function SetupTeam() {
 								/>
 							</span>
 							<span className={styles.persona}>
-								{t(JOBS[agent.role], { pm })}
+								{t(JOBS[agent.role], { pm, developer })}
 							</span>
 							{why.length > 0 && (
 								<span id={whyId} className={styles.error}>
 									{why.map((e) => said(e.code)).join(" ")}
 								</span>
+							)}
+							{cannot && (
+								<div className={styles.memberCard}>
+									<strong>{t("teamNeedsSandbox")}</strong>
+									<p>
+										{t("teamNeedsSandboxNote", {
+											designer: agent.displayName,
+										})}
+									</p>
+									<div className={styles.buttons}>
+										<Button onClick={checkAgain}>{t("teamCheckAgain")}</Button>
+										<a
+											href="https://docs.docker.com/get-started/get-docker/"
+											target="_blank"
+											rel="noreferrer"
+										>
+											{t("teamInstallDocker")}
+										</a>
+									</div>
+								</div>
+							)}
+							{designer && included && (
+								<section
+									className={styles.memberCard}
+									aria-labelledby={`preview-${index}`}
+								>
+									<h2 id={`preview-${index}`}>
+										{t("previewSetupTitle", { designer: agent.displayName })}
+									</h2>
+									<p>
+										{t("previewSetupLead", { designer: agent.displayName })}
+									</p>
+									<PreviewFields
+										id={`preview-${index}`}
+										form={draft.preview}
+										designer={agent.displayName}
+										errors={errors}
+										onChange={(preview) => {
+											setErrors(
+												errors.filter((e) => !e.path.startsWith("/preview")),
+											);
+											change({ ...draft, preview });
+										}}
+									/>
+								</section>
 							)}
 						</li>
 					);

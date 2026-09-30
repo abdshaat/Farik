@@ -47,11 +47,12 @@ async function today(fields: {
 	waiting?: unknown[];
 	moved?: unknown[];
 	sprint?: unknown;
+	team?: unknown;
 }) {
 	const { container, socket } = await renderApp("/");
 	const s = socket as FakeSocket;
 	await answerStatus(s, false);
-	await answerQuery(s, "team.get", { team: TEAM });
+	await answerQuery(s, "team.get", { team: fields.team ?? TEAM });
 	await answerQuery(s, "team.activity", fields.activity ?? ACTIVITY);
 	await answerQuery(s, "waiting.list", { waiting: fields.waiting ?? [] });
 	await answerQuery(s, "moved.since", { moved: fields.moved ?? [] });
@@ -241,6 +242,63 @@ describe("today", () => {
 				within(rows[1] as HTMLElement).queryByText(/checks passed/),
 			).toBeNull(),
 		);
+		await expectNoAxeViolations(container);
+	});
+
+	it("links_the_waiting_rows_to_settings", async () => {
+		const { container } = await today({
+			waiting: [
+				{
+					task_id: "FRK-22",
+					kind: "preview_missing",
+					agent_id: "iris",
+					title: "The Order again button",
+					line: "iris needs to know how to open your app",
+				},
+				{
+					task_id: "FRK-23",
+					kind: "designer_needs_sandbox",
+					agent_id: "iris",
+					title: "A bigger basket",
+					line: "The UI/UX Designer needs Docker's sandbox to open your app. Turn the sandbox on, or retire the Designer",
+				},
+			],
+			team: {
+				...TEAM,
+				agents: [
+					...TEAM.agents,
+					agent("iris", "Iris", "ui_ux_designer", "extra-1"),
+				],
+			},
+		});
+		const list = await screen.findByRole("list", { name: en.waitingList });
+		const [missing, sandbox] = within(list).getAllByRole(
+			"listitem",
+		) as HTMLElement[];
+		expect(
+			within(missing as HTMLElement).getByText(en.waitingPreviewMissing),
+		).toBeTruthy();
+		expect(
+			within(missing as HTMLElement).getByText(
+				"Iris needs it to look at your screens. Until then Iris takes no work, and nobody checks the screens Theo builds.",
+			),
+		).toBeTruthy();
+		expect(
+			within(missing as HTMLElement)
+				.getByRole("link", { name: en.waitingOpenSettings })
+				.getAttribute("href"),
+		).toBe("/settings#preview");
+		expect(
+			within(sandbox as HTMLElement).getByText("Iris needs Docker’s sandbox"),
+		).toBeTruthy();
+		expect(
+			within(sandbox as HTMLElement).getByText(en.waitingNeedsSandboxLine),
+		).toBeTruthy();
+		expect(
+			within(sandbox as HTMLElement)
+				.getByRole("link", { name: en.waitingOpenTeam })
+				.getAttribute("href"),
+		).toBe("/team");
 		await expectNoAxeViolations(container);
 	});
 

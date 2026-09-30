@@ -265,7 +265,7 @@ Tests, each also running axe:
 - `marks_a_task_waiting_on_the_designer`: a `verifying` card with `waiting_on_designer` shows "Waiting on the Designer".
 - `links_the_waiting_rows_to_settings`: `preview_missing` links to `/settings#preview`, and `designer_needs_sandbox` shows its sentence.
 
-- [ ] `feat(web): show the design review, and ask how to open the app`
+- [x] `feat(web): show the design review, and ask how to open the app`
 
 ### Task 6: `--preview`, and the Designer's journey
 

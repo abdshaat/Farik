@@ -12,7 +12,14 @@ import type { Agent, Team } from "./setup/TeamSetup.tsx";
 import styles from "./Today.module.css";
 
 type Activity = { agentId: string; state: string; line: string };
-type Kind = "approval" | "acceptance" | "question" | "help" | "integration";
+type Kind =
+	| "approval"
+	| "acceptance"
+	| "question"
+	| "help"
+	| "integration"
+	| "preview_missing"
+	| "designer_needs_sandbox";
 type Waiting = {
 	taskId: string;
 	kind: Kind;
@@ -24,10 +31,15 @@ type Moved = { at: string; line: string };
 type Sprint = { sprintId: string; done: number; total: number } | null;
 type Check = { passed: boolean };
 
-/** Each kind's title, button word and page (the step 08 plan's routes). */
+/** Each kind's title, button word and page (the step 08 plan's routes); `line` in place of the daemon's. */
 const KINDS: Record<
 	Kind,
-	{ title: keyof typeof en; word: keyof typeof en; page: string }
+	{
+		title: keyof typeof en;
+		word: keyof typeof en;
+		page: string;
+		line?: keyof typeof en;
+	}
 > = {
 	approval: { title: "waitingApproval", word: "waitingReview", page: "plan" },
 	acceptance: {
@@ -45,6 +57,18 @@ const KINDS: Record<
 		title: "waitingIntegration",
 		word: "waitingAdd",
 		page: "accept",
+	},
+	preview_missing: {
+		title: "waitingPreviewMissing",
+		word: "waitingOpenSettings",
+		page: "/settings#preview",
+		line: "waitingPreviewMissingLine",
+	},
+	designer_needs_sandbox: {
+		title: "waitingNeedsSandbox",
+		word: "waitingOpenTeam",
+		page: "/team",
+		line: "waitingNeedsSandboxLine",
 	},
 };
 
@@ -122,6 +146,13 @@ export function Today() {
 									key={`${item.kind}-${item.taskId}`}
 									item={item}
 									agent={agent(item.agentId)}
+									developer={
+										agents.find(
+											(a) =>
+												a.role === "software_developer" &&
+												a.status !== "retired",
+										)?.displayName ?? ""
+									}
 								/>
 							))}
 						</ul>
@@ -241,9 +272,11 @@ function RequestBox({ pmName }: { pmName: string }) {
 function WaitingRow({
 	item,
 	agent,
+	developer,
 }: {
 	item: Waiting;
 	agent: Agent | undefined;
+	developer: string;
 }) {
 	const kind = KINDS[item.kind];
 	const name = agent?.displayName ?? item.agentId ?? "";
@@ -257,12 +290,18 @@ function WaitingRow({
 				<strong id={titleId}>
 					{t(kind.title, { title: item.title, agent: name })}
 				</strong>
-				<span>{item.line}</span>
+				<span>
+					{kind.line ? t(kind.line, { designer: name, developer }) : item.line}
+				</span>
 				{item.kind === "acceptance" && <ChecksPassed taskId={item.taskId} />}
 			</div>
 			<Link
 				className={styles.action}
-				to={`/tasks/${item.taskId}/${kind.page}`}
+				to={
+					kind.page.startsWith("/")
+						? kind.page
+						: `/tasks/${item.taskId}/${kind.page}`
+				}
 				aria-describedby={titleId}
 			>
 				{t(kind.word)}

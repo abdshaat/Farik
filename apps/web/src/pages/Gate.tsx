@@ -1,10 +1,11 @@
 import { Button, DiffView, TextArea } from "@farik/ui";
-import { useState } from "react";
+import { Fragment, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 import { useConnection } from "../app/connection.tsx";
 import { useQuery } from "../app/store.ts";
 import { roleWord, sentence, statusWord } from "../app/words.ts";
 import { t } from "../strings/t.ts";
+import { DesignReview, type Review } from "./DesignReview.tsx";
 import { Failed } from "./Failed.tsx";
 import gate from "./Gate.module.css";
 import own from "./PlanPage.module.css";
@@ -83,6 +84,11 @@ export function Gate() {
 		"waiting.list",
 		{},
 	);
+	// The design review is the Designer's letter; the page reads without it.
+	const { data: detail } = useQuery<{ designReview: Review | null }>(
+		"task.get",
+		task,
+	);
 	const [busy, setBusy] = useState(false);
 	const [refusal, setRefusal] = useState<string>();
 	const [showDiff, setShowDiff] = useState(false);
@@ -108,6 +114,20 @@ export function Gate() {
 		["completion", "gateWrote"],
 		["review", "gateReviewed"],
 	] as const;
+
+	const nameOf = (role: string) =>
+		agents.find((a) => a.role === role && a.status !== "retired")
+			?.displayName ?? "";
+	const review = detail?.designReview && (
+		<DesignReview
+			taskId={id}
+			review={detail.designReview}
+			events={events}
+			designer={nameOf("ui_ux_designer")}
+			reviewer={nameOf(contract.reviewerRole ?? "architect")}
+			builder={builder?.displayName ?? ""}
+		/>
+	);
 
 	const send = async (command: object) => {
 		if (!client) return;
@@ -141,18 +161,19 @@ export function Gate() {
 				const by = agents.find((a) => a.id === note?.body.writtenBy);
 				if (!note || !by) return null;
 				return (
-					<section
-						key={kind}
-						className={own.letter}
-						aria-labelledby={`${kind}-signed`}
-					>
-						<p id={`${kind}-signed`} className={styles.muted}>
-							{signed(key, by)}
-						</p>
-						<p>{note.body.text?.split(/\n\s*\n/)[0]}</p>
-					</section>
+					<Fragment key={kind}>
+						{/* The Designer checked the screens before the Architect read the code. */}
+						{kind === "review" && review}
+						<section className={own.letter} aria-labelledby={`${kind}-signed`}>
+							<p id={`${kind}-signed`} className={styles.muted}>
+								{signed(key, by)}
+							</p>
+							<p>{note.body.text?.split(/\n\s*\n/)[0]}</p>
+						</section>
+					</Fragment>
 				);
 			})}
+			{!latestNote(events, "review") && review}
 			<section className={styles.section} aria-labelledby="checked">
 				<h2 id="checked">{t("planChecked")}</h2>
 				<p className={styles.muted}>{t("gateCheckedHint")}</p>

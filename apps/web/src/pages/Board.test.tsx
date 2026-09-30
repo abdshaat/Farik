@@ -143,11 +143,12 @@ async function board(
 	sprint: unknown = { sprint_id: "S2", done: 1, total: 3 },
 	tasks: object[] = TASKS,
 	activity: object = ACTIVITY,
+	team: object = TEAM,
 ) {
 	const { container, socket } = await renderApp("/board");
 	const s = socket as FakeSocket;
 	await answerStatus(s, false);
-	await answerQuery(s, "team.get", { team: TEAM });
+	await answerQuery(s, "team.get", { team });
 	await answerQuery(s, "tasks.list", { tasks });
 	await answerQuery(s, "waiting.list", { waiting: WAITING });
 	await answerQuery(s, "team.activity", activity);
@@ -255,6 +256,60 @@ describe("board", () => {
 			.getByRole("link", { name: "Launch post" })
 			.closest("li") as HTMLElement;
 		expect(within(row).getByText(en.markPlanning)).toBeTruthy();
+	});
+
+	it("marks_a_task_waiting_on_the_designer", async () => {
+		media.set(WIDE, true);
+		const withIris = {
+			...TEAM,
+			agents: [
+				...TEAM.agents,
+				agent("iris", "Iris", "ui_ux_designer", "extra-1"),
+			],
+		};
+		const tasks = [
+			...TASKS,
+			task(22, "The Order again button", "verifying", { assignee_id: "theo" }),
+			task(23, "A bigger basket", "verifying", { assignee_id: "theo" }),
+		];
+		const checking = {
+			activity: [
+				...ACTIVITY.activity,
+				{
+					agent_id: "iris",
+					state: "working",
+					line: "Checking FRK-23",
+					task_id: "FRK-23",
+					session_id: "s-2",
+					purpose: "verify",
+				},
+			],
+		};
+		const { container, s } = await board(undefined, tasks, checking, withIris);
+		const review = screen.getByRole("region", { name: en.statusReview });
+		const row = (title: string) =>
+			within(review)
+				.getByRole("link", { name: title })
+				.closest("li") as HTMLElement;
+		// The Designer's own review session is checking the screens.
+		expect(
+			within(row("A bigger basket")).getByText(en.designChecking),
+		).toBeTruthy();
+		// A card with nothing else to say asks the task where its design review stands.
+		const asked = s.calls("query").filter((q) => q.params.name === "task.get");
+		expect(asked.map((q) => q.params.params)).toEqual([{ task_id: "FRK-22" }]);
+		await answerQuery(s, "task.get", {
+			task: {},
+			design_plan: null,
+			ui_change: true,
+			design_review: { state: "waiting_on_designer", checks: [] },
+		});
+		expect(
+			await within(row("The Order again button")).findByText(
+				en.designOnDesigner,
+			),
+		).toBeTruthy();
+		await expectNoAxeViolations(container);
 	});
 
 	it("filters_the_board", async () => {

@@ -8,7 +8,7 @@ import {
 	waitFor,
 	within,
 } from "@testing-library/react";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { en } from "../strings/en.ts";
 import type { FakeSocket } from "../test/fake-socket.ts";
 import { answerQuery, answerStatus, renderApp } from "../test/render-app.tsx";
@@ -56,6 +56,7 @@ const EFFECTIVE = [
 		{ id: "claude-sonnet-5-5", label: "Everyday model" },
 		["read", "network", "write_workspace", "git_local"],
 	],
+	["iris", OPUS, ["read", "write_workspace", "execute", "git_local"]],
 ].map(([id, model, tiers]) => ({
 	id,
 	model: { ...(model as object), effort: "high" },
@@ -124,6 +125,27 @@ const BUDGET = "Does the task fit its budget?";
 const NOTICE =
 	"Would its checks notice if the work went wrong the way its intent worries about?";
 const SMALL = "Is it small enough to finish in one go?";
+const UI_PATHS = [
+	"**/*.tsx",
+	"**/*.jsx",
+	"**/*.vue",
+	"**/*.svelte",
+	"**/*.css",
+	"**/*.scss",
+	"**/*.html",
+];
+const PLAYWRIGHT = [{ name: "playwright", source: "builtin" }];
+/** The team with Iris, the UI/UX Designer, and her connector. */
+const WITH_IRIS = {
+	...TEAM,
+	agents: [
+		...TEAM.agents,
+		{
+			...agent("iris", "Iris", "ui_ux_designer", "extra-1"),
+			mcp_servers: PLAYWRIGHT,
+		},
+	],
+};
 /** What `farik init` writes, as settings.defaults answers it. */
 const DEFAULTS = {
 	budgets: {},
@@ -137,17 +159,18 @@ const DEFAULTS = {
 		},
 		permissions: { run_commands: true, push: false },
 	},
+	ui_paths: UI_PATHS,
 };
 
 /** Settings, with the team and the defaults answered: its team's rules area. */
-async function settings() {
-	const { container, socket } = await renderApp("/settings");
+async function settings(team: object = TEAM, path = "/settings") {
+	const { container, socket } = await renderApp(path);
 	const s = socket as FakeSocket;
 	// The shell asks first, then the page itself.
 	await answerStatus(s, false);
 	await answerStatus(s, false, 2);
 	await answerQuery(s, "team.get", {
-		team: TEAM,
+		team,
 		agents: EFFECTIVE,
 		judges: JUDGES,
 		max_agents: 7,
@@ -498,6 +521,141 @@ describe("team page", () => {
 		await s.fail(gone, -32603, "keyring: platform secure storage failure");
 		expect(await within(row).findByText(en.refuseOther)).toBeTruthy();
 		expect(within(row).queryByText(/keyring/)).toBeNull();
+	});
+
+	it("switches_a_connector", async () => {
+		const { container, s } = await opened("/team/theo");
+		await screen.findByRole("heading", { name: "Theo, your Developer" });
+		const connectors = screen.getByRole("region", { name: /^Connectors/ });
+		const playwright = within(connectors).getByRole("switch", {
+			name: en.connectorPlaywright,
+		});
+		expect(playwright.getAttribute("aria-checked")).toBe("false");
+		await expectNoAxeViolations(container);
+
+		fireEvent.click(playwright);
+		expect(playwright.getAttribute("aria-checked")).toBe("true");
+		const effect = "Theo may now open your app in a browser.";
+		const checked = await validated(s, [effect]);
+		expect(one(checked, "theo").mcp_servers).toEqual(PLAYWRIGHT);
+		// What changes is shown before anything is saved.
+		expect(await screen.findByText(effect)).toBeTruthy();
+		expect(s.calls("team.save")).toHaveLength(0);
+		fireEvent.click(screen.getByRole("button", { name: en.agentSave }));
+		expect(one(await saved(s), "theo").mcp_servers).toEqual(PLAYWRIGHT);
+		cleanup();
+
+		// Turned off for the Designer, the page says what that costs.
+		await opened("/team/iris", WITH_IRIS);
+		await screen.findByRole("heading", { name: "Iris, your UI/UX Designer" });
+		const hers = screen.getByRole("switch", { name: en.connectorPlaywright });
+		expect(hers.getAttribute("aria-checked")).toBe("true");
+		expect(
+			screen.queryByText(
+				"Without it Iris cannot look at your app, so Farik gives Iris no work.",
+			),
+		).toBeNull();
+		fireEvent.click(hers);
+		expect(
+			screen.getByText(
+				"Without it Iris cannot look at your app, so Farik gives Iris no work.",
+			),
+		).toBeTruthy();
+	});
+
+	it("saves_the_preview_in_settings", async () => {
+		const scrolled = vi.fn();
+		Element.prototype.scrollIntoView = scrolled;
+		const { container, s } = await settings(WITH_IRIS, "/settings#preview");
+		const preview = await screen.findByRole("region", {
+			name: en.previewTitle,
+		});
+		expect(preview.id).toBe("preview");
+		// Today's row links here, and the page goes to the section.
+		await waitFor(() => expect(scrolled.mock.contexts).toContain(preview));
+		expect(
+			within(preview).getByText(
+				"Iris, your UI/UX Designer, looks at your app in a browser to check its screens. Tell Farik the commands you use to open it. Farik runs them inside Docker’s sandbox, never straight on your computer.",
+			),
+		).toBeTruthy();
+		expect(within(preview).getByText(en.previewNotSure)).toBeTruthy();
+		await expectNoAxeViolations(container);
+
+		const field = (name: string) =>
+			within(preview).getByRole("textbox", { name });
+		fireEvent.change(field(en.previewPrepare), {
+			target: { value: "pnpm install" },
+		});
+		fireEvent.change(field(en.previewStart), {
+			target: { value: "pnpm dev" },
+		});
+		fireEvent.change(field(en.previewPort), { target: { value: "5173" } });
+		const effect = "Iris can now open your app.";
+		const draft = (await validated(s, [effect])) as unknown as {
+			preview: unknown;
+		};
+		const expected = {
+			prepare: "pnpm install",
+			start: "pnpm dev",
+			port: 5173,
+			path: "/",
+		};
+		expect(draft.preview).toEqual(expected);
+		expect(await within(preview).findByText(effect)).toBeTruthy();
+		expect(s.calls("team.save")).toHaveLength(0);
+		fireEvent.click(
+			within(preview).getByRole("button", { name: en.agentSave }),
+		);
+		expect(
+			((await saved(s)) as unknown as { preview: unknown }).preview,
+		).toEqual(expected);
+		cleanup();
+
+		// A team without a Designer is never asked.
+		await settings();
+		expect(screen.queryByRole("region", { name: en.previewTitle })).toBeNull();
+	});
+
+	it("edits_the_ui_paths_in_advanced", async () => {
+		const { container, s } = await settings(WITH_IRIS);
+		expect(screen.queryByRole("region", { name: en.uiPathsTitle })).toBeNull();
+		fireEvent.click(screen.getByRole("switch", { name: en.advancedSwitch }));
+		const paths = screen.getByRole("region", { name: en.uiPathsTitle });
+		const list = within(paths).getByRole("list");
+		// The team says none, so the seven defaults stand.
+		expect(
+			within(list)
+				.getAllByRole("listitem")
+				.map((li) => li.querySelector("code")?.textContent),
+		).toEqual(UI_PATHS);
+		await expectNoAxeViolations(container);
+
+		fireEvent.change(
+			within(paths).getByRole("textbox", { name: en.uiPathsAdd }),
+			{
+				target: { value: "**/*.strings" },
+			},
+		);
+		fireEvent.click(
+			within(paths).getByRole("button", { name: en.uiPathsAddButton }),
+		);
+		const effect = "Iris checks 8 kinds of file.";
+		const draft = await validated(s, [effect]);
+		expect(draft.rules).toEqual({ ui_paths: [...UI_PATHS, "**/*.strings"] });
+		expect(await within(paths).findByText(effect)).toBeTruthy();
+		fireEvent.click(within(paths).getByRole("button", { name: en.agentSave }));
+		expect((await saved(s)).rules).toEqual({
+			ui_paths: [...UI_PATHS, "**/*.strings"],
+		});
+
+		// Each one can go, by name.
+		fireEvent.click(
+			within(paths).getByRole("button", { name: "Remove **/*.html" }),
+		);
+		const fewer = await validated(s, []);
+		expect((fewer.rules as { ui_paths: string[] }).ui_paths).not.toContain(
+			"**/*.html",
+		);
 	});
 
 	it("changes_what_agents_may_do_and_the_limit_from_settings", async () => {

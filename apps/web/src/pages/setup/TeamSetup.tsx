@@ -5,6 +5,12 @@ import { useConnection } from "../../app/connection.tsx";
 import { saidAll } from "../../app/refusals.ts";
 import { useQuery } from "../../app/store.ts";
 import { t } from "../../strings/t.ts";
+import {
+	formOf,
+	type Preview,
+	type PreviewForm,
+	previewOf,
+} from "./PreviewFields.tsx";
 import { slug } from "./SetupProject.tsx";
 
 export type Agent = {
@@ -15,6 +21,8 @@ export type Agent = {
 	persona?: string;
 	status: string;
 	model?: unknown;
+	/** The connectors its sessions get (spec 5.6). */
+	mcpServers?: { name: string; source: string }[];
 };
 export type Judgment = {
 	required?: "always" | "never";
@@ -34,8 +42,10 @@ export type Team = {
 	rules: {
 		requireNewTests?: boolean;
 		maxTaskBudgetUsd?: number;
+		uiPaths?: string[];
 		[key: string]: unknown;
 	};
+	preview?: Preview;
 };
 export type Criterion = {
 	name: string;
@@ -53,8 +63,17 @@ export type Draft = {
 	criteria: Library;
 	/** The two permission questions, unanswered until the user answers them. */
 	answers: { commands?: boolean; push?: boolean };
+	/** How to open the app, asked on the Designer's row. */
+	preview: PreviewForm;
 };
-type Setup = { draft: Draft; change: (next: Draft) => void };
+type Setup = {
+	draft: Draft;
+	change: (next: Draft) => void;
+	/** The agents this computer cannot run, which start unticked (step 12, D3). */
+	unavailable: string[];
+	/** Asks the daemon again, after the user installs Docker. */
+	checkAgain: () => void;
+};
 
 /** The names "Add someone" suggests, in order, each with its picture. */
 const SPARE = ["Noor", "Ivo", "Lena", "Sami", "Rui"];
@@ -73,7 +92,9 @@ export function teamOf(draft: Draft): Team {
 			taken.add(id);
 			return { ...agent, id };
 		});
-	return { ...draft.team, agents };
+	const preview =
+		agents.some((a) => a.role === "ui_ux_designer") && previewOf(draft.preview);
+	return { ...draft.team, agents, ...(preview && { preview }) };
 }
 
 /** Another agent like `like`, named from the spare names none of `agents` uses yet. */
@@ -94,25 +115,39 @@ export function someone(agents: Agent[], like: Agent): Agent {
 
 /** The layout of the team screens: the suggested team, fetched once, held for every screen. */
 export function TeamSetup() {
-	const { data } = useQuery<{ team: Team; criteria: Library }>(
-		"team.propose",
-		{},
-	);
+	const { data, again } = useQuery<{
+		team: Team;
+		criteria: Library;
+		unavailable?: { agentId: string }[];
+	}>("team.propose", {});
 	const [mine, setMine] = useState<Draft>();
+	const unavailable = (data?.unavailable ?? []).map((u) => u.agentId);
 	const draft: Draft | undefined =
 		mine ??
 		(data && {
 			team: data.team,
 			members: data.team.agents.map((agent, key) => ({
 				agent,
-				on: true,
+				on: !unavailable.includes(agent.id),
 				key,
 			})),
 			criteria: data.criteria,
 			answers: {},
+			preview: formOf(data.team.preview),
 		});
 	if (!draft) return null;
-	return <Outlet context={{ draft, change: setMine } satisfies Setup} />;
+	return (
+		<Outlet
+			context={
+				{
+					draft,
+					change: setMine,
+					unavailable,
+					checkAgain: again,
+				} satisfies Setup
+			}
+		/>
+	);
 }
 
 export function useSetup(): Setup {
@@ -152,6 +187,8 @@ export type Defaults = {
 		permissions: { runCommands: boolean; push: boolean };
 	};
 	rules: Team["rules"];
+	/** The globs that make a Developer's change a UI change (spec 5.12). */
+	uiPaths: string[];
 };
 
 /** The defaults, once the daemon has answered them. */

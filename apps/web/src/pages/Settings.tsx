@@ -8,7 +8,7 @@ import type { ThemeChoice } from "../app/theme.ts";
 import { t } from "../strings/t.ts";
 import { ConnectAgain } from "./ConnectAgain.tsx";
 import styles from "./pages.module.css";
-import { TeamRules } from "./TeamRules.tsx";
+import { HowToOpen, TeamRules } from "./TeamRules.tsx";
 
 const ADVANCED = "farik.advanced";
 
@@ -80,6 +80,7 @@ export function Settings({
 					},
 				]}
 			/>
+			<HowToOpen />
 			<section className={styles.section} aria-labelledby="advanced-heading">
 				<h2 id="advanced-heading">{t("advanced")}</h2>
 				<Switch
@@ -91,7 +92,7 @@ export function Settings({
 				/>
 				<p>{t("advancedSafe")}</p>
 			</section>
-			<TeamRules />
+			<TeamRules advanced={advanced} />
 			<section className={styles.section} aria-labelledby="computer-heading">
 				<h2 id="computer-heading">{t("thisComputer")}</h2>
 				<p>

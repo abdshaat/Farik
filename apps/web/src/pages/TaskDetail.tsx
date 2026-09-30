@@ -5,6 +5,7 @@ import { useQuery } from "../app/store.ts";
 import { movedWords, statusWord } from "../app/words.ts";
 import type { en } from "../strings/en.ts";
 import { t } from "../strings/t.ts";
+import { DesignReview, type Review } from "./DesignReview.tsx";
 import { CancelTask } from "./dialogs/CancelTask.tsx";
 import { useCommand } from "./dialogs/StartSprint.tsx";
 import {
@@ -149,10 +150,10 @@ export function TaskDetail() {
 		{},
 	);
 	const { data: costs } = useQuery<Costs>("task.costs", task);
-	const { data: detail } = useQuery<{ designPlan: DesignPlan | null }>(
-		"task.get",
-		task,
-	);
+	const { data: detail } = useQuery<{
+		designPlan: DesignPlan | null;
+		designReview?: Review | null;
+	}>("task.get", task);
 	const [tab, setTab] = useState<Tab>("summary");
 	const [cancelling, setCancelling] = useState(false);
 	const { busy, refusal, send } = useCommand(() => {});
@@ -267,12 +268,47 @@ export function TaskDetail() {
 	).length;
 	const limit = tries.of - 1;
 	// The plan's state stands for the task's while the Designer's task is being worked on.
+	const review = detail.designReview;
+	const checking = review?.state === "waiting";
+	const onDesigner = review?.state === "waiting_on_designer";
 	const designWord =
-		design &&
-		contract.status === "in_progress" &&
-		(design.state === "proposed"
-			? t("designWaiting", { pm })
-			: t(design.state === "approved" ? "designBeingBuilt" : "designSentBack"));
+		(design &&
+			contract.status === "in_progress" &&
+			(design.state === "proposed"
+				? t("designWaiting", { pm })
+				: t(
+						design.state === "approved" ? "designBeingBuilt" : "designSentBack",
+					))) ||
+		(checking && t("designChecking")) ||
+		(onDesigner && t("designOnDesigner"));
+	// The team's Designer, who checks every screen a Developer changes.
+	const iris = agents.find(
+		(a) => a.role === "ui_ux_designer" && a.status !== "retired",
+	);
+	const names = {
+		designer: iris?.displayName ?? designer,
+		reviewer: reviewer ?? "",
+		developer: assignee ?? "",
+		pm,
+	};
+	// Where the Designer's own task stands, step by step (the "How Iris works" panel).
+	const reached =
+		contract.status === "accepted"
+			? 5
+			: contract.status === "verifying"
+				? 4
+				: design?.state === "approved"
+					? 3
+					: design?.state === "proposed"
+						? 2
+						: 0;
+	const steps = [
+		"designerStepLook",
+		"designerStepPlan",
+		"designerStepApprove",
+		"designerStepChange",
+		"designerStepReview",
+	] as const;
 
 	const told = (e: Event) => {
 		const actor =
@@ -325,6 +361,16 @@ export function TaskDetail() {
 						</p>
 						<p>{summary.body.text?.split(/\n\s*\n/)[0]}</p>
 					</section>
+				)}
+				{review && (
+					<DesignReview
+						taskId={id}
+						review={review}
+						events={events}
+						designer={names.designer}
+						reviewer={names.reviewer}
+						builder={names.developer}
+					/>
 				)}
 				<h2 id="checks">{t("taskChecks")}</h2>
 				<ul className={own.checks} aria-labelledby="checks">
@@ -528,6 +574,19 @@ export function TaskDetail() {
 						{designWord || statusWord(contract.status)}
 					</StatusWord>
 					<p className={styles.muted}>{lead}</p>
+					{checking && <p>{t("designCheckingNote", names)}</p>}
+					{onDesigner && (
+						<>
+							<p>{t("designOnDesignerNote", names)}</p>
+							{iris && (
+								<p>
+									<Link to={`/team/${iris.id}`}>
+										{t("designResume", names)}
+									</Link>
+								</p>
+							)}
+						</>
+					)}
 				</div>
 				<div
 					role="tablist"
@@ -561,6 +620,30 @@ export function TaskDetail() {
 				</div>
 			</div>
 			<aside className={page.side}>
+				{contract.assigneeRole === "ui_ux_designer" && (
+					<section className={styles.section} aria-labelledby="designer-works">
+						<h2 id="designer-works">{t("designerWorks", { designer })}</h2>
+						<ol className={page.steps}>
+							{steps.map((key, at) => (
+								<li key={key}>
+									{t(key, { ...names, designer })}
+									{at <= reached && (
+										<>
+											{" "}
+											<strong>
+												{t(at < reached ? "stepDone" : "stepNow")}
+											</strong>
+										</>
+									)}
+								</li>
+							))}
+						</ol>
+						<dl className={own.facts}>
+							<dt>{t("plansSentBack")}</dt>
+							<dd>{t("plansOf", { n: returns, of: limit })}</dd>
+						</dl>
+					</section>
+				)}
 				<section className={styles.section} aria-labelledby="cost">
 					<h2 id="cost">{t("taskCost")}</h2>
 					<table className={page.cost}>

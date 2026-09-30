@@ -304,7 +304,7 @@ describe("team setup", () => {
 		expect(include.checked).toBe(true);
 		expect(
 			within(include.closest("li") as HTMLElement).getByText(
-				"Looks at your app the way a customer does, plans changes to its screens, and makes them once Mira agrees.",
+				"Looks at your app the way a customer does, plans changes to its screens, and makes them once Mira agrees. Checks every screen Theo builds.",
 			),
 		).toBeTruthy();
 		expect(
@@ -354,6 +354,108 @@ describe("team setup", () => {
 			"theo",
 			"kai",
 		]);
+	});
+
+	it("asks_how_to_open_the_app_when_the_designer_is_on", async () => {
+		const { container, socket } = await renderApp("/setup/team");
+		const s = socket as FakeSocket;
+		await answerQuery(s, "team.propose", {
+			...proposed((team) => {
+				team.agents = [...FIVE.slice(0, 4), IRIS, ...FIVE.slice(4)];
+			}),
+			unavailable: [],
+		});
+		const card = await screen.findByRole("region", {
+			name: "Iris needs to know how to open your app",
+		});
+		const field = (name: string) =>
+			within(card).getByRole("textbox", { name }) as HTMLInputElement;
+		expect(field(en.previewPrepare).value).toBe("");
+		expect(field(en.previewStart).value).toBe("");
+		expect(field(en.previewPort).value).toBe("");
+		expect(field(en.previewPath).value).toBe("/");
+		await expectNoAxeViolations(container);
+
+		fireEvent.change(field(en.previewStart), {
+			target: { value: "pnpm dev" },
+		});
+		fireEvent.change(field(en.previewPort), { target: { value: "80" } });
+		fireEvent.click(
+			screen.getByRole("button", { name: "Continue with these six" }),
+		);
+		const validate = await asked(s, "team.validate");
+		const team = (validate.params.params as { team: { preview: unknown } })
+			.team;
+		expect(team.preview).toEqual({ start: "pnpm dev", port: 80, path: "/" });
+		await s.reply(validate, {
+			errors: [
+				{
+					path: "/preview/port",
+					message: "80 is less than the minimum of 1024",
+					code: "invalid",
+				},
+			],
+			effects: [],
+		});
+		// The daemon's refusal, in plain words, at the port's own field.
+		const why = await within(card).findByText(en.refusePreviewPort);
+		expect(field(en.previewPort).getAttribute("aria-invalid")).toBe("true");
+		expect(field(en.previewPort).getAttribute("aria-describedby")).toContain(
+			why.id,
+		);
+		expect(screen.queryByText(/less than the minimum/)).toBeNull();
+		await expectNoAxeViolations(container);
+
+		// Without the Designer, nobody asks, and nothing is sent.
+		fireEvent.click(
+			screen.getByRole("checkbox", { name: "Include the UI/UX Designer" }),
+		);
+		expect(
+			screen.queryByRole("region", {
+				name: "Iris needs to know how to open your app",
+			}),
+		).toBeNull();
+		fireEvent.click(screen.getByRole("button", { name: en.teamContinue }));
+		await waitFor(() =>
+			expect(
+				s.calls("query").filter((f) => f.params.name === "team.validate"),
+			).toHaveLength(2),
+		);
+		const again = (await asked(s, "team.validate")).params.params as {
+			team: Record<string, unknown>;
+		};
+		expect("preview" in again.team).toBe(false);
+	});
+
+	it("unticks_the_designer_without_a_sandbox", async () => {
+		const { container, socket } = await renderApp("/setup/team");
+		const s = socket as FakeSocket;
+		await answerQuery(s, "team.propose", {
+			...proposed((team) => {
+				team.agents = [...FIVE.slice(0, 4), IRIS, ...FIVE.slice(4)];
+			}),
+			unavailable: [{ agent_id: "iris", reason: "designer_needs_sandbox" }],
+		});
+		const include = (await screen.findByRole("checkbox", {
+			name: "Include the UI/UX Designer",
+		})) as HTMLInputElement;
+		expect(include.checked).toBe(false);
+		expect(include.disabled).toBe(true);
+		const row = include.closest("li") as HTMLElement;
+		expect(within(row).getByText(en.teamNeedsSandbox)).toBeTruthy();
+		expect(
+			within(row).getByRole("button", { name: en.teamCheckAgain }),
+		).toBeTruthy();
+		expect(
+			screen.queryByRole("region", {
+				name: "Iris needs to know how to open your app",
+			}),
+		).toBeNull();
+		await expectNoAxeViolations(container);
+		fireEvent.click(screen.getByRole("button", { name: en.teamContinue }));
+		const validate = await asked(s, "team.validate");
+		const team = (validate.params.params as { team: { agents: never[] } }).team;
+		expect(team.agents.map((a: { id: string }) => a.id)).not.toContain("iris");
 	});
 
 	it("adds_from_the_spare_names_without_mixing_rows_up", async () => {

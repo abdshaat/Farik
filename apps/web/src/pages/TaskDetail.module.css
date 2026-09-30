@@ -109,3 +109,11 @@
 	border-top: 1px solid var(--farik-color-rule);
 	font-weight: 600;
 }
+
+/* The Designer's five steps, numbered as the mockup's side panel numbers them. */
+.steps {
+	display: grid;
+	gap: var(--farik-space-2);
+	margin: 0;
+	padding-left: var(--farik-space-5);
+}

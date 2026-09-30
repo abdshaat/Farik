@@ -450,3 +450,38 @@
 .question span {
 	display: grid;
 }
+
+/* Under a member's row: how to open the app, or why the Designer cannot be on the team here. */
+.memberCard {
+	display: grid;
+	flex-basis: 100%;
+	gap: var(--farik-space-3);
+	padding: var(--farik-space-4);
+	background: var(--farik-color-surface);
+	border: 1px solid var(--farik-color-rule);
+	border-radius: var(--farik-radius-control);
+}
+
+.memberCard h2,
+.memberCard p {
+	margin: 0;
+}
+
+.memberCard h2 {
+	font:
+		var(--farik-type-heading-weight) var(--farik-type-heading-size) /
+		var(--farik-type-heading-line-height) var(--farik-type-heading-family);
+}
+
+.buttons {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: var(--farik-space-3);
+}
+
+.buttons a {
+	display: inline-flex;
+	align-items: center;
+	min-height: 44px;
+}
