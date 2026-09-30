@@ -239,12 +239,14 @@ async fn give_browser(
         Ok(running) => running,
         Err(error) => return preview_failed(deps, team, contract, spec, ids, &error).map(Err),
     };
+    // The browser's own folder, apart from the page check's screenshots, which only Farik writes.
     let output = deps
         .tools
         .files
         .root()
-        .join(".farik/local/screenshots")
-        .join(contract.id.as_str());
+        .join(".farik/local/browser")
+        .join(contract.id.as_str())
+        .join(&spec.session_id);
     if let Err(error) = std::fs::create_dir_all(&output) {
         let why = format!("{} cannot be made: {error}", output.display());
         close_preview(deps, ids, running.as_ref(), &why)?;
@@ -1092,6 +1094,25 @@ mod tests {
         for spec in adapter.started() {
             let servers: Vec<&str> = spec.mcp_servers.iter().map(|s| s.name.as_str()).collect();
             assert_eq!(servers, ["playwright"]);
+            // The browser saves into a folder of the session's own, never the page check's.
+            let crate::session::McpTransport::Stdio { args, .. } = &spec.mcp_servers[0].transport
+            else {
+                panic!("the browser is a child process");
+            };
+            let mount = crate::preview::fixtures::after(args, "--mount")[0];
+            let source = mount
+                .strip_prefix("type=bind,src=")
+                .and_then(|rest| rest.strip_suffix(",dst=/output"))
+                .expect("the output folder is mounted");
+            let screenshots = crate::tools::design::screenshots(
+                deps.tools.files.root(),
+                &"FRK-1".parse().expect("an id"),
+            );
+            assert!(
+                !std::path::Path::new(source).starts_with(&screenshots),
+                "{source}"
+            );
+            assert!(source.ends_with(&spec.session_id), "{source}");
             assert!(
                 spec.disallowed_tools
                     .contains(&"mcp__playwright__browser_evaluate".to_string()),

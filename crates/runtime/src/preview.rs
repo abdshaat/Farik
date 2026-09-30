@@ -647,7 +647,7 @@ mod tests {
         let server = connector_server(
             &definition,
             &NamedPreview { port: 4400 },
-            Path::new("/p/.farik/local/screenshots/FRK-1"),
+            Path::new("/p/.farik/local/browser/FRK-1/s-1"),
         );
         assert_eq!(server.name, "playwright");
         let McpTransport::Stdio { command, args } = server.transport else {
@@ -667,7 +667,7 @@ mod tests {
         );
         assert_eq!(
             after(&args, "--mount"),
-            ["type=bind,src=/p/.farik/local/screenshots/FRK-1,dst=/output"]
+            ["type=bind,src=/p/.farik/local/browser/FRK-1/s-1,dst=/output"]
         );
         // The image, then its own arguments, then Farik's confinement.
         let image = args
