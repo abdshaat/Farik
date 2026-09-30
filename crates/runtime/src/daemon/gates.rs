@@ -430,16 +430,22 @@ fn file_words(deps: &ToolDeps, text: &str) -> Result<Value, Failure> {
     Ok(json!({ "task_id": filed.id }))
 }
 
-/// `contract.save`: the human's edit, judged by `check_contract_write`. A frozen plan goes back to
-/// `refining` first (5.11), by the escalation's resolve, and one the team is working to is
-/// refused; then the fields the human changed are written over the file and
-/// `contract.written` is recorded as theirs.
+/// `contract.save`: the human's edit, judged by `check_contract_write`. One the team is working to
+/// is refused; otherwise the fields the human changed are written over the file and
+/// `contract.written` is recorded as theirs, and then a frozen plan goes back to `refining`
+/// (5.11), by the escalation's resolve.
 async fn save(state: &DaemonState, deps: &Arc<ToolDeps>, params: &Value) -> Result<Value, Failure> {
     let (held, edit) = (deps.clone(), params.clone());
     let (task_id, changed, after, back) = off_the_worker(move || judged(&held, &edit)).await?;
+    // Written while the task is still held, so a session the move wakes reads the human's plan.
+    // If the move is then refused, the edit sits on a held task, which nobody works to.
+    if !changed.is_empty() {
+        let (held, task_id) = (deps.clone(), task_id.clone());
+        off_the_worker(move || written_over(&held, &task_id, &changed, &after)).await?;
+    }
     if back {
         let command = Command::EscalationResolve {
-            task_id: task_id.clone(),
+            task_id,
             to: TaskStatus::Refining,
             message: EDITED.to_string(),
             extra_tries: None,
@@ -447,10 +453,6 @@ async fn save(state: &DaemonState, deps: &Arc<ToolDeps>, params: &Value) -> Resu
         if let CommandReply::Error { detail, .. } = super::handled(state, command).await {
             return Err(Failure::new(REFUSED, detail));
         }
-    }
-    if !changed.is_empty() {
-        let held = deps.clone();
-        off_the_worker(move || written_over(&held, &task_id, &changed, &after)).await?;
     }
     Ok(json!({ "saved": true, "back_to_refining": back }))
 }
@@ -513,7 +515,7 @@ fn written_over(
     changed: &[String],
     after: &Value,
 ) -> Result<(), Failure> {
-    // The move wrote the file's lifecycle fields, so the human's fields go over what it left.
+    // The human's fields go over the file as it is now, lifecycle fields and all.
     let mut written = file_value(deps, task_id)?;
     for field in changed {
         written[field] = after[field].clone();
@@ -525,6 +527,8 @@ fn written_over(
     }
     let mut written = validate_contract(&written)
         .map_err(|errors| Failure::new(REFUSED, schema_words(&errors)))?;
+    // The board holds the status (5.2), and `contract.written` carries it to the board.
+    written.status = row(deps, task_id)?.status;
     written.updated_at = Some(deps.clock.now());
     deps.files
         .write_contract(&written)
@@ -867,11 +871,12 @@ pub(super) mod tests {
             // Farik's line about the move in the channel is not the task's.
             .filter(|kind| *kind != "message.posted")
             .collect();
+        // Written before the move, so a session the move wakes reads the human's plan.
         assert!(
             kinds.ends_with(&[
+                "contract.written",
                 "task.transitioned",
-                "escalation.resolved",
-                "contract.written"
+                "escalation.resolved"
             ]),
             "{kinds:?}"
         );
