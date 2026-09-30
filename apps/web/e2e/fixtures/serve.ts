@@ -96,7 +96,7 @@ export async function startServe(o: {
 	setupPending?: boolean;
 	home?: string;
 	/** The team to write in place of `farik init`'s two. */
-	team?: "pm-architect-developer";
+	team?: "pm-architect-developer" | "pm-architect-developer-designer";
 	/** How long each recorded session waits before it plays, so a page sees each state it leaves. */
 	paceMs?: number;
 }): Promise<{
@@ -123,7 +123,7 @@ export async function startServe(o: {
 		args.push("--no-keychain");
 	} else {
 		setUp(project, o.setupPending === true);
-		if (o.team) writeTeam(project);
+		if (o.team) writeTeam(project, o.team.endsWith("-designer"));
 	}
 
 	const port = await freePort();
@@ -169,8 +169,11 @@ function setUp(project: string, setupPending: boolean): void {
 	}
 }
 
-/** Mira (Product Manager), Ada (Architect, who checks plans and reviews Theo) and Theo (Developer). */
-function writeTeam(project: string): void {
+/**
+ * Mira (Product Manager), Ada (Architect, who checks plans and reviews Theo) and Theo (Developer),
+ * and Iris (UI/UX Designer) when `designer`.
+ */
+function writeTeam(project: string, designer: boolean): void {
 	const agent = (id: string, name: string, role: string) =>
 		`- display_name: ${name}\n  id: ${id}\n  model:\n    effort: high\n    id: claude-opus-5\n  persona: ${name}.\n  role: ${role}\n  status: active\n`;
 	const path = join(project, ".farik/team.yaml");
@@ -178,7 +181,8 @@ function writeTeam(project: string): void {
 	const agents =
 		agent("mira", "Mira", "product_manager") +
 		agent("ada", "Ada", "architect") +
-		agent("theo", "Theo", "software_developer");
+		agent("theo", "Theo", "software_developer") +
+		(designer ? agent("iris", "Iris", "ui_ux_designer") : "");
 	writeFileSync(
 		path,
 		yaml.replace(/^agents:\n[\s\S]*?(?=^budgets:)/m, `agents:\n${agents}`),

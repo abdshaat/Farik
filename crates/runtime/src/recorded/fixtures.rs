@@ -355,6 +355,21 @@ pub fn implement_after_send_back_frk_1() -> Transcript {
 
 // Step 11's Designer flow, on a team with the UI/UX Designer `iris`.
 
+/// As `refine_writes_task_for_theo_frk_1`, but for the UI/UX Designer, whose task runs its plan
+/// gate. Hand-written.
+#[must_use]
+pub fn refine_writes_task_for_iris_frk_1() -> Transcript {
+    Transcript::from_jsonl(include_str!(
+        "transcripts/refine_writes_task_for_iris_frk_1.jsonl"
+    ))
+}
+
+/// As `plan_assigns_frk_1_to_theo`, but to the UI/UX Designer `iris`. Hand-written.
+#[must_use]
+pub fn plan_assigns_frk_1_to_iris() -> Transcript {
+    Transcript::from_jsonl(include_str!("transcripts/plan_assigns_frk_1_to_iris.jsonl"))
+}
+
 /// `iris`'s explore session of FRK-1: `farik_propose_design_plan` of a plan for the sign-in page,
 /// which opens with its summary, and a successful end. Hand-written.
 #[must_use]

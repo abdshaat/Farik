@@ -15,9 +15,10 @@ use farik::ids::SystemClock;
 use farik::{CliIo, Engine, Interrupts, run_cli};
 use farik_core::pricing::Usage;
 use farik_runtime::recorded::fixtures::{
-    UsageThenWaitAdapter, accept_frk_1, ask_with_choices_frk_1, implement_after_send_back_frk_1,
-    implement_finishes_frk_1, judge_frk_1_by_architect, plan_assigns_frk_1_to_theo,
-    planning_ceremony_frk_1, refine_writes_epic_frk_1, refine_writes_high_risk_frk_1,
+    UsageThenWaitAdapter, accept_frk_1, ask_with_choices_frk_1, explore_plans_frk_1,
+    implement_after_send_back_frk_1, implement_finishes_frk_1, judge_frk_1_by_architect,
+    plan_assigns_frk_1_to_iris, plan_assigns_frk_1_to_theo, planning_ceremony_frk_1,
+    refine_writes_epic_frk_1, refine_writes_high_risk_frk_1, refine_writes_task_for_iris_frk_1,
     refine_writes_task_for_theo_frk_1, reply_to_a_mention, retro, review, review_writes_note,
     tool_runner, triage_frk_1_large, triage_frk_1_small_by_pm,
 };
@@ -32,6 +33,9 @@ fn transcript(name: &str) -> Option<Transcript> {
         "triage_frk_1_small_by_pm" => Some(triage_frk_1_small_by_pm()),
         "ask_with_choices_frk_1" => Some(ask_with_choices_frk_1()),
         "refine_writes_task_for_theo_frk_1" => Some(refine_writes_task_for_theo_frk_1()),
+        "refine_writes_task_for_iris_frk_1" => Some(refine_writes_task_for_iris_frk_1()),
+        "plan_assigns_frk_1_to_iris" => Some(plan_assigns_frk_1_to_iris()),
+        "explore_plans_frk_1" => Some(explore_plans_frk_1()),
         "refine_writes_epic_frk_1" => Some(refine_writes_epic_frk_1()),
         "refine_writes_high_risk_frk_1" => Some(refine_writes_high_risk_frk_1()),
         "judge_frk_1_by_architect" => Some(judge_frk_1_by_architect()),
