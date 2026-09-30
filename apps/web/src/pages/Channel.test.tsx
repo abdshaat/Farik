@@ -285,6 +285,15 @@ describe("channel", () => {
 		await expectNoAxeViolations(container);
 	});
 
+	it("links_a_task_whose_id_starts_a_longer_one", async () => {
+		await channel([
+			message("theo", "reaction", "FRK-10 is done.", { task_id: "FRK-1" }),
+		]);
+		const list = await screen.findByRole("list", { name: en.channelMessages });
+		expect(within(list).getByRole("link", { name: "FRK-10" })).toBeTruthy();
+		expect(within(list).getByRole("link", { name: "FRK-1" })).toBeTruthy();
+	});
+
 	it("posts_and_mentions", async () => {
 		media.set("(min-width: 1024px)", true);
 		const { container, s } = await channel([]);

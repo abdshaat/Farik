@@ -337,7 +337,7 @@ function MessageRow({
 				)}
 				<p className={styles.text}>
 					{text}
-					{task && !message.text.includes(task) && (
+					{task && !message.text.match(new RegExp(`${task}\\b`)) && (
 						<> {renderMessageText(task, agents, waiting)}</>
 					)}
 				</p>
