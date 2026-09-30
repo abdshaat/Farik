@@ -3,4 +3,5 @@ export type Role =
 	| "scrum_master"
 	| "architect"
 	| "software_developer"
-	| "marketing_specialist";
+	| "marketing_specialist"
+	| "ui_ux_designer";

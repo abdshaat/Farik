@@ -8,6 +8,7 @@ const tone: Record<Role, string> = {
 	architect: styles.architect as string,
 	software_developer: styles.developer as string,
 	marketing_specialist: styles.marketingSpecialist as string,
+	ui_ux_designer: styles.uiUxDesigner as string,
 };
 
 export function RoleTag({ role }: { role: Role }) {

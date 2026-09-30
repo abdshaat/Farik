@@ -156,8 +156,44 @@ pub fn load_role(role: Role) -> Result<RoleDefinition, RoleError> {
                 include_str!("../roles/marketing_specialist/skills/marketing-what-ships/SKILL.md"),
             )],
         ),
-        // The UI/UX Designer's definition ships in phase 6 step 11's next task.
-        Role::UiUxDesigner | Role::Human => Err(RoleError::NotFound {
+        Role::UiUxDesigner => parse_role(
+            role,
+            include_str!("../roles/ui_ux_designer/role.yaml"),
+            include_str!("../roles/ui_ux_designer/system.md"),
+            &[
+                (
+                    "ux-review-heuristics",
+                    include_str!("../roles/ui_ux_designer/skills/ux-review-heuristics/SKILL.md"),
+                ),
+                (
+                    "wcag-accessibility-checks",
+                    include_str!(
+                        "../roles/ui_ux_designer/skills/wcag-accessibility-checks/SKILL.md"
+                    ),
+                ),
+                (
+                    "brand-and-design-tokens",
+                    include_str!("../roles/ui_ux_designer/skills/brand-and-design-tokens/SKILL.md"),
+                ),
+                (
+                    "plain-language-interface-wording",
+                    include_str!(
+                        "../roles/ui_ux_designer/skills/plain-language-interface-wording/SKILL.md"
+                    ),
+                ),
+                (
+                    "writing-mockups",
+                    include_str!("../roles/ui_ux_designer/skills/writing-mockups/SKILL.md"),
+                ),
+                (
+                    "responsive-and-phone-checks",
+                    include_str!(
+                        "../roles/ui_ux_designer/skills/responsive-and-phone-checks/SKILL.md"
+                    ),
+                ),
+            ],
+        ),
+        Role::Human => Err(RoleError::NotFound {
             role_id: role.to_string(),
         }),
     }
@@ -355,6 +391,71 @@ mod tests {
     }
 
     #[test]
+    fn ships_the_designer_with_its_six_skills() {
+        let definition = loaded(Role::UiUxDesigner);
+        assert_eq!(definition.id, Role::UiUxDesigner);
+        assert_eq!(definition.persona, "Makes it clear, calm and easy to use");
+        assert_eq!(definition.model, "claude-opus-5");
+        assert_eq!(definition.effort, Effort::High);
+        assert_eq!(definition.default_tiers, default_tiers(Role::UiUxDesigner));
+        assert!(definition.system_prompt.contains("untrusted"));
+        let names: Vec<&str> = definition
+            .skills
+            .iter()
+            .map(|skill| skill.name.as_str())
+            .collect();
+        assert_eq!(
+            names,
+            [
+                "ux-review-heuristics",
+                "wcag-accessibility-checks",
+                "brand-and-design-tokens",
+                "plain-language-interface-wording",
+                "writing-mockups",
+                "responsive-and-phone-checks",
+            ]
+        );
+        for skill in &definition.skills {
+            assert!(!skill.description.trim().is_empty(), "{}", skill.name);
+            assert!(!skill.body.trim().is_empty(), "{}", skill.name);
+        }
+    }
+
+    /// Spec 0.11 as the founder amended it on 2026-09-30: two roles change code, and no prompt or
+    /// skill still says one does.
+    #[test]
+    fn says_who_changes_code_in_every_prompt() {
+        const SENTENCE: &str = "Only the Developer and the UI/UX Designer change code.";
+        for role in [
+            Role::ProductManager,
+            Role::ScrumMaster,
+            Role::Architect,
+            Role::SoftwareDeveloper,
+            Role::MarketingSpecialist,
+            Role::UiUxDesigner,
+        ] {
+            let definition = loaded(role);
+            let texts = std::iter::once(&definition.system_prompt)
+                .chain(definition.skills.iter().map(|skill| &skill.body));
+            for text in texts {
+                let lower = text.to_lowercase();
+                assert!(
+                    !lower.contains("only the developer changes code"),
+                    "{role}: {text}"
+                );
+                assert!(
+                    !lower.contains("only the software developer"),
+                    "{role}: {text}"
+                );
+            }
+        }
+        for role in [Role::SoftwareDeveloper, Role::UiUxDesigner] {
+            let prompt = loaded(role).system_prompt;
+            assert!(prompt.contains(SENTENCE), "{role}: {prompt}");
+        }
+    }
+
+    #[test]
     fn loads_the_product_manager() {
         let definition = assert_loads(Role::ProductManager, "writing-task-contracts");
         assert!(definition.system_prompt.contains("untrusted"));
@@ -496,6 +597,7 @@ mod tests {
                 "product_manager",
                 "scrum_master",
                 "software_developer",
+                "ui_ux_designer",
             ]
         );
         for directory in &directories {

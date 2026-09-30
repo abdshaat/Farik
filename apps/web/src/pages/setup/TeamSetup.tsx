@@ -175,6 +175,7 @@ export function roleName(role: Role): string {
 				architect: "roleArchitect",
 				software_developer: "roleDeveloper",
 				marketing_specialist: "roleMarketing",
+				ui_ux_designer: "roleDesigner",
 			} as const
 		)[role],
 	);

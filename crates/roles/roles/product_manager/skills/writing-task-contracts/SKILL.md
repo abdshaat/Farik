@@ -49,13 +49,13 @@ The team's rules and the criterion library are in this prompt; call `farik_read_
 - **Scope**: `allowed_paths` as narrow as the work allows and within the team's ceiling, and at
   least one `out_of_scope` item that says where the work stops. An empty exclusion list predicts
   scope creep.
-- **Only the Developer changes code**: a task for any other role keeps every `allowed_paths`
-  entry inside the team's `document_paths` (`farik_read_rules`), and a Developer's task says
-  `change: fix` when it repairs a defect.
+- **Only the Developer and the UI/UX Designer change code**: a task for any other role keeps every
+  `allowed_paths` entry inside the team's `document_paths` (`farik_read_rules`), and a Developer's
+  or a Designer's task says `change: fix` when it repairs a defect.
 - **Exit criteria**: see below.
 - **Assignee role and reviewer role**: a Developer's task is reviewed by an active Architect when
-  the team has one, else by another active Developer, which needs two active Developers; an
-  Architect's or a Marketing Specialist's by you. Paused and retired agents do not count. When
+  the team has one, else by another active Developer, which needs two active Developers; a
+  UI/UX Designer's by an active Architect, else by a Developer; an Architect's or a Marketing Specialist's by you. Paused and retired agents do not count. When
   the team has neither, the contract fails readiness: ask the user for a reviewer with
   `farik_ask_human` rather than naming one nobody can staff. Nobody reviews their own work.
 - **Risk** and **budget**: set both. A task's budget is within the team's maximum when the team

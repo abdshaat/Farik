@@ -28,3 +28,7 @@
 .marketingSpecialist {
 	background: var(--farik-color-role-marketing-specialist);
 }
+
+.uiUxDesigner {
+	background: var(--farik-color-role-ui-ux-designer);
+}

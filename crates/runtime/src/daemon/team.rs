@@ -1,4 +1,4 @@
-//! The team's setup and settings for the browser (`docs/SPEC.md` 4.1, 4.4, 10): the suggested five,
+//! The team's setup and settings for the browser (`docs/SPEC.md` 4.1, 4.4, 10): the suggested six,
 //! a change checked and described before it is saved, the setup form's start, the checks, the
 //! models, the AI account's disconnect and its connecting again, and the project read back with
 //! the user's note on it.
@@ -51,13 +51,14 @@ const WORKED: &str = " has done work; retire it instead";
 /// Who the human is in the log.
 const HUMAN: &str = "human";
 
-/// The five the team builder suggests (spec 4.1): name, role, and shipped avatar. The id is the
+/// The six the team builder suggests (spec 4.1): name, role, and shipped avatar. The id is the
 /// name's slug.
-const FIVE: [(&str, Role, &str); 5] = [
+const SIX: [(&str, Role, &str); 6] = [
     ("Mira", Role::ProductManager, "product-manager"),
     ("Sol", Role::ScrumMaster, "scrum-master"),
     ("Ada", Role::Architect, "architect"),
     ("Theo", Role::SoftwareDeveloper, "developer"),
+    ("Iris", Role::UiUxDesigner, "extra-1"),
     ("Kai", Role::MarketingSpecialist, "marketing-specialist"),
 ];
 
@@ -180,11 +181,11 @@ fn web_of(state: &DaemonState) -> Result<&super::web::WebState, Failure> {
         .ok_or_else(|| Failure::new(INTERNAL_ERROR, "the browser routes are off"))
 }
 
-/// `team.propose`: the team as it is, with the five in place of its agents, and the criteria.
+/// `team.propose`: the team as it is, with the six in place of its agents, and the criteria.
 fn propose(deps: &ToolDeps) -> Result<Value, Failure> {
     let mut team = serde_json::to_value(deps.files.read_team().map_err(|e| internal(&e))?)
         .map_err(|e| internal(&e))?;
-    let agents = FIVE
+    let agents = SIX
         .iter()
         .map(|(name, role, avatar)| {
             let shipped = load_role(*role).map_err(|e| internal(&e))?;
@@ -795,7 +796,7 @@ mod tests {
 
     #[test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
-    fn proposes_the_suggested_five() {
+    fn proposes_the_suggested_six() {
         let harness = driven("team-propose");
         let proposed = query(
             &harness.daemon,
@@ -861,6 +862,16 @@ mod tests {
                     "claude-opus-5",
                     "high",
                     "Builds it and tests it",
+                    "active"
+                ]),
+                json!([
+                    "iris",
+                    "Iris",
+                    "ui_ux_designer",
+                    "extra-1",
+                    "claude-opus-5",
+                    "high",
+                    "Makes it clear, calm and easy to use",
                     "active"
                 ]),
                 json!([
@@ -1274,6 +1285,7 @@ mod tests {
                 json!("sol"),
                 json!("ada"),
                 json!("theo"),
+                json!("iris"),
                 json!("kai")
             ]
         );

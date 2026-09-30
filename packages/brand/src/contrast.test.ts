@@ -15,6 +15,7 @@ describe("contrast", () => {
 		expect(contrastRatio("#161616", "#D8896A").toFixed(2)).toBe("6.64");
 		expect(contrastRatio("#F3E7D3", "#161616").toFixed(2)).toBe("14.81");
 		expect(contrastRatio("#5F7A9B", "#F3E7D3").toFixed(2)).toBe("3.62");
+		expect(contrastRatio("#161616", "#CDB29C").toFixed(2)).toBe("9.00");
 	});
 
 	it("is the same either way round", () => {
@@ -66,6 +67,7 @@ describe("contrast", () => {
 				"role-architect",
 				"role-developer",
 				"role-marketing-specialist",
+				"role-ui-ux-designer",
 				"status-done",
 				"status-working",
 				"status-waiting",
@@ -125,6 +127,7 @@ describe("contrast", () => {
 			["role-ink", "role-architect", 4.5],
 			["role-ink", "role-developer", 4.5],
 			["role-ink", "role-marketing-specialist", 4.5],
+			["role-ink", "role-ui-ux-designer", 4.5],
 			["ink", "diff-added", 4.5],
 			["ink", "diff-removed", 4.5],
 			["ready-ink", "ready", 4.5],

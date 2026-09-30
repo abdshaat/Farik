@@ -30,6 +30,7 @@ const ROLES = [
 	"architect",
 	"developer",
 	"marketing-specialist",
+	"ui-ux-designer",
 ];
 
 /** Token names from tokens.json; text needs 4.5, controls 3 (WCAG 2.2 AA). */

@@ -11,6 +11,7 @@ const roles: Role[] = [
 	"architect",
 	"software_developer",
 	"marketing_specialist",
+	"ui_ux_designer",
 ];
 
 describe("RoleTag", () => {
@@ -23,6 +24,21 @@ describe("RoleTag", () => {
 			await expectNoAxeViolations(container);
 			unmount();
 		}
+	});
+
+	it("tags_the_designer_ux_in_its_own_colour", () => {
+		const designer: Role = "ui_ux_designer";
+		const { container } = render(<RoleTag role={designer} />);
+		const abbr = container.querySelector("abbr");
+		expect(abbr?.textContent).toBe("UX");
+		expect(abbr?.getAttribute("title")).toBe("UI/UX Designer");
+		const tones = roles.map((role) => {
+			const { container: other, unmount } = render(<RoleTag role={role} />);
+			const tone = other.querySelector("abbr")?.className;
+			unmount();
+			return tone;
+		});
+		expect(new Set(tones).size).toBe(roles.length);
 	});
 
 	it("says_developer_as_the_mockups_do", () => {

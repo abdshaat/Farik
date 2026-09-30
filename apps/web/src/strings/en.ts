@@ -204,6 +204,7 @@ export const en = {
 	roleArchitect: "Architect",
 	roleDeveloper: "Developer",
 	roleMarketing: "Marketing Specialist",
+	roleDesigner: "UI/UX Designer",
 	mayTitle: "What may your team do on its own?",
 	mayLead:
 		"Two things can cause real harm, so Farik asks you about them directly. Nothing runs until you answer both.",

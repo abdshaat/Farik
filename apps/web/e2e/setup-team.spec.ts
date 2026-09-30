@@ -26,7 +26,7 @@ async function screenshots(page: Page, name: string) {
 	await page.screenshot({ path: `${shots}${name}-1280.png`, fullPage: true });
 }
 
-test("the team's setup keeps the five, sets the rules, and starts them", async ({
+test("the team's setup keeps the six, sets the rules, and starts them", async ({
 	page,
 }) => {
 	const serve = await startServe({
@@ -43,9 +43,8 @@ test("the team's setup keeps the five, sets the rules, and starts them", async (
 
 		await expect(page).toHaveURL(/\/setup\/team$/);
 		await screenshots(page, "setup-team");
-		await page
-			.getByRole("button", { name: "Continue with these five" })
-			.click();
+		// Six reads the general words until step 11 task 5 gives six its own.
+		await page.getByRole("button", { name: "Continue with this team" }).click();
 
 		await expect(page).toHaveURL(/\/setup\/permissions$/);
 		await page.getByLabel(/^Yes, the Developer and Architect may/).check();
@@ -64,9 +63,9 @@ test("the team's setup keeps the five, sets the rules, and starts them", async (
 		await expect(page).toHaveURL(/:\d+\/$/);
 
 		const yaml = readFileSync(join(serve.project, ".farik/team.yaml"), "utf8");
-		for (const id of ["mira", "sol", "ada", "theo", "kai"])
+		for (const id of ["mira", "sol", "ada", "theo", "iris", "kai"])
 			expect(yaml).toMatch(new RegExp(`id: ${id}\\b`));
-		expect(yaml.match(/^ {2}id: /gm)).toHaveLength(5);
+		expect(yaml.match(/^ {2}id: /gm)).toHaveLength(6);
 		expect(yaml).toMatch(/daily_usd: 10\b/);
 		expect(yaml).toMatch(/run_commands: true/);
 

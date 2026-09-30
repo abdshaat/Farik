@@ -123,7 +123,7 @@ Tests:
 - `proposes_the_suggested_six`: the ids, the roles, and the order (PM, SM, Architect, Developer, Designer, Marketing).
 - `contrast.test.ts`: the existing test gains a pair, `role-ui-ux-designer` against `role-ink`, which passes AA in both themes.
 
-- [ ] `feat(roles): add the UI/UX Designer's role, skills and reviewer, and suggest six`
+- [x] `feat(roles): add the UI/UX Designer's role, skills and reviewer, and suggest six`
 
 ### Task 4: The Designer's flow: explore, plan, approval, implement
 
