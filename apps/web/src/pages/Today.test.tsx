@@ -244,6 +244,31 @@ describe("today", () => {
 		await expectNoAxeViolations(container);
 	});
 
+	it("says_the_key_did_not_work_and_links_to_settings", async () => {
+		const { container, s } = await today({});
+		await answerQuery(s, "account.status", {
+			provider: "anthropic",
+			kind: "subscription_token",
+			source: "keychain",
+			key_refused: true,
+		});
+		expect(
+			await screen.findByRole("heading", { name: "Waiting on you (1)" }),
+		).toBeTruthy();
+		const list = screen.getByRole("list", { name: en.waitingList });
+		const [row] = within(list).getAllByRole("listitem") as HTMLElement[];
+		expect(
+			within(row as HTMLElement).getByText(
+				"Your AI account’s key did not work",
+			),
+		).toBeTruthy();
+		const link = within(row as HTMLElement).getByRole("link", {
+			name: en.waitingKeyConnect,
+		});
+		expect(link.getAttribute("href")).toBe("/settings");
+		await expectNoAxeViolations(container);
+	});
+
 	it("says_what_moved", async () => {
 		const now = new Date().toISOString().replace(/\.\d+Z$/, "Z");
 		const { container, s } = await today({

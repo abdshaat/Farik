@@ -201,7 +201,12 @@ fn result(
             || value.get("api_error_status").and_then(Value::as_u64) == Some(429)
             || lowered.contains("usage limit")
             || lowered.contains("rate limit"));
-    let (reason, resets_at) = if is_provider_limit {
+    // A 401 is the provider refusing the account's credential (2.1.285's capture): no retry fixes it.
+    let is_credential_refused = reason == EndReason::Error
+        && value.get("api_error_status").and_then(Value::as_u64) == Some(401);
+    let (reason, resets_at) = if is_credential_refused {
+        (EndReason::CredentialRefused, None)
+    } else if is_provider_limit {
         (
             EndReason::ProviderLimit,
             rate_limit.and_then(|limit| limit.resets_at),
@@ -259,8 +264,9 @@ mod tests {
     use super::StreamParser;
     use crate::recorded::Transcript;
     use crate::recorded::fixtures::{
-        hits_the_turn_limit, hook_denies_a_write, provider_limit_429, provider_limit_rejected,
-        provider_limit_text, reads_a_file, success_with_is_error, write_denied,
+        credential_refused, hits_the_turn_limit, hook_denies_a_write, provider_limit_429,
+        provider_limit_rejected, provider_limit_text, reads_a_file, success_with_is_error,
+        write_denied,
     };
     use crate::session::{EndReason, RuntimeError, SessionEvent};
 
@@ -579,6 +585,17 @@ mod tests {
             end_of(&events_of(&success_with_is_error())),
             (EndReason::Error, None)
         );
+    }
+
+    #[test]
+    fn reads_a_401_as_the_credential_refused() {
+        let events = events_of(&credential_refused());
+        assert_eq!(end_of(&events), (EndReason::CredentialRefused, None));
+        let refused_twice = one_line(
+            r#"{"type":"result","subtype":"error_during_execution","is_error":true,"api_error_status":401,"errors":["Invalid API key"],"usage":{"input_tokens":0,"output_tokens":0,"cache_read_input_tokens":0,"cache_creation_input_tokens":0}}"#,
+        )
+        .expect("a result line parses");
+        assert_eq!(end_of(&refused_twice), (EndReason::CredentialRefused, None));
     }
 
     #[test]

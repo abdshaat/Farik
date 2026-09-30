@@ -6,6 +6,7 @@ import { saidAll } from "../app/refusals.ts";
 import { type ServeStatus, useQuery } from "../app/store.ts";
 import type { ThemeChoice } from "../app/theme.ts";
 import { t } from "../strings/t.ts";
+import { ConnectAgain } from "./ConnectAgain.tsx";
 import styles from "./pages.module.css";
 import { TeamRules } from "./TeamRules.tsx";
 
@@ -129,6 +130,8 @@ type AccountStatus = {
 	source: "environment" | "keychain" | "file" | null;
 	/** The variable a credential from the environment comes from, which Farik cannot remove. */
 	environmentVariable?: string;
+	/** Whether the provider refused the key, so the team is paused until it is connected again. */
+	keyRefused?: boolean;
 };
 
 /** The AI account's row: what is connected and where it is kept, and Disconnect, asked twice. */
@@ -155,6 +158,7 @@ function Account() {
 	return (
 		<section className={styles.section} aria-labelledby="account-heading">
 			<h2 id="account-heading">{t("accountRow")}</h2>
+			{data?.keyRefused && <ConnectAgain onConnected={again} />}
 			{data?.source && data.kind ? (
 				<>
 					<p>

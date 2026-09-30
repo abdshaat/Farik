@@ -1,7 +1,7 @@
 //! Whether the human has paused the team (`docs/SPEC.md` section 3): the log's last `team.paused`
 //! or `team.resumed` says, so that a pause holds across a restart and every process agrees.
 
-use farik_protocol::event::{EventBody, EventKind};
+use farik_protocol::event::{EventBody, EventKind, FarikEvent, TeamPausedBodyReason};
 use farik_store::{EventLog, EventQuery, StoreError};
 
 /// Whether the log's last `team.paused` or `team.resumed` is a `team.paused`.
@@ -10,12 +10,29 @@ use farik_store::{EventLog, EventQuery, StoreError};
 ///
 /// When the log cannot be read.
 pub fn paused(log: &EventLog) -> Result<bool, StoreError> {
+    Ok(last(log)?.is_some_and(|event| matches!(event.body, EventBody::TeamPaused(_))))
+}
+
+/// The log's last `team.paused` or `team.resumed`.
+fn last(log: &EventLog) -> Result<Option<FarikEvent>, StoreError> {
     let query = EventQuery {
         kinds: vec![EventKind::TeamPaused, EventKind::TeamResumed],
         ..EventQuery::default()
     };
-    let last = log.read(&query)?.into_iter().last();
-    Ok(last.is_some_and(|event| matches!(event.body, EventBody::TeamPaused(_))))
+    Ok(log.read(&query)?.into_iter().last())
+}
+
+/// Whether the team is paused because the model provider refused the AI account's key (5.5):
+/// the log's last `team.paused` or `team.resumed` is a pause for `credential_refused`.
+///
+/// # Errors
+///
+/// When the log cannot be read.
+pub fn key_refused(log: &EventLog) -> Result<bool, StoreError> {
+    Ok(last(log)?.is_some_and(|event| {
+        matches!(event.body, EventBody::TeamPaused(body)
+            if body.reason == Some(TeamPausedBodyReason::CredentialRefused))
+    }))
 }
 
 #[cfg(test)]
@@ -25,7 +42,7 @@ mod tests {
     use serde_json::json;
     use std::path::Path;
 
-    use super::paused;
+    use super::{key_refused, paused};
 
     fn a_log() -> EventLog {
         open_event_log(Path::new(IN_MEMORY), chrono::Utc::now()).expect("a log")
@@ -47,6 +64,31 @@ mod tests {
         };
         let event = new_event(body, chrono::Utc::now(), ids).expect("an event");
         log.append(&event).expect("appended");
+    }
+
+    #[test]
+    fn knows_a_pause_for_a_refused_key_until_the_next_resume() {
+        let log = a_log();
+        assert!(!key_refused(&log).expect("reads"));
+        record(&log, false);
+        assert!(!key_refused(&log).expect("reads"));
+        let refused = serde_json::from_value(
+            json!({ "by": "farik", "reason": "credential_refused", "detail": "401" }),
+        )
+        .expect("a body");
+        let ids = EventIds {
+            team_id: "team".to_string(),
+            project_id: "project".to_string(),
+            task_id: None,
+            agent_id: None,
+            session_id: None,
+        };
+        let event =
+            new_event(EventBody::TeamPaused(refused), chrono::Utc::now(), ids).expect("an event");
+        log.append(&event).expect("appended");
+        assert!(key_refused(&log).expect("reads"));
+        record(&log, true);
+        assert!(!key_refused(&log).expect("reads"));
     }
 
     #[test]

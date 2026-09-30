@@ -111,6 +111,8 @@ pub enum EndReason {
     Error,
     /// The model provider refused it for a usage or rate limit.
     ProviderLimit,
+    /// The model provider refused the account's credential: the key did not work.
+    CredentialRefused,
 }
 
 /// One thing a session reported.

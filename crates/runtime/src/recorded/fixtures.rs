@@ -90,6 +90,15 @@ pub fn provider_limit_text() -> Transcript {
     Transcript::from_jsonl(include_str!("transcripts/provider_limit_text.jsonl"))
 }
 
+/// Recorded from `claude` 2.1.285 on 2026-09-30, run with a subscription token that is not valid:
+/// two `api_retry` lines with `error_status` 401, the synthetic assistant line, and a `success`
+/// result that is an error with `api_error_status` 401. Paths are replaced with `/workspace` and
+/// `/home/user`.
+#[must_use]
+pub fn credential_refused() -> Transcript {
+    Transcript::from_jsonl(include_str!("transcripts/credential_refused.jsonl"))
+}
+
 /// An `allowed` rate-limit event, then a `success` result that is an error: a 500.
 #[must_use]
 pub fn success_with_is_error() -> Transcript {

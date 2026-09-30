@@ -12,7 +12,8 @@ use farik_core::governor::permissions::PermissionTier;
 use farik_core::pricing::Usage;
 use farik_core::team::{Agent, Effort, Team};
 use farik_protocol::event::{
-    AgentSleptBody, EventBody, EventIds, EventKind, NoteWrittenBody, NoteWrittenBodyKind, Thread,
+    AgentSleptBody, EventBody, EventIds, EventKind, NoteWrittenBody, NoteWrittenBodyKind,
+    TeamPausedBody, TeamPausedBodyBy, TeamPausedBodyReason, Thread,
 };
 use farik_roles::load_role;
 use farik_store::EventQuery;
@@ -124,6 +125,20 @@ pub(super) async fn run_session(
     if end.reason == EndReason::ProviderLimit {
         sleep(deps, ask.agent, &end)?;
     }
+    // A key the provider refused fails every session alike, so no other starts until the human
+    // connects the account again or resumes (5.5).
+    if end.reason == EndReason::CredentialRefused {
+        let body = TeamPausedBody {
+            by: TeamPausedBodyBy::Farik,
+            reason: Some(TeamPausedBodyReason::CredentialRefused),
+            detail: Some(end.detail.clone()),
+        };
+        append_stamped(
+            &deps.tools,
+            deps.tools.ids.clone(),
+            EventBody::TeamPaused(body),
+        )?;
+    }
     if let Some(contract) = ask.contract
         && ask.purpose == SessionPurpose::Implement
     {
@@ -199,7 +214,11 @@ fn leave_note(
     match end.reason {
         EndReason::Limit => causes.push("a limit"),
         EndReason::ProviderLimit => causes.push("its model provider's usage limit"),
-        EndReason::Completed | EndReason::Aborted | EndReason::Error => {}
+        // A refused credential is not the task's to resume from: the team is paused instead.
+        EndReason::Completed
+        | EndReason::Aborted
+        | EndReason::Error
+        | EndReason::CredentialRefused => {}
     }
     for scope in &end.crossed {
         causes.push(match scope {

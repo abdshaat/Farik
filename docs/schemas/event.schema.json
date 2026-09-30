@@ -680,12 +680,14 @@
     },
     "teamPausedBody": {
       "title": "Team Paused Body",
-      "description": "The body of both team.paused and team.resumed: the human paused every agent of the team at once, or resumed them. The two share one shape, so the one branch of the body choice serves both and the event's kind says which it is. by is the human, the only one who can. It is about no one contract, and the team file is not written; the pause is what the log says last.",
+      "description": "The body of both team.paused and team.resumed: every agent of the team paused at once, or resumed. The two share one shape, so the one branch of the body choice serves both and the event's kind says which it is. by is the human, or farik when Farik paused the team itself, which it does for one reason alone: credential_refused, the model provider refused the AI account's credential (docs/SPEC.md 5.5), with detail saying what the provider said. Only the human resumes. It is about no one contract, and the team file is not written; the pause is what the log says last.",
       "type": "object",
       "additionalProperties": false,
       "required": ["by"],
       "properties": {
-        "by": { "type": "string", "enum": ["human"] }
+        "by": { "type": "string", "enum": ["human", "farik"] },
+        "reason": { "type": "string", "enum": ["credential_refused"] },
+        "detail": { "type": "string" }
       }
     },
     "questionAskedBody": {
@@ -779,12 +781,12 @@
     },
     "sessionEndedBody": {
       "title": "Session Ended Body",
-      "description": "A Claude Code session ended (docs/SPEC.md sections 8.2 and 8.5): completed when the model finished its turn, aborted when its caller stopped it, limit when a limit did, error when the program failed; detail is what the program said about it. The envelope names the session, the agent, and the task when the session has one.",
+      "description": "A Claude Code session ended (docs/SPEC.md sections 8.2 and 8.5): completed when the model finished its turn, aborted when its caller stopped it, limit when a limit did, error when the program failed, provider_limit when the model provider refused it for a usage or rate limit, credential_refused when the model provider refused the account's credential (a 401); detail is what the program said about it. The envelope names the session, the agent, and the task when the session has one.",
       "type": "object",
       "additionalProperties": false,
       "required": ["reason", "detail"],
       "properties": {
-        "reason": { "type": "string", "enum": ["completed", "aborted", "limit", "error", "provider_limit"] },
+        "reason": { "type": "string", "enum": ["completed", "aborted", "limit", "error", "provider_limit", "credential_refused"] },
         "detail": { "type": "string" }
       }
     }

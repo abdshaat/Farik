@@ -72,6 +72,7 @@ pub fn record_session_ended(
             EndReason::Limit => SessionEndedBodyReason::Limit,
             EndReason::Error => SessionEndedBodyReason::Error,
             EndReason::ProviderLimit => SessionEndedBodyReason::ProviderLimit,
+            EndReason::CredentialRefused => SessionEndedBodyReason::CredentialRefused,
         },
         detail: detail.to_string(),
     };

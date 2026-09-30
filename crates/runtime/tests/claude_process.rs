@@ -96,7 +96,7 @@ impl Fake {
 
     fn adapter(&self) -> ClaudeAdapter {
         ClaudeAdapter::new(
-            ClaudeCredential::ApiKey(Secret::new(API_KEY.to_string())),
+            shared(ClaudeCredential::ApiKey(Secret::new(API_KEY.to_string()))),
             self.config(),
         )
         .expect("the fake is new enough")
@@ -348,7 +348,7 @@ fn refuses_a_claude_code_that_is_too_old_or_missing() {
     let fake = Fake::with_version("too-old", "2.1.200", "exit 0");
     let credential = || ClaudeCredential::ApiKey(Secret::new(API_KEY.to_string()));
     assert!(matches!(
-        ClaudeAdapter::new(credential(), fake.config()),
+        ClaudeAdapter::new(shared(credential()), fake.config()),
         Err(RuntimeError::VersionTooOld { .. })
     ));
     let missing = ClaudeConfig {
@@ -356,7 +356,7 @@ fn refuses_a_claude_code_that_is_too_old_or_missing() {
         ..fake.config()
     };
     assert!(matches!(
-        ClaudeAdapter::new(credential(), missing),
+        ClaudeAdapter::new(shared(credential()), missing),
         Err(RuntimeError::Spawn { .. })
     ));
 }
@@ -517,7 +517,7 @@ fn refuses_a_claude_code_that_does_not_say_its_version_in_time() {
     let fake = Fake::with_version_command("version-hangs", "exec sleep 30", "exit 0");
     let started = std::time::Instant::now();
     match ClaudeAdapter::new(
-        ClaudeCredential::ApiKey(Secret::new(API_KEY.to_string())),
+        shared(ClaudeCredential::ApiKey(Secret::new(API_KEY.to_string()))),
         fake.config(),
     ) {
         Err(RuntimeError::Spawn { detail }) => assert!(detail.contains("--version"), "{detail}"),
@@ -558,7 +558,9 @@ async fn gives_a_subscription_session_no_api_key_from_its_base() {
         "sk-from-the-base".to_string(),
     );
     let adapter = ClaudeAdapter::new(
-        ClaudeCredential::OauthToken(Secret::new("the-token".to_string())),
+        shared(ClaudeCredential::OauthToken(Secret::new(
+            "the-token".to_string(),
+        ))),
         config,
     )
     .expect("the fake is new enough");
@@ -686,4 +688,9 @@ fn refuses_to_start_a_session_outside_a_tokio_runtime() {
         Err(RuntimeError::Spawn { detail }) => assert!(detail.contains("tokio"), "{detail}"),
         other => panic!("expected a refusal, got {:?}", other.map(|_| ())),
     }
+}
+
+/// A credential as the adapter holds it.
+fn shared(credential: ClaudeCredential) -> farik_runtime::claude::SharedCredential {
+    std::sync::Arc::new(std::sync::Mutex::new(credential))
 }

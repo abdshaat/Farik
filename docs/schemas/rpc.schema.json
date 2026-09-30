@@ -1237,6 +1237,10 @@
         "environment_variable": {
           "type": "string",
           "description": "The variable the credential comes from, when it comes from the environment: Farik cannot remove it, so the page names it rather than offering Disconnect."
+        },
+        "key_refused": {
+          "type": "boolean",
+          "description": "True while the team is paused because the model provider refused the credential (docs/SPEC.md 5.5): the key did not work, and connecting the account again resumes the team. Left out otherwise."
         }
       },
       "required": [

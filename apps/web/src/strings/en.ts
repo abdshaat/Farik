@@ -370,6 +370,9 @@ export const en = {
 	accountFile: "Kept in a private file on this computer.",
 	accountEnvironment: "Read from this computer’s environment.",
 	accountNone: "No AI account is connected.",
+	accountKeyRefused:
+		"The key did not work, so your team is paused. Connect your AI account again with a new key.",
+	accountConnectAgain: "Connect again",
 	accountDisconnect: "Disconnect this account",
 	accountGone:
 		"Disconnected. The team is paused; start Farik again to connect another account.",
@@ -405,6 +408,10 @@ export const en = {
 	waitingAnswer: "Answer",
 	waitingHelpButton: "Help",
 	waitingAdd: "Add",
+	waitingKeyRefused: "Your AI account’s key did not work",
+	waitingKeyRefusedLine:
+		"The team is paused until you connect your AI account again.",
+	waitingKeyConnect: "Connect again",
 	checksPassed: "All {count} of Farik’s checks passed.",
 	movedTitle: "What moved since yesterday",
 	yesterday: "Yesterday",

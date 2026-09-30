@@ -5,11 +5,11 @@
 use std::fs::{File, TryLockError};
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 
 use farik_protocol::command::{Command, command_to_value, reply_from_value};
-use farik_runtime::claude::{ClaudeAdapter, ClaudeConfig, ClaudeCredential, CredentialKind};
+use farik_runtime::claude::{ClaudeAdapter, ClaudeConfig, CredentialKind, SharedCredential};
 use farik_runtime::credential::{Source, load_credential};
 use farik_runtime::daemon::web::{BrowserSessions, ConnectCodes, WebState};
 use farik_runtime::daemon::{DaemonConfig, DaemonHandle, DaemonState, PortChoice, serve};
@@ -409,7 +409,7 @@ async fn start_listening(
     let credential = claude
         .as_ref()
         .map(|((credential, source), _)| (credential.kind(), *source));
-    let claude = claude.map(|((credential, _), path)| (credential, path));
+    let claude = claude.map(|((credential, _), path)| (Arc::new(Mutex::new(credential)), path));
     // Every session reads the prices, so a table that cannot be read is refused here, once.
     for sentence in unpriced(project)? {
         let _ = writeln!(
@@ -420,10 +420,10 @@ async fn start_listening(
     }
     let tools = tool_deps(project, io)?;
     let daemon = Arc::new(DaemonState::new(Arc::clone(&tools)));
-    let kind = claude.as_ref().map(|(credential, _)| credential.kind());
+    let in_use = claude.as_ref().map(|(shared, _)| Arc::clone(shared));
     let web = options
         .web
-        .then(|| web(&project.root, io, kind))
+        .then(|| web(&project.root, io, in_use))
         .transpose()?;
     let handle = serve(
         DaemonConfig {
@@ -488,13 +488,14 @@ async fn start_listening(
     })
 }
 
-/// What the browser routes need but the port, and the first connect code, issued. The sessions
-/// are kept in the state folder, made here when it is not there yet, or in memory when there is
-/// none.
+/// What the browser routes need but the port, and the first connect code, issued. `in_use` is the
+/// credential the sessions start with, shared so that connecting the account again replaces it.
+/// The sessions are kept in the state folder, made here when it is not there yet, or in memory
+/// when there is none.
 pub(crate) fn web(
     root: &Path,
     io: &CliIo<'_>,
-    credential: Option<CredentialKind>,
+    in_use: Option<SharedCredential>,
 ) -> Result<(WebState, String), String> {
     let file = match state_dir(&io.env) {
         Some(directory) => {
@@ -510,12 +511,18 @@ pub(crate) fn web(
         codes,
         sessions,
         project_root: root.to_path_buf(),
-        credential,
+        credential: in_use.as_ref().map(|credential| {
+            credential
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .kind()
+        }),
         port: 0,
         clock: Arc::clone(&io.clock),
         take_on_error: std::sync::Mutex::default(),
         stores: (io.credential_stores)(),
         env: io.env.clone(),
+        in_use,
     };
     Ok((web, code))
 }
@@ -525,7 +532,7 @@ pub(crate) fn web(
 fn adapter(
     project: &Project,
     io: &CliIo<'_>,
-    claude: Option<(ClaudeCredential, PathBuf)>,
+    claude: Option<(SharedCredential, PathBuf)>,
     daemon: &Arc<DaemonState>,
     handle: &DaemonHandle,
 ) -> Result<Arc<dyn RuntimeAdapter>, String> {

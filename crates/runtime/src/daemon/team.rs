@@ -1,6 +1,7 @@
 //! The team's setup and settings for the browser (`docs/SPEC.md` 4.1, 4.4, 10): the suggested five,
 //! a change checked and described before it is saved, the setup form's start, the checks, the
-//! models, the AI account's disconnect, and the project read back with the user's note on it.
+//! models, the AI account's disconnect and its connecting again, and the project read back with
+//! the user's note on it.
 //! `web.rs` answers the frames; this module answers what they ask.
 
 use std::fmt::Display;
@@ -20,9 +21,9 @@ use serde_json::{Value, json};
 
 use super::DaemonState;
 use super::web::{Failure, INTERNAL_ERROR, NO_PROJECT, REFUSED};
-use crate::claude::credential_variable;
-use crate::credential::{CredentialError, load_credential};
-use crate::pause::paused;
+use crate::claude::{CredentialKind, credential_variable};
+use crate::credential::{CredentialError, credential_of_kind, load_credential, save_credential};
+use crate::pause::{key_refused, paused};
 use crate::session::session_model;
 use crate::tools::ToolDeps;
 
@@ -119,7 +120,7 @@ pub(super) fn query(deps: &ToolDeps, name: &str, params: &Value) -> Result<Value
 /// and the stores `farik serve` was given.
 pub(super) fn account_status(state: &DaemonState) -> Result<Value, Failure> {
     let web = web_of(state)?;
-    Ok(match load_credential(&web.env, &web.stores) {
+    let mut status = match load_credential(&web.env, &web.stores) {
         Some((credential, source)) => {
             let mut status =
                 json!({ "provider": "anthropic", "kind": credential.kind(), "source": source });
@@ -129,7 +130,48 @@ pub(super) fn account_status(state: &DaemonState) -> Result<Value, Failure> {
             status
         }
         None => json!({ "provider": null, "kind": null, "source": null }),
+    };
+    if let Some(deps) = state.deps()
+        && key_refused(&deps.log).map_err(|e| internal(&e))?
+    {
+        status["key_refused"] = json!(true);
+    }
+    Ok(status)
+}
+
+/// `account.connect` on a daemon with a project: the credential kept, as setup keeps it, and put
+/// in place for the next session; a team paused because the provider refused the old key is
+/// resumed (5.5), and one the human paused stays paused. A credential from the environment comes
+/// before any kept one, so connecting over it is refused, naming its variable.
+pub(super) async fn connect(state: &DaemonState, params: &Value) -> Result<Value, Failure> {
+    let web = web_of(state)?;
+    if let Some(variable) = credential_variable(&web.env) {
+        return Err(Failure::new(
+            REFUSED,
+            format!(
+                "your AI account's key comes from {variable}, which Farik cannot change: change \
+                 it where Farik runs, then start Farik again"
+            ),
+        ));
+    }
+    let kind = serde_json::from_value::<CredentialKind>(params["kind"].clone())
+        .map_err(|e| internal(&e))?;
+    let credential = credential_of_kind(kind, params["secret"].as_str().unwrap_or_default())
+        .map_err(|why| Failure::new(REFUSED, why))?;
+    let (stores, kept) = (web.stores.clone(), credential.clone());
+    let source = off_the_worker(move || {
+        save_credential(&kept, &stores).map_err(|error| Failure::new(REFUSED, words(&error)))
     })
+    .await?;
+    if let Some(in_use) = &web.in_use {
+        *crate::locked(in_use) = credential;
+    }
+    if let Some(deps) = state.deps()
+        && key_refused(&deps.log).map_err(|e| internal(&e))?
+    {
+        handled(state, Command::TeamResume).await?;
+    }
+    Ok(json!({ "stored_in": source, "taking_on": false }))
 }
 
 fn web_of(state: &DaemonState) -> Result<&super::web::WebState, Failure> {
@@ -658,18 +700,27 @@ mod tests {
     use farik_protocol::event::{EventKind, NewEvent, event_from_value};
     use serde_json::{Value, json};
 
-    use crate::claude::{ClaudeCredential, Secret};
+    use crate::claude::{ClaudeCredential, Secret, SharedCredential};
     use crate::credential::{CredentialStore, MemoryStore};
     use crate::daemon::gates::tests::{call, driven, query, rpc};
     use crate::daemon::web::{BrowserSessions, ConnectCodes, WebState};
     use crate::orchestrator::fixtures::Harness;
+    use crate::pause::paused;
     use crate::tools::fixtures::at;
 
     const MARKER: &str = ".farik/local/setup-pending";
 
-    /// `harness`'s daemon with its browser routes on, its credential kept in `store`, and `env`.
-    fn served(harness: &Harness, store: &Arc<MemoryStore>, env: &[(&str, &str)]) {
+    /// `harness`'s daemon with its browser routes on, its credential kept in `store`, and `env`;
+    /// answered with the credential its sessions start with.
+    fn served(
+        harness: &Harness,
+        store: &Arc<MemoryStore>,
+        env: &[(&str, &str)],
+    ) -> SharedCredential {
         let stores: Vec<Arc<dyn CredentialStore>> = vec![Arc::clone(store) as _];
+        let in_use: SharedCredential = Arc::new(std::sync::Mutex::new(ClaudeCredential::ApiKey(
+            Secret::new("sk-ant-api-old".to_string()),
+        )));
         assert!(
             harness.daemon.set_web(WebState {
                 codes: ConnectCodes::default(),
@@ -684,8 +735,10 @@ mod tests {
                     .iter()
                     .map(|(name, value)| ((*name).to_string(), (*value).to_string()))
                     .collect::<BTreeMap<_, _>>(),
+                in_use: Some(Arc::clone(&in_use)),
             })
         );
+        in_use
     }
 
     /// An event `agent` produced, which is work the log has seen.
@@ -1379,6 +1432,95 @@ mod tests {
             json!({ "removed_from": [], "paused": false, "environment_variable": "ANTHROPIC_API_KEY" })
         );
         assert!(harness.project.events(&[EventKind::TeamPaused]).is_empty());
+    }
+
+    /// Appends a `team.paused` with `body`, as Farik or the human would.
+    fn paused_with(harness: &Harness, body: &Value) {
+        let event = event_from_value(&json!({
+            "seq": 1, "recorded_at": at().to_rfc3339(), "team_id": "farik", "project_id": "farik",
+            "kind": "team.paused", "body": body.clone(),
+        }))
+        .expect("the fixture is schema-valid");
+        harness
+            .project
+            .deps
+            .log
+            .append(&NewEvent {
+                recorded_at: event.envelope.recorded_at,
+                ids: event.envelope.ids,
+                body: event.body,
+            })
+            .expect("appends");
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn connects_the_account_again_and_resumes_a_team_paused_for_its_key() {
+        let harness = driven("team-reconnect");
+        let store = Arc::new(MemoryStore::default());
+        let in_use = served(&harness, &store, &[]);
+        let status = || {
+            query(
+                &harness.daemon,
+                "account.status",
+                &json!({}),
+                "accountStatusResult",
+            )
+        };
+        assert_eq!(status().get("key_refused"), None);
+        paused_with(
+            &harness,
+            &json!({ "by": "farik", "reason": "credential_refused", "detail": "401" }),
+        );
+        assert_eq!(status()["key_refused"], json!(true));
+
+        let answer = call(
+            &harness.daemon,
+            "account.connect",
+            &json!({ "kind": "subscription_token", "secret": "sk-ant-oat01-new" }),
+            "accountConnectResult",
+        );
+
+        assert_eq!(
+            answer,
+            json!({ "stored_in": "keychain", "taking_on": false })
+        );
+        let new = ClaudeCredential::OauthToken(Secret::new("sk-ant-oat01-new".to_string()));
+        assert_eq!(store.load().expect("reads"), Some(new.clone()));
+        assert_eq!(*in_use.lock().expect("not poisoned"), new);
+        assert!(!paused(&harness.project.deps.log).expect("reads"));
+        assert_eq!(status().get("key_refused"), None);
+
+        // A pause the human made is theirs to end: connecting again keeps it.
+        paused_with(&harness, &json!({ "by": "human" }));
+        call(
+            &harness.daemon,
+            "account.connect",
+            &json!({ "kind": "subscription_token", "secret": "sk-ant-oat01-newer" }),
+            "accountConnectResult",
+        );
+        assert!(paused(&harness.project.deps.log).expect("reads"));
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn refuses_to_connect_over_a_key_from_the_environment() {
+        let harness = driven("team-reconnect-env");
+        let store = Arc::new(MemoryStore::default());
+        served(&harness, &store, &[("ANTHROPIC_API_KEY", "sk-ant-api-y")]);
+        let reply = rpc(
+            &harness.daemon,
+            "account.connect",
+            &json!({ "kind": "api_key", "secret": "sk-ant-api-z" }),
+        );
+        assert_eq!(reply["error"]["code"], json!(-32005), "{reply}");
+        assert!(
+            reply["error"]["message"]
+                .as_str()
+                .is_some_and(|said| said.contains("ANTHROPIC_API_KEY")),
+            "{reply}"
+        );
+        assert!(store.load().expect("reads").is_none());
     }
 
     #[test]

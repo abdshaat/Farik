@@ -1288,6 +1288,7 @@ fn ran(agent: &Agent, purpose: &str, end: &SessionEnd) -> String {
         EndReason::Limit => "reached a limit",
         EndReason::Error => "failed",
         EndReason::ProviderLimit => "stopped at its model provider's limit",
+        EndReason::CredentialRefused => "was refused: the AI account's key did not work",
     };
     format!(
         "ran {}'s {purpose} session, which {how}: {}",
@@ -1331,10 +1332,10 @@ mod tests {
     };
     use crate::orchestrator::{OrchestratorError, TickReport, TickRules, TickScope};
     use crate::recorded::fixtures::{
-        accept_frk_1, hits_the_turn_limit, implement_finishes_frk_1, implement_stops_early,
-        plan_assigns_frk_1, planning_ceremony_frk_1, provider_limit_429, provider_limit_rejected,
-        reads_a_file, replays_farik_read_board, reply_to_a_mention, retro, review,
-        review_answers_nothing, review_writes_note, standup,
+        accept_frk_1, credential_refused, hits_the_turn_limit, implement_finishes_frk_1,
+        implement_stops_early, plan_assigns_frk_1, planning_ceremony_frk_1, provider_limit_429,
+        provider_limit_rejected, reads_a_file, replays_farik_read_board, reply_to_a_mention, retro,
+        review, review_answers_nothing, review_writes_note, standup,
     };
     use crate::recorded::{RecordedAdapter, Transcript};
     use crate::session::SessionPurpose;
@@ -5278,6 +5279,40 @@ mod tests {
         assert_eq!(sleeps(&harness), vec![(Some("dev-a".to_string()), until)]);
         assert_eq!(harness.row("FRK-1").status, TaskStatus::InProgress);
         assert_eq!(team_file(&harness), team);
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn pauses_the_team_once_when_the_provider_refuses_the_key() {
+        let harness = Harness::new("orch-key-refused", |_| {});
+        harness.in_progress("FRK-1", "dev-a", "dev-b");
+        let adapter = harness.recorded(vec![credential_refused(), reads_a_file()]);
+        let orchestrator = harness.orchestrator(adapter.clone());
+
+        orchestrator.tick().await.expect("the tick runs");
+        let second = orchestrator.tick().await.expect("the tick runs");
+
+        let pauses: Vec<serde_json::Value> = harness
+            .events(&[EventKind::TeamPaused])
+            .iter()
+            .map(|event| match &event.body {
+                EventBody::TeamPaused(body) => serde_json::to_value(body).expect("a body"),
+                other => panic!("not a pause: {other:?}"),
+            })
+            .collect();
+        assert_eq!(
+            pauses,
+            vec![serde_json::json!({
+                "by": "farik",
+                "reason": "credential_refused",
+                "detail": "Failed to authenticate. API Error: 401 OAuth access token is invalid.",
+            })]
+        );
+        assert!(matches!(second, TickReport::Idle { .. }), "{second:?}");
+        assert_eq!(adapter.started().len(), 1);
+        assert!(farik_notes(&harness).is_empty());
+        assert!(sleeps(&harness).is_empty());
+        assert_eq!(harness.row("FRK-1").status, TaskStatus::InProgress);
     }
 
     #[tokio::test]

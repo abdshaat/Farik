@@ -693,6 +693,52 @@ describe("team page", () => {
 		await expectNoAxeViolations(container);
 	});
 
+	it("says_the_key_did_not_work_and_connects_again", async () => {
+		const { container, socket } = await renderApp("/settings");
+		const s = socket as FakeSocket;
+		await answerStatus(s, true);
+		await answerQuery(s, "account.status", {
+			provider: "anthropic",
+			kind: "subscription_token",
+			source: "keychain",
+			key_refused: true,
+		});
+		const row = await screen.findByRole("region", { name: en.accountRow });
+		expect(await within(row).findByText(en.accountKeyRefused)).toBeTruthy();
+		await expectNoAxeViolations(container);
+		fireEvent.change(within(row).getByLabelText(en.subscriptionKey), {
+			target: { value: "sk-ant-oat01-new" },
+		});
+		fireEvent.click(
+			within(row).getByRole("button", { name: en.accountConnectAgain }),
+		);
+		const connect = await sent(s, "account.connect");
+		expect(connect.params).toEqual({
+			kind: "subscription_token",
+			secret: "sk-ant-oat01-new",
+		});
+		act(() => s.reply(connect, { stored_in: "keychain", taking_on: false }));
+		// The row reads the account again, and the key works now.
+		const again = await waitFor(() => {
+			const asked = s
+				.calls("query")
+				.filter((q) => q.params.name === "account.status");
+			if (asked.length < 2) throw new Error("the account was not asked again");
+			return asked.at(-1) as never;
+		});
+		act(() =>
+			s.reply(again, {
+				provider: "anthropic",
+				kind: "subscription_token",
+				source: "keychain",
+			}),
+		);
+		await waitFor(() =>
+			expect(within(row).queryByText(en.accountKeyRefused)).toBeNull(),
+		);
+		expect(within(row).getByText(/your Claude subscription/)).toBeTruthy();
+	});
+
 	it("names_the_variable_a_key_from_the_environment_comes_from", async () => {
 		const { socket } = await renderApp("/settings");
 		const s = socket as FakeSocket;

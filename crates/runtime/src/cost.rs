@@ -17,7 +17,7 @@ use farik_protocol::clock::Clock;
 use farik_protocol::event::{
     BudgetExhaustedBody, BudgetExhaustedBodyConsequence, BudgetExhaustedBodyScope,
     CostRecordedBody, CostRecordedBodyModelId, CostRecordedBodyPurpose, EventBody, EventIds,
-    EventKind, FarikEvent, TokenUsage, new_event,
+    EventKind, FarikEvent, SessionEndedBodyReason, TokenUsage, new_event,
 };
 use farik_roles::{RoleError, load_role};
 use farik_store::{CostProjection, CostScope, EventLog, EventQuery, Projections, StoreError};
@@ -230,9 +230,26 @@ pub fn budget_state(
                 kinds: vec![EventKind::EscalationResolved],
                 ..EventQuery::default()
             })?;
+            // A session the provider refused the key of is not the task's (5.5): it is not counted.
+            let refused = projections
+                .log()
+                .read(&EventQuery {
+                    task_id: Some(contract.id.clone()),
+                    kinds: vec![EventKind::SessionEnded],
+                    ..EventQuery::default()
+                })?
+                .iter()
+                .filter(|event| {
+                    matches!(&event.body, EventBody::SessionEnded(body)
+                        if body.reason == SessionEndedBodyReason::CredentialRefused)
+                })
+                .count();
             (
                 spent.as_ref().map_or(0.0, |row| row.usd),
-                spent.as_ref().map_or(0, |row| row.sessions),
+                spent
+                    .as_ref()
+                    .map_or(0, |row| row.sessions)
+                    .saturating_sub(u32::try_from(refused).unwrap_or(u32::MAX)),
                 contract.budget.max_cost_usd,
                 u32::try_from(contract.budget.max_sessions.get())
                     .unwrap_or(u32::MAX)
@@ -789,6 +806,40 @@ mod tests {
         assert!(close(read.day_max_usd, 20.0));
         assert!(read.sprint_max_usd.is_infinite() && read.sprint_max_usd > 0.0);
         assert!(close(read.sprint_spent_usd, 0.0));
+    }
+
+    #[test]
+    fn counts_no_session_the_provider_refused_the_key_of() {
+        let (log, projections) = a_board();
+        filed(&log, &projections, "FRK-1");
+        for session in ["a", "b"] {
+            record_session_cost(
+                &log,
+                &projections,
+                &source(ids(Some("FRK-1"), session)),
+                &usage(0, 0),
+                &prices(),
+                &clock(),
+            )
+            .expect("recorded");
+        }
+        crate::sessions::record_session_ended(
+            &log,
+            "b",
+            crate::session::EndReason::CredentialRefused,
+            "Failed to authenticate. API Error: 401 OAuth access token is invalid.",
+            &ids(Some("FRK-1"), "b"),
+            &clock(),
+        )
+        .expect("recorded");
+        let contract = a_contract("FRK-1", 5.0, 3);
+        let read = state(
+            &projections,
+            &a_team(None),
+            Role::SoftwareDeveloper,
+            Some(&contract),
+        );
+        assert_eq!(read.task_sessions, 1);
     }
 
     #[test]

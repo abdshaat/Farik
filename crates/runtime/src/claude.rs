@@ -193,9 +193,13 @@ impl fmt::Debug for ClaudeConfig {
     }
 }
 
+/// The credential sessions start with, shared so that connecting the account again replaces it
+/// for the next session without a restart.
+pub type SharedCredential = Arc<Mutex<ClaudeCredential>>;
+
 /// Starts Claude Code sessions as child processes, and resumes the ones it started.
 pub struct ClaudeAdapter {
-    credential: ClaudeCredential,
+    credential: SharedCredential,
     config: ClaudeConfig,
     /// Each session this adapter started: its spec, and a token cancelled once its process is
     /// gone.
@@ -221,7 +225,7 @@ impl ClaudeAdapter {
     /// `Spawn` when the program cannot be run or names no version; `VersionTooOld` when it is
     /// older than the minimum.
     pub fn new(
-        credential: ClaudeCredential,
+        credential: SharedCredential,
         config: ClaudeConfig,
     ) -> Result<ClaudeAdapter, RuntimeError> {
         check_version(&version_output(&config)?)?;
@@ -250,7 +254,7 @@ impl ClaudeAdapter {
             .args(&args)
             .current_dir(&spec.cwd)
             .env_clear()
-            .envs(child_env(&self.credential, &self.config.env))
+            .envs(child_env(&locked(&self.credential), &self.config.env))
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())

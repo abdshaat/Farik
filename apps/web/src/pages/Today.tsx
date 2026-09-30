@@ -68,6 +68,12 @@ export function Today() {
 		since,
 	});
 	const { data: sprint } = useQuery<Sprint>("sprint.current", {});
+	// While the provider refuses the key the team is paused, and one row says so first.
+	const { data: account } = useQuery<{ keyRefused?: boolean }>(
+		"account.status",
+		{},
+	);
+	const keyRefused = account?.keyRefused === true;
 	const agents = team?.team.agents ?? [];
 	const agent = (id: string | null) => agents.find((a) => a.id === id);
 	const pm = agents.find(
@@ -102,12 +108,15 @@ export function Today() {
 			{waiting && (
 				<section className={styles.section} aria-labelledby="waiting-heading">
 					<h2 id="waiting-heading">
-						{t("waitingTitle", { count: String(waiting.waiting.length) })}
+						{t("waitingTitle", {
+							count: String(waiting.waiting.length + (keyRefused ? 1 : 0)),
+						})}
 					</h2>
-					{waiting.waiting.length === 0 ? (
+					{waiting.waiting.length === 0 && !keyRefused ? (
 						<p className={styles.muted}>{t("waitingNone")}</p>
 					) : (
 						<ul className={styles.rows} aria-label={t("waitingList")}>
+							{keyRefused && <KeyRefusedRow />}
 							{waiting.waiting.map((item) => (
 								<WaitingRow
 									key={`${item.kind}-${item.taskId}`}
@@ -257,6 +266,25 @@ function WaitingRow({
 				aria-describedby={titleId}
 			>
 				{t(kind.word)}
+			</Link>
+		</li>
+	);
+}
+
+/** The provider refused the AI account's key: the team waits until it is connected again. */
+function KeyRefusedRow() {
+	return (
+		<li className={styles.row}>
+			<div className={styles.rowText}>
+				<strong id="waiting-key">{t("waitingKeyRefused")}</strong>
+				<span>{t("waitingKeyRefusedLine")}</span>
+			</div>
+			<Link
+				className={styles.action}
+				to="/settings"
+				aria-describedby="waiting-key"
+			>
+				{t("waitingKeyConnect")}
 			</Link>
 		</li>
 	);

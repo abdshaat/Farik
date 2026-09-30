@@ -28,8 +28,9 @@ pub use crate::generated::event::{
     SessionStartedBodyEffort, SessionStartedBodyModel, SessionStartedBodyPurpose, SprintEndedBody,
     SprintEndedBodyEndedBy, SprintPlannedBody, SprintStartedBody, TaskCreatedBody,
     TaskIntegratedBody, TaskIntegratedBodyIntegratedBy, TaskTransitionedBody,
-    TaskTransitionedBodyEffectsItem, TeamPausedBody, TeamUpdatedBody, TokenUsage, ToolCalledBody,
-    ToolDeniedBody, ToolReturnedBody, TransitionRefusedBody, TransitionRefusedBodyRefusal,
+    TaskTransitionedBodyEffectsItem, TeamPausedBody, TeamPausedBodyBy, TeamPausedBodyReason,
+    TeamUpdatedBody, TokenUsage, ToolCalledBody, ToolDeniedBody, ToolReturnedBody,
+    TransitionRefusedBody, TransitionRefusedBodyRefusal,
 };
 /// The generated names of the vocabularies the governor's events repeat, renamed at the edge so
 /// that they cannot be mistaken for `farik-core`'s own types of the same name.

@@ -287,7 +287,11 @@ fn run(
             })
             .collect(),
     };
-    let adapter = ClaudeAdapter::new(credential, config).expect("claude is new enough");
+    let adapter = ClaudeAdapter::new(
+        std::sync::Arc::new(std::sync::Mutex::new(credential)),
+        config,
+    )
+    .expect("claude is new enough");
     let events = runtime.block_on(async {
         let mut session = adapter.start_session(spec).expect("the session starts");
         let mut events = Vec::new();

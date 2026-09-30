@@ -55,6 +55,9 @@ pub struct WebState {
     pub stores: Vec<Arc<dyn CredentialStore>>,
     /// The environment `farik serve` was given, which a credential may come from.
     pub env: BTreeMap<String, String>,
+    /// The credential the sessions start with, which connecting the account again replaces;
+    /// `None` in setup mode or when the sessions are given one.
+    pub in_use: Option<crate::claude::SharedCredential>,
 }
 
 /// The one live connect code: `issue` replaces it, and `redeem` spends it. It lives in memory, so
@@ -586,6 +589,7 @@ pub(super) async fn answer(state: &Arc<DaemonState>, text: &str, sent: &mut Opti
         "command" => command(state, &params["command"]).await,
         method if gates::METHODS.contains(&method) => gates::call(state, method, params).await,
         method if team::METHODS.contains(&method) => team::call(state, method, params).await,
+        "account.connect" if state.host().is_none() => team::connect(state, params).await,
         "query" => {
             // The store and the files are read off the async workers.
             let (state, params) = (Arc::clone(state), params.clone());
@@ -977,6 +981,7 @@ mod tests {
             take_on_error: std::sync::Mutex::default(),
             stores: Vec::new(),
             env: std::collections::BTreeMap::new(),
+            in_use: None,
         }));
         (daemon, code)
     }
@@ -1389,6 +1394,7 @@ mod tests {
             take_on_error: std::sync::Mutex::default(),
             stores: Vec::new(),
             env: std::collections::BTreeMap::new(),
+            in_use: None,
         }));
         (handle, secret)
     }
@@ -2044,6 +2050,7 @@ mod tests {
             take_on_error: std::sync::Mutex::default(),
             stores: Vec::new(),
             env: std::collections::BTreeMap::new(),
+            in_use: None,
         };
         let state = Arc::new(DaemonState::setup(
             Arc::clone(&host) as Arc<dyn SetupHost>,
