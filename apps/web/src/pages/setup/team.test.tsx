@@ -456,7 +456,11 @@ describe("team setup", () => {
 		).toBe(true);
 		expect(screen.getByText(en.firstDay)).toBeTruthy();
 		// The first-day figure is an estimate, for the six setup suggests.
-		expect(en.firstDay).toMatch(/^We estimate .* suggested team of six /);
+		// A scaled figure, not a measured one, so it is "about", never a bound.
+		expect(en.firstDay).toMatch(
+			/suggested team of six costs about twenty-five dollars \(an estimate\)/,
+		);
+		expect(en.firstDay).not.toMatch(/under/);
 		fireEvent.click(screen.getByRole("radio", { name: /^Stop the team/ }));
 		const amount = screen.getByLabelText(en.spendAmount) as HTMLInputElement;
 		expect(amount.value).toBe("10");
