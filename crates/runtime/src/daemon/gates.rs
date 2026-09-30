@@ -113,8 +113,17 @@ pub(super) fn query(deps: &ToolDeps, name: &str, params: &Value) -> Result<Value
             match name {
                 "contract.get" => Ok(json!({ "contract": file_value(deps, &task_id)? })),
                 "contract.check" => check(deps, &team()?, &task_id, &params["contract"]),
+                // A session makes hundreds of tool calls; they are the log's, not the task's
+                // history. A refused one stays, since the governor stopped something.
                 "task.history" => Ok(json!({
-                    "events": history(deps, &task_id)?.iter().map(event_to_value).collect::<Vec<_>>()
+                    "events": history(deps, &task_id)?
+                        .iter()
+                        .filter(|event| !matches!(
+                            event.body,
+                            EventBody::ToolCalled(_) | EventBody::ToolReturned(_)
+                        ))
+                        .map(event_to_value)
+                        .collect::<Vec<_>>()
                 })),
                 "task.diff" => task_diff(deps, &team()?, &task_id),
                 "task.checks" => task_checks(deps, &team()?, &task_id),
@@ -827,6 +836,10 @@ pub(super) mod tests {
 
     #[test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
+    #[allow(
+        clippy::too_many_lines,
+        reason = "the save, its history without the tool calls, a second save, and a refusal"
+    )]
     fn saves_the_human_edit_back_to_refining() {
         let harness = driven("gates-save");
         harness.file("FRK-1", "refining", |_| {});
@@ -878,6 +891,22 @@ pub(super) mod tests {
             .expect("a row");
         assert_eq!(row.status, TaskStatus::Refining);
         assert_eq!(harness.project.file("FRK-1")["intent"], edited["intent"]);
+        // A session's tool calls are the log's, not the task's history; a refused one is.
+        harness.project.record(
+            "FRK-1",
+            "tool.called",
+            &json!({ "tool": "Read", "input": "{}" }),
+        );
+        harness.project.record(
+            "FRK-1",
+            "tool.returned",
+            &json!({ "tool": "Read", "output": "" }),
+        );
+        harness.project.record(
+            "FRK-1",
+            "tool.denied",
+            &json!({ "tool": "Bash", "reason": "not in the allowed paths" }),
+        );
         let history = query(
             &harness.daemon,
             "task.history",
@@ -897,7 +926,8 @@ pub(super) mod tests {
             kinds.ends_with(&[
                 "contract.written",
                 "task.transitioned",
-                "escalation.resolved"
+                "escalation.resolved",
+                "tool.denied",
             ]),
             "{kinds:?}"
         );
