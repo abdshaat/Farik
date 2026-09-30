@@ -438,6 +438,26 @@ describe("channel", () => {
 		expect(screen.getByText("Started.")).toBeTruthy();
 	});
 
+	it("adds_a_live_message_once_and_settles", async () => {
+		const { s } = await channel([message("human", "human", "Morning.")]);
+		await screen.findByText("Morning.");
+		const said = vi.spyOn(console, "error").mockImplementation(() => {});
+		// Played outside act: a fold that re-adds what it holds would update itself for ever, and
+		// inside act that loop hangs the test with no failure; here it shows as the message twice.
+		play(s, 1000, "message.posted", {
+			author: "theo",
+			kind: "reaction",
+			text: "Started.",
+			mentions: [],
+		});
+		await screen.findByText("Started.");
+		// Load can only let fewer passes run in this wait, so it can only pass falsely, never fail.
+		await new Promise((r) => setTimeout(r, 50));
+		expect(screen.getAllByText("Started.")).toHaveLength(1);
+		expect(said).not.toHaveBeenCalled();
+		said.mockRestore();
+	});
+
 	it("shows_a_message_once_when_its_page_and_its_event_both_hold_it", async () => {
 		const { s } = await channel([
 			message("theo", "reaction", "Only once.", { seq: 5 }),
