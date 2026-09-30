@@ -68,13 +68,14 @@ The task stays `in_progress` from step 1 to step 4. The plan gate adds events, n
 
 ### The preview
 
-- **The command.** The user sets it once in Settings, under "How to open your app", and the Designer's card in setup asks for it:
-  - `preview.command`: the command that starts the app, run in the task's worktree;
+- **The commands** (amended 2026-09-30 by the founder's decision D2; step 12's plan has the detail). The user sets them once in Settings, under "How to open your app", and the Designer's card in setup asks for them:
+  - `preview.prepare` (optional): installs and builds, in the sandbox with the network on, for at most 15 minutes, reused while the task's committed tree and the command are unchanged;
+  - `preview.start`: the command that starts the app, in the sandbox with the network off;
   - `preview.port`: the port it serves on;
   - `preview.path`: the page to open first, default `/`.
 
-  The command is kept in `team.yaml` under a new top-level `preview` (decided here: it travels with the repository, like the criterion library's commands, and agents cannot write `.farik/`, 5.8). Templates leave it out, as they leave out paths and checks. For Farik's own repository the command starts Farik's own web app. The step plan names it; the proposal is the `farik-e2e-serve` test binary over a recorded team, which serves the built app with a live daemon and calls no model.
-- **Where it runs.** In a preview container of the task's sandbox image, with the task's worktree mounted, under the same network rule as the task's sandbox (8.3). Farik starts it when a Designer's session, or a design review, starts, and stops it when the session ends. It waits up to 120 seconds for the port to answer, then fails the session with the preview's output tail. It never runs on the host, because it runs code an agent wrote. No-sandbox mode (8.3) is the exception, as it is for every command, and its warning already covers it.
+  The command is kept in `team.yaml` under a new top-level `preview` (decided here: it travels with the repository, like the criterion library's commands, and agents cannot write `.farik/`, 5.8). Templates leave it out, as they leave out paths and checks. For Farik's own repository the commands build and start Farik's own web app, through the `farik-e2e-serve` test binary over a recorded team; step 12's plan writes them out.
+- **Where it runs** (amended 2026-09-30, the founder's decision D3). `prepare` runs in a container of the task's sandbox image with the network on; `start` runs in a preview container of that image, with the task's worktree mounted and the network off. Farik starts it when a Designer's session, or a design review, starts, and stops it when the session ends. It waits up to 120 seconds for the page to answer inside the container, then escalates the task with the preview's output tail. It never runs on the host, because it runs code an agent wrote. The Designer needs Docker's sandbox: in no-sandbox mode, or without Docker, it is unavailable.
 - **With no preview command set**, a Designer's task is not assigned and a design review does not start. Today's "Waiting on you" shows "Tell Farik how to open your app", linking to Settings.
 
 ### The Playwright connector
@@ -91,7 +92,8 @@ The task stays `in_progress` from step 1 to step 4. The plan gate adds events, n
   A test lists the pinned image's tools and fails when they differ from the pinned list, which is role-kits' drift test in its first form. It runs with the integration tests, since it needs Docker, not the live service.
 - **Tags.** The tools that navigate, read the page, click, type, press keys, resize, wait, and take screenshots are `network`: they reach only the preview and change nothing outside the sandbox. Everything else is `denied` and never offered: running script in the page, uploading files, installing browsers, saving PDFs, and any tool the pinned version adds before a person tags it. The step plan pins the exact names from the pinned version.
 - **The browser is confined to the preview:**
-  - it runs in a container that shares the preview container's network namespace, so it reaches what the preview reaches and, under the sandbox's default of no network, only the preview;
+  - it runs in a container that shares the preview container's network namespace, which has the network off, so it reaches only the preview;
+  - Chromium runs with `--proxy-server` pointed at a dead port, with loopback bypassed, so no click, redirect or page script can leave (the founder, 2026-09-30, D3);
   - the server's `--allowed-origins` limits the browser to the preview's origin;
   - the governor checks every `url` argument of every Playwright call against the preview's origin (`http://localhost:<port>`), and denies anything else with `url_outside_preview`. This is Farik's own check, so the confinement is not the server's promise alone (5.1: governance is code).
 - **The governor sees every connector call.** The hook judges `mcp__<server>__<tool>` by the server's entry in the agent's `mcp_servers` and the tool's tag, and denies an unknown server or an untagged tool, as it does today for any server that is not Farik's (5.6). `tool.called` and `tool.denied` gain `server` and `tag` for a connector's call, so the log shows each call with its tier and tag. A connector tool runs whatever the agent's own tiers, as role-kits decided, and only in the sessions that give it: `explore`, `implement` and the design review, never a chat.
@@ -128,7 +130,7 @@ Connector: the Playwright connector above. Phase 9 moves both into `roles/ui_ux_
 - **Farik tools**: `farik_propose_design_plan`, `farik_decide_design_plan`, `farik_check_page`, `farik_record_design_review`.
 - **Session purposes**: `explore` joins `SessionPurpose`. The Product Manager's plan decision and the design review are `verify` sessions.
 - **Contract**: optional `ui_change: boolean`.
-- **Team file**: `ui_ux_designer` in the role enum; `agents[].mcp_servers`; `rules.ui_paths`; top-level `preview { command, port, path }`.
+- **Team file**: `ui_ux_designer` in the role enum; `agents[].mcp_servers`; `rules.ui_paths`; top-level `preview { prepare?, start, port, path }`.
 - **RPC**: `settings.defaults` gains `ui_paths`; `task.get` gains the plan and the design review; `team.propose` suggests six; the existing `team.save` saves `preview` and `mcp_servers`.
 - **Pages**: the Designer in the team builder and on the Team page; "How to open your app" in Settings and in setup; the plan on the task's page ("The plan", with the Product Manager's decision); the design review's four checks on the task's page, each with its screenshot; the waiting row for a missing preview.
 
@@ -242,7 +244,7 @@ Nothing step 12 builds is replaced; each later step widens it.
 ## Risks
 
 - **A heavier machine.** The Designer needs Docker, which the sandbox needs anyway, and two more images: the Playwright server's, some hundreds of megabytes, and the preview's. The computer check gains a row for the browser image when the team has a Designer, and builds or pulls it as it builds the sandbox image.
-- **Previews differ by project.** A preview that needs a database, secrets, or a network the sandbox does not give will not start, and the user who set the command may not know why. The session fails with the preview's output tail, and the Designer's task escalates rather than guessing. No-sandbox mode runs it on the host, with the warning.
+- **Previews differ by project.** A preview that needs a database, secrets, or a network the sandbox does not give will not start, and the user who set the command may not know why. The task escalates with the preview's output tail rather than guessing. There is no host path: the Designer needs Docker's sandbox.
 - **Two reviews cost more.** A UI change now takes a design review and then a code review, and a Designer's task takes a plan session and the Product Manager's decision before any code. Both are `verify` and `explore` costs the Costs page shows. A team that finds this too slow can untick the Designer.
 - **The `ui_paths` defaults are a guess.** They catch React, Vue, Svelte and plain web projects, and miss others (a native app's layout files). Settings' advanced view is the fix, and the step plan checks the defaults against the scan's detected stacks.
 - **A third-party server.** The Playwright MCP server is Microsoft's, and its tools change between versions. The pin, the drift test, and denying any tool a person has not tagged are the defence. Every pin update re-reviews the tags (role-kits).
@@ -250,7 +252,7 @@ Nothing step 12 builds is replaced; each later step widens it.
 - **Chats cost money in the background.** A user who chats a lot while the team is paused is still spending. The daily budget still stops chats, and "Conversations" on the Costs page shows it.
 - **Privacy is local, not secret.** A chat is kept out of the channel and away from other agents, but it lives in the event log like everything else, and `farik log` shows it to anyone at the machine.
 - **Templates and providers.** A template saved with a model the project's provider cannot run (phase 7) falls back to the role's default, and the before-and-after dialog says so.
-- **Milestone runbook.** Step 14's team sprint uses seven agents, the six of phase 4 and the Designer, the cap (decided by the founder, 2026-09-30). Its two requests are CLI work, so the Designer's review of UI changes occurs only if the run touches UI files.
+- **Milestone runbook.** Step 15's team sprint uses seven agents, the six of phase 4 and the Designer, the cap (decided by the founder, 2026-09-30). Its two requests are CLI work, so the Designer's review of UI changes occurs only if the run touches UI files.
 
 ## Open items
 

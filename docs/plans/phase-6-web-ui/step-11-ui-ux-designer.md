@@ -2,9 +2,9 @@
 
 Status: draft
 Branch: `phase/6-web-ui`
-Spec: `docs/SPEC.md` sections 3, 4.1, 5.1 to 5.4, 6 (6.1 to 6.5, a new 6.8), 8.2 (the `explore` session), 8.5, F1
+Spec: `docs/SPEC.md` sections 3, 4.1, 5.1 to 5.4, 5.6 (the Designer's tiers), 5.12 (`document_paths`), 6 (6.1 to 6.5, a new 6.8), 8.2 (the `explore` session), 8.5, F1. The same list is in the project plan's step 11 row and the design's placement table.
 Depends on: steps 01 to 10 of this phase (landed); ADR 0026 and `docs/design/designer-chats-templates.md` (accepted 2026-09-30), whose decisions are binding and not restated here
-Readiness confirmed by: round one not ready (2026-09-30); founder decisions D2, D3 and S1 made; round two pending
+Readiness confirmed by: fresh-session reviewer, 2026-09-30; round one not ready; round two ready with findings, folded in
 
 Signatures, not bodies; test names and what each asserts, not test code; around 300 lines at most (ADR 0008).
 
@@ -30,7 +30,7 @@ The ADR's and the design's decisions hold as written. This plan decides only wha
 - **The tools' tiers.** `farik_propose_design_plan` and `farik_decide_design_plan` are `read`: they write only the log. Each also checks its session's purpose and role, and is refused with `design_plan_refused` outside the session that gives it.
 - **The explore session in this step:** the read tier's built-ins in the task's worktree, and five Farik tools: `farik_read_task`, `farik_read_board`, `farik_read_rules`, `farik_read_criteria` and `farik_read_decisions`. Plus `farik_propose_design_plan`. Step 12 adds the connector and `farik_check_page`.
 - **A session that ends without its one answer** (D6). An `explore` session that ends with no `farik_propose_design_plan` is started again, and so is a Product Manager's decision session that ends with no `farik_decide_design_plan`. This is what `verify.rs` does for a reviewer who wrote no note. Each restart counts toward the contract's sessions allowance, which escalates with `sessions` as today.
-- **Without Docker's sandbox** (the founder, 2026-09-30, D3), the Designer is unavailable: `team.propose` lists it unticked with "Needs Docker's sandbox". Step 12 adds the rule that enforces this for assignment, since the browser is step 12's; until step 12 lands, an explore session needs no Docker.
+- **Without Docker's sandbox** (the founder, 2026-09-30, D3), the Designer is unavailable. Everything about that is step 12's, since the browser is: the unticked "Needs Docker's sandbox" row in `team.propose` (tested there by `proposes_the_designer_with_its_connector`) and the assignment refusal. Step 11 draws the row in its mockups only. Until step 12 lands, an explore session needs no Docker.
 - **The mockups are new files**, so the approved ones stay untouched: `DesignerTeam`, `SettingsPreview`, `DesignPlan` and `GateDesignReview`. They are registered in `canvas.json` under the pages `team`, `settings`, `daily` and `gates`.
 
 ## File map
@@ -43,7 +43,8 @@ crates/core/src/governor/{permissions.rs,readiness.rs}                    modifi
 crates/protocol/src/event.rs                                              modifies (T2)
 crates/roles/roles/ui_ux_designer/{role.yaml,system.md,skills/*/SKILL.md} creates (T3)
 crates/roles/roles/*/system.md, crates/roles/src/{lib.rs,reviewer.rs}      modifies (T3)
-crates/runtime/src/daemon/team.rs                                         modifies (T3 propose; T4 task.get)
+crates/runtime/src/daemon/team.rs                                         modifies (T3 propose)
+crates/runtime/src/daemon/web.rs                                          modifies (T4): `task.get`'s `design_plan`
 packages/brand/tokens/tokens.json, packages/brand/assets/avatars/          modifies (T3)
 crates/runtime/src/{session.rs,tools.rs,tools/design.rs,daemon/hooks.rs}   modifies / creates (T4)
 crates/runtime/src/orchestrator/{rules.rs,design.rs,messages.rs}           modifies / creates (T4)
@@ -127,7 +128,7 @@ Tests:
 
 Produces: `SessionPurpose::Explore`, the two tools, the flow and `task.get.design_plan`. Consumes: Tasks 2 and 3.
 
-Files: `orchestrator/design.rs`; `rules.rs` (the `in_progress` branch for a Designer's task); `messages.rs`; `tools/design.rs`; the hook; `daemon/team.rs`; the RPC schema and client.
+Files: `orchestrator/design.rs`; `rules.rs` (the `in_progress` branch for a Designer's task); `messages.rs`; `tools/design.rs`; the hook; `daemon/web.rs` (`task.get`); the RPC schema and client.
 
 The latest `design_plan.*` event decides the session:
 - none, or `returned`: the Designer's `explore` session, with the tools in Decisions;
@@ -169,7 +170,8 @@ Tests, each also running axe:
 - 3: the agent and the role;
 - 4.1: the suggested six;
 - 5.1 and 5.2: the plan gate's text;
-- 5.3: `document_paths` for two roles;
+- 5.3 and 5.12: `document_paths` for two roles;
+- 5.6: the Designer's tiers and the team's permission answers;
 - 5.4: the Designer's reviewer;
 - 6.1 to 6.5: "only the Developer and the UI/UX Designer";
 - a new 6.8, the Designer;
@@ -189,7 +191,7 @@ The header gains "Revision 0.31 (<date>) …", from phase 6 step 11, in the form
 cargo xtask check --integration
 # expected: cargo 0 failed (T2 6 new, T3 4, T4 10);
 #   @farik/brand: the count at this step's start (one pair added to an existing test);
-#   @farik/web: the count at this step's start plus 4 (T5);
+#   @farik/web: the count at this step's start plus 3 (T5);
 #   playwright: the count at this step's start, unchanged;
 #   last line: xtask check: ok
 ```

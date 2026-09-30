@@ -4,7 +4,7 @@ Status: draft
 Branch: `phase/6-web-ui`
 Spec: `docs/SPEC.md` sections 4.1 (the preview commands), 5.4 (the design review), 5.6 (connectors), 5.7 (the `preview` escalation), 5.12 (`ui_paths`), 6.7, 8.2 (the hook's connector check), 8.3 (the preview and browser containers), 8.5, 8.6, F9
 Depends on: step 11 of this phase (the Designer, its plan gate, and the mockups the founder approved in its Task 1, which cover this step's screens); ADR 0026 and `docs/design/designer-chats-templates.md`
-Readiness confirmed by: round one not ready (2026-09-30); founder decisions D2, D3 and S1 made; round two pending
+Readiness confirmed by: fresh-session reviewer, 2026-09-30; round one not ready; round two ready with findings, folded in
 
 Signatures, not bodies; test names and what each asserts, not test code; around 300 lines at most (ADR 0008).
 
@@ -30,7 +30,7 @@ The ADR and the design hold as written. The founder's decisions of 2026-09-30 (D
   - **`prepare`** installs and builds. It runs in the sandbox image with the worktree mounted and the network on (`bridge`), for at most 15 minutes. It is reused while its cache key holds. The key is the sha256 of the task branch's `HEAD^{tree}` id and the `prepare` text, kept in `.farik/local/previews/<task>.json` and recorded in `preview.prepared { tree, seconds }`.
   - Uncommitted edits are not in the key: `start` reads the worktree as it is. So a dev server shows them, and a prebuilt binary shows them only after a commit.
   - Left out, `prepare` is skipped.
-  - **`start`** runs in a container `farik-preview-<project>-<task>` of the sandbox image, the worktree mounted, with `--network none`. Farik waits up to 120 s for `http://localhost:<port><path>` to answer inside it.
+  - **`start`** runs in a container `farik-preview-<project>-<task>` of the sandbox image, the worktree mounted, with `--network none`. Farik waits up to 120 s for `http://localhost:<port><path>` to answer inside it. The host cannot reach that namespace, so the probe is a `docker exec` in the preview container, once a second: `sh -c 'curl -fsS -o /dev/null <url> || wget -q -O /dev/null <url>'`. That is curl in the sandbox image, and busybox `wget` in the journey's `alpine:3.22` (R10).
   - Every project command runs in the sandbox (ADR 0004).
 - **A preview that fails.** A `prepare` that exits non-zero or times out, a `start` that never answers, or Docker being gone, each escalates the task with a new reason, `preview`. The detail is the output's last 40 lines, and `preview.stopped { reason }` is recorded. This applies to a Designer's task in `explore` or `implement`, and to a Developer's task under design review. The human fixes the commands in Settings and resolves the escalation. Rejected: retrying, because a broken command fails the same way each time.
 - **Farik's own preview** (D2):
@@ -54,7 +54,7 @@ The ADR and the design hold as written. The founder's decisions of 2026-09-30 (D
   - Chromium runs with `--proxy-server http://127.0.0.1:9`, a dead port, and Chromium's default loopback bypass. No click, redirect or page script can leave, whatever the namespace.
   - `--allowed-origins http://localhost:<port>` is also set.
   - The governor checks every `url` argument (below).
-  - These are four barriers, and the integration test removes each one in turn.
+  - These are four barriers. The integration test proves the first three, each on its own. The governor's `url` check is proved by `evaluates_connector_calls`, not in Docker.
   - `RunningPreview::stop` removes both containers by name, and the task cleanup's `remove` does too, so a killed session leaves none behind (F5).
 - **The URL rule** (F1). The governor checks every field named `url`, at any depth of a connector call's input.
   - A string must be `http://localhost:<port>`, exactly or followed by `/`, `?` or `#`.
@@ -73,7 +73,7 @@ The ADR and the design hold as written. The founder's decisions of 2026-09-30 (D
 - **`page.checked`** records each of `farik_check_page`'s results. `farik_record_design_review` copies the session's four latest checks, one per width and theme, into its `checks`. It is refused with `design_review_incomplete` until all four exist. Farik's own measurement gates the Architect (5.1).
 - **Screenshots** are kept at `.farik/local/screenshots/<task>/<session>-<width>-<theme>.png`, and the MCP answer carries each as an image block. The query `task.screenshot { task_id, file }` answers `{ png_base64 }`. It refuses any `file` that is not named by one of that task's `page.checked` events, with `not_found` (F4).
 - **axe-core 4.13.0**, `packages/ui`'s pin, is vendored as `crates/runtime/assets/axe.min.js` with its licence, with a test that the versions match. It runs the tags `wcag2a`, `wcag2aa`, `wcag21a`, `wcag21aa` and `wcag22aa` (F6).
-- **The check script** is `crates/runtime/assets/check-page.mjs`, Farik's own code. It runs in the pinned image with `--entrypoint node`, in the same namespace and with the same proxy as the browser, and takes Playwright from the recorded module root. The agent never gets it.
+- **The check script** is `crates/runtime/assets/check-page.mjs`, Farik's own code. It runs in the pinned image with `--entrypoint node` and `--user <uid>:<gid>`, in the same namespace and with the same proxy as the browser (R4), and takes Playwright from the recorded module root. The agent never gets it.
 - **The Designer's rejection** (F9). The runtime sets `TransitionContext.design_reviewer` only when the latest `design_review.recorded` since the task entered `verifying` failed, and sets it to that Designer's id. Core only compares that id with the requester's. `DoneRule::DesignReviewPassed` joins the Definition of Done.
 
 ## File map
@@ -87,6 +87,9 @@ crates/roles/connectors/playwright.yaml, crates/roles/src/connectors.rs   create
 crates/runtime/Cargo.toml, crates/cli/Cargo.toml                          modifies (T2): the `e2e` feature
 crates/runtime/src/{preview.rs,preview/docker.rs}                         creates (T2)
 crates/runtime/src/{daemon.rs,daemon/hooks.rs,daemon/team.rs,claude.rs,session.rs,computer.rs,orchestrator.rs}  modifies (T2)
+crates/runtime/src/daemon/web.rs                                          modifies (T4): `task.get`, `task.screenshot`, `settings.defaults`; (T6): the admit branch
+apps/web/src/pages/setup/SetupComputer.tsx (+ test)                       modifies (T2): the Designer's browser row
+xtask/src/check.rs                                                        modifies (T6): clippy with `e2e`, and the `--all-features` guard
 crates/runtime/tests/playwright_connector.rs                              creates (T2, T3): `#[ignore = "needs docker"]`
 .github/workflows/check.yml                                               modifies (T2): pulls the pinned image
 crates/runtime/assets/{axe.min.js,axe-LICENSE.txt,check-page.mjs}          creates (T3)
@@ -95,7 +98,7 @@ crates/runtime/src/orchestrator/{verify.rs,design.rs,rules.rs}             modif
 crates/runtime/src/recorded/{fixtures.rs,transcripts/*.jsonl}              modifies / creates (T4, T6)
 docs/schemas/rpc.schema.json, crates/protocol/src/rpc.rs, packages/protocol-client/src/*  modifies (T4)
 apps/web/src/pages/{AgentEdit,Settings,TeamRules,TaskDetail,Gate,Today,Board}.tsx, setup/SetupTeam.tsx, app/lanes.ts, strings/en.ts (+ tests)  modifies (T5)
-crates/runtime/src/daemon/web.rs, crates/cli/src/{lib.rs,bin/farik-e2e-serve.rs}, crates/cli/tests/serving.rs   modifies (T6)
+crates/cli/src/{lib.rs,bin/farik-e2e-serve.rs}, crates/cli/tests/serving.rs   modifies (T6)
 apps/web/e2e/{designer.spec.ts,fixtures/serve.ts}                         creates / modifies (T6)
 docs/SPEC.md, docs/plans/project-plan.md                                  modifies (T7)
 ```
@@ -194,9 +197,13 @@ Tests:
 - `lists_the_denied_tools_as_disallowed`: `claude_args` carries `Bash` and the denied names.
 - `launches_the_browser_confined`: `connector_server`'s arguments carry the container name, the label, `--user`, `--network container:<preview>`, `--proxy-server http://127.0.0.1:9` and `--allowed-origins`.
 - `proposes_the_designer_with_its_connector`, including unticked when there is no sandbox.
+- `lists_the_designer_browser_row_only_with_a_designer` (R6): `check_computer` has the row "Browser for the UI/UX Designer" only when the team has a Designer. Its state is ready when `docker image inspect <image@digest>` succeeds and missing when it fails. `SetupComputer.test.tsx`'s `shows_the_designer_browser_row` shows the row and its pull button.
 - Integration (`#[ignore = "needs docker"]`), with `alpine:3.22` serving a page with `busybox httpd` (F3):
   - `the_pinned_image_lists_the_pinned_tools`: the drift test;
-  - `the_browser_reaches_only_the_preview`: navigating to the preview passes; `http://example.com` and a preview page that redirects to it both fail. The case is run three times, each with the network turned on (`bridge`) and exactly one barrier left: the network off, the proxy, or `--allowed-origins`. Each barrier alone must stop both.
+  - `the_browser_reaches_only_the_preview` (R2). Navigating to the preview passes. The redirect is a busybox `httpd` CGI, `/cgi-bin/away`, answering `302` with `Location: http://example.com/`. It runs three times, each with one barrier:
+    - (a) `--network none` alone: both the direct navigation to `http://example.com/` and the redirect fail;
+    - (b) `bridge` plus the proxy alone: both fail;
+    - (c) `bridge` plus `--allowed-origins` alone: the direct navigation fails; the redirect is recorded as reaching `example.com`, since the server's README says `--allowed-origins` does not affect redirects. That is why the proxy exists.
   - `stop_leaves_no_container`: after `stop`, neither container name exists.
 
 - [ ] `feat(runtime): prepare and start a preview in the sandbox, and a confined Playwright connector per agent`
@@ -206,7 +213,7 @@ Tests:
 Produces: `check_page`, the tool and `page.checked`. Consumes: Task 2.
 
 Tests:
-- `checks_a_page_through_the_runner` (fake runner): the arguments per width and theme, the proxy, `page.checked` recorded, and the answer's shape, under the untrusted notice.
+- `checks_a_page_through_the_runner` (fake runner): the arguments per width and theme, `--user <uid>:<gid>`, the proxy, `page.checked` recorded, and the answer's shape, under the untrusted notice.
 - `refuses_outside_a_designer_session`: `check_page_refused` for the Architect, and for a session with no preview.
 - `returns_the_screenshot_as_an_image_block`: `mcp.rs` answers text plus an `image/png` block.
 - `bundles_the_axe_the_web_tests_pin`: the banner equals `packages/ui`'s `axe-core`, and the tag list has all five.
@@ -222,8 +229,8 @@ In rule 5, before the reviewer's session, when `is_ui_change` holds and the team
 - no preview set: wait (`preview_missing`);
 - the Designer is not `Ready`: wait (`designer_needs_sandbox`);
 - the only Designer is paused: wait (`waiting_on_designer`);
-- no passing review since the task entered `verifying`: start the Designer's read-only session (D9);
-- the latest review failed: reject in the Designer's name, with its reasons.
+- the latest review since the task entered `verifying` failed: reject in the Designer's name, with its reasons (checked before the next case, R1);
+- no review since the task entered `verifying`: start the Designer's read-only session (D9).
 
 Step 11's explore session gains the connector and `farik_check_page`, and loses its "no browser yet" line.
 
@@ -231,7 +238,7 @@ The recorded transcripts are `implement_css_frk_2`, `design_review_passes_frk_2`
 
 Tests:
 - `checks_a_ui_change_before_the_architect`: the Designer's read-only session first, with the listed tools and no `farik_exec`; the Architect's second.
-- `sends_a_failed_design_review_back_to_the_developer`: `rejected` by the Designer's id, with its reasons; no Architect session.
+- `sends_a_failed_design_review_back_to_the_developer`: `rejected` by the Designer's id, with its reasons; no Architect session and no second Designer session.
 - `leaves_a_non_ui_change_to_the_architect`, and `reviews_alone_without_a_designer` (every Designer retired).
 - `waits_on_a_paused_designer`, and `waits_for_a_missing_preview`: no session starts, and `design_review.state` is `waiting_on_designer` or `preview_missing`.
 - `refuses_an_incomplete_design_review`: three checks give `design_review_incomplete`; the fourth lets the review record, with `checks` copied from the events.
@@ -281,7 +288,11 @@ Steps:
 Tests in `serving.rs`, built with `e2e`:
 - `admits_a_local_browser_without_a_code_in_preview_mode`: with `--preview`, `GET /` with `Host: localhost:<port>` sets the session cookie and serves the app. `Host: localhost:<other>` and `evil.example` are refused.
 
-The existing `web.rs` tests that refuse `localhost` stay and run without the feature. They are the proof that the release build has no admit path.
+- `refuses_preview_without_the_e2e_feature` (R12), under `#[cfg(not(feature = "e2e"))]` so the default `cargo test --workspace` runs it: `farik serve --preview` is refused by the argument parser as an unknown argument.
+
+In `xtask/src/check.rs`:
+- `integration_steps` gains `cargo clippy -p farik-runtime --features e2e -- -D warnings`, since `cargo clippy -p farik --features e2e` does not lint `farik-runtime`'s `#[cfg(feature = "e2e")]` code. It is asserted by `integration_steps_lint_the_runtime_with_e2e`.
+- The release build never uses `--all-features`, which would switch the admit branch on (R13). This is enforced by `never_builds_with_all_features`, which fails when any xtask command or any `.github/workflows/*.yml` contains `--all-features`.
 
 - [ ] `test(web): walk a Designer's task and a design review through the real server and browser`
 
@@ -295,9 +306,9 @@ The existing `web.rs` tests that refuse `localhost` stay and run without the fea
 - 5.12: `ui_paths`;
 - 6.7;
 - 8.2: the hook's connector check;
-- 8.3: `prepare`, `start` and the browser container, with the proxy;
+- 8.3: `prepare`, `start` and the browser container, with the proxy; the release build is never built with `--all-features`;
 - 8.5: the events;
-- 8.6: browsing only the preview;
+- 8.6: "The Designer's browsing is limited to the project's preview. `prepare` runs the project's install and build with the network on, as the founder decided, and the browser's confinement does not cover it." (R14);
 - F9.
 
 The project plan: step 12's line gains "Built <date> (spec 0.32): …".
@@ -308,8 +319,8 @@ The project plan: step 12's line gains "Built <date> (spec 0.32): …".
 
 ```
 cargo xtask check --integration
-# expected: cargo 0 failed (T1 8 new, T2 7 plus 3 Docker, T3 4 plus 1 Docker, T4 12, T6 1);
-#   @farik/web: step 11's landed count plus 8 (T5);
+# expected: cargo 0 failed (T1 8 new, T2 8 plus 3 Docker, T3 4 plus 1 Docker, T4 12, T6 4);
+#   @farik/web: step 11's landed count plus 9 (T5 8, T2 1);
 #   playwright: step 11's landed count plus 1 (designer.spec.ts) passed;
 #   last line: xtask check: ok
 ```
