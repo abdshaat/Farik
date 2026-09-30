@@ -15,6 +15,13 @@ use crate::files::ProjectFiles;
 use crate::waiting::name_of;
 use crate::{EventLog, EventQuery, Projections, StoreError, TaskProjection};
 
+/// The events that say where a Designer's plan stands.
+const DESIGN_PLAN_KINDS: [EventKind; 3] = [
+    EventKind::DesignPlanProposed,
+    EventKind::DesignPlanApproved,
+    EventKind::DesignPlanReturned,
+];
+
 /// What an agent is doing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ActivityState {
@@ -84,11 +91,7 @@ pub fn activity(
     let titles = titles(projections)?;
     let board = projections.board()?;
     let plans = log.read(&EventQuery {
-        kinds: vec![
-            EventKind::DesignPlanProposed,
-            EventKind::DesignPlanApproved,
-            EventKind::DesignPlanReturned,
-        ],
+        kinds: DESIGN_PLAN_KINDS.to_vec(),
         ..EventQuery::default()
     })?;
     let waiting = crate::waiting::waiting(projections, log, files, team)?;
@@ -150,12 +153,7 @@ pub fn activity(
             ));
             continue;
         }
-        if let Some(task) = plan_waiting(&plans, &board, id) {
-            let pm = team
-                .active_agents()
-                .find(|agent| Role::from(agent.role) == Role::ProductManager)
-                .map_or("the Product Manager", |agent| agent.display_name.as_str());
-            let line = format!("Waiting for {pm} to approve a plan");
+        if let Some((task, line)) = plan_waiting(&plans, &board, team, id) {
             all.push(one(ActivityState::Idle, line, Some(task), None));
             continue;
         }
@@ -169,9 +167,15 @@ pub fn activity(
     Ok(all)
 }
 
-/// The task in progress whose latest design plan `agent` proposed and nobody decided yet.
-fn plan_waiting(plans: &[FarikEvent], board: &[TaskProjection], agent: &str) -> Option<TaskId> {
-    board
+/// The task in progress whose latest design plan `agent` proposed and nobody decided yet, with
+/// the line that says who it waits for.
+fn plan_waiting(
+    plans: &[FarikEvent],
+    board: &[TaskProjection],
+    team: &Team,
+    agent: &str,
+) -> Option<(TaskId, String)> {
+    let task = board
         .iter()
         .filter(|row| row.status == TaskStatus::InProgress)
         .find(|row| {
@@ -183,8 +187,15 @@ fn plan_waiting(plans: &[FarikEvent], board: &[TaskProjection], agent: &str) -> 
                     latest.body.kind() == EventKind::DesignPlanProposed
                         && latest.envelope.ids.agent_id.as_deref() == Some(agent)
                 })
-        })
-        .map(|row| row.task_id.clone())
+        })?;
+    let pm = team
+        .active_agents()
+        .find(|agent| Role::from(agent.role) == Role::ProductManager)
+        .map_or("the Product Manager", |agent| agent.display_name.as_str());
+    Some((
+        task.task_id.clone(),
+        format!("Waiting for {pm} to approve a plan"),
+    ))
 }
 
 /// What `agent` is doing in its session that has started and not ended, on which task, in which
