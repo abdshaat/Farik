@@ -4,6 +4,7 @@ Date: 2026-09-28
 Status: accepted
 Amended 2026-09-29 by ADR 0023: phase numbers after 6 moved up by one.
 Amended 2026-09-29: the first-run order is computer, AI account, project (the founder); the credential falls back to a private file (ADR 0022).
+Amended 2026-09-30 by ADR 0025: phase numbers after 9 moved up by one.
 
 ## Context
 

@@ -2,6 +2,7 @@
 
 Date: 2026-09-29
 Status: accepted
+Amended 2026-09-30 by ADR 0025: phase numbers after 9 moved up by one, and every role kit must be tested and work on every supported engine and provider.
 
 ## Context
 

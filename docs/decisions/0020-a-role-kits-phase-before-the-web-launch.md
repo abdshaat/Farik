@@ -3,6 +3,7 @@
 Date: 2026-09-28
 Status: accepted
 Amended 2026-09-29 by ADR 0023: phase numbers after 6 moved up by one.
+Amended 2026-09-30 by ADR 0025: phase numbers after 9 moved up by one; every kit must work on every supported engine; and every connector ships before the launch, which closes the question left open below.
 
 ## Context
 

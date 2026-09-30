@@ -1,6 +1,6 @@
 # The Finance Specialist
 
-Status: approved by the founder on 2026-09-27, in conversation; revised the same day to take receipts from email and read Stripe; and revised again that evening, on the market evaluation's evidence, to record the team's AI spending first, read a dedicated receipts mailbox over IMAP after the web release, and leave a connector to the user's main mailbox unplanned. It is the design input to phase 8 step 02 and phase 11 step 02. ADR 0019 records the decision, and spec 0.21 (sections 1 and 6.6, with exceptions in 5.2, 5.3, 5.4, 5.6, 5.8 and 5.14, and the `finance` purpose in F17) carries its rules.
+Status: approved by the founder on 2026-09-27, in conversation; revised the same day to take receipts from email and read Stripe; and revised again that evening, on the market evaluation's evidence, to record the team's AI spending first, read a dedicated receipts mailbox over IMAP after the web release, and leave a connector to the user's main mailbox unplanned. It is the design input to phase 8 step 02 and phase 12 step 02. ADR 0019 records the decision, and spec 0.21 (sections 1 and 6.6, with exceptions in 5.2, 5.3, 5.4, 5.6, 5.8 and 5.14, and the `finance` purpose in F17) carries its rules.
 
 ## Why
 
@@ -14,7 +14,7 @@ The founder's answers shaped the design:
 - It reads Stripe, read-only, when the product uses Stripe.
 - It is built in phase 8, after MCP connections exist, because Stripe needs them.
 
-The market evaluation of 2026-09-27 (`~/farik-research/reports/`, outside the repository) changed the order. The founder accepted three findings: the one finance feature with proven demand inside an agent-team product is AI-spend accounting; reading the user's main mailbox through Google's or Microsoft's mail API needs a restricted-scope verification with a paid yearly assessment, and its label filter is Farik's promise rather than the provider's enforcement; and receipts alone are the wrong source of truth, since every incumbent reconciles against the bank or card statement. So the role ships in two steps. Phase 8 step 02, before the web launch: the role, the books, the AI-spend accounting and forecast, and Stripe. Phase 11 step 02, in the first release after the web release check: receipts from a dedicated receipts mailbox over IMAP, and bank statement reconciliation.
+The market evaluation of 2026-09-27 (`~/farik-research/reports/`, outside the repository) changed the order. The founder accepted three findings: the one finance feature with proven demand inside an agent-team product is AI-spend accounting; reading the user's main mailbox through Google's or Microsoft's mail API needs a restricted-scope verification with a paid yearly assessment, and its label filter is Farik's promise rather than the provider's enforcement; and receipts alone are the wrong source of truth, since every incumbent reconciles against the bank or card statement. So the role ships in two steps. Phase 8 step 02, before the web launch: the role, the books, the AI-spend accounting and forecast, and Stripe. Phase 12 step 02, in the first release after the web release check: receipts from a dedicated receipts mailbox over IMAP, and bank statement reconciliation.
 
 ## The role
 
@@ -51,9 +51,9 @@ The books live in `.farik/local/finance/`. The folder is on the user's machine, 
   books.xlsx           Expenses, Revenue, Categories, Monthly summary; each row names its receipt file, statement line or Stripe object
   forecast.xlsx        the long-term forecast, the AI spending from phase 8 on
   <name>.xlsx          further workbooks a task asks for, such as pricing.xlsx
-  receipts/<yyyy-mm>/  each receipt filed from the receipts mailbox: its attachment (PDF or image), or the email itself when it has none (phase 11)
-  imports/             bank and card statements the user exports as CSV, the source the books are reconciled against (phase 11)
-  mailbox.json         the receipts mailbox's settings, the approved senders, and the ledger of filed messages (phase 11)
+  receipts/<yyyy-mm>/  each receipt filed from the receipts mailbox: its attachment (PDF or image), or the email itself when it has none (phase 12)
+  imports/             bank and card statements the user exports as CSV, the source the books are reconciled against (phase 12)
+  mailbox.json         the receipts mailbox's settings, the approved senders, and the ledger of filed messages (phase 12)
   .history/            the previous version of each workbook, kept on every overwrite, and under <task-id>/ the copy of every workbook taken when a finance task is assigned, the baseline its reviewer compares against
 ```
 
@@ -92,7 +92,7 @@ A finance task is an ordinary contract: a month's close, a forecast, a pricing a
 
 The explanation for the human goes in the task's completion note, which already opens with a plain-language summary (spec 5.4).
 
-## Phase 11 step 02: receipts intake
+## Phase 12 step 02: receipts intake
 
 Receipts come from a mailbox that holds nothing else, so the boundary is structural rather than a filter Farik promises to apply, which is how every incumbent (Expensify, Dext, Hubdoc, Kick) takes receipts.
 
@@ -123,7 +123,7 @@ The web app's finance setup gains the mailbox connection and the approved sender
 - **Reading a paid ledger** (Kick or Digits expose MCP servers) as an alternative to keeping the books. It is an optional connector in the Finance Specialist's kit (phase 9 step 05), not a replacement for the books.
 - **A page that shows the books in the browser.** The workbooks are the view until a step asks for one.
 
-New dependencies, each pinned per the repository's rules and named in the step plans: `rust_xlsxwriter` to write workbooks and `calamine` to read them (phase 8); an IMAP client (phase 11).
+New dependencies, each pinned per the repository's rules and named in the step plans: `rust_xlsxwriter` to write workbooks and `calamine` to read them (phase 8); an IMAP client (phase 12).
 
 ## Tests
 
@@ -142,7 +142,7 @@ Phase 8 step 02:
 - A finance session cannot read the worktrees, the event log, or `settings.json`.
 - Stripe's write tools are refused to the role.
 
-Phase 11 step 02:
+Phase 12 step 02:
 - The connector hands over only unread messages from approved senders, and never any other.
 - The connector has no call that changes the mailbox.
 - A filed message is never handed over again.
