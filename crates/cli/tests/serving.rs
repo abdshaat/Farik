@@ -1295,7 +1295,21 @@ fn connecting_the_account_takes_the_waiting_project_on() {
 #[test]
 #[ignore = "needs the git program: cargo xtask check --integration"]
 fn keeps_waiting_on_the_project_after_a_failed_take_on() {
-    let repository = a_team("setup-waits-again");
+    failed_take_on("setup-waits-again", false);
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn follows_serve_to_its_new_port_after_a_failed_take_on() {
+    // The flake's cause, made certain: something takes serve's port the moment the take-on lets
+    // it go and holds it past serve's 5 s wait, so setup comes back on another port.
+    failed_take_on("setup-moves-port", true);
+}
+
+/// A take-on that fails, then serve's setup waiting on the same project; with `hold`, its old
+/// port is taken as soon as it is let go, for 8 s.
+fn failed_take_on(name: &str, hold: bool) {
+    let repository = a_team(name);
     std::fs::write(repository.path.join(".farik/prices.json"), "not JSON").expect("written");
     let (_home, state) = setup_folders("setup-waits-again");
     let (_claude, path) = project::a_claude_saying("setup-waits-claude", "2.1.300 (Claude Code)");
@@ -1303,6 +1317,20 @@ fn keeps_waiting_on_the_project_after_a_failed_take_on() {
     env.insert("PATH".to_string(), path);
     let serving = serving_in(&repository.path, env, false);
     let connect = json!({ "kind": "api_key", "secret": "sk-ant-api03-test" });
+    let holder = hold.then(|| {
+        let port = serving.port;
+        std::thread::spawn(move || {
+            let deadline = Instant::now() + Duration::from_secs(60);
+            while Instant::now() < deadline {
+                if let Ok(held) = std::net::TcpListener::bind(("127.0.0.1", port)) {
+                    std::thread::sleep(Duration::from_secs(8));
+                    drop(held);
+                    return true;
+                }
+            }
+            false
+        })
+    });
 
     let first = call(
         serving.port,
@@ -1324,7 +1352,12 @@ fn keeps_waiting_on_the_project_after_a_failed_take_on() {
         "account.connect",
         connect,
     );
+    let moved = serving.port_now() != serving.port;
     let (ran, out, err) = serving.interrupted();
     assert_eq!(again["result"]["taking_on"], true, "{again}");
     assert_eq!(ran.code, 130, "{out}\n{err}");
+    if let Some(holder) = holder {
+        assert!(holder.join().expect("the holder ends"), "the port was held");
+        assert!(moved, "serve came back on another port\n{out}");
+    }
 }
