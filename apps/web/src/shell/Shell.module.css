@@ -97,6 +97,29 @@ content alone fills the window, rather than a rail beside it too wide for a phon
 	background: var(--farik-color-status-done);
 }
 
+/* While connected the dot breathes, one slow 3 s cycle from the calm done green to halfway
+towards the pale Added tint and back: a low, soft change, far under three flashes a second.
+It holds the calm green under reduced motion. */
+.live {
+	animation: breathe 3s ease-in-out infinite;
+}
+
+@keyframes breathe {
+	50% {
+		background: color-mix(
+			in srgb,
+			var(--farik-color-status-done),
+			var(--farik-color-ready)
+		);
+	}
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.live {
+		animation: none;
+	}
+}
+
 /* Pause is outlined; Resume, the way back, is filled. */
 .pause,
 .resume {

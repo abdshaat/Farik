@@ -109,6 +109,8 @@ The skill lists five looks that generated designs fall into. The founder's kit p
 
 One more revision came from the "remove one accessory" test. The first plan also blinked the cursor in the team band and gave every avatar an idle animation. Now the only motion that runs without the user doing anything is the cursor in the request box. Any other motion answers an event: when an agent's status changes, its avatar makes one two-frame hop. Both stop under `prefers-reduced-motion`.
 
+The founder added one more idle motion on 2026-09-30: while the page is connected, the rail's "Connected" dot breathes. One cycle takes 3 seconds, easing in and out, from the calm done green (`status-done`) to halfway towards the pale Added tint (`ready`) and back, so its brightness changes little and nothing flashes. In any other connection state the dot is still, and under `prefers-reduced-motion` it holds the calm green. The phone's top bar shows no connection mark, so nothing breathes there.
+
 ## Screens
 
 The screens map to phase 6's steps as follows:

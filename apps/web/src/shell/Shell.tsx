@@ -60,7 +60,10 @@ export function Shell() {
 					<nav aria-label={t("navRail")}>{places}</nav>
 					<div className={styles.foot}>
 						<p className={styles.conn}>
-							<span className={styles.dot} aria-hidden="true" />
+							<span
+								className={`${styles.dot}${status === "open" ? ` ${styles.live}` : ""}`}
+								aria-hidden="true"
+							/>
 							{t(status === "open" ? "connected" : "connecting")}
 						</p>
 						{data && <p>{t(data.paused ? "teamPaused" : "teamWorking")}</p>}

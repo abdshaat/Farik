@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { expectNoAxeViolations } from "@farik/ui/test";
 import {
 	act,
@@ -10,6 +12,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { en } from "../strings/en.ts";
 import { media } from "../test/media.ts";
 import { answerStatus, eventArrives, renderApp } from "../test/render-app.tsx";
+import styles from "./Shell.module.css";
 
 const WIDE = "(min-width: 1024px)";
 
@@ -133,5 +136,28 @@ describe("shell", () => {
 		});
 		expect(await screen.findByText("The team is not paused")).toBeTruthy();
 		await expectNoAxeViolations(container);
+	});
+
+	it("breathes_the_dot_while_connected", async () => {
+		media.set(WIDE, true);
+		const { socket } = await renderApp("/team");
+		if (!socket) throw new Error("no socket");
+		await answerStatus(socket, false);
+		const dot = (await screen.findByText(en.connected)).querySelector("span");
+		expect(dot?.classList).toContain(styles.dot);
+		expect(dot?.classList).toContain(styles.live);
+	});
+
+	it("keeps_the_connected_dot_still_under_reduced_motion", () => {
+		const css = readFileSync(
+			join(import.meta.dirname, "Shell.module.css"),
+			"utf8",
+		).replace(/\s+/g, " ");
+		expect(css).toMatch(
+			/\.live \{[^}]*animation: breathe 3s ease-in-out infinite;/,
+		);
+		expect(css).toMatch(
+			/@media \(prefers-reduced-motion: reduce\) \{ \.live \{ animation: none; \} \}/,
+		);
 	});
 });

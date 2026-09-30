@@ -63,6 +63,15 @@ test("a request is sized, its question answered by choice, and it becomes a task
 		);
 		await page.setViewportSize({ width: 1280, height: 800 });
 
+		// While connected, the rail's dot breathes; under reduced motion it holds still.
+		const dot = page.getByText("Connected", { exact: true }).locator("span");
+		const animation = () =>
+			dot.evaluate((el) => getComputedStyle(el).animationName);
+		// A module's keyframes are renamed when the app is built, so any name but none will do.
+		await expect.poll(animation).not.toBe("none");
+		await page.emulateMedia({ reducedMotion: "reduce" });
+		await expect.poll(animation).toBe("none");
+		await page.emulateMedia({ reducedMotion: null });
 		// The render before the shell trades its rail for the bars, held: the shell is told the
 		// window is wide at a phone's width. The user testing found the page 133 px too wide there.
 		const stale = await page.context().newPage();
