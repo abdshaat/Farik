@@ -85,7 +85,12 @@ describe("acceptance gate", () => {
 			"$1.82",
 		])
 			expect(within(about).getByText(text)).toBeTruthy();
-		expect(within(about).getByText("See the whole history")).toBeTruthy();
+		// The whole history is the task page's, not a list of raw kinds here.
+		expect(
+			within(about)
+				.getByRole("link", { name: "See the whole history" })
+				.getAttribute("href"),
+		).toBe("/tasks/FRK-1");
 		await expectNoAxeViolations(container);
 	});
 

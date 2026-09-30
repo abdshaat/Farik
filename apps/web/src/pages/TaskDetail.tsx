@@ -8,6 +8,7 @@ import { t } from "../strings/t.ts";
 import { CancelTask } from "./dialogs/CancelTask.tsx";
 import { useCommand } from "./dialogs/StartSprint.tsx";
 import {
+	approvesPlan,
 	dollars,
 	type HistoryEvent,
 	latestNote,
@@ -153,11 +154,7 @@ export function TaskDetail() {
 			(e.body.kind === "completion" || e.body.kind === "review"),
 	);
 	const summaryBy = agentOf(summary?.body.writtenBy);
-	const approved = events.find(
-		(e) =>
-			(e.kind === "human.accepted" && e.body.subject === "contract") ||
-			(e.kind === "task.transitioned" && e.body.to === "ready"),
-	);
+	const approved = events.find(approvesPlan);
 	const integrated = events.findLast((e) => e.kind === "task.integrated");
 	const awaitsIntegration = waiting.waiting.some(
 		(w) => w.taskId === id && w.kind === "integration",

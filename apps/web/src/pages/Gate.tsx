@@ -30,6 +30,12 @@ export type HistoryEvent = {
 		reason?: string;
 	};
 };
+
+/** Whether `e` approved the task's plan: the person's acceptance, or the task made ready. */
+export const approvesPlan = (e: HistoryEvent) =>
+	(e.kind === "human.accepted" && e.body.subject === "contract") ||
+	(e.kind === "task.transitioned" && e.body.to === "ready");
+
 /** The try in progress, of all the task gets, as `task.tries` works them out. */
 export type Tries = { try: number; of: number };
 type Check = { criterionId: string; text: string; passed: boolean };
@@ -97,11 +103,7 @@ export function Gate() {
 	const builder = agents.find(
 		(a) => a.role === contract.assigneeRole && a.status !== "retired",
 	);
-	const approved = events.find(
-		(e) =>
-			(e.kind === "human.accepted" && e.body.subject === "contract") ||
-			(e.kind === "task.transitioned" && e.body.to === "ready"),
-	);
+	const approved = events.find(approvesPlan);
 	const letters = [
 		["completion", "gateWrote"],
 		["review", "gateReviewed"],
@@ -190,17 +192,9 @@ export function Gate() {
 					<dt>{t("gateCost")}</dt>
 					<dd>{dollars(spent(events))}</dd>
 				</dl>
-				{/* ponytail: step 09's task detail replaces this list. */}
-				<details className={own.written}>
-					<summary>{t("gateHistory")}</summary>
-					<ol>
-						{events.map((e) => (
-							<li key={e.seq}>
-								{e.recordedAt.slice(11, 16)} {e.kind}
-							</li>
-						))}
-					</ol>
-				</details>
+				<p>
+					<Link to={`/tasks/${id}`}>{t("gateHistory")}</Link>
+				</p>
 			</section>
 			{refusal && (
 				<p role="alert" className={styles.alert}>
