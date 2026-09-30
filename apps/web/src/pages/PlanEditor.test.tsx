@@ -203,4 +203,94 @@ describe("plan editor", () => {
 			},
 		});
 	});
+
+	it("keeps_your_draft_when_the_plan_is_read_again", async () => {
+		const { container, s } = await opened({
+			...CONTRACT,
+			status: "in_progress",
+		});
+		const mine = "Customers can send a gift card to a friend by email.";
+		fireEvent.change(await screen.findByLabelText("Why you want it"), {
+			target: { value: mine },
+		});
+		// Holding the work moves the task, which stamps the file: the page reads it again.
+		fireEvent.click(screen.getByRole("button", { name: "Hold the work" }));
+		act(() =>
+			s.reply(s.calls("command")[0] as never, { said: "held", events: [30] }),
+		);
+		await waitFor(() => expect(gets(s)).toHaveLength(2));
+		act(() =>
+			s.reply(gets(s)[1] as never, {
+				contract: {
+					...CONTRACT,
+					status: "escalated",
+					updated_at: "2026-09-24T10:05:00Z",
+				},
+			}),
+		);
+		await screen.findByText("Mira can still change this plan");
+		expect(
+			(screen.getByLabelText("Why you want it") as HTMLTextAreaElement).value,
+		).toBe(mine);
+		expect(
+			screen.queryByRole("button", { name: "Take the new version" }),
+		).toBeNull();
+
+		// Mira writes the plan while you type: a field only she changed is hers, one you both
+		// changed stays yours, and the page says so.
+		const hers = "Customers will be able to buy a gift card and send it on.";
+		act(() => s.event(31));
+		await waitFor(() => expect(gets(s)).toHaveLength(3));
+		act(() =>
+			s.reply(gets(s)[2] as never, {
+				contract: {
+					...CONTRACT,
+					status: "escalated",
+					intent: "Customers can give a gift card and use it.",
+					summary: hers,
+					updated_at: "2026-09-24T10:07:00Z",
+				},
+			}),
+		);
+		expect(
+			await screen.findByText(
+				"Mira changed this plan while you were editing. Your changes are kept.",
+			),
+		).toBeTruthy();
+		expect(
+			(screen.getByLabelText("Why you want it") as HTMLTextAreaElement).value,
+		).toBe(mine);
+		expect(
+			(
+				screen.getByLabelText(
+					"The summary you read first",
+				) as HTMLTextAreaElement
+			).value,
+		).toBe(hers);
+
+		// A save sends your field over the plan as last read, its status among it.
+		fireEvent.click(screen.getByRole("button", { name: "Save" }));
+		const save = await waitFor(() => {
+			const c = s.calls("contract.save")[0];
+			if (!c) throw new Error("nothing was saved");
+			return c;
+		});
+		const sent = (save.params as { contract: Record<string, unknown> })
+			.contract;
+		expect([sent.intent, sent.summary, sent.status]).toEqual([
+			mine,
+			hers,
+			"escalated",
+		]);
+
+		// Or take her version whole.
+		fireEvent.click(
+			screen.getByRole("button", { name: "Take the new version" }),
+		);
+		expect(
+			(screen.getByLabelText("Why you want it") as HTMLTextAreaElement).value,
+		).toBe("Customers can give a gift card and use it.");
+		expect(screen.queryByText(/while you were editing/)).toBeNull();
+		await expectNoAxeViolations(container);
+	});
 });

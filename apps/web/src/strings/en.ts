@@ -549,6 +549,9 @@ export const en = {
 	savedBack:
 		"Saved. {pm} checks the plan again, then it comes back to you to approve.",
 	saved: "Saved.",
+	editClash:
+		"{pm} changed this plan while you were editing. Your changes are kept.",
+	editTakeNew: "Take the new version",
 	gateTitle: "Accept {title}",
 	gateWrote: "{name}, your {role}, wrote this for you",
 	gateReviewed: "{name}, your {role}, reviewed it",

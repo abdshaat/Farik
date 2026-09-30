@@ -37,6 +37,20 @@ const lines = (text: string) =>
 		.split("\n")
 		.map((l) => l.trim())
 		.filter(Boolean);
+/** The fields the editor writes; a save sends those the person changed over the latest read. */
+const EDITABLE = [
+	"intent",
+	"summary",
+	"requirements",
+	"exitCriteria",
+	"scope",
+	"budget",
+	"risk",
+	"allowedPaths",
+] as const;
+type Editable = (typeof EDITABLE)[number];
+const same = (a: unknown, b: unknown) =>
+	JSON.stringify(a) === JSON.stringify(b);
 const next = (ids: string[], prefix: string) =>
 	`${prefix}${Math.max(0, ...ids.map((i) => Number(i.slice(1)) || 0)) + 1}`;
 
@@ -62,10 +76,10 @@ export function PlanEditor() {
 	if (!team || !plan) return null;
 	const pm = active(team.team.agents, "product_manager");
 	const pmName = pm?.displayName ?? uiStrings.roleName.product_manager;
-	// A save refuses stale fields, so each fresh read starts a fresh draft.
+	// One draft per plan: a fresh read updates what the person has not changed (I3).
 	return (
 		<Editor
-			key={plan.contract.updatedAt}
+			key={id}
 			id={id}
 			contract={plan.contract}
 			pmName={pmName}
@@ -96,28 +110,57 @@ function Editor({
 }) {
 	const { client } = useConnection();
 	const [advanced, setAdvanced] = useAdvanced();
+	// `base` is the plan the draft was last brought up to date with.
+	const [base, setBase] = useState(contract);
 	const [draft, setDraft] = useState(contract);
 	const [budget, setBudget] = useState(String(contract.budget.maxCostUsd));
 	const [out, setOut] = useState(contract.scope.outOfScope.join("\n"));
 	const [paths, setPaths] = useState(contract.allowedPaths.join("\n"));
+	const [clash, setClash] = useState(false);
 	const [verdict, setVerdict] = useState<Verdict>();
 	const [busy, setBusy] = useState(false);
 	const [refusal, setRefusal] = useState<string>();
 
-	// The plan as it would be saved: the lock and the status as last read, since a save never
-	// changes them, and the budget as read unless its text changed.
-	const edited: Contract = {
+	// The draft as typed, the budget as read unless its text changed.
+	const mine: Contract = {
 		...draft,
-		locked: contract.locked,
-		status: contract.status,
 		scope: { ...draft.scope, outOfScope: lines(out) },
 		allowedPaths: lines(paths),
 		budget:
-			budget === String(contract.budget.maxCostUsd)
+			budget === String(base.budget.maxCostUsd)
 				? draft.budget
 				: { ...draft.budget, maxCostUsd: Number(budget) },
 	};
+	const ours = EDITABLE.filter((k) => !same(mine[k], base[k]));
+	const withOurs = (c: Contract): Contract => ({
+		...c,
+		...Object.fromEntries(ours.map((k) => [k, mine[k]])),
+	});
+	// The plan as it would be saved: the latest read, the lock and status among it, since a save
+	// never changes them, with the fields this person changed.
+	const edited = withOurs(contract);
 	const key = JSON.stringify(edited);
+
+	const takeUp = (c: Contract, keep: readonly Editable[]) => {
+		setBase(c);
+		setDraft(keep.length ? withOurs(c) : c);
+		if (!keep.includes("budget")) setBudget(String(c.budget.maxCostUsd));
+		if (!keep.includes("scope")) setOut(c.scope.outOfScope.join("\n"));
+		if (!keep.includes("allowedPaths")) setPaths(c.allowedPaths.join("\n"));
+	};
+	// A fresh read: what the person has not changed follows it, what they have is kept, and a
+	// field someone else changed too is said.
+	// biome-ignore lint/correctness/useExhaustiveDependencies: only a fresh read brings the draft up to date
+	useEffect(() => {
+		if (contract === base) return;
+		if (
+			ours.some(
+				(k) => !same(contract[k], base[k]) && !same(contract[k], mine[k]),
+			)
+		)
+			setClash(true);
+		takeUp(contract, ours);
+	}, [contract]);
 
 	useEffect(() => {
 		if (!client) return;
@@ -163,6 +206,7 @@ function Editor({
 				taskId: id,
 				contract: edited,
 			})) as { backToRefining: boolean };
+			setClash(false);
 			onSaid(
 				reply.backToRefining
 					? t("savedBack").replace("{pm}", pmName)
@@ -481,6 +525,19 @@ function Editor({
 				</p>
 			)}
 			{said && <p role="status">{said}</p>}
+			{clash && (
+				<div className={own.banner} role="status">
+					<p>{t("editClash").replace("{pm}", pmName)}</p>
+					<Button
+						onClick={() => {
+							setClash(false);
+							takeUp(contract, []);
+						}}
+					>
+						{t("editTakeNew")}
+					</Button>
+				</div>
+			)}
 			<div className={styles.actions}>
 				<Button kind="primary" busy={busy} onClick={save}>
 					{t("editSave")}
