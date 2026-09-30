@@ -817,8 +817,10 @@ mod tests {
         use crate::preview::fixtures::FakePreviews;
 
         let proposed_with = |name: &str, previews: Arc<dyn crate::preview::PreviewFactory>| {
-            let harness = driven(name);
-            harness.project.deps.transitions.set_previews(previews);
+            let mut harness = Harness::new(name, |_| {});
+            harness.previews = previews;
+            // The orchestrator tells the governor's door what runs previews, as `farik serve` does.
+            let _ = harness.orchestrator(harness.recorded(Vec::new()));
             query(
                 &harness.daemon,
                 "team.propose",

@@ -413,7 +413,7 @@ pub(crate) enum ReviewState {
     NotNeeded,
     /// The Designer's review is due.
     Waiting,
-    /// The team's only Designer is paused.
+    /// The team's only Designer is paused, or has Playwright off.
     WaitingOnDesigner,
     /// The team has not said how to open its app.
     PreviewMissing,
@@ -484,11 +484,15 @@ pub(crate) fn design_review(
                 .map(|agent| (agent, event.envelope.ids.session_id.clone())),
         };
     }
+    // A Designer with Playwright off gets no work, as a paused one gets none.
     waiting(if team.preview().is_none() {
         ReviewState::PreviewMissing
-    } else if browser != DesignerBrowser::Ready {
+    } else if matches!(
+        browser,
+        DesignerBrowser::NoSandbox | DesignerBrowser::NoPreview
+    ) {
         ReviewState::DesignerNeedsSandbox
-    } else if team.designer().is_none() {
+    } else if team.designer().is_none() || browser == DesignerBrowser::NoConnector {
         ReviewState::WaitingOnDesigner
     } else {
         ReviewState::Waiting

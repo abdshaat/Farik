@@ -1921,7 +1921,8 @@ mod tests {
     /// FRK-2, `dev-a`'s change to `site/style.css` on a team with the Designer, in `verifying`;
     /// and FRK-1, a task with no change.
     fn a_ui_change(name: &str) -> Harness {
-        let harness = Harness::new(name, crate::tools::fixtures::browsing);
+        let mut harness = Harness::new(name, crate::tools::fixtures::browsing);
+        harness.previews = Arc::new(crate::preview::fixtures::FakePreviews::ready());
         harness.file("FRK-1", "in_progress", |_| {});
         harness.verifying_a_ui_change("FRK-2");
         harness

@@ -767,6 +767,12 @@ mod tests {
     fn a_harness(name: &str, team: impl FnOnce(&mut Value)) -> Harness {
         let mut harness = Harness::new(name, team);
         harness.previews = Arc::new(FakePreviews::ready());
+        // Read before a tick too, so the governor's door is told before any orchestrator is made.
+        harness
+            .project
+            .deps
+            .transitions
+            .set_previews(Arc::clone(&harness.previews));
         harness
     }
 
@@ -1009,13 +1015,32 @@ mod tests {
     #[tokio::test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn waits_for_the_designers_sandbox() {
-        let mut harness = a_harness("design-review-no-sandbox", browsing);
-        harness.previews = Arc::new(crate::preview::NoPreviews);
+        // `Harness::new` runs no previews, as in no-sandbox mode.
+        let harness = Harness::new("design-review-no-sandbox", browsing);
         a_developers_change(&harness, "site/style.css");
         let (started, _) = ticked(&harness, Vec::new(), 2).await;
 
         assert!(started.is_empty(), "{:?}", who(&started));
         assert_eq!(harness.row("FRK-2").status, TaskStatus::Verifying);
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn waits_on_a_designer_without_its_browser() {
+        // Playwright switched off for Iris: Farik gives her no work, so no design review starts.
+        let harness = a_harness("design-review-no-connector", |wire| {
+            browsing(wire);
+            wire["agents"][3]
+                .as_object_mut()
+                .expect("an agent")
+                .remove("mcp_servers");
+        });
+        a_developers_change(&harness, "site/style.css");
+        let (started, _) = ticked(&harness, Vec::new(), 2).await;
+
+        assert!(started.is_empty(), "{:?}", who(&started));
+        assert_eq!(harness.row("FRK-2").status, TaskStatus::Verifying);
+        assert_eq!(state(&harness), ReviewState::WaitingOnDesigner);
     }
 
     #[tokio::test]

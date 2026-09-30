@@ -223,15 +223,14 @@ impl Transitions {
         let _ = self.previews.set(previews);
     }
 
-    /// Whether the team's Designer can have its browser: `Ready` until the driver has said what
-    /// runs previews, as for a command handled in its own process.
+    /// Whether the team's Designer can have its browser. Until the driver has said what runs
+    /// previews, as for a command handled in its own process, nothing does: it fails closed.
     #[must_use]
     pub fn designer_browser(&self, team: &Team) -> DesignerBrowser {
-        self.previews
-            .get()
-            .map_or(DesignerBrowser::Ready, |previews| {
-                crate::preview::designer_browser(team, previews.as_ref())
-            })
+        match self.previews.get() {
+            Some(previews) => crate::preview::designer_browser(team, previews.as_ref()),
+            None => crate::preview::designer_browser(team, &crate::preview::NoPreviews),
+        }
     }
 
     /// Judges one request on the store's facts and records the answer: a move writes the contract
@@ -2414,48 +2413,66 @@ mod tests {
     fn refuses_to_assign_the_designer_without_its_browser() {
         use crate::preview::fixtures::FakePreviews;
         use crate::preview::{NoPreviews, PreviewFactory};
-
         type Case = (
             &'static str,
             Team,
-            Arc<dyn PreviewFactory>,
+            Option<Arc<dyn PreviewFactory>>,
             Option<&'static str>,
         );
 
-        let with_iris = |preview: bool| {
+        let with_iris = |preview: bool, playwright: bool| {
             a_team(|wire| {
+                let mut iris = an_agent_wire("iris", "ui_ux_designer");
+                if playwright {
+                    iris["mcp_servers"] = json!([{ "name": "playwright", "source": "builtin" }]);
+                }
                 wire["agents"]
                     .as_array_mut()
                     .expect("a list of agents")
-                    .push(an_agent_wire("iris", "ui_ux_designer"));
+                    .push(iris);
                 if preview {
                     wire["preview"] = json!({ "start": "make serve", "port": 4401 });
                 }
             })
         };
-        let cases: [Case; 3] = [
+        let cases: [Case; 5] = [
             (
                 "assign-designer-no-sandbox",
-                with_iris(true),
-                Arc::new(NoPreviews),
+                with_iris(true, true),
+                Some(Arc::new(NoPreviews)),
                 Some("designer_needs_sandbox"),
             ),
             (
                 "assign-designer-no-preview",
-                with_iris(false),
-                Arc::new(FakePreviews::ready()),
+                with_iris(false, true),
+                Some(Arc::new(FakePreviews::ready())),
                 Some("preview_not_set"),
             ),
             (
+                "assign-designer-no-connector",
+                with_iris(true, false),
+                Some(Arc::new(FakePreviews::ready())),
+                Some("designer_needs_browser"),
+            ),
+            // A process that never said what runs previews has none (fails closed).
+            (
+                "assign-designer-previews-unset",
+                with_iris(true, true),
+                None,
+                Some("designer_needs_sandbox"),
+            ),
+            (
                 "assign-designer-ready",
-                with_iris(true),
-                Arc::new(FakePreviews::ready()),
+                with_iris(true, true),
+                Some(Arc::new(FakePreviews::ready())),
                 None,
             ),
         ];
         for (name, team, previews, refusal) in cases {
             let project = Project::new(name, team, at(12));
-            project.transitions.set_previews(previews);
+            if let Some(previews) = previews {
+                project.transitions.set_previews(previews);
+            }
             project.file("FRK-1", |wire| {
                 wire["assignee_role"] = json!("ui_ux_designer");
             });

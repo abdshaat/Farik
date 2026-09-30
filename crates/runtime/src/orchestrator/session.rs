@@ -34,7 +34,8 @@ use crate::cost::{CostError, CostSource, budget_state, record_exhaustion, record
 use crate::daemon::SessionRegistration;
 use crate::exec::Executor;
 use crate::preview::{
-    PreviewError, RunningPreview, connector_server, designer_browser, disallowed_tools,
+    PLAYWRIGHT, PreviewError, RunningPreview, connector_server, designer_browser, disallowed_tools,
+    has_playwright,
 };
 use crate::prompt::{
     CEREMONY_INSTRUCTIONS, DESIGN_DECISION_INSTRUCTION, JUDGMENT_INSTRUCTION, PromptInput,
@@ -195,11 +196,7 @@ pub(super) fn offered_connector(
     purpose: SessionPurpose,
     browser: DesignerBrowser,
 ) -> Option<ConnectorDefinition> {
-    let on = agent
-        .mcp_servers
-        .iter()
-        .flatten()
-        .any(|server| server.name.as_str() == PLAYWRIGHT);
+    let on = has_playwright(agent);
     let in_its_sessions = match purpose {
         SessionPurpose::Explore | SessionPurpose::Implement => true,
         // A Designer reviews no one's work but in its design review of a UI change (D9).
@@ -264,9 +261,6 @@ async fn give_browser(
     };
     Ok(Ok(Some((running, connector))))
 }
-
-/// The one connector Farik ships.
-const PLAYWRIGHT: &str = "playwright";
 
 /// What the preview's `prepare` is cached by (step 12): the task branch's tree and the command.
 #[derive(serde::Serialize, serde::Deserialize)]

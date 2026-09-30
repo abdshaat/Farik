@@ -11,7 +11,7 @@ use std::process::{Command, Stdio};
 use farik_core::contract::TaskId;
 use farik_core::governor::gates::DesignerBrowser;
 use farik_core::governor::permissions::ConnectorTag;
-use farik_core::team::{Preview, Team};
+use farik_core::team::{Agent, Preview, Team};
 use farik_protocol::event::Violation;
 use farik_roles::ConnectorDefinition;
 use schemars::JsonSchema;
@@ -154,17 +154,35 @@ impl PreviewFactory for NoPreviews {
 }
 
 /// Whether the team's Designer can have its browser (D4): not without a preview to open, nor
-/// where no preview can run.
+/// where no preview can run, nor with its Playwright connector off.
 #[must_use]
 pub fn designer_browser(team: &Team, previews: &dyn PreviewFactory) -> DesignerBrowser {
     if !previews.available() {
         DesignerBrowser::NoSandbox
     } else if team.preview().is_none() {
         DesignerBrowser::NoPreview
+    } else if team
+        .designer()
+        .is_some_and(|designer| !has_playwright(designer))
+    {
+        DesignerBrowser::NoConnector
     } else {
         DesignerBrowser::Ready
     }
 }
+
+/// Whether `agent` has the Playwright connector on in its `mcp_servers`.
+#[must_use]
+pub fn has_playwright(agent: &Agent) -> bool {
+    agent
+        .mcp_servers
+        .iter()
+        .flatten()
+        .any(|server| server.name.as_str() == PLAYWRIGHT)
+}
+
+/// The one connector Farik ships.
+pub const PLAYWRIGHT: &str = "playwright";
 
 /// The name of the browser container beside the preview container `preview`.
 #[must_use]

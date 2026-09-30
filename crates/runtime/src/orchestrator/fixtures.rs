@@ -106,6 +106,11 @@ impl Harness {
         forge: Forge,
         session_ids: Arc<dyn IdSource + Send + Sync>,
     ) -> Orchestrator {
+        // As `farik serve` does: the governor's door and the orchestrator judge by one factory.
+        self.project
+            .deps
+            .transitions
+            .set_previews(Arc::clone(&self.previews));
         Orchestrator::new(OrchestratorDeps {
             tools: Arc::clone(&self.project.deps),
             daemon: Arc::clone(&self.daemon),
@@ -152,6 +157,7 @@ impl Harness {
             clock: Arc::clone(&clock) as Arc<dyn Clock + Send + Sync>,
             ids: deps.ids.clone(),
         });
+        tools.transitions.set_previews(Arc::clone(&self.previews));
         Orchestrator::new(OrchestratorDeps {
             tools,
             daemon: Arc::clone(&self.daemon),

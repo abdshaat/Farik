@@ -59,7 +59,7 @@ pub struct DependencyState {
 }
 
 /// Whether the UI/UX Designer can open the project's app (the founder's D3 and D4): the team
-/// has a preview, and Docker's sandbox is there to run it.
+/// has a preview, Docker's sandbox is there to run it, and the Designer has its browser on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DesignerBrowser {
     /// A preview is set and the sandbox is available.
@@ -68,6 +68,8 @@ pub enum DesignerBrowser {
     NoPreview,
     /// The sandbox is off, or Docker is not there.
     NoSandbox,
+    /// The Designer does not have the Playwright connector on (`mcp_servers`).
+    NoConnector,
 }
 
 /// Everything the assignment gate needs from the world.
@@ -252,6 +254,10 @@ fn without_a_browser(input: &AssignmentInput) -> Option<String> {
         ),
         DesignerBrowser::NoSandbox => Some(
             "designer_needs_sandbox: The UI/UX Designer needs Docker's sandbox to open your app. Turn the sandbox on, or retire the Designer"
+                .to_string(),
+        ),
+        DesignerBrowser::NoConnector => Some(
+            "designer_needs_browser: Playwright is off for the UI/UX Designer, and without it the Designer cannot look at your app, so Farik gives it no work. Turn Playwright on for it on the Team page"
                 .to_string(),
         ),
     }
@@ -1092,9 +1098,20 @@ mod tests {
                 "designer_needs_sandbox: The UI/UX Designer needs Docker's sandbox to open your app. Turn the sandbox on, or retire the Designer"
             ]
         );
+        input.designer_browser = DesignerBrowser::NoConnector;
+        assert_eq!(
+            reasons(check_assignment(&designers, &input)),
+            [
+                "designer_needs_browser: Playwright is off for the UI/UX Designer, and without it the Designer cannot look at your app, so Farik gives it no work. Turn Playwright on for it on the Team page"
+            ]
+        );
         // The browser is the Designer's alone: a Developer is assigned whatever it says.
         let mut developers = an_assignment();
-        for browser in [DesignerBrowser::NoPreview, DesignerBrowser::NoSandbox] {
+        for browser in [
+            DesignerBrowser::NoPreview,
+            DesignerBrowser::NoSandbox,
+            DesignerBrowser::NoConnector,
+        ] {
             developers.designer_browser = browser;
             assert_eq!(
                 check_assignment(&a_contract(), &developers),
