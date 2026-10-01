@@ -272,6 +272,11 @@
 	font-size: inherit;
 }
 
+/* "What changes", below the four groups. */
+.changes {
+	margin-top: var(--farik-space-4);
+}
+
 .people {
 	display: grid;
 	gap: var(--farik-space-2);

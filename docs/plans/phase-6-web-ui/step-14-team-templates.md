@@ -275,6 +275,8 @@ Fix wave (M2): `template.apply` requires `saved_at`, the previewed template's, a
 
 Fix wave (What changes): `template.preview`'s and `template.apply`'s `effects` start with one line per retired agent that holds an `in_progress` task, naming the task by id and title and saying it is put on hold until the user gives it to someone (the task `status_effects` blocks); the role is left out of the line, since the page calls the Software Developer "Developer". Model and effort changes were already `describe_change`'s lines ("Ada now uses claude-sonnet-5.", pinned in `previews_without_writing`); left as they are. Asserted in `applies_with_the_retirements_effects`.
 
+Fix wave (M1, u1): carry 1 root-caused by the review: a fast "Add someone" after a template is applied sent the cached `team.get`'s team, refused as `status_from_card`; "Farik stopped answering" was the test's teardown. `UseTemplate` takes `onApplied`, which the Team page gives `team.get`'s `again`, and calls it before `onClose`; `shows_what_changes_before_using` asserts `team.get` is asked again with no event arriving. "What changes" is a `section` labelled by its heading (as the mockup's `fx-h`), with `margin-top: var(--farik-space-4)` (`.changes`), so it no longer sits flush under the Retired group. The optional `stale_team` code is not added.
+
 ## Verification
 
 ```

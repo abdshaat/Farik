@@ -64,12 +64,17 @@ function refusedLine(error: Refusal, preview: Preview): string {
 	].join(" ");
 }
 
-/** "Use a saved team": pick one, see what changes, then `template.apply`. */
+/**
+ * "Use a saved team": pick one, see what changes, then `template.apply`. Once it is applied,
+ * `onApplied` reads the team again at once, so nothing on the page acts on the team it replaced.
+ */
 export function UseTemplate({
 	current,
+	onApplied,
 	onClose,
 }: {
 	current: Team;
+	onApplied: () => void;
 	onClose: () => void;
 }) {
 	const { client } = useConnection();
@@ -97,6 +102,7 @@ export function UseTemplate({
 				slug: shown,
 				savedAt: template.savedAt,
 			});
+			onApplied();
 			onClose();
 		} catch (e) {
 			setRefused(saidAll(e));
@@ -166,14 +172,16 @@ export function UseTemplate({
 					))}
 				</div>
 				{preview.effects.length > 0 && (
-					<>
-						<h3 className={styles.groupTitle}>{t("useChanges")}</h3>
+					<section className={styles.changes} aria-labelledby="use-changes">
+						<h3 id="use-changes" className={styles.groupTitle}>
+							{t("useChanges")}
+						</h3>
 						<ul>
 							{preview.effects.map((effect) => (
 								<li key={effect}>{effect}</li>
 							))}
 						</ul>
-					</>
+					</section>
 				)}
 				{refused && (
 					<p role="alert" className={styles.alert}>

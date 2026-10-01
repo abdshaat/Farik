@@ -52,7 +52,7 @@ export type Judges = {
 
 /** The team file, what the daemon works out for each agent, and the models the price table knows. */
 export function useTeam() {
-	const { data } = useQuery<{
+	const { data, again } = useQuery<{
 		team: TeamFile;
 		agents: Effective[];
 		maxAgents: number;
@@ -64,6 +64,8 @@ export function useTeam() {
 		/** The most agents a team has that are not retired (SPEC F1), as the daemon says. */
 		most: data?.maxAgents,
 		models: models?.models ?? [],
+		/** Reads the team again now, rather than on the next event. */
+		again,
 	};
 }
 
@@ -102,7 +104,7 @@ export function useStatus() {
 
 /** The Team page: each agent on a card, with its model and a Pause or Resume. */
 export function Team() {
-	const { team, effective, most } = useTeam();
+	const { team, effective, most, again } = useTeam();
 	const status = useStatus();
 	const { data: activity } = useQuery<{
 		activity: { agentId: string; line: string }[];
@@ -144,7 +146,11 @@ export function Team() {
 				/>
 			)}
 			{open === "use" && (
-				<UseTemplate current={team} onClose={() => setOpen(undefined)} />
+				<UseTemplate
+					current={team}
+					onApplied={again}
+					onClose={() => setOpen(undefined)}
+				/>
 			)}
 			{status.refusal && (
 				<p role="alert" className={styles.alert}>

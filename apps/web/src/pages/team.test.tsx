@@ -12,12 +12,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { en } from "../strings/en.ts";
 import { t } from "../strings/t.ts";
 import type { FakeSocket } from "../test/fake-socket.ts";
-import {
-	answerQuery,
-	answerStatus,
-	eventArrives,
-	renderApp,
-} from "../test/render-app.tsx";
+import { answerQuery, answerStatus, renderApp } from "../test/render-app.tsx";
 
 const agent = (id: string, name: string, role: string, avatar: string) => ({
 	id,
@@ -1314,8 +1309,11 @@ describe("team templates", () => {
 		expect(names(en.useJoins)).toEqual(["Noor"]);
 		expect(names(en.useRetired)).toEqual(["Theo"]);
 		expect(names(en.useRemoved)).toEqual(["Sol", "Ada", "Kai"]);
+		const changes = within(preview).getByRole("region", {
+			name: en.useChanges,
+		});
 		expect(
-			within(preview).getByText("Noor joins as a Developer."),
+			within(changes).getByText("Noor joins as a Developer."),
 		).toBeTruthy();
 		expect(s.calls("template.apply")).toHaveLength(0);
 		await expectNoAxeViolations(container);
@@ -1326,10 +1324,14 @@ describe("team templates", () => {
 			slug: "pair",
 			saved_at: PAIR.template.saved_at,
 		});
+		const asks = () =>
+			s.calls("query").filter((q) => q.params.name === "team.get").length;
+		const before = asks();
 		await s.reply(applied, PREVIEW);
 		await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
-		// The Team page reads the team again and shows the new one.
-		await eventArrives(s, 1);
+		// The Team page reads the team again at once, not on the next event, so "Add someone"
+		// is not built from the team as it was.
+		await waitFor(() => expect(asks()).toBe(before + 1));
 		await s.reply(await query(s, "team.get"), {
 			team: PREVIEW.team,
 			agents: EFFECTIVE,
