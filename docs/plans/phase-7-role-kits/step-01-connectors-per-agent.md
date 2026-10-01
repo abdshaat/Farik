@@ -4,7 +4,7 @@ Status: draft
 Branch: `phase/7-role-kits`
 Spec: `docs/SPEC.md` 5.6, 6.7, 8.2, 8.5, 8.6; F9
 Depends on: phase 6 (merged in #19), whose step 05 keeps the model credential in the keychain (`crates/runtime/src/credential.rs`, with ADR 0022's file fallback) and whose step 12 built the connector base (ADR 0026)
-Readiness: fresh-session reviewer, 2026-10-01, not ready → findings folded in; second-round confirmation pending
+Readiness: fresh-session reviewer, 2026-10-01: round 1 not ready, round 2 one Blocking (R2-B1), all folded; confirmed by the controller
 
 ## Goal
 
@@ -21,7 +21,7 @@ The split with later steps:
 
 The team file:
 - **The shape** (extending phase 6 step 12's `{ name, source: builtin }`): `{ name, source: custom, transport: stdio | http, command, args, url, headers, credential_keys, tools }`.
-  - `command` and `args` for stdio only, `url` and `headers` for http only; the schema's `oneOf` enforces it.
+  - `command` and `args` for stdio only, `url` and `headers` for http only. `mcpServer` stays one flat object, with every field optional beside `name` and `source`. `validate_team` checks the rest on the typed value, as it does its other rules, each error at its own field: `command` and `args` only with `transport: stdio`, `url` and `headers` only with `http`, `transport` required with `source: custom` and absent with `builtin`. Rejected: `oneOf`, which jsonschema reports once at the item, and `if`/`then`, which typify 0.8 does not generate (finding R2-S1).
   - `credential_keys` match `^[A-Z][A-Z0-9_]{0,63}$`, at most 8.
   - `headers` are templates that may hold `{KEY}` for a key in `credential_keys` and nothing else, so no secret is written in the file.
   - `tools` maps every listed tool to `network`, `external_effect` or `denied`. Not `tool_tiers`, as the project plan wrote, because `denied` is not a tier.
@@ -38,8 +38,8 @@ Transport and process:
   - The launcher clears its environment, sets `PATH`, `HOME`, `LANG`, `TMPDIR` and the keys, and execs the server. So the model credential in Claude Code's environment never reaches a connector, which an inherited environment would do (`child_env`, 8.2).
   - An http connector gets Claude Code's `headersHelper`: `farik connector headers` with the same arguments, which asks the same route and prints the filled headers as a JSON object. Claude Code runs the helper through a shell, so each argument is single-quoted for POSIX `sh`, each `'` written `'\''`.
   - Rejected: an `env` or `headers` map in `mcp.json`, which is 0600 but kept on disk, while 8.6 says the key goes to the process environment from the keychain.
-- **What was connected on this machine is what runs** (finding B1). `connect` keeps, beside the keys in the same keychain entry or file entry, `spec_sha256`: the sha256 of the canonical JSON of the entry's `transport`, `command`, `args`, `url`, `headers`, `credential_keys` and `tools`. A server with no keys still gets an entry. The launch route refuses with 403 `connector_not_confirmed` when the team file's entry hashes differently or has no entry, and the headers helper then prints no header. Claude Code runs the session without that server, and `team.get` reports it `connect_again`, which the agent page shows as "Connect again". `tools` is in the hash too, so a commit cannot retag a `denied` tool `network`. Why: `.farik/team.yaml` is committed (8.4), so a clone or a pulled branch could otherwise run `sh -c "curl … | sh"` on the host, or move a connected server's `url` and receive the user's key. Agents cannot write `.farik/` (5.3), so this is a supply-chain threat; 8.6 expects hostile repository content.
-- **Listing tools.** `rmcp` as a client: features `client`, `transport-child-process`, `transport-streamable-http-client-reqwest` and `reqwest` (rustls). In rmcp 3.3.0 the plain `transport-streamable-http-client` gives only a transport generic over a client trait. This brings `reqwest` (0.13) and `rustls` in as new transitive dependencies, recorded with their licences in the pull request (code.md line 154). Rejected: listing over the existing `hyper`, which means writing the client rmcp already has. The listing runs with the launcher's clean environment and gives up after 30 seconds.
+- **What was connected on this machine is what runs** (finding B1). `connect` keeps, beside the keys in the same keychain entry or file entry, `spec_sha256`: the sha256 of the canonical JSON of the entry's `transport`, `command`, `args`, `url`, `headers`, `credential_keys` and `tools`. A server with no keys still gets an entry. `run_session` leaves an unconfirmed custom server (its entry hashes differently, or there is none) out of `mcp.json`, out of the registration's `connectors` and out of the untrusted-content notice (finding R2-B1). The launch route refuses it again with 403 `connector_not_confirmed`, as the second check. On that refusal, the headers helper prints nothing and exits non-zero, so Claude Code fails the connection rather than connecting without a header. Claude Code runs the session without that server, and `team.get` reports it `connect_again`, which the agent page shows as "Connect again". `tools` is in the hash too, so a commit cannot retag a `denied` tool `network`. Why: `.farik/team.yaml` is committed (8.4), so a clone or a pulled branch could otherwise run `sh -c "curl … | sh"` on the host, or move a connected server's `url` and receive the user's key. Agents cannot write `.farik/` (5.3), so this is a supply-chain threat; 8.6 expects hostile repository content.
+- **Listing tools.** `rmcp` as a client: features `client`, `transport-child-process`, `transport-streamable-http-client-reqwest` and `reqwest` (rustls). In rmcp 3.3.0 the plain `transport-streamable-http-client` gives only a transport generic over a client trait. This brings `reqwest` (0.13), `rustls` and, through `transport-child-process`, `process-wrap` (10) in as new transitive dependencies, recorded with their licences in the pull request (code.md line 154). Rejected: listing over the existing `hyper`, which means writing the client rmcp already has. The listing runs with the launcher's clean environment and gives up after 30 seconds.
 
 Credentials:
 - **Where keys are kept.** Per agent, in the keychain, through phase 6 step 05's `keyring` adapter. Service `farik`, account `connector:<project_id>:<agent_id>:<server>` (two projects can both have an agent `theo`). The entry is one JSON object `{ spec_sha256, keys }`. Disconnecting deletes it, and never another agent's. `credential.rs`'s `map_keyring_error` and `read_keychain` become `pub(crate)`.
@@ -62,8 +62,8 @@ What a non-technical user sees:
 - The canvas's `ConnectorAdd` breaks two made decisions, and Task 1 removes both: "Don't ask me" (pre-authorisation, which is step 05's allowance, and only for tools that spend credits), and "They reuse this sign-in" (credentials are per agent). The kit's "Recommended" connectors are step 05's.
 
 Security:
-- **Secrets stay out** of `team.yaml`, `mcp.json`, an event, a log line, a reply, the prompt and a command body. `connector.connected` records key names only. A refused `connector.connect` drops its parameters from the error, as `account.connect` does (8.6). The launch route's answer is never logged.
-- **Deny by default.** A connector not given to the session: `connector_not_in_session`. A tool the pin does not name: `tool_not_tagged`. `denied`: refused, and passed to `--disallowedTools`. `external_effect`: `external_effect_refused`. A launch for an unregistered session, a server the session lacks, or an unconfirmed server: refused. A keychain failing at launch: the server does not start, and the hook refuses its calls.
+- **Secrets stay out** of `team.yaml`, `mcp.json`, an event, a log line, a reply, the prompt and a command body. `connector.connected` records key names only. A refused `connector.connect` or `connector.tools` drops its parameters from the error, as `account.connect` does (8.6): both join `SECRET_METHODS` in `daemon/web.rs`. The launch route's answer is never logged.
+- **Deny by default.** A connector not given to the session: `connector_not_in_session`. A tool the pin does not name: `tool_not_tagged`. `denied`: refused, and passed to `--disallowedTools`. `external_effect`: `external_effect_refused`. A launch for an unregistered session, a server the session lacks, or an unconfirmed server: refused. A keychain failing at launch: the route answers 503 `secret_store_unavailable`, the launcher and the helper exit non-zero, and Claude Code runs the session without that server.
 - **Untrusted output.** Everything a connector returns is untrusted (8.6). The prompt's untrusted-content notice names each connector the session was given. Wrapping each result is not done in this phase.
 - **8.6's no-sandbox residuals** gain three routes to a key, beside the Claude Code process's environment: running the launcher (the token in `daemon.json` reaches the launch route), calling the route directly, and reading a connector process's `/proc/<pid>/environ`. In sandbox mode none applies: the container sees neither `daemon.json`, `mcp.json` nor the host's `/proc`.
 - **Risk: `headersHelper`'s 10-second limit.** A macOS keychain prompt can take longer, which fails the connection with Claude Code's own message. Accepted; the Advanced copy says to allow Farik "Always".
@@ -94,7 +94,8 @@ crates/runtime/src/claude.rs                                       modifies: lau
 crates/runtime/src/daemon/app.rs, daemon.rs                        modifies: POST /connector/launch (Task 6)
 crates/runtime/src/prompt.rs                                       modifies: the notice names connectors (Task 6)
 crates/cli/src/connector_run.rs                                    creates: farik connector run|headers (Task 6)
-crates/runtime/src/daemon/team.rs                                  modifies: connector RPCs and commands, team.get status (Task 7)
+crates/runtime/src/daemon/team.rs                                  modifies: connector RPCs and commands (Task 7)
+crates/runtime/src/daemon/web.rs                                   modifies: SECRET_METHODS gains connector.connect and connector.tools; team.get's connector states (Task 7)
 docs/schemas/{event,command,rpc}.schema.json                       modifies: two events, two commands, three RPCs (Task 7)
 crates/protocol/src/event.rs, command.rs                           modifies: hand-written EventKind, EventBody, Command (Task 7)
 crates/cli/src/connector.rs, lib.rs, crates/cli/Cargo.toml          creates/modifies: connect, disconnect, clap (Task 8)
@@ -112,6 +113,7 @@ Produces:
 
 ```rust
 // farik-core
+// hand-written, built from the generated `McpServer` by `custom_server(&McpServer) -> Option<CustomServer>` in team.rs, the crate's one mapping
 pub enum McpServer { Builtin { name: String }, Custom(CustomServer) }
 pub struct CustomServer { pub name: String, pub transport: CustomTransport,
     pub credential_keys: Vec<String>, pub tools: BTreeMap<String, ConnectorTag> }
@@ -132,13 +134,15 @@ pub trait ConnectorSecrets: Send + Sync {
     fn save(&self, at: &SecretAt, entry: &ConnectorEntry) -> Result<SecretStore, CredentialError>;
     fn delete(&self, at: &SecretAt) -> Result<(), CredentialError>; }
 pub struct KeychainConnectorSecrets; pub struct FileConnectorSecrets { /* path */ }
+pub struct ConnectorSecretStores { /* keychain, then file */ }  // ConnectorSecrets: save tries the keychain
+    // then the file; load looks in both, so an entry saved to the file before a keychain appeared is still found
 pub struct LaunchSpec { pub command: String, pub args: Vec<String>, pub env: BTreeMap<String, Secret> }
 pub fn launch_spec(server: &CustomServer, entry: &ConnectorEntry) -> Result<LaunchSpec, ConnectorError>;
 pub async fn list_tools(server: &CustomServer, keys: &BTreeMap<String, Secret>)
     -> Result<Vec<ListedTool>, ConnectorError>;              // ListedTool { name, description }
 ```
 
-Wire (`snake_case`): events `connector.connected { agent, server, transport, credential_keys, tools, spec_sha256 }`, `connector.disconnected { agent, server }`; commands `connector_connect { agent, server, spec_sha256 }` (`server` the entry, no values) and `connector_disconnect { agent, server }`; RPCs `connector.tools`, `connector.connect`, `connector.disconnect`; `team.get` gains each custom server's `state: connected | connect_again`; route `POST /connector/launch { session, server }`.
+Wire (`snake_case`): events `connector.connected { agent, server, transport, credential_keys, tools, spec_sha256 }`, `connector.disconnected { agent, server }`; commands `connector_connect { agent, server, spec_sha256 }` (`server` the entry, no values) and `connector_disconnect { agent, server }`; RPCs `connector.tools`, `connector.connect`, `connector.disconnect`; `team.get`'s result gains `connectors: [{ agent, server, state: connected | connect_again }]` beside `team`, which stays the file as it is (the daemon reads each stored `spec_sha256` from the store once per connect and disconnect and at daemon start, and compares it with the team file on each query, so a macOS keychain is not asked on each `team.get`); route `POST /connector/launch { session, server }`.
 
 ## Tasks
 
@@ -165,13 +169,14 @@ Files: `team.schema.json`, `crates/core/src/team.rs`, `crates/core/Cargo.toml`, 
 - `refuses_a_header_naming_an_undeclared_key`: `{TOKEN}` with `credential_keys: [API_KEY]` gives `header_key_unknown`.
 - `refuses_a_tool_tagged_read`: a schema error at `/agents/0/mcp_servers/0/tools/x`.
 - `keeps_builtin_entries_as_they_were`: step 12's fixture still validates, unchanged.
+- `keeps_the_source_error_at_its_field`: `source: npm` is still a schema error at `/agents/1/mcp_servers/1/source` (the existing case in `team.rs`).
 - `spec_hash_ignores_key_order_and_sees_every_field`: `{a:1,b:2}` and `{b:2,a:1}` give one `canonical_json`; changing `url`, `command`, one arg, one header, one key name or one tag each changes `spec_sha256`.
 
 - [ ] `feat(core): describe custom MCP servers in the team file`
 
 ### Task 3: Per-agent keys, in the keychain or a private file
 
-Files: `connectors.rs`, `credential.rs` (`map_keyring_error`, `read_keychain` to `pub(crate)`). Produces `ConnectorSecrets`, `SecretAt`, `ConnectorEntry`, `SecretStore`, `KeychainConnectorSecrets`, `FileConnectorSecrets`, an in-memory one for tests.
+Files: `connectors.rs`, `credential.rs` (`map_keyring_error`, `read_keychain` to `pub(crate)`). Produces `ConnectorSecrets`, `SecretAt`, `ConnectorEntry`, `SecretStore`, `KeychainConnectorSecrets`, `FileConnectorSecrets`, `ConnectorSecretStores`, an in-memory one for tests.
 
 - `keeps_keys_under_the_project_agent_and_server`: the account is `connector:p:theo:github`, the service `farik`, and the entry reads back with its `spec_sha256`.
 - `deleting_one_agents_keys_leaves_anothers`: after deleting theo's, iris's same server still loads.
@@ -179,7 +184,7 @@ Files: `connectors.rs`, `credential.rs` (`map_keyring_error`, `read_keychain` to
 - `falls_back_to_the_private_file_without_a_keychain`: with the keychain answering `NoKeychain`, `save` answers `SecretStore::File` and the entry loads back equal.
 - `connectors_json_is_owner_only`: the file is 0600 and its folder 0700 after a save.
 - `refuses_with_no_store_at_all`: no keychain and no state folder give `no_secret_store`.
-- `a_secret_never_prints`: the `Debug` forms of `ConnectorEntry` and `LaunchSpec` show key names and `***`.
+- `a_secret_never_prints`: the `Debug` form of `ConnectorEntry` shows key names and `***`.
 
 - [ ] `feat(runtime): keep each agent's connector keys in the keychain or a private file`
 
@@ -191,6 +196,7 @@ Files: `connectors.rs`, `crates/runtime/tests/fixture_mcp.rs`, the workspace `Ca
 - `the_server_sees_its_keys_and_not_the_model_key`: the fixture's `env` tool reports `API_KEY` set and neither `ANTHROPIC_API_KEY` nor `CLAUDE_CODE_OAUTH_TOKEN`, both set in the test's own environment.
 - `fills_http_headers_from_keys`: `Bearer {API_KEY}` becomes `Bearer k`, and the http fixture sees it.
 - `marks_a_tool_name_claude_code_would_rewrite`: a fixture tool `repo.delete` is listed as unusable and never offered for a tag.
+- `a_launch_spec_never_prints`: `LaunchSpec`'s `Debug` shows key names and `***`.
 - `gives_up_after_thirty_seconds`: a fixture that never answers gives `ConnectorError::Timeout` (paused clock).
 
 - [ ] `feat(runtime): list an MCP server's tools with the agent's keys`
@@ -218,7 +224,10 @@ Files: `orchestrator/session.rs`, `claude.rs`, `daemon/app.rs`, `daemon.rs`, `pr
 - `headers_helper_quotes_a_path_with_a_space`: a daemon path `/tmp/a b/it's/daemon.json` round-trips through `sh -c` as one argument.
 - `denied_tools_join_disallowed_tools`: `mcp__github__delete_repo` follows `Bash`.
 - `launch_refuses_an_unregistered_session_or_server`: 404 `unknown_session`, and 403 `connector_not_in_session`.
-- `launch_refuses_a_server_changed_since_connect`: after the entry's `url`, and separately its `command`, is changed in `team.yaml`, launch answers 403 `connector_not_confirmed`, and the headers helper prints no header.
+- `launch_refuses_a_server_changed_since_connect`: after the entry's `url`, and separately its `command`, is changed in `team.yaml`, launch answers 403 `connector_not_confirmed`, and the headers helper prints nothing and exits non-zero.
+- `an_unconfirmed_server_is_left_out_of_the_session`: a custom http server in `team.yaml` with no entry, and one whose `url` changed since connect, are absent from `mcp.json` and from the registration's connectors, and `mcp__<server>__<tool>` is denied `connector_not_in_session`.
+- `a_custom_connector_adds_no_tier`: `run_session` for an agent without `network`, given a custom connector, registers its tiers unchanged; given Playwright, `network` is added as in step 12.
+- `launch_answers_503_when_the_store_fails`: with an in-memory store answering an error, launch answers 503 `secret_store_unavailable`.
 - `connector_run_execs_with_a_clean_environment`: against the fixture, only `PATH`, `HOME`, `LANG`, `TMPDIR` and the keys.
 - `the_notice_names_the_connectors`: the untrusted-content section names `github` when given.
 - `a_live_session_calls_a_custom_connector` (integration, `--integration`): Claude Code calls the fixture's `network` tool through the launcher; the stream's `system/init` line's `tools` list holds `mcp__fixture__<network tool>` and not `mcp__fixture__<denied tool>`; and the log has no `tool.called` for the denied tool.
@@ -227,14 +236,14 @@ Files: `orchestrator/session.rs`, `claude.rs`, `daemon/app.rs`, `daemon.rs`, `pr
 
 ### Task 7: Connect and disconnect in the daemon
 
-Files: `daemon/team.rs`, the event, command and RPC schemas, `protocol/src/event.rs`, `command.rs`.
+Files: `daemon/team.rs`, `daemon/web.rs`, the event, command and RPC schemas, `protocol/src/event.rs`, `command.rs`.
 
 - `connect_lists_tags_saves_and_records`: `connector.connect` keeps the entry, writes the team file, and records `connector.connected` with key names and `spec_sha256` only.
 - `an_unlabelled_tool_is_written_external_effect`: asserts the written entry's `tools.<name>` is `external_effect`.
-- `a_refused_connect_echoes_no_secret`: the error's text has no key value.
+- `a_refused_connect_echoes_no_secret`: the error's text has no key value; for `connector.connect` and `connector.tools` alike, a frame the schema refuses has no `error.data`.
 - `a_connect_command_body_holds_no_secret`: `connector_connect` validates without any value field, and the daemon records it unchanged.
 - `disconnect_removes_entry_and_keys_and_records`: another agent's same server is untouched.
-- `team_get_says_connect_again_for_an_unconfirmed_server`: a hand-edited `url` gives `state: connect_again`.
+- `team_get_says_connect_again_for_an_unconfirmed_server`: a hand-edited `url` gives `state: connect_again` in `connectors`, and `team` still validates against `team.schema.json`.
 
 - [ ] `feat(runtime): connect and disconnect an agent's MCP server`
 

@@ -4,7 +4,7 @@ Status: draft
 Branch: `phase/7-role-kits`
 Spec: `docs/SPEC.md` 5.6, 5.7, 8.3, 8.5, 8.6; F9
 Depends on: step 01 of this phase (connectors per agent, not yet committed), whose `ConnectorRefusal::ExternalEffectRefused` this step replaces; phase 6 (merged in #19), whose `question.asked` waiting projection and Today page this step extends
-Readiness: fresh-session reviewer, 2026-10-01, not ready → findings folded in; second-round confirmation pending
+Readiness: fresh-session reviewer, 2026-10-01, round 1 not ready → findings folded in; round 2 ready with findings, folded
 
 ## Goal
 
@@ -16,9 +16,9 @@ The ask:
 - **An `external_effect` call waits like a question (5.7).** With no matching grant, the hook denies the call with `approval_needed: <server> <tool> waits for the human (approval <seq>)` and records `tool_approval.requested { server, tool, input, input_sha256 }`.
   - The approval's id is the event's own seq, as a question's is the seq of its `question.asked`, so the event needs no field it cannot know before it is appended (finding B5).
   - `input` is the full compact JSON, never cut, so the human always sees all of what they allow, and a later call can be matched to the grant from the log.
-  - An input over 64 KiB is not asked about. It is denied `tool_input_too_large: <tool>'s input is over 64 KiB, too long to show you, so it is refused`, and nothing is recorded but the refused `tool.called`.
-- **The session ends** with reason `approval_needed`. It does not raise the task's `iteration`, counts towards `max_sessions` as any session does, and raises no escalation (finding S7).
-- **The task waits on the human.** It keeps its status, is listed in `waiting.list` while an approval is open, and the orchestrator starts no session for it until the approval is decided.
+  - An input over 64 KiB is not asked about. It is denied `tool_input_too_large: <tool>'s input is over 64 KiB, too long to show you, so it is refused`, and nothing is recorded but its `tool.denied`.
+- **The session ends.** The hook's denial stops the session, as a pause does, so it ends `aborted` with the detail `approval_needed: approval <seq>`; `tool_approval.requested` is the record of why, so `session.ended` gains no reason (finding R2-S8). It does not raise the task's `iteration`, counts towards `max_sessions` as any session does, and raises no escalation (finding S7).
+- **The task waits on the human.** It keeps its status, is listed in `waiting.list` while an approval is open, and the orchestrator starts no session for it until the approval is decided. An open approval counts as an open question does: `task_projections` gains `open_approvals`, raised by `tool_approval.requested` and lowered by `.granted` or `.refused`, and `waiting_on_human` becomes `open_questions > 0 OR open_approvals > 0`, which the orchestrator's rules already skip (finding R2-S7).
 - Rejected: holding the hook open until the human answers, because the hook has a 10-second limit and a session must not sit for hours. Rejected: an escalation with reason `permission`, because it moves the task to `escalated`, and asking is not something going wrong.
 
 The answer:
@@ -32,7 +32,7 @@ The grant:
 - **It is for the asking agent's next session about the task** (Note N3). The decision is given to that session as the human's message: "You may call `<tool>` once with the input you asked for", or "The human did not allow `<tool>`", with the note. A session about the task by another agent (a reviewer's) is not told and cannot use it. When that next session ends without using the grant, the grant lapses, and a later call asks again.
 - **Check and use are atomic.** The hook holds the daemon's one sessions lock across `judge` and `record_decision` (`decide_pre_tool_use`), so two identical calls after one grant cannot both run.
 - **`preauthorized_external_tools` does not apply to connector tools** (finding B3, ruled 2026-10-01). The hook never consults it for an `mcp__<server>__*` call: a connector tool tagged `external_effect` always asks, one grant per call, until step 05's allowances, which are the one pre-authorisation and which remove or map that field. `ApprovedCall`, `ToolCallContext.approved_calls` and `RequiresHumanApproval` stay unused by connector calls; `ApprovalKey` is the connector path's record, because it binds agent and task, which `ApprovedCall` does not.
-- **The Designer's plan gate** holds an `external_effect` connector call as it holds a write: before the Product Manager approves the plan, it is refused as a write would be, and not asked about.
+- **The Designer's plan gate** holds an `external_effect` connector call as it holds a write: before the Product Manager approves the plan, it is refused as a write would be, and not asked about. `check_design_plan` gains `ExternalEffect`, and the hook passes it for an `external_effect` connector call, before any grant lookup or ask (finding R2-S9).
 
 What a non-technical user sees:
 - **Today's list** of what waits on the user gets the row "<agent name> wants to use <server>". It opens `ToolApproval`, a dialog, which shows the tool's plain name, the whole input as the agent wrote it in an `untrusted` frame, an optional note, "Allow once" and "Don't allow".
@@ -46,16 +46,18 @@ Open, for the founder:
 ## File map
 
 ```
-docs/design/mockups/{ToolApproval,Today}.dc.html, canvas.json   Task 1
+docs/design/mockups/{ToolApproval,TodayBacklog}.dc.html, canvas.json   Task 1
 docs/decisions/0031-connector-calls-wait-for-the-human.md       creates: the ADR (Task 2)
-crates/core/src/governor/permissions.rs                         modifies: ApprovalKey, input_sha256, ApprovalNeeded (Task 2)
-crates/runtime/src/daemon/hooks.rs                              modifies: ask, grant lookup and use (Task 3)
-crates/runtime/src/orchestrator/session.rs                      modifies: end reason approval_needed (Task 3)
+crates/core/src/governor/permissions.rs                         modifies: ApprovalKey, input_sha256, ApprovalNeeded, check_design_plan (Task 2)
+crates/runtime/src/daemon/hooks.rs                              modifies: call site (Task 2); ask, grant lookup and use (Task 3)
+crates/runtime/src/orchestrator/session.rs                      modifies: the aborted detail approval_needed (Task 3)
 crates/runtime/src/orchestrator/messages.rs                     modifies: the decision as the human's message (Task 3)
 crates/runtime/src/daemon/team.rs                               modifies: tool_approve, tool_refuse (Task 3)
 docs/schemas/{event,command}.schema.json                        modifies: three events, approval on tool.called, two commands (Task 3)
 crates/protocol/src/event.rs, command.rs                        modifies: hand-written EventKind, EventBody, Command (Task 3)
 crates/store/src/waiting.rs, projections.rs                     modifies: open approvals wait on the human; open grants (Task 3)
+crates/store/src/migrations/0011_tool_approvals.sql             creates: open_approvals (Task 3)
+docs/schemas/rpc.schema.json                                    modifies: waiting row kind tool_approval (Task 3)
 crates/cli/src/human.rs, lib.rs                                 modifies: farik tool approve|refuse (Task 4)
 packages/protocol-client/src/mapping.ts                         modifies: the waiting row's camelCase mapping (Task 5)
 apps/web/src/pages/dialogs/ToolApproval.tsx, test               creates (Task 5)
@@ -84,13 +86,13 @@ pub struct OpenGrant { pub approval: u64, pub key: ApprovalKey }
 pub fn open_grants(events: &[Event]) -> Vec<OpenGrant>;     // granted, not used, not lapsed
 ```
 
-Wire (`snake_case`): events `tool_approval.requested { server, tool, input, input_sha256 }` (its seq is the approval id), `tool_approval.granted { approval, note? }`, `tool_approval.refused { approval, note? }`; `tool.called` gains `approval?`; session end reason `approval_needed`; commands `tool_approve { approval, note? }`, `tool_refuse { approval, note? }`; `waiting.list` gains rows of kind `tool_approval`.
+Wire (`snake_case`): events `tool_approval.requested { server, tool, input, input_sha256 }` (its seq is the approval id), `tool_approval.granted { approval, note? }`, `tool_approval.refused { approval, note? }`; `tool.called` gains `approval?`; commands `tool_approve { approval, note? }`, `tool_refuse { approval, note? }`; `waiting.list` gains rows of kind `tool_approval`.
 
 ## Tasks
 
 ### Task 1: The approval, mocked up
 
-Files: on the canvas (https://claude.ai/artifact/6tNaCmNojhixuiJBsDPsmf), copied into `docs/design/mockups/`: `ToolApproval`, new, with a long input and a short one; Today's row. Each at desktop and phone width.
+Files: on the canvas (https://claude.ai/artifact/6tNaCmNojhixuiJBsDPsmf), copied into `docs/design/mockups/`: `ToolApproval`, new, with a long input and a short one; Today's row, on `TodayBacklog`, the repository's one Today board. Each at desktop and phone width.
 
 Gate (O3): the founder approves the boards, and the approval is written into this plan's Decisions with its date. Task 5 does not start until then; Tasks 2 to 4 do not depend on the boards.
 
@@ -98,7 +100,7 @@ Gate (O3): the founder approves the boards, and the approval is written into thi
 
 ### Task 2: The governor's check, with grants
 
-Files: `permissions.rs`, ADR 0031. Produces `input_sha256`, `ApprovalKey`, `ApprovalNeeded`, `InputTooLarge`, the new `evaluate_connector_call`.
+Files: `permissions.rs`, ADR 0031, and, as call sites only, `daemon/hooks.rs` (`judge_connector`, passing `None` until Task 3). Produces `input_sha256`, `ApprovalKey`, `ApprovalNeeded`, `InputTooLarge`, the new `evaluate_connector_call`.
 
 - `external_effect_without_a_grant_needs_approval`: `ApprovalNeeded`.
 - `external_effect_with_a_grant_runs_and_names_it`: `Ok((ExternalEffect, Some(7)))`.
@@ -106,16 +108,20 @@ Files: `permissions.rs`, ADR 0031. Produces `input_sha256`, `ApprovalKey`, `Appr
 - `a_large_input_is_refused_not_asked`: an input of 64 KiB and one byte gives `InputTooLarge`, with or without a grant.
 - `the_approval_key_ignores_key_order`: `{a:1,b:2}` and `{b:2,a:1}` give one `input_sha256`.
 - `a_network_tool_ignores_grants`: `Ok((Network, None))` whatever `granted` holds.
+- `a_designers_external_effect_waits_for_the_plan`: `check_design_plan(UiUxDesigner, ExternalEffect, false)` is `DesignPlanNotApproved`.
 
 - [ ] `feat(core): let an external_effect connector call run once the human allows it`
 
 ### Task 3: The hook, and approvals that wait
 
-Files: `daemon/hooks.rs`, `orchestrator/session.rs`, `orchestrator/messages.rs`, `daemon/team.rs`, the event and command schemas, `protocol/src/event.rs`, `command.rs`, `store/src/waiting.rs`, `projections.rs`.
+Files: `daemon/hooks.rs`, `orchestrator/session.rs`, `orchestrator/messages.rs`, `daemon/team.rs`, the event, command and RPC schemas, `protocol/src/event.rs`, `command.rs`, `store/src/waiting.rs`, `projections.rs`, migration `0011_tool_approvals.sql`.
 
-- `an_external_effect_call_asks_and_stops`: the call is denied `approval_needed`, `tool_approval.requested` is recorded with the full input and its `input_sha256`, and the session ends with reason `approval_needed`.
+The hook reads only the task's events for `open_grants`, through the log's query by task, so the sessions lock stays short. `append` returns the seq it wrote, so the hook appends `tool_approval.requested` first and names its seq in the denial; a `tool.denied` that then fails to record leaves a request with no denial, which is harmless, since the call was denied either way.
+
+- `an_external_effect_call_asks_and_stops`: the call is denied `approval_needed`, `tool_approval.requested` is recorded with the full input and its `input_sha256`, and the session ends `aborted` with the detail `approval_needed: approval <seq>`.
 - `a_large_input_is_refused_not_asked`: the hook denies `tool_input_too_large` and records no `tool_approval.requested`.
-- `an_approval_stop_is_not_a_failed_try`: after it, the task's `iteration` is unchanged, `max_sessions` counts the session, and no escalation is open.
+- `an_approval_stop_is_not_a_failed_try`: after it, the task's `iteration` is unchanged, `max_sessions` counts the session, and no escalation is open (checked against `orchestrator/human.rs`'s special handling of `aborted`).
+- `a_designers_call_before_the_plan_is_refused_not_asked`: a Designer's `external_effect` call before plan approval is refused, and no `tool_approval.requested` is recorded.
 - `an_open_approval_waits_on_the_human`: the task is listed in `waiting.list` and the orchestrator starts no session for it.
 - `approve_then_the_same_call_runs_once`: after `tool_approve`, the matching call in the asking agent's next session is allowed with `approval` on `tool.called`, and a second one asks again.
 - `a_grant_is_used_once_under_concurrency`: two identical calls through `decide_pre_tool_use` from two threads after one grant; exactly one is allowed.
