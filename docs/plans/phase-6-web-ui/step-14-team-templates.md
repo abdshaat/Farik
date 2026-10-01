@@ -281,6 +281,8 @@ Fix wave (u2): `firstDay` keeps the suggested six's figure, which the SPEC deriv
 
 Fix wave (I1, M4): setup holds an unavailable agent off by role: `unavailableRoles(proposed)` maps `team.propose`'s `unavailable` ids through the suggested agents to roles; `draftOf` starts a saved team's and the suggested team's rows of those roles unticked, and SetupTeam disables the checkbox by `agent.role`. `takes_a_saved_designer_off_without_a_sandbox` (a saved Designer `nova`, `unavailable: [iris]`): Nova's row is unticked, cannot be ticked, says it needs Docker's sandbox, and Continue validates a team without it. `starts_from_scratch` asserts no checkbox on the two required rows (kills W5).
 
+Fix wave (u3): the Wizard's lead is `teamLead` (or `teamLeadScratch`) whatever the start, and `teamLeadSaved` ("Filled from <name>…") is a paragraph after the starts and before the rows; `starts_from_a_saved_team` asserts that document order.
+
 ## Verification
 
 ```

@@ -127,11 +127,7 @@ export function SetupTeam() {
 		<Wizard
 			step={4}
 			title={t("teamTitle")}
-			lead={
-				draft.from
-					? t("teamLeadSaved", { name: draft.from })
-					: t(scratch ? "teamLeadScratch" : "teamLead")
-			}
+			lead={t(scratch ? "teamLeadScratch" : "teamLead")}
 			carried={!!draft.from}
 		>
 			<Choice<Start>
@@ -178,6 +174,7 @@ export function SetupTeam() {
 					},
 				]}
 			/>
+			{draft.from && <p>{t("teamLeadSaved", { name: draft.from })}</p>}
 			<ul className={styles.members} aria-label={t("teamMembers")}>
 				{draft.members.map((member, index) => {
 					const { agent, on: included } = member;

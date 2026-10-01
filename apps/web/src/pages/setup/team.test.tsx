@@ -979,10 +979,20 @@ describe("team setup's three starts", () => {
 		expect(three.closest("label")?.textContent).toContain(
 			"Mira, Ada and Theo · saved 28 September",
 		);
-		expect(
-			await screen.findByText(t("teamLeadSaved", { name: "Three of us" })),
-		).toBeTruthy();
+		const filled = await screen.findByText(
+			t("teamLeadSaved", { name: "Three of us" }),
+		);
 		const list = screen.getByRole("list", { name: en.teamMembers });
+		// The screen's intro, then the starts, then "Filled from…" beside the rows it filled.
+		const intro = screen.getByText(en.teamLead);
+		const starts = screen.getByRole("group", { name: en.startsLegend });
+		const follows = (a: Node, b: Node) =>
+			(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0;
+		expect([
+			follows(intro, starts),
+			follows(starts, filled),
+			follows(filled, list),
+		]).toEqual([true, true, true]);
 		const names = within(list).getAllByRole("textbox") as HTMLInputElement[];
 		expect(names.map((n) => n.value)).toEqual(["Mira", "Ada", "Theo"]);
 		// The template's persona, or the role's where it has none.
