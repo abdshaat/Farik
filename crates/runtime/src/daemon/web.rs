@@ -729,14 +729,12 @@ fn query(state: &DaemonState, name: &str, params: &Value) -> Result<Value, Failu
             for task in &board {
                 let mut wire = task_wire(task, &team, open.as_deref());
                 // A UI change in review says where its design review stands, for the board's card.
-                if task.status == TaskStatus::Verifying {
-                    let (ui_change, review) = deps
-                        .transitions
-                        .design_review(&team, &task.task_id)
-                        .map_err(|error| internal(&error))?;
-                    if ui_change {
-                        wire["design_review_state"] = json!(review.state);
-                    }
+                // One that cannot be read (its contract or branch) leaves only its card without
+                // the state, not the whole board blank; the task's page says what failed.
+                if task.status == TaskStatus::Verifying
+                    && let Ok((true, review)) = deps.transitions.design_review(&team, &task.task_id)
+                {
+                    wire["design_review_state"] = json!(review.state);
                 }
                 tasks.push(wire);
             }
@@ -2021,6 +2019,34 @@ mod tests {
         // A UI change in review says where its design review stands, so the board need not ask.
         assert_eq!(row("FRK-2")["design_review_state"], "waiting", "{listed}");
         assert_eq!(row("FRK-1").get("design_review_state"), None, "{listed}");
+        drop(socket);
+        handle.shutdown().await.expect("the daemon stops");
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn lists_the_tasks_when_a_design_review_cannot_be_read() {
+        let harness = a_ui_change("rpc-board-design-review-unread");
+        let contract = harness
+            .project
+            .deps
+            .files
+            .root()
+            .join(".farik/contracts/FRK-2.yaml");
+        std::fs::write(&contract, "not: [a contract\n").expect("written");
+        let (handle, mut socket) = driven(&harness).await;
+        let listed = query(&mut socket, 1, "tasks.list", &json!({}), "tasksListResult").await;
+        // One unreadable review leaves its card without a state; the board still shows.
+        let ids: Vec<&Value> = listed["tasks"]
+            .as_array()
+            .map(|tasks| tasks.iter().map(|task| &task["task_id"]).collect())
+            .unwrap_or_default();
+        assert_eq!(ids, vec!["FRK-1", "FRK-2"], "{listed}");
+        assert_eq!(
+            listed["tasks"][1].get("design_review_state"),
+            None,
+            "{listed}"
+        );
         drop(socket);
         handle.shutdown().await.expect("the daemon stops");
     }
