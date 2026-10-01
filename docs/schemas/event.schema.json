@@ -185,13 +185,14 @@
     },
     "taskCreatedBody": {
       "title": "Task Created Body",
-      "description": "A request was filed as a draft contract (docs/SPEC.md section 5.16 item 1).",
+      "description": "A request was filed as a draft contract (docs/SPEC.md section 5.16 item 1). from_chat_message is the seq of the agent's chat_message.posted whose proposed request the user sent (ADR 0026); created_by is then human, since the user sent it, and one proposal is sent once.",
       "type": "object",
       "additionalProperties": false,
       "required": ["summary", "created_by"],
       "properties": {
         "summary": { "$ref": "#/$defs/contractSummary" },
-        "created_by": { "type": "string", "description": "The agent id that filed the request, or human." }
+        "created_by": { "type": "string", "description": "The agent id that filed the request, or human." },
+        "from_chat_message": { "type": "integer", "minimum": 1, "maximum": 18446744073709551615 }
       }
     },
     "requestTriagedBody": {

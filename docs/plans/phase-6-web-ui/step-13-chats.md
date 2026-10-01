@@ -28,6 +28,10 @@ As built (Task 4, 2026-09-30):
 As built (Task 5, 2026-09-30):
 - `CostScope::Purpose` groups `cost_records` by its `purpose` column; `costs.summary`'s `conversations_today_usd` is today's `chat` row, 0 with none, and `rpc.schema.json` requires it. The web's line is Task 7's.
 
+As built (Task 6, 2026-09-30):
+- `file_request` checks the link (`check_proposal`) and files under one process-wide lock, `FILING`, which every filing takes; the command line never links a chat, so a lock across processes is not needed. The refusals read, after the gate's "the request ": "links to message <seq>, which is not an agent's reply in a chat", "links to message <seq>, a reply that proposes no request", "was already sent, as FRK-n".
+- `sent_as` reads every `task.created` (ponytail). `request.file`'s schema gains `from_chat_message`; `files_a_proposal_once` races `file_words` on two threads, five rounds.
+
 Signatures, not bodies; test names and what each asserts, not test code; around 300 lines at most (ADR 0008).
 
 ## Goal
@@ -221,7 +225,7 @@ Tests:
 - `files_a_proposal_once` — two `request.file` calls with one `from_chat_message`, raced on two threads, file one task; the other is refused as already sent.
 - `shows_what_was_sent` — `chat.messages` gives that reply `sent_as: "FRK-1"` and null for others.
 
-- [ ] `feat(runtime): file a chat's proposed request by the human's hand`
+- [x] `feat(runtime): file a chat's proposed request by the human's hand`
 
 ### Task 7: The chat list and the one-to-one in the browser
 

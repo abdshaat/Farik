@@ -180,6 +180,7 @@ fn filed(project: &Project, request: Value, io: &CliIo<'_>) -> Result<(TaskId, S
         None,
         io.clock.now(),
         &crate::contract::event_ids(project),
+        None,
     )
     .map_err(|error| match error {
         RequestError::Refused { reason } => format!("the request {reason}"),

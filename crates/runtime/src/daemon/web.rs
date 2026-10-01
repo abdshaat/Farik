@@ -528,6 +528,7 @@ async fn push(
 }
 
 /// A JSON-RPC error: its code and its sentence, and for invalid params what the schema found.
+#[derive(Debug)]
 pub(super) struct Failure {
     code: i64,
     message: String,

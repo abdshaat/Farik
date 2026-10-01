@@ -597,6 +597,7 @@ fn shows_a_tasks_events_cost_and_children() {
         Some(&"FRK-1".parse().expect("a task id")),
         at(),
         &ids,
+        None,
     )
     .expect("the child is filed");
     project::record_as(

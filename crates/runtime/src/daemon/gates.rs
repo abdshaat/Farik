@@ -473,7 +473,8 @@ pub(super) async fn call(
     };
     if method == "request.file" {
         let text = params["text"].as_str().unwrap_or_default().to_string();
-        let filed = off_the_worker(move || file_words(&deps, &text)).await?;
+        let link = params["from_chat_message"].as_u64();
+        let filed = off_the_worker(move || file_words(&deps, &text, link)).await?;
         state.wakes().notify_one();
         return Ok(filed);
     }
@@ -489,8 +490,13 @@ async fn off_the_worker<T: Send + 'static>(
         .unwrap_or_else(|error| Err(internal(&error)))
 }
 
-/// `request.file`: the person's words filed as a draft request of the human's.
-fn file_words(deps: &ToolDeps, text: &str) -> Result<Value, Failure> {
+/// `request.file`: the person's words filed as a draft request of the human's, from a chat's
+/// proposed request when `from_chat_message` names its reply.
+fn file_words(
+    deps: &ToolDeps,
+    text: &str,
+    from_chat_message: Option<u64>,
+) -> Result<Value, Failure> {
     let team = deps.files.read_team().map_err(|e| internal(&e))?;
     let request =
         request_from_text(text, placeholder_budget_usd(&team.rules())).map_err(|sentence| {
@@ -511,6 +517,7 @@ fn file_words(deps: &ToolDeps, text: &str) -> Result<Value, Failure> {
         None,
         deps.clock.now(),
         &deps.ids,
+        from_chat_message,
     )
     .map_err(|error| match error {
         RequestError::Refused { reason } => Failure::new(REFUSED, format!("the request {reason}")),
@@ -941,6 +948,195 @@ pub(super) mod tests {
             "requestFileResult",
         );
         assert_eq!(harness.project.events(&[EventKind::TaskCreated]).len(), 2);
+    }
+
+    /// A message in dev-a's chat by `author`, proposing a request when `proposes`.
+    fn chat_line(harness: &Harness, author: &str, proposes: bool) -> u64 {
+        let deps = &harness.project.deps;
+        crate::chat::post_chat(
+            &deps.log,
+            deps.clock.as_ref(),
+            &deps.ids,
+            crate::chat::NewChatMessage {
+                chat: "dev-a".to_string(),
+                author: author.to_string(),
+                text: "Could customers also pay with Apple Pay?".to_string(),
+                in_reply_to: None,
+                request: proposes.then(|| crate::chat::ProposedRequest {
+                    title: "Let customers pay with Apple Pay".to_string(),
+                    text: "Add Apple Pay to the checkout beside the card form.".to_string(),
+                }),
+                session_id: None,
+            },
+        )
+        .expect("the chat message is recorded")
+    }
+
+    /// The `from_chat_message` of every `task.created` in the log.
+    fn links(harness: &Harness) -> Vec<Option<u64>> {
+        harness
+            .project
+            .events(&[EventKind::TaskCreated])
+            .iter()
+            .map(|event| match &event.body {
+                farik_protocol::event::EventBody::TaskCreated(body) => {
+                    body.from_chat_message.map(std::num::NonZeroU64::get)
+                }
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn files_a_chat_proposal() {
+        let harness = driven("gates-file-proposal");
+        let reply = chat_line(&harness, "dev-a", true);
+        // The user's edit of the prefilled box is what is filed.
+        let text = "Let customers pay with Apple Pay and Google Pay\n\nAdd both to the checkout.";
+        let filed = call(
+            &harness.daemon,
+            "request.file",
+            &json!({ "text": text, "from_chat_message": reply }),
+            "requestFileResult",
+        );
+        assert_eq!(filed, json!({ "task_id": "FRK-1" }));
+        let contract = harness.project.file("FRK-1");
+        assert_eq!(contract["intent"], text);
+        assert_eq!(
+            contract["title"],
+            "Let customers pay with Apple Pay and Google Pay"
+        );
+        assert_eq!(contract["created_by"], "human");
+        let created = harness.project.events(&[EventKind::TaskCreated]);
+        match &created[0].body {
+            farik_protocol::event::EventBody::TaskCreated(body) => {
+                assert_eq!(body.created_by, "human");
+                assert_eq!(
+                    body.from_chat_message.map(std::num::NonZeroU64::get),
+                    Some(reply)
+                );
+            }
+            other => panic!("not a task.created: {other:?}"),
+        }
+        // A request filed from the Today page links to nothing.
+        call(
+            &harness.daemon,
+            "request.file",
+            &json!({ "text": "Add a dark mode to the settings page" }),
+            "requestFileResult",
+        );
+        assert_eq!(links(&harness), [Some(reply), None]);
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn refuses_a_bad_proposal_link() {
+        let harness = driven("gates-file-proposal-refused");
+        let asked = chat_line(&harness, "human", false);
+        let plain = chat_line(&harness, "dev-a", false);
+        let proposal = chat_line(&harness, "dev-a", true);
+        let text = "Let customers pay with Apple Pay at the checkout";
+        call(
+            &harness.daemon,
+            "request.file",
+            &json!({ "text": text, "from_chat_message": proposal }),
+            "requestFileResult",
+        );
+        // A channel message is no chat reply either.
+        let channel = harness
+            .project
+            .deps
+            .log
+            .read(&farik_store::EventQuery::default())
+            .expect("the log reads")
+            .last()
+            .map_or(0, |event| event.envelope.seq)
+            + 100;
+        for (seq, sentence) in [
+            (
+                asked,
+                format!(
+                    "the request links to message {asked}, which is not an agent's reply in a chat"
+                ),
+            ),
+            (
+                channel,
+                format!(
+                    "the request links to message {channel}, which is not an agent's reply in a chat"
+                ),
+            ),
+            (
+                plain,
+                format!("the request links to message {plain}, a reply that proposes no request"),
+            ),
+            (
+                proposal,
+                "the request was already sent, as FRK-1".to_string(),
+            ),
+        ] {
+            let refused = rpc(
+                &harness.daemon,
+                "request.file",
+                &json!({ "text": text, "from_chat_message": seq }),
+            );
+            assert_eq!(refused["error"]["code"], -32005, "{refused}");
+            assert_eq!(refused["error"]["message"], sentence.as_str());
+        }
+        assert_eq!(links(&harness), [Some(proposal)]);
+        assert_eq!(
+            harness
+                .project
+                .deps
+                .files
+                .list_contracts()
+                .expect("listed")
+                .len(),
+            1
+        );
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn files_a_proposal_once() {
+        let harness = driven("gates-file-proposal-once");
+        // Raced a few times, so that a check outside the lock is caught every run, not by luck.
+        for round in 0..5 {
+            let reply = chat_line(&harness, "dev-a", true);
+            let start = Arc::new(std::sync::Barrier::new(2));
+            let racers: Vec<_> = (0..2)
+                .map(|_| {
+                    let (deps, start) = (harness.project.deps.clone(), start.clone());
+                    std::thread::spawn(move || {
+                        start.wait();
+                        super::file_words(
+                            &deps,
+                            "Let customers pay with Apple Pay at the checkout",
+                            Some(reply),
+                        )
+                    })
+                })
+                .collect();
+            let answers: Vec<_> = racers
+                .into_iter()
+                .map(|racer| racer.join().expect("the racer ends"))
+                .collect();
+            let filed = answers.iter().filter(|answer| answer.is_ok()).count();
+            assert_eq!(filed, 1, "round {round}: {answers:?}");
+            let refused = format!(
+                "{:?}",
+                answers
+                    .iter()
+                    .find_map(|answer| answer.as_ref().err())
+                    .expect("one is refused")
+            );
+            assert!(
+                refused.contains("code: -32005")
+                    && refused.contains("the request was already sent, as FRK-"),
+                "{refused}"
+            );
+        }
+        assert_eq!(links(&harness).len(), 5);
     }
 
     #[tokio::test]

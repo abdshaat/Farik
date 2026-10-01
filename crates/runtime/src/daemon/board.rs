@@ -288,7 +288,7 @@ fn channel_messages(deps: &ToolDeps, params: &Value) -> Result<Value, Failure> {
 }
 
 /// `chat.messages { agent_id, before_seq?, limit }`: the newest page of one agent's chat before
-/// `before_seq`, oldest first within it.
+/// `before_seq`, oldest first within it, each reply with the request its proposal was sent as.
 fn chat_messages(deps: &ToolDeps, params: &Value) -> Result<Value, Failure> {
     let page = chat_page(
         &deps.log,
@@ -300,6 +300,23 @@ fn chat_messages(deps: &ToolDeps, params: &Value) -> Result<Value, Failure> {
             .unwrap_or(100),
     )
     .map_err(|e| internal(&e))?;
+    // ponytail: every task.created is read; an index on the link if chats grow past thousands.
+    let sent: Vec<(u64, String)> = deps
+        .log
+        .read(&EventQuery {
+            kinds: vec![EventKind::TaskCreated],
+            ..EventQuery::default()
+        })
+        .map_err(|e| internal(&e))?
+        .into_iter()
+        .filter_map(|event| match event.body {
+            EventBody::TaskCreated(body) => Some((
+                body.from_chat_message?.get(),
+                event.envelope.ids.task_id?.as_str().to_string(),
+            )),
+            _ => None,
+        })
+        .collect();
     let messages: Vec<Value> = page
         .iter()
         .filter_map(|event| match &event.body {
@@ -310,6 +327,10 @@ fn chat_messages(deps: &ToolDeps, params: &Value) -> Result<Value, Failure> {
                 "text": body.text,
                 "in_reply_to": body.in_reply_to,
                 "request": body.request,
+                "sent_as": sent
+                    .iter()
+                    .find(|(seq, _)| *seq == event.envelope.seq)
+                    .map(|(_, task_id)| task_id),
             })),
             _ => None,
         })
@@ -1198,10 +1219,11 @@ mod tests {
                         "title": "Let customers pay with Apple Pay",
                         "text": "Add Apple Pay at checkout, beside the card form."
                     },
+                    "sent_as": null,
                 },
                 {
                     "seq": three, "at": at_now, "author": "human", "text": "Three.",
-                    "in_reply_to": null, "request": null,
+                    "in_reply_to": null, "request": null, "sent_as": null,
                 },
             ])
         );
@@ -1217,6 +1239,71 @@ mod tests {
             );
             assert_eq!(refused["error"]["code"], -32602, "{refused}");
         }
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn shows_what_was_sent() {
+        let harness = super::super::gates::tests::driven("board-chat-sent");
+        let deps = &harness.project.deps;
+        let proposal = |text: &str| {
+            crate::chat::post_chat(
+                &deps.log,
+                deps.clock.as_ref(),
+                &deps.ids,
+                crate::chat::NewChatMessage {
+                    chat: "dev-a".to_string(),
+                    author: "dev-a".to_string(),
+                    text: text.to_string(),
+                    in_reply_to: None,
+                    request: Some(crate::chat::ProposedRequest {
+                        title: "Let customers pay with Apple Pay".to_string(),
+                        text: "Add Apple Pay at checkout, beside the card form.".to_string(),
+                    }),
+                    session_id: None,
+                },
+            )
+            .expect("the reply is recorded")
+        };
+        let asked = chatted(&harness, "dev-a", "human", "Apple Pay?", None);
+        let sent = proposal("Here is one.");
+        let unsent = proposal("And another.");
+        super::super::gates::tests::call(
+            &harness.daemon,
+            "request.file",
+            &json!({
+                "text": "Let customers pay with Apple Pay at the checkout",
+                "from_chat_message": sent,
+            }),
+            "requestFileResult",
+        );
+
+        let messages = query(
+            &harness.daemon,
+            "chat.messages",
+            &json!({ "agent_id": "dev-a" }),
+            "chatMessagesResult",
+        )["messages"]
+            .clone();
+        let sent_as: Vec<(u64, Value)> = messages
+            .as_array()
+            .expect("messages")
+            .iter()
+            .map(|message| {
+                (
+                    message["seq"].as_u64().expect("a seq"),
+                    message["sent_as"].clone(),
+                )
+            })
+            .collect();
+        assert_eq!(
+            sent_as,
+            [
+                (asked, Value::Null),
+                (sent, json!("FRK-1")),
+                (unsent, Value::Null)
+            ]
+        );
     }
 
     #[test]

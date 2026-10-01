@@ -59,11 +59,6 @@ pub fn create(
     } else {
         "; from the command line, farik contract lock takes the lock and farik triage gives the size"
     };
-    let ids = EventIds {
-        team_id: project.ids.team_id.clone(),
-        project_id: project.ids.project_id.clone(),
-        ..EventIds::default()
-    };
     let contract = file_request(
         &project.files,
         &project.log,
@@ -71,7 +66,12 @@ pub fn create(
         HUMAN,
         parent.as_ref(),
         now,
-        &ids,
+        &EventIds {
+            team_id: project.ids.team_id.clone(),
+            project_id: project.ids.project_id.clone(),
+            ..EventIds::default()
+        },
+        None,
     )
     .map_err(|error| match error {
         RequestError::Refused { reason } => {

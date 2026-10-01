@@ -222,6 +222,7 @@ impl SetupHost for CliHost {
             None,
             self.clock.now(),
             &crate::contract::event_ids(&project),
+            None,
         )
         .map_err(|error| match error {
             RequestError::Refused { reason } => failed(format!("the request {reason}")),

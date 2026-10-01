@@ -4,6 +4,8 @@
 //! reason: `farik board --json` and `farik_read_board` say one thing.
 
 use std::fmt;
+use std::num::NonZeroU64;
+use std::sync::{Mutex, PoisonError};
 
 use chrono::{DateTime, Utc};
 use farik_core::contract::{TaskContract, TaskId, TaskKind, TaskStatus};
@@ -17,13 +19,13 @@ use farik_core::governor::team_rules::TeamRules;
 use farik_core::governor::transition_table::TransitionActor;
 use farik_protocol::command::{Command, RequestSize, command_from_value};
 use farik_protocol::event::{
-    ContractLockedBody, ContractSummary, ContractUnlockedBody, EventBody, EventIds, FarikEvent,
-    RequestTriagedBody, RequestTriagedBodySize, TaskCreatedBody, new_event,
+    ContractLockedBody, ContractSummary, ContractUnlockedBody, EventBody, EventIds, EventKind,
+    FarikEvent, RequestTriagedBody, RequestTriagedBodySize, TaskCreatedBody, new_event,
 };
 use serde_json::{Value, json};
 
 use crate::files::{FilesError, ProjectFiles};
-use crate::{EventLog, Projections, StoreError, TaskProjection};
+use crate::{EventLog, EventQuery, Projections, StoreError, TaskProjection};
 
 /// Who the human is in the log: the id every act of theirs is recorded under.
 const HUMAN: &str = "human";
@@ -181,10 +183,17 @@ pub fn fields_not_the_authors(wire: &Value) -> Vec<&'static str> {
 /// The contract goes through `command_from_value`, so that a request filed from a terminal is held
 /// to exactly the rules one arriving from an agent is.
 ///
+/// With `from_chat_message`, the request is a chat's proposal the user sent: that seq must be an
+/// agent's `chat_message.posted` carrying a `request` no `task.created` names yet, and
+/// `task.created` names it. Requests are filed one at a time, the check among them, so that two
+/// tabs cannot send one proposal twice.
+///
 /// # Errors
 ///
-/// `Refused` when `wire` is not a mapping, sets a field that is not its author's, or breaks a
-/// contract rule; `Files` or `Store` when the contract or the events cannot be written.
+/// `Refused` when `wire` is not a mapping, sets a field that is not its author's, breaks a
+/// contract rule, or links to a message that is not an unsent proposal; `Files` or `Store` when the
+/// contract or the events cannot be read or written.
+#[allow(clippy::too_many_arguments)]
 pub fn file_request(
     files: &ProjectFiles,
     log: &EventLog,
@@ -193,7 +202,13 @@ pub fn file_request(
     parent: Option<&TaskId>,
     now: DateTime<Utc>,
     ids: &EventIds,
+    from_chat_message: Option<u64>,
 ) -> Result<TaskContract, RequestError> {
+    // ponytail: one lock for the process; a second process (the command line) never links a chat.
+    let _filing = FILING.lock().unwrap_or_else(PoisonError::into_inner);
+    if let Some(seq) = from_chat_message {
+        check_proposal(log, seq)?;
+    }
     let written = fields_not_the_authors(&wire);
     if !written.is_empty() {
         return Err(RequestError::Refused {
@@ -264,6 +279,7 @@ pub fn file_request(
     let mut bodies = vec![EventBody::TaskCreated(TaskCreatedBody {
         created_by: created_by.to_string(),
         summary: summary_of(&contract),
+        from_chat_message: from_chat_message.and_then(NonZeroU64::new),
     })];
     if let Some(parent) = parent {
         bodies.push(EventBody::RequestTriaged(RequestTriagedBody {
@@ -279,6 +295,51 @@ pub fn file_request(
         log.append(&event)?;
     }
     Ok(*contract)
+}
+
+/// Held while a request is filed, so that a proposal's check and its filing are one step.
+static FILING: Mutex<()> = Mutex::new(());
+
+/// Refused unless `seq` is an agent's chat reply that proposes a request not yet sent.
+fn check_proposal(log: &EventLog, seq: u64) -> Result<(), RequestError> {
+    let refused = |reason: String| Err(RequestError::Refused { reason });
+    let event = log
+        .read(&EventQuery {
+            after_seq: Some(seq.saturating_sub(1)),
+            limit: Some(1),
+            ..EventQuery::default()
+        })?
+        .into_iter()
+        .find(|event| event.envelope.seq == seq);
+    let reply = match event.map(|event| event.body) {
+        Some(EventBody::ChatMessagePosted(reply)) if reply.author != HUMAN => reply,
+        _ => {
+            return refused(format!(
+                "links to message {seq}, which is not an agent's reply in a chat"
+            ));
+        }
+    };
+    if reply.request.is_none() {
+        return refused(format!(
+            "links to message {seq}, a reply that proposes no request"
+        ));
+    }
+    let sent = log
+        .read(&EventQuery {
+            kinds: vec![EventKind::TaskCreated],
+            ..EventQuery::default()
+        })?
+        .into_iter()
+        .find(|event| match &event.body {
+            EventBody::TaskCreated(body) => {
+                body.from_chat_message.map(NonZeroU64::get) == Some(seq)
+            }
+            _ => false,
+        });
+    match sent.and_then(|event| event.envelope.ids.task_id) {
+        Some(task_id) => refused(format!("was already sent, as {}", task_id.as_str())),
+        None => Ok(()),
+    }
 }
 
 /// Records the human's size of a request, and the kind that follows from it: large makes it an
@@ -735,7 +796,7 @@ mod tests {
     fn files_a_request_with_the_next_id_the_log_hands_out() {
         let (project, log) = a_project("requests-next");
         let files = project.files();
-        let request = file_request(&files, &log, a_request(), "human", None, at(), &ids())
+        let request = file_request(&files, &log, a_request(), "human", None, at(), &ids(), None)
             .expect("the request is filed");
 
         assert_eq!(request.id.as_str(), "FRK-1");
@@ -752,8 +813,17 @@ mod tests {
         let (project, log) = a_project("requests-child");
         let files = project.files();
         let epic = TaskId::try_from("FRK-1").expect("an id");
-        let request = file_request(&files, &log, a_request(), "pm", Some(&epic), at(), &ids())
-            .expect("the child is filed");
+        let request = file_request(
+            &files,
+            &log,
+            a_request(),
+            "pm",
+            Some(&epic),
+            at(),
+            &ids(),
+            None,
+        )
+        .expect("the child is filed");
 
         assert_eq!(request.kind, TaskKind::Task);
         assert_eq!(request.parent.as_ref().map(|p| p.as_str()), Some("FRK-1"));
@@ -787,7 +857,7 @@ mod tests {
         let files = project.files();
         let mut wire = a_request();
         wire["id"] = serde_json::json!("FRK-9");
-        let refused = file_request(&files, &log, wire, "human", None, at(), &ids())
+        let refused = file_request(&files, &log, wire, "human", None, at(), &ids(), None)
             .expect_err("an id is Farik's to give");
 
         let RequestError::Refused { reason } = refused else {
@@ -812,6 +882,7 @@ mod tests {
             None,
             at(),
             &ids(),
+            None,
         )
         .expect("the request is filed");
         let projections = open_projections(Arc::clone(&log)).expect("the projections open");

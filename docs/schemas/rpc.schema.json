@@ -1934,6 +1934,12 @@
               "type": "string",
               "maxLength": 20000,
               "description": "The request in the person's words: its first line is the title, and the whole is the intent. The daemon refuses a text under 20 characters."
+            },
+            "from_chat_message": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 18446744073709551615,
+              "description": "The seq of the agent's chat reply whose proposed request this is: the reply must carry a request not already sent, or the daemon refuses with a sentence. task.created records it."
             }
           },
           "required": [
@@ -3858,7 +3864,7 @@
       }
     },
     "chatMessagesResult": {
-      "description": "One page of the agent's chat_message.posted, oldest first within the page: seq and at from the envelope, and the body's author, text (line breaks kept), in_reply_to and request, null when it has none. waiting says why the user's newest message has no answer yet, null when the agent answered or nobody wrote; when several reasons apply the first wins: retired, key_refused (the team is paused because the provider refused the key), day_spent (the team's daily budget; the message is kept), asleep with until, answering (a session answers or is about to), no_answer (a session ended without a reply: the user asks again). No event is written for a chat that did not run (ADR 0026).",
+      "description": "One page of the agent's chat_message.posted, oldest first within the page: seq and at from the envelope, and the body's author, text (line breaks kept), in_reply_to and request, null when it has none; sent_as is the request the user sent a reply's proposal as (request.file's from_chat_message), null when not sent. waiting says why the user's newest message has no answer yet, null when the agent answered or nobody wrote; when several reasons apply the first wins: retired, key_refused (the team is paused because the provider refused the key), day_spent (the team's daily budget; the message is kept), asleep with until, answering (a session answers or is about to), no_answer (a session ended without a reply: the user asks again). No event is written for a chat that did not run (ADR 0026).",
       "type": "object",
       "additionalProperties": false,
       "required": ["messages", "waiting"],
@@ -3885,7 +3891,7 @@
           "items": {
             "type": "object",
             "additionalProperties": false,
-            "required": ["seq", "at", "author", "text", "in_reply_to", "request"],
+            "required": ["seq", "at", "author", "text", "in_reply_to", "request", "sent_as"],
             "properties": {
               "seq": { "type": "integer", "minimum": 1, "maximum": 18446744073709551615 },
               "at": { "type": "string", "format": "date-time" },
@@ -3909,6 +3915,12 @@
                       "text": { "type": "string" }
                     }
                   }
+                ]
+              },
+              "sent_as": {
+                "oneOf": [
+                  { "type": "null" },
+                  { "type": "string", "pattern": "^FRK-[0-9]{1,6}$" }
                 ]
               }
             }
