@@ -102,6 +102,12 @@ impl ConnectCodes {
         }
         opens
     }
+
+    /// Makes `code`, which `redeem` spent, live again, unless a newer code took its place: the
+    /// browser it was traded for got no session, so the link still has to open.
+    pub fn give_back(&self, code: &str) {
+        locked(&self.live).get_or_insert_with(|| code.to_string());
+    }
 }
 
 /// How long a browser session lasts: thirty days, which is also the cookie's `Max-Age`.
@@ -332,20 +338,23 @@ pub(super) async fn connect(
     let code = serde_json::from_slice::<Value>(&body)
         .ok()
         .and_then(|value| value.get("code")?.as_str().map(str::to_string));
-    if !code.is_some_and(|code| web.codes.redeem(&code)) {
+    let Some(code) = code.filter(|code| web.codes.redeem(code)) else {
         return (
             StatusCode::UNAUTHORIZED,
             Json(serde_json::json!({ "error": USED_LINK })),
         )
             .into_response();
-    }
+    };
     match web.sessions.issue(web.clock.now()) {
         Ok(secret) => (
             StatusCode::NO_CONTENT,
             [(header::SET_COOKIE, session_cookie(&secret))],
         )
             .into_response(),
-        Err(error) => (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()).into_response(),
+        Err(error) => {
+            web.codes.give_back(&code);
+            (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()).into_response()
+        }
     }
 }
 
@@ -1127,12 +1136,17 @@ mod tests {
 
     /// A daemon whose browser routes answer, and a code to connect with.
     fn served(name: &str) -> (TestDaemon, String) {
+        served_with(name, None)
+    }
+
+    /// `served`, its sessions kept in `file` when one is given.
+    fn served_with(name: &str, file: Option<PathBuf>) -> (TestDaemon, String) {
         let daemon = TestDaemon::new(name, |_| {});
         let codes = ConnectCodes::default();
         let code = codes.issue().expect("a code");
         assert!(daemon.state.set_web(WebState {
             codes,
-            sessions: BrowserSessions::open(None).expect("the sessions open"),
+            sessions: BrowserSessions::open(file).expect("the sessions open"),
             project_root: daemon.project.repo.path.clone(),
             credential: None,
             port: PORT,
@@ -1219,6 +1233,45 @@ mod tests {
                 json!({ "error": "this link has been used or is out of date; start farik serve again for a new one" })
             );
         }
+    }
+
+    #[test]
+    fn gives_a_spent_code_back_only_while_no_newer_one_is_live() {
+        let codes = ConnectCodes::default();
+        let old = codes.issue().expect("a code");
+        assert!(codes.redeem(&old));
+        let new = codes.issue().expect("a code");
+        codes.give_back(&old);
+        assert!(!codes.redeem(&old));
+        assert!(codes.redeem(&new));
+        codes.give_back(&new);
+        assert!(codes.redeem(&new));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn keeps_the_code_when_the_session_cannot_be_written() {
+        let folder =
+            std::env::temp_dir().join(format!("farik-web-unwritten-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&folder);
+        std::fs::create_dir_all(&folder).expect("made");
+        let (daemon, code) =
+            served_with("web-unwritten", Some(folder.join("browser-sessions.json")));
+        // The state folder is a file now, so the session cannot be kept.
+        std::fs::remove_dir(&folder).expect("removed");
+        std::fs::write(&folder, "").expect("written");
+        let failed = send(&daemon.state, connect(Some(ORIGIN), HOST, &code)).await;
+        assert_eq!(failed.status(), StatusCode::INTERNAL_SERVER_ERROR);
+        assert!(failed.headers().get(header::SET_COOKIE).is_none());
+
+        // The failure spent nothing: the same link opens once the folder is back.
+        std::fs::remove_file(&folder).expect("removed");
+        std::fs::create_dir_all(&folder).expect("made");
+        let opened = send(&daemon.state, connect(Some(ORIGIN), HOST, &code)).await;
+        assert_eq!(opened.status(), StatusCode::NO_CONTENT);
+        let again = send(&daemon.state, connect(Some(ORIGIN), HOST, &code)).await;
+        assert_eq!(again.status(), StatusCode::UNAUTHORIZED);
+        std::fs::remove_dir_all(&folder).expect("removed");
     }
 
     #[tokio::test(flavor = "multi_thread")]
