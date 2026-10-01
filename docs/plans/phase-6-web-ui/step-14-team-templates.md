@@ -273,6 +273,8 @@ Fix wave (M3): `agent.replace` takes `team_writes()` before its read and calls `
 
 Fix wave (M2): `template.apply` requires `saved_at`, the previewed template's, and refuses a template whose `saved_at` differs with -32005 `template_changed` at `/saved_at`, writing nothing (`refuses_a_template_saved_again_since_the_preview`). The page sends it from `templates.list` and words the code (`templateChanged`; `says_when_the_saved_team_changed_since_the_preview`). A hand edit that keeps `saved_at` is not caught; only the local user writes that folder.
 
+Fix wave (What changes): `template.preview`'s and `template.apply`'s `effects` start with one line per retired agent that holds an `in_progress` task, naming the task by id and title and saying it is put on hold until the user gives it to someone (the task `status_effects` blocks); the role is left out of the line, since the page calls the Software Developer "Developer". Model and effort changes were already `describe_change`'s lines ("Ada now uses claude-sonnet-5.", pinned in `previews_without_writing`); left as they are. Asserted in `applies_with_the_retirements_effects`.
+
 ## Verification
 
 ```

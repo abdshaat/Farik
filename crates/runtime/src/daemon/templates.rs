@@ -5,6 +5,7 @@
 use std::collections::BTreeSet;
 use std::sync::Arc;
 
+use farik_core::contract::TaskStatus;
 use farik_core::team::{
     AgentStatus, Team, TemplateApplied, apply_template, describe_change, template_from_team,
 };
@@ -85,7 +86,7 @@ pub(super) fn query(
         }));
     }
     let (before, applied, _) = applying(deps, templates, slug_of(params), None)?;
-    Ok(answer(&before, &applied))
+    answer(deps, &before, &applied)
 }
 
 fn slug_of(params: &Value) -> &str {
@@ -122,17 +123,48 @@ fn applying(
     Ok((current, applied, template.name.to_string()))
 }
 
-/// The preview's answer, and the apply's.
-fn answer(before: &Team, applied: &TemplateApplied) -> Value {
-    json!({
+/// The preview's answer, and the apply's. Its effects say first what each retirement puts on hold:
+/// the `in_progress` tasks the retired agent holds, which its retirement blocks.
+fn answer(deps: &ToolDeps, before: &Team, applied: &TemplateApplied) -> Result<Value, Failure> {
+    let board = deps.projections.board().map_err(|e| internal(&e))?;
+    let mut effects = Vec::new();
+    for agent in before
+        .agents
+        .iter()
+        .filter(|agent| applied.retired.iter().any(|id| id == agent.id.as_str()))
+    {
+        let held: Vec<String> = board
+            .iter()
+            .filter(|row| {
+                row.assignee_id.as_deref() == Some(agent.id.as_str())
+                    && row.status == TaskStatus::InProgress
+            })
+            .map(|row| format!("{} \u{201c}{}\u{201d}", row.task_id.as_str(), row.title))
+            .collect();
+        let name = agent.display_name.as_str();
+        match held.as_slice() {
+            [] => {}
+            [task] => effects.push(format!(
+                "{name} is retired. {name}'s unfinished task, {task}, is put on hold until you \
+                 give it to someone."
+            )),
+            tasks => effects.push(format!(
+                "{name} is retired. {name}'s unfinished tasks, {}, are put on hold until you give \
+                 them to someone.",
+                tasks.join(", ")
+            )),
+        }
+    }
+    effects.extend(describe_change(before, &applied.team));
+    Ok(json!({
         "team": applied.team,
         "kept": applied.kept,
         "retired": applied.retired,
         "removed": applied.removed,
         "added": applied.added,
-        "effects": describe_change(before, &applied.team),
+        "effects": effects,
         "errors": errors_wire(&applied.errors),
-    })
+    }))
 }
 
 /// `template.apply`: worked out again under the lock that writes the team, so what is written is
@@ -147,6 +179,7 @@ fn apply(
 ) -> Result<Value, Failure> {
     let _writing = state.team_writes();
     let (before, applied, name) = applying(deps, templates, slug, Some(saved_at))?;
+    let answered = answer(deps, &before, &applied)?;
     if !applied.errors.is_empty() {
         return Err(Refused::Errors(applied.errors).into());
     }
@@ -164,7 +197,7 @@ fn apply(
         .map_err(|error| internal(&format!("{error:?}")))?;
     }
     append(deps, team_updated(&applied.team, Some(&name)))?;
-    Ok(answer(&before, &applied))
+    Ok(answered)
 }
 
 /// The methods of this module, whose params the schema already passed.
@@ -521,6 +554,12 @@ mod tests {
         harness.in_progress("FRK-1", "dev-b", "dev-a");
         worked(&harness, "dev-b");
         let shown = preview(&harness, "pair");
+        assert_eq!(
+            shown["effects"][0],
+            "dev-b is retired. dev-b's unfinished task, FRK-1 \u{201c}Add a login page\u{201d}, is put \
+             on hold until you give it to someone.",
+            "the preview names what a retirement puts on hold"
+        );
         let before = seq_count(&harness);
 
         let applied = call(
