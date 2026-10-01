@@ -1,6 +1,6 @@
 # Phase 7, step 01: Connectors per agent
 
-Status: draft
+Status: built; landing review pending
 Branch: `phase/7-role-kits`
 Spec: `docs/SPEC.md` 5.6, 6.7, 8.2, 8.5, 8.6; F9
 Depends on: phase 6 (merged in #19), whose step 05 keeps the model credential in the keychain (`crates/runtime/src/credential.rs`, with ADR 0022's file fallback) and whose step 12 built the connector base (ADR 0026)
@@ -275,7 +275,7 @@ Files: `apps/web/src/pages/AgentEdit.tsx`, `ConnectorAdd.tsx`, their tests, `str
 
 `docs/SPEC.md`: 5.6 (custom servers, labels, `external_effect_refused` until approvals), 6.7 (connect, per-agent keys, the file fallback), 8.2 (the launcher in `mcp.json`), 8.5 (the two events), 8.6 (the launcher, the clean environment, `connector_not_confirmed`, and the three no-sandbox routes to a key). `docs/plans/project-plan.md`: phase 7's row 01 and the `mcp_servers` decision bullet (`credential_keys`, `tools`, `source: custom`), already amended by the readiness commit, corrected if execution changed them. `docs/design/role-kits.md`: its steps table, likewise.
 
-- [ ] `docs(spec): connectors per agent with their own keys`
+- [x] `docs(spec): record connectors per agent`
 
 ## Verification
 
