@@ -1315,6 +1315,7 @@ fn connecting_the_account_takes_the_waiting_project_on() {
     );
     until("the team is driven", || daemon_file(&repository).exists());
     let status = serve_status(serving.port, &serving.cookie);
+    let port = serving.port;
     let (ran, out, err) = serving.interrupted();
     let root = repository.path.canonicalize().expect("the root");
     assert_eq!(
@@ -1323,6 +1324,13 @@ fn connecting_the_account_takes_the_waiting_project_on() {
         "{status}"
     );
     assert_eq!(ran.code, 130, "{out}\n{err}");
+    // It found the project: what it lacks is the account, and it says so.
+    let first = out.lines().next().unwrap_or_default();
+    assert_eq!(
+        first,
+        format!("no AI account yet: connect one in the browser, on 127.0.0.1:{port}"),
+        "{out}"
+    );
 }
 
 #[test]

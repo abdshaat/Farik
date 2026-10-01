@@ -125,6 +125,12 @@ async fn set_up(
     no_open: bool,
     linked: &mut Option<u16>,
 ) -> Result<Option<(PathBuf, u16)>, String> {
+    // A project found with no account waits on the account, not on a project.
+    let lacks = if waiting.is_some() {
+        "no AI account yet: connect one in the browser"
+    } else {
+        "no project yet: farik is set up in the browser"
+    };
     let (chosen, mut choice) = watch::channel(None);
     let host: Arc<dyn SetupHost> = Arc::new(CliHost {
         env: io.env.clone(),
@@ -168,10 +174,7 @@ async fn set_up(
             Err(error) => return Err(error.to_string()),
         }
     };
-    say(
-        &mut io.stdout,
-        &format!("no project yet: farik is set up in the browser, on 127.0.0.1:{bound}"),
-    );
+    say(&mut io.stdout, &format!("{lacks}, on 127.0.0.1:{bound}"));
     if *linked != Some(bound) {
         print_link(io, bound, &code, no_open);
         *linked = Some(bound);
