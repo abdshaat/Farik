@@ -173,7 +173,7 @@ Files: `team.schema.json`, `crates/core/src/team.rs`, `crates/core/Cargo.toml`, 
 - `keeps_the_source_error_at_its_field`: `source: npm` is still a schema error at `/agents/1/mcp_servers/1/source` (the existing case in `team.rs`).
 - `spec_hash_ignores_key_order_and_sees_every_field`: `{a:1,b:2}` and `{b:2,a:1}` give one `canonical_json`; changing `url`, `command`, one arg, one header, one key name or one tag each changes `spec_sha256`.
 
-- [ ] `feat(core): describe custom MCP servers in the team file`
+- [x] `feat(core): describe custom MCP servers in the team file`
 
 ### Task 3: Per-agent keys, in the keychain or a private file
 

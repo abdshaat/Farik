@@ -83,21 +83,94 @@
         "name",
         "source"
       ],
+      "description": "One connector an agent's task sessions get (spec 5.6). A builtin one is its name alone. A custom one says how it is started (stdio: command and args) or reached (http: url and headers), the names of the agent's keys it is given, and the label of each of its tools. validate_team checks what this schema does not, each at its own field: transport is required with source custom and absent with builtin; command and args go with stdio only; url and headers with http only; command with stdio and url with http are required; a url holds no userinfo or query (url_holds_secret); a header names only a key in credential_keys (header_key_unknown); a custom name is not farik or a builtin's (connector_name_reserved); and one name appears once on an agent (connector_name_twice).",
       "properties": {
         "name": {
           "type": "string",
-          "minLength": 1,
-          "maxLength": 64,
-          "description": "The connector's name. validate_team refuses one Farik does not ship with unknown_connector; the one it ships is playwright."
+          "pattern": "^[a-z][a-z0-9-]{0,39}$",
+          "description": "The connector's name on this agent, and its tools' mcp__<name>__ prefix: lower-case letters, digits and hyphens, never an underscore. validate_team refuses a builtin one Farik does not ship with unknown_connector; the one it ships is playwright."
         },
         "source": {
           "type": "string",
           "enum": [
-            "builtin"
+            "builtin",
+            "custom"
           ],
-          "description": "Where the connector's definition comes from: builtin, shipped in the farik binary."
+          "description": "Where the connector's definition comes from: builtin, shipped in the farik binary; custom, added by the user to this agent."
+        },
+        "transport": {
+          "type": "string",
+          "enum": [
+            "stdio",
+            "http"
+          ],
+          "description": "How a custom connector is reached: stdio, a program Farik starts on the host; http, a web address spoken to over streamable HTTP. The old SSE transport is not supported."
+        },
+        "command": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500,
+          "description": "The program a stdio connector is started with, found on PATH."
+        },
+        "args": {
+          "type": "array",
+          "maxItems": 64,
+          "items": {
+            "type": "string",
+            "maxLength": 1000
+          },
+          "description": "The stdio connector's arguments. Never a secret: keys reach the program as environment variables."
+        },
+        "url": {
+          "type": "string",
+          "format": "uri",
+          "pattern": "^https?://",
+          "maxLength": 2048,
+          "description": "The http connector's address. It is written here as it is, so it holds no userinfo and no query."
+        },
+        "headers": {
+          "type": "object",
+          "maxProperties": 16,
+          "propertyNames": {
+            "pattern": "^[A-Za-z0-9-]{1,64}$"
+          },
+          "additionalProperties": {
+            "type": "string",
+            "maxLength": 1000
+          },
+          "description": "Headers sent to an http connector, each a template that may hold {KEY} for a key in credential_keys and nothing else, filled in at launch."
+        },
+        "credential_keys": {
+          "type": "array",
+          "maxItems": 8,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+          },
+          "description": "The names of this agent's keys the connector is given. Their values are kept in the keychain or a private file, never here."
+        },
+        "tools": {
+          "type": "object",
+          "maxProperties": 256,
+          "propertyNames": {
+            "pattern": "^[A-Za-z0-9_-]{1,64}$"
+          },
+          "additionalProperties": {
+            "$ref": "#/$defs/connectorTag"
+          },
+          "description": "Every tool the connector listed when it was connected, with the user's label. A tool it lists later is refused until it is connected again."
         }
       }
+    },
+    "connectorTag": {
+      "type": "string",
+      "enum": [
+        "network",
+        "external_effect",
+        "denied"
+      ],
+      "description": "A connector tool's label (spec 5.6): network, it only reads; external_effect, it changes something outside the sandbox and asks the human; denied, never offered."
     },
     "role": {
       "type": "string",
@@ -191,7 +264,7 @@
           "items": {
             "$ref": "#/$defs/mcpServer"
           },
-          "description": "The connectors this agent's explore, implement and design review sessions get (spec 5.6). Any agent may have one; team.propose gives the ui_ux_designer playwright."
+          "description": "The connectors this agent's task sessions get (spec 5.6). Any agent may have one; team.propose gives the ui_ux_designer playwright."
         }
       }
     },

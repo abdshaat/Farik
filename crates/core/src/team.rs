@@ -2,19 +2,23 @@
 //! Rust types, the validator that turns an untrusted JSON value into one, and the three rules the
 //! schema cannot say.
 
+use std::collections::BTreeMap;
+use std::fmt::Write as _;
 use std::sync::LazyLock;
 
 use jsonschema::Validator;
 use serde_json::Value;
+use sha2::{Digest as _, Sha256};
 
 use crate::contract::{named, pointer, repeated_ids, with_integers_normalised};
-use crate::governor::permissions::{PermissionTier, default_tiers};
+use crate::governor::permissions::{ConnectorTag, PermissionTier, default_tiers};
 use crate::governor::team_rules::TeamRules;
 
 pub use crate::contract::{Role, ValidationError};
 pub use crate::generated::team::{
-    Agent, AgentId, AgentStatus, Budgets as TeamBudgets, FarikTeam as Team,
-    JudgmentJudge as JudgeChoice, JudgmentRequired, Model as AgentModel, ModelEffort as Effort,
+    Agent, AgentId, AgentStatus, Budgets as TeamBudgets, ConnectorTag as ConnectorTagWire,
+    FarikTeam as Team, JudgmentJudge as JudgeChoice, JudgmentRequired, McpServer as McpServerWire,
+    McpServerSource, McpServerTransport, Model as AgentModel, ModelEffort as Effort,
     PermissionTier as PermissionTierWire, Permissions as TeamPermissions, Policy as TeamPolicy,
     PolicyHumanAcceptsContracts as HumanAcceptsContracts, PolicyIntegration as Integration,
     Role as RoleWire, Rules as RulesWire, SessionLimits as SessionLimitsWire,
@@ -181,7 +185,7 @@ pub fn validate_team(input: &Value) -> Result<Team, Vec<ValidationError>> {
             });
         }
     }
-    errors.extend(unknown_connectors(&team));
+    errors.extend(connector_errors(&team));
     let judgment = team.judgment();
     if let Some(role) = named_judge(judgment.judge)
         && !team.has_active(role)
@@ -218,25 +222,272 @@ pub fn validate_team(input: &Value) -> Result<Team, Vec<ValidationError>> {
     }
 }
 
-/// One `unknown_connector` refusal per connector, on any agent's list, that Farik does not ship
-/// (F8).
-fn unknown_connectors(team: &Team) -> Vec<ValidationError> {
+/// Every connector rule the schema cannot say (spec 5.6, F8), each refusal at its own field: a
+/// built-in one Farik ships and nothing else; a custom one named for nothing Farik reserves, with
+/// the fields of its transport and no other's, an address that holds no secret, and headers that
+/// name only its own keys; and one name once on an agent.
+fn connector_errors(team: &Team) -> Vec<ValidationError> {
     let mut errors = Vec::new();
     for (index, agent) in team.agents.iter().enumerate() {
+        let mut names = Vec::new();
         for (at, server) in agent.mcp_servers.iter().flatten().enumerate() {
             let name = server.name.as_str();
-            if !BUILTIN_CONNECTORS.contains(&name) {
-                errors.push(ValidationError {
-                    path: format!("/agents/{index}/mcp_servers/{at}/name"),
-                    message: format!(
-                        "unknown_connector: {name} is not a connector Farik ships; the one it \
-                         ships is playwright."
+            let mut refused = entry_errors(server);
+            if names.contains(&name) {
+                refused.insert(
+                    0,
+                    (
+                        "name".to_string(),
+                        format!(
+                            "connector_name_twice: this agent already has a connector named \
+                             {name}."
+                        ),
                     ),
-                });
+                );
             }
+            names.push(name);
+            errors.extend(refused.into_iter().map(|(field, message)| ValidationError {
+                path: format!("/agents/{index}/mcp_servers/{at}/{field}"),
+                message,
+            }));
         }
     }
     errors
+}
+
+/// One `mcp_servers` entry's refusals, each as its field below the entry and its message.
+fn entry_errors(server: &McpServerWire) -> Vec<(String, String)> {
+    let name = server.name.as_str();
+    let given = present_fields(server);
+    let mut refused = Vec::new();
+    let mut refuse = |field: &str, message: String| refused.push((field.to_string(), message));
+    if server.source == McpServerSource::Builtin {
+        if !BUILTIN_CONNECTORS.contains(&name) {
+            refuse(
+                "name",
+                format!(
+                    "unknown_connector: {name} is not a connector Farik ships; the one it ships \
+                     is playwright."
+                ),
+            );
+        }
+        for field in given {
+            refuse(
+                field,
+                format!("A connector Farik ships has no {field}: Farik knows it."),
+            );
+        }
+        return refused;
+    }
+    if name == "farik" || BUILTIN_CONNECTORS.contains(&name) {
+        refuse(
+            "name",
+            format!(
+                "connector_name_reserved: {name} is a name Farik keeps for itself. Name this \
+                 connector something else."
+            ),
+        );
+    }
+    let (other, required, what) = match server.transport {
+        None => {
+            refuse(
+                "transport",
+                "Say how this connector is reached: stdio, a command Farik starts, or http, a \
+                 web address."
+                    .to_string(),
+            );
+            return refused;
+        }
+        Some(McpServerTransport::Stdio) => (["url", "headers"], "command", "started by a command"),
+        Some(McpServerTransport::Http) => (["command", "args"], "url", "reached at a web address"),
+    };
+    for field in other {
+        if given.contains(&field) {
+            refuse(
+                field,
+                format!("This connector is {what}, so it has no {field}."),
+            );
+        }
+    }
+    if !given.contains(&required) {
+        refuse(
+            required,
+            format!("A connector {what} needs its {required}."),
+        );
+    }
+    if let Some(url) = &server.url
+        && url_holds_secret(url)
+    {
+        refuse(
+            "url",
+            "url_holds_secret: this address carries a name, a password or a query, and the team \
+             file is shared. A service whose address holds a key is not supported yet."
+                .to_string(),
+        );
+    }
+    let keys: Vec<&str> = server
+        .credential_keys
+        .iter()
+        .flatten()
+        .map(|key| key.as_str())
+        .collect();
+    for (header, template) in &server.headers {
+        if !header_names_only(template, &keys) {
+            let header = header.as_str();
+            refuse(
+                &format!("headers/{header}"),
+                format!(
+                    "header_key_unknown: {header} may hold {{KEY}} only for a key this connector \
+                     is given in credential_keys."
+                ),
+            );
+        }
+    }
+    refused
+}
+
+/// The fields beside `name` and `source` an entry gives, in the schema's order.
+fn present_fields(server: &McpServerWire) -> Vec<&'static str> {
+    [
+        ("transport", server.transport.is_some()),
+        ("command", server.command.is_some()),
+        ("args", !server.args.is_empty()),
+        ("url", server.url.is_some()),
+        ("headers", !server.headers.is_empty()),
+        ("credential_keys", server.credential_keys.is_some()),
+        ("tools", !server.tools.is_empty()),
+    ]
+    .into_iter()
+    .filter_map(|(field, given)| given.then_some(field))
+    .collect()
+}
+
+/// Whether an address carries userinfo or a query, which a committed team file must not hold.
+fn url_holds_secret(url: &str) -> bool {
+    let rest = url.split_once("://").map_or(url, |(_, rest)| rest);
+    let authority = rest.split(['/', '?', '#']).next().unwrap_or_default();
+    authority.contains('@') || rest.contains('?')
+}
+
+/// Whether every `{` in a header template opens a `{KEY}` for one of `keys`.
+fn header_names_only(template: &str, keys: &[&str]) -> bool {
+    template.split('{').skip(1).all(|part| {
+        part.split_once('}')
+            .is_some_and(|(key, _)| keys.contains(&key))
+    })
+}
+
+/// A connector tool's label as the schema spells it, as the governor's.
+fn connector_tag(tag: ConnectorTagWire) -> ConnectorTag {
+    match tag {
+        ConnectorTagWire::Network => ConnectorTag::Network,
+        ConnectorTagWire::ExternalEffect => ConnectorTag::ExternalEffect,
+        ConnectorTagWire::Denied => ConnectorTag::Denied,
+    }
+}
+
+/// A custom connector, as `validate_team` let it through.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CustomServer {
+    /// Its name on the agent, and its tools' `mcp__<name>__` prefix.
+    pub name: String,
+    /// How Farik starts or reaches it.
+    pub transport: CustomTransport,
+    /// The names of the agent's keys it is given; their values are never in the team file.
+    pub credential_keys: Vec<String>,
+    /// Each tool the server listed at connect, with the user's label.
+    pub tools: BTreeMap<String, ConnectorTag>,
+}
+
+/// How a custom connector is started or reached.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CustomTransport {
+    /// A program Farik starts on the host, spoken to over its standard input and output.
+    Stdio {
+        /// The program, found on `PATH`.
+        command: String,
+        /// Its arguments.
+        args: Vec<String>,
+    },
+    /// A web address, spoken to over streamable HTTP.
+    Http {
+        /// The address.
+        url: String,
+        /// Each header's template, which may hold `{KEY}`.
+        headers: BTreeMap<String, String>,
+    },
+}
+
+/// The custom connector a validated `mcp_servers` entry describes; `None` for a built-in one.
+/// This is the crate's one mapping from the generated entry.
+#[must_use]
+pub fn custom_server(server: &McpServerWire) -> Option<CustomServer> {
+    if server.source != McpServerSource::Custom {
+        return None;
+    }
+    let transport = match server.transport? {
+        McpServerTransport::Stdio => CustomTransport::Stdio {
+            command: server.command.as_deref()?.clone(),
+            args: server
+                .args
+                .iter()
+                .map(|arg| arg.as_str().to_string())
+                .collect(),
+        },
+        McpServerTransport::Http => CustomTransport::Http {
+            url: server.url.as_deref()?.clone(),
+            headers: server
+                .headers
+                .iter()
+                .map(|(name, value)| (name.as_str().to_string(), value.as_str().to_string()))
+                .collect(),
+        },
+    };
+    Some(CustomServer {
+        name: server.name.as_str().to_string(),
+        transport,
+        credential_keys: server
+            .credential_keys
+            .iter()
+            .flatten()
+            .map(|key| key.as_str().to_string())
+            .collect(),
+        tools: server
+            .tools
+            .iter()
+            .map(|(tool, tag)| (tool.as_str().to_string(), connector_tag(*tag)))
+            .collect(),
+    })
+}
+
+/// `value` as compact JSON with every object's keys sorted, at every depth: `serde_json`'s own
+/// form, since this workspace builds it without `preserve_order` (the test pins that).
+#[must_use]
+pub fn canonical_json(value: &Value) -> String {
+    value.to_string()
+}
+
+/// The sha256, in lower-case hex, of the canonical JSON of what a custom connector runs as: its
+/// transport, command and args or url and headers, key names and tool labels (ADR 0030). Its name
+/// is not in it: the name is where the keys are kept.
+#[must_use]
+pub fn spec_sha256(server: &CustomServer) -> String {
+    let mut definition = match &server.transport {
+        CustomTransport::Stdio { command, args } => {
+            serde_json::json!({ "transport": "stdio", "command": command, "args": args })
+        }
+        CustomTransport::Http { url, headers } => {
+            serde_json::json!({ "transport": "http", "url": url, "headers": headers })
+        }
+    };
+    definition["credential_keys"] = serde_json::json!(server.credential_keys);
+    definition["tools"] = serde_json::json!(server.tools);
+    Sha256::digest(canonical_json(&definition).as_bytes())
+        .iter()
+        .fold(String::with_capacity(64), |mut hex, byte| {
+            let _ = write!(hex, "{byte:02x}");
+            hex
+        })
 }
 
 /// The plan check (`docs/SPEC.md` section 5.3), with what the team left out filled in.
@@ -499,9 +750,12 @@ mod tests {
         SMALL_ENOUGH_QUESTION, Team, TeamPermissions, TeamPolicy, changes_code, defaults,
         validate_team,
     };
+    use super::{CustomServer, CustomTransport, canonical_json, custom_server, spec_sha256};
+    use crate::governor::permissions::ConnectorTag;
     use crate::governor::team_rules::{
         DEFAULT_DOCUMENT_PATHS, DEFAULT_PROTECTED_PATHS, DEFAULT_UI_PATHS, TeamRules,
     };
+    use std::collections::BTreeMap;
 
     fn team(wire: &Value) -> Team {
         validate_team(wire).expect("the fixture is a team")
@@ -1465,5 +1719,380 @@ mod tests {
                 PermissionTier::ExternalEffect,
             ]
         );
+    }
+
+    /// A team whose first agent has `servers` as its connectors.
+    fn with_servers(servers: Value) -> Value {
+        let mut wire = a_team_wire();
+        wire["agents"][0]["mcp_servers"] = servers;
+        wire
+    }
+
+    fn a_stdio_server() -> Value {
+        json!({
+            "name": "github",
+            "source": "custom",
+            "transport": "stdio",
+            "command": "npx",
+            "args": ["-y", "@example/github-mcp"],
+            "credential_keys": ["GITHUB_TOKEN"],
+            "tools": {
+                "search": "network",
+                "create_issue": "external_effect",
+                "delete_repo": "denied"
+            }
+        })
+    }
+
+    fn an_http_server() -> Value {
+        json!({
+            "name": "linear",
+            "source": "custom",
+            "transport": "http",
+            "url": "https://mcp.example.com/mcp",
+            "headers": { "Authorization": "Bearer {API_KEY}" },
+            "credential_keys": ["API_KEY"],
+            "tools": { "list_issues": "network" }
+        })
+    }
+
+    fn the_custom_servers(wire: &Value) -> Vec<Option<CustomServer>> {
+        team(wire).agents[0]
+            .mcp_servers
+            .iter()
+            .flatten()
+            .map(custom_server)
+            .collect()
+    }
+
+    #[test]
+    fn accepts_a_custom_stdio_and_a_custom_http_server() {
+        let wire = with_servers(json!([
+            a_stdio_server(),
+            an_http_server(),
+            { "name": "playwright", "source": "builtin" }
+        ]));
+        assert_eq!(
+            the_custom_servers(&wire),
+            [
+                Some(CustomServer {
+                    name: "github".to_string(),
+                    transport: CustomTransport::Stdio {
+                        command: "npx".to_string(),
+                        args: vec!["-y".to_string(), "@example/github-mcp".to_string()],
+                    },
+                    credential_keys: vec!["GITHUB_TOKEN".to_string()],
+                    tools: BTreeMap::from([
+                        ("create_issue".to_string(), ConnectorTag::ExternalEffect),
+                        ("delete_repo".to_string(), ConnectorTag::Denied),
+                        ("search".to_string(), ConnectorTag::Network),
+                    ]),
+                }),
+                Some(CustomServer {
+                    name: "linear".to_string(),
+                    transport: CustomTransport::Http {
+                        url: "https://mcp.example.com/mcp".to_string(),
+                        headers: BTreeMap::from([(
+                            "Authorization".to_string(),
+                            "Bearer {API_KEY}".to_string()
+                        )]),
+                    },
+                    credential_keys: vec!["API_KEY".to_string()],
+                    tools: BTreeMap::from([("list_issues".to_string(), ConnectorTag::Network)]),
+                }),
+                None,
+            ]
+        );
+        let mut bare = a_stdio_server();
+        for field in ["args", "credential_keys", "tools"] {
+            bare.as_object_mut().expect("an object").remove(field);
+        }
+        assert_eq!(
+            the_custom_servers(&with_servers(json!([bare]))),
+            [Some(CustomServer {
+                name: "github".to_string(),
+                transport: CustomTransport::Stdio {
+                    command: "npx".to_string(),
+                    args: Vec::new(),
+                },
+                credential_keys: Vec::new(),
+                tools: BTreeMap::new(),
+            })],
+            "a server with no arguments, keys or tools is one"
+        );
+    }
+
+    #[test]
+    fn refuses_a_custom_server_named_farik_or_playwright() {
+        for name in ["farik", "playwright"] {
+            let mut server = a_stdio_server();
+            server["name"] = json!(name);
+            let refused = refusals(&with_servers(json!([server])));
+            assert_eq!(refused.len(), 1, "{name}: {refused:?}");
+            assert_eq!(refused[0].0, "/agents/0/mcp_servers/0/name", "{name}");
+            assert!(
+                refused[0].1.starts_with("connector_name_reserved: "),
+                "{name}: {}",
+                refused[0].1
+            );
+        }
+    }
+
+    #[test]
+    fn refuses_a_server_name_with_an_underscore() {
+        let mut server = a_stdio_server();
+        server["name"] = json!("my_server");
+        assert_eq!(
+            paths(&with_servers(json!([server]))),
+            ["/agents/0/mcp_servers/0/name"]
+        );
+        for name in ["My-server", "1server", "-server", &"x".repeat(41)] {
+            let mut server = a_stdio_server();
+            server["name"] = json!(name);
+            assert_eq!(
+                paths(&with_servers(json!([server]))),
+                ["/agents/0/mcp_servers/0/name"],
+                "{name}"
+            );
+        }
+        let mut server = a_stdio_server();
+        server["name"] = json!(format!("my-server-2{}", "x".repeat(29)));
+        assert!(validate_team(&with_servers(json!([server]))).is_ok());
+    }
+
+    #[test]
+    fn refuses_one_name_twice() {
+        let mut again = a_stdio_server();
+        again["command"] = json!("github-mcp");
+        let refused = refusals(&with_servers(json!([
+            a_stdio_server(),
+            an_http_server(),
+            again
+        ])));
+        assert_eq!(refused.len(), 1, "{refused:?}");
+        assert_eq!(refused[0].0, "/agents/0/mcp_servers/2/name");
+        assert!(
+            refused[0].1.starts_with("connector_name_twice: "),
+            "{}",
+            refused[0].1
+        );
+        let mut elsewhere = with_servers(json!([a_stdio_server()]));
+        elsewhere["agents"][1]["mcp_servers"] = json!([a_stdio_server()]);
+        assert!(
+            validate_team(&elsewhere).is_ok(),
+            "two agents may each have their own github"
+        );
+    }
+
+    #[test]
+    fn refuses_url_on_stdio_and_command_on_http() {
+        let at = |field: &str| format!("/agents/0/mcp_servers/0/{field}");
+        for (field, value) in [
+            ("url", json!("https://mcp.example.com/mcp")),
+            ("headers", json!({ "X-Team": "farik" })),
+        ] {
+            let mut server = a_stdio_server();
+            server[field] = value;
+            assert_eq!(
+                paths(&with_servers(json!([server]))),
+                [at(field)],
+                "{field}"
+            );
+        }
+        for (field, value) in [("command", json!("npx")), ("args", json!(["-y"]))] {
+            let mut server = an_http_server();
+            server[field] = value;
+            assert_eq!(
+                paths(&with_servers(json!([server]))),
+                [at(field)],
+                "{field}"
+            );
+        }
+        for (mut server, field) in [(a_stdio_server(), "command"), (an_http_server(), "url")] {
+            server.as_object_mut().expect("an object").remove(field);
+            assert_eq!(
+                paths(&with_servers(json!([server]))),
+                [at(field)],
+                "{field} is required"
+            );
+        }
+        let mut server = a_stdio_server();
+        server
+            .as_object_mut()
+            .expect("an object")
+            .remove("transport");
+        assert_eq!(
+            paths(&with_servers(json!([server]))),
+            [at("transport")],
+            "a custom server says how it is reached"
+        );
+        for (field, value) in [
+            ("transport", json!("stdio")),
+            ("command", json!("npx")),
+            ("credential_keys", json!(["API_KEY"])),
+            ("tools", json!({ "browser_click": "network" })),
+        ] {
+            let server = json!({ "name": "playwright", "source": "builtin", field: value });
+            assert_eq!(
+                paths(&with_servers(json!([server]))),
+                [at(field)],
+                "a built-in connector has no {field}"
+            );
+        }
+        let mut server = an_http_server();
+        server["transport"] = json!("sse");
+        assert_eq!(paths(&with_servers(json!([server]))), [at("transport")]);
+    }
+
+    #[test]
+    fn refuses_a_url_holding_a_secret() {
+        for url in [
+            "https://u:p@x.example/mcp",
+            "https://x.example/mcp?key=v",
+            "https://token@x.example/mcp",
+        ] {
+            let mut server = an_http_server();
+            server["url"] = json!(url);
+            let refused = refusals(&with_servers(json!([server])));
+            assert_eq!(refused.len(), 1, "{url}: {refused:?}");
+            assert_eq!(refused[0].0, "/agents/0/mcp_servers/0/url", "{url}");
+            assert!(
+                refused[0].1.starts_with("url_holds_secret: "),
+                "{url}: {}",
+                refused[0].1
+            );
+        }
+        let mut server = an_http_server();
+        server["url"] = json!("https://x.example/team@farik/mcp");
+        assert!(
+            validate_team(&with_servers(json!([server]))).is_ok(),
+            "an @ in the path is not userinfo"
+        );
+        let mut server = an_http_server();
+        server["url"] = json!("ftp://x.example/mcp");
+        assert_eq!(
+            paths(&with_servers(json!([server]))),
+            ["/agents/0/mcp_servers/0/url"]
+        );
+    }
+
+    #[test]
+    fn refuses_a_header_naming_an_undeclared_key() {
+        for template in ["Bearer {TOKEN}", "Bearer {API_KEY", "{API_KEY} {}"] {
+            let mut server = an_http_server();
+            server["headers"] = json!({ "Authorization": template });
+            let refused = refusals(&with_servers(json!([server])));
+            assert_eq!(refused.len(), 1, "{template}: {refused:?}");
+            assert_eq!(
+                refused[0].0, "/agents/0/mcp_servers/0/headers/Authorization",
+                "{template}"
+            );
+            assert!(
+                refused[0].1.starts_with("header_key_unknown: "),
+                "{template}: {}",
+                refused[0].1
+            );
+        }
+        let mut server = an_http_server();
+        server["headers"] = json!({ "Authorization": "Bearer {API_KEY}", "X-Team": "farik" });
+        assert!(validate_team(&with_servers(json!([server]))).is_ok());
+        let mut server = an_http_server();
+        server["credential_keys"] = json!(["api_key"]);
+        server["headers"] = json!({});
+        assert_eq!(
+            paths(&with_servers(json!([server]))),
+            ["/agents/0/mcp_servers/0/credential_keys/0"]
+        );
+    }
+
+    #[test]
+    fn refuses_a_tool_tagged_read() {
+        let mut server = a_stdio_server();
+        server["tools"]["x"] = json!("read");
+        assert_eq!(
+            paths(&with_servers(json!([server]))),
+            ["/agents/0/mcp_servers/0/tools/x"]
+        );
+    }
+
+    #[test]
+    fn keeps_builtin_entries_as_they_were() {
+        let full = a_full_team_wire();
+        assert!(validate_team(&full).is_ok());
+        let servers: Vec<&Value> = full["agents"]
+            .as_array()
+            .expect("the fixture's agents are a list")
+            .iter()
+            .filter_map(|agent| agent.get("mcp_servers"))
+            .collect();
+        assert_eq!(
+            servers,
+            [&json!([{ "name": "playwright", "source": "builtin" }])]
+        );
+    }
+
+    #[test]
+    fn keeps_the_source_error_at_its_field() {
+        let mut wire = a_team_wire();
+        wire["agents"][1]["mcp_servers"] = json!([
+            { "name": "playwright", "source": "builtin" },
+            { "name": "playwright", "source": "npm" }
+        ]);
+        assert_eq!(paths(&wire), ["/agents/1/mcp_servers/1/source"]);
+    }
+
+    #[test]
+    fn spec_hash_ignores_key_order_and_sees_every_field() {
+        let ordered: Value = serde_json::from_str(r#"{"a":1,"b":2}"#).expect("json");
+        let reversed: Value = serde_json::from_str(r#"{"b":2,"a":1}"#).expect("json");
+        assert_eq!(canonical_json(&ordered), canonical_json(&reversed));
+        let nested: Value =
+            serde_json::from_str(r#"{ "b": { "d": [1, {"f": 2, "e": 3}], "c": null }, "a": "x" }"#)
+                .expect("json");
+        assert_eq!(
+            canonical_json(&nested),
+            r#"{"a":"x","b":{"c":null,"d":[1,{"e":3,"f":2}]}}"#
+        );
+
+        let server = |wire: Value| {
+            custom_server(&serde_json::from_value::<super::McpServerWire>(wire).expect("a server"))
+                .expect("a custom server")
+        };
+        let stdio = server(a_stdio_server());
+        let http = server(an_http_server());
+        let hash = spec_sha256(&stdio);
+        assert_eq!(hash.len(), 64);
+        assert!(
+            hash.chars()
+                .all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase())
+        );
+        assert_eq!(spec_sha256(&server(a_stdio_server())), hash, "stable");
+        let mut renamed = a_stdio_server();
+        renamed["name"] = json!("github-two");
+        assert_eq!(
+            spec_sha256(&server(renamed)),
+            hash,
+            "the name is the account's, not the definition's"
+        );
+        let changes: [(Value, &str); 7] = [
+            (a_stdio_server(), "/command"),
+            (a_stdio_server(), "/args/1"),
+            (a_stdio_server(), "/credential_keys/0"),
+            (a_stdio_server(), "/tools/delete_repo"),
+            (an_http_server(), "/url"),
+            (an_http_server(), "/headers/Authorization"),
+            (an_http_server(), "/tools/list_issues"),
+        ];
+        for (mut wire, field) in changes {
+            let before = spec_sha256(&server(wire.clone()));
+            let value = wire.pointer_mut(field).expect("the field is there");
+            *value = match field {
+                "/tools/delete_repo" | "/tools/list_issues" => json!("external_effect"),
+                "/credential_keys/0" => json!("OTHER_KEY"),
+                _ => json!(format!("{}x", value.as_str().expect("a string"))),
+            };
+            assert_ne!(spec_sha256(&server(wire)), before, "{field}");
+        }
+        assert_ne!(spec_sha256(&http), hash);
     }
 }
