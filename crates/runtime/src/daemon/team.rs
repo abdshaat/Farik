@@ -170,8 +170,12 @@ pub(super) async fn connect(state: &DaemonState, params: &Value) -> Result<Value
     }
     if let Some(deps) = state.deps()
         && key_refused(&deps.log).map_err(|e| internal(&e))?
+        && let Err(refused) = handled(state, Command::TeamResume).await
+        // The human's own Resume can land first: the key is kept and the team runs, so the
+        // connect stands.
+        && paused(&deps.log).map_err(|e| internal(&e))?
     {
-        handled(state, Command::TeamResume).await?;
+        return Err(refused);
     }
     Ok(json!({ "stored_in": source, "taking_on": false }))
 }
@@ -1804,6 +1808,46 @@ pub(super) mod tests {
             "accountConnectResult",
         );
         assert!(paused(&harness.project.deps.log).expect("reads"));
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn keeps_a_connect_whose_resume_the_human_beat() {
+        // The human's Resume lands between the connect's look at the pause and its own resume.
+        let harness = Harness::new("team-reconnect-race", |_| {});
+        let orchestrator = Arc::new(harness.orchestrator(harness.recorded(Vec::new())));
+        let handler: crate::daemon::CommandHandler = Arc::new(move |command| {
+            let orchestrator = Arc::clone(&orchestrator);
+            Box::pin(async move {
+                if matches!(command, farik_protocol::command::Command::TeamResume) {
+                    orchestrator
+                        .handle(farik_protocol::command::Command::TeamResume)
+                        .await
+                        .expect("the human's resume");
+                }
+                orchestrator.handle(command).await
+            })
+        });
+        assert!(harness.daemon.set_command_handler(handler));
+        let store = Arc::new(MemoryStore::default());
+        served(&harness, &store, &[]);
+        paused_with(
+            &harness,
+            &json!({ "by": "farik", "reason": "credential_refused", "detail": "401" }),
+        );
+
+        let reply = rpc(
+            &harness.daemon,
+            "account.connect",
+            &json!({ "kind": "api_key", "secret": "sk-ant-api-new" }),
+        );
+
+        assert_eq!(
+            reply["result"],
+            json!({ "stored_in": "keychain", "taking_on": false }),
+            "{reply}"
+        );
+        assert!(!paused(&harness.project.deps.log).expect("reads"));
     }
 
     #[test]
