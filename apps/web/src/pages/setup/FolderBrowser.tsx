@@ -1,5 +1,6 @@
 import { Button } from "@farik/ui";
 import { useState } from "react";
+import { daemonSaid } from "../../app/refusals.ts";
 import { useQuery } from "../../app/store.ts";
 import { t } from "../../strings/t.ts";
 import styles from "./setup.module.css";
@@ -56,7 +57,7 @@ export function FolderBrowser(props: {
 			</p>
 			{error && (
 				<p role="alert" className={styles.alert}>
-					{error.message}
+					{daemonSaid(error, "setupUnreadable")}
 				</p>
 			)}
 			<ul className={styles.items}>

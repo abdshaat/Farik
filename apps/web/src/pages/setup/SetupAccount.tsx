@@ -2,6 +2,7 @@ import { Button, Choice, TextField } from "@farik/ui";
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router";
 import { useConnection } from "../../app/connection.tsx";
+import { daemonSaid } from "../../app/refusals.ts";
 import { useQuery } from "../../app/store.ts";
 import { t } from "../../strings/t.ts";
 import styles from "./setup.module.css";
@@ -43,7 +44,7 @@ export function SetupAccount() {
 			// The next screen says where the key went.
 			navigate("/setup/project", { state: { stored: answer.storedIn } });
 		} catch (e) {
-			setRefused((e as Error).message);
+			setRefused(daemonSaid(e, "setupRefused"));
 			setSaving(false);
 		}
 	};

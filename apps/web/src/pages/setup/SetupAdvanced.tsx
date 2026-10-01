@@ -236,8 +236,8 @@ export function SetupAdvanced() {
 			setRules(toCamel(JSON.parse(asText ?? "")) as Team["rules"]);
 			setAsText(undefined);
 			setTextWrong(undefined);
-		} catch (e) {
-			setTextWrong(t("rulesTextWrong").replace("{why}", (e as Error).message));
+		} catch {
+			setTextWrong(t("rulesTextWrong"));
 		}
 	};
 	const add = async () => {

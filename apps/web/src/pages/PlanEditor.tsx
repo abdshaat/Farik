@@ -9,6 +9,7 @@ import {
 import { type ReactNode, useEffect, useState } from "react";
 import { Link, useParams } from "react-router";
 import { useConnection } from "../app/connection.tsx";
+import { daemonSaid } from "../app/refusals.ts";
 import { useQuery } from "../app/store.ts";
 import { active, sentence } from "../app/words.ts";
 import { t } from "../strings/t.ts";
@@ -190,7 +191,7 @@ function Editor({
 		try {
 			await work();
 		} catch (error) {
-			setRefusal(sentence((error as Error).message));
+			setRefusal(daemonSaid(error, "refuseCommand"));
 		} finally {
 			setBusy(false);
 		}

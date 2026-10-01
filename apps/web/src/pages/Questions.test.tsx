@@ -112,7 +112,7 @@ describe("questions page", () => {
 			},
 		});
 		expect((await screen.findByRole("alert")).textContent).toBe(
-			"The question has an answer already",
+			en.refuseAlreadyAnswered,
 		);
 	});
 

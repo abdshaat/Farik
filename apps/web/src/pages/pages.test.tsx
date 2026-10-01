@@ -136,12 +136,25 @@ describe("pages", () => {
 		await waitFor(() => expect(asked().length).toBeGreaterThan(0));
 		for (const q of asked())
 			await socket.fail(q, -32002, "there is no task FRK-99");
+		// The daemon's words never show: a task that is not there is said plainly.
 		expect((await screen.findByRole("alert")).textContent).toBe(
-			"There is no task FRK-99",
+			en.pageNotFound,
 		);
 		expect(
 			screen.getByRole("link", { name: en.backToToday }).getAttribute("href"),
 		).toBe("/");
 		await expectNoAxeViolations(container);
+	});
+
+	it("says_a_failed_read_plainly", async () => {
+		const { socket } = await renderApp("/tasks/FRK-1/help");
+		if (!socket) throw new Error("no socket");
+		await answerStatus(socket, false);
+		const asked = () =>
+			socket.calls("query").filter((q) => q.params.name !== "serve.status");
+		await waitFor(() => expect(asked().length).toBeGreaterThan(0));
+		for (const q of asked())
+			await socket.fail(q, -32603, "the log cannot be read: disk I/O error");
+		expect((await screen.findByRole("alert")).textContent).toBe(en.pageFailed);
 	});
 });

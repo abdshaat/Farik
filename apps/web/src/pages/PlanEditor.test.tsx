@@ -238,7 +238,7 @@ describe("plan editor", () => {
 			"the team is working to this plan; hold the work first, then change it",
 		);
 		expect((await screen.findByRole("alert")).textContent).toBe(
-			"The team is working to this plan; hold the work first, then change it",
+			en.planHoldFirst,
 		);
 		fireEvent.click(screen.getByRole("button", { name: "Hold the work" }));
 		const hold = await sent(s);

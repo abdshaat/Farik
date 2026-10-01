@@ -2,9 +2,9 @@ import { Avatar, type AvatarKey, Button, RoleTag, uiStrings } from "@farik/ui";
 import { type FormEvent, useState } from "react";
 import { Link, useNavigate } from "react-router";
 import { useConnection } from "../app/connection.tsx";
-import { saidAll } from "../app/refusals.ts";
+import { daemonSaid, saidAll } from "../app/refusals.ts";
 import { useQuery } from "../app/store.ts";
-import { codeOf, sentence } from "../app/words.ts";
+import { codeOf } from "../app/words.ts";
 import type { en } from "../strings/en.ts";
 import { t } from "../strings/t.ts";
 import { type Backlog, moreWaits } from "./Board.tsx";
@@ -255,7 +255,7 @@ function RequestBox({ pmName }: { pmName: string }) {
 		} catch (error) {
 			// A coded refusal (the length one) is worded by its code; the store's own sentences as they are.
 			setRefusal(
-				codeOf(error) ? saidAll(error) : sentence((error as Error).message),
+				codeOf(error) ? saidAll(error) : daemonSaid(error, "refuseCommand"),
 			);
 			setBusy(false);
 		}

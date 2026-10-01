@@ -32,7 +32,7 @@ describe("refusals", () => {
 				.replaceAll("{name}", "Theo")
 				.replaceAll("{role}", "Developer"),
 		);
-		expect(commandSaid("same_status: theo is already paused", {})).toBe(
+		expect(commandSaid("not_a_question: event 7 is a task.created", {})).toBe(
 			en.refuseOther,
 		);
 	});
