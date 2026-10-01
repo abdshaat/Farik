@@ -1321,10 +1321,12 @@ async fn ready(
     {
         return Ok(None);
     }
+    let open = deps.tools.projections.open_sprint()?;
+    let open = open.as_ref().map(|sprint| sprint.sprint_id.as_str());
     let assignees: Vec<String> = team
         .active_agents()
         .filter(|agent| Role::from(agent.role) == contract.assignee_role)
-        .filter(|agent| has_room(team, board, agent))
+        .filter(|agent| has_room(team, open, board, agent))
         .map(|agent| agent.id.to_string())
         .collect();
     let Some(first) = assignees.first() else {
@@ -1368,10 +1370,20 @@ fn assigner(team: &Team) -> Option<&Agent> {
     holding(Role::ScrumMaster).or_else(|| holding(Role::ProductManager))
 }
 
-/// Whether `agent` holds fewer open tasks, neither accepted nor cancelled, than the WIP limit.
-pub(super) fn has_room(team: &Team, board: &[TaskProjection], agent: &Agent) -> bool {
-    u64::from(transitions::open_tasks(board, agent.id.as_str()))
-        < u64::try_from(team.policy.wip_limit_per_agent).unwrap_or(0)
+/// Whether `agent` holds fewer open tasks, neither accepted nor cancelled nor waiting for a sprint
+/// while `open` is open, than the WIP limit.
+pub(super) fn has_room(
+    team: &Team,
+    open: Option<&str>,
+    board: &[TaskProjection],
+    agent: &Agent,
+) -> bool {
+    u64::from(transitions::open_tasks(
+        team,
+        open,
+        board,
+        agent.id.as_str(),
+    )) < u64::try_from(team.policy.wip_limit_per_agent).unwrap_or(0)
 }
 
 /// Whether the governor would let `candidate` be assigned the task on the rules the orchestrator
@@ -7603,6 +7615,48 @@ mod tests {
         assert_eq!(harness.row("FRK-2").status, TaskStatus::InProgress);
         assert_eq!(acted_on(&started), Some("FRK-1"), "{started:?}");
         assert_eq!(harness.row("FRK-1").status, TaskStatus::InProgress);
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn leaves_backlog_work_out_of_the_wip_limit() {
+        // The landing review's stall: S1 ends early, its leftovers keep their assignees, and S2
+        // plans only FRK-3. A leftover waits, it is not being worked, so it fills no WIP limit.
+        let harness = Harness::new("orch-sprints-wip", |wire| {
+            in_sprints(wire);
+            wire["policy"]["wip_limit_per_agent"] = json!(1);
+        });
+        harness.assigned("FRK-1", "dev-a", "dev-b");
+        harness.assigned("FRK-2", "dev-b", "dev-a");
+        harness.open_sprint("S1", &["FRK-1", "FRK-2"]);
+        let deps = &harness.project.deps;
+        end_sprint(deps, EndedBy::Human).expect("S1 ends");
+        harness.ready("FRK-3");
+        start_sprint(deps, None, "human").expect("S2 starts");
+        plan_sprint(
+            deps,
+            &["FRK-3".parse().expect("an id")],
+            &PlannedBy::Assigner("pm".to_string()),
+        )
+        .expect("S2 plans FRK-3");
+        let adapter = harness.recorded(vec![rewritten(&plan_assigns_frk_1(), "FRK-1", "FRK-3")]);
+        let orchestrator = harness.orchestrator(adapter.clone());
+
+        let report = orchestrator
+            .tick_within(&TickScope {
+                task_id: Some("FRK-3".parse().expect("a task id")),
+                ..TickScope::default()
+            })
+            .await
+            .expect("the tick runs");
+
+        assert_eq!(acted_on(&report), Some("FRK-3"), "{report:?}");
+        let row = harness.row("FRK-3");
+        assert_eq!(
+            (row.status, row.assignee_id.as_deref()),
+            (TaskStatus::Assigned, Some("dev-a"))
+        );
+        assert!(harness.row("FRK-1").left_for_the_backlog);
     }
 
     #[tokio::test]

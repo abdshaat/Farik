@@ -20,7 +20,7 @@ use farik_core::governor::done::{
 use farik_core::governor::escalation::EscalationReason;
 use farik_core::governor::gates::{
     AssignmentInput, AssignmentRequester, Blocker, ChildState, DependencyState, DesignerBrowser,
-    Rejection, WorkState,
+    Rejection, WorkState, waits_for_a_sprint,
 };
 use farik_core::governor::readiness::{
     JudgmentAnswer, JudgmentReview, ParentState, ReadinessContext,
@@ -1098,7 +1098,7 @@ fn assignment(
         assignee_role: role_in(team, assignee_id),
         reviewer_id,
         reviewer_role,
-        assignee_open_tasks: open_tasks(board, assignee_id),
+        assignee_open_tasks: open_tasks(team, open_sprint.as_deref(), board, assignee_id),
         wip_limit: u32::try_from(team.policy.wip_limit_per_agent).unwrap_or(u32::MAX),
         remaining_sprint_budget_usd: sprint_left_usd,
         open_sprint,
@@ -1146,13 +1146,20 @@ fn role_in(team: &Team, agent_id: &str) -> Role {
         .map_or(Role::Human, |agent| Role::from(agent.role))
 }
 
-/// The tasks an agent holds that are neither accepted nor cancelled (5.2).
-pub(crate) fn open_tasks(board: &[TaskProjection], agent_id: &str) -> u32 {
+/// The tasks an agent holds that are neither accepted nor cancelled (5.2), leaving out one that
+/// waits for a sprint while `open_sprint` is open: it is not being worked (ADR 0028).
+pub(crate) fn open_tasks(
+    team: &Team,
+    open_sprint: Option<&str>,
+    board: &[TaskProjection],
+    agent_id: &str,
+) -> u32 {
     let held = board
         .iter()
         .filter(|row| {
             row.assignee_id.as_deref() == Some(agent_id)
                 && !matches!(row.status, TaskStatus::Accepted | TaskStatus::Cancelled)
+                && !waits_for_a_sprint(&crate::sprints::sprint_hold(team, open_sprint, row))
         })
         .count();
     u32::try_from(held).unwrap_or(u32::MAX)

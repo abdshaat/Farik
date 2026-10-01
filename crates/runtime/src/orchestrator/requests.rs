@@ -332,7 +332,9 @@ pub(super) fn ready_epic(
         Some(sm) => (sm, TransitionActor::ScrumMaster, Some(pm.id.to_string())),
         None => (pm, TransitionActor::ProductManager, None),
     };
-    if !has_room(team, board, assignee)
+    let open = deps.tools.projections.open_sprint()?;
+    let open = open.as_ref().map(|sprint| sprint.sprint_id.as_str());
+    if !has_room(team, open, board, assignee)
         || refused_since_entering(deps, &row.task_id, TaskStatus::Ready, TaskStatus::Assigned)?
     {
         return Ok(None);
