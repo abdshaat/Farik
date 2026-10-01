@@ -222,7 +222,7 @@ Files: created `apps/web/e2e/sprints.spec.ts`; modified `apps/web/e2e/fixtures/s
 
 Screenshots `sprints-{backlog,start,today}` at 360 and 1440 px, with no sideways scroll at 360.
 
-- [ ] `test(web): a request waits in the backlog until the sprint that plans it`
+- [x] `test(web): a request waits in the backlog until the sprint that plans it`
 
 ### Task 7: Spec and plan
 

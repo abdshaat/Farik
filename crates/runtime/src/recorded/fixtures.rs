@@ -300,6 +300,23 @@ pub fn planning_ceremony_frk_1_frk_3() -> Transcript {
     ))
 }
 
+/// As `plan_breaks_down_frk_1`, of the epic FRK-2 for the step 15 browser journey: one task,
+/// FRK-3, "Write the run's date into done.txt", within the epic's allowed paths, for a Developer
+/// reviewed by the Architect, `low` risk, with a summary and a budget of 2 dollars. Hand-written.
+#[must_use]
+pub fn plan_breaks_down_frk_2() -> Transcript {
+    Transcript::from_jsonl(include_str!("transcripts/plan_breaks_down_frk_2.jsonl"))
+}
+
+/// As `planning_ceremony_frk_1_frk_3`, for the step 15 browser journey: `farik_plan_sprint` of the
+/// task FRK-1 and the epic FRK-2, which brings its task FRK-3. Hand-written.
+#[must_use]
+pub fn planning_ceremony_frk_1_frk_2() -> Transcript {
+    Transcript::from_jsonl(include_str!(
+        "transcripts/planning_ceremony_frk_1_frk_2.jsonl"
+    ))
+}
+
 /// The Scrum Master's standup: one post, "Standup: FRK-1 moved from assigned to `in_progress`.
 /// …", then "The standup is posted.". Hand-written.
 #[must_use]

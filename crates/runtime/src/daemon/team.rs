@@ -624,14 +624,16 @@ pub(super) async fn call(
         .await
         .map(|()| json!({})),
         "team.save" => {
-            let state = Arc::clone(state);
+            let holder = Arc::clone(state);
             off_the_worker(move || {
-                let _writing = state.team_writes();
+                let _writing = holder.team_writes();
                 let (_, team) = checked(&deps, &params["team"], false)?;
                 write_team(&deps, &team)
             })
-            .await
-            .map(|()| json!({}))
+            .await?;
+            // A saved rule can free work at once: the policy switched off frees the Backlog.
+            state.wakes().notify_one();
+            Ok(json!({}))
         }
         "agent.replace" => {
             let state = Arc::clone(state);
@@ -991,6 +993,33 @@ pub(super) mod tests {
             proposed["criteria"],
             serde_json::to_value(harness.project.deps.files.read_criteria().expect("reads"))
                 .expect("JSON")
+        );
+    }
+
+    /// Switching "Plan work in sprints" off frees the Backlog's work at once, not at the next
+    /// minute's look (the step 15 journey).
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn wakes_the_team_when_the_team_is_saved() {
+        let harness = Harness::new("team-save-wakes", |_| {});
+        let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
+        let team = team_file(&harness);
+
+        let (ended, saved) = tokio::join!(
+            tokio::time::timeout(
+                std::time::Duration::from_secs(5),
+                orchestrator.wait_until(at() + chrono::Duration::hours(1)),
+            ),
+            async {
+                tokio::task::yield_now().await;
+                super::call(&harness.daemon, "team.save", &json!({ "team": team })).await
+            }
+        );
+
+        assert!(saved.is_ok(), "the team is saved");
+        assert_eq!(
+            ended.expect("the wait ends"),
+            crate::orchestrator::Waited::Woken
         );
     }
 
