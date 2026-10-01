@@ -200,7 +200,9 @@ Files: created `crates/runtime/src/templates.rs`; modified `crates/store/src/fil
 - `lists_by_name_and_names_unreadable_files`: three templates in case-insensitive name order; a `broken.yaml` of `{` appears in `unreadable`, not in `templates`.
 - `renames_and_deletes`: `rename` answers the new slug, the old file is gone, `saved_at` unchanged; a case-only rename keeps the slug; a rename onto another's slug is `Exists`; `delete` removes the file; an unknown slug is `NotFound` for `read`, `rename` and `delete`.
 
-- [ ] `feat(runtime): keep team templates privately in Farik's state folder`
+As built (Task 4): `round_trips_through_yaml` is in `farik-store`'s `files.rs`, beside `template_yaml`; the rest are in `templates.rs`, with two more: `maps_a_refused_name_from_the_team` (`impl From<Vec<ValidationError>> for TemplateError`, every refusal `Name`, since for a valid team `template_from_team` can only refuse the name) and `refuses_a_path_through_a_name_or_a_slug` (a slug that is not its own `template_slug` is `NotFound`, so `..` or a path names nothing). A file is written beside as `.<slug>.yaml.saving` and renamed over. A file in `templates/` whose stem is not a slug is not listed. The folder Settings' mockup names, `~/.config/farik/templates`, is the path only when `XDG_CONFIG_HOME` is unset: `state_dir` takes `$XDG_CONFIG_HOME/farik` first and `%APPDATA%\farik` last, so Task 6 shows the real path from the daemon rather than the mockup's fixed text.
+
+- [x] `feat(runtime): keep team templates privately in Farik's state folder`
 
 ### Task 5: Templates over the wire
 
