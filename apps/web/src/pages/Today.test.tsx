@@ -138,12 +138,24 @@ describe("today", () => {
 			en.requestTooShort,
 		);
 
+		// A refusal with no code is worded for the person, never shown as the daemon's text.
+		fireEvent.click(screen.getByRole("button", { name: en.requestSend }));
+		await waitFor(() => expect(s.calls("request.file")).toHaveLength(2));
+		await s.fail(
+			s.calls("request.file")[1] as never,
+			-32603,
+			"database is locked (SQLITE_BUSY)",
+		);
+		expect((await screen.findByRole("alert")).textContent).toBe(
+			en.refuseCommand,
+		);
+
 		fireEvent.change(box, {
 			target: { value: "Add gift cards to the checkout page" },
 		});
 		fireEvent.click(screen.getByRole("button", { name: en.requestSend }));
-		await waitFor(() => expect(s.calls("request.file")).toHaveLength(2));
-		await s.reply(s.calls("request.file")[1] as never, { task_id: "FRK-3" });
+		await waitFor(() => expect(s.calls("request.file")).toHaveLength(3));
+		await s.reply(s.calls("request.file")[2] as never, { task_id: "FRK-3" });
 		// The request's own page asks for FRK-3.
 		await waitFor(() =>
 			expect(
