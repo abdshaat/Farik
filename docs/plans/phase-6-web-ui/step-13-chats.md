@@ -48,6 +48,7 @@ As built (Task 9, 2026-09-30):
 As built (fix wave, 2026-09-30, the landing review's findings):
 - Fix wave I1: `a_paused_agent_answers_its_chat` registers a chat session for the retired agent and asserts that the hook (`decide_pre_tool_use`) and `call_tool` both refuse it with `agent_not_active`; mutation M7 (`may_work` letting any status work in a chat) now fails it.
 - Fix wave I2 (the founder's decision of 2026-09-30, "Conversations" is one-to-one chats only): `in_words` gives `chat` its own word, "Conversations" (the fifth of `WORDS`, also in `rpc.schema.json`'s two enums), and the channel's `conversation` stays under "Meetings and talk" (`counts_a_chat_as_conversations_not_meetings`); the cost per accepted task leaves `chat` out, total and split, since a chat is no task's work (`PURPOSES` is eight, the total sums those; `leaves_chat_out_of_cost_per_accepted_task`), so `farik metrics` drops its `chat` line and key. SPEC F17 says so.
+- Fix wave m1: `farik_chat_reply` holds one process-wide lock, `REPLYING`, around the one-reply check and the post (the smaller of the two the ruling allowed; ponytail: per-session locks if replies queue on it), so two replies of one session at once record one (`records_one_reply_when_two_race`, ten rounds on two threads). SPEC 8.2 says so, and 0.34's revision note names the fix wave.
 
 Signatures, not bodies; test names and what each asserts, not test code; around 300 lines at most (ADR 0008).
 

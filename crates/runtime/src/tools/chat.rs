@@ -29,6 +29,10 @@ fn refused(detail: impl Into<String>) -> ToolError {
     .into()
 }
 
+/// Held around the one-reply check and the post, so two replies of one session at once record one.
+// ponytail: one lock for every chat's reply; per-session locks if replies ever queue on it.
+static REPLYING: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 /// Records the agent's reply in its chat, answering the user's message the session was started
 /// for, and tells the agent its turn is over. Refused outside a `chat` session and after the
 /// session's one reply; a reply refused for its limits does not use that one up.
@@ -41,6 +45,9 @@ pub(super) fn chat_reply(call: &Call<'_>, input: ChatReplyInput) -> Result<Value
     }
     let deps = call.deps();
     let session = Some(context.session_id.as_str());
+    let _replying = REPLYING
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     let replied = deps
         .log
         .read(&EventQuery {
@@ -165,5 +172,57 @@ mod tests {
             Some("session-1")
         );
         assert_eq!(replies[1].envelope.ids.agent_id.as_deref(), Some("pm"));
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn records_one_reply_when_two_race() {
+        let project = TestProject::new("chat-reply-race", &a_team_of_three(|_| {}));
+        // Raced a few times, so that a check outside the lock is caught every run, not by luck.
+        for round in 0..10 {
+            let asked = crate::chat::post_chat(
+                &project.deps.log,
+                project.deps.clock.as_ref(),
+                &project.deps.ids,
+                crate::chat::NewChatMessage {
+                    chat: "pm".to_string(),
+                    author: "human".to_string(),
+                    text: "Status?".to_string(),
+                    in_reply_to: None,
+                    request: None,
+                    session_id: None,
+                },
+            )
+            .expect("the question is recorded");
+            let mut context = project.context("pm", None);
+            context.purpose = SessionPurpose::Chat;
+            context.in_reply_to = Some(asked);
+            context.session_id = format!("session-race-{round}");
+            let start = std::sync::Barrier::new(2);
+            let answers: Vec<_> = std::thread::scope(|scope| {
+                let racers: Vec<_> = (0..2)
+                    .map(|_| {
+                        scope.spawn(|| {
+                            start.wait();
+                            run(&context, "farik_chat_reply", json!({ "text": "On it." }))
+                        })
+                    })
+                    .collect();
+                racers
+                    .into_iter()
+                    .map(|racer| racer.join().expect("the racer ends"))
+                    .collect()
+            });
+            let sent = answers.iter().filter(|answer| answer.is_ok()).count();
+            assert_eq!(sent, 1, "round {round}: {answers:?}");
+            let recorded = project
+                .events(&[EventKind::ChatMessagePosted])
+                .iter()
+                .filter(|event| {
+                    event.envelope.ids.session_id.as_deref() == Some(context.session_id.as_str())
+                })
+                .count();
+            assert_eq!(recorded, 1, "round {round}");
+        }
     }
 }
