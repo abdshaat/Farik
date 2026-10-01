@@ -716,11 +716,9 @@ async fn socket(port: u16, cookie: &str) -> Socket {
     }
 }
 
-/// The browser's socket on `port`, with the session `cookie`, tried once.
-async fn try_socket(
-    port: u16,
-    cookie: &str,
-) -> Result<Socket, tokio_tungstenite::tungstenite::Error> {
+/// The browser's socket on `port`, with the session `cookie`, tried once. The handshake is given
+/// up after 5 s: a port that is held but never served takes the connection and never answers.
+async fn try_socket(port: u16, cookie: &str) -> Result<Socket, String> {
     use tokio_tungstenite::tungstenite::client::IntoClientRequest as _;
 
     let mut request = format!("ws://127.0.0.1:{port}/rpc")
@@ -734,9 +732,14 @@ async fn try_socket(
             .expect("a header"),
     );
     headers.insert("Cookie", cookie.parse().expect("a header"));
-    tokio_tungstenite::connect_async(request)
-        .await
-        .map(|(socket, _)| socket)
+    tokio::time::timeout(
+        Duration::from_secs(5),
+        tokio_tungstenite::connect_async(request),
+    )
+    .await
+    .map_err(|_| "no handshake within 5 s".to_string())?
+    .map(|(socket, _)| socket)
+    .map_err(|error| error.to_string())
 }
 
 /// Sends `method` with `params` and answers the reply.
