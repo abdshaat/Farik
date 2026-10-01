@@ -42,6 +42,12 @@ export type Effective = {
 	tiers: Tier[];
 	baseTiers: Tier[];
 };
+/** A custom connector's state on this computer, as `team.get` answers it. */
+export type ConnectorState = {
+	agent: string;
+	server: string;
+	state: "connected" | "connect_again" | "store_unavailable";
+};
 type Holder = { agentId: string; displayName: string; role: Agent["role"] };
 /** Who checks plans under each choice of judge, or null where nobody active holds it. */
 export type Judges = {
@@ -56,11 +62,14 @@ export function useTeam() {
 		team: TeamFile;
 		agents: Effective[];
 		maxAgents: number;
+		connectors?: ConnectorState[];
 	}>("team.get", {});
 	const { data: models } = useQuery<{ models: Model[] }>("models.list", {});
 	return {
 		team: data?.team,
 		effective: data?.agents ?? [],
+		/** Whether each custom connector runs on this computer (ADR 0030). */
+		connectors: data?.connectors ?? [],
 		/** The most agents a team has that are not retired (SPEC F1), as the daemon says. */
 		most: data?.maxAgents,
 		models: models?.models ?? [],

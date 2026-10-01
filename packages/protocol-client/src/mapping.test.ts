@@ -21,4 +21,62 @@ describe("mapping", () => {
 			body: { input, output: '{"exit_code":0}' },
 		});
 	});
+
+	it("keeps_the_names_a_user_gave_tools_keys_and_headers", () => {
+		// A connector's tools, keys and headers are named by the user or the server, not the wire.
+		const camel = {
+			agent: "theo",
+			server: {
+				credentialKeys: ["API_KEY"],
+				headers: { Authorization: "Bearer {API_KEY}" },
+			},
+			keys: { API_KEY: "v" },
+			tags: { list_bases: "network", listBases: "denied" },
+		};
+		expect(toSnake(camel)).toEqual({
+			agent: "theo",
+			server: {
+				credential_keys: ["API_KEY"],
+				headers: { Authorization: "Bearer {API_KEY}" },
+			},
+			keys: { API_KEY: "v" },
+			tags: { list_bases: "network", listBases: "denied" },
+		});
+		const wire = {
+			stored_in: "file",
+			tools: { list_bases: "network" },
+			team: {
+				agents: [
+					{
+						mcp_servers: [
+							{
+								tools: { list_bases: "network", "describe-table": "denied" },
+								headers: { "X-Api-Key": "{API_KEY}" },
+							},
+						],
+					},
+				],
+			},
+		};
+		expect(toCamel(wire)).toEqual({
+			storedIn: "file",
+			tools: { list_bases: "network" },
+			team: {
+				agents: [
+					{
+						mcpServers: [
+							{
+								tools: { list_bases: "network", "describe-table": "denied" },
+								headers: { "X-Api-Key": "{API_KEY}" },
+							},
+						],
+					},
+				],
+			},
+		});
+		// A list of tools is still a list of wire objects.
+		expect(toCamel({ tools: [{ name: "a_b", is_x: true }] })).toEqual({
+			tools: [{ name: "a_b", isX: true }],
+		});
+	});
 });

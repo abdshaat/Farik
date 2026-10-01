@@ -1096,6 +1096,115 @@ export const en = {
 		"Without it {name} cannot look at your app, so Farik gives {name} no work.",
 	connectorsNote:
 		"On for a UI/UX Designer. You can turn it on for anyone else. More connectors arrive in a later version.",
+	connectorsYours: "Added by you",
+	connectorsYoursLead:
+		"connectors Farik has not checked; you labelled their tools",
+	connectorStdio: "Started by a command on this computer",
+	connectorHttp: "Reached at a web address",
+	connectorTools: "{count} tools: {labels}",
+	connectorOneTool: "1 tool: {labels}",
+	connectorCantUse: "{count} Farik can’t use",
+	connectorAgain: "Connect again to use it",
+	connectorAgainNote:
+		"Its settings in your project changed since you connected it on this computer, for example in a copied project or a saved team. {name} does not use it until you check it and connect again.",
+	connectorAgainButton: "Connect again",
+	connectorUnreadable: "Farik cannot read {name}’s keys for {server} right now",
+	connectorUnreadableNote:
+		"The last time Farik looked, your computer’s keychain or the private file that keeps them could not be opened, so {name} works without {server} for now. If your computer asks whether Farik may use the keychain, choose “Always”.",
+	connectorRemove: "Remove",
+	connectorRemoveLabel: "Remove {server}",
+	connectorRemoveTitle: "Remove {server} from {name}?",
+	connectorRemoveBody:
+		"{name} stops using {server} from the next piece of work. Farik deletes the keys you gave it for {name} from this computer.",
+	connectorRemoveOthers:
+		"Nobody else on the team is affected. To use it again, add it again and type the keys.",
+	connectorKeep: "Keep it",
+	connectorCustom: "A custom connector",
+	connectorCustomNote:
+		"Any connector, by the command that starts it or its web address. Farik has not checked it, so you label each of its tools yourself. A connector started by a command runs on this computer with your rights, so add only one you trust.",
+	connectorCustomAdd: "Add a custom connector",
+	connectorCustomKeychain:
+		"If your computer asks whether Farik may use the keychain, choose “Always”, or the connector cannot start.",
+	tagNetwork: "Only reads",
+	tagNetworkNote:
+		"{name} may use it any time. It looks things up and changes nothing.",
+	tagExternal: "Changes things, asks you",
+	tagExternalNote:
+		"{name} asks you before each use, and you see exactly what {name} wants to send.",
+	tagDenied: "Never",
+	tagDeniedNote: "{name} is not given it.",
+	addTitle: "Add a custom connector to {name}",
+	addTitleNamed: "Add {server} to {name}",
+	addStepStart: "How to start it",
+	addStepLabel: "Label its tools",
+	addStepDone: "Done",
+	addName: "Name",
+	addNameHint:
+		"Lowercase letters, numbers and dashes. It is how {name}’s page lists it.",
+	addHow: "How does it start?",
+	addCommandChoice: "A command",
+	addCommandChoiceNote: "Farik runs it on this computer.",
+	addUrlChoice: "A web address",
+	addUrlChoiceNote: "The service runs it for you.",
+	addCommand: "Command",
+	addCommandHint:
+		"Copy it from the connector’s instructions. It runs on this computer with your rights, so use only one you trust.",
+	addUrl: "Web address",
+	addUrlHint: "Copy it from the service’s instructions.",
+	addUrlSecret:
+		"This address has a key inside it. Farik cannot keep a key that is part of an address safe yet, so a service like this cannot be added for now. Zapier is one.",
+	addHeader: "Where the key goes",
+	addHeaderHint: "Change it only if the service’s instructions say so.",
+	addKeys: "Keys",
+	addKeysHint:
+		"Each key is for {name} only. Name it as the connector’s instructions do.",
+	addKeysAgain:
+		"Type {name}’s key again. Farik does not reuse the old one for a changed connector.",
+	addKeyName: "Key name",
+	addKeyValue: "Key",
+	addKeyRemove: "Remove",
+	addKeyRemoveLabel: "key {count}",
+	addKeyMore: "Add another key",
+	addNext: "Next: list its tools",
+	addNextNote:
+		"Farik starts it once, with {name}’s keys, to list what it can do.",
+	addChanged:
+		"{server}’s settings in your project changed since you connected it on this computer, or it was never connected here. Check each one against the service’s or the connector’s instructions before you go on.",
+	addListLead:
+		"Farik has not checked {server}, so you decide what {name} may do with each of its {count} tools. When unsure, leave “Changes things, asks you”.",
+	addFrom: "Each tool’s description comes from {server}.",
+	addUnusable:
+		"Farik can’t use this tool: its name has characters Farik can’t pass on. {name} is not given it.",
+	addBack: "Back",
+	addDone: "{server} is added to {name}",
+	addKeychain:
+		"{name}’s keys for {server} are kept in your computer’s keychain.",
+	addKeychainNote:
+		"{name} never sees them: Farik hands them to {server} when {server} starts.",
+	addFile:
+		"{name}’s keys for {server} are kept in a private file only you can read.",
+	addFileNote:
+		"This computer has no keychain, so Farik keeps them in a file in your Farik folder that only your user account can open. {name} never sees them.",
+	addNextWork: "{name} can use it from the next piece of work.",
+	addOnly:
+		"Only {name} has {server}. To give it to someone else, add it from their page, with their own key.",
+	addBackTo: "Back to {name}",
+	addNameWrong:
+		"Use lowercase letters, numbers and dashes, starting with a letter.",
+	addNameReserved: "Farik keeps this name for itself. Choose another.",
+	addNameTwice: "{name} already has a connector with this name.",
+	addCommandWrong:
+		"Farik cannot use this command as it is. Copy it again from the connector’s instructions.",
+	addUrlWrong:
+		"Farik cannot use this address. Copy it again from the service’s instructions; it starts with https://.",
+	addHeaderWrong:
+		"Write a name, a colon, then the value, like Authorization: Bearer {API_KEY}, naming only the keys below.",
+	addKeyWrong:
+		"A key name is capital letters, numbers and underscores, starting with a letter, like API_KEY. Up to 8 keys.",
+	addNotListed:
+		"Farik could not start {server} or reach it to list its tools. Check the command or the address, and the keys, against its instructions.",
+	addTimeout:
+		"{server} did not answer within thirty seconds. Check the command or the address, and try again.",
 	uiPathsTitle: "Which files are screens",
 	uiPathsLead:
 		"When a Developer’s change touches a file like these, the UI/UX Designer checks its screens before the Architect reviews the code.",

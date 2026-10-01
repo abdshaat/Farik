@@ -269,7 +269,7 @@ Files: `apps/web/src/pages/AgentEdit.tsx`, `ConnectorAdd.tsx`, their tests, `str
 - `connector_add_clears_the_key_field_after_sending`.
 - `connector_add_says_which_store_kept_the_keys`.
 
-- [ ] `feat(web): connectors on the agent page`
+- [x] `feat(web): connectors on the agent page`
 
 ### Task 10: Spec and plan
 

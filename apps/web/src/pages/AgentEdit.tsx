@@ -1,19 +1,22 @@
-import { Button, Choice, Switch, TextField } from "@farik/ui";
+import { Button, Choice, Dialog, Switch, TextField } from "@farik/ui";
 import { useState } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 import { useConnection } from "../app/connection.tsx";
 import { type Refusal, said, saidAll } from "../app/refusals.ts";
 import { useQuery } from "../app/store.ts";
 import { t } from "../strings/t.ts";
+import { ConnectorAdd, labelsSaid } from "./ConnectorAdd.tsx";
 import styles from "./pages.module.css";
 import { useAdvanced } from "./Settings.tsx";
 import {
 	type Agent,
+	type McpServer,
 	roleName,
 	someone,
 	type Team as TeamFile,
 } from "./setup/TeamSetup.tsx";
 import {
+	type ConnectorState,
 	type Effective,
 	type Model,
 	type Tier,
@@ -72,7 +75,7 @@ function withPlaywright(agent: Edited, on: boolean): Edited {
 /** One agent's page, once the team has loaded. */
 export function AgentEdit() {
 	const { id } = useParams();
-	const { team, effective, models } = useTeam();
+	const { team, effective, models, connectors, again } = useTeam();
 	if (!team) return null;
 	const saved = team.agents.find((a) => a.id === id);
 	const known = effective.find((e) => e.id === id);
@@ -90,6 +93,8 @@ export function AgentEdit() {
 			saved={saved as Edited}
 			known={known}
 			models={models}
+			connectors={connectors}
+			again={again}
 		/>
 	);
 }
@@ -100,12 +105,17 @@ function Editor({
 	saved,
 	known,
 	models,
+	connectors,
+	again,
 }: {
 	team: TeamFile;
 	saved: Edited;
 	/** The daemon's answer for the saved agent: its model in words, and its tiers before its own changes. */
 	known: Effective;
 	models: Model[];
+	connectors: ConnectorState[];
+	/** Reads the team again, after a connector is added or removed outside Save. */
+	again: () => void;
 }) {
 	const { client } = useConnection();
 	const navigate = useNavigate();
@@ -176,6 +186,25 @@ function Editor({
 		if (await status.set(saved, "retired")) navigate("/team");
 	};
 	const paused = saved.status === "paused";
+	const custom = (saved.mcpServers ?? []).filter((c) => c.source === "custom");
+	const stateOf = (server: string) =>
+		connectors.find((c) => c.agent === saved.id && c.server === server)?.state;
+	const [adding, setAdding] = useState<{ again?: McpServer }>();
+	const [removing, setRemoving] = useState<string>();
+	const [removeRefused, setRemoveRefused] = useState<string>();
+	const remove = async (server: string) => {
+		if (!client) return;
+		setBusy(true);
+		setRemoveRefused(undefined);
+		try {
+			await client.call("connector.disconnect", { agent: saved.id, server });
+			setRemoving(undefined);
+			again();
+		} catch (e) {
+			setRemoveRefused(saidAll(e));
+		}
+		setBusy(false);
+	};
 	const browsing = (agent.mcpServers ?? []).some(
 		(c) => c.name === PLAYWRIGHT.name,
 	);
@@ -277,6 +306,18 @@ function Editor({
 				) : (
 					<p className={styles.muted}>{t("agentMayAdvanced")}</p>
 				)}
+				{advanced && (
+					<>
+						<h3 className={styles.subheading}>{t("connectorCustom")}</h3>
+						<p>{t("connectorCustomNote")}</p>
+						<span>
+							<Button onClick={() => setAdding({})}>
+								{t("connectorCustomAdd")}
+							</Button>
+						</span>
+						<p className={styles.muted}>{t("connectorCustomKeychain")}</p>
+					</>
+				)}
 				<span>
 					<Button
 						kind="quiet"
@@ -311,7 +352,70 @@ function Editor({
 					</p>
 				)}
 				<p className={styles.muted}>{t("connectorsNote")}</p>
+				{custom.length > 0 && (
+					<>
+						<h3 id="yours-heading" className={styles.subheading}>
+							{t("connectorsYours")}{" "}
+							<span className={styles.muted}>{t("connectorsYoursLead")}</span>
+						</h3>
+						<ul className={styles.ruled} aria-label={t("connectorsYours")}>
+							{custom.map((c) => (
+								<CustomRow
+									key={c.name}
+									server={c}
+									state={stateOf(c.name)}
+									name={name}
+									onAgain={() => setAdding({ again: c })}
+									onRemove={() => {
+										setRemoveRefused(undefined);
+										setRemoving(c.name);
+									}}
+								/>
+							))}
+						</ul>
+					</>
+				)}
 			</section>
+			{removing && (
+				<Dialog
+					open
+					title={t("connectorRemoveTitle", { server: removing, name })}
+					onClose={() => setRemoving(undefined)}
+					actions={
+						<>
+							<Button onClick={() => setRemoving(undefined)}>
+								{t("connectorKeep")}
+							</Button>
+							<Button
+								kind="primary"
+								busy={busy}
+								onClick={() => remove(removing)}
+							>
+								{t("connectorRemoveLabel", { server: removing })}
+							</Button>
+						</>
+					}
+				>
+					<p>{t("connectorRemoveBody", { server: removing, name })}</p>
+					<p className={styles.muted}>{t("connectorRemoveOthers")}</p>
+					{removeRefused && (
+						<p role="alert" className={styles.alert}>
+							{removeRefused}
+						</p>
+					)}
+				</Dialog>
+			)}
+			{adding && (
+				<ConnectorAdd
+					agent={saved.id}
+					name={name}
+					again={adding.again}
+					onClose={(changed) => {
+						setAdding(undefined);
+						if (changed) again();
+					}}
+				/>
+			)}
 			{effects.length > 0 && (
 				<section
 					className={styles.section}
@@ -363,5 +467,71 @@ function Editor({
 				</div>
 			</section>
 		</div>
+	);
+}
+
+/** One of "Added by you": how it starts, its tools by label, and whether it runs here. */
+function CustomRow({
+	server,
+	state,
+	name,
+	onAgain,
+	onRemove,
+}: {
+	server: McpServer;
+	state: ConnectorState["state"] | undefined;
+	name: string;
+	onAgain: () => void;
+	onRemove: () => void;
+}) {
+	const tags = Object.values(server.tools ?? {});
+	const labels = labelsSaid(tags);
+	return (
+		<li>
+			<div className={styles.rowHead}>
+				<span>
+					<strong>{server.name}</strong>{" "}
+					<span className={styles.muted}>
+						{t(
+							server.transport === "http" ? "connectorHttp" : "connectorStdio",
+						)}
+					</span>
+				</span>
+				<span className={styles.actions}>
+					{state === "connect_again" && (
+						<Button onClick={onAgain}>{t("connectorAgainButton")}</Button>
+					)}
+					<Button kind="quiet" onClick={onRemove}>
+						{t("connectorRemove")}{" "}
+						<span className={styles.hidden}>{server.name}</span>
+					</Button>
+				</span>
+			</div>
+			<p className={styles.muted}>
+				{tags.length === 1
+					? t("connectorOneTool", { labels })
+					: t("connectorTools", { count: tags.length, labels })}
+			</p>
+			{state === "connect_again" && (
+				<>
+					<p>
+						<strong>{t("connectorAgain")}</strong>
+					</p>
+					<p className={styles.muted}>{t("connectorAgainNote", { name })}</p>
+				</>
+			)}
+			{state === "store_unavailable" && (
+				<>
+					<p>
+						<strong>
+							{t("connectorUnreadable", { name, server: server.name })}
+						</strong>
+					</p>
+					<p className={styles.muted}>
+						{t("connectorUnreadableNote", { name, server: server.name })}
+					</p>
+				</>
+			)}
+		</li>
 	);
 }
