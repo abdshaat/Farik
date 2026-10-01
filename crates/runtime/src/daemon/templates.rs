@@ -702,6 +702,69 @@ mod tests {
 
     #[test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn works_the_result_out_again_under_the_lock() {
+        let (harness, folder) = templated("templates-under-lock", |_| {});
+        let mut duo = pair();
+        duo["agents"].as_array_mut().expect("agents").pop();
+        saved(&folder, &duo);
+        worked(&harness, "dev-b");
+        let writing = harness.daemon.team_writes();
+        let daemon = Arc::clone(&harness.daemon);
+        let asking =
+            std::thread::spawn(move || rpc(&daemon, "template.apply", &json!({ "slug": "pair" })));
+        std::thread::sleep(std::time::Duration::from_millis(300));
+        // While another write holds the team, it pauses Ada (dev-a), whom Pair keeps as its only
+        // Developer: worked out against this team, applying retires dev-b and leaves none active.
+        let mut wire = team_file(&harness);
+        wire["agents"][1]["status"] = json!("paused");
+        harness
+            .project
+            .deps
+            .files
+            .write_team(&farik_core::team::validate_team(&wire).expect("a team"))
+            .expect("written");
+        let events = seq_count(&harness);
+        drop(writing);
+        let reply = asking.join().expect("the apply ends");
+        assert_eq!(reply["error"]["code"], -32005, "{reply}");
+        assert_eq!(
+            reply["error"]["data"]["errors"][0]["code"],
+            "needs_developer"
+        );
+        assert_eq!(team_file(&harness), wire, "nothing is written");
+        assert_eq!(seq_count(&harness), events);
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn retires_an_agent_the_user_only_chatted_with() {
+        let (harness, folder) = templated("templates-chatted", |_| {});
+        saved(&folder, &pair());
+        let deps = &harness.project.deps;
+        crate::chat::post_chat(
+            &deps.log,
+            deps.clock.as_ref(),
+            &deps.ids,
+            crate::chat::NewChatMessage {
+                chat: "dev-b".to_string(),
+                author: "human".to_string(),
+                text: "How is it going?".to_string(),
+                in_reply_to: None,
+                request: None,
+                session_id: None,
+            },
+        )
+        .expect("posted");
+        let shown = preview(&harness, "pair");
+        assert_eq!(
+            json!([shown["retired"], shown["removed"]]),
+            json!([["dev-b"], ["kai"]]),
+            "a chat counts as work"
+        );
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
     fn applies_only_under_the_lock_that_writes_the_team() {
         let (harness, folder) = templated("templates-locked", |_| {});
         saved(&folder, &pair());

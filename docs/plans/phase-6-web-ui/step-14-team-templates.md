@@ -267,6 +267,8 @@ As built (Task 8): spec revision 0.35 (0.32 to 0.34 were taken by the DevOps Eng
 
 - [x] `docs(spec): team templates kept on the machine, and the one-team non-goal`
 
+Fix wave (I2, I3; landing review of 8bc19dd): `works_the_result_out_again_under_the_lock` pauses the only kept Developer while the test holds `team_writes()` and asserts `template.apply` answers -32005 `needs_developer` and writes nothing (kills R3, the result worked out before the lock); `retires_an_agent_the_user_only_chatted_with` gives `dev-b` one `chat_message.posted` and no other event and asserts the preview retires it (kills R8, `worked()` narrowed to `tool.called`). Tests only; the code was right.
+
 ## Verification
 
 ```
