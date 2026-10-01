@@ -1,6 +1,6 @@
 # Phase 6, step 13: Chats
 
-Status: draft
+Status: built 2026-09-30 (spec 0.34); landing review pending
 Branch: `phase/6-web-ui`
 Spec: `docs/SPEC.md` sections 3, 4.3, 4.4, 5.1, 5.2, 5.5, 5.9, 8.2, 8.4, 8.5, F7, F8
 Depends on: steps 01 to 12 of this phase (renumbered from step 12 by the project plan's revision 23); ADR 0026 and `docs/design/designer-chats-templates.md` (section B), both binding
@@ -41,6 +41,9 @@ As built (Task 7, 2026-09-30):
 As built (Task 8, 2026-09-30):
 - The journey goes on past Today: Ada, paused on the Team page, answers her chat (a second `chat_answers_with_a_request`; Mira and Theo are the team's only Product Manager and Developer, which the page refuses to pause), and the Costs page's "Conversations today" equals the log's `chat` `cost.recorded` sum.
 - Screenshots at 360 and 1440 (the controller's width, where the list, the chat and the channel's meetings column fit), through `screenshots`' new `width` argument: `chats`, `chats-reply`, `chats-sent`, `chats-paused`, `chats-costs`.
+
+As built (Task 9, 2026-09-30):
+- SPEC 0.34 is written from the commits, not the plan: it also corrects 5.16 (a chat's request is the user's, not the agent's), the paused tick in 3 and 8.2, F17's purpose split (a chat's cost is under "Meetings and talk" there; `finance` is not yet in the code's split) and section 11 (the one-to-one moves from Milestone 2 to 1). 5.2 had no pause rule to change; it gains the chat rule's place.
 
 Signatures, not bodies; test names and what each asserts, not test code; around 300 lines at most (ADR 0008).
 
@@ -272,7 +275,7 @@ Vitest and axe. Tests:
 
 `docs/SPEC.md`, in the next free revision when this step lands (0.34: 0.31 is step 11, 0.32 the DevOps Engineer, 0.33 step 12), as the design's table lists: 3 (the channel and chats), 4.3 (the one-to-one as built), 5.1 (chat is not command), 5.2 (the chat rule runs while paused), 4.4 (a paused agent still answers its chat), 5.5 (a chat's cost, the daily limit), 5.9 (chats apart from the channel; their privacy depends on `.farik/local/**` staying protected), 8.2 (the `chat` session and its tools), 8.4 (chats in the log), 8.5 (`chat_message.posted`, `from_chat_message`, purpose `chat`, `session.started`'s `chat`, and the attribution exception: the envelope names the chat's agent on the user's message too), F7 and F8. The project plan's step 13 line records the landing.
 
-- [ ] `docs(spec): specify one-to-one chats`
+- [x] `docs(spec): record one-to-one chats`
 
 ## Verification
 
