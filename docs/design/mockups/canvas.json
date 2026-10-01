@@ -412,6 +412,42 @@
       "title": "Use a saved team on a phone",
       "page": "templates",
       "is_interactive": true
+    },
+    "BoardBacklog.dc.html": {
+      "x": 0,
+      "y": 0,
+      "w": 1440,
+      "h": 2287,
+      "title": "Board with a Backlog lane: waiting, starting, running",
+      "page": "sprints",
+      "is_interactive": true
+    },
+    "TodayBacklog.dc.html": {
+      "x": 1520,
+      "y": 0,
+      "w": 1440,
+      "h": 1267,
+      "title": "Today: the Backlog line",
+      "page": "sprints",
+      "is_interactive": true
+    },
+    "SettingsSprints.dc.html": {
+      "x": 3040,
+      "y": 0,
+      "w": 1440,
+      "h": 1558,
+      "title": "Settings: Plan work in sprints",
+      "page": "sprints",
+      "is_interactive": true
+    },
+    "SetupSprints.dc.html": {
+      "x": 4560,
+      "y": 0,
+      "w": 1440,
+      "h": 1798,
+      "title": "Setup: sprints on by default",
+      "page": "sprints",
+      "is_interactive": true
     }
   },
   "createdOnFiles": {
@@ -504,6 +540,15 @@
       "w": 240,
       "x": 0,
       "y": -300
+    },
+    "t_sprints": {
+      "kind": "title1",
+      "maxW": 6000,
+      "page": "sprints",
+      "text": "Sprints gather ready work",
+      "w": 240,
+      "x": 0,
+      "y": -300
     }
   },
   "order": [
@@ -552,7 +597,11 @@
     "SaveTemplate.dc.html",
     "UseTemplate.dc.html",
     "SavedTeams.dc.html",
-    "PhoneUseTemplate.dc.html"
+    "PhoneUseTemplate.dc.html",
+    "BoardBacklog.dc.html",
+    "TodayBacklog.dc.html",
+    "SettingsSprints.dc.html",
+    "SetupSprints.dc.html"
   ],
   "pages": [
     {
@@ -590,6 +639,10 @@
     {
       "id": "templates",
       "name": "Team templates"
+    },
+    {
+      "id": "sprints",
+      "name": "Sprints"
     }
   ],
   "title": "Farik web UI mockup"

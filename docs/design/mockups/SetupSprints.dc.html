@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Setup: sprints on by default</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&amp;family=Silkscreen&amp;family=Space+Grotesk:wght@400;500;600&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0;font-family:'Space Grotesk',system-ui,sans-serif;background:#F3E7D3;color:#161616}
+a{color:#161616;text-decoration:underline;text-underline-offset:3px}a:hover{color:#5B5347}
+.px{image-rendering:pixelated}
+button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible,summary:focus-visible{outline:2px solid #5F7A9B;outline-offset:2px}
+</style>
+</helmet>
+<div style="width: 1440px; background: #F3E7D3; color: #161616;">
+<p style="margin: 0; padding: 14px 24px; font-family: 'JetBrains Mono', monospace; font-size: 13px; line-height: 20px; color: #5B5347; background: #F3E7D3; border-top: 1px solid #161616;">1. The last screen says the new team works in sprints. No extra question: it is the default, said once in plain words.</p>
+<div style="width: 1440px; height: 1000px; display: flex; background: #F3E7D3; overflow: hidden;">
+<aside style="width: 440px; flex-shrink: 0; background: #161616; color: #F3E7D3; display: flex; flex-direction: column; padding: 48px; box-sizing: border-box; gap: 28px;">
+<div style="display: flex; align-items: center; gap: 16px;">
+<img class="px" src="/_blob/cbf211abf5739b5bb073797fe4fb08fc" alt="" style="width: 64px; height: 64px;">
+<div style="display: flex; flex-direction: column; gap: 6px;">
+<img src="/_blob/357b43dd6301616912c5f06654da35a4" alt="Farik" style="width: 196px; height: auto;">
+<span style="font-family: 'Silkscreen', monospace; font-size: 13px; letter-spacing: 0.2em; color: #F3E7D3;">AI HARNESS ENGINE</span>
+</div>
+</div>
+<img class="px" src="/_blob/8376139218c7d991cfe8566817a314dc" alt="The team at a long table under a sprint board" style="width: 344px; height: auto; border: 3px solid #D8896A;">
+<div style="font-family: 'JetBrains Mono', monospace; font-size: 18px; line-height: 30px; display: flex; flex-direction: column;">
+<span><span style="color: #D8896A;">&gt;</span> Plan.</span>
+<span><span style="color: #D8896A;">&gt;</span> Build.</span>
+<span><span style="color: #D8896A;">&gt;</span> Iterate.</span>
+<span><span style="color: #D8896A;">&gt;</span> Ship together.</span>
+</div>
+</aside>
+<main style="flex-grow: 1; min-width: 0; display: flex; flex-direction: column; padding: 40px 72px 32px; box-sizing: border-box; gap: 28px;">
+<ol aria-label="Setup steps" style="list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 10px 20px; font-size: 14px;">
+<li style="display: flex; align-items: center; gap: 8px; color: #161616; font-weight: 400;"><span style="font-family: 'JetBrains Mono', monospace; width: 24px; height: 24px; display: inline-flex; align-items: center; justify-content: center; border: 1px solid #161616; background: transparent; color: #161616;">1</span>Your computer</li>
+<li style="display: flex; align-items: center; gap: 8px; color: #161616; font-weight: 400;"><span style="font-family: 'JetBrains Mono', monospace; width: 24px; height: 24px; display: inline-flex; align-items: center; justify-content: center; border: 1px solid #161616; background: transparent; color: #161616;">2</span>Your AI account</li>
+<li style="display: flex; align-items: center; gap: 8px; color: #161616; font-weight: 400;"><span style="font-family: 'JetBrains Mono', monospace; width: 24px; height: 24px; display: inline-flex; align-items: center; justify-content: center; border: 1px solid #161616; background: transparent; color: #161616;">3</span>Your project</li>
+<li style="display: flex; align-items: center; gap: 8px; color: #161616; font-weight: 400;"><span style="font-family: 'JetBrains Mono', monospace; width: 24px; height: 24px; display: inline-flex; align-items: center; justify-content: center; border: 1px solid #161616; background: transparent; color: #161616;">4</span>What we found</li>
+<li style="display: flex; align-items: center; gap: 8px; color: #161616; font-weight: 400;"><span style="font-family: 'JetBrains Mono', monospace; width: 24px; height: 24px; display: inline-flex; align-items: center; justify-content: center; border: 1px solid #161616; background: transparent; color: #161616;">5</span>Your team</li>
+<li style="display: flex; align-items: center; gap: 8px; color: #161616; font-weight: 400;"><span style="font-family: 'JetBrains Mono', monospace; width: 24px; height: 24px; display: inline-flex; align-items: center; justify-content: center; border: 1px solid #161616; background: transparent; color: #161616;">6</span>What they may do</li>
+<li style="display: flex; align-items: center; gap: 8px; color: #161616; font-weight: 400;"><span style="font-family: 'JetBrains Mono', monospace; width: 24px; height: 24px; display: inline-flex; align-items: center; justify-content: center; border: 1px solid #161616; background: transparent; color: #161616;">7</span>Spending</li>
+<li aria-current="step" style="display: flex; align-items: center; gap: 8px; color: #161616; font-weight: 600;"><span style="font-family: 'JetBrains Mono', monospace; width: 24px; height: 24px; display: inline-flex; align-items: center; justify-content: center; border: 1px solid #161616; background: #161616; color: #F3E7D3;">8</span>Finishing work</li>
+</ol>
+<div style="display: flex; flex-direction: column; gap: 8px; max-width: 760px;">
+<h1 style="margin: 0; font-size: 36px; line-height: 40px; font-weight: 600;">When you accept a piece of work, what happens to it?</h1>
+<p style="margin: 0; font-size: 16px; line-height: 24px; color: #5B5347;">Accepted work has to be added to your project. Pick what suits you; you can change it later in Settings.</p>
+</div>
+<div role="radiogroup" aria-label="Accepted work" style="display: flex; flex-direction: column; gap: 10px; max-width: 760px; margin-top: -8px;">
+<label style="display: flex; gap: 14px; align-items: flex-start; padding: 14px; border: 3px solid #161616; border-radius: 8px; background: #FBF6EC; cursor: pointer;"><input type="radio" name="integ" checked="{{true}}" style="width: 20px; height: 20px; margin: 2px 0 0; accent-color: #161616; flex-shrink: 0;"><span style="display: flex; flex-direction: column; gap: 4px;"><span style="font-size: 16px; font-weight: 600;">Farik adds it for me</span><span style="font-size: 15px; line-height: 22px; color: #5B5347;">Recommended. Farik adds the work to your project as soon as you accept it, and sends it to your online repository if you have one.</span></span></label>
+<label style="display: flex; gap: 14px; align-items: flex-start; padding: 16px; border: 1px solid #8A7F6E; border-radius: 8px; background: #FBF6EC; cursor: pointer;"><input type="radio" name="integ" style="width: 20px; height: 20px; margin: 2px 0 0; accent-color: #161616; flex-shrink: 0;"><span style="display: flex; flex-direction: column; gap: 4px;"><span style="font-size: 16px; font-weight: 600;">Open a pull request on GitHub for each piece</span><span style="font-size: 15px; line-height: 22px; color: #5B5347;">You, or someone you trust, merges each one on GitHub. Needs the GitHub app on this computer.</span></span></label>
+<label style="display: flex; gap: 14px; align-items: flex-start; padding: 16px; border: 1px solid #8A7F6E; border-radius: 8px; background: #FBF6EC; cursor: pointer;"><input type="radio" name="integ" style="width: 20px; height: 20px; margin: 2px 0 0; accent-color: #161616; flex-shrink: 0;"><span style="display: flex; flex-direction: column; gap: 4px;"><span style="font-size: 16px; font-weight: 600;">I will add each one myself</span><span style="font-size: 15px; line-height: 22px; color: #5B5347;">Farik waits. Each accepted piece shows an “Add to project” button until you press it.</span></span></label>
+</div>
+<section aria-labelledby="sp-h" style="max-width: 760px; box-sizing: border-box; border: 1px solid #D9CBB3; border-radius: 8px; background: #FBF6EC; padding: 16px 20px; display: flex; flex-direction: column; gap: 6px;">
+<h2 id="sp-h" style="margin: 0; font-size: 18px; line-height: 24px; font-weight: 600;">Your team works in sprints</h2>
+<p style="margin: 0; font-size: 15px; line-height: 22px;">The team gets your requests ready straight away, and starts building when you start a sprint from the Board. Until then, ready work waits in the Backlog.</p>
+<p style="margin: 0; font-size: 14px; line-height: 20px; color: #5B5347;">Change this under advanced settings, or later in Settings.</p></section>
+<p style="margin: 0; font-size: 15px; line-height: 22px; max-width: 760px;">Rules for the whole team, the checks every piece of work must pass, how plans are judged and sprints are already set to safe choices. <a href="#adv">Show advanced settings</a></p>
+<div style="flex-grow: 1;"></div>
+<div style="display: flex; gap: 12px; align-items: center; max-width: 820px;"><button type="button" style="font-family: inherit; font-size: 16px; font-weight: 600; background: #FBF6EC; color: #161616; border: 1px solid #8A7F6E; border-radius: 4px; padding: 0 18px; min-height: 44px; cursor: pointer;">Back</button><span style="flex-grow: 1;"></span><button type="button" style="font-family: inherit; font-size: 16px; font-weight: 600; background: #D8896A; color: #161616; border: 0; border-radius: 4px; padding: 0 20px; min-height: 44px; cursor: pointer;">Start the team</button></div>
+</main>
+</div>
+<p style="margin: 0; padding: 14px 24px; font-family: 'JetBrains Mono', monospace; font-size: 13px; line-height: 20px; color: #5B5347; background: #F3E7D3; border-top: 1px solid #161616;">2. Behind “Show advanced settings”: the same switch as in Settings, on. A saved team brings its own answer and fills it.</p>
+<div style="width: 1440px; height: 700px; display: flex; background: #F3E7D3; overflow: hidden;">
+<aside style="width: 440px; flex-shrink: 0; background: #161616; color: #F3E7D3; display: flex; flex-direction: column; padding: 48px; box-sizing: border-box; gap: 28px;">
+<div style="display: flex; align-items: center; gap: 16px;">
+<img class="px" src="/_blob/cbf211abf5739b5bb073797fe4fb08fc" alt="" style="width: 64px; height: 64px;">
+<div style="display: flex; flex-direction: column; gap: 6px;">
+<img src="/_blob/357b43dd6301616912c5f06654da35a4" alt="Farik" style="width: 196px; height: auto;">
+<span style="font-family: 'Silkscreen', monospace; font-size: 13px; letter-spacing: 0.2em; color: #F3E7D3;">AI HARNESS ENGINE</span>
+</div>
+</div>
+<img class="px" src="/_blob/8376139218c7d991cfe8566817a314dc" alt="The team at a long table under a sprint board" style="width: 344px; height: auto; border: 3px solid #D8896A;">
+<div style="font-family: 'JetBrains Mono', monospace; font-size: 18px; line-height: 30px; display: flex; flex-direction: column;">
+<span><span style="color: #D8896A;">&gt;</span> Plan.</span>
+<span><span style="color: #D8896A;">&gt;</span> Build.</span>
+<span><span style="color: #D8896A;">&gt;</span> Iterate.</span>
+<span><span style="color: #D8896A;">&gt;</span> Ship together.</span>
+</div>
+</aside>
+<main style="flex-grow: 1; min-width: 0; display: flex; flex-direction: column; padding: 40px 72px 32px; box-sizing: border-box; gap: 28px;">
+<ol aria-label="Setup steps" style="list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 10px 20px; font-size: 14px;">
+<li style="display: flex; align-items: center; gap: 8px; color: #161616; font-weight: 400;"><span style="font-family: 'JetBrains Mono', monospace; width: 24px; height: 24px; display: inline-flex; align-items: center; justify-content: center; border: 1px solid #161616; background: transparent; color: #161616;">1</span>Your computer</li>
+<li style="display: flex; align-items: center; gap: 8px; color: #161616; font-weight: 400;"><span style="font-family: 'JetBrains Mono', monospace; width: 24px; height: 24px; display: inline-flex; align-items: center; justify-content: center; border: 1px solid #161616; background: transparent; color: #161616;">2</span>Your AI account</li>
+<li style="display: flex; align-items: center; gap: 8px; color: #161616; font-weight: 400;"><span style="font-family: 'JetBrains Mono', monospace; width: 24px; height: 24px; display: inline-flex; align-items: center; justify-content: center; border: 1px solid #161616; background: transparent; color: #161616;">3</span>Your project</li>
+<li style="display: flex; align-items: center; gap: 8px; color: #161616; font-weight: 400;"><span style="font-family: 'JetBrains Mono', monospace; width: 24px; height: 24px; display: inline-flex; align-items: center; justify-content: center; border: 1px solid #161616; background: transparent; color: #161616;">4</span>What we found</li>
+<li style="display: flex; align-items: center; gap: 8px; color: #161616; font-weight: 400;"><span style="font-family: 'JetBrains Mono', monospace; width: 24px; height: 24px; display: inline-flex; align-items: center; justify-content: center; border: 1px solid #161616; background: transparent; color: #161616;">5</span>Your team</li>
+<li style="display: flex; align-items: center; gap: 8px; color: #161616; font-weight: 400;"><span style="font-family: 'JetBrains Mono', monospace; width: 24px; height: 24px; display: inline-flex; align-items: center; justify-content: center; border: 1px solid #161616; background: transparent; color: #161616;">6</span>What they may do</li>
+<li style="display: flex; align-items: center; gap: 8px; color: #161616; font-weight: 400;"><span style="font-family: 'JetBrains Mono', monospace; width: 24px; height: 24px; display: inline-flex; align-items: center; justify-content: center; border: 1px solid #161616; background: transparent; color: #161616;">7</span>Spending</li>
+<li aria-current="step" style="display: flex; align-items: center; gap: 8px; color: #161616; font-weight: 600;"><span style="font-family: 'JetBrains Mono', monospace; width: 24px; height: 24px; display: inline-flex; align-items: center; justify-content: center; border: 1px solid #161616; background: #161616; color: #F3E7D3;">8</span>Finishing work</li>
+</ol>
+<div style="display: flex; flex-direction: column; gap: 8px; max-width: 760px;">
+<h1 style="margin: 0; font-size: 36px; line-height: 40px; font-weight: 600;">Advanced settings</h1>
+<p style="margin: 0; font-size: 16px; line-height: 24px; color: #5B5347;">Farik’s defaults are safe, and you never need to change them.</p>
+</div>
+<p style="margin: 0; font-family: 'JetBrains Mono', monospace; font-size: 13px; color: #5B5347; border: 1px dashed #8A7F6E; padding: 12px 16px; max-width: 728px;">The team’s rules, the checks, and checking plans, as before</p>
+<section id="adv" aria-labelledby="ap-h" style="display: flex; flex-direction: column; gap: 10px; max-width: 760px;"><h2 id="ap-h" style="margin: 0; font-size: 20px; line-height: 28px; font-weight: 600;">Planning work</h2><div style="display: flex; gap: 14px; align-items: flex-start;"><button id="spis" type="button" role="switch" aria-checked="true" aria-labelledby="spis-l" aria-describedby="spis-d" style="position: relative; width: 44px; height: 24px; margin-top: 10px; border-radius: 12px; border: 1px solid #161616; background: #161616; cursor: pointer; flex-shrink: 0; padding: 0;"><span aria-hidden="true" style="position: absolute; top: 2px; left: 22px; width: 18px; height: 18px; border-radius: 9px; background: #F3E7D3;"></span></button><span style="display: flex; flex-direction: column; gap: 4px;"><span id="spis-l" style="font-size: 16px; line-height: 44px; font-weight: 600;">Plan work in sprints</span><span id="spis-d" style="font-size: 15px; line-height: 22px; color: #5B5347; max-width: 640px;">The team gets work ready at any time: it asks its questions, writes the plans and has them checked, and breaks big requests into tasks. Nobody starts building until you start a sprint. Work that becomes ready during a sprint waits in the Backlog for the next one.</span></span></div></section>
+<div style="flex-grow: 1;"></div>
+<div style="display: flex; gap: 12px; align-items: center; max-width: 820px;"><button type="button" style="font-family: inherit; font-size: 16px; font-weight: 600; background: #FBF6EC; color: #161616; border: 1px solid #8A7F6E; border-radius: 4px; padding: 0 18px; min-height: 44px; cursor: pointer;">Hide advanced settings</button><span style="flex-grow: 1;"></span><button type="button" style="font-family: inherit; font-size: 16px; font-weight: 600; background: #D8896A; color: #161616; border: 0; border-radius: 4px; padding: 0 20px; min-height: 44px; cursor: pointer;">Start the team</button></div>
+</main>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1798}}'>
+class Component extends DCLogic {
+renderVals() { return {}; }
+}
+</script>
+</body>
+</html>
