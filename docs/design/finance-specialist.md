@@ -40,7 +40,7 @@ The rest of its setup:
 - **Tiers:** `read` and `network`, the network to research prices. It has no `write_workspace`, `execute`, git, or `external_effect` tier.
 - **Reviewer:** the Product Manager, as for the Marketing Specialist.
 - **Model:** `claude-sonnet-5` at medium effort, the Marketing Specialist's default. The team file can override it.
-- **In the team builder:** it is optional and not among the five suggested. The user adds it with one click. Its avatar is `extra-4` (the character with glasses and the green cardigan), chosen on 2026-09-27; the brand's `characters/extra-4.png` and `avatars/extra-4-256.png` become `finance-specialist.png` in phase 7 step 07, and the character keeps its place among the extras for any other agent.
+- **In the team builder:** it is optional and not among the five suggested. The user adds it with one click. Its avatar is `extra-4` (the character with glasses and the green cardigan), chosen on 2026-09-27; the brand's `characters/extra-4.png` and `avatars/extra-4-256.png` become `finance-specialist.png` in phase 7 step 09, and the character keeps its place among the extras for any other agent.
 
 ## The finance folder
 
@@ -64,11 +64,11 @@ Access:
 - Every other agent is refused the folder as it is today: it lies outside a task's worktree, and `.farik/local/**` is one of the default protected paths, which also keeps it from a conversation session in the project root.
 - That protection stays for every session. A finance session gets one narrow exception, for `.farik/local/finance/**` alone.
 
-## Phase 8 step 02: the role, the books, the AI spending, and Stripe
+## Phase 7 step 09: the role, the books, the AI spending, and Stripe
 
 The first deliverable is the accounting of the team's own AI spending, because it needs no connector, no verification programme, and answers the market's top complaint: `farik_read_costs` gives the role the totals Farik already keeps, and the role writes them into `books.xlsx` and `forecast.xlsx` with a forecast of the next sprints and a recommended budget.
 
-Stripe is read through Stripe's official MCP server, configured for this agent the way phase 7 step 01 configures any MCP server. The user signs in to Stripe (OAuth), which they can revoke from Stripe's dashboard; a scheduled run uses a restricted key with read permissions only, tagged for agents as Stripe requires from 2026-10-31. Read-only is locked twice: at Stripe by the key's permissions, and in Farik, where until the kit takes the connection over in phase 9 step 05, its tools are tagged at connection as spec 5.6 says, the read tools read-only and `stripe_api_write` side-effecting, which the role's tiers refuse; in the kit the read tools are `network` and the rest `denied` (`docs/design/role-kits.md`). Either way the harness refuses a write before Stripe would. Stripe's `stripe_analytics` gives revenue metrics the role uses rather than re-deriving them. Stripe is optional: a product that takes no payments through Stripe skips it.
+Stripe is read through Stripe's official MCP server, configured for this agent the way phase 7 step 01 configures any MCP server. The user signs in to Stripe (OAuth, phase 7 step 03), which they can revoke from Stripe's dashboard; a scheduled run uses a restricted key with read permissions only, tagged for agents as Stripe requires from 2026-10-31. Read-only is locked twice: at Stripe by the key's permissions, and in Farik, where until the kit takes the connection over in phase 7 step 10, its tools are tagged at connection as spec 5.6 says, the read tools read-only and `stripe_api_write` side-effecting, which the role's tiers refuse; in the kit the read tools are `network` and the rest `denied` (`docs/design/role-kits.md`). Either way the harness refuses a write before Stripe would. Stripe's `stripe_analytics` gives revenue metrics the role uses rather than re-deriving them. Stripe is optional: a product that takes no payments through Stripe skips it.
 
 Three Farik tools, which only this role may call:
 
@@ -120,7 +120,7 @@ The web app's finance setup gains the mailbox connection and the approved sender
 ## Not planned
 
 - **A connector to the user's main mailbox** through Google's or Microsoft's mail API, filtered by a label or folder, the design of the afternoon of 2026-09-27. It needs Google's restricted-scope verification for `gmail.readonly`, with a paid third-party assessment repeated every year, and Microsoft's publisher verification; its filter is applied after a grant that reaches the whole mailbox; and email read by an agent is the best-documented prompt-injection channel. It is built only if users ask for it once receipts intake has shipped.
-- **Reading a paid ledger** (Kick or Digits expose MCP servers) as an alternative to keeping the books. It is an optional connector in the Finance Specialist's kit (phase 7 step 08), not a replacement for the books.
+- **Reading a paid ledger** (Kick or Digits expose MCP servers) as an alternative to keeping the books. It is an optional connector in the Finance Specialist's kit (phase 7 step 10), not a replacement for the books.
 - **A page that shows the books in the browser.** The workbooks are the view until a step asks for one.
 
 New dependencies, each pinned per the repository's rules and named in the step plans: `rust_xlsxwriter` to write workbooks and `calamine` to read them (phase 7); an IMAP client (phase 12).
@@ -129,7 +129,7 @@ New dependencies, each pinned per the repository's rules and named in the step p
 
 The step plans turn each of these into a test that fails first.
 
-Phase 8 step 02:
+Phase 7 step 09:
 - The role loads, and is refused application code.
 - Every finance tool refuses every other role, except `farik_read_sheet` for the Product Manager reviewing a finance task.
 - A path that climbs out of the finance folder, is absolute, or names another part of `.farik/local` is refused.

@@ -2,7 +2,7 @@
 
 Date: 2026-09-30
 Status: accepted
-Amended 2026-10-01 by ADR 0029: the role kits are phase 7, so the role and its flow are phase 7 step 09, its connectors step 10 and the kit check step 11; the step references below are updated.
+Amended 2026-10-01 by ADR 0029: the role kits are phase 7, so the role and its flow are phase 7 step 09, its connectors step 10 and the kit check step 11; the step references below are updated. Renumbered 2026-10-01 by the project plan's revision 27, which split phase 7 step 01 and added a sign-in step: steps 11, 12 and 13.
 
 ## Context
 
@@ -43,7 +43,7 @@ The three Farik tools are `external_effect`, approved by the human's start of a 
 
 The agent never calls a platform's write tools. Farik's `farik_deploy`, `farik_restart` and `farik_roll_back` do, with arguments Farik chooses; the platform's read tools are `network`, and everything else is `denied`.
 
-The role and its incident flow are phase 7 step 09; its four platform connectors are phase 7 step 10; the kit check becomes step 11 and gains a DevOps task (phase 9 steps 06, 07 and 08 until ADR 0029).
+The role and its incident flow are phase 7 step 11; its four platform connectors are phase 7 step 12; the kit check becomes step 13 and gains a DevOps task (phase 9 steps 06, 07 and 08 until ADR 0029, phase 7 steps 09, 10 and 11 until revision 27).
 
 ## Consequences
 
