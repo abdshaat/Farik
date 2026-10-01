@@ -285,6 +285,8 @@ Fix wave (u3): the Wizard's lead is `teamLead` (or `teamLeadScratch`) whatever t
 
 Fix wave (re-review I1): `describe_change` names models in the Team cards' words, from `MODEL_FAMILIES`, which moved from the daemon to `farik-core` with a third column for sentences: "<Name>'s model changes from the strongest model to the everyday model.", "<Name> moves to another version of the strongest model." within a family, the role's model when there is none, and the id only for a model no family names; effort as "<Name> now works quickly / in a balanced way / carefully / as its role usually does." Asserted in `names_models_in_the_words_the_page_uses` and the updated `describes_each_change_in_words`, `previews_without_writing` and `validates_with_effects_and_saves`.
 
+Fix wave (re-review M1, M2): `applies_with_the_retirements_effects` names dev-b "Sol", so the on-hold line is pinned to the display name, and gives dev-b an `assigned` task (FRK-2) and a `verifying` one (FRK-3) beside its `in_progress` FRK-1, so only the task in progress is said to be put on hold. A test only: the code was right; mutations HOLD-id and HOLD-status, which survived the re-review, are now caught.
+
 ## Verification
 
 ```

@@ -549,16 +549,27 @@ mod tests {
     #[test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
     fn applies_with_the_retirements_effects() {
-        let (harness, folder) = templated("templates-apply", |_| {});
+        let (harness, folder) = templated("templates-apply", |wire| {
+            wire["agents"][2]["display_name"] = json!("Sol");
+        });
         saved(&folder, &pair());
         harness.in_progress("FRK-1", "dev-b", "dev-a");
+        // dev-b also holds a task not started and one handed in: neither is put on hold.
+        harness.assigned("FRK-2", "dev-b", "dev-a");
+        harness.in_progress("FRK-3", "dev-b", "dev-a");
+        harness.project.moved(
+            "FRK-3",
+            "in_progress",
+            "verifying",
+            &json!({ "actor": "assignee", "requested_by": "dev-b", "assignee": "dev-b", "reviewer": "dev-a" }),
+        );
         worked(&harness, "dev-b");
         let shown = preview(&harness, "pair");
         assert_eq!(
             shown["effects"][0],
-            "dev-b is retired. dev-b's unfinished task, FRK-1 \u{201c}Add a login page\u{201d}, is put \
+            "Sol is retired. Sol's unfinished task, FRK-1 \u{201c}Add a login page\u{201d}, is put \
              on hold until you give it to someone.",
-            "the preview names what a retirement puts on hold"
+            "the preview names what a retirement puts on hold, by name, and only what is in progress"
         );
         let before = seq_count(&harness);
 
