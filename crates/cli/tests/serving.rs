@@ -636,6 +636,14 @@ fn admits_a_local_browser_without_a_code_in_preview_mode() {
         }
     };
 
+    // The preview's own project (`TempRepo::new("preview")` on the binary's main thread) does not
+    // plan in sprints, so a request filed in it flows without one.
+    let team = std::fs::read_to_string(
+        std::env::temp_dir()
+            .join(format!("farik-git-preview-{}-ThreadId(1)", child.id()))
+            .join(".farik/team.yaml"),
+    )
+    .unwrap_or_default();
     let admitted = get_as(port, &format!("localhost:{port}"), "/", None);
     let cookie = cookie_set(&admitted);
     let session = cookie
@@ -666,6 +674,7 @@ fn admits_a_local_browser_without_a_code_in_preview_mode() {
     assert!(interrupted.success());
     // What a serve that Ctrl-C ended exits with.
     assert_eq!(status.code(), Some(130), "{status:?}");
+    assert!(team.contains("plan_in_sprints: false"), "{team}");
 }
 
 #[cfg(not(feature = "e2e"))]
