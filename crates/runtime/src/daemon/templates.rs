@@ -31,8 +31,8 @@ pub(super) const METHODS: [&str; 4] = [
 pub(super) const QUERIES: [&str; 2] = ["templates.list", "template.preview"];
 
 const NO_STATE_FOLDER: &str = "Farik has no folder on this computer to keep saved teams in.";
-const TEMPLATE_CHANGED: &str =
-    "This saved team was saved again since you looked at it. Look at what changes once more.";
+const TEMPLATE_CHANGED: &str = "This saved team was saved again since you looked at it. Go back and look at what changes \
+     once more.";
 
 /// A refusal the page words by `code`, at `path`.
 fn refusal(code: &str, path: &str, message: &str) -> Failure {
@@ -85,28 +85,28 @@ pub(super) fn query(
                 .collect::<Vec<_>>(),
         }));
     }
-    let (before, applied, _) = applying(deps, templates, slug_of(params), None)?;
-    answer(deps, &before, &applied)
+    let (before, applied, _, digest) = applying(deps, templates, slug_of(params), None)?;
+    answer(deps, &before, &applied, &digest)
 }
 
 fn slug_of(params: &Value) -> &str {
     params["slug"].as_str().unwrap_or_default()
 }
 
-/// The team as it is, what the template saved as `slug` makes of it, and the template's name.
-/// An agent has worked when the log has an event of its. When `saved_at` is given, a template
-/// saved at another time is refused: it changed since the preview that named that time.
+/// The team as it is, what the template saved as `slug` makes of it, the template's name, and its
+/// file's digest. An agent has worked when the log has an event of its. When `digest` is given, a
+/// file with another digest is refused: it changed since the preview that answered that one.
 fn applying(
     deps: &ToolDeps,
     templates: &Templates,
     slug: &str,
-    saved_at: Option<&str>,
-) -> Result<(Team, TemplateApplied, String), Failure> {
-    let template = templates.read(slug).map_err(|error| failure(&error))?;
-    if let Some(saved_at) = saved_at
-        && chrono::DateTime::parse_from_rfc3339(saved_at).ok() != Some(template.saved_at.into())
-    {
-        return Err(refusal("template_changed", "/saved_at", TEMPLATE_CHANGED));
+    digest: Option<&str>,
+) -> Result<(Team, TemplateApplied, String, String), Failure> {
+    let (template, read) = templates
+        .read_digested(slug)
+        .map_err(|error| failure(&error))?;
+    if digest.is_some_and(|digest| digest != read) {
+        return Err(refusal("template_changed", "/digest", TEMPLATE_CHANGED));
     }
     let current = deps.files.read_team().map_err(|e| internal(&e))?;
     let mut workers = BTreeSet::new();
@@ -120,12 +120,17 @@ fn applying(
         }
     }
     let applied = apply_template(&current, &template, &workers, &suggested()?);
-    Ok((current, applied, template.name.to_string()))
+    Ok((current, applied, template.name.to_string(), read))
 }
 
 /// The preview's answer, and the apply's. Its effects say first what each retirement puts on hold:
 /// the `in_progress` tasks the retired agent holds, which its retirement blocks.
-fn answer(deps: &ToolDeps, before: &Team, applied: &TemplateApplied) -> Result<Value, Failure> {
+fn answer(
+    deps: &ToolDeps,
+    before: &Team,
+    applied: &TemplateApplied,
+    digest: &str,
+) -> Result<Value, Failure> {
     let board = deps.projections.board().map_err(|e| internal(&e))?;
     let mut effects = Vec::new();
     for agent in before
@@ -164,6 +169,7 @@ fn answer(deps: &ToolDeps, before: &Team, applied: &TemplateApplied) -> Result<V
         "added": applied.added,
         "effects": effects,
         "errors": errors_wire(&applied.errors),
+        "digest": digest,
     }))
 }
 
@@ -175,11 +181,11 @@ fn apply(
     state: &DaemonState,
     templates: &Templates,
     slug: &str,
-    saved_at: &str,
+    digest: &str,
 ) -> Result<Value, Failure> {
     let _writing = state.team_writes();
-    let (before, applied, name) = applying(deps, templates, slug, Some(saved_at))?;
-    let answered = answer(deps, &before, &applied)?;
+    let (before, applied, name, read) = applying(deps, templates, slug, Some(digest))?;
+    let answered = answer(deps, &before, &applied, &read)?;
     if !applied.errors.is_empty() {
         return Err(Refused::Errors(applied.errors).into());
     }
@@ -242,7 +248,7 @@ pub(super) async fn call(
                 &state,
                 templates,
                 slug,
-                params["saved_at"].as_str().unwrap_or_default(),
+                params["digest"].as_str().unwrap_or_default(),
             ),
         }
     })
@@ -260,6 +266,7 @@ mod tests {
     use farik_protocol::clock::FixedClock;
     use farik_protocol::event::event_to_value;
     use serde_json::{Value, json};
+    use sha2::{Digest as _, Sha256};
 
     use crate::daemon::gates::tests::{call, query, rpc};
     use crate::daemon::team::tests::{refused, team_file, worked};
@@ -308,8 +315,13 @@ mod tests {
         (harness, folder)
     }
 
-    /// When `pair` was saved.
-    const SAVED: &str = "2026-09-30T12:00:00Z";
+    /// A digest no template file has.
+    const NO_DIGEST: &str = "0000000000000000000000000000000000000000000000000000000000000000";
+
+    /// The digest `template.preview` answers for `slug`, which `template.apply` is given.
+    fn digest(harness: &Harness, slug: &str) -> Value {
+        preview(harness, slug)["digest"].clone()
+    }
 
     /// "Pair": Mira, the Product Manager `pm`; Ada, the Developer `dev-a`, on a cheaper model;
     /// Noor, a new Developer; commands off and pushing on, no plan check, pull requests, and no
@@ -497,6 +509,12 @@ mod tests {
             shown["team"]["policy"]["permissions"],
             json!({ "run_commands": false, "push": true })
         );
+        let bytes = std::fs::read(folder.join("pair.yaml")).expect("the file reads");
+        assert_eq!(
+            shown["digest"],
+            crate::daemon::hex(&Sha256::digest(&bytes)),
+            "the digest is the file's bytes' sha256"
+        );
         assert_eq!(team_file(&harness), team, "previewing writes nothing");
         assert_eq!(seq_count(&harness), events, "and records nothing");
     }
@@ -576,7 +594,7 @@ mod tests {
         let applied = call(
             &harness.daemon,
             "template.apply",
-            &json!({ "slug": "pair", "saved_at": SAVED }),
+            &json!({ "slug": "pair", "digest": shown["digest"] }),
             "templateAppliedResult",
         );
         assert_eq!(applied, shown, "applying makes what the preview showed");
@@ -676,7 +694,7 @@ mod tests {
             let params = if method == "query" {
                 json!({ "name": "template.preview", "params": { "slug": "broken" } })
             } else {
-                json!({ "slug": "broken", "saved_at": SAVED })
+                json!({ "slug": "broken", "digest": NO_DIGEST })
             };
             assert_eq!(
                 refusal(&harness, method, &params),
@@ -693,7 +711,7 @@ mod tests {
             rpc(
                 &harness.daemon,
                 "template.apply",
-                &json!({ "slug": "nope", "saved_at": SAVED })
+                &json!({ "slug": "nope", "digest": NO_DIGEST })
             )["error"]
                 .get("data"),
             None
@@ -717,7 +735,7 @@ mod tests {
             refusal(
                 &harness,
                 "template.apply",
-                &json!({ "slug": "paused", "saved_at": SAVED })
+                &json!({ "slug": "paused", "digest": digest(&harness, "paused") })
             ),
             (-32005, json!("needs_developer"), json!("/agents"))
         );
@@ -735,7 +753,7 @@ mod tests {
             ("template.save", json!({ "name": "Pair" })),
             (
                 "template.apply",
-                json!({ "slug": "pair", "saved_at": SAVED }),
+                json!({ "slug": "pair", "digest": NO_DIGEST }),
             ),
             ("template.rename", json!({ "slug": "pair", "name": "Two" })),
             ("template.delete", json!({ "slug": "pair" })),
@@ -756,7 +774,8 @@ mod tests {
         duo["agents"].as_array_mut().expect("agents").pop();
         saved(&folder, &duo);
         worked(&harness, "dev-b");
-        assert_eq!(preview(&harness, "pair")["errors"], json!([]));
+        let shown = preview(&harness, "pair");
+        assert_eq!(shown["errors"], json!([]));
         // Since the preview, Ada (dev-a), whom Pair now keeps as its only Developer, was paused:
         // applying now would retire dev-b and leave no active Developer.
         let mut wire = team_file(&harness);
@@ -772,7 +791,7 @@ mod tests {
             refusal(
                 &harness,
                 "template.apply",
-                &json!({ "slug": "pair", "saved_at": SAVED })
+                &json!({ "slug": "pair", "digest": shown["digest"] })
             ),
             (-32005, json!("needs_developer"), json!("/agents"))
         );
@@ -786,10 +805,11 @@ mod tests {
         let (harness, folder) = templated("templates-changed", |_| {});
         saved(&folder, &pair());
         worked(&harness, "dev-b");
-        assert_eq!(preview(&harness, "pair")["errors"], json!([]));
-        // Since the preview, Pair was saved again, from another tab, with another permission.
+        let shown = preview(&harness, "pair");
+        assert_eq!(shown["errors"], json!([]));
+        // Since the preview, Pair was saved again, from another tab or by hand, with another
+        // permission and the same saved_at.
         let mut again = pair();
-        again["saved_at"] = json!("2026-10-01T09:00:00Z");
         again["policy"]["permissions"]["push"] = json!(false);
         Templates::new(folder.clone())
             .save(&validate_template(&again).expect("a template"), true)
@@ -799,16 +819,30 @@ mod tests {
             refusal(
                 &harness,
                 "template.apply",
-                &json!({ "slug": "pair", "saved_at": "2026-09-30T12:00:00Z" })
+                &json!({ "slug": "pair", "digest": shown["digest"] })
             ),
-            (-32005, json!("template_changed"), json!("/saved_at"))
+            (-32005, json!("template_changed"), json!("/digest"))
         );
         assert_eq!(team_file(&harness), team, "nothing is written");
         assert_eq!(seq_count(&harness), events);
+        let (_, message) = refused(
+            &harness,
+            "template.apply",
+            &json!({ "slug": "pair", "digest": shown["digest"] }),
+        );
+        assert_eq!(
+            message,
+            "This saved team was saved again since you looked at it. Go back and look at what \
+             changes once more.",
+            "the words the page says"
+        );
+        // Looking again gives the new file's digest, which applies.
+        let again = preview(&harness, "pair");
+        assert_ne!(again["digest"], shown["digest"]);
         call(
             &harness.daemon,
             "template.apply",
-            &json!({ "slug": "pair", "saved_at": "2026-10-01T09:00:00Z" }),
+            &json!({ "slug": "pair", "digest": again["digest"] }),
             "templateAppliedResult",
         );
         assert_eq!(team_file(&harness)["policy"]["permissions"]["push"], false);
@@ -822,13 +856,14 @@ mod tests {
         duo["agents"].as_array_mut().expect("agents").pop();
         saved(&folder, &duo);
         worked(&harness, "dev-b");
+        let digest = digest(&harness, "pair");
         let writing = harness.daemon.team_writes();
         let daemon = Arc::clone(&harness.daemon);
         let asking = std::thread::spawn(move || {
             rpc(
                 &daemon,
                 "template.apply",
-                &json!({ "slug": "pair", "saved_at": SAVED }),
+                &json!({ "slug": "pair", "digest": digest }),
             )
         });
         std::thread::sleep(std::time::Duration::from_millis(300));
@@ -902,7 +937,7 @@ mod tests {
             ),
             (
                 "template.apply",
-                json!({ "slug": "pair", "saved_at": SAVED }),
+                json!({ "slug": "pair", "digest": digest(&harness, "pair") }),
             ),
         ] {
             let before = team_file(&harness);

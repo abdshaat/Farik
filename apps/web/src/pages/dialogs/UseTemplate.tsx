@@ -30,6 +30,8 @@ type Preview = {
 	added: string[];
 	effects: string[];
 	errors: Refusal[];
+	/** The template file's digest as this preview read it, which `template.apply` is given. */
+	digest: string;
 };
 
 /** The role a missing-role refusal names. */
@@ -94,13 +96,13 @@ export function UseTemplate({
 	const name = template?.name ?? "";
 
 	const apply = async () => {
-		if (!client || !shown || !template) return;
+		if (!client || !shown || !preview) return;
 		setBusy(true);
 		setRefused(undefined);
 		try {
 			await client.call("template.apply", {
 				slug: shown,
-				savedAt: template.savedAt,
+				digest: preview.digest,
 			});
 			onApplied();
 			onClose();

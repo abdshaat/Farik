@@ -9,6 +9,7 @@ use std::path::PathBuf;
 use farik_core::contract::ValidationError;
 use farik_core::team::{TeamTemplate, template_slug, validate_template};
 use farik_store::files::{template_yaml, yaml_value};
+use sha2::{Digest as _, Sha256};
 
 /// The folder saved templates are kept in, one file per template, named by its slug.
 pub struct Templates {
@@ -143,6 +144,15 @@ impl Templates {
     /// `NotFound` when there is none, or `slug` is not a slug; `Unreadable` when the file is not a
     /// template; `Io` when it cannot be read.
     pub fn read(&self, slug: &str) -> Result<TeamTemplate, TemplateError> {
+        self.read_digested(slug).map(|(template, _)| template)
+    }
+
+    /// `read`'s template, and the sha256 of the file's bytes it was read from, in lowercase hex.
+    ///
+    /// # Errors
+    ///
+    /// `read`'s.
+    pub fn read_digested(&self, slug: &str) -> Result<(TeamTemplate, String), TemplateError> {
         let path = self.path(slug)?;
         let text = std::fs::read_to_string(&path).map_err(|error| match error.kind() {
             ErrorKind::NotFound => TemplateError::NotFound {
@@ -154,7 +164,8 @@ impl Templates {
             slug: slug.to_string(),
         };
         let value = yaml_value(&text, &format!("{slug}.yaml")).map_err(|_| unreadable())?;
-        validate_template(&value).map_err(|_| unreadable())
+        let digest = crate::daemon::hex(&Sha256::digest(text.as_bytes()));
+        Ok((validate_template(&value).map_err(|_| unreadable())?, digest))
     }
 
     /// Saves `template` under its name's slug, which it answers. The state folder and `templates/`

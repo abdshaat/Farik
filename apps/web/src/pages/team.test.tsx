@@ -407,9 +407,7 @@ describe("team page", () => {
 			id: "claude-opus-5-5",
 			effort: "low",
 		});
-		expect(
-			await screen.findByText("Theo now works quickly."),
-		).toBeTruthy();
+		expect(await screen.findByText("Theo now works quickly.")).toBeTruthy();
 		expect(s.calls("team.save")).toHaveLength(0);
 
 		fireEvent.click(screen.getByRole("button", { name: en.agentSave }));
@@ -1215,6 +1213,7 @@ const PREVIEW = {
 	added: ["noor"],
 	effects: ["Theo, the Developer, is retired.", "Noor joins as a Developer."],
 	errors: [],
+	digest: "a".repeat(64),
 };
 
 /** The latest `name` query the page asked. */
@@ -1322,10 +1321,7 @@ describe("team templates", () => {
 
 		fireEvent.click(within(preview).getByRole("button", { name: en.useApply }));
 		const applied = await sent(s, "template.apply");
-		expect(applied.params).toEqual({
-			slug: "pair",
-			saved_at: PAIR.template.saved_at,
-		});
+		expect(applied.params).toEqual({ slug: "pair", digest: PREVIEW.digest });
 		const asks = () =>
 			s.calls("query").filter((q) => q.params.name === "team.get").length;
 		const before = asks();
@@ -1372,13 +1368,41 @@ describe("team templates", () => {
 		fireEvent.click(within(preview).getByRole("button", { name: en.useApply }));
 		await s.fail(await sent(s, "template.apply"), -32005, "changed", {
 			errors: [
-				{ path: "/saved_at", message: "changed", code: "template_changed" },
+				{ path: "/digest", message: "changed", code: "template_changed" },
 			],
 		});
 		expect((await within(preview).findByRole("alert")).textContent).toBe(
 			en.templateChanged,
 		);
 		await expectNoAxeViolations(container);
+
+		// As the words say: Back, look again, and use what is shown now.
+		fireEvent.click(within(preview).getByRole("button", { name: en.back }));
+		const list = await screen.findByRole("dialog", {
+			name: en.templateUseOpen,
+		});
+		const previews = s
+			.calls("query")
+			.filter((q) => q.params.name === "template.preview").length;
+		fireEvent.click(within(list).getByRole("button", { name: en.useShow }));
+		await waitFor(() =>
+			expect(
+				s.calls("query").filter((q) => q.params.name === "template.preview"),
+			).toHaveLength(previews + 1),
+		);
+		const fresh = { ...PREVIEW, digest: "b".repeat(64) };
+		await s.reply(await query(s, "template.preview"), fresh);
+		const again = await screen.findByRole("dialog", {
+			name: t("usePreviewTitle", { name: "Pair" }),
+		});
+		fireEvent.click(within(again).getByRole("button", { name: en.useApply }));
+		await waitFor(() => expect(s.calls("template.apply")).toHaveLength(2));
+		const second = s.calls("template.apply")[1] as never as {
+			params: unknown;
+		};
+		expect(second.params).toEqual({ slug: "pair", digest: fresh.digest });
+		await s.reply(second as never, fresh);
+		await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
 	});
 
 	it("disables_use_when_the_result_is_refused", async () => {

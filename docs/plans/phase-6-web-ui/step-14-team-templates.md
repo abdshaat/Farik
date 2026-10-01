@@ -287,6 +287,8 @@ Fix wave (re-review I1): `describe_change` names models in the Team cards' words
 
 Fix wave (re-review M1, M2): `applies_with_the_retirements_effects` names dev-b "Sol", so the on-hold line is pinned to the display name, and gives dev-b an `assigned` task (FRK-2) and a `verifying` one (FRK-3) beside its `in_progress` FRK-1, so only the task in progress is said to be put on hold. A test only: the code was right; mutations HOLD-id and HOLD-status, which survived the re-review, are now caught.
 
+Fix wave (re-review M3, M4; supersedes the M2 `saved_at` line above): `template.preview` and `template.apply` answer `digest`, the sha256 of the template file's bytes from `Templates::read_digested`; `template.apply` takes `digest` in place of `saved_at` (rpc.schema.json, generated types) and refuses a file whose digest differs with -32005 `template_changed` at `/digest`, writing nothing, so a hand edit that keeps `saved_at` is caught too. The page sends the digest of the preview it shows, not the list's `saved_at`, so after a refusal Back, Show and Use applies. The daemon's message now matches the page's ("Go back and look at what changes once more."). Asserted in `refuses_a_template_saved_again_since_the_preview` (same `saved_at`, new bytes; refusal, look again, apply), `previews_without_writing` (the digest is the file's sha256), and the web tests `shows_what_changes_before_using` and `says_when_the_saved_team_changed_since_the_preview` (refusal, Back, Show, Use succeeds).
+
 ## Verification
 
 ```
