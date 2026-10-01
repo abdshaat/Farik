@@ -46,7 +46,7 @@ The records are `docs/milestones/m1-team-exit.md`, `docs/milestones/m1-web-exit.
           path: /
 
     - `prepare` is D2's word for word. It runs in the sandbox image, whose crates layer (stage 1) lets cargo build offline. The pnpm in the image switches itself to the repository's pinned pnpm, with the network on.
-    - `start` is D2's, plus the sample data. `--preview` serves Farik's web app on a recorded team of its own, Mira (Product Manager), Ada (Architect) and Theo (Developer), with no credential and the network off. `--transcripts` is the accept journey's list (`apps/web/e2e/accept.spec.ts`), so a request filed in the preview plays a recorded high-risk task through its plan gate, a send-back and the acceptance gate, and no AI session starts. `--pace 600` lets each state show.
+    - `start` is D2's, plus the sample data. `--preview` serves Farik's web app on a recorded team of its own, Mira (Product Manager), Ada (Architect) and Theo (Developer), with no credential and the network off. `--transcripts` is the accept journey's list (`apps/web/e2e/accept.spec.ts`), so a request filed in the preview plays a recorded high-risk task through its plan gate, a send-back and the acceptance gate, and no AI session starts. `--pace 600` lets each state show. Its recorded team writes `plan_in_sprints: false` (step 15, B2), so the preview's journey does not stall at `ready`.
     - The first page is `/`, Today.
     - Caches: only the task's worktree is mounted, so no target or pnpm store can be shared between tasks. `target/` and `node_modules/` stay in the worktree (both ignored by git), so a task's later prepares are warm. Measured on 2026-10-01 at e71ec5f: a cold prepare 78 s, a warm one 16 s, both within the 15-minute limit.
     - What it shows: Farik's web app built from the task's tree, on sample data, not the run's own team. Neither request touches `ui_paths`, so no design review is expected. The Designer gets work only if planning gives it some, and the record says which happened.
@@ -54,7 +54,7 @@ The records are `docs/milestones/m1-team-exit.md`, `docs/milestones/m1-web-exit.
     1. On Today, file request 1, then request 2, pasting `brief1.txt` and `brief2.txt`.
     2. Answer the Product Manager's questions.
     3. Open FRK-2's gate and check phase 4's three things (`allowed_paths` include `CHANGELOG.md`; the requirements or criteria name the CHANGELOG entry; they name the decision the Architect records). If all hold, approve the epic, and approve FRK-1 if it waits; if one is missing, that is an incident: re-run from stage 1 (phase 4 stage 3).
-    4. Both wait in the Backlog: on the Board, FRK-1 is in the Backlog lane, and so is FRK-2 once the Scrum Master has broken it down; Today says "2 pieces of work are ready and wait in the Backlog". Nothing is assigned yet.
+    4. Both wait in the Backlog: on the Board, FRK-1 is in the Backlog lane, and so is FRK-2, the epic, from its approval; Today's count reaches 2 once FRK-1 is ready ("2 pieces of work are ready and wait in the Backlog"). Nothing is assigned yet.
     5. Start the sprint, from Today's link or the Board, with "No limit".
     6. Planning takes both: S1's planning ceremony plans FRK-1 and FRK-2 with every task under it.
 

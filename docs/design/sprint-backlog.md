@@ -29,9 +29,9 @@ policy:
 
 The defaults:
 - **An old team file** has no key, so the policy is off and the project behaves exactly as before.
-- **A team that setup makes** (`team.propose`, then `team.start`) has `plan_in_sprints: true`, written out so the user sees it in the file.
+- **A team that setup makes** (`team.propose`, then `team.start`) has `plan_in_sprints: true`, written out so the user sees it in the file. `team.propose` answers `true` whatever the file says, since setup only ever makes a new team.
 - **`settings.defaults`**, which Settings' "Put back the default" reads, answers `true`.
-- **`farik init`'s starter team** has `plan_in_sprints: true` (the founder, 2026-10-01; open question 1). It takes its policy from `farik_core::team::defaults()`, which `settings.defaults` answers too, so one value serves both. `farik run` on a new project ends idle until `farik sprint start`. Tests and journeys that drive work without a sprint say `plan_in_sprints: false` in their team.
+- **`farik init`'s starter team** has `plan_in_sprints: true` (the founder, 2026-10-01; open question 1). It takes its policy from `farik_core::team::defaults()`, which `settings.defaults` answers too, so one value serves both. "Put back the default" on an old project's Planning section therefore turns the policy on. `farik run` on a new project ends idle until `farik sprint start`. Tests and journeys that drive work without a sprint say `plan_in_sprints: false` in their team.
 
 ## What is gated, and what is not
 
@@ -58,19 +58,19 @@ With the policy off, nothing here changes: `in_the_open_sprint` keeps its rule (
 
 The core rule, one function both the gate and the orchestrator read:
 - **`waits_for_a_sprint`** is true when the policy is on, the row is a task (not an epic), it is not in the open sprint (or no sprint is open), and it is `ready` or carries the Backlog mark.
-- **The assignment gate** refuses such a task with "this team plans work in sprints, and <task> waits in the Backlog until a sprint plans it".
+- **The assignment gate** refuses such a task with "this team plans work in sprints, and <task> waits in the Backlog until a sprint plans it". Under the policy this sentence replaces the sprint membership sentence, so a refusal carries one sprint reason.
 - **Under the policy, an epic's assignment passes the sprint's membership rule.** The sprint budget is checked only for a row in the open sprint.
 - **The exception "a task under an epic in no sprint"** does not hold under the policy, so an unplanned epic's tasks wait with it.
 
 **A task filed under an epic the open sprint holds** joins that sprint, as today (spec 3). It is the planned epic's own work, not new work.
 
-**Incident fixes** (ADR 0027) skip planning and run even outside a sprint. Phase 9 step 06 builds the incident's fix contract and adds its exception to `waits_for_a_sprint`. This step adds nothing for it, because nothing exists to mark a contract as an incident fix yet.
+**Incident fixes** (ADR 0027) skip planning and run even outside a sprint. Phase 9 step 06 builds the incident's fix contract and adds its exception to `waits_for_a_sprint`, and to the open sprint's membership rule with the policy off. This step adds nothing for it, because nothing exists to mark a contract as an incident fix yet.
 
-**A sprint ended early** under the policy: its unfinished tasks leave it, as today, and now wait in the Backlog for the next sprint, where today they carry on (the founder kept this, 2026-10-01). The end-early dialog says so. What tells them from work that was under way at the switch is the **Backlog mark**:
+**A sprint ended early** under the policy: its unfinished tasks leave it, as today, and now wait in the Backlog for the next sprint, where today they carry on (the founder kept this, 2026-10-01; answer 4). The end-early dialog says so. What tells them from work that was under way at the switch is the **Backlog mark**:
 - `sprint.ended` gains an optional `backlog: boolean`, true when the team planned in sprints as the sprint ended, absent otherwise;
 - the projection's task row gains `left_for_the_backlog: bool`, set for each task in `left` by a `sprint.ended` with `backlog: true`, and cleared by the `sprint.planned` that puts the task in a sprint;
 - a task left by a sprint ended with the policy off has no mark, so switching the policy on later lets it finish, as any work under way;
-- switching the policy off ignores the mark; switching it on again while a task still has one holds that task again, since no sprint has planned it.
+- **switching the policy off clears every mark** (the controller's ruling, 2026-10-01, following answer 3, "started work finishes"): `team.updated` gains an optional `plan_in_sprints: boolean`, written by every team write, and the projection clears `left_for_the_backlog` on all tasks on a `team.updated` with `plan_in_sprints: false`. A task built while the policy was off is therefore never held again mid-work when the policy is switched back on.
 
 ## The Backlog
 
@@ -88,6 +88,8 @@ That covers a ready task, an epic being broken down or broken down, its ready ta
 - the escalation digest is unchanged.
 
 Nothing escalates because a sprint was not started.
+
+A marked task under an epic that left the Backlog (the epic `escalated`, say) cannot be planned alone, because `farik_plan_sprint` refuses a task with a parent. It waits until its epic is back in the Backlog.
 
 ## The planning ceremony
 
@@ -125,9 +127,9 @@ The count is the Backlog's rows with no parent, so an epic counts once. It comes
 
 "Your team's rules" gains a section after "How finished work is added": **Planning work**, with the switch **Plan work in sprints**. The line under it reads: "The team gets work ready at any time: it asks its questions, writes the plans and has them checked, and breaks big requests into tasks. Nobody starts building until you start a sprint. Work that becomes ready during a sprint waits in the Backlog for the next one."
 
-It saves through `team.save`, like every rule there, with "Put back the default", Save changes, Cancel, and "What this changes" from `team.validate`'s effects (`describe_change`):
+It saves through `team.save`, like every rule there, with "Put back the default", Save changes, Cancel, and "What this changes" from `team.validate`'s effects (`describe_change`, which gains the board's counts: how many tasks are under way, and the titles of the Backlog's rows with no parent):
 - **On:** "Ready work now waits in the Backlog until you start a sprint." When work is under way outside a sprint, also: "The <n> tasks already under way finish first." (The founder's answer of 2026-10-01; the approved mockup shows only the off state, so this line is not drawn.)
-- **Off:** "Ready work starts as soon as someone is free, without waiting for a sprint." When the Backlog holds work, also: "The <n> pieces of work in the Backlog can start now." And always: "You can still start sprints from the Board."
+- **Off:** "Ready work starts as soon as someone is free, without waiting for a sprint." When the Backlog holds work, also: "The <n> pieces of work in the Backlog, <titles>, can start now." And always: "You can still start sprints from the Board."
 
 ## Setup
 
@@ -152,10 +154,11 @@ A template holds `policy.plan_in_sprints`, optional in `team-template.schema.jso
 - Starting and planning a sprint record `sprint.started` and `sprint.planned` as today.
 - Holding a task records nothing, as a full agent's does not.
 - `sprint.ended` gains the optional `backlog: boolean` above; old events without it read as `false`.
+- `team.updated` gains the optional `plan_in_sprints: boolean` above; old events without it clear nothing.
 
 **`tasks.list` rows gain `backlog: boolean`**, false whenever the policy is off.
 
-**An idle tick** whose Backlog holds work while no sprint is open says "the ready work waits for a sprint". So `farik run` ends with that line, and its closing list of what waits on the user adds "start a sprint: <n> waits in the Backlog (`farik sprint start`)".
+**An idle tick** whose Backlog holds work while no sprint is open says "the ready work waits for a sprint". So `farik run` ends with that line, and after its closing list of what waits on the user it prints "start a sprint: <n> waits in the Backlog (`farik sprint start`)" (with `--json`, `{"backlog": {"count": n}}`). The line is not a kind of waiting, so Today's "Waiting on you" does not show it.
 
 `farik board` is not changed in this step.
 
@@ -164,3 +167,4 @@ A template holds `policy.plan_in_sprints`, optional in `team-template.schema.jso
 1. `farik init`'s starter team: **on**, as setup's teams. The command line ends idle until `farik sprint start`.
 2. A Backlog waiting with no sprint open as a row in Today's "Waiting on you": not asked separately; the approved TodayBacklog mockup has the line in the team band only, so that is what is built.
 3. Turning the policy on while tasks are under way outside a sprint: **the started work finishes; only new work waits for a sprint**, over the design's "stop after the current session". The rule is in "What is gated, and what is not".
+4. A sprint ended early under the policy: **its unfinished tasks wait in the Backlog** for the next sprint, as the design proposed.
