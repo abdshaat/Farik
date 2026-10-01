@@ -185,12 +185,6 @@ impl FileConnectorSecrets {
     }
 }
 
-/// Held while `connectors.json` is read and rewritten, so two saves in one process do not lose
-/// one another's entry.
-// ponytail: one lock per process; a `farik connect` and the daemon saving at the same moment can
-// still race, a file lock if that is ever seen.
-static FILE_LOCK: Mutex<()> = Mutex::new(());
-
 impl FileConnectorSecrets {
     /// Every entry in the file, by account; none when there is no file.
     fn read_all(&self) -> Result<serde_json::Map<String, serde_json::Value>, CredentialError> {
@@ -214,15 +208,6 @@ impl FileConnectorSecrets {
         &self,
         entries: serde_json::Map<String, serde_json::Value>,
     ) -> Result<(), CredentialError> {
-        use std::os::unix::fs::{DirBuilderExt as _, PermissionsExt as _};
-
-        let folder = self.path.parent().unwrap_or(std::path::Path::new("."));
-        std::fs::DirBuilder::new()
-            .recursive(true)
-            .mode(0o700)
-            .create(folder)
-            .and_then(|()| std::fs::set_permissions(folder, std::fs::Permissions::from_mode(0o700)))
-            .map_err(|error| self.failed("make the folder of", &error))?;
         let beside = self
             .path
             .with_extension(format!("json.{}.tmp", std::process::id()));
@@ -235,6 +220,41 @@ impl FileConnectorSecrets {
             })
     }
 
+    /// Reads the entries, lets `change` change them, and writes them back when it says so, all
+    /// under an exclusive lock on `connectors.json.lock`: `farik connect` and the daemon may both
+    /// rewrite the file, and neither may lose the other's entry.
+    fn rewrite(
+        &self,
+        change: impl FnOnce(&mut serde_json::Map<String, serde_json::Value>) -> bool,
+    ) -> Result<(), CredentialError> {
+        use std::os::unix::fs::{DirBuilderExt as _, OpenOptionsExt as _, PermissionsExt as _};
+
+        let folder = self.path.parent().unwrap_or(std::path::Path::new("."));
+        std::fs::DirBuilder::new()
+            .recursive(true)
+            .mode(0o700)
+            .create(folder)
+            .and_then(|()| std::fs::set_permissions(folder, std::fs::Permissions::from_mode(0o700)))
+            .map_err(|error| self.failed("make the folder of", &error))?;
+        // A file beside, not `connectors.json` itself, which the rename replaces.
+        let lock = std::fs::OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .write(true)
+            .mode(0o600)
+            .open(self.path.with_extension("json.lock"))
+            .and_then(|lock| lock.lock().map(|()| lock))
+            .map_err(|error| self.failed("lock", &error))?;
+        let mut entries = self.read_all()?;
+        let written = if change(&mut entries) {
+            self.write_all(entries)
+        } else {
+            Ok(())
+        };
+        drop(lock);
+        written
+    }
+
     fn failed(&self, what: &str, error: &std::io::Error) -> CredentialError {
         CredentialError::Failed(format!("could not {what} {}: {error}", self.path.display()))
     }
@@ -242,7 +262,7 @@ impl FileConnectorSecrets {
 
 impl ConnectorSecrets for FileConnectorSecrets {
     fn load(&self, at: &SecretAt) -> Result<Option<ConnectorEntry>, CredentialError> {
-        let _held = crate::locked(&FILE_LOCK);
+        // No lock: the file is only ever replaced whole, by a rename.
         self.read_all()?
             .get(&at.account())
             .map(ConnectorEntry::from_json)
@@ -250,19 +270,15 @@ impl ConnectorSecrets for FileConnectorSecrets {
     }
 
     fn save(&self, at: &SecretAt, entry: &ConnectorEntry) -> Result<SecretStore, CredentialError> {
-        let _held = crate::locked(&FILE_LOCK);
-        let mut entries = self.read_all()?;
-        entries.insert(at.account(), entry.to_json());
-        self.write_all(entries).map(|()| SecretStore::File)
+        self.rewrite(|entries| {
+            entries.insert(at.account(), entry.to_json());
+            true
+        })
+        .map(|()| SecretStore::File)
     }
 
     fn delete(&self, at: &SecretAt) -> Result<(), CredentialError> {
-        let _held = crate::locked(&FILE_LOCK);
-        let mut entries = self.read_all()?;
-        if entries.remove(&at.account()).is_none() {
-            return Ok(());
-        }
-        self.write_all(entries)
+        self.rewrite(|entries| entries.remove(&at.account()).is_some())
     }
 }
 
@@ -528,12 +544,14 @@ mod tests {
         };
         assert_eq!(mode(&file), 0o600);
         assert_eq!(mode(&folder), 0o700);
-        // Written beside and renamed over: nothing else is left in the folder.
-        let names: Vec<_> = std::fs::read_dir(&folder)
+        assert_eq!(mode(&folder.join("connectors.json.lock")), 0o600);
+        // Written beside and renamed over: nothing else is left in the folder but the lock.
+        let mut names: Vec<_> = std::fs::read_dir(&folder)
             .expect("the folder reads")
             .map(|item| item.expect("an item").file_name())
             .collect();
-        assert_eq!(names, ["connectors.json"]);
+        names.sort();
+        assert_eq!(names, ["connectors.json", "connectors.json.lock"]);
     }
 
     #[test]
@@ -544,6 +562,60 @@ mod tests {
             Err(CredentialError::Failed(why)) if why.starts_with(NO_SECRET_STORE)
         ));
         assert_eq!(stores.load(&at("theo", "github")), Ok(None));
+    }
+
+    /// Set in the children `two_processes_saving_at_once_lose_no_entry` runs itself as: the
+    /// file both write, and the agent whose entries this one saves.
+    const WRITER_FILE: &str = "FARIK_TEST_CONNECTORS_FILE";
+    const WRITER_AGENT: &str = "FARIK_TEST_CONNECTORS_AGENT";
+    const SAVES: usize = 40;
+
+    #[test]
+    fn two_processes_saving_at_once_lose_no_entry() {
+        // `farik connect` and the daemon may both rewrite `connectors.json`: two processes, each
+        // with its own handle on the file.
+        if let (Some(file), Some(agent)) = (
+            std::env::var_os(WRITER_FILE),
+            std::env::var(WRITER_AGENT).ok(),
+        ) {
+            let store = FileConnectorSecrets::new(PathBuf::from(file));
+            for index in 0..SAVES {
+                store
+                    .save(&at(&agent, &format!("s{index}")), &entry("h"))
+                    .expect("kept");
+            }
+            return;
+        }
+        let dir = scratch("two-writers");
+        let file = dir.join("connectors.json");
+        let writers: Vec<_> = ["theo", "iris"]
+            .map(|agent| {
+                std::process::Command::new(std::env::current_exe().expect("the test binary"))
+                    .args([
+                        "--exact",
+                        "connectors::tests::two_processes_saving_at_once_lose_no_entry",
+                    ])
+                    .env(WRITER_FILE, &file)
+                    .env(WRITER_AGENT, agent)
+                    .stdout(std::process::Stdio::null())
+                    .spawn()
+                    .expect("the test runs itself")
+            })
+            .into();
+        for mut writer in writers {
+            assert!(writer.wait().expect("the writer ends").success());
+        }
+        let store = FileConnectorSecrets::new(file);
+        for agent in ["theo", "iris"] {
+            for index in 0..SAVES {
+                let server = format!("s{index}");
+                assert_eq!(
+                    store.load(&at(agent, &server)),
+                    Ok(Some(entry("h"))),
+                    "{agent} {server}"
+                );
+            }
+        }
     }
 
     #[test]
