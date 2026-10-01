@@ -492,9 +492,23 @@ fn checked(deps: &ToolDeps, wire: &Value, setup: bool) -> Result<(Team, Team), R
     }
 }
 
-/// Whether the log has an event of `agent_id`'s: work, which retires an agent rather than
-/// removing it (step 06).
+/// Whether the log has an event of `agent_id`'s, or a task is left with it as its assignee or
+/// reviewer: work, which retires an agent rather than removing it (step 06), so no task is left
+/// with nobody.
 pub(super) fn worked(deps: &ToolDeps, agent_id: &str) -> Result<bool, Failure> {
+    let holds = deps
+        .projections
+        .board()
+        .map_err(|e| internal(&e))?
+        .iter()
+        .any(|task| {
+            [&task.assignee_id, &task.reviewer_id]
+                .iter()
+                .any(|held| held.as_deref() == Some(agent_id))
+        });
+    if holds {
+        return Ok(true);
+    }
     let seen = deps
         .log
         .read(&EventQuery {
@@ -1350,6 +1364,32 @@ pub(super) mod tests {
             team_file(&harness)["agents"].as_array().map(Vec::len),
             Some(2)
         );
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn refuses_removing_an_agent_that_holds_a_task() {
+        // Assigned work but no event of its own yet: removed, it would leave FRK-1 with nobody.
+        let harness = driven("team-refuse-assigned");
+        harness.ready("FRK-1");
+        harness.project.moved(
+            "FRK-1",
+            "ready",
+            "assigned",
+            &json!({ "assignee": "dev-b", "reviewer": "dev-a" }),
+        );
+        let before = team_file(&harness);
+        for id in ["dev-b", "dev-a"] {
+            let mut without = before.clone();
+            without["agents"]
+                .as_array_mut()
+                .expect("agents")
+                .retain(|agent| agent["id"] != id);
+            assert_eq!(
+                refused(&harness, "team.save", &json!({ "team": without })),
+                (-32005, format!("{id} has done work; retire it instead"))
+            );
+        }
     }
 
     #[test]
