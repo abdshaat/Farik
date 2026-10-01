@@ -431,6 +431,45 @@ pub fn launch_spec(
     })
 }
 
+/// The headers the http `server` is sent with the keys in `entry`: each template filled.
+///
+/// # Errors
+///
+/// `server` is started, not reached at a web address, or a key a header names has no value in
+/// `entry`.
+pub fn launch_headers(
+    server: &CustomServer,
+    entry: &ConnectorEntry,
+) -> Result<BTreeMap<String, Secret>, ConnectorError> {
+    let CustomTransport::Http { headers, .. } = &server.transport else {
+        return Err(ConnectorError::Failed(format!(
+            "{} is started, not reached at a web address",
+            server.name
+        )));
+    };
+    headers
+        .iter()
+        .map(|(name, template)| Ok((name.clone(), Secret::new(filled(template, &entry.keys)?))))
+        .collect()
+}
+
+/// The entry kept for `server` at `at`, when it was connected as the team file has it now: its
+/// `spec_sha256` is the server's (ADR 0030). `Ok(None)` when none is kept, or it hashes
+/// differently, so the server runs nothing and is sent no key.
+///
+/// # Errors
+///
+/// The store could not be read.
+pub fn confirmed_entry(
+    secrets: &dyn ConnectorSecrets,
+    at: &SecretAt,
+    server: &CustomServer,
+) -> Result<Option<ConnectorEntry>, CredentialError> {
+    Ok(secrets
+        .load(at)?
+        .filter(|entry| entry.spec_sha256 == farik_core::team::spec_sha256(server)))
+}
+
 /// Each key `server` names, with its value from `keys`.
 fn named_keys(
     server: &CustomServer,

@@ -29,6 +29,7 @@ fn main() -> std::process::ExitCode {
     io.session_ids = Arc::new(RandomSessionIds);
     io.open_url = Arc::new(open_in_browser);
     io.credential_stores = farik::system_credential_stores(&io.env, true);
+    io.connector_secrets = farik::system_connector_secrets(&io.env);
     let code = run_cli(&arguments, &mut io);
     std::process::ExitCode::from(u8::try_from(code).unwrap_or(1))
 }

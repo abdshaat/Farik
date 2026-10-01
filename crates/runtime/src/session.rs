@@ -55,6 +55,15 @@ pub enum McpTransport {
         /// Its arguments.
         args: Vec<String>,
     },
+    /// A user's connector started on the host by `farik connector run`, which asks the daemon
+    /// for its command and keys (ADR 0030).
+    Launched,
+    /// A user's connector at `url`, whose headers `farik connector headers` asks the daemon for
+    /// (ADR 0030).
+    Helped {
+        /// Where the server listens.
+        url: String,
+    },
 }
 
 /// One MCP server a session is given.

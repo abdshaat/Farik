@@ -20,25 +20,10 @@ use rmcp::transport::streamable_http_server::session::local::LocalSessionManager
 use rmcp::transport::streamable_http_server::{StreamableHttpServerConfig, StreamableHttpService};
 use rmcp::{ErrorData, RoleServer, ServerHandler};
 
-/// A stdio MCP server in `sh`, one JSON-RPC message per line. Its tools are `search`, `env`,
-/// whose description is what the server sees of its environment, and `repo.delete`, a name
-/// Claude Code would rewrite.
-const STDIO_SERVER: &str = r#"
-while IFS= read -r line; do
-  id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9]*\).*/\1/p')
-  case "$line" in
-    *'"method":"initialize"'*)
-      version=$(printf '%s' "$line" | sed -n 's/.*"protocolVersion":"\([^"]*\)".*/\1/p')
-      printf '{"jsonrpc":"2.0","id":%s,"result":{"protocolVersion":"%s","capabilities":{"tools":{}},"serverInfo":{"name":"fixture","version":"1"}}}\n' "$id" "$version"
-      ;;
-    *'"method":"tools/list"'*)
-      seen="HOME=${HOME:+set} API_KEY=${API_KEY-} ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY-} CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN-}"
-      schema='{"type":"object"}'
-      printf '{"jsonrpc":"2.0","id":%s,"result":{"tools":[{"name":"search","description":"Searches.","inputSchema":%s},{"name":"env","description":"%s","inputSchema":%s},{"name":"repo.delete","description":"Deletes a repository.","inputSchema":%s}]}}\n' "$id" "$schema" "$seen" "$schema" "$schema"
-      ;;
-  esac
-done
-"#;
+/// A stdio MCP server in `sh` (`fixtures/mcp_server.sh`). Its tools are `search`, `env`, whose
+/// description is what the server sees of its environment, `delete_repo`, and `repo.delete`, a
+/// name Claude Code would rewrite.
+const STDIO_SERVER: &str = include_str!("fixtures/mcp_server.sh");
 
 /// A stdio server that reads and never answers.
 const SILENT_SERVER: &str = "cat > /dev/null\n";
@@ -91,7 +76,10 @@ async fn lists_a_stdio_servers_tools() {
     let tools = list_tools(&server, &BTreeMap::new())
         .await
         .expect("the tools are listed");
-    assert_eq!(names(&tools), ["search", "env", "repo.delete"]);
+    assert_eq!(
+        names(&tools),
+        ["search", "env", "delete_repo", "repo.delete"]
+    );
     assert_eq!(tool(&tools, "search").description, "Searches.");
 }
 

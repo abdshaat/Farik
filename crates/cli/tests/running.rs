@@ -859,3 +859,82 @@ fn lists_a_high_risk_result_and_no_answered_question() {
         ran.out
     );
 }
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn gives_a_session_the_connectors_kept_where_this_computer_keeps_them() {
+    use farik_core::team::{custom_server, spec_sha256, validate_team};
+    use farik_runtime::claude::Secret;
+    use farik_runtime::connectors::{
+        ConnectorEntry, ConnectorSecrets as _, MemoryConnectorSecrets, SecretAt,
+    };
+    use farik_runtime::recorded::fixtures::tool_runner;
+    use farik_runtime::{RecordedAdapter, SessionSpec};
+
+    let mut team = Value::Null;
+    let repository = a_team_with("run-custom-connector", |wire| {
+        wire["agents"][0]["mcp_servers"] = json!([{
+            "name": "github", "source": "custom", "transport": "stdio",
+            "command": "github-mcp", "args": [], "credential_keys": [],
+            "tools": { "search_issues": "network" }
+        }]);
+        team = wire.clone();
+    });
+    let task = a_small_request(&repository);
+    let project_id = events(&repository, &[])[0].envelope.ids.project_id.clone();
+    let server = validate_team(&team).expect("a team").agents[0]
+        .mcp_servers
+        .iter()
+        .flatten()
+        .find_map(custom_server)
+        .expect("a custom server");
+    let store = Arc::new(MemoryConnectorSecrets::default());
+    store
+        .save(
+            &SecretAt {
+                project_id,
+                agent_id: "pm".to_string(),
+                server: "github".to_string(),
+            },
+            &ConnectorEntry {
+                spec_sha256: spec_sha256(&server),
+                keys: std::collections::BTreeMap::<String, Secret>::new(),
+            },
+        )
+        .expect("kept");
+    let started: Arc<std::sync::Mutex<Option<Arc<RecordedAdapter>>>> = Arc::default();
+    let kept = Arc::clone(&started);
+
+    let ran = run_with(&repository.path, &["run"], |io| {
+        io.connector_secrets = store;
+        io.engine = Engine::Given(Arc::new(move |daemon| {
+            let adapter = Arc::new(RecordedAdapter::with_tools(
+                vec![refine_writes_task_frk_1()],
+                tool_runner(daemon),
+            ));
+            *kept.lock().expect("not poisoned") = Some(Arc::clone(&adapter));
+            let adapter: Arc<dyn RuntimeAdapter> = adapter;
+            adapter
+        }));
+    });
+
+    let adapter = started
+        .lock()
+        .expect("not poisoned")
+        .clone()
+        .expect("an engine");
+    let specs: Vec<SessionSpec> = adapter.started();
+    assert_eq!(
+        specs[0].purpose,
+        farik_runtime::SessionPurpose::Refine,
+        "{}\n{}",
+        ran.out,
+        ran.err
+    );
+    let servers: Vec<&str> = specs[0]
+        .mcp_servers
+        .iter()
+        .map(|s| s.name.as_str())
+        .collect();
+    assert_eq!(servers, ["github"], "{task}");
+}

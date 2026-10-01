@@ -233,7 +233,7 @@ Files: `orchestrator/session.rs`, `claude.rs`, `daemon/app.rs`, `daemon.rs`, `pr
 - `the_notice_names_the_connectors`: the untrusted-content section names `github` when given.
 - `a_live_session_calls_a_custom_connector` (integration, `--integration`): Claude Code calls the fixture's `network` tool through the launcher; the stream's `system/init` line's `tools` list holds `mcp__fixture__<network tool>` and not `mcp__fixture__<denied tool>`; and the log has no `tool.called` for the denied tool.
 
-- [ ] `feat(runtime): load each agent's connectors into its sessions`
+- [x] `feat(runtime): load each agent's connectors into its sessions`
 
 ### Task 7: Connect and disconnect in the daemon
 

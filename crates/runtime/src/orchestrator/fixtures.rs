@@ -725,11 +725,24 @@ pub(crate) struct ExecutorWitness {
     tools: Mutex<Vec<Vec<String>>>,
     listed: Mutex<Vec<Vec<String>>>,
     tiers: Mutex<Vec<Vec<farik_core::governor::permissions::PermissionTier>>>,
+    connectors: Mutex<Vec<Vec<String>>>,
+    probes: Vec<String>,
+    decided: Mutex<Vec<Vec<crate::daemon::HookDecision>>>,
 }
 
 impl ExecutorWitness {
     /// A witness of `inner`'s sessions as `daemon` registered them.
     pub(crate) fn new(inner: Arc<dyn RuntimeAdapter>, daemon: Arc<DaemonState>) -> Self {
+        Self::probing(inner, daemon, &[])
+    }
+
+    /// A witness that also asks the hook, as each session starts, about a call of each tool
+    /// `probes` names.
+    pub(crate) fn probing(
+        inner: Arc<dyn RuntimeAdapter>,
+        daemon: Arc<DaemonState>,
+        probes: &[&str],
+    ) -> Self {
         Self {
             inner,
             daemon,
@@ -737,7 +750,26 @@ impl ExecutorWitness {
             tools: Mutex::new(Vec::new()),
             listed: Mutex::new(Vec::new()),
             tiers: Mutex::new(Vec::new()),
+            connectors: Mutex::new(Vec::new()),
+            probes: probes.iter().map(ToString::to_string).collect(),
+            decided: Mutex::new(Vec::new()),
         }
+    }
+
+    /// For each session started, in order, the servers of the connectors its registration holds.
+    pub(crate) fn given_connectors(&self) -> Vec<Vec<String>> {
+        self.connectors
+            .lock()
+            .expect("no test panics holding it")
+            .clone()
+    }
+
+    /// For each session started, in order, the hook's answer to each probe.
+    pub(crate) fn decided(&self) -> Vec<Vec<crate::daemon::HookDecision>> {
+        self.decided
+            .lock()
+            .expect("no test panics holding it")
+            .clone()
     }
 
     /// For each session started, in order, the tiers its registration holds it to.
@@ -779,6 +811,37 @@ impl RuntimeAdapter for ExecutorWitness {
             .tool_context(&spec.session_id)
             .expect("the session is registered before it starts");
         let executor = context.executor.is_some();
+        self.connectors
+            .lock()
+            .expect("no test panics holding it")
+            .push(
+                context
+                    .connectors
+                    .iter()
+                    .map(|connector| connector.server.clone())
+                    .collect(),
+            );
+        let decided = self
+            .probes
+            .iter()
+            .map(|tool| {
+                let request = crate::daemon::HookRequest {
+                    session_id: spec.session_id.clone(),
+                    cwd: spec.cwd.clone(),
+                    hook_event_name: "PreToolUse".to_string(),
+                    tool_name: tool.clone(),
+                    tool_input: serde_json::json!({ "url": "https://example.com/" }),
+                    tool_use_id: Some(format!("probe-{tool}")),
+                    tool_response: None,
+                    duration_ms: None,
+                };
+                crate::daemon::decide_pre_tool_use(&request, &self.daemon)
+            })
+            .collect();
+        self.decided
+            .lock()
+            .expect("no test panics holding it")
+            .push(decided);
         self.tiers
             .lock()
             .expect("no test panics holding it")

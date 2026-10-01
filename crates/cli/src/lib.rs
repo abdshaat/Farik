@@ -12,6 +12,10 @@ pub mod board;
 pub mod channel;
 /// The human's one-to-one chats.
 pub mod chat;
+/// `farik connector run` and `farik connector headers`: a custom connector's keys, from the
+/// daemon to the server, never through a file (ADR 0030).
+#[cfg(unix)]
+pub mod connector_run;
 /// Taking a contract from the team, and giving it back.
 pub mod contract;
 /// Writing a contract with the Product Manager at the terminal.
@@ -81,6 +85,10 @@ use farik_protocol::command::{AcceptSubject, Command};
 #[cfg(unix)]
 use farik_runtime::RuntimeAdapter;
 #[cfg(unix)]
+use farik_runtime::connectors::{
+    ConnectorSecretStores, ConnectorSecrets, KeychainConnectorSecrets, MemoryConnectorSecrets,
+};
+#[cfg(unix)]
 use farik_runtime::credential::{CredentialStore, FileStore, KeychainStore, MemoryStore};
 #[cfg(unix)]
 use farik_runtime::daemon::DaemonState;
@@ -149,6 +157,10 @@ pub struct CliIo<'a> {
     /// real keychain, and the keychain then the file in `main`.
     #[cfg(unix)]
     pub credential_stores: CredentialStores,
+    /// Where each agent's connector keys are kept (ADR 0030): in memory here, so that no test
+    /// touches a real keychain, and the keychain then `connectors.json` in `main`.
+    #[cfg(unix)]
+    pub connector_secrets: Arc<dyn ConnectorSecrets>,
     /// Whether `farik serve` lets a browser at `http://localhost:<port>` in without a code: the
     /// end-to-end server's `--preview` (step 12, D1). The release build has no such field.
     #[cfg(feature = "e2e")]
@@ -184,6 +196,17 @@ pub fn system_credential_stores(
     })
 }
 
+/// The computer's connector key stores (ADR 0030): its keychain, then `connectors.json` in the
+/// state folder of `env`, when there is one.
+#[cfg(unix)]
+#[must_use]
+pub fn system_connector_secrets(env: &BTreeMap<String, String>) -> Arc<dyn ConnectorSecrets> {
+    Arc::new(ConnectorSecretStores::new(
+        Arc::new(KeychainConnectorSecrets::default()),
+        state::state_dir(env).map(|directory| directory.join("connectors.json")),
+    ))
+}
+
 /// Opens a link in a browser, or says why it could not.
 pub type Opener = Arc<dyn Fn(&str) -> Result<(), String> + Send + Sync>;
 
@@ -217,6 +240,8 @@ impl<'a> CliIo<'a> {
                 let memory: Arc<dyn CredentialStore> = Arc::new(MemoryStore::default());
                 Arc::new(move || vec![Arc::clone(&memory)])
             },
+            #[cfg(unix)]
+            connector_secrets: Arc::new(MemoryConnectorSecrets::default()),
             #[cfg(feature = "e2e")]
             admit_local_preview: false,
             #[cfg(feature = "e2e")]
@@ -327,6 +352,13 @@ enum Commands {
     Hook {
         #[command(subcommand)]
         command: HookCommands,
+    },
+    /// Start a custom connector, or fill its headers, with its keys from the daemon: what a
+    /// session's `mcp.json` names (ADR 0030).
+    #[cfg(unix)]
+    Connector {
+        #[command(subcommand)]
+        command: ConnectorCommands,
     },
     /// Drive the team until nothing needs doing, a stop, or Ctrl-C (8.2).
     Run,
@@ -483,6 +515,28 @@ enum HookCommands {
     },
 }
 
+/// Which session's server `farik connector` asks the daemon for.
+#[derive(clap::Args)]
+struct ConnectorAsk {
+    /// The daemon's `daemon.json`.
+    #[arg(long)]
+    daemon: PathBuf,
+    /// The session's id.
+    #[arg(long)]
+    session: String,
+    /// The server's name.
+    #[arg(long)]
+    server: String,
+}
+
+#[derive(Subcommand)]
+enum ConnectorCommands {
+    /// Start the server with only its keys and the variables Farik keeps.
+    Run(ConnectorAsk),
+    /// Print the server's headers, filled with its keys, as one JSON object.
+    Headers(ConnectorAsk),
+}
+
 #[derive(Subcommand)]
 enum SprintCommands {
     /// Start a sprint, which the team plans from the ready backlog.
@@ -598,6 +652,17 @@ pub fn run_cli(args: &[String], io: &mut CliIo<'_>) -> i32 {
             HookCommands::PostToolUse { daemon } => hook::post_tool_use(&io.cwd.join(daemon), io),
         };
     }
+    #[cfg(unix)]
+    if let Commands::Connector { command } = &parsed.command {
+        return match command {
+            ConnectorCommands::Run(ask) => {
+                connector_run::run(&io.cwd.join(&ask.daemon), &ask.session, &ask.server, io)
+            }
+            ConnectorCommands::Headers(ask) => {
+                connector_run::headers(&io.cwd.join(&ask.daemon), &ask.session, &ask.server, io)
+            }
+        };
+    }
     if parsed.json && matches!(parsed.command, Commands::Serve { .. }) {
         say(
             &mut io.stderr,
@@ -682,6 +747,8 @@ pub fn run_cli(args: &[String], io: &mut CliIo<'_>) -> i32 {
         Commands::Criteria {
             command: CriteriaCommands::List,
         } => open_project(&io.cwd, now).and_then(|project| team::criteria(&project)),
+        #[cfg(unix)]
+        Commands::Connector { .. } => unreachable!("a connector command returned above"),
         Commands::Hook { .. }
         | Commands::Run
         | Commands::Serve { .. }

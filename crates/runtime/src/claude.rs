@@ -674,11 +674,8 @@ pub fn write_session_files(
     let prompt = session_dir.join(SYSTEM_PROMPT_FILE);
     std::fs::write(&prompt, &spec.system_prompt).map_err(|error| io(&prompt, error))?;
     let mcp = session_dir.join(MCP_CONFIG_FILE);
-    crate::write_private(
-        &mcp,
-        mcp_config(spec, &config.daemon).to_string().as_bytes(),
-    )
-    .map_err(|error| io(&mcp, error))
+    crate::write_private(&mcp, mcp_config(spec, config).to_string().as_bytes())
+        .map_err(|error| io(&mcp, error))
 }
 
 /// The program's whole environment: `base`, the credential's one variable, and `QUIET`.
@@ -854,7 +851,26 @@ fn shell_quoted(text: &str) -> String {
     format!("'{}'", text.replace('\'', r"'\''"))
 }
 
-fn mcp_config(spec: &SessionSpec, daemon: &DaemonInfo) -> Value {
+/// `mcp.json`: Farik's server with the daemon's token and the session's id, and the spec's
+/// servers. A user's connector holds no key: its stdio launcher, or its http headers' helper,
+/// asks the daemon for them (ADR 0030).
+fn mcp_config(spec: &SessionSpec, config: &ClaudeConfig) -> Value {
+    let daemon = &config.daemon;
+    // `farik connector <run|headers> --daemon <daemon.json> --session <id> --server <name>`.
+    let launcher = |verb: &str, server: &str| -> Vec<String> {
+        [
+            "connector",
+            verb,
+            "--daemon",
+            &config.daemon_file.display().to_string(),
+            "--session",
+            &spec.session_id,
+            "--server",
+            server,
+        ]
+        .map(ToString::to_string)
+        .to_vec()
+    };
     let mut servers = serde_json::Map::new();
     servers.insert(
         FARIK_SERVER.to_string(),
@@ -875,6 +891,21 @@ fn mcp_config(spec: &SessionSpec, daemon: &DaemonInfo) -> Value {
             McpTransport::Stdio { command, args } => {
                 json!({ "type": "stdio", "command": command, "args": args })
             }
+            McpTransport::Launched => json!({
+                "type": "stdio",
+                "command": config.hook_command.display().to_string(),
+                "args": launcher("run", &server.name),
+            }),
+            // Claude Code runs the helper through a shell, so each word is quoted for one.
+            McpTransport::Helped { url } => json!({
+                "type": "http",
+                "url": url,
+                "headersHelper": std::iter::once(config.hook_command.display().to_string())
+                    .chain(launcher("headers", &server.name))
+                    .map(|word| shell_quoted(&word))
+                    .collect::<Vec<_>>()
+                    .join(" "),
+            }),
         };
         servers.insert(server.name.clone(), entry);
     }
@@ -1045,6 +1076,88 @@ mod tests {
             !disallowed.contains(&"mcp__playwright__browser_navigate"),
             "{disallowed:?}"
         );
+    }
+
+    #[test]
+    fn headers_helper_quotes_a_path_with_a_space() {
+        let project = a_project("claude-helper-quoting");
+        let config = ClaudeConfig {
+            hook_command: PathBuf::from("/opt/my tools/farik"),
+            daemon_file: PathBuf::from("/tmp/a b/it's/daemon.json"),
+            ..config(&project)
+        };
+        let spec = SessionSpec {
+            mcp_servers: vec![
+                McpServerConfig {
+                    name: "github".to_string(),
+                    transport: McpTransport::Launched,
+                    headers: BTreeMap::new(),
+                },
+                McpServerConfig {
+                    name: "linear".to_string(),
+                    transport: McpTransport::Helped {
+                        url: "https://mcp.linear.example/mcp".to_string(),
+                    },
+                    headers: BTreeMap::new(),
+                },
+            ],
+            ..spec()
+        };
+        let dir = session_dir(&config, &spec);
+        write_session_files(&spec, &config, &dir).expect("the files are written");
+        let file: Value =
+            serde_json::from_str(&std::fs::read_to_string(dir.join("mcp.json")).expect("readable"))
+                .expect("JSON");
+        let asking = |server: &str| {
+            [
+                "--daemon",
+                "/tmp/a b/it's/daemon.json",
+                "--session",
+                &spec.session_id,
+                "--server",
+                server,
+            ]
+            .map(ToString::to_string)
+            .to_vec()
+        };
+
+        // A stdio connector is the launcher, which Claude Code runs without a shell.
+        let github = &file["mcpServers"]["github"];
+        assert_eq!(github["type"], "stdio");
+        assert_eq!(github["command"], "/opt/my tools/farik");
+        let launcher: Vec<String> = ["connector", "run"]
+            .map(ToString::to_string)
+            .into_iter()
+            .chain(asking("github"))
+            .collect();
+        assert_eq!(github["args"], json!(launcher));
+        assert_eq!(github.get("env"), None, "{github}");
+
+        // An http connector's helper is run through `sh`: every word comes back whole.
+        let linear = &file["mcpServers"]["linear"];
+        assert_eq!(linear["type"], "http");
+        assert_eq!(linear["url"], "https://mcp.linear.example/mcp");
+        assert_eq!(linear.get("headers"), None, "{linear}");
+        let helper = linear["headersHelper"].as_str().expect("a helper");
+        let words = helper
+            .strip_prefix("'/opt/my tools/farik' ")
+            .unwrap_or_else(|| panic!("the program is quoted first: {helper}"));
+        let output = std::process::Command::new("sh")
+            .arg("-c")
+            .arg(format!("printf '%s\\n' {words}"))
+            .output()
+            .expect("sh runs");
+        let printed: Vec<String> = String::from_utf8(output.stdout)
+            .expect("text")
+            .lines()
+            .map(ToString::to_string)
+            .collect();
+        let expected: Vec<String> = ["connector", "headers"]
+            .map(ToString::to_string)
+            .into_iter()
+            .chain(asking("linear"))
+            .collect();
+        assert_eq!(printed, expected);
     }
 
     #[test]

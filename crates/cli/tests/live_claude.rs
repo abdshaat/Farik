@@ -15,14 +15,19 @@ use std::time::Duration;
 use chrono::{DateTime, Utc};
 use farik_core::budget::DEFAULT_SESSION_LIMITS;
 use farik_core::governor::permissions::PermissionTier;
+use farik_core::governor::permissions::SessionConnector;
 use farik_core::team::fixtures::{a_team_wire, an_agent_wire};
-use farik_core::team::{Effort, validate_team};
+use farik_core::team::{CustomServer, Effort, custom_server, spec_sha256, validate_team};
 use farik_protocol::clock::Clock;
 use farik_protocol::event::{EventIds, EventKind};
 use farik_runtime::claude::{
-    ClaudeAdapter, ClaudeConfig, ClaudeCredential, allowed_builtins, credential_from_env,
+    ClaudeAdapter, ClaudeConfig, ClaudeCredential, Secret, allowed_builtins, credential_from_env,
+};
+use farik_runtime::connectors::{
+    ConnectorEntry, ConnectorSecrets as _, MemoryConnectorSecrets, SecretAt,
 };
 use farik_runtime::daemon::{DaemonConfig, DaemonState, SessionRegistration, serve};
+use farik_runtime::session::{McpServerConfig, McpTransport};
 use farik_runtime::transitions::Transitions;
 use farik_runtime::{
     EndReason, RuntimeAdapter, SessionEvent, SessionPurpose, SessionSpec, ToolDeps,
@@ -33,6 +38,10 @@ use farik_store::{EventLog, EventQuery, IN_MEMORY, open_event_log, open_projecti
 use serde_json::{Value, json};
 
 const SECRET: &str = "s3cr3t-farik-live-value";
+/// The key a custom connector is connected with.
+const CONNECTOR_KEY: &str = "fixture-key-value";
+/// The stdio MCP server the custom connector runs (`fixtures/mcp_server.sh`).
+const FIXTURE_SERVER: &str = include_str!("../../runtime/tests/fixtures/mcp_server.sh");
 
 /// The variables of this process's environment a session is given besides its credential.
 const BASE_ENV: [&str; 6] = ["PATH", "HOME", "USER", "LANG", "TERM", "TMPDIR"];
@@ -122,6 +131,12 @@ struct Project {
 
 impl Project {
     fn new() -> Project {
+        Project::with_team(|_, _| {})
+    }
+
+    /// `new`, with `change` made to the team's wire, given the repository's folder: each custom
+    /// server `dev-a` then has is given to its session, and connected as it is.
+    fn with_team(change: impl FnOnce(&mut Value, &Path)) -> Project {
         let repo = TempRepo::new("live-claude");
         repo.write("note.txt", "hello live\n");
         repo.write(".env", &format!("FARIK_LIVE_SECRET={SECRET}\n"));
@@ -130,7 +145,14 @@ impl Project {
             an_agent_wire("pm", "product_manager"),
             an_agent_wire("dev-a", "software_developer"),
         ]);
+        change(&mut wire, &repo.path);
         let team = validate_team(&wire).expect("a team");
+        let custom: Vec<CustomServer> = team.agents[1]
+            .mcp_servers
+            .iter()
+            .flatten()
+            .filter_map(custom_server)
+            .collect();
         let tiers: BTreeSet<PermissionTier> = team
             .agents
             .iter()
@@ -167,6 +189,24 @@ impl Project {
             clock,
             ids,
         })));
+        let store = Arc::new(MemoryConnectorSecrets::default());
+        for server in &custom {
+            let at = SecretAt {
+                project_id: "farik".to_string(),
+                agent_id: "dev-a".to_string(),
+                server: server.name.clone(),
+            };
+            let entry = ConnectorEntry {
+                spec_sha256: spec_sha256(server),
+                keys: server
+                    .credential_keys
+                    .iter()
+                    .map(|key| (key.clone(), Secret::new(CONNECTOR_KEY.to_string())))
+                    .collect(),
+            };
+            store.save(&at, &entry).expect("kept");
+        }
+        state.set_connector_secrets(store);
         let session_id = a_session_id();
         state.register_session(SessionRegistration {
             session_id: session_id.clone(),
@@ -177,7 +217,14 @@ impl Project {
             limits: DEFAULT_SESSION_LIMITS,
             farik_tools: vec![FARIK_TOOL.to_string()],
             tiers: tiers.iter().copied().collect(),
-            connectors: Vec::new(),
+            connectors: custom
+                .iter()
+                .map(|server| SessionConnector {
+                    server: server.name.clone(),
+                    origin: None,
+                    tools: server.tools.clone(),
+                })
+                .collect(),
             preview: None,
             purpose: SessionPurpose::Implement,
             in_reply_to: None,
@@ -418,4 +465,73 @@ fn live_session_reads_is_denied_and_completes() {
         .filter(|tool| !tool.starts_with("mcp__"))
         .collect();
     assert_eq!(builtins, builtin_tools);
+}
+
+#[test]
+#[ignore = "a live Claude Code session needs the founder's credential: FARIK_LIVE_TESTS=1 with \
+            ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN, by hand"]
+fn a_live_session_calls_a_custom_connector() {
+    if std::env::var("FARIK_LIVE_TESTS").as_deref() != Ok("1") {
+        eprintln!("skipped: set FARIK_LIVE_TESTS=1 to run a live Claude Code session");
+        return;
+    }
+    let env: BTreeMap<String, String> = std::env::vars().collect();
+    let credential = credential_from_env(&env)
+        .expect("FARIK_LIVE_TESTS=1 needs ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN");
+    let project = Project::with_team(|wire, root| {
+        let script = root.join(".farik/local/fixture-server.sh");
+        std::fs::create_dir_all(root.join(".farik/local")).expect("the folder");
+        std::fs::write(&script, FIXTURE_SERVER).expect("the server is written");
+        wire["agents"][1]["mcp_servers"] = json!([{
+            "name": "fixture", "source": "custom", "transport": "stdio",
+            "command": "sh", "args": [script.display().to_string()],
+            "credential_keys": ["API_KEY"],
+            "tools": { "search": "network", "delete_repo": "denied" }
+        }]);
+    });
+    let mut spec = project.spec();
+    spec.mcp_servers = vec![McpServerConfig {
+        name: "fixture".to_string(),
+        transport: McpTransport::Launched,
+        headers: BTreeMap::new(),
+    }];
+    spec.disallowed_tools = vec!["mcp__fixture__delete_repo".to_string()];
+    spec.initial_prompt = "First, call the mcp__fixture__search tool with the query hello. \
+                           Second, call the mcp__fixture__delete_repo tool. Then reply with what \
+                           the search returned."
+        .to_string();
+    let run = run(&project, spec, credential, &env);
+    let init = init_tools(&run.stream);
+    assert!(
+        init.iter().any(|tool| tool == "mcp__fixture__search"),
+        "the session has no mcp__fixture__search: {init:?}\n{}",
+        run.farik_mcp_lines()
+    );
+    assert!(
+        !init.iter().any(|tool| tool == "mcp__fixture__delete_repo"),
+        "{init:?}"
+    );
+    assert!(
+        run.events.iter().any(
+            |event| matches!(event, SessionEvent::ToolReturned { tool, output }
+            if tool == "mcp__fixture__search" && output.contains("fixture-found"))
+        ),
+        "{:?}",
+        run.events
+    );
+    let logged = project
+        .log
+        .read(&EventQuery::default())
+        .expect("the log reads");
+    let called = |tool: &str| {
+        logged.iter().any(|event| {
+            event.body.kind() == EventKind::ToolCalled
+                && serde_json::to_value(&event.body)
+                    .is_ok_and(|body| body.to_string().contains(tool))
+        })
+    };
+    assert!(called("mcp__fixture__search"));
+    assert!(!called("mcp__fixture__delete_repo"));
+    // The key went to the server, and to nothing the session can read.
+    assert!(!run.stream.contains(CONNECTOR_KEY));
 }

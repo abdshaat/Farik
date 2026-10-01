@@ -425,6 +425,7 @@ async fn start_listening(
     }
     let tools = tool_deps(project, io)?;
     let daemon = Arc::new(DaemonState::new(Arc::clone(&tools)));
+    daemon.set_connector_secrets(Arc::clone(&io.connector_secrets));
     let in_use = claude.as_ref().map(|(shared, _)| Arc::clone(shared));
     let web = options
         .web
