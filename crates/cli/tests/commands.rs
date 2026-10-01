@@ -220,6 +220,19 @@ fn makes_a_project_out_of_a_repository() {
         ["team.updated", "project.scanned", "criteria.updated"],
         "one event per thing it wrote, in the order it wrote them"
     );
+    let log = farik_store::open_event_log(&repository.path.join(".farik/local/farik.db"), at())
+        .expect("the log opens");
+    let events = log
+        .read(&farik_store::EventQuery::default())
+        .expect("the log reads");
+    let farik_protocol::event::EventBody::TeamUpdated(updated) = &events[0].body else {
+        panic!("a team.updated first");
+    };
+    assert_eq!(
+        updated.plan_in_sprints,
+        Some(true),
+        "the starter team plans in sprints, and its team.updated says so (SPEC 8.5)"
+    );
     assert!(
         repository.path.join(".farik/local/.gitignore").is_file(),
         "the log is local and not committed (D5)"
