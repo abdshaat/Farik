@@ -19,6 +19,7 @@ type Summary = {
 		budgetUsd?: number | null;
 	} | null;
 	agents: { agentId: string; todayUsd: number; sprintUsd: number }[];
+	conversationsTodayUsd: number;
 };
 type Activity = { agentId: string; line: string };
 type Words = { words: string; usd: number };
@@ -150,6 +151,11 @@ export function Costs() {
 					</tbody>
 				</table>
 				<p className={styles.muted}>{t("costsResting")}</p>
+				<p>
+					{t("costsConversations")}{" "}
+					<strong>{dollars(summary.conversationsTodayUsd)}</strong>.{" "}
+					{t("costsConversationsWhy")}
+				</p>
 			</section>
 			<section className={styles.section} aria-labelledby="how-well">
 				<h2 id="how-well">{t("costsHowWell")}</h2>

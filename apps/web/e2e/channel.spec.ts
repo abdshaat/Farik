@@ -79,7 +79,7 @@ test("the user mentions an agent in the channel, and the agent's reply appears b
 	});
 	try {
 		await page.goto(serve.url);
-		await page.getByRole("link", { name: "Channel" }).first().click();
+		await page.getByRole("link", { name: "Chats" }).first().click();
 		await expect(page).toHaveURL(/\/channel$/);
 
 		// 1. The post, with its mention, picked from the list with Enter, which types no new line.

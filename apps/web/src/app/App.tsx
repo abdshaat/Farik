@@ -1,7 +1,7 @@
 import { Navigate, Route, Routes } from "react-router";
 import { AgentEdit } from "../pages/AgentEdit.tsx";
 import { Board } from "../pages/Board.tsx";
-import { Channel } from "../pages/Channel.tsx";
+import { Chats } from "../pages/Chats.tsx";
 import { Connect } from "../pages/Connect.tsx";
 import { Costs } from "../pages/Costs.tsx";
 import { Events } from "../pages/Events.tsx";
@@ -60,7 +60,8 @@ export function App() {
 			<Route element={<Shell />}>
 				<Route index element={<Today />} />
 				<Route path="/board" element={<Board />} />
-				<Route path="/channel" element={<Channel />} />
+				<Route path="/channel" element={<Chats />} />
+				<Route path="/channel/:id" element={<Chats />} />
 				<Route path="/sprints/:id" element={<SprintPage />} />
 				<Route path="/costs" element={<Costs />} />
 				<Route path="/events" element={<Events />} />

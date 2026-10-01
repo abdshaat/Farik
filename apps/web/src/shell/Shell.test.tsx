@@ -58,7 +58,7 @@ describe("shell", () => {
 		expect(words(rail)).toEqual([
 			[en.today, "/"],
 			[en.board, "/board"],
-			[en.channel, "/channel"],
+			[en.chats, "/channel"],
 			[en.team, "/team"],
 			[en.costs, "/costs"],
 			[en.settings, "/settings"],
@@ -71,7 +71,7 @@ describe("shell", () => {
 		expect(words(bar)).toEqual([
 			[en.today, "/"],
 			[en.board, "/board"],
-			[en.channel, "/channel"],
+			[en.chats, "/channel"],
 			[en.team, "/team"],
 			[en.costs, "/costs"],
 		]);

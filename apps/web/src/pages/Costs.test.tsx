@@ -36,6 +36,7 @@ const SUMMARY = {
 		{ agent_id: "mira", today_usd: 1.48, sprint_usd: 2.35 },
 		{ agent_id: "theo", today_usd: 2.94, sprint_usd: 6.1 },
 	],
+	conversations_today_usd: 0.42,
 };
 const ACTIVITY = {
 	activity: [
@@ -107,6 +108,15 @@ const metricsAsked = (s: FakeSocket) =>
 
 describe("costs page", () => {
 	afterEach(() => vi.unstubAllGlobals());
+
+	it("shows_conversations_on_costs", async () => {
+		const { container } = await costs();
+		const amount = screen.getByText("$0.42", { selector: "strong" });
+		expect(amount.closest("p")?.textContent).toBe(
+			"Conversations today: $0.42. Your chats with the team; they count toward the daily limit.",
+		);
+		await expectNoAxeViolations(container);
+	});
 
 	it("shows_the_costs", async () => {
 		const first = await costs();

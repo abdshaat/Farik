@@ -473,12 +473,15 @@ function Composer({ agents, wide }: { agents: Agent[]; wide: boolean }) {
 					value={text}
 					onChange={setText}
 					agents={agents}
-					describedBy="channel-hint"
+					describedBy="channel-enter channel-hint"
 				/>
 				<Button kind="primary" type="submit" busy={busy}>
 					{t("channelPost")}
 				</Button>
 			</div>
+			<p id="channel-enter" className={styles.muted}>
+				{t("chatsEnterSends")}
+			</p>
 			<p id="channel-hint" className={styles.muted}>
 				{t("channelHintLead")} <Link to="/">{t("channelHintLink")}</Link>{" "}
 				{t("channelHintEnd")}

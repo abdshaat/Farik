@@ -872,6 +872,9 @@ export const en = {
 	costsNow: "Right now",
 	costsResting:
 		"Resting is not a problem. An agent whose AI account reached its usage limit stops, writes down where it was, and picks up again at the time shown. The rest of the team keeps working.",
+	costsConversations: "Conversations today:",
+	costsConversationsWhy:
+		"Your chats with the team; they count toward the daily limit.",
 	costsHowWell: "How well the team works",
 	costsWholeProject: "Across the whole project.",
 	costsSprintOnly: "In sprint {n} only.",
@@ -888,7 +891,40 @@ export const en = {
 	metricWeeks: "Active weeks: {n}",
 	metricMessages:
 		"Messages: {reaction} reactions, {reply} replies, {ceremony} from meetings, {human} from you",
-	channel: "Channel",
+	channel: "Team",
+	chats: "Chats",
+	chatsEveryone: "Everyone, together",
+	chatsSaid: "{name}: {text}",
+	chatsNone: "No messages yet. Ask {name} anything.",
+	chatsGone: "{name} has left the team. Kept to read.",
+	chatsPast: "Past teammates",
+	chatsTitle: "Talking with {name}",
+	chatsIntro:
+		"{name} answers from memory and from reading the project, and changes nothing here. When work is needed, {name} suggests a request, and you decide whether to send it.",
+	chatsIntroPhone:
+		"{name} answers from memory and the project, and changes nothing.",
+	chatsBack: "Back to Team",
+	chatsNoSuch: "No such teammate",
+	chatsLabel: "Message {name}",
+	chatsSend: "Send",
+	chatsEnterSends: "Enter sends, Shift+Enter for a new line",
+	chatsTooLong:
+		"A message is at most 4000 characters, and this one is {length}.",
+	chatsSuggests: "A request {name} suggests. Change the words if you like.",
+	chatsSuggested: "A request {name} suggested",
+	chatsSendRequest: "Send as a request",
+	chatsNothingSent: "Nothing is sent until you press it.",
+	chatsSentAs: "Sent as {id}",
+	chatsAnswering: "{name} is thinking…",
+	chatsDaySpent:
+		"Today’s spending limit is reached, so {name} will answer tomorrow. Your message is kept.",
+	chatsDaySpentLink: "See today’s costs",
+	chatsAsleep:
+		"{name} is resting until {time}, when the AI account’s usage limit resets, and will answer then.",
+	chatsKeyRefused: "{name} cannot answer: your AI provider refused the key.",
+	chatsKeyLink: "Check the key in Settings",
+	chatsNoAnswer: "{name} could not answer. Ask again.",
+	chatsRetired: "{name} has left the team. This chat is kept for you to read.",
 	channelIntro:
 		"Where the team talks. Nothing said here starts work: to ask for something, use the request box on Today.",
 	channelMessages: "Messages",

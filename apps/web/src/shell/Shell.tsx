@@ -19,7 +19,7 @@ function subscribe(changed: () => void) {
 const PLACES = [
 	["/", "today"],
 	["/board", "board"],
-	["/channel", "channel"],
+	["/channel", "chats"],
 	["/team", "team"],
 	["/costs", "costs"],
 	["/settings", "settings"],

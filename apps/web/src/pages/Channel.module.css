@@ -5,9 +5,10 @@
 	gap: var(--farik-space-6);
 }
 
-@media (min-width: 1024px) {
+/* Beside the chat list, the meetings column needs the room of a wider screen. */
+@media (min-width: 1440px) {
 	.page {
-		grid-template-columns: minmax(0, 820px) 300px;
+		grid-template-columns: minmax(0, 820px) 240px;
 	}
 }
 

@@ -32,6 +32,12 @@ As built (Task 6, 2026-09-30):
 - `file_request` checks the link (`check_proposal`) and files under one process-wide lock, `FILING`, which every filing takes; the command line never links a chat, so a lock across processes is not needed. The refusals read, after the gate's "the request ": "links to message <seq>, which is not an agent's reply in a chat", "links to message <seq>, a reply that proposes no request", "was already sent, as FRK-n".
 - `sent_as` reads every `task.created` (ponytail). `request.file`'s schema gains `from_chat_message`; `files_a_proposal_once` races `file_words` on two threads, five rounds.
 
+As built (Task 7, 2026-09-30):
+- `/channel` and `/channel/:id` both render `Chats()`, which holds the list and opens `Channel()` (Team, unchanged but for its "Team" heading and the Enter hint) or `OneToOne({ agent, agents })`. The phone's row of faces lists past teammates last; the wide list puts them under "Past teammates".
+- `MentionBox.sendOnEnter` is the one Enter-sends rule both composers use. The Channel page's meetings column now sits beside the messages from 1440 px, since the list takes the room beside it.
+- The open chat re-queries `chat.messages` on its chat's `session.started`, on any `session.ended` of its agent (that event names no purpose; ponytail), and on each of its messages; the message itself is appended from the event at once.
+- No pronouns are known for an agent, so the mockups' "she"/"her" lines read with the name ("Mira suggests a request", "when the AI account’s usage limit resets").
+
 Signatures, not bodies; test names and what each asserts, not test code; around 300 lines at most (ADR 0008).
 
 ## Goal
@@ -243,7 +249,7 @@ Vitest and axe. Tests:
 - `shows_conversations_on_costs` — the Costs page's line with `conversationsTodayUsd`.
 - `passes_axe_on_the_chats` — the list and a one-to-one have no axe violations.
 
-- [ ] `feat(web): add the chat list and one-to-one chats`
+- [x] `feat(web): add the chat list and one-to-one chats`
 
 ### Task 8: The journey through the real server
 

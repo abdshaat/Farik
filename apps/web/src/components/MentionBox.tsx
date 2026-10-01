@@ -3,6 +3,13 @@ import type { Agent } from "../pages/setup/TeamSetup.tsx";
 import { t } from "../strings/t.ts";
 import styles from "./MentionBox.module.css";
 
+/** Enter sends the box's form; Shift+Enter, or Enter while composing a character, types on. */
+export function sendOnEnter(e: KeyboardEvent<HTMLTextAreaElement>) {
+	if (e.key !== "Enter" || e.shiftKey || e.nativeEvent.isComposing) return;
+	e.preventDefault();
+	e.currentTarget.form?.requestSubmit();
+}
+
 /**
  * The composer's text box: typing `@` opens a listbox of the team's agents, which the arrow keys
  * move through and Enter picks, inserting `@<id>`.
@@ -53,8 +60,8 @@ export function MentionBox({
 		setCaret(start + inserted.length);
 		onChange(value.slice(0, start) + inserted + value.slice(caret));
 	};
-	const onKeyDown = (e: KeyboardEvent) => {
-		if (!open) return;
+	const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
+		if (!open) return sendOnEnter(e);
 		const n = options.length;
 		if (e.key === "ArrowDown") setActive((current + 1) % n);
 		else if (e.key === "ArrowUp") setActive((current - 1 + n) % n);
