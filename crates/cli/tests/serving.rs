@@ -1100,12 +1100,12 @@ fn goes_back_to_setup_when_the_driver_cannot_start() {
 fn follows_serve_to_its_new_port_when_the_driver_cannot_start() {
     // The flake's cause, made certain: something holds serve's port past its 5 s wait once the
     // take-on lets it go, so setup comes back on another port with a link of its own.
-    driver_cannot_start("setup-cannot-start-moves", true);
+    until_held(|| driver_cannot_start("setup-cannot-start-moves", true));
 }
 
 /// A project chosen in setup whose driver cannot start, then setup again; with `hold`, its old
-/// port is taken as soon as it is let go, for 8 s.
-fn driver_cannot_start(name: &str, hold: bool) {
+/// port is taken as soon as it is let go, for 8 s. Answers whether that hold took.
+fn driver_cannot_start(name: &str, hold: bool) -> bool {
     let repository = a_team(name);
     std::fs::write(repository.path.join(".farik/prices.json"), "not JSON").expect("written");
     let home = repository.path.parent().expect("a parent").to_path_buf();
@@ -1128,6 +1128,7 @@ fn driver_cannot_start(name: &str, hold: bool) {
             serve_status_across_a_restart(serving.port_now(), &serving.cookie).unwrap_or_default();
         status["take_on_error"].is_string()
     });
+    let back = Instant::now();
     let (port, now) = (serving.port, serving.port_now());
     let (ran, out, err) = serving.interrupted();
     assert_eq!(status["project_root"], Value::Null, "{status}");
@@ -1156,10 +1157,11 @@ fn driver_cannot_start(name: &str, hold: bool) {
     };
     assert_eq!(ports, expected, "{out}");
     assert_eq!(ran.code, 130, "{out}\n{err}");
-    if let Some(holder) = holder {
-        assert!(holder.join().expect("the holder ends"), "the port was held");
+    let took = holder.is_some_and(|holder| held_before(holder, back));
+    if took {
         assert_ne!(now, port, "serve came back on another port\n{out}");
     }
+    took
 }
 
 #[test]
@@ -1325,27 +1327,48 @@ fn keeps_waiting_on_the_project_after_a_failed_take_on() {
 fn follows_serve_to_its_new_port_after_a_failed_take_on() {
     // The flake's cause, made certain: something takes serve's port the moment the take-on lets
     // it go and holds it past serve's 5 s wait, so setup comes back on another port.
-    failed_take_on("setup-moves-port", true);
+    until_held(|| failed_take_on("setup-moves-port", true));
 }
 
-/// Holds `port` for 8 s as soon as it is free, answering whether it was ever held.
-fn hold_once_free(port: u16) -> std::thread::JoinHandle<bool> {
+/// Holds `port` for 8 s as soon as it is free, answering when it took it, if it ever did.
+fn hold_once_free(port: u16) -> std::thread::JoinHandle<Option<Instant>> {
     std::thread::spawn(move || {
         let deadline = Instant::now() + Duration::from_secs(60);
         while Instant::now() < deadline {
             if let Ok(held) = std::net::TcpListener::bind(("127.0.0.1", port)) {
+                let at = Instant::now();
                 std::thread::sleep(Duration::from_secs(8));
                 drop(held);
-                return true;
+                return Some(at);
             }
         }
-        false
+        None
     })
 }
 
+/// Whether `holder` took the port before `back`, the moment serve was seen back in setup.
+///
+/// The port is free only for the few milliseconds between the take-on letting it go and serve
+/// binding it again. A holder the machine is too busy to run in that window takes it only once the
+/// test ends serve, after `back`; serve then rightly stayed, and the hold proves nothing.
+fn held_before(holder: std::thread::JoinHandle<Option<Instant>>, back: Instant) -> bool {
+    holder
+        .join()
+        .expect("the holder ends")
+        .is_some_and(|at| at < back)
+}
+
+/// Runs a held-port `scenario` until its hold takes, up to 5 times, and fails when it never does.
+fn until_held(mut scenario: impl FnMut() -> bool) {
+    assert!(
+        (0..5).any(|_| scenario()),
+        "serve's port was never held while it came back"
+    );
+}
+
 /// A take-on that fails, then serve's setup waiting on the same project; with `hold`, its old
-/// port is taken as soon as it is let go, for 8 s.
-fn failed_take_on(name: &str, hold: bool) {
+/// port is taken as soon as it is let go, for 8 s. Answers whether that hold took.
+fn failed_take_on(name: &str, hold: bool) -> bool {
     let repository = a_team(name);
     std::fs::write(repository.path.join(".farik/prices.json"), "not JSON").expect("written");
     let (_home, state) = setup_folders("setup-waits-again");
@@ -1369,6 +1392,7 @@ fn failed_take_on(name: &str, hold: bool) {
             serve_status_across_a_restart(serving.port_now(), &serving.cookie).unwrap_or_default();
         status["take_on_error"].is_string()
     });
+    let back = Instant::now();
     // The project is still the one setup waits on: connecting again takes it on again.
     let again = call(
         serving.port_now(),
@@ -1380,8 +1404,9 @@ fn failed_take_on(name: &str, hold: bool) {
     let (ran, out, err) = serving.interrupted();
     assert_eq!(again["result"]["taking_on"], true, "{again}");
     assert_eq!(ran.code, 130, "{out}\n{err}");
-    if let Some(holder) = holder {
-        assert!(holder.join().expect("the holder ends"), "the port was held");
+    let took = holder.is_some_and(|holder| held_before(holder, back));
+    if took {
         assert!(moved, "serve came back on another port\n{out}");
     }
+    took
 }
