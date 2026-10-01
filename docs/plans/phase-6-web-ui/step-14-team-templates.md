@@ -277,6 +277,8 @@ Fix wave (What changes): `template.preview`'s and `template.apply`'s `effects` s
 
 Fix wave (M1, u1): carry 1 root-caused by the review: a fast "Add someone" after a template is applied sent the cached `team.get`'s team, refused as `status_from_card`; "Farik stopped answering" was the test's teardown. `UseTemplate` takes `onApplied`, which the Team page gives `team.get`'s `again`, and calls it before `onClose`; `shows_what_changes_before_using` asserts `team.get` is asked again with no event arriving. "What changes" is a `section` labelled by its heading (as the mockup's `fx-h`), with `margin-top: var(--farik-space-4)` (`.changes`), so it no longer sits flush under the Retired group. The optional `stale_team` code is not added.
 
+Fix wave (u2): `firstDay` keeps the suggested six's figure, which the SPEC derives and step 06's test pins, and adds "A smaller team costs less.", rather than scaling an estimate that bounds nothing by the team's size; `lists_the_team_with_the_first_day_line` asserts it.
+
 ## Verification
 
 ```

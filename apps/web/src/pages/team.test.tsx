@@ -205,6 +205,8 @@ describe("team page", () => {
 				.getAttribute("href"),
 		).toBe("/team/theo");
 		expect(screen.getByText(en.firstDay, { exact: false })).toBeTruthy();
+		// The figure is the suggested six's; a team of another size is told how it compares.
+		expect(en.firstDay).toMatch(/A smaller team costs less\.$/);
 		await expectNoAxeViolations(container);
 
 		fireEvent.click(screen.getByRole("button", { name: "Pause Theo" }));
