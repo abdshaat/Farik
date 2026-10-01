@@ -159,6 +159,7 @@ const DEFAULTS = {
 			judge: "auto",
 		},
 		permissions: { run_commands: true, push: false },
+		plan_in_sprints: true,
 	},
 	ui_paths: UI_PATHS,
 };
@@ -887,6 +888,57 @@ describe("team page", () => {
 				questions: [BUDGET, NOTICE, SMALL],
 				judge: "auto",
 			},
+		});
+	});
+
+	it("switches_planning_in_sprints", async () => {
+		const on = { ...TEAM, policy: { ...TEAM.policy, plan_in_sprints: true } };
+		const { container, s, rules, part } = await settings(on);
+		// The section sits after "How finished work is added", before the plan check.
+		const headings = within(rules)
+			.getAllByRole("heading", { level: 2 })
+			.map((h) => h.textContent);
+		expect(headings.indexOf(en.rulesPlanning)).toBe(
+			headings.indexOf(en.rulesFinish) + 1,
+		);
+		const planning = part(en.rulesPlanning);
+		const toggle = within(planning).getByRole("switch", {
+			name: en.planInSprints,
+		});
+		expect(toggle.getAttribute("aria-checked")).toBe("true");
+		expect(toggle.getAttribute("aria-describedby")).toBeTruthy();
+		expect(within(planning).getByText(en.planInSprintsNote)).toBeTruthy();
+		await expectNoAxeViolations(container);
+
+		fireEvent.click(toggle);
+		expect(toggle.getAttribute("aria-checked")).toBe("false");
+		const effects = [
+			"Ready work starts as soon as someone is free, without waiting for a sprint.",
+			"The 2 pieces of work in the Backlog, Gift cards at checkout and Sold-out badge on the menu, can start now.",
+			"You can still start sprints from the Board.",
+		];
+		const off = await validated(s, effects);
+		expect(off.policy).toMatchObject({ plan_in_sprints: false });
+		for (const line of effects)
+			expect(await within(planning).findByText(line)).toBeTruthy();
+		await expectNoAxeViolations(container);
+
+		// "Put back the default" turns it on again: nothing to save.
+		fireEvent.click(within(planning).getByRole("button", { name: en.putBack }));
+		expect(toggle.getAttribute("aria-checked")).toBe("true");
+		const save = () =>
+			within(planning).getByRole("button", {
+				name: en.agentSave,
+			}) as HTMLButtonElement;
+		expect(save().disabled).toBe(true);
+
+		fireEvent.click(toggle);
+		await validated(s, effects);
+		await waitFor(() => expect(save().disabled).toBe(false));
+		fireEvent.click(save());
+		expect((await saved(s)).policy).toMatchObject({
+			integration: "auto_merge",
+			plan_in_sprints: false,
 		});
 	});
 

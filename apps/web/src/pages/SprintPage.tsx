@@ -6,7 +6,7 @@ import { statusWord, type TaskStatus } from "../app/words.ts";
 import type { en } from "../strings/en.ts";
 import { t } from "../strings/t.ts";
 import board from "./Board.module.css";
-import { plannerOf } from "./Board.tsx";
+import { type Backlog, plannerOf } from "./Board.tsx";
 import { EndSprint } from "./dialogs/EndSprint.tsx";
 import { dollars } from "./Gate.tsx";
 import { day } from "./PlanPage.tsx";
@@ -44,6 +44,7 @@ export function SprintPage() {
 	const { id = "" } = useParams();
 	const { data: team } = useQuery<{ team: Team }>("team.get", {});
 	const { data: sprint } = useQuery<Sprint>("sprint.get", { sprintId: id });
+	const { data: backlog } = useQuery<Backlog>("backlog.summary", {});
 	const [ending, setEnding] = useState(false);
 	if (!team || !sprint) return null;
 	const agents = team.team.agents;
@@ -151,11 +152,12 @@ export function SprintPage() {
 				<p className={styles.muted}>{t("costsSprintWhy")}</p>
 				<Link to="/costs">{t("sprintSeeCosts")}</Link>
 			</section>
-			{ending && (
+			{ending && backlog && (
 				<EndSprint
 					n={n}
 					unfinished={sprint.taskCount - sprint.doneCount}
 					planner={plannerOf(agents)}
+					backlog={backlog.planInSprints}
 					onClose={() => setEnding(false)}
 				/>
 			)}

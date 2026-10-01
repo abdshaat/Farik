@@ -57,6 +57,7 @@ const task = (
 	verifications: 0,
 	rejections: 0,
 	interventions: 0,
+	backlog: false,
 	...more,
 });
 const TASKS = [
@@ -144,20 +145,27 @@ async function board(
 	tasks: object[] = TASKS,
 	activity: object = ACTIVITY,
 	team: object = TEAM,
+	{
+		summary = { plan_in_sprints: false, count: 0 },
+		path = "/board",
+		waiting = WAITING,
+	}: { summary?: object; path?: string; waiting?: object[] } = {},
 ) {
-	const { container, socket } = await renderApp("/board");
+	const { container, socket } = await renderApp(path);
 	const s = socket as FakeSocket;
 	await answerStatus(s, false);
 	await answerQuery(s, "team.get", { team });
 	await answerQuery(s, "tasks.list", { tasks });
-	await answerQuery(s, "waiting.list", { waiting: WAITING });
+	await answerQuery(s, "waiting.list", { waiting });
 	await answerQuery(s, "team.activity", activity);
 	await answerQuery(s, "sprint.current", sprint);
+	await answerQuery(s, "backlog.summary", summary);
 	// Until the sprints are listed, the next sprint's number is not known: nothing is drawn.
+	const last = (tasks.at(-1) as { title: string }).title;
 	await act(async () => {});
-	expect(screen.queryByRole("link", { name: "Loyalty stamps" })).toBeNull();
+	expect(screen.queryByRole("link", { name: last })).toBeNull();
 	await answerQuery(s, "sprints.list", SPRINTS);
-	await screen.findByRole("link", { name: "Loyalty stamps" });
+	await screen.findByRole("link", { name: last });
 	return { container, s };
 }
 
@@ -464,6 +472,167 @@ describe("board", () => {
 				screen.getByRole("dialog", { name: "End sprint 2 early?" }),
 			).getByText(
 				"1 task is not finished. It leaves the sprint and goes back on the board exactly as it is. Nothing is lost, and work in progress keeps going. Sol will still run the review and the look back.",
+			),
+		).toBeTruthy();
+	});
+});
+
+/** The founder's mockup: an epic broken into three tasks and a small request, waiting. */
+const WAITING_WORK = [
+	task(15, "A page for opening hours", "refining", { assignee_id: "mira" }),
+	task(12, "Gift cards at checkout", "in_progress", {
+		kind: "epic",
+		assignee_id: "sol",
+		backlog: true,
+	}),
+	...[17, 18, 19].map((id) =>
+		task(id, `Gift card part ${id}`, "ready", {
+			parent: "FRK-12",
+			backlog: true,
+		}),
+	),
+	task(14, "Sold-out badge on the menu", "ready", { backlog: true }),
+	task(9, "Opening hours in the footer", "accepted", { assignee_id: "theo" }),
+];
+const ON = { plan_in_sprints: true, count: 2 };
+const NONE_WAITING = { summary: ON, waiting: [] };
+
+describe("the board's backlog", () => {
+	afterEach(() => vi.unstubAllGlobals());
+
+	it("shows_the_backlog_lane_only_under_the_policy", async () => {
+		media.set(WIDE, true);
+		const first = await board(null, WAITING_WORK, ACTIVITY, TEAM, NONE_WAITING);
+		expect(screen.getByText(en.sprintNoneBacklog)).toBeTruthy();
+		const lane = screen.getByRole("region", { name: en.statusBacklog });
+		expect(within(lane).getByText(en.laneBacklogNote)).toBeTruthy();
+		const card = (title: string) =>
+			within(lane)
+				.getByRole("link", { name: title })
+				.closest("li") as HTMLElement;
+		// The epic carries its parts; they wait with it, under it.
+		expect(
+			within(card("Gift cards at checkout")).getByText(
+				"Ready, broken into 3 tasks",
+			),
+		).toBeTruthy();
+		expect(
+			within(card("Gift cards at checkout")).getByText("3 parts, 0 done"),
+		).toBeTruthy();
+		expect(
+			within(card("Sold-out badge on the menu")).getByText(en.backlogReady),
+		).toBeTruthy();
+		expect(
+			within(lane).queryByRole("link", { name: /Gift card part/ }),
+		).toBeNull();
+		await expectNoAxeViolations(first.container);
+		// On a phone, the Backlog is one more lane tab.
+		act(() => media.set(WIDE, false));
+		fireEvent.click(
+			screen.getByRole("button", { name: `${en.statusBacklog} 2` }),
+		);
+		expect(shown()).toEqual(["FRK-12", "FRK-14"]);
+		await expectNoAxeViolations(first.container);
+		cleanup();
+
+		// Off, there is no Backlog lane, and the line is the board's own.
+		media.set(WIDE, true);
+		await board(null);
+		expect(screen.getByText(en.sprintNone)).toBeTruthy();
+		expect(screen.queryByRole("region", { name: en.statusBacklog })).toBeNull();
+		cleanup();
+
+		// While sprint 3 runs, late work waits for sprint 4.
+		const late = [
+			task(16, "A holiday banner on the home page", "ready", { backlog: true }),
+			task(18, "Gift card balance check", "ready", { sprint: "S3" }),
+		];
+		const third = await board(
+			{ sprint_id: "S3", done: 1, total: 5 },
+			late,
+			ACTIVITY,
+			TEAM,
+			{ summary: { plan_in_sprints: true, count: 1 } },
+		);
+		expect(
+			screen.getByRole("link", {
+				name: "Sprint 3 is running: 1 of 5 tasks done",
+			}).parentElement?.textContent,
+		).toBe(
+			"Sprint 3 is running: 1 of 5 tasks done. 1 more waits in the Backlog for the next sprint.",
+		);
+		const waiting = screen.getByRole("region", { name: en.statusBacklog });
+		expect(
+			within(waiting).getByText(
+				"Became ready during sprint 3, so it waits for sprint 4.",
+			),
+		).toBeTruthy();
+		expect(within(waiting).getByText(en.backlogNextSprint)).toBeTruthy();
+		expect(
+			within(screen.getByRole("region", { name: en.statusToDo })).getByRole(
+				"link",
+				{ name: "Gift card balance check" },
+			),
+		).toBeTruthy();
+		await expectNoAxeViolations(third.container);
+	});
+
+	it("lists_the_backlog_when_starting_a_sprint", async () => {
+		media.set(WIDE, true);
+		const { container } = await board(null, WAITING_WORK, ACTIVITY, TEAM, {
+			...NONE_WAITING,
+			path: "/board?start=sprint",
+		});
+		// Today's "Start a sprint" link opens the Board with the dialog open.
+		const dialog = screen.getByRole("dialog", { name: "Start sprint 3" });
+		const list = within(dialog).getByRole("list", {
+			name: en.sprintStartBacklog,
+		});
+		expect(
+			within(list)
+				.getAllByRole("listitem")
+				.map((li) => li.textContent),
+		).toEqual([
+			"FRK-12Gift cards at checkoutEpic, 3 tasks",
+			"FRK-14Sold-out badge on the menuTask",
+		]);
+		expect(
+			within(dialog).getByText(
+				"Sol plans it: Sol picks from this work, posts the plan in Chats, under Team, and then runs a short standup each day and a review and a look back at the end. Work that becomes ready later waits for the next sprint.",
+			),
+		).toBeTruthy();
+		await expectNoAxeViolations(container);
+	});
+
+	it("says_what_ending_early_does_under_the_policy", async () => {
+		media.set(WIDE, true);
+		const { container } = await board(
+			{ sprint_id: "S2", done: 1, total: 3 },
+			TASKS,
+			ACTIVITY,
+			TEAM,
+			{ summary: { plan_in_sprints: true, count: 0 } },
+		);
+		fireEvent.click(screen.getByRole("button", { name: en.sprintEndEarly }));
+		expect(
+			within(
+				screen.getByRole("dialog", { name: "End sprint 2 early?" }),
+			).getByText(
+				"2 tasks are not finished. They leave the sprint and wait in the Backlog for the next one. A session already running finishes. Sol will still run the review and the look back.",
+			),
+		).toBeTruthy();
+		await expectNoAxeViolations(container);
+		cleanup();
+
+		await board({ sprint_id: "S2", done: 2, total: 3 }, TASKS, ACTIVITY, TEAM, {
+			summary: { plan_in_sprints: true, count: 0 },
+		});
+		fireEvent.click(screen.getByRole("button", { name: en.sprintEndEarly }));
+		expect(
+			within(
+				screen.getByRole("dialog", { name: "End sprint 2 early?" }),
+			).getByText(
+				"1 task is not finished. It leaves the sprint and waits in the Backlog for the next one. A session already running finishes. Sol will still run the review and the look back.",
 			),
 		).toBeTruthy();
 	});

@@ -27,16 +27,29 @@ export function useCommand(onDone: () => void) {
 	return { busy, refusal, send };
 }
 
-/** "Start sprint N": who plans it, and an optional spending limit. */
+/** One row waiting in the Backlog; `parts` is an epic's task count. */
+export type Waiting = {
+	taskId: string;
+	title: string;
+	parts?: number | undefined;
+};
+
+/**
+ * "Start sprint N": who plans it, and an optional spending limit; under the policy, what waits in
+ * the Backlog (step 15).
+ */
 export function StartSprint({
 	n,
 	planner,
 	ready,
+	backlog,
 	onClose,
 }: {
 	n: string;
 	planner: string;
 	ready: number;
+	/** What waits in the Backlog, when the team plans in sprints. */
+	backlog?: Waiting[] | undefined;
 	onClose: () => void;
 }) {
 	const [limit, setLimit] = useState<"none" | "limit">("none");
@@ -69,10 +82,32 @@ export function StartSprint({
 			}
 		>
 			<p className={styles.muted}>{t("sprintStartWhat")}</p>
+			{backlog && (
+				<section aria-labelledby="sprint-backlog">
+					<h3 id="sprint-backlog" className={styles.subheading}>
+						{t("sprintStartBacklog")}
+					</h3>
+					<ul className={styles.waiting} aria-labelledby="sprint-backlog">
+						{backlog.map((w) => (
+							<li key={w.taskId}>
+								<span className={styles.muted}>{w.taskId}</span>
+								<span>{w.title}</span>
+								<span className={styles.muted}>
+									{w.parts === undefined
+										? t("sprintStartTask")
+										: t("sprintStartEpic", { count: w.parts })}
+								</span>
+							</li>
+						))}
+					</ul>
+				</section>
+			)}
 			<p>
-				{t("sprintStartPlanner")
-					.replaceAll("{name}", planner)
-					.replace("{count}", String(ready))}
+				{backlog
+					? t("sprintStartPlansBacklog", { name: planner })
+					: t("sprintStartPlanner")
+							.replaceAll("{name}", planner)
+							.replace("{count}", String(ready))}
 			</p>
 			<Choice
 				name="sprint-limit"

@@ -1,3 +1,4 @@
+import { toCamel } from "@farik/protocol-client";
 import { AVATAR_URLS } from "@farik/ui";
 import { expectNoAxeViolations } from "@farik/ui/test";
 import {
@@ -16,6 +17,8 @@ import {
 	answerStatus,
 	renderApp,
 } from "../../test/render-app.tsx";
+import type { Template } from "../SavedTeams.tsx";
+import { draftOf, type Proposed } from "./TeamSetup.tsx";
 
 const BUDGET = "Does the task fit its budget?";
 const NOTICE =
@@ -63,6 +66,8 @@ function proposed(change: (team: Record<string, unknown>) => void = () => {}) {
 				judge: "auto",
 			},
 			permissions: { run_commands: true, push: false },
+			// team.propose answers it for every new team (step 15).
+			plan_in_sprints: true,
 		},
 		rules: { require_new_tests: false },
 	};
@@ -881,6 +886,64 @@ describe("team setup", () => {
 		expect(start.team.policy).toMatchObject(DEFAULTS.policy);
 	});
 
+	it("starts_a_team_that_plans_in_sprints", async () => {
+		const first = await renderApp("/setup/finish");
+		const s = first.socket as FakeSocket;
+		await answerQuery(s, "team.propose", proposed());
+		await screen.findByRole("heading", { name: en.finishTitle });
+		const box = screen.getByRole("region", { name: en.finishSprints });
+		expect(within(box).getByText(en.finishSprintsNote)).toBeTruthy();
+		expect(within(box).getByText(en.finishSprintsChange)).toBeTruthy();
+		await expectNoAxeViolations(first.container);
+
+		// Behind advanced settings, the same switch as in Settings, on.
+		fireEvent.click(screen.getByRole("switch", { name: en.advancedSwitch }));
+		const toggle = await screen.findByRole("switch", {
+			name: en.planInSprints,
+		});
+		expect(toggle.getAttribute("aria-checked")).toBe("true");
+		expect(
+			screen.getByRole("heading", { name: en.rulesPlanning }),
+		).toBeTruthy();
+		await expectNoAxeViolations(first.container);
+		fireEvent.click(screen.getByRole("button", { name: en.startTeam }));
+		const on = (await sent(s, "team.start")).params as {
+			team: { policy: Record<string, unknown> };
+		};
+		expect(on.team.policy.plan_in_sprints).toBe(true);
+		cleanup();
+
+		const second = await renderApp("/setup/advanced");
+		const s2 = second.socket as FakeSocket;
+		await answerQuery(s2, "team.propose", proposed());
+		fireEvent.click(
+			await screen.findByRole("switch", { name: en.planInSprints }),
+		);
+		expect(
+			screen
+				.getByRole("switch", { name: en.planInSprints })
+				.getAttribute("aria-checked"),
+		).toBe("false");
+		fireEvent.click(screen.getByRole("button", { name: en.startTeam }));
+		const off = (await sent(s2, "team.start")).params as {
+			team: { policy: Record<string, unknown> };
+		};
+		expect(off.team.policy.plan_in_sprints).toBe(false);
+
+		// A saved team brings its own answer.
+		const wire = toCamel(proposed()) as Proposed;
+		const template = toCamel(THREE.template) as Template;
+		expect(
+			draftOf(wire, "saved", {
+				...template,
+				policy: { ...template.policy, planInSprints: false },
+			}).team.policy.planInSprints,
+		).toBe(false);
+		expect(draftOf(wire, "saved", template).team.policy.planInSprints).toBe(
+			true,
+		);
+	});
+
 	it("starts_the_team", async () => {
 		const { socket } = await renderApp("/setup/finish");
 		const s = socket as FakeSocket;
@@ -1057,6 +1120,8 @@ describe("team setup's three starts", () => {
 		expect(start.team.policy.integration).toBe("pull_request");
 		expect(start.team.policy.judgment).toEqual(THREE.template.policy.judgment);
 		expect(start.team.budgets).toEqual({ daily_usd: 20 });
+		// A saved team without the sprint answer plans in sprints, as any new team.
+		expect(start.team.policy.plan_in_sprints).toBe(true);
 		expect(
 			s.calls("query").filter((f) => f.params.name === "template.preview"),
 		).toHaveLength(0);

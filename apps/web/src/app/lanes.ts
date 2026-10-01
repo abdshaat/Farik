@@ -2,6 +2,7 @@ import type { TaskStatus } from "./words.ts";
 
 export type Lane =
 	| "planning"
+	| "backlog"
 	| "todo"
 	| "in_progress"
 	| "stuck"
@@ -16,6 +17,8 @@ export type TaskRow = {
 	status: TaskStatus;
 	risk: "low" | "medium" | "high";
 	awaitingApproval: boolean;
+	/** Waits in the Backlog for a sprint (step 15): the daemon says so. */
+	backlog: boolean;
 	parent?: string;
 	assigneeId?: string;
 	sprint?: string;
@@ -26,6 +29,7 @@ export type TaskRow = {
 /** The board's lanes, in the mockup's order. */
 export const LANES: Lane[] = [
 	"planning",
+	"backlog",
 	"todo",
 	"in_progress",
 	"stuck",
@@ -50,6 +54,7 @@ const PLACES: Record<TaskStatus, Lane> = {
 
 /** A task's lane (web-ui.md's table): an escalated plan awaiting approval waits in Planning. */
 export function laneOf(task: TaskRow): Lane {
+	if (task.backlog) return "backlog";
 	if (task.status === "escalated" && task.awaitingApproval) return "planning";
 	return PLACES[task.status];
 }

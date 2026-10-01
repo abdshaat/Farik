@@ -399,6 +399,7 @@ export const en = {
 	accountKept:
 		"Farik reads this key from the {variable} variable on this computer, so it cannot remove it. Remove it there, then start Farik again.",
 	statusPlanning: "Planning",
+	statusBacklog: "Backlog",
 	statusToDo: "To do",
 	statusInProgress: "In progress",
 	statusReworked: "Being reworked",
@@ -726,6 +727,39 @@ export const en = {
 	sprintEndLeavesOne:
 		"1 task is not finished. It leaves the sprint and goes back on the board exactly as it is. Nothing is lost, and work in progress keeps going. {name} will still run the review and the look back.",
 	sprintKeep: "Keep it running",
+	sprintNoneBacklog:
+		"No sprint is running. Ready work waits in the Backlog until you start one.",
+	sprintMoreOne: "1 more waits in the Backlog for the next sprint.",
+	sprintMore: "{count} more wait in the Backlog for the next sprint.",
+	laneBacklogNote: "Ready work waits here until you start a sprint.",
+	laneBacklogLate:
+		"Became ready during sprint {n}, so it waits for sprint {next}.",
+	backlogReady: "Ready",
+	backlogNextSprint: "Ready. Waits for the next sprint",
+	backlogEpicReady: "Ready, broken into {count} tasks",
+	sprintStartBacklog: "Waiting in the Backlog",
+	sprintStartEpic: "Epic, {count} tasks",
+	sprintStartTask: "Task",
+	sprintStartPlansBacklog:
+		"{name} plans it: {name} picks from this work, posts the plan in Chats, under Team, and then runs a short standup each day and a review and a look back at the end. Work that becomes ready later waits for the next sprint.",
+	sprintEndBacklog:
+		"{count} tasks are not finished. They leave the sprint and wait in the Backlog for the next one. A session already running finishes. {name} will still run the review and the look back.",
+	sprintEndBacklogOne:
+		"1 task is not finished. It leaves the sprint and waits in the Backlog for the next one. A session already running finishes. {name} will still run the review and the look back.",
+	todayBacklog: "{count} pieces of work are ready and wait in the Backlog.",
+	todayBacklogOne: "1 piece of work is ready and waits in the Backlog.",
+	todayBacklogStart: "Start a sprint",
+	todayBacklogBegin: "to begin them.",
+	todayBacklogBeginOne: "to begin it.",
+	rulesPlanning: "Planning work",
+	planInSprints: "Plan work in sprints",
+	planInSprintsNote:
+		"The team gets work ready at any time: it asks its questions, writes the plans and has them checked, and breaks big requests into tasks. Nobody starts building until you start a sprint. Work that becomes ready during a sprint waits in the Backlog for the next one.",
+	finishSprints: "Your team works in sprints",
+	finishSprintsNote:
+		"The team gets your requests ready straight away, and starts building when you start a sprint from the Board. Until then, ready work waits in the Backlog.",
+	finishSprintsChange:
+		"Change this under advanced settings, or later in Settings.",
 	taskBack: "Back to the board",
 	taskInSprint: "{id} in sprint {n}.",
 	taskDoing: "{name} is doing it",

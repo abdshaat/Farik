@@ -54,6 +54,25 @@ function holder(who: Holder | null | undefined): string | undefined {
 		: undefined;
 }
 
+/** "Plan work in sprints": the switch, as Settings has it (step 15). */
+export function SprintsSwitch({
+	on,
+	onChange,
+}: {
+	on: boolean;
+	onChange: (on: boolean) => void;
+}) {
+	return (
+		<Switch
+			id="plan-in-sprints"
+			label={t("planInSprints")}
+			description={t("planInSprintsNote")}
+			checked={on}
+			onChange={onChange}
+		/>
+	);
+}
+
 /** The refusals whose path starts with `prefix`. */
 const at = (errors: Refusal[], prefix: string) =>
 	errors.filter((e) => e.path.startsWith(prefix));
@@ -400,6 +419,19 @@ export function SetupAdvanced() {
 						))
 				}
 			/>
+			<section className={styles.card} aria-labelledby="planning">
+				<h2 id="planning" className={styles.heading}>
+					{t("rulesPlanning")}
+				</h2>
+				<SprintsSwitch
+					on={draft.team.policy.planInSprints === true}
+					onChange={(planInSprints) =>
+						change(
+							withTeam({ policy: { ...draft.team.policy, planInSprints } }),
+						)
+					}
+				/>
+			</section>
 			{(elsewhere.length > 0 || refused) && (
 				<p role="alert" className={styles.alert}>
 					{[...elsewhere.map((e) => said(e.code)), refused]

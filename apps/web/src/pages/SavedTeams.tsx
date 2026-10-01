@@ -19,6 +19,7 @@ export type Template = {
 		permissions: { runCommands: boolean; push: boolean };
 		judgment: Judgment;
 		integration: string;
+		planInSprints?: boolean;
 	};
 	budgets: { dailyUsd?: number };
 };

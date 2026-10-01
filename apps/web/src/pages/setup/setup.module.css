@@ -490,3 +490,23 @@
 .which {
 	margin-left: var(--farik-space-6);
 }
+
+/* Finishing work's one box: the new team works in sprints (step 15's mockup). */
+.sprints {
+	display: grid;
+	gap: var(--farik-space-2);
+	max-width: 720px;
+	padding: var(--farik-space-4);
+	background: var(--farik-color-surface);
+	border: 1px solid var(--farik-color-rule);
+	border-radius: var(--farik-radius-control);
+}
+
+.sprints h2,
+.sprints p {
+	margin: 0;
+}
+
+.sprints h2 {
+	font-size: inherit;
+}

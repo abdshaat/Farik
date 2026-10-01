@@ -2,13 +2,18 @@ import { describe, expect, it } from "vitest";
 import { LANES, type Lane, laneOf, type TaskRow } from "./lanes.ts";
 import type { TaskStatus } from "./words.ts";
 
-const row = (status: TaskStatus, awaitingApproval = false): TaskRow => ({
+const row = (
+	status: TaskStatus,
+	awaitingApproval = false,
+	backlog = false,
+): TaskRow => ({
 	taskId: "FRK-1",
 	kind: "task",
 	title: "A task",
 	status,
 	risk: "low",
 	awaitingApproval,
+	backlog,
 });
 
 describe("lanes", () => {
@@ -34,11 +39,26 @@ describe("lanes", () => {
 		expect(laneOf(row("escalated", false))).toBe("stuck");
 		expect(LANES).toEqual([
 			"planning",
+			"backlog",
 			"todo",
 			"in_progress",
 			"stuck",
 			"review",
 			"done",
 		]);
+	});
+
+	it("places_backlog_rows_in_their_lane", () => {
+		// The daemon marks a Backlog row; the board does not work it out again.
+		for (const status of [
+			"ready",
+			"assigned",
+			"in_progress",
+			"rejected",
+		] as TaskStatus[])
+			expect(laneOf(row(status, false, true)), status).toBe("backlog");
+		expect(laneOf(row("ready"))).toBe("todo");
+		expect(laneOf(row("in_progress"))).toBe("in_progress");
+		expect(LANES.indexOf("backlog")).toBe(1);
 	});
 });

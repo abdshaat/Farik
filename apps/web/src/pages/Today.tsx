@@ -7,6 +7,7 @@ import { useQuery } from "../app/store.ts";
 import { codeOf, sentence } from "../app/words.ts";
 import type { en } from "../strings/en.ts";
 import { t } from "../strings/t.ts";
+import { type Backlog, moreWaits } from "./Board.tsx";
 import { ChannelPreview } from "./Channel.tsx";
 import type { Agent, Team } from "./setup/TeamSetup.tsx";
 import styles from "./Today.module.css";
@@ -100,6 +101,9 @@ export function Today() {
 		since,
 	});
 	const { data: sprint } = useQuery<Sprint>("sprint.current", {});
+	const { data: backlog } = useQuery<Backlog>("backlog.summary", {});
+	// The daemon counts nothing while the team does not plan in sprints.
+	const waits = backlog?.count ?? 0;
 	// While the provider refuses the key the team is paused, and one row says so first.
 	const { data: account } = useQuery<{ keyRefused?: boolean }>(
 		"account.status",
@@ -115,14 +119,27 @@ export function Today() {
 		<div className={styles.page}>
 			<h1 className={styles.title}>{t("today")}</h1>
 			<div className={styles.band}>
-				{sprint && (
+				{sprint ? (
 					<p>
-						{t("sprintLine", {
-							n: sprint.sprintId.replace(/^S/, ""),
-							done: String(sprint.done),
-							total: String(sprint.total),
-						})}
+						<Link to={`/sprints/${sprint.sprintId}`}>
+							{t("sprintLine", {
+								n: sprint.sprintId.replace(/^S/, ""),
+								done: String(sprint.done),
+								total: String(sprint.total),
+							})}
+						</Link>
+						{waits > 0 && <>. {moreWaits(waits)}</>}
 					</p>
+				) : (
+					waits > 0 && (
+						<p>
+							{waits === 1
+								? t("todayBacklogOne")
+								: t("todayBacklog", { count: waits })}{" "}
+							<Link to="/board?start=sprint">{t("todayBacklogStart")}</Link>{" "}
+							{t(waits === 1 ? "todayBacklogBeginOne" : "todayBacklogBegin")}
+						</p>
+					)
 				)}
 				<ul className={styles.agents} aria-label={t("teamBand")}>
 					{activity?.activity.map((one) => (

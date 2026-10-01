@@ -205,7 +205,7 @@ Every test also runs axe (step 06's rule). Copy from the approved mockups. Pages
 - `switches_planning_in_sprints` (pages/team.test.tsx, TeamRules): the switch reflects `team.get`; turning it off shows `team.validate`'s effect lines and Save sends `team.save` with `plan_in_sprints: false`.
 - `starts_a_team_that_plans_in_sprints` (setup/team.test.tsx): the Finishing work screen shows "Your team works in sprints"; SetupAdvanced's switch is on; `team.start` carries `plan_in_sprints: true`, and `false` once the switch is turned off.
 
-- [ ] `feat(web): show the backlog on the board and today, and switch sprint planning in settings and setup`
+- [x] `feat(web): show the backlog on the board and today, and switch sprint planning in settings and setup`
 
 ### Task 6: The sprints journey (Playwright)
 

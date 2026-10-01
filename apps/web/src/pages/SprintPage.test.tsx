@@ -128,6 +128,10 @@ describe("sprint page", () => {
 		await expectNoAxeViolations(container);
 
 		// Ending it early asks first.
+		await answerQuery(s, "backlog.summary", {
+			plan_in_sprints: false,
+			count: 0,
+		});
 		fireEvent.click(screen.getByRole("button", { name: en.sprintEndEarly }));
 		expect(
 			within(
@@ -163,5 +167,28 @@ describe("sprint page", () => {
 			screen.getByText("$11.84 so far, with no limit set for this sprint."),
 		).toBeTruthy();
 		expect(screen.getByText(en.costsSprintWhy)).toBeTruthy();
+	});
+
+	it("says_what_ending_early_does_under_the_policy", async () => {
+		const { container, socket } = await renderApp("/sprints/S2");
+		const s = socket as FakeSocket;
+		await answerStatus(s, false);
+		await answerQuery(s, "team.get", { team: TEAM });
+		await answerQuery(s, "sprint.get", SPRINT);
+		await answerQuery(s, "backlog.summary", {
+			plan_in_sprints: true,
+			count: 0,
+		});
+		fireEvent.click(
+			await screen.findByRole("button", { name: en.sprintEndEarly }),
+		);
+		expect(
+			within(
+				screen.getByRole("dialog", { name: "End sprint 2 early?" }),
+			).getByText(
+				"2 tasks are not finished. They leave the sprint and wait in the Backlog for the next one. A session already running finishes. Sol will still run the review and the look back.",
+			),
+		).toBeTruthy();
+		await expectNoAxeViolations(container);
 	});
 });

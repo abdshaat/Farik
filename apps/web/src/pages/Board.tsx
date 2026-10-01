@@ -6,7 +6,7 @@ import {
 	StatusWord,
 } from "@farik/ui";
 import { useState } from "react";
-import { Link } from "react-router";
+import { Link, useSearchParams } from "react-router";
 import { LANES, type Lane, laneOf, type TaskRow } from "../app/lanes.ts";
 import { useQuery } from "../app/store.ts";
 import { statusWord } from "../app/words.ts";
@@ -26,10 +26,13 @@ type Activity = {
 };
 type Waiting = { taskId: string; kind: string };
 type Sprint = { sprintId: string; done: number; total: number } | null;
+/** `backlog.summary`: whether the team plans in sprints, and how much waits (step 15). */
+export type Backlog = { planInSprints: boolean; count: number };
 type Mark = { word: string; tone: "done" | "working" | "waiting" };
 
 const LANE_WORDS: Record<Lane, keyof typeof en> = {
 	planning: "statusPlanning",
+	backlog: "statusBacklog",
 	todo: "statusToDo",
 	in_progress: "statusInProgress",
 	stuck: "statusStuck",
@@ -66,6 +69,7 @@ export function Board() {
 		"sprints.list",
 		{},
 	);
+	const { data: backlog } = useQuery<Backlog>("backlog.summary", {});
 	const [who, setWho] = useState<string>();
 	const [mine, setMine] = useState(false);
 	const [epic, setEpic] = useState<string>();
@@ -73,7 +77,11 @@ export function Board() {
 	const [risk, setRisk] = useState<RiskPick>("any");
 	const [cancelled, setCancelled] = useState(false);
 	const [lane, setLane] = useState<Lane>("planning");
-	const [dialog, setDialog] = useState<"start" | "end">();
+	// Today's "Start a sprint" opens the board with the dialog open.
+	const [search] = useSearchParams();
+	const [dialog, setDialog] = useState<"start" | "end" | undefined>(
+		search.get("start") === "sprint" ? "start" : undefined,
+	);
 
 	if (
 		!team ||
@@ -81,7 +89,8 @@ export function Board() {
 		!waiting ||
 		!activity ||
 		sprint === undefined ||
-		!sprints
+		!sprints ||
+		!backlog
 	)
 		return null;
 	const agents = team.team.agents.filter((a) => a.status !== "retired");
@@ -138,13 +147,23 @@ export function Board() {
 					: !task.sprint)) &&
 			(risk === "any" || task.risk === risk),
 	);
-	const inLane = (l: Lane) => shown.filter((task) => laneOf(task) === l);
+	// A part of an epic in the Backlog waits under its epic, as its parts line.
+	const inLane = (l: Lane) =>
+		shown.filter(
+			(task) =>
+				laneOf(task) === l &&
+				!(l === "backlog" && task.parent && byId.get(task.parent)?.backlog),
+		);
 	const n = (sprint?.sprintId ?? `S${sprints.sprints.length + 1}`).slice(1);
+	const lanes = LANES.filter((l) => l !== "backlog" || backlog.planInSprints);
+	const waits = tasks.filter((task) => task.backlog && !task.parent);
+	const partsOf = (task: TaskRow) =>
+		tasks.filter((p) => p.parent === task.taskId);
 
 	const row = (task: TaskRow) => {
 		const who = agents.find((a) => a.id === task.assigneeId);
 		const mark = markOf(task);
-		const parts = tasks.filter((p) => p.parent === task.taskId);
+		const parts = partsOf(task);
 		const parent = task.parent ? byId.get(task.parent) : undefined;
 		return (
 			<li key={task.taskId} className={styles.row}>
@@ -173,15 +192,21 @@ export function Board() {
 						<StatusWord tone={mark.tone}>{mark.word}</StatusWord>
 					) : task.designReviewState === "waiting_on_designer" ? (
 						<StatusWord tone="waiting">{t("designOnDesigner")}</StatusWord>
+					) : task.designReviewState === "designer_needs_browser" ? (
+						<StatusWord tone="waiting">{t("designNoBrowser")}</StatusWord>
 					) : (
-						task.designReviewState === "designer_needs_browser" && (
-							<StatusWord tone="waiting">{t("designNoBrowser")}</StatusWord>
-						)
+						task.backlog && <span>{waitWord(task, parts.length)}</span>
 					)}
 				</div>
 			</li>
 		);
 	};
+
+	/** A Backlog card's word: ready, and waiting for the next sprint while one runs. */
+	const waitWord = (task: TaskRow, parts: number) =>
+		task.kind === "epic" && parts > 0
+			? t("backlogEpicReady", { count: parts })
+			: t(sprint ? "backlogNextSprint" : "backlogReady");
 
 	const column = (l: Lane) => {
 		const rows = inLane(l);
@@ -192,6 +217,13 @@ export function Board() {
 				title={t(LANE_WORDS[l])}
 				count={rows.length}
 			>
+				{l === "backlog" && (
+					<p className={styles.small}>
+						{sprint
+							? t("laneBacklogLate", { n, next: Number(n) + 1 })
+							: t("laneBacklogNote")}
+					</p>
+				)}
 				{rows.length === 0 ? (
 					<p className={styles.small}>{t("laneEmpty")}</p>
 				) : (
@@ -225,9 +257,10 @@ export function Board() {
 								.replace("{done}", String(sprint.done))
 								.replace("{total}", String(sprint.total))}
 						</Link>
+						{backlog.count > 0 && <>. {moreWaits(backlog.count)}</>}
 					</p>
 				) : (
-					<p>{t("sprintNone")}</p>
+					<p>{t(backlog.planInSprints ? "sprintNoneBacklog" : "sprintNone")}</p>
 				)}
 				<Button
 					kind={sprint ? "secondary" : "primary"}
@@ -289,12 +322,12 @@ export function Board() {
 			{/* The lanes' own headings sit under this one. */}
 			<h2 className={styles.hidden}>{t("laneTabs")}</h2>
 			{wide ? (
-				<div className={styles.lanes}>{LANES.map(column)}</div>
+				<div className={styles.lanes}>{lanes.map(column)}</div>
 			) : (
 				<>
 					<fieldset className={styles.tabs}>
 						<legend className={styles.hidden}>{t("laneTabs")}</legend>
-						{LANES.map((l) =>
+						{lanes.map((l) =>
 							pick(
 								lane === l,
 								`${t(LANE_WORDS[l])} ${inLane(l).length}`,
@@ -310,6 +343,16 @@ export function Board() {
 				<StartSprint
 					n={n}
 					planner={plannerOf(agents)}
+					backlog={
+						backlog.planInSprints
+							? waits.map((task) => ({
+									taskId: task.taskId,
+									title: task.title,
+									parts:
+										task.kind === "epic" ? partsOf(task).length : undefined,
+								}))
+							: undefined
+					}
 					ready={
 						tasks.filter(
 							(task) => task.status === "ready" && !task.parent && !task.sprint,
@@ -323,11 +366,17 @@ export function Board() {
 					n={n}
 					unfinished={sprint.total - sprint.done}
 					planner={plannerOf(agents)}
+					backlog={backlog.planInSprints}
 					onClose={() => setDialog(undefined)}
 				/>
 			)}
 		</div>
 	);
+}
+
+/** "1 more waits in the Backlog for the next sprint.", Board's and Today's. */
+export function moreWaits(count: number): string {
+	return count === 1 ? t("sprintMoreOne") : t("sprintMore", { count });
 }
 
 /** The sprint's planner: the Scrum Master, or the Product Manager when there is none (spec 5.9). */

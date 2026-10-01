@@ -12,7 +12,7 @@ import {
 	type PreviewForm,
 	previewOf,
 } from "./setup/PreviewFields.tsx";
-import { PlanCheck } from "./setup/SetupAdvanced.tsx";
+import { PlanCheck, SprintsSwitch } from "./setup/SetupAdvanced.tsx";
 import { IntegrationChoice } from "./setup/SetupFinish.tsx";
 import { PermissionChoices } from "./setup/SetupPermissions.tsx";
 import { useDailyLimit } from "./setup/SetupSpending.tsx";
@@ -70,6 +70,10 @@ export function TeamRules({ advanced = false }: { advanced?: boolean }) {
 				{...part("spend")}
 			/>
 			<Finish key={`finish-${rounds.finish ?? 0}`} {...part("finish")} />
+			<Planning
+				key={`planning-${rounds.planning ?? 0}`}
+				{...part("planning")}
+			/>
 			<Plans key={`plans-${rounds.plans ?? 0}`} {...part("plans")} />
 			{advanced && (
 				<UiPaths key={`paths-${rounds.paths ?? 0}`} {...part("paths")} />
@@ -233,6 +237,30 @@ function Finish(part: Part) {
 				value={mine ?? saved.policy.integration}
 				onChange={setMine}
 				putBack={defaults && (() => setMine(defaults.policy.integration))}
+			/>
+			{foot}
+		</Part>
+	);
+}
+
+function Planning(part: Part) {
+	const { saved, defaults } = part;
+	const [mine, setMine] = useState<boolean>();
+	// An old team file without the key does not plan in sprints.
+	const was = saved.policy.planInSprints === true;
+	const now = mine ?? was;
+	const next =
+		now === was
+			? saved
+			: { ...saved, policy: { ...saved.policy, planInSprints: now } };
+	const { foot } = useChange(part, next);
+	return (
+		<Part id="rules-planning" title={t("rulesPlanning")}>
+			<SprintsSwitch on={now} onChange={setMine} />
+			<PutBack
+				onClick={
+					defaults && (() => setMine(defaults.policy.planInSprints === true))
+				}
 			/>
 			{foot}
 		</Part>

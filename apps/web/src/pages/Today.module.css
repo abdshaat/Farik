@@ -31,6 +31,12 @@
 	margin: 0;
 }
 
+/* The sprint's and the Backlog's links, in the band's own ink. */
+.band a {
+	color: inherit;
+	font-weight: 600;
+}
+
 .agents {
 	display: grid;
 	grid-template-columns: repeat(auto-fill, minmax(min(100%, 9rem), 1fr));

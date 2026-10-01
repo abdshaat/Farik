@@ -78,6 +78,13 @@ export function SetupFinish() {
 				putBack={defaults && (() => integrate(defaults.policy.integration))}
 			/>
 			{draft.from && <Carried from={draft.from} answers={draft.answers} />}
+			{draft.team.policy.planInSprints && (
+				<section className={styles.sprints} aria-labelledby="sprints">
+					<h2 id="sprints">{t("finishSprints")}</h2>
+					<p>{t("finishSprintsNote")}</p>
+					<p className={styles.note}>{t("finishSprintsChange")}</p>
+				</section>
+			)}
 			<p className={styles.note}>{t("finishSafe")}</p>
 			<Switch
 				id="advanced"

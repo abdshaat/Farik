@@ -1,5 +1,12 @@
 import { expectNoAxeViolations } from "@farik/ui/test";
-import { fireEvent, screen, waitFor, within } from "@testing-library/react";
+import {
+	act,
+	cleanup,
+	fireEvent,
+	screen,
+	waitFor,
+	within,
+} from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { en } from "../strings/en.ts";
 import type { FakeSocket } from "../test/fake-socket.ts";
@@ -48,6 +55,7 @@ async function today(fields: {
 	moved?: unknown[];
 	sprint?: unknown;
 	team?: unknown;
+	backlog?: unknown;
 }) {
 	const { container, socket } = await renderApp("/");
 	const s = socket as FakeSocket;
@@ -57,6 +65,7 @@ async function today(fields: {
 	await answerQuery(s, "waiting.list", { waiting: fields.waiting ?? [] });
 	await answerQuery(s, "moved.since", { moved: fields.moved ?? [] });
 	await answerQuery(s, "sprint.current", fields.sprint ?? null);
+	if (fields.backlog) await answerQuery(s, "backlog.summary", fields.backlog);
 	return { container, s };
 }
 
@@ -398,5 +407,65 @@ describe("today", () => {
 		);
 		expect(Math.abs(Date.now() - 86_400_000 - since)).toBeLessThan(60_000);
 		await expectNoAxeViolations(container);
+	});
+
+	it("counts_the_backlog_on_today", async () => {
+		const band = async () =>
+			(await screen.findByRole("list", { name: en.teamBand }))
+				.parentElement as HTMLElement;
+		const first = await today({ backlog: { plan_in_sprints: true, count: 2 } });
+		const line = await within(await band()).findByText(
+			/^2 pieces of work are ready and wait in the Backlog\./,
+		);
+		expect(line.textContent).toBe(
+			"2 pieces of work are ready and wait in the Backlog. Start a sprint to begin them.",
+		);
+		expect(
+			within(line)
+				.getByRole("link", { name: en.todayBacklogStart })
+				.getAttribute("href"),
+		).toBe("/board?start=sprint");
+		await expectNoAxeViolations(first.container);
+		cleanup();
+
+		await today({ backlog: { plan_in_sprints: true, count: 1 } });
+		expect(
+			(
+				await within(await band()).findByText(
+					/^1 piece of work is ready and waits in the Backlog\./,
+				)
+			).textContent,
+		).toBe(
+			"1 piece of work is ready and waits in the Backlog. Start a sprint to begin it.",
+		);
+		cleanup();
+
+		// While a sprint runs, the late work waits for the next one.
+		const second = await today({
+			sprint: { sprint_id: "S3", done: 1, total: 5 },
+			backlog: { plan_in_sprints: true, count: 1 },
+		});
+		const sprint = await screen.findByRole("link", {
+			name: "Sprint 3 is running: 1 of 5 tasks done",
+		});
+		expect(sprint.getAttribute("href")).toBe("/sprints/S3");
+		await waitFor(() =>
+			expect(sprint.parentElement?.textContent).toBe(
+				"Sprint 3 is running: 1 of 5 tasks done. 1 more waits in the Backlog for the next sprint.",
+			),
+		);
+		await expectNoAxeViolations(second.container);
+		cleanup();
+
+		// Nothing waits, or the team does not plan in sprints: no line.
+		for (const backlog of [
+			{ plan_in_sprints: true, count: 0 },
+			{ plan_in_sprints: false, count: 0 },
+		]) {
+			await today({ backlog });
+			await act(async () => {});
+			expect(within(await band()).queryByText(/Backlog/)).toBeNull();
+			cleanup();
+		}
 	});
 });
