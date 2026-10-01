@@ -3,6 +3,7 @@
 Date: 2026-09-30
 Status: accepted
 Amended 2026-09-30 by ADR 0026: the phase order is unchanged, but the role kits, and so the single agent's union of them, now include the UI/UX Designer's.
+Amended 2026-10-01 by ADR 0029: the role kits are phase 7 and are built and checked on Claude; phase 8, engines and providers, checks every kit again on each engine and provider it adds, which meets this ADR's rule. Phases 10 to 14 keep their numbers.
 
 ## Context
 

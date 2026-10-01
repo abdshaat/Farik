@@ -5,6 +5,7 @@ Status: accepted
 Amended 2026-09-29 by ADR 0023: phase numbers after 6 moved up by one.
 Amended 2026-09-30 by ADR 0025: phase numbers after 9 moved up by one; every kit must work on every supported engine; and every connector ships before the launch, which closes the question left open below.
 Amended 2026-09-30 by ADR 0026: the kits include a seventh, the UI/UX Designer's, whose skills and Playwright connector phase 6 steps 11 and 12 build first and phase 9 step 01 moves into its `kit.yaml`; phase 8 step 01 extends that connector base rather than starting one.
+Amended 2026-10-01 by ADR 0029: the role kits are phase 7, built on Claude before other engines, with the per-agent MCP and skills plumbing and the Finance Specialist pulled forward from the ecosystem, and the Milestone 0 and 1 runs as the phase's last step; engines and providers are phase 8, the rest of the ecosystem phase 9.
 
 ## Context
 
