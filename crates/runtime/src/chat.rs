@@ -493,6 +493,17 @@ mod tests {
             said(&log, "mira", "mira");
         }
         assert_eq!(pending_chat(&log, "mira").expect("reads"), Some(behind));
+
+        // Behind exactly a page: the message is the first row of the next page.
+        chat_started(&log, "mira", behind);
+        let first_on_the_next_page = said(&log, "mira", "human");
+        for _ in 0..super::CHAT_PAGE {
+            said(&log, "mira", "mira");
+        }
+        assert_eq!(
+            pending_chat(&log, "mira").expect("reads"),
+            Some(first_on_the_next_page)
+        );
     }
 
     #[test]
