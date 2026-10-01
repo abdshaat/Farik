@@ -842,6 +842,17 @@ pub(crate) fn update_agent_with(
     newcomer: Option<Agent>,
 ) -> Result<CommandReport, CommandError> {
     let _writing = daemon.team_writes();
+    update_agent_held(tools, daemon, agent_id, status, newcomer)
+}
+
+/// `update_agent_with` for a caller that already holds `daemon.team_writes()`.
+pub(crate) fn update_agent_held(
+    tools: &ToolDeps,
+    daemon: &DaemonState,
+    agent_id: &str,
+    status: AgentStatus,
+    newcomer: Option<Agent>,
+) -> Result<CommandReport, CommandError> {
     let mut team = tools.files.read_team().map_err(failed)?;
     let Some(agent) = team
         .agents

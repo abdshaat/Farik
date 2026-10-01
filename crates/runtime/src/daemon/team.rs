@@ -497,10 +497,12 @@ pub(super) fn worked(deps: &ToolDeps, agent_id: &str) -> Result<bool, Failure> {
     Ok(!seen.is_empty())
 }
 
-/// `agent.replace`: the agent retired and the newcomer added in one write, checked as a save is,
-/// then `agent.updated` and `team.updated`.
+/// `agent.replace`: the agent retired and the newcomer added in one write, checked as a save is
+/// against the team it replaces, under the lock from the read to the write; then `agent.updated`
+/// and `team.updated`.
 fn replace(deps: &ToolDeps, state: &DaemonState, params: &Value) -> Result<(), Failure> {
     let agent_id = params["agent_id"].as_str().unwrap_or_default();
+    let writing = state.team_writes();
     let team = deps.files.read_team().map_err(|e| internal(&e))?;
     let mut wire = serde_json::to_value(&team).map_err(|e| internal(&e))?;
     let Some(at) = team
@@ -519,13 +521,14 @@ fn replace(deps: &ToolDeps, state: &DaemonState, params: &Value) -> Result<(), F
     }
     let after = validate_team(&wire).map_err(|errors| Failure::from(Refused::Errors(errors)))?;
     let newcomer = after.agents.last().cloned();
-    let report = crate::orchestrator::update_agent_with(
+    let report = crate::orchestrator::update_agent_held(
         deps,
         state,
         agent_id,
         farik_core::team::AgentStatus::Retired,
         newcomer,
     );
+    drop(writing);
     match report {
         Ok(_) => {}
         Err(crate::orchestrator::CommandError::Refused { reason }) => {
@@ -1318,6 +1321,38 @@ pub(super) mod tests {
             kinds(&harness)[seen..],
             [EventKind::AgentUpdated, EventKind::TeamUpdated]
         );
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn checks_a_replacement_against_the_team_it_replaces() {
+        let harness = driven("team-replace-locked");
+        let writing = harness.daemon.team_writes();
+        let daemon = Arc::clone(&harness.daemon);
+        let asking = std::thread::spawn(move || {
+            rpc(
+                &daemon,
+                "agent.replace",
+                &json!({ "agent_id": "dev-b", "newcomer": farik_core::team::fixtures::an_agent_wire("lin", "software_developer") }),
+            )
+        });
+        std::thread::sleep(std::time::Duration::from_millis(300));
+        // While another write holds the team, it adds a Lin of its own: the newcomer's id is taken.
+        let mut wire = team_file(&harness);
+        wire["agents"].as_array_mut().expect("agents").push(
+            farik_core::team::fixtures::an_agent_wire("lin", "architect"),
+        );
+        harness
+            .project
+            .deps
+            .files
+            .write_team(&farik_core::team::validate_team(&wire).expect("a team"))
+            .expect("written");
+        drop(writing);
+        let reply = asking.join().expect("the replace ends");
+        assert_eq!(reply["error"]["code"], -32005, "{reply}");
+        assert_eq!(reply["error"]["data"]["errors"][0]["path"], "/agents");
+        assert_eq!(team_file(&harness), wire, "nothing is written");
     }
 
     #[test]

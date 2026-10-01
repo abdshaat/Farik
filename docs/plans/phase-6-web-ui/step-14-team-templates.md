@@ -269,6 +269,8 @@ As built (Task 8): spec revision 0.35 (0.32 to 0.34 were taken by the DevOps Eng
 
 Fix wave (I2, I3; landing review of 8bc19dd): `works_the_result_out_again_under_the_lock` pauses the only kept Developer while the test holds `team_writes()` and asserts `template.apply` answers -32005 `needs_developer` and writes nothing (kills R3, the result worked out before the lock); `retires_an_agent_the_user_only_chatted_with` gives `dev-b` one `chat_message.posted` and no other event and asserts the preview retires it (kills R8, `worked()` narrowed to `tool.called`). Tests only; the code was right.
 
+Fix wave (M3): `agent.replace` takes `team_writes()` before its read and calls `update_agent_held` (the body of `update_agent_with`, which now only takes the lock and calls it), so the newcomer is validated against the team as it is under the lock; a newcomer whose id was taken meanwhile is -32005 at `/agents`, not -32603. Test `checks_a_replacement_against_the_team_it_replaces` in `daemon/team.rs`.
+
 ## Verification
 
 ```
