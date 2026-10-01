@@ -200,7 +200,7 @@ Files: `connectors.rs`, `crates/runtime/tests/fixture_mcp.rs`, the workspace `Ca
 - `a_launch_spec_never_prints`: `LaunchSpec`'s `Debug` shows key names and `***`.
 - `gives_up_after_thirty_seconds`: a fixture that never answers gives `ConnectorError::Timeout` (paused clock).
 
-- [ ] `feat(runtime): list an MCP server's tools with the agent's keys`
+- [x] `feat(runtime): list an MCP server's tools with the agent's keys`
 
 ### Task 5: The governor's connector check
 

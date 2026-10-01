@@ -35,6 +35,7 @@ futures-util.workspace = true
 jsonschema.workspace = true
 keyring-core.workspace = true
 rusqlite.workspace = true
+tokio = { workspace = true, features = ["test-util"] }
 tokio-tungstenite.workspace = true
 tower.workspace = true
 

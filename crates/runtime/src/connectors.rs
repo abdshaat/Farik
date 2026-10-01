@@ -6,6 +6,8 @@ use std::fmt;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
+use farik_core::team::{CustomServer, CustomTransport};
+
 use crate::claude::Secret;
 use crate::credential::{CredentialError, map_keyring_error, read_keychain};
 
@@ -355,6 +357,213 @@ impl ConnectorSecrets for MemoryConnectorSecrets {
     }
 }
 
+/// Why a server's tools could not be listed, or its launch not described.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ConnectorError {
+    /// The server did not answer within thirty seconds.
+    Timeout,
+    /// A key the server names has no value kept for it.
+    KeyMissing(String),
+    /// Anything else, said in a sentence.
+    Failed(String),
+}
+
+/// A tool a server listed.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ListedTool {
+    /// Its name, as the server gave it.
+    pub name: String,
+    /// What the server says it does.
+    pub description: String,
+    /// Whether Claude Code would call it by this name.
+    pub usable: bool,
+}
+
+/// How to start a stdio server: the program, its arguments, and its keys.
+pub struct LaunchSpec {
+    /// The program.
+    pub command: String,
+    /// Its arguments.
+    pub args: Vec<String>,
+    /// Each key's name and value.
+    pub env: BTreeMap<String, Secret>,
+}
+
+impl fmt::Debug for LaunchSpec {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let env: BTreeMap<&str, &str> =
+            self.env.keys().map(|name| (name.as_str(), "***")).collect();
+        formatter
+            .debug_struct("LaunchSpec")
+            .field("command", &self.command)
+            .field("args", &self.args)
+            .field("env", &env)
+            .finish()
+    }
+}
+
+/// The variables a server's environment keeps from Farik's, beside its keys (ADR 0030): never
+/// the model credential.
+pub const KEPT_ENV: [&str; 4] = ["PATH", "HOME", "LANG", "TMPDIR"];
+
+/// How long a server has to list its tools.
+const LISTING_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+
+/// How to start the stdio `server` with the keys in `entry`: each key it names, and no other.
+///
+/// # Errors
+///
+/// `server` is reached at a web address, or a key it names has no value in `entry`.
+pub fn launch_spec(
+    server: &CustomServer,
+    entry: &ConnectorEntry,
+) -> Result<LaunchSpec, ConnectorError> {
+    let CustomTransport::Stdio { command, args } = &server.transport else {
+        return Err(ConnectorError::Failed(format!(
+            "{} is reached at a web address, not started",
+            server.name
+        )));
+    };
+    Ok(LaunchSpec {
+        command: command.clone(),
+        args: args.clone(),
+        env: named_keys(server, &entry.keys)?,
+    })
+}
+
+/// Each key `server` names, with its value from `keys`.
+fn named_keys(
+    server: &CustomServer,
+    keys: &BTreeMap<String, Secret>,
+) -> Result<BTreeMap<String, Secret>, ConnectorError> {
+    server
+        .credential_keys
+        .iter()
+        .map(|name| {
+            keys.get(name)
+                .map(|value| (name.clone(), value.clone()))
+                .ok_or_else(|| ConnectorError::KeyMissing(name.clone()))
+        })
+        .collect()
+}
+
+/// Each header template with every `{KEY}` replaced by its value.
+fn filled_headers(
+    templates: &BTreeMap<String, String>,
+    keys: &BTreeMap<String, Secret>,
+) -> Result<
+    std::collections::HashMap<axum::http::HeaderName, axum::http::HeaderValue>,
+    ConnectorError,
+> {
+    templates
+        .iter()
+        .map(|(name, template)| {
+            // The error never quotes the value, which holds a key.
+            let invalid =
+                || ConnectorError::Failed(format!("the header {name} is not one HTTP can send"));
+            Ok((
+                axum::http::HeaderName::try_from(name.as_str()).map_err(|_| invalid())?,
+                axum::http::HeaderValue::try_from(filled(template, keys)?)
+                    .map_err(|_| invalid())?,
+            ))
+        })
+        .collect()
+}
+
+/// `template` with each `{KEY}` replaced by its value, in one pass, so a value is never read as
+/// a template itself.
+fn filled(template: &str, keys: &BTreeMap<String, Secret>) -> Result<String, ConnectorError> {
+    let mut filled = String::new();
+    let mut rest = template;
+    while let Some((before, after)) = rest.split_once('{') {
+        let Some((key, after)) = after.split_once('}') else {
+            break;
+        };
+        let value = keys
+            .get(key)
+            .ok_or_else(|| ConnectorError::KeyMissing(key.to_string()))?;
+        filled.push_str(before);
+        filled.push_str(value.expose());
+        rest = after;
+    }
+    filled.push_str(rest);
+    Ok(filled)
+}
+
+/// Whether Claude Code calls a tool by this name: it rewrites any other character, so the hook's
+/// lookup and `--disallowedTools` would miss it.
+fn usable_tool_name(name: &str) -> bool {
+    (1..=64).contains(&name.len())
+        && name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+}
+
+/// The tools `server` lists when started, or reached, with `keys`. A stdio server runs with only
+/// [`KEPT_ENV`] and its keys; the whole listing gives up after thirty seconds.
+///
+/// # Errors
+///
+/// A key is missing, the server could not be started or reached, it did not answer as MCP, or it
+/// took longer than thirty seconds.
+pub async fn list_tools(
+    server: &CustomServer,
+    keys: &BTreeMap<String, Secret>,
+) -> Result<Vec<ListedTool>, ConnectorError> {
+    use rmcp::ServiceExt as _;
+
+    let failed = |what: &str, error: &dyn fmt::Display| {
+        ConnectorError::Failed(format!("{} {what}: {error}", server.name))
+    };
+    let listing = async {
+        let client = match &server.transport {
+            CustomTransport::Stdio { command, args } => {
+                let mut process = tokio::process::Command::new(command);
+                process.args(args).env_clear().kill_on_drop(true);
+                for name in KEPT_ENV {
+                    if let Some(value) = std::env::var_os(name) {
+                        process.env(name, value);
+                    }
+                }
+                for (name, value) in named_keys(server, keys)? {
+                    process.env(name, value.expose());
+                }
+                let transport = rmcp::transport::TokioChildProcess::builder(process)
+                    .stderr(std::process::Stdio::null())
+                    .spawn()
+                    .map_err(|error| failed("could not be started", &error))?
+                    .0;
+                ().serve(transport).await
+            }
+            CustomTransport::Http { url, headers } => {
+                let config = rmcp::transport::streamable_http_client::StreamableHttpClientTransportConfig::with_uri(url.as_str())
+                    .custom_headers(filled_headers(headers, keys)?);
+                ().serve(rmcp::transport::StreamableHttpClientTransport::from_config(config)).await
+            }
+        }
+        .map_err(|error| failed("did not answer as an MCP server", &error))?;
+        let tools = client
+            .list_all_tools()
+            .await
+            .map_err(|error| failed("could not list its tools", &error));
+        let _ = client.cancel().await;
+        Ok(tools?
+            .into_iter()
+            .map(|tool| ListedTool {
+                usable: usable_tool_name(&tool.name),
+                name: tool.name.into_owned(),
+                description: tool
+                    .description
+                    .map(std::borrow::Cow::into_owned)
+                    .unwrap_or_default(),
+            })
+            .collect())
+    };
+    tokio::time::timeout(LISTING_TIMEOUT, listing)
+        .await
+        .unwrap_or(Err(ConnectorError::Timeout))
+}
+
 #[cfg(test)]
 mod tests {
     use std::os::unix::fs::PermissionsExt as _;
@@ -616,6 +825,54 @@ mod tests {
                 );
             }
         }
+    }
+
+    fn stdio(credential_keys: &[&str]) -> CustomServer {
+        CustomServer {
+            name: "github".to_string(),
+            transport: CustomTransport::Stdio {
+                command: "github-mcp".to_string(),
+                args: vec!["stdio".to_string()],
+            },
+            credential_keys: credential_keys.iter().map(ToString::to_string).collect(),
+            tools: BTreeMap::new(),
+        }
+    }
+
+    #[test]
+    fn a_launch_spec_never_prints() {
+        let spec = launch_spec(&stdio(&["API_KEY"]), &entry("abc")).expect("a stdio server");
+        assert_eq!(spec.command, "github-mcp");
+        assert_eq!(spec.args, ["stdio"]);
+        assert_eq!(
+            spec.env.get("API_KEY").map(Secret::expose),
+            Some("ghp-secret-value")
+        );
+        let printed = format!("{spec:?}");
+        assert!(printed.contains("API_KEY"), "{printed}");
+        assert!(printed.contains("***"), "{printed}");
+        assert!(!printed.contains("ghp-secret-value"), "{printed}");
+
+        // Only the keys the server names, and each of them.
+        assert_eq!(
+            launch_spec(&stdio(&[]), &entry("abc")).map(|spec| spec.env.len()),
+            Ok(0)
+        );
+        assert_eq!(
+            launch_spec(&stdio(&["API_KEY", "TOKEN"]), &entry("abc")).err(),
+            Some(ConnectorError::KeyMissing("TOKEN".to_string()))
+        );
+        let http = CustomServer {
+            transport: CustomTransport::Http {
+                url: "https://x.example/mcp".to_string(),
+                headers: BTreeMap::new(),
+            },
+            ..stdio(&[])
+        };
+        assert!(matches!(
+            launch_spec(&http, &entry("abc")),
+            Err(ConnectorError::Failed(_))
+        ));
     }
 
     #[test]
