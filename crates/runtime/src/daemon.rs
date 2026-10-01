@@ -457,8 +457,42 @@ pub async fn serve(
     config: DaemonConfig,
     state: Arc<DaemonState>,
 ) -> Result<DaemonHandle, DaemonError> {
+    serve_on(bind(config.port).await?, config.daemon_file, state).await
+}
+
+/// `serve` on a socket its caller already holds and keeps when the daemon stops. `farik serve`
+/// binds its port once and serves each of its daemons on it in turn, so between two of them the
+/// port is never free for another process to take; a browser connecting meanwhile waits in the
+/// socket's queue for the next one.
+///
+/// # Errors
+///
+/// As `serve`'s; `Bind` when the socket cannot be shared.
+pub async fn serve_held(
+    listener: &std::net::TcpListener,
+    daemon_file: Option<PathBuf>,
+    state: Arc<DaemonState>,
+) -> Result<DaemonHandle, DaemonError> {
+    let failed = |error: std::io::Error| DaemonError::Bind {
+        detail: error.to_string(),
+    };
+    let shared = listener.try_clone().map_err(failed)?;
+    shared.set_nonblocking(true).map_err(failed)?;
+    serve_on(
+        TcpListener::from_std(shared).map_err(failed)?,
+        daemon_file,
+        state,
+    )
+    .await
+}
+
+/// `serve` on `listener`.
+async fn serve_on(
+    listener: TcpListener,
+    daemon_file: Option<PathBuf>,
+    state: Arc<DaemonState>,
+) -> Result<DaemonHandle, DaemonError> {
     let token = random_token()?;
-    let listener = bind(config.port).await?;
     let port = listener
         .local_addr()
         .map_err(|error| DaemonError::Bind {
@@ -482,7 +516,7 @@ pub async fn serve(
     });
     let handle = DaemonHandle {
         info,
-        daemon_file: config.daemon_file,
+        daemon_file,
         cancel,
         stop,
         server,
