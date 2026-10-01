@@ -16,6 +16,7 @@ fn main() -> std::process::ExitCode {
         Arc::new(SystemClock),
     );
     io.stdin = Box::new(std::io::stdin());
+    io.stdin_is_terminal = std::io::IsTerminal::is_terminal(&std::io::stdin());
     io.env = std::env::vars_os()
         .map(|(name, value)| {
             (

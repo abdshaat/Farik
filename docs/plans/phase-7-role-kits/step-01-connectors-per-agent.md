@@ -45,7 +45,7 @@ Transport and process:
 Credentials:
 - **Where keys are kept.** Per agent, in the keychain, through phase 6 step 05's `keyring` adapter. Service `farik`, account `connector:<project_id>:<agent_id>:<server>` (two projects can both have an agent `theo`). The entry is one JSON object `{ spec_sha256, keys }`. Disconnecting deletes it, and never another agent's. `credential.rs`'s `map_keyring_error` and `read_keychain` become `pub(crate)`.
 - **A computer with no keychain** (O2, the founder, 2026-10-01; as ADR 0022 does for the model credential): the entry goes to `connectors.json` in the user's Farik state folder, the folder 0700 and the file 0600, written beside and renamed over, keyed by the same account string. `ConnectorAdd` and `farik connect` say which store was used ("Kept in your computer's keychain" or "Kept in a private file only you can read"). With no state folder either, connect is refused `no_secret_store`.
-- **Secrets on the command line.** Each `--key` reads its value from standard input, echo off on a terminal, through `rpassword = "=7.4.0"` (one small new dependency, over a terminal echoing the secret). Never from an argument, which `ps` shows.
+- **Secrets on the command line.** Each `--key` reads its value from standard input, echo off on a terminal, through `rpassword = "=7.5.4"` (one small new dependency, Apache-2.0, bringing `rtoolbox` 0.0.6, Apache-2.0, from the same author; 7.5.4 was the newest on crates.io at Task 8, 2026-10-01, over the 7.4.0 this plan first named), over a terminal echoing the secret. Never from an argument, which `ps` shows.
 - **`farik connect <agent> <name> (--command <program> [--arg <a>]... | --url <url> [--header '<Name>: <template>']...) [--key <NAME>]... [--tag <tool>=network|external_effect|denied]...`** (finding B4). The command lists the tools in its own process with the keys, prints each with its tag (one not named by `--tag` is `external_effect`), and saves the entry through `ConnectorSecrets` there too, so a key never crosses a socket. The team file and `connector.connected` go through `here_or_sent` (`cli/src/start.rs`): written here, holding the run lock, when nothing drives the project, else sent as the command `connector_connect`, whose body carries names, tags and `spec_sha256`, never a value. `farik disconnect <agent> <name>` deletes the entry in its own process and sends `connector_disconnect`. The browser's RPCs carry the keys to the daemon, which keeps them, as `account.connect` does.
 
 Which sessions get custom connectors:
@@ -257,7 +257,7 @@ Files: `cli/src/connector.rs`, `cli/src/lib.rs`, `crates/cli/Cargo.toml`, the wo
 - `farik_connect_says_which_store_kept_the_keys`: with the in-memory keychain answering `NoKeychain`, the last line is "Kept in a private file only you can read".
 - `farik_connect_sends_names_when_something_drives`: with a daemon running, the command sent is `connector_connect` and holds no key value.
 
-- [ ] `feat(cli): connect and disconnect an MCP server for one agent`
+- [x] `feat(cli): connect and disconnect an MCP server for one agent`
 
 ### Task 9: The screens
 

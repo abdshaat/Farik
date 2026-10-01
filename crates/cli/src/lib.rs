@@ -12,6 +12,10 @@ pub mod board;
 pub mod channel;
 /// The human's one-to-one chats.
 pub mod chat;
+/// `farik connect` and `farik disconnect`: one agent's MCP server, its keys kept by this process
+/// and only names sent on (ADR 0030).
+#[cfg(unix)]
+mod connector;
 /// `farik connector run` and `farik connector headers`: a custom connector's keys, from the
 /// daemon to the server, never through a file (ADR 0030).
 #[cfg(unix)]
@@ -130,6 +134,9 @@ pub struct CliIo<'a> {
     /// What a command reads: the hook commands' JSON from Claude Code, and the answers
     /// `farik contract new` asks for. Owned, so that one reader thread can hold it.
     pub stdin: Box<dyn Read + Send>,
+    /// Whether `stdin` is a terminal, where a key is read with its echo off: `false` here, and
+    /// what the process's standard input is in `main`.
+    pub stdin_is_terminal: bool,
     /// What a person or a script asked for.
     pub stdout: Box<dyn Write + 'a>,
     /// Why Farik would not do something, and warnings.
@@ -224,6 +231,7 @@ impl<'a> CliIo<'a> {
         let (_, never) = tokio::sync::mpsc::unbounded_channel();
         CliIo {
             stdin: Box::new(std::io::empty()),
+            stdin_is_terminal: false,
             stdout,
             stderr,
             cwd,
@@ -359,6 +367,43 @@ enum Commands {
     Connector {
         #[command(subcommand)]
         command: ConnectorCommands,
+    },
+    /// Give one agent an MCP server, with its keys read from standard input, and label its tools
+    /// (5.6, ADR 0030).
+    #[cfg(unix)]
+    #[command(group(clap::ArgGroup::new("start").required(true).args(["command", "url"])))]
+    Connect {
+        /// The agent's id.
+        agent: String,
+        /// The server's name: lower-case letters, digits and dashes.
+        name: String,
+        /// The program that starts the server.
+        #[arg(long)]
+        command: Option<String>,
+        /// One argument to that program; repeat it for each.
+        #[arg(long = "arg", requires = "command", allow_hyphen_values = true)]
+        args: Vec<String>,
+        /// The server's web address.
+        #[arg(long)]
+        url: Option<String>,
+        /// A header, as 'Name: template', where {KEY} is a key's value; repeat it for each.
+        #[arg(long = "header", requires = "url")]
+        headers: Vec<String>,
+        /// A key's name; its value is read from standard input. Repeat it for each.
+        #[arg(long = "key")]
+        keys: Vec<String>,
+        /// A tool's label: `<tool>=network`, `<tool>=external_effect` or `<tool>=denied`. A tool
+        /// left unlabelled is `external_effect`.
+        #[arg(long = "tag")]
+        tags: Vec<String>,
+    },
+    /// Take an MCP server from one agent, and delete its keys.
+    #[cfg(unix)]
+    Disconnect {
+        /// The agent's id.
+        agent: String,
+        /// The server's name.
+        name: String,
     },
     /// Drive the team until nothing needs doing, a stop, or Ctrl-C (8.2).
     Run,
@@ -747,6 +792,35 @@ pub fn run_cli(args: &[String], io: &mut CliIo<'_>) -> i32 {
         Commands::Criteria {
             command: CriteriaCommands::List,
         } => open_project(&io.cwd, now).and_then(|project| team::criteria(&project)),
+        #[cfg(unix)]
+        Commands::Connect {
+            agent,
+            name,
+            command,
+            args,
+            url,
+            headers,
+            keys,
+            tags,
+        } => open_project(&io.cwd, now).and_then(|project| {
+            connector::connect(
+                &project,
+                &connector::Asked {
+                    agent,
+                    name,
+                    command: command.as_deref(),
+                    args,
+                    url: url.as_deref(),
+                    headers,
+                    keys,
+                    tags,
+                },
+                io,
+            )
+        }),
+        #[cfg(unix)]
+        Commands::Disconnect { agent, name } => open_project(&io.cwd, now)
+            .and_then(|project| connector::disconnect(&project, agent, name, io)),
         #[cfg(unix)]
         Commands::Connector { .. } => unreachable!("a connector command returned above"),
         Commands::Hook { .. }

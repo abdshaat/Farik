@@ -28,6 +28,7 @@ keyring = "=4.2.0"
 keyring-core = "=1.0.0"
 regress = "=0.12.0"
 rmcp = { version = "=3.3.0", default-features = false, features = ["client", "reqwest", "server", "transport-child-process", "transport-streamable-http-client-reqwest", "transport-streamable-http-server"] }
+rpassword = "=7.5.4"
 rusqlite = { version = "=0.40.2", features = ["bundled"] }
 rust-embed = { version = "=8.12.0", features = ["mime-guess"] }
 schemars = "=1.2.2"

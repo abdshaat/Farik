@@ -27,7 +27,7 @@ use serde_json::{Value, json};
 use super::web::{Failure, INTERNAL_ERROR, NO_PROJECT, REFUSED};
 use super::{DaemonState, Kept};
 use crate::claude::{CredentialKind, Secret, credential_variable};
-use crate::connectors::{ConnectorEntry, ConnectorError, SecretAt, list_tools};
+use crate::connectors::{ConnectorEntry, ConnectorError, ListedTool, SecretAt, list_tools};
 use crate::credential::{CredentialError, credential_of_kind, load_credential, save_credential};
 use crate::pause::{key_refused, paused};
 use crate::session::session_model;
@@ -285,13 +285,28 @@ fn described(
     wire: &Value,
     tools: Value,
 ) -> Result<(Value, CustomServer), Failure> {
+    let team = deps.files.read_team().map_err(|e| internal(&e))?;
+    custom_entry(&team, agent, wire, tools).map_err(|errors| Failure::from(Refused::Errors(errors)))
+}
+
+/// `wire`, a custom server as the user describes it, as `agent`'s entry in `team` with `tools`,
+/// held to the team's rules: the entry and the server it describes. What `connector.connect` and
+/// `farik connect` both build (ADR 0030).
+///
+/// # Errors
+///
+/// The team's errors, each at its field.
+pub fn custom_entry(
+    team: &Team,
+    agent: &str,
+    wire: &Value,
+    tools: Value,
+) -> Result<(Value, CustomServer), Vec<ValidationError>> {
     let mut entry = wire.clone();
     entry["source"] = json!("custom");
     entry["tools"] = tools;
     let name = entry["name"].as_str().unwrap_or_default().to_string();
-    let team = deps.files.read_team().map_err(|e| internal(&e))?;
-    let after = with_server(&team, agent, &name, Some(&entry))
-        .map_err(|errors| Failure::from(Refused::Errors(errors)))?;
+    let after = with_server(team, agent, &name, Some(&entry))?;
     let server = after
         .agents
         .iter()
@@ -299,8 +314,30 @@ fn described(
         .flat_map(|held| held.mcp_servers.iter().flatten())
         .find(|server| server.name.as_str() == name)
         .and_then(custom_server)
-        .ok_or_else(|| internal(&format!("{name} is not a custom server once validated")))?;
+        .ok_or_else(|| {
+            vec![ValidationError {
+                path: "/agents".to_string(),
+                message: format!("{name} is not a custom server once validated"),
+            }]
+        })?;
     Ok((entry, server))
+}
+
+/// The usable tools of `listed`, each labelled by `tags` (an object of tool name to tag) or else
+/// `external_effect` (SPEC 5.6).
+#[must_use]
+pub fn labelled(listed: &[ListedTool], tags: &Value) -> serde_json::Map<String, Value> {
+    listed
+        .iter()
+        .filter(|tool| tool.usable)
+        .map(|tool| {
+            let tag = tags
+                .get(&tool.name)
+                .cloned()
+                .unwrap_or_else(|| json!("external_effect"));
+            (tool.name.clone(), tag)
+        })
+        .collect()
 }
 
 /// The keys `connector.tools` and `connector.connect` carry.
@@ -334,10 +371,7 @@ fn not_listed(error: ConnectorError) -> Failure {
 
 /// The tools of the server `params` describes for its agent, held to the team's rules first, as
 /// it lists them with the keys `params` carries.
-async fn listed(
-    deps: &Arc<ToolDeps>,
-    params: &Value,
-) -> Result<Vec<crate::connectors::ListedTool>, Failure> {
+async fn listed(deps: &Arc<ToolDeps>, params: &Value) -> Result<Vec<ListedTool>, Failure> {
     let (held, asked) = (Arc::clone(deps), params.clone());
     let (_, server) = off_the_worker(move || {
         described(
@@ -363,17 +397,7 @@ async fn connector_connect(
 ) -> Result<Value, Failure> {
     let agent = params["agent"].as_str().unwrap_or_default().to_string();
     let listed = listed(deps, params).await?;
-    let tools: serde_json::Map<String, Value> = listed
-        .iter()
-        .filter(|tool| tool.usable)
-        .map(|tool| {
-            let tag = params["tags"]
-                .get(&tool.name)
-                .cloned()
-                .unwrap_or_else(|| json!("external_effect"));
-            (tool.name.clone(), tag)
-        })
-        .collect();
+    let tools = labelled(&listed, &params["tags"]);
     let (held, asked, labels) = (Arc::clone(deps), params.clone(), tools.clone());
     let (entry, server) = off_the_worker(move || {
         described(
