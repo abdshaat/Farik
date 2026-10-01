@@ -151,20 +151,21 @@ pub enum ToolRefusal {
 pub enum ConnectorTag {
     /// Reaches only the preview and changes nothing outside the sandbox.
     Network,
-    /// Changes state outside the sandbox; denied until phase 8.
+    /// Changes state outside the sandbox; refused until a human can approve one call.
     ExternalEffect,
     /// Never offered and always refused.
     Denied,
 }
 
-/// A connector a session was given: its server's name, the one origin its calls may name, and
-/// each tool's tag.
+/// A connector a session was given: its server's name, the one origin its calls may name when it
+/// is confined to the preview, and each tool's tag.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SessionConnector {
     /// The server's name, as in `mcp__<server>__<tool>`.
     pub server: String,
-    /// The preview's origin, `http://localhost:<port>`.
-    pub origin: String,
+    /// The preview's origin, `http://localhost:<port>`, for a connector confined to the preview;
+    /// `None` for a user's server, whose `network` tools may name any `url`.
+    pub origin: Option<String>,
     /// Every tool the connector's pinned list tags.
     pub tools: std::collections::BTreeMap<String, ConnectorTag>,
 }
@@ -176,8 +177,10 @@ pub enum ConnectorRefusal {
     ConnectorNotInSession,
     /// The connector's pinned list does not tag the tool.
     ToolNotTagged,
-    /// The tool is tagged `denied`, or `external_effect`, which is denied until phase 8.
+    /// The tool is tagged `denied`.
     ToolDenied,
+    /// The tool is tagged `external_effect`, which Farik cannot yet ask the human about.
+    ExternalEffectRefused,
     /// A `url` field names something other than the preview.
     UrlOutsidePreview {
         /// The field's value: the string, or the JSON of a value that is not one.
@@ -186,14 +189,16 @@ pub enum ConnectorRefusal {
 }
 
 /// Decides one connector call (`docs/SPEC.md` sections 5.6 and 8.6): the session must have the
-/// connector, the tool must be tagged `network`, and every field named `url`, at any depth of the
-/// input, must be a string naming the preview: its origin exactly, or followed by `/`, `?` or `#`.
+/// connector, the tool must be tagged `network`, and, for a connector with an origin, every field
+/// named `url`, at any depth of the input, must be a string naming the preview: its origin
+/// exactly, or followed by `/`, `?` or `#`. The tag governs whatever the agent's tiers.
 /// `tool` is the bare tool name, without `mcp__<server>__`.
 ///
 /// # Errors
 ///
-/// `ConnectorNotInSession`, then `ToolNotTagged`, then `ToolDenied` for a `denied` or an
-/// `external_effect` tool, then `UrlOutsidePreview` with the first `url` found outside it.
+/// `ConnectorNotInSession`, then `ToolNotTagged`, then `ToolDenied` for a `denied` tool or
+/// `ExternalEffectRefused` for an `external_effect` one, then `UrlOutsidePreview` with the first
+/// `url` found outside the origin.
 pub fn evaluate_connector_call(
     tool: &str,
     input: &serde_json::Value,
@@ -202,11 +207,12 @@ pub fn evaluate_connector_call(
     let connector = connector.ok_or(ConnectorRefusal::ConnectorNotInSession)?;
     match connector.tools.get(tool) {
         None => Err(ConnectorRefusal::ToolNotTagged),
-        Some(ConnectorTag::Denied | ConnectorTag::ExternalEffect) => {
-            Err(ConnectorRefusal::ToolDenied)
-        }
+        Some(ConnectorTag::Denied) => Err(ConnectorRefusal::ToolDenied),
+        Some(ConnectorTag::ExternalEffect) => Err(ConnectorRefusal::ExternalEffectRefused),
         Some(ConnectorTag::Network) => {
-            check_urls(input, &connector.origin)?;
+            if let Some(origin) = &connector.origin {
+                check_urls(input, origin)?;
+            }
             Ok(ConnectorTag::Network)
         }
     }
@@ -456,7 +462,7 @@ mod tests {
     fn playwright() -> SessionConnector {
         SessionConnector {
             server: "playwright".to_string(),
-            origin: "http://localhost:4400".to_string(),
+            origin: Some("http://localhost:4400".to_string()),
             tools: [
                 ("browser_navigate", ConnectorTag::Network),
                 ("browser_click", ConnectorTag::Network),
@@ -470,7 +476,30 @@ mod tests {
     }
 
     #[test]
-    fn evaluates_connector_calls() {
+    fn a_network_tool_runs_with_no_origin() {
+        let github = SessionConnector {
+            origin: None,
+            ..playwright()
+        };
+        for url in [
+            "https://api.github.com/search?q=x",
+            "http://evil.test/",
+            "/x",
+        ] {
+            assert_eq!(
+                evaluate_connector_call(
+                    "browser_navigate",
+                    &json!({ "url": url, "then": [{ "url": url }] }),
+                    Some(&github)
+                ),
+                Ok(ConnectorTag::Network),
+                "{url}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_preview_connector_still_checks_urls() {
         let connector = playwright();
         let navigate = |input: serde_json::Value| {
             evaluate_connector_call("browser_navigate", &input, Some(&connector))
@@ -545,8 +574,8 @@ mod tests {
         );
         assert_eq!(
             evaluate_connector_call("browser_send_email", &json!({}), Some(&connector)),
-            Err(Refused::ToolDenied),
-            "external_effect is denied until phase 8"
+            Err(Refused::ExternalEffectRefused),
+            "external_effect is refused, with its own reason, until step 02 asks the human"
         );
     }
 

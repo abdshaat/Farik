@@ -9,7 +9,7 @@ use farik_core::governor::permissions::{
     AgentGrants, ConnectorRefusal, ConnectorTag, PermissionTier, ToolCallContext, ToolCallRequest,
     ToolDescriptor, evaluate_connector_call, evaluate_tool_call,
 };
-use farik_core::team::{AgentStatus, BUILTIN_CONNECTORS, Team};
+use farik_core::team::{AgentStatus, Team};
 use farik_protocol::event::{
     ConnectorTagWire, EventBody, EventIds, ToolCalledBody, ToolDeniedBody, ToolReturnedBody,
     new_event,
@@ -266,8 +266,9 @@ fn judge_call(
             Some(tool) => (tool.tier, Vec::new()),
             None => return Err(not_allowed(&request.tool_name)),
         },
+        // A connector's call is judged by its tag alone, whatever the session's tiers (5.6).
         None if connector_tool(&request.tool_name).is_some() => {
-            (judge_connector(request, registration)?, Vec::new())
+            return judge_connector(request, registration);
         }
         None => match builtin_tool_tier(&request.tool_name) {
             Some(tier) => (
@@ -321,12 +322,11 @@ fn judge_call(
     })
 }
 
-/// A shipped connector's tool name, `mcp__<server>__<tool>`, as its server and its tool; `None`
-/// for any other name, which no session is served.
+/// A connector's tool name, `mcp__<server>__<tool>`, as its server and its tool; `None` for any
+/// other name. A server's name holds no `_` (the team file's rule), so the first `__` ends it.
+/// Farik's own tools are told apart before this is asked.
 fn connector_tool(name: &str) -> Option<(&str, &str)> {
-    name.strip_prefix("mcp__")?
-        .split_once("__")
-        .filter(|(server, _)| BUILTIN_CONNECTORS.contains(server))
+    name.strip_prefix("mcp__")?.split_once("__")
 }
 
 /// The server and the tag a connector's call is recorded with: its server whenever the name is a
@@ -344,11 +344,12 @@ fn connector_of(
     Some((server.to_string(), tag))
 }
 
-/// The tier a connector's call needs, `network`, once `evaluate_connector_call` passes it (5.6).
+/// Whether a connector's call may go ahead, by `evaluate_connector_call` alone (5.6): no tier is
+/// asked, and `preauthorized_external_tools` is never consulted.
 fn judge_connector(
     request: &HookRequest,
     registration: &SessionRegistration,
-) -> Result<PermissionTier, String> {
+) -> Result<(), String> {
     let Some((server, tool)) = connector_tool(&request.tool_name) else {
         return Err(not_allowed(&request.tool_name));
     };
@@ -357,7 +358,7 @@ fn judge_connector(
         .iter()
         .find(|connector| connector.server == server);
     evaluate_connector_call(tool, &request.tool_input, connector)
-        .map(|_| PermissionTier::Network)
+        .map(|_| ())
         .map_err(|refusal| match refusal {
             ConnectorRefusal::ConnectorNotInSession => format!(
                 "connector_not_in_session: {server} is not a connector this session was given"
@@ -367,12 +368,17 @@ fn judge_connector(
                  offered"
             ),
             ConnectorRefusal::ToolDenied => format!(
-                "tool_denied: {tool} of {server} reaches beyond the preview or changes something \
-                 outside the sandbox, and no session may call it"
+                "tool_denied: {tool} of {server} is tagged denied, and no session may call it"
+            ),
+            ConnectorRefusal::ExternalEffectRefused => format!(
+                "external_effect_refused: {tool} of {server} changes something outside the \
+                 sandbox, and Farik cannot ask you about one call yet, so it is refused"
             ),
             ConnectorRefusal::UrlOutsidePreview { url } => format!(
                 "url_outside_preview: {url} is not the project's preview; open pages under {}",
-                connector.map_or("", |connector| connector.origin.as_str())
+                connector
+                    .and_then(|connector| connector.origin.as_deref())
+                    .unwrap_or_default()
             ),
         })
 }
@@ -848,9 +854,14 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     fn denies_bash_and_every_tool_without_a_tier() {
         let daemon = TestDaemon::new("hook-bash", |_| {});
-        for tool in ["Bash", "Task", "mcp__github__create_issue"] {
+        for (tool, kind) in [
+            ("Bash", "tool_not_allowed"),
+            ("Task", "tool_not_allowed"),
+            // Any `mcp__<server>__<tool>` is a connector's call, judged by the session's connectors.
+            ("mcp__github__create_issue", "connector_not_in_session"),
+        ] {
             let decision = decide_pre_tool_use(&daemon.dev_call(tool, &json!({})), &daemon.state);
-            denied_for(&decision, "tool_not_allowed");
+            denied_for(&decision, kind);
         }
     }
 
@@ -1072,7 +1083,7 @@ mod tests {
             tiers: vec![PermissionTier::Read, PermissionTier::Network],
             connectors: vec![SessionConnector {
                 server: "playwright".to_string(),
-                origin: "http://localhost:4400".to_string(),
+                origin: Some("http://localhost:4400".to_string()),
                 tools: definition.tools,
             }],
             preview: None,
@@ -1149,6 +1160,171 @@ mod tests {
         );
         assert_eq!(body.tag, None);
         assert_eq!(daemon.events(EventKind::ToolCalled).len(), 1);
+    }
+
+    /// Registers `session-github`, a session of `dev-a` holding the `read` tier alone and given
+    /// the custom server `github`, which has one tool of each tag and no origin.
+    fn with_github(daemon: &TestDaemon) {
+        use farik_core::governor::permissions::{ConnectorTag, PermissionTier, SessionConnector};
+
+        use crate::daemon::SessionRegistration;
+        use crate::session::SessionPurpose;
+
+        daemon.state.register_session(SessionRegistration {
+            session_id: "session-github".to_string(),
+            agent_id: "dev-a".to_string(),
+            task_id: Some("FRK-1".parse().expect("a task id")),
+            purpose: SessionPurpose::Implement,
+            in_reply_to: None,
+            thread: None,
+            cwd: daemon.worktree.clone(),
+            executor: None,
+            limits: DEFAULT_SESSION_LIMITS,
+            farik_tools: Vec::new(),
+            tiers: vec![PermissionTier::Read],
+            connectors: vec![SessionConnector {
+                server: "github".to_string(),
+                origin: None,
+                tools: [
+                    ("search_issues", ConnectorTag::Network),
+                    ("create_issue", ConnectorTag::ExternalEffect),
+                    ("delete_repo", ConnectorTag::Denied),
+                ]
+                .into_iter()
+                .map(|(tool, tag)| (tool.to_string(), tag))
+                .collect(),
+            }],
+            preview: None,
+        });
+    }
+
+    fn github_call(daemon: &TestDaemon, tool: &str, input: &Value) -> HookDecision {
+        decide_pre_tool_use(&daemon.call("session-github", tool, input), &daemon.state)
+    }
+
+    /// The server the last `tool.denied` was recorded against.
+    fn last_denied_server(daemon: &TestDaemon) -> Option<String> {
+        let denied = daemon.events(EventKind::ToolDenied);
+        let EventBody::ToolDenied(body) = &denied.last().expect("recorded").body else {
+            panic!("a tool.denied body");
+        };
+        body.server.as_deref().map(ToString::to_string)
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn the_hook_judges_any_connector_the_session_has() {
+        use farik_protocol::event::ConnectorTagWire;
+
+        let daemon = TestDaemon::new("hook-custom", |_| {});
+        with_github(&daemon);
+        // `network` runs whatever the agent's tiers, and with no origin any url.
+        let search = "mcp__github__search_issues";
+        let allowed = github_call(
+            &daemon,
+            search,
+            &json!({ "url": "https://api.github.com/search/issues?q=bug" }),
+        );
+        assert!(allowed.allow, "{allowed:?}");
+        let called = daemon.events(EventKind::ToolCalled);
+        let EventBody::ToolCalled(body) = &called.last().expect("recorded").body else {
+            panic!("a tool.called body");
+        };
+        assert_eq!(body.tool, search);
+        assert_eq!(body.server.as_deref().map(String::as_str), Some("github"));
+        assert_eq!(body.tag, Some(ConnectorTagWire::Network));
+
+        denied_for(
+            &github_call(&daemon, "mcp__github__delete_repo", &json!({})),
+            "tool_denied",
+        );
+        denied_for(
+            &github_call(&daemon, "mcp__github__merge_pull", &json!({})),
+            "tool_not_tagged",
+        );
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn a_custom_connector_does_not_let_webfetch_through() {
+        let daemon = TestDaemon::new("hook-custom-webfetch", |_| {});
+        with_github(&daemon);
+        for tool in ["WebFetch", "WebSearch"] {
+            let decision = github_call(&daemon, tool, &json!({ "url": "https://example.com/" }));
+            denied_for(&decision, "tier_not_granted");
+        }
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn external_effect_is_refused_with_a_sentence() {
+        use farik_core::governor::permissions::{
+            ConnectorRefusal, SessionConnector, evaluate_connector_call,
+        };
+
+        let daemon = TestDaemon::new("hook-custom-external", |_| {});
+        with_github(&daemon);
+        let connector = SessionConnector {
+            server: "github".to_string(),
+            origin: None,
+            tools: [(
+                "create_issue".to_string(),
+                farik_core::governor::permissions::ConnectorTag::ExternalEffect,
+            )]
+            .into(),
+        };
+        assert_eq!(
+            evaluate_connector_call("create_issue", &json!({}), Some(&connector)),
+            Err(ConnectorRefusal::ExternalEffectRefused)
+        );
+        let decision = github_call(
+            &daemon,
+            "mcp__github__create_issue",
+            &json!({ "title": "x" }),
+        );
+        assert!(!decision.allow, "{decision:?}");
+        assert_eq!(
+            decision.reason,
+            "external_effect_refused: create_issue of github changes something outside the \
+             sandbox, and Farik cannot ask you about one call yet, so it is refused"
+        );
+        assert_eq!(
+            last_denied_server(&daemon).as_deref(),
+            Some("github"),
+            "recorded against its server"
+        );
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn a_preauthorized_external_tool_is_still_refused() {
+        let daemon = TestDaemon::new("hook-custom-preauthorized", |_| {});
+        daemon
+            .project
+            .deps
+            .files
+            .write_team(&a_team_of_three(|wire| {
+                wire["agents"][1]["preauthorized_external_tools"] =
+                    json!(["mcp__github__create_issue"]);
+            }))
+            .expect("the team is written");
+        with_github(&daemon);
+        denied_for(
+            &github_call(&daemon, "mcp__github__create_issue", &json!({})),
+            "external_effect_refused",
+        );
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn an_unknown_mcp_server_is_still_not_in_session() {
+        let daemon = TestDaemon::new("hook-custom-unknown", |_| {});
+        with_github(&daemon);
+        denied_for(
+            &github_call(&daemon, "mcp__linear__create_issue", &json!({})),
+            "connector_not_in_session",
+        );
+        assert_eq!(last_denied_server(&daemon).as_deref(), Some("linear"));
     }
 
     #[test]

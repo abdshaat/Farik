@@ -214,7 +214,7 @@ Files: `permissions.rs`, `daemon/hooks.rs`, and as call sites only `orchestrator
 - `a_custom_connector_does_not_let_webfetch_through`: that agent's `WebFetch` is refused `tool_not_allowed` or `tier_not_granted`.
 - `an_unknown_mcp_server_is_still_not_in_session`: `connector_not_in_session`.
 
-- [ ] `feat(core): judge any connector by its tag, and refuse external_effect for now`
+- [x] `feat(core): judge any connector by its tag, and refuse external_effect for now`
 
 ### Task 6: Custom connectors in sessions, through the launcher
 

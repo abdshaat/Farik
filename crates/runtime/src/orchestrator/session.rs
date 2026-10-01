@@ -260,7 +260,7 @@ async fn give_browser(
     spec.disallowed_tools = disallowed_tools(&definition);
     let connector = SessionConnector {
         server: definition.name.clone(),
-        origin: running.origin(),
+        origin: Some(running.origin()),
         tools: definition.tools.clone(),
     };
     Ok(Ok(Some((running, connector))))
