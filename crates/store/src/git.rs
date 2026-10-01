@@ -317,7 +317,7 @@ impl Git {
         let mut add = vec!["--literal-pathspecs", "add", "--"];
         add.extend(paths.iter().map(String::as_str));
         run_git(path, &add)?;
-        run_git(path, &["commit", "-m", message])?;
+        run_git(path, &as_someone(path, &["commit", "-m", message]))?;
         run_git(path, &["rev-parse", "HEAD"])
     }
 
@@ -506,7 +506,10 @@ impl Git {
         from: &str,
         message: &str,
     ) -> Result<MergeOutcome, GitError> {
-        match self.at_root(&["merge", "--no-ff", "-m", message, from]) {
+        match self.at_root(&as_someone(
+            &self.root,
+            &["merge", "--no-ff", "-m", message, from],
+        )) {
             Ok(_) => Ok(MergeOutcome::Merged {
                 sha: self.at_root(&["rev-parse", "HEAD"])?,
             }),
@@ -560,6 +563,26 @@ impl Git {
     fn at_root(&self, arguments: &[&str]) -> Result<String, GitError> {
         run_git(&self.root, arguments)
     }
+}
+
+/// Who Farik commits as when git knows nobody (`docs/SPEC.md` 5.14), as `-c` options before a
+/// git command: a fresh computer, or a CI runner, has no `user.name` or `user.email`, and git then
+/// refuses every commit.
+pub const FARIK_IDENTITY: [&str; 4] = ["-c", "user.name=farik", "-c", "user.email=farik@localhost"];
+
+/// `arguments`, a commit or a merge in `directory`, made as the person git knows there, or as
+/// `FARIK_IDENTITY` when git has no name or no email for them.
+fn as_someone<'a>(directory: &Path, arguments: &[&'a str]) -> Vec<&'a str> {
+    // `git config <key>` exits 1 when the key is not set.
+    let knows =
+        |key: &str| run_git(directory, &["config", key]).is_ok_and(|value| !value.is_empty());
+    let mut with = if knows("user.name") && knows("user.email") {
+        Vec::new()
+    } else {
+        FARIK_IDENTITY.to_vec()
+    };
+    with.extend_from_slice(arguments);
+    with
 }
 
 /// What every worktree of one repository shares and no two repositories do. `--path-format` makes

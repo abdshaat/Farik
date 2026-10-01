@@ -110,14 +110,8 @@ impl CliHost {
     fn git(&self, directory: &Path, args: &[&str]) -> Result<(), SetupError> {
         let program = on_path("git", &self.env).ok_or_else(|| refused("git is not installed"))?;
         let output = std::process::Command::new(program)
-            .args([
-                "-c",
-                "user.name=farik",
-                "-c",
-                "user.email=farik@localhost",
-                "-c",
-                "commit.gpgsign=false",
-            ])
+            .args(farik_store::git::FARIK_IDENTITY)
+            .args(["-c", "commit.gpgsign=false"])
             .args(args)
             .current_dir(directory)
             .env_clear()
