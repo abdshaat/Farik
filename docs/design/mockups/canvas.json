@@ -3,13 +3,13 @@
   "attachments": {},
   "boards": {
     "AgentEdit.dc.html": {
-      "h": 1000,
-      "is_interactive": true,
-      "page": "team",
-      "title": "Edit Theo",
+      "x": 0,
+      "y": 0,
       "w": 1440,
-      "x": 1520,
-      "y": 0
+      "h": 3658,
+      "title": "Edit Theo: connectors added by you, Connect again, Remove",
+      "page": "connectors",
+      "is_interactive": true
     },
     "AnswerQuestion.dc.html": {
       "h": 1000,
@@ -448,6 +448,33 @@
       "title": "Setup: sprints on by default",
       "page": "sprints",
       "is_interactive": true
+    },
+    "ConnectorAdd.dc.html": {
+      "x": 1520,
+      "y": 0,
+      "w": 1440,
+      "h": 6063,
+      "title": "Add a custom connector: start it, label its tools, done",
+      "page": "connectors",
+      "is_interactive": true
+    },
+    "ToolApproval.dc.html": {
+      "x": 3040,
+      "y": 0,
+      "w": 1440,
+      "h": 2657,
+      "title": "Theo wants to use airtable: Today and Allow once",
+      "page": "connectors",
+      "is_interactive": true
+    },
+    "PhoneToolApproval.dc.html": {
+      "x": 4560,
+      "y": 0,
+      "w": 360,
+      "h": 1626,
+      "title": "Theo wants to use airtable, on a phone",
+      "page": "connectors",
+      "is_interactive": true
     }
   },
   "createdOnFiles": {
@@ -549,6 +576,15 @@
       "w": 240,
       "x": 0,
       "y": -300
+    },
+    "t_connectors": {
+      "kind": "title1",
+      "maxW": 6000,
+      "page": "connectors",
+      "text": "Connectors per agent, and approving their calls",
+      "w": 240,
+      "x": 0,
+      "y": -300
     }
   },
   "order": [
@@ -601,7 +637,10 @@
     "BoardBacklog.dc.html",
     "TodayBacklog.dc.html",
     "SettingsSprints.dc.html",
-    "SetupSprints.dc.html"
+    "SetupSprints.dc.html",
+    "ConnectorAdd.dc.html",
+    "ToolApproval.dc.html",
+    "PhoneToolApproval.dc.html"
   ],
   "pages": [
     {
@@ -643,6 +682,10 @@
     {
       "id": "sprints",
       "name": "Sprints"
+    },
+    {
+      "id": "connectors",
+      "name": "Connectors"
     }
   ],
   "title": "Farik web UI mockup"
