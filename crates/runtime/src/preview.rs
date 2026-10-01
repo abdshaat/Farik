@@ -441,9 +441,19 @@ fn run_docker(args: &[String], stdin: &str) -> Result<String, CheckError> {
     // check given up on is removed by its name.
     run_within(docker, stdin, CHECK_LIMIT, || {
         if let Some(removal) = removal(args) {
-            let _ = Command::new("docker").args(removal).output();
+            let mut docker = Command::new("docker");
+            docker.args(removal);
+            remove_within(docker, REMOVAL_LIMIT);
         }
     })
+}
+
+/// How long removing a check's container may take: a wedged docker daemon gives up the check.
+const REMOVAL_LIMIT: std::time::Duration = std::time::Duration::from_secs(20);
+
+/// Runs `removal`, given up on after `limit`; what it says is not read.
+fn remove_within(removal: Command, limit: std::time::Duration) {
+    let _ = run_within(removal, "", limit, || {});
 }
 
 /// The `docker` arguments that remove the container `args` name.
@@ -722,6 +732,17 @@ mod tests {
             Ok("{}\n".to_string())
         );
         assert!(!removed.get());
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn gives_up_on_a_removal_that_runs_past_its_deadline() {
+        // A wedged docker daemon would hold the check here after its own deadline.
+        let started = std::time::Instant::now();
+        let mut sleeping = std::process::Command::new("sleep");
+        sleeping.arg("30");
+        super::remove_within(sleeping, std::time::Duration::from_millis(200));
+        assert!(started.elapsed() < std::time::Duration::from_secs(5));
     }
 
     #[test]
