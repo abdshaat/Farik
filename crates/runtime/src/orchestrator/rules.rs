@@ -7285,8 +7285,6 @@ mod tests {
     #[tokio::test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn a_paused_agent_answers_its_chat() {
-        use crate::daemon::{HookRequest, SessionRegistration, decide_pre_tool_use};
-
         let harness = Harness::new("orch-chat-paused-agent", |wire| {
             wire["agents"][1]["status"] = json!("paused");
             wire["agents"].as_array_mut().expect("agents").push(json!({
@@ -7317,12 +7315,27 @@ mod tests {
         assert_eq!(adapter.started().len(), 1, "{:?}", adapter.started());
         assert_eq!(replies_of(&harness, "old"), 0);
 
-        // Any other session of the paused agent is still refused, by the hook and by the tool.
+        // Any other session of the paused agent is still refused, by the hook and by the tool,
+        // and so is a retired agent's chat session.
+        refused_by_hook_and_tool(&harness, "dev-a", SessionPurpose::Implement).await;
+        let mut context = harness.project.context("dev-a", None);
+        context.purpose = SessionPurpose::Chat;
+        let read = crate::tools::call_tool(&context, "farik_read_board", json!({})).await;
+        assert!(read.is_ok(), "{read:?}");
+        refused_by_hook_and_tool(&harness, "old", SessionPurpose::Chat).await;
+    }
+
+    /// Registers a session of `agent` for `purpose` and asserts that the hook and `call_tool` both
+    /// refuse its `farik_read_board` with `agent_not_active`.
+    async fn refused_by_hook_and_tool(harness: &Harness, agent: &str, purpose: SessionPurpose) {
+        use crate::daemon::{HookRequest, SessionRegistration, decide_pre_tool_use};
+
+        let session_id = format!("session-{agent}-{purpose:?}");
         harness.daemon.register_session(SessionRegistration {
-            session_id: "session-implement".to_string(),
-            agent_id: "dev-a".to_string(),
+            session_id: session_id.clone(),
+            agent_id: agent.to_string(),
             task_id: None,
-            purpose: SessionPurpose::Implement,
+            purpose,
             in_reply_to: None,
             thread: None,
             cwd: harness.project.repo.path.clone(),
@@ -7335,7 +7348,7 @@ mod tests {
         });
         let decision = decide_pre_tool_use(
             &HookRequest {
-                session_id: "session-implement".to_string(),
+                session_id,
                 cwd: harness.project.repo.path.clone(),
                 hook_event_name: "PreToolUse".to_string(),
                 tool_name: "mcp__farik__farik_read_board".to_string(),
@@ -7348,18 +7361,16 @@ mod tests {
         );
         assert!(
             !decision.allow && decision.reason.starts_with("agent_not_active"),
-            "{decision:?}"
+            "{agent} {purpose:?}: {decision:?}"
         );
-        let mut context = harness.project.context("dev-a", None);
+        let mut context = harness.project.context(agent, None);
+        context.purpose = purpose;
         let refused = crate::tools::call_tool(&context, "farik_read_board", json!({}))
             .await
-            .expect_err("a paused agent's implement session is refused");
+            .expect_err("the session is refused");
         assert!(
             refused.to_string().contains("agent_not_active"),
-            "{refused:?}"
+            "{agent} {purpose:?}: {refused:?}"
         );
-        context.purpose = SessionPurpose::Chat;
-        let read = crate::tools::call_tool(&context, "farik_read_board", json!({})).await;
-        assert!(read.is_ok(), "{read:?}");
     }
 }

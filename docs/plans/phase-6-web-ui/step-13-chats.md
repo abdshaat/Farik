@@ -45,6 +45,9 @@ As built (Task 8, 2026-09-30):
 As built (Task 9, 2026-09-30):
 - SPEC 0.34 is written from the commits, not the plan: it also corrects 5.16 (a chat's request is the user's, not the agent's), the paused tick in 3 and 8.2, F17's purpose split (a chat's cost is under "Meetings and talk" there; `finance` is not yet in the code's split) and section 11 (the one-to-one moves from Milestone 2 to 1). 5.2 had no pause rule to change; it gains the chat rule's place.
 
+As built (fix wave, 2026-09-30, the landing review's findings):
+- Fix wave I1: `a_paused_agent_answers_its_chat` registers a chat session for the retired agent and asserts that the hook (`decide_pre_tool_use`) and `call_tool` both refuse it with `agent_not_active`; mutation M7 (`may_work` letting any status work in a chat) now fails it.
+
 Signatures, not bodies; test names and what each asserts, not test code; around 300 lines at most (ADR 0008).
 
 ## Goal
