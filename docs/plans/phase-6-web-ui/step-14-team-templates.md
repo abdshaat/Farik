@@ -279,6 +279,8 @@ Fix wave (M1, u1): carry 1 root-caused by the review: a fast "Add someone" after
 
 Fix wave (u2): `firstDay` keeps the suggested six's figure, which the SPEC derives and step 06's test pins, and adds "A smaller team costs less.", rather than scaling an estimate that bounds nothing by the team's size; `lists_the_team_with_the_first_day_line` asserts it.
 
+Fix wave (I1, M4): setup holds an unavailable agent off by role: `unavailableRoles(proposed)` maps `team.propose`'s `unavailable` ids through the suggested agents to roles; `draftOf` starts a saved team's and the suggested team's rows of those roles unticked, and SetupTeam disables the checkbox by `agent.role`. `takes_a_saved_designer_off_without_a_sandbox` (a saved Designer `nova`, `unavailable: [iris]`): Nova's row is unticked, cannot be ticked, says it needs Docker's sandbox, and Continue validates a team without it. `starts_from_scratch` asserts no checkbox on the two required rows (kills W5).
+
 ## Verification
 
 ```

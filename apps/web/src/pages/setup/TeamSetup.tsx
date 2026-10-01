@@ -83,8 +83,11 @@ type Setup = {
 	/** The suggested team, which every start builds from. */
 	proposed: Proposed;
 	change: (next: Draft) => void;
-	/** The agents this computer cannot run, which start unticked (step 12, D3). */
-	unavailable: string[];
+	/**
+	 * The roles this computer cannot run, whose rows start unticked and cannot be ticked (step 12,
+	 * D3): by role, so a saved team's Designer is held off whatever its id.
+	 */
+	unavailable: Agent["role"][];
 	/** Asks the daemon again, after the user installs Docker. */
 	checkAgain: () => void;
 };
@@ -127,6 +130,14 @@ export function someone(agents: Agent[], like: Agent): Agent {
 	};
 }
 
+/** The roles `team.propose` names unavailable on this computer, from the suggested agents' ids. */
+export function unavailableRoles(proposed: Proposed): Agent["role"][] {
+	const ids = (proposed.unavailable ?? []).map((u) => u.agentId);
+	return proposed.team.agents
+		.filter((a) => ids.includes(a.id))
+		.map((a) => a.role);
+}
+
 /**
  * The draft a start makes from the suggested team: its six; a saved team's agents, each field the
  * template leaves out the role's, with its four answers; or a Product Manager and a Developer,
@@ -137,7 +148,7 @@ export function draftOf(
 	start: Start,
 	template?: Template,
 ): Draft {
-	const unavailable = (proposed.unavailable ?? []).map((u) => u.agentId);
+	const unavailable = unavailableRoles(proposed);
 	const suggested = proposed.team.agents;
 	const role = (r: Agent["role"]) => suggested.find((a) => a.role === r);
 	const base = {
@@ -164,7 +175,7 @@ export function draftOf(
 			answers: { commands: permissions.runCommands, push: permissions.push },
 			members: template.agents.map((agent, key) => ({
 				agent: { ...role(agent.role), ...agent, status: "active" },
-				on: true,
+				on: !unavailable.includes(agent.role),
 				key,
 			})),
 		};
@@ -185,7 +196,7 @@ export function draftOf(
 		...base,
 		members: suggested.map((agent, key) => ({
 			agent,
-			on: !unavailable.includes(agent.id),
+			on: !unavailable.includes(agent.role),
 			key,
 		})),
 	};
@@ -195,7 +206,7 @@ export function draftOf(
 export function TeamSetup() {
 	const { data, again } = useQuery<Proposed>("team.propose", {});
 	const [mine, setMine] = useState<Draft>();
-	const unavailable = (data?.unavailable ?? []).map((u) => u.agentId);
+	const unavailable = data ? unavailableRoles(data) : [];
 	const draft: Draft | undefined = mine ?? (data && draftOf(data, "suggested"));
 	if (!draft || !data) return null;
 	return (

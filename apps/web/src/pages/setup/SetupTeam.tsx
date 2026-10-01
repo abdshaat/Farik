@@ -187,7 +187,7 @@ export function SetupTeam() {
 					const why = included ? at(on.indexOf(member)) : [];
 					const whyId = `why-${index}`;
 					const designer = agent.role === "ui_ux_designer";
-					const cannot = unavailable.includes(agent.id);
+					const cannot = unavailable.includes(agent.role);
 					return (
 						<li key={member.key} className={styles.member}>
 							{!scratch && (

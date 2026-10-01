@@ -1052,6 +1052,48 @@ describe("team setup's three starts", () => {
 		).toHaveLength(0);
 	});
 
+	it("takes_a_saved_designer_off_without_a_sandbox", async () => {
+		const { container, socket } = await renderApp("/setup/team");
+		const s = socket as FakeSocket;
+		await answerQuery(s, "team.propose", {
+			...proposed((team) => {
+				team.agents = [...FIVE.slice(0, 4), IRIS, ...FIVE.slice(4)];
+			}),
+			unavailable: [{ agent_id: "iris", reason: "designer_needs_sandbox" }],
+		});
+		const withNova = {
+			...THREE,
+			template: {
+				...THREE.template,
+				agents: [
+					...THREE.template.agents,
+					{ id: "nova", display_name: "Nova", role: "ui_ux_designer" },
+				],
+			},
+		};
+		await answerQuery(s, "templates.list", {
+			...LISTED,
+			templates: [withNova],
+		});
+		fireEvent.click(
+			await screen.findByRole("radio", { name: /^A saved team/ }),
+		);
+		const include = (await screen.findByRole("checkbox", {
+			name: "Include the UI/UX Designer",
+		})) as HTMLInputElement;
+		expect([include.checked, include.disabled]).toEqual([false, true]);
+		const row = include.closest("li") as HTMLElement;
+		expect(within(row).getByText(en.teamNeedsSandbox)).toBeTruthy();
+		await expectNoAxeViolations(container);
+		fireEvent.click(screen.getByRole("button", { name: en.teamContinue }));
+		const team = (
+			(await asked(s, "team.validate")).params.params as {
+				team: { agents: { id: string }[] };
+			}
+		).team;
+		expect(team.agents.map((a) => a.id)).toEqual(["mira", "ada", "theo"]);
+	});
+
 	it("starts_from_scratch", async () => {
 		const { container, socket } = await renderApp("/setup/team");
 		const s = socket as FakeSocket;
@@ -1066,6 +1108,8 @@ describe("team setup's three starts", () => {
 			["Name for the Product Manager", ""],
 			["Name for the Developer", ""],
 		]);
+		// Both rows are required: neither can be left out.
+		expect(within(list).queryAllByRole("checkbox")).toHaveLength(0);
 		const onward = screen.getByRole("button", {
 			name: en.teamContinue,
 		}) as HTMLButtonElement;
