@@ -38,6 +38,10 @@ As built (Task 7, 2026-09-30):
 - The open chat re-queries `chat.messages` on its chat's `session.started`, on any `session.ended` of its agent (that event names no purpose; ponytail), and on each of its messages; the message itself is appended from the event at once.
 - No pronouns are known for an agent, so the mockups' "she"/"her" lines read with the name ("Mira suggests a request", "when the AI account’s usage limit resets").
 
+As built (Task 8, 2026-09-30):
+- The journey goes on past Today: Ada, paused on the Team page, answers her chat (a second `chat_answers_with_a_request`; Mira and Theo are the team's only Product Manager and Developer, which the page refuses to pause), and the Costs page's "Conversations today" equals the log's `chat` `cost.recorded` sum.
+- Screenshots at 360 and 1440 (the controller's width, where the list, the chat and the channel's meetings column fit), through `screenshots`' new `width` argument: `chats`, `chats-reply`, `chats-sent`, `chats-paused`, `chats-costs`.
+
 Signatures, not bodies; test names and what each asserts, not test code; around 300 lines at most (ADR 0008).
 
 ## Goal
@@ -262,7 +266,7 @@ Vitest and axe. Tests:
 5. open Today and find FRK-1 there ("Mira has a question" about it);
 6. take screenshots at 360 and 1280 px.
 
-- [ ] `test(web): chat with an agent through the real server and browser`
+- [x] `test(web): chat with an agent through the real server and browser`
 
 ### Task 9: The spec and the plan
 

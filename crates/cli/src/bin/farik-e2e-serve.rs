@@ -19,16 +19,17 @@ use farik::ids::SystemClock;
 use farik::{CliIo, Engine, Interrupts, run_cli};
 use farik_core::pricing::Usage;
 use farik_runtime::recorded::fixtures::{
-    UsageThenWaitAdapter, accept_frk_1, ask_with_choices_frk_1, decide_design_plan_approves_frk_1,
-    design_review_passes_frk_2, explore_checks_and_plans_frk_1, explore_plans_frk_1,
-    implement_after_send_back_frk_1, implement_by_iris_page_frk_1, implement_css_frk_2,
-    implement_finishes_frk_1, judge_frk_1_by_architect, plan_assigns_frk_1_to_iris,
-    plan_assigns_frk_1_to_theo, plan_assigns_frk_2_to_theo, planning_ceremony_frk_1,
-    refine_writes_css_task_for_theo_frk_2, refine_writes_epic_frk_1, refine_writes_high_risk_frk_1,
-    refine_writes_page_task_for_iris_frk_1, refine_writes_task_for_iris_frk_1,
-    refine_writes_task_for_theo_frk_1, reply_to_a_mention, retro, review,
-    review_answers_the_rubric_frk_1, review_answers_the_rubric_frk_2, review_writes_note,
-    tool_runner, triage_frk_1_large, triage_frk_1_small_by_pm, triage_frk_2_small_by_pm,
+    UsageThenWaitAdapter, accept_frk_1, ask_with_choices_frk_1, chat_answers_with_a_request,
+    decide_design_plan_approves_frk_1, design_review_passes_frk_2, explore_checks_and_plans_frk_1,
+    explore_plans_frk_1, implement_after_send_back_frk_1, implement_by_iris_page_frk_1,
+    implement_css_frk_2, implement_finishes_frk_1, judge_frk_1_by_architect,
+    plan_assigns_frk_1_to_iris, plan_assigns_frk_1_to_theo, plan_assigns_frk_2_to_theo,
+    planning_ceremony_frk_1, refine_writes_css_task_for_theo_frk_2, refine_writes_epic_frk_1,
+    refine_writes_high_risk_frk_1, refine_writes_page_task_for_iris_frk_1,
+    refine_writes_task_for_iris_frk_1, refine_writes_task_for_theo_frk_1, reply_to_a_mention,
+    retro, review, review_answers_the_rubric_frk_1, review_answers_the_rubric_frk_2,
+    review_writes_note, tool_runner, triage_frk_1_large, triage_frk_1_small_by_pm,
+    triage_frk_2_small_by_pm,
 };
 use farik_runtime::{
     RecordedAdapter, RuntimeAdapter, RuntimeError, SessionHandle, SessionSpec, Transcript,
@@ -68,6 +69,7 @@ fn transcript(name: &str) -> Option<Transcript> {
         "implement_css_frk_2" => Some(implement_css_frk_2()),
         "design_review_passes_frk_2" => Some(design_review_passes_frk_2()),
         "review_answers_the_rubric_frk_2" => Some(review_answers_the_rubric_frk_2()),
+        "chat_answers_with_a_request" => Some(chat_answers_with_a_request()),
         _ => None,
     }
 }
