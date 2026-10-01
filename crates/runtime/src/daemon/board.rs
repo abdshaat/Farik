@@ -29,8 +29,15 @@ pub(super) const QUERIES: [&str; 8] = [
     "chat.messages",
 ];
 
-/// The purposes' plain words, in the order the pages show them.
-const WORDS: [&str; 4] = ["Planning", "Building", "Checking", "Meetings and talk"];
+/// The purposes' plain words, in the order the pages show them. "Conversations" is the one-to-one
+/// chats alone; the channel's `conversation` stays under "Meetings and talk".
+const WORDS: [&str; 5] = [
+    "Planning",
+    "Building",
+    "Checking",
+    "Meetings and talk",
+    "Conversations",
+];
 
 fn internal(error: &dyn Display) -> Failure {
     Failure::new(INTERNAL_ERROR, error.to_string())
@@ -74,6 +81,7 @@ fn in_words(spent: impl IntoIterator<Item = (String, f64)>) -> Vec<Value> {
             "triage" | "refine" | "plan" | "explore" => 0,
             "implement" => 1,
             "verify" => 2,
+            "chat" => 4,
             _ => 3,
         };
         *summed.entry(word).or_default() += usd;
@@ -493,6 +501,17 @@ mod tests {
         assert_eq!(
             super::in_words([("explore".to_string(), 1.5), ("plan".to_string(), 0.5)]),
             [json!({ "words": "Planning", "usd": 2.0 })]
+        );
+    }
+
+    #[test]
+    fn counts_a_chat_as_conversations_not_meetings() {
+        assert_eq!(
+            super::in_words([("chat".to_string(), 3.0), ("ceremony".to_string(), 1.0)]),
+            [
+                json!({ "words": "Meetings and talk", "usd": 1.0 }),
+                json!({ "words": "Conversations", "usd": 3.0 }),
+            ]
         );
     }
 

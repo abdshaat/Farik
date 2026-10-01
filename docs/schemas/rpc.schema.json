@@ -2468,7 +2468,7 @@
       ]
     },
     "taskCostsResult": {
-      "description": "What a task has spent, by the purposes' plain words (Planning: triage, refine, plan; Building: implement; Checking: verify; Meetings and talk: ceremony, conversation), each word that has spent anything, and its contract's limit.",
+      "description": "What a task has spent, by the purposes' plain words (Planning: triage, refine, plan; Building: implement; Checking: verify; Meetings and talk: ceremony, conversation; Conversations: chat), each word that has spent anything, and its contract's limit.",
       "type": "object",
       "additionalProperties": false,
       "properties": {
@@ -2484,7 +2484,8 @@
                   "Planning",
                   "Building",
                   "Checking",
-                  "Meetings and talk"
+                  "Meetings and talk",
+                  "Conversations"
                 ]
               },
               "usd": {
@@ -2925,7 +2926,8 @@
                           "Planning",
                           "Building",
                           "Checking",
-                          "Meetings and talk"
+                          "Meetings and talk",
+                          "Conversations"
                         ]
                       },
                       "usd": {

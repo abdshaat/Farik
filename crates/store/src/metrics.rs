@@ -89,9 +89,10 @@ impl From<rusqlite::Error> for MetricsError {
     }
 }
 
-/// Every session purpose the wire names, in the schema's order, so that a split always has all
-/// nine and they add up to its total.
-const PURPOSES: [CostRecordedBodyPurpose; 9] = [
+/// Every session purpose the wire names but `chat`, in the schema's order, so that a split always
+/// has all eight and they add up to its total. A one-to-one chat is no task's work, so it is left
+/// out of the cost per accepted task.
+const PURPOSES: [CostRecordedBodyPurpose; 8] = [
     CostRecordedBodyPurpose::Triage,
     CostRecordedBodyPurpose::Refine,
     CostRecordedBodyPurpose::Plan,
@@ -100,7 +101,6 @@ const PURPOSES: [CostRecordedBodyPurpose; 9] = [
     CostRecordedBodyPurpose::Verify,
     CostRecordedBodyPurpose::Ceremony,
     CostRecordedBodyPurpose::Conversation,
-    CostRecordedBodyPurpose::Chat,
 ];
 
 /// What the board says, counted in one query.
@@ -163,7 +163,10 @@ impl Projections {
         let per_task = |value: f64| {
             (counts.accepted_tasks > 0).then(|| value / f64::from(counts.accepted_tasks))
         };
-        let total: f64 = spent.values().sum();
+        let total: f64 = PURPOSES
+            .iter()
+            .filter_map(|purpose| spent.get(purpose))
+            .sum();
         Ok(HarnessMetrics {
             accepted_tasks: counts.accepted_tasks,
             first_pass_acceptance_rate: per_task(f64::from(counts.first_pass)),
