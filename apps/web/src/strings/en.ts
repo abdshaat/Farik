@@ -555,6 +555,7 @@ export const en = {
 	fieldParts: "The parts of the plan",
 	fieldPart: "Part {n}",
 	addPart: "Add a part",
+	removePart: "Remove part {n}",
 	fieldCriteria: "How we will know it is done",
 	fieldCriteriaHint: "Each check says how it is checked.",
 	fieldCriterion: "Check {n}",
@@ -566,6 +567,7 @@ export const en = {
 	criterionCommandLocked:
 		"Farik runs a command. Turn on Advanced view to change it.",
 	addCriterion: "Add a check",
+	removeCriterion: "Remove check {n}",
 	fieldOut: "What is left out",
 	fieldOutHint:
 		"One per line. Name at least one thing this plan does not do. It keeps the work from growing.",

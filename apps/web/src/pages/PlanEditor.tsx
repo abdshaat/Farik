@@ -326,20 +326,50 @@ function Editor({
 				<fieldset className={own.group}>
 					<legend>{t("fieldParts")}</legend>
 					{draft.requirements.map((r, i) => (
-						<TextField
-							key={r.id}
-							id={`plan-${r.id}`}
-							label={t("fieldPart", { n: String(i + 1) })}
-							value={r.text}
-							onChange={(text) =>
-								setDraft((d) => ({
-									...d,
-									requirements: d.requirements.map((one, j) =>
-										j === i ? { ...one, text } : one,
-									),
-								}))
-							}
-						/>
+						<div key={r.id} className={own.part}>
+							<TextField
+								id={`plan-${r.id}`}
+								label={t("fieldPart", { n: String(i + 1) })}
+								value={r.text}
+								onChange={(text) =>
+									setDraft((d) => ({
+										...d,
+										requirements: d.requirements.map((one, j) =>
+											j === i ? { ...one, text } : one,
+										),
+									}))
+								}
+							/>
+							{/* A plan has at least one part (the contract's schema). */}
+							{draft.requirements.length > 1 && (
+								<span>
+									<Button
+										kind="quiet"
+										onClick={() =>
+											setDraft((d) => ({
+												...d,
+												requirements: d.requirements.filter(
+													(one) => one.id !== r.id,
+												),
+												// No check still says it covers a part that is gone.
+												exitCriteria: d.exitCriteria.map((c) =>
+													c.satisfies
+														? {
+																...c,
+																satisfies: c.satisfies.filter(
+																	(id) => id !== r.id,
+																),
+															}
+														: c,
+												),
+											}))
+										}
+									>
+										{t("removePart", { n: String(i + 1) })}
+									</Button>
+								</span>
+							)}
+						</div>
 					))}
 					<div>
 						<Button
@@ -413,6 +443,24 @@ function Editor({
 										}
 										required
 									/>
+								)}
+								{/* A plan has at least one check (the contract's schema). */}
+								{draft.exitCriteria.length > 1 && (
+									<span>
+										<Button
+											kind="quiet"
+											onClick={() =>
+												setDraft((d) => ({
+													...d,
+													exitCriteria: d.exitCriteria.filter(
+														(one) => one.id !== c.id,
+													),
+												}))
+											}
+										>
+											{t("removeCriterion", { n: c.id })}
+										</Button>
+									</span>
 								)}
 							</div>
 						);
