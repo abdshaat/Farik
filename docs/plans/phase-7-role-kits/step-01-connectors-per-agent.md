@@ -187,7 +187,7 @@ Files: `connectors.rs`, `credential.rs` (`map_keyring_error`, `read_keychain` to
 - `refuses_with_no_store_at_all`: no keychain and no state folder give `no_secret_store`.
 - `a_secret_never_prints`: the `Debug` form of `ConnectorEntry` shows key names and `***`.
 
-- [ ] `feat(runtime): keep each agent's connector keys in the keychain or a private file`
+- [x] `feat(runtime): keep each agent's connector keys in the keychain or a private file`
 
 ### Task 4: Listing a server's tools
 

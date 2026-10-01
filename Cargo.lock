@@ -872,6 +872,7 @@ dependencies = [
  "futures-util",
  "jsonschema",
  "keyring",
+ "keyring-core",
  "rmcp",
  "rusqlite",
  "rust-embed",

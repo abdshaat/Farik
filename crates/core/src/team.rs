@@ -460,11 +460,28 @@ pub fn custom_server(server: &McpServerWire) -> Option<CustomServer> {
     })
 }
 
-/// `value` as compact JSON with every object's keys sorted, at every depth: `serde_json`'s own
-/// form, since this workspace builds it without `preserve_order` (the test pins that).
+/// `value` as compact JSON with every object's keys sorted, at every depth. The keys are sorted
+/// here, so the form does not depend on whether `serde_json`'s `preserve_order` is on.
 #[must_use]
 pub fn canonical_json(value: &Value) -> String {
-    value.to_string()
+    match value {
+        Value::Object(map) => {
+            let mut entries: Vec<_> = map.iter().collect();
+            entries.sort_unstable_by_key(|(key, _)| *key);
+            let members: Vec<String> = entries
+                .into_iter()
+                .map(|(key, item)| {
+                    format!("{}:{}", Value::from(key.as_str()), canonical_json(item))
+                })
+                .collect();
+            format!("{{{}}}", members.join(","))
+        }
+        Value::Array(items) => {
+            let items: Vec<String> = items.iter().map(canonical_json).collect();
+            format!("[{}]", items.join(","))
+        }
+        other => other.to_string(),
+    }
 }
 
 /// The sha256, in lower-case hex, of the canonical JSON of what a custom connector runs as: its
@@ -2039,6 +2056,20 @@ mod tests {
             { "name": "playwright", "source": "npm" }
         ]);
         assert_eq!(paths(&wire), ["/agents/1/mcp_servers/1/source"]);
+    }
+
+    #[test]
+    fn canonical_json_sorts_keys_whatever_order_a_map_keeps() {
+        let mut inner = serde_json::Map::new();
+        inner.insert("z".to_string(), json!(1));
+        inner.insert("y".to_string(), json!(2));
+        let mut outer = serde_json::Map::new();
+        outer.insert("b".to_string(), Value::Array(vec![Value::Object(inner)]));
+        outer.insert("a\"".to_string(), json!(null));
+        assert_eq!(
+            canonical_json(&Value::Object(outer)),
+            r#"{"a\"":null,"b":[{"y":2,"z":1}]}"#
+        );
     }
 
     #[test]

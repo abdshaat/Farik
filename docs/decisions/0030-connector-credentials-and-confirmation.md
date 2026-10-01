@@ -38,4 +38,4 @@ Without the sandbox, a program running as the user can reach a key three new way
 
 On a computer without a keychain, the keys are in a file that any program running as the user can read, as with ADR 0022.
 
-The canonical JSON relies on `serde_json` being built without `preserve_order`. If a dependency ever turns that feature on, every hash changes and each server asks to be connected again, which fails safe. A test pins the order.
+The canonical JSON sorts object keys itself, at every depth, so a dependency turning on `serde_json`'s `preserve_order` does not change a hash. A test builds a map in reverse order to pin it.

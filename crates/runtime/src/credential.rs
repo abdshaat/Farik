@@ -68,7 +68,10 @@ pub struct KeychainStore;
 
 impl CredentialStore for KeychainStore {
     fn load(&self) -> Result<Option<ClaudeCredential>, CredentialError> {
-        read_keychain(keyring::Entry::new(SERVICE, PROVIDER).and_then(|entry| entry.get_password()))
+        read_keychain(
+            keyring::Entry::new(SERVICE, PROVIDER).and_then(|entry| entry.get_password()),
+            from_json,
+        )
     }
 
     fn save(&self, credential: &ClaudeCredential) -> Result<(), CredentialError> {
@@ -223,7 +226,7 @@ pub fn credential_of_kind(kind: CredentialKind, secret: &str) -> Result<ClaudeCr
 
 /// What a keychain error means for Farik.
 /// No store registered, or no secret service on the bus, is no keychain at all.
-fn map_keyring_error(error: &keyring::Error) -> CredentialError {
+pub(crate) fn map_keyring_error(error: &keyring::Error) -> CredentialError {
     match error {
         keyring::Error::NoDefaultStore => CredentialError::NoKeychain,
         keyring::Error::PlatformFailure(why) if why.to_string().contains("ServiceUnknown") => {
@@ -233,12 +236,13 @@ fn map_keyring_error(error: &keyring::Error) -> CredentialError {
     }
 }
 
-/// What the keychain's answer to a load means: no entry is nothing stored.
-fn read_keychain(
+/// What the keychain's answer to a load means, read by `parse`: no entry is nothing stored.
+pub(crate) fn read_keychain<Kept>(
     answer: keyring::Result<String>,
-) -> Result<Option<ClaudeCredential>, CredentialError> {
+    parse: impl FnOnce(&str) -> Result<Kept, CredentialError>,
+) -> Result<Option<Kept>, CredentialError> {
     match answer {
-        Ok(text) => from_json(&text).map(Some),
+        Ok(text) => parse(&text).map(Some),
         Err(keyring::Error::NoEntry) => Ok(None),
         Err(error) => Err(map_keyring_error(&error)),
     }
@@ -404,14 +408,17 @@ mod tests {
 
     #[test]
     fn treats_no_entry_as_nothing_stored() {
-        assert_eq!(read_keychain(Err(keyring::Error::NoEntry)), Ok(None));
         assert_eq!(
-            read_keychain(Err(keyring::Error::NoDefaultStore)),
+            read_keychain(Err(keyring::Error::NoEntry), from_json),
+            Ok(None)
+        );
+        assert_eq!(
+            read_keychain(Err(keyring::Error::NoDefaultStore), from_json),
             Err(CredentialError::NoKeychain)
         );
         let kept = r#"{"provider":"anthropic","kind":"api_key","secret":"sk-ant-api03-key"}"#;
         assert_eq!(
-            read_keychain(Ok(kept.to_string())),
+            read_keychain(Ok(kept.to_string()), from_json),
             Ok(Some(ClaudeCredential::ApiKey(Secret::new(
                 "sk-ant-api03-key".to_string()
             ))))

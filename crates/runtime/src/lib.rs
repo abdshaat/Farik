@@ -13,6 +13,9 @@ pub mod claude;
 /// What the first-run wizard finds on the computer, and the sandbox image it builds.
 #[cfg(unix)]
 pub mod computer;
+/// A custom connector's keys, per agent: the keychain, or a private file.
+#[cfg(unix)]
+pub mod connectors;
 /// What a session cost, and what each budget has left.
 pub mod cost;
 /// Where the model credential is kept: the environment, the keychain, or a private file.

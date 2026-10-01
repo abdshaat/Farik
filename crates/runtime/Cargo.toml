@@ -33,6 +33,7 @@ tokio-util.workspace = true
 [dev-dependencies]
 futures-util.workspace = true
 jsonschema.workspace = true
+keyring-core.workspace = true
 rusqlite.workspace = true
 tokio-tungstenite.workspace = true
 tower.workspace = true
