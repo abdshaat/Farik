@@ -95,7 +95,9 @@ export function StartSprint({
 								<span className={styles.muted}>
 									{w.parts === undefined
 										? t("sprintStartTask")
-										: t("sprintStartEpic", { count: w.parts })}
+										: w.parts === 1
+											? t("sprintStartEpicOne")
+											: t("sprintStartEpic", { count: w.parts })}
 								</span>
 							</li>
 						))}

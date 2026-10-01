@@ -562,10 +562,10 @@ describe("the board's backlog", () => {
 			"Sprint 3 is running: 1 of 5 tasks done. 1 more waits in the Backlog for the next sprint.",
 		);
 		const waiting = screen.getByRole("region", { name: en.statusBacklog });
+		// The founder's line (2026-10-01): true for late work, early-end leftovers and work
+		// the planning passed over alike.
 		expect(
-			within(waiting).getByText(
-				"Became ready during sprint 3, so it waits for sprint 4.",
-			),
+			within(waiting).getByText("Waits here for the next sprint."),
 		).toBeTruthy();
 		expect(within(waiting).getByText(en.backlogNextSprint)).toBeTruthy();
 		expect(
@@ -601,6 +601,40 @@ describe("the board's backlog", () => {
 				"Sol plans it: Sol picks from this work, posts the plan in Chats, under Team, and then runs a short standup each day and a review and a look back at the end. Work that becomes ready later waits for the next sprint.",
 			),
 		).toBeTruthy();
+		await expectNoAxeViolations(container);
+	});
+
+	it("says_one_part_in_the_singular", async () => {
+		media.set(WIDE, true);
+		// The board helper waits for the last row's link, which only the epic has.
+		const one = [
+			task(17, "Gift card part 17", "ready", {
+				parent: "FRK-12",
+				backlog: true,
+			}),
+			task(12, "Gift cards at checkout", "in_progress", {
+				kind: "epic",
+				assignee_id: "sol",
+				backlog: true,
+			}),
+		];
+		const { container } = await board(null, one, ACTIVITY, TEAM, {
+			summary: { plan_in_sprints: true, count: 1 },
+			waiting: [],
+			path: "/board?start=sprint",
+		});
+		const lane = screen.getByRole("region", { name: en.statusBacklog });
+		const card = within(lane)
+			.getByRole("link", { name: "Gift cards at checkout" })
+			.closest("li") as HTMLElement;
+		expect(within(card).getByText("Ready, broken into 1 task")).toBeTruthy();
+		expect(within(card).getByText("1 part, 0 done")).toBeTruthy();
+		const dialog = screen.getByRole("dialog", { name: "Start sprint 3" });
+		expect(
+			within(within(dialog).getByRole("list", { name: en.sprintStartBacklog }))
+				.getAllByRole("listitem")
+				.map((li) => li.textContent),
+		).toEqual(["FRK-12Gift cards at checkoutEpic, 1 task"]);
 		await expectNoAxeViolations(container);
 	});
 

@@ -180,7 +180,7 @@ export function Board() {
 					<span className={styles.small}>{task.taskId}</span>
 					{task.kind === "epic" && (
 						<span className={styles.small}>
-							{t("epicParts")
+							{t(parts.length === 1 ? "epicPartsOne" : "epicParts")
 								.replace("{parts}", String(parts.length))
 								.replace(
 									"{done}",
@@ -205,7 +205,9 @@ export function Board() {
 	/** A Backlog card's word: ready, and waiting for the next sprint while one runs. */
 	const waitWord = (task: TaskRow, parts: number) =>
 		task.kind === "epic" && parts > 0
-			? t("backlogEpicReady", { count: parts })
+			? parts === 1
+				? t("backlogEpicReadyOne")
+				: t("backlogEpicReady", { count: parts })
 			: t(sprint ? "backlogNextSprint" : "backlogReady");
 
 	const column = (l: Lane) => {
@@ -219,9 +221,7 @@ export function Board() {
 			>
 				{l === "backlog" && (
 					<p className={styles.small}>
-						{sprint
-							? t("laneBacklogLate", { n, next: Number(n) + 1 })
-							: t("laneBacklogNote")}
+						{sprint ? t("laneBacklogLate") : t("laneBacklogNote")}
 					</p>
 				)}
 				{rows.length === 0 ? (

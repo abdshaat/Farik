@@ -130,10 +130,8 @@ test("ready work waits in the backlog until a sprint plans it, and late work for
 		).toBeVisible();
 		await expect(backlog.locator('a[href="/tasks/FRK-1"]')).toBeVisible();
 		await expect(backlog.locator('a[href="/tasks/FRK-2"]')).toBeVisible();
-		// The singular is Task 5's to settle ("1 tasks" today), so either reads here.
-		await expect(
-			backlog.getByText(/^Ready, broken into 1 tasks?$/),
-		).toBeVisible();
+		await expect(backlog.getByText("Ready, broken into 1 task")).toBeVisible();
+		await expect(backlog.getByText("1 part, 0 done")).toBeVisible();
 		await backlogShots(page, "sprints-backlog");
 
 		// 4. Today's link opens the start dialog on the Board, which lists both.
@@ -144,7 +142,7 @@ test("ready work waits in the backlog until a sprint plans it, and late work for
 		const waiting = start.getByRole("list", { name: "Waiting in the Backlog" });
 		await expect(waiting.getByRole("listitem")).toHaveText([
 			/^FRK-1.*Task$/,
-			/^FRK-2.*Epic, 1 tasks?$/,
+			/^FRK-2.*Epic, 1 task$/,
 		]);
 		await expect(start.getByLabel("No limit")).toBeChecked();
 		await shots(page, "sprints-start");

@@ -708,6 +708,7 @@ export const en = {
 	markReviewing: "Reviewing",
 	markPlanning: "Planning",
 	epicParts: "{parts} parts, {done} done",
+	epicPartsOne: "1 part, {done} done",
 	sprintStartTitle: "Start sprint {n}",
 	sprintStartWhat:
 		"A sprint is a batch of work the team finishes before it stops to look back. It ends by itself when every task in it is done.",
@@ -732,13 +733,14 @@ export const en = {
 	sprintMoreOne: "1 more waits in the Backlog for the next sprint.",
 	sprintMore: "{count} more wait in the Backlog for the next sprint.",
 	laneBacklogNote: "Ready work waits here until you start a sprint.",
-	laneBacklogLate:
-		"Became ready during sprint {n}, so it waits for sprint {next}.",
+	laneBacklogLate: "Waits here for the next sprint.",
 	backlogReady: "Ready",
 	backlogNextSprint: "Ready. Waits for the next sprint",
 	backlogEpicReady: "Ready, broken into {count} tasks",
+	backlogEpicReadyOne: "Ready, broken into 1 task",
 	sprintStartBacklog: "Waiting in the Backlog",
 	sprintStartEpic: "Epic, {count} tasks",
+	sprintStartEpicOne: "Epic, 1 task",
 	sprintStartTask: "Task",
 	sprintStartPlansBacklog:
 		"{name} plans it: {name} picks from this work, posts the plan in Chats, under Team, and then runs a short standup each day and a review and a look back at the end. Work that becomes ready later waits for the next sprint.",
