@@ -1136,18 +1136,14 @@ describe("team page", () => {
 			target: { value: "sk-ant-api-wrong" },
 		});
 		fireEvent.click(button);
-		// The daemon's refusal is the sentence to show.
+		// The daemon's refusal is said in plain words, never its own.
 		const wrong = await sent(s, "account.connect");
 		await s.fail(
 			wrong,
 			-32005,
-			"that is not a subscription key: it starts with sk-ant-oat",
+			"that is not a Claude subscription token: a subscription token starts with sk-ant-oat",
 		);
-		expect(
-			await within(row).findByText(
-				"that is not a subscription key: it starts with sk-ant-oat",
-			),
-		).toBeTruthy();
+		expect(await within(row).findByText(en.setupNotSubscription)).toBeTruthy();
 		fireEvent.change(within(row).getByLabelText(en.subscriptionKey), {
 			target: { value: "sk-ant-oat01-new" },
 		});

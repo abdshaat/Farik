@@ -73,3 +73,9 @@
 .verdict ul {
 	margin: 0;
 }
+
+/* A part's field and, below it, the button that removes it. */
+.part {
+	display: grid;
+	gap: var(--farik-space-2);
+}

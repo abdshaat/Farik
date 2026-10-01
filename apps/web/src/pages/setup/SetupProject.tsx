@@ -2,6 +2,7 @@ import { Button, Choice, TextArea, TextField } from "@farik/ui";
 import { useEffect, useState } from "react";
 import { useLocation, useNavigate } from "react-router";
 import { useConnection } from "../../app/connection.tsx";
+import { daemonSaid } from "../../app/refusals.ts";
 import { type ServeStatus, useQuery } from "../../app/store.ts";
 import { t } from "../../strings/t.ts";
 import { FolderBrowser, join } from "./FolderBrowser.tsx";
@@ -54,7 +55,7 @@ export function SetupProject() {
 			reopen();
 			setOpening(true);
 		} catch (e) {
-			setRefused((e as Error).message);
+			setRefused(daemonSaid(e, "setupRefused"));
 			setBusy(false);
 		}
 	};

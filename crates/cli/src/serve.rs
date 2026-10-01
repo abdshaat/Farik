@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use farik_runtime::credential::load_credential;
-use farik_runtime::daemon::{DaemonConfig, DaemonState, PortChoice, SetupHost, candidates};
+use farik_runtime::daemon::{DaemonState, PortChoice, SetupHost, candidates, serve_held};
 use farik_runtime::orchestrator::{TickRules, TickScope};
 use serde_json::json;
 use tokio::sync::watch;
@@ -21,11 +21,6 @@ use crate::{CliIo, Engine, Interrupts, say};
 
 /// The port `serve` asks for when it is not told one.
 const DEFAULT_PORT: u16 = 7420;
-/// How many more times the wizard's daemon tries a port after the one it found was taken.
-const BIND_TRIES: u32 = 3;
-/// How long the wizard waits for its exact port, the one the browser's tab is on, when it comes
-/// back after a failed take-on and something holds that port for a moment.
-const EXACT_PORT_WAIT: std::time::Duration = std::time::Duration::from_secs(5);
 
 /// What `serve` does next.
 enum Mode {
@@ -51,8 +46,14 @@ pub(crate) fn serve(port: Option<u16>, no_open: bool, io: &mut CliIo<'_>) -> i32
             Err(error) => return refuse(io, false, &error),
         }
         let mut mode = found(io);
-        let mut port = PortChoice::Preferred(port.unwrap_or(DEFAULT_PORT));
-        let mut linked = None;
+        // Bound once and held until serve ends: the wizard's daemon and the driver's each listen
+        // on it in turn, so the port the browser's tab is on is never free for another process to
+        // take while one stops and the next starts.
+        let held = match hold(PortChoice::Preferred(port.unwrap_or(DEFAULT_PORT))) {
+            Ok(held) => held,
+            Err(error) => return refuse(io, false, &error),
+        };
+        let mut linked = false;
         let (mut take_on_error, mut taking_on) = (None, false);
         // The project setup waits on the credential for, kept across a take-on that fails.
         let mut waited_on = None;
@@ -62,15 +63,14 @@ pub(crate) fn serve(port: Option<u16>, no_open: bool, io: &mut CliIo<'_>) -> i32
                     waited_on.clone_from(&waiting);
                     let set_up = set_up(
                         io,
-                        port,
+                        &held,
                         waiting,
                         take_on_error.take(),
                         no_open,
                         &mut linked,
                     );
                     match set_up.await {
-                        Ok(Some((root, bound))) => {
-                            port = PortChoice::Exact(bound);
+                        Ok(Some(root)) => {
                             taking_on = true;
                             Mode::Drive(root)
                         }
@@ -78,7 +78,7 @@ pub(crate) fn serve(port: Option<u16>, no_open: bool, io: &mut CliIo<'_>) -> i32
                         Err(error) => return refuse(io, false, &error),
                     }
                 }
-                Mode::Drive(root) => match drive(&root, port, no_open, &mut linked, io).await {
+                Mode::Drive(root) => match drive(&root, &held, no_open, &mut linked, io).await {
                     Ok(code) => return code,
                     // A take-on that failed goes back to the wizard, which says why.
                     Err(error) if taking_on => {
@@ -115,16 +115,22 @@ fn found(io: &CliIo<'_>) -> Mode {
     }
 }
 
-/// Serves the wizard on `port` until it chooses a project, answered with the port it was served
-/// on, or until Ctrl-C, answered `None`. The link is printed when this port has had none.
+/// Serves the wizard on `held` until it chooses a project, answered with it, or until Ctrl-C,
+/// answered `None`. The link is printed when serve has printed none.
 async fn set_up(
     io: &mut CliIo<'_>,
-    port: PortChoice,
+    held: &std::net::TcpListener,
     waiting: Option<PathBuf>,
     take_on_error: Option<String>,
     no_open: bool,
-    linked: &mut Option<u16>,
-) -> Result<Option<(PathBuf, u16)>, String> {
+    linked: &mut bool,
+) -> Result<Option<PathBuf>, String> {
+    // A project found with no account waits on the account, not on a project.
+    let lacks = if waiting.is_some() {
+        "no AI account yet: connect one in the browser"
+    } else {
+        "no project yet: farik is set up in the browser"
+    };
     let (chosen, mut choice) = watch::channel(None);
     let host: Arc<dyn SetupHost> = Arc::new(CliHost {
         env: io.env.clone(),
@@ -138,43 +144,18 @@ async fn set_up(
         chosen,
         waiting,
     });
-    // The web state needs the port before the daemon binds it, so a free one is found first, and
-    // found again when something takes it in between. An exact port, the one the browser's tab is
-    // on, is waited for a while; one that still cannot be had gives way to any, whose new link is
-    // printed.
-    let mut wanted = port;
-    let mut tries = 0;
-    let (handle, bound, code) = loop {
-        let bound = match free_port_soon(wanted).await {
-            Ok(bound) => bound,
-            Err(_) => free_port(PortChoice::Any)?,
-        };
-        let (mut web, code) = web(Path::new(""), io, None)?;
-        web.port = bound;
-        web.take_on_error = std::sync::Mutex::new(take_on_error.clone());
-        let config = DaemonConfig {
-            port: PortChoice::Exact(bound),
-            daemon_file: None,
-        };
-        let state = Arc::new(DaemonState::setup(Arc::clone(&host), web));
-        match farik_runtime::daemon::serve(config, state).await {
-            Ok(handle) => break (handle, bound, code),
-            Err(_) if tries < BIND_TRIES => {
-                tries += 1;
-                if let PortChoice::Exact(_) = wanted {
-                    wanted = PortChoice::Any;
-                }
-            }
-            Err(error) => return Err(error.to_string()),
-        }
-    };
-    say(
-        &mut io.stdout,
-        &format!("no project yet: farik is set up in the browser, on 127.0.0.1:{bound}"),
-    );
-    if *linked != Some(bound) {
+    let bound = port_of(held)?;
+    let (mut web, code) = web(Path::new(""), io, None)?;
+    web.port = bound;
+    web.take_on_error = std::sync::Mutex::new(take_on_error);
+    let state = Arc::new(DaemonState::setup(Arc::clone(&host), web));
+    let handle = serve_held(held, None, state)
+        .await
+        .map_err(|error| error.to_string())?;
+    say(&mut io.stdout, &format!("{lacks}, on 127.0.0.1:{bound}"));
+    if !*linked {
         print_link(io, bound, &code, no_open);
-        *linked = Some(bound);
+        *linked = true;
     }
     let Interrupts::Channel(interrupts) = &mut io.interrupts else {
         return Err("Ctrl-C is not listened for".to_string());
@@ -184,41 +165,26 @@ async fn set_up(
         Some(()) = interrupts.recv() => None,
     };
     handle.shutdown().await.map_err(|error| error.to_string())?;
-    Ok(chosen.map(|root| (root, bound)))
+    Ok(chosen)
 }
 
-/// The first port of `choice` that is free on `127.0.0.1` now.
+/// The first port of `choice` that is free on `127.0.0.1`, bound.
 ///
 /// # Errors
 ///
 /// A sentence saying none is.
-// ponytail: another process may take the port between this check and the bind, which then fails;
-// passing the port to the web state after the bind removes the race if it ever bites.
-fn free_port(choice: PortChoice) -> Result<u16, String> {
+fn hold(choice: PortChoice) -> Result<std::net::TcpListener, String> {
     candidates(choice)
         .into_iter()
-        .find_map(|port| {
-            let listener = std::net::TcpListener::bind((Ipv4Addr::LOCALHOST, port)).ok()?;
-            listener.local_addr().ok().map(|address| address.port())
-        })
+        .find_map(|port| std::net::TcpListener::bind((Ipv4Addr::LOCALHOST, port)).ok())
         .ok_or_else(|| "no port is free on 127.0.0.1 for farik serve".to_string())
 }
 
-/// `free_port`, but an exact port is asked again every 50 ms for up to `EXACT_PORT_WAIT` while
-/// something else holds it.
-async fn free_port_soon(choice: PortChoice) -> Result<u16, String> {
-    let deadline = std::time::Instant::now() + EXACT_PORT_WAIT;
-    loop {
-        match free_port(choice) {
-            Err(_)
-                if matches!(choice, PortChoice::Exact(_))
-                    && std::time::Instant::now() < deadline =>
-            {
-                tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-            }
-            found => return found,
-        }
-    }
+/// The port `held` is bound to.
+fn port_of(held: &std::net::TcpListener) -> Result<u16, String> {
+    held.local_addr()
+        .map(|address| address.port())
+        .map_err(|error| error.to_string())
 }
 
 /// Prints the browser's link, and opens it unless told not to.
@@ -237,13 +203,16 @@ fn print_link(io: &mut CliIo<'_>, port: u16, code: &str, no_open: bool) {
 /// of a start that refused, with nothing left running and nothing remembered.
 async fn drive(
     root: &Path,
-    port: PortChoice,
+    held: &std::net::TcpListener,
     no_open: bool,
-    linked: &mut Option<u16>,
+    linked: &mut bool,
     io: &mut CliIo<'_>,
 ) -> Result<i32, String> {
     let project = open_project(root, io.clock.now())?;
-    let options = StartOptions { port, web: true };
+    let options = StartOptions {
+        listener: Some(held),
+        web: true,
+    };
     let mut driver = start(&project, io, options).await?;
     match state_dir(&io.env) {
         Some(directory) => {
@@ -272,10 +241,10 @@ async fn drive(
         &json!({}),
     );
     if let Some(code) = &driver.connect_code
-        && *linked != Some(driver.port())
+        && !*linked
     {
         print_link(printer.io, driver.port(), code, no_open);
-        *linked = Some(driver.port());
+        *linked = true;
     }
     let scope = TickScope {
         task_id: None,
@@ -292,30 +261,4 @@ async fn drive(
     )
     .await;
     Ok(finish(&project, driver, &mut printer, ended, presses).await)
-}
-
-#[cfg(test)]
-mod tests {
-    use std::net::{Ipv4Addr, TcpListener};
-    use std::time::Duration;
-
-    use farik_runtime::daemon::PortChoice;
-
-    use super::free_port_soon;
-
-    #[tokio::test]
-    async fn waits_for_its_exact_port_while_something_holds_it() {
-        let held = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).expect("a port");
-        let port = held.local_addr().expect("an address").port();
-        let mut finding = Box::pin(free_port_soon(PortChoice::Exact(port)));
-        // Its first look finds the port held, and it waits rather than giving up.
-        assert!(
-            tokio::time::timeout(Duration::from_millis(1), &mut finding)
-                .await
-                .is_err(),
-            "it gave up on a held port at once"
-        );
-        drop(held);
-        assert_eq!(finding.await, Ok(port));
-    }
 }

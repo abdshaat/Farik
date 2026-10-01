@@ -125,7 +125,7 @@ fn applying(
 }
 
 /// The preview's answer, and the apply's. Its effects say first what each retirement puts on hold:
-/// the `in_progress` tasks the retired agent holds, which its retirement blocks.
+/// the `in_progress` and `assigned` tasks the retired agent holds, which its retirement blocks.
 fn answer(
     deps: &ToolDeps,
     before: &Team,
@@ -143,7 +143,7 @@ fn answer(
             .iter()
             .filter(|row| {
                 row.assignee_id.as_deref() == Some(agent.id.as_str())
-                    && row.status == TaskStatus::InProgress
+                    && matches!(row.status, TaskStatus::InProgress | TaskStatus::Assigned)
             })
             .map(|row| format!("{} \u{201c}{}\u{201d}", row.task_id.as_str(), row.title))
             .collect();
@@ -629,7 +629,7 @@ mod tests {
         });
         saved(&folder, &pair());
         harness.in_progress("FRK-1", "dev-b", "dev-a");
-        // dev-b also holds a task not started and one handed in: neither is put on hold.
+        // dev-b also holds a task not started, put on hold too, and one handed in, which is not.
         harness.assigned("FRK-2", "dev-b", "dev-a");
         harness.in_progress("FRK-3", "dev-b", "dev-a");
         harness.project.moved(
@@ -642,9 +642,9 @@ mod tests {
         let shown = preview(&harness, "pair");
         assert_eq!(
             shown["effects"][0],
-            "Sol is retired. Sol's unfinished task, FRK-1 \u{201c}Add a login page\u{201d}, is put \
-             on hold until you give it to someone.",
-            "the preview names what a retirement puts on hold, by name, and only what is in progress"
+            "Sol is retired. Sol's unfinished tasks, FRK-1 \u{201c}Add a login page\u{201d}, FRK-2 \
+             \u{201c}Add a login page\u{201d}, are put on hold until you give them to someone.",
+            "the preview names what a retirement puts on hold, by name, and only what is not handed in"
         );
         let before = seq_count(&harness);
 
@@ -690,20 +690,27 @@ mod tests {
         let kinds: Vec<&Value> = after.iter().map(|event| &event["kind"]).collect();
         assert_eq!(
             kinds,
-            ["agent.updated", "task.transitioned", "team.updated"]
+            [
+                "agent.updated",
+                "task.transitioned",
+                "task.transitioned",
+                "team.updated"
+            ]
         );
         assert_eq!(
             after[0]["body"],
             json!({ "agent_id": "dev-b", "status": "retired", "updated_by": "human" })
         );
-        assert_eq!(after[1]["task_id"], "FRK-1");
-        assert_eq!(after[1]["body"]["to"], "blocked");
+        for (blocked, task) in after[1..3].iter().zip(["FRK-1", "FRK-2"]) {
+            assert_eq!(blocked["task_id"], task);
+            assert_eq!(blocked["body"]["to"], "blocked");
+            assert_eq!(
+                blocked["body"]["blocker"]["description"],
+                "agent retired by the user"
+            );
+        }
         assert_eq!(
-            after[1]["body"]["blocker"]["description"],
-            "agent retired by the user"
-        );
-        assert_eq!(
-            after[2]["body"],
+            after[3]["body"],
             json!({
                 "team_name": "Farik",
                 "agent_ids": ["pm", "dev-a", "dev-b", "noor"],

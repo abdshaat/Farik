@@ -138,11 +138,11 @@ describe("request page", () => {
 		await s.reply(sent, {
 			error: {
 				kind: "refused",
-				detail: "triage_closed: the request is already being planned",
+				detail: "triage_refused: FRK-1 is already refining",
 			},
 		});
 		expect((await screen.findByRole("alert")).textContent).toBe(
-			"The request is already being planned",
+			en.refuseTriage,
 		);
 		await expectNoAxeViolations(container);
 

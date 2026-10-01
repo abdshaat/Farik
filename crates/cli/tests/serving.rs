@@ -716,11 +716,9 @@ async fn socket(port: u16, cookie: &str) -> Socket {
     }
 }
 
-/// The browser's socket on `port`, with the session `cookie`, tried once.
-async fn try_socket(
-    port: u16,
-    cookie: &str,
-) -> Result<Socket, tokio_tungstenite::tungstenite::Error> {
+/// The browser's socket on `port`, with the session `cookie`, tried once. The handshake is given
+/// up after 5 s: a port that is held but never served takes the connection and never answers.
+async fn try_socket(port: u16, cookie: &str) -> Result<Socket, String> {
     use tokio_tungstenite::tungstenite::client::IntoClientRequest as _;
 
     let mut request = format!("ws://127.0.0.1:{port}/rpc")
@@ -734,9 +732,14 @@ async fn try_socket(
             .expect("a header"),
     );
     headers.insert("Cookie", cookie.parse().expect("a header"));
-    tokio_tungstenite::connect_async(request)
-        .await
-        .map(|(socket, _)| socket)
+    tokio::time::timeout(
+        Duration::from_secs(5),
+        tokio_tungstenite::connect_async(request),
+    )
+    .await
+    .map_err(|_| "no handshake within 5 s".to_string())?
+    .map(|(socket, _)| socket)
+    .map_err(|error| error.to_string())
 }
 
 /// Sends `method` with `params` and answers the reply.
@@ -783,9 +786,8 @@ fn serve_status(port: u16, cookie: &str) -> Value {
 }
 
 /// `serve.status` while serve may be restarting: `None` when no daemon answers on `port` now, or
-/// the one it reached was shutting down and cut the socket before it replied. Tried once, since a
-/// serve that cannot have its port back prints a new link on another, which the caller's next try
-/// reads.
+/// the one it reached was shutting down and cut the socket before it replied. Tried once; the
+/// caller tries again.
 fn serve_status_across_a_restart(port: u16, cookie: &str) -> Option<Value> {
     a_runtime().block_on(async {
         let mut socket = try_socket(port, cookie).await.ok()?;
@@ -894,13 +896,6 @@ fn serving_in(
 }
 
 impl Serving {
-    /// The port of the last link serve printed, which is where the browser is sent.
-    fn port_now(&self) -> u16 {
-        links(&self.out.text())
-            .last()
-            .map_or(self.port, |(port, _)| *port)
-    }
-
     /// Interrupts serve once and answers how it ended.
     fn interrupted(self) -> (Ran, String, String) {
         self.interrupt.send(()).expect("serve listens");
@@ -1101,26 +1096,12 @@ fn stays_in_setup_when_the_project_is_busy() {
 #[test]
 #[ignore = "needs the git program: cargo xtask check --integration"]
 fn goes_back_to_setup_when_the_driver_cannot_start() {
-    driver_cannot_start("setup-cannot-start", false);
-}
-
-#[test]
-#[ignore = "needs the git program: cargo xtask check --integration"]
-fn follows_serve_to_its_new_port_when_the_driver_cannot_start() {
-    // The flake's cause, made certain: something holds serve's port past its 5 s wait once the
-    // take-on lets it go, so setup comes back on another port with a link of its own.
-    until_held(|| driver_cannot_start("setup-cannot-start-moves", true));
-}
-
-/// A project chosen in setup whose driver cannot start, then setup again; with `hold`, its old
-/// port is taken as soon as it is let go, for 8 s. Answers whether that hold took.
-fn driver_cannot_start(name: &str, hold: bool) -> bool {
-    let repository = a_team(name);
+    let repository = a_team("setup-cannot-start");
     std::fs::write(repository.path.join(".farik/prices.json"), "not JSON").expect("written");
     let home = repository.path.parent().expect("a parent").to_path_buf();
-    let (cwd, state) = setup_folders(name);
+    let (cwd, state) = setup_folders("setup-cannot-start");
     let serving = serving_setup(&cwd, &home, &state);
-    let holder = hold.then(|| hold_once_free(serving.port));
+    let prober = Prober::on(serving.port);
 
     let opened = call(
         serving.port,
@@ -1133,12 +1114,11 @@ fn driver_cannot_start(name: &str, hold: bool) -> bool {
     // shutting down is cut off unanswered.
     let mut status = Value::Null;
     until("serve is back in setup mode with the reason", || {
-        status =
-            serve_status_across_a_restart(serving.port_now(), &serving.cookie).unwrap_or_default();
+        status = serve_status_across_a_restart(serving.port, &serving.cookie).unwrap_or_default();
         status["take_on_error"].is_string()
     });
-    let back = Instant::now();
-    let (port, now) = (serving.port, serving.port_now());
+    let took = prober.stopped();
+    let port = serving.port;
     let (ran, out, err) = serving.interrupted();
     assert_eq!(status["project_root"], Value::Null, "{status}");
     assert!(
@@ -1148,29 +1128,23 @@ fn driver_cannot_start(name: &str, hold: bool) -> bool {
         "{status}"
     );
     assert!(!state.join("farik/state.json").exists());
-    // Back on the port the browser's tab is on with no second link, or, when something held that
-    // port past serve's wait, on another port with its own link (serve.rs's own test holds the
-    // port while it comes back).
+    // Serve never lets its port go, so nothing else can take it: setup is back on the port the
+    // browser's tab is on, with no second link.
+    assert!(
+        !took,
+        "something took serve's port during the take-on\n{out}"
+    );
     let setups: Vec<&str> = out
         .lines()
         .filter(|line| line.starts_with("no project yet"))
         .collect();
     assert_eq!(setups.len(), 2, "{out}");
-    assert!(setups[0].ends_with(&format!("127.0.0.1:{port}")), "{out}");
-    assert!(setups[1].ends_with(&format!("127.0.0.1:{now}")), "{out}");
-    let ports: Vec<u16> = links(&out).iter().map(|(port, _)| *port).collect();
-    let expected = if now == port {
-        vec![port]
-    } else {
-        vec![port, now]
-    };
-    assert_eq!(ports, expected, "{out}");
-    assert_eq!(ran.code, 130, "{out}\n{err}");
-    let took = holder.is_some_and(|holder| held_before(holder, back));
-    if took {
-        assert_ne!(now, port, "serve came back on another port\n{out}");
+    for setup in setups {
+        assert!(setup.ends_with(&format!("127.0.0.1:{port}")), "{out}");
     }
-    took
+    let ports: Vec<u16> = links(&out).iter().map(|(port, _)| *port).collect();
+    assert_eq!(ports, vec![port], "{out}");
+    assert_eq!(ran.code, 130, "{out}\n{err}");
 }
 
 #[test]
@@ -1315,6 +1289,7 @@ fn connecting_the_account_takes_the_waiting_project_on() {
     );
     until("the team is driven", || daemon_file(&repository).exists());
     let status = serve_status(serving.port, &serving.cookie);
+    let port = serving.port;
     let (ran, out, err) = serving.interrupted();
     let root = repository.path.canonicalize().expect("the root");
     assert_eq!(
@@ -1323,62 +1298,19 @@ fn connecting_the_account_takes_the_waiting_project_on() {
         "{status}"
     );
     assert_eq!(ran.code, 130, "{out}\n{err}");
+    // It found the project: what it lacks is the account, and it says so.
+    let first = out.lines().next().unwrap_or_default();
+    assert_eq!(
+        first,
+        format!("no AI account yet: connect one in the browser, on 127.0.0.1:{port}"),
+        "{out}"
+    );
 }
 
 #[test]
 #[ignore = "needs the git program: cargo xtask check --integration"]
 fn keeps_waiting_on_the_project_after_a_failed_take_on() {
-    failed_take_on("setup-waits-again", false);
-}
-
-#[test]
-#[ignore = "needs the git program: cargo xtask check --integration"]
-fn follows_serve_to_its_new_port_after_a_failed_take_on() {
-    // The flake's cause, made certain: something takes serve's port the moment the take-on lets
-    // it go and holds it past serve's 5 s wait, so setup comes back on another port.
-    until_held(|| failed_take_on("setup-moves-port", true));
-}
-
-/// Holds `port` for 8 s as soon as it is free, answering when it took it, if it ever did.
-fn hold_once_free(port: u16) -> std::thread::JoinHandle<Option<Instant>> {
-    std::thread::spawn(move || {
-        let deadline = Instant::now() + Duration::from_secs(60);
-        while Instant::now() < deadline {
-            if let Ok(held) = std::net::TcpListener::bind(("127.0.0.1", port)) {
-                let at = Instant::now();
-                std::thread::sleep(Duration::from_secs(8));
-                drop(held);
-                return Some(at);
-            }
-        }
-        None
-    })
-}
-
-/// Whether `holder` took the port before `back`, the moment serve was seen back in setup.
-///
-/// The port is free only for the few milliseconds between the take-on letting it go and serve
-/// binding it again. A holder the machine is too busy to run in that window takes it only once the
-/// test ends serve, after `back`; serve then rightly stayed, and the hold proves nothing.
-fn held_before(holder: std::thread::JoinHandle<Option<Instant>>, back: Instant) -> bool {
-    holder
-        .join()
-        .expect("the holder ends")
-        .is_some_and(|at| at < back)
-}
-
-/// Runs a held-port `scenario` until its hold takes, up to 5 times, and fails when it never does.
-fn until_held(mut scenario: impl FnMut() -> bool) {
-    assert!(
-        (0..5).any(|_| scenario()),
-        "serve's port was never held while it came back"
-    );
-}
-
-/// A take-on that fails, then serve's setup waiting on the same project; with `hold`, its old
-/// port is taken as soon as it is let go, for 8 s. Answers whether that hold took.
-fn failed_take_on(name: &str, hold: bool) -> bool {
-    let repository = a_team(name);
+    let repository = a_team("setup-waits-again");
     std::fs::write(repository.path.join(".farik/prices.json"), "not JSON").expect("written");
     let (_home, state) = setup_folders("setup-waits-again");
     let (_claude, path) = project::a_claude_saying("setup-waits-claude", "2.1.300 (Claude Code)");
@@ -1386,7 +1318,7 @@ fn failed_take_on(name: &str, hold: bool) -> bool {
     env.insert("PATH".to_string(), path);
     let serving = serving_in(&repository.path, env, false);
     let connect = json!({ "kind": "api_key", "secret": "sk-ant-api03-test" });
-    let holder = hold.then(|| hold_once_free(serving.port));
+    let prober = Prober::on(serving.port);
 
     let first = call(
         serving.port,
@@ -1397,25 +1329,48 @@ fn failed_take_on(name: &str, hold: bool) -> bool {
     assert_eq!(first["result"]["taking_on"], true, "{first}");
     let mut status = Value::Null;
     until("serve is back in setup mode with the reason", || {
-        status =
-            serve_status_across_a_restart(serving.port_now(), &serving.cookie).unwrap_or_default();
+        status = serve_status_across_a_restart(serving.port, &serving.cookie).unwrap_or_default();
         status["take_on_error"].is_string()
     });
-    let back = Instant::now();
+    let took = prober.stopped();
     // The project is still the one setup waits on: connecting again takes it on again.
-    let again = call(
-        serving.port_now(),
-        &serving.cookie,
-        "account.connect",
-        connect,
-    );
-    let moved = serving.port_now() != serving.port;
+    let again = call(serving.port, &serving.cookie, "account.connect", connect);
     let (ran, out, err) = serving.interrupted();
     assert_eq!(again["result"]["taking_on"], true, "{again}");
     assert_eq!(ran.code, 130, "{out}\n{err}");
-    let took = holder.is_some_and(|holder| held_before(holder, back));
-    if took {
-        assert!(moved, "serve came back on another port\n{out}");
+    assert!(
+        !took,
+        "something took serve's port during the take-on\n{out}"
+    );
+    assert_eq!(links(&out).len(), 1, "{out}");
+}
+
+/// A thread that tries, over and over, to take `port` on `127.0.0.1`, as any other process on the
+/// machine may at any moment: a parallel test asking the system for a free port among them.
+struct Prober {
+    done: Arc<std::sync::atomic::AtomicBool>,
+    thread: std::thread::JoinHandle<bool>,
+}
+
+impl Prober {
+    fn on(port: u16) -> Self {
+        let done = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let stop = Arc::clone(&done);
+        let thread = std::thread::spawn(move || {
+            while !stop.load(std::sync::atomic::Ordering::SeqCst) {
+                if std::net::TcpListener::bind(("127.0.0.1", port)).is_ok() {
+                    return true;
+                }
+                std::thread::yield_now();
+            }
+            false
+        });
+        Self { done, thread }
     }
-    took
+
+    /// Stops trying, and answers whether it ever took the port.
+    fn stopped(self) -> bool {
+        self.done.store(true, std::sync::atomic::Ordering::SeqCst);
+        self.thread.join().expect("the prober ends")
+    }
 }

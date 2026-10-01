@@ -1,6 +1,7 @@
 import { expectNoAxeViolations } from "@farik/ui/test";
 import { fireEvent, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { en } from "../strings/en.ts";
 import {
 	ACCEPTING,
 	COMPLETION,
@@ -190,7 +191,7 @@ describe("acceptance gate", () => {
 			},
 		});
 		expect((await screen.findByRole("alert")).textContent).toBe(
-			"FRK-1 is done, and its result does not wait for the human",
+			en.refuseNotWaiting,
 		);
 		await expectNoAxeViolations(container);
 	});

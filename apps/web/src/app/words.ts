@@ -3,12 +3,11 @@ import { uiStrings } from "@farik/ui";
 import type { Agent } from "../pages/setup/TeamSetup.tsx";
 import type { en } from "../strings/en.ts";
 import { t } from "../strings/t.ts";
+import { said } from "./refusals.ts";
 
-/** "triage_closed: the request is already being planned" -> "The request is already being planned". */
-export function sentence(detail: string): string {
-	const said = detail.replace(/^[a-z_]+: /, "");
-	return said.charAt(0).toUpperCase() + said.slice(1);
-}
+/** A command's refusal (`already_paused: …`) as its code's plain sentence; the daemon's own detail never shows. */
+export const sentence = (detail: string): string =>
+	said(/^([a-z_]+): /.exec(detail)?.[1], {}, "refuseCommand");
 
 /** The code a refused call carries in its data (`errors[0].code`), if it carries one. */
 export const codeOf = (e: unknown): string | undefined =>

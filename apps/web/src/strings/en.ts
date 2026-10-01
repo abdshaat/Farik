@@ -282,7 +282,8 @@ export const en = {
 	editAsText: "Edit as text",
 	rulesText: "Team rules, as text",
 	rulesTextUse: "Use this text",
-	rulesTextWrong: "This is not a set of team rules: {why}",
+	rulesTextWrong:
+		"This is not a set of team rules. Check the text, then try again.",
 	rulePrivate: "Keep private files private",
 	rulePrivateNote:
 		"No agent may open passwords and keys: .env files, and key files.",
@@ -554,6 +555,7 @@ export const en = {
 	fieldParts: "The parts of the plan",
 	fieldPart: "Part {n}",
 	addPart: "Add a part",
+	removePart: "Remove part {n}",
 	fieldCriteria: "How we will know it is done",
 	fieldCriteriaHint: "Each check says how it is checked.",
 	fieldCriterion: "Check {n}",
@@ -565,6 +567,7 @@ export const en = {
 	criterionCommandLocked:
 		"Farik runs a command. Turn on Advanced view to change it.",
 	addCriterion: "Add a check",
+	removeCriterion: "Remove check {n}",
 	fieldOut: "What is left out",
 	fieldOutHint:
 		"One per line. Name at least one thing this plan does not do. It keeps the work from growing.",
@@ -662,6 +665,71 @@ export const en = {
 		"{name} checks your plans. Let Farik choose who checks, or add another {role}, first.",
 	refuseOther:
 		"Farik could not make this change. Check what you changed, then try again.",
+	refuseAlreadyPaused: "The team is already paused.",
+	refuseNotPaused: "The team is already working.",
+	refuseAlreadyAnswered: "This question already has an answer.",
+	refuseAlreadyAccepted: "You have already accepted this work.",
+	refuseNotWaiting:
+		"This is not waiting for you any more. Reload the page to see where it is now.",
+	refuseReviewFirst:
+		"The reviewer has not finished yet. Send it back once their review is in.",
+	refuseChecksNotRun:
+		"Farik has not finished checking this work yet. Try again once the checks have run.",
+	refuseChecksFailed:
+		"Some checks failed once the parts were put together, so this cannot be accepted yet. Send it back with what is missing.",
+	refuseUsePlan:
+		"This plan is waiting for your approval. Approve it from its plan page.",
+	refuseUseHelp:
+		"This task is waiting for your help. Answer it from its help page.",
+	refuseExtraTries:
+		"More tries come only with sending the work back to be done, for a task that used up its tries.",
+	refuseSameStatus: "That is already so, so nothing changed.",
+	refuseAgentRetired:
+		"This teammate has left the team, so this chat can be read but not added to.",
+	refuseSprintOpen: "A sprint is already open. End it before starting another.",
+	refuseNoSprintOpen: "No sprint is open right now.",
+	refuseTriage:
+		"Farik could not size this request. Reload the page to see where it is now.",
+	refuseLock:
+		"Farik could not take or give back this plan. Reload the page to see where it is now.",
+	refuseCommand: "Farik could not do that. Reload the page, then try again.",
+	planHoldFirst:
+		"The team is working to this plan. Hold the work first, then change it.",
+	requestSentAs: "This was already sent, as {id}.",
+	setupNoFolder: "That folder is not there any more. Choose another.",
+	setupOutsideHome: "Choose a folder inside your home folder.",
+	setupUnreadable: "Farik cannot open that folder. Choose another.",
+	setupNotGit:
+		"That folder is not a git project. Choose another, or start a new project.",
+	setupInsideGit:
+		"That folder is inside a git project. Choose the project’s top folder instead.",
+	setupBusy: "Farik is already running this project.",
+	setupNoAccount: "Connect your AI account first.",
+	setupName:
+		"A project’s name is lowercase letters, digits and dashes, up to 64 characters.",
+	setupDescribeMore:
+		"Say a little more about the project: at least 20 characters.",
+	setupDescribeLess:
+		"That description is too long. Keep it to 2,000 characters.",
+	setupNameTaken:
+		"A folder with that name is already there. Choose another name.",
+	setupNoGit: "Git is not installed on this computer.",
+	setupNotSubscription:
+		"That is not a subscription key. A subscription key starts with sk-ant-oat.",
+	setupNotApiKey: "That is not an API key. An API key starts with sk-ant-api.",
+	setupNoKeep:
+		"This computer has no keychain and no folder to keep the key in.",
+	setupKeyFromEnvironment:
+		"Your AI account’s key is set where Farik runs. Change it there, then start Farik again.",
+	setupNoDocker: "Docker is not installed on this computer.",
+	setupBuildFailed:
+		"Farik could not prepare the sandbox. Check that Docker is running, then try again.",
+	setupPullFailed:
+		"Farik could not fetch the browser. Check that Docker is running and you are online, then try again.",
+	setupRefused:
+		"Farik could not do that. Check what you entered, then try again.",
+	pageNotFound: "This is not here any more. It may have been removed.",
+	pageFailed: "Farik could not open this page. Reload it to try again.",
 	teamAddRole: "Their role",
 	teamFull:
 		"Your team has seven people, the most it can have. Retire someone to make room.",

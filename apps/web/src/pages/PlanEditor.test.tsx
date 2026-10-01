@@ -238,7 +238,7 @@ describe("plan editor", () => {
 			"the team is working to this plan; hold the work first, then change it",
 		);
 		expect((await screen.findByRole("alert")).textContent).toBe(
-			"The team is working to this plan; hold the work first, then change it",
+			en.planHoldFirst,
 		);
 		fireEvent.click(screen.getByRole("button", { name: "Hold the work" }));
 		const hold = await sent(s);
@@ -339,6 +339,54 @@ describe("plan editor", () => {
 		).toBe("Customers can give a gift card and use it.");
 		expect(screen.queryByText(/while you were editing/)).toBeNull();
 		await expectNoAxeViolations(container);
+	});
+
+	it("removes_a_part_or_a_check_but_never_the_last", async () => {
+		const { container, s } = await opened({
+			...CONTRACT,
+			status: "refining",
+		});
+		// A part goes, and no check still says it covers it.
+		fireEvent.click(
+			await screen.findByRole("button", {
+				name: en.removePart.replace("{n}", "2"),
+			}),
+		);
+		expect(screen.queryByDisplayValue(/arrives by email/)).toBeNull();
+		// The one part left cannot go: a plan has at least one.
+		expect(
+			screen.queryByRole("button", { name: en.removePart.replace("{n}", "1") }),
+		).toBeNull();
+		fireEvent.click(
+			screen.getByRole("button", {
+				name: en.removeCriterion.replace("{n}", "C1"),
+			}),
+		);
+		expect(
+			screen.queryByRole("button", {
+				name: en.removeCriterion.replace("{n}", "C2"),
+			}),
+		).toBeNull();
+		await expectNoAxeViolations(container);
+
+		fireEvent.click(screen.getByRole("button", { name: "Save" }));
+		const save = await waitFor(() => {
+			const c = s.calls("contract.save")[0];
+			if (!c) throw new Error("nothing was saved");
+			return c;
+		});
+		const sent = (
+			save.params as {
+				contract: {
+					requirements: { id: string }[];
+					exit_criteria: { id: string; satisfies?: string[] }[];
+				};
+			}
+		).contract;
+		expect(sent.requirements.map((r) => r.id)).toEqual(["R1"]);
+		expect(sent.exit_criteria.map((c) => [c.id, c.satisfies])).toEqual([
+			["C2", []],
+		]);
 	});
 
 	it("saves_in_place_while_refining", async () => {

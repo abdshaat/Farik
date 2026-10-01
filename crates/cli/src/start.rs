@@ -12,7 +12,9 @@ use farik_protocol::command::{Command, command_to_value, reply_from_value};
 use farik_runtime::claude::{ClaudeAdapter, ClaudeConfig, CredentialKind, SharedCredential};
 use farik_runtime::credential::{Source, load_credential};
 use farik_runtime::daemon::web::{BrowserSessions, ConnectCodes, WebState};
-use farik_runtime::daemon::{DaemonConfig, DaemonHandle, DaemonState, PortChoice, serve};
+use farik_runtime::daemon::{
+    DaemonConfig, DaemonHandle, DaemonState, PortChoice, serve, serve_held,
+};
 use farik_runtime::forge::Forge;
 use farik_runtime::orchestrator::{
     CommandError, CommandReport, Orchestrator, OrchestratorDeps, RecoveryReport, command_handler,
@@ -284,9 +286,10 @@ const SESSION_ENV: [&str; 6] = ["PATH", "HOME", "USER", "LANG", "TERM", "TMPDIR"
 
 /// What a start is told besides the project: how the process differs from `run`'s.
 #[derive(Clone, Copy, Default)]
-pub(crate) struct StartOptions {
-    /// The port the daemon asks for.
-    pub(crate) port: PortChoice,
+pub(crate) struct StartOptions<'l> {
+    /// The socket `farik serve` holds for all its daemons, which the daemon listens on; without
+    /// one, it listens on a port the system picks.
+    pub(crate) listener: Option<&'l std::net::TcpListener>,
     /// Whether the daemon answers the browser routes (`farik serve` alone), with a first connect
     /// code for the link it prints.
     pub(crate) web: bool,
@@ -342,7 +345,7 @@ impl Driver {
 pub(crate) async fn start(
     project: &Project,
     io: &mut CliIo<'_>,
-    options: StartOptions,
+    options: StartOptions<'_>,
 ) -> Result<Driver, String> {
     let Some(lock) = try_lock(&project.root)? else {
         return Err(driven_elsewhere(&project.root));
@@ -361,7 +364,7 @@ pub(crate) async fn start_holding(
     project: &Project,
     io: &mut CliIo<'_>,
     lock: RunLock,
-    options: StartOptions,
+    options: StartOptions<'_>,
 ) -> Result<Driver, String> {
     let interrupts = listen(std::mem::replace(&mut io.interrupts, never()))?;
     match start_listening(project, io, lock, options).await {
@@ -386,7 +389,7 @@ async fn start_listening(
     project: &Project,
     io: &mut CliIo<'_>,
     lock: RunLock,
-    options: StartOptions,
+    options: StartOptions<'_>,
 ) -> Result<Driver, String> {
     let settings = project
         .files
@@ -427,14 +430,16 @@ async fn start_listening(
         .web
         .then(|| web(&project.root, io, in_use))
         .transpose()?;
-    let handle = serve(
-        DaemonConfig {
-            port: options.port,
-            daemon_file: Some(project.root.join(DAEMON_FILE)),
-        },
-        Arc::clone(&daemon),
-    )
-    .await
+    let daemon_file = Some(project.root.join(DAEMON_FILE));
+    let handle = if let Some(listener) = options.listener {
+        serve_held(listener, daemon_file, Arc::clone(&daemon)).await
+    } else {
+        let config = DaemonConfig {
+            port: PortChoice::Any,
+            daemon_file,
+        };
+        serve(config, Arc::clone(&daemon)).await
+    }
     .map_err(|error| error.to_string())?;
     // The port is known once the daemon listens, and the routes read the state on each request.
     let connect_code = web.map(|(mut web, code)| {

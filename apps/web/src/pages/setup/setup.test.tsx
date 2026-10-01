@@ -112,10 +112,12 @@ describe("setup", () => {
 		fireEvent.change(field, { target: { value: "sk-ant-api01-wrong" } });
 		fireEvent.click(screen.getByRole("button", { name: en.saveContinue }));
 		const refused = await sent(s, "account.connect");
-		await s.fail(refused, -32005, "a subscription key starts with sk-ant-oat");
-		const why = await screen.findByText(
-			"a subscription key starts with sk-ant-oat",
+		await s.fail(
+			refused,
+			-32005,
+			"that is not a Claude subscription token: a subscription token starts with sk-ant-oat",
 		);
+		const why = await screen.findByText(en.setupNotSubscription);
 		expect(field.getAttribute("aria-describedby")).toContain(why.id);
 
 		fireEvent.change(field, { target: { value: "sk-ant-oat01-test" } });
@@ -149,6 +151,80 @@ describe("setup", () => {
 		await again.reply(kept, { stored_in: "keychain", taking_on: false });
 		expect(await screen.findByText(en.storedKeychain)).toBeTruthy();
 		expect(screen.queryByText(en.storedFile)).toBeNull();
+	});
+
+	it("says_each_setup_refusal_in_plain_words", async () => {
+		// The folder browser: a folder it cannot read, said without the system's words.
+		sessionStorage.setItem("farik.noSandbox", "true");
+		const project = await renderApp("/setup/project");
+		const s = project.socket as FakeSocket;
+		await answerStatus(s, false, 1, NO_PROJECT);
+		fireEvent.click(await screen.findByRole("button", { name: en.continue }));
+		const listed = await waitFor(() => {
+			const frame = s
+				.calls("query")
+				.find((f) => f.params.name === "folders.list");
+			if (!frame) throw new Error("no folders.list was sent");
+			return frame;
+		});
+		await s.fail(
+			listed,
+			-32005,
+			"that folder cannot be read: Permission denied (os error 13)",
+		);
+		expect(await screen.findByText(en.setupUnreadable)).toBeTruthy();
+		expect(screen.queryByText(/os error/)).toBeNull();
+		cleanup();
+
+		// A new project Farik could not make, for a reason it has no words for: a plain sentence.
+		const fresh = await renderApp("/setup/project");
+		const n = fresh.socket as FakeSocket;
+		await answerStatus(n, false, 1, NO_PROJECT);
+		fireEvent.click(await screen.findByRole("radio", { name: /^No, start/ }));
+		fireEvent.change(screen.getByLabelText(en.newWhat), {
+			target: {
+				value: "An ordering site for my bakery, where customers pick up.",
+			},
+		});
+		fireEvent.change(screen.getByLabelText(en.newName), {
+			target: { value: "corner-bakery" },
+		});
+		fireEvent.click(screen.getByRole("button", { name: en.continue }));
+		const create = await sent(n, "project.create");
+		await n.fail(
+			create,
+			-32603,
+			"README.md cannot be written: No space left on device (os error 28)",
+		);
+		expect(await screen.findByText(en.setupRefused)).toBeTruthy();
+		expect(screen.queryByText(/os error/)).toBeNull();
+		cleanup();
+
+		// The computer: a sandbox that would not build, and a browser with no Docker to fetch it.
+		const computer = await renderApp("/setup/computer");
+		const c = computer.socket as FakeSocket;
+		await answerQuery(c, "computer.check", {
+			claude: READY,
+			git: READY,
+			docker: READY,
+			sandbox_image: MISSING,
+			designer_browser: MISSING,
+		});
+		fireEvent.click(await screen.findByRole("button", { name: en.prepare }));
+		await c.fail(
+			await sent(c, "sandbox.build"),
+			-32005,
+			"the sandbox image could not be built: step 3/7 exited 1",
+		);
+		expect(await screen.findByText(en.setupBuildFailed)).toBeTruthy();
+		fireEvent.click(screen.getByRole("button", { name: en.fetchIt }));
+		await c.fail(
+			await sent(c, "browser.pull"),
+			-32005,
+			"Docker is not installed",
+		);
+		expect(await screen.findByText(en.setupNoDocker)).toBeTruthy();
+		expect(screen.queryByText(/step 3/)).toBeNull();
 	});
 
 	it("takes_the_waiting_project_on_once_connected", async () => {

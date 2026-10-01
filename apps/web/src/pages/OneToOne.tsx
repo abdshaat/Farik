@@ -9,7 +9,7 @@ import {
 } from "react";
 import { Link } from "react-router";
 import { useConnection } from "../app/connection.tsx";
-import { saidAll } from "../app/refusals.ts";
+import { daemonSaid, saidAll } from "../app/refusals.ts";
 import { useEvents } from "../app/store.ts";
 import { codeOf, sentence } from "../app/words.ts";
 import { sendOnEnter } from "../components/MentionBox.tsx";
@@ -340,7 +340,7 @@ function ProposalBox({
 			onSent(filed.taskId);
 		} catch (error) {
 			setRefusal(
-				codeOf(error) ? saidAll(error) : sentence((error as Error).message),
+				codeOf(error) ? saidAll(error) : daemonSaid(error, "refuseCommand"),
 			);
 		} finally {
 			setBusy(false);

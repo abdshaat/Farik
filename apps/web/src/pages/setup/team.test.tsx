@@ -769,6 +769,15 @@ describe("team setup", () => {
 		await s.fail(await sent(s, "criteria.save"), -32602, RAW);
 		expect(await screen.findByText(en.refuseOther)).toBeTruthy();
 		expect(screen.queryByText(/does not match/)).toBeNull();
+
+		// Rules typed as text that do not parse are said plainly, not by the parser.
+		fireEvent.click(screen.getByRole("button", { name: en.editAsText }));
+		fireEvent.change(screen.getByLabelText(en.rulesText), {
+			target: { value: "{ not json" },
+		});
+		fireEvent.click(screen.getByRole("button", { name: en.rulesTextUse }));
+		expect(await screen.findByText(en.rulesTextWrong)).toBeTruthy();
+		expect(screen.queryByText(/JSON|position|token/)).toBeNull();
 		cleanup();
 
 		const scan = await renderApp("/setup/scan");
