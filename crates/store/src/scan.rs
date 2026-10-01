@@ -551,7 +551,7 @@ impl Reading {
             toolchain,
             is_workspace,
             packages: packages_in(tracked),
-            tests: tests_in(tracked, manifest.as_ref()),
+            tests: tests_in(toolchain, tracked, manifest.as_ref()),
             scripts: scripts_in(manifest.as_ref()),
         })
     }
@@ -673,7 +673,16 @@ fn packages_in(tracked: &[String]) -> usize {
 }
 
 /// The test runner a tree names, by a configuration file of its own or by a dependency.
-fn tests_in(tracked: &[String], manifest: Option<&Value>) -> Option<&'static str> {
+/// A toolchain that runs its own tests, `cargo test` or `go test`, is the runner already: a Rust
+/// workspace with a web app in it does not test with the web app's runner, so none is named.
+fn tests_in(
+    toolchain: Option<&Toolchain>,
+    tracked: &[String],
+    manifest: Option<&Value>,
+) -> Option<&'static str> {
+    if toolchain.is_some_and(|toolchain| ["cargo", "go"].contains(&toolchain.name)) {
+        return None;
+    }
     // The runner's own file, not a file that mentions it: `vitest.config.ts` says the project tests
     // with vitest, and `jest-to-vitest-migration.md` says somebody wrote about it.
     let named = |needle: &str| {
@@ -921,28 +930,53 @@ mod tests {
     #[test]
     fn names_the_test_runner_a_project_configures_or_depends_on() {
         assert_eq!(
-            tests_in(&strings(&["vitest.config.ts"]), None),
+            tests_in(None, &strings(&["vitest.config.ts"]), None),
             Some("vitest")
         );
-        assert_eq!(tests_in(&strings(&["tests/test_it.py"]), None), None);
+        assert_eq!(tests_in(None, &strings(&["tests/test_it.py"]), None), None);
         assert_eq!(
-            tests_in(&strings(&["packages/ui/vitest.config.ts"]), None),
+            tests_in(None, &strings(&["packages/ui/vitest.config.ts"]), None),
             Some("vitest"),
             "a package's own configuration counts wherever it sits"
         );
         assert_eq!(
-            tests_in(&strings(&["docs/jest-to-vitest-migration.md"]), None),
+            tests_in(None, &strings(&["docs/jest-to-vitest-migration.md"]), None),
             None,
             "and a file that writes about a runner is not a project that uses one"
         );
         assert_eq!(
-            tests_in(&strings(&["bin/pytest"]), None),
+            tests_in(None, &strings(&["bin/pytest"]), None),
             Some("pytest"),
             "a committed wrapper script is named for its runner and carries no extension"
         );
         let manifest = json!({ "devDependencies": { "jest": "^30.0.0" } });
-        assert_eq!(tests_in(&[], Some(&manifest)), Some("jest"));
-        assert_eq!(tests_in(&[], None), None);
+        assert_eq!(tests_in(None, &[], Some(&manifest)), Some("jest"));
+        assert_eq!(tests_in(None, &[], None), None);
+        // A Rust workspace with a web app tests with cargo, not its front end's runner.
+        assert_eq!(
+            tests_in(
+                Some(toolchain("cargo")),
+                &strings(&["Cargo.lock", "apps/web/vitest.config.ts"]),
+                None
+            ),
+            None
+        );
+        assert_eq!(
+            tests_in(
+                Some(toolchain("go")),
+                &strings(&["go.sum", "web/vitest.config.ts"]),
+                None
+            ),
+            None
+        );
+        assert_eq!(
+            tests_in(
+                Some(toolchain("pnpm")),
+                &strings(&["vitest.config.ts"]),
+                None
+            ),
+            Some("vitest")
+        );
     }
 
     #[test]
