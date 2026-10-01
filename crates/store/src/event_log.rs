@@ -499,6 +499,54 @@ mod tests {
         open_event_log(Path::new(IN_MEMORY), at(9)).expect("a log in memory opens")
     }
 
+    /// SQLite's plan for `query`, one line per step.
+    fn plan_of(log: &EventLog, query: &EventQuery) -> String {
+        let (sql, parameters) = super::statement_of(query);
+        let connection = log.connection();
+        let mut statement = connection
+            .prepare(&format!("EXPLAIN QUERY PLAN {sql}"))
+            .expect("the plan prepares");
+        statement
+            .query_map(rusqlite::params_from_iter(parameters), |row| {
+                row.get::<_, String>(3)
+            })
+            .expect("the plan reads")
+            .map(|step| step.expect("a step"))
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    #[test]
+    fn reads_one_agents_events_of_one_kind_by_its_own_index() {
+        // Every tick asks each agent for its newest chat messages and its sessions since: each is
+        // a walk over that agent's rows of that kind, not over the project's rows of the kind.
+        let log = a_log();
+        let mira = Some("mira".to_string());
+        for query in [
+            EventQuery {
+                agent_id: mira.clone(),
+                kinds: vec![EventKind::ChatMessagePosted],
+                newest_first: true,
+                before_seq: Some(40),
+                limit: Some(8),
+                ..EventQuery::default()
+            },
+            EventQuery {
+                agent_id: mira.clone(),
+                kinds: vec![EventKind::SessionStarted],
+                after_seq: Some(7),
+                ..EventQuery::default()
+            },
+        ] {
+            let plan = plan_of(&log, &query);
+            assert!(
+                plan.contains("USING INDEX events_by_agent_and_kind (agent_id=? AND kind=?"),
+                "{plan}"
+            );
+            assert!(!plan.contains("TEMP B-TREE"), "no sort: {plan}");
+        }
+    }
+
     #[test]
     fn refuses_the_one_kind_its_fixture_names_and_takes_the_rest() {
         let log = a_log();

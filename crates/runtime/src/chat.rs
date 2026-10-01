@@ -177,8 +177,8 @@ pub fn chat_page(
 /// not retried, since its `in_reply_to` answers the message it was started for.
 ///
 /// Every tick asks this of every agent, so it reads back from the newest message alone, by the
-/// log's index on the agent: a session that answers the newest message started after it, so only
-/// the sessions since are read.
+/// log's index on the agent and the kind: a session that answers the newest message started after
+/// it, so only the sessions since are read.
 ///
 /// # Errors
 ///
