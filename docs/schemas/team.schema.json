@@ -343,6 +343,10 @@
           "default": 8000,
           "description": "How long each agent's notebook, .farik/agents/<id>/memory.md, may be, in tokens counted as a quarter of its characters; a longer write is refused (spec 5.8). Left out, 8000."
         },
+        "plan_in_sprints": {
+          "type": "boolean",
+          "description": "Whether the team plans its work in sprints (ADR 0028): ready tasks wait in the Backlog until a sprint plans them, and no task is assigned outside the open sprint. Left out, false, so a team file written before the key works as it did; setup and farik init write true."
+        },
         "judgment": {
           "$ref": "#/$defs/judgment"
         },

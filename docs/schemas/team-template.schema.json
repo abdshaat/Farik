@@ -103,9 +103,13 @@
         },
         "integration": {
           "$ref": "#/$defs/integration"
+        },
+        "plan_in_sprints": {
+          "type": "boolean",
+          "description": "Whether the team plans its work in sprints (ADR 0028). Left out, applying the template keeps the project's answer, and setup from it plans in sprints."
         }
       },
-      "description": "Three of the four answers setup asks: what the agents may do, the plan check, and what happens to accepted work."
+      "description": "Three of the four answers setup asks: what the agents may do, the plan check, and what happens to accepted work; and whether the team plans in sprints."
     },
     "templateBudgets": {
       "type": "object",

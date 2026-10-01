@@ -13,7 +13,7 @@ use farik_core::criteria::validate_criteria;
 use farik_core::governor::gates::DesignerBrowser;
 use farik_core::governor::paths::{PathRefusal, check_protected_paths};
 use farik_core::team::{
-    Agent, MODEL_FAMILIES, Team, ValidationError, describe_change, validate_team,
+    Agent, MODEL_FAMILIES, SprintWork, Team, ValidationError, describe_change, validate_team,
 };
 use farik_protocol::command::{Command, CommandReply};
 use farik_protocol::event::{EventBody, new_event};
@@ -86,7 +86,8 @@ pub(super) fn query(deps: &ToolDeps, name: &str, params: &Value) -> Result<Value
                 Ok((before, after)) => {
                     let mut answer = effective(deps, &after)?;
                     answer["errors"] = json!([]);
-                    answer["effects"] = json!(describe_change(&before, &after));
+                    answer["effects"] =
+                        json!(describe_change(&before, &after, &SprintWork::default()));
                     Ok(answer)
                 }
                 Err(Refused::Errors(errors)) => {

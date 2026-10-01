@@ -123,8 +123,8 @@ fn team_wire(template: &TeamTemplate) -> Value {
 }
 
 /// The template of a team: its agents that are not retired, without status, grants, revokes,
-/// preauthorized tools, connectors or an uploaded picture; its permissions, plan check and
-/// integration written out; its daily limit. The name is trimmed.
+/// preauthorized tools, connectors or an uploaded picture; its permissions, plan check,
+/// integration and whether it plans in sprints written out; its daily limit. The name is trimmed.
 ///
 /// # Errors
 ///
@@ -166,6 +166,7 @@ pub fn template_from_team(
             "permissions": team.permissions(),
             "judgment": team.policy.judgment.clone().unwrap_or_default(),
             "integration": team.policy.integration,
+            "plan_in_sprints": team.plans_in_sprints(),
         },
         "budgets": budgets,
     }))
@@ -201,7 +202,8 @@ pub struct TemplateApplied {
 ///   of the `suggested` agent of its role (`team.propose`'s) for each the template leaves out; its
 ///   id takes `-2`, `-3`… when an agent left in the file holds it.
 /// - The team takes the template's permissions, plan check, integration and daily limit (none
-///   clears it); everything else is the project's. Agents already retired are left as they are.
+///   clears it), and whether it plans in sprints when the template says (none keeps the
+///   project's); everything else is the project's. Agents already retired are left as they are.
 ///
 /// The result is held to `validate_team`, whose errors come back in `errors` beside the lists:
 /// a kept match that is paused can leave a required role with no active agent.
@@ -267,6 +269,9 @@ pub fn apply_template(
     team.policy.permissions = Some(template.policy.permissions.clone());
     team.policy.judgment = Some(template.policy.judgment.clone());
     team.policy.integration = template.policy.integration;
+    if let Some(plan_in_sprints) = template.policy.plan_in_sprints {
+        team.policy.plan_in_sprints = Some(plan_in_sprints);
+    }
     team.budgets.daily_usd = template.budgets.daily_usd;
     let errors = serde_json::to_value(&team)
         .map_err(|error| {
@@ -431,7 +436,8 @@ mod tests {
                         ],
                         "judge": "auto"
                     },
-                    "integration": "manual"
+                    "integration": "manual",
+                    "plan_in_sprints": false
                 },
                 "budgets": { "daily_usd": 20.0 }
             })
@@ -457,7 +463,7 @@ mod tests {
         );
         assert_eq!(
             keys(&template["policy"]),
-            ["integration", "judgment", "permissions"]
+            ["integration", "judgment", "permissions", "plan_in_sprints"]
                 .map(str::to_string)
                 .into(),
             "no integration branch or other policy key"
@@ -1036,6 +1042,30 @@ mod tests {
             expected,
             "the four answers are the template's; rules, name and every other key the project's"
         );
+    }
+
+    #[test]
+    fn carries_the_policy_in_a_template() {
+        let mut wire = a_team_wire();
+        wire["policy"]["plan_in_sprints"] = json!(true);
+        assert_eq!(template_of(&wire)["policy"]["plan_in_sprints"], json!(true));
+
+        let without = a_template_wire();
+        assert!(without["policy"].get("plan_in_sprints").is_none());
+        validate_template(&without).expect("a template without the key is one");
+
+        let mut project = a_full_team_wire();
+        project["policy"]["plan_in_sprints"] = json!(true);
+        let mut template = template_with(&[
+            joining("ada", "Ada", "product_manager"),
+            joining("linus", "Linus", "software_developer"),
+        ]);
+        assert!(
+            applied(&project, &template, &[]).team.plans_in_sprints(),
+            "the key absent keeps the project's"
+        );
+        template["policy"]["plan_in_sprints"] = json!(false);
+        assert!(!applied(&project, &template, &[]).team.plans_in_sprints());
     }
 
     #[test]

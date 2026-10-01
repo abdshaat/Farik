@@ -158,7 +158,7 @@ Files and produces: as the file map and Interfaces say.
 
 `defaults()` stays without the key in this task; Task 3 turns it on.
 
-- [ ] `feat(core): let a team plan its work in sprints, holding ready tasks in a backlog`
+- [x] `feat(core): let a team plan its work in sprints, holding ready tasks in a backlog`
 
 ### Task 3: The orchestrator holds work and plans the Backlog (`farik-runtime`, `farik-cli`)
 

@@ -7,7 +7,8 @@ use std::sync::Arc;
 
 use farik_core::contract::TaskStatus;
 use farik_core::team::{
-    AgentStatus, Team, TemplateApplied, apply_template, describe_change, template_from_team,
+    AgentStatus, SprintWork, Team, TemplateApplied, apply_template, describe_change,
+    template_from_team,
 };
 use serde_json::{Value, json};
 
@@ -160,7 +161,11 @@ fn answer(
             )),
         }
     }
-    effects.extend(describe_change(before, &applied.team));
+    effects.extend(describe_change(
+        before,
+        &applied.team,
+        &SprintWork::default(),
+    ));
     Ok(json!({
         "team": applied.team,
         "kept": applied.kept,

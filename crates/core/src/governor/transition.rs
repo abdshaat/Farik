@@ -750,6 +750,7 @@ mod tests {
             open_sprint: None,
             task_sprint: None,
             parent_sprint: None,
+            plan_in_sprints: false,
             dependencies: Vec::new(),
             designer_browser: DesignerBrowser::Ready,
         }

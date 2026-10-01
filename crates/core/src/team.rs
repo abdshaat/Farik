@@ -28,7 +28,7 @@ mod describe;
 mod template;
 
 pub use defaults::{SMALL_ENOUGH_QUESTION, TeamDefaults, defaults};
-pub use describe::{MODEL_FAMILIES, describe_change};
+pub use describe::{MODEL_FAMILIES, SprintWork, describe_change};
 pub use template::{
     TeamTemplate, TemplateAgent, TemplateApplied, apply_template, template_from_team,
     template_slug, validate_template,
@@ -317,6 +317,13 @@ impl Team {
                 .find(|role| self.has_active(*role))
                 .unwrap_or(Role::ProductManager),
         }
+    }
+
+    /// Whether the team plans its work in sprints (ADR 0028): its `policy.plan_in_sprints`, off
+    /// when left out, so no team file written before the key changes how it works.
+    #[must_use]
+    pub fn plans_in_sprints(&self) -> bool {
+        self.policy.plan_in_sprints == Some(true)
     }
 
     /// The team's answers to what its agents may do: its `policy.permissions`, or the defaults.
@@ -1004,6 +1011,16 @@ mod tests {
                 "{pointer} = {value}: {paths:?}"
             );
         }
+    }
+
+    #[test]
+    fn reads_an_absent_policy_as_off() {
+        let mut wire = a_team_wire();
+        assert!(!team(&wire).plans_in_sprints());
+        wire["policy"]["plan_in_sprints"] = json!(true);
+        assert!(team(&wire).plans_in_sprints());
+        wire["policy"]["plan_in_sprints"] = json!("yes");
+        assert_eq!(paths(&wire), ["/policy/plan_in_sprints"]);
     }
 
     #[test]
