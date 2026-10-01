@@ -1,6 +1,6 @@
 # Phase 6, step 13: Chats
 
-Status: built 2026-09-30 (spec 0.34); landing review pending
+Status: done (landed and landing-reviewed 2026-09-30; one fix wave and a scoped re-review)
 Branch: `phase/6-web-ui`
 Spec: `docs/SPEC.md` sections 3, 4.3, 4.4, 5.1, 5.2, 5.5, 5.9, 8.2, 8.4, 8.5, F7, F8
 Depends on: steps 01 to 12 of this phase (renumbered from step 12 by the project plan's revision 23); ADR 0026 and `docs/design/designer-chats-templates.md` (section B), both binding
