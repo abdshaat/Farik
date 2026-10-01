@@ -891,6 +891,16 @@ describe("team page", () => {
 		});
 	});
 
+	it("reads_an_old_team_as_not_planning_in_sprints", async () => {
+		// TEAM has no plan_in_sprints, as a team file from before step 15; the default is on.
+		expect("plan_in_sprints" in TEAM.policy).toBe(false);
+		const { part } = await settings(TEAM);
+		const toggle = within(part(en.rulesPlanning)).getByRole("switch", {
+			name: en.planInSprints,
+		});
+		expect(toggle.getAttribute("aria-checked")).toBe("false");
+	});
+
 	it("switches_planning_in_sprints", async () => {
 		const on = { ...TEAM, policy: { ...TEAM.policy, plan_in_sprints: true } };
 		const { container, s, rules, part } = await settings(on);
