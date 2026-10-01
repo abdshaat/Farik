@@ -2880,6 +2880,7 @@ name = "xtask"
 version = "0.0.0"
 dependencies = [
  "anyhow",
+ "serde-saphyr",
  "serde_json",
 ]
 

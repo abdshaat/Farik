@@ -324,4 +324,37 @@ mod tests {
         }
         assert!(found.is_empty(), "{flag} is used in {found:?}");
     }
+
+    #[test]
+    fn every_workflow_is_valid_yaml() {
+        // GitHub rejects an invalid workflow without running a single step, so CI fails in 0 s.
+        let folder = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../.github/workflows");
+        let mut seen = 0;
+        for entry in std::fs::read_dir(&folder).expect("the folder is there") {
+            let path = entry.expect("an entry").path();
+            if path.extension().is_none_or(|extension| extension != "yml") {
+                continue;
+            }
+            seen += 1;
+            let text = std::fs::read_to_string(&path).expect("the workflow is readable");
+            let workflow: serde_json::Value = serde_saphyr::from_str(&text)
+                .unwrap_or_else(|error| panic!("{} is not valid YAML: {error}", path.display()));
+            assert!(
+                workflow.get("on").is_some(),
+                "{} has no `on`",
+                path.display()
+            );
+            let jobs = workflow["jobs"].as_object().expect("jobs is a mapping");
+            for (name, job) in jobs {
+                for step in job["steps"].as_array().into_iter().flatten() {
+                    assert!(
+                        step.is_object(),
+                        "{}: a step of job {name} is not a mapping: {step}",
+                        path.display()
+                    );
+                }
+            }
+        }
+        assert!(seen > 0, "no workflow found in {}", folder.display());
+    }
 }

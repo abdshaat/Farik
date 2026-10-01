@@ -32,7 +32,8 @@ jobs:
       - run: git --version
       - run: docker pull alpine:3.22
       # The Designer's browser, the Playwright connector's image, by the digest playwright.yaml pins.
-      - run: docker pull "$(sed -n 's/^image: //p' crates/roles/connectors/playwright.yaml)"
+      - run: |
+          docker pull "$(sed -n 's/^image: //p' crates/roles/connectors/playwright.yaml)"
       # The browser journey's Chromium, which Playwright downloads rather than finds on the runner.
       - run: pnpm install --frozen-lockfile
       - run: pnpm --filter @farik/web exec playwright install --with-deps chromium
