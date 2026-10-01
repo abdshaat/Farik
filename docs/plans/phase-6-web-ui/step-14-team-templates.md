@@ -5,7 +5,7 @@ Branch: `phase/6-web-ui`
 Spec: `docs/SPEC.md` sections 1 (the "one team" non-goal), 3 (team), 4.1 (three starts), 4.4, 8.4 (the state folder), F1
 Depends on: steps 01 to 13 of this phase (step 06's team setup, step 11's `ui_ux_designer` role, step 12's per-agent connectors, step 13's chats; renumbered from step 13 by the project plan's revision 23)
 Readiness confirmed by: fresh-session reviewer, 2026-09-30, ready with findings, folded in
-Mockups approved by: (pending; Task 1's gate)
+Mockups approved by: auto-approved 2026-09-30 under the founder's standing instruction of that night ("auto approve the design, we can refine it later"), not reviewed by the founder; on the canvas's "Team templates" page (version 1790822068-6ce7) for the founder's later review. Wording the mockups add, which binds Task 6: "Replace" in the `template_exists` state, a templates-specific refusal sentence, "Delete it" / "Keep it", and the folder `~/.config/farik/templates` named in Settings
 
 Signatures, not bodies; test names and what each asserts, not test code; around 300 lines at most (ADR 0008).
 
@@ -151,7 +151,7 @@ Files: created `docs/design/mockups/{SetupTeamStarts,SaveTemplate,UseTemplate,Ph
 - `SavedTeams`: Settings' section, each saved team with its faces, Rename (inline) and Delete (confirm), an unreadable file's row with Delete only, and the no-state-folder line.
 Colours from `@farik/brand`'s tokens only, muted and light, one colour per job (`docs/brand/brand.md`). No test; the gate is the founder's approval, recorded in this plan's header in the same commit.
 
-- [ ] `docs(design): mock up team templates for the founder's approval`
+- [x] `docs(design): mock up team templates for the founder's approval`
 
 ### Task 2: The template format (`farik-core`)
 
