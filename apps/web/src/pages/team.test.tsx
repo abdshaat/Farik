@@ -402,13 +402,13 @@ describe("team page", () => {
 		await expectNoAxeViolations(container);
 
 		fireEvent.click(screen.getByRole("radio", { name: /^Quick/ }));
-		const checked = await validated(s, ["Theo now thinks with low effort."]);
+		const checked = await validated(s, ["Theo now works quickly."]);
 		expect(one(checked, "theo").model).toEqual({
 			id: "claude-opus-5-5",
 			effort: "low",
 		});
 		expect(
-			await screen.findByText("Theo now thinks with low effort."),
+			await screen.findByText("Theo now works quickly."),
 		).toBeTruthy();
 		expect(s.calls("team.save")).toHaveLength(0);
 
@@ -425,7 +425,7 @@ describe("team page", () => {
 			name: "Kai, your Marketing Specialist",
 		});
 		fireEvent.click(screen.getByRole("radio", { name: /^Quick/ }));
-		const checked = await validated(s, ["Kai now thinks with low effort."]);
+		const checked = await validated(s, ["Kai now works quickly."]);
 		expect(one(checked, "kai").model).toEqual({ effort: "low" });
 	});
 

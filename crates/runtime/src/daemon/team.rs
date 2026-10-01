@@ -12,7 +12,9 @@ use farik_core::contract::Role;
 use farik_core::criteria::validate_criteria;
 use farik_core::governor::gates::DesignerBrowser;
 use farik_core::governor::paths::{PathRefusal, check_protected_paths};
-use farik_core::team::{Agent, Team, ValidationError, describe_change, validate_team};
+use farik_core::team::{
+    Agent, MODEL_FAMILIES, Team, ValidationError, describe_change, validate_team,
+};
 use farik_protocol::command::{Command, CommandReply};
 use farik_protocol::event::{EventBody, new_event};
 use farik_protocol::generated::event::{CriteriaUpdatedBody, TeamUpdatedBody};
@@ -61,14 +63,6 @@ const SIX: [(&str, Role, &str); 6] = [
     ("Theo", Role::SoftwareDeveloper, "developer"),
     ("Iris", Role::UiUxDesigner, "extra-1"),
     ("Kai", Role::MarketingSpecialist, "marketing-specialist"),
-];
-
-/// Each model family a person may choose, as its ids start, and the words they read for it.
-const FAMILIES: [(&str, &str); 4] = [
-    ("claude-fable-", "Most capable model"),
-    ("claude-opus-", "Strongest model, thinks hard"),
-    ("claude-sonnet-", "Everyday model"),
-    ("claude-haiku-", "Quick model"),
 ];
 
 pub(super) fn internal(error: &dyn Display) -> Failure {
@@ -239,9 +233,9 @@ fn models(deps: &ToolDeps) -> Result<Value, Failure> {
 /// model as its alias, so it is passed over.
 fn newest(deps: &ToolDeps) -> Result<Vec<(String, &'static str)>, Failure> {
     let prices = deps.files.effective_prices().map_err(|e| internal(&e))?;
-    Ok(FAMILIES
+    Ok(MODEL_FAMILIES
         .iter()
-        .filter_map(|(prefix, label)| {
+        .filter_map(|(prefix, label, _)| {
             prices
                 .prices
                 .keys()
@@ -262,9 +256,12 @@ fn newest(deps: &ToolDeps) -> Result<Vec<(String, &'static str)>, Failure> {
 /// The words for `id`: its family's, marked older when a newer one of the family is priced, or
 /// the id itself when no family Farik names it.
 fn model_label(id: &str, newest: &[(String, &str)]) -> String {
-    match FAMILIES.iter().find(|(prefix, _)| id.starts_with(prefix)) {
-        Some((_, label)) if newest.iter().any(|(new, _)| new == id) => (*label).to_string(),
-        Some((_, label)) => format!("{label} (older)"),
+    match MODEL_FAMILIES
+        .iter()
+        .find(|(prefix, _, _)| id.starts_with(prefix))
+    {
+        Some((_, label, _)) if newest.iter().any(|(new, _)| new == id) => (*label).to_string(),
+        Some((_, label, _)) => format!("{label} (older)"),
         None => id.to_string(),
     }
 }
@@ -1003,7 +1000,10 @@ pub(super) mod tests {
             json!({ "errors": checked["errors"], "effects": checked["effects"] }),
             json!({
                 "errors": [],
-                "effects": ["dev-a now uses claude-opus-5.", "dev-a now thinks with low effort."],
+                "effects": [
+                    "dev-a's model changes from the role's model to the strongest model.",
+                    "dev-a now works quickly.",
+                ],
             })
         );
         let mut without_pm = before.clone();

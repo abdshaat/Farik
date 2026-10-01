@@ -1,7 +1,7 @@
 //! Each effect of a change to a team in plain words (`docs/SPEC.md` section 10), shown before the
 //! change is saved.
 
-use super::{Agent, Integration, JudgeChoice, JudgmentRequired, Team};
+use super::{Agent, Effort, Integration, JudgeChoice, JudgmentRequired, Team};
 use crate::governor::permissions::PermissionTier;
 
 /// One sentence per effect of changing `old` into `new`, in the order: each agent's model, effort
@@ -19,18 +19,7 @@ pub fn describe_change(old: &Team, new: &Team) -> Vec<String> {
             continue;
         };
         let name = agent.display_name.as_str();
-        if model(before) != model(agent) {
-            said.push(match model(agent) {
-                Some(id) => format!("{name} now uses {id}."),
-                None => format!("{name} now uses the role's model."),
-            });
-        }
-        if effort(before) != effort(agent) {
-            said.push(match effort(agent) {
-                Some(effort) => format!("{name} now thinks with {effort} effort."),
-                None => format!("{name} now thinks with the role's effort."),
-            });
-        }
+        said.extend(model_change(name, before, agent));
         let (was, is) = (before.tiers(&permissions), agent.tiers(&permissions));
         for tier in is.iter().filter(|tier| !was.contains(tier)) {
             said.push(format!("{name} may now {}.", may(*tier)));
@@ -110,6 +99,30 @@ pub fn describe_change(old: &Team, new: &Team) -> Vec<String> {
     said
 }
 
+/// The model and effort lines of `name`, which was `before` and is `agent`, in the Team cards'
+/// words.
+fn model_change(name: &str, before: &Agent, agent: &Agent) -> Vec<String> {
+    let mut said = Vec::new();
+    let (was, is) = (model(before), model(agent));
+    if was != is {
+        let (from, to) = (model_words(was.as_deref()), model_words(is.as_deref()));
+        said.push(if from == to {
+            format!("{name} moves to another version of {to}.")
+        } else {
+            format!("{name}'s model changes from {from} to {to}.")
+        });
+    }
+    if effort(before) != effort(agent) {
+        said.push(match effort(agent) {
+            Some(Effort::Low) => format!("{name} now works quickly."),
+            Some(Effort::Medium) => format!("{name} now works in a balanced way."),
+            Some(Effort::High) => format!("{name} now works carefully."),
+            None => format!("{name} now works as its role usually does."),
+        });
+    }
+    said
+}
+
 fn model(agent: &Agent) -> Option<String> {
     agent
         .model
@@ -118,12 +131,37 @@ fn model(agent: &Agent) -> Option<String> {
         .map(|id| id.as_str().to_string())
 }
 
-fn effort(agent: &Agent) -> Option<String> {
-    agent
-        .model
-        .as_ref()
-        .and_then(|model| model.effort)
-        .map(|effort| effort.to_string())
+fn effort(agent: &Agent) -> Option<Effort> {
+    agent.model.as_ref().and_then(|model| model.effort)
+}
+
+/// Each model family a person may choose, as its ids start, the words its card shows, and the
+/// words a sentence names it by.
+pub const MODEL_FAMILIES: [(&str, &str, &str); 4] = [
+    (
+        "claude-fable-",
+        "Most capable model",
+        "the most capable model",
+    ),
+    (
+        "claude-opus-",
+        "Strongest model, thinks hard",
+        "the strongest model",
+    ),
+    ("claude-sonnet-", "Everyday model", "the everyday model"),
+    ("claude-haiku-", "Quick model", "the quick model"),
+];
+
+/// The words a sentence names the model `id` by: its family's, the role's when there is none, or
+/// the id itself when no family Farik names it.
+fn model_words(id: Option<&str>) -> &str {
+    let Some(id) = id else {
+        return "the role's model";
+    };
+    MODEL_FAMILIES
+        .iter()
+        .find(|(prefix, _, _)| id.starts_with(prefix))
+        .map_or(id, |(_, _, words)| words)
 }
 
 /// What a tier lets an agent do, after "may".
@@ -157,9 +195,32 @@ mod tests {
         let mut new = a_team_wire();
         new["agents"][1]["model"] = json!({ "effort": "low" });
         let new = validate_team(&new).expect("an effort without a model is a team");
+        assert_eq!(describe_change(&old, &new), ["linus now works quickly."]);
+    }
+
+    #[test]
+    fn names_models_in_the_words_the_page_uses() {
+        let mut old = a_team_wire();
+        old["agents"][0]["model"] = json!({ "id": "claude-opus-5", "effort": "high" });
+        old["agents"][1]["model"] = json!({ "id": "claude-haiku-4-5" });
+        let old = team(&old);
+        let mut new = serde_json::to_value(&old).expect("a team is JSON");
+        new["agents"][0]["model"] = json!({ "id": "claude-opus-5-5", "effort": "medium" });
+        new["agents"][1]["model"] = json!({ "id": "local-model" });
         assert_eq!(
-            describe_change(&old, &new),
-            ["linus now thinks with low effort."]
+            describe_change(&old, &team(&new)),
+            [
+                "ada moves to another version of the strongest model.",
+                "ada now works in a balanced way.",
+                "linus's model changes from the quick model to local-model.",
+            ],
+            "a model of no family Farik names keeps its id"
+        );
+        let mut fable = serde_json::to_value(&old).expect("a team is JSON");
+        fable["agents"][0]["model"] = json!({ "id": "claude-fable-5", "effort": "high" });
+        assert_eq!(
+            describe_change(&old, &team(&fable)),
+            ["ada's model changes from the strongest model to the most capable model."]
         );
     }
 
@@ -188,8 +249,8 @@ mod tests {
             describe_change(&old, &new),
             [
                 "Ada may no longer use the internet.",
-                "Linus now uses claude-sonnet-5.",
-                "Linus now thinks with high effort.",
+                "Linus's model changes from the role's model to the everyday model.",
+                "Linus now works carefully.",
                 "Linus may now use the internet.",
                 "The team may spend up to $10 a day.",
                 "Finished work is merged on its own.",
@@ -221,7 +282,7 @@ mod tests {
             describe_change(&new, &back),
             [
                 "Ada may now use the internet.",
-                "Linus now thinks with the role's effort.",
+                "Linus now works as its role usually does.",
                 "The team may spend up to $20.50 a day.",
                 "Finished work opens a pull request for you.",
                 "Developers and Architects may run commands.",
@@ -246,7 +307,7 @@ mod tests {
         assert_eq!(
             describe_change(&back, &cleared),
             [
-                "Linus now uses the role's model.",
+                "Linus's model changes from the everyday model to the role's model.",
                 "The team has no daily spending limit.",
                 "Finished work waits for you to merge it.",
                 "Every plan is checked before work starts.",

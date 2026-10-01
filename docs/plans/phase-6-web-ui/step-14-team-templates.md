@@ -283,6 +283,8 @@ Fix wave (I1, M4): setup holds an unavailable agent off by role: `unavailableRol
 
 Fix wave (u3): the Wizard's lead is `teamLead` (or `teamLeadScratch`) whatever the start, and `teamLeadSaved` ("Filled from <name>…") is a paragraph after the starts and before the rows; `starts_from_a_saved_team` asserts that document order.
 
+Fix wave (re-review I1): `describe_change` names models in the Team cards' words, from `MODEL_FAMILIES`, which moved from the daemon to `farik-core` with a third column for sentences: "<Name>'s model changes from the strongest model to the everyday model.", "<Name> moves to another version of the strongest model." within a family, the role's model when there is none, and the id only for a model no family names; effort as "<Name> now works quickly / in a balanced way / carefully / as its role usually does." Asserted in `names_models_in_the_words_the_page_uses` and the updated `describes_each_change_in_words`, `previews_without_writing` and `validates_with_effects_and_saves`.
+
 ## Verification
 
 ```

@@ -484,8 +484,8 @@ mod tests {
         assert_eq!(
             shown["effects"],
             json!([
-                "Ada now uses claude-sonnet-5.",
-                "Ada now thinks with low effort.",
+                "Ada's model changes from the role's model to the everyday model.",
+                "Ada now works quickly.",
                 "The team has no daily spending limit.",
                 "Finished work opens a pull request for you.",
                 "Developers and Architects may no longer run commands.",
