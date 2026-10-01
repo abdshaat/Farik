@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Saved teams in Settings</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&amp;family=Silkscreen&amp;family=Space+Grotesk:wght@400;500;600&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0;font-family:'Space Grotesk',system-ui,sans-serif;background:#F3E7D3;color:#161616}
+a{color:#161616;text-decoration:underline;text-underline-offset:3px}a:hover{color:#5B5347}
+.px{image-rendering:pixelated}
+button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible,summary:focus-visible{outline:2px solid #5F7A9B;outline-offset:2px}
+</style>
+</helmet>
+<div style="width: 1440px; background: #F3E7D3; color: #161616;">
+<p style="margin: 0; padding: 14px 24px; font-family: 'JetBrains Mono', monospace; font-size: 13px; line-height: 20px; color: #5B5347; background: #F3E7D3; border-top: 1px solid #161616;">1. Settings, “Saved teams”: a row, a row being renamed, a row asking to confirm a delete, and a file Farik cannot read</p>
+<div style="width: 1440px; height: 960px; display: flex; background: #F3E7D3; overflow: hidden;">
+<nav aria-label="Main" style="width: 88px; flex-shrink: 0; background: #161616; display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 20px 0; box-sizing: border-box;">
+<img class="px" src="/_blob/cbf211abf5739b5bb073797fe4fb08fc" alt="Farik" style="width: 48px; height: 48px; margin-bottom: 16px;">
+<a href="Main.dc.html" style="width: 72px; min-height: 44px; padding: 10px 0; display: flex; flex-direction: column; align-items: center; gap: 4px; text-decoration: none; font-size: 12px; color: #B9AE9C;">
+<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="4"></circle><path d="M12 2v2M12 20v2M2 12h2M20 12h2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"></path></svg>Today</a>
+<a href="Board.dc.html" style="width: 72px; min-height: 44px; padding: 10px 0; display: flex; flex-direction: column; align-items: center; gap: 4px; text-decoration: none; font-size: 12px; color: #B9AE9C;">
+<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="3" y="4" width="5" height="16"></rect><rect x="10" y="4" width="5" height="10"></rect><rect x="17" y="4" width="4" height="13"></rect></svg>Board</a>
+<a href="Chats.dc.html" style="width: 72px; min-height: 44px; padding: 10px 0; display: flex; flex-direction: column; align-items: center; gap: 4px; text-decoration: none; font-size: 12px; color: #B9AE9C;">
+<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 5h16v11H9l-5 4z"></path></svg>Chats</a>
+<a href="Team.dc.html" style="width: 72px; min-height: 44px; padding: 10px 0; display: flex; flex-direction: column; align-items: center; gap: 4px; text-decoration: none; font-size: 12px; color: #B9AE9C;">
+<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="9" cy="8" r="3"></circle><circle cx="17" cy="9" r="2.5"></circle><path d="M3 20c0-3.3 2.7-6 6-6s6 2.7 6 6M15 20c0-2.2 1.3-4.2 3.5-4.8"></path></svg>Team</a>
+<a href="Costs.dc.html" style="width: 72px; min-height: 44px; padding: 10px 0; display: flex; flex-direction: column; align-items: center; gap: 4px; text-decoration: none; font-size: 12px; color: #B9AE9C;">
+<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><path d="M15 9.5c-.5-1-1.6-1.5-3-1.5-1.7 0-3 .8-3 2s1.3 1.7 3 2 3 .8 3 2-1.3 2-3 2c-1.4 0-2.5-.5-3-1.5M12 6v2M12 16v2"></path></svg>Costs</a>
+<div style="flex-grow: 1;"></div>
+<a href="Settings.dc.html" aria-current="page" style="width: 72px; min-height: 44px; padding: 10px 0; display: flex; flex-direction: column; align-items: center; gap: 4px; text-decoration: none; font-size: 12px; color: #F3E7D3; background: #2A2A2A; border-radius: 4px;">
+<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="3"></circle><path d="M12 2v3M12 19v3M2 12h3M19 12h3M5 5l2 2M17 17l2 2M5 19l2-2M17 7l2-2"></path></svg>Settings</a>
+</nav>
+<main style="flex-grow: 1; min-width: 0; padding: 32px 48px; display: flex; flex-direction: column; gap: 24px; box-sizing: border-box;">
+<h1 style="margin: 0; font-size: 24px; line-height: 30px; font-weight: 600;">Settings</h1>
+<p style="margin: 0; font-family: 'JetBrains Mono', monospace; font-size: 13px; color: #5B5347; border: 1px dashed #8A7F6E; padding: 12px 16px; max-width: 868px;">Theme, Advanced settings, Your team’s rules and Farik on this computer, as before</p>
+<section aria-labelledby="saved-h" style="display: flex; flex-direction: column; gap: 10px; max-width: 900px;">
+<h2 id="saved-h" style="margin: 0; font-size: 20px; line-height: 28px; font-weight: 600;">Saved teams</h2>
+<p style="margin: 0; font-size: 16px; line-height: 24px; color: #5B5347;">Teams you saved from a Team page. Every project on this computer can start from them. Renaming or deleting one changes no project’s team.</p>
+<ul aria-label="Saved teams" style="list-style: none; margin: 0; padding: 0; border-top: 1px solid #161616;">
+<li style="display: flex; align-items: center; gap: 16px; padding: 14px 0; border-bottom: 1px solid #D9CBB3; flex-wrap: wrap;"><span style="display: flex; flex-direction: column; gap: 6px; min-width: 0; flex-grow: 1;"><span style="font-size: 17px; font-weight: 600;">My usual team</span><span style="display: flex; align-items: center; gap: 12px;"><span aria-hidden="true" style="display: flex; gap: 4px; flex-shrink: 0;"><img class="px" src="/_blob/9bb5279ccb2c1912098a3a1b2c486aee" alt="" style="width: 32px; height: 32px; border: 2px solid #C9A0A6; flex-shrink: 0; box-sizing: border-box;"><img class="px" src="/_blob/ad487f8d4aefebda16a64e156d704fdb" alt="" style="width: 32px; height: 32px; border: 2px solid #D6B77A; flex-shrink: 0; box-sizing: border-box;"><img class="px" src="/_blob/b3a8b1467a4f9ce051ca665a72525186" alt="" style="width: 32px; height: 32px; border: 2px solid #B7C7DA; flex-shrink: 0; box-sizing: border-box;"><img class="px" src="/_blob/d639a95a4e1c0d33f55ba49d10828138" alt="" style="width: 32px; height: 32px; border: 2px solid #B3A9CF; flex-shrink: 0; box-sizing: border-box;"><img class="px" src="/_blob/96fd70a6ba3c33c0c1f22ba8c032b059" alt="" style="width: 32px; height: 32px; border: 2px solid #CDB29C; flex-shrink: 0; box-sizing: border-box;"></span><span style="font-size: 14px; line-height: 20px; color: #5B5347;">Mira, Ada, Theo, Kai and Iris · saved 28 September 2026</span></span></span><span style="display: flex; gap: 8px;"><button type="button" style="font-family: inherit; font-size: 16px; font-weight: 600; background: #FBF6EC; color: #161616; border: 1px solid #8A7F6E; border-radius: 4px; padding: 0 18px; min-height: 44px; cursor: pointer;">Rename<span style="position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%);"> My usual team</span></button><button type="button" style="font-family: inherit; font-size: 16px; font-weight: 600; background: #FBF6EC; color: #161616; border: 1px solid #8A7F6E; border-radius: 4px; padding: 0 18px; min-height: 44px; cursor: pointer;">Delete<span style="position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%);"> My usual team</span></button></span></li>
+<li style="display: flex; align-items: center; gap: 16px; padding: 14px 0; border-bottom: 1px solid #D9CBB3; flex-wrap: wrap;"><span style="display: flex; flex-direction: column; gap: 6px; flex-grow: 1; min-width: 0;"><label for="rn" style="font-size: 15px; font-weight: 600;">New name for Small shop pair</label><span style="display: flex; gap: 8px; align-items: center;"><input id="rn" type="text" value="Shop pair" style="font-family: inherit; font-size: 16px; min-height: 44px; width: 360px; padding: 0 12px; border: 1px solid #8A7F6E; border-radius: 4px; background: #FFFFFF; color: #161616; box-sizing: border-box;"><button type="button" style="font-family: inherit; font-size: 16px; font-weight: 600; background: #D8896A; color: #161616; border: 0; border-radius: 4px; padding: 0 20px; min-height: 44px; cursor: pointer;">Save name</button><button type="button" style="font-family: inherit; font-size: 16px; font-weight: 600; background: #FBF6EC; color: #161616; border: 1px solid #8A7F6E; border-radius: 4px; padding: 0 18px; min-height: 44px; cursor: pointer;">Cancel</button></span><span style="display: flex; align-items: center; gap: 12px;"><span aria-hidden="true" style="display: flex; gap: 4px; flex-shrink: 0;"><img class="px" src="/_blob/9bb5279ccb2c1912098a3a1b2c486aee" alt="" style="width: 32px; height: 32px; border: 2px solid #C9A0A6; flex-shrink: 0; box-sizing: border-box;"><img class="px" src="/_blob/b3a8b1467a4f9ce051ca665a72525186" alt="" style="width: 32px; height: 32px; border: 2px solid #B7C7DA; flex-shrink: 0; box-sizing: border-box;"></span><span style="font-size: 14px; color: #5B5347;">Mira and Theo · saved 12 September 2026</span></span></span></li>
+<li style="display: flex; align-items: center; gap: 16px; padding: 14px 0; border-bottom: 1px solid #D9CBB3; flex-wrap: wrap;"><span style="display: flex; flex-direction: column; gap: 6px; min-width: 0; flex-grow: 1;"><span style="font-size: 17px; font-weight: 600;">Weekend launch crew</span><span style="display: flex; align-items: center; gap: 12px;"><span aria-hidden="true" style="display: flex; gap: 4px; flex-shrink: 0;"><img class="px" src="/_blob/9bb5279ccb2c1912098a3a1b2c486aee" alt="" style="width: 32px; height: 32px; border: 2px solid #C9A0A6; flex-shrink: 0; box-sizing: border-box;"><img class="px" src="/_blob/50d64e70d63028a36a09a3b10dd330bb" alt="" style="width: 32px; height: 32px; border: 2px solid #A3B8A0; flex-shrink: 0; box-sizing: border-box;"><img class="px" src="/_blob/b3a8b1467a4f9ce051ca665a72525186" alt="" style="width: 32px; height: 32px; border: 2px solid #B7C7DA; flex-shrink: 0; box-sizing: border-box;"><img class="px" src="/_blob/d639a95a4e1c0d33f55ba49d10828138" alt="" style="width: 32px; height: 32px; border: 2px solid #B3A9CF; flex-shrink: 0; box-sizing: border-box;"></span><span style="font-size: 14px; line-height: 20px; color: #5B5347;">Mira, Sol, Theo and Kai · saved 2 September 2026</span></span></span><div role="group" aria-labelledby="del-q" style="flex-basis: 100%; margin: 0; padding: 10px 14px; border-left: 3px solid #96533A; background: #FBF6EC; display: flex; align-items: center; gap: 12px; flex-wrap: wrap;"><span id="del-q" style="flex-basis: 100%; font-size: 15px; line-height: 22px;"><strong>Delete Weekend launch crew?</strong> Projects that started from it keep their teams. This cannot be undone.</span><button type="button" style="font-family: inherit; font-size: 16px; font-weight: 600; background: #FBF6EC; color: #161616; border: 1px solid #8A7F6E; border-radius: 4px; padding: 0 18px; min-height: 44px; cursor: pointer;">Delete it</button><button type="button" style="font-family: inherit; font-size: 16px; font-weight: 600; background: #FBF6EC; color: #161616; border: 1px solid #8A7F6E; border-radius: 4px; padding: 0 18px; min-height: 44px; cursor: pointer;">Keep it</button></div></li>
+<li style="display: flex; align-items: center; gap: 16px; padding: 14px 0; border-bottom: 1px solid #D9CBB3; flex-wrap: wrap;"><span style="display: flex; flex-direction: column; gap: 4px; flex-grow: 1; min-width: 0;"><span style="font-family: 'JetBrains Mono', monospace; font-size: 15px; font-weight: 600;">old-team</span><span style="font-size: 15px; line-height: 22px; font-weight: 600;">This saved team cannot be read. Delete it, or fix the file by hand.</span></span><button type="button" style="font-family: inherit; font-size: 16px; font-weight: 600; background: #FBF6EC; color: #161616; border: 1px solid #8A7F6E; border-radius: 4px; padding: 0 18px; min-height: 44px; cursor: pointer;">Delete<span style="position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%);"> old-team</span></button></li>
+</ul>
+<p style="margin: 0; font-size: 14px; line-height: 20px; color: #5B5347;">Kept on this computer, in <span style="font-family: 'JetBrains Mono', monospace;">~/.config/farik/templates</span>.</p>
+</section>
+</main>
+</div>
+<p style="margin: 0; padding: 14px 24px; font-family: 'JetBrains Mono', monospace; font-size: 13px; line-height: 20px; color: #5B5347; background: #F3E7D3; border-top: 1px solid #161616;">2. No saved teams yet</p>
+<div style="width: 1440px; height: 300px; display: flex; background: #F3E7D3; overflow: hidden;">
+<nav aria-label="Main" style="width: 88px; flex-shrink: 0; background: #161616; display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 20px 0; box-sizing: border-box;">
+<img class="px" src="/_blob/cbf211abf5739b5bb073797fe4fb08fc" alt="Farik" style="width: 48px; height: 48px; margin-bottom: 16px;">
+<a href="Main.dc.html" style="width: 72px; min-height: 44px; padding: 10px 0; display: flex; flex-direction: column; align-items: center; gap: 4px; text-decoration: none; font-size: 12px; color: #B9AE9C;">
+<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="4"></circle><path d="M12 2v2M12 20v2M2 12h2M20 12h2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"></path></svg>Today</a>
+<a href="Board.dc.html" style="width: 72px; min-height: 44px; padding: 10px 0; display: flex; flex-direction: column; align-items: center; gap: 4px; text-decoration: none; font-size: 12px; color: #B9AE9C;">
+<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="3" y="4" width="5" height="16"></rect><rect x="10" y="4" width="5" height="10"></rect><rect x="17" y="4" width="4" height="13"></rect></svg>Board</a>
+<a href="Chats.dc.html" style="width: 72px; min-height: 44px; padding: 10px 0; display: flex; flex-direction: column; align-items: center; gap: 4px; text-decoration: none; font-size: 12px; color: #B9AE9C;">
+<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 5h16v11H9l-5 4z"></path></svg>Chats</a>
+<a href="Team.dc.html" style="width: 72px; min-height: 44px; padding: 10px 0; display: flex; flex-direction: column; align-items: center; gap: 4px; text-decoration: none; font-size: 12px; color: #B9AE9C;">
+<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="9" cy="8" r="3"></circle><circle cx="17" cy="9" r="2.5"></circle><path d="M3 20c0-3.3 2.7-6 6-6s6 2.7 6 6M15 20c0-2.2 1.3-4.2 3.5-4.8"></path></svg>Team</a>
+<a href="Costs.dc.html" style="width: 72px; min-height: 44px; padding: 10px 0; display: flex; flex-direction: column; align-items: center; gap: 4px; text-decoration: none; font-size: 12px; color: #B9AE9C;">
+<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><path d="M15 9.5c-.5-1-1.6-1.5-3-1.5-1.7 0-3 .8-3 2s1.3 1.7 3 2 3 .8 3 2-1.3 2-3 2c-1.4 0-2.5-.5-3-1.5M12 6v2M12 16v2"></path></svg>Costs</a>
+<div style="flex-grow: 1;"></div>
+<a href="Settings.dc.html" aria-current="page" style="width: 72px; min-height: 44px; padding: 10px 0; display: flex; flex-direction: column; align-items: center; gap: 4px; text-decoration: none; font-size: 12px; color: #F3E7D3; background: #2A2A2A; border-radius: 4px;">
+<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="3"></circle><path d="M12 2v3M12 19v3M2 12h3M19 12h3M5 5l2 2M17 17l2 2M5 19l2-2M17 7l2-2"></path></svg>Settings</a>
+</nav>
+<main style="flex-grow: 1; min-width: 0; padding: 32px 48px; display: flex; flex-direction: column; gap: 24px; box-sizing: border-box;">
+<h1 style="margin: 0; font-size: 24px; line-height: 30px; font-weight: 600;">Settings</h1>
+<section aria-labelledby="saved-h" style="display: flex; flex-direction: column; gap: 10px; max-width: 900px;">
+<h2 id="saved-h" style="margin: 0; font-size: 20px; line-height: 28px; font-weight: 600;">Saved teams</h2>
+<p style="margin: 0; font-size: 16px; line-height: 24px;">You have no saved teams yet. Save one from your <a href="Team.dc.html">Team</a> page with “Save as a template”.</p>
+</section>
+</main>
+</div>
+<p style="margin: 0; padding: 14px 24px; font-family: 'JetBrains Mono', monospace; font-size: 13px; line-height: 20px; color: #5B5347; background: #F3E7D3; border-top: 1px solid #161616;">3. No folder for saved teams on this computer (no state folder)</p>
+<div style="width: 1440px; height: 300px; display: flex; background: #F3E7D3; overflow: hidden;">
+<nav aria-label="Main" style="width: 88px; flex-shrink: 0; background: #161616; display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 20px 0; box-sizing: border-box;">
+<img class="px" src="/_blob/cbf211abf5739b5bb073797fe4fb08fc" alt="Farik" style="width: 48px; height: 48px; margin-bottom: 16px;">
+<a href="Main.dc.html" style="width: 72px; min-height: 44px; padding: 10px 0; display: flex; flex-direction: column; align-items: center; gap: 4px; text-decoration: none; font-size: 12px; color: #B9AE9C;">
+<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="4"></circle><path d="M12 2v2M12 20v2M2 12h2M20 12h2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"></path></svg>Today</a>
+<a href="Board.dc.html" style="width: 72px; min-height: 44px; padding: 10px 0; display: flex; flex-direction: column; align-items: center; gap: 4px; text-decoration: none; font-size: 12px; color: #B9AE9C;">
+<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="3" y="4" width="5" height="16"></rect><rect x="10" y="4" width="5" height="10"></rect><rect x="17" y="4" width="4" height="13"></rect></svg>Board</a>
+<a href="Chats.dc.html" style="width: 72px; min-height: 44px; padding: 10px 0; display: flex; flex-direction: column; align-items: center; gap: 4px; text-decoration: none; font-size: 12px; color: #B9AE9C;">
+<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 5h16v11H9l-5 4z"></path></svg>Chats</a>
+<a href="Team.dc.html" style="width: 72px; min-height: 44px; padding: 10px 0; display: flex; flex-direction: column; align-items: center; gap: 4px; text-decoration: none; font-size: 12px; color: #B9AE9C;">
+<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="9" cy="8" r="3"></circle><circle cx="17" cy="9" r="2.5"></circle><path d="M3 20c0-3.3 2.7-6 6-6s6 2.7 6 6M15 20c0-2.2 1.3-4.2 3.5-4.8"></path></svg>Team</a>
+<a href="Costs.dc.html" style="width: 72px; min-height: 44px; padding: 10px 0; display: flex; flex-direction: column; align-items: center; gap: 4px; text-decoration: none; font-size: 12px; color: #B9AE9C;">
+<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><path d="M15 9.5c-.5-1-1.6-1.5-3-1.5-1.7 0-3 .8-3 2s1.3 1.7 3 2 3 .8 3 2-1.3 2-3 2c-1.4 0-2.5-.5-3-1.5M12 6v2M12 16v2"></path></svg>Costs</a>
+<div style="flex-grow: 1;"></div>
+<a href="Settings.dc.html" aria-current="page" style="width: 72px; min-height: 44px; padding: 10px 0; display: flex; flex-direction: column; align-items: center; gap: 4px; text-decoration: none; font-size: 12px; color: #F3E7D3; background: #2A2A2A; border-radius: 4px;">
+<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="3"></circle><path d="M12 2v3M12 19v3M2 12h3M19 12h3M5 5l2 2M17 17l2 2M5 19l2-2M17 7l2-2"></path></svg>Settings</a>
+</nav>
+<main style="flex-grow: 1; min-width: 0; padding: 32px 48px; display: flex; flex-direction: column; gap: 24px; box-sizing: border-box;">
+<h1 style="margin: 0; font-size: 24px; line-height: 30px; font-weight: 600;">Settings</h1>
+<section aria-labelledby="saved-h" style="display: flex; flex-direction: column; gap: 10px; max-width: 900px;">
+<h2 id="saved-h" style="margin: 0; font-size: 20px; line-height: 28px; font-weight: 600;">Saved teams</h2>
+<p role="status" style="margin: 0; padding: 10px 14px; border-left: 3px solid #96533A; background: #FBF6EC; font-size: 16px; line-height: 24px; font-weight: 600;">Farik has no folder on this computer to keep saved teams in.</p>
+</section>
+</main>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1707}}'>
+class Component extends DCLogic {
+renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

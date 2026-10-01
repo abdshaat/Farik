@@ -310,7 +310,7 @@
       "y": 0,
       "w": 1440,
       "h": 2080,
-      "title": "Iris’s plan, and checking the screens",
+      "title": "Iris\u2019s plan, and checking the screens",
       "page": "designer",
       "is_interactive": true
     },
@@ -319,7 +319,7 @@
       "y": 0,
       "w": 1440,
       "h": 2200,
-      "title": "Accept work, with Iris’s check",
+      "title": "Accept work, with Iris\u2019s check",
       "page": "designer",
       "is_interactive": true
     },
@@ -366,6 +366,51 @@
       "h": 844,
       "title": "Chats on a phone",
       "page": "chats",
+      "is_interactive": true
+    },
+    "SetupTeamStarts.dc.html": {
+      "x": 0,
+      "y": 0,
+      "w": 1440,
+      "h": 4230,
+      "title": "Your team: suggested, saved or from scratch",
+      "page": "templates",
+      "is_interactive": true
+    },
+    "SaveTemplate.dc.html": {
+      "x": 1520,
+      "y": 0,
+      "w": 1440,
+      "h": 2287,
+      "title": "Save as a template",
+      "page": "templates",
+      "is_interactive": true
+    },
+    "UseTemplate.dc.html": {
+      "x": 3040,
+      "y": 0,
+      "w": 1440,
+      "h": 3307,
+      "title": "Use a saved team: pick, preview, refused",
+      "page": "templates",
+      "is_interactive": true
+    },
+    "SavedTeams.dc.html": {
+      "x": 4560,
+      "y": 0,
+      "w": 1440,
+      "h": 1707,
+      "title": "Saved teams in Settings",
+      "page": "templates",
+      "is_interactive": true
+    },
+    "PhoneUseTemplate.dc.html": {
+      "x": 6080,
+      "y": 0,
+      "w": 360,
+      "h": 3420,
+      "title": "Use a saved team on a phone",
+      "page": "templates",
       "is_interactive": true
     }
   },
@@ -450,6 +495,15 @@
       "w": 240,
       "x": 0,
       "y": -300
+    },
+    "t_templates": {
+      "kind": "title1",
+      "maxW": 6000,
+      "page": "templates",
+      "text": "Team templates",
+      "w": 240,
+      "x": 0,
+      "y": -300
     }
   },
   "order": [
@@ -493,7 +547,12 @@
     "SettingsPreviewPhone.dc.html",
     "DesignPlanPhone.dc.html",
     "GateDesignReviewPhone.dc.html",
-    "PhoneChats.dc.html"
+    "PhoneChats.dc.html",
+    "SetupTeamStarts.dc.html",
+    "SaveTemplate.dc.html",
+    "UseTemplate.dc.html",
+    "SavedTeams.dc.html",
+    "PhoneUseTemplate.dc.html"
   ],
   "pages": [
     {
@@ -527,6 +586,10 @@
     {
       "id": "chats",
       "name": "Chats"
+    },
+    {
+      "id": "templates",
+      "name": "Team templates"
     }
   ],
   "title": "Farik web UI mockup"
