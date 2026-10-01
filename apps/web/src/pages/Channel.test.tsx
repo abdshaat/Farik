@@ -401,10 +401,10 @@ describe("channel", () => {
 		fireEvent.click(screen.getByRole("button", { name: en.channelPost }));
 		await waitFor(() => expect(s.calls("command")).toHaveLength(2));
 		await s.reply(s.calls("command")[1] as never, {
-			error: { kind: "refused", detail: "paused: the team is paused" },
+			error: { kind: "invalid", detail: "a message is blank" },
 		});
 		expect((await screen.findByRole("alert")).textContent).toBe(
-			"The team is paused",
+			en.refuseCommand,
 		);
 
 		// Too long a text is refused before sending.

@@ -420,7 +420,7 @@ describe("board", () => {
 		await first.s.reply(sent, {
 			error: { kind: "refused", detail: "sprint_open: a sprint is open" },
 		});
-		expect(await within(dialog).findByText(en.refuseOther)).toBeTruthy();
+		expect(await within(dialog).findByText(en.refuseSprintOpen)).toBeTruthy();
 
 		// With a limit, the budget is sent in dollars.
 		fireEvent.click(within(dialog).getByLabelText(en.sprintLimitAfter));

@@ -20,3 +20,19 @@ pub fn refuse_appends_of(log: &EventLog, kind: EventKind) {
         ))
         .expect("the trigger is made");
 }
+
+/// Appends a row of `kind` for `agent_id` whose body no reader accepts, so that a read that
+/// reaches it fails: how a test shows that a query never reads that far back.
+///
+/// # Panics
+///
+/// When the database will not take the row, which is the fixture failing rather than the code.
+pub fn append_unreadable(log: &EventLog, agent_id: &str, kind: EventKind) {
+    log.connection()
+        .execute(
+            "INSERT INTO events (recorded_at, team_id, project_id, agent_id, kind, body)
+             VALUES ('2026-09-17T12:00:00Z', 'farik', 'farik', ?1, ?2, '{}')",
+            (agent_id, kind.to_string()),
+        )
+        .expect("the row is written");
+}

@@ -1950,7 +1950,7 @@ mod tests {
     }
 
     /// One case per row of `TRANSITION_TABLE`, in its order.
-    fn every_row() -> [Case; 21] {
+    fn every_row() -> [Case; 22] {
         use TaskStatus as S;
         let no_change: fn(&mut TransitionContext) = |_| {};
         [
@@ -1976,24 +1976,25 @@ mod tests {
             case(6, S::Assigned, S::InProgress, A::Assignee, no_change),
             case(7, S::InProgress, S::Verifying, A::Assignee, no_change),
             case(8, S::InProgress, S::Blocked, A::Assignee, no_change),
-            case(9, S::Blocked, S::InProgress, A::ScrumMaster, no_change),
-            case(10, S::Blocked, S::InProgress, A::Human, no_change),
-            case(11, S::Blocked, S::Escalated, A::Governor, |context| {
+            case(9, S::Assigned, S::Blocked, A::Assignee, no_change),
+            case(10, S::Blocked, S::InProgress, A::ScrumMaster, no_change),
+            case(11, S::Blocked, S::InProgress, A::Human, no_change),
+            case(12, S::Blocked, S::Escalated, A::Governor, |context| {
                 context.blocked_limit = Duration::from_secs(3600);
             }),
-            case(12, S::Verifying, S::Accepted, A::ProductManager, no_change),
-            case(13, S::Verifying, S::Rejected, A::Reviewer, no_change),
-            case(14, S::Verifying, S::Rejected, A::Human, no_change),
-            case(15, S::Rejected, S::InProgress, A::Governor, no_change),
-            case(16, S::Rejected, S::Escalated, A::Governor, |context| {
+            case(13, S::Verifying, S::Accepted, A::ProductManager, no_change),
+            case(14, S::Verifying, S::Rejected, A::Reviewer, no_change),
+            case(15, S::Verifying, S::Rejected, A::Human, no_change),
+            case(16, S::Rejected, S::InProgress, A::Governor, no_change),
+            case(17, S::Rejected, S::Escalated, A::Governor, |context| {
                 context.contract.iteration = 3;
             }),
-            case(17, S::InProgress, S::Escalated, A::Governor, |context| {
+            case(18, S::InProgress, S::Escalated, A::Governor, |context| {
                 context.permission_denied = true;
             }),
-            case(18, S::InProgress, S::Escalated, A::Human, no_change),
-            case(19, S::InProgress, S::Cancelled, A::Human, no_change),
-            case(20, S::Escalated, S::Ready, A::Human, no_change),
+            case(19, S::InProgress, S::Escalated, A::Human, no_change),
+            case(20, S::InProgress, S::Cancelled, A::Human, no_change),
+            case(21, S::Escalated, S::Ready, A::Human, no_change),
         ]
     }
 

@@ -356,6 +356,12 @@ pub fn check_page(
     let mut args: Vec<String> = ["run", "--rm", "-i", "--init", "--pull", "never"]
         .map(String::from)
         .to_vec();
+    // Its own name, so a check Farik gives up on can be removed (`run_docker`).
+    let suffix = crate::daemon::random_token().map_err(|failed| error(format!("{failed:?}")))?;
+    args.extend([
+        "--name".to_string(),
+        format!("farik-check-{}-{}", preview.container(), &suffix[..12]),
+    ]);
     for label in preview.labels() {
         args.extend(["--label".to_string(), label]);
     }
@@ -431,7 +437,30 @@ const CHECK_LIMIT: std::time::Duration = std::time::Duration::from_secs(150);
 fn run_docker(args: &[String], stdin: &str) -> Result<String, CheckError> {
     let mut docker = Command::new("docker");
     docker.args(args);
-    run_within(docker, stdin, CHECK_LIMIT)
+    // Killing the client leaves its container running until the script's own watchdog, so a
+    // check given up on is removed by its name.
+    run_within(docker, stdin, CHECK_LIMIT, || {
+        if let Some(removal) = removal(args) {
+            let mut docker = Command::new("docker");
+            docker.args(removal);
+            remove_within(docker, REMOVAL_LIMIT);
+        }
+    })
+}
+
+/// How long removing a check's container may take: a wedged docker daemon gives up the check.
+const REMOVAL_LIMIT: std::time::Duration = std::time::Duration::from_secs(20);
+
+/// Runs `removal`, given up on after `limit`; what it says is not read.
+fn remove_within(removal: Command, limit: std::time::Duration) {
+    let _ = run_within(removal, "", limit, || {});
+}
+
+/// The `docker` arguments that remove the container `args` name.
+fn removal(args: &[String]) -> Option<Vec<String>> {
+    let at = args.iter().position(|arg| arg == "--name")?;
+    let name = args.get(at + 1)?;
+    Some(vec!["rm".to_string(), "-f".to_string(), name.clone()])
 }
 
 /// Runs `command` with `stdin` on its input, killed once it runs past `limit`, and answers its
@@ -440,6 +469,7 @@ fn run_within(
     mut command: Command,
     stdin: &str,
     limit: std::time::Duration,
+    on_kill: impl FnOnce(),
 ) -> Result<String, CheckError> {
     let error = |detail: String| CheckError { detail };
     let finished = crate::exec::supervise_with_input(
@@ -453,6 +483,7 @@ fn run_within(
     )
     .map_err(|failed| error(format!("docker could not be run: {failed:?}")))?;
     if finished.killed {
+        on_kill();
         return Err(error(format!(
             "the check ran past its {} seconds",
             limit.as_secs_f64()
@@ -681,17 +712,49 @@ mod tests {
         let started = std::time::Instant::now();
         let mut sleeping = std::process::Command::new("sleep");
         sleeping.arg("30");
-        let error = super::run_within(sleeping, "", std::time::Duration::from_millis(200))
-            .expect_err("the check ran out of time");
+        let removed = std::cell::Cell::new(false);
+        let error = super::run_within(sleeping, "", std::time::Duration::from_millis(200), || {
+            removed.set(true);
+        })
+        .expect_err("the check ran out of time");
         assert!(started.elapsed() < std::time::Duration::from_secs(5));
         assert!(error.detail.contains("ran past"), "{error}");
-        // Its input still reaches it.
+        // Killing the client leaves its container running, so the container is removed too.
+        assert!(removed.get());
+        // Its input still reaches it, and a check that ends removes nothing.
         let mut echoing = std::process::Command::new("cat");
         echoing.arg("-");
+        let removed = std::cell::Cell::new(false);
         assert_eq!(
-            super::run_within(echoing, "{}\n", std::time::Duration::from_secs(5)),
+            super::run_within(echoing, "{}\n", std::time::Duration::from_secs(5), || {
+                removed.set(true);
+            }),
             Ok("{}\n".to_string())
         );
+        assert!(!removed.get());
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn gives_up_on_a_removal_that_runs_past_its_deadline() {
+        // A wedged docker daemon would hold the check here after its own deadline.
+        let started = std::time::Instant::now();
+        let mut sleeping = std::process::Command::new("sleep");
+        sleeping.arg("30");
+        super::remove_within(sleeping, std::time::Duration::from_millis(200));
+        assert!(started.elapsed() < std::time::Duration::from_secs(5));
+    }
+
+    #[test]
+    fn removes_a_check_container_by_its_name() {
+        let args: Vec<String> = ["run", "--rm", "--name", "farik-check-x-1", "image"]
+            .map(String::from)
+            .to_vec();
+        assert_eq!(
+            super::removal(&args),
+            Some(["rm", "-f", "farik-check-x-1"].map(String::from).to_vec())
+        );
+        assert_eq!(super::removal(&args[..2]), None);
     }
 
     #[test]

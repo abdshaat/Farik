@@ -1,6 +1,7 @@
 import { expectNoAxeViolations } from "@farik/ui/test";
 import { fireEvent, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { en } from "../strings/en.ts";
 import { event, note, openedGate, sentCommand, TASK } from "../test/gate.ts";
 
 const HELP = [
@@ -93,7 +94,7 @@ describe("help page", () => {
 			},
 		});
 		expect((await screen.findByRole("alert")).textContent).toBe(
-			"More tries resume the work",
+			en.refuseExtraTries,
 		);
 
 		// Without a note, the choice's label is the message.

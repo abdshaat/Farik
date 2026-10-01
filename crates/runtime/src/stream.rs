@@ -15,6 +15,21 @@ pub struct StreamParser {
     tools_by_id: BTreeMap<String, String>,
     denied_ids: BTreeSet<String>,
     rate_limit: Option<RateLimit>,
+    /// Whether a line has ended the session: the lines after it are not read.
+    is_over: bool,
+}
+
+/// The credential-refused retry that ends a session (5.5): Claude Code retries a refused
+/// subscription token twice and then gives its result, but retries a refused API key ten times
+/// over about three minutes, which no retry fixes.
+/// It is the retry's own `attempt` of one request, so single retries spread over a long session,
+/// such as a token refreshed with one 401, never add up.
+const REFUSED_RETRIES: u64 = 3;
+
+/// Whether `status` is the provider refusing the account's credential: 401 for a key it does not
+/// know, 403 for one whose organisation is revoked or disabled.
+fn refuses_the_credential(status: Option<u64>) -> bool {
+    matches!(status, Some(401 | 403))
 }
 
 /// The last `rate_limit_event`'s `rate_limit_info`: its status, when it has one, and when it said
@@ -33,10 +48,13 @@ impl StreamParser {
     /// `RuntimeError::Protocol` when the line is not JSON, or is a kind of line the parser reads
     /// and lacks a field it needs.
     pub fn parse_line(&mut self, line: &str) -> Result<Vec<SessionEvent>, RuntimeError> {
+        if self.is_over {
+            return Ok(Vec::new());
+        }
         let value: Value = serde_json::from_str(line).map_err(|error| RuntimeError::Protocol {
             detail: format!("a line is not JSON: {error}"),
         })?;
-        match value.get("type").and_then(Value::as_str) {
+        let events = match value.get("type").and_then(Value::as_str) {
             Some("assistant") => self.assistant(&value),
             Some("user") => self.user(&value),
             Some("system") => self.system(&value),
@@ -47,7 +65,11 @@ impl StreamParser {
             Some("result") => result(&value, self.rate_limit.as_ref()),
             // The program adds line types between minor versions; a new one must not end a session.
             _ => Ok(Vec::new()),
-        }
+        }?;
+        self.is_over = events
+            .iter()
+            .any(|event| matches!(event, SessionEvent::Ended { .. }));
+        Ok(events)
     }
 
     fn assistant(&mut self, value: &Value) -> Result<Vec<SessionEvent>, RuntimeError> {
@@ -135,8 +157,10 @@ impl StreamParser {
     }
 
     fn system(&mut self, value: &Value) -> Result<Vec<SessionEvent>, RuntimeError> {
-        if value.get("subtype").and_then(Value::as_str) != Some("permission_denied") {
-            return Ok(Vec::new());
+        match value.get("subtype").and_then(Value::as_str) {
+            Some("permission_denied") => {}
+            Some("api_retry") => return Ok(api_retry(value)),
+            _ => return Ok(Vec::new()),
         }
         let what = "a permission_denied line";
         let id = string_field(value, "tool_use_id", what)?;
@@ -147,6 +171,24 @@ impl StreamParser {
         self.denied_ids.insert(id.to_string());
         Ok(vec![denied])
     }
+}
+
+/// A retry of a refused credential; the third attempt of one request ends the session.
+fn api_retry(value: &Value) -> Vec<SessionEvent> {
+    let status = value.get("error_status").and_then(Value::as_u64);
+    let attempt = value.get("attempt").and_then(Value::as_u64).unwrap_or(0);
+    if !refuses_the_credential(status) || attempt < REFUSED_RETRIES {
+        return Vec::new();
+    }
+    let error = value
+        .get("error")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    vec![SessionEvent::Ended {
+        reason: EndReason::CredentialRefused,
+        detail: format!("API Error: {} {error}", status.unwrap_or_default()),
+        resets_at: None,
+    }]
 }
 
 fn result(
@@ -201,9 +243,10 @@ fn result(
             || value.get("api_error_status").and_then(Value::as_u64) == Some(429)
             || lowered.contains("usage limit")
             || lowered.contains("rate limit"));
-    // A 401 is the provider refusing the account's credential (2.1.285's capture): no retry fixes it.
+    // A 401 or a 403 is the provider refusing the account's credential (2.1.285's capture): no
+    // retry fixes it.
     let is_credential_refused = reason == EndReason::Error
-        && value.get("api_error_status").and_then(Value::as_u64) == Some(401);
+        && refuses_the_credential(value.get("api_error_status").and_then(Value::as_u64));
     let (reason, resets_at) = if is_credential_refused {
         (EndReason::CredentialRefused, None)
     } else if is_provider_limit {
@@ -598,6 +641,81 @@ mod tests {
         )
         .expect("a result line parses");
         assert_eq!(end_of(&refused_twice), (EndReason::CredentialRefused, None));
+    }
+
+    /// A result line with `status` as its API error status.
+    fn refused_with(status: u16) -> String {
+        format!(
+            r#"{{"type":"result","subtype":"success","is_error":true,"api_error_status":{status},"result":"Failed to authenticate. API Error: {status}","usage":{{"input_tokens":0,"output_tokens":0,"cache_read_input_tokens":0,"cache_creation_input_tokens":0}}}}"#
+        )
+    }
+
+    /// An `api_retry` line for `status`, its `attempt` of ten.
+    fn retry(attempt: u8, status: u16) -> String {
+        format!(
+            r#"{{"type":"system","subtype":"api_retry","attempt":{attempt},"max_retries":10,"retry_delay_ms":500,"error_status":{status},"error":"authentication_failed"}}"#
+        )
+    }
+
+    #[test]
+    fn reads_a_403_as_the_credential_refused() {
+        // A revoked or disabled organisation is refused with 403, which no retry fixes either.
+        let events = one_line(&refused_with(403)).expect("a result line parses");
+        assert_eq!(end_of(&events), (EndReason::CredentialRefused, None));
+    }
+
+    #[test]
+    fn ends_the_session_at_the_third_refused_retry() {
+        // The API key's capture retries ten times over about three minutes before its result;
+        // the session ends at the third, once, and reads nothing after.
+        let events = events_of(&credential_refused_api_key());
+        let ends: Vec<_> = events
+            .iter()
+            .filter_map(|event| match event {
+                SessionEvent::Ended { reason, detail, .. } => Some((*reason, detail.clone())),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            ends,
+            vec![(
+                EndReason::CredentialRefused,
+                "API Error: 401 authentication_failed".to_string()
+            )]
+        );
+        for status in [401, 403] {
+            let mut parser = StreamParser::default();
+            for attempt in 1..=2 {
+                let said = parser.parse_line(&retry(attempt, status)).expect("parses");
+                assert_eq!(said, vec![], "attempt {attempt} of {status}");
+            }
+            let third = parser.parse_line(&retry(3, status)).expect("parses");
+            assert_eq!(end_of(&third), (EndReason::CredentialRefused, None));
+        }
+        // The subscription's capture retries twice and then gives its result, which stands.
+        let events = events_of(&credential_refused());
+        assert!(
+            matches!(events.last(), Some(SessionEvent::Ended { reason: EndReason::CredentialRefused, detail, .. })
+                if detail.contains("OAuth access token is invalid")),
+            "{events:?}"
+        );
+        // Another status retried is the provider's trouble, not the key's.
+        let mut parser = StreamParser::default();
+        for attempt in 1..=3 {
+            assert_eq!(
+                parser.parse_line(&retry(attempt, 529)).expect("parses"),
+                vec![]
+            );
+        }
+    }
+
+    #[test]
+    fn counts_refused_retries_per_request() {
+        // A token refreshed with one 401 retry, three times over a long session, never ends it.
+        let mut parser = StreamParser::default();
+        for _ in 0..3 {
+            assert_eq!(parser.parse_line(&retry(1, 401)).expect("parses"), vec![]);
+        }
     }
 
     #[test]

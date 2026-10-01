@@ -595,6 +595,12 @@ mod tests {
         );
         // A missing image fails the check at once rather than pulling gigabytes unseen.
         assert_eq!(after(args, "--pull"), ["never"]);
+        // Named, so that a check Farik gives up on is removed by name, not left to its watchdog.
+        let named = after(args, "--name");
+        assert!(
+            named.len() == 1 && named[0].starts_with("farik-check-farik-preview-p-frk-1-"),
+            "{args:?}"
+        );
         assert_eq!(after(args, "--entrypoint"), ["node"]);
         let definition = farik_roles::builtin_connector("playwright").expect("shipped");
         let image = args

@@ -252,7 +252,7 @@ describe("chats", () => {
 			error: { kind: "refused", detail: "agent_retired: mira is retired" },
 		});
 		expect((await screen.findByRole("alert")).textContent).toBe(
-			"Mira is retired",
+			en.refuseAgentRetired,
 		);
 
 		// 4,000 characters, counted as Farik counts them, pass; 4,001 are refused before sending.
@@ -371,7 +371,7 @@ describe("chats", () => {
 		});
 		await s.fail(filed, -32005, "the request was already sent, as FRK-12");
 		expect((await screen.findByRole("alert")).textContent).toBe(
-			"The request was already sent, as FRK-12",
+			en.requestSentAs.replace("{id}", "FRK-12"),
 		);
 		press();
 		await waitFor(() => expect(s.calls("request.file")).toHaveLength(2));

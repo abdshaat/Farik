@@ -2,6 +2,7 @@ import { Button, StatusWord } from "@farik/ui";
 import { useState } from "react";
 import { useNavigate } from "react-router";
 import { useConnection } from "../../app/connection.tsx";
+import { daemonSaid } from "../../app/refusals.ts";
 import { useQuery } from "../../app/store.ts";
 import type { en } from "../../strings/en.ts";
 import { t } from "../../strings/t.ts";
@@ -87,7 +88,7 @@ export function SetupComputer() {
 		try {
 			await client.call("sandbox.build", {});
 		} catch (e) {
-			setBuildError((e as Error).message);
+			setBuildError(daemonSaid(e, "setupBuildFailed"));
 		} finally {
 			setBuilding(false);
 			again();
@@ -101,7 +102,7 @@ export function SetupComputer() {
 		try {
 			await client.call("browser.pull", {});
 		} catch (e) {
-			setFetchError((e as Error).message);
+			setFetchError(daemonSaid(e, "setupPullFailed"));
 		} finally {
 			setFetching(false);
 			again();

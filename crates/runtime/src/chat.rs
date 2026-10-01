@@ -172,48 +172,64 @@ pub fn chat_page(
 }
 
 /// The seq of the user's message `agent_id`'s chat waits to have answered: the user's newest,
-/// when it is past the `in_reply_to` of every chat session of that agent, whoever wrote last. A
-/// message sent while a session ran is past that session's, so it is answered next; a failed
-/// session is not retried, since its `in_reply_to` answers the message it was started for.
+/// unless a chat session of that agent answers it or a later one, whoever wrote last. A message
+/// sent while a session ran is past that session's, so it is answered next; a failed session is
+/// not retried, since its `in_reply_to` answers the message it was started for.
+///
+/// Every tick asks this of every agent, so it reads back from the newest message alone, by the
+/// log's index on the agent and the kind: a session that answers the newest message started after
+/// it, so only the sessions since are read.
 ///
 /// # Errors
 ///
 /// `StoreError` when the log cannot be read.
 pub fn pending_chat(log: &EventLog, agent_id: &str) -> Result<Option<u64>, StoreError> {
-    // ponytail: reads the agent's chat and its sessions' starts whole; a projection of each
-    // chat's newest user message and answered seq when chats grow long.
-    let newest = log
-        .read(&EventQuery {
-            agent_id: Some(agent_id.to_string()),
-            kinds: vec![EventKind::ChatMessagePosted],
-            newest_first: true,
-            ..EventQuery::default()
-        })?
-        .into_iter()
-        .find(|event| {
-            matches!(&event.body, EventBody::ChatMessagePosted(body) if body.author == HUMAN)
-        })
-        .map(|event| event.envelope.seq);
-    let Some(newest) = newest else {
+    let Some(newest) = newest_from_the_user(log, agent_id)? else {
         return Ok(None);
     };
     let answered = log
         .read(&EventQuery {
             agent_id: Some(agent_id.to_string()),
             kinds: vec![EventKind::SessionStarted],
+            after_seq: Some(newest),
             ..EventQuery::default()
         })?
         .iter()
-        .filter_map(|event| match &event.body {
-            EventBody::SessionStarted(body) if body.purpose == SessionStartedBodyPurpose::Chat => {
-                body.in_reply_to.map(NonZeroU64::get)
-            }
-            _ => None,
-        })
-        .max();
-    Ok(answered
-        .is_none_or(|answered| newest > answered)
-        .then_some(newest))
+        .any(|event| {
+            matches!(&event.body, EventBody::SessionStarted(body)
+                if body.purpose == SessionStartedBodyPurpose::Chat
+                    && body.in_reply_to.is_some_and(|seq| seq.get() >= newest))
+        });
+    Ok((!answered).then_some(newest))
+}
+
+/// How many of a chat's messages one read takes, newest first, looking for the user's newest.
+const CHAT_PAGE: usize = 8;
+
+/// The seq of the user's newest message in `agent_id`'s chat, read a page at a time from the
+/// newest back: the agent replies once to each, so it is on the first page but for a long run of
+/// replies.
+fn newest_from_the_user(log: &EventLog, agent_id: &str) -> Result<Option<u64>, StoreError> {
+    let mut before_seq = None;
+    loop {
+        let page = log.read(&EventQuery {
+            agent_id: Some(agent_id.to_string()),
+            kinds: vec![EventKind::ChatMessagePosted],
+            newest_first: true,
+            before_seq,
+            limit: Some(CHAT_PAGE),
+            ..EventQuery::default()
+        })?;
+        if let Some(found) = page.iter().find(|event| {
+            matches!(&event.body, EventBody::ChatMessagePosted(body) if body.author == HUMAN)
+        }) {
+            return Ok(Some(found.envelope.seq));
+        }
+        match page.last() {
+            Some(oldest) if page.len() == CHAT_PAGE => before_seq = Some(oldest.envelope.seq),
+            _ => return Ok(None),
+        }
+    }
 }
 
 /// Why the user's newest message in a chat has no answer yet (ADR 0026).
@@ -387,7 +403,9 @@ mod tests {
     use farik_store::{EventQuery, IN_MEMORY, open_event_log};
     use serde_json::json;
 
-    use super::{NewChatMessage, ProposedRequest, post_chat};
+    use farik_store::event_log::fixtures::append_unreadable;
+
+    use super::{NewChatMessage, ProposedRequest, pending_chat, post_chat};
     use crate::tools::fixtures::at;
 
     fn farik_ids() -> EventIds {
@@ -396,6 +414,96 @@ mod tests {
             project_id: "farik".to_string(),
             ..EventIds::default()
         }
+    }
+
+    /// A chat `session.started` of `agent` answering `in_reply_to`.
+    fn chat_started(log: &farik_store::EventLog, agent: &str, in_reply_to: u64) -> u64 {
+        let event = event_from_value(&json!({
+            "seq": 1, "recorded_at": at().to_rfc3339(), "team_id": "farik", "project_id": "farik",
+            "agent_id": agent, "session_id": format!("chat-{in_reply_to}"),
+            "kind": "session.started",
+            "body": {
+                "purpose": "chat", "model": "claude-opus-5", "effort": "low",
+                "in_reply_to": in_reply_to,
+            },
+        }))
+        .expect("the fixture is schema-valid");
+        log.append(&farik_protocol::event::NewEvent {
+            recorded_at: event.envelope.recorded_at,
+            ids: event.envelope.ids,
+            body: event.body,
+        })
+        .expect("appends")
+        .envelope
+        .seq
+    }
+
+    /// The user's or `agent`'s message in `agent`'s chat.
+    fn said(log: &farik_store::EventLog, agent: &str, author: &str) -> u64 {
+        post_chat(
+            log,
+            &FixedClock::new(at()),
+            &farik_ids(),
+            NewChatMessage {
+                chat: agent.to_string(),
+                author: author.to_string(),
+                text: "Status?".to_string(),
+                in_reply_to: None,
+                request: None,
+                session_id: None,
+            },
+        )
+        .expect("the message is recorded")
+    }
+
+    #[test]
+    fn finds_the_pending_message_without_reading_the_chat_or_sessions_before_it() {
+        // Every tick asks this of every agent, so it reads from the newest message back, not the
+        // agent's whole history: a row before the newest message is never reached.
+        let log = open_event_log(Path::new(IN_MEMORY), at()).expect("the log opens");
+        append_unreadable(&log, "mira", EventKind::SessionStarted);
+        append_unreadable(&log, "mira", EventKind::ChatMessagePosted);
+        assert_eq!(pending_chat(&log, "ari").expect("reads"), None);
+        // An earlier exchange, a page's worth, answered.
+        for _ in 0..super::CHAT_PAGE / 2 {
+            let earlier = said(&log, "mira", "human");
+            chat_started(&log, "mira", earlier);
+            said(&log, "mira", "mira");
+        }
+
+        let asked = said(&log, "mira", "human");
+        assert_eq!(pending_chat(&log, "mira").expect("reads"), Some(asked));
+        chat_started(&log, "mira", asked);
+        assert_eq!(pending_chat(&log, "mira").expect("reads"), None);
+        said(&log, "mira", "mira");
+        assert_eq!(pending_chat(&log, "mira").expect("reads"), None);
+
+        // Asked again while the agent's other work ran: answered next.
+        let again = said(&log, "mira", "human");
+        for _ in 0..3 {
+            said(&log, "mira", "mira");
+        }
+        assert_eq!(pending_chat(&log, "mira").expect("reads"), Some(again));
+        chat_started(&log, "mira", again);
+        assert_eq!(pending_chat(&log, "mira").expect("reads"), None);
+
+        // A message behind more than a page of the agent's is still found.
+        let behind = said(&log, "mira", "human");
+        for _ in 0..=super::CHAT_PAGE {
+            said(&log, "mira", "mira");
+        }
+        assert_eq!(pending_chat(&log, "mira").expect("reads"), Some(behind));
+
+        // Behind exactly a page: the message is the first row of the next page.
+        chat_started(&log, "mira", behind);
+        let first_on_the_next_page = said(&log, "mira", "human");
+        for _ in 0..super::CHAT_PAGE {
+            said(&log, "mira", "mira");
+        }
+        assert_eq!(
+            pending_chat(&log, "mira").expect("reads"),
+            Some(first_on_the_next_page)
+        );
     }
 
     #[test]

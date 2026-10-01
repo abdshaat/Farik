@@ -883,7 +883,7 @@ pub(crate) fn update_agent_held(
 
 /// What follows from `agent_id`'s status becoming `status` in `team`, already written:
 /// `agent.updated`; for a pause or a retirement, its sessions stopped and each `in_progress` task it
-/// holds blocked; for a resume, each task its pause blocked taken back to `in_progress`. Answers
+/// holds blocked, and for a retirement each `assigned` one too; for a resume, each task its pause blocked taken back to `in_progress`. Answers
 /// the events' sequence numbers.
 pub(crate) fn status_effects(
     tools: &ToolDeps,
@@ -917,10 +917,19 @@ pub(crate) fn status_effects(
             } else {
                 (RETIRED, "the human reassigns the task".to_string())
             };
-            for session_id in daemon.sessions_of(agent_id) {
-                daemon.request_stop(&session_id, words);
+            // A paused agent still answers its chats (ADR 0026), so a chat answer under way runs
+            // to its end; its other sessions stop.
+            for (session_id, purpose) in daemon.sessions_of(agent_id) {
+                if !crate::tools::may_work(status, purpose) {
+                    daemon.request_stop(&session_id, words);
+                }
             }
-            for row in held.filter(|row| row.status == TaskStatus::InProgress) {
+            // A retired agent never starts what it was assigned, so that is blocked for the human
+            // too; a paused one starts it once resumed, so it waits.
+            for row in held.filter(|row| {
+                row.status == TaskStatus::InProgress
+                    || (status == AgentStatus::Retired && row.status == TaskStatus::Assigned)
+            }) {
                 events.extend(moved_for(
                     tools,
                     team,
@@ -1947,6 +1956,92 @@ mod tests {
             orchestrator.tick().await.expect("the tick runs"),
             crate::orchestrator::TickReport::Idle { .. }
         ));
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn lets_a_paused_agent_finish_its_chat_answer() {
+        // The founder's rule: a paused agent still answers its chats, so pausing it stops only
+        // its other sessions; retiring it stops them all.
+        let harness = Harness::new("human-pause-keeps-chat", |wire| {
+            wire["agents"].as_array_mut().expect("agents").push(json!({
+                "id": "dev-c", "display_name": "dev-c", "role": "software_developer",
+                "status": "active",
+            }));
+        });
+        let register = |session: &str, agent: &str, purpose: crate::session::SessionPurpose| {
+            harness
+                .daemon
+                .register_session(crate::daemon::SessionRegistration {
+                    session_id: session.to_string(),
+                    agent_id: agent.to_string(),
+                    task_id: None,
+                    purpose,
+                    in_reply_to: None,
+                    thread: None,
+                    cwd: harness.project.repo.path.clone(),
+                    executor: None,
+                    limits: farik_core::budget::DEFAULT_SESSION_LIMITS,
+                    farik_tools: Vec::new(),
+                    tiers: Vec::new(),
+                    connectors: Vec::new(),
+                    preview: None,
+                });
+        };
+        register("chat-a", "dev-a", crate::session::SessionPurpose::Chat);
+        register("work-a", "dev-a", crate::session::SessionPurpose::Implement);
+        register("chat-c", "dev-c", crate::session::SessionPurpose::Chat);
+        let orchestrator = an_orchestrator(&harness);
+
+        handled(&orchestrator, a_pause("dev-a", AgentStatus::Paused)).await;
+        handled(&orchestrator, a_pause("dev-c", AgentStatus::Retired)).await;
+
+        assert_eq!(harness.daemon.stop_reason("chat-a"), None);
+        assert_eq!(
+            harness.daemon.stop_reason("work-a").as_deref(),
+            Some(super::PAUSED)
+        );
+        assert_eq!(
+            harness.daemon.stop_reason("chat-c").as_deref(),
+            Some(super::RETIRED)
+        );
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn blocks_a_retired_agents_assigned_task_and_leaves_a_paused_ones() {
+        // A task assigned to an agent that retires is never started: it is blocked for the human,
+        // as a task under way is, so no task is left with nobody. A pause leaves it to wait.
+        let harness = Harness::new("human-retire-assigned", |wire| {
+            wire["agents"].as_array_mut().expect("agents").push(json!({
+                "id": "dev-c", "display_name": "dev-c", "role": "software_developer",
+                "status": "active",
+            }));
+        });
+        harness.assigned("FRK-1", "dev-a", "dev-c");
+        harness.assigned("FRK-2", "dev-b", "dev-c");
+        let orchestrator = an_orchestrator(&harness);
+        handled(&orchestrator, a_pause("dev-a", AgentStatus::Paused)).await;
+        handled(&orchestrator, a_pause("dev-b", AgentStatus::Retired)).await;
+        let status_of = |task: &str| {
+            harness
+                .project
+                .deps
+                .projections
+                .board()
+                .expect("the board reads")
+                .into_iter()
+                .find(|row| row.task_id.as_str() == task)
+                .map(|row| row.status)
+        };
+        assert_eq!(status_of("FRK-1"), Some(TaskStatus::Assigned));
+        assert_eq!(status_of("FRK-2"), Some(TaskStatus::Blocked));
+        assert_eq!(
+            super::last_blocker(&harness.project.deps, &task("FRK-2"))
+                .expect("reads")
+                .as_deref(),
+            Some(super::RETIRED)
+        );
     }
 
     #[tokio::test]

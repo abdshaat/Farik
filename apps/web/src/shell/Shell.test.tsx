@@ -134,7 +134,7 @@ describe("shell", () => {
 				detail: "not_paused: the team is not paused",
 			},
 		});
-		expect(await screen.findByText("The team is not paused")).toBeTruthy();
+		expect(await screen.findByText(en.refuseNotPaused)).toBeTruthy();
 		await expectNoAxeViolations(container);
 	});
 

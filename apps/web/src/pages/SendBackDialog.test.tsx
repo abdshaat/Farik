@@ -1,6 +1,7 @@
 import { expectNoAxeViolations } from "@farik/ui/test";
 import { fireEvent, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { en } from "../strings/en.ts";
 import { openedGate, sentCommand } from "../test/gate.ts";
 
 describe("send back dialog", () => {
@@ -73,7 +74,7 @@ describe("send back dialog", () => {
 			},
 		});
 		expect((await screen.findByRole("alert")).textContent).toBe(
-			"The reviewer has not finished; send back once the review is in",
+			en.refuseReviewFirst,
 		);
 		await expectNoAxeViolations(container);
 	});

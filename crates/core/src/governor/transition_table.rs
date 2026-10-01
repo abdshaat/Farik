@@ -103,7 +103,7 @@ const fn row(from: Status, to: Status, actor: TransitionActor, gate: GateId) -> 
 
 /// The transition table of `docs/SPEC.md` section 5.2: the spec's lines in order, split where
 /// a line names two triggers or two actors, with the `any` rows last.
-pub static TRANSITION_TABLE: [TransitionRow; 21] = {
+pub static TRANSITION_TABLE: [TransitionRow; 22] = {
     use GateId as G;
     use Status::{Any, Is};
     use TaskStatus as S;
@@ -144,6 +144,12 @@ pub static TRANSITION_TABLE: [TransitionRow; 21] = {
         ),
         row(
             Is(S::InProgress),
+            Is(S::Blocked),
+            A::Assignee,
+            G::BlockerWritten,
+        ),
+        row(
+            Is(S::Assigned),
             Is(S::Blocked),
             A::Assignee,
             G::BlockerWritten,
@@ -246,28 +252,28 @@ mod tests {
     }
 
     #[test]
-    fn has_exactly_twenty_one_distinct_rows() {
+    fn has_exactly_twenty_two_distinct_rows() {
         let distinct: BTreeSet<String> = TRANSITION_TABLE
             .iter()
             .map(|row| format!("{row:?}"))
             .collect();
-        assert_eq!(TRANSITION_TABLE.len(), 21);
-        assert_eq!(distinct.len(), 21);
+        assert_eq!(TRANSITION_TABLE.len(), 22);
+        assert_eq!(distinct.len(), 22);
     }
 
     #[test]
-    fn has_seventeen_specific_rows_and_four_any_rows() {
+    fn has_eighteen_specific_rows_and_four_any_rows() {
         let specific = TRANSITION_TABLE
             .iter()
             .filter(|row| is_specific(**row))
             .count();
-        assert_eq!(specific, 17);
+        assert_eq!(specific, 18);
         assert_eq!(TRANSITION_TABLE.len() - specific, 4);
     }
 
     #[test]
     fn matches_every_line_of_the_spec_table() {
-        let lines: [Line; 13] = [
+        let lines: [Line; 14] = [
             (S::Draft, S::Refining, &[(A::ProductManager, G::Triaged)]),
             (
                 S::Refining,
@@ -301,6 +307,7 @@ mod tests {
                 S::Blocked,
                 &[(A::Assignee, G::BlockerWritten)],
             ),
+            (S::Assigned, S::Blocked, &[(A::Assignee, G::BlockerWritten)]),
             (
                 S::Blocked,
                 S::InProgress,
