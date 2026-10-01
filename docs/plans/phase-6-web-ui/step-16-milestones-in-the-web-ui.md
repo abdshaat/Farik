@@ -36,7 +36,7 @@ The records are `docs/milestones/m1-team-exit.md`, `docs/milestones/m1-web-exit.
   - **Who checks plans.** Under the founder's rule of 2026-09-29, the Architect checks plans, because the team has one. Phase 4 had the Scrum Master judge. The pass criteria change to match.
   - **Models.** The six keep phase 4's models. Triage and ceremonies now run on `claude-sonnet-5-5` (spec 5.9), not `claude-sonnet-5`, and the record says so.
   - **The seventh agent**, the founder to confirm at readiness (the role's defaults):
-    `- { id: ux, display_name: UI/UX Designer, role: ui_ux_designer, status: active, persona: "Checks every screen the Developer builds, in the browser.", model: { id: claude-opus-5-5, effort: high }, mcp_servers: [{ name: playwright, source: builtin }] }`
+    `- { id: ux, display_name: Iris, role: ui_ux_designer, status: active, persona: "Checks every screen the Developer builds, in the browser.", model: { id: claude-opus-5-5, effort: high }, mcp_servers: [{ name: playwright, source: builtin }] }`
   - **The Designer, with the preview of Farik with sample data** (the founder, 2026-10-01). `team.yaml` carries ADR 0026 D2's preview, so the Designer is `Ready`, not refused with `preview_not_set`. [A] writes this block at the end of `team.yaml` in stage 1:
 
         preview:
