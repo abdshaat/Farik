@@ -85,12 +85,21 @@ export function SetupSpending() {
 	};
 
 	return (
-		<Wizard step={6} title={t("spendTitle")} lead={t("spendLead")}>
+		<Wizard
+			step={6}
+			title={t("spendTitle")}
+			lead={t("spendLead")}
+			carried={!!draft.from}
+		>
 			{fields}
 			<p className={styles.note}>{t("spendFixed")}</p>
 			<p className={styles.note}>{t("firstDay")}</p>
 			<div className={styles.foot}>
-				<Button onClick={() => navigate("/setup/permissions")}>
+				<Button
+					onClick={() =>
+						navigate(draft.from ? "/setup/team" : "/setup/permissions")
+					}
+				>
 					{t("back")}
 				</Button>
 				<Button kind="primary" disabled={wrong} onClick={onward}>

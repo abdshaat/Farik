@@ -70,3 +70,8 @@
 		var(--farik-type-small-family);
 	color: var(--farik-color-ink);
 }
+
+.card:has(.radio:disabled) {
+	color: var(--farik-color-ink-muted);
+	cursor: default;
+}

@@ -9,6 +9,7 @@ import {
 } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { en } from "../../strings/en.ts";
+import { t } from "../../strings/t.ts";
 import type { FakeSocket } from "../../test/fake-socket.ts";
 import {
 	answerQuery,
@@ -899,5 +900,238 @@ describe("team setup", () => {
 		await s.reply(s.calls("team.start")[1] as never, {});
 		await answerStatus(s, false, 1, { setup_pending: false });
 		expect(await screen.findByRole("heading", { name: en.today })).toBeTruthy();
+	});
+});
+
+/** A saved team as `templates.list` answers it: Mira and Ada with the template's own personas, Theo with none. */
+const THREE = {
+	slug: "three-of-us",
+	template: {
+		version: 1,
+		name: "Three of us",
+		saved_at: "2026-09-28T12:00:00Z",
+		agents: [
+			{
+				id: "mira",
+				display_name: "Mira",
+				role: "product_manager",
+				persona: "Mira.",
+				avatar: "product-manager",
+				model: { id: "claude-sonnet-5", effort: "low" },
+			},
+			{ id: "ada", display_name: "Ada", role: "architect", persona: "Ada." },
+			{ id: "theo", display_name: "Theo", role: "software_developer" },
+		],
+		policy: {
+			permissions: { run_commands: true, push: false },
+			judgment: { required: "never", questions: [BUDGET], judge: "auto" },
+			integration: "pull_request",
+		},
+		budgets: { daily_usd: 20 },
+	},
+};
+const LISTED = { folder: "/home/me/.config/farik/templates", unreadable: [] };
+
+describe("team setup's three starts", () => {
+	it("offers_three_starts", async () => {
+		const { container, socket } = await renderApp("/setup/team");
+		const s = socket as FakeSocket;
+		await answerQuery(
+			s,
+			"team.propose",
+			proposed((team) => {
+				team.agents = [...FIVE.slice(0, 4), IRIS, ...FIVE.slice(4)];
+			}),
+		);
+		await answerQuery(s, "templates.list", { ...LISTED, templates: [THREE] });
+		const starts = await screen.findByRole("group", { name: en.startsLegend });
+		const radios = within(starts).getAllByRole("radio") as HTMLInputElement[];
+		expect(radios.map((r) => r.closest("label")?.textContent)).toEqual([
+			`${en.startSuggested}${en.startSuggestedNote}`,
+			`${en.startSaved}${en.startSavedNote}`,
+			`${en.startScratch}${en.startScratchNote}`,
+		]);
+		expect(radios[0]?.checked).toBe(true);
+		const list = screen.getByRole("list", { name: en.teamMembers });
+		expect(within(list).getAllByRole("listitem")).toHaveLength(6);
+		await expectNoAxeViolations(container);
+	});
+
+	it("starts_from_a_saved_team", async () => {
+		const { container, socket } = await renderApp("/setup/team");
+		const s = socket as FakeSocket;
+		await answerQuery(
+			s,
+			"team.propose",
+			proposed((team) => {
+				team.agents = [...FIVE.slice(0, 4), IRIS, ...FIVE.slice(4)];
+			}),
+		);
+		await answerQuery(s, "templates.list", { ...LISTED, templates: [THREE] });
+		fireEvent.click(
+			await screen.findByRole("radio", { name: /^A saved team/ }),
+		);
+		const which = await screen.findByRole("group", { name: en.startWhich });
+		const three = within(which).getByRole("radio", {
+			name: /^Three of us/,
+		}) as HTMLInputElement;
+		expect(three.checked).toBe(true);
+		expect(three.closest("label")?.textContent).toContain(
+			"Mira, Ada and Theo · saved 28 September",
+		);
+		expect(
+			await screen.findByText(t("teamLeadSaved", { name: "Three of us" })),
+		).toBeTruthy();
+		const list = screen.getByRole("list", { name: en.teamMembers });
+		const names = within(list).getAllByRole("textbox") as HTMLInputElement[];
+		expect(names.map((n) => n.value)).toEqual(["Mira", "Ada", "Theo"]);
+		// The template's persona, or the role's where it has none.
+		expect(within(list).getByText("Mira.")).toBeTruthy();
+		expect(within(list).getByText("Theo persona")).toBeTruthy();
+		await expectNoAxeViolations(container);
+
+		fireEvent.click(screen.getByRole("button", { name: en.teamContinue }));
+		await s.reply(await asked(s, "team.validate"), { errors: [], effects: [] });
+		// What they may do is not asked again: the steps are seven.
+		await screen.findByRole("heading", { name: en.spendTitle });
+		expect(screen.queryByText(en.wizardMay)).toBeNull();
+		expect(
+			(
+				screen.getByRole("radio", {
+					name: /^Stop the team/,
+				}) as HTMLInputElement
+			).checked,
+		).toBe(true);
+		expect(
+			(screen.getByLabelText(en.spendAmount) as HTMLInputElement).value,
+		).toBe("20");
+		fireEvent.click(screen.getByRole("button", { name: en.continue }));
+		await screen.findByRole("heading", { name: en.finishTitle });
+		expect(
+			(
+				screen.getByRole("radio", {
+					name: /^Open a pull request/,
+				}) as HTMLInputElement
+			).checked,
+		).toBe(true);
+		const carried = screen.getByRole("region", {
+			name: t("finishCarried", { name: "Three of us" }),
+		});
+		expect(carried.textContent).toContain(
+			`${en.finishYes} ${en.finishCommandsYes}`,
+		);
+		expect(carried.textContent).toContain(`${en.finishNo} ${en.finishPushNo}`);
+		await expectNoAxeViolations(container);
+
+		fireEvent.click(screen.getByRole("button", { name: en.startTeam }));
+		const start = (await sent(s, "team.start")).params as {
+			team: {
+				agents: Record<string, unknown>[];
+				policy: Record<string, unknown>;
+				budgets: unknown;
+			};
+		};
+		expect(start.team.agents.map((a) => [a.id, a.persona, a.status])).toEqual([
+			["mira", "Mira.", "active"],
+			["ada", "Ada.", "active"],
+			["theo", "Theo persona", "active"],
+		]);
+		expect(start.team.agents[0]?.model).toEqual({
+			id: "claude-sonnet-5",
+			effort: "low",
+		});
+		expect(start.team.policy.permissions).toEqual({
+			run_commands: true,
+			push: false,
+		});
+		expect(start.team.policy.integration).toBe("pull_request");
+		expect(start.team.policy.judgment).toEqual(THREE.template.policy.judgment);
+		expect(start.team.budgets).toEqual({ daily_usd: 20 });
+		expect(
+			s.calls("query").filter((f) => f.params.name === "template.preview"),
+		).toHaveLength(0);
+	});
+
+	it("starts_from_scratch", async () => {
+		const { container, socket } = await renderApp("/setup/team");
+		const s = socket as FakeSocket;
+		await answerQuery(s, "team.propose", proposed());
+		await answerQuery(s, "templates.list", { ...LISTED, templates: [] });
+		fireEvent.click(
+			await screen.findByRole("radio", { name: /^From scratch/ }),
+		);
+		const list = screen.getByRole("list", { name: en.teamMembers });
+		const names = within(list).getAllByRole("textbox") as HTMLInputElement[];
+		expect(names.map((n) => [n.getAttribute("aria-label"), n.value])).toEqual([
+			["Name for the Product Manager", ""],
+			["Name for the Developer", ""],
+		]);
+		const onward = screen.getByRole("button", {
+			name: en.teamContinue,
+		}) as HTMLButtonElement;
+		expect(onward.disabled).toBe(true);
+		expect(screen.getByText(en.teamNameBoth)).toBeTruthy();
+		await expectNoAxeViolations(container);
+
+		fireEvent.change(names[0] as HTMLInputElement, {
+			target: { value: "Mira" },
+		});
+		expect(onward.disabled).toBe(true);
+		fireEvent.change(names[1] as HTMLInputElement, {
+			target: { value: "Noor" },
+		});
+		expect(onward.disabled).toBe(false);
+		fireEvent.click(onward);
+		const team = (
+			(await asked(s, "team.validate")).params.params as {
+				team: { agents: Record<string, unknown>[] };
+			}
+		).team;
+		expect(team.agents.map((a) => [a.id, a.role, a.persona])).toEqual([
+			["mira", "product_manager", "Mira persona"],
+			["noor", "software_developer", "Theo persona"],
+		]);
+	});
+
+	it("disables_saved_with_no_state_folder_or_none_saved", async () => {
+		const first = await renderApp("/setup/team");
+		const s = first.socket as FakeSocket;
+		await answerQuery(s, "team.propose", proposed());
+		await answerQuery(s, "templates.list", { ...LISTED, templates: [] });
+		const none = (await screen.findByRole("radio", {
+			name: /^A saved team/,
+		})) as HTMLInputElement;
+		await waitFor(() =>
+			expect(none.closest("label")?.textContent).toBe(
+				`${en.startSaved}${en.startSavedNone}`,
+			),
+		);
+		expect(none.disabled).toBe(true);
+		await expectNoAxeViolations(first.container);
+		cleanup();
+
+		const second = await renderApp("/setup/team");
+		const t2 = second.socket as FakeSocket;
+		await answerQuery(t2, "team.propose", proposed());
+		const listing = await waitFor(() => {
+			const f = t2
+				.calls("query")
+				.find((q) => q.params.name === "templates.list");
+			if (!f) throw new Error("no templates.list was asked");
+			return f;
+		});
+		await t2.fail(listing, -32005, "farik has no state folder", {
+			errors: [{ path: "/", message: "no folder", code: "no_state_folder" }],
+		});
+		const nowhere = (await screen.findByRole("radio", {
+			name: /^A saved team/,
+		})) as HTMLInputElement;
+		await waitFor(() =>
+			expect(nowhere.closest("label")?.textContent).toBe(
+				`${en.startSaved}${en.templateNoFolder}`,
+			),
+		);
+		expect(nowhere.disabled).toBe(true);
+		await expectNoAxeViolations(second.container);
 	});
 });

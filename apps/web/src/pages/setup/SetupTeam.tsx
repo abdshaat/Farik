@@ -1,12 +1,21 @@
-import { AVATAR_URLS, type AvatarKey, Button } from "@farik/ui";
+import { AVATAR_URLS, type AvatarKey, Button, Choice } from "@farik/ui";
 import { useState } from "react";
 import { useNavigate } from "react-router";
 import { useConnection } from "../../app/connection.tsx";
 import { type Refusal, refusalsOf, said } from "../../app/refusals.ts";
 import { t } from "../../strings/t.ts";
+import { Faces, templateMeta, useTemplates } from "../SavedTeams.tsx";
 import { PreviewFields } from "./PreviewFields.tsx";
 import styles from "./setup.module.css";
-import { ringOf, roleName, someone, teamOf, useSetup } from "./TeamSetup.tsx";
+import {
+	draftOf,
+	ringOf,
+	roleName,
+	type Start,
+	someone,
+	teamOf,
+	useSetup,
+} from "./TeamSetup.tsx";
 import { Wizard } from "./Wizard.tsx";
 
 type Checked = { errors: Refusal[] };
@@ -21,11 +30,24 @@ const JOBS = {
 	ui_ux_designer: "jobDesigner",
 } as const;
 
-/** Setup's fifth step: the six suggested agents, named, and any second Developer. */
+/** Setup's fifth step: where the team starts from, then its agents, named, and anyone added. */
 export function SetupTeam() {
 	const { client } = useConnection();
 	const navigate = useNavigate();
-	const { draft, change, unavailable, checkAgain } = useSetup();
+	const { draft, proposed, change, unavailable, checkAgain } = useSetup();
+	const { listing, noFolder } = useTemplates();
+	const saved = listing?.templates ?? [];
+	const [slug, setSlug] = useState<string>();
+	const begin = (start: Start, chosen = slug ?? saved[0]?.slug) => {
+		setErrors([]);
+		setSlug(chosen);
+		const template = saved.find((s) => s.slug === chosen)?.template;
+		change(draftOf(proposed, start, template));
+	};
+	const scratch = draft.start === "scratch";
+	// From scratch, the two required rows have to be named before going on.
+	const unnamed =
+		scratch && draft.members.some((m) => !m.agent.displayName.trim());
 	const [errors, setErrors] = useState<Checked["errors"]>([]);
 	const [busy, setBusy] = useState(false);
 	const on = draft.members.filter((m) => m.on);
@@ -92,7 +114,9 @@ export function SetupTeam() {
 				team: teamOf(draft),
 			})) as Checked;
 			setErrors(checked.errors);
-			if (checked.errors.length === 0) navigate("/setup/permissions");
+			// A saved team's permission answers carry over, so they are not asked again.
+			if (checked.errors.length === 0)
+				navigate(draft.from ? "/setup/spending" : "/setup/permissions");
 		} catch (e) {
 			setErrors(refusalsOf(e));
 		}
@@ -100,7 +124,60 @@ export function SetupTeam() {
 	};
 
 	return (
-		<Wizard step={4} title={t("teamTitle")} lead={t("teamLead")}>
+		<Wizard
+			step={4}
+			title={t("teamTitle")}
+			lead={
+				draft.from
+					? t("teamLeadSaved", { name: draft.from })
+					: t(scratch ? "teamLeadScratch" : "teamLead")
+			}
+			carried={!!draft.from}
+		>
+			<Choice<Start>
+				name="start"
+				legend={t("startsLegend")}
+				value={draft.start}
+				onChange={(start) => begin(start)}
+				options={[
+					{
+						value: "suggested",
+						label: t("startSuggested"),
+						description: t("startSuggestedNote"),
+					},
+					{
+						value: "saved",
+						label: t("startSaved"),
+						description: noFolder
+							? t("templateNoFolder")
+							: saved.length
+								? t("startSavedNote")
+								: t("startSavedNone"),
+						disabled: !saved.length,
+						after: draft.start === "saved" && (
+							<div className={styles.which}>
+								<Choice<string>
+									name="saved"
+									legend={t("startWhich")}
+									value={slug ?? ""}
+									onChange={(chosen) => begin("saved", chosen)}
+									options={saved.map(({ slug, template }) => ({
+										value: slug,
+										label: template.name,
+										description: templateMeta(template),
+										extra: <Faces agents={template.agents} />,
+									}))}
+								/>
+							</div>
+						),
+					},
+					{
+						value: "scratch",
+						label: t("startScratch"),
+						description: t("startScratchNote"),
+					},
+				]}
+			/>
 			<ul className={styles.members} aria-label={t("teamMembers")}>
 				{draft.members.map((member, index) => {
 					const { agent, on: included } = member;
@@ -113,13 +190,15 @@ export function SetupTeam() {
 					const cannot = unavailable.includes(agent.id);
 					return (
 						<li key={member.key} className={styles.member}>
-							<input
-								type="checkbox"
-								checked={included}
-								disabled={cannot}
-								aria-label={t("teamInclude").replace("{role}", role)}
-								onChange={(e) => set(index, { on: e.target.checked })}
-							/>
+							{!scratch && (
+								<input
+									type="checkbox"
+									checked={included}
+									disabled={cannot}
+									aria-label={t("teamInclude").replace("{role}", role)}
+									onChange={(e) => set(index, { on: e.target.checked })}
+								/>
+							)}
 							{avatar && (
 								<img
 									className={styles.face}
@@ -141,7 +220,11 @@ export function SetupTeam() {
 								/>
 							</span>
 							<span className={styles.persona}>
-								{t(JOBS[agent.role], { pm, developer })}
+								{scratch
+									? t("teamScratchNote")
+									: draft.from
+										? agent.persona
+										: t(JOBS[agent.role], { pm, developer })}
 							</span>
 							{why.length > 0 && (
 								<span id={whyId} className={styles.error}>
@@ -202,6 +285,11 @@ export function SetupTeam() {
 					{t("teamAdd")}
 				</Button>
 			</span>
+			{draft.from && (
+				<p className={styles.note}>
+					{t("teamSavedAnswers", { name: draft.from })}
+				</p>
+			)}
 			{loose.length > 0 && (
 				<p role="alert" className={styles.alert}>
 					{loose.map((e) => said(e.code)).join(" ")}
@@ -209,14 +297,21 @@ export function SetupTeam() {
 			)}
 			<div className={styles.foot}>
 				<Button onClick={() => navigate("/setup/scan")}>{t("back")}</Button>
-				<Button
-					kind="primary"
-					busy={busy}
-					disabled={on.length === 0}
-					onClick={onward}
-				>
-					{t(on.length === 6 ? "teamContinueSix" : "teamContinue")}
-				</Button>
+				<span>
+					{unnamed && <span className={styles.note}>{t("teamNameBoth")}</span>}
+					<Button
+						kind="primary"
+						busy={busy}
+						disabled={on.length === 0 || unnamed}
+						onClick={onward}
+					>
+						{t(
+							on.length === 6 && draft.start === "suggested"
+								? "teamContinueSix"
+								: "teamContinue",
+						)}
+					</Button>
+				</span>
 			</div>
 		</Wizard>
 	);

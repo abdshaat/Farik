@@ -235,7 +235,9 @@ Files as the file map says. Every test also runs axe (step 06's rule).
 - `disables_use_when_the_result_is_refused`: a preview with `needs_developer` shows `en.ts`'s sentence for it, not the daemon's message, and "Use this team" is disabled.
 - `renames_and_deletes_in_settings`: Rename sends `template.rename`; Delete asks, then sends `template.delete`; an unreadable row offers Delete only, with `en.ts`'s fixed line.
 
-- [ ] `feat(web): start a team from a saved one, and save, use, rename and delete templates`
+As built (Task 6): `templates.list` already answers during setup: the team screens run once the project is taken on, with the setup marker, so the daemon has the project and the same `WebState.templates` (`start.rs`'s `web()` builds it in setup and project mode alike); no daemon change. "Your team"'s three starts sit above the builder on one screen (the suggested start selected, its six rows below), not on a screen of their own as the mockup draws it, so step 06's builder tests stand; the saved team's picker opens inside the start's group. `@farik/ui`'s `Choice` gains an option's `disabled`, `extra` (the faces) and `after` (the picker). The eight tests are in `setup/team.test.tsx` (four) and `pages/team.test.tsx` (four), beside the pages' other tests, rather than in new test files. The builder filled from a saved team shows each persona but not the "Model:" line. The refused preview names the missing role's paused agents and those it would retire, from the preview, in the words written for templates; any other code is its `en.ts` sentence and "Choose another saved team." Settings shows `templates.list`'s `folder`.
+
+- [x] `feat(web): start a team from a saved one, and save, use, rename and delete templates`
 
 ### Task 7: The templates journey (Playwright)
 

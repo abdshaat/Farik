@@ -485,3 +485,8 @@
 	align-items: center;
 	min-height: 44px;
 }
+
+/* The saved teams to pick from, under "A saved team". */
+.which {
+	margin-left: var(--farik-space-6);
+}

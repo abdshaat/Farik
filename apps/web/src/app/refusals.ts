@@ -21,6 +21,10 @@ const WORDS: Record<string, keyof typeof en> = {
 	last_of_role: "refuseLastOfRole",
 	last_judge: "refuseLastJudge",
 	too_short: "requestTooShort",
+	template_exists: "templateExists",
+	template_name: "templateName",
+	template_unreadable: "templateUnreadable",
+	no_state_folder: "templateNoFolder",
 };
 
 /** A refusal in plain words, `{key}` filled from `fill`: its code's sentence, or a plain one for any other. */

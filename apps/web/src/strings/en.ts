@@ -1049,4 +1049,117 @@ export const en = {
 	waitingNeedsBrowser: "{agent}’s browser is off",
 	waitingNeedsBrowserLine:
 		"{designer} opens your app with Playwright. Turn Playwright on for {designer} on the Team page; until then {designer} takes no work, and nobody checks the screens {developer} builds.",
+	startsLegend:
+		"Start from the team Farik suggests, from a team you saved in another project, or from nothing. Whichever you pick, you can change anyone below.",
+	startSuggested: "The suggested team",
+	startSuggestedNote:
+		"Six people, one for each job. A good start for a first project.",
+	startSaved: "A saved team",
+	startSavedNote:
+		"A team you tuned before and saved from a Team page. It brings everyone’s name, picture, persona and model, and your answers to the setup questions.",
+	startSavedNone:
+		"You have no saved teams yet. Save one from a project’s Team page with “Save as a template”.",
+	startWhich: "Which saved team?",
+	startScratch: "From scratch",
+	startScratchNote:
+		"Start with the two every team needs, a Product Manager and a Developer, and add whoever else you want.",
+	teamLeadSaved:
+		"Filled from {name}. Change anyone before you continue; the saved team itself stays as it is.",
+	teamLeadScratch:
+		"Every team needs a Product Manager to plan and a Developer to build. Name them, then add whoever else you want.",
+	teamScratchNote:
+		"Every team needs one. Picture, persona and model are the role’s own; change them later on the Team page.",
+	teamNameBoth: "Name both to continue.",
+	teamSavedAnswers:
+		"{name} also holds your answers about what they may do, spending, finishing work and checking plans. You will see them on the next screens, already chosen.",
+	templateMeta: "{names} · saved {date}",
+	finishLeadSaved:
+		"Accepted work has to be added to your project. {name}’s answer is already chosen; change it if this project needs another.",
+	finishCarried: "What they may do, from {name}",
+	finishCommands: "Run commands on this computer",
+	finishPush: "Send work to your online repository",
+	finishYes: "Yes.",
+	finishNo: "No.",
+	finishCommandsYes:
+		"The team may run commands, in a sealed box away from your other files.",
+	finishCommandsNo:
+		"Nobody runs commands; Farik still runs every check itself.",
+	finishPushYes: "The Developer may send work to its own branches online.",
+	finishPushNo: "Everything stays on this computer.",
+	finishCarriedBefore:
+		"You answered these when you saved the team, so Farik does not ask again. Change them any time in ",
+	finishCarriedAfter: ", under Your team’s rules.",
+	templateSaveOpen: "Save as a template",
+	templateUseOpen: "Use a saved team",
+	saveTitle: "Save this team as a template",
+	saveLead:
+		"Farik keeps a copy on this computer, so any of your projects can start from it.",
+	saveKeeps: "What it keeps",
+	saveKeepsBody:
+		"Everyone’s name, picture, persona and model, and your answers about what they may do, checking plans, spending and finishing work.",
+	saveStays: "What stays with this project",
+	saveStaysBody:
+		"The team’s rules, the checks, how to open your app, and who is paused or retired.",
+	saveName: "Name",
+	saveNameHint: "Up to 60 characters, such as “My usual team”.",
+	saveSave: "Save",
+	saveReplace: "Replace",
+	savedAsBefore: "Saved as ",
+	savedAsAfter:
+		". Any project on this computer can use it, and you can rename or delete it in ",
+	templateExists:
+		"A saved team is called {name} already. Replace it, or choose another name.",
+	templateRenameTaken:
+		"A saved team is called {name} already. Choose another name.",
+	templateName: "Give the saved team a name with a letter or a number in it.",
+	templateUnreadable:
+		"This saved team cannot be read. Delete it, or fix the file by hand.",
+	templateNoFolder:
+		"Farik has no folder on this computer to keep saved teams in.",
+	useLead:
+		"Pick a team you saved. Farik shows you who stays, who joins and who leaves before anything changes.",
+	useList: "Saved teams",
+	useSettingsBefore: "Rename or delete saved teams in ",
+	useShow: "Show what changes",
+	usePreviewTitle: "Use {name}?",
+	usePreviewLead:
+		"This is what your team would look like. Nothing changes until you choose “Use this team”.",
+	useStays: "Stays",
+	useStaysNote:
+		"Keep their work and chats, and take the saved name, picture, persona and model.",
+	useJoins: "Joins",
+	useJoinsNote: "New to this project.",
+	useRetired: "Retired",
+	useRetiredNote:
+		"Have done work here, so they leave the team and their work and chats stay to read.",
+	useRemoved: "Removed",
+	useRemovedNote: "Never started any work here, so they are taken off.",
+	useNobody: "Nobody",
+	useChanges: "What changes",
+	useApply: "Use this team",
+	useCannot: "Farik cannot use this team here",
+	useNothingChanged: "Nothing has changed.",
+	usePaused: "{role} · paused",
+	templateNoActive: "Your team would have no active {role}.",
+	templatePaused: "{paused} stays but is paused.",
+	templatePausedRetired:
+		"{paused} stays but is paused, and {retired} would be retired.",
+	templateResume:
+		"Resume {paused} on the Team page first, or choose another saved team.",
+	templateChooseAnother: "Choose another saved team.",
+	savedTeams: "Saved teams",
+	savedTeamsLead:
+		"Teams you saved from a Team page. Every project on this computer can start from them. Renaming or deleting one changes no project’s team.",
+	savedTeamsNoneBefore: "You have no saved teams yet. Save one from your ",
+	savedTeamsNoneAfter: " page with “Save as a template”.",
+	savedRename: "Rename",
+	savedRenameLabel: "New name for {name}",
+	savedRenameSave: "Save name",
+	savedDelete: "Delete",
+	savedDeleteAsk: "Delete {name}?",
+	savedDeleteNote:
+		"Projects that started from it keep their teams. This cannot be undone.",
+	savedDeleteYes: "Delete it",
+	savedDeleteNo: "Keep it",
+	savedFolder: "Kept on this computer, in {folder}.",
 };

@@ -5,6 +5,8 @@ import { useConnection } from "../app/connection.tsx";
 import { commandSaid, saidAll } from "../app/refusals.ts";
 import { useQuery } from "../app/store.ts";
 import { t } from "../strings/t.ts";
+import { SaveTemplate } from "./dialogs/SaveTemplate.tsx";
+import { UseTemplate } from "./dialogs/UseTemplate.tsx";
 import styles from "./pages.module.css";
 import {
 	type Agent,
@@ -105,6 +107,8 @@ export function Team() {
 	const { data: activity } = useQuery<{
 		activity: { agentId: string; line: string }[];
 	}>("team.activity", {});
+	const [open, setOpen] = useState<"save" | "use">();
+	const [savedAs, setSavedAs] = useState<string>();
 	if (!team) return null;
 	const agents = team.agents.filter((a) => a.status !== "retired");
 	const designer = agents.find((a) => a.role === "ui_ux_designer");
@@ -117,6 +121,31 @@ export function Team() {
 					.replace("{count}", String(agents.length))
 					.replace("{name}", team.name)}
 			</p>
+			<div className={styles.actions}>
+				<Button onClick={() => setOpen("use")}>{t("templateUseOpen")}</Button>
+				<Button onClick={() => setOpen("save")}>{t("templateSaveOpen")}</Button>
+			</div>
+			{savedAs && (
+				<p role="status" className={styles.notice}>
+					{t("savedAsBefore")}
+					<strong>{savedAs}</strong>
+					{t("savedAsAfter")}
+					<Link to="/settings">{t("settings")}</Link>.
+				</p>
+			)}
+			{open === "save" && (
+				<SaveTemplate
+					agents={agents}
+					onSaved={(name) => {
+						setSavedAs(name);
+						setOpen(undefined);
+					}}
+					onClose={() => setOpen(undefined)}
+				/>
+			)}
+			{open === "use" && (
+				<UseTemplate current={team} onClose={() => setOpen(undefined)} />
+			)}
 			{status.refusal && (
 				<p role="alert" className={styles.alert}>
 					{status.refusal}

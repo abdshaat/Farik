@@ -5,6 +5,7 @@ import { useConnection } from "../../app/connection.tsx";
 import { saidAll } from "../../app/refusals.ts";
 import { useQuery } from "../../app/store.ts";
 import { t } from "../../strings/t.ts";
+import type { Template } from "../SavedTeams.tsx";
 import {
 	formOf,
 	type Preview,
@@ -65,9 +66,22 @@ export type Draft = {
 	answers: { commands?: boolean; push?: boolean };
 	/** How to open the app, asked on the Designer's row. */
 	preview: PreviewForm;
+	/** Where the team started from: the suggested team, a saved team, or from scratch. */
+	start: Start;
+	/** The saved team's name, when it started from one; its permission answers are not asked again. */
+	from?: string;
+};
+export type Start = "suggested" | "saved" | "scratch";
+/** What `team.propose` answers: the suggested team and checks, and the agents this computer cannot run. */
+export type Proposed = {
+	team: Team;
+	criteria: Library;
+	unavailable?: { agentId: string }[];
 };
 type Setup = {
 	draft: Draft;
+	/** The suggested team, which every start builds from. */
+	proposed: Proposed;
 	change: (next: Draft) => void;
 	/** The agents this computer cannot run, which start unticked (step 12, D3). */
 	unavailable: string[];
@@ -113,34 +127,83 @@ export function someone(agents: Agent[], like: Agent): Agent {
 	};
 }
 
-/** The layout of the team screens: the suggested team, fetched once, held for every screen. */
-export function TeamSetup() {
-	const { data, again } = useQuery<{
-		team: Team;
-		criteria: Library;
-		unavailable?: { agentId: string }[];
-	}>("team.propose", {});
-	const [mine, setMine] = useState<Draft>();
-	const unavailable = (data?.unavailable ?? []).map((u) => u.agentId);
-	const draft: Draft | undefined =
-		mine ??
-		(data && {
-			team: data.team,
-			members: data.team.agents.map((agent, key) => ({
-				agent,
-				on: !unavailable.includes(agent.id),
+/**
+ * The draft a start makes from the suggested team: its six; a saved team's agents, each field the
+ * template leaves out the role's, with its four answers; or a Product Manager and a Developer,
+ * unnamed. A saved team never goes through `template.preview`: setup replaces the starter team.
+ */
+export function draftOf(
+	proposed: Proposed,
+	start: Start,
+	template?: Template,
+): Draft {
+	const unavailable = (proposed.unavailable ?? []).map((u) => u.agentId);
+	const suggested = proposed.team.agents;
+	const role = (r: Agent["role"]) => suggested.find((a) => a.role === r);
+	const base = {
+		team: proposed.team,
+		criteria: proposed.criteria,
+		answers: {},
+		preview: formOf(proposed.team.preview),
+		start,
+	};
+	if (start === "saved" && template) {
+		const { permissions, judgment, integration } = template.policy;
+		const { dailyUsd: _, ...budgets } = proposed.team.budgets;
+		return {
+			...base,
+			from: template.name,
+			team: {
+				...proposed.team,
+				policy: { ...proposed.team.policy, permissions, judgment, integration },
+				budgets:
+					template.budgets.dailyUsd === undefined
+						? budgets
+						: { ...budgets, dailyUsd: template.budgets.dailyUsd },
+			},
+			answers: { commands: permissions.runCommands, push: permissions.push },
+			members: template.agents.map((agent, key) => ({
+				agent: { ...role(agent.role), ...agent, status: "active" },
+				on: true,
 				key,
 			})),
-			criteria: data.criteria,
-			answers: {},
-			preview: formOf(data.team.preview),
-		});
-	if (!draft) return null;
+		};
+	}
+	if (start === "scratch")
+		return {
+			...base,
+			members: (["product_manager", "software_developer"] as const).flatMap(
+				(r, key) => {
+					const agent = role(r);
+					return agent
+						? [{ agent: { ...agent, displayName: "" }, on: true, key }]
+						: [];
+				},
+			),
+		};
+	return {
+		...base,
+		members: suggested.map((agent, key) => ({
+			agent,
+			on: !unavailable.includes(agent.id),
+			key,
+		})),
+	};
+}
+
+/** The layout of the team screens: the suggested team, fetched once, held for every screen. */
+export function TeamSetup() {
+	const { data, again } = useQuery<Proposed>("team.propose", {});
+	const [mine, setMine] = useState<Draft>();
+	const unavailable = (data?.unavailable ?? []).map((u) => u.agentId);
+	const draft: Draft | undefined = mine ?? (data && draftOf(data, "suggested"));
+	if (!draft || !data) return null;
 	return (
 		<Outlet
 			context={
 				{
 					draft,
+					proposed: data,
 					change: setMine,
 					unavailable,
 					checkAgain: again,

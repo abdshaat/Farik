@@ -8,6 +8,7 @@ import type { ThemeChoice } from "../app/theme.ts";
 import { t } from "../strings/t.ts";
 import { ConnectAgain } from "./ConnectAgain.tsx";
 import styles from "./pages.module.css";
+import { SavedTeams } from "./SavedTeams.tsx";
 import { HowToOpen, TeamRules } from "./TeamRules.tsx";
 
 const ADVANCED = "farik.advanced";
@@ -93,6 +94,7 @@ export function Settings({
 				<p>{t("advancedSafe")}</p>
 			</section>
 			<TeamRules advanced={advanced} />
+			<SavedTeams />
 			<section className={styles.section} aria-labelledby="computer-heading">
 				<h2 id="computer-heading">{t("thisComputer")}</h2>
 				<p>

@@ -10,8 +10,14 @@ import {
 } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { en } from "../strings/en.ts";
+import { t } from "../strings/t.ts";
 import type { FakeSocket } from "../test/fake-socket.ts";
-import { answerQuery, answerStatus, renderApp } from "../test/render-app.tsx";
+import {
+	answerQuery,
+	answerStatus,
+	eventArrives,
+	renderApp,
+} from "../test/render-app.tsx";
 
 const agent = (id: string, name: string, role: string, avatar: string) => ({
 	id,
@@ -1163,5 +1169,333 @@ describe("team page", () => {
 		expect(
 			within(row).queryByRole("button", { name: en.accountDisconnect }),
 		).toBeNull();
+	});
+});
+
+const PAIR = {
+	slug: "pair",
+	template: {
+		version: 1,
+		name: "Pair",
+		saved_at: "2026-09-28T12:00:00Z",
+		agents: [
+			{
+				id: "mira",
+				display_name: "Mira",
+				role: "product_manager",
+				avatar: "product-manager",
+			},
+			{
+				id: "noor",
+				display_name: "Noor",
+				role: "software_developer",
+				avatar: "extra-2",
+			},
+		],
+		policy: {
+			permissions: { run_commands: true, push: false },
+			judgment: { required: "always", questions: [BUDGET], judge: "auto" },
+			integration: "auto_merge",
+		},
+		budgets: {},
+	},
+};
+const FOLDER = "/home/me/.config/farik/templates";
+
+/** The `template.preview` answer: Mira stays, Noor joins, Theo is retired, the rest removed. */
+const PREVIEW = {
+	team: {
+		...TEAM,
+		agents: [
+			TEAM.agents[0],
+			{ ...TEAM.agents[3], status: "retired" },
+			agent("noor", "Noor", "software_developer", "extra-2"),
+		],
+	},
+	kept: ["mira"],
+	retired: ["theo"],
+	removed: ["sol", "ada", "kai"],
+	added: ["noor"],
+	effects: ["Theo, the Developer, is retired.", "Noor joins as a Developer."],
+	errors: [],
+};
+
+/** The latest `name` query the page asked. */
+async function query(s: FakeSocket, name: string) {
+	return waitFor(() => {
+		const f = s
+			.calls("query")
+			.filter((q) => q.params.name === name)
+			.at(-1);
+		if (!f) throw new Error(`no ${name} was asked`);
+		return f;
+	});
+}
+
+describe("team templates", () => {
+	it("saves_the_team_as_a_template", async () => {
+		const { container, s } = await opened("/team");
+		fireEvent.click(
+			await screen.findByRole("button", { name: en.templateSaveOpen }),
+		);
+		const dialog = await screen.findByRole("dialog", { name: en.saveTitle });
+		expect(
+			within(dialog).getByText("Mira, Sol, Ada, Theo and Kai"),
+		).toBeTruthy();
+		fireEvent.change(
+			within(dialog).getByRole("textbox", { name: en.saveName }),
+			{
+				target: { value: "My usual team" },
+			},
+		);
+		fireEvent.click(within(dialog).getByRole("button", { name: en.saveSave }));
+		const first = await sent(s, "template.save");
+		expect(first.params).toEqual({ name: "My usual team" });
+		await s.fail(first, -32005, "a template is called My usual team already", {
+			errors: [{ path: "/name", message: "taken", code: "template_exists" }],
+		});
+		expect((await within(dialog).findByRole("alert")).textContent).toBe(
+			t("templateExists", { name: "My usual team" }),
+		);
+		expect(within(dialog).queryByText(/already$/)).toBeNull();
+		expect(
+			within(dialog).queryByRole("button", { name: en.saveSave }),
+		).toBeNull();
+		await expectNoAxeViolations(container);
+
+		fireEvent.click(
+			within(dialog).getByRole("button", { name: en.saveReplace }),
+		);
+		await waitFor(() => expect(s.calls("template.save")).toHaveLength(2));
+		const second = s.calls("template.save")[1] as never as {
+			params: unknown;
+		};
+		expect(second.params).toEqual({ name: "My usual team", replace: true });
+		await s.reply(second as never, { slug: "my-usual-team" });
+		const line = await screen.findByRole("status");
+		expect(line.textContent).toBe(
+			`${en.savedAsBefore}My usual team${en.savedAsAfter}${en.settings}.`,
+		);
+		expect(screen.queryByRole("dialog")).toBeNull();
+		await expectNoAxeViolations(container);
+	});
+
+	it("shows_what_changes_before_using", async () => {
+		const { container, s } = await opened("/team");
+		fireEvent.click(
+			await screen.findByRole("button", { name: en.templateUseOpen }),
+		);
+		await answerQuery(s, "templates.list", {
+			folder: FOLDER,
+			templates: [PAIR],
+			unreadable: [],
+		});
+		const dialog = await screen.findByRole("dialog", {
+			name: en.templateUseOpen,
+		});
+		const pair = (await within(dialog).findByRole("radio", {
+			name: /^Pair/,
+		})) as HTMLInputElement;
+		expect(pair.checked).toBe(true);
+		await expectNoAxeViolations(container);
+		fireEvent.click(within(dialog).getByRole("button", { name: en.useShow }));
+		const asked = await query(s, "template.preview");
+		expect(asked.params.params).toEqual({ slug: "pair" });
+		await s.reply(asked, PREVIEW);
+		const preview = await screen.findByRole("dialog", {
+			name: t("usePreviewTitle", { name: "Pair" }),
+		});
+		const group = (name: string) =>
+			within(preview)
+				.getByRole("region", { name: new RegExp(`^${name}`) })
+				.querySelectorAll("li strong");
+		const names = (name: string) => [...group(name)].map((n) => n.textContent);
+		expect(names(en.useStays)).toEqual(["Mira"]);
+		expect(names(en.useJoins)).toEqual(["Noor"]);
+		expect(names(en.useRetired)).toEqual(["Theo"]);
+		expect(names(en.useRemoved)).toEqual(["Sol", "Ada", "Kai"]);
+		expect(
+			within(preview).getByText("Noor joins as a Developer."),
+		).toBeTruthy();
+		expect(s.calls("template.apply")).toHaveLength(0);
+		await expectNoAxeViolations(container);
+
+		fireEvent.click(within(preview).getByRole("button", { name: en.useApply }));
+		const applied = await sent(s, "template.apply");
+		expect(applied.params).toEqual({ slug: "pair" });
+		await s.reply(applied, PREVIEW);
+		await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+		// The Team page reads the team again and shows the new one.
+		await eventArrives(s, 1);
+		await s.reply(await query(s, "team.get"), {
+			team: PREVIEW.team,
+			agents: EFFECTIVE,
+			judges: JUDGES,
+			max_agents: 7,
+		});
+		const cards = await screen.findByRole("list", { name: en.teamMembers });
+		await waitFor(() =>
+			expect(
+				within(cards)
+					.getAllByRole("listitem")
+					.map((li) => li.querySelector("strong")?.textContent),
+			).toEqual(["Mira", "Noor"]),
+		);
+	});
+
+	it("disables_use_when_the_result_is_refused", async () => {
+		const paused = {
+			...TEAM,
+			agents: [
+				...TEAM.agents.map((a) =>
+					a.id === "theo" ? { ...a, status: "paused" } : a,
+				),
+				agent("rowan", "Rowan", "software_developer", "extra-2"),
+			],
+		};
+		const { container, s } = await opened("/team", paused);
+		fireEvent.click(
+			await screen.findByRole("button", { name: en.templateUseOpen }),
+		);
+		await answerQuery(s, "templates.list", {
+			folder: FOLDER,
+			templates: [PAIR],
+			unreadable: [],
+		});
+		const dialog = await screen.findByRole("dialog", {
+			name: en.templateUseOpen,
+		});
+		await within(dialog).findByRole("radio", { name: /^Pair/ });
+		fireEvent.click(within(dialog).getByRole("button", { name: en.useShow }));
+		await s.reply(await query(s, "template.preview"), {
+			team: {
+				...paused,
+				agents: paused.agents.map((a) =>
+					["mira", "theo"].includes(a.id) ? a : { ...a, status: "retired" },
+				),
+			},
+			kept: ["mira", "theo"],
+			retired: ["sol", "ada", "kai", "rowan"],
+			removed: [],
+			added: [],
+			effects: [],
+			errors: [
+				{
+					path: "/agents",
+					message:
+						"A team needs an active Software Developer to do the work, and this one has none.",
+					code: "needs_developer",
+				},
+			],
+		});
+		const preview = await screen.findByRole("dialog", {
+			name: t("usePreviewTitle", { name: "Pair" }),
+		});
+		const alert = within(preview).getByRole("alert");
+		expect(alert.textContent).toBe(
+			`${en.useCannot}${t("templateNoActive", { role: "Developer" })} ${t(
+				"templatePausedRetired",
+				{ paused: "Theo", retired: "Rowan" },
+			)} ${t("templateResume", { paused: "Theo" })}${en.useNothingChanged}`,
+		);
+		expect(within(preview).queryByText(/Software Developer/)).toBeNull();
+		expect(
+			(
+				within(preview).getByRole("button", {
+					name: en.useApply,
+				}) as HTMLButtonElement
+			).disabled,
+		).toBe(true);
+		await expectNoAxeViolations(container);
+	});
+
+	it("renames_and_deletes_in_settings", async () => {
+		const { container, socket } = await renderApp("/settings");
+		const s = socket as FakeSocket;
+		await answerStatus(s, false);
+		const listed = {
+			folder: FOLDER,
+			templates: [
+				{
+					...PAIR,
+					slug: "my-usual-team",
+					template: { ...PAIR.template, name: "My usual team" },
+				},
+			],
+			unreadable: [{ slug: "old-team" }],
+		};
+		await answerQuery(s, "templates.list", listed);
+		const section = await screen.findByRole("region", { name: en.savedTeams });
+		expect(
+			await within(section).findByText("My usual team", { selector: "strong" }),
+		).toBeTruthy();
+		expect(
+			within(section).getByText("Mira and Noor · saved 28 September 2026"),
+		).toBeTruthy();
+		expect(
+			within(section).getByText(t("savedFolder", { folder: FOLDER })),
+		).toBeTruthy();
+		// A file Farik cannot read offers Delete alone, with the fixed line.
+		const broken = within(section)
+			.getByText("old-team", { selector: "code" })
+			.closest("li") as HTMLElement;
+		expect(within(broken).getByText(en.templateUnreadable)).toBeTruthy();
+		expect(
+			within(broken)
+				.getAllByRole("button")
+				.map((b) => b.textContent),
+		).toEqual([`${en.savedDelete} old-team`]);
+		await expectNoAxeViolations(container);
+
+		fireEvent.click(
+			within(section).getByRole("button", { name: "Rename My usual team" }),
+		);
+		const field = within(section).getByRole("textbox", {
+			name: t("savedRenameLabel", { name: "My usual team" }),
+		}) as HTMLInputElement;
+		expect(field.value).toBe("My usual team");
+		fireEvent.change(field, { target: { value: "Shop pair" } });
+		await expectNoAxeViolations(container);
+		fireEvent.click(
+			within(section).getByRole("button", { name: en.savedRenameSave }),
+		);
+		const renamed = await sent(s, "template.rename");
+		expect(renamed.params).toEqual({
+			slug: "my-usual-team",
+			name: "Shop pair",
+		});
+		await s.reply(renamed, { slug: "shop-pair" });
+		// The list is read again: saving a template records no event.
+		await waitFor(() =>
+			expect(
+				s.calls("query").filter((q) => q.params.name === "templates.list"),
+			).toHaveLength(2),
+		);
+		await answerQuery(s, "templates.list", listed);
+
+		fireEvent.click(
+			await within(section).findByRole("button", {
+				name: "Delete My usual team",
+			}),
+		);
+		expect(
+			within(section).getByText(t("savedDeleteAsk", { name: "My usual team" })),
+		).toBeTruthy();
+		expect(s.calls("template.delete")).toHaveLength(0);
+		await expectNoAxeViolations(container);
+		fireEvent.click(
+			within(section).getByRole("button", { name: en.savedDeleteNo }),
+		);
+		expect(
+			within(section).queryByRole("button", { name: en.savedDeleteYes }),
+		).toBeNull();
+		fireEvent.click(
+			within(section).getByRole("button", { name: "Delete My usual team" }),
+		);
+		fireEvent.click(
+			within(section).getByRole("button", { name: en.savedDeleteYes }),
+		);
+		const deleted = await sent(s, "template.delete");
+		expect(deleted.params).toEqual({ slug: "my-usual-team" });
 	});
 });

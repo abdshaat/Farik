@@ -5,13 +5,14 @@ import type { ReactNode } from "react";
 import { t } from "../../strings/t.ts";
 import styles from "./setup.module.css";
 
+const MAY = t("wizardMay");
 const STEPS = [
 	t("wizardComputer"),
 	t("wizardAccount"),
 	t("wizardProject"),
 	t("wizardFound"),
 	t("wizardTeam"),
-	t("wizardMay"),
+	MAY,
 	t("wizardSpending"),
 	t("wizardFinishing"),
 ];
@@ -24,7 +25,11 @@ export function Wizard(props: {
 	title: string;
 	lead: string;
 	children: ReactNode;
+	/** A saved team's permission answers carried over: "What they may do" is not a step. */
+	carried?: boolean;
 }) {
+	const steps = props.carried ? STEPS.filter((s) => s !== MAY) : STEPS;
+	const current = props.carried && props.step > 5 ? props.step - 1 : props.step;
 	return (
 		<div className={styles.wizard}>
 			<aside className={styles.side}>
@@ -44,7 +49,7 @@ export function Wizard(props: {
 			</aside>
 			<main className={styles.main}>
 				<nav aria-label={t("setupSteps")}>
-					<Stepper steps={STEPS} current={props.step} />
+					<Stepper steps={steps} current={current} />
 				</nav>
 				<h1 className={styles.title}>{props.title}</h1>
 				<p className={styles.lead}>{props.lead}</p>
