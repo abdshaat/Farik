@@ -1,6 +1,6 @@
 # Phase 6, step 14: Team templates
 
-Status: built; landing review pending
+Status: done (landed and landing-reviewed 2026-10-01; one fix wave, a scoped re-review and its follow-up)
 Branch: `phase/6-web-ui`
 Spec: `docs/SPEC.md` sections 1 (the "one team" non-goal), 3 (team), 4.1 (three starts), 4.4, 8.4 (the state folder), F1
 Depends on: steps 01 to 13 of this phase (step 06's team setup, step 11's `ui_ux_designer` role, step 12's per-agent connectors, step 13's chats; renumbered from step 13 by the project plan's revision 23)
