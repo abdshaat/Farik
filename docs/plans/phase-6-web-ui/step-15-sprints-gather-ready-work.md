@@ -250,3 +250,6 @@ cargo xtask check --integration
 #   playwright: step 14's landed count plus 1 (sprints.spec.ts);
 #   last line: xtask check: ok
 ```
+
+As built (fix wave, 2026-10-01, the landing review's findings):
+- Fix wave I1: `pays_a_task_in_the_sprint_from_its_budget_under_the_policy` refuses, under the policy, a task in the open sprint whose budget of 5 USD does not fit the 1 USD left, and `fits_the_open_sprint` answers false; mutation A2 (the sprint budget never checked under the policy) now fails it. No behaviour change.

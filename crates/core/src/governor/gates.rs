@@ -1086,7 +1086,7 @@ mod tests {
         FIELDS_THE_STORE_OWNS, ParentEpic, Rejection, SprintHold, WorkState, check_assignment,
         check_blocker_resolved, check_blocker_written, check_child_creation, check_children_done,
         check_contract_write, check_criteria_recorded, check_human_triage, check_product_doc_write,
-        check_rejection_reasons, in_the_backlog, waits_for_a_sprint,
+        check_rejection_reasons, fits_the_open_sprint, in_the_backlog, waits_for_a_sprint,
     };
     use crate::contract::{Role, TaskContract, TaskStatus, VerificationWire};
     use crate::generated::task_contract::ExitCriterionVerificationVariant0Expect;
@@ -1613,6 +1613,25 @@ mod tests {
                 "the budget of 5 USD does not fit the 1 USD left in the sprint",
             ]
         );
+    }
+
+    #[test]
+    fn pays_a_task_in_the_sprint_from_its_budget_under_the_policy() {
+        let contract = a_contract();
+        assert!((contract.budget.max_cost_usd - 5.0).abs() < f64::EPSILON);
+        let mut input = an_assignment();
+        input.plan_in_sprints = true;
+        input.open_sprint = Some("S1".to_string());
+        input.task_sprint = Some("S1".to_string());
+        input.remaining_sprint_budget_usd = 5.0;
+        assert_eq!(check_assignment(&contract, &input), Ok(()));
+        assert!(fits_the_open_sprint(&contract, &input));
+        input.remaining_sprint_budget_usd = 1.0;
+        assert_eq!(
+            reasons(check_assignment(&contract, &input)),
+            ["the budget of 5 USD does not fit the 1 USD left in the sprint"]
+        );
+        assert!(!fits_the_open_sprint(&contract, &input));
     }
 
     #[test]
