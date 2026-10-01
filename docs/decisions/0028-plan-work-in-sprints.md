@@ -2,6 +2,7 @@
 
 Date: 2026-10-01
 Status: accepted (the founder, in conversation, 2026-10-01)
+Mockups approved by: the founder, 2026-10-01 (canvas version 1790857656-ceac)
 
 ## Context
 
@@ -26,14 +27,16 @@ A team policy, `policy.plan_in_sprints`, a boolean in `team.yaml`.
 
 With it on:
 - triage, refining, the Product Manager's questions, the plan check, approvals, an epic's breakdown, conversations, chats and ceremonies run at any time;
-- no task is assigned, started or worked on outside the open sprint;
+- no task is assigned outside the open sprint, so nothing new is built outside one;
 - ready work waits in the Backlog;
+- work already under way outside a sprint when the policy is switched on finishes: a task past `ready` (`assigned`, `in_progress`, `blocked`, `verifying` or `rejected`) carries on to acceptance, rework included, and only `ready` tasks wait (the founder, 2026-10-01);
+- a sprint ended early sends its unfinished tasks to the Backlog (the founder, 2026-10-01): each is marked as left for the Backlog, and is neither started, worked on nor reworked until a sprint plans it, a session already running finishing first;
 - work that becomes ready during a sprint waits for the next sprint, and is not added to the open one; a task filed under an epic the sprint already holds still joins it, as today;
 - starting a sprint plans the Backlog, through the planning ceremony that exists.
 
 The one exception is ADR 0027's incident fix: it skips planning and runs even outside a sprint. Phase 9 step 06 builds that path, and keeps the exception.
 
-It is on for every team setup creates, and for a team made from a template that has it on. It is off when the key is absent, so every existing project behaves as it does today. The user switches it in Settings, under "Your team's rules", or behind setup's Advanced switch.
+It is on for every team setup creates, for `farik init`'s starter team (the founder, 2026-10-01), and for a team made from a template that has it on. It is off when the key is absent, so every existing project behaves as it does today. The user switches it in Settings, under "Your team's rules", or behind setup's Advanced switch.
 
 The design is `docs/design/sprint-backlog.md`. It is built in phase 6 step 15, "Sprints gather ready work", before the milestone runbook, which becomes step 16.
 
@@ -47,5 +50,6 @@ Easier:
 Harder:
 - A new team does nothing visible until its user starts a sprint, so a first user may wait without knowing why. Today and the Board must say so in plain words, and the thirty-minute test will show whether they do.
 - The lifecycle gains a condition that is not a state: a `ready` row can be held by a policy, not by a dependency or a full agent. Assignment, the planning candidates, `farik_plan_sprint`, the Board's lanes, Today, and the idle report each learn it.
-- An unfinished task left by a sprint ended early stops after its running session and waits for the next sprint, where today it carries on. The end-early dialog says so.
+- An unfinished task left by a sprint ended early stops after its running session and waits for the next sprint, where today it carries on. The end-early dialog says so. Telling it from work that was under way at the switch takes a mark: `sprint.ended` says whether its left tasks wait in the Backlog, and the projection keeps that on each task until a sprint plans it.
+- `farik init`'s starter team plans in sprints too, so `farik run` on a new project does nothing until `farik sprint start`. Tests and journeys that drive work without a sprint say `plan_in_sprints: false` in their team.
 - Phase 9 step 06 has to keep the incident fix's exception, or a broken production waits for a sprint.
