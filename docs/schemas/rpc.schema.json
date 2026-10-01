@@ -55,7 +55,9 @@
         "settings.defaults",
         "channel.messages",
         "chats.list",
-        "chat.messages"
+        "chat.messages",
+        "templates.list",
+        "template.preview"
       ]
     },
     "subscribeRequest": {
@@ -279,6 +281,12 @@
             },
             {
               "$ref": "#/$defs/chatMessagesQuery"
+            },
+            {
+              "$ref": "#/$defs/templatesListQuery"
+            },
+            {
+              "$ref": "#/$defs/templatePreviewQuery"
             }
           ]
         }
@@ -456,6 +464,18 @@
         },
         {
           "$ref": "#/$defs/agentReplaceRequest"
+        },
+        {
+          "$ref": "#/$defs/templateSaveRequest"
+        },
+        {
+          "$ref": "#/$defs/templateApplyRequest"
+        },
+        {
+          "$ref": "#/$defs/templateRenameRequest"
+        },
+        {
+          "$ref": "#/$defs/templateDeleteRequest"
         }
       ]
     },
@@ -3270,39 +3290,7 @@
         "errors": {
           "type": "array",
           "items": {
-            "type": "object",
-            "additionalProperties": false,
-            "required": [
-              "path",
-              "message",
-              "code"
-            ],
-            "properties": {
-              "path": {
-                "type": "string"
-              },
-              "message": {
-                "type": "string"
-              },
-              "code": {
-                "type": "string",
-                "enum": [
-                  "too_many",
-                  "needs_product_manager",
-                  "needs_developer",
-                  "repeated_id",
-                  "worked",
-                  "name",
-                  "keeps_read",
-                  "status_from_card",
-                  "judge_not_held",
-                  "no_questions",
-                  "question_length",
-                  "invalid"
-                ],
-                "description": "The refusal as the page words it for a person; the message is for a log, and invalid is any refusal with no words of its own."
-              }
-            }
+            "$ref": "#/$defs/teamError"
           }
         },
         "effects": {
@@ -4028,6 +4016,371 @@
               }
             }
           }
+        }
+      }
+    },
+    "teamError": {
+      "title": "Team Error",
+      "description": "One reason a team is refused: where, the daemon's sentence for a log, and the code the page words it by.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "message",
+        "code"
+      ],
+      "properties": {
+        "path": {
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        },
+        "code": {
+          "type": "string",
+          "enum": [
+            "too_many",
+            "needs_product_manager",
+            "needs_developer",
+            "repeated_id",
+            "worked",
+            "name",
+            "keeps_read",
+            "status_from_card",
+            "judge_not_held",
+            "no_questions",
+            "question_length",
+            "invalid"
+          ],
+          "description": "The refusal as the page words it for a person; the message is for a log, and invalid is any refusal with no words of its own."
+        }
+      }
+    },
+    "templatesListQuery": {
+      "title": "Templates List Query",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "params"
+      ],
+      "properties": {
+        "name": {
+          "const": "templates.list"
+        },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {}
+        }
+      },
+      "description": "The saved teams on this computer, each whole, and the files in the templates folder that are not one. Every template query and method is refused with -32005 and the code no_state_folder at / when Farik has no state folder."
+    },
+    "templatePreviewQuery": {
+      "title": "Template Preview Query",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "params"
+      ],
+      "properties": {
+        "name": {
+          "const": "template.preview"
+        },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "slug": {
+              "type": "string",
+              "description": "The saved team's file name without .yaml, as templates.list answers it."
+            }
+          },
+          "required": [
+            "slug"
+          ]
+        }
+      },
+      "description": "What using a saved team would make of this project's team: who stays, joins, is retired or removed, the effects in words, and the errors that would refuse it. Nothing is written. A slug with no file is -32002; a file that is not a template is refused with template_unreadable at /slug."
+    },
+    "templateSaveRequest": {
+      "title": "Template Save Request",
+      "description": "Saves this project's team as a template under name, in the state folder, and records no event. A name whose slug another template holds is refused with template_exists at /name unless replace is true; a name with no letter or digit, with template_name at /name. Answers templateSlugResult.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "jsonrpc",
+        "id",
+        "method",
+        "params"
+      ],
+      "properties": {
+        "jsonrpc": {
+          "const": "2.0"
+        },
+        "id": {
+          "$ref": "#/$defs/requestId"
+        },
+        "method": {
+          "const": "template.save"
+        },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "name"
+          ],
+          "properties": {
+            "name": {
+              "type": "string",
+              "description": "The saved team's name, as the person typed it; the daemon trims it."
+            },
+            "replace": {
+              "type": "boolean",
+              "description": "Write over the template that holds the name's slug."
+            }
+          }
+        }
+      }
+    },
+    "templateApplyRequest": {
+      "title": "Template Apply Request",
+      "description": "Uses a saved team on this project: worked out again from the team as it is now, so a preview gone stale applies nothing wrong, then the team written once, each retirement's effects (agent.updated, and each in_progress task it held blocked), and team.updated with the template's name. Answers templateAppliedResult, its errors empty; a result the team's rules refuse is refused with -32005, writing nothing, and data.errors as template.preview answers them.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "jsonrpc",
+        "id",
+        "method",
+        "params"
+      ],
+      "properties": {
+        "jsonrpc": {
+          "const": "2.0"
+        },
+        "id": {
+          "$ref": "#/$defs/requestId"
+        },
+        "method": {
+          "const": "template.apply"
+        },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "slug"
+          ],
+          "properties": {
+            "slug": {
+              "type": "string",
+              "description": "The saved team's file name without .yaml, as templates.list answers it."
+            }
+          }
+        }
+      }
+    },
+    "templateRenameRequest": {
+      "title": "Template Rename Request",
+      "description": "Gives a saved team another name, keeping when it was saved, and records no event. A new slug another template holds is refused with template_exists at /name. Answers templateSlugResult.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "jsonrpc",
+        "id",
+        "method",
+        "params"
+      ],
+      "properties": {
+        "jsonrpc": {
+          "const": "2.0"
+        },
+        "id": {
+          "$ref": "#/$defs/requestId"
+        },
+        "method": {
+          "const": "template.rename"
+        },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "slug",
+            "name"
+          ],
+          "properties": {
+            "slug": {
+              "type": "string",
+              "description": "The saved team's file name without .yaml, as templates.list answers it."
+            },
+            "name": {
+              "type": "string",
+              "description": "The saved team's name, as the person typed it; the daemon trims it."
+            }
+          }
+        }
+      }
+    },
+    "templateDeleteRequest": {
+      "title": "Template Delete Request",
+      "description": "Removes a saved team's file, readable or not, and records no event. Answers emptyResult.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "jsonrpc",
+        "id",
+        "method",
+        "params"
+      ],
+      "properties": {
+        "jsonrpc": {
+          "const": "2.0"
+        },
+        "id": {
+          "$ref": "#/$defs/requestId"
+        },
+        "method": {
+          "const": "template.delete"
+        },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "slug"
+          ],
+          "properties": {
+            "slug": {
+              "type": "string",
+              "description": "The saved team's file name without .yaml, as templates.list answers it."
+            }
+          }
+        }
+      }
+    },
+    "templatesListResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "folder",
+        "templates",
+        "unreadable"
+      ],
+      "properties": {
+        "folder": {
+          "type": "string",
+          "description": "The folder the daemon keeps saved teams in, as it uses it: under XDG_CONFIG_HOME when that is set."
+        },
+        "templates": {
+          "type": "array",
+          "description": "By name, case-insensitive.",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "slug",
+              "template"
+            ],
+            "properties": {
+              "slug": {
+                "type": "string"
+              },
+              "template": {
+                "type": "object",
+                "description": "The template whole, as team-template.schema.json shapes it."
+              }
+            }
+          }
+        },
+        "unreadable": {
+          "type": "array",
+          "description": "The files that are not a template, by slug.",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "slug"
+            ],
+            "properties": {
+              "slug": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    "templateAppliedResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "team",
+        "kept",
+        "retired",
+        "removed",
+        "added",
+        "effects",
+        "errors"
+      ],
+      "description": "template.preview's answer, and template.apply's as applied.",
+      "properties": {
+        "team": {
+          "type": "object",
+          "description": "The team as it would be, or is, as team.schema.json shapes it."
+        },
+        "kept": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Agents that stay, by id."
+        },
+        "retired": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Agents that have worked and are retired, by id."
+        },
+        "removed": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Agents that never worked and leave the file, by id."
+        },
+        "added": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Agents that join, by the id each gets."
+        },
+        "effects": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Each effect on the agents that stay and on the team's answers, in plain words."
+        },
+        "errors": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/teamError"
+          },
+          "description": "Why the result is not a team; empty when it is."
+        }
+      }
+    },
+    "templateSlugResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "slug"
+      ],
+      "properties": {
+        "slug": {
+          "type": "string",
+          "description": "The file name the template is kept under."
         }
       }
     }

@@ -218,7 +218,9 @@ Consumes: Tasks 3 and 4.
 - `still_retires_one_agent_as_before`: `agent_update` retire and `agent.replace` keep their existing tests' events (the refactor's guard).
 - The protocol client (not counted above): `client.test.ts` maps `saved_at` → `savedAt` and `team.updated`'s `template`.
 
-- [ ] `feat(runtime): list, save, preview, apply, rename and delete team templates`
+As built (Task 5): `templates.list` also answers `folder`, the templates folder as the daemon uses it (`$XDG_CONFIG_HOME/farik/templates` when that is set), which Settings shows (Task 6 carry). The retirement's effects are `status_effects(tools, daemon, team, agent_id, status)` in `human.rs`, covering pause and resume too, rather than a retire-only `retire_effects`. `team.propose`'s agent building is `suggested()` in `daemon/team.rs`, used by `team.propose`, `template.preview` and `template.apply`; whether an agent worked is `worked()` there, shared with `checked`. Every write of `team.yaml` (`team.save`, `team.start`, `update_agent_with` and so `agent.update` and `agent.replace`, and `template.apply`) holds one lock, `DaemonState::team_writes`, from its read to its write; `template.apply` works the template out again under it. The validation error item is the shared `$defs/teamError` (`teamValidateResult` and `templateAppliedResult`). Two tests beyond the seven: `checks_again_when_applying_a_preview_gone_stale` and `applies_only_under_the_lock_that_writes_the_team`, so farik-runtime gains 9 (8 in `daemon/templates.rs`, `still_retires_one_agent_as_before` in `human.rs`). `crates/protocol/src/{event.rs,rpc.rs}` needed no change: the types are generated from the schemas, and the runtime tests hold every new request and answer to them.
+
+- [x] `feat(runtime): list, save, preview, apply, rename and delete team templates`
 
 ### Task 6: The pages
 

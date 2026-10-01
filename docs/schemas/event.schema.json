@@ -258,14 +258,15 @@
     },
     "teamUpdatedBody": {
       "title": "Team Updated Body",
-      "description": "The team file was written. A status change alone is agent.updated.",
+      "description": "The team file was written. A status change alone is agent.updated. template names the saved team the team was made from, when it was.",
       "type": "object",
       "additionalProperties": false,
       "required": ["team_name", "agent_ids", "updated_by"],
       "properties": {
         "team_name": { "type": "string" },
         "agent_ids": { "type": "array", "items": { "type": "string" } },
-        "updated_by": { "type": "string" }
+        "updated_by": { "type": "string" },
+        "template": { "type": "string" }
       }
     },
     "criteriaUpdatedBody": {

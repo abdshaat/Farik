@@ -28,7 +28,7 @@ use tokio_util::sync::CancellationToken;
 
 use super::setup::list_folders;
 use super::{DaemonError, DaemonState, SetupError, SetupHost, hex, random_token, same_token};
-use super::{board, gates, team};
+use super::{board, gates, team, templates};
 use crate::claude::CredentialKind;
 use crate::computer::{build_sandbox_image, check_computer, pull_browser_image};
 use crate::credential::CredentialStore;
@@ -58,6 +58,9 @@ pub struct WebState {
     /// The credential the sessions start with, which connecting the account again replaces;
     /// `None` in setup mode or when the sessions are given one.
     pub in_use: Option<crate::claude::SharedCredential>,
+    /// Where saved teams are kept: the state folder's `templates/`, or `None` when there is no
+    /// state folder.
+    pub templates: Option<crate::templates::Templates>,
     /// Whether a browser at `http://localhost:<port>` is let in without a code, and given a
     /// session by `GET /`: the end-to-end server's `--preview`, which runs as a project's preview
     /// with a temporary team and credential store (step 12, D1). Absent from the release build.
@@ -599,6 +602,7 @@ pub(super) async fn answer(state: &Arc<DaemonState>, text: &str, sent: &mut Opti
         && !SETUP_METHODS.contains(&method)
         && !gates::METHODS.contains(&method)
         && !team::METHODS.contains(&method)
+        && !templates::METHODS.contains(&method)
     {
         return failure(
             &id,
@@ -636,6 +640,9 @@ pub(super) async fn answer(state: &Arc<DaemonState>, text: &str, sent: &mut Opti
         "command" => command(state, &params["command"]).await,
         method if gates::METHODS.contains(&method) => gates::call(state, method, params).await,
         method if team::METHODS.contains(&method) => team::call(state, method, params).await,
+        method if templates::METHODS.contains(&method) => {
+            templates::call(state, method, params).await
+        }
         "account.connect" if state.host().is_none() => team::connect(state, params).await,
         "query" => {
             // The store and the files are read off the async workers.
@@ -782,6 +789,7 @@ fn query(state: &DaemonState, name: &str, params: &Value) -> Result<Value, Failu
         "team.get" | "team.propose" | "team.validate" | "models.list" | "project.scan"
         | "settings.defaults" => team::query(deps, name, params),
         name if board::QUERIES.contains(&name) => board::query(deps, name, params),
+        name if templates::QUERIES.contains(&name) => templates::query(state, deps, name, params),
         _ => gates::query(deps, name, params),
     }
 }
@@ -1120,6 +1128,7 @@ mod tests {
             stores: Vec::new(),
             env: std::collections::BTreeMap::new(),
             in_use: None,
+            templates: None,
             #[cfg(feature = "e2e")]
             admit_local_preview: false,
         }));
@@ -1535,6 +1544,7 @@ mod tests {
             stores: Vec::new(),
             env: std::collections::BTreeMap::new(),
             in_use: None,
+            templates: None,
             #[cfg(feature = "e2e")]
             admit_local_preview: false,
         }));
@@ -2441,6 +2451,7 @@ mod tests {
             stores: Vec::new(),
             env: std::collections::BTreeMap::new(),
             in_use: None,
+            templates: None,
             #[cfg(feature = "e2e")]
             admit_local_preview: false,
         };

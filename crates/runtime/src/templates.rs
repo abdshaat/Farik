@@ -87,6 +87,12 @@ impl Templates {
         Templates { dir }
     }
 
+    /// The folder the templates are kept in.
+    #[must_use]
+    pub fn dir(&self) -> &std::path::Path {
+        &self.dir
+    }
+
     /// Every template saved, and every file that is not one.
     ///
     /// # Errors

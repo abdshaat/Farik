@@ -120,4 +120,57 @@ describe("client", () => {
 		ws.receive({ jsonrpc: "2.0", id: 1, result: { project_root: "/h/a" } });
 		expect(await p).toEqual({ projectRoot: "/h/a" });
 	});
+
+	it("maps_saved_teams_and_the_template_a_team_came_from", async () => {
+		const ws = new FakeSocket();
+		const client = connect("ws://x/rpc", ws);
+		ws.emit("open", {});
+		const seen: unknown[] = [];
+		const sub = client.subscribe(0, (e) => seen.push(e));
+		const listed = client.query("templates.list", {});
+		const applied = client.call("template.apply", { slug: "pair" });
+		await tick();
+		expect(ws.sent[2]).toMatchObject({
+			method: "template.apply",
+			params: { slug: "pair" },
+		});
+		ws.receive({ jsonrpc: "2.0", id: 1, result: {} });
+		await sub;
+		ws.receive({
+			jsonrpc: "2.0",
+			id: 2,
+			result: {
+				folder: "/h/.config/farik/templates",
+				templates: [
+					{ slug: "pair", template: { name: "Pair", saved_at: "t" } },
+				],
+				unreadable: [],
+			},
+		});
+		ws.receive({ jsonrpc: "2.0", id: 3, result: { added: ["noor"] } });
+		ws.receive({
+			jsonrpc: "2.0",
+			method: "event",
+			params: {
+				event: {
+					seq: 9,
+					kind: "team.updated",
+					body: { team_name: "Farik", template: "Pair" },
+				},
+			},
+		});
+		expect(await listed).toEqual({
+			folder: "/h/.config/farik/templates",
+			templates: [{ slug: "pair", template: { name: "Pair", savedAt: "t" } }],
+			unreadable: [],
+		});
+		expect(await applied).toEqual({ added: ["noor"] });
+		expect(seen).toEqual([
+			{
+				seq: 9,
+				kind: "team.updated",
+				body: { teamName: "Farik", template: "Pair" },
+			},
+		]);
+	});
 });

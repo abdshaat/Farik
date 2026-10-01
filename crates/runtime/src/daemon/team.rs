@@ -12,7 +12,7 @@ use farik_core::contract::Role;
 use farik_core::criteria::validate_criteria;
 use farik_core::governor::gates::DesignerBrowser;
 use farik_core::governor::paths::{PathRefusal, check_protected_paths};
-use farik_core::team::{Team, ValidationError, describe_change, validate_team};
+use farik_core::team::{Agent, Team, ValidationError, describe_change, validate_team};
 use farik_protocol::command::{Command, CommandReply};
 use farik_protocol::event::{EventBody, new_event};
 use farik_protocol::generated::event::{CriteriaUpdatedBody, TeamUpdatedBody};
@@ -71,7 +71,7 @@ const FAMILIES: [(&str, &str); 4] = [
     ("claude-haiku-", "Quick model"),
 ];
 
-fn internal(error: &dyn Display) -> Failure {
+pub(super) fn internal(error: &dyn Display) -> Failure {
     Failure::new(INTERNAL_ERROR, error.to_string())
 }
 
@@ -177,7 +177,7 @@ pub(super) async fn connect(state: &DaemonState, params: &Value) -> Result<Value
     Ok(json!({ "stored_in": source, "taking_on": false }))
 }
 
-fn web_of(state: &DaemonState) -> Result<&super::web::WebState, Failure> {
+pub(super) fn web_of(state: &DaemonState) -> Result<&super::web::WebState, Failure> {
     state
         .web()
         .ok_or_else(|| Failure::new(INTERNAL_ERROR, "the browser routes are off"))
@@ -190,14 +190,27 @@ fn propose(deps: &ToolDeps) -> Result<Value, Failure> {
     let current = deps.files.read_team().map_err(|e| internal(&e))?;
     let no_sandbox = deps.transitions.designer_browser(&current) == DesignerBrowser::NoSandbox;
     let mut team = serde_json::to_value(current).map_err(|e| internal(&e))?;
-    let mut unavailable = Vec::new();
-    let agents = SIX
+    let agents = suggested()?;
+    let unavailable: Vec<Value> = agents
         .iter()
+        .filter(|agent| no_sandbox && Role::from(agent.role) == Role::UiUxDesigner)
+        .map(|agent| json!({ "agent_id": agent.id, "reason": "designer_needs_sandbox" }))
+        .collect();
+    team["agents"] = serde_json::to_value(agents).map_err(|e| internal(&e))?;
+    let criteria = serde_json::to_value(deps.files.read_criteria().map_err(|e| internal(&e))?)
+        .map_err(|e| internal(&e))?;
+    Ok(json!({ "team": team, "criteria": criteria, "unavailable": unavailable }))
+}
+
+/// The six setup suggests, one of each role, active, each with its role's persona, model and
+/// effort and its shipped picture; the Designer with its Playwright connector on (step 12). A
+/// template's added agent takes from these whatever the template leaves out.
+pub(super) fn suggested() -> Result<Vec<Agent>, Failure> {
+    SIX.iter()
         .map(|(name, role, avatar)| {
             let shipped = load_role(*role).map_err(|e| internal(&e))?;
-            let id = name.to_lowercase();
             let mut agent = json!({
-                "id": id,
+                "id": name.to_lowercase(),
                 "display_name": name,
                 "role": role,
                 "avatar": avatar,
@@ -207,17 +220,10 @@ fn propose(deps: &ToolDeps) -> Result<Value, Failure> {
             });
             if *role == Role::UiUxDesigner {
                 agent["mcp_servers"] = json!([{ "name": "playwright", "source": "builtin" }]);
-                if no_sandbox {
-                    unavailable.push(json!({ "agent_id": id, "reason": "designer_needs_sandbox" }));
-                }
             }
-            Ok(agent)
+            serde_json::from_value(agent).map_err(|e| internal(&e))
         })
-        .collect::<Result<Vec<_>, Failure>>()?;
-    team["agents"] = json!(agents);
-    let criteria = serde_json::to_value(deps.files.read_criteria().map_err(|e| internal(&e))?)
-        .map_err(|e| internal(&e))?;
-    Ok(json!({ "team": team, "criteria": criteria, "unavailable": unavailable }))
+        .collect()
 }
 
 /// `models.list`: the newest model of each family the prices name.
@@ -374,7 +380,7 @@ fn walk(dir: &Path, prefix: &str, depth: u32, found: &mut Vec<String>) {
 }
 
 /// Why a team change is not made: the errors to show at their rows, or a failure.
-enum Refused {
+pub(super) enum Refused {
     Errors(Vec<ValidationError>),
     Failed(Failure),
 }
@@ -399,7 +405,7 @@ impl From<Refused> for Failure {
     }
 }
 
-fn errors_wire(errors: &[ValidationError]) -> Vec<Value> {
+pub(super) fn errors_wire(errors: &[ValidationError]) -> Vec<Value> {
     errors
         .iter()
         .map(
@@ -462,15 +468,7 @@ fn checked(deps: &ToolDeps, wire: &Value, setup: bool) -> Result<(Team, Team), R
             .iter()
             .filter(|was| !after.agents.iter().any(|agent| agent.id == was.id))
         {
-            let seen = deps
-                .log
-                .read(&EventQuery {
-                    agent_id: Some(gone.id.to_string()),
-                    limit: Some(1),
-                    ..EventQuery::default()
-                })
-                .map_err(|e| Refused::Failed(internal(&e)))?;
-            if !seen.is_empty() {
+            if worked(deps, gone.id.as_str()).map_err(Refused::Failed)? {
                 errors.push(ValidationError {
                     path: "/agents".to_string(),
                     message: format!("{}{WORKED}", gone.display_name.as_str()),
@@ -483,6 +481,20 @@ fn checked(deps: &ToolDeps, wire: &Value, setup: bool) -> Result<(Team, Team), R
     } else {
         Err(Refused::Errors(errors))
     }
+}
+
+/// Whether the log has an event of `agent_id`'s: work, which retires an agent rather than
+/// removing it (step 06).
+pub(super) fn worked(deps: &ToolDeps, agent_id: &str) -> Result<bool, Failure> {
+    let seen = deps
+        .log
+        .read(&EventQuery {
+            agent_id: Some(agent_id.to_string()),
+            limit: Some(1),
+            ..EventQuery::default()
+        })
+        .map_err(|e| internal(&e))?;
+    Ok(!seen.is_empty())
 }
 
 /// `agent.replace`: the agent retired and the newcomer added in one write, checked as a save is,
@@ -522,11 +534,11 @@ fn replace(deps: &ToolDeps, state: &DaemonState, params: &Value) -> Result<(), F
         Err(error) => return Err(internal(&format!("{error:?}"))),
     }
     let written = deps.files.read_team().map_err(|e| internal(&e))?;
-    append(deps, team_updated(&written))
+    append(deps, team_updated(&written, None))
 }
 
 /// Appends `body` as the human's and projects it.
-fn append(deps: &ToolDeps, body: EventBody) -> Result<(), Failure> {
+pub(super) fn append(deps: &ToolDeps, body: EventBody) -> Result<(), Failure> {
     let event = new_event(body, deps.clock.now(), deps.ids.clone())
         .map_err(|error| internal(&format!("{error:?}")))?;
     let recorded = deps.log.append(&event).map_err(|e| internal(&e))?;
@@ -539,11 +551,11 @@ fn append(deps: &ToolDeps, body: EventBody) -> Result<(), Failure> {
 /// Writes `team` and records `team.updated`.
 fn write_team(deps: &ToolDeps, team: &Team) -> Result<(), Failure> {
     deps.files.write_team(team).map_err(|e| internal(&e))?;
-    append(deps, team_updated(team))
+    append(deps, team_updated(team, None))
 }
 
-/// `team.updated` for `team`, as the human's.
-fn team_updated(team: &Team) -> EventBody {
+/// `team.updated` for `team`, as the human's, naming the saved team it was made from.
+pub(super) fn team_updated(team: &Team, template: Option<&str>) -> EventBody {
     EventBody::TeamUpdated(TeamUpdatedBody {
         team_name: team.name.to_string(),
         agent_ids: team
@@ -552,6 +564,7 @@ fn team_updated(team: &Team) -> EventBody {
             .map(|agent| agent.id.to_string())
             .collect(),
         updated_by: HUMAN.to_string(),
+        template: template.map(str::to_string),
     })
 }
 
@@ -601,12 +614,16 @@ pub(super) async fn call(
         })
         .await
         .map(|()| json!({})),
-        "team.save" => off_the_worker(move || {
-            let (_, team) = checked(&deps, &params["team"], false)?;
-            write_team(&deps, &team)
-        })
-        .await
-        .map(|()| json!({})),
+        "team.save" => {
+            let state = Arc::clone(state);
+            off_the_worker(move || {
+                let _writing = state.team_writes();
+                let (_, team) = checked(&deps, &params["team"], false)?;
+                write_team(&deps, &team)
+            })
+            .await
+            .map(|()| json!({}))
+        }
         "agent.replace" => {
             let state = Arc::clone(state);
             off_the_worker(move || replace(&deps, &state, &params))
@@ -619,10 +636,11 @@ pub(super) async fn call(
                 .map(|()| json!({}))
         }
         _ => {
-            let held = Arc::clone(&deps);
+            let (held, holder) = (Arc::clone(&deps), Arc::clone(state));
             // Only setup's start resumes the team: without the marker, a team paused by a
             // budget's stop or by a person stays paused.
             let setup = off_the_worker(move || {
+                let _writing = holder.team_writes();
                 let marker = held.files.root().join(SETUP_PENDING);
                 let setup = marker.exists();
                 let (_, team) = checked(&held, &params["team"], setup)?;
@@ -698,7 +716,7 @@ fn words(error: &CredentialError) -> String {
 }
 
 /// `work`, which reads and writes the store, run where it cannot hold up the daemon's worker.
-async fn off_the_worker<T: Send + 'static>(
+pub(super) async fn off_the_worker<T: Send + 'static>(
     work: impl FnOnce() -> Result<T, Failure> + Send + 'static,
 ) -> Result<T, Failure> {
     tokio::task::spawn_blocking(work)
@@ -707,7 +725,7 @@ async fn off_the_worker<T: Send + 'static>(
 }
 
 #[cfg(test)]
-mod tests {
+pub(super) mod tests {
     use std::collections::BTreeMap;
     use std::sync::Arc;
 
@@ -751,6 +769,7 @@ mod tests {
                     .map(|(name, value)| ((*name).to_string(), (*value).to_string()))
                     .collect::<BTreeMap<_, _>>(),
                 in_use: Some(Arc::clone(&in_use)),
+                templates: None,
                 #[cfg(feature = "e2e")]
                 admit_local_preview: false,
             })
@@ -759,7 +778,7 @@ mod tests {
     }
 
     /// An event `agent` produced, which is work the log has seen.
-    fn worked(harness: &Harness, agent: &str) {
+    pub(crate) fn worked(harness: &Harness, agent: &str) {
         let event = event_from_value(&json!({
             "seq": 1, "recorded_at": at().to_rfc3339(), "team_id": "farik", "project_id": "farik",
             "agent_id": agent, "kind": "tool.called", "body": { "tool": "Read", "input": "{}" },
@@ -777,7 +796,7 @@ mod tests {
             .expect("appends");
     }
 
-    fn team_file(harness: &Harness) -> Value {
+    pub(crate) fn team_file(harness: &Harness) -> Value {
         serde_json::to_value(
             harness
                 .project
@@ -799,7 +818,7 @@ mod tests {
     }
 
     /// The error of the reply to `method` with `params`: its code and its message.
-    fn refused(harness: &Harness, method: &str, params: &Value) -> (i64, String) {
+    pub(crate) fn refused(harness: &Harness, method: &str, params: &Value) -> (i64, String) {
         let reply = rpc(&harness.daemon, method, params);
         (
             reply["error"]["code"].as_i64().unwrap_or_default(),

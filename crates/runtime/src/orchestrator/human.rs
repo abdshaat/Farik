@@ -841,6 +841,7 @@ pub(crate) fn update_agent_with(
     status: AgentStatus,
     newcomer: Option<Agent>,
 ) -> Result<CommandReport, CommandError> {
+    let _writing = daemon.team_writes();
     let mut team = tools.files.read_team().map_err(failed)?;
     let Some(agent) = team
         .agents
@@ -863,6 +864,23 @@ pub(crate) fn update_agent_with(
         return Err(CommandError::Refused { reason });
     }
     tools.files.write_team(&team).map_err(failed)?;
+    Ok(CommandReport {
+        said: format!("{agent_id} is {status}"),
+        events: status_effects(tools, daemon, &team, agent_id, status)?,
+    })
+}
+
+/// What follows from `agent_id`'s status becoming `status` in `team`, already written:
+/// `agent.updated`; for a pause or a retirement, its sessions stopped and each `in_progress` task it
+/// holds blocked; for a resume, each task its pause blocked taken back to `in_progress`. Answers
+/// the events' sequence numbers.
+pub(crate) fn status_effects(
+    tools: &ToolDeps,
+    daemon: &DaemonState,
+    team: &Team,
+    agent_id: &str,
+    status: AgentStatus,
+) -> Result<Vec<u64>, CommandError> {
     let mut events = vec![append(
         tools,
         None,
@@ -894,7 +912,7 @@ pub(crate) fn update_agent_with(
             for row in held.filter(|row| row.status == TaskStatus::InProgress) {
                 events.extend(moved_for(
                     tools,
-                    &team,
+                    team,
                     &TransitionRequest {
                         task_id: row.task_id.clone(),
                         to: TaskStatus::Blocked,
@@ -918,7 +936,7 @@ pub(crate) fn update_agent_with(
                 }
                 events.extend(moved_for(
                     tools,
-                    &team,
+                    team,
                     &TransitionRequest {
                         task_id: row.task_id.clone(),
                         to: TaskStatus::InProgress,
@@ -933,10 +951,7 @@ pub(crate) fn update_agent_with(
             }
         }
     }
-    Ok(CommandReport {
-        said: format!("{agent_id} is {status}"),
-        events,
-    })
+    Ok(events)
 }
 
 /// Why `name`, of `role`, may not be paused or retired, in `team` as it would be after: it was the
@@ -1921,6 +1936,63 @@ mod tests {
             orchestrator.tick().await.expect("the tick runs"),
             crate::orchestrator::TickReport::Idle { .. }
         ));
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn still_retires_one_agent_as_before() {
+        let harness = Harness::new("human-retire-one", |_| {});
+        harness.in_progress("FRK-1", "dev-b", "dev-a");
+        let orchestrator = an_orchestrator(&harness);
+        let before = harness.events(&[]).len();
+        let report = handled(&orchestrator, a_pause("dev-b", AgentStatus::Retired)).await;
+        let after: Vec<Value> = harness.events(&[])[before..]
+            .iter()
+            .map(farik_protocol::event::event_to_value)
+            .collect();
+        assert_eq!(
+            report.events,
+            after
+                .iter()
+                .map(|event| event["seq"].as_u64().expect("a seq"))
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(report.said, "dev-b is retired");
+        assert_eq!(
+            after
+                .iter()
+                .map(|event| (event["kind"].clone(), event["task_id"].clone()))
+                .collect::<Vec<_>>(),
+            [
+                (json!("agent.updated"), Value::Null),
+                (json!("task.transitioned"), json!("FRK-1")),
+            ]
+        );
+        assert_eq!(
+            after[0]["body"],
+            json!({ "agent_id": "dev-b", "status": "retired", "updated_by": "human" })
+        );
+        assert_eq!(
+            (&after[1]["body"]["to"], &after[1]["body"]["blocker"]),
+            (
+                &json!("blocked"),
+                &json!({
+                    "description": "agent retired by the user",
+                    "needed": "the human reassigns the task"
+                })
+            )
+        );
+        let status = harness
+            .project
+            .deps
+            .files
+            .read_team()
+            .expect("reads")
+            .agents
+            .iter()
+            .find(|agent| agent.id.as_str() == "dev-b")
+            .map(|agent| agent.status);
+        assert_eq!(status, Some(AgentStatus::Retired));
     }
 
     #[tokio::test]

@@ -50,6 +50,7 @@ mod hooks;
 mod mcp;
 mod setup;
 mod team;
+mod templates;
 pub mod web;
 
 #[cfg(test)]
@@ -151,6 +152,9 @@ pub struct DaemonState {
     wakes: tokio::sync::Notify,
     commands: OnceLock<CommandHandler>,
     web: OnceLock<web::WebState>,
+    /// Held by every write of `team.yaml` from its read to its write, so a change is checked
+    /// against the team it replaces.
+    team_writes: Mutex<()>,
 }
 
 impl DaemonState {
@@ -165,6 +169,7 @@ impl DaemonState {
             wakes: tokio::sync::Notify::new(),
             commands: OnceLock::new(),
             web: OnceLock::new(),
+            team_writes: Mutex::new(()),
         }
     }
 
@@ -180,6 +185,7 @@ impl DaemonState {
             wakes: tokio::sync::Notify::new(),
             commands: OnceLock::new(),
             web: OnceLock::from(web),
+            team_writes: Mutex::new(()),
         }
     }
 
@@ -321,6 +327,11 @@ impl DaemonState {
     /// The project's tools, or `None` in setup mode.
     pub(crate) fn deps(&self) -> Option<&Arc<ToolDeps>> {
         self.deps.as_ref()
+    }
+
+    /// The lock every write of the team file holds from its read to its write.
+    pub(crate) fn team_writes(&self) -> MutexGuard<'_, ()> {
+        crate::locked(&self.team_writes)
     }
 
     /// The sessions, locked. A panic while they were held leaves them as they were, which is

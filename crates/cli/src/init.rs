@@ -72,18 +72,20 @@ pub fn init(cwd: &Path, now: DateTime<Utc>) -> Result<Report, String> {
         ids,
     };
 
+    let agent_ids: Vec<String> = project
+        .team
+        .agents
+        .iter()
+        .map(|agent| agent.id.to_string())
+        .collect();
     let mut recorded = Vec::new();
     if team_was_written {
         let event = project.event(
             EventBody::TeamUpdated(TeamUpdatedBody {
-                agent_ids: project
-                    .team
-                    .agents
-                    .iter()
-                    .map(|agent| agent.id.to_string())
-                    .collect(),
+                agent_ids: agent_ids.clone(),
                 team_name: project.team.name.to_string(),
                 updated_by: HUMAN.to_string(),
+                template: None,
             }),
             now,
             None,
@@ -111,16 +113,7 @@ pub fn init(cwd: &Path, now: DateTime<Utc>) -> Result<Report, String> {
 
     let mut lines = vec![scan.read_back.clone()];
     if team_was_written {
-        lines.push(format!(
-            "wrote .farik/team.yaml: {}",
-            project
-                .team
-                .agents
-                .iter()
-                .map(|agent| agent.id.to_string())
-                .collect::<Vec<_>>()
-                .join(", ")
-        ));
+        lines.push(format!("wrote .farik/team.yaml: {}", agent_ids.join(", ")));
         lines.push(AUTO_MERGE_NOTICE.to_string());
     } else {
         lines.push("kept the team already in .farik/team.yaml".to_string());

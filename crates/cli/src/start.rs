@@ -22,6 +22,7 @@ use farik_runtime::sleep::{Sleeper, TokioSleeper};
 use farik_runtime::{
     DockerPreviewFactory, DockerSandboxFactory, HostSandboxFactory, NoPreviews, PreviewFactory,
     RuntimeAdapter, RuntimeError, SANDBOX_IMAGE, SandboxFactory, SessionHandle, SessionSpec,
+    Templates,
 };
 use farik_store::files::Sandbox;
 use serde_json::Value;
@@ -523,9 +524,10 @@ pub(crate) fn web(
     io: &CliIo<'_>,
     in_use: Option<SharedCredential>,
 ) -> Result<(WebState, String), String> {
-    let file = match state_dir(&io.env) {
+    let state = state_dir(&io.env);
+    let file = match &state {
         Some(directory) => {
-            make_state_dir(&directory)?;
+            make_state_dir(directory)?;
             Some(directory.join("browser-sessions.json"))
         }
         None => None,
@@ -549,6 +551,7 @@ pub(crate) fn web(
         stores: (io.credential_stores)(),
         env: io.env.clone(),
         in_use,
+        templates: state.map(|directory| Templates::new(directory.join("templates"))),
         #[cfg(feature = "e2e")]
         admit_local_preview: io.admit_local_preview,
     };

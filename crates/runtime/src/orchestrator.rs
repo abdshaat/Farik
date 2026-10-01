@@ -34,7 +34,7 @@ mod design;
 #[cfg(test)]
 pub(crate) mod fixtures;
 mod human;
-pub(crate) use human::update_agent_with;
+pub(crate) use human::{status_effects, update_agent_with};
 mod integrate;
 mod messages;
 mod recover;
