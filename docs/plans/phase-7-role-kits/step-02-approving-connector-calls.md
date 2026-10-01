@@ -5,6 +5,7 @@ Branch: `phase/7-role-kits`
 Spec: `docs/SPEC.md` 5.6, 5.7, 8.3, 8.5, 8.6; F9
 Depends on: step 01 of this phase (connectors per agent, not yet committed), whose `ConnectorRefusal::ExternalEffectRefused` this step replaces; phase 6 (merged in #19), whose `question.asked` waiting projection and Today page this step extends
 Readiness: fresh-session reviewer, 2026-10-01, round 1 not ready → findings folded in; round 2 ready with findings, folded
+Mockups approved by: the founder, 2026-10-01 (AgentEdit, ConnectorAdd, ToolApproval, PhoneToolApproval on the canvas's Connectors page, version 1790878525-fbae)
 
 ## Goal
 
@@ -96,7 +97,7 @@ Files: on the canvas (https://claude.ai/artifact/6tNaCmNojhixuiJBsDPsmf), copied
 
 Gate (O3): the founder approves the boards, and the approval is written into this plan's Decisions with its date. Task 5 does not start until then; Tasks 2 to 4 do not depend on the boards.
 
-- [ ] `docs(design): mock up the tool approval`
+- [x] `docs(design): mock up the tool approval` (done in 4fe98dc, `docs(design): mock up connectors per agent and approving their calls`)
 
 ### Task 2: The governor's check, with grants
 

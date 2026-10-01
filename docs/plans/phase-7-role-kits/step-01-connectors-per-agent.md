@@ -5,6 +5,7 @@ Branch: `phase/7-role-kits`
 Spec: `docs/SPEC.md` 5.6, 6.7, 8.2, 8.5, 8.6; F9
 Depends on: phase 6 (merged in #19), whose step 05 keeps the model credential in the keychain (`crates/runtime/src/credential.rs`, with ADR 0022's file fallback) and whose step 12 built the connector base (ADR 0026)
 Readiness: fresh-session reviewer, 2026-10-01: round 1 not ready, round 2 one Blocking (R2-B1), all folded; confirmed by the controller
+Mockups approved by: the founder, 2026-10-01 (AgentEdit, ConnectorAdd, ToolApproval, PhoneToolApproval on the canvas's Connectors page, version 1790878525-fbae)
 
 ## Goal
 
@@ -154,7 +155,7 @@ Files: on the canvas (https://claude.ai/artifact/6tNaCmNojhixuiJBsDPsmf, page "T
 
 Gate (O3): the founder approves both boards, and the approval is written into this plan's Decisions with its date. Task 9 does not start until then; Tasks 2 to 8 do not depend on the boards.
 
-- [ ] `docs(design): mock up the connector screens`
+- [x] `docs(design): mock up the connector screens` (done in 4fe98dc, `docs(design): mock up connectors per agent and approving their calls`)
 
 ### Task 2: Custom servers in the team file
 
