@@ -1,6 +1,6 @@
 # Phase 6, step 15: Sprints gather ready work
 
-Status: built; landing review pending
+Status: done (landed and landing-reviewed 2026-10-01; one fix wave and a scoped re-review)
 Branch: `phase/6-web-ui`
 Spec: `docs/SPEC.md` sections 3 (Sprint), 4.1, 4.4, 5.2, 5.5, 5.7, 5.9, 5.12 (team policy), 8.5, F3
 Depends on: steps 01 to 14 of this phase, landed (step 14 recorded at 9512424; step 09's board, sprints and `lanes.ts`; step 14's templates). Added by the project plan's revision 25 on the founder's decision of 2026-10-01 (ADR 0028); the milestone runbook moves to step 16 and waits on this step.
