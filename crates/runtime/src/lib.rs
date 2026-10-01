@@ -5,11 +5,19 @@
 pub mod ceremonies;
 /// The team's channel: messages, and whom they mention.
 pub mod channel;
+/// The user's one-to-one chats with each agent, kept apart from the channel.
+pub mod chat;
 /// The Claude Code program as a runtime: its command line, credential, and version.
 #[cfg(unix)]
 pub mod claude;
+/// What the first-run wizard finds on the computer, and the sandbox image it builds.
+#[cfg(unix)]
+pub mod computer;
 /// What a session cost, and what each budget has left.
 pub mod cost;
+/// Where the model credential is kept: the environment, the keychain, or a private file.
+#[cfg(unix)]
+pub mod credential;
 /// Contract exit criteria, run and judged.
 pub mod criteria;
 /// The local service: the hooks around every tool call, and Farik's tools over MCP.
@@ -22,6 +30,10 @@ pub mod forge;
 /// Farik running its team: the board read, the next thing on it done, one session at a time.
 #[cfg(unix)]
 pub mod orchestrator;
+/// Whether the human has paused the team.
+pub mod pause;
+/// The project's preview, and the confined browser beside it.
+pub mod preview;
 /// A session's system prompt, assembled in one fixed order.
 pub mod prompt;
 /// Sessions replayed from recorded transcripts.
@@ -38,6 +50,9 @@ pub mod sleep;
 pub mod sprints;
 /// The Claude Code program's `stream-json` lines, read as session events.
 pub mod stream;
+/// Saved team templates, kept privately in Farik's state folder.
+#[cfg(unix)]
+pub mod templates;
 /// Farik's own tools, each checked against the agent's tier and the rule that owns it.
 pub mod tools;
 /// Transition requests, judged by the governor on the store's facts and recorded either way.
@@ -53,8 +68,12 @@ pub(crate) fn locked<Value>(mutex: &std::sync::Mutex<Value>) -> std::sync::Mutex
 /// Writes `bytes` to `path` readable by its owner alone, replacing whatever was there. The file is
 /// removed first, because a mode is only given to a file as it is created, and a file left
 /// behind may be readable by others.
+///
+/// # Errors
+///
+/// The error of removing the old file, or of creating or writing the new one.
 #[cfg(unix)]
-pub(crate) fn write_private(path: &std::path::Path, bytes: &[u8]) -> std::io::Result<()> {
+pub fn write_private(path: &std::path::Path, bytes: &[u8]) -> std::io::Result<()> {
     use std::io::Write as _;
     use std::os::unix::fs::OpenOptionsExt as _;
     match std::fs::remove_file(path) {
@@ -70,6 +89,13 @@ pub(crate) fn write_private(path: &std::path::Path, bytes: &[u8]) -> std::io::Re
 }
 
 pub use exec::{ExecError, ExecResult, Executor, OUTPUT_LIMIT_BYTES};
+#[cfg(unix)]
+pub use preview::docker::DockerPreviewFactory;
+pub use preview::{
+    BLACKHOLE_PROXY, CheckError, CheckTheme, CheckWidth, NoPreviews, PageCheck, PreviewError,
+    PreviewFactory, RunningPreview, browser_container, check_page, connector_server,
+    disallowed_tools,
+};
 pub use recorded::{RecordedAdapter, Transcript};
 #[cfg(unix)]
 pub use sandbox::docker::{DockerSandbox, DockerSandboxFactory};
@@ -81,4 +107,6 @@ pub use session::{
     SessionHandle, SessionPurpose, SessionSpec,
 };
 pub use stream::StreamParser;
+#[cfg(unix)]
+pub use templates::{TemplateError, TemplateListing, Templates};
 pub use tools::{FarikTool, ToolContext, ToolDeps, ToolError, call_tool, tool_descriptors};

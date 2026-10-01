@@ -1,0 +1,104 @@
+/* "See the code changes": a link-like toggle, as in the Gate mockup. */
+.toggle {
+	justify-self: start;
+	padding: 0;
+	font: inherit;
+	text-align: left;
+	color: var(--farik-color-link);
+	background: none;
+	border: 0;
+	text-decoration: underline;
+	cursor: pointer;
+}
+
+.toggle:focus-visible {
+	outline: 2px solid var(--farik-color-focus);
+	outline-offset: 2px;
+}
+
+.criteria {
+	display: grid;
+	gap: var(--farik-space-2);
+	margin: 0;
+	padding: 0;
+	border: 0;
+}
+
+.criteria label {
+	display: flex;
+	gap: var(--farik-space-2);
+	align-items: baseline;
+}
+
+/* The palette's ink, as Choice's radios, not the browser's blue. */
+.criteria input {
+	accent-color: var(--farik-color-ink);
+}
+
+/* The design review's four screenshots: one column on a phone, two from a tablet up. */
+.shots {
+	display: grid;
+	grid-template-columns: repeat(auto-fit, minmax(min(100%, 16rem), 1fr));
+	gap: var(--farik-space-4);
+}
+
+.shot {
+	display: grid;
+	gap: var(--farik-space-2);
+	margin: 0;
+}
+
+/* A thumbnail of bounded height, cut from the page's top, as the mockup frames it. */
+.shot img {
+	width: 100%;
+	height: auto;
+	max-height: 270px;
+	object-fit: cover;
+	object-position: top;
+	border: 1px solid var(--farik-color-rule);
+	border-radius: var(--farik-radius-control);
+}
+
+/* A phone's tall picture sits in the mockup's 150 by 270 frame. */
+.shot .phone {
+	width: 150px;
+	height: 270px;
+	justify-self: center;
+}
+
+.shot figcaption,
+.shot li {
+	display: grid;
+	gap: var(--farik-space-1);
+}
+
+.shot ul {
+	margin: 0;
+	padding-left: var(--farik-space-4);
+}
+
+/* The Designer's earlier send-backs, folded away; the summary is a 44px target. */
+.backs {
+	padding-block: var(--farik-space-2);
+	border-block: 1px solid var(--farik-color-rule);
+}
+
+.backs summary {
+	min-height: 44px;
+	padding-block: 10px;
+	box-sizing: border-box;
+	font-weight: 600;
+	cursor: pointer;
+}
+
+.backs p {
+	margin: var(--farik-space-2) 0 0;
+}
+
+/* "Who looked at it, in order". */
+.order {
+	display: grid;
+	gap: var(--farik-space-1);
+	margin: 0;
+	padding-left: var(--farik-space-4);
+}

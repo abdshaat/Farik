@@ -23,3 +23,12 @@ pub mod event {
         derives = [PartialEq],
     );
 }
+
+#[allow(clippy::all, clippy::pedantic, missing_docs)]
+pub mod rpc {
+    typify::import_types!(
+        schema = "../../docs/schemas/rpc.schema.json",
+        struct_builder = false,
+        derives = [PartialEq],
+    );
+}

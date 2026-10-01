@@ -13,23 +13,26 @@ pub use farik_core::contract::{TaskId, ValidationError};
 
 pub use crate::generated::event::{
     AgentSleptBody, AgentUpdatedBody, AgentUpdatedBodyStatus, BudgetExhaustedBody,
-    BudgetExhaustedBodyConsequence, BudgetExhaustedBodyScope, ContractEvaluatedBody,
-    ContractEvaluatedBodyGate, ContractJudgedBody, ContractLockedBody, ContractSummary,
-    ContractSummaryKind, ContractSummaryParent, ContractSummaryRisk, ContractSummaryStatus,
-    ContractUnlockedBody, ContractWrittenBody, CostRecordedBody, CostRecordedBodyModelId,
-    CostRecordedBodyPurpose, CriteriaUpdatedBody, CriterionRecordedBody,
-    CriterionRecordedBodyRunBy, DecisionWrittenBody, DriftDetectedBody, DriftDetectedBodyDrift,
-    EscalationAgedBody, EscalationRaisedBody, EscalationRaisedBodyReason, EscalationResolvedBody,
-    EventKind, HumanAcceptedBody, HumanAcceptedBodySubject, MemoryWrittenBody, MessagePostedBody,
-    NoteWrittenBody, NoteWrittenBodyKind, ProductDocWrittenBody, ProjectScannedBody,
-    PullRequestOpenedBody, QuestionAnsweredBody, QuestionAskedBody, RequestTriagedBody,
-    RequestTriagedBodySize, RetroAppendedBody, ReviewRecordedBody, SessionEndedBody,
-    SessionEndedBodyReason, SessionStartedBody, SessionStartedBodyEffort, SessionStartedBodyModel,
-    SessionStartedBodyPurpose, SprintEndedBody, SprintEndedBodyEndedBy, SprintPlannedBody,
-    SprintStartedBody, TaskCreatedBody, TaskIntegratedBody, TaskIntegratedBodyIntegratedBy,
-    TaskTransitionedBody, TaskTransitionedBodyEffectsItem, TeamUpdatedBody, TokenUsage,
-    ToolCalledBody, ToolDeniedBody, ToolReturnedBody, TransitionRefusedBody,
-    TransitionRefusedBodyRefusal,
+    BudgetExhaustedBodyConsequence, BudgetExhaustedBodyScope, ChatMessagePostedBody, CheckTheme,
+    CheckWidth, ConnectorTag as ConnectorTagWire, ContractEvaluatedBody, ContractEvaluatedBodyGate,
+    ContractJudgedBody, ContractLockedBody, ContractSummary, ContractSummaryKind,
+    ContractSummaryParent, ContractSummaryRisk, ContractSummaryStatus, ContractUnlockedBody,
+    ContractWrittenBody, CostRecordedBody, CostRecordedBodyModelId, CostRecordedBodyPurpose,
+    CriteriaUpdatedBody, CriterionRecordedBody, CriterionRecordedBodyRunBy, DecisionWrittenBody,
+    DesignPlanProposedBody, DesignReviewCheck, DesignReviewRecordedBody, DriftDetectedBody,
+    DriftDetectedBodyDrift, EscalationAgedBody, EscalationRaisedBody, EscalationRaisedBodyReason,
+    EscalationResolvedBody, EventKind, HumanAcceptedBody, HumanAcceptedBodySubject, JudgmentAnswer,
+    MemoryWrittenBody, MessagePostedBody, NoteWrittenBody, NoteWrittenBodyKind, PageCheckedBody,
+    PreviewPreparedBody, PreviewStartedBody, ProductDocWrittenBody, ProjectScannedBody,
+    ProposedRequest, PullRequestOpenedBody, QuestionAnsweredBody, QuestionAskedBody,
+    QuestionChoice, ReasonBody, RequestTriagedBody, RequestTriagedBodySize, RetroAppendedBody,
+    ReviewRecordedBody, SessionEndedBody, SessionEndedBodyReason, SessionStartedBody,
+    SessionStartedBodyEffort, SessionStartedBodyModel, SessionStartedBodyPurpose, SprintEndedBody,
+    SprintEndedBodyEndedBy, SprintPlannedBody, SprintStartedBody, TaskCreatedBody,
+    TaskIntegratedBody, TaskIntegratedBodyIntegratedBy, TaskTransitionedBody,
+    TaskTransitionedBodyEffectsItem, TeamPausedBody, TeamPausedBodyBy, TeamPausedBodyReason,
+    TeamUpdatedBody, TokenUsage, ToolCalledBody, ToolDeniedBody, ToolReturnedBody,
+    TransitionRefusedBody, TransitionRefusedBodyRefusal, Violation,
 };
 /// The generated names of the vocabularies the governor's events repeat, renamed at the edge so
 /// that they cannot be mistaken for `farik-core`'s own types of the same name.
@@ -62,7 +65,7 @@ static VALIDATOR: LazyLock<Validator> = LazyLock::new(|| {
 });
 
 /// One validator per kind, each holding that kind's body schema alone. The event schema types
-/// `body` as a choice of forty-one shapes, so it can only say that a body matched none of them; these
+/// `body` as a choice of forty-two shapes, so it can only say that a body matched none of them; these
 /// say what is wrong with the one shape the event's `kind` asked for.
 static BODY_VALIDATORS: LazyLock<Vec<Validator>> = LazyLock::new(|| {
     let schema: Value = serde_json::from_str(SCHEMA_JSON).expect(
@@ -136,6 +139,16 @@ fn body_def_name(kind: EventKind) -> &'static str {
         EventKind::EscalationAged => "escalationAgedBody",
         EventKind::MemoryWritten => "memoryWrittenBody",
         EventKind::DecisionWritten => "decisionWrittenBody",
+        EventKind::TeamPaused | EventKind::TeamResumed => "teamPausedBody",
+        EventKind::DesignPlanProposed => "designPlanProposedBody",
+        EventKind::DesignPlanApproved
+        | EventKind::DesignPlanReturned
+        | EventKind::PreviewStopped => "reasonBody",
+        EventKind::DesignReviewRecorded => "designReviewRecordedBody",
+        EventKind::PreviewPrepared => "previewPreparedBody",
+        EventKind::PreviewStarted => "previewStartedBody",
+        EventKind::PageChecked => "pageCheckedBody",
+        EventKind::ChatMessagePosted => "chatMessagePostedBody",
     }
 }
 
@@ -165,6 +178,14 @@ pub fn is_about_one_contract(kind: EventKind) -> bool {
             | EventKind::HumanAccepted
             | EventKind::EscalationResolved
             | EventKind::EscalationAged
+            | EventKind::DesignPlanProposed
+            | EventKind::DesignPlanApproved
+            | EventKind::DesignPlanReturned
+            | EventKind::DesignReviewRecorded
+            | EventKind::PreviewPrepared
+            | EventKind::PreviewStarted
+            | EventKind::PreviewStopped
+            | EventKind::PageChecked
     )
 }
 
@@ -175,7 +196,12 @@ pub fn is_about_one_contract(kind: EventKind) -> bool {
 /// `sprint.ended` name who acted in a closed vocabulary, `governor` or `human`, which cannot be
 /// blank. Nor for the three `tool.` kinds, the two `session.` kinds, and `agent.slept`, whose
 /// envelope names the agent and the session; Farik observed the sleep, and nobody asked for it.
-/// Nor for `escalation.aged`: the human left it waiting, and nobody acted.
+/// Nor for `escalation.aged`: the human left it waiting, and nobody acted. `team.paused` and
+/// `team.resumed` name the human in a closed vocabulary, which cannot be blank. The three
+/// `design_plan.` kinds name no one in the body: their envelope names the agent and the session.
+/// Nor do the five kinds of step 12: `design_review.recorded` and `page.checked`, whose envelope
+/// names the Designer and the session, and `preview.prepared`, `preview.started` and
+/// `preview.stopped`, which record what Farik itself did with the task's preview.
 fn attribution(body: &mut EventBody) -> Option<(&'static str, &mut String)> {
     match body {
         EventBody::TaskCreated(body) => Some(("created_by", &mut body.created_by)),
@@ -203,6 +229,7 @@ fn attribution(body: &mut EventBody) -> Option<(&'static str, &mut String)> {
         EventBody::RetroAppended(body) => Some(("appended_by", &mut body.appended_by)),
         EventBody::MemoryWritten(body) => Some(("written_by", &mut body.written_by)),
         EventBody::DecisionWritten(body) => Some(("written_by", &mut body.written_by)),
+        EventBody::ChatMessagePosted(body) => Some(("author", &mut body.author)),
         EventBody::DriftDetected(_)
         | EventBody::ProjectScanned(_)
         | EventBody::CostRecorded(_)
@@ -218,13 +245,23 @@ fn attribution(body: &mut EventBody) -> Option<(&'static str, &mut String)> {
         | EventBody::SprintEnded(_)
         | EventBody::AgentSlept(_)
         | EventBody::PullRequestOpened(_)
-        | EventBody::EscalationAged(_) => None,
+        | EventBody::EscalationAged(_)
+        | EventBody::TeamPaused(_)
+        | EventBody::TeamResumed(_)
+        | EventBody::DesignPlanProposed(_)
+        | EventBody::DesignPlanApproved(_)
+        | EventBody::DesignPlanReturned(_)
+        | EventBody::DesignReviewRecorded(_)
+        | EventBody::PreviewPrepared(_)
+        | EventBody::PreviewStarted(_)
+        | EventBody::PreviewStopped(_)
+        | EventBody::PageChecked(_) => None,
     }
 }
 
 /// Every kind the log holds in this phase, in the order `docs/schemas/event.schema.json` lists
 /// them. The step that adds a kind adds it here.
-pub const EVERY_KIND: [EventKind; 41] = [
+pub const EVERY_KIND: [EventKind; 52] = [
     EventKind::TaskCreated,
     EventKind::RequestTriaged,
     EventKind::ContractWritten,
@@ -266,6 +303,17 @@ pub const EVERY_KIND: [EventKind; 41] = [
     EventKind::EscalationAged,
     EventKind::MemoryWritten,
     EventKind::DecisionWritten,
+    EventKind::TeamPaused,
+    EventKind::TeamResumed,
+    EventKind::DesignPlanProposed,
+    EventKind::DesignPlanApproved,
+    EventKind::DesignPlanReturned,
+    EventKind::DesignReviewRecorded,
+    EventKind::PreviewPrepared,
+    EventKind::PreviewStarted,
+    EventKind::PreviewStopped,
+    EventKind::PageChecked,
+    EventKind::ChatMessagePosted,
 ];
 
 /// The ids an event is stamped with: which team and project it belongs to, and the contract, agent
@@ -349,7 +397,7 @@ pub enum EventBody {
     /// A contract was held to the Definition of Ready or of Done.
     #[serde(rename = "contract.evaluated")]
     ContractEvaluated(ContractEvaluatedBody),
-    /// The Scrum Master judged a contract against the Definition of Ready's judgment rules.
+    /// The team's judge checked a contract's plan against the team's questions.
     #[serde(rename = "contract.judged")]
     ContractJudged(ContractJudgedBody),
     /// An agent recorded an exit criterion's result.
@@ -428,6 +476,39 @@ pub enum EventBody {
     /// The Architect or the Product Manager recorded a decision, which is never written over.
     #[serde(rename = "decision.written")]
     DecisionWritten(DecisionWrittenBody),
+    /// The human paused every agent of the team.
+    #[serde(rename = "team.paused")]
+    TeamPaused(TeamPausedBody),
+    /// The human resumed the team.
+    #[serde(rename = "team.resumed")]
+    TeamResumed(TeamPausedBody),
+    /// The UI/UX Designer proposed its plan for the task.
+    #[serde(rename = "design_plan.proposed")]
+    DesignPlanProposed(DesignPlanProposedBody),
+    /// The Product Manager approved the task's design plan.
+    #[serde(rename = "design_plan.approved")]
+    DesignPlanApproved(ReasonBody),
+    /// The Product Manager returned the task's design plan with a reason.
+    #[serde(rename = "design_plan.returned")]
+    DesignPlanReturned(ReasonBody),
+    /// The UI/UX Designer recorded its design review of a Developer's UI change.
+    #[serde(rename = "design_review.recorded")]
+    DesignReviewRecorded(DesignReviewRecordedBody),
+    /// Farik ran the preview's `prepare` for the task.
+    #[serde(rename = "preview.prepared")]
+    PreviewPrepared(PreviewPreparedBody),
+    /// Farik started the task's preview and it answered.
+    #[serde(rename = "preview.started")]
+    PreviewStarted(PreviewStartedBody),
+    /// Farik stopped the task's preview.
+    #[serde(rename = "preview.stopped")]
+    PreviewStopped(ReasonBody),
+    /// `farik_check_page` checked one page at one width and theme.
+    #[serde(rename = "page.checked")]
+    PageChecked(PageCheckedBody),
+    /// The user or an agent said something in their one-to-one chat.
+    #[serde(rename = "chat_message.posted")]
+    ChatMessagePosted(ChatMessagePostedBody),
 }
 
 impl EventBody {
@@ -476,6 +557,17 @@ impl EventBody {
             Self::EscalationAged(_) => EventKind::EscalationAged,
             Self::MemoryWritten(_) => EventKind::MemoryWritten,
             Self::DecisionWritten(_) => EventKind::DecisionWritten,
+            Self::TeamPaused(_) => EventKind::TeamPaused,
+            Self::TeamResumed(_) => EventKind::TeamResumed,
+            Self::DesignPlanProposed(_) => EventKind::DesignPlanProposed,
+            Self::DesignPlanApproved(_) => EventKind::DesignPlanApproved,
+            Self::DesignPlanReturned(_) => EventKind::DesignPlanReturned,
+            Self::DesignReviewRecorded(_) => EventKind::DesignReviewRecorded,
+            Self::PreviewPrepared(_) => EventKind::PreviewPrepared,
+            Self::PreviewStarted(_) => EventKind::PreviewStarted,
+            Self::PreviewStopped(_) => EventKind::PreviewStopped,
+            Self::PageChecked(_) => EventKind::PageChecked,
+            Self::ChatMessagePosted(_) => EventKind::ChatMessagePosted,
         }
     }
 }
@@ -624,7 +716,7 @@ pub fn event_from_value(input: &Value) -> Result<FarikEvent, Vec<ValidationError
 }
 
 /// The schema's own failures. A failure inside `body` is reported by the schema once, at `/body`,
-/// because `body` there is a choice of forty-one shapes and the schema can only say that none matched.
+/// because `body` there is a choice of forty-two shapes and the schema can only say that none matched.
 /// The event's `kind` says which one it was meant to be, so such a failure is asked again of that
 /// shape alone and reported where it actually is.
 fn schema_errors(input: &Value) -> Vec<ValidationError> {
@@ -799,7 +891,22 @@ mod tests {
         // after it would have to guess which one to believe.
         for kind in EVERY_KIND {
             for other in EVERY_KIND {
-                if other == kind {
+                // team.paused and team.resumed share one body, so each carries the other's, and so
+                // do design_plan.approved, design_plan.returned and preview.stopped; no others do,
+                // and a fixture that made one equal must not hide it.
+                let shared: [&[EventKind]; 2] = [
+                    &[EventKind::TeamPaused, EventKind::TeamResumed],
+                    &[
+                        EventKind::DesignPlanApproved,
+                        EventKind::DesignPlanReturned,
+                        EventKind::PreviewStopped,
+                    ],
+                ];
+                if other == kind
+                    || shared
+                        .iter()
+                        .any(|pair| pair.contains(&kind) && pair.contains(&other))
+                {
                     continue;
                 }
                 let mut input = an_event_wire(kind);
@@ -816,6 +923,125 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn reads_the_new_events() {
+        let violation = json!({
+            "rule": "color-contrast",
+            "impact": "serious",
+            "target": "#save",
+            "help": "Elements must meet minimum color contrast ratio thresholds"
+        });
+        for (kind, body) in [
+            (
+                "design_review.recorded",
+                json!({
+                    "pass": false,
+                    "reasons": "The save button fails contrast in the dark theme.",
+                    "checks": [
+                        { "width": "phone", "theme": "light", "violations": [] },
+                        { "width": "phone", "theme": "dark", "violations": [violation] },
+                        { "width": "desktop", "theme": "light", "violations": [] },
+                        { "width": "desktop", "theme": "dark", "violations": [violation] }
+                    ]
+                }),
+            ),
+            (
+                "preview.prepared",
+                json!({ "tree": "4b825dc642cb6eb9a060e54bf8d69288fbee4904", "seconds": 212 }),
+            ),
+            ("preview.started", json!({ "port": 4400 })),
+            ("preview.stopped", json!({ "reason": "The session ended." })),
+            (
+                "page.checked",
+                json!({
+                    "width": "desktop",
+                    "theme": "dark",
+                    "path": "/settings",
+                    "violations": [violation],
+                    "screenshot": "session-1-desktop-dark.png"
+                }),
+            ),
+            (
+                "tool.called",
+                json!({
+                    "tool": "mcp__playwright__browser_navigate",
+                    "input": "{\"url\":\"http://localhost:4400/\"}",
+                    "server": "playwright",
+                    "tag": "network"
+                }),
+            ),
+            (
+                "tool.denied",
+                json!({
+                    "tool": "mcp__playwright__browser_evaluate",
+                    "reason": "tool_denied: browser_evaluate runs script in the page",
+                    "server": "playwright",
+                    "tag": "denied"
+                }),
+            ),
+            (
+                "escalation.raised",
+                json!({ "reason": "preview", "detail": "npm ERR! missing script: dev" }),
+            ),
+        ] {
+            let mut wire = an_event_wire(EventKind::NoteWritten);
+            wire["kind"] = json!(kind);
+            wire["body"] = body;
+            let event =
+                event_from_value(&wire).unwrap_or_else(|errors| panic!("{kind}: {errors:?}"));
+            assert_eq!(event.body.kind().to_string(), kind);
+            assert_eq!(event_to_value(&event), wire, "{kind}");
+        }
+        for (kind, body) in [
+            (
+                "page.checked",
+                json!({ "width": "tablet", "theme": "dark", "path": "/", "violations": [], "screenshot": "s.png" }),
+            ),
+            (
+                "page.checked",
+                json!({ "width": "phone", "theme": "sepia", "path": "/", "violations": [], "screenshot": "s.png" }),
+            ),
+            (
+                "tool.called",
+                json!({ "tool": "t", "input": "{}", "server": "playwright", "tag": "loud" }),
+            ),
+            ("preview.started", json!({ "port": 0 })),
+        ] {
+            let mut wire = an_event_wire(EventKind::NoteWritten);
+            wire["kind"] = json!(kind);
+            wire["body"] = body;
+            assert!(event_from_value(&wire).is_err(), "{kind}: {}", wire["body"]);
+        }
+    }
+
+    #[test]
+    fn reads_the_design_plan_events() {
+        let plan = "Make the sign-in page calm.\n\nI saw two buttons fighting for attention.";
+        for (kind, body) in [
+            ("design_plan.proposed", json!({ "plan": plan })),
+            (
+                "design_plan.approved",
+                json!({ "reason": "It keeps to the contract." }),
+            ),
+            (
+                "design_plan.returned",
+                json!({ "reason": "Leave the header alone." }),
+            ),
+        ] {
+            let mut wire = an_event_wire(EventKind::NoteWritten);
+            wire["kind"] = json!(kind);
+            wire["body"] = body;
+            let event =
+                event_from_value(&wire).unwrap_or_else(|errors| panic!("{kind}: {errors:?}"));
+            assert_eq!(event.body.kind().to_string(), kind);
+            assert_eq!(event_to_value(&event), wire, "{kind}");
+        }
+        let mut wire = an_event_wire(EventKind::NoteWritten);
+        wire["kind"] = json!("design_plan.proposed");
+        wire["body"] = json!({ "reason": "a decision is not a plan" });
+        assert_eq!(refusal(&wire)[0].path, "/body");
     }
 
     #[test]
@@ -1019,7 +1245,7 @@ mod tests {
 
     #[test]
     fn reports_a_malformed_field_inside_a_body_at_its_own_path() {
-        // The schema types `body` as a choice of forty-one shapes, so it reports a failure anywhere
+        // The schema types `body` as a choice of forty-two shapes, so it reports a failure anywhere
         // inside one at `/body`, with the whole body echoed back. The kind says which shape the
         // body was meant to be, so the reader checks it again against that one alone.
         let mut input = an_event_wire(EventKind::ProjectScanned);
@@ -1215,6 +1441,29 @@ mod tests {
         let errors = refusal(&input);
         assert_eq!(errors.len(), 1);
         assert_eq!(errors[0].path, "/body/usage/input_tokens");
+    }
+
+    #[test]
+    fn reads_a_team_paused_and_resumed_by_the_human() {
+        assert_eq!(EVERY_KIND.len(), 52);
+        for kind in [EventKind::TeamPaused, EventKind::TeamResumed] {
+            assert_eq!(a_body_wire(kind), json!({ "by": "human" }));
+            let input = an_event_wire(kind);
+            let event = event_from_value(&input).expect("valid");
+            assert_eq!(event.body.kind(), kind);
+            assert_eq!(event_to_value(&event), input);
+        }
+    }
+
+    #[test]
+    fn refuses_a_team_paused_by_anyone_but_the_human() {
+        for kind in [EventKind::TeamPaused, EventKind::TeamResumed] {
+            let mut input = an_event_wire(kind);
+            input["body"]["by"] = json!("governor");
+            let errors = refusal(&input);
+            assert_eq!(errors.len(), 1, "{kind}");
+            assert_eq!(errors[0].path, "/body/by", "{kind}");
+        }
     }
 
     #[test]

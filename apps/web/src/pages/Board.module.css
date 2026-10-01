@@ -1,0 +1,144 @@
+.page {
+	display: grid;
+	grid-template-columns: minmax(0, 1fr);
+	gap: var(--farik-space-4);
+}
+
+.head {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: var(--farik-space-3);
+}
+
+.head p {
+	margin: 0;
+	flex: 1 1 16rem;
+	color: var(--farik-color-ink-muted);
+}
+
+.head a {
+	color: var(--farik-color-ink-muted);
+}
+
+.title {
+	margin: 0;
+	flex-basis: 100%;
+	font:
+		var(--farik-type-title-weight) var(--farik-type-title-size) /
+		var(--farik-type-title-line-height) var(--farik-type-title-family);
+}
+
+.filters,
+.tabs {
+	min-width: 0;
+	margin: 0;
+	padding: 0;
+	border: 0;
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: var(--farik-space-2);
+}
+
+.chip {
+	padding: var(--farik-space-1) var(--farik-space-3);
+	border: 1px solid var(--farik-color-rule);
+	border-radius: 999px;
+	background: transparent;
+	color: var(--farik-color-ink);
+	font: inherit;
+	cursor: pointer;
+}
+
+.chip[aria-pressed="true"] {
+	background: var(--farik-color-ink);
+	color: var(--farik-color-page);
+	border-color: var(--farik-color-ink);
+}
+
+.chip:focus-visible,
+.more summary:focus-visible {
+	outline: 2px solid var(--farik-color-focus);
+	outline-offset: 2px;
+}
+
+.more {
+	flex-basis: 100%;
+}
+
+.more summary {
+	cursor: pointer;
+	color: var(--farik-color-ink-muted);
+}
+
+.more label {
+	display: inline-flex;
+	align-items: center;
+	gap: var(--farik-space-1);
+	margin: var(--farik-space-2) var(--farik-space-4) 0 0;
+}
+
+.lanes {
+	display: grid;
+	grid-template-columns: repeat(6, minmax(0, 1fr));
+	gap: var(--farik-space-3);
+	align-items: start;
+}
+
+.rows {
+	display: grid;
+	gap: var(--farik-space-2);
+	margin: 0;
+	padding: 0;
+	list-style: none;
+}
+
+.row {
+	display: flex;
+	align-items: flex-start;
+	gap: var(--farik-space-2);
+	padding: var(--farik-space-2);
+	background: var(--farik-color-page);
+	border: 1px solid var(--farik-color-rule);
+	border-radius: var(--farik-radius-control);
+}
+
+.rowText {
+	display: grid;
+	gap: var(--farik-space-1);
+	min-width: 0;
+	overflow-wrap: anywhere;
+}
+
+.rowText a {
+	color: var(--farik-color-ink);
+	font-weight: 600;
+}
+
+/* A row's own link beside its words ("Read it"): whole, on one line, and a 24 px target. */
+.rowLink {
+	flex: none;
+	display: inline-flex;
+	align-items: center;
+	min-height: 24px;
+	margin-left: auto;
+	white-space: nowrap;
+}
+
+.small {
+	margin: 0;
+	color: var(--farik-color-ink-muted);
+	font:
+		var(--farik-type-small-weight) var(--farik-type-small-size) /
+		var(--farik-type-small-line-height) var(--farik-type-small-family);
+}
+
+.hidden {
+	position: absolute;
+	width: 1px;
+	height: 1px;
+	overflow: hidden;
+	clip-path: inset(50%);
+	white-space: nowrap;
+}

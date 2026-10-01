@@ -1,12 +1,15 @@
 //! `farik run` and `farik plan` (`docs/SPEC.md` 8.2): a process that drives the project until
 //! nothing needs doing, a stop, or Ctrl-C, and then says what waits on the human.
 
+use farik_runtime::claude::CredentialKind;
+use farik_runtime::credential::Source;
 use farik_runtime::orchestrator::{TickReport, TickRules, TickScope};
+use farik_runtime::sprints::backlog;
 use farik_store::files::Sandbox;
 use serde_json::{Value, json};
 
 use crate::project::Project;
-use crate::start::{Driver, runtime, start};
+use crate::start::{Driver, StartOptions, runtime, start};
 use crate::waiting::{Waiting, waiting};
 use crate::{CliIo, say};
 
@@ -44,6 +47,19 @@ impl Printer<'_, '_> {
     }
 }
 
+/// What `ticks` does when a tick is idle with no agent to wait for.
+#[derive(Clone, Copy)]
+pub(crate) enum OnIdle {
+    /// Return: the run is done.
+    Return,
+    /// Say why, once until a tick acts or the reason changes, and wait for a command, a stop, or
+    /// the recheck: `farik serve`.
+    Wait,
+}
+
+/// How long an idle `serve` asks to wait; `Orchestrator::wait_until` caps it at its recheck.
+const IDLE_WAIT: chrono::Duration = chrono::Duration::hours(24);
+
 /// How a loop of ticks ended.
 pub(crate) enum Ended {
     /// A tick was idle, for this reason.
@@ -62,7 +78,7 @@ pub(crate) fn drive(project: &Project, rules: TickRules, io: &mut CliIo<'_>, as_
         Err(error) => return refuse(io, as_json, &error),
     };
     runtime.block_on(async {
-        let mut driver = match start(project, io).await {
+        let mut driver = match start(project, io, StartOptions::default()).await {
             Ok(driver) => driver,
             Err(error) => return refuse(io, as_json, &error),
         };
@@ -77,7 +93,15 @@ pub(crate) fn drive(project: &Project, rules: TickRules, io: &mut CliIo<'_>, as_
             rules,
         };
         let mut presses = 0;
-        let ended = ticks(&mut driver, &scope, &mut printer, &mut presses, |_| {}).await;
+        let ended = ticks(
+            &mut driver,
+            &scope,
+            &mut printer,
+            &mut presses,
+            OnIdle::Return,
+            |_| {},
+        )
+        .await;
         finish(project, driver, &mut printer, ended, presses).await
     })
 }
@@ -89,7 +113,7 @@ pub(crate) fn started(printer: &mut Printer<'_, '_>, driver: &Driver) {
         printer.line(
             "",
             &json!({
-                "credential": driver.credential,
+                "credential": driver.credential.map(credential_name),
                 "sandbox": match driver.sandbox {
                     Sandbox::Docker => "docker",
                     Sandbox::None => "none",
@@ -103,15 +127,18 @@ pub(crate) fn started(printer: &mut Printer<'_, '_>, driver: &Driver) {
         );
         return;
     }
-    match driver.credential {
-        Some("ANTHROPIC_API_KEY") => {
-            printer.line("credential: ANTHROPIC_API_KEY (an API key)", &Value::Null);
-        }
-        Some(name) => printer.line(
-            &format!("credential: {name} (a subscription token)"),
-            &Value::Null,
-        ),
-        None => {}
+    if let Some((kind, source)) = driver.credential {
+        let what = match kind {
+            CredentialKind::ApiKey => "an API key",
+            CredentialKind::SubscriptionToken => "a subscription token",
+        };
+        let name = credential_name((kind, source));
+        let line = match source {
+            Source::Environment => format!("credential: {name} ({what})"),
+            Source::Keychain => format!("credential: {what}, kept in your computer's keychain"),
+            Source::File => format!("credential: {what}, kept in farik's credential.json"),
+        };
+        printer.line(&line, &Value::Null);
     }
     if recovered.sessions_interrupted + recovered.worktrees_removed + recovered.tasks_resumed > 0 {
         printer.line(
@@ -126,19 +153,33 @@ pub(crate) fn started(printer: &mut Printer<'_, '_>, driver: &Driver) {
     }
 }
 
+/// Where the credential came from, as `--json` names it: the variable, or the store.
+fn credential_name((kind, source): (CredentialKind, Source)) -> &'static str {
+    match (source, kind) {
+        (Source::Environment, CredentialKind::ApiKey) => "ANTHROPIC_API_KEY",
+        (Source::Environment, CredentialKind::SubscriptionToken) => "CLAUDE_CODE_OAUTH_TOKEN",
+        (Source::Keychain, _) => "keychain",
+        (Source::File, _) => "file",
+    }
+}
+
 /// Ticks within `scope` until a tick is idle with no agent to wait for, the run is stopped, or a
-/// tick fails, printing each; a tick idle while an agent sleeps is waited out, and says so.
-/// Ctrl-C is heard between and during ticks. `after` is called after each tick that acted.
+/// tick fails, printing each; a tick idle while an agent sleeps is waited out, and says so. An
+/// idle tick with no agent to wait for ends the loop under `OnIdle::Return`; under `Wait` it is
+/// printed once until its reason changes or a tick acts, and waited out. Ctrl-C is heard between and during ticks.
+/// `after` is called after each tick that acted.
 pub(crate) async fn ticks(
     driver: &mut Driver,
     scope: &TickScope,
     printer: &mut Printer<'_, '_>,
     presses: &mut u32,
+    on_idle: OnIdle,
     mut after: impl FnMut(&mut Printer<'_, '_>),
 ) -> Ended {
     // The last wait printed, so a wait capped and rechecked (`Orchestrator::wait_until`) prints
     // its line once, not once per recheck; printed again only when the agent or the time changes.
     let mut last_wait: Option<(String, chrono::DateTime<chrono::Utc>)> = None;
+    let mut last_idle: Option<String> = None;
     loop {
         if driver.orchestrator.is_stopped() {
             printer.line("stopped", &json!({ "stopped": true }));
@@ -168,23 +209,21 @@ pub(crate) async fn ticks(
                     );
                     last_wait = Some((why.clone(), until));
                 }
-                let wait = orchestrator.wait_until(until);
-                tokio::pin!(wait);
-                loop {
-                    tokio::select! {
-                        _ = &mut wait => break,
-                        Some(()) = driver.interrupts.recv() => {
-                            *presses += 1;
-                            interrupted(driver, printer, *presses);
-                        }
-                    }
-                }
+                wait_out(driver, printer, presses, orchestrator.wait_until(until)).await;
             }
             Ok(TickReport::Idle { why, until: None }) => {
-                printer.line(&format!("idle: {why}"), &json!({ "idle": why }));
-                return Ended::Idle(why);
+                if last_idle.as_ref() != Some(&why) || matches!(on_idle, OnIdle::Return) {
+                    printer.line(&format!("idle: {why}"), &json!({ "idle": why }));
+                    last_idle = Some(why.clone());
+                }
+                if matches!(on_idle, OnIdle::Return) {
+                    return Ended::Idle(why);
+                }
+                let until = printer.io.clock.now() + IDLE_WAIT;
+                wait_out(driver, printer, presses, orchestrator.wait_until(until)).await;
             }
             Ok(TickReport::Acted { task_id, what }) => {
+                last_idle = None;
                 printer.line(
                     &format!("{}: {what}", task_id.as_str()),
                     &json!({ "task_id": task_id.as_str(), "what": what }),
@@ -192,13 +231,17 @@ pub(crate) async fn ticks(
                 after(printer);
             }
             Ok(TickReport::Sprint { sprint_id, what }) => {
+                last_idle = None;
                 printer.line(
                     &format!("{sprint_id}: {what}"),
                     &json!({ "sprint_id": sprint_id, "what": what }),
                 );
                 after(printer);
             }
-            Ok(TickReport::Conversation { agent_id, what }) => {
+            Ok(
+                TickReport::Conversation { agent_id, what } | TickReport::Chat { agent_id, what },
+            ) => {
+                last_idle = None;
                 printer.line(
                     &format!("{agent_id}: {what}"),
                     &json!({ "agent_id": agent_id, "what": what }),
@@ -206,6 +249,25 @@ pub(crate) async fn ticks(
                 after(printer);
             }
             Err(error) => return Ended::Failed(error.to_string()),
+        }
+    }
+}
+
+/// Waits for `wait`, hearing Ctrl-C meanwhile.
+async fn wait_out(
+    driver: &mut Driver,
+    printer: &mut Printer<'_, '_>,
+    presses: &mut u32,
+    wait: impl Future<Output = farik_runtime::orchestrator::Waited>,
+) {
+    tokio::pin!(wait);
+    loop {
+        tokio::select! {
+            _ = &mut wait => break,
+            Some(()) = driver.interrupts.recv() => {
+                *presses += 1;
+                interrupted(driver, printer, *presses);
+            }
         }
     }
 }
@@ -252,6 +314,17 @@ pub(crate) async fn finish(
             code = 1;
         }
     }
+    match backlog_now(project) {
+        Ok(0) => {}
+        Ok(count) => printer.line(
+            &format!("start a sprint: {count} waits in the Backlog (`farik sprint start`)"),
+            &json!({ "backlog": { "count": count } }),
+        ),
+        Err(error) => {
+            report_error(printer, &error);
+            code = 1;
+        }
+    }
     if let Err(error) = driver.finish().await {
         report_error(printer, &error);
         code = 1;
@@ -281,7 +354,27 @@ pub(crate) fn waiting_now(project: &Project) -> Result<Vec<Waiting>, String> {
         .read_team()
         .map_err(|error| error.to_string())?;
     let projections = project.projections()?;
-    waiting(&project.log, &projections, &team)
+    waiting(&project.log, &projections, &project.files, &team)
+}
+
+/// How much work waits in the Backlog for a sprint to start (ADR 0028): the Backlog's rows with no
+/// parent while no sprint is open, so an epic counts once; none while a sprint is open, since its
+/// Backlog waits for the next one rather than for the human.
+fn backlog_now(project: &Project) -> Result<usize, String> {
+    let team = project
+        .files
+        .read_team()
+        .map_err(|error| error.to_string())?;
+    let projections = project.projections()?;
+    if projections
+        .open_sprint()
+        .map_err(|error| error.to_string())?
+        .is_some()
+    {
+        return Ok(0);
+    }
+    let board = projections.board().map_err(|error| error.to_string())?;
+    Ok(backlog(&team, None, &board).count())
 }
 
 /// Prints what waits on the human: a person's lines, or one `{"waiting_on_you"}` object.

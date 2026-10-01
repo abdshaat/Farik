@@ -13,14 +13,26 @@ use crate::governor::team_rules::TeamRules;
 
 pub use crate::contract::{Role, ValidationError};
 pub use crate::generated::team::{
-    Agent, AgentId, AgentStatus, Budgets as TeamBudgets, FarikTeam as Team, Model as AgentModel,
-    ModelEffort as Effort, PermissionTier as PermissionTierWire, Policy as TeamPolicy,
+    Agent, AgentId, AgentStatus, Budgets as TeamBudgets, FarikTeam as Team,
+    JudgmentJudge as JudgeChoice, JudgmentRequired, Model as AgentModel, ModelEffort as Effort,
+    PermissionTier as PermissionTierWire, Permissions as TeamPermissions, Policy as TeamPolicy,
     PolicyHumanAcceptsContracts as HumanAcceptsContracts, PolicyIntegration as Integration,
     Role as RoleWire, Rules as RulesWire, SessionLimits as SessionLimitsWire,
 };
 
 /// Wire fixtures for tests, in this crate and in others.
 pub mod fixtures;
+
+mod defaults;
+mod describe;
+mod template;
+
+pub use defaults::{SMALL_ENOUGH_QUESTION, TeamDefaults, defaults};
+pub use describe::{MODEL_FAMILIES, SprintWork, describe_change};
+pub use template::{
+    TeamTemplate, TemplateAgent, TemplateApplied, apply_template, template_from_team,
+    template_slug, validate_template,
+};
 
 const SCHEMA_JSON: &str = include_str!("../../../docs/schemas/team.schema.json");
 
@@ -43,9 +55,47 @@ static VALIDATOR: LazyLock<Validator> = LazyLock::new(|| {
 /// `docs/SPEC.md` section 3 and F1: a team with nobody to write a contract has no way to start, and
 /// a team with nobody to do the work has no way to finish. Every other role is the human's choice.
 const REQUIRED_ROLES: [(RoleWire, &str); 2] = [
-    (RoleWire::ProductManager, "write a contract"),
+    (RoleWire::ProductManager, "write its plans"),
     (RoleWire::SoftwareDeveloper, "do the work"),
 ];
+
+/// The connectors Farik ships, by name (spec 5.6); `farik-roles` holds their definitions.
+pub const BUILTIN_CONNECTORS: [&str; 1] = ["playwright"];
+
+/// The most agents a team has that are not retired (spec 4.1). A retired agent stays in the file
+/// so that its past events still name someone, so it is not one of them.
+pub const MAX_AGENTS: usize = 7;
+
+/// The role a team named to check plans; `None` for `auto`.
+fn named_judge(choice: JudgeChoice) -> Option<Role> {
+    match choice {
+        JudgeChoice::Auto => None,
+        JudgeChoice::Architect => Some(Role::Architect),
+        JudgeChoice::ScrumMaster => Some(Role::ScrumMaster),
+    }
+}
+
+/// A role as a person reads it.
+#[must_use]
+pub fn plain_role(role: Role) -> &'static str {
+    match role {
+        Role::ProductManager => "Product Manager",
+        Role::ScrumMaster => "Scrum Master",
+        Role::Architect => "Architect",
+        Role::SoftwareDeveloper => "Software Developer",
+        Role::MarketingSpecialist => "Marketing Specialist",
+        Role::UiUxDesigner => "UI/UX Designer",
+        Role::Human => "human",
+    }
+}
+
+/// Whether a role's tasks change code: the Software Developer's and the UI/UX Designer's
+/// (`docs/SPEC.md` sections 5.12 and 5.14). Every other role's task is held to the document paths
+/// and works on a `docs/` branch.
+#[must_use]
+pub fn changes_code(role: Role) -> bool {
+    matches!(role, Role::SoftwareDeveloper | Role::UiUxDesigner)
+}
 
 /// Checks a value against `docs/schemas/team.schema.json` and, when it conforms, returns the typed
 /// team.
@@ -58,6 +108,9 @@ const REQUIRED_ROLES: [(RoleWire, &str); 2] = [
 /// The fourth is there because the schema has no way to say it either: an agent may not have `read`
 /// taken away, since everyone reads (5.6) and an agent that cannot read is one every tool call is
 /// refused for.
+///
+/// Two more are the plan check's (spec 5.3, spec 10's foolproof configuration): a judge the team
+/// names must be an active agent, and a team that checks every plan must ask at least one question.
 ///
 /// They are checked after the schema passes, on the typed value, and every one of them is reported
 /// rather than only the first.
@@ -88,6 +141,19 @@ pub fn validate_team(input: &Value) -> Result<Team, Vec<ValidationError>> {
             }]
         })?;
     let mut errors = Vec::new();
+    if team
+        .agents
+        .iter()
+        .filter(|agent| agent.status != AgentStatus::Retired)
+        .count()
+        > MAX_AGENTS
+    {
+        errors.push(ValidationError {
+            path: "/agents".to_string(),
+            message: "A team has seven agents at most. Retire one before adding another."
+                .to_string(),
+        });
+    }
     let repeated = repeated_ids(team.agents.iter().map(|agent| agent.id.as_str()));
     if !repeated.is_empty() {
         errors.push(ValidationError {
@@ -108,21 +174,39 @@ pub fn validate_team(input: &Value) -> Result<Team, Vec<ValidationError>> {
             errors.push(ValidationError {
                 path: format!("/agents/{index}/revokes"),
                 message: format!(
-                    "{} cannot have read taken away: everyone reads (docs/SPEC.md section 5.6), \
-                     and an agent that cannot read is one every tool call is refused for. A team \
-                     pauses an agent instead.",
-                    agent.id.as_str()
+                    "{id} must keep reading the project: every agent reads, and one that cannot \
+                     is refused everything it tries. Pause {id} instead.",
+                    id = agent.id.as_str()
                 ),
             });
         }
+    }
+    errors.extend(unknown_connectors(&team));
+    let judgment = team.judgment();
+    if let Some(role) = named_judge(judgment.judge)
+        && !team.has_active(role)
+    {
+        errors.push(ValidationError {
+            path: "/policy/judgment/judge".to_string(),
+            message: format!(
+                "No active {} can check plans. Let Farik choose, or add one.",
+                plain_role(role)
+            ),
+        });
+    }
+    if judgment.required == JudgmentRequired::Always && judgment.questions.is_empty() {
+        errors.push(ValidationError {
+            path: "/policy/judgment/questions".to_string(),
+            message: "Checking plans needs at least one question.".to_string(),
+        });
     }
     for (role, what) in REQUIRED_ROLES {
         if !team.has_active(Role::from(role)) {
             errors.push(ValidationError {
                 path: "/agents".to_string(),
                 message: format!(
-                    "a team needs an active {role} to {what}; this one has none (docs/SPEC.md \
-                     section 3)"
+                    "A team needs an active {} to {what}, and this one has none.",
+                    plain_role(Role::from(role))
                 ),
             });
         }
@@ -134,7 +218,120 @@ pub fn validate_team(input: &Value) -> Result<Team, Vec<ValidationError>> {
     }
 }
 
+/// One `unknown_connector` refusal per connector, on any agent's list, that Farik does not ship
+/// (F8).
+fn unknown_connectors(team: &Team) -> Vec<ValidationError> {
+    let mut errors = Vec::new();
+    for (index, agent) in team.agents.iter().enumerate() {
+        for (at, server) in agent.mcp_servers.iter().flatten().enumerate() {
+            let name = server.name.as_str();
+            if !BUILTIN_CONNECTORS.contains(&name) {
+                errors.push(ValidationError {
+                    path: format!("/agents/{index}/mcp_servers/{at}/name"),
+                    message: format!(
+                        "unknown_connector: {name} is not a connector Farik ships; the one it \
+                         ships is playwright."
+                    ),
+                });
+            }
+        }
+    }
+    errors
+}
+
+/// The plan check (`docs/SPEC.md` section 5.3), with what the team left out filled in.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct JudgmentPolicy {
+    /// Whether every contract's plan is checked before work starts.
+    pub required: JudgmentRequired,
+    /// What the judge answers about each plan, in order.
+    pub questions: Vec<String>,
+    /// Who checks, as the team chose it; `Team::judge` resolves it.
+    pub judge: JudgeChoice,
+}
+
+/// How Farik opens the project's app for the UI/UX Designer (the founder's D2): `prepare` installs
+/// and builds with the network on, `start` serves on `port` with it off, and `path` is the first
+/// page.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Preview {
+    /// Installs and builds; left out, skipped.
+    pub prepare: Option<String>,
+    /// Starts the app.
+    pub start: String,
+    /// The port it serves on.
+    pub port: u16,
+    /// The page to open first, starting with `/`.
+    pub path: String,
+}
+
 impl Team {
+    /// The team's preview, if it set one, with `path` defaulted to `/`.
+    #[must_use]
+    pub fn preview(&self) -> Option<Preview> {
+        self.preview.as_ref().map(|wire| Preview {
+            prepare: wire.prepare.as_deref().cloned(),
+            start: wire.start.to_string(),
+            port: u16::try_from(wire.port).unwrap_or(u16::MAX),
+            path: wire.path.to_string(),
+        })
+    }
+
+    /// The first active UI/UX Designer, the one a design review names.
+    #[must_use]
+    pub fn designer(&self) -> Option<&Agent> {
+        self.active_agents()
+            .find(|agent| agent.role == RoleWire::UiUxDesigner)
+    }
+
+    /// Whether a UI/UX Designer is on the team and not retired: a paused one still holds a UI
+    /// change in `verifying`, waiting on it.
+    #[must_use]
+    pub fn has_designer(&self) -> bool {
+        self.agents.iter().any(|agent| {
+            agent.role == RoleWire::UiUxDesigner && agent.status != AgentStatus::Retired
+        })
+    }
+
+    /// The plan check this team runs: its `policy.judgment`, or the schema's defaults where it
+    /// left something out.
+    #[must_use]
+    pub fn judgment(&self) -> JudgmentPolicy {
+        let wire = self.policy.judgment.clone().unwrap_or_default();
+        JudgmentPolicy {
+            required: wire.required,
+            questions: wire.questions.into_iter().map(String::from).collect(),
+            judge: wire.judge,
+        }
+    }
+
+    /// The role that checks plans (spec 5.3): the named one, or under `auto` the first active
+    /// agent of the Architect, the Scrum Master and the Product Manager (the founder,
+    /// 2026-09-29). Every team has an active Product Manager (D18), so `auto` always finds one.
+    #[must_use]
+    pub fn judge(&self) -> Role {
+        match named_judge(self.judgment().judge) {
+            Some(role) => role,
+            None => [Role::Architect, Role::ScrumMaster]
+                .into_iter()
+                .find(|role| self.has_active(*role))
+                .unwrap_or(Role::ProductManager),
+        }
+    }
+
+    /// Whether the team plans its work in sprints (ADR 0028): its `policy.plan_in_sprints`, off
+    /// when left out, so no team file written before the key changes how it works.
+    #[must_use]
+    pub fn plans_in_sprints(&self) -> bool {
+        self.policy.plan_in_sprints == Some(true)
+    }
+
+    /// The team's answers to what its agents may do: its `policy.permissions`, or the defaults.
+    #[must_use]
+    pub fn permissions(&self) -> TeamPermissions {
+        self.policy.permissions.clone().unwrap_or_default()
+    }
+
     /// The rules the governor applies, with what the team left out filled in from what
     /// `farik-core` ships (`docs/SPEC.md` section 5.12).
     ///
@@ -187,6 +384,12 @@ impl Team {
                 .iter()
                 .map(|glob| glob.to_string())
                 .collect(),
+            ui_paths: self
+                .rules
+                .ui_paths
+                .iter()
+                .map(|glob| glob.to_string())
+                .collect(),
         }
     }
 
@@ -210,8 +413,11 @@ impl Team {
 }
 
 impl Agent {
-    /// Every permission tier this agent holds: its role's defaults, widened by what it was granted
-    /// and narrowed by what was taken away.
+    /// Every permission tier this agent holds: its role's defaults, then the team's answers
+    /// (without `execute` for Developers, Designers and Architects when `run_commands` is false,
+    /// with `git_remote` for Developers and Designers when `push` is true), widened by what it was granted and
+    /// narrowed by what was taken away. The team's answers apply to every agent of the role, so an
+    /// agent added later follows them.
     ///
     /// `docs/SPEC.md` section 5.6 says a role's tiers are the user's to override, and an override
     /// that could only widen would leave no way to say that this Developer does not run commands.
@@ -219,8 +425,15 @@ impl Agent {
     /// narrower reading of a mistake is the safer one. The order is the role's own first, then what
     /// a grant added, so that a list read back reads as the role plus the exceptions.
     #[must_use]
-    pub fn tiers(&self) -> Vec<PermissionTier> {
-        let mut tiers = default_tiers(Role::from(self.role)).to_vec();
+    pub fn tiers(&self, permissions: &TeamPermissions) -> Vec<PermissionTier> {
+        let role = Role::from(self.role);
+        let mut tiers = default_tiers(role).to_vec();
+        if !permissions.run_commands && (changes_code(role) || role == Role::Architect) {
+            tiers.retain(|tier| *tier != PermissionTier::Execute);
+        }
+        if permissions.push && changes_code(role) {
+            tiers.push(PermissionTier::GitRemote);
+        }
         for granted in self
             .grants
             .iter()
@@ -255,6 +468,7 @@ impl From<RoleWire> for Role {
             RoleWire::Architect => Self::Architect,
             RoleWire::SoftwareDeveloper => Self::SoftwareDeveloper,
             RoleWire::MarketingSpecialist => Self::MarketingSpecialist,
+            RoleWire::UiUxDesigner => Self::UiUxDesigner,
         }
     }
 }
@@ -280,10 +494,14 @@ mod tests {
 
     use super::fixtures::{a_full_team_wire, a_team_wire, an_agent_wire};
     use super::{
-        AgentStatus, HumanAcceptsContracts, Integration, PermissionTier, PermissionTierWire, Role,
-        RoleWire, Team, validate_team,
+        AgentStatus, HumanAcceptsContracts, Integration, JudgeChoice, JudgmentPolicy,
+        JudgmentRequired, PermissionTier, PermissionTierWire, Preview, Role, RoleWire,
+        SMALL_ENOUGH_QUESTION, Team, TeamPermissions, TeamPolicy, changes_code, defaults,
+        validate_team,
     };
-    use crate::governor::team_rules::{DEFAULT_DOCUMENT_PATHS, DEFAULT_PROTECTED_PATHS};
+    use crate::governor::team_rules::{
+        DEFAULT_DOCUMENT_PATHS, DEFAULT_PROTECTED_PATHS, DEFAULT_UI_PATHS, TeamRules,
+    };
 
     fn team(wire: &Value) -> Team {
         validate_team(wire).expect("the fixture is a team")
@@ -342,8 +560,11 @@ mod tests {
             Some("Asks the question nobody asked.")
         );
         assert_eq!(
-            ada.model.as_ref().expect("a model").id.as_str(),
-            "claude-opus-5"
+            ada.model
+                .as_ref()
+                .and_then(|model| model.id.as_deref())
+                .map(String::as_str),
+            Some("claude-opus-5-5")
         );
         assert_eq!(
             ada.preauthorized_external_tools
@@ -382,11 +603,29 @@ mod tests {
 
         let mut eight = a_team_wire();
         eight["agents"] = Value::Array(
-            (0..8)
-                .map(|n| an_agent_wire(&format!("agent-{n}"), "software_developer"))
+            std::iter::once(an_agent_wire("ada", "product_manager"))
+                .chain((0..7).map(|n| an_agent_wire(&format!("agent-{n}"), "software_developer")))
                 .collect(),
         );
-        assert_eq!(paths(&eight), ["/agents"], "and seven at most");
+        assert_eq!(
+            refusals(&eight),
+            [(
+                "/agents".to_string(),
+                "A team has seven agents at most. Retire one before adding another.".to_string()
+            )],
+            "and seven at most"
+        );
+
+        // A retired agent stays in the file so its past work still names someone, and is not one
+        // of the seven: replacing an agent a third time still leaves room.
+        let mut retired = eight.clone();
+        for n in 0..3 {
+            retired["agents"][n + 1]["status"] = json!("retired");
+        }
+        let mut more = retired["agents"].as_array().expect("agents").clone();
+        more.extend((7..9).map(|n| an_agent_wire(&format!("agent-{n}"), "software_developer")));
+        retired["agents"] = Value::Array(more);
+        validate_team(&retired).expect("seven not retired, three retired, is a team");
     }
 
     #[test]
@@ -446,10 +685,8 @@ mod tests {
         assert_eq!(
             messages,
             [
-                "a team needs an active product_manager to write a contract; this one has none \
-                 (docs/SPEC.md section 3)",
-                "a team needs an active software_developer to do the work; this one has none \
-                 (docs/SPEC.md section 3)",
+                "A team needs an active Product Manager to write its plans, and this one has none.",
+                "A team needs an active Software Developer to do the work, and this one has none.",
             ],
             "both, not the first of them"
         );
@@ -471,7 +708,7 @@ mod tests {
         assert_eq!(messages.len(), 2, "{messages:?}");
         assert!(messages[0].contains("the id ada names"), "{}", messages[0]);
         assert!(
-            messages[1].contains("software_developer"),
+            messages[1].contains("Software Developer"),
             "{}",
             messages[1]
         );
@@ -488,7 +725,7 @@ mod tests {
             .map(|(_, message)| message)
             .collect();
         assert_eq!(messages.len(), 1, "{messages:?}");
-        assert!(messages[0].contains("product_manager"), "{}", messages[0]);
+        assert!(messages[0].contains("Product Manager"), "{}", messages[0]);
     }
 
     #[test]
@@ -533,6 +770,134 @@ mod tests {
         assert_eq!(team(&wire).rules().document_paths, ["notes/**"]);
         wire["rules"]["document_paths"] = json!([]);
         assert!(team(&wire).rules().document_paths.is_empty());
+    }
+
+    #[test]
+    fn defaults_the_ui_paths_when_left_out() {
+        // The seven design globs of ADR 0026 fill a key left out; a team's own list replaces them,
+        // and an explicit `[]` is kept, which leaves only the contract's `ui_change` to say so.
+        assert_eq!(
+            team(&a_team_wire()).rules().ui_paths,
+            [
+                "**/*.tsx",
+                "**/*.jsx",
+                "**/*.vue",
+                "**/*.svelte",
+                "**/*.css",
+                "**/*.scss",
+                "**/*.html"
+            ]
+        );
+        assert_eq!(
+            TeamRules::default().ui_paths,
+            DEFAULT_UI_PATHS.map(str::to_string)
+        );
+        let mut wire = a_team_wire();
+        wire["rules"]["ui_paths"] = json!(["app/**"]);
+        assert_eq!(team(&wire).rules().ui_paths, ["app/**"]);
+        wire["rules"]["ui_paths"] = json!([]);
+        assert!(team(&wire).rules().ui_paths.is_empty());
+    }
+
+    #[test]
+    fn validates_the_preview_and_the_connectors() {
+        // Every existing fixture still validates, the full one with a preview and a connector.
+        assert!(team(&a_team_wire()).preview().is_none());
+        let full = team(&a_full_team_wire());
+        assert_eq!(
+            full.preview(),
+            Some(Preview {
+                prepare: Some("pnpm install --frozen-lockfile".to_string()),
+                start: "pnpm dev --port 4400".to_string(),
+                port: 4400,
+                path: "/app".to_string(),
+            })
+        );
+
+        let mut wire = a_team_wire();
+        wire["preview"] = json!({ "start": "npm start", "port": 3000 });
+        assert_eq!(
+            team(&wire).preview(),
+            Some(Preview {
+                prepare: None,
+                start: "npm start".to_string(),
+                port: 3000,
+                path: "/".to_string(),
+            }),
+            "prepare left out is skipped, and path defaults to /"
+        );
+        let long = "x".repeat(501);
+        for (field, value) in [
+            ("prepare", json!("")),
+            ("prepare", json!(long)),
+            ("start", json!("")),
+            ("start", json!(long)),
+            ("port", json!(1023)),
+            ("port", json!(65536)),
+            ("path", json!("app")),
+        ] {
+            let mut wire = a_team_wire();
+            wire["preview"] = json!({ "start": "npm start", "port": 3000 });
+            wire["preview"][field] = value;
+            assert_eq!(paths(&wire), [format!("/preview/{field}")], "{field}");
+        }
+        for (field, value) in [
+            ("prepare", json!("x".repeat(500))),
+            ("start", json!("x".repeat(500))),
+            ("port", json!(1024)),
+            ("port", json!(65535)),
+        ] {
+            let mut wire = a_team_wire();
+            wire["preview"] = json!({ "start": "npm start", "port": 3000 });
+            wire["preview"][field] = value;
+            assert!(validate_team(&wire).is_ok(), "{field}");
+        }
+        let mut wire = a_team_wire();
+        wire["preview"] = json!({ "port": 3000 });
+        assert_eq!(paths(&wire), ["/preview"], "start is required");
+
+        // Any agent may have a connector, and every agent's list is checked (F8).
+        let mut wire = a_team_wire();
+        wire["agents"][0]["mcp_servers"] = json!([{ "name": "playwright", "source": "builtin" }]);
+        wire["agents"][1]["mcp_servers"] = json!([
+            { "name": "playwright", "source": "builtin" },
+            { "name": "selenium", "source": "builtin" }
+        ]);
+        assert_eq!(
+            refusals(&wire),
+            [(
+                "/agents/1/mcp_servers/1/name".to_string(),
+                "unknown_connector: selenium is not a connector Farik ships; the one it ships is playwright."
+                    .to_string()
+            )]
+        );
+        wire["agents"][1]["mcp_servers"][1] = json!({ "name": "playwright", "source": "npm" });
+        assert_eq!(paths(&wire), ["/agents/1/mcp_servers/1/source"]);
+
+        // The Designer: the first active one, and whether any is not retired.
+        let mut wire = a_team_wire();
+        assert!(team(&wire).designer().is_none());
+        assert!(!team(&wire).has_designer());
+        let mut paused = an_agent_wire("iris", "ui_ux_designer");
+        paused["status"] = json!("paused");
+        wire["agents"]
+            .as_array_mut()
+            .expect("the fixture's agents are a list")
+            .extend([paused, an_agent_wire("vera", "ui_ux_designer")]);
+        let designers = team(&wire);
+        assert_eq!(
+            designers.designer().map(|agent| agent.id.as_str()),
+            Some("vera")
+        );
+        assert!(designers.has_designer());
+        wire["agents"][3]["status"] = json!("retired");
+        assert!(team(&wire).designer().is_none());
+        assert!(
+            team(&wire).has_designer(),
+            "a paused Designer is still the team's"
+        );
+        wire["agents"][2]["status"] = json!("retired");
+        assert!(!team(&wire).has_designer());
     }
 
     #[test]
@@ -649,6 +1014,16 @@ mod tests {
     }
 
     #[test]
+    fn reads_an_absent_policy_as_off() {
+        let mut wire = a_team_wire();
+        assert!(!team(&wire).plans_in_sprints());
+        wire["policy"]["plan_in_sprints"] = json!(true);
+        assert!(team(&wire).plans_in_sprints());
+        wire["policy"]["plan_in_sprints"] = json!("yes");
+        assert_eq!(paths(&wire), ["/policy/plan_in_sprints"]);
+    }
+
+    #[test]
     fn reads_a_whole_number_a_person_wrote_with_a_fraction() {
         // YAML and JSON both call 2.0 a number and JSON Schema calls it an integer, so a file that
         // says `wip_limit_per_agent: 2.0` is one the schema accepts. Normalising it is what keeps
@@ -708,11 +1083,11 @@ mod tests {
         // are read and network; she is granted execute and denied network.
         let team = team(&a_full_team_wire());
         assert_eq!(
-            team.agents[0].tiers(),
+            team.agents[0].tiers(&team.permissions()),
             [PermissionTier::Read, PermissionTier::Execute]
         );
         assert_eq!(
-            team.agents[1].tiers(),
+            team.agents[1].tiers(&team.permissions()),
             [
                 PermissionTier::Read,
                 PermissionTier::WriteWorkspace,
@@ -732,7 +1107,7 @@ mod tests {
         wire["agents"][1]["revokes"] = json!(["git_remote", "execute"]);
         let team = team(&wire);
         assert_eq!(
-            team.agents[1].tiers(),
+            team.agents[1].tiers(&team.permissions()),
             [
                 PermissionTier::Read,
                 PermissionTier::WriteWorkspace,
@@ -754,10 +1129,294 @@ mod tests {
         assert_eq!(refusals[0].0, "/agents/1/revokes");
         assert_eq!(
             refusals[0].1,
-            "linus cannot have read taken away: everyone reads (docs/SPEC.md section 5.6), and an \
-             agent that cannot read is one every tool call is refused for. A team pauses an agent \
-             instead."
+            "linus must keep reading the project: every agent reads, and one that cannot is \
+             refused everything it tries. Pause linus instead."
         );
+    }
+
+    #[test]
+    fn resolves_the_judge_in_the_founders_order() {
+        // The founder, 2026-09-29: the Architect, else the Scrum Master, else the Product Manager,
+        // who checks its own plans only when the team has neither.
+        let mut wire = a_team_wire();
+        wire["policy"]["judgment"] = json!({ "required": "always" });
+        assert_eq!(team(&wire).judge(), Role::ProductManager);
+
+        wire["agents"]
+            .as_array_mut()
+            .expect("the fixture's agents are a list")
+            .push(an_agent_wire("sol", "scrum_master"));
+        assert_eq!(team(&wire).judge(), Role::ScrumMaster);
+
+        wire["agents"]
+            .as_array_mut()
+            .expect("the fixture's agents are a list")
+            .push(an_agent_wire("kai", "architect"));
+        assert_eq!(team(&wire).judge(), Role::Architect);
+
+        wire["policy"]["judgment"]["judge"] = json!("scrum_master");
+        assert_eq!(
+            team(&wire).judge(),
+            Role::ScrumMaster,
+            "a named judge is the judge"
+        );
+
+        wire["policy"]["judgment"]["judge"] = json!("auto");
+        wire["agents"][3]["status"] = json!("paused");
+        assert_eq!(
+            team(&wire).judge(),
+            Role::ScrumMaster,
+            "a paused Architect checks nothing"
+        );
+    }
+
+    #[test]
+    fn refuses_a_named_judge_no_active_agent_holds() {
+        let mut wire = a_team_wire();
+        wire["policy"]["judgment"] = json!({ "judge": "architect" });
+        assert_eq!(
+            refusals(&wire),
+            [(
+                "/policy/judgment/judge".to_string(),
+                "No active Architect can check plans. Let Farik choose, or add one.".to_string()
+            )]
+        );
+
+        wire["policy"]["judgment"]["judge"] = json!("scrum_master");
+        let mut sol = an_agent_wire("sol", "scrum_master");
+        sol["status"] = json!("paused");
+        wire["agents"]
+            .as_array_mut()
+            .expect("the fixture's agents are a list")
+            .push(sol);
+        assert_eq!(
+            refusals(&wire),
+            [(
+                "/policy/judgment/judge".to_string(),
+                "No active Scrum Master can check plans. Let Farik choose, or add one.".to_string()
+            )],
+            "a paused one is not active"
+        );
+
+        wire["policy"]["judgment"]["judge"] = json!("product_manager");
+        assert_eq!(
+            paths(&wire),
+            ["/policy/judgment/judge"],
+            "the Product Manager is reached only through auto"
+        );
+    }
+
+    #[test]
+    fn refuses_checking_with_no_questions() {
+        let mut wire = a_team_wire();
+        wire["policy"]["judgment"] = json!({ "required": "always", "questions": [] });
+        assert_eq!(
+            refusals(&wire),
+            [(
+                "/policy/judgment/questions".to_string(),
+                "Checking plans needs at least one question.".to_string()
+            )]
+        );
+
+        wire["policy"]["judgment"]["required"] = json!("never");
+        assert!(
+            validate_team(&wire).is_ok(),
+            "a team that checks no plans needs no questions"
+        );
+
+        for questions in [
+            json!(["Too short"]),
+            json!(["a".repeat(201)]),
+            json!(vec!["Does the task fit its budget?"; 6]),
+        ] {
+            wire["policy"]["judgment"]["questions"] = questions.clone();
+            let paths = paths(&wire);
+            assert!(
+                !paths.is_empty()
+                    && paths
+                        .iter()
+                        .all(|path| path.starts_with("/policy/judgment/questions")),
+                "{questions}: {paths:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn accepts_every_existing_team() {
+        // A team.yaml written before the policy existed says nothing about it, and gets the
+        // defaults: every plan is checked, by the two questions of 5.3, and the base fixture's
+        // Product Manager checks them.
+        let mut wire = a_team_wire();
+        wire["policy"]
+            .as_object_mut()
+            .expect("the fixture's policy is an object")
+            .remove("judgment");
+        let base = team(&wire);
+        assert_eq!(
+            base.judgment(),
+            JudgmentPolicy {
+                required: JudgmentRequired::Always,
+                questions: vec![
+                    "Does the task fit its budget?".to_string(),
+                    "Would its checks notice if the work went wrong the way its intent worries \
+                     about?"
+                        .to_string(),
+                ],
+                judge: JudgeChoice::Auto,
+            }
+        );
+        assert_eq!(base.judge(), Role::ProductManager);
+        assert_eq!(
+            base.permissions(),
+            TeamPermissions {
+                run_commands: true,
+                push: false
+            }
+        );
+
+        // `farik init`'s starter team, as it was written before the defaults moved to core.
+        let starter = team(&json!({
+            "name": "notes",
+            "agents": [
+                an_agent_wire("product-manager", "product_manager"),
+                an_agent_wire("developer", "software_developer"),
+            ],
+            "budgets": {},
+            "policy": {
+                "human_accepts_contracts": "high_risk",
+                "wip_limit_per_agent": 1,
+                "blocked_limit_hours": 24,
+                "max_iterations": 3,
+                "integration": "auto_merge"
+            },
+            "rules": {}
+        }));
+        let defaults = defaults();
+        assert_eq!(defaults.budgets, starter.budgets, "no daily_usd (ADR 0015)");
+        assert_eq!(
+            defaults.policy,
+            TeamPolicy {
+                judgment: Some(base.policy.judgment.clone().unwrap_or_default()),
+                permissions: Some(TeamPermissions::default()),
+                plan_in_sprints: Some(true),
+                ..starter.policy
+            },
+            "the starter values, with the plan check, the permissions and sprint planning \
+             written out"
+        );
+        assert_eq!(defaults.policy.ambient_messages_per_sprint, 1);
+        assert_eq!(defaults.policy.escalation_age_hours.get(), 24);
+        assert_eq!(defaults.policy.memory_cap_tokens, 8000);
+        assert_eq!(
+            SMALL_ENOUGH_QUESTION,
+            "Is it small enough to finish in one go?"
+        );
+    }
+
+    #[test]
+    fn applies_the_permission_answers_to_every_agent_of_the_role() {
+        // Answered once for the team, so a Developer added later follows the answers too.
+        let mut wire = a_team_wire();
+        wire["agents"]
+            .as_array_mut()
+            .expect("the fixture's agents are a list")
+            .extend([
+                an_agent_wire("kai", "architect"),
+                an_agent_wire("theo", "software_developer"),
+            ]);
+        let before = team(&wire);
+        let developer = before.agents[3].tiers(&before.permissions());
+        assert!(developer.contains(&PermissionTier::Execute));
+        assert!(!developer.contains(&PermissionTier::GitRemote));
+
+        wire["policy"]["permissions"] = json!({ "run_commands": false, "push": true });
+        let after = team(&wire);
+        let permissions = after.permissions();
+        let tiers = |index: usize| after.agents[index].tiers(&permissions);
+        for developer in [1, 3] {
+            assert_eq!(
+                tiers(developer),
+                [
+                    PermissionTier::Read,
+                    PermissionTier::WriteWorkspace,
+                    PermissionTier::GitLocal,
+                    PermissionTier::GitRemote,
+                ]
+            );
+        }
+        assert_eq!(
+            tiers(2),
+            [
+                PermissionTier::Read,
+                PermissionTier::WriteWorkspace,
+                PermissionTier::Network,
+                PermissionTier::GitLocal,
+            ],
+            "the Architect runs no commands either, and pushes nothing"
+        );
+        assert_eq!(
+            tiers(0),
+            [PermissionTier::Read, PermissionTier::Network],
+            "the Product Manager neither runs commands nor pushes"
+        );
+
+        wire["agents"][3]["grants"] = json!(["execute"]);
+        assert!(
+            team(&wire).agents[3]
+                .tiers(&permissions)
+                .contains(&PermissionTier::Execute),
+            "an agent's own grant still widens what the team said"
+        );
+    }
+
+    #[test]
+    fn changes_code_for_the_developer_and_the_designer_only() {
+        assert!(changes_code(Role::SoftwareDeveloper));
+        assert!(changes_code(Role::UiUxDesigner));
+        for role in [
+            Role::ProductManager,
+            Role::ScrumMaster,
+            Role::Architect,
+            Role::MarketingSpecialist,
+            Role::Human,
+        ] {
+            assert!(!changes_code(role), "{role}");
+        }
+    }
+
+    #[test]
+    fn gives_the_designer_the_developers_tiers_and_permission_answers() {
+        let mut wire = a_team_wire();
+        wire["agents"]
+            .as_array_mut()
+            .expect("the fixture's agents are a list")
+            .push(an_agent_wire("iris", "ui_ux_designer"));
+        let before = team(&wire);
+        let full = [
+            PermissionTier::Read,
+            PermissionTier::WriteWorkspace,
+            PermissionTier::Execute,
+            PermissionTier::GitLocal,
+        ];
+        for index in [1, 2] {
+            assert_eq!(before.agents[index].tiers(&before.permissions()), full);
+        }
+
+        wire["policy"]["permissions"] = json!({ "run_commands": false, "push": true });
+        let after = team(&wire);
+        let answered = [
+            PermissionTier::Read,
+            PermissionTier::WriteWorkspace,
+            PermissionTier::GitLocal,
+            PermissionTier::GitRemote,
+        ];
+        for index in [1, 2] {
+            assert_eq!(
+                after.agents[index].tiers(&after.permissions()),
+                answered,
+                "a Designer as a Developer"
+            );
+        }
     }
 
     #[test]
@@ -769,6 +1428,7 @@ mod tests {
                 RoleWire::Architect,
                 RoleWire::SoftwareDeveloper,
                 RoleWire::MarketingSpecialist,
+                RoleWire::UiUxDesigner,
             ]
             .map(Role::from),
             [
@@ -777,6 +1437,7 @@ mod tests {
                 Role::Architect,
                 Role::SoftwareDeveloper,
                 Role::MarketingSpecialist,
+                Role::UiUxDesigner,
             ]
         );
     }

@@ -9,5 +9,8 @@ publish = false
 anyhow.workspace = true
 serde_json.workspace = true
 
+[dev-dependencies]
+serde-saphyr.workspace = true
+
 [lints]
 workspace = true

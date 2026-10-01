@@ -2,10 +2,10 @@
 //! questions nobody answered, the contracts awaiting approval, the escalations, the results that
 //! may need the human's acceptance, and the tasks waiting to be integrated by hand.
 
-use farik_core::contract::{Risk, TaskKind, TaskStatus};
-use farik_core::team::{Integration, Team};
-use farik_protocol::event::{EventBody, EventKind};
-use farik_store::{EventLog, EventQuery, Projections};
+use farik_core::team::Team;
+use farik_store::files::ProjectFiles;
+use farik_store::waiting::WaitingKind;
+use farik_store::{EventLog, Projections};
 use serde_json::{Value, json};
 
 /// One thing that waits on the human.
@@ -37,7 +37,8 @@ impl Waiting {
 }
 
 /// Everything that waits on the human, in groups (questions, approvals, other escalations,
-/// acceptances, integrations), each by task id.
+/// acceptances, integrations), each by task id: the store's list, with the command that answers
+/// each.
 ///
 /// # Errors
 ///
@@ -45,101 +46,53 @@ impl Waiting {
 pub(crate) fn waiting(
     log: &EventLog,
     projections: &Projections,
+    files: &ProjectFiles,
     team: &Team,
 ) -> Result<Vec<Waiting>, String> {
-    projections.catch_up().map_err(|error| error.to_string())?;
-    let board = projections.board().map_err(|error| error.to_string())?;
-    let history = log
-        .read(&EventQuery {
-            kinds: vec![
-                EventKind::QuestionAsked,
-                EventKind::QuestionAnswered,
-                EventKind::EscalationRaised,
-            ],
-            ..EventQuery::default()
-        })
-        .map_err(|error| error.to_string())?;
-    let mut waiting = Vec::new();
-    for row in &board {
-        for event in &history {
-            let EventBody::QuestionAsked(body) = &event.body else {
-                continue;
-            };
-            let seq = event.envelope.seq;
-            let answered = history.iter().any(|later| {
-                matches!(&later.body, EventBody::QuestionAnswered(answer)
-                    if answer.question_id.get() == seq)
-            });
-            if answered || event.envelope.ids.task_id.as_ref() != Some(&row.task_id) {
-                continue;
-            }
-            waiting.push(Waiting {
-                task_id: row.task_id.to_string(),
-                what: format!(
-                    "question {seq} on {} from {}: {}",
-                    row.task_id.as_str(),
-                    body.asked_by,
-                    body.question
+    let listed =
+        farik_store::waiting::waiting(projections, log, files, team).map_err(|e| e.to_string())?;
+    Ok(listed
+        .into_iter()
+        .map(|item| {
+            let id = item.task_id.as_str();
+            let (what, command) = match item.kind {
+                WaitingKind::Question => {
+                    let seq = item.question_id.unwrap_or_default();
+                    (
+                        format!(
+                            "question {seq} on {id} from {}: {}",
+                            item.agent_id.as_deref().unwrap_or_default(),
+                            item.line
+                        ),
+                        format!("farik answer {seq} <your answer>"),
+                    )
+                }
+                WaitingKind::Approval => (
+                    "awaits your approval".to_string(),
+                    format!("farik approve {id}, or farik resolve {id} refining <why>"),
                 ),
-                command: format!("farik answer {seq} <your answer>"),
-                question: true,
-            });
-        }
-    }
-    let item = |row: &farik_store::TaskProjection, what: String, command: String| Waiting {
-        task_id: row.task_id.to_string(),
-        what,
-        command,
-        question: false,
-    };
-    for row in board.iter().filter(|row| row.awaiting_approval) {
-        let id = row.task_id.as_str();
-        waiting.push(item(
-            row,
-            "awaits your approval".to_string(),
-            format!("farik approve {id}, or farik resolve {id} refining <why>"),
-        ));
-    }
-    for row in board
-        .iter()
-        .filter(|row| row.status == TaskStatus::Escalated && !row.awaiting_approval)
-    {
-        let reason = history
-            .iter()
-            .rev()
-            .filter(|event| event.envelope.ids.task_id.as_ref() == Some(&row.task_id))
-            .find_map(|event| match &event.body {
-                EventBody::EscalationRaised(body) => Some(body.reason.to_string()),
-                _ => None,
-            })
-            .unwrap_or_else(|| "no reason recorded".to_string());
-        waiting.push(item(
-            row,
-            format!("is escalated ({reason})"),
-            format!("farik resolve {} <status> <message>", row.task_id.as_str()),
-        ));
-    }
-    for row in board.iter().filter(|row| {
-        row.status == TaskStatus::Verifying
-            && (row.kind == TaskKind::Epic || row.risk == Risk::High)
-    }) {
-        waiting.push(item(
-            row,
-            "may need your acceptance".to_string(),
-            format!(
-                "farik accept {} --message <your review>",
-                row.task_id.as_str()
-            ),
-        ));
-    }
-    if team.policy.integration == Integration::Manual {
-        for row in board.iter().filter(|row| row.awaiting_integration) {
-            waiting.push(item(
-                row,
-                "waits for you to integrate it".to_string(),
-                format!("farik integrate {}", row.task_id.as_str()),
-            ));
-        }
-    }
-    Ok(waiting)
+                WaitingKind::Help => (
+                    format!(
+                        "is escalated ({})",
+                        item.reason.as_deref().unwrap_or("no reason recorded")
+                    ),
+                    format!("farik resolve {id} <status> <message>"),
+                ),
+                WaitingKind::Acceptance => (
+                    "may need your acceptance".to_string(),
+                    format!("farik accept {id} --message <your review>"),
+                ),
+                WaitingKind::Integration => (
+                    "waits for you to integrate it".to_string(),
+                    format!("farik integrate {id}"),
+                ),
+            };
+            Waiting {
+                task_id: id.to_string(),
+                what,
+                command,
+                question: item.kind == WaitingKind::Question,
+            }
+        })
+        .collect())
 }

@@ -1,0 +1,51 @@
+.dialog {
+	background: var(--farik-color-surface);
+	color: var(--farik-color-ink);
+	border: 1px solid var(--farik-color-control-border);
+	border-radius: var(--farik-radius-raised);
+	padding: var(--farik-space-5);
+	max-width: min(32rem, calc(100vw - 2 * var(--farik-space-4)));
+	font:
+		var(--farik-type-body-weight) var(--farik-type-body-size) /
+		var(--farik-type-body-line-height) var(--farik-type-body-family);
+}
+
+.dialog::backdrop {
+	background: color-mix(in srgb, var(--farik-color-ink) 40%, transparent);
+}
+
+.header {
+	display: flex;
+	justify-content: space-between;
+	align-items: start;
+	gap: var(--farik-space-4);
+}
+
+.title {
+	margin: 0;
+	font-size: inherit;
+}
+
+.close {
+	font: inherit;
+	background: none;
+	color: var(--farik-color-ink);
+	border: 1px solid transparent;
+	text-decoration: underline;
+	cursor: pointer;
+}
+
+.close:focus-visible {
+	outline: 2px solid var(--farik-color-focus);
+	outline-offset: 2px;
+}
+
+.body {
+	margin-block: var(--farik-space-4);
+}
+
+.actions {
+	display: flex;
+	justify-content: flex-end;
+	gap: var(--farik-space-3);
+}

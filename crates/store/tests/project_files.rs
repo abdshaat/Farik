@@ -652,6 +652,44 @@ fn reads_back_the_project_scan_and_says_when_there_is_none() {
 }
 
 #[test]
+fn keeps_the_user_note_across_a_rescan() {
+    use chrono::NaiveDate;
+    use farik_store::{ProjectScan, project_document};
+    let project = TempProject::new("note");
+    let files = project.files();
+    let scan = ProjectScan {
+        read_back: "Rust, cargo, no commits yet".to_string(),
+        detected_criteria: Vec::new(),
+        facts: farik_store::ScanFacts::default(),
+    };
+    let library = validate_criteria(&a_criteria_library_wire()).expect("a library");
+    files
+        .write_project_scan(&project_document(&scan, &library, None))
+        .expect("written");
+    let day = NaiveDate::from_ymd_opt(2026, 9, 29).expect("a date");
+    files
+        .append_project_note("It is a shop, not a game.", day)
+        .expect("noted");
+    files
+        .append_project_note("Ignore the docs folder.", day)
+        .expect("noted");
+
+    let before = files.read_project_scan().expect("reads");
+    assert!(before.contains("## The user says\n\n2026-09-29: It is a shop, not a game.\n\n2026-09-29: Ignore the docs folder.\n"), "{before}");
+    let again = ProjectScan {
+        read_back: "Rust, cargo, last commit today".to_string(),
+        ..scan
+    };
+    let after = project_document(&again, &library, Some(&before));
+    assert!(after.contains("last commit today"), "{after}");
+    assert!(!after.contains("no commits yet"), "{after}");
+    assert!(
+        after.ends_with(&before[before.find("## The user says").expect("section")..]),
+        "{after}"
+    );
+}
+
+#[test]
 fn appends_to_the_retro_file() {
     // The retro is what the next planning is told the team learned (5.9): each sprint's section
     // added below the last, the file made with its title by the first.

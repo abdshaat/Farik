@@ -1,0 +1,33 @@
+.steps {
+	display: flex;
+	flex-wrap: wrap;
+	gap: var(--farik-space-4);
+	margin: 0;
+	padding: 0;
+	list-style: none;
+	font:
+		var(--farik-type-body-weight) var(--farik-type-body-size) /
+		var(--farik-type-body-line-height) var(--farik-type-body-family);
+}
+
+.step {
+	color: var(--farik-color-ink-muted);
+}
+
+.current {
+	color: var(--farik-color-ink);
+	font-weight: 700;
+}
+
+.number {
+	margin-inline-end: var(--farik-space-1);
+}
+
+.hidden {
+	position: absolute;
+	width: 1px;
+	height: 1px;
+	overflow: hidden;
+	clip-path: inset(50%);
+	white-space: nowrap;
+}

@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use chrono::{DateTime, Utc};
-use farik_core::team::Team;
+use farik_core::team::{Team, template_slug};
 use farik_protocol::event::{EventBody, EventIds, NewEvent, new_event};
 use farik_runtime::ToolDeps;
 use farik_runtime::transitions::Transitions;
@@ -174,25 +174,13 @@ pub(crate) fn directory_name(root: &Path) -> String {
 }
 
 /// A kebab-case slug of a name a person chose, which is how an id is spelled everywhere in Farik
-/// (`docs/standards/code.md`).
+/// (`docs/standards/code.md`): `farik-core`'s `template_slug`, so the rule lives once, at most 64
+/// characters as the team schema caps an id.
 ///
 /// A name with nothing a slug can keep — punctuation, another script — answers `farik`, because a
 /// blank id names nobody and `new_event` refuses one.
 pub(crate) fn slug(name: &str) -> String {
-    let mut slug = String::new();
-    for character in name.chars() {
-        if character.is_ascii_alphanumeric() {
-            slug.push(character.to_ascii_lowercase());
-        } else if !slug.ends_with('-') {
-            slug.push('-');
-        }
-    }
-    let slug = slug.trim_matches('-').to_string();
-    if slug.is_empty() {
-        "farik".to_string()
-    } else {
-        slug
-    }
+    template_slug(name).unwrap_or_else(|| "farik".into())
 }
 
 /// The project's tools, over this process's own board of the project's log.

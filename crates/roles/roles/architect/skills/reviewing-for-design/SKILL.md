@@ -30,6 +30,7 @@ yes or no with a cited reason: the file, the line, or the pattern that decided i
 ## 3. Record and close out
 
 Record each `review` criterion's result with `farik_record_criterion_result`, and write the review
-note with `farik_write_note`, kind `review`, mapping every criterion to its evidence. If a criterion
+note with `farik_write_note`, kind `review`, opening with two or three plain sentences for the user,
+then a blank line, then every criterion mapped to its evidence. If a criterion
 failed, request `rejected` with `farik_request_transition`, naming the failed criteria and why. If
 every criterion passed, end your turn without accepting: that is the Product Manager's call.

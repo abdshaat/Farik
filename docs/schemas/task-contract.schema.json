@@ -49,6 +49,12 @@
       "minLength": 20,
       "description": "The user-facing reason this task exists. If the task were done perfectly, what would be true for a user that is not true today?"
     },
+    "summary": {
+      "type": "string",
+      "minLength": 20,
+      "maxLength": 600,
+      "description": "Two or three plain sentences the user decides on, which a human gate shows first (docs/SPEC.md 5.4). Required by the Definition of Ready for every epic and for every task whose approval the team's human_accepts_contracts policy asks of the human."
+    },
     "scope": {
       "type": "object",
       "additionalProperties": false,
@@ -158,7 +164,11 @@
         "feature",
         "fix"
       ],
-      "description": "Whether the code this task changes adds a feature or repairs a defect. Absent reads as feature (docs/SPEC.md 5.14). Read only for a task whose assignee_role is software_developer; accepted and ignored for every other role."
+      "description": "Whether the code this task changes adds a feature or repairs a defect. Absent reads as feature (docs/SPEC.md 5.14). Read only for a task whose assignee_role is software_developer or ui_ux_designer; accepted and ignored for every other role."
+    },
+    "ui_change": {
+      "type": "boolean",
+      "description": "Whether the task changes the interface in a way no ui_paths glob sees, such as the words in a strings file (ADR 0026). Set by the Product Manager or the Scrum Master. A Software Developer's task that sets it, or whose diff touches the team's ui_paths, is design-reviewed by the UI/UX Designer before its reviewer sees it. Absent reads as false; read only for a task whose assignee_role is software_developer."
     },
     "budget": {
       "type": "object",
@@ -269,6 +279,7 @@
         "architect",
         "software_developer",
         "marketing_specialist",
+        "ui_ux_designer",
         "human"
       ]
     },

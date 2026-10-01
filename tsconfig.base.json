@@ -1,0 +1,15 @@
+{
+	"compilerOptions": {
+		"strict": true,
+		"noUncheckedIndexedAccess": true,
+		"exactOptionalPropertyTypes": true,
+		"module": "nodenext",
+		"moduleResolution": "nodenext",
+		"target": "es2024",
+		"verbatimModuleSyntax": true,
+		"noEmit": true,
+		"allowImportingTsExtensions": true,
+		"erasableSyntaxOnly": true,
+		"skipLibCheck": true
+	}
+}

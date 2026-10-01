@@ -1,8 +1,10 @@
 //! The board, read from the log rather than scanned out of it (`docs/SPEC.md` sections 8.4 and 10).
 
+use std::collections::BTreeMap;
 use std::str::FromStr;
 use std::sync::Arc;
 
+use chrono::NaiveDate;
 use farik_core::contract::{Risk, TaskId, TaskKind, TaskStatus};
 use farik_protocol::event::{
     ContractSummary, ContractSummaryKind, ContractSummaryRisk, ContractSummaryStatus,
@@ -72,6 +74,11 @@ pub struct TaskProjection {
     /// The sprint the task is in: set by `sprint.planned`, cleared by the `sprint.ended` that
     /// leaves it (5.5).
     pub sprint: Option<String>,
+    /// Whether a sprint ended under the policy "plan work in sprints" left the task waiting in the
+    /// Backlog (ADR 0028): set by a `sprint.ended` with `backlog: true` for each task in its
+    /// `left`, cleared by the `sprint.planned` that puts the task in a sprint, and on every task by
+    /// a `team.updated` with `plan_in_sprints: false`.
+    pub left_for_the_backlog: bool,
 }
 
 /// A key that costs are summed by (`docs/SPEC.md` 5.5).
@@ -88,6 +95,19 @@ pub enum CostScope {
     /// By the sprint the cost's task was in when the cost was recorded. A cost with no task, or of
     /// a task in no sprint, is in no sprint's row.
     Sprint,
+    /// By the session purpose, as the log writes it (`chat`, `implement`, ...).
+    Purpose,
+}
+
+/// Which costs a sum reads: one UTC day's, one sprint's, or all of them.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CostWindow {
+    /// The costs recorded on this UTC day.
+    Day(NaiveDate),
+    /// The costs whose task was in this sprint when they were recorded.
+    Sprint(String),
+    /// Every cost.
+    All,
 }
 
 /// A sprint, as its `sprint.started` and `sprint.ended` left it.
@@ -256,25 +276,48 @@ impl Projections {
     ///
     /// `Sqlite` when the read fails; `InvalidEvent` when a sum cannot be read back as a count.
     pub fn costs(&self, scope: CostScope) -> Result<Vec<CostProjection>, StoreError> {
+        self.costs_for(scope, CostWindow::All)
+    }
+
+    /// `costs`, over only the costs `window` reads.
+    ///
+    /// # Errors
+    ///
+    /// As `costs`.
+    pub fn costs_for(
+        &self,
+        scope: CostScope,
+        window: CostWindow,
+    ) -> Result<Vec<CostProjection>, StoreError> {
         let (column, order) = match scope {
             CostScope::Task => ("task_id", BY_NUMBER),
             CostScope::Agent => ("agent_id", "agent_id"),
             CostScope::Session => ("session_id", "session_id"),
             CostScope::Day => ("day", "day"),
             CostScope::Sprint => ("sprint", "sprint"),
+            CostScope::Purpose => ("purpose", "purpose"),
         };
+        // The task order holds `?1`, so the window's parameter follows it there.
+        let slot = if scope == CostScope::Task { "?2" } else { "?1" };
+        let (within, bound) = match window {
+            CostWindow::Day(day) => (format!("day = {slot}"), Some(day.to_string())),
+            CostWindow::Sprint(sprint) => (format!("sprint = {slot}"), Some(sprint)),
+            CostWindow::All => ("1".to_string(), None),
+        };
+        let bound = bound.map(rusqlite::types::Value::from);
         let connection = self.connection();
         let mut statement = connection.prepare(&format!(
             "SELECT {column}, SUM(cost_usd), SUM(input_tokens), SUM(output_tokens),
                     COUNT(DISTINCT session_id)
-             FROM cost_records WHERE {column} IS NOT NULL
+             FROM cost_records WHERE {column} IS NOT NULL AND {within}
              GROUP BY {column} ORDER BY {order}"
         ))?;
-        // Only the task order has a parameter; SQLite refuses one bound to nothing.
-        let parameters: Vec<i64> = match scope {
-            CostScope::Task => vec![number_offset()],
+        // Only the task order and the window have parameters; SQLite refuses one bound to nothing.
+        let mut parameters: Vec<rusqlite::types::Value> = match scope {
+            CostScope::Task => vec![number_offset().into()],
             _ => Vec::new(),
         };
+        parameters.extend(bound);
         let rows = statement.query_map(rusqlite::params_from_iter(parameters), |row| {
             Ok((
                 row.get::<_, String>(0)?,
@@ -302,6 +345,22 @@ impl Projections {
             });
         }
         Ok(costs)
+    }
+
+    /// What `task_id` has spent on each session purpose, by the purpose as the log writes it.
+    ///
+    /// # Errors
+    ///
+    /// `Sqlite` when the read fails.
+    pub fn costs_by_purpose(&self, task_id: &TaskId) -> Result<BTreeMap<String, f64>, StoreError> {
+        let connection = self.connection();
+        let mut statement = connection.prepare(
+            "SELECT purpose, SUM(cost_usd) FROM cost_records WHERE task_id = ?1 GROUP BY purpose",
+        )?;
+        let rows = statement.query_map((task_id.to_string(),), |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, f64>(1)?))
+        })?;
+        Ok(rows.collect::<Result<_, _>>()?)
     }
 
     /// The sprint that is open, or nothing when none is.
@@ -362,6 +421,12 @@ impl Projections {
         Ok(behind.len())
     }
 
+    /// The log these project.
+    #[must_use]
+    pub fn log(&self) -> &EventLog {
+        &self.log
+    }
+
     /// The log's own connection: the projections live in the same database, and share its lock so
     /// that a view cannot read a half-written append.
     pub(crate) fn connection(&self) -> std::sync::MutexGuard<'_, Connection> {
@@ -375,7 +440,8 @@ const SELECT_PROJECTION: &str = "SELECT task_id, kind, parent, title, status, ri
                                   WHERE cost_records.task_id = task_projections.task_id), \
                                  assignee_id, reviewer_id, iteration, awaiting_integration, \
                                  open_questions > 0, awaiting_approval, verifications, \
-                                 rejections, interventions, sprint \
+                                 rejections, interventions, sprint, \
+                                 left_for_the_backlog \
                                  FROM task_projections";
 
 /// The board is ordered by the number in the task id, not by the id itself: `FRK-10` sorts before
@@ -417,6 +483,7 @@ type ProjectedRow = (
     i64,
     i64,
     Option<String>,
+    bool,
 );
 
 fn projected_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ProjectedRow> {
@@ -441,6 +508,7 @@ fn projected_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ProjectedRow> {
         row.get(17)?,
         row.get(18)?,
         row.get(19)?,
+        row.get(20)?,
     ))
 }
 
@@ -472,6 +540,7 @@ fn projection_of_row(row: ProjectedRow) -> Result<TaskProjection, StoreError> {
         rejections,
         interventions,
         sprint,
+        left_for_the_backlog,
     ) = row;
     let refuse = |what: &str, value: &str| StoreError::InvalidEvent {
         detail: format!("the projection of {task_id} holds {value:?} as its {what}"),
@@ -505,6 +574,7 @@ fn projection_of_row(row: ProjectedRow) -> Result<TaskProjection, StoreError> {
         interventions: u32::try_from(interventions)
             .map_err(|_| refuse("interventions", &interventions.to_string()))?,
         sprint,
+        left_for_the_backlog,
     })
 }
 
@@ -522,6 +592,14 @@ fn apply_to(transaction: &Transaction<'_>, event: &FarikEvent) -> Result<(), Sto
         // About no one contract, so they name their tasks in the body rather than the envelope.
         EventBody::SprintStarted(_) | EventBody::SprintPlanned(_) | EventBody::SprintEnded(_) => {
             return apply_sprint(transaction, &event.body, seq);
+        }
+        // Switching the policy off lets every task the Backlog held go on (ADR 0028).
+        EventBody::TeamUpdated(body) if body.plan_in_sprints == Some(false) => {
+            return update(
+                transaction,
+                "UPDATE task_projections SET left_for_the_backlog = 0 WHERE left_for_the_backlog = 1",
+                (),
+            );
         }
         _ => {}
     }
@@ -590,7 +668,18 @@ fn apply_to(transaction: &Transaction<'_>, event: &FarikEvent) -> Result<(), Sto
         | EventBody::RetroAppended(_)
         | EventBody::EscalationAged(_)
         | EventBody::MemoryWritten(_)
-        | EventBody::DecisionWritten(_) => Ok(()),
+        | EventBody::DecisionWritten(_)
+        | EventBody::TeamPaused(_)
+        | EventBody::TeamResumed(_)
+        | EventBody::DesignPlanProposed(_)
+        | EventBody::DesignPlanApproved(_)
+        | EventBody::DesignPlanReturned(_)
+        | EventBody::DesignReviewRecorded(_)
+        | EventBody::PreviewPrepared(_)
+        | EventBody::PreviewStarted(_)
+        | EventBody::PreviewStopped(_)
+        | EventBody::PageChecked(_)
+        | EventBody::ChatMessagePosted(_) => Ok(()),
     }
 }
 
@@ -704,7 +793,8 @@ fn apply_sprint(
             for task_id in &body.task_ids {
                 update(
                     transaction,
-                    "UPDATE task_projections SET sprint = ?2, updated_seq = ?3
+                    "UPDATE task_projections SET sprint = ?2, left_for_the_backlog = 0,
+                                                 updated_seq = ?3
                      WHERE task_id = ?1
                        AND EXISTS (SELECT 1 FROM sprints WHERE sprint_id = ?2 AND open = 1)",
                     (task_id.as_str(), body.sprint_id.as_str(), seq),
@@ -723,7 +813,17 @@ fn apply_sprint(
                 "UPDATE task_projections SET sprint = NULL, updated_seq = ?2
                  WHERE sprint = ?1 AND status NOT IN ('accepted', 'cancelled')",
                 (body.sprint_id.as_str(), seq),
-            )
+            )?;
+            if body.backlog == Some(true) {
+                for task_id in &body.left {
+                    update(
+                        transaction,
+                        "UPDATE task_projections SET left_for_the_backlog = 1 WHERE task_id = ?1",
+                        (task_id.as_str(),),
+                    )?;
+                }
+            }
+            Ok(())
         }
         _ => Ok(()),
     }
@@ -987,6 +1087,7 @@ mod tests {
                 rejections: 0,
                 interventions: 0,
                 sprint: None,
+                left_for_the_backlog: false,
             }]
         );
         assert_eq!(projections.cursor().expect("the cursor reads"), 1);
@@ -1033,6 +1134,7 @@ mod tests {
                 rejections: 0,
                 interventions: 0,
                 sprint: None,
+                left_for_the_backlog: false,
             }
         );
     }
@@ -1233,7 +1335,7 @@ mod tests {
         );
         assert_eq!(
             migrations::known_versions(),
-            vec![1, 2, 3, 4, 5, 6, 7, 8, 9]
+            vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
         );
     }
 
@@ -2152,6 +2254,69 @@ mod tests {
         row_of(projections, task_id).sprint
     }
 
+    fn marked(projections: &Projections, task_id: &str) -> bool {
+        row_of(projections, task_id).left_for_the_backlog
+    }
+
+    fn team_updated(plan_in_sprints: Option<bool>) -> NewEvent {
+        let mut body = json!({ "team_name": "farik", "agent_ids": ["pm"], "updated_by": "human" });
+        if let Some(on) = plan_in_sprints {
+            body["plan_in_sprints"] = json!(on);
+        }
+        sprint_event(EventKind::TeamUpdated, body)
+    }
+
+    #[test]
+    fn marks_what_a_sprint_leaves_for_the_backlog() {
+        let (log, projections) = a_board();
+        for task_id in ["FRK-1", "FRK-2", "FRK-3"] {
+            record(&log, &projections, &about(EventKind::TaskCreated, task_id));
+        }
+        // Without the field, an end marks nothing.
+        record(&log, &projections, &started("S1", None));
+        record(
+            &log,
+            &projections,
+            &planned("S1", &["FRK-1", "FRK-2", "FRK-3"]),
+        );
+        record(
+            &log,
+            &projections,
+            &ended("S1", &["FRK-1", "FRK-2", "FRK-3"]),
+        );
+        assert!(!marked(&projections, "FRK-1"));
+        // With `backlog: true`, each task in `left` and no other.
+        record(&log, &projections, &started("S2", None));
+        record(
+            &log,
+            &projections,
+            &planned("S2", &["FRK-1", "FRK-2", "FRK-3"]),
+        );
+        let mut end = ended("S2", &["FRK-1", "FRK-2"]);
+        let farik_protocol::event::EventBody::SprintEnded(body) = &mut end.body else {
+            panic!("a sprint.ended");
+        };
+        body.backlog = Some(true);
+        record(&log, &projections, &end);
+        assert_eq!(
+            ["FRK-1", "FRK-2", "FRK-3"].map(|task_id| marked(&projections, task_id)),
+            [true, true, false]
+        );
+        // The plan that puts a task in a sprint clears its mark.
+        record(&log, &projections, &started("S3", None));
+        record(&log, &projections, &planned("S3", &["FRK-1"]));
+        assert_eq!(
+            ["FRK-1", "FRK-2"].map(|task_id| marked(&projections, task_id)),
+            [false, true]
+        );
+        // Switching the policy on, or saying nothing of it, clears none; switching it off, all.
+        record(&log, &projections, &team_updated(Some(true)));
+        record(&log, &projections, &team_updated(None));
+        assert!(marked(&projections, "FRK-2"));
+        record(&log, &projections, &team_updated(Some(false)));
+        assert!(!marked(&projections, "FRK-2"));
+    }
+
     #[test]
     fn projects_the_open_sprint() {
         let (log, projections) = a_board();
@@ -2377,7 +2542,9 @@ mod tests {
             // stuck in S1 after S1 ended. A move into `verifying` and a cost are also already
             // projected, in `task_projections` and `cost_records`, so a 0009 that failed to empty
             // either table (N2, N4) would replay them a second time. 0008 runs before these rows
-            // exist, so its own emptying of `task_projections` (M4c) is not pinned here.
+            // exist, so its own emptying of `task_projections` (M4c) is not pinned here. Opening
+            // the log applies every later migration; only 0009's record is taken back, since
+            // 0010's column cannot be.
             let log = Arc::new(open_event_log(&path, at(9)).expect("the log opens"));
             for event in [
                 about(EventKind::TaskCreated, "FRK-1"),
@@ -2391,7 +2558,7 @@ mod tests {
             }
             log.connection()
                 .execute_batch(
-                    "DELETE FROM schema_migrations WHERE version > 8;
+                    "DELETE FROM schema_migrations WHERE version = 9;
                      INSERT INTO task_projections
                          (task_id, kind, parent, title, status, risk, triaged, locked, updated_seq,
                           sprint, verifications)
@@ -2422,5 +2589,132 @@ mod tests {
             "a stale row left in cost_records would collide with the replayed one"
         );
         let _ = std::fs::remove_dir_all(&directory);
+    }
+
+    #[test]
+    fn splits_a_tasks_cost_by_purpose() {
+        use farik_protocol::event::{CostRecordedBodyPurpose, EventBody};
+        let (log, projections) = a_board();
+        for task_id in ["FRK-1", "FRK-2"] {
+            record(&log, &projections, &about(EventKind::TaskCreated, task_id));
+        }
+        let with = |purpose, task_id, usd| {
+            let mut spent = cost(Some(task_id), "a", "s1", "2026-09-22", (usd, 1, 1));
+            if let EventBody::CostRecorded(body) = &mut spent.body {
+                body.purpose = purpose;
+            }
+            spent
+        };
+        for spent in [
+            with(CostRecordedBodyPurpose::Implement, "FRK-1", 1.0),
+            with(CostRecordedBodyPurpose::Implement, "FRK-1", 2.0),
+            with(CostRecordedBodyPurpose::Verify, "FRK-1", 4.0),
+            with(CostRecordedBodyPurpose::Verify, "FRK-2", 8.0),
+        ] {
+            record(&log, &projections, &spent);
+        }
+        let split = projections
+            .costs_by_purpose(&"FRK-1".parse().expect("a task id"))
+            .expect("the costs read");
+        assert_eq!(
+            split.into_iter().collect::<Vec<_>>(),
+            vec![("implement".to_string(), 3.0), ("verify".to_string(), 4.0)]
+        );
+    }
+
+    #[test]
+    fn costs_each_agent_by_day_and_sprint() {
+        use super::CostWindow;
+        let (log, projections) = a_board();
+        record(&log, &projections, &about(EventKind::TaskCreated, "FRK-1"));
+        record(&log, &projections, &started("S1", None));
+        record(&log, &projections, &planned("S1", &["FRK-1"]));
+        for spent in [
+            cost(Some("FRK-1"), "a", "s1", "2026-09-21", (1.0, 1, 1)),
+            cost(Some("FRK-1"), "a", "s2", "2026-09-22", (2.0, 1, 1)),
+            cost(Some("FRK-1"), "b", "s3", "2026-09-22", (4.0, 1, 1)),
+            // No task, so no sprint; still the day's.
+            cost(None, "b", "s4", "2026-09-22", (8.0, 1, 1)),
+        ] {
+            record(&log, &projections, &spent);
+        }
+        let agents = |window| {
+            projections
+                .costs_for(CostScope::Agent, window)
+                .expect("the costs read")
+        };
+        let day = chrono::NaiveDate::from_ymd_opt(2026, 9, 22).expect("a real day");
+        assert_eq!(
+            agents(CostWindow::Day(day)),
+            vec![
+                row(CostScope::Agent, "a", (2.0, 1, 1, 1)),
+                row(CostScope::Agent, "b", (12.0, 2, 2, 2)),
+            ]
+        );
+        assert_eq!(
+            agents(CostWindow::Sprint("S1".to_string())),
+            vec![
+                row(CostScope::Agent, "a", (3.0, 2, 2, 2)),
+                row(CostScope::Agent, "b", (4.0, 1, 1, 1)),
+            ]
+        );
+        assert!(agents(CostWindow::Sprint("S2".to_string())).is_empty());
+        // The task order's own parameter and the window's are bound together.
+        assert_eq!(
+            projections
+                .costs_for(CostScope::Task, CostWindow::Day(day))
+                .expect("the costs read"),
+            vec![row(CostScope::Task, "FRK-1", (6.0, 2, 2, 2))]
+        );
+        assert_eq!(
+            agents(CostWindow::All),
+            projections.costs(CostScope::Agent).expect("the costs read")
+        );
+    }
+
+    #[test]
+    fn sums_costs_by_purpose() {
+        use super::CostWindow;
+        use farik_protocol::event::{CostRecordedBodyPurpose, EventBody};
+        let (log, projections) = a_board();
+        record(&log, &projections, &about(EventKind::TaskCreated, "FRK-1"));
+        let with = |purpose, task_id, session, day, usd| {
+            let mut spent = cost(task_id, "a", session, day, (usd, 1, 1));
+            if let EventBody::CostRecorded(body) = &mut spent.body {
+                body.purpose = purpose;
+            }
+            spent
+        };
+        for spent in [
+            with(
+                CostRecordedBodyPurpose::Chat,
+                None,
+                "s1",
+                "2026-09-22",
+                0.25,
+            ),
+            with(CostRecordedBodyPurpose::Chat, None, "s2", "2026-09-22", 0.5),
+            with(
+                CostRecordedBodyPurpose::Implement,
+                Some("FRK-1"),
+                "s3",
+                "2026-09-22",
+                2.0,
+            ),
+            // Another day's chat is not this day's.
+            with(CostRecordedBodyPurpose::Chat, None, "s4", "2026-09-21", 8.0),
+        ] {
+            record(&log, &projections, &spent);
+        }
+        let day = chrono::NaiveDate::from_ymd_opt(2026, 9, 22).expect("a real day");
+        assert_eq!(
+            projections
+                .costs_for(CostScope::Purpose, CostWindow::Day(day))
+                .expect("the costs read"),
+            vec![
+                row(CostScope::Purpose, "chat", (0.75, 2, 2, 2)),
+                row(CostScope::Purpose, "implement", (2.0, 1, 1, 1)),
+            ]
+        );
     }
 }

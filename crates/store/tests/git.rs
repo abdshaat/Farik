@@ -864,3 +864,128 @@ fn refuses_a_branch_name_git_would_read_as_another() {
         assert_eq!(adapter.check_branch_name(name), Ok(()), "{name}");
     }
 }
+
+/// Set in the child that `commits_and_merges_as_farik_when_git_knows_nobody` runs itself as.
+const KNOWS_NOBODY: &str = "FARIK_TEST_GIT_KNOWS_NOBODY";
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn commits_and_merges_as_farik_when_git_knows_nobody() {
+    // Git reads who someone is from the environment, and a test cannot change its own without
+    // `unsafe`, so the test runs itself again as a child on a machine that knows nobody: no
+    // global or system configuration, and a home with nothing in it.
+    if std::env::var_os(KNOWS_NOBODY).is_none() {
+        let home = std::env::temp_dir().join(format!("farik-git-no-home-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&home);
+        std::fs::create_dir_all(&home).expect("an empty home");
+        let mut child =
+            std::process::Command::new(std::env::current_exe().expect("the test binary"));
+        child
+            .args([
+                "--exact",
+                "commits_and_merges_as_farik_when_git_knows_nobody",
+                "--include-ignored",
+                "--nocapture",
+            ])
+            .env(KNOWS_NOBODY, "1")
+            .env("HOME", &home)
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("GIT_CONFIG_NOSYSTEM", "1");
+        for name in [
+            "XDG_CONFIG_HOME",
+            "GIT_CONFIG_SYSTEM",
+            "GIT_AUTHOR_NAME",
+            "GIT_AUTHOR_EMAIL",
+            "GIT_COMMITTER_NAME",
+            "GIT_COMMITTER_EMAIL",
+            "EMAIL",
+        ] {
+            child.env_remove(name);
+        }
+        let output = child.output().expect("the test runs itself");
+        let _ = std::fs::remove_dir_all(&home);
+        assert!(
+            output.status.success(),
+            "{}{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        return;
+    }
+    let root = std::env::temp_dir().join(format!("farik-git-nobody-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(&root).expect("a directory");
+    git_in(&root, &["init", "-b", "main"]);
+    let git = Git::open(root.clone());
+    let author =
+        |reference: &str| git_output_in(&root, &["log", "-1", "--format=%an <%ae>", reference]);
+
+    std::fs::write(root.join("first.txt"), "one\n").expect("a file");
+    git.commit(&root, "the first commit", &["first.txt".to_string()])
+        .expect("the commit works without an identity");
+    assert_eq!(author("main"), "farik <farik@localhost>");
+
+    git_in(&root, &["checkout", "-b", "farik/FRK-1"]);
+    std::fs::write(root.join("second.txt"), "two\n").expect("a file");
+    git.commit(&root, "the second commit", &["second.txt".to_string()])
+        .expect("the commit works without an identity");
+    let outcome = git
+        .merge("main", "farik/FRK-1", "integrate FRK-1")
+        .expect("the merge works without an identity");
+    assert!(
+        matches!(outcome, MergeOutcome::Merged { .. }),
+        "{outcome:?}"
+    );
+    assert_eq!(author("main"), "farik <farik@localhost>");
+
+    // Half an identity is none, and an empty name is no name: git refuses a commit without both.
+    for (name, email) in [
+        (Some("someone"), None),
+        (None, Some("someone@example.com")),
+        (Some(""), Some("someone@example.com")),
+    ] {
+        for (key, value) in [("user.name", name), ("user.email", email)] {
+            // Exits 5 when the key is not set, which is what this wants.
+            let _ = std::process::Command::new("git")
+                .args(["config", "--unset-all", key])
+                .current_dir(&root)
+                .status();
+            if let Some(value) = value {
+                git_in(&root, &["config", key, value]);
+            }
+        }
+        std::fs::write(root.join("first.txt"), format!("{name:?} {email:?}")).expect("a change");
+        git.commit(&root, "a change", &["first.txt".to_string()])
+            .expect("the commit works with half an identity");
+        assert_eq!(
+            author("HEAD"),
+            "farik <farik@localhost>",
+            "with {name:?} and {email:?}"
+        );
+    }
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn commits_and_merges_as_the_user_when_git_knows_them() {
+    let repository = TempRepo::new("identity-kept");
+    let git = repository.adapter();
+    repository.git(&["checkout", "-b", "farik/FRK-1"]);
+    repository.write("added.txt", "added\n");
+    git.commit(&repository.path, "add a file", &["added.txt".to_string()])
+        .expect("the commit works");
+    let author = |reference: &str| {
+        repository.git_output(&["log", "-1", "--format=%an <%ae> %cn <%ce>", reference])
+    };
+    assert_eq!(
+        author("farik/FRK-1"),
+        "Farik Test <test@farik.invalid> Farik Test <test@farik.invalid>"
+    );
+    git.merge("main", "farik/FRK-1", "integrate FRK-1")
+        .expect("the merge works");
+    assert_eq!(
+        author("main"),
+        "Farik Test <test@farik.invalid> Farik Test <test@farik.invalid>"
+    );
+}

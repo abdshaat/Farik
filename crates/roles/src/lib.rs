@@ -14,11 +14,14 @@ use serde_json::Value;
 
 use crate::generated::role::{FarikRole, FarikRoleModelEffort};
 
+/// The connectors Farik ships.
+mod connectors;
 /// Types generated from `docs/schemas/role.schema.json`.
 pub mod generated;
 /// Which role reviews a task (D7).
 mod reviewer;
 
+pub use connectors::{ConnectorDefinition, builtin_connector};
 pub use reviewer::{REVIEWER_ROLE_FOR, default_reviewer_role};
 
 const SCHEMA_JSON: &str = include_str!("../../../docs/schemas/role.schema.json");
@@ -53,6 +56,8 @@ pub struct RoleDefinition {
     pub id: Role,
     /// What the role is for.
     pub mandate: String,
+    /// The line a person is shown beside the role: what it does for them, in plain words.
+    pub persona: String,
     /// What the role's work leaves behind.
     pub produces: Vec<String>,
     /// What the role may not do.
@@ -154,6 +159,43 @@ pub fn load_role(role: Role) -> Result<RoleDefinition, RoleError> {
                 include_str!("../roles/marketing_specialist/skills/marketing-what-ships/SKILL.md"),
             )],
         ),
+        Role::UiUxDesigner => parse_role(
+            role,
+            include_str!("../roles/ui_ux_designer/role.yaml"),
+            include_str!("../roles/ui_ux_designer/system.md"),
+            &[
+                (
+                    "ux-review-heuristics",
+                    include_str!("../roles/ui_ux_designer/skills/ux-review-heuristics/SKILL.md"),
+                ),
+                (
+                    "wcag-accessibility-checks",
+                    include_str!(
+                        "../roles/ui_ux_designer/skills/wcag-accessibility-checks/SKILL.md"
+                    ),
+                ),
+                (
+                    "brand-and-design-tokens",
+                    include_str!("../roles/ui_ux_designer/skills/brand-and-design-tokens/SKILL.md"),
+                ),
+                (
+                    "plain-language-interface-wording",
+                    include_str!(
+                        "../roles/ui_ux_designer/skills/plain-language-interface-wording/SKILL.md"
+                    ),
+                ),
+                (
+                    "writing-mockups",
+                    include_str!("../roles/ui_ux_designer/skills/writing-mockups/SKILL.md"),
+                ),
+                (
+                    "responsive-and-phone-checks",
+                    include_str!(
+                        "../roles/ui_ux_designer/skills/responsive-and-phone-checks/SKILL.md"
+                    ),
+                ),
+            ],
+        ),
         Role::Human => Err(RoleError::NotFound {
             role_id: role.to_string(),
         }),
@@ -214,6 +256,7 @@ fn parse_role(
     Ok(RoleDefinition {
         id: role,
         mandate: file.mandate.to_string(),
+        persona: file.persona.to_string(),
         produces: file.produces.into_iter().map(String::from).collect(),
         forbidden: file.forbidden.into_iter().map(String::from).collect(),
         default_tiers: default_tiers(role).to_vec(),
@@ -315,7 +358,7 @@ mod tests {
         assert!(!definition.mandate.trim().is_empty());
         assert!(!definition.produces.is_empty());
         assert!(!definition.forbidden.is_empty());
-        assert_eq!(definition.model, "claude-opus-5");
+        assert_eq!(definition.model, "claude-opus-5-5");
         assert_eq!(definition.effort, Effort::High);
         assert_eq!(definition.default_tiers, default_tiers(role));
         assert_eq!(definition.skills.len(), 1);
@@ -329,6 +372,90 @@ mod tests {
             "the frontmatter is not part of the body"
         );
         definition
+    }
+
+    #[test]
+    fn ships_the_mockup_persona_per_role() {
+        for (role, line) in [
+            (
+                Role::ProductManager,
+                "Asks the questions that decide what to build",
+            ),
+            (Role::ScrumMaster, "Keeps the work moving and nobody stuck"),
+            (Role::Architect, "Thinks about how it all fits together"),
+            (Role::SoftwareDeveloper, "Builds it and tests it"),
+            (
+                Role::MarketingSpecialist,
+                "Tells people about what you made",
+            ),
+        ] {
+            assert_eq!(loaded(role).persona, line, "{role}");
+        }
+    }
+
+    #[test]
+    fn ships_the_designer_with_its_six_skills() {
+        let definition = loaded(Role::UiUxDesigner);
+        assert_eq!(definition.id, Role::UiUxDesigner);
+        assert_eq!(definition.persona, "Makes it clear, calm and easy to use");
+        assert_eq!(definition.model, "claude-opus-5-5");
+        assert_eq!(definition.effort, Effort::High);
+        assert_eq!(definition.default_tiers, default_tiers(Role::UiUxDesigner));
+        assert!(definition.system_prompt.contains("untrusted"));
+        let names: Vec<&str> = definition
+            .skills
+            .iter()
+            .map(|skill| skill.name.as_str())
+            .collect();
+        assert_eq!(
+            names,
+            [
+                "ux-review-heuristics",
+                "wcag-accessibility-checks",
+                "brand-and-design-tokens",
+                "plain-language-interface-wording",
+                "writing-mockups",
+                "responsive-and-phone-checks",
+            ]
+        );
+        for skill in &definition.skills {
+            assert!(!skill.description.trim().is_empty(), "{}", skill.name);
+            assert!(!skill.body.trim().is_empty(), "{}", skill.name);
+        }
+    }
+
+    /// Spec 0.11 as the founder amended it on 2026-09-30: two roles change code, and no prompt or
+    /// skill still says one does.
+    #[test]
+    fn says_who_changes_code_in_every_prompt() {
+        const SENTENCE: &str = "Only the Developer and the UI/UX Designer change code.";
+        for role in [
+            Role::ProductManager,
+            Role::ScrumMaster,
+            Role::Architect,
+            Role::SoftwareDeveloper,
+            Role::MarketingSpecialist,
+            Role::UiUxDesigner,
+        ] {
+            let definition = loaded(role);
+            let texts = std::iter::once(&definition.system_prompt)
+                .chain(definition.skills.iter().map(|skill| &skill.body));
+            for text in texts {
+                let lower = text.to_lowercase();
+                assert!(
+                    !lower.contains("only the developer changes code"),
+                    "{role}: {text}"
+                );
+                assert!(
+                    !lower.contains("only the software developer"),
+                    "{role}: {text}"
+                );
+            }
+        }
+        for role in [Role::SoftwareDeveloper, Role::UiUxDesigner] {
+            let prompt = loaded(role).system_prompt;
+            assert!(prompt.contains(SENTENCE), "{role}: {prompt}");
+        }
     }
 
     #[test]
@@ -348,7 +475,7 @@ mod tests {
     fn loads_the_scrum_master() {
         let definition = loaded(Role::ScrumMaster);
         assert_eq!(definition.id, Role::ScrumMaster);
-        assert_eq!(definition.model, "claude-sonnet-5");
+        assert_eq!(definition.model, "claude-sonnet-5-5");
         assert_eq!(definition.effort, Effort::Medium);
         assert_eq!(definition.default_tiers, default_tiers(Role::ScrumMaster));
         assert_eq!(definition.skills.len(), 1);
@@ -381,7 +508,7 @@ mod tests {
     fn loads_the_architect() {
         let definition = loaded(Role::Architect);
         assert_eq!(definition.id, Role::Architect);
-        assert_eq!(definition.model, "claude-opus-5");
+        assert_eq!(definition.model, "claude-opus-5-5");
         assert_eq!(definition.effort, Effort::High);
         assert_eq!(definition.default_tiers, default_tiers(Role::Architect));
         assert_eq!(definition.skills.len(), 1);
@@ -413,7 +540,7 @@ mod tests {
     fn loads_the_marketing_specialist() {
         let definition = loaded(Role::MarketingSpecialist);
         assert_eq!(definition.id, Role::MarketingSpecialist);
-        assert_eq!(definition.model, "claude-sonnet-5");
+        assert_eq!(definition.model, "claude-sonnet-5-5");
         assert_eq!(definition.effort, Effort::Medium);
         assert_eq!(
             definition.default_tiers,
@@ -473,6 +600,7 @@ mod tests {
                 "product_manager",
                 "scrum_master",
                 "software_developer",
+                "ui_ux_designer",
             ]
         );
         for directory in &directories {

@@ -54,6 +54,9 @@ pub enum GateId {
     IterationLimitReached,
     /// Budget exhausted or permission denied on a required action.
     GovernorEscalation,
+    /// The result waits on the human's acceptance and, for a task, its review has passed: the
+    /// human sends it back (ADR 0024).
+    HumanRejection,
 }
 
 /// A status pattern in a row: one status, or any status.
@@ -100,7 +103,7 @@ const fn row(from: Status, to: Status, actor: TransitionActor, gate: GateId) -> 
 
 /// The transition table of `docs/SPEC.md` section 5.2: the spec's lines in order, split where
 /// a line names two triggers or two actors, with the `any` rows last.
-pub static TRANSITION_TABLE: [TransitionRow; 20] = {
+pub static TRANSITION_TABLE: [TransitionRow; 21] = {
     use GateId as G;
     use Status::{Any, Is};
     use TaskStatus as S;
@@ -171,6 +174,12 @@ pub static TRANSITION_TABLE: [TransitionRow; 20] = {
             G::RejectionReasons,
         ),
         row(
+            Is(S::Verifying),
+            Is(S::Rejected),
+            A::Human,
+            G::HumanRejection,
+        ),
+        row(
             Is(S::Rejected),
             Is(S::InProgress),
             A::Governor,
@@ -237,22 +246,22 @@ mod tests {
     }
 
     #[test]
-    fn has_exactly_twenty_distinct_rows() {
+    fn has_exactly_twenty_one_distinct_rows() {
         let distinct: BTreeSet<String> = TRANSITION_TABLE
             .iter()
             .map(|row| format!("{row:?}"))
             .collect();
-        assert_eq!(TRANSITION_TABLE.len(), 20);
-        assert_eq!(distinct.len(), 20);
+        assert_eq!(TRANSITION_TABLE.len(), 21);
+        assert_eq!(distinct.len(), 21);
     }
 
     #[test]
-    fn has_sixteen_specific_rows_and_four_any_rows() {
+    fn has_seventeen_specific_rows_and_four_any_rows() {
         let specific = TRANSITION_TABLE
             .iter()
             .filter(|row| is_specific(**row))
             .count();
-        assert_eq!(specific, 16);
+        assert_eq!(specific, 17);
         assert_eq!(TRANSITION_TABLE.len() - specific, 4);
     }
 
@@ -309,7 +318,10 @@ mod tests {
             (
                 S::Verifying,
                 S::Rejected,
-                &[(A::Reviewer, G::RejectionReasons)],
+                &[
+                    (A::Reviewer, G::RejectionReasons),
+                    (A::Human, G::HumanRejection),
+                ],
             ),
             (
                 S::Rejected,

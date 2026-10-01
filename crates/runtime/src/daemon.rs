@@ -15,10 +15,11 @@ use axum::extract::{Request, State};
 use axum::http::{StatusCode, header};
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
-use axum::routing::post;
-use axum::{Json, Router};
+use axum::routing::{get, post};
+use axum::{Extension, Json, Router};
 use farik_core::budget::SessionLimits;
 use farik_core::contract::TaskId;
+use farik_core::governor::permissions::{PermissionTier, SessionConnector};
 use rmcp::transport::streamable_http_server::session::local::LocalSessionManager;
 use rmcp::transport::streamable_http_server::{StreamableHttpServerConfig, StreamableHttpService};
 use tokio::net::TcpListener;
@@ -36,13 +37,21 @@ use self::mcp::FarikMcp;
 
 use crate::exec::Executor;
 use crate::orchestrator::{CommandError, CommandReport, reply_of};
+use crate::preview::RunningPreview;
 use crate::session::SessionPurpose;
 use crate::tools::{ToolContext, ToolDeps};
 
+mod app;
+mod board;
 #[cfg(test)]
 pub(crate) mod fixtures;
+mod gates;
 mod hooks;
 mod mcp;
+mod setup;
+mod team;
+mod templates;
+pub mod web;
 
 #[cfg(test)]
 pub(crate) use mcp::listed_names;
@@ -50,6 +59,11 @@ pub(crate) use mcp::listed_names;
 pub use hooks::{
     HookDecision, HookRequest, builtin_tool_tier, decide_pre_tool_use, record_post_tool_use,
 };
+pub use setup::{SetupError, SetupHost};
+pub use team::SETUP_PENDING;
+
+/// What a daemon with no project answers what needs one.
+pub(crate) const NO_PROJECT: &str = "farik has no project yet";
 
 /// Why the daemon could not do what it was asked.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -101,6 +115,14 @@ pub struct SessionRegistration {
     /// `mcp__farik__` prefix: the hook denies every other Farik tool (`tool_not_in_session`), and
     /// the MCP server neither lists nor calls one.
     pub farik_tools: Vec<String>,
+    /// The agent's tiers when the session started (spec 4.4): a grant or a revoke waits for the
+    /// agent's next session, while a pause or a retirement stops this one at once.
+    pub tiers: Vec<PermissionTier>,
+    /// The connectors it was given (5.6): the hook refuses a connector's call unless it is one of
+    /// these and passes `evaluate_connector_call`.
+    pub connectors: Vec<SessionConnector>,
+    /// The task's preview while the session runs, when it was given a connector.
+    pub preview: Option<Arc<dyn RunningPreview>>,
 }
 
 /// A registration, the tool calls the hook has allowed it, and why it was told to stop, once it
@@ -120,12 +142,19 @@ pub type CommandHandler = Arc<
 >;
 
 /// What the daemon holds: the project's tools, the sessions it answers for, the notice a
-/// session's loop waits on for a stop, and who takes the human's commands.
+/// session's loop waits on for a stop, and who takes the human's commands. In setup mode it has no
+/// project's tools, and a host that answers the wizard in their place.
 pub struct DaemonState {
-    deps: Arc<ToolDeps>,
+    deps: Option<Arc<ToolDeps>>,
+    host: Option<Arc<dyn SetupHost>>,
     sessions: Mutex<BTreeMap<String, Session>>,
     stops: tokio::sync::Notify,
+    wakes: tokio::sync::Notify,
     commands: OnceLock<CommandHandler>,
+    web: OnceLock<web::WebState>,
+    /// Held by every write of `team.yaml` from its read to its write, so a change is checked
+    /// against the team it replaces.
+    team_writes: Mutex<()>,
 }
 
 impl DaemonState {
@@ -133,11 +162,36 @@ impl DaemonState {
     #[must_use]
     pub fn new(deps: Arc<ToolDeps>) -> DaemonState {
         DaemonState {
-            deps,
+            deps: Some(deps),
+            host: None,
             sessions: Mutex::new(BTreeMap::new()),
             stops: tokio::sync::Notify::new(),
+            wakes: tokio::sync::Notify::new(),
             commands: OnceLock::new(),
+            web: OnceLock::new(),
+            team_writes: Mutex::new(()),
         }
+    }
+
+    /// A daemon in setup mode: no project, the browser routes on with `web`, and the wizard's
+    /// calls answered through `host`.
+    #[must_use]
+    pub fn setup(host: Arc<dyn SetupHost>, web: web::WebState) -> DaemonState {
+        DaemonState {
+            deps: None,
+            host: Some(host),
+            sessions: Mutex::new(BTreeMap::new()),
+            stops: tokio::sync::Notify::new(),
+            wakes: tokio::sync::Notify::new(),
+            commands: OnceLock::new(),
+            web: OnceLock::from(web),
+            team_writes: Mutex::new(()),
+        }
+    }
+
+    /// The host answering the wizard, in setup mode.
+    pub(crate) fn host(&self) -> Option<&Arc<dyn SetupHost>> {
+        self.host.as_ref()
     }
 
     /// Hands the human's commands to `handler` from now on. It is set once the orchestrator
@@ -146,6 +200,18 @@ impl DaemonState {
     /// is kept.
     pub fn set_command_handler(&self, handler: CommandHandler) -> bool {
         self.commands.set(handler).is_ok()
+    }
+
+    /// Turns the browser routes on with `web`: until then, and under every driver but
+    /// `farik serve`, they answer 404. Answers `true`, or `false` when they were already on, and
+    /// the state they have is kept.
+    pub fn set_web(&self, web: web::WebState) -> bool {
+        self.web.set(web).is_ok()
+    }
+
+    /// What the browser routes have, once they are on.
+    pub(crate) fn web(&self) -> Option<&web::WebState> {
+        self.web.get()
     }
 
     /// The ids of every registered session, in order.
@@ -210,6 +276,11 @@ impl DaemonState {
         &self.stops
     }
 
+    /// The notice a request filed in the browser wakes, so that the team's wait ends at once.
+    pub(crate) fn wakes(&self) -> &tokio::sync::Notify {
+        &self.wakes
+    }
+
     /// Stops answering for a session: every later hook of it is `unknown_session`.
     pub fn end_session(&self, session_id: &str) {
         self.sessions().remove(session_id);
@@ -229,6 +300,7 @@ impl DaemonState {
     /// daemon does not answer for. The MCP server and a replayed session both take this path.
     #[must_use]
     pub fn tool_context(&self, session_id: &str) -> Option<ToolContext> {
+        let deps = self.deps.as_ref()?;
         self.sessions().get(session_id).map(|session| ToolContext {
             agent_id: session.registration.agent_id.clone(),
             task_id: session.registration.task_id.clone(),
@@ -237,7 +309,10 @@ impl DaemonState {
             in_reply_to: session.registration.in_reply_to,
             thread: session.registration.thread,
             executor: session.registration.executor.clone(),
-            deps: Arc::clone(&self.deps),
+            tiers: session.registration.tiers.clone(),
+            connectors: session.registration.connectors.clone(),
+            preview: session.registration.preview.clone(),
+            deps: Arc::clone(deps),
         })
     }
 
@@ -249,8 +324,14 @@ impl DaemonState {
             .map(|session| session.registration.farik_tools.clone())
     }
 
-    pub(crate) fn deps(&self) -> &Arc<ToolDeps> {
-        &self.deps
+    /// The project's tools, or `None` in setup mode.
+    pub(crate) fn deps(&self) -> Option<&Arc<ToolDeps>> {
+        self.deps.as_ref()
+    }
+
+    /// The lock every write of the team file holds from its read to its write.
+    pub(crate) fn team_writes(&self) -> MutexGuard<'_, ()> {
+        crate::locked(&self.team_writes)
     }
 
     /// The sessions, locked. A panic while they were held leaves them as they were, which is
@@ -262,12 +343,35 @@ impl DaemonState {
     }
 }
 
+/// Which port the daemon asks for.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum PortChoice {
+    /// One the operating system picks.
+    #[default]
+    Any,
+    /// This one, else the next nine in order, else `Any`.
+    Preferred(u16),
+    /// This one, or none.
+    Exact(u16),
+}
+
+/// The ports to try, in order, for `choice`; `0` is the operating system's pick.
+#[must_use]
+pub fn candidates(choice: PortChoice) -> Vec<u16> {
+    match choice {
+        PortChoice::Any => vec![0],
+        PortChoice::Preferred(port) => (port..=port.saturating_add(9)).chain([0]).collect(),
+        PortChoice::Exact(port) => vec![port],
+    }
+}
+
 /// Where the daemon listens, and where it says so.
 pub struct DaemonConfig {
-    /// The port to bind on `127.0.0.1`; `None` lets the operating system pick one.
-    pub port: Option<u16>,
-    /// Where `daemon.json` is written: `.farik/local/daemon.json`.
-    pub daemon_file: PathBuf,
+    /// The port to bind on `127.0.0.1`.
+    pub port: PortChoice,
+    /// Where `daemon.json` is written: `.farik/local/daemon.json`; `None` writes none, as the
+    /// setup daemon, which no hook reaches, does not.
+    pub daemon_file: Option<PathBuf>,
 }
 
 /// What `daemon.json` holds: how a hook reaches the daemon. Its `Debug` prints the token as
@@ -297,7 +401,7 @@ impl fmt::Debug for DaemonInfo {
 pub struct DaemonHandle {
     /// How it is reached.
     pub info: DaemonInfo,
-    daemon_file: PathBuf,
+    daemon_file: Option<PathBuf>,
     cancel: CancellationToken,
     stop: oneshot::Sender<()>,
     server: JoinHandle<std::io::Result<()>>,
@@ -318,10 +422,16 @@ impl DaemonHandle {
         let served = self.server.await.map_err(|error| DaemonError::Io {
             detail: format!("the server's task failed: {error}"),
         })?;
-        let removed = match std::fs::remove_file(&self.daemon_file) {
-            Err(error) if error.kind() != std::io::ErrorKind::NotFound => Err(DaemonError::Io {
-                detail: format!("{} cannot be removed: {error}", self.daemon_file.display()),
-            }),
+        let removed = match self
+            .daemon_file
+            .as_deref()
+            .map(|file| (file, std::fs::remove_file(file)))
+        {
+            Some((file, Err(error))) if error.kind() != std::io::ErrorKind::NotFound => {
+                Err(DaemonError::Io {
+                    detail: format!("{} cannot be removed: {error}", file.display()),
+                })
+            }
             _ => Ok(()),
         };
         served.map_err(|error| DaemonError::Io {
@@ -331,7 +441,7 @@ impl DaemonHandle {
     }
 }
 
-/// Starts the daemon on `127.0.0.1`, on the configured port or one the operating system picks,
+/// Starts the daemon on `127.0.0.1`, on the configured port (`PortChoice`) or one the operating system picks,
 /// with a fresh token, and writes `daemon.json` (mode 0600) once it is listening. A file left by
 /// a daemon that crashed is overwritten: only the one `farik run` that owns the project serves.
 ///
@@ -343,11 +453,7 @@ pub async fn serve(
     state: Arc<DaemonState>,
 ) -> Result<DaemonHandle, DaemonError> {
     let token = random_token()?;
-    let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, config.port.unwrap_or(0)))
-        .await
-        .map_err(|error| DaemonError::Bind {
-            detail: error.to_string(),
-        })?;
+    let listener = bind(config.port).await?;
     let port = listener
         .local_addr()
         .map_err(|error| DaemonError::Bind {
@@ -376,11 +482,37 @@ pub async fn serve(
         stop,
         server,
     };
-    if let Err(error) = write_daemon_file(&handle.daemon_file, &handle.info) {
+    let written = handle
+        .daemon_file
+        .as_deref()
+        .map_or(Ok(()), |file| write_daemon_file(file, &handle.info));
+    if let Err(error) = written {
         let _ = handle.shutdown().await;
         return Err(error);
     }
     Ok(handle)
+}
+
+/// Binds the first of `candidates(choice)` that is free on `127.0.0.1`. A port in use is skipped;
+/// any other error fails.
+async fn bind(choice: PortChoice) -> Result<TcpListener, DaemonError> {
+    let mut last = None;
+    for port in candidates(choice) {
+        match TcpListener::bind((Ipv4Addr::LOCALHOST, port)).await {
+            Ok(listener) => return Ok(listener),
+            Err(error) if error.kind() == std::io::ErrorKind::AddrInUse => last = Some(error),
+            Err(error) => {
+                return Err(DaemonError::Bind {
+                    detail: error.to_string(),
+                });
+            }
+        }
+    }
+    // `Any` (port 0) is last, and the system does not answer "in use" for it, so this is a
+    // defensive answer for a list that ended without a listener.
+    Err(DaemonError::Bind {
+        detail: last.map_or_else(|| "no port to try".to_string(), |error| error.to_string()),
+    })
 }
 
 /// Writes `info` to `path` readable by its owner alone, replacing whatever was there.
@@ -398,25 +530,39 @@ fn write_daemon_file(path: &Path, info: &DaemonInfo) -> Result<(), DaemonError> 
 }
 
 /// Thirty-two bytes from the kernel's random source, hex-encoded.
-fn random_token() -> Result<String, DaemonError> {
+pub(crate) fn random_token() -> Result<String, DaemonError> {
     let mut bytes = [0_u8; 32];
     std::fs::File::open("/dev/urandom")
         .and_then(|mut source| source.read_exact(&mut bytes))
         .map_err(|error| DaemonError::Io {
             detail: format!("no token could be made: {error}"),
         })?;
-    Ok(bytes
+    Ok(hex(&bytes))
+}
+
+/// `bytes` in lowercase hex.
+pub(crate) fn hex(bytes: &[u8]) -> String {
+    bytes
         .iter()
-        .fold(String::with_capacity(64), |mut hex, byte| {
+        .fold(String::with_capacity(bytes.len() * 2), |mut hex, byte| {
             let _ = write!(hex, "{byte:02x}");
             hex
-        }))
+        })
 }
 
 /// The routes, each behind the token: the two hooks, and Farik's MCP server for the session
 /// `X-Farik-Session` names. `cancel` ends every MCP session, whose event streams a graceful
-/// shutdown would otherwise wait on forever.
+/// shutdown would otherwise wait on forever, and every browser socket, which it does not track.
 pub(crate) fn router(state: Arc<DaemonState>, token: &str, cancel: CancellationToken) -> Router {
+    router_serving::<app::WebApp>(state, token, cancel)
+}
+
+/// `router`, serving the embed `E` as the web app.
+pub(crate) fn router_serving<E: rust_embed::RustEmbed + 'static>(
+    state: Arc<DaemonState>,
+    token: &str,
+    cancel: CancellationToken,
+) -> Router {
     let expected: Arc<str> = Arc::from(format!("Bearer {token}"));
     let server = StreamableHttpService::new(
         || Ok(FarikMcp),
@@ -424,7 +570,7 @@ pub(crate) fn router(state: Arc<DaemonState>, token: &str, cancel: CancellationT
         // The stateful sessions Claude Code opens with `initialize` are the default.
         StreamableHttpServerConfig::default()
             .with_json_response(true)
-            .with_cancellation_token(cancel),
+            .with_cancellation_token(cancel.clone()),
     );
     let mcp = Router::new()
         .route_service("/mcp", server)
@@ -432,13 +578,39 @@ pub(crate) fn router(state: Arc<DaemonState>, token: &str, cancel: CancellationT
             Arc::clone(&state),
             mcp::require_session,
         ));
+    // Merged after the bearer layer, which a layer only puts on the routes it already has: a
+    // browser has no bearer token, and proves itself with its `Origin` and a session instead.
+    let browser = Router::new()
+        .route("/", get(app::app_from::<E>))
+        .route("/connect", get(app::app_from::<E>).post(web::connect))
+        .route("/rpc", get(web::rpc))
+        .route("/session", get(web::session))
+        .route("/disconnect", post(web::disconnect))
+        .fallback(get(app::app_from::<E>))
+        .layer(Extension(cancel))
+        .with_state(Arc::clone(&state));
     Router::new()
         .route("/hook/pre-tool-use", post(pre_tool_use))
         .route("/hook/post-tool-use", post(post_tool_use))
         .route("/command", post(command))
-        .with_state(state)
+        .with_state(Arc::clone(&state))
         .merge(mcp)
+        .layer(middleware::from_fn_with_state(state, require_project))
         .layer(middleware::from_fn_with_state(expected, require_token))
+        .merge(browser)
+}
+
+/// Answers 503 for a route that needs the project, on a daemon in setup mode.
+async fn require_project(
+    State(state): State<Arc<DaemonState>>,
+    request: Request,
+    next: Next,
+) -> Response {
+    if state.deps().is_some() {
+        next.run(request).await
+    } else {
+        (StatusCode::SERVICE_UNAVAILABLE, NO_PROJECT).into_response()
+    }
 }
 
 /// Refuses a request without `Authorization: Bearer <token>`.
@@ -477,34 +649,43 @@ async fn pre_tool_use(
 }
 
 /// A command the human gave from another terminal, handled by this process's orchestrator and
-/// answered with the reply wire. A command that is not one is `invalid`, with every error the
-/// schema found; a daemon with no handler answers `failed`. The command runs on a task of its own,
-/// so that a client that goes away does not cut it off half done.
+/// answered with the reply wire.
 async fn command(State(state): State<Arc<DaemonState>>, Json(value): Json<Value>) -> Response {
     let reply = match command_from_value(&value) {
-        Err(errors) => CommandReply::Error {
-            kind: ReplyKind::Invalid,
-            detail: errors
-                .iter()
-                .map(|error| format!("{} {}", error.path, error.message))
-                .collect::<Vec<_>>()
-                .join("; "),
-        },
-        Ok(command) => match state.commands.get() {
-            None => CommandReply::Error {
-                kind: ReplyKind::Failed,
-                detail: "this daemon takes no commands".to_string(),
-            },
-            Some(handler) => match tokio::spawn(handler(command)).await {
-                Ok(result) => reply_of(result),
-                Err(error) => CommandReply::Error {
-                    kind: ReplyKind::Failed,
-                    detail: format!("the command's task failed: {error}"),
-                },
-            },
-        },
+        Err(errors) => invalid(&errors),
+        Ok(command) => handled(&state, command).await,
     };
     Json(reply_to_value(&reply)).into_response()
+}
+
+/// What a command that is not one is answered: `invalid`, with every error the schema found.
+fn invalid(errors: &[farik_protocol::command::ValidationError]) -> CommandReply {
+    CommandReply::Error {
+        kind: ReplyKind::Invalid,
+        detail: errors
+            .iter()
+            .map(|error| format!("{} {}", error.path, error.message))
+            .collect::<Vec<_>>()
+            .join("; "),
+    }
+}
+
+/// `command` handled by the orchestrator, or `failed` on a daemon with no handler. The command
+/// runs on a task of its own, so that a client that goes away does not cut it off half done.
+async fn handled(state: &DaemonState, command: Command) -> CommandReply {
+    match state.commands.get() {
+        None => CommandReply::Error {
+            kind: ReplyKind::Failed,
+            detail: "this daemon takes no commands".to_string(),
+        },
+        Some(handler) => match tokio::spawn(handler(command)).await {
+            Ok(result) => reply_of(result),
+            Err(error) => CommandReply::Error {
+                kind: ReplyKind::Failed,
+                detail: format!("the command's task failed: {error}"),
+            },
+        },
+    }
 }
 
 async fn post_tool_use(
@@ -535,7 +716,8 @@ mod tests {
 
     use super::fixtures::{PRE_READ, TestDaemon};
     use super::{
-        DaemonConfig, DaemonInfo, DaemonState, SessionPurpose, SessionRegistration, router, serve,
+        DaemonConfig, DaemonInfo, DaemonState, PortChoice, SessionPurpose, SessionRegistration,
+        candidates, router, serve,
     };
     use crate::exec::Executor;
     use crate::orchestrator::command_handler;
@@ -607,6 +789,41 @@ mod tests {
         assert_eq!(body["hookSpecificOutput"]["hookEventName"], "PreToolUse");
     }
 
+    #[test]
+    fn candidates_are_the_port_the_next_nine_then_any() {
+        assert_eq!(
+            candidates(PortChoice::Preferred(7420)),
+            [
+                7420, 7421, 7422, 7423, 7424, 7425, 7426, 7427, 7428, 7429, 0
+            ]
+        );
+        assert_eq!(candidates(PortChoice::Any), [0]);
+        assert_eq!(candidates(PortChoice::Exact(7420)), [7420]);
+        assert_eq!(
+            candidates(PortChoice::Preferred(65530)),
+            [65530, 65531, 65532, 65533, 65534, 65535, 0]
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn skips_a_port_in_use() {
+        let daemon = TestDaemon::new("daemon-port-in-use", |_| {});
+        let holder = std::net::TcpListener::bind(("127.0.0.1", 0)).expect("a port is held");
+        let held = holder.local_addr().expect("an address").port();
+        let handle = serve(
+            DaemonConfig {
+                port: PortChoice::Preferred(held),
+                daemon_file: Some(daemon.project.repo.path.join(".farik/local/daemon.json")),
+            },
+            daemon.state.clone(),
+        )
+        .await
+        .expect("the daemon is up on another port");
+        assert_ne!(handle.info.port, held);
+        handle.shutdown().await.expect("the daemon stops");
+    }
+
     #[tokio::test(flavor = "multi_thread")]
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn writes_the_daemon_file_and_removes_it_on_shutdown() {
@@ -614,8 +831,8 @@ mod tests {
         let daemon_file = daemon.project.repo.path.join(".farik/local/daemon.json");
         let handle = serve(
             DaemonConfig {
-                port: None,
-                daemon_file: daemon_file.clone(),
+                port: PortChoice::Any,
+                daemon_file: Some(daemon_file.clone()),
             },
             daemon.state.clone(),
         )
@@ -653,8 +870,8 @@ mod tests {
             .expect("the mode is set");
         let handle = serve(
             DaemonConfig {
-                port: None,
-                daemon_file: daemon_file.clone(),
+                port: PortChoice::Any,
+                daemon_file: Some(daemon_file.clone()),
             },
             daemon.state.clone(),
         )
@@ -680,8 +897,8 @@ mod tests {
         let daemon = TestDaemon::new("daemon-loopback", |_| {});
         let handle = serve(
             DaemonConfig {
-                port: None,
-                daemon_file: daemon.project.repo.path.join(".farik/local/daemon.json"),
+                port: PortChoice::Any,
+                daemon_file: Some(daemon.project.repo.path.join(".farik/local/daemon.json")),
             },
             daemon.state.clone(),
         )
@@ -720,6 +937,9 @@ mod tests {
             executor: Some(Arc::clone(&executor)),
             limits: DEFAULT_SESSION_LIMITS,
             farik_tools: Vec::new(),
+            tiers: Vec::new(),
+            connectors: Vec::new(),
+            preview: None,
             purpose: SessionPurpose::Implement,
             in_reply_to: None,
             thread: None,
@@ -827,6 +1047,57 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn wakes_serve_on_a_chat() {
+        use crate::orchestrator::{TickReport, Waited};
+        use crate::tools::fixtures::at;
+
+        let harness = Harness::new("daemon-chat-wakes", |_| {});
+        // Paused by the human: `farik serve` waits, and a chat is answered all the same.
+        harness
+            .project
+            .record("", "team.paused", &json!({ "by": "human" }));
+        let orchestrator = Arc::new(harness.orchestrator(harness.recorded(vec![
+            crate::recorded::fixtures::chat_answers_with_a_request(),
+        ])));
+        assert!(
+            harness
+                .daemon
+                .set_command_handler(command_handler(Arc::clone(&orchestrator)))
+        );
+        let idle = orchestrator.tick().await.expect("the tick runs");
+        assert!(matches!(idle, TickReport::Idle { .. }), "{idle:?}");
+
+        let (ended, answer) = tokio::join!(
+            tokio::time::timeout(
+                std::time::Duration::from_secs(5),
+                orchestrator.wait_until(at() + chrono::Duration::hours(1)),
+            ),
+            async {
+                tokio::task::yield_now().await;
+                router(harness.daemon.clone(), TOKEN, CancellationToken::new())
+                    .oneshot(post(
+                        "/command",
+                        Some(TOKEN),
+                        &json!({ "command": "chat_message_post",
+                                 "body": { "agent_id": "dev-a", "text": "Status?" } }),
+                    ))
+                    .await
+                    .expect("the router answers")
+            }
+        );
+
+        let body = body_of(answer).await;
+        assert!(body["said"].is_string(), "{body}");
+        assert_eq!(ended.expect("the wait ends"), Waited::Woken);
+        let next = orchestrator.tick().await.expect("the tick runs");
+        assert!(
+            matches!(&next, TickReport::Chat { agent_id, .. } if agent_id == "dev-a"),
+            "{next:?}"
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn finishes_a_command_whose_client_went_away() {
         use std::sync::atomic::{AtomicBool, Ordering};
         use std::time::{Duration, Instant};
@@ -887,6 +1158,9 @@ mod tests {
                 executor: None,
                 limits: DEFAULT_SESSION_LIMITS,
                 farik_tools: Vec::new(),
+                tiers: Vec::new(),
+                connectors: Vec::new(),
+                preview: None,
                 purpose: SessionPurpose::Implement,
                 in_reply_to: None,
                 thread: None,
@@ -930,8 +1204,8 @@ mod tests {
         let daemon = TestDaemon::new("daemon-stream", |_| {});
         let handle = serve(
             DaemonConfig {
-                port: None,
-                daemon_file: daemon.project.repo.path.join(".farik/local/daemon.json"),
+                port: PortChoice::Any,
+                daemon_file: Some(daemon.project.repo.path.join(".farik/local/daemon.json")),
             },
             daemon.state.clone(),
         )

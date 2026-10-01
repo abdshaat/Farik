@@ -47,13 +47,19 @@ pub(super) fn triage_message(contract: &TaskContract) -> String {
     )
 }
 
-/// The judgment session's message: judge the contract on the Definition of Ready's two
-/// questions and record both answers.
-pub(super) fn judgment_message(contract: &TaskContract) -> String {
+/// The judgment session's message: check the contract against the team's questions, numbered,
+/// and record one answer to each.
+pub(super) fn judgment_message(contract: &TaskContract, questions: &[String]) -> String {
+    let numbered: Vec<String> = questions
+        .iter()
+        .enumerate()
+        .map(|(index, question)| format!("{}. {question}", index + 1))
+        .collect();
     format!(
-        "Judge the contract of {task}, which is above: does the task fit its budget, and would its \
-         criteria detect the failure its intent worries about? Record both answers and your reason \
-         with `farik_record_judgment`.",
+        "Check the plan of {task}, whose contract is above, against these questions:\n\n{}\n\n\
+         Record one answer to each, in this order, and your overall reason with \
+         `farik_record_judgment`.",
+        numbered.join("\n"),
         task = contract.id.as_str()
     )
 }
@@ -242,16 +248,22 @@ pub(super) struct Digest {
 /// agent or the human wrote is untrusted text, each block cut at 16 KiB.
 pub(super) fn planning_message(
     sprint_id: &str,
-    candidates: &[TaskContract],
+    candidates: &[(TaskContract, usize)],
+    backlog: bool,
     budget_left: Option<f64>,
     digest: &Digest,
     retro: Option<&str>,
 ) -> String {
     let listed = candidates
         .iter()
-        .map(|contract| {
+        .map(|(contract, tasks)| {
+            let under = match (contract.kind, tasks) {
+                (TaskKind::Task, _) => String::new(),
+                (TaskKind::Epic, 1) => ", 1 task under it".to_string(),
+                (TaskKind::Epic, tasks) => format!(", {tasks} tasks under it"),
+            };
             format!(
-                "{} ({}, ${:.2}): {}",
+                "{} ({}, ${:.2}{under}): {}",
                 contract.id.as_str(),
                 contract.kind,
                 contract.budget.max_cost_usd,
@@ -277,10 +289,15 @@ pub(super) fn planning_message(
     let facts = escalations.chain(spent).collect::<Vec<_>>().join("\n");
     format!(
         "Plan {sprint_id} with `farik_plan_sprint`, naming the tasks the team should finish in it. \
-         Its budget: {budget}. The candidates, each ready and in no sprint: {candidates}\nThe \
+         Its budget: {budget}. The candidates, {each}: {candidates}\nThe \
          digest, each open escalation and each budget spent since the last planning: \
          {digest}{retro}",
         budget = budget_left.map_or_else(|| "no budget".to_string(), |usd| format!("${usd:.2}")),
+        each = if backlog {
+            "each waiting in the Backlog"
+        } else {
+            "each ready and in no sprint"
+        },
         candidates = untrusted_block("candidates", &listed, NOTE_CAP_BYTES),
         digest = if facts.is_empty() {
             "none".to_string()
@@ -539,6 +556,67 @@ pub(super) fn implement_message(contract: &TaskContract, resume: &Resume) -> Str
         },
     );
     format!("{message}\n\nResuming: {commit}; {note}")
+}
+
+/// The UI/UX Designer's `explore` session's message (ADR 0026): read the task's screens, then
+/// propose a plan; with the Product Manager's reason, an agent's words and so untrusted, when the
+/// last plan was returned. Step 12 gives the session a browser and removes the line saying so.
+pub(super) fn explore_message(contract: &TaskContract, returned: Option<&str>) -> String {
+    let message = format!(
+        "Explore {task} before you change anything, in this worktree, on the branch {branch}: \
+         work out what its screens show now and what should change. Read the code and the files \
+         that make the screens, and when the app's preview is open for you, look at them in the \
+         browser and check them with `farik_check_page`. Then end the session with your plan \
+         through `farik_propose_design_plan`: a summary for the user, a blank line, then what \
+         you saw, what you will change, which screens and sizes, and what you will leave alone. \
+         The Product Manager approves it before you change anything.",
+        task = contract.id.as_str(),
+        branch = task_branch(contract)
+    );
+    match returned {
+        Some(reason) => format!(
+            "{message}\n\nThe Product Manager returned your last plan: {}",
+            untrusted_block("reason", reason, NOTE_CAP_BYTES)
+        ),
+        None => message,
+    }
+}
+
+/// The UI/UX Designer's design review's message (step 12): the Developer's change, the
+/// repository's words and so untrusted, the page the preview opens on, and the one answer to give.
+pub(super) fn design_review_message(contract: &TaskContract, diff: &str, page: &str) -> String {
+    format!(
+        "The Software Developer changed the interface of {task}, whose contract is above. Before \
+         the reviewer reads it, check it in the browser: the app's preview opens at {page}. Look \
+         at the pages the change touches at phone width (360 px) and desktop width (1280 px), in \
+         the light and the dark theme, and run `farik_check_page` on each at both widths in both \
+         themes. You change nothing. End the session with `farik_record_design_review`: pass it, \
+         or fail it with what the Developer is to change.\n\nThe diff from the integration \
+         branch to {branch}: {diff}",
+        task = contract.id.as_str(),
+        branch = task_branch(contract),
+        diff = untrusted_block("diff", diff, DIFF_CAP_BYTES)
+    )
+}
+
+/// The Product Manager's decision session's message: the Designer's plan, an agent's words and so
+/// untrusted, and the decision to record.
+pub(super) fn decide_design_plan_message(contract: &TaskContract, plan: &str) -> String {
+    format!(
+        "The UI/UX Designer proposed this plan for {task}, whose contract is above: {plan}\n\n\
+         Approve it or return it with `farik_decide_design_plan`, with your reason.",
+        task = contract.id.as_str(),
+        plan = untrusted_block("plan", plan, NOTE_CAP_BYTES)
+    )
+}
+
+/// An implement session's message with the plan the Product Manager approved, an agent's words
+/// and so untrusted, after it.
+pub(super) fn with_the_approved_plan(message: &str, plan: &str) -> String {
+    format!(
+        "{message}\n\nThe Product Manager approved your plan. Do what it says: {}",
+        untrusted_block("plan", plan, NOTE_CAP_BYTES)
+    )
 }
 
 /// What the reviewer's first message is made of.
@@ -929,7 +1007,8 @@ mod tests {
         };
         let retro = format!("# Retro\n{}\nkeep the tasks small", "x".repeat(20 * 1024));
 
-        let message = planning_message("S2", &[contract()], None, &digest, Some(&retro));
+        let message =
+            planning_message("S2", &[(contract(), 0)], false, None, &digest, Some(&retro));
 
         assert!(
             message.contains("<untrusted source=\"retro\">"),
@@ -937,7 +1016,7 @@ mod tests {
         );
         assert!(message.contains("keep the tasks small"), "{message}");
         assert!(!message.contains("# Retro"), "{message}");
-        let without = planning_message("S2", &[contract()], None, &digest, None);
+        let without = planning_message("S2", &[(contract(), 0)], false, None, &digest, None);
         assert!(!without.contains("source=\"retro\""), "{without}");
     }
 }

@@ -14,7 +14,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use farik::Engine;
-use farik_protocol::command::{Command, RequestSize};
+use farik_protocol::command::{AcceptSubject, Command, RequestSize};
 use farik_protocol::event::{EventBody, EventKind, HumanAcceptedBodySubject};
 use farik_runtime::orchestrator::CommandError;
 use farik_runtime::recorded::fixtures::tool_runner;
@@ -307,6 +307,39 @@ fn accepts_a_result_with_the_humans_review() {
 
 #[test]
 #[ignore = "needs the git program: cargo xtask check --integration"]
+fn sends_back_from_the_command_line() {
+    let repository = a_project("human-send-back");
+    let task = filed(&repository, "Add done.txt");
+    let driver = LiveDriver::new(&repository);
+
+    let ran = run(
+        &repository.path,
+        &[
+            "send-back",
+            &task,
+            "The button is too small to tap.",
+            "--criterion",
+            "C1",
+            "--criterion",
+            "C2",
+        ],
+    );
+
+    assert_eq!(ran.code, 0, "{}", ran.err);
+    assert!(ran.out.contains("handled by the run"), "{}", ran.out);
+    assert_eq!(
+        driver.commands(),
+        vec![Command::HumanSendBack {
+            task_id: task.parse().expect("a task id"),
+            subject: AcceptSubject::Result,
+            message: "The button is too small to tap.".to_string(),
+            failed_criteria: vec!["C1".to_string(), "C2".to_string()],
+        }]
+    );
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
 fn prints_the_refusal_the_driving_process_answered() {
     // A project per answer: dropping a driver does not free its run lock at once, because a child
     // another test thread is forking meanwhile holds a copy of the lock's descriptor until it
@@ -441,6 +474,52 @@ fn starts_and_shows_a_sprint_from_the_command_line() {
         "{}",
         shown.out
     );
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn pauses_and_resumes_from_the_command_line() {
+    let repository = a_team("human-pause");
+
+    let paused = run(&repository.path, &["pause"]);
+    assert_eq!(paused.code, 0, "{}", paused.err);
+    assert!(paused.out.contains("paused the team"), "{}", paused.out);
+    let resumed = run(&repository.path, &["resume"]);
+    assert_eq!(resumed.code, 0, "{}", resumed.err);
+    assert!(resumed.out.contains("resumed the team"), "{}", resumed.out);
+
+    let again = run(&repository.path, &["resume"]);
+    assert_eq!(again.code, 1, "{}", again.out);
+    assert!(
+        again.err.contains("not_paused: the team is not paused"),
+        "{}",
+        again.err
+    );
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn run_on_a_paused_team_says_so_and_exits() {
+    let repository = a_team("human-pause-run");
+    let paused = run(&repository.path, &["pause"]);
+    assert_eq!(paused.code, 0, "{}", paused.err);
+
+    let ran = run_with(&repository.path, &["run"], |io| {
+        io.engine = Engine::Given(Arc::new(|daemon| {
+            let adapter: Arc<dyn RuntimeAdapter> =
+                Arc::new(RecordedAdapter::with_tools(Vec::new(), tool_runner(daemon)));
+            adapter
+        }));
+    });
+
+    assert_eq!(ran.code, 0, "{}\n{}", ran.out, ran.err);
+    assert!(
+        ran.out
+            .contains("idle: the team is paused; farik resume starts it again"),
+        "{}",
+        ran.out
+    );
+    assert!(events(&repository, &[EventKind::SessionStarted]).is_empty());
 }
 
 #[test]
@@ -612,4 +691,71 @@ fn shows_the_last_messages_of_the_channel() {
         .filter_map(|line| line.rsplit(' ').next())
         .collect();
     assert_eq!(texts, ["two", "three"], "{}", shown.out);
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn chats_from_the_command_line() {
+    let repository = a_team("human-chat");
+
+    let sent = run(
+        &repository.path,
+        &[
+            "chat",
+            "dev-a",
+            "Could",
+            "customers",
+            "pay",
+            "with",
+            "Apple",
+            "Pay?",
+        ],
+    );
+    assert_eq!(sent.code, 0, "{}", sent.err);
+    let chats = events(&repository, &[EventKind::ChatMessagePosted]);
+    assert_eq!(chats.len(), 1);
+    assert_eq!(chats[0].envelope.ids.agent_id.as_deref(), Some("dev-a"));
+    let EventBody::ChatMessagePosted(body) = &chats[0].body else {
+        panic!("a chat message");
+    };
+    assert_eq!(
+        (body.chat.as_str(), body.author.as_str(), body.text.as_str()),
+        ("dev-a", "human", "Could customers pay with Apple Pay?")
+    );
+    record_as(
+        &repository,
+        "",
+        Some(("dev-a", "session-1")),
+        "chat_message.posted",
+        &json!({
+            "chat": "dev-a",
+            "author": "dev-a",
+            "text": "Not yet.\nShall I \u{1b}[31mpropose it?",
+            "in_reply_to": chats[0].envelope.seq,
+            "request": { "title": "Let customers pay with Apple Pay", "text": "Add Apple Pay at checkout, beside the card form." }
+        }),
+    );
+
+    let shown = run(&repository.path, &["chat", "dev-a"]);
+
+    assert_eq!(shown.code, 0, "{}", shown.err);
+    let asked = shown
+        .out
+        .find("Could customers pay with Apple Pay?")
+        .expect("the user's message is shown");
+    let answered = shown
+        .out
+        .find("Not yet.\n")
+        .expect("the reply is shown, lines kept");
+    assert!(asked < answered, "oldest first: {}", shown.out);
+    assert!(
+        shown.out.contains("Let customers pay with Apple Pay"),
+        "{}",
+        shown.out
+    );
+    assert!(!shown.out.contains('\u{1b}'), "{:?}", shown.out);
+    // The chat is not the channel's.
+    let channel = run(&repository.path, &["channel"]);
+    assert_eq!(channel.code, 0, "{}", channel.err);
+    assert!(!channel.out.contains("Apple Pay"), "{}", channel.out);
 }

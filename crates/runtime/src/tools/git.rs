@@ -11,6 +11,7 @@ use serde_json::{Value, json};
 
 use super::refusal::Refusal;
 use super::{Call, ToolError, failed};
+use crate::channel::post_system;
 use crate::transitions::integration_branch;
 
 /// The remote a task branch is pushed to.
@@ -55,12 +56,23 @@ pub(super) fn commit(call: &Call<'_>, input: &CommitInput) -> Result<Value, Tool
     if let Some(path) = input.paths.iter().find(|path| worktree.join(path).is_dir()) {
         return Err(Refusal::PathIsADirectory { path: path.clone() }.into());
     }
-    let sha = call
-        .deps()
-        .git
-        .commit(&worktree, &input.message, &input.paths)
-        .map_err(failed)?;
-    Ok(json!({ "sha": sha }))
+    let deps = call.deps();
+    match deps.git.commit(&worktree, &input.message, &input.paths) {
+        Ok(sha) => Ok(json!({ "sha": sha })),
+        Err(error) => {
+            // The agent is told in the tool's answer, which it may ignore; a task whose work is
+            // not committed never reaches verification, so the user is told too (5.14).
+            post_system(
+                &deps.log,
+                deps.clock.as_ref(),
+                &call.ids(Some(task)),
+                Some(task.clone()),
+                &format!("{} could not be committed: {error}", task.as_str()),
+            )
+            .map_err(failed)?;
+            Err(failed(error))
+        }
+    }
 }
 
 /// `farik_git_push`: pushes the task branch to `origin`, for the task's assignee alone. It spells
@@ -162,6 +174,56 @@ mod tests {
                 .contains("b/src/login/form.ts"),
             "{diff}"
         );
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn says_in_the_channel_why_a_commit_failed() {
+        // A commit that fails leaves the task in `in_progress` with nothing for verification to
+        // check, so the user is told why as well as the agent.
+        use farik_protocol::event::{EventBody, EventKind, MessageKind};
+        let project = TestProject::new("tools-git-commit-fails", &a_team_of_three(|_| {}));
+        project.filed("FRK-1", "assigned", "task", None);
+        project.moved(
+            "FRK-1",
+            "assigned",
+            "in_progress",
+            &json!({ "assignee": "dev-a", "reviewer": "dev-b" }),
+        );
+        let worktree = project.repo.path.join(".farik/local/worktrees/FRK-1");
+        project
+            .deps
+            .git
+            .create_worktree(&worktree, &project.branch("FRK-1"), "main")
+            .expect("the task's worktree is made");
+
+        let refused = project
+            .call(
+                "dev-a",
+                Some("FRK-1"),
+                "farik_git_commit",
+                json!({ "message": "add the login form", "paths": ["src/login/form.ts"] }),
+            )
+            .expect_err("there is nothing at that path to commit");
+        let ToolError::Failed { detail } = &refused else {
+            panic!("a failure: {refused:?}");
+        };
+        assert!(detail.contains("src/login/form.ts"), "{detail}");
+
+        let posted = project.events(&[EventKind::MessagePosted]);
+        let [line] = posted.as_slice() else {
+            panic!("one line: {posted:?}");
+        };
+        let EventBody::MessagePosted(body) = &line.body else {
+            panic!("a message: {line:?}");
+        };
+        assert_eq!(body.author, "farik");
+        assert_eq!(body.kind, MessageKind::System);
+        assert_eq!(
+            line.envelope.ids.task_id.as_ref().map(|id| id.as_str()),
+            Some("FRK-1")
+        );
+        assert_eq!(body.text, format!("FRK-1 could not be committed: {detail}"));
     }
 
     #[test]

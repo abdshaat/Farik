@@ -36,6 +36,9 @@ pub enum EscalationReason {
     Integration,
     /// The user asked for it.
     ExplicitRequest,
+    /// The task's preview could not be prepared or started (step 12): the human fixes the
+    /// commands in Settings.
+    Preview,
 }
 
 /// An escalation: the task, why, what was tried, and the options proposed to the user.
@@ -258,7 +261,7 @@ mod tests {
 
     #[test]
     fn names_the_reasons_of_the_spec_on_the_wire() {
-        // Exhaustive on purpose: an eleventh reason cannot be added to the enum without failing
+        // Exhaustive on purpose: a twelfth reason cannot be added to the enum without failing
         // to compile here, so the governance vocabulary cannot grow without the spec growing too.
         fn wire_name(reason: EscalationReason) -> &'static str {
             match reason {
@@ -272,6 +275,7 @@ mod tests {
                 EscalationReason::ReadinessFailures => "readiness_failures",
                 EscalationReason::Integration => "integration",
                 EscalationReason::ExplicitRequest => "explicit_request",
+                EscalationReason::Preview => "preview",
             }
         }
         let reasons = [
@@ -285,8 +289,9 @@ mod tests {
             EscalationReason::ReadinessFailures,
             EscalationReason::Integration,
             EscalationReason::ExplicitRequest,
+            EscalationReason::Preview,
         ];
-        assert_eq!(reasons.len(), 10, "spec 5.7 names ten reasons");
+        assert_eq!(reasons.len(), 11, "spec 5.7 names eleven reasons");
         for reason in reasons {
             let wire = wire_name(reason);
             assert_eq!(serde_json::to_value(reason).unwrap(), json!(wire));

@@ -10,6 +10,7 @@ use farik_core::contract::fixtures::a_contract_wire;
 use farik_core::contract::{TaskId, validate_contract};
 use farik_core::criteria::fixtures::a_criteria_library_wire;
 use farik_core::criteria::validate_criteria;
+use farik_core::governor::permissions::PermissionTier;
 use farik_core::sprint::fixtures::an_open_sprint_wire;
 use farik_core::sprint::validate_sprint;
 use farik_core::team::fixtures::{a_team_wire, an_agent_wire};
@@ -43,6 +44,27 @@ pub(crate) fn a_team_of_three(change: impl FnOnce(&mut Value)) -> Team {
     ]);
     change(&mut wire);
     validate_team(&wire).expect("the fixture is a team")
+}
+
+/// Adds the UI/UX Designer `iris` and the Architect `ada` to a team's wire.
+pub(crate) fn with_the_designer(wire: &mut Value) {
+    let agents = wire["agents"].as_array_mut().expect("a list of agents");
+    agents.push(an_agent_wire("iris", "ui_ux_designer"));
+    agents.push(an_agent_wire("ada", "architect"));
+}
+
+/// The Designer `iris` and the Architect `ada` added, both with the Playwright connector on,
+/// and a preview set.
+pub(crate) fn browsing(wire: &mut Value) {
+    with_the_designer(wire);
+    let on = json!([{ "name": "playwright", "source": "builtin" }]);
+    wire["agents"][3]["mcp_servers"] = on.clone();
+    wire["agents"][4]["mcp_servers"] = on;
+    wire["preview"] = json!({
+        "prepare": "make site",
+        "start": "busybox httpd -f -p 4401 -h site",
+        "port": 4401
+    });
 }
 
 /// A project the tools run on.
@@ -100,6 +122,9 @@ impl TestProject {
             in_reply_to: None,
             thread: None,
             executor: None,
+            tiers: tiers_of(&self.deps, agent),
+            connectors: Vec::new(),
+            preview: None,
             deps: Arc::clone(&self.deps),
         }
     }
@@ -292,6 +317,18 @@ impl TestProject {
         kind: &str,
         body: &Value,
     ) -> FarikEvent {
+        self.record_by(None, recorded_at, task, kind, body)
+    }
+
+    /// `record_at`, by `agent` when there is one.
+    pub(crate) fn record_by(
+        &self,
+        agent: Option<&str>,
+        recorded_at: DateTime<Utc>,
+        task: &str,
+        kind: &str,
+        body: &Value,
+    ) -> FarikEvent {
         let mut wire = json!({
             "seq": 1,
             "recorded_at": recorded_at.to_rfc3339(),
@@ -302,6 +339,9 @@ impl TestProject {
         });
         if !task.is_empty() {
             wire["task_id"] = json!(task);
+        }
+        if let Some(agent) = agent {
+            wire["agent_id"] = json!(agent);
         }
         let event = event_from_value(&wire).expect("the fixture is schema-valid");
         let appended = self
@@ -316,6 +356,17 @@ impl TestProject {
         self.deps.projections.apply(&appended).expect("projects");
         appended
     }
+}
+
+/// `agent`'s tiers as the team file says now, which a session starting now is given; none for an
+/// agent the team does not have.
+pub(crate) fn tiers_of(deps: &ToolDeps, agent: &str) -> Vec<PermissionTier> {
+    let team = deps.files.read_team().expect("the team reads");
+    team.agents
+        .iter()
+        .find(|one| one.id.as_str() == agent)
+        .map(|one| one.tiers(&team.permissions()))
+        .unwrap_or_default()
 }
 
 /// Runs one call to the end on a runtime of its own.

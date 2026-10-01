@@ -4,12 +4,16 @@ use farik_core::contract::{Role, TaskKind};
 use farik_core::team::Team;
 
 /// The roles that review a task, in order of preference, by its assignee's role: a Developer's
-/// work to the Architect, then another Developer; an Architect's and a Marketing Specialist's to
-/// the Product Manager. The Product Manager's and the Scrum Master's own tasks have no row until
+/// work to the Architect, then another Developer; a UI/UX Designer's to the Architect, then a
+/// Developer; an Architect's and a Marketing Specialist's to the Product Manager. The Product Manager's and the Scrum Master's own tasks have no row until
 /// phase 4 decides them.
 pub const REVIEWER_ROLE_FOR: &[(Role, &[Role])] = &[
     (
         Role::SoftwareDeveloper,
+        &[Role::Architect, Role::SoftwareDeveloper],
+    ),
+    (
+        Role::UiUxDesigner,
         &[Role::Architect, Role::SoftwareDeveloper],
     ),
     (Role::Architect, &[Role::ProductManager]),
@@ -155,6 +159,28 @@ mod tests {
                 Role::MarketingSpecialist
             ),
             Some(Role::ProductManager)
+        );
+    }
+
+    #[test]
+    fn sends_a_designers_task_to_the_architect_then_a_developer() {
+        let with_an_architect = a_team(&[
+            ("dev-a", "software_developer", "active"),
+            ("arch", "architect", "active"),
+            ("iris", "ui_ux_designer", "active"),
+        ]);
+        assert_eq!(
+            default_reviewer_role(&with_an_architect, TaskKind::Task, Role::UiUxDesigner),
+            Some(Role::Architect)
+        );
+        let with_a_paused_architect = a_team(&[
+            ("dev-a", "software_developer", "active"),
+            ("arch", "architect", "paused"),
+            ("iris", "ui_ux_designer", "active"),
+        ]);
+        assert_eq!(
+            default_reviewer_role(&with_a_paused_architect, TaskKind::Task, Role::UiUxDesigner),
+            Some(Role::SoftwareDeveloper)
         );
     }
 

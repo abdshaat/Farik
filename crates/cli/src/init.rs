@@ -4,7 +4,7 @@ use std::path::Path;
 use std::sync::Arc;
 
 use chrono::{DateTime, Utc};
-use farik_core::team::{Team, validate_team};
+use farik_core::team::{Team, defaults, validate_team};
 use farik_protocol::event::EventBody;
 use farik_protocol::generated::event::{CriteriaUpdatedBody, ProjectScannedBody, TeamUpdatedBody};
 use farik_store::files::{FilesError, ProjectFiles};
@@ -56,8 +56,9 @@ pub fn init(cwd: &Path, now: DateTime<Utc>) -> Result<Report, String> {
     files
         .write_criteria(&library)
         .map_err(|error| error.to_string())?;
+    let previous = files.read_project_scan().ok();
     files
-        .write_project_scan(&project_document(&scan, &library))
+        .write_project_scan(&project_document(&scan, &library, previous.as_deref()))
         .map_err(|error| error.to_string())?;
 
     let log =
@@ -71,18 +72,21 @@ pub fn init(cwd: &Path, now: DateTime<Utc>) -> Result<Report, String> {
         ids,
     };
 
+    let agent_ids: Vec<String> = project
+        .team
+        .agents
+        .iter()
+        .map(|agent| agent.id.to_string())
+        .collect();
     let mut recorded = Vec::new();
     if team_was_written {
         let event = project.event(
             EventBody::TeamUpdated(TeamUpdatedBody {
-                agent_ids: project
-                    .team
-                    .agents
-                    .iter()
-                    .map(|agent| agent.id.to_string())
-                    .collect(),
+                agent_ids: agent_ids.clone(),
                 team_name: project.team.name.to_string(),
                 updated_by: HUMAN.to_string(),
+                template: None,
+                plan_in_sprints: Some(project.team.plans_in_sprints()),
             }),
             now,
             None,
@@ -110,16 +114,7 @@ pub fn init(cwd: &Path, now: DateTime<Utc>) -> Result<Report, String> {
 
     let mut lines = vec![scan.read_back.clone()];
     if team_was_written {
-        lines.push(format!(
-            "wrote .farik/team.yaml: {}",
-            project
-                .team
-                .agents
-                .iter()
-                .map(|agent| agent.id.to_string())
-                .collect::<Vec<_>>()
-                .join(", ")
-        ));
+        lines.push(format!("wrote .farik/team.yaml: {}", agent_ids.join(", ")));
         lines.push(AUTO_MERGE_NOTICE.to_string());
     } else {
         lines.push("kept the team already in .farik/team.yaml".to_string());
@@ -169,7 +164,7 @@ fn absent_or<T>(read: Result<T, FilesError>) -> Result<Option<T>, String> {
 /// (D18), named after their roles because the person has not named them yet.
 ///
 /// The team editor (F1) is how a person renames them, adds the other roles, and changes the models.
-/// Both get `claude-opus-5` at `high`, which is what `docs/SPEC.md` 8.2 ships as the default for the
+/// Both get `claude-opus-5-5` at `high`, which is what `docs/SPEC.md` 8.2 ships as the default for the
 /// Product Manager, the Architect and the Developer. It sets no dollar limit, which is the user's
 /// to set (ADR 0015).
 ///
@@ -178,6 +173,7 @@ fn absent_or<T>(read: Result<T, FilesError>) -> Result<Option<T>, String> {
 /// The sentence `validate_team`'s refusal reads as, which would mean this function and the schema
 /// disagree.
 fn starter_team(project: &str) -> Result<Team, String> {
+    let defaults = defaults();
     let wire = json!({
         "name": if project.is_empty() { "Farik".to_string() } else { project.to_string() },
         "agents": [
@@ -187,7 +183,7 @@ fn starter_team(project: &str) -> Result<Team, String> {
                 "role": "product_manager",
                 "persona": "Owns the backlog and turns every request into a contract.",
                 "status": "active",
-                "model": { "id": "claude-opus-5", "effort": "high" }
+                "model": { "id": "claude-opus-5-5", "effort": "high" }
             },
             {
                 "id": "developer",
@@ -195,17 +191,11 @@ fn starter_team(project: &str) -> Result<Team, String> {
                 "role": "software_developer",
                 "persona": "Writes the code and the tests that hold it.",
                 "status": "active",
-                "model": { "id": "claude-opus-5", "effort": "high" }
+                "model": { "id": "claude-opus-5-5", "effort": "high" }
             }
         ],
-        "budgets": {},
-        "policy": {
-            "human_accepts_contracts": "high_risk",
-            "wip_limit_per_agent": 1,
-            "blocked_limit_hours": 24,
-            "max_iterations": 3,
-            "integration": "auto_merge"
-        },
+        "budgets": defaults.budgets,
+        "policy": defaults.policy,
         "rules": {}
     });
     validate_team(&wire).map_err(|errors| {
@@ -244,13 +234,18 @@ mod tests {
             team.agents
                 .iter()
                 .map(|agent| agent.model.as_ref().map(|model| (
-                    model.id.as_str().to_string(),
+                    model
+                        .id
+                        .as_deref()
+                        .map(String::as_str)
+                        .unwrap_or_default()
+                        .to_string(),
                     model.effort.map(|effort| effort.to_string())
                 )))
                 .collect::<Vec<_>>(),
             [
-                Some(("claude-opus-5".to_string(), Some("high".to_string()))),
-                Some(("claude-opus-5".to_string(), Some("high".to_string())))
+                Some(("claude-opus-5-5".to_string(), Some("high".to_string()))),
+                Some(("claude-opus-5-5".to_string(), Some("high".to_string())))
             ],
             "8.2 ships Opus 5 at high for the Product Manager, the Architect and the Developer, and \
              this team is two of those three"
@@ -280,6 +275,12 @@ mod tests {
             team.budgets.daily_usd, None,
             "the starter team ships no daily dollar budget (ADR 0015)"
         );
+    }
+
+    #[test]
+    fn writes_a_starter_team_that_plans_in_sprints() {
+        // The founder's answer 1 (ADR 0028): `farik run` on a new project waits for a sprint.
+        assert!(starter_team("notes").expect("a team").plans_in_sprints());
     }
 
     #[test]

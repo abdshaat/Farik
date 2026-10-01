@@ -8,6 +8,7 @@
   "required": [
     "id",
     "mandate",
+    "persona",
     "produces",
     "forbidden",
     "model",
@@ -21,7 +22,8 @@
         "scrum_master",
         "architect",
         "software_developer",
-        "marketing_specialist"
+        "marketing_specialist",
+        "ui_ux_designer"
       ],
       "description": "The role, equal to its directory's name. `human` is a role a contract may name as a reviewer, never one an agent is instantiated from."
     },
@@ -29,6 +31,11 @@
       "type": "string",
       "minLength": 1,
       "description": "What the role is for, in a sentence or a paragraph."
+    },
+    "persona": {
+      "type": "string",
+      "minLength": 1,
+      "description": "One line a person is shown beside the role when they choose a team: what the role does for them, in plain words."
     },
     "produces": {
       "type": "array",

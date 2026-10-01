@@ -26,6 +26,8 @@ pub enum SessionPurpose {
     Refine,
     /// Breaking an epic into tasks and assigning them.
     Plan,
+    /// The UI/UX Designer reading the app before it plans a change to it (ADR 0026).
+    Explore,
     /// Doing a task's work.
     Implement,
     /// Reviewing a task's work against its contract.
@@ -34,6 +36,8 @@ pub enum SessionPurpose {
     Ceremony,
     /// Talking with the human.
     Conversation,
+    /// Answering the user in the agent's one-to-one chat, on the read tier alone (ADR 0026).
+    Chat,
 }
 
 /// How a session reaches an MCP server.
@@ -90,6 +94,9 @@ pub struct SessionSpec {
     /// The MCP servers it is given besides Farik's own, which the runtime adds itself; a server
     /// here named `farik` is refused.
     pub mcp_servers: Vec<McpServerConfig>,
+    /// The connector tools it may never call, as `mcp__<server>__<tool>`: refused by the program
+    /// beside `Bash`, and by the hook whatever the program does.
+    pub disallowed_tools: Vec<String>,
     /// The directory it works in.
     pub cwd: PathBuf,
     /// When it is stopped.
@@ -111,6 +118,8 @@ pub enum EndReason {
     Error,
     /// The model provider refused it for a usage or rate limit.
     ProviderLimit,
+    /// The model provider refused the account's credential: the key did not work.
+    CredentialRefused,
 }
 
 /// One thing a session reported.
@@ -240,18 +249,20 @@ pub trait RuntimeAdapter: Send + Sync {
 /// The model a triage session runs on, whatever the agent's own: 5.16 runs triage on the cheaper
 /// model, and 8.2 names it. It lives here rather than in the orchestrator, which re-exports it, so
 /// that `cost::unpriced_models` can name it where the orchestrator is not built.
-pub const TRIAGE_MODEL: &str = "claude-sonnet-5";
+pub const TRIAGE_MODEL: &str = "claude-sonnet-5-5";
 
-/// The model and effort an agent's sessions run on: its own `model.id` when it has one, with its
-/// own effort or else its role's, and otherwise its role's model and effort. A triage session
+/// The model and effort an agent's sessions run on: its own `model.id` when it has one and
+/// otherwise its role's model, with its own effort when it has one and otherwise its role's. A triage session
 /// runs on the orchestrator's `TRIAGE_MODEL` instead (5.16), which is the orchestrator's choice
 /// rather than this one.
 #[must_use]
 pub fn session_model(agent: &Agent, role: &RoleDefinition) -> (String, Effort) {
-    match &agent.model {
-        Some(model) => (model.id.to_string(), model.effort.unwrap_or(role.effort)),
-        None => (role.model.clone(), role.effort),
-    }
+    let own = agent.model.as_ref();
+    (
+        own.and_then(|model| model.id.as_ref())
+            .map_or_else(|| role.model.clone(), |id| id.as_str().to_string()),
+        own.and_then(|model| model.effort).unwrap_or(role.effort),
+    )
 }
 
 #[cfg(test)]
@@ -282,18 +293,24 @@ mod tests {
         );
         assert_eq!(
             session_model(
-                &an_agent(Some(json!({ "id": "claude-sonnet-5", "effort": "low" }))),
+                &an_agent(Some(json!({ "id": "claude-sonnet-5-5", "effort": "low" }))),
                 &role
             ),
-            ("claude-sonnet-5".to_string(), Effort::Low)
+            ("claude-sonnet-5-5".to_string(), Effort::Low)
         );
         assert_eq!(
-            session_model(&an_agent(Some(json!({ "id": "claude-sonnet-5" }))), &role),
-            ("claude-sonnet-5".to_string(), role.effort)
+            session_model(&an_agent(Some(json!({ "id": "claude-sonnet-5-5" }))), &role),
+            ("claude-sonnet-5-5".to_string(), role.effort)
         );
         assert_eq!(
             session_model(&an_agent(None), &role),
             (role.model.clone(), role.effort)
+        );
+        // An effort alone keeps the role's model: changing how carefully an agent works never
+        // changes what it runs on.
+        assert_eq!(
+            session_model(&an_agent(Some(json!({ "effort": "low" }))), &role),
+            (role.model.clone(), Effort::Low)
         );
     }
 
@@ -304,8 +321,8 @@ mod tests {
         let mut role = load_role(Role::SoftwareDeveloper).expect("Farik ships the role");
         role.effort = Effort::Medium;
         assert_eq!(
-            session_model(&an_agent(Some(json!({ "id": "claude-sonnet-5" }))), &role),
-            ("claude-sonnet-5".to_string(), Effort::Medium)
+            session_model(&an_agent(Some(json!({ "id": "claude-sonnet-5-5" }))), &role),
+            ("claude-sonnet-5-5".to_string(), Effort::Medium)
         );
         assert_eq!(
             session_model(&an_agent(None), &role),
@@ -334,6 +351,7 @@ mod tests {
             SessionPurpose::Triage,
             SessionPurpose::Refine,
             SessionPurpose::Plan,
+            SessionPurpose::Explore,
             SessionPurpose::Implement,
             SessionPurpose::Verify,
             SessionPurpose::Ceremony,

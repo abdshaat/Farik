@@ -12,16 +12,17 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, LazyLock, Mutex};
 
 use chrono::{DateTime, Utc};
-use farik::{CliIo, run_cli};
+use farik::{CliIo, Engine, run_cli};
 use farik_core::team::fixtures::{a_team_wire, an_agent_wire};
 use farik_core::team::validate_team;
 use farik_protocol::clock::{Clock, FixedClock};
 use farik_protocol::command::Command;
 use farik_protocol::event::{EventIds, EventKind, FarikEvent, NewEvent, event_from_value};
-use farik_runtime::ToolDeps;
 use farik_runtime::daemon::{DaemonConfig, DaemonHandle, DaemonState, serve};
 use farik_runtime::orchestrator::{CommandError, CommandReport};
+use farik_runtime::recorded::fixtures::tool_runner;
 use farik_runtime::transitions::Transitions;
+use farik_runtime::{RecordedAdapter, RuntimeAdapter, ToolDeps, Transcript};
 use farik_store::files::{LocalSettings, ProjectFiles, Sandbox};
 use farik_store::git::fixtures::TempRepo;
 use farik_store::{EventLog, EventQuery, open_event_log, open_projections};
@@ -72,11 +73,16 @@ pub fn run_with(cwd: &Path, args: &[&str], set: impl FnOnce(&mut CliIo<'_>)) -> 
     }
 }
 
-/// A repository made a Farik project by `farik init`.
+/// A repository made a Farik project by `farik init`, its team saying `plan_in_sprints: false` so
+/// that work flows without a sprint, as before ADR 0028.
 pub fn a_project(name: &str) -> TempRepo {
     let repository = TempRepo::new(name);
     let ran = run(&repository.path, &["init"]);
     assert_eq!(ran.code, 0, "{}", ran.err);
+    let files = files_of(&repository);
+    let mut team = files.read_team().expect("farik init wrote a team");
+    team.policy.plan_in_sprints = Some(false);
+    files.write_team(&team).expect("the team is written");
     repository
 }
 
@@ -468,8 +474,8 @@ impl LiveDriver {
         let handle = runtime
             .block_on(serve(
                 DaemonConfig {
-                    port: None,
-                    daemon_file: repository.path.join(".farik/local/daemon.json"),
+                    port: farik_runtime::daemon::PortChoice::Any,
+                    daemon_file: Some(repository.path.join(".farik/local/daemon.json")),
                 },
                 Arc::clone(&state),
             ))
@@ -564,4 +570,15 @@ pub fn joined<T>(handle: std::thread::JoinHandle<T>, what: &str) -> T {
         std::thread::sleep(std::time::Duration::from_millis(20));
     }
     handle.join().unwrap_or_else(|_| panic!("{what} panicked"))
+}
+
+/// An engine replaying `transcripts`, whose Farik tool calls the driving process's daemon answers.
+pub fn recorded(transcripts: Vec<Transcript>) -> Engine {
+    Engine::Given(Arc::new(move |daemon| {
+        let adapter: Arc<dyn RuntimeAdapter> = Arc::new(RecordedAdapter::with_tools(
+            transcripts.clone(),
+            tool_runner(daemon),
+        ));
+        adapter
+    }))
 }

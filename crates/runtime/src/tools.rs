@@ -9,8 +9,8 @@ use std::sync::{Arc, LazyLock};
 
 use farik_core::contract::{Role, TaskContract, TaskId};
 use farik_core::governor::permissions::{
-    AgentGrants, PermissionTier, ToolCallContext, ToolCallRequest, ToolDescriptor,
-    evaluate_tool_call,
+    AgentGrants, PermissionTier, SessionConnector, ToolCallContext, ToolCallRequest,
+    ToolDescriptor, evaluate_tool_call,
 };
 use farik_core::team::{Agent, AgentStatus, Team};
 use farik_protocol::clock::Clock;
@@ -22,11 +22,14 @@ use serde::de::DeserializeOwned;
 use serde_json::Value;
 
 use crate::exec::Executor;
+use crate::preview::RunningPreview;
 use crate::session::SessionPurpose;
 use crate::transitions::Transitions;
 
 mod channel;
-mod contracts;
+mod chat;
+pub(crate) mod contracts;
+pub(crate) mod design;
 mod exec;
 #[cfg(test)]
 pub(crate) mod fixtures;
@@ -94,8 +97,8 @@ pub struct ToolDeps {
 
 /// The session a call comes from.
 pub struct ToolContext {
-    /// The calling agent. Its role and tiers are read from `.farik/team.yaml` on every call, so a
-    /// pause, a grant, or a revoke changes the next call rather than the next session.
+    /// The calling agent. Its status and role are read from `.farik/team.yaml` on every call, so
+    /// a pause or a retirement stops the next call.
     pub agent_id: String,
     /// The task the session works on, when it works on one.
     pub task_id: Option<TaskId>,
@@ -109,6 +112,13 @@ pub struct ToolContext {
     pub thread: Option<Thread>,
     /// Where the task's commands run, when it has somewhere.
     pub executor: Option<Arc<dyn Executor>>,
+    /// The agent's tiers when the session started (spec 4.4): a grant or a revoke waits for the
+    /// agent's next session.
+    pub tiers: Vec<PermissionTier>,
+    /// The connectors the session was given.
+    pub connectors: Vec<SessionConnector>,
+    /// The task's preview while the session runs, when it was given a connector.
+    pub preview: Option<Arc<dyn RunningPreview>>,
     /// The project's store, files, and repository.
     pub deps: Arc<ToolDeps>,
 }
@@ -178,7 +188,7 @@ static TOOLS: LazyLock<Vec<FarikTool>> = LazyLock::new(|| {
         tool::<contracts::RecordJudgmentInput>(
             "farik_record_judgment",
             Read,
-            "Record your judgment of this session's contract: whether the task fits its budget and whether its criteria would detect the failure its intent worries about, with the reason.",
+            "Record your check of this session's contract: one answer (pass, and why) to each question the session's message numbers, in that order, and your overall reason.",
         ),
         tool::<contracts::WriteContractInput>(
             "farik_write_contract",
@@ -255,6 +265,31 @@ static TOOLS: LazyLock<Vec<FarikTool>> = LazyLock::new(|| {
             Read,
             "List the project's decisions, oldest first, or read one whole by its number.",
         ),
+        tool::<design::ProposeDesignPlanInput>(
+            "farik_propose_design_plan",
+            Read,
+            "End your explore session with your plan for the task: a summary for the user, a blank line, then what you saw, what you will change, which screens and sizes, and what you will leave alone.",
+        ),
+        tool::<design::DecideDesignPlanInput>(
+            "farik_decide_design_plan",
+            Read,
+            "Approve the Designer's plan for this session's task, or return it, with your reason.",
+        ),
+        tool::<design::CheckPageInput>(
+            "farik_check_page",
+            Read,
+            "Check a page of the task's preview for accessibility (axe-core, WCAG 2.2 A and AA) at one width, phone (360 px) or desktop (1280 px), in one theme, light or dark. Answers what it found and a screenshot.",
+        ),
+        tool::<design::RecordDesignReviewInput>(
+            "farik_record_design_review",
+            Read,
+            "End your design review with your answer: pass, or fail with what the Developer is to change. Check the task's pages at both widths in both themes first.",
+        ),
+        tool::<chat::ChatReplyInput>(
+            "farik_chat_reply",
+            Read,
+            "Answer the user in your one-to-one chat, once, then end your turn. When work is needed, add a request, a title and what it asks for, for the user to send.",
+        ),
         tool::<exec::ExecInput>(
             "farik_exec",
             Execute,
@@ -294,6 +329,13 @@ pub fn tool_descriptors() -> Vec<FarikTool> {
     TOOLS.clone()
 }
 
+/// Whether an agent of `status` works in a session for `purpose`: an active agent in any, and a
+/// paused one in its chat alone, since a paused agent still answers its chat (ADR 0026).
+pub(crate) fn may_work(status: AgentStatus, purpose: SessionPurpose) -> bool {
+    status == AgentStatus::Active
+        || (status == AgentStatus::Paused && purpose == SessionPurpose::Chat)
+}
+
 /// Runs one tool for the session `context` names. The agent must be an active agent of the team,
 /// hold the tool's tier with the paths the call touches allowed (`evaluate_tool_call`, asked here
 /// as well as in the hook because the endpoint is reachable by anything holding the daemon's
@@ -321,7 +363,7 @@ pub async fn call_tool(
         .iter()
         .find(|agent| agent.id.as_str() == context.agent_id)
     {
-        Some(agent) if agent.status == AgentStatus::Active => agent.clone(),
+        Some(agent) if may_work(agent.status, context.purpose) => agent.clone(),
         found => {
             return Err(Refusal::AgentNotActive {
                 agent_id: context.agent_id.clone(),
@@ -358,6 +400,11 @@ pub async fn call_tool(
         "farik_write_memory" => memory::write_memory(&call, &parse(input)?),
         "farik_write_decision" => memory::write_decision(&call, &parse(input)?),
         "farik_read_decisions" => memory::read_decisions(&call, &parse(input)?),
+        "farik_propose_design_plan" => design::propose(&call, parse(input)?),
+        "farik_decide_design_plan" => design::decide(&call, parse(input)?),
+        "farik_check_page" => design::check(&call, parse(input)?).await,
+        "farik_record_design_review" => design::record_review(&call, parse(input)?),
+        "farik_chat_reply" => chat::chat_reply(&call, parse(input)?),
         "farik_exec" => exec::exec(&call, parse(input)?).await,
         "farik_git_status" => nothing_in(input).and_then(|()| git::status(&call)),
         "farik_git_diff" => nothing_in(input).and_then(|()| git::diff(&call)),
@@ -489,7 +536,7 @@ impl Call<'_> {
                 input_hash: String::new(),
             },
             &AgentGrants {
-                tiers: self.agent.tiers().into_iter().collect::<BTreeSet<_>>(),
+                tiers: self.context.tiers.iter().copied().collect::<BTreeSet<_>>(),
                 preauthorized_external_tools: BTreeSet::new(),
             },
             &ToolCallContext {
@@ -498,7 +545,13 @@ impl Call<'_> {
                 approved_calls: Vec::new(),
             },
         )
-        .map_err(|refusal| Refusal::Tool(refusal).into())
+        .map_err(|refusal| -> ToolError { Refusal::Tool(refusal).into() })?;
+        design::design_plan_gate(
+            &self.deps().log,
+            self.role(),
+            tool.tier,
+            self.context.task_id.as_ref(),
+        )
     }
 
     /// The ids an event of this call is stamped with: the agent, the session, and `task`.
@@ -560,6 +613,11 @@ mod tests {
             "farik_write_memory",
             "farik_write_decision",
             "farik_read_decisions",
+            "farik_propose_design_plan",
+            "farik_decide_design_plan",
+            "farik_check_page",
+            "farik_record_design_review",
+            "farik_chat_reply",
             "farik_exec",
             "farik_git_status",
             "farik_git_diff",
@@ -578,7 +636,7 @@ mod tests {
         assert_eq!(tier("farik_git_diff"), Some(PermissionTier::GitLocal));
         assert_eq!(tier("farik_git_commit"), Some(PermissionTier::GitLocal));
         assert_eq!(tier("farik_git_push"), Some(PermissionTier::GitRemote));
-        for tool in &tools[..21] {
+        for tool in &tools[..26] {
             assert_eq!(tool.tier, PermissionTier::Read, "{}", tool.name);
         }
         for tool in &tools {

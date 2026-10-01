@@ -1,0 +1,24 @@
+version: 1
+name: Pair
+saved_at: 2026-09-29T09:00:00Z
+agents:
+- id: mira
+  display_name: Mira
+  role: product_manager
+  persona: Mira, from the pair.
+  avatar: product-manager
+- id: noor
+  display_name: Noor
+  role: software_developer
+  persona: Noor, from the pair.
+  avatar: developer
+policy:
+  permissions:
+    run_commands: false
+    push: false
+  judgment:
+    required: always
+    judge: auto
+  integration: auto_merge
+budgets:
+  daily_usd: 5

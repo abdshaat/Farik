@@ -1,0 +1,381 @@
+.title {
+	margin: 0;
+	font:
+		var(--farik-type-title-weight) var(--farik-type-title-size) /
+		var(--farik-type-title-line-height) var(--farik-type-title-family);
+}
+
+.page {
+	display: grid;
+	/* A card's 16rem floor must not widen the column past a phone's screen. */
+	grid-template-columns: minmax(0, 1fr);
+	gap: var(--farik-space-6);
+	max-width: 720px;
+}
+
+.section {
+	display: grid;
+	/* As `.page`: a wide child must not widen the section, nested or not, past a phone's screen. */
+	grid-template-columns: minmax(0, 1fr);
+	gap: var(--farik-space-2);
+}
+
+.section h2 {
+	margin: 0;
+	font:
+		var(--farik-type-heading-weight) var(--farik-type-heading-size) /
+		var(--farik-type-heading-line-height) var(--farik-type-heading-family);
+}
+
+.section p {
+	margin: 0;
+	max-width: 65ch;
+}
+
+.muted {
+	color: var(--farik-color-ink-muted);
+}
+
+.facts {
+	display: grid;
+	grid-template-columns: max-content 1fr;
+	gap: var(--farik-space-1) var(--farik-space-4);
+	margin: 0;
+}
+
+.facts dd {
+	margin: 0;
+	overflow-wrap: anywhere;
+	font-family: var(--farik-type-code-family);
+}
+
+/* The connect page is dark in both themes, like the rail. */
+.connect {
+	min-height: 100vh;
+	box-sizing: border-box;
+	display: grid;
+	align-content: start;
+	gap: var(--farik-space-4);
+	padding: var(--farik-space-7) var(--farik-space-4);
+	background: var(--farik-color-band);
+	color: var(--farik-color-band-ink);
+}
+
+.connect > * {
+	box-sizing: border-box;
+	width: 100%;
+	max-width: 40rem;
+	margin: 0 auto;
+}
+
+.brand {
+	display: flex;
+	align-items: center;
+	gap: var(--farik-space-4);
+}
+
+.mark {
+	width: 56px;
+	height: 56px;
+	image-rendering: pixelated;
+}
+
+.wordmark {
+	width: 168px;
+	height: auto;
+}
+
+.connect .muted {
+	color: inherit;
+	opacity: 0.8;
+}
+
+.steps {
+	display: grid;
+	gap: var(--farik-space-3);
+	padding-left: var(--farik-space-5);
+}
+
+.command {
+	display: flex;
+	flex-wrap: wrap;
+	gap: var(--farik-space-3);
+	align-items: center;
+	margin-top: var(--farik-space-2);
+}
+
+.command code {
+	padding: 10px 14px;
+	border: 1px solid
+		color-mix(in srgb, var(--farik-color-band-ink) 30%, var(--farik-color-band));
+	border-radius: var(--farik-radius-control);
+	font:
+		var(--farik-type-code-weight) var(--farik-type-code-size) /
+		var(--farik-type-code-line-height) var(--farik-type-code-family);
+}
+
+/* Outlined on the dark band, as in the Connect mockup. */
+.command button {
+	background: transparent;
+	color: inherit;
+	border-color: currentColor;
+	font-weight: 600;
+}
+
+.retry {
+	font-family: var(--farik-type-code-family);
+}
+
+.alert {
+	margin: 0;
+	padding: var(--farik-space-2) var(--farik-space-3);
+	border-left: 3px solid var(--farik-color-status-waiting);
+}
+
+/* The Team page's cards: one column on a phone, as many as fit after. */
+.cards {
+	display: grid;
+	grid-template-columns: repeat(auto-fill, minmax(min(100%, 16rem), 1fr));
+	gap: var(--farik-space-4);
+	margin: 0;
+	padding: 0;
+	list-style: none;
+}
+
+.card {
+	display: grid;
+	align-content: start;
+	gap: var(--farik-space-2);
+	padding: var(--farik-space-4);
+	background: var(--farik-color-surface);
+	border: 1px solid var(--farik-color-rule);
+	border-radius: var(--farik-radius-control);
+}
+
+.card p {
+	margin: 0;
+}
+
+.cardHead {
+	display: flex;
+	align-items: center;
+	gap: var(--farik-space-3);
+}
+
+.face {
+	width: 48px;
+	height: 48px;
+	image-rendering: pixelated;
+	border: 3px solid var(--ring, transparent);
+}
+
+.actions {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: var(--farik-space-3);
+}
+
+.field {
+	display: grid;
+	gap: var(--farik-space-1);
+	font-weight: 600;
+}
+
+.select {
+	font: inherit;
+	min-width: 0;
+	max-width: 100%;
+	padding: var(--farik-space-2);
+	color: var(--farik-color-ink);
+	background: var(--farik-color-surface);
+	border: 1px solid var(--farik-color-control-border);
+	border-radius: var(--farik-radius-control);
+}
+
+.select:focus-visible {
+	outline: 2px solid var(--farik-color-focus);
+	outline-offset: 2px;
+}
+
+.tiers {
+	display: grid;
+	gap: var(--farik-space-3);
+	margin: 0;
+	padding: 0;
+	list-style: none;
+}
+
+.place {
+	display: grid;
+	grid-template-columns: max-content 1fr;
+	align-items: center;
+	gap: var(--farik-space-3);
+}
+
+@media (max-width: 40rem) {
+	.place {
+		grid-template-columns: 1fr;
+	}
+}
+
+/* Settings' UI paths: each glob with its Remove button. */
+.globs {
+	display: grid;
+	gap: var(--farik-space-1);
+	margin: 0;
+	padding: 0;
+	list-style: none;
+}
+
+.globs li {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: var(--farik-space-3);
+}
+
+.globs code {
+	font-family: var(--farik-type-code-family);
+	overflow-wrap: anywhere;
+}
+
+/* A saved team's faces, small, in a row (the templates mockups). */
+.faces {
+	display: inline-flex;
+	flex-wrap: wrap;
+	gap: var(--farik-space-1);
+}
+
+.faces img {
+	width: 28px;
+	height: 28px;
+	image-rendering: pixelated;
+	border: 2px solid var(--ring, transparent);
+}
+
+/* The four groups of a saved team's preview: two columns where they fit, one on a phone. */
+.groups {
+	display: grid;
+	grid-template-columns: repeat(auto-fit, minmax(min(100%, 14rem), 1fr));
+	gap: var(--farik-space-4);
+}
+
+.groups p {
+	margin: 0 0 var(--farik-space-2);
+}
+
+.groupTitle {
+	margin: 0 0 var(--farik-space-1);
+	padding-bottom: var(--farik-space-1);
+	border-bottom: 1px solid var(--farik-color-rule);
+	font-size: inherit;
+}
+
+/* "What changes", below the four groups. */
+.changes {
+	margin-top: var(--farik-space-4);
+}
+
+.people {
+	display: grid;
+	gap: var(--farik-space-2);
+	margin: 0;
+	padding: 0;
+	list-style: none;
+}
+
+.smallFace {
+	width: 32px;
+	height: 32px;
+	image-rendering: pixelated;
+	border: 2px solid var(--ring, transparent);
+}
+
+.notice {
+	margin: 0;
+	padding: var(--farik-space-2) var(--farik-space-3);
+	border-left: 3px solid var(--farik-color-ink-muted);
+	background: var(--farik-color-surface);
+}
+
+/* Settings' saved teams: one row each, its buttons beside it where they fit. */
+.savedRows {
+	display: grid;
+	margin: 0;
+	padding: 0;
+	list-style: none;
+	border-top: 1px solid var(--farik-color-ink);
+}
+
+.savedRows > li {
+	display: flex;
+	flex-wrap: wrap;
+	justify-content: space-between;
+	align-items: center;
+	gap: var(--farik-space-2) var(--farik-space-4);
+	padding: var(--farik-space-3) 0;
+	border-bottom: 1px solid var(--farik-color-rule);
+}
+
+.savedRows > li > div {
+	display: grid;
+	gap: var(--farik-space-1);
+	min-width: 0;
+}
+
+.savedRows code {
+	font-family: var(--farik-type-code-family);
+}
+
+.confirm {
+	flex-basis: 100%;
+	display: grid;
+	gap: var(--farik-space-2);
+	padding: var(--farik-space-3);
+	border-left: 3px solid var(--farik-color-status-waiting);
+	background: var(--farik-color-surface);
+}
+
+.confirm p {
+	margin: 0;
+}
+
+/* Read by a screen reader, not drawn: a button's object, such as "Delete My usual team". */
+.hidden {
+	position: absolute;
+	width: 1px;
+	height: 1px;
+	overflow: hidden;
+	clip-path: inset(50%);
+	white-space: nowrap;
+}
+
+/* "Start a sprint": what waits in the Backlog, one ruled row each (step 15's mockup). */
+.subheading {
+	margin: 0;
+	font-size: inherit;
+}
+
+.waiting {
+	margin: var(--farik-space-2) 0 0;
+	padding: 0;
+	list-style: none;
+	border-top: 1px solid var(--farik-color-rule);
+}
+
+.waiting li {
+	display: flex;
+	flex-wrap: wrap;
+	gap: var(--farik-space-1) var(--farik-space-4);
+	padding: var(--farik-space-2) 0;
+	border-bottom: 1px solid var(--farik-color-rule);
+}
+
+.waiting li span:nth-child(2) {
+	flex: 1 1 12rem;
+}
+
+.waiting li span:first-child {
+	font-family: var(--farik-type-code-family);
+}

@@ -2,7 +2,7 @@
 //! diff may touch, what was written down, and when the human must accept, as one function over a
 //! contract and the evidence gathered for it.
 
-use crate::contract::{ExitCriterion, TaskContract, wire_method};
+use crate::contract::{ExitCriterion, TaskContract, TaskStatus, wire_method};
 use crate::generated::task_contract::FarikTaskContractKind as Kind;
 use crate::generated::task_contract::FarikTaskContractRisk as Risk;
 use crate::governor::paths::{
@@ -34,6 +34,19 @@ pub struct CriterionResult {
     pub run_by: RunBy,
 }
 
+/// Whether the task's change needs the UI/UX Designer's pass (ADR 0026), as the runtime found it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum DesignReviewNeed {
+    /// Not a UI change, or no Designer on the team.
+    #[default]
+    NotNeeded,
+    /// A UI change with no passing `design_review.recorded` since the task last entered
+    /// `verifying`.
+    Missing,
+    /// A UI change the Designer passed since the task last entered `verifying`.
+    Passed,
+}
+
 /// Everything the Definition of Done is judged on, gathered by the runtime.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct DoneEvidence {
@@ -50,6 +63,8 @@ pub struct DoneEvidence {
     pub human_accepted: bool,
     /// The team's protected globs (5.6, 5.12), which no accepted diff may touch.
     pub protected_paths: Vec<String>,
+    /// Whether the change needs the Designer's pass, and has it.
+    pub design_review: DesignReviewNeed,
 }
 
 /// One rule of the Definition of Done. Failures are reported in this order.
@@ -71,6 +86,8 @@ pub enum DoneRule {
     CompletionNotePresent,
     /// The reviewer wrote a review note.
     ReviewNotePresent,
+    /// A UI change has the UI/UX Designer's pass since the task last entered `verifying`.
+    DesignReviewPassed,
     /// The human accepted, which a `high` risk task and every epic require.
     HumanAccepted,
 }
@@ -96,9 +113,22 @@ pub fn requires_human_acceptance(contract: &TaskContract) -> bool {
     contract.risk == Risk::High || contract.kind == Kind::Epic
 }
 
+/// Whether the task's result waits on the human's acceptance (5.4): it is `verifying`, and it is an
+/// epic, risk `high`, or has a `human` criterion. The status is the contract's, which the caller
+/// takes from the board.
+#[must_use]
+pub fn result_awaits_human(contract: &TaskContract) -> bool {
+    contract.status == TaskStatus::Verifying
+        && (requires_human_acceptance(contract)
+            || contract
+                .exit_criteria
+                .iter()
+                .any(|criterion| wire_method(&criterion.verification) == Some("human")))
+}
+
 type Check = fn(&TaskContract, &DoneEvidence) -> Option<DoneFailure>;
 
-const CHECKS: [Check; 9] = [
+const CHECKS: [Check; 10] = [
     criterion_run_by_reviewer,
     criterion_passed,
     human_criterion_accepted,
@@ -107,15 +137,16 @@ const CHECKS: [Check; 9] = [
     no_farik_path_changed,
     completion_note_present,
     review_note_present,
+    design_review_passed,
     human_accepted,
 ];
 
 /// Checks a task against the Definition of Done (`docs/SPEC.md` section 5.4): every exit
 /// criterion run by the reviewer independently and passed, every `human` criterion accepted by
 /// the human, no change outside the contract's allowed paths, no change to a path the team
-/// protects or under `.farik/`, a completion note, a review note,
-/// and the human's acceptance where the risk or the kind requires it. Refuses with every rule the
-/// task fails.
+/// protects or under `.farik/`, a completion note, a review note, the UI/UX Designer's pass of a
+/// UI change, and the human's acceptance where the risk or the kind requires it. Refuses with
+/// every rule the task fails.
 ///
 /// # Errors
 ///
@@ -327,6 +358,15 @@ fn review_note_present(_: &TaskContract, evidence: &DoneEvidence) -> Option<Done
     ))
 }
 
+fn design_review_passed(_: &TaskContract, evidence: &DoneEvidence) -> Option<DoneFailure> {
+    (evidence.design_review == DesignReviewNeed::Missing).then(|| {
+        failure(
+            DoneRule::DesignReviewPassed,
+            "the change touches the interface, and the UI/UX Designer has not passed it since the task last entered verifying".to_string(),
+        )
+    })
+}
+
 fn human_accepted(contract: &TaskContract, evidence: &DoneEvidence) -> Option<DoneFailure> {
     if !requires_human_acceptance(contract) || evidence.human_accepted {
         return None;
@@ -347,7 +387,7 @@ mod tests {
     use serde_json::json;
 
     use super::{
-        CriterionResult, DoneEvidence, DoneRule as R, RunBy, evaluate_done,
+        CriterionResult, DesignReviewNeed, DoneEvidence, DoneRule as R, RunBy, evaluate_done,
         requires_human_acceptance,
     };
     use crate::contract::{ExitCriterion, Role, TaskContract, VerificationWire};
@@ -379,7 +419,30 @@ mod tests {
             review_note: Some("C1: cargo test, 11 passed.".to_string()),
             human_accepted: false,
             protected_paths: DEFAULT_PROTECTED_PATHS.map(str::to_string).to_vec(),
+            design_review: DesignReviewNeed::NotNeeded,
         }
+    }
+
+    #[test]
+    fn requires_the_design_review_when_needed() {
+        let mut evidence = an_evidence();
+        evidence.design_review = DesignReviewNeed::Missing;
+        assert_eq!(
+            failed_rules(&a_contract(), &evidence),
+            [R::DesignReviewPassed]
+        );
+        assert_eq!(
+            message_of(&a_contract(), &evidence, R::DesignReviewPassed),
+            "the change touches the interface, and the UI/UX Designer has not passed it since the task last entered verifying"
+        );
+        for held in [DesignReviewNeed::NotNeeded, DesignReviewNeed::Passed] {
+            evidence.design_review = held;
+            assert_eq!(evaluate_done(&a_contract(), &evidence), Ok(()), "{held:?}");
+        }
+        assert_eq!(
+            DoneEvidence::default().design_review,
+            DesignReviewNeed::NotNeeded
+        );
     }
 
     #[test]

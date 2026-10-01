@@ -22,6 +22,7 @@ use super::{Orchestrator, OrchestratorDeps, OrchestratorError, TickReport};
 use crate::daemon::DaemonState;
 use crate::exec::{ExecError, ExecResult, Executor};
 use crate::forge::Forge;
+use crate::preview::{NoPreviews, PreviewFactory};
 use crate::recorded::{RecordedAdapter, Transcript};
 use crate::sandbox::host::HostSandboxFactory;
 use crate::sandbox::{Sandbox, SandboxError, SandboxFactory};
@@ -39,6 +40,9 @@ pub(crate) struct Harness {
     pub(crate) daemon: Arc<DaemonState>,
     /// The `gh` every orchestrator of this harness drives, answering nothing until told.
     pub(crate) gh: FakeGh,
+    /// What every orchestrator of this harness starts previews with: none can run, as in
+    /// no-sandbox mode, until a test sets its own.
+    pub(crate) previews: Arc<dyn PreviewFactory>,
 }
 
 impl Harness {
@@ -56,6 +60,7 @@ impl Harness {
             project,
             daemon,
             gh,
+            previews: Arc::new(NoPreviews),
         }
     }
 
@@ -101,11 +106,17 @@ impl Harness {
         forge: Forge,
         session_ids: Arc<dyn IdSource + Send + Sync>,
     ) -> Orchestrator {
+        // As `farik serve` does: the governor's door and the orchestrator judge by one factory.
+        self.project
+            .deps
+            .transitions
+            .set_previews(Arc::clone(&self.previews));
         Orchestrator::new(OrchestratorDeps {
             tools: Arc::clone(&self.project.deps),
             daemon: Arc::clone(&self.daemon),
             adapter,
             sandboxes,
+            previews: Arc::clone(&self.previews),
             session_ids,
             forge: Arc::new(forge),
             sleeper: Arc::new(NeverWakes),
@@ -146,11 +157,13 @@ impl Harness {
             clock: Arc::clone(&clock) as Arc<dyn Clock + Send + Sync>,
             ids: deps.ids.clone(),
         });
+        tools.transitions.set_previews(Arc::clone(&self.previews));
         Orchestrator::new(OrchestratorDeps {
             tools,
             daemon: Arc::clone(&self.daemon),
             adapter,
             sandboxes: Arc::new(HostSandboxFactory),
+            previews: Arc::clone(&self.previews),
             session_ids: Arc::new(LaterIds(SequentialIds::new())),
             forge: Arc::new(self.gh.forge(&self.project.repo.path)),
             sleeper: Arc::new(MovingSleeper(clock)),
@@ -226,6 +239,7 @@ impl Harness {
             None,
             at(),
             &deps.ids,
+            None,
         )
         .expect("the request is filed");
         deps.projections.catch_up().expect("the board catches up");
@@ -323,6 +337,28 @@ impl Harness {
         body["actor"] = json!("assignee");
         body["requested_by"] = json!("dev-a");
         self.project.moved(task, "in_progress", "verifying", &body);
+    }
+
+    /// Files `task`, `dev-a`'s, reviewed by `ada`, and moves it to `verifying` with
+    /// `site/style.css` committed on its branch: a UI change under the default `ui_paths`.
+    pub(crate) fn verifying_a_ui_change(&self, task: &str) {
+        self.file(task, "in_progress", |wire| {
+            wire["allowed_paths"] = json!(["site/style.css"]);
+        });
+        let worktree = self.worktree(task);
+        let git = &self.project.deps.git;
+        git.create_worktree(&worktree, &self.branch(task), "main")
+            .expect("the task's worktree is made");
+        std::fs::create_dir_all(worktree.join("site")).expect("made");
+        std::fs::write(worktree.join("site/style.css"), "h1 {}\n").expect("written");
+        git.commit(&worktree, "Style", &["site/style.css".to_string()])
+            .expect("committed");
+        self.project.moved(
+            task,
+            "in_progress",
+            "verifying",
+            &json!({ "assignee": "dev-a", "reviewer": "ada" }),
+        );
     }
 
     /// `verifying_with` `done.txt` committed, the note written, and no change.
@@ -688,6 +724,7 @@ pub(crate) struct ExecutorWitness {
     seen: Mutex<Vec<bool>>,
     tools: Mutex<Vec<Vec<String>>>,
     listed: Mutex<Vec<Vec<String>>>,
+    tiers: Mutex<Vec<Vec<farik_core::governor::permissions::PermissionTier>>>,
 }
 
 impl ExecutorWitness {
@@ -699,7 +736,18 @@ impl ExecutorWitness {
             seen: Mutex::new(Vec::new()),
             tools: Mutex::new(Vec::new()),
             listed: Mutex::new(Vec::new()),
+            tiers: Mutex::new(Vec::new()),
         }
+    }
+
+    /// For each session started, in order, the tiers its registration holds it to.
+    pub(crate) fn given_tiers(
+        &self,
+    ) -> Vec<Vec<farik_core::governor::permissions::PermissionTier>> {
+        self.tiers
+            .lock()
+            .expect("no test panics holding it")
+            .clone()
     }
 
     /// For each session started, in order, the tools `tools/list` answered it with.
@@ -726,12 +774,15 @@ impl ExecutorWitness {
 
 impl RuntimeAdapter for ExecutorWitness {
     fn start_session(&self, spec: SessionSpec) -> Result<Box<dyn SessionHandle>, RuntimeError> {
-        let executor = self
+        let context = self
             .daemon
             .tool_context(&spec.session_id)
-            .expect("the session is registered before it starts")
-            .executor
-            .is_some();
+            .expect("the session is registered before it starts");
+        let executor = context.executor.is_some();
+        self.tiers
+            .lock()
+            .expect("no test panics holding it")
+            .push(context.tiers);
         self.seen
             .lock()
             .expect("no test panics holding it")

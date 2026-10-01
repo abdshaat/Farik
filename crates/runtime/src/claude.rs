@@ -114,6 +114,36 @@ pub enum ClaudeCredential {
     OauthToken(Secret),
 }
 
+/// Which kind of credential the sessions run on, without the secret: what the browser is told.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CredentialKind {
+    /// An `ANTHROPIC_API_KEY`.
+    ApiKey,
+    /// A subscription's `CLAUDE_CODE_OAUTH_TOKEN`.
+    SubscriptionToken,
+}
+
+impl ClaudeCredential {
+    /// Which kind of credential this is.
+    #[must_use]
+    pub fn kind(&self) -> CredentialKind {
+        match self {
+            Self::ApiKey(_) => CredentialKind::ApiKey,
+            Self::OauthToken(_) => CredentialKind::SubscriptionToken,
+        }
+    }
+}
+
+/// The variable of `env` a credential comes from, when one does: what cannot be removed from
+/// Farik, since the environment is the user's.
+#[must_use]
+pub fn credential_variable(env: &BTreeMap<String, String>) -> Option<&'static str> {
+    [API_KEY, OAUTH_TOKEN]
+        .into_iter()
+        .find(|name| env.get(*name).is_some_and(|value| !value.trim().is_empty()))
+}
+
 /// The credential an environment holds: `ANTHROPIC_API_KEY` first, else
 /// `CLAUDE_CODE_OAUTH_TOKEN`; a blank value is none.
 #[must_use]
@@ -163,9 +193,13 @@ impl fmt::Debug for ClaudeConfig {
     }
 }
 
+/// The credential sessions start with, shared so that connecting the account again replaces it
+/// for the next session without a restart.
+pub type SharedCredential = Arc<Mutex<ClaudeCredential>>;
+
 /// Starts Claude Code sessions as child processes, and resumes the ones it started.
 pub struct ClaudeAdapter {
-    credential: ClaudeCredential,
+    credential: SharedCredential,
     config: ClaudeConfig,
     /// Each session this adapter started: its spec, and a token cancelled once its process is
     /// gone.
@@ -191,7 +225,7 @@ impl ClaudeAdapter {
     /// `Spawn` when the program cannot be run or names no version; `VersionTooOld` when it is
     /// older than the minimum.
     pub fn new(
-        credential: ClaudeCredential,
+        credential: SharedCredential,
         config: ClaudeConfig,
     ) -> Result<ClaudeAdapter, RuntimeError> {
         check_version(&version_output(&config)?)?;
@@ -220,7 +254,7 @@ impl ClaudeAdapter {
             .args(&args)
             .current_dir(&spec.cwd)
             .env_clear()
-            .envs(child_env(&self.credential, &self.config.env))
+            .envs(child_env(&locked(&self.credential), &self.config.env))
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
@@ -582,6 +616,10 @@ pub fn claude_args(
     refuse_an_unexpressible_glob(&protected)?;
     let settings = settings_json(config, &protected);
     let session_flag = if resume { "--resume" } else { "--session-id" };
+    let disallowed = std::iter::once(REFUSED_BUILTIN)
+        .chain(spec.disallowed_tools.iter().map(String::as_str))
+        .collect::<Vec<_>>()
+        .join(",");
     let args = [
         "-p",
         "--output-format",
@@ -600,7 +638,7 @@ pub fn claude_args(
         "--tools",
         &spec.builtin_tools.join(","),
         "--disallowedTools",
-        REFUSED_BUILTIN,
+        &disallowed,
         "--mcp-config",
         &session_dir.join(MCP_CONFIG_FILE).display().to_string(),
         "--strict-mcp-config",
@@ -856,8 +894,8 @@ mod tests {
     use serde_json::{Value, json};
 
     use super::{
-        ClaudeConfig, ClaudeCredential, Secret, allowed_builtins, check_version, child_env,
-        claude_args, credential_from_env, write_session_files,
+        ClaudeConfig, ClaudeCredential, CredentialKind, Secret, allowed_builtins, check_version,
+        child_env, claude_args, credential_from_env, write_session_files,
     };
     use crate::daemon::DaemonInfo;
     use crate::recorded::fixtures::a_session_spec;
@@ -973,6 +1011,39 @@ mod tests {
         assert!(
             args.iter().all(|arg| !arg.contains(TOKEN)),
             "the token is on the command line: {args:?}"
+        );
+    }
+
+    #[test]
+    fn lists_the_denied_tools_as_disallowed() {
+        let project = a_project("claude-disallowed");
+        let config = config(&project);
+        let definition = farik_roles::builtin_connector("playwright").expect("shipped");
+        let spec = SessionSpec {
+            disallowed_tools: crate::preview::disallowed_tools(&definition),
+            ..spec()
+        };
+        let dir = session_dir(&config, &spec);
+        let args = claude_args(&spec, &config, &dir, false).expect("the args are built");
+        let disallowed: Vec<&str> = value_after(&args, "--disallowedTools").split(',').collect();
+        assert_eq!(disallowed[0], "Bash");
+        for tool in [
+            "browser_evaluate",
+            "browser_run_code",
+            "browser_file_upload",
+            "browser_install",
+            "browser_pdf_save",
+            "browser_network_requests",
+        ] {
+            let named = format!("mcp__playwright__{tool}");
+            assert!(
+                disallowed.contains(&named.as_str()),
+                "{named}: {disallowed:?}"
+            );
+        }
+        assert!(
+            !disallowed.contains(&"mcp__playwright__browser_navigate"),
+            "{disallowed:?}"
         );
     }
 
@@ -1279,6 +1350,19 @@ mod tests {
         ));
         assert!(credential_from_env(&env(&[("CLAUDE_CODE_OAUTH_TOKEN", "")])).is_none());
         assert!(credential_from_env(&env(&[])).is_none());
+        // What the browser is told of each, never the secret itself.
+        let key = ClaudeCredential::ApiKey(Secret::new("sk-key".to_string()));
+        let token = ClaudeCredential::OauthToken(Secret::new("oauth".to_string()));
+        assert_eq!(key.kind(), CredentialKind::ApiKey);
+        assert_eq!(token.kind(), CredentialKind::SubscriptionToken);
+        assert_eq!(
+            serde_json::to_value(key.kind()).ok(),
+            Some("api_key".into())
+        );
+        assert_eq!(
+            serde_json::to_value(token.kind()).ok(),
+            Some("subscription_token".into())
+        );
     }
 
     #[test]

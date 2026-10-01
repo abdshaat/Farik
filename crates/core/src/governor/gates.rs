@@ -58,6 +58,20 @@ pub struct DependencyState {
     pub integrated: bool,
 }
 
+/// Whether the UI/UX Designer can open the project's app (the founder's D3 and D4): the team
+/// has a preview, Docker's sandbox is there to run it, and the Designer has its browser on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DesignerBrowser {
+    /// A preview is set and the sandbox is available.
+    Ready,
+    /// The team has no `preview`.
+    NoPreview,
+    /// The sandbox is off, or Docker is not there.
+    NoSandbox,
+    /// The Designer does not have the Playwright connector on (`mcp_servers`).
+    NoConnector,
+}
+
 /// Everything the assignment gate needs from the world.
 #[derive(Debug, Clone, PartialEq)]
 pub struct AssignmentInput {
@@ -92,15 +106,79 @@ pub struct AssignmentInput {
     /// The sprint the task's epic is in, when the task has an epic: `Some(None)` for an epic in
     /// no sprint.
     pub parent_sprint: Option<Option<String>>,
+    /// Whether the team plans its work in sprints (`Team::plans_in_sprints`, ADR 0028).
+    pub plan_in_sprints: bool,
     /// The state of every dependency the contract lists, in any order.
     pub dependencies: Vec<DependencyState>,
+    /// Whether a UI/UX Designer assignee could open the app; read for no other role.
+    pub designer_browser: DesignerBrowser,
+}
+
+/// A row of the board as the sprint policy reads it (ADR 0028).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SprintHold<'a> {
+    /// Whether the team plans its work in sprints.
+    pub plan_in_sprints: bool,
+    /// The sprint that is open, if one is.
+    pub open_sprint: Option<&'a str>,
+    /// The row's kind.
+    pub kind: Kind,
+    /// The row's status.
+    pub status: TaskStatus,
+    /// The sprint the row is in, if it is in one.
+    pub sprint: Option<&'a str>,
+    /// Whether a sprint ended early left the task for the Backlog.
+    pub left_for_the_backlog: bool,
+}
+
+/// Whether a task waits for a sprint to plan it: under the policy, a task outside the open sprint
+/// that is `ready` or that a sprint left for the Backlog. Work under way when the policy was
+/// switched on is not held, and an epic never is: its breakdown is preparation.
+#[must_use]
+pub fn waits_for_a_sprint(hold: &SprintHold<'_>) -> bool {
+    hold.plan_in_sprints
+        && hold.kind == Kind::Task
+        && outside(hold)
+        && (hold.status == TaskStatus::Ready || hold.left_for_the_backlog)
+}
+
+/// Whether a row is in the Backlog: under the policy, outside the open sprint, in `ready`,
+/// `assigned`, `in_progress` or `rejected`, and an epic or a task that waits for a sprint.
+#[must_use]
+pub fn in_the_backlog(hold: &SprintHold<'_>) -> bool {
+    hold.plan_in_sprints
+        && outside(hold)
+        && matches!(
+            hold.status,
+            TaskStatus::Ready
+                | TaskStatus::Assigned
+                | TaskStatus::InProgress
+                | TaskStatus::Rejected
+        )
+        && (hold.kind == Kind::Epic || waits_for_a_sprint(hold))
+}
+
+/// Whether the row is outside the open sprint: in no sprint, or in another than the open one.
+fn outside(hold: &SprintHold<'_>) -> bool {
+    hold.sprint.is_none() || hold.sprint != hold.open_sprint
 }
 
 /// Whether the open sprint lets the task be assigned (`docs/SPEC.md` section 5.5): with none open,
 /// any task; with one open, a task in it, or one under an epic in no sprint, whose work began
-/// before any sprint.
+/// before any sprint. Under the policy (ADR 0028), an epic, whose assignment is preparation, and a
+/// task that does not wait for a sprint, read as `ready` with no mark: one in the open sprint.
 #[must_use]
-pub fn in_the_open_sprint(input: &AssignmentInput) -> bool {
+pub fn in_the_open_sprint(kind: Kind, input: &AssignmentInput) -> bool {
+    if input.plan_in_sprints {
+        return !waits_for_a_sprint(&SprintHold {
+            plan_in_sprints: true,
+            open_sprint: input.open_sprint.as_deref(),
+            kind,
+            status: TaskStatus::Ready,
+            sprint: input.task_sprint.as_deref(),
+            left_for_the_backlog: false,
+        });
+    }
     let Some(open) = &input.open_sprint else {
         return true;
     };
@@ -112,8 +190,15 @@ pub fn in_the_open_sprint(input: &AssignmentInput) -> bool {
 /// fails them rather than asking for a move the gate refuses.
 #[must_use]
 pub fn fits_the_open_sprint(contract: &TaskContract, input: &AssignmentInput) -> bool {
-    in_the_open_sprint(input)
-        && fits_within(
+    in_the_open_sprint(contract.kind, input) && the_sprint_pays(contract, input)
+}
+
+/// Whether the open sprint's budget lets the row be assigned. Under the policy only a row in the
+/// open sprint is paid from it: an epic's breakdown outside it is preparation.
+fn the_sprint_pays(contract: &TaskContract, input: &AssignmentInput) -> bool {
+    let in_it = input.task_sprint.is_some() && input.task_sprint == input.open_sprint;
+    (input.plan_in_sprints && !in_it)
+        || fits_within(
             contract.budget.max_cost_usd,
             input.remaining_sprint_budget_usd,
         )
@@ -121,7 +206,8 @@ pub fn fits_the_open_sprint(contract: &TaskContract, input: &AssignmentInput) ->
 
 /// The `Assignment` gate of `ready -> assigned` (`docs/SPEC.md` sections 5.2, 5.14, 5.16): who may
 /// ask, whether the pair of agents fits the contract, whether the agent has room, whether the
-/// sprint can pay for it, and whether every dependency is accepted and integrated.
+/// sprint can pay for it, whether a UI/UX Designer can open the app (`preview_not_set`,
+/// `designer_needs_sandbox`), and whether every dependency is accepted and integrated.
 ///
 /// # Errors
 ///
@@ -203,24 +289,53 @@ pub fn check_assignment(contract: &TaskContract, input: &AssignmentInput) -> Gat
             )
         });
     }
-    if !in_the_open_sprint(input) {
+    if !in_the_open_sprint(contract.kind, input) {
         let open = input.open_sprint.as_deref().unwrap_or_default();
-        reasons.push(format!(
-            "this task is in {} and {open} is open; only {open}'s tasks are assigned until it ends",
-            input.task_sprint.as_deref().unwrap_or("no sprint")
-        ));
+        reasons.push(if input.plan_in_sprints {
+            format!(
+                "this team plans work in sprints, and {} waits in the Backlog until a sprint plans \
+                 it",
+                contract.id.as_str()
+            )
+        } else {
+            format!(
+                "this task is in {} and {open} is open; only {open}'s tasks are assigned until it \
+                 ends",
+                input.task_sprint.as_deref().unwrap_or("no sprint")
+            )
+        });
     }
-    if !fits_within(
-        contract.budget.max_cost_usd,
-        input.remaining_sprint_budget_usd,
-    ) {
+    if !the_sprint_pays(contract, input) {
         reasons.push(format!(
             "the budget of {} USD does not fit the {} USD left in the sprint",
             contract.budget.max_cost_usd, input.remaining_sprint_budget_usd
         ));
     }
+    reasons.extend(without_a_browser(input));
     reasons.extend(unready_dependencies(contract, input));
     verdict(reasons)
+}
+
+/// Why a UI/UX Designer cannot be assigned for want of its browser (D3, D4), if it cannot.
+fn without_a_browser(input: &AssignmentInput) -> Option<String> {
+    if input.assignee_role != Role::UiUxDesigner {
+        return None;
+    }
+    match input.designer_browser {
+        DesignerBrowser::Ready => None,
+        DesignerBrowser::NoPreview => Some(
+            "preview_not_set: the UI/UX Designer opens your app to work, and Farik has not been told how; set it in Settings, under How to open your app"
+                .to_string(),
+        ),
+        DesignerBrowser::NoSandbox => Some(
+            "designer_needs_sandbox: The UI/UX Designer needs Docker's sandbox to open your app. Turn the sandbox on, or retire the Designer"
+                .to_string(),
+        ),
+        DesignerBrowser::NoConnector => Some(
+            "designer_needs_browser: Playwright is off for the UI/UX Designer, and without it the Designer cannot look at your app, so Farik gives it no work. Turn Playwright on for it on the Team page"
+                .to_string(),
+        ),
+    }
 }
 
 fn unready_dependencies(contract: &TaskContract, input: &AssignmentInput) -> Vec<String> {
@@ -616,15 +731,53 @@ pub fn check_rejection_reasons(
     if rejection.failed_criterion_ids.is_empty() {
         reasons.push("the rejection names no failed criterion".to_string());
     }
-    if rejection
-        .failed_criterion_ids
-        .iter()
-        .any(|id| id.trim().is_empty())
-    {
+    if let Err(mut named) = check_failed_criterion_ids(contract, &rejection.failed_criterion_ids) {
+        reasons.append(&mut named);
+    }
+    if !is_written(&rejection.reasons) {
+        reasons.push("the rejection says nothing about why the criteria failed".to_string());
+    }
+    verdict(reasons)
+}
+
+/// The `RejectionReasons` gate for the UI/UX Designer's rejection of a UI change it failed (F9):
+/// its written reasons, which need name no criterion, since a design review fails none, and any it
+/// does name the contract has.
+///
+/// # Errors
+///
+/// No rejection, no written reasons, or a named criterion this contract does not have.
+pub fn check_design_rejection(
+    contract: &TaskContract,
+    rejection: Option<&Rejection>,
+) -> GateResult {
+    let Some(rejection) = rejection else {
+        return Err(vec![
+            "work is rejected with written reasons mapped to the criteria that failed".to_string(),
+        ]);
+    };
+    let mut reasons = Vec::new();
+    if let Err(mut named) = check_failed_criterion_ids(contract, &rejection.failed_criterion_ids) {
+        reasons.append(&mut named);
+    }
+    if !is_written(&rejection.reasons) {
+        reasons.push("the rejection says nothing about why the criteria failed".to_string());
+    }
+    verdict(reasons)
+}
+
+/// The failed criteria a rejection names, the reviewer's or the human's: each has an id, and the
+/// contract has a criterion of that id. Naming none is the caller's to judge.
+///
+/// # Errors
+///
+/// A blank id, and the ids this contract has no criterion of.
+pub fn check_failed_criterion_ids(contract: &TaskContract, ids: &[String]) -> GateResult {
+    let mut reasons = Vec::new();
+    if ids.iter().any(|id| id.trim().is_empty()) {
         reasons.push("the rejection names a criterion with no id".to_string());
     }
-    let unknown: Vec<String> = rejection
-        .failed_criterion_ids
+    let unknown: Vec<String> = ids
         .iter()
         .map(|id| id.trim().to_string())
         .filter(|id| !id.is_empty())
@@ -640,9 +793,6 @@ pub fn check_rejection_reasons(
             "this contract has no {}",
             listed("criterion", "criteria", &unknown)
         ));
-    }
-    if !is_written(&rejection.reasons) {
-        reasons.push("the rejection says nothing about why the criteria failed".to_string());
     }
     verdict(reasons)
 }
@@ -752,9 +902,10 @@ pub const FIELDS_FIXED_AT_CREATION: [&str; 2] = ["kind", "parent"];
 /// assignee writing the tasks under it, and by the human. Written out rather than left as
 /// whatever is not in the other sets, so that a field added to the schema is refused until
 /// somebody says who writes it.
-pub const FIELDS_OF_THE_CONTENT: [&str; 14] = [
+pub const FIELDS_OF_THE_CONTENT: [&str; 16] = [
     "title",
     "intent",
+    "summary",
     "scope",
     "requirements",
     "exit_criteria",
@@ -767,6 +918,7 @@ pub const FIELDS_OF_THE_CONTENT: [&str; 14] = [
     "change",
     "budget",
     "allowed_paths",
+    "ui_change",
 ];
 
 /// The fields the note tools write, which stay open whatever the contract's status: its notes,
@@ -928,13 +1080,13 @@ mod tests {
 
     use super::{
         AssignmentInput, AssignmentRequester, Blocker, ChildState, ContractWriteActor,
-        ContractWriteOutcome, ContractWriteRefusal, DependencyState, FIELDS_AFTER_FREEZE,
-        FIELDS_ALWAYS_WRITABLE, FIELDS_FIXED_AT_CREATION, FIELDS_OF_THE_CONTENT,
-        FIELDS_ONLY_THE_HUMAN_WRITES, FIELDS_THE_GOVERNOR_WRITES, FIELDS_THE_STORE_OWNS,
-        ParentEpic, Rejection, WorkState, check_assignment, check_blocker_resolved,
-        check_blocker_written, check_child_creation, check_children_done, check_contract_write,
-        check_criteria_recorded, check_human_triage, check_product_doc_write,
-        check_rejection_reasons,
+        ContractWriteOutcome, ContractWriteRefusal, DependencyState, DesignerBrowser,
+        FIELDS_AFTER_FREEZE, FIELDS_ALWAYS_WRITABLE, FIELDS_FIXED_AT_CREATION,
+        FIELDS_OF_THE_CONTENT, FIELDS_ONLY_THE_HUMAN_WRITES, FIELDS_THE_GOVERNOR_WRITES,
+        FIELDS_THE_STORE_OWNS, ParentEpic, Rejection, SprintHold, WorkState, check_assignment,
+        check_blocker_resolved, check_blocker_written, check_child_creation, check_children_done,
+        check_contract_write, check_criteria_recorded, check_human_triage, check_product_doc_write,
+        check_rejection_reasons, fits_the_open_sprint, in_the_backlog, waits_for_a_sprint,
     };
     use crate::contract::{Role, TaskContract, TaskStatus, VerificationWire};
     use crate::generated::task_contract::ExitCriterionVerificationVariant0Expect;
@@ -958,7 +1110,9 @@ mod tests {
             open_sprint: None,
             task_sprint: None,
             parent_sprint: None,
+            plan_in_sprints: false,
             dependencies: Vec::new(),
+            designer_browser: DesignerBrowser::Ready,
         }
     }
 
@@ -996,6 +1150,51 @@ mod tests {
         );
         input.has_active_scrum_master = false;
         assert_eq!(check_assignment(&a_contract(), &input), Ok(()));
+    }
+
+    #[test]
+    fn refuses_to_assign_a_designer_without_its_browser() {
+        let mut designers = a_contract();
+        designers.assignee_role = Role::UiUxDesigner;
+        let mut input = an_assignment();
+        input.assignee_id = "iris".to_string();
+        input.assignee_role = Role::UiUxDesigner;
+        assert_eq!(check_assignment(&designers, &input), Ok(()), "Ready");
+        input.designer_browser = DesignerBrowser::NoPreview;
+        assert_eq!(
+            reasons(check_assignment(&designers, &input)),
+            [
+                "preview_not_set: the UI/UX Designer opens your app to work, and Farik has not been told how; set it in Settings, under How to open your app"
+            ]
+        );
+        input.designer_browser = DesignerBrowser::NoSandbox;
+        assert_eq!(
+            reasons(check_assignment(&designers, &input)),
+            [
+                "designer_needs_sandbox: The UI/UX Designer needs Docker's sandbox to open your app. Turn the sandbox on, or retire the Designer"
+            ]
+        );
+        input.designer_browser = DesignerBrowser::NoConnector;
+        assert_eq!(
+            reasons(check_assignment(&designers, &input)),
+            [
+                "designer_needs_browser: Playwright is off for the UI/UX Designer, and without it the Designer cannot look at your app, so Farik gives it no work. Turn Playwright on for it on the Team page"
+            ]
+        );
+        // The browser is the Designer's alone: a Developer is assigned whatever it says.
+        let mut developers = an_assignment();
+        for browser in [
+            DesignerBrowser::NoPreview,
+            DesignerBrowser::NoSandbox,
+            DesignerBrowser::NoConnector,
+        ] {
+            developers.designer_browser = browser;
+            assert_eq!(
+                check_assignment(&a_contract(), &developers),
+                Ok(()),
+                "{browser:?}"
+            );
+        }
     }
 
     #[test]
@@ -1236,6 +1435,225 @@ mod tests {
         // With no sprint open, the board flows as in phase 3.
         input.open_sprint = None;
         assert_eq!(check_assignment(&a_contract(), &input), Ok(()));
+    }
+
+    /// The statuses of work under way: past `ready`, not finished, not escalated.
+    const UNDER_WAY: [TaskStatus; 5] = [
+        TaskStatus::Assigned,
+        TaskStatus::InProgress,
+        TaskStatus::Blocked,
+        TaskStatus::Verifying,
+        TaskStatus::Rejected,
+    ];
+
+    /// A task in no sprint, with no sprint open, no mark, under the policy.
+    fn a_hold(status: TaskStatus) -> SprintHold<'static> {
+        SprintHold {
+            plan_in_sprints: true,
+            open_sprint: None,
+            kind: Kind::Task,
+            status,
+            sprint: None,
+            left_for_the_backlog: false,
+        }
+    }
+
+    #[test]
+    fn holds_a_task_outside_the_sprint() {
+        let ready = a_hold(TaskStatus::Ready);
+        assert!(waits_for_a_sprint(&ready), "no sprint is open");
+        let open = SprintHold {
+            open_sprint: Some("S1"),
+            ..ready
+        };
+        assert!(!waits_for_a_sprint(&SprintHold {
+            sprint: Some("S1"),
+            ..open
+        }));
+        assert!(waits_for_a_sprint(&open), "in no sprint while S1 is open");
+        assert!(waits_for_a_sprint(&SprintHold {
+            sprint: Some("S0"),
+            ..open
+        }));
+        for status in [
+            TaskStatus::Assigned,
+            TaskStatus::InProgress,
+            TaskStatus::Rejected,
+        ] {
+            let marked = SprintHold {
+                left_for_the_backlog: true,
+                ..a_hold(status)
+            };
+            assert!(waits_for_a_sprint(&marked), "{status:?}");
+        }
+        for status in TASK_STATUSES {
+            for left_for_the_backlog in [false, true] {
+                let off = SprintHold {
+                    plan_in_sprints: false,
+                    left_for_the_backlog,
+                    ..a_hold(status)
+                };
+                assert!(!waits_for_a_sprint(&off), "{status:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn lets_work_under_way_finish() {
+        for status in UNDER_WAY {
+            assert!(!waits_for_a_sprint(&a_hold(status)), "{status:?}");
+            assert!(!in_the_backlog(&a_hold(status)), "{status:?}");
+        }
+    }
+
+    #[test]
+    fn never_holds_an_epic() {
+        for open_sprint in [None, Some("S1")] {
+            for left_for_the_backlog in [false, true] {
+                let epic = SprintHold {
+                    kind: Kind::Epic,
+                    open_sprint,
+                    left_for_the_backlog,
+                    ..a_hold(TaskStatus::Ready)
+                };
+                assert!(!waits_for_a_sprint(&epic), "{open_sprint:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn places_rows_in_the_backlog() {
+        let in_four = [
+            TaskStatus::Ready,
+            TaskStatus::Assigned,
+            TaskStatus::InProgress,
+            TaskStatus::Rejected,
+        ];
+        assert!(in_the_backlog(&a_hold(TaskStatus::Ready)));
+        for status in [
+            TaskStatus::Assigned,
+            TaskStatus::InProgress,
+            TaskStatus::Rejected,
+        ] {
+            let marked = SprintHold {
+                left_for_the_backlog: true,
+                ..a_hold(status)
+            };
+            assert!(in_the_backlog(&marked), "{status:?} with the mark");
+            assert!(!in_the_backlog(&a_hold(status)), "{status:?} without it");
+        }
+        for status in in_four {
+            let epic = SprintHold {
+                kind: Kind::Epic,
+                ..a_hold(status)
+            };
+            assert!(in_the_backlog(&epic), "an epic in {status:?}");
+        }
+        for status in TASK_STATUSES.into_iter().filter(|s| !in_four.contains(s)) {
+            for kind in [Kind::Task, Kind::Epic] {
+                for left_for_the_backlog in [false, true] {
+                    let row = SprintHold {
+                        kind,
+                        left_for_the_backlog,
+                        ..a_hold(status)
+                    };
+                    assert!(!in_the_backlog(&row), "{kind:?} in {status:?}");
+                }
+            }
+        }
+        for kind in [Kind::Task, Kind::Epic] {
+            let in_the_sprint = SprintHold {
+                kind,
+                open_sprint: Some("S1"),
+                sprint: Some("S1"),
+                ..a_hold(TaskStatus::Ready)
+            };
+            assert!(
+                !in_the_backlog(&in_the_sprint),
+                "{kind:?} in the open sprint"
+            );
+        }
+        for status in TASK_STATUSES {
+            for kind in [Kind::Task, Kind::Epic] {
+                for left_for_the_backlog in [false, true] {
+                    let off = SprintHold {
+                        plan_in_sprints: false,
+                        kind,
+                        left_for_the_backlog,
+                        ..a_hold(status)
+                    };
+                    assert!(!in_the_backlog(&off), "{kind:?} in {status:?}, policy off");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn assigns_an_epic_outside_the_sprint_under_the_policy() {
+        let mut epic = a_contract();
+        epic.kind = Kind::Epic;
+        assert!((epic.budget.max_cost_usd - 5.0).abs() < f64::EPSILON);
+        let mut input = an_assignment();
+        input.assignee_role = Role::ScrumMaster;
+        input.reviewer_role = Role::ProductManager;
+        input.remaining_sprint_budget_usd = 1.0;
+        input.plan_in_sprints = true;
+        assert_eq!(check_assignment(&epic, &input), Ok(()), "no sprint open");
+        input.open_sprint = Some("S1".to_string());
+        assert_eq!(
+            check_assignment(&epic, &input),
+            Ok(()),
+            "S1 open, the epic in none"
+        );
+        input.plan_in_sprints = false;
+        assert_eq!(
+            reasons(check_assignment(&epic, &input)),
+            [
+                "this task is in no sprint and S1 is open; only S1's tasks are assigned until it ends",
+                "the budget of 5 USD does not fit the 1 USD left in the sprint",
+            ]
+        );
+    }
+
+    #[test]
+    fn pays_a_task_in_the_sprint_from_its_budget_under_the_policy() {
+        let contract = a_contract();
+        assert!((contract.budget.max_cost_usd - 5.0).abs() < f64::EPSILON);
+        let mut input = an_assignment();
+        input.plan_in_sprints = true;
+        input.open_sprint = Some("S1".to_string());
+        input.task_sprint = Some("S1".to_string());
+        input.remaining_sprint_budget_usd = 5.0;
+        assert_eq!(check_assignment(&contract, &input), Ok(()));
+        assert!(fits_the_open_sprint(&contract, &input));
+        input.remaining_sprint_budget_usd = 1.0;
+        assert_eq!(
+            reasons(check_assignment(&contract, &input)),
+            ["the budget of 5 USD does not fit the 1 USD left in the sprint"]
+        );
+        assert!(!fits_the_open_sprint(&contract, &input));
+    }
+
+    #[test]
+    fn refuses_a_held_task_in_plain_words() {
+        let mut input = an_assignment();
+        input.plan_in_sprints = true;
+        let backlog = [
+            "this team plans work in sprints, and FRK-1 waits in the Backlog until a sprint plans it",
+        ];
+        assert_eq!(reasons(check_assignment(&a_contract(), &input)), backlog);
+        input.open_sprint = Some("S1".to_string());
+        assert_eq!(reasons(check_assignment(&a_contract(), &input)), backlog);
+    }
+
+    #[test]
+    fn drops_the_unsprinted_epic_exception_under_the_policy() {
+        let mut input = an_assignment();
+        input.open_sprint = Some("S1".to_string());
+        input.parent_sprint = Some(None);
+        assert_eq!(check_assignment(&a_contract(), &input), Ok(()));
+        input.plan_in_sprints = true;
+        assert!(check_assignment(&a_contract(), &input).is_err());
     }
 
     #[test]

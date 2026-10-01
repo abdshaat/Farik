@@ -92,7 +92,7 @@ pub(crate) fn workspace_relative(cwd: &str) -> Result<Option<String>, ExecError>
 }
 
 #[cfg(unix)]
-pub(crate) use supervise::{Finished, supervise};
+pub(crate) use supervise::{Finished, supervise, supervise_with_input};
 
 /// Kills the process group `pid` leads, through the shell's `kill` builtin: no `unsafe`, so no
 /// `libc`, and `/bin/kill` may be absent. `-s KILL` because dash reads `-KILL --` as a number. A
@@ -150,15 +150,37 @@ mod supervise {
         kill: impl FnOnce(&mut Child),
         after_exit: impl FnOnce(&Child),
     ) -> Result<Finished, ExecError> {
+        supervise_with_input(command, Vec::new(), kill_after, kill, after_exit)
+    }
+
+    /// `supervise`, with `input` written to the standard input on a thread of its own, so that a
+    /// process that never reads it still ends by `kill_after`. Empty, the input is closed.
+    pub(crate) fn supervise_with_input(
+        command: &mut Command,
+        input: Vec<u8>,
+        kill_after: Duration,
+        kill: impl FnOnce(&mut Child),
+        after_exit: impl FnOnce(&Child),
+    ) -> Result<Finished, ExecError> {
         let started = Instant::now();
         let mut child = command
-            .stdin(Stdio::null())
+            .stdin(if input.is_empty() {
+                Stdio::null()
+            } else {
+                Stdio::piped()
+            })
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()
             .map_err(|error| ExecError::SpawnFailed {
                 detail: error.to_string(),
             })?;
+        if let Some(mut stdin) = child.stdin.take() {
+            thread::spawn(move || {
+                use std::io::Write as _;
+                let _ = stdin.write_all(&input);
+            });
+        }
         let stdout = drain(child.stdout.take());
         let stderr = drain(child.stderr.take());
         let mut kill = Some(kill);

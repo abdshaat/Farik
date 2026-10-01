@@ -93,13 +93,13 @@
       "y": 0
     },
     "OneOnOne.dc.html": {
-      "h": 1000,
+      "h": 1720,
       "is_interactive": true,
-      "page": "daily",
+      "page": "chats",
       "title": "Talking with Mira",
       "w": 1440,
       "x": 1520,
-      "y": 2240
+      "y": 0
     },
     "Phone.dc.html": {
       "h": 844,
@@ -286,6 +286,168 @@
       "w": 1440,
       "x": 3040,
       "y": 0
+    },
+    "DesignerTeam.dc.html": {
+      "x": 0,
+      "y": 0,
+      "w": 1440,
+      "h": 2600,
+      "title": "Iris on your team: picture, colour, connector",
+      "page": "designer",
+      "is_interactive": true
+    },
+    "SettingsPreview.dc.html": {
+      "x": 1520,
+      "y": 0,
+      "w": 1440,
+      "h": 2200,
+      "title": "How to open your app",
+      "page": "designer",
+      "is_interactive": true
+    },
+    "DesignPlan.dc.html": {
+      "x": 3040,
+      "y": 0,
+      "w": 1440,
+      "h": 2080,
+      "title": "Iris\u2019s plan, and checking the screens",
+      "page": "designer",
+      "is_interactive": true
+    },
+    "GateDesignReview.dc.html": {
+      "x": 4560,
+      "y": 0,
+      "w": 1440,
+      "h": 2200,
+      "title": "Accept work, with Iris\u2019s check",
+      "page": "designer",
+      "is_interactive": true
+    },
+    "SettingsPreviewPhone.dc.html": {
+      "x": 0,
+      "y": 2720,
+      "w": 390,
+      "h": 844,
+      "title": "Open your app, on a phone",
+      "page": "designer",
+      "is_interactive": true
+    },
+    "DesignPlanPhone.dc.html": {
+      "x": 470,
+      "y": 2720,
+      "w": 390,
+      "h": 844,
+      "title": "Board on a phone, with Iris",
+      "page": "designer",
+      "is_interactive": true
+    },
+    "GateDesignReviewPhone.dc.html": {
+      "x": 940,
+      "y": 2720,
+      "w": 390,
+      "h": 844,
+      "title": "Accept work on a phone, with Iris",
+      "page": "designer",
+      "is_interactive": true
+    },
+    "Chats.dc.html": {
+      "x": 0,
+      "y": 0,
+      "w": 1440,
+      "h": 1000,
+      "title": "Chats, with Team open",
+      "page": "chats",
+      "is_interactive": true
+    },
+    "PhoneChats.dc.html": {
+      "x": 3040,
+      "y": 0,
+      "w": 360,
+      "h": 844,
+      "title": "Chats on a phone",
+      "page": "chats",
+      "is_interactive": true
+    },
+    "SetupTeamStarts.dc.html": {
+      "x": 0,
+      "y": 0,
+      "w": 1440,
+      "h": 4230,
+      "title": "Your team: suggested, saved or from scratch",
+      "page": "templates",
+      "is_interactive": true
+    },
+    "SaveTemplate.dc.html": {
+      "x": 1520,
+      "y": 0,
+      "w": 1440,
+      "h": 2287,
+      "title": "Save as a template",
+      "page": "templates",
+      "is_interactive": true
+    },
+    "UseTemplate.dc.html": {
+      "x": 3040,
+      "y": 0,
+      "w": 1440,
+      "h": 3307,
+      "title": "Use a saved team: pick, preview, refused",
+      "page": "templates",
+      "is_interactive": true
+    },
+    "SavedTeams.dc.html": {
+      "x": 4560,
+      "y": 0,
+      "w": 1440,
+      "h": 1707,
+      "title": "Saved teams in Settings",
+      "page": "templates",
+      "is_interactive": true
+    },
+    "PhoneUseTemplate.dc.html": {
+      "x": 6080,
+      "y": 0,
+      "w": 360,
+      "h": 3420,
+      "title": "Use a saved team on a phone",
+      "page": "templates",
+      "is_interactive": true
+    },
+    "BoardBacklog.dc.html": {
+      "x": 0,
+      "y": 0,
+      "w": 1440,
+      "h": 2287,
+      "title": "Board with a Backlog lane: waiting, starting, running",
+      "page": "sprints",
+      "is_interactive": true
+    },
+    "TodayBacklog.dc.html": {
+      "x": 1520,
+      "y": 0,
+      "w": 1440,
+      "h": 1267,
+      "title": "Today: the Backlog line",
+      "page": "sprints",
+      "is_interactive": true
+    },
+    "SettingsSprints.dc.html": {
+      "x": 3040,
+      "y": 0,
+      "w": 1440,
+      "h": 1558,
+      "title": "Settings: Plan work in sprints",
+      "page": "sprints",
+      "is_interactive": true
+    },
+    "SetupSprints.dc.html": {
+      "x": 4560,
+      "y": 0,
+      "w": 1440,
+      "h": 1798,
+      "title": "Setup: sprints on by default",
+      "page": "sprints",
+      "is_interactive": true
     }
   },
   "createdOnFiles": {
@@ -351,6 +513,42 @@
       "w": 240,
       "x": 0,
       "y": -300
+    },
+    "t_designer": {
+      "kind": "title1",
+      "maxW": 6000,
+      "page": "designer",
+      "text": "UI/UX Designer",
+      "w": 240,
+      "x": 0,
+      "y": -300
+    },
+    "t_chats": {
+      "kind": "title1",
+      "maxW": 4400,
+      "page": "chats",
+      "text": "Chats",
+      "w": 240,
+      "x": 0,
+      "y": -300
+    },
+    "t_templates": {
+      "kind": "title1",
+      "maxW": 6000,
+      "page": "templates",
+      "text": "Team templates",
+      "w": 240,
+      "x": 0,
+      "y": -300
+    },
+    "t_sprints": {
+      "kind": "title1",
+      "maxW": 6000,
+      "page": "sprints",
+      "text": "Sprints gather ready work",
+      "w": 240,
+      "x": 0,
+      "y": -300
     }
   },
   "order": [
@@ -361,6 +559,7 @@
     "SprintStart.dc.html",
     "SprintView.dc.html",
     "Channel.dc.html",
+    "Chats.dc.html",
     "OneOnOne.dc.html",
     "Costs.dc.html",
     "RequestFiled.dc.html",
@@ -385,7 +584,24 @@
     "PhoneGate.dc.html",
     "PhoneBoard.dc.html",
     "PhoneChannel.dc.html",
-    "Site.dc.html"
+    "Site.dc.html",
+    "DesignerTeam.dc.html",
+    "SettingsPreview.dc.html",
+    "DesignPlan.dc.html",
+    "GateDesignReview.dc.html",
+    "SettingsPreviewPhone.dc.html",
+    "DesignPlanPhone.dc.html",
+    "GateDesignReviewPhone.dc.html",
+    "PhoneChats.dc.html",
+    "SetupTeamStarts.dc.html",
+    "SaveTemplate.dc.html",
+    "UseTemplate.dc.html",
+    "SavedTeams.dc.html",
+    "PhoneUseTemplate.dc.html",
+    "BoardBacklog.dc.html",
+    "TodayBacklog.dc.html",
+    "SettingsSprints.dc.html",
+    "SetupSprints.dc.html"
   ],
   "pages": [
     {
@@ -411,6 +627,22 @@
     {
       "id": "site",
       "name": "Website"
+    },
+    {
+      "id": "designer",
+      "name": "UI/UX Designer"
+    },
+    {
+      "id": "chats",
+      "name": "Chats"
+    },
+    {
+      "id": "templates",
+      "name": "Team templates"
+    },
+    {
+      "id": "sprints",
+      "name": "Sprints"
     }
   ],
   "title": "Farik web UI mockup"

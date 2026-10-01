@@ -131,12 +131,12 @@ impl Project {
             an_agent_wire("dev-a", "software_developer"),
         ]);
         let team = validate_team(&wire).expect("a team");
-        let tiers = team
+        let tiers: BTreeSet<PermissionTier> = team
             .agents
             .iter()
             .find(|agent| agent.id.as_str() == "dev-a")
             .expect("dev-a")
-            .tiers()
+            .tiers(&team.permissions())
             .into_iter()
             .collect();
         let files = Arc::new(ProjectFiles::open(repo.path.clone()));
@@ -176,6 +176,9 @@ impl Project {
             executor: None,
             limits: DEFAULT_SESSION_LIMITS,
             farik_tools: vec![FARIK_TOOL.to_string()],
+            tiers: tiers.iter().copied().collect(),
+            connectors: Vec::new(),
+            preview: None,
             purpose: SessionPurpose::Implement,
             in_reply_to: None,
             thread: None,
@@ -203,6 +206,7 @@ impl Project {
             farik_tools: vec![FARIK_TOOL.to_string()],
             builtin_tools: allowed_builtins(&self.tiers),
             mcp_servers: Vec::new(),
+            disallowed_tools: Vec::new(),
             cwd: self.repo.path.clone(),
             limits: DEFAULT_SESSION_LIMITS,
             initial_prompt: format!(
@@ -263,8 +267,8 @@ fn run(
     let handle = runtime
         .block_on(serve(
             DaemonConfig {
-                port: None,
-                daemon_file: daemon_file.clone(),
+                port: farik_runtime::daemon::PortChoice::Any,
+                daemon_file: Some(daemon_file.clone()),
             },
             Arc::clone(&project.state),
         ))
@@ -286,7 +290,11 @@ fn run(
             })
             .collect(),
     };
-    let adapter = ClaudeAdapter::new(credential, config).expect("claude is new enough");
+    let adapter = ClaudeAdapter::new(
+        std::sync::Arc::new(std::sync::Mutex::new(credential)),
+        config,
+    )
+    .expect("claude is new enough");
     let events = runtime.block_on(async {
         let mut session = adapter.start_session(spec).expect("the session starts");
         let mut events = Vec::new();

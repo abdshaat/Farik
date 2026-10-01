@@ -5,7 +5,7 @@ use farik_core::contract::TaskContract;
 use farik_core::criteria::CriteriaLibrary;
 use farik_core::governor::permissions::PermissionTier;
 use farik_core::governor::team_rules::TeamRules;
-use farik_core::team::Agent;
+use farik_core::team::{Agent, TeamPermissions};
 use farik_core::text::tokens;
 use farik_protocol::event::Thread;
 use farik_roles::RoleDefinition;
@@ -21,6 +21,8 @@ pub struct PromptInput<'a> {
     pub role: &'a RoleDefinition,
     /// The agent the session is for.
     pub agent: &'a Agent,
+    /// The team's permission answers, which the agent's tiers follow.
+    pub permissions: &'a TeamPermissions,
     /// The project scan, `.farik/project.md`, when there is one.
     pub project_scan: Option<&'a str>,
     /// The agent's notebook, empty when it never wrote one.
@@ -65,7 +67,7 @@ pub const PROMPT_SECTIONS: [&str; 11] = [
 ];
 
 /// The `This session` section of each purpose: what the session is for and the tool it ends with.
-pub const CLOSING_INSTRUCTIONS: [(SessionPurpose, &str); 7] = [
+pub const CLOSING_INSTRUCTIONS: [(SessionPurpose, &str); 9] = [
     (
         SessionPurpose::Triage,
         "This session sizes the request you were given. Decide whether it is large (an epic) or \
@@ -88,6 +90,13 @@ pub const CLOSING_INSTRUCTIONS: [(SessionPurpose, &str); 7] = [
          `farik_write_note` of kind `completion` and request `verifying`. End the session when \
          there is nothing left to file or assign. After asking for a move, post one or two sentences \
          about it with `farik_post_message`, in your persona's voice, naming the task.",
+    ),
+    (
+        SessionPurpose::Explore,
+        "This session explores the task before anything changes: work out what its screens show \
+         now and what should change, and change nothing. End the session by calling \
+         `farik_propose_design_plan` with your plan; the Product Manager approves it before you \
+         change anything.",
     ),
     (
         SessionPurpose::Implement,
@@ -119,6 +128,14 @@ pub const CLOSING_INSTRUCTIONS: [(SessionPurpose, &str); 7] = [
          once, in one post with `farik_post_message`, in your persona's voice. Nothing said in \
          the channel is work: file any work it asks for as a request with `farik_create_task`, \
          without a parent. Then end the session.",
+    ),
+    (
+        SessionPurpose::Chat,
+        "This session answers the user in your one-to-one chat: the newest of their messages in \
+         `From the human`, with the chat before it. Answer once with `farik_chat_reply`, in your \
+         persona's voice. You can read the project and change nothing. When work is needed, put a \
+         request in your reply, a title and what it asks for, for the user to send. Then end the \
+         session.",
     ),
 ];
 
@@ -155,14 +172,21 @@ pub const CEREMONY_INSTRUCTIONS: [(Thread, &str); 4] = [
     ),
 ];
 
-/// The `This session` section of the Scrum Master's judgment of a contract (5.3), a `refine`
+/// The `This session` section of the judge's check of a contract's plan (5.3), a `refine`
 /// session given `farik_record_judgment` alone.
-pub const JUDGMENT_INSTRUCTION: &str = "This session judges the contract above, which already \
-     passes the governor's structural rules. Answer two questions, each honestly: is the task small \
-     enough to finish within its budget, and would its criteria actually detect the failure its \
-     intent worries about, not just that something ran? End the session by calling \
-     `farik_record_judgment` with both answers and your reason, which the Product Manager \
-     rewrites from when either answer is no.";
+pub const JUDGMENT_INSTRUCTION: &str = "This session checks the plan of the contract above, \
+     which already passes the governor's structural rules. Answer each question of the message you \
+     were given, honestly: yes only when the plan passes it, not just when something would run. \
+     End the session by calling `farik_record_judgment` with one answer to each question, in the \
+     order they are numbered, and your overall reason, which the Product Manager rewrites from \
+     when any answer is no.";
+
+/// The closing of the Product Manager's session given `farik_decide_design_plan` alone.
+pub const DESIGN_DECISION_INSTRUCTION: &str = "This session decides the UI/UX Designer's plan \
+     for the task above, which the message you were given holds. Approve it when it keeps to the \
+     contract and says what it will change and what it leaves alone; return it otherwise, saying \
+     what to change. End the session by calling `farik_decide_design_plan` with your decision \
+     and your reason.";
 
 /// The system prompt of one session: the sections of `PROMPT_SECTIONS`, in that order.
 ///
@@ -291,7 +315,7 @@ fn memory_section(input: &PromptInput<'_>) -> String {
 
 /// Whether the session's tiers let it call the tool named `name`, among those it is offered.
 fn offers(input: &PromptInput<'_>, name: &str) -> bool {
-    let tiers = input.agent.tiers();
+    let tiers = input.agent.tiers(input.permissions);
     input
         .tools
         .iter()
@@ -429,7 +453,7 @@ fn rules_section(rules: &TeamRules) -> String {
 /// The Farik tools the agent's tiers allow of those it is offered, the built-ins it may use, and,
 /// for a session offered a tool that runs commands or git, where its shell and git are (ADR 0004).
 fn tools_section(input: &PromptInput<'_>) -> String {
-    let tiers = input.agent.tiers();
+    let tiers = input.agent.tiers(input.permissions);
     let farik = std::iter::once(
         "Farik's tools are called `mcp__farik__<name>`: `farik_read_board` is \
          `mcp__farik__farik_read_board`. These are yours:"
@@ -506,7 +530,7 @@ mod tests {
     use farik_core::governor::permissions::{PermissionTier, default_tiers};
     use farik_core::governor::team_rules::TeamRules;
     use farik_core::team::fixtures::an_agent_wire;
-    use farik_core::team::{Agent, Effort};
+    use farik_core::team::{Agent, Effort, TeamPermissions};
     use farik_roles::{RoleDefinition, Skill, load_role};
     use farik_store::files::{contract_yaml, criteria_yaml, yaml_value};
     use serde_json::json;
@@ -521,6 +545,7 @@ mod tests {
     fn a_role(role: Role) -> RoleDefinition {
         RoleDefinition {
             id: role,
+            persona: "Writes the contracts.".to_string(),
             mandate: "Write the contracts.".to_string(),
             produces: vec!["contracts".to_string()],
             forbidden: vec!["code".to_string()],
@@ -563,6 +588,7 @@ mod tests {
         tools: Vec<FarikTool>,
         builtin_tools: Vec<String>,
         memory_cap_tokens: usize,
+        permissions: TeamPermissions,
     }
 
     impl Inputs {
@@ -576,6 +602,7 @@ mod tests {
                 tools: tool_descriptors(),
                 builtin_tools: vec!["Read".to_string(), "Glob".to_string()],
                 memory_cap_tokens: 8_000,
+                permissions: TeamPermissions::default(),
             }
         }
 
@@ -583,6 +610,7 @@ mod tests {
             PromptInput {
                 role: &self.role,
                 agent: &self.agent,
+                permissions: &self.permissions,
                 project_scan: Some("A Rust workspace with a check command."),
                 memory: "Last time the check was slow.",
                 memory_cap_tokens: self.memory_cap_tokens,
@@ -988,6 +1016,7 @@ mod tests {
             max_task_budget_usd: None,
             forbidden_commands: Vec::new(),
             document_paths: Vec::new(),
+            ui_paths: Vec::new(),
         };
         let prompt = assembled(&inputs.full(SessionPurpose::Refine));
         assert_eq!(
@@ -1006,6 +1035,7 @@ mod tests {
             max_task_budget_usd: Some(12.5),
             forbidden_commands: vec!["^rm -rf /".to_string()],
             document_paths: TeamRules::default().document_paths,
+            ui_paths: Vec::new(),
         };
         let prompt = assembled(&inputs.full(SessionPurpose::Refine));
         assert_eq!(
@@ -1087,10 +1117,12 @@ mod tests {
             SessionPurpose::Triage,
             SessionPurpose::Refine,
             SessionPurpose::Plan,
+            SessionPurpose::Explore,
             SessionPurpose::Implement,
             SessionPurpose::Verify,
             SessionPurpose::Ceremony,
             SessionPurpose::Conversation,
+            SessionPurpose::Chat,
         ] {
             let entries = CLOSING_INSTRUCTIONS
                 .iter()

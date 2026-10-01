@@ -9,6 +9,7 @@ use std::time::Duration;
 use farik_core::contract::TaskId;
 
 use crate::exec::{ExecError, ExecResult, Executor, Finished, supervise, workspace_relative};
+use crate::preview::docker::container_name as preview_container;
 use crate::sandbox::{Sandbox, SandboxError, SandboxFactory};
 
 /// How long after the deadline the `docker exec` client is killed, in case the container stops
@@ -167,9 +168,11 @@ impl Sandbox for DockerSandbox {
 
 /// What `docker rm -f` answering `output` means for `discard`: a container already gone is
 /// discarded, since that is all `discard` asks. Older dockers refuse a missing one; newer ones do
-/// not.
-fn removed(output: &Output) -> Result<(), SandboxError> {
-    if !output.status.success() && !stderr_of(output).contains("No such container") {
+/// not. So is one Docker is already removing, as it does a `--rm` container whose process ended.
+pub(crate) fn removed(output: &Output) -> Result<(), SandboxError> {
+    let said = stderr_of(output);
+    let gone = said.contains("No such container") || said.contains("is already in progress");
+    if !output.status.success() && !gone {
         return Err(SandboxError::ContainerFailed {
             detail: stderr_of(output),
         });
@@ -213,16 +216,19 @@ impl SandboxFactory for DockerSandboxFactory {
     }
 
     fn remove(&self, project_id: &str, task_id: &TaskId) -> Result<(), SandboxError> {
-        removed(&docker(&[
-            "rm",
-            "-f",
-            &container_name(project_id, task_id),
-        ])?)?;
-        removed(&docker(&[
-            "rm",
-            "-f",
-            &base_container_name(project_id, task_id),
-        ])?)
+        // The task's preview, its browser, and its prepare go with it, so that a session killed
+        // before it stopped its preview leaves none behind (step 12's F5).
+        let preview = preview_container("preview", project_id, task_id);
+        for name in [
+            container_name(project_id, task_id),
+            base_container_name(project_id, task_id),
+            crate::preview::browser_container(&preview),
+            preview,
+            preview_container("prepare", project_id, task_id),
+        ] {
+            removed(&docker(&["rm", "-f", &name])?)?;
+        }
+        Ok(())
     }
 }
 
@@ -234,8 +240,12 @@ fn base_container_name(project_id: &str, task_id: &TaskId) -> String {
 
 /// `farik-<project>-<task_id>`, lowercased with everything outside `[a-z0-9_.-]` made `-`.
 fn container_name(project_id: &str, task_id: &TaskId) -> String {
-    format!("farik-{project_id}-{}", task_id.as_str())
-        .to_lowercase()
+    docker_name(&format!("farik-{project_id}-{}", task_id.as_str()))
+}
+
+/// `raw` lowercased with everything outside `[a-z0-9_.-]` made `-`: Docker's alphabet for names.
+pub(crate) fn docker_name(raw: &str) -> String {
+    raw.to_lowercase()
         .chars()
         .map(|character| match character {
             'a'..='z' | '0'..='9' | '_' | '.' | '-' => character,
@@ -261,7 +271,7 @@ fn is_container_gone(finished: &Finished) -> bool {
     })
 }
 
-fn docker(args: &[&str]) -> Result<Output, SandboxError> {
+pub(crate) fn docker(args: &[&str]) -> Result<Output, SandboxError> {
     Command::new("docker")
         .args(args)
         .output()
@@ -269,7 +279,7 @@ fn docker(args: &[&str]) -> Result<Output, SandboxError> {
 }
 
 /// `id -u` or `id -g`, the user's own, so that what a command writes in the worktree is theirs.
-fn id(flag: &str) -> Result<String, SandboxError> {
+pub(crate) fn id(flag: &str) -> Result<String, SandboxError> {
     let output =
         Command::new("id")
             .arg(flag)
@@ -285,7 +295,7 @@ fn id(flag: &str) -> Result<String, SandboxError> {
     Ok(String::from_utf8_lossy(&output.stdout).trim().to_owned())
 }
 
-fn stderr_of(output: &Output) -> String {
+pub(crate) fn stderr_of(output: &Output) -> String {
     String::from_utf8_lossy(&output.stderr).trim().to_owned()
 }
 
@@ -315,6 +325,10 @@ mod tests {
         };
         let missing = "Error response from daemon: No such container: farik-p-frk-1\n";
         assert_eq!(removed(&answer(missing)), Ok(()));
+        // A `--rm` container whose process just ended is being removed by Docker itself.
+        let going = "Error response from daemon: removal of container farik-browser-p-frk-1 is \
+                     already in progress\n";
+        assert_eq!(removed(&answer(going)), Ok(()));
         let refused = "Error response from daemon: could not kill: permission denied\n";
         assert_eq!(
             removed(&answer(refused)),

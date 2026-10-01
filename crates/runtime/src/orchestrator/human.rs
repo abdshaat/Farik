@@ -2,30 +2,35 @@
 //! human gives the orchestrator, each judged and recorded through the store and the governor, so
 //! that any process may handle one.
 
-use farik_core::contract::{TaskContract, TaskId, TaskKind, TaskStatus};
-use farik_core::governor::done::requires_human_acceptance;
-use farik_core::governor::gates::Blocker;
+use std::num::NonZeroU64;
+
+use farik_core::contract::{Role, TaskContract, TaskId, TaskKind, TaskStatus};
+use farik_core::governor::gates::{Blocker, Rejection};
 use farik_core::governor::transition::TransitionRequest;
 use farik_core::governor::transition_table::TransitionActor;
 use farik_core::sprint::{Sprint, SprintStatus};
-use farik_core::team::{AgentStatus, Team};
+use farik_core::team::{Agent, AgentStatus, Team, plain_role};
 use farik_protocol::command::{AcceptSubject, Command, RequestSize};
 use farik_protocol::event::{
-    AgentUpdatedBody, EscalationResolvedBody, EventBody, EventIds, EventKind, HumanAcceptedBody,
-    HumanAcceptedBodySubject, MessageKind, QuestionAnsweredBody, new_event,
+    AgentUpdatedBody, EscalationRaisedBodyReason, EscalationResolvedBody, EventBody, EventIds,
+    EventKind, HumanAcceptedBody, HumanAcceptedBodySubject, MessageKind, QuestionAnsweredBody,
+    new_event,
 };
 use farik_store::requests::{RequestError, hold_contract, triage_by_human};
 use farik_store::{EventQuery, TaskProjection};
 
 use super::requests::HUMAN;
-use super::verify::{governor_results, is_human, is_mechanical, since_verifying};
+use super::verify::{governor_results, is_mechanical, since_verifying};
 use super::{CommandError, CommandReport, IntegrationOutcome, Orchestrator, OrchestratorError};
 use crate::channel::{ChannelError, NewMessage, mentions_in, post};
+use crate::chat::{ChatError, NewChatMessage, post_chat};
+use crate::daemon::DaemonState;
+use crate::pause::paused;
 use crate::sprints::{EndedBy, SprintError, end_sprint, start_sprint};
 use crate::tools::ToolDeps;
 use crate::transitions::{
     TransitionAsk, TransitionOutcome, contract_accepted, refusal_details, result_accepted,
-    status_wire,
+    result_awaits_human, review_passed, status_wire,
 };
 
 /// Who the human is in the log.
@@ -77,7 +82,20 @@ pub(super) async fn handle(
             task_id,
             to,
             message,
-        } => resolve(tools, &task_id, to, &message),
+            extra_tries,
+        } => resolve(tools, &task_id, to, &message, extra_tries),
+        Command::HumanSendBack {
+            task_id,
+            subject: AcceptSubject::Contract,
+            message,
+            failed_criteria: _,
+        } => send_plan_back(tools, &task_id, &message),
+        Command::HumanSendBack {
+            task_id,
+            subject: AcceptSubject::Result,
+            message,
+            failed_criteria,
+        } => send_result_back(tools, &task_id, &message, failed_criteria),
         Command::TaskTransition {
             task_id,
             to,
@@ -96,7 +114,10 @@ pub(super) async fn handle(
             end_sprint(tools, EndedBy::Human),
             EventKind::SprintEnded,
         ),
+        Command::TeamPause => pause(tools, true),
+        Command::TeamResume => pause(tools, false),
         Command::MessagePost { text } => post_message(tools, text),
+        Command::ChatMessagePost { agent_id, text } => post_chat_message(tools, &agent_id, text),
         Command::RunStop => {
             orchestrator.stop();
             Ok(CommandReport {
@@ -107,6 +128,31 @@ pub(super) async fn handle(
             })
         }
     }
+}
+
+/// The human's pause of the whole team, or its resume: recorded once, and refused when the team
+/// is already so.
+fn pause(tools: &ToolDeps, pausing: bool) -> Result<CommandReport, CommandError> {
+    if paused(&tools.log).map_err(failed)? == pausing {
+        return Err(CommandError::Refused {
+            reason: if pausing {
+                "already_paused: the team is already paused"
+            } else {
+                "not_paused: the team is not paused"
+            }
+            .to_string(),
+        });
+    }
+    let by = serde_json::from_value(serde_json::json!({ "by": HUMAN })).map_err(failed)?;
+    let (body, said) = if pausing {
+        (EventBody::TeamPaused(by), "paused the team")
+    } else {
+        (EventBody::TeamResumed(by), "resumed the team")
+    };
+    Ok(CommandReport {
+        said: said.to_string(),
+        events: vec![append(tools, None, body)?],
+    })
 }
 
 /// The human's message in the team's channel (5.9), its mentions found by Farik.
@@ -135,6 +181,54 @@ fn post_message(tools: &ToolDeps, text: String) -> Result<CommandReport, Command
     })?;
     Ok(CommandReport {
         said: "posted in the channel".to_string(),
+        events: vec![seq],
+    })
+}
+
+/// The human's message in their one-to-one chat with `agent_id` (4.3), which is refused for an
+/// agent not on the team or retired.
+fn post_chat_message(
+    tools: &ToolDeps,
+    agent_id: &str,
+    text: String,
+) -> Result<CommandReport, CommandError> {
+    let team = tools.files.read_team().map_err(failed)?;
+    let Some(agent) = team
+        .agents
+        .iter()
+        .find(|agent| agent.id.as_str() == agent_id)
+    else {
+        return Err(CommandError::NotFound {
+            what: format!("agent {agent_id}, who is not on the team"),
+        });
+    };
+    if agent.status == AgentStatus::Retired {
+        return Err(CommandError::Refused {
+            reason: format!(
+                "agent_retired: {} has retired, and a past teammate's chat is read-only",
+                agent.display_name.as_str()
+            ),
+        });
+    }
+    let seq = post_chat(
+        &tools.log,
+        tools.clock.as_ref(),
+        &tools.ids,
+        NewChatMessage {
+            chat: agent_id.to_string(),
+            author: HUMAN.to_string(),
+            text,
+            in_reply_to: None,
+            request: None,
+            session_id: None,
+        },
+    )
+    .map_err(|error| match error {
+        ChatError::Refused { reason } => CommandError::Invalid { detail: reason },
+        ChatError::Store(error) => failed(error),
+    })?;
+    Ok(CommandReport {
+        said: format!("sent to {}", agent.display_name.as_str()),
         events: vec![seq],
     })
 }
@@ -317,13 +411,7 @@ fn approve(
 ) -> Result<CommandReport, CommandError> {
     let row = row_of(tools, task_id)?;
     if !row.awaiting_approval {
-        return Err(CommandError::Refused {
-            reason: format!(
-                "not_awaiting_approval: {} is {} and no approval is asked of the human",
-                task_id.as_str(),
-                row.status
-            ),
-        });
+        return Err(not_awaiting_approval(&row));
     }
     let team = tools.files.read_team().map_err(failed)?;
     let mut events = vec![append(
@@ -357,7 +445,8 @@ fn accept_result(
     message: Option<String>,
 ) -> Result<CommandReport, CommandError> {
     let row = row_of(tools, task_id)?;
-    let contract = tools.files.read_contract(task_id).map_err(failed)?;
+    let mut contract = tools.files.read_contract(task_id).map_err(failed)?;
+    contract.status = row.status;
     if row.status != TaskStatus::Verifying {
         return Err(not_waiting(&row));
     }
@@ -379,7 +468,7 @@ fn accept_result(
                     .to_string(),
             });
         }
-    } else if !requires_human_acceptance(&contract) && !has_human_criterion(&contract) {
+    } else if !result_awaits_human(&contract) {
         return Err(not_waiting(&row));
     }
     let seq = append(
@@ -421,8 +510,72 @@ fn not_waiting(row: &TaskProjection) -> CommandError {
     }
 }
 
-fn has_human_criterion(contract: &TaskContract) -> bool {
-    contract.exit_criteria.iter().any(is_human)
+fn not_awaiting_approval(row: &TaskProjection) -> CommandError {
+    CommandError::Refused {
+        reason: format!(
+            "not_awaiting_approval: {} is {} and no approval is asked of the human",
+            row.task_id.as_str(),
+            row.status
+        ),
+    }
+}
+
+/// Sends a contract awaiting approval back to `refining` with the human's message (ADR 0024): the
+/// escalation's own resolve.
+fn send_plan_back(
+    tools: &ToolDeps,
+    task_id: &TaskId,
+    message: &str,
+) -> Result<CommandReport, CommandError> {
+    written(message, "a send-back's message")?;
+    let row = row_of(tools, task_id)?;
+    if !row.awaiting_approval {
+        return Err(not_awaiting_approval(&row));
+    }
+    resolve(tools, task_id, TaskStatus::Refining, message, None)
+}
+
+/// Sends a result that waits on the human back to its assignee (ADR 0024): `verifying ->
+/// rejected` as the human, the message its reason, once the reviewer's review has passed; an epic
+/// waits on no reviewer. The governor's return to work counts the try.
+fn send_result_back(
+    tools: &ToolDeps,
+    task_id: &TaskId,
+    message: &str,
+    failed_criteria: Vec<String>,
+) -> Result<CommandReport, CommandError> {
+    written(message, "a send-back's message")?;
+    let row = row_of(tools, task_id)?;
+    let mut contract = tools.files.read_contract(task_id).map_err(failed)?;
+    contract.status = row.status;
+    if !result_awaits_human(&contract) {
+        return Err(not_waiting(&row));
+    }
+    if contract.kind != TaskKind::Epic && !review_passed(&history_of(tools, task_id)?) {
+        return Err(CommandError::Refused {
+            reason: "review_first: the reviewer has not finished; send back once the review is in"
+                .to_string(),
+        });
+    }
+    let team = tools.files.read_team().map_err(failed)?;
+    let events = human_moves(
+        tools,
+        &team,
+        task_id,
+        TaskStatus::Rejected,
+        &TransitionAsk {
+            reason: Some(message.to_string()),
+            rejection: Some(Rejection {
+                failed_criterion_ids: failed_criteria,
+                reasons: message.to_string(),
+            }),
+            ..TransitionAsk::default()
+        },
+    )?;
+    Ok(CommandReport {
+        said: format!("{} is sent back to its assignee", task_id.as_str()),
+        events,
+    })
 }
 
 /// Every `command`, `test`, or `artifact` criterion of the epic has Farik's passing result since
@@ -469,14 +622,17 @@ fn mechanical_criteria_passed(
 }
 
 /// Resolves an escalation (5.7): `escalated -> to` as the human, then, on the move,
-/// `escalation.resolved { to, message }`. Never to `ready` while the contract awaits approval,
-/// which is `HumanAccept`'s, nor for an epic whose contract the human has not approved, which
-/// reaches `ready` only by that approval (5.16 item 2).
+/// `escalation.resolved { to, message, extra_tries }`. Never to `ready` while the contract awaits
+/// approval, which is `HumanAccept`'s, nor for an epic whose contract the human has not approved,
+/// which reaches `ready` only by that approval (5.16 item 2). `extra_tries` is only for an
+/// `iterations` escalation resolved to `in_progress`, and the move it makes counts the attempt it
+/// starts (ADR 0024).
 fn resolve(
     tools: &ToolDeps,
     task_id: &TaskId,
     to: TaskStatus,
     message: &str,
+    extra_tries: Option<u8>,
 ) -> Result<CommandReport, CommandError> {
     written(message, "a resolution's message")?;
     let row = row_of(tools, task_id)?;
@@ -511,6 +667,32 @@ fn resolve(
             ),
         });
     }
+    if let Some(tries) = extra_tries {
+        if !(1..=5).contains(&tries) {
+            return Err(CommandError::Invalid {
+                detail: format!("extra_tries is {tries}, and it is 1 to 5"),
+            });
+        }
+        if to != TaskStatus::InProgress {
+            return Err(CommandError::Refused {
+                reason: format!(
+                    "extra_tries_only_for_tries: more tries resume the work, so they come with a \
+                     move to in_progress, not to {to}"
+                ),
+            });
+        }
+        let reason = escalated_for(tools, task_id)?;
+        if reason != Some(EscalationRaisedBodyReason::Iterations) {
+            return Err(CommandError::Refused {
+                reason: format!(
+                    "extra_tries_only_for_tries: {} escalated for {}, and more tries are granted \
+                     only to a task that used its tries",
+                    task_id.as_str(),
+                    reason.map_or_else(|| "no recorded reason".to_string(), |r| r.to_string())
+                ),
+            });
+        }
+    }
     let team = tools.files.read_team().map_err(failed)?;
     let mut events = human_moves(
         tools,
@@ -519,6 +701,7 @@ fn resolve(
         to,
         &TransitionAsk {
             reason: Some(message.to_string()),
+            grants_tries: extra_tries.is_some(),
             ..TransitionAsk::default()
         },
     )?;
@@ -529,12 +712,27 @@ fn resolve(
             to: status_wire(to).map_err(failed)?,
             message: message.to_string(),
             resolved_by: HUMAN.to_string(),
+            extra_tries: extra_tries.and_then(|tries| NonZeroU64::new(u64::from(tries))),
         }),
     )?);
     Ok(CommandReport {
         said: format!("{} is resolved to {to}", task_id.as_str()),
         events,
     })
+}
+
+/// The reason of the task's last escalation.
+fn escalated_for(
+    tools: &ToolDeps,
+    task_id: &TaskId,
+) -> Result<Option<EscalationRaisedBodyReason>, CommandError> {
+    Ok(history_of(tools, task_id)?
+        .iter()
+        .rev()
+        .find_map(|event| match &event.body {
+            EventBody::EscalationRaised(body) => Some(body.reason),
+            _ => None,
+        }))
 }
 
 /// Moves a task as the human (5.2), from any status but `escalated`, whose way out is `resolve`.
@@ -625,7 +823,36 @@ fn update_agent(
     agent_id: &str,
     status: AgentStatus,
 ) -> Result<CommandReport, CommandError> {
-    let tools = &orchestrator.deps.tools;
+    update_agent_with(
+        &orchestrator.deps.tools,
+        &orchestrator.deps.daemon,
+        agent_id,
+        status,
+        None,
+    )
+}
+
+/// `update_agent`, with `newcomer` added to the team in the same write when there is one: a
+/// replacement, which never leaves the team without the role the agent held, even for a moment.
+pub(crate) fn update_agent_with(
+    tools: &ToolDeps,
+    daemon: &DaemonState,
+    agent_id: &str,
+    status: AgentStatus,
+    newcomer: Option<Agent>,
+) -> Result<CommandReport, CommandError> {
+    let _writing = daemon.team_writes();
+    update_agent_held(tools, daemon, agent_id, status, newcomer)
+}
+
+/// `update_agent_with` for a caller that already holds `daemon.team_writes()`.
+pub(crate) fn update_agent_held(
+    tools: &ToolDeps,
+    daemon: &DaemonState,
+    agent_id: &str,
+    status: AgentStatus,
+    newcomer: Option<Agent>,
+) -> Result<CommandReport, CommandError> {
     let mut team = tools.files.read_team().map_err(failed)?;
     let Some(agent) = team
         .agents
@@ -641,8 +868,30 @@ fn update_agent(
             reason: format!("same_status: {agent_id} is already {status}"),
         });
     }
+    let (name, role) = (agent.display_name.to_string(), Role::from(agent.role));
     agent.status = status;
+    team.agents.extend(newcomer);
+    if let Some(reason) = leaves_a_gap(&team, &name, role, status) {
+        return Err(CommandError::Refused { reason });
+    }
     tools.files.write_team(&team).map_err(failed)?;
+    Ok(CommandReport {
+        said: format!("{agent_id} is {status}"),
+        events: status_effects(tools, daemon, &team, agent_id, status)?,
+    })
+}
+
+/// What follows from `agent_id`'s status becoming `status` in `team`, already written:
+/// `agent.updated`; for a pause or a retirement, its sessions stopped and each `in_progress` task it
+/// holds blocked; for a resume, each task its pause blocked taken back to `in_progress`. Answers
+/// the events' sequence numbers.
+pub(crate) fn status_effects(
+    tools: &ToolDeps,
+    daemon: &DaemonState,
+    team: &Team,
+    agent_id: &str,
+    status: AgentStatus,
+) -> Result<Vec<u64>, CommandError> {
     let mut events = vec![append(
         tools,
         None,
@@ -668,13 +917,13 @@ fn update_agent(
             } else {
                 (RETIRED, "the human reassigns the task".to_string())
             };
-            for session_id in orchestrator.deps.daemon.sessions_of(agent_id) {
-                orchestrator.deps.daemon.request_stop(&session_id, words);
+            for session_id in daemon.sessions_of(agent_id) {
+                daemon.request_stop(&session_id, words);
             }
             for row in held.filter(|row| row.status == TaskStatus::InProgress) {
                 events.extend(moved_for(
                     tools,
-                    &team,
+                    team,
                     &TransitionRequest {
                         task_id: row.task_id.clone(),
                         to: TaskStatus::Blocked,
@@ -698,7 +947,7 @@ fn update_agent(
                 }
                 events.extend(moved_for(
                     tools,
-                    &team,
+                    team,
                     &TransitionRequest {
                         task_id: row.task_id.clone(),
                         to: TaskStatus::InProgress,
@@ -713,10 +962,36 @@ fn update_agent(
             }
         }
     }
-    Ok(CommandReport {
-        said: format!("{agent_id} is {status}"),
-        events,
-    })
+    Ok(events)
+}
+
+/// Why `name`, of `role`, may not be paused or retired, in `team` as it would be after: it was the
+/// last active agent of a role the team cannot work without (D18), or of the role the team named
+/// to check plans (spec 5.3). Section 10's foolproof configuration: the refusal says what to do.
+fn leaves_a_gap(team: &Team, name: &str, role: Role, status: AgentStatus) -> Option<String> {
+    if status == AgentStatus::Active || team.has_active(role) {
+        return None;
+    }
+    let (plain, verb) = (
+        plain_role(role),
+        if status == AgentStatus::Paused {
+            "stops"
+        } else {
+            "leaves"
+        },
+    );
+    if matches!(role, Role::ProductManager | Role::SoftwareDeveloper) {
+        Some(format!(
+            "last_of_role: {name} is your only {plain}; add another before {name} {verb}."
+        ))
+    } else if team.judge() == role {
+        Some(format!(
+            "last_judge: {name} checks your plans; let Farik choose who checks, or add another \
+             {plain}, before {name} {verb}."
+        ))
+    } else {
+        None
+    }
 }
 
 /// Stops a session registered in this process, and escalates its task as the human unless the
@@ -1324,6 +1599,7 @@ mod tests {
             task_id: task(id),
             to,
             message: message.to_string(),
+            extra_tries: None,
         };
 
         handled(
@@ -1385,6 +1661,7 @@ mod tests {
             task_id: task(id),
             to: TaskStatus::Ready,
             message: "Go.".to_string(),
+            extra_tries: None,
         };
 
         let unapproved = refused(&orchestrator, to_ready("FRK-1")).await;
@@ -1674,6 +1951,93 @@ mod tests {
 
     #[tokio::test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn still_retires_one_agent_as_before() {
+        let harness = Harness::new("human-retire-one", |_| {});
+        harness.in_progress("FRK-1", "dev-b", "dev-a");
+        let orchestrator = an_orchestrator(&harness);
+        let before = harness.events(&[]).len();
+        let report = handled(&orchestrator, a_pause("dev-b", AgentStatus::Retired)).await;
+        let after: Vec<Value> = harness.events(&[])[before..]
+            .iter()
+            .map(farik_protocol::event::event_to_value)
+            .collect();
+        assert_eq!(
+            report.events,
+            after
+                .iter()
+                .map(|event| event["seq"].as_u64().expect("a seq"))
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(report.said, "dev-b is retired");
+        assert_eq!(
+            after
+                .iter()
+                .map(|event| (event["kind"].clone(), event["task_id"].clone()))
+                .collect::<Vec<_>>(),
+            [
+                (json!("agent.updated"), Value::Null),
+                (json!("task.transitioned"), json!("FRK-1")),
+            ]
+        );
+        assert_eq!(
+            after[0]["body"],
+            json!({ "agent_id": "dev-b", "status": "retired", "updated_by": "human" })
+        );
+        assert_eq!(
+            (&after[1]["body"]["to"], &after[1]["body"]["blocker"]),
+            (
+                &json!("blocked"),
+                &json!({
+                    "description": "agent retired by the user",
+                    "needed": "the human reassigns the task"
+                })
+            )
+        );
+        let status = harness
+            .project
+            .deps
+            .files
+            .read_team()
+            .expect("reads")
+            .agents
+            .iter()
+            .find(|agent| agent.id.as_str() == "dev-b")
+            .map(|agent| agent.status);
+        assert_eq!(status, Some(AgentStatus::Retired));
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn refuses_leaving_the_team_without_a_role_it_needs() {
+        let harness = Harness::new("human-last-of-role", |wire| {
+            wire["agents"]
+                .as_array_mut()
+                .expect("agents")
+                .push(json!({ "id": "ada", "display_name": "Ada", "role": "architect", "status": "active" }));
+            wire["policy"]["judgment"] = json!({ "required": "always", "judge": "architect" });
+        });
+        let orchestrator = an_orchestrator(&harness);
+        let before = harness.project.deps.files.read_team().expect("reads");
+        assert_eq!(
+            refused(&orchestrator, a_pause("pm", AgentStatus::Retired)).await,
+            "last_of_role: pm is your only Product Manager; add another before pm leaves."
+        );
+        assert_eq!(
+            refused(&orchestrator, a_pause("ada", AgentStatus::Paused)).await,
+            "last_judge: Ada checks your plans; let Farik choose who checks, or add another \
+             Architect, before Ada stops."
+        );
+        assert_eq!(
+            harness.project.deps.files.read_team().expect("reads"),
+            before
+        );
+        assert!(last(&harness, EventKind::AgentUpdated).is_none());
+        // One of two Developers may go.
+        handled(&orchestrator, a_pause("dev-b", AgentStatus::Retired)).await;
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn resumes_what_the_pause_blocked() {
         let harness = Harness::new("human-resume", |wire| {
             wire["policy"]["wip_limit_per_agent"] = json!(2);
@@ -1853,6 +2217,58 @@ mod tests {
 
     #[tokio::test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn records_a_pause_the_human_asks_for() {
+        let harness = Harness::new("human-pause", |_| {});
+        let orchestrator = an_orchestrator(&harness);
+
+        let report = handled(&orchestrator, Command::TeamPause).await;
+
+        let paused = last(&harness, EventKind::TeamPaused).expect("the pause is recorded");
+        assert_eq!(report.events, vec![paused.envelope.seq]);
+        assert_eq!(
+            serde_json::to_value(&paused.body).expect("a body")["body"],
+            json!({ "by": "human" })
+        );
+        let again = refused(&orchestrator, Command::TeamPause).await;
+        assert_eq!(again, "already_paused: the team is already paused");
+        assert_eq!(harness.events(&[EventKind::TeamPaused]).len(), 1);
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn refuses_a_resume_when_not_paused() {
+        let harness = Harness::new("human-resume-refused", |_| {});
+        let orchestrator = an_orchestrator(&harness);
+
+        let reason = refused(&orchestrator, Command::TeamResume).await;
+
+        assert_eq!(reason, "not_paused: the team is not paused");
+        assert!(harness.events(&[EventKind::TeamResumed]).is_empty());
+
+        handled(&orchestrator, Command::TeamPause).await;
+        handled(&orchestrator, Command::TeamResume).await;
+        assert_eq!(harness.events(&[EventKind::TeamResumed]).len(), 1);
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn takes_the_human_commands_while_paused() {
+        let harness = Harness::new("human-paused-commands", |_| {});
+        harness.open_sprint("S1", &[]);
+        let orchestrator = an_orchestrator(&harness);
+        handled(&orchestrator, Command::TeamPause).await;
+
+        handled(&orchestrator, Command::SprintEnd).await;
+
+        let ended = last(&harness, EventKind::SprintEnded).expect("the end is recorded");
+        let EventBody::SprintEnded(body) = &ended.body else {
+            panic!("an end");
+        };
+        assert_eq!(body.ended_by, SprintEndedBodyEndedBy::Human);
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn ends_a_sprint_leaving_its_unfinished_tasks() {
         let harness = Harness::new("human-sprint-end", |_| {});
         harness.accepted("FRK-1");
@@ -1875,6 +2291,9 @@ mod tests {
             body.left.iter().map(|id| id.as_str()).collect::<Vec<_>>(),
             vec!["FRK-2"]
         );
+        // With the policy off, what the sprint leaves goes on: no Backlog mark (ADR 0028).
+        assert_eq!(body.backlog, None);
+        assert!(!harness.row("FRK-2").left_for_the_backlog);
         assert_eq!(report.events, vec![ended.envelope.seq]);
         let contract = files.read_contract(&task("FRK-2")).expect("FRK-2 reads");
         assert_eq!(contract.sprint, None);
@@ -1985,5 +2404,392 @@ mod tests {
         said_in_the_channel(&orchestrator, &"é".repeat(2_000))
             .await
             .expect("2,000 characters are posted");
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn refuses_a_chat_message_out_of_bounds() {
+        let harness = Harness::new("human-chat-bounds", |wire| {
+            wire["agents"]
+                .as_array_mut()
+                .expect("agents")
+                .push(json!({ "id": "old", "display_name": "Old", "role": "software_developer", "status": "retired" }));
+        });
+        let orchestrator = an_orchestrator(&harness);
+        let chat = |agent: &str, text: String| Command::ChatMessagePost {
+            agent_id: agent.to_string(),
+            text,
+        };
+
+        for (agent, text) in [
+            ("dev-a", " \n\t ".to_string()),
+            ("dev-a", "é".repeat(4_001)),
+            ("nobody", "Hello?".to_string()),
+            ("old", "Hello?".to_string()),
+        ] {
+            let said = orchestrator.handle(chat(agent, text)).await;
+            let sentence = match &said {
+                Err(
+                    CommandError::Invalid { detail: sentence }
+                    | CommandError::Refused { reason: sentence }
+                    | CommandError::NotFound { what: sentence },
+                ) => sentence.clone(),
+                other => panic!("{agent}'s chat is refused, not {other:?}"),
+            };
+            assert!(sentence.trim().contains(' '), "a sentence: {sentence}");
+        }
+        assert!(harness.events(&[EventKind::ChatMessagePosted]).is_empty());
+
+        // A proposed request out of its limits is refused too, and nothing is recorded.
+        let deps = &harness.project.deps;
+        for (title, text) in [
+            (
+                "t".repeat(121),
+                "Add Apple Pay at checkout, beside the card.".to_string(),
+            ),
+            (
+                "Two\nlines".to_string(),
+                "Add Apple Pay at checkout, beside the card.".to_string(),
+            ),
+            ("Apple Pay".to_string(), "Too short, 19 chars".to_string()),
+            ("Apple Pay".to_string(), "a".repeat(4_001)),
+        ] {
+            let proposed = crate::chat::post_chat(
+                &deps.log,
+                deps.clock.as_ref(),
+                &deps.ids,
+                crate::chat::NewChatMessage {
+                    chat: "dev-a".to_string(),
+                    author: "dev-a".to_string(),
+                    text: "Here is a request.".to_string(),
+                    in_reply_to: None,
+                    request: Some(crate::chat::ProposedRequest { title, text }),
+                    session_id: None,
+                },
+            );
+            assert!(
+                matches!(proposed, Err(crate::chat::ChatError::Refused { .. })),
+                "{proposed:?}"
+            );
+        }
+        assert!(harness.events(&[EventKind::ChatMessagePosted]).is_empty());
+
+        // The limit counts code points, not bytes, and line breaks are kept.
+        let text = format!("{}\n", "é".repeat(3_999));
+        let report = orchestrator
+            .handle(chat("dev-a", text.clone()))
+            .await
+            .expect("4,000 code points are sent");
+        let posted = harness.events(&[EventKind::ChatMessagePosted]);
+        assert_eq!(report.events, [posted[0].envelope.seq]);
+        assert_eq!(posted[0].envelope.ids.agent_id.as_deref(), Some("dev-a"));
+        let EventBody::ChatMessagePosted(body) = &posted[0].body else {
+            panic!("a chat message");
+        };
+        assert_eq!(
+            (body.chat.as_str(), body.author.as_str(), body.text.as_str()),
+            ("dev-a", "human", text.as_str())
+        );
+    }
+
+    fn send_back(id: &str, subject: AcceptSubject, criteria: &[&str]) -> Command {
+        Command::HumanSendBack {
+            task_id: task(id),
+            subject,
+            message: "The button is too small to tap.".to_string(),
+            failed_criteria: criteria.iter().map(ToString::to_string).collect(),
+        }
+    }
+
+    fn a_review(harness: &Harness, id: &str, passed: bool) {
+        harness.project.record(
+            id,
+            "review.recorded",
+            &json!({ "reviewer": "dev-b", "criteria_run": 1, "passed": passed }),
+        );
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn sends_a_result_back_after_the_review() {
+        let harness = Harness::new("human-send-back", |wire| {
+            wire["policy"]["wip_limit_per_agent"] = json!(4);
+        });
+        harness.verifying_with("FRK-1", true, true, |wire| wire["risk"] = json!("high"));
+        harness.verifying("FRK-2");
+        let orchestrator = an_orchestrator(&harness);
+        let back = send_back("FRK-1", AcceptSubject::Result, &["C1"]);
+
+        let early = refused(&orchestrator, back.clone()).await;
+        assert_eq!(
+            early,
+            "review_first: the reviewer has not finished; send back once the review is in"
+        );
+        a_review(&harness, "FRK-1", false);
+        let failed = refused(&orchestrator, back.clone()).await;
+        assert!(failed.starts_with("review_first"), "{failed}");
+        a_review(&harness, "FRK-1", true);
+        // The human names only criteria the contract has, as the reviewer does.
+        let unknown = refused(
+            &orchestrator,
+            send_back("FRK-1", AcceptSubject::Result, &["C99"]),
+        )
+        .await;
+        assert!(
+            unknown.contains("this contract has no criterion C99"),
+            "{unknown}"
+        );
+        assert_eq!(harness.row("FRK-1").status, TaskStatus::Verifying);
+
+        let report = handled(&orchestrator, back).await;
+        let moved = last(&harness, EventKind::TaskTransitioned).expect("a move");
+        assert!(report.events.contains(&moved.envelope.seq));
+        let EventBody::TaskTransitioned(body) = &moved.body else {
+            panic!("a move");
+        };
+        assert_eq!(
+            (
+                body.from.to_string(),
+                body.to.to_string(),
+                body.actor.to_string(),
+                body.gate.to_string()
+            ),
+            (
+                "verifying".to_string(),
+                "rejected".to_string(),
+                "human".to_string(),
+                "human_rejection".to_string()
+            )
+        );
+        let rejection = body.rejection.as_ref().expect("the human's reasons");
+        assert_eq!(rejection.failed_criterion_ids, vec!["C1".to_string()]);
+        assert_eq!(rejection.reasons, "The button is too small to tap.");
+        assert_eq!(
+            body.reason.as_deref(),
+            Some("The button is too small to tap.")
+        );
+        // The rejection counts as a try: the governor's return to work counts it.
+        orchestrator.tick().await.expect("the tick runs");
+        let row = harness.row("FRK-1");
+        assert_eq!(row.status, TaskStatus::InProgress);
+        assert_eq!(row.iteration, 1);
+
+        let low = refused(
+            &orchestrator,
+            send_back("FRK-2", AcceptSubject::Result, &[]),
+        )
+        .await;
+        assert!(low.starts_with("not_waiting_for_the_human"), "{low}");
+        // An epic is the human's to review, so it goes back with no reviewer's review.
+        an_epic(&harness, "FRK-3", "verifying", a_command_criterion());
+        handled(
+            &orchestrator,
+            send_back("FRK-3", AcceptSubject::Result, &[]),
+        )
+        .await;
+        assert_eq!(harness.row("FRK-3").status, TaskStatus::Rejected);
+        assert!(matches!(
+            orchestrator
+                .handle(Command::HumanSendBack {
+                    task_id: task("FRK-2"),
+                    subject: AcceptSubject::Result,
+                    message: " ".to_string(),
+                    failed_criteria: Vec::new(),
+                })
+                .await,
+            Err(CommandError::Invalid { .. })
+        ));
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn sends_a_plan_back_to_refining() {
+        let harness = Harness::new("human-send-plan-back", |_| {});
+        an_epic(&harness, "FRK-1", "refining", a_command_criterion());
+        escalated(&harness, "FRK-1", "approval");
+        harness.ready("FRK-2");
+        let orchestrator = an_orchestrator(&harness);
+
+        handled(
+            &orchestrator,
+            send_back("FRK-1", AcceptSubject::Contract, &[]),
+        )
+        .await;
+        assert_eq!(harness.row("FRK-1").status, TaskStatus::Refining);
+        let resolved = last(&harness, EventKind::EscalationResolved).expect("the resolution");
+        let EventBody::EscalationResolved(body) = &resolved.body else {
+            panic!("a resolution");
+        };
+        assert_eq!(body.to.to_string(), "refining");
+        assert_eq!(body.message, "The button is too small to tap.");
+
+        let not = refused(
+            &orchestrator,
+            send_back("FRK-2", AcceptSubject::Contract, &[]),
+        )
+        .await;
+        assert!(not.starts_with("not_awaiting_approval"), "{not}");
+    }
+
+    /// FRK-1's sessions allowance as the budgets read it now.
+    fn max_sessions(harness: &Harness) -> u32 {
+        let deps = &harness.project.deps;
+        let contract = deps
+            .files
+            .read_contract(&task("FRK-1"))
+            .expect("the contract reads");
+        crate::cost::budget_state(
+            &deps.projections,
+            &deps.files.read_team().expect("the team reads"),
+            contract.assignee_role,
+            Some(&contract),
+            &farik_core::budget::SessionLedger::default(),
+            deps.clock.now(),
+        )
+        .expect("the budgets read")
+        .task_max_sessions
+    }
+
+    /// FRK-1, back in `in_progress` at `iteration`, verified and rejected by its reviewer.
+    fn rejected_again(harness: &Harness, iteration: u32) {
+        let people = json!({ "assignee": "dev-a", "reviewer": "dev-b", "iteration": iteration });
+        harness
+            .project
+            .moved("FRK-1", "in_progress", "verifying", &people);
+        let mut body = people;
+        body["actor"] = json!("reviewer");
+        body["requested_by"] = json!("dev-b");
+        body["rejection"] = json!({ "failed_criterion_ids": ["C1"], "reasons": "still missing" });
+        harness
+            .project
+            .moved("FRK-1", "verifying", "rejected", &body);
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn grants_extra_tries() {
+        let harness = Harness::new("human-extra-tries", |_| {});
+        harness.rejected("FRK-1", 3, "C1: done.txt missing");
+        let orchestrator = an_orchestrator(&harness);
+        orchestrator.tick().await.expect("the tick runs");
+        assert_eq!(harness.row("FRK-1").status, TaskStatus::Escalated);
+        let sessions = max_sessions(&harness);
+
+        handled(
+            &orchestrator,
+            Command::EscalationResolve {
+                task_id: task("FRK-1"),
+                to: TaskStatus::InProgress,
+                message: "Try again with the new API.".to_string(),
+                extra_tries: Some(2),
+            },
+        )
+        .await;
+        let row = harness.row("FRK-1");
+        assert_eq!(row.status, TaskStatus::InProgress);
+        // The resumed attempt is the first of the two, so it is counted.
+        assert_eq!(row.iteration, 4);
+        let resolved = last(&harness, EventKind::EscalationResolved).expect("the resolution");
+        let EventBody::EscalationResolved(body) = &resolved.body else {
+            panic!("a resolution");
+        };
+        assert_eq!(body.extra_tries.map(std::num::NonZero::get), Some(2));
+        assert_eq!(max_sessions(&harness), sessions + 8);
+
+        // The resumed attempt fails, and the second one runs.
+        rejected_again(&harness, 4);
+        orchestrator.tick().await.expect("the tick runs");
+        let row = harness.row("FRK-1");
+        assert_eq!((row.status, row.iteration), (TaskStatus::InProgress, 5));
+        // The second fails too, and iterations escalates again.
+        rejected_again(&harness, 5);
+        orchestrator.tick().await.expect("the tick runs");
+        assert_eq!(harness.row("FRK-1").status, TaskStatus::Escalated);
+        let reasons: Vec<EscalationRaisedBodyReason> = harness
+            .events(&[EventKind::EscalationRaised])
+            .iter()
+            .filter_map(|event| match &event.body {
+                EventBody::EscalationRaised(body) => Some(body.reason),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            reasons,
+            vec![
+                EscalationRaisedBodyReason::Iterations,
+                EscalationRaisedBodyReason::Iterations
+            ]
+        );
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn refuses_extra_tries_for_other_reasons() {
+        let harness = Harness::new("human-extra-tries-refused", |_| {});
+        harness.file("FRK-1", "refining", |_| {});
+        escalated(&harness, "FRK-1", "readiness_failures");
+        let orchestrator = an_orchestrator(&harness);
+
+        let reason = refused(
+            &orchestrator,
+            Command::EscalationResolve {
+                task_id: task("FRK-1"),
+                to: TaskStatus::InProgress,
+                message: "Split it by page.".to_string(),
+                extra_tries: Some(2),
+            },
+        )
+        .await;
+        assert!(reason.starts_with("extra_tries_only_for_tries"), "{reason}");
+        assert_eq!(harness.row("FRK-1").status, TaskStatus::Escalated);
+        assert!(harness.events(&[EventKind::EscalationResolved]).is_empty());
+
+        // More tries resume the work, so they come only with a move back to it.
+        harness.rejected("FRK-2", 3, "C1: done.txt missing");
+        orchestrator.tick().await.expect("the tick runs");
+        assert_eq!(harness.row("FRK-2").status, TaskStatus::Escalated);
+        for to in [TaskStatus::Cancelled, TaskStatus::Refining] {
+            let reason = refused(
+                &orchestrator,
+                Command::EscalationResolve {
+                    task_id: task("FRK-2"),
+                    to,
+                    message: "Stop here.".to_string(),
+                    extra_tries: Some(2),
+                },
+            )
+            .await;
+            assert!(reason.starts_with("extra_tries_only_for_tries"), "{reason}");
+        }
+        // The escalation that counts is the latest one.
+        harness.project.record(
+            "FRK-2",
+            "escalation.raised",
+            &json!({ "reason": "explicit_request", "detail": "the PM asks" }),
+        );
+        let reason = refused(
+            &orchestrator,
+            Command::EscalationResolve {
+                task_id: task("FRK-2"),
+                to: TaskStatus::InProgress,
+                message: "Go on.".to_string(),
+                extra_tries: Some(2),
+            },
+        )
+        .await;
+        assert!(
+            reason.contains("escalated for explicit_request"),
+            "{reason}"
+        );
+        assert_eq!(harness.row("FRK-2").status, TaskStatus::Escalated);
+        assert!(harness.events(&[EventKind::EscalationResolved]).is_empty());
+        // The schema holds the number to 1 to 5.
+        assert!(
+            farik_protocol::command::command_from_value(&json!({
+                "command": "escalation_resolve",
+                "body": { "task_id": "FRK-1", "to": "in_progress", "message": "Go.", "extra_tries": 6 }
+            }))
+            .is_err()
+        );
     }
 }

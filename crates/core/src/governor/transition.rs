@@ -25,7 +25,8 @@ use crate::governor::escalation::{
 use crate::governor::gates::{
     AssignmentInput, AssignmentRequester, Blocker, ChildState, GateResult, Rejection, WorkState,
     check_assignment, check_blocker_resolved, check_blocker_written, check_children_done,
-    check_criteria_recorded, check_rejection_reasons,
+    check_criteria_recorded, check_design_rejection, check_failed_criterion_ids,
+    check_rejection_reasons,
 };
 use crate::governor::readiness::{ReadinessContext, evaluate_readiness};
 use crate::governor::transition_table::{GateId, TransitionActor, TransitionRow, find_transitions};
@@ -61,6 +62,9 @@ pub struct ContractAcceptance {
 /// Everything a gate of the table can ask, gathered by the runtime before it asks. Not `PartialEq`:
 /// the generated `TaskContract` is not, and a context is a bundle of inputs rather than a value to
 /// compare.
+// Each flag is one fact a gate reads, gathered independently of the others; an enum of them would
+// name combinations no gate asks about.
+#[allow(clippy::struct_excessive_bools)]
 #[derive(Debug, Clone)]
 pub struct TransitionContext {
     /// Its contract as it stands.
@@ -111,6 +115,23 @@ pub struct TransitionContext {
     /// Whether Farik could not run one of the task's criteria for its reviewer, for a reason that
     /// is not the work's (5.4): the task goes to the human rather than back to its assignee.
     pub criterion_unrunnable: bool,
+    /// Whether the task's preview could not be prepared or started for a session that needed it
+    /// (step 12): the task goes to the human, who fixes the commands.
+    pub preview_failed: bool,
+    /// Whether the task's result waits on the human's acceptance: it is `verifying`, and it is an
+    /// epic, risk `high`, or has a `human` criterion (5.4).
+    pub result_awaits_human: bool,
+    /// Whether the latest review since the task entered `verifying` passed.
+    pub review_passed: bool,
+    /// The more tries the human granted, summed over the task's resolved escalations (ADR 0024).
+    pub extra_iterations: u32,
+    /// How many times the Product Manager returned the task's design plans (ADR 0026), which count
+    /// against the same limit as rejections.
+    pub design_plan_returns: u32,
+    /// The UI/UX Designer whose latest design review since the task entered `verifying` failed
+    /// (F9), set by the runtime only then: that agent may ask for `verifying -> rejected` as the
+    /// reviewer does.
+    pub design_reviewer: Option<String>,
 }
 
 /// What the runtime must record along with the move.
@@ -235,10 +256,16 @@ pub fn evaluate_transition(
             allowed: allowed_actors(&rows),
         });
     }
+    let asked = trimmed(request.agent_id.as_deref());
+    // F9: a UI change's Designer rejects it as the reviewer does, and does nothing else.
+    let the_designer_rejects = request.actor == TransitionActor::Reviewer
+        && request.to == TaskStatus::Rejected
+        && asked.is_some()
+        && trimmed(context.design_reviewer.as_deref()) == asked;
     if is_named_by_the_contract(request.actor) {
         let named = named_agent(request.actor, &context.contract);
         let named_id = trimmed(named);
-        if named_id.is_none() || named_id != trimmed(request.agent_id.as_deref()) {
+        if !the_designer_rejects && (named_id.is_none() || named_id != asked) {
             return Err(TransitionRefusal::NotTheNamedAgent {
                 actor: request.actor,
                 named: named.map(str::to_string),
@@ -248,7 +275,12 @@ pub fn evaluate_transition(
     }
     let mut failures = Vec::new();
     for row in mine {
-        match check_gate(row.gate, request.actor, context) {
+        let checked = if the_designer_rejects && row.gate == GateId::RejectionReasons {
+            check_design_rejection(&context.contract, context.rejection.as_ref())
+        } else {
+            check_gate(row.gate, request.actor, context)
+        };
+        match checked {
             Ok(()) => {
                 return Ok(TransitionDecision {
                     from: context.contract.status,
@@ -372,22 +404,22 @@ fn check_gate(gate: GateId, actor: TransitionActor, context: &TransitionContext)
             check_rejection_reasons(&context.contract, context.rejection.as_ref())
         }
         GateId::IterationBelowLimit => open_or(
-            rejection_outcome(&context.contract) == RejectionOutcome::ReturnToInProgress,
+            rejection_outcome(context) == RejectionOutcome::ReturnToInProgress,
             || {
                 format!(
                     "the task has been rejected {} times and the limit is {}, so it escalates rather than being worked again",
                     iteration(&context.contract),
-                    max_iterations(&context.contract)
+                    iteration_limit(context)
                 )
             },
         ),
         GateId::IterationLimitReached => open_or(
-            rejection_outcome(&context.contract) == RejectionOutcome::Escalate,
+            rejection_outcome(context) == RejectionOutcome::Escalate,
             || {
                 format!(
                     "the task has been rejected {} times and the limit is {}, so it is worked again rather than escalated",
                     iteration(&context.contract),
-                    max_iterations(&context.contract)
+                    iteration_limit(context)
                 )
             },
         ),
@@ -395,6 +427,26 @@ fn check_gate(gate: GateId, actor: TransitionActor, context: &TransitionContext)
             open_or(governor_escalation_reason(context).is_some(), || {
                 "no budget whose consequence is escalation is exhausted, no permission was denied, and Farik ran every criterion it tried, so the governor has nothing to escalate"
                     .to_string()
+            })
+        }
+        GateId::HumanRejection => {
+            if !context.result_awaits_human {
+                return Err(vec![
+                    "the result does not wait on the human's acceptance, so it is the reviewer's to send back"
+                        .to_string(),
+                ]);
+            }
+            // The reviewer still reviews first (5.1): the human does not stand in for it. An epic
+            // is the human's to review, so it waits on nobody.
+            open_or(
+                context.contract.kind == Kind::Epic || context.review_passed,
+                || {
+                    "the reviewer has not passed the review yet, and the human sends back once it has".to_string()
+                },
+            )?;
+            // The ids the human names are held as the reviewer's are; naming none is allowed.
+            context.rejection.as_ref().map_or(Ok(()), |rejection| {
+                check_failed_criterion_ids(&context.contract, &rejection.failed_criterion_ids)
             })
         }
     }
@@ -539,15 +591,21 @@ fn max_iterations(contract: &TaskContract) -> u32 {
     u32::try_from(contract.budget.max_iterations.get()).unwrap_or(u32::MAX)
 }
 
-fn rejection_outcome(contract: &TaskContract) -> RejectionOutcome {
-    evaluate_rejection(iteration(contract), max_iterations(contract))
+/// `max_iterations` and the tries the human granted since (ADR 0024).
+fn iteration_limit(context: &TransitionContext) -> u32 {
+    max_iterations(&context.contract).saturating_add(context.extra_iterations)
+}
+
+fn rejection_outcome(context: &TransitionContext) -> RejectionOutcome {
+    evaluate_rejection(iteration(&context.contract), iteration_limit(context))
 }
 
 /// Why the governor's own `any -> escalated` row is open, or `None` when it is not. The task's
-/// sessions are their own reason (5.7); every other exhausted budget is `budget`; then a denied
-/// permission; then a criterion Farik could not run for the reviewer, which asks the human and so
-/// is `explicit_request`. A user's `stop` reaches the table as the human's own row instead, which
-/// needs no gate.
+/// sessions are their own reason (5.7); every other exhausted budget is `budget`; then design plans
+/// returned as often as the task may be tried, `iterations` (ADR 0026); then a denied
+/// permission; then a preview that could not be made ready, `preview`; then a criterion Farik could
+/// not run for the reviewer, which asks the human and so is `explicit_request`. A user's `stop`
+/// reaches the table as the human's own row instead, which needs no gate.
 fn governor_escalation_reason(context: &TransitionContext) -> Option<EscalationReason> {
     for exhausted in check_budgets(&context.budget) {
         if exhausted.consequence != BudgetConsequence::EscalateTask {
@@ -567,8 +625,15 @@ fn governor_escalation_reason(context: &TransitionContext) -> Option<EscalationR
             | BudgetScope::DayUsd => EscalationReason::Budget,
         });
     }
+    // A Designer whose plans were returned as often as the task may be tried is out of tries.
+    if context.design_plan_returns >= iteration_limit(context) {
+        return Some(EscalationReason::Iterations);
+    }
     if context.permission_denied {
         return Some(EscalationReason::Permission);
+    }
+    if context.preview_failed {
+        return Some(EscalationReason::Preview);
     }
     if context.criterion_unrunnable {
         return Some(EscalationReason::ExplicitRequest);
@@ -633,7 +698,8 @@ fn escalation_reason(gate: GateId, context: &TransitionContext) -> EscalationRea
         | GateId::BlockerResolved
         | GateId::DefinitionOfDone
         | GateId::RejectionReasons
-        | GateId::IterationBelowLimit => EscalationReason::ExplicitRequest,
+        | GateId::IterationBelowLimit
+        | GateId::HumanRejection => EscalationReason::ExplicitRequest,
     }
 }
 
@@ -651,12 +717,13 @@ mod tests {
     use crate::contract::{Role, TaskStatus};
     use crate::generated::task_contract::FarikTaskContractKind as Kind;
     use crate::generated::task_contract::FarikTaskContractRisk as Risk;
-    use crate::governor::done::{CriterionResult, DoneEvidence, RunBy};
+    use crate::governor::done::{CriterionResult, DesignReviewNeed, DoneEvidence, RunBy};
     use crate::governor::escalation::{
         DEFAULT_BLOCKED_LIMIT, EscalationReason as Why, RejectionOutcome,
     };
     use crate::governor::gates::{
-        AssignmentInput, AssignmentRequester, Blocker, ChildState, Rejection, WorkState,
+        AssignmentInput, AssignmentRequester, Blocker, ChildState, DesignerBrowser, Rejection,
+        WorkState,
     };
     use crate::governor::readiness::fixtures::{a_contract, a_ready_context};
     use crate::governor::transition_table::{
@@ -683,7 +750,9 @@ mod tests {
             open_sprint: None,
             task_sprint: None,
             parent_sprint: None,
+            plan_in_sprints: false,
             dependencies: Vec::new(),
+            designer_browser: DesignerBrowser::Ready,
         }
     }
 
@@ -747,6 +816,7 @@ mod tests {
                 review_note: Some("C1: cargo test, 11 passed.".to_string()),
                 human_accepted: false,
                 protected_paths: Vec::new(),
+                design_review: DesignReviewNeed::NotNeeded,
             },
             rejection: Some(Rejection {
                 failed_criterion_ids: vec!["C1".to_string()],
@@ -755,6 +825,12 @@ mod tests {
             budget: a_budget(),
             permission_denied: false,
             criterion_unrunnable: false,
+            preview_failed: false,
+            result_awaits_human: true,
+            review_passed: true,
+            extra_iterations: 0,
+            design_plan_returns: 0,
+            design_reviewer: None,
         }
     }
 
@@ -900,6 +976,111 @@ mod tests {
                     "{named:?} {asked:?}"
                 );
             }
+        }
+    }
+
+    #[test]
+    fn lets_the_designer_reject_a_ui_change() {
+        // F9: the runtime names the Designer only when its latest design review since the task
+        // entered verifying failed; core compares that id with the requester's.
+        let mut context = a_context();
+        context.contract.status = TaskStatus::Verifying;
+        let by_iris = ask(TaskStatus::Rejected, A::Reviewer, Some("iris"));
+        assert_eq!(
+            decide(&by_iris, &context),
+            Err(TransitionRefusal::NotTheNamedAgent {
+                actor: A::Reviewer,
+                named: Some("arch-1".to_string()),
+                asked: Some("iris".to_string())
+            }),
+            "no failed design review, no Designer's rejection"
+        );
+        context.design_reviewer = Some("iris".to_string());
+        assert_eq!(effects(&by_iris, &context), []);
+        assert_eq!(
+            effects(
+                &ask(TaskStatus::Rejected, A::Reviewer, Some(" iris ")),
+                &context
+            ),
+            []
+        );
+        // The reviewer the contract names still may, and anyone else still may not.
+        assert_eq!(
+            effects(
+                &ask(TaskStatus::Rejected, A::Reviewer, Some("arch-1")),
+                &context
+            ),
+            []
+        );
+        assert_eq!(
+            decide(
+                &ask(TaskStatus::Rejected, A::Reviewer, Some("dev-1")),
+                &context
+            ),
+            Err(TransitionRefusal::NotTheNamedAgent {
+                actor: A::Reviewer,
+                named: Some("arch-1".to_string()),
+                asked: Some("dev-1".to_string())
+            })
+        );
+        // The Designer's rejection carries its reasons, as a reviewer's does.
+        context.rejection = None;
+        assert_eq!(
+            one_gate(&by_iris, &context),
+            (
+                GateId::RejectionReasons,
+                vec![
+                    "work is rejected with written reasons mapped to the criteria that failed"
+                        .to_string()
+                ]
+            )
+        );
+    }
+
+    #[test]
+    fn lets_the_designer_reject_without_naming_a_criterion() {
+        // A failed design review fails no exit criterion: the Designer's reasons are the rejection.
+        let mut context = a_context();
+        context.contract.status = TaskStatus::Verifying;
+        context.design_reviewer = Some("iris".to_string());
+        context.rejection = Some(Rejection {
+            failed_criterion_ids: Vec::new(),
+            reasons: "The menu button has no name at 360 px.".to_string(),
+        });
+        let by_iris = ask(TaskStatus::Rejected, A::Reviewer, Some("iris"));
+        assert_eq!(effects(&by_iris, &context), []);
+        // The reviewer the contract names still maps its rejection to criteria.
+        assert_eq!(
+            one_gate(
+                &ask(TaskStatus::Rejected, A::Reviewer, Some("arch-1")),
+                &context
+            ),
+            (
+                GateId::RejectionReasons,
+                vec!["the rejection names no failed criterion".to_string()]
+            )
+        );
+        // The Designer still says why, and names only criteria the contract has.
+        for (failed, reasons, said) in [
+            (
+                Vec::new(),
+                " ",
+                "the rejection says nothing about why the criteria failed",
+            ),
+            (
+                vec!["C9".to_string()],
+                "No name.",
+                "this contract has no criterion C9",
+            ),
+        ] {
+            context.rejection = Some(Rejection {
+                failed_criterion_ids: failed,
+                reasons: reasons.to_string(),
+            });
+            assert_eq!(
+                one_gate(&by_iris, &context),
+                (GateId::RejectionReasons, vec![said.to_string()])
+            );
         }
     }
 
@@ -1445,6 +1626,58 @@ mod tests {
     }
 
     #[test]
+    fn lets_the_human_send_back_only_a_result_that_waits_on_them_once_it_is_reviewed() {
+        let mut context = a_context();
+        context.contract.status = TaskStatus::Verifying;
+        let request = ask(TaskStatus::Rejected, A::Human, None);
+        assert_eq!(effects(&request, &context), []);
+
+        let mut waits_on_nobody = context.clone();
+        waits_on_nobody.result_awaits_human = false;
+        assert_eq!(
+            one_gate(&request, &waits_on_nobody),
+            (
+                GateId::HumanRejection,
+                vec!["the result does not wait on the human's acceptance, so it is the reviewer's to send back".to_string()]
+            )
+        );
+
+        let mut unreviewed = context.clone();
+        unreviewed.review_passed = false;
+        assert_eq!(
+            one_gate(&request, &unreviewed),
+            (
+                GateId::HumanRejection,
+                vec!["the reviewer has not passed the review yet, and the human sends back once it has".to_string()]
+            )
+        );
+        // An epic is the human's to review, so it waits on no reviewer.
+        unreviewed.contract.kind = Kind::Epic;
+        assert_eq!(effects(&request, &unreviewed), []);
+
+        // The human names the failed criteria as the reviewer does, or none at all (ADR 0024).
+        context.rejection = Some(Rejection {
+            failed_criterion_ids: Vec::new(),
+            reasons: "The button is too small to tap.".to_string(),
+        });
+        assert_eq!(effects(&request, &context), []);
+        context.rejection = Some(Rejection {
+            failed_criterion_ids: vec!["C99".to_string(), "  ".to_string()],
+            reasons: "The button is too small to tap.".to_string(),
+        });
+        assert_eq!(
+            one_gate(&request, &context),
+            (
+                GateId::HumanRejection,
+                vec![
+                    "the rejection names a criterion with no id".to_string(),
+                    "this contract has no criterion C99".to_string()
+                ]
+            )
+        );
+    }
+
+    #[test]
     fn counts_the_iteration_when_the_task_returns_to_work_and_clears_its_blocker() {
         let mut context = a_context();
         context.contract.status = TaskStatus::Rejected;
@@ -1614,6 +1847,36 @@ mod tests {
     }
 
     #[test]
+    fn escalates_a_designers_task_whose_plans_were_returned_as_often_as_it_may_be_tried() {
+        // ADR 0026: returned design plans count against `max_iterations` plus the tries the human
+        // granted, and read after an exhausted budget and before a denied permission.
+        let mut context = a_context();
+        let request = ask(TaskStatus::Escalated, A::Governor, None);
+        context.extra_iterations = 2;
+        let limit =
+            u32::try_from(context.contract.budget.max_iterations.get()).expect("a small limit") + 2;
+        context.design_plan_returns = limit - 1;
+        assert_eq!(one_gate(&request, &context).0, GateId::GovernorEscalation);
+        context.design_plan_returns = limit;
+        assert_eq!(
+            effects(&request, &context),
+            [TransitionEffect::RaiseEscalation(Why::Iterations)]
+        );
+        // Read before a denied permission.
+        context.permission_denied = true;
+        assert_eq!(
+            effects(&request, &context),
+            [TransitionEffect::RaiseEscalation(Why::Iterations)]
+        );
+        // And after an exhausted budget.
+        context.budget.task_spent_usd = context.budget.task_max_usd;
+        assert_eq!(
+            effects(&request, &context),
+            [TransitionEffect::RaiseEscalation(Why::Budget)]
+        );
+    }
+
+    #[test]
     fn lets_the_human_escalate_or_cancel_anything_and_move_an_escalated_task() {
         let mut context = a_context();
         assert_eq!(
@@ -1687,7 +1950,7 @@ mod tests {
     }
 
     /// One case per row of `TRANSITION_TABLE`, in its order.
-    fn every_row() -> [Case; 20] {
+    fn every_row() -> [Case; 21] {
         use TaskStatus as S;
         let no_change: fn(&mut TransitionContext) = |_| {};
         [
@@ -1720,16 +1983,17 @@ mod tests {
             }),
             case(12, S::Verifying, S::Accepted, A::ProductManager, no_change),
             case(13, S::Verifying, S::Rejected, A::Reviewer, no_change),
-            case(14, S::Rejected, S::InProgress, A::Governor, no_change),
-            case(15, S::Rejected, S::Escalated, A::Governor, |context| {
+            case(14, S::Verifying, S::Rejected, A::Human, no_change),
+            case(15, S::Rejected, S::InProgress, A::Governor, no_change),
+            case(16, S::Rejected, S::Escalated, A::Governor, |context| {
                 context.contract.iteration = 3;
             }),
-            case(16, S::InProgress, S::Escalated, A::Governor, |context| {
+            case(17, S::InProgress, S::Escalated, A::Governor, |context| {
                 context.permission_denied = true;
             }),
-            case(17, S::InProgress, S::Escalated, A::Human, no_change),
-            case(18, S::InProgress, S::Cancelled, A::Human, no_change),
-            case(19, S::Escalated, S::Ready, A::Human, no_change),
+            case(18, S::InProgress, S::Escalated, A::Human, no_change),
+            case(19, S::InProgress, S::Cancelled, A::Human, no_change),
+            case(20, S::Escalated, S::Ready, A::Human, no_change),
         ]
     }
 
@@ -1777,6 +2041,8 @@ mod tests {
             (case.prepare)(&mut context);
             let stranger = match case.actor {
                 A::Assignee | A::Reviewer => A::ScrumMaster,
+                // The reviewer shares the human's `verifying -> rejected`.
+                A::Human if case.from == TaskStatus::Verifying => A::Assignee,
                 A::ScrumMaster | A::ProductManager | A::Governor | A::Human => A::Reviewer,
             };
             match decide(&ask(case.to, stranger, Some("arch-1")), &context) {

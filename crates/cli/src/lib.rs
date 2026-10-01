@@ -10,6 +10,8 @@
 pub mod board;
 /// The team's channel.
 pub mod channel;
+/// The human's one-to-one chats.
+pub mod chat;
 /// Taking a contract from the team, and giving it back.
 pub mod contract;
 /// Writing a contract with the Product Manager at the terminal.
@@ -41,6 +43,12 @@ pub mod refusal;
 /// `farik run` and `farik plan`.
 #[cfg(unix)]
 mod run;
+/// `farik serve`.
+#[cfg(unix)]
+mod serve;
+/// What `farik serve` does for the first-run wizard before there is a project.
+#[cfg(unix)]
+mod setup;
 /// One contract, and what happened to it.
 pub mod show;
 /// One sprint, and how it went.
@@ -48,6 +56,9 @@ pub mod sprint;
 /// Who drives a project, and how a command reaches it.
 #[cfg(unix)]
 mod start;
+/// What outlives a project: the state folder.
+#[cfg(unix)]
+mod state;
 /// Filing a request.
 pub mod task;
 /// The team's rules and its criterion library.
@@ -69,6 +80,8 @@ use farik_protocol::clock::{Clock, IdSource, SequentialIds};
 use farik_protocol::command::{AcceptSubject, Command};
 #[cfg(unix)]
 use farik_runtime::RuntimeAdapter;
+#[cfg(unix)]
+use farik_runtime::credential::{CredentialStore, FileStore, KeychainStore, MemoryStore};
 #[cfg(unix)]
 use farik_runtime::daemon::DaemonState;
 use farik_runtime::sleep::Sleeper;
@@ -130,7 +143,49 @@ pub struct CliIo<'a> {
     /// What a driving process waits on while every agent with work is asleep: the machine's timer
     /// over `clock` when `None`, a test's own otherwise.
     pub sleeper: Option<Arc<dyn Sleeper>>,
+    /// What `farik serve` opens its link with: nothing here, and the system's opener in `main`.
+    pub open_url: Opener,
+    /// Where the model credential is kept: one store in memory here, so that no test touches a
+    /// real keychain, and the keychain then the file in `main`.
+    #[cfg(unix)]
+    pub credential_stores: CredentialStores,
+    /// Whether `farik serve` lets a browser at `http://localhost:<port>` in without a code: the
+    /// end-to-end server's `--preview` (step 12, D1). The release build has no such field.
+    #[cfg(feature = "e2e")]
+    pub admit_local_preview: bool,
+    /// The image Docker's sandbox and the preview run in, in place of `SANDBOX_IMAGE`: the
+    /// end-to-end server's `--sandbox-image`.
+    #[cfg(feature = "e2e")]
+    pub sandbox_image: Option<String>,
 }
+
+/// The places the model credential is kept, in the order they are tried.
+#[cfg(unix)]
+pub type CredentialStores = Arc<dyn Fn() -> Vec<Arc<dyn CredentialStore>> + Send + Sync>;
+
+/// The computer's credential stores: its keychain when `keychain` is true, then
+/// `credential.json` in the state folder of `env`, when there is one.
+#[cfg(unix)]
+#[must_use]
+pub fn system_credential_stores(
+    env: &BTreeMap<String, String>,
+    keychain: bool,
+) -> CredentialStores {
+    let file = state::state_dir(env).map(|directory| directory.join("credential.json"));
+    Arc::new(move || {
+        let mut stores: Vec<Arc<dyn CredentialStore>> = Vec::new();
+        if keychain {
+            stores.push(Arc::new(KeychainStore));
+        }
+        if let Some(file) = &file {
+            stores.push(Arc::new(FileStore::new(file.clone())));
+        }
+        stores
+    })
+}
+
+/// Opens a link in a browser, or says why it could not.
+pub type Opener = Arc<dyn Fn(&str) -> Result<(), String> + Send + Sync>;
 
 impl<'a> CliIo<'a> {
     /// A harness writing to `stdout` and `stderr`, run in `cwd` at `clock`'s time, with nothing on
@@ -156,6 +211,16 @@ impl<'a> CliIo<'a> {
             interrupts: Interrupts::Channel(never),
             session_ids: Arc::new(SequentialIds::new()),
             sleeper: None,
+            open_url: Arc::new(|_| Ok(())),
+            #[cfg(unix)]
+            credential_stores: {
+                let memory: Arc<dyn CredentialStore> = Arc::new(MemoryStore::default());
+                Arc::new(move || vec![Arc::clone(&memory)])
+            },
+            #[cfg(feature = "e2e")]
+            admit_local_preview: false,
+            #[cfg(feature = "e2e")]
+            sandbox_image: None,
         }
     }
 }
@@ -265,6 +330,15 @@ enum Commands {
     },
     /// Drive the team until nothing needs doing, a stop, or Ctrl-C (8.2).
     Run,
+    /// Drive the team and keep driving when the board is idle, until a stop or Ctrl-C (8.1).
+    Serve {
+        /// The port to listen on, instead of 7420 and the nine after it.
+        #[arg(long)]
+        port: Option<u16>,
+        /// Print the link and do not open it in a browser.
+        #[arg(long)]
+        no_open: bool,
+    },
     /// Plan without doing: triage, contracts, breakdowns, and assignments, and no work (8.2).
     Plan,
     /// Approve a contract that awaits your approval (5.16).
@@ -279,6 +353,16 @@ enum Commands {
         /// Your review, which an epic's result needs.
         #[arg(long)]
         message: Option<String>,
+    },
+    /// Send a result that waits for you back to its assignee, after its review (ADR 0024).
+    SendBack {
+        /// The task whose result it is.
+        task_id: String,
+        /// What is wrong, for the next attempt.
+        message: String,
+        /// A criterion the result fails; repeat it for each one.
+        #[arg(long = "criterion")]
+        criteria: Vec<String>,
     },
     /// Answer a question an agent asked (5.7).
     Answer {
@@ -316,10 +400,22 @@ enum Commands {
         #[command(subcommand)]
         command: SprintCommands,
     },
+    /// Pause the whole team: no rule runs and no session starts until `farik resume`.
+    Pause,
+    /// Resume a paused team.
+    Resume,
     /// Say something in the team's channel; @<id> mentions an agent (5.9).
     Say {
         /// What you say.
         #[arg(required = true, trailing_var_arg = true, allow_hyphen_values = true)]
+        text: Vec<String>,
+    },
+    /// Say something to one agent in your one-to-one chat, or with no text show the chat (4.3).
+    Chat {
+        /// The agent's id.
+        agent: String,
+        /// What you say; nothing shows the chat, oldest first.
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         text: Vec<String>,
     },
     /// Show the team's channel, oldest first (5.9).
@@ -490,6 +586,7 @@ impl From<SizeArgument> for farik_protocol::command::RequestSize {
 ///
 /// `args` is the whole invocation, program name first, as `std::env::args` gives it.
 #[must_use]
+#[allow(clippy::too_many_lines, reason = "one arm per command")]
 pub fn run_cli(args: &[String], io: &mut CliIo<'_>) -> i32 {
     let parsed = match Cli::try_parse_from(args) {
         Ok(parsed) => parsed,
@@ -501,8 +598,16 @@ pub fn run_cli(args: &[String], io: &mut CliIo<'_>) -> i32 {
             HookCommands::PostToolUse { daemon } => hook::post_tool_use(&io.cwd.join(daemon), io),
         };
     }
+    if parsed.json && matches!(parsed.command, Commands::Serve { .. }) {
+        say(
+            &mut io.stderr,
+            "farik: farik serve prints lines for a person; --json is not available for it",
+        );
+        return MISUSE;
+    }
     let now = io.clock.now();
     if let Commands::Run
+    | Commands::Serve { .. }
     | Commands::Plan
     | Commands::Contract {
         command: ContractCommands::New { .. },
@@ -521,13 +626,20 @@ pub fn run_cli(args: &[String], io: &mut CliIo<'_>) -> i32 {
             command: ContractCommands::Lock { .. } | ContractCommands::Unlock { .. },
         } => open_project(&io.cwd, now)
             .and_then(|project| phase_two_write(&parsed.command, &project, now)),
+        Commands::Chat { agent, text } if text.is_empty() => {
+            open_project(&io.cwd, now).and_then(|project| chat::chat(&project, agent))
+        }
         Commands::Approve { .. }
+        | Commands::Chat { .. }
         | Commands::Accept { .. }
+        | Commands::SendBack { .. }
         | Commands::Answer { .. }
         | Commands::Integrate { .. }
         | Commands::Resolve { .. }
         | Commands::Cancel { .. }
         | Commands::Say { .. }
+        | Commands::Pause
+        | Commands::Resume
         | Commands::Sprint {
             command: SprintCommands::Start { .. } | SprintCommands::End,
         } => open_project(&io.cwd, now).and_then(|project| {
@@ -572,6 +684,7 @@ pub fn run_cli(args: &[String], io: &mut CliIo<'_>) -> i32 {
         } => open_project(&io.cwd, now).and_then(|project| team::criteria(&project)),
         Commands::Hook { .. }
         | Commands::Run
+        | Commands::Serve { .. }
         | Commands::Plan
         | Commands::Contract {
             command: ContractCommands::New { .. },
@@ -648,6 +761,19 @@ fn humans(command: &Commands) -> Result<(&'static str, Command), String> {
                 message: message.clone(),
             },
         ),
+        Commands::SendBack {
+            task_id,
+            message,
+            criteria,
+        } => (
+            "send-back",
+            Command::HumanSendBack {
+                task_id: task(task_id)?,
+                subject: AcceptSubject::Result,
+                message: message.clone(),
+                failed_criteria: criteria.clone(),
+            },
+        ),
         Commands::Answer {
             question_id,
             answer,
@@ -674,6 +800,7 @@ fn humans(command: &Commands) -> Result<(&'static str, Command), String> {
                 task_id: task(task_id)?,
                 to: (*status).into(),
                 message: message.join(" "),
+                extra_tries: None,
             },
         ),
         Commands::Cancel { task_id, reason } => (
@@ -695,9 +822,18 @@ fn humans(command: &Commands) -> Result<(&'static str, Command), String> {
         Commands::Sprint {
             command: SprintCommands::End,
         } => ("sprint end", Command::SprintEnd),
+        Commands::Pause => ("pause", Command::TeamPause),
+        Commands::Resume => ("resume", Command::TeamResume),
         Commands::Say { text } => (
             "say",
             Command::MessagePost {
+                text: text.join(" "),
+            },
+        ),
+        Commands::Chat { agent, text } => (
+            "chat",
+            Command::ChatMessagePost {
+                agent_id: agent.clone(),
                 text: text.join(" "),
             },
         ),
@@ -751,6 +887,9 @@ fn human_command(
 fn drive(command: &Commands, as_json: bool, io: &mut CliIo<'_>) -> i32 {
     use farik_runtime::orchestrator::TickRules;
 
+    if let Commands::Serve { port, no_open } = command {
+        return serve::serve(*port, *no_open, io);
+    }
     let project = match open_project(&io.cwd, io.clock.now()) {
         Ok(project) => project,
         Err(error) => return run::refuse(io, as_json, &error),

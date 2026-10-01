@@ -1,0 +1,46 @@
+.button {
+	font:
+		var(--farik-type-body-weight) var(--farik-type-body-size) /
+		var(--farik-type-body-line-height) var(--farik-type-body-family);
+	padding: var(--farik-space-2) var(--farik-space-4);
+	border: 1px solid var(--farik-color-control-border);
+	border-radius: var(--farik-radius-control);
+	cursor: pointer;
+}
+
+.button:focus-visible {
+	outline: 2px solid var(--farik-color-focus);
+	outline-offset: 2px;
+}
+
+.button:disabled {
+	cursor: not-allowed;
+	opacity: 0.6;
+}
+
+.primary {
+	background: var(--farik-color-action);
+	color: var(--farik-color-action-ink);
+	border-color: var(--farik-color-action);
+}
+
+.secondary {
+	background: var(--farik-color-surface);
+	color: var(--farik-color-ink);
+}
+
+.quiet {
+	background: none;
+	color: var(--farik-color-ink);
+	border-color: transparent;
+	text-decoration: underline;
+}
+
+.hidden {
+	position: absolute;
+	width: 1px;
+	height: 1px;
+	overflow: hidden;
+	clip-path: inset(50%);
+	white-space: nowrap;
+}

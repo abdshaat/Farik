@@ -4,20 +4,23 @@
 use std::collections::BTreeSet;
 use std::path::{Component, Path, PathBuf};
 
+use farik_core::contract::Role;
 use farik_core::governor::permissions::{
-    AgentGrants, PermissionTier, ToolCallContext, ToolCallRequest, ToolDescriptor,
-    evaluate_tool_call,
+    AgentGrants, ConnectorRefusal, ConnectorTag, PermissionTier, ToolCallContext, ToolCallRequest,
+    ToolDescriptor, evaluate_connector_call, evaluate_tool_call,
 };
-use farik_core::team::{Agent, AgentStatus, Team};
+use farik_core::team::{AgentStatus, BUILTIN_CONNECTORS, Team};
 use farik_protocol::event::{
-    EventBody, EventIds, ToolCalledBody, ToolDeniedBody, ToolReturnedBody, new_event,
+    ConnectorTagWire, EventBody, EventIds, ToolCalledBody, ToolDeniedBody, ToolReturnedBody,
+    new_event,
 };
 use serde::{Deserialize, Serialize, Serializer};
 use serde_json::{Value, json};
 
 use super::{DaemonError, DaemonState, SessionRegistration};
+use crate::tools::design::design_plan_gate;
 use crate::tools::refusal::Refusal;
-use crate::tools::{ToolDeps, tool_descriptors};
+use crate::tools::{ToolDeps, ToolError, tool_descriptors};
 
 /// What Claude Code sends a hook on its standard input, the fields Farik reads.
 #[derive(Debug, Clone, PartialEq, Deserialize)]
@@ -109,7 +112,9 @@ pub fn builtin_tool_tier(tool: &str) -> Option<PermissionTier> {
 /// Code runs read tools in parallel.
 #[must_use]
 pub fn decide_pre_tool_use(request: &HookRequest, state: &DaemonState) -> HookDecision {
-    let deps = state.deps();
+    let Some(deps) = state.deps() else {
+        return HookDecision::deny(format!("no_project: {}", super::NO_PROJECT));
+    };
     let mut sessions = state.sessions();
     let Some(session) = sessions.get_mut(&request.session_id) else {
         let reason = format!(
@@ -120,7 +125,7 @@ pub fn decide_pre_tool_use(request: &HookRequest, state: &DaemonState) -> HookDe
             session_id: Some(request.session_id.clone()),
             ..deps.ids.clone()
         };
-        return record_decision(deps, ids, request, Err(reason));
+        return record_decision(deps, ids, request, None, Err(reason));
     };
     let verdict = match &session.stop_reason {
         Some(reason) => Err(Denial::from(format!("{SESSION_STOPPED}: {reason}"))),
@@ -133,7 +138,14 @@ pub fn decide_pre_tool_use(request: &HookRequest, state: &DaemonState) -> HookDe
         }
         denial.reason
     });
-    let decision = record_decision(deps, ids_of(deps, &session.registration), request, verdict);
+    let connector = connector_of(request, &session.registration);
+    let decision = record_decision(
+        deps,
+        ids_of(deps, &session.registration),
+        request,
+        connector,
+        verdict,
+    );
     if decision.allow {
         session.tool_calls += 1;
     }
@@ -159,7 +171,11 @@ impl From<String> for Denial {
 ///
 /// `Io` when the log does not take the event.
 pub fn record_post_tool_use(request: &HookRequest, state: &DaemonState) -> Result<(), DaemonError> {
-    let deps = state.deps();
+    let Some(deps) = state.deps() else {
+        return Err(DaemonError::Io {
+            detail: super::NO_PROJECT.to_string(),
+        });
+    };
     let ids = state.sessions().get(&request.session_id).map_or_else(
         || EventIds {
             session_id: Some(request.session_id.clone()),
@@ -198,12 +214,12 @@ fn judge(
         .files
         .read_team()
         .map_err(|error| format!("team_unreadable: {error}"))?;
-    let agent = match team
+    match team
         .agents
         .iter()
         .find(|agent| agent.id.as_str() == registration.agent_id)
     {
-        Some(agent) if agent.status == AgentStatus::Active => agent,
+        Some(agent) if crate::tools::may_work(agent.status, registration.purpose) => {}
         found => {
             let status = found.map(|agent| agent.status);
             return Err(Denial {
@@ -219,18 +235,18 @@ fn judge(
                 }),
             });
         }
-    };
-    judge_call(request, registration, tool_calls, deps, &team, agent).map_err(Denial::from)
+    }
+    judge_call(request, registration, tool_calls, deps, &team).map_err(Denial::from)
 }
 
-/// Whether an active agent's call may go ahead, or the reason it may not.
+/// Whether an active agent's call may go ahead, or the reason it may not: by the tiers the
+/// session started with (spec 4.4).
 fn judge_call(
     request: &HookRequest,
     registration: &SessionRegistration,
     tool_calls: u32,
     deps: &ToolDeps,
     team: &Team,
-    agent: &Agent,
 ) -> Result<(), String> {
     if tool_calls >= registration.limits.max_tool_calls {
         return Err(format!(
@@ -250,6 +266,9 @@ fn judge_call(
             Some(tool) => (tool.tier, Vec::new()),
             None => return Err(not_allowed(&request.tool_name)),
         },
+        None if connector_tool(&request.tool_name).is_some() => {
+            (judge_connector(request, registration)?, Vec::new())
+        }
         None => match builtin_tool_tier(&request.tool_name) {
             Some(tier) => (
                 tier,
@@ -279,7 +298,7 @@ fn judge_call(
             input_hash: String::new(),
         },
         &AgentGrants {
-            tiers: agent.tiers().into_iter().collect::<BTreeSet<_>>(),
+            tiers: registration.tiers.iter().copied().collect::<BTreeSet<_>>(),
             preauthorized_external_tools: BTreeSet::new(),
         },
         &ToolCallContext {
@@ -288,7 +307,74 @@ fn judge_call(
             approved_calls: Vec::new(),
         },
     )
-    .map_err(|refusal| Refusal::Tool(refusal).reason())
+    .map_err(|refusal| Refusal::Tool(refusal).reason())?;
+    let role = team
+        .agents
+        .iter()
+        .find(|agent| agent.id.as_str() == registration.agent_id)
+        .map_or(Role::Human, |agent| Role::from(agent.role));
+    design_plan_gate(&deps.log, role, tier, registration.task_id.as_ref()).map_err(|error| {
+        match error {
+            ToolError::Refused { reason } => reason,
+            other => format!("design_plan_unreadable: {other}"),
+        }
+    })
+}
+
+/// A shipped connector's tool name, `mcp__<server>__<tool>`, as its server and its tool; `None`
+/// for any other name, which no session is served.
+fn connector_tool(name: &str) -> Option<(&str, &str)> {
+    name.strip_prefix("mcp__")?
+        .split_once("__")
+        .filter(|(server, _)| BUILTIN_CONNECTORS.contains(server))
+}
+
+/// The server and the tag a connector's call is recorded with: its server whenever the name is a
+/// connector's, and its tag when the session's list of that server tags it.
+fn connector_of(
+    request: &HookRequest,
+    registration: &SessionRegistration,
+) -> Option<(String, Option<ConnectorTag>)> {
+    let (server, tool) = connector_tool(&request.tool_name)?;
+    let tag = registration
+        .connectors
+        .iter()
+        .find(|connector| connector.server == server)
+        .and_then(|connector| connector.tools.get(tool).copied());
+    Some((server.to_string(), tag))
+}
+
+/// The tier a connector's call needs, `network`, once `evaluate_connector_call` passes it (5.6).
+fn judge_connector(
+    request: &HookRequest,
+    registration: &SessionRegistration,
+) -> Result<PermissionTier, String> {
+    let Some((server, tool)) = connector_tool(&request.tool_name) else {
+        return Err(not_allowed(&request.tool_name));
+    };
+    let connector = registration
+        .connectors
+        .iter()
+        .find(|connector| connector.server == server);
+    evaluate_connector_call(tool, &request.tool_input, connector)
+        .map(|_| PermissionTier::Network)
+        .map_err(|refusal| match refusal {
+            ConnectorRefusal::ConnectorNotInSession => format!(
+                "connector_not_in_session: {server} is not a connector this session was given"
+            ),
+            ConnectorRefusal::ToolNotTagged => format!(
+                "tool_not_tagged: {tool} is not in {server}'s pinned list of tools, so it is not \
+                 offered"
+            ),
+            ConnectorRefusal::ToolDenied => format!(
+                "tool_denied: {tool} of {server} reaches beyond the preview or changes something \
+                 outside the sandbox, and no session may call it"
+            ),
+            ConnectorRefusal::UrlOutsidePreview { url } => format!(
+                "url_outside_preview: {url} is not the project's preview; open pages under {}",
+                connector.map_or("", |connector| connector.origin.as_str())
+            ),
+        })
 }
 
 fn not_allowed(tool: &str) -> String {
@@ -389,8 +475,13 @@ fn record_decision(
     deps: &ToolDeps,
     ids: EventIds,
     request: &HookRequest,
+    connector: Option<(String, Option<ConnectorTag>)>,
     verdict: Result<(), String>,
 ) -> HookDecision {
+    let (server, tag) = match connector {
+        Some((server, tag)) => (Some(server), tag.map(tag_wire)),
+        None => (None, None),
+    };
     let tool = request.tool_name.clone();
     let tool_use_id = request.tool_use_id.clone();
     let (body, decision) = match verdict {
@@ -399,6 +490,8 @@ fn record_decision(
                 tool,
                 tool_use_id,
                 input: cut(request.tool_input.to_string()),
+                server: server.and_then(|name| name.try_into().ok()),
+                tag,
             }),
             HookDecision {
                 allow: true,
@@ -410,6 +503,8 @@ fn record_decision(
                 tool,
                 tool_use_id,
                 reason: reason.clone(),
+                server: server.and_then(|name| name.try_into().ok()),
+                tag,
             }),
             HookDecision::deny(reason),
         ),
@@ -417,6 +512,14 @@ fn record_decision(
     match append(deps, ids, body) {
         Ok(()) => decision,
         Err(detail) => HookDecision::deny(format!("record_failed: {detail}")),
+    }
+}
+
+fn tag_wire(tag: ConnectorTag) -> ConnectorTagWire {
+    match tag {
+        ConnectorTag::Network => ConnectorTagWire::Network,
+        ConnectorTag::ExternalEffect => ConnectorTagWire::ExternalEffect,
+        ConnectorTag::Denied => ConnectorTagWire::Denied,
     }
 }
 
@@ -451,7 +554,7 @@ mod tests {
 
     use super::{HookDecision, HookRequest, cut, decide_pre_tool_use, record_post_tool_use};
     use crate::daemon::fixtures::{DEV_SESSION, POST_READ, PRE_READ, PRE_WRITE, TestDaemon};
-    use crate::tools::fixtures::a_team_of_three;
+    use crate::tools::fixtures::{a_team_of_three, with_the_designer};
 
     fn denied_for(decision: &HookDecision, kind: &str) {
         assert!(!decision.allow, "{decision:?}");
@@ -893,6 +996,266 @@ mod tests {
             daemon.state.stop_reason(DEV_SESSION).as_deref(),
             Some("agent paused by the user")
         );
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn keeps_a_session_to_the_tiers_it_started_with() {
+        let daemon = TestDaemon::new("hook-session-tiers", |_| {});
+        // dev-a's session started holding `execute`; the tier is taken away while it runs.
+        daemon
+            .project
+            .deps
+            .files
+            .write_team(&a_team_of_three(|wire| {
+                wire["agents"][1]["revokes"] = json!(["execute"]);
+            }))
+            .expect("the team is written");
+        let exec = json!({ "command": "true" });
+        let running = decide_pre_tool_use(
+            &daemon.dev_call("mcp__farik__farik_exec", &exec),
+            &daemon.state,
+        );
+        assert!(running.allow, "{running:?}");
+        let context = daemon
+            .state
+            .tool_context(DEV_SESSION)
+            .expect("the session is registered");
+        // Past the tier check: the fixture's session has no sandbox to run the command in.
+        assert_eq!(
+            crate::tools::fixtures::run(&context, "farik_exec", exec.clone()),
+            Err(crate::tools::ToolError::Failed {
+                detail: "this session has no sandbox to run a command in".to_string()
+            })
+        );
+        daemon.register(
+            "session-next",
+            "dev-a",
+            Some("FRK-1"),
+            DEFAULT_SESSION_LIMITS,
+        );
+        let next = decide_pre_tool_use(
+            &daemon.call("session-next", "mcp__farik__farik_exec", &exec),
+            &daemon.state,
+        );
+        denied_for(&next, "tier_not_granted");
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn denies_a_connector_call_outside_the_rules() {
+        use farik_core::governor::permissions::{PermissionTier, SessionConnector};
+        use farik_protocol::event::ConnectorTagWire;
+
+        use crate::daemon::SessionRegistration;
+        use crate::session::SessionPurpose;
+
+        let daemon = TestDaemon::new("hook-connector", |_| {});
+        let definition = farik_roles::builtin_connector("playwright").expect("shipped");
+        daemon.state.register_session(SessionRegistration {
+            session_id: "session-browser".to_string(),
+            agent_id: "dev-a".to_string(),
+            task_id: Some("FRK-1".parse().expect("a task id")),
+            purpose: SessionPurpose::Implement,
+            in_reply_to: None,
+            thread: None,
+            cwd: daemon.worktree.clone(),
+            executor: None,
+            limits: DEFAULT_SESSION_LIMITS,
+            farik_tools: Vec::new(),
+            tiers: vec![PermissionTier::Read, PermissionTier::Network],
+            connectors: vec![SessionConnector {
+                server: "playwright".to_string(),
+                origin: "http://localhost:4400".to_string(),
+                tools: definition.tools,
+            }],
+            preview: None,
+        });
+        let hook = |tool: &str, input: Value| {
+            decide_pre_tool_use(&daemon.call("session-browser", tool, &input), &daemon.state)
+        };
+        let navigate = "mcp__playwright__browser_navigate";
+
+        let allowed = hook(navigate, json!({ "url": "http://localhost:4400/cart" }));
+        assert!(allowed.allow, "{allowed:?}");
+        let called = daemon.events(EventKind::ToolCalled);
+        let EventBody::ToolCalled(body) = &called.last().expect("recorded").body else {
+            panic!("a tool.called body");
+        };
+        assert_eq!(body.tool, navigate);
+        assert_eq!(
+            body.server.as_deref().map(String::as_str),
+            Some("playwright")
+        );
+        assert_eq!(body.tag, Some(ConnectorTagWire::Network));
+
+        for (tool, input, kind, server, tag) in [
+            (
+                navigate,
+                json!({ "url": "http://example.com/" }),
+                "url_outside_preview",
+                "playwright",
+                Some(ConnectorTagWire::Network),
+            ),
+            (
+                "mcp__playwright__browser_evaluate",
+                json!({ "function": "() => 1" }),
+                "tool_denied",
+                "playwright",
+                Some(ConnectorTagWire::Denied),
+            ),
+            (
+                "mcp__playwright__browser_teleport",
+                json!({}),
+                "tool_not_tagged",
+                "playwright",
+                None,
+            ),
+        ] {
+            let decision = hook(tool, input);
+            denied_for(&decision, kind);
+            let denied = daemon.events(EventKind::ToolDenied);
+            let EventBody::ToolDenied(body) = &denied.last().expect("recorded").body else {
+                panic!("a tool.denied body");
+            };
+            assert_eq!(body.tool, tool);
+            assert_eq!(body.reason, decision.reason);
+            assert_eq!(
+                body.server.as_deref().map(String::as_str),
+                Some(server),
+                "{tool}"
+            );
+            assert_eq!(body.tag, tag, "{tool}");
+        }
+        // A shipped connector that dev-a's own session was not given.
+        let decision = decide_pre_tool_use(
+            &daemon.dev_call(navigate, &json!({ "url": "http://localhost:4400" })),
+            &daemon.state,
+        );
+        denied_for(&decision, "connector_not_in_session");
+        let denied = daemon.events(EventKind::ToolDenied);
+        let EventBody::ToolDenied(body) = &denied.last().expect("recorded").body else {
+            panic!("a tool.denied body");
+        };
+        assert_eq!(
+            body.server.as_deref().map(String::as_str),
+            Some("playwright")
+        );
+        assert_eq!(body.tag, None);
+        assert_eq!(daemon.events(EventKind::ToolCalled).len(), 1);
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn refuses_a_designer_write_before_approval() {
+        let daemon = TestDaemon::new("hook-design-plan", |_| {});
+        daemon
+            .project
+            .deps
+            .files
+            .write_team(&a_team_of_three(|wire| {
+                with_the_designer(wire);
+                wire["agents"][3]["grants"] = json!(["git_remote"]);
+            }))
+            .expect("the team is written");
+        daemon.register(
+            "session-iris",
+            "iris",
+            Some("FRK-1"),
+            DEFAULT_SESSION_LIMITS,
+        );
+        let edit = json!({
+            "file_path": daemon.inside("src/a.rs"), "old_string": "a", "new_string": "b"
+        });
+        let exec = json!({ "command": "true" });
+        let hook = |tool: &str, input: &Value| {
+            decide_pre_tool_use(&daemon.call("session-iris", tool, input), &daemon.state)
+        };
+        let context = daemon
+            .state
+            .tool_context("session-iris")
+            .expect("the session is registered");
+        let called = |tool: &str, input: Value| crate::tools::fixtures::run(&context, tool, input);
+        let not_approved = |result| {
+            assert!(
+                matches!(&result, Err(crate::tools::ToolError::Refused { reason })
+                    if reason.starts_with("design_plan_not_approved: ")),
+                "{result:?}"
+            );
+        };
+
+        let proposed = json!({ "plan": "A plan." });
+        let returned = json!({ "reason": "Say what changes." });
+        for before in [
+            None,
+            Some(("design_plan.proposed", &proposed)),
+            Some(("design_plan.returned", &returned)),
+        ] {
+            if let Some((kind, body)) = before {
+                daemon.project.record("FRK-1", kind, body);
+            }
+            denied_for(&hook("Edit", &edit), "design_plan_not_approved");
+            denied_for(
+                &hook("mcp__farik__farik_exec", &exec),
+                "design_plan_not_approved",
+            );
+            denied_for(
+                &hook("mcp__farik__farik_git_status", &json!({})),
+                "design_plan_not_approved",
+            );
+            denied_for(
+                &hook("mcp__farik__farik_git_push", &json!({})),
+                "design_plan_not_approved",
+            );
+            not_approved(called("farik_exec", exec.clone()));
+            not_approved(called("farik_git_status", json!({})));
+            not_approved(called("farik_git_push", json!({})));
+            let read = hook("Read", &json!({ "file_path": daemon.inside("src/a.rs") }));
+            assert!(read.allow, "{read:?}");
+        }
+        // The dev's own session is not held to the Designer's plan.
+        let dev = decide_pre_tool_use(&daemon.dev_call("Edit", &edit), &daemon.state);
+        assert!(dev.allow, "{dev:?}");
+
+        daemon
+            .project
+            .record("FRK-1", "design_plan.proposed", &proposed);
+        daemon.project.record(
+            "FRK-1",
+            "design_plan.approved",
+            &json!({ "reason": "Go ahead." }),
+        );
+        let approved = hook("Edit", &edit);
+        assert!(approved.allow, "{approved:?}");
+        let exec_approved = hook("mcp__farik__farik_exec", &exec);
+        assert!(exec_approved.allow, "{exec_approved:?}");
+        // Past the plan gate: the fixture's session has no sandbox to run the command in.
+        assert_eq!(
+            called("farik_exec", exec.clone()),
+            Err(crate::tools::ToolError::Failed {
+                detail: "this session has no sandbox to run a command in".to_string()
+            })
+        );
+
+        // A Designer's session about no task has no plan, so its commands are held, even while a
+        // task's plan is approved.
+        daemon.register("session-iris-none", "iris", None, DEFAULT_SESSION_LIMITS);
+        let none = |tool: &str, input: &Value| {
+            decide_pre_tool_use(
+                &daemon.call("session-iris-none", tool, input),
+                &daemon.state,
+            )
+        };
+        // (Its `Edit` is refused before the gate: a session with no task has no allowed paths.)
+        denied_for(
+            &none("mcp__farik__farik_exec", &exec),
+            "design_plan_not_approved",
+        );
+        let no_task = daemon
+            .state
+            .tool_context("session-iris-none")
+            .expect("the session is registered");
+        not_approved(crate::tools::fixtures::run(&no_task, "farik_exec", exec));
     }
 
     #[test]

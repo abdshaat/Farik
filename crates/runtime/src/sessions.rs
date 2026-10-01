@@ -40,6 +40,19 @@ pub fn record_session_started(
         effort: effort_wire(spec.effort),
         in_reply_to: in_reply_to.and_then(NonZeroU64::new),
         thread,
+        // A chat session names its chat, which is its agent's (ADR 0026).
+        chat: match spec.purpose {
+            SessionPurpose::Chat => {
+                Some(
+                    spec.agent_id
+                        .parse()
+                        .map_err(|error| StoreError::InvalidEvent {
+                            detail: format!("session.started names no chat: {error}"),
+                        })?,
+                )
+            }
+            _ => None,
+        },
     };
     let ids = EventIds {
         task_id: spec.task_id.clone(),
@@ -72,6 +85,7 @@ pub fn record_session_ended(
             EndReason::Limit => SessionEndedBodyReason::Limit,
             EndReason::Error => SessionEndedBodyReason::Error,
             EndReason::ProviderLimit => SessionEndedBodyReason::ProviderLimit,
+            EndReason::CredentialRefused => SessionEndedBodyReason::CredentialRefused,
         },
         detail: detail.to_string(),
     };
@@ -99,10 +113,12 @@ fn purpose_wire(purpose: SessionPurpose) -> SessionStartedBodyPurpose {
         SessionPurpose::Triage => SessionStartedBodyPurpose::Triage,
         SessionPurpose::Refine => SessionStartedBodyPurpose::Refine,
         SessionPurpose::Plan => SessionStartedBodyPurpose::Plan,
+        SessionPurpose::Explore => SessionStartedBodyPurpose::Explore,
         SessionPurpose::Implement => SessionStartedBodyPurpose::Implement,
         SessionPurpose::Verify => SessionStartedBodyPurpose::Verify,
         SessionPurpose::Ceremony => SessionStartedBodyPurpose::Ceremony,
         SessionPurpose::Conversation => SessionStartedBodyPurpose::Conversation,
+        SessionPurpose::Chat => SessionStartedBodyPurpose::Chat,
     }
 }
 
@@ -209,10 +225,12 @@ mod tests {
             (SessionPurpose::Triage, "triage"),
             (SessionPurpose::Refine, "refine"),
             (SessionPurpose::Plan, "plan"),
+            (SessionPurpose::Explore, "explore"),
             (SessionPurpose::Implement, "implement"),
             (SessionPurpose::Verify, "verify"),
             (SessionPurpose::Ceremony, "ceremony"),
             (SessionPurpose::Conversation, "conversation"),
+            (SessionPurpose::Chat, "chat"),
         ];
         let efforts = [
             (Effort::Low, "low"),

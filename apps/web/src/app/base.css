@@ -1,0 +1,16 @@
+body {
+	margin: 0;
+	font:
+		var(--farik-type-body-weight) var(--farik-type-body-size) /
+		var(--farik-type-body-line-height) var(--farik-type-body-family);
+}
+
+/* Never the browser's own link colour. */
+a {
+	color: var(--farik-color-link);
+}
+
+a:focus-visible {
+	outline: 2px solid var(--farik-color-focus);
+	outline-offset: 2px;
+}

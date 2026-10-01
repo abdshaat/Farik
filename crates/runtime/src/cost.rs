@@ -17,10 +17,10 @@ use farik_protocol::clock::Clock;
 use farik_protocol::event::{
     BudgetExhaustedBody, BudgetExhaustedBodyConsequence, BudgetExhaustedBodyScope,
     CostRecordedBody, CostRecordedBodyModelId, CostRecordedBodyPurpose, EventBody, EventIds,
-    TokenUsage, new_event,
+    EventKind, FarikEvent, SessionEndedBodyReason, TokenUsage, new_event,
 };
 use farik_roles::{RoleError, load_role};
-use farik_store::{CostProjection, CostScope, EventLog, Projections, StoreError};
+use farik_store::{CostProjection, CostScope, EventLog, EventQuery, Projections, StoreError};
 
 use crate::channel::{ChannelError, post_system};
 use crate::session::{SessionPurpose, TRIAGE_MODEL, session_model};
@@ -162,8 +162,8 @@ pub fn unpriced_models(
     for agent in team.active_agents() {
         let role = Role::from(agent.role);
         let mut models = Vec::new();
-        match &agent.model {
-            Some(model) => models.push(model.id.to_string()),
+        match agent.model.as_ref().and_then(|model| model.id.as_ref()) {
+            Some(id) => models.push(id.to_string()),
             None => match load_role(role) {
                 Ok(definition) => models.push(session_model(agent, &definition).0),
                 // Every role a team file can give an agent ships now; `NotFound` is `Human`
@@ -187,10 +187,35 @@ pub fn unpriced_models(
     Ok(unpriced)
 }
 
+/// Whether the team's daily budget is spent at `now`, for a session of `role` about no task.
+///
+/// # Errors
+///
+/// `Store` when the costs cannot be read.
+pub fn day_spent(
+    projections: &Projections,
+    team: &Team,
+    role: Role,
+    now: DateTime<Utc>,
+) -> Result<bool, CostError> {
+    let state = budget_state(
+        projections,
+        team,
+        role,
+        None,
+        &SessionLedger::default(),
+        now,
+    )?;
+    Ok(check_budgets(&state)
+        .iter()
+        .any(|exhausted| exhausted.scope == BudgetScope::DayUsd))
+}
+
 /// Everything `check_budgets` needs for one session, read from the projections at `now`.
 ///
 /// The session limits are the role's defaults with each field `team.budgets.session` sets put in
-/// its place. The task's come from its contract, and a session with no task is bounded by none. The
+/// its place. The task's come from its contract, and a session with no task is bounded by none;
+/// its sessions allowance grows by 4 for every extra try the human granted it (ADR 0024). The
 /// day is the UTC date of `now`, and a team that sets no daily budget has an unbounded day (ADR
 /// 0015). The sprint's is the open sprint's, and unbounded with none open or one with no budget.
 ///
@@ -224,11 +249,35 @@ pub fn budget_state(
         None => (0.0, 0, f64::INFINITY, u32::MAX),
         Some(contract) => {
             let spent = spent_by(projections, CostScope::Task, &contract.id.to_string())?;
+            let resolved = projections.log().read(&EventQuery {
+                task_id: Some(contract.id.clone()),
+                kinds: vec![EventKind::EscalationResolved],
+                ..EventQuery::default()
+            })?;
+            // A session the provider refused the key of is not the task's (5.5): it is not counted.
+            let refused = projections
+                .log()
+                .read(&EventQuery {
+                    task_id: Some(contract.id.clone()),
+                    kinds: vec![EventKind::SessionEnded],
+                    ..EventQuery::default()
+                })?
+                .iter()
+                .filter(|event| {
+                    matches!(&event.body, EventBody::SessionEnded(body)
+                        if body.reason == SessionEndedBodyReason::CredentialRefused)
+                })
+                .count();
             (
                 spent.as_ref().map_or(0.0, |row| row.usd),
-                spent.as_ref().map_or(0, |row| row.sessions),
+                spent
+                    .as_ref()
+                    .map_or(0, |row| row.sessions)
+                    .saturating_sub(u32::try_from(refused).unwrap_or(u32::MAX)),
                 contract.budget.max_cost_usd,
-                u32::try_from(contract.budget.max_sessions.get()).unwrap_or(u32::MAX),
+                u32::try_from(contract.budget.max_sessions.get())
+                    .unwrap_or(u32::MAX)
+                    .saturating_add(extra_tries(&resolved).saturating_mul(4)),
             )
         }
     };
@@ -252,6 +301,18 @@ pub fn budget_state(
         day_spent_usd: day.map_or(0.0, |row| row.usd),
         day_max_usd: team.budgets.daily_usd.unwrap_or(f64::INFINITY),
     })
+}
+
+/// The more tries the human granted over `history`'s `escalation.resolved` events (ADR 0024).
+pub(crate) fn extra_tries(history: &[FarikEvent]) -> u32 {
+    history
+        .iter()
+        .filter_map(|event| match &event.body {
+            EventBody::EscalationResolved(body) => body.extra_tries,
+            _ => None,
+        })
+        .map(|tries| u32::try_from(tries.get()).unwrap_or(u32::MAX))
+        .fold(0, u32::saturating_add)
 }
 
 /// Records a `budget.exhausted` for every budget exhausted in `after` that was not in `before`,
@@ -335,10 +396,12 @@ fn purpose_wire(purpose: SessionPurpose) -> CostRecordedBodyPurpose {
         SessionPurpose::Triage => CostRecordedBodyPurpose::Triage,
         SessionPurpose::Refine => CostRecordedBodyPurpose::Refine,
         SessionPurpose::Plan => CostRecordedBodyPurpose::Plan,
+        SessionPurpose::Explore => CostRecordedBodyPurpose::Explore,
         SessionPurpose::Implement => CostRecordedBodyPurpose::Implement,
         SessionPurpose::Verify => CostRecordedBodyPurpose::Verify,
         SessionPurpose::Ceremony => CostRecordedBodyPurpose::Ceremony,
         SessionPurpose::Conversation => CostRecordedBodyPurpose::Conversation,
+        SessionPurpose::Chat => CostRecordedBodyPurpose::Chat,
     }
 }
 
@@ -525,6 +588,7 @@ mod tests {
             SessionPurpose::Verify,
             SessionPurpose::Ceremony,
             SessionPurpose::Conversation,
+            SessionPurpose::Chat,
         ] {
             assert_eq!(
                 serde_json::to_value(purpose_wire(purpose)).expect("serializes"),
@@ -644,7 +708,7 @@ mod tests {
         let mut wire = a_team_wire();
         wire["agents"] = json!([
             // Its own model is the one its triage sessions run on: named once, not twice.
-            on("pm", "product_manager", Some("claude-sonnet-5")),
+            on("pm", "product_manager", Some("claude-sonnet-5-5")),
             on("dev-a", "software_developer", Some("claude-unknown-9")),
             on("dev-b", "software_developer", Some("claude-unknown-9")),
             paused,
@@ -652,12 +716,12 @@ mod tests {
             on("arch-2", "architect", Some("claude-other-2")),
         ]);
         let team = validate_team(&wire).expect("a team");
-        let only_opus_5 = validate_price_table(&json!({
+        let only_opus_5_5 = validate_price_table(&json!({
             "version": 1,
             "source_url": "https://example.com/prices",
             "retrieved_at": "2026-09-23",
             "prices": {
-                "claude-opus-5": {
+                "claude-opus-5-5": {
                     "input_usd_per_mtok": 5.0,
                     "output_usd_per_mtok": 25.0,
                     "cache_read_usd_per_mtok": 0.5,
@@ -678,14 +742,14 @@ mod tests {
                 .collect()
         };
         assert_eq!(
-            unpriced_models(&team, &only_opus_5)
+            unpriced_models(&team, &only_opus_5_5)
                 .expect("an Architect with no model uses its role's shipped model"),
             // Every active agent's conversations, and the ceremony runner's ceremonies, run on
-            // Claude Sonnet 5 whatever its own model.
+            // Claude Sonnet 5.5 whatever its own model.
             named(&[
                 ("claude-other-2", &["arch-2"]),
                 (
-                    "claude-sonnet-5",
+                    "claude-sonnet-5-5",
                     &["pm", "dev-a", "dev-b", "arch", "arch-2"]
                 ),
                 ("claude-unknown-9", &["dev-a", "dev-b"]),
@@ -769,6 +833,43 @@ mod tests {
         assert!(close(read.day_max_usd, 20.0));
         assert!(read.sprint_max_usd.is_infinite() && read.sprint_max_usd > 0.0);
         assert!(close(read.sprint_spent_usd, 0.0));
+    }
+
+    #[test]
+    fn counts_no_session_the_provider_refused_the_key_of() {
+        let (log, projections) = a_board();
+        filed(&log, &projections, "FRK-1");
+        for session in ["a", "b"] {
+            record_session_cost(
+                &log,
+                &projections,
+                &source(ids(Some("FRK-1"), session)),
+                &usage(0, 0),
+                &prices(),
+                &clock(),
+            )
+            .expect("recorded");
+        }
+        // Another task's refused session is not this task's to leave out.
+        for (task, session) in [("FRK-1", "b"), ("FRK-2", "c")] {
+            crate::sessions::record_session_ended(
+                &log,
+                session,
+                crate::session::EndReason::CredentialRefused,
+                "Failed to authenticate. API Error: 401 OAuth access token is invalid.",
+                &ids(Some(task), session),
+                &clock(),
+            )
+            .expect("recorded");
+        }
+        let contract = a_contract("FRK-1", 5.0, 3);
+        let read = state(
+            &projections,
+            &a_team(None),
+            Role::SoftwareDeveloper,
+            Some(&contract),
+        );
+        assert_eq!(read.task_sessions, 1);
     }
 
     #[test]

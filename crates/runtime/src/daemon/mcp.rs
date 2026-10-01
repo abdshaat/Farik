@@ -9,6 +9,8 @@ use axum::http::StatusCode;
 use axum::http::request::Parts;
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
+use base64::Engine as _;
+use base64::engine::general_purpose::STANDARD;
 use rmcp::model::{
     CacheScope, CallToolRequestParams, CallToolResponse, CallToolResult, ContentBlock,
     Implementation, InitializeResult, JsonObject, ListToolsResult, PaginatedRequestParams,
@@ -19,6 +21,7 @@ use rmcp::{ErrorData, RoleServer, ServerHandler};
 use serde_json::{Value, json};
 
 use super::DaemonState;
+use crate::tools::design::screenshots;
 use crate::tools::refusal::Refusal;
 use crate::tools::{ToolContext, call_tool, tool_descriptors};
 
@@ -118,11 +121,26 @@ impl ServerHandler for FarikMcp {
         }
         let input = request.arguments.map_or_else(|| json!({}), Value::Object);
         let result = match call_tool(&calling.context, &request.name, input).await {
-            Ok(value) => CallToolResult::success(vec![ContentBlock::text(value.to_string())]),
+            Ok(value) => {
+                let mut blocks = vec![ContentBlock::text(value.to_string())];
+                blocks.extend(screenshot_of(&calling.context, &request.name, &value));
+                CallToolResult::success(blocks)
+            }
             Err(error) => CallToolResult::error(vec![ContentBlock::text(error.to_string())]),
         };
         Ok(result.into())
     }
+}
+
+/// The screenshot `farik_check_page` answered with, as an image block the agent sees.
+fn screenshot_of(context: &ToolContext, tool: &str, answer: &Value) -> Option<ContentBlock> {
+    if tool != "farik_check_page" {
+        return None;
+    }
+    let file = answer.get("screenshot")?.as_str()?;
+    let folder = screenshots(context.deps.files.root(), context.task_id.as_ref()?);
+    let png = std::fs::read(folder.join(file)).ok()?;
+    Some(ContentBlock::image(STANDARD.encode(png), "image/png"))
 }
 
 /// The session a request comes from, which `require_session` put in its extensions.
@@ -207,8 +225,13 @@ mod tests {
 
     use farik_core::budget::DEFAULT_SESSION_LIMITS;
 
+    use std::sync::Arc;
+
     use crate::daemon::fixtures::{DEV_SESSION, TestDaemon};
-    use crate::daemon::{decide_pre_tool_use, router};
+    use crate::daemon::{SessionRegistration, decide_pre_tool_use, router};
+    use crate::preview::fixtures::CheckedPreview;
+    use crate::session::SessionPurpose;
+    use crate::tools::fixtures::{a_team_of_three, tiers_of, with_the_designer};
     use crate::tools::tool_descriptors;
 
     const TOKEN: &str = "a-token";
@@ -454,7 +477,7 @@ mod tests {
             .filter_map(|tool| tool["name"].as_str())
             .collect();
         let mut expected: Vec<&str> = tool_descriptors().iter().map(|tool| tool.name).collect();
-        assert_eq!(expected.len(), 26);
+        assert_eq!(expected.len(), 31);
         expected.push("permission");
         assert_eq!(names, expected);
         for tool in answer["result"]["tools"].as_array().expect("a list") {
@@ -525,6 +548,48 @@ mod tests {
             "{refused}"
         );
         assert!(daemon.events(EventKind::ContractWritten).is_empty());
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn returns_the_screenshot_as_an_image_block() {
+        let daemon = TestDaemon::new("mcp-screenshot", |_| {});
+        let deps = &daemon.project.deps;
+        deps.files
+            .write_team(&a_team_of_three(with_the_designer))
+            .expect("the Designer joins");
+        daemon.state.register_session(SessionRegistration {
+            session_id: "session-iris".to_string(),
+            agent_id: "iris".to_string(),
+            task_id: Some("FRK-1".parse().expect("a task id")),
+            cwd: daemon.worktree.clone(),
+            executor: None,
+            limits: DEFAULT_SESSION_LIMITS,
+            farik_tools: vec!["farik_check_page".to_string()],
+            tiers: tiers_of(deps, "iris"),
+            connectors: Vec::new(),
+            preview: Some(Arc::new(CheckedPreview::printing(r#"{"violations":[]}"#))),
+            purpose: SessionPurpose::Verify,
+            in_reply_to: None,
+            thread: None,
+        });
+        let mut client = Client::new(&daemon, "session-iris");
+        client.initialize().await;
+        let answer = client
+            .call(
+                "farik_check_page",
+                json!({ "path": "/", "width": "phone", "theme": "light" }),
+            )
+            .await;
+        assert_ne!(answer["result"]["isError"], json!(true), "{answer}");
+        let content = answer["result"]["content"].as_array().expect("content");
+        assert_eq!(content.len(), 2, "{answer}");
+        let said: Value = serde_json::from_str(&text_of(&answer)).expect("the answer is JSON");
+        assert_eq!(said["screenshot"], "session-iris-phone-light.png");
+        assert_eq!(content[1]["type"], "image", "{answer}");
+        assert_eq!(content[1]["mimeType"], "image/png", "{answer}");
+        // SCREENSHOT, in base64.
+        assert_eq!(content[1]["data"], "iVBORw0KGgo=", "{answer}");
     }
 
     #[tokio::test(flavor = "multi_thread")]

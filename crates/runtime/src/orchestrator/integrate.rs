@@ -254,9 +254,10 @@ fn rescan(tools: &ToolDeps, task_id: &TaskId) -> Result<ScanRefresh, String> {
     };
     let library = seeded_library(&scan.detected_criteria, kept.as_ref());
     let words = |error: OrchestratorError| error.to_string();
+    let previous = tools.files.read_project_scan().ok();
     tools
         .files
-        .write_project_scan(&project_document(&scan, &library))
+        .write_project_scan(&project_document(&scan, &library, previous.as_deref()))
         .map_err(|error| error.to_string())?;
     if kept.as_ref() != Some(&library) {
         tools
@@ -679,7 +680,7 @@ pub(super) fn cleanup(
 
 /// Removes a finished task's sandbox and worktrees when either worktree is still there, and says
 /// whether it removed them. The containers go by name, since after a restart no handle reaches
-/// them; then the base worktree; then the task's own worktree last, so that a run stopped in
+/// them; then the browser's folder and the base worktree; then the task's own worktree last, so that a run stopped in
 /// between leaves it, which is what brings this back.
 ///
 /// Containers that cannot be removed (docker is down) leave the worktrees as they are, so that
@@ -703,6 +704,22 @@ pub(super) fn remove_workspace(
     {
         // ponytail: nothing reports the failure; the board shows the task's worktree kept.
         return Ok(false);
+    }
+    // What the task's browser sessions saved (step 12), before the worktree that brings this back.
+    let browser = deps
+        .tools
+        .files
+        .root()
+        .join(".farik/local/browser")
+        .join(task_id.as_str());
+    match std::fs::remove_dir_all(&browser) {
+        Err(error) if error.kind() != std::io::ErrorKind::NotFound => {
+            return Err(OrchestratorError::Files(FilesError::Io {
+                path: browser.display().to_string(),
+                detail: error.to_string(),
+            }));
+        }
+        _ => {}
     }
     remove_worktree(&deps.tools.git, &base)?;
     remove_worktree(&deps.tools.git, &own)?;
@@ -1638,14 +1655,24 @@ mod tests {
     async fn rescans_after_an_integration_that_changed_the_project() {
         let harness = under("int-rescan", "auto_merge");
         accepted_adding(&harness, "FRK-1", PACKAGE);
+        let files = &harness.project.deps.files;
+        files
+            .append_project_note(
+                "It is a shop, not a game.",
+                chrono::NaiveDate::from_ymd_opt(2026, 9, 22).expect("a date"),
+            )
+            .expect("the note is kept");
         let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
 
         let what = acted(&orchestrator).await;
 
         assert!(what.ends_with("; the project scan was refreshed"), "{what}");
-        let files = &harness.project.deps.files;
         let document = files.read_project_scan().expect("project.md");
         assert!(document.contains("npm"), "{document}");
+        assert!(
+            document.contains("2026-09-22: It is a shop, not a game."),
+            "the user's words outlive the rescan: {document}"
+        );
         assert!(document.contains("the-tests-pass"), "{document}");
         let kinds: Vec<EventKind> = harness
             .events(&[

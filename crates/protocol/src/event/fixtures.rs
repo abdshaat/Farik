@@ -59,14 +59,7 @@ pub fn a_body_wire(kind: EventKind) -> Value {
             "triaged_by": "sam-ortiz"
         }),
         EventKind::ContractLocked | EventKind::ContractUnlocked => a_hold_body_wire(kind),
-        EventKind::DriftDetected => json!({
-            "drift": "contract_without_events",
-            "detail": "FRK-1 has a contract file and no events."
-        }),
-        EventKind::ProjectScanned => json!({
-            "read_back": "A Rust workspace with one crate and a check command.",
-            "detected_criteria": ["cargo xtask check"]
-        }),
+        EventKind::DriftDetected | EventKind::ProjectScanned => a_project_body_wire(kind),
         EventKind::TeamUpdated => json!({
             "team_name": "Farik",
             "agent_ids": ["maya-chen", "sam-ortiz"],
@@ -108,11 +101,7 @@ pub fn a_body_wire(kind: EventKind) -> Value {
             "refusal": "gate_failed",
             "details": ["the reviewer is the assignee"]
         }),
-        EventKind::EscalationRaised => json!({
-            "reason": "blocker_age",
-            "detail": "blocked_age: no key"
-        }),
-        EventKind::EscalationAged => json!({ "raised_seq": 1, "hours": 25 }),
+        EventKind::EscalationRaised | EventKind::EscalationAged => an_escalation_body_wire(kind),
         EventKind::MemoryWritten | EventKind::DecisionWritten => a_kept_body_wire(kind),
         EventKind::ContractEvaluated => json!({
             "gate": "definition_of_ready",
@@ -142,8 +131,18 @@ pub fn a_body_wire(kind: EventKind) -> Value {
         | EventKind::QuestionAnswered
         | EventKind::HumanAccepted
         | EventKind::EscalationResolved
-        | EventKind::MessagePosted => a_human_body_wire(kind),
+        | EventKind::MessagePosted
+        | EventKind::ChatMessagePosted => a_human_body_wire(kind),
         EventKind::AgentUpdated | EventKind::AgentSlept => an_agent_body_wire(kind),
+        EventKind::TeamPaused | EventKind::TeamResumed => json!({ "by": "human" }),
+        EventKind::DesignPlanProposed
+        | EventKind::DesignPlanApproved
+        | EventKind::DesignPlanReturned
+        | EventKind::DesignReviewRecorded
+        | EventKind::PreviewPrepared
+        | EventKind::PreviewStarted
+        | EventKind::PreviewStopped
+        | EventKind::PageChecked => a_design_body_wire(kind),
         EventKind::SprintStarted
         | EventKind::SprintPlanned
         | EventKind::SprintEnded
@@ -175,6 +174,67 @@ fn a_kept_body_wire(kind: EventKind) -> Value {
     }
 }
 
+/// An escalation raised for a blocker's age, or one that has waited 25 hours on the human.
+fn an_escalation_body_wire(kind: EventKind) -> Value {
+    if kind == EventKind::EscalationRaised {
+        json!({ "reason": "blocker_age", "detail": "blocked_age: no key" })
+    } else {
+        json!({ "raised_seq": 1, "hours": 25 })
+    }
+}
+
+/// A Designer's plan, or the Product Manager's decision on it; a stopped preview's reason has the
+/// decision's shape.
+fn a_design_plan_body_wire(kind: EventKind) -> Value {
+    if kind == EventKind::DesignPlanProposed {
+        json!({ "plan": "Make the sign-in page calm.\n\nOne button leads; the header stays." })
+    } else {
+        json!({ "reason": "It keeps to the contract." })
+    }
+}
+
+/// A design plan or its decision, a design review, a preview's life, or a page check.
+fn a_design_body_wire(kind: EventKind) -> Value {
+    match kind {
+        EventKind::DesignPlanProposed
+        | EventKind::DesignPlanApproved
+        | EventKind::DesignPlanReturned
+        | EventKind::PreviewStopped => a_design_plan_body_wire(kind),
+        EventKind::DesignReviewRecorded => json!({
+            "pass": true,
+            "reasons": "Both widths read well in both themes.",
+            "checks": [{ "width": "phone", "theme": "light", "violations": [] }]
+        }),
+        EventKind::PreviewPrepared => {
+            json!({ "tree": "4b825dc642cb6eb9a060e54bf8d69288fbee4904", "seconds": 212 })
+        }
+        EventKind::PageChecked => json!({
+            "width": "phone",
+            "theme": "light",
+            "path": "/",
+            "violations": [],
+            "screenshot": "session-1-phone-light.png"
+        }),
+        // preview.started
+        _ => json!({ "port": 4400 }),
+    }
+}
+
+/// A drift report, or the project scan's read-back.
+fn a_project_body_wire(kind: EventKind) -> Value {
+    if kind == EventKind::DriftDetected {
+        json!({
+            "drift": "contract_without_events",
+            "detail": "FRK-1 has a contract file and no events."
+        })
+    } else {
+        json!({
+            "read_back": "A Rust workspace with one crate and a check command.",
+            "detected_criteria": ["cargo xtask check"]
+        })
+    }
+}
+
 /// A lock or an unlock of a contract, by the human.
 fn a_hold_body_wire(kind: EventKind) -> Value {
     if kind == EventKind::ContractLocked {
@@ -184,12 +244,13 @@ fn a_hold_body_wire(kind: EventKind) -> Value {
     }
 }
 
-/// The Scrum Master's judgment of a contract, passing both rules.
+/// The judge's check of a contract's plan, passing its one question.
 fn a_judgment_body_wire() -> Value {
     json!({
         "judged_by": "sam-ortiz",
-        "fits_budget": true,
-        "criteria_detect_failure": true,
+        "answers": [
+            { "question": "Does the task fit its budget?", "pass": true, "reason": "One deliverable." }
+        ],
         "reason": "One deliverable and a criterion that runs it."
     })
 }
@@ -204,8 +265,8 @@ fn a_record_body_wire(kind: EventKind) -> Value {
 }
 
 /// A body of a question to the human or of the human's own acts: a question, an answer to question
-/// 3, an acceptance of a result with its words, a resolution back to `refining`, and a message
-/// in the channel mentioning `dev-a`.
+/// 3, an acceptance of a result with its words, a resolution back to `refining`, a message
+/// in the channel mentioning `dev-a`, and the human's message in dev-a's chat.
 fn a_human_body_wire(kind: EventKind) -> Value {
     match kind {
         EventKind::QuestionAsked => json!({
@@ -217,6 +278,9 @@ fn a_human_body_wire(kind: EventKind) -> Value {
         }
         EventKind::HumanAccepted => {
             json!({ "subject": "result", "accepted_by": "human", "message": "Both look right." })
+        }
+        EventKind::ChatMessagePosted => {
+            json!({ "chat": "dev-a", "author": "human", "text": "How is FRK-1?\nNo rush." })
         }
         EventKind::MessagePosted => json!({
             "author": "human",

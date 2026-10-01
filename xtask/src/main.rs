@@ -61,6 +61,9 @@ fn cargo(root: &Path, args: &[&str]) -> anyhow::Result<()> {
 }
 
 fn check(root: &Path, tests: Tests) -> anyhow::Result<()> {
+    for args in xtask::check::web_app_first(tests) {
+        program(root, "pnpm", &args)?;
+    }
     cargo(root, &["fmt", "--all", "--check"])?;
     cargo(
         root,
@@ -76,7 +79,29 @@ fn check(root: &Path, tests: Tests) -> anyhow::Result<()> {
     cargo(root, &xtask::check::test_arguments(tests))?;
     todos(root)?;
     core_io(root)?;
+    for args in xtask::check::front_end_commands(root.join("package.json").exists()) {
+        program(root, "pnpm", &args)?;
+    }
+    for (name, args) in xtask::check::integration_steps(tests) {
+        if name == "cargo" {
+            cargo(root, &args)?;
+        } else {
+            program(root, name, &args)?;
+        }
+    }
     println!("xtask check: ok");
+    Ok(())
+}
+
+fn program(root: &Path, name: &str, args: &[&str]) -> anyhow::Result<()> {
+    let status = Command::new(name)
+        .args(args)
+        .current_dir(root)
+        .status()
+        .with_context(|| format!("running {name} {}", args.join(" ")))?;
+    if !status.success() {
+        bail!("{name} {} failed", args.join(" "));
+    }
     Ok(())
 }
 

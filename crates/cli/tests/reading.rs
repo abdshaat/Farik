@@ -597,6 +597,7 @@ fn shows_a_tasks_events_cost_and_children() {
         Some(&"FRK-1".parse().expect("a task id")),
         at(),
         &ids,
+        None,
     )
     .expect("the child is filed");
     project::record_as(
@@ -849,6 +850,7 @@ fn prints_the_harness_metrics() {
             "  triage: $0.25",
             "  refine: $0.00",
             "  plan: $0.00",
+            "  explore: $0.00",
             "  implement: $0.25",
             "  verify: $0.50",
             "  ceremony: $0.00",
@@ -902,6 +904,7 @@ fn prints_the_harness_metrics_as_json() {
                     "triage": 0.25,
                     "refine": 0.0,
                     "plan": 0.0,
+                    "explore": 0.0,
                     "implement": 0.25,
                     "verify": 0.5,
                     "ceremony": 0.0,
@@ -971,6 +974,10 @@ fn prints_the_channel_counts() {
 #[cfg(unix)]
 #[test]
 #[ignore = "needs the git program: cargo xtask check --integration"]
+#[allow(
+    clippy::too_many_lines,
+    reason = "the whole of what a sprint's metrics print, one line per purpose"
+)]
 fn prints_the_metrics_of_a_sprint() {
     use serde_json::json;
 
@@ -1030,6 +1037,7 @@ fn prints_the_metrics_of_a_sprint() {
             "  triage: $0.00",
             "  refine: $0.00",
             "  plan: $0.00",
+            "  explore: $0.00",
             "  implement: $1.00",
             "  verify: $0.00",
             "  ceremony: $0.00",
@@ -1055,6 +1063,7 @@ fn prints_the_metrics_of_a_sprint() {
                     "triage": 0.0,
                     "refine": 0.0,
                     "plan": 0.0,
+                    "explore": 0.0,
                     "implement": 1.0,
                     "verify": 0.0,
                     "ceremony": 0.0,

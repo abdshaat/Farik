@@ -1,6 +1,6 @@
 # Farik web UI design
 
-Status: approved by the founder on 2026-09-26, who then asked for every page to be mocked up before any code. It is the design input to phase 6. Phase 6's step plans build from it, and step 02's component library takes its tokens from `@farik/brand` (phase 5 step 02).
+Status: approved by the founder on 2026-09-26, who then asked for every page to be mocked up before any code. It is the design input to phase 6. Phase 6's step plans build from it, and step 03's component library takes its tokens from `@farik/brand` (phase 6 step 01).
 Sources:
 - the brand, `docs/brand/brand.md` and the founder's kit, `docs/brand/brand-kit.png`;
 - the spec: section 2 (who it is for), 4 (journeys), 5.4 (Definition of Done), 10 (non-functional requirements) and 14 (brand);
@@ -29,12 +29,13 @@ The five brand colours, the three text shades, and the light and dark themes are
 | `page` | Soft Sand `#F3E7D3` | Midnight `#161616` | The page background |
 | `surface` | `#FBF6EC` | `#1F1F1F` | Raised areas: the request box, a dialog, a lane |
 | `ink` | Midnight `#161616` | Soft Sand `#F3E7D3` | Text |
-| `ink-muted` | `#5B5347` | `#B9AE9C` | Secondary text (checked for AA in step 02) |
+| `ink-muted` | `#5B5347` | `#B9AE9C` | Secondary text (checked for AA in step 01) |
 | `rule` | `#D9CBB3` | `#333333` | Borders and dividers |
 | `band` | Midnight `#161616` | `#0E0E0E` | The team band and the navigation rail, dark in both themes |
-| `action` | Clay Coral `#D8896A`, with Midnight text | the same | The one primary action on a screen |
-| `role-*` | Coral, Moss, Signal Blue, lavender, Midnight | the same | Role tags only |
-| `status-*` | Moss Text (done), Signal Text (working), Coral Text (waiting on you) | the base colours | Status words, always with a word, never colour alone |
+| `action` | Clay Coral `#D8896A`, with Midnight text | the same | The main button, and nothing else |
+| `role-*` | Dusty Rose `#C9A0A6` (Product Manager), Sage `#A3B8A0` (Scrum Master), Wheat `#D6B77A` (Architect), Sky `#B7C7DA` (Developer), Heather `#B3A9CF` (Marketing Specialist), with Midnight text | the same | Role tags only |
+| `status-*` | Moss Text `#536C59` (done), Slate Text `#44607F` (in progress), Clay Text `#96533A` (waiting on you) | Moss Grid `#6E8F76`, Slate `#8AA3C2`, Peach `#E0A68C` | Status words, always with a word, never colour alone |
+| `ready`, `ready-ink` | Added tint `#E3EBDF`, with Moss Text `#536C59` (4.71:1) | the same | The pale green pill behind "Ready" on the computer check, and only there; the Board's "Accepted" and the other done words stay plain (founder, 2026-09-30) |
 
 ### Type
 
@@ -84,6 +85,8 @@ The main area is a single left-aligned column, 720 px at most for reading screen
 
 On a phone (360 px), the rail becomes a bottom bar of five places, with Settings under Team. The team band scrolls sideways, with the agents waiting on the user first, and the request box stays at the top of Today.
 
+Each "Waiting on you" row's button (Answer, Review, Help, Add, Connect again) is a full-size button, at least 44 px tall, centred on its row and at the row's right end, whether or not the row has an avatar. Below 640 px it drops under the row's words and runs the row's width (founder, 2026-09-30).
+
 ### Principles
 
 1. **The team is the interface.** Every piece of work has a face on it: the avatar of the agent who did it or who is asking. The user deals with people, not with records.
@@ -106,23 +109,25 @@ The skill lists five looks that generated designs fall into. The founder's kit p
 
 One more revision came from the "remove one accessory" test. The first plan also blinked the cursor in the team band and gave every avatar an idle animation. Now the only motion that runs without the user doing anything is the cursor in the request box. Any other motion answers an event: when an agent's status changes, its avatar makes one two-frame hop. Both stop under `prefers-reduced-motion`.
 
+The founder added one more idle motion on 2026-09-30: while the page is connected, the rail's "Connected" dot breathes. One cycle takes 3 seconds, easing in and out, from the calm done green (`status-done`) to halfway towards the pale Added tint (`ready`) and back, so its brightness changes little and nothing flashes. In any other connection state the dot is still, and under `prefers-reduced-motion` it holds the calm green. The phone's top bar shows no connection mark, so nothing breathes there.
+
 ## Screens
 
 The screens map to phase 6's steps as follows:
 
 | Screen | Step | What it shows |
 |---|---|---|
-| Welcome and first-run wizard | 04 | One question per screen, as a numbered sequence (it is one), with a safe default already chosen and one line on why Farik asks. Back and Continue. The welcome uses the office scene and the display face. The team builder shows the five characters with their suggested names. Phase 7 step 02 adds the Finance Specialist to it as an optional sixth (ADR 0019). |
-| Today | 03, 05 | The team band, the request box, "Waiting on you", and "What moved". |
-| A human gate: approve a plan, or accept work | 05 | The agent's summary as a short letter signed by the agent's avatar. Then "What Farik checked": each exit criterion in plain words, marked passed or failed. Then "See the code changes" (collapsed). A decision bar with the primary action ("Accept the work" or "Approve the plan") and "Send back with a note". |
-| A question from an agent | 05 | The question with its avatar, the choices the agent offered, and a free-text answer. |
-| Help needed (an escalation) | 05 | What happened in plain words, what the agent tried, and the user's options. |
-| Board | 06 | Lanes named for the kit's sprint board (To do, In progress, Review, Done) plus Planning before them and Stuck after In progress. Each task is a row showing its assignee's avatar, its title, and a status word. Filters are chips. Sprint controls sit at the top. |
-| Task detail | 06 | Summary, checks, history, the diff, notes, and cost, in that order. |
-| Channel | 07 | Chat with avatars. Ceremonies (standup, review, retro) are collapsible threads titled in plain words. |
-| Team | 04 | Each agent's card-sized profile: avatar, name, role, persona, model, and pause or retire. Its advanced view holds permissions and rules. |
-| Costs | 06 | Today's and this sprint's spend per agent, in dollars, with the harness metrics. |
-| Settings | 03, 04 | Theme (light, dark, or match the system) and the Advanced switch. |
+| Welcome and first-run wizard | 05, 06 | One question per screen, as a numbered sequence (it is one), with a safe default already chosen and one line on why Farik asks. Back and Continue. The welcome uses the office scene and the display face. The team builder shows the six characters with their suggested names, the UI/UX Designer among them (`designer-chats-templates.md`). Phase 8 step 02 adds the Finance Specialist to it as an optional sixth (ADR 0019). |
+| Today | 08 | The team band, the request box, "Waiting on you", and "What moved". |
+| A human gate: approve a plan, or accept work | 08 | The agent's summary as a short letter signed by the agent's avatar. Then "What Farik checked": each exit criterion in plain words, marked passed or failed. Then "See the code changes" (collapsed). A decision bar with the primary action ("Accept the work" or "Approve the plan") and "Send back with a note". |
+| A question from an agent | 08 | The question with its avatar, the choices the agent offered, and a free-text answer. |
+| Help needed (an escalation) | 08 | What happened in plain words, what the agent tried, and the user's options. |
+| Board | 09 | Lanes named for the kit's sprint board (To do, In progress, Review, Done) plus Planning before them and Stuck after In progress. Each task is a row showing its assignee's avatar, its title, and a status word. Filters are chips. Sprint controls sit at the top. |
+| Task detail | 09 | Summary, checks, history, the diff, notes, and cost, in that order. |
+| Channel | 10 | Chat with avatars. Ceremonies (standup, review, retro) are collapsible threads titled in plain words. |
+| Team | 06 | Each agent's card-sized profile: avatar, name, role, persona, model, and pause or retire. Its advanced view holds permissions and rules. |
+| Costs | 09 | Today's and this sprint's spend per agent, in dollars, with the harness metrics. |
+| Settings | 04, 06, 09 | Theme (light, dark, or match the system), the Advanced switch, and "Your team's rules": setup's permission, spending, finishing and plan-check answers, each changed on its own with its effect shown first. |
 
 Lifecycle states map to plain words. Nothing shows the raw state names unless the user opens a task's advanced view:
 
@@ -142,29 +147,31 @@ The mark "Waiting on you" cuts across the lanes. It sits on:
 
 Every other `escalated` task is marked "Needs your help".
 
-The spec's lifecycle (5.2) is the authority. Step 06's plan checks this mapping against it.
+The spec's lifecycle (5.2) is the authority. Step 09's plan checks this mapping against it.
 
 ## Quality floor
 
 These hold without being mentioned on any screen:
 - responsive from 360 px, with no sideways page scroll;
-- visible keyboard focus: a 2 px Signal Blue ring with a 2 px offset;
+- visible keyboard focus: a 2 px ring with a 2 px offset, Slate Focus `#5F7A9B` in light (3.62:1 on Soft Sand) and Mist `#A7BCD6` in dark, both over 3:1;
 - `prefers-reduced-motion` respected;
-- WCAG 2.2 AA for every text pair, checked by phase 5 step 02's contrast test;
+- WCAG 2.2 AA for every text pair, checked by phase 6 step 01's contrast test;
 - status never shown by colour alone;
-- every string externalized (step 02).
+- every string externalized (step 03).
 
 ## Every page, mocked up
 
-On 2026-09-26 the founder asked for every page to be mocked up before any code. There are 32 screens. They are on the design canvas (https://claude.ai/artifact/6tNaCmNojhixuiJBsDPsmf) in six pages, and their sources are in `docs/design/mockups/`. Each `.dc.html` file is one screen, and `canvas.json` is the layout. The images in them are the canvas's uploaded crops of the kit, referenced as `/_blob/` addresses, so they show only on the canvas. Phase 6 builds from these screens, and step 02's components are taken from them.
+On 2026-09-26 the founder asked for every page to be mocked up before any code. There are 32 screens. They are on the design canvas (https://claude.ai/artifact/6tNaCmNojhixuiJBsDPsmf) in six pages, and their sources are in `docs/design/mockups/`. Each `.dc.html` file is one screen, and `canvas.json` is the layout. The images in them are the canvas's uploaded crops of the kit, referenced as `/_blob/` addresses, so they show only on the canvas. The mockups keep the colours of 2026-09-26; the palette in `docs/brand/brand.md` (2026-09-28) replaces them, and the tokens win. Phase 6 builds from these screens, and step 03's components are taken from them.
 
 | Canvas page | Screens | Phase 6 step |
 |---|---|---|
-| Daily work | Today (`Main`, with a dark-theme switch), Accept work (`Gate`), `Board`, `TaskDetail`, `SprintStart`, `SprintView`, `Channel`, `OneOnOne`, `Costs` | 03, 05, 06, 07 (the one-on-one is phase 7 step 04) |
-| Requests and approvals | `RequestFiled`, `Questions`, `ApprovePlan`, `PlanEditor`, `SendBack`, `HelpNeeded`, `AnswerQuestion` | 05 |
-| First run | `SetupProject`, `SetupScan`, the team (`Welcome`), `SetupPermissions`, `SetupSpending`, `SetupFinish`, `SetupAdvanced`, `Connect` | 01 (the connect page), 04 |
-| Team and settings | `Team`, `AgentEdit`, `Settings` | 03, 04 |
-| Phone (360 to 390 px) | Today (`Phone`), `PhoneGate`, `PhoneBoard`, `PhoneChannel` | 03 to 07 |
-| Website | `Site`, the public site on the domain (ADR 0017) | Phase 9 step 01 |
+| Daily work | Today (`Main`, with a dark-theme switch), Accept work (`Gate`), `Board`, `TaskDetail`, `SprintStart`, `SprintView`, `Channel`, `OneOnOne`, `Costs` | 08, 09, 10 (the one-on-one is phase 8 step 04) |
+| Requests and approvals | `RequestFiled`, `Questions`, `ApprovePlan`, `PlanEditor`, `SendBack`, `HelpNeeded`, `AnswerQuestion` | 08 |
+| First run | `SetupProject`, `SetupScan`, the team (`Welcome`), `SetupPermissions`, `SetupSpending`, `SetupFinish`, `SetupAdvanced`, `Connect` | 04 (the connect page), 05, 06 |
+| Team and settings | `Team`, `AgentEdit`, `Settings` | 04, 06 |
+| Phone (360 to 390 px) | Today (`Phone`), `PhoneGate`, `PhoneBoard`, `PhoneChannel` | 04 to 10 |
+| Website | `Site`, the public site on the domain (ADR 0017) | Phase 11 step 01 |
 
 The mockups are not the spec. Where one disagrees with `docs/SPEC.md`, the spec wins, and the step plan that builds that screen records the difference. The `Connect` screen's two "Mockup: …" buttons only switch between its states, for review.
+
+The step numbers above are revision 20's (revision 18's, ADR 0021, with step 07 split in two). Three first-run screens the founder's decisions of 2026-09-28 added have no mockup yet: the folder browser inside `SetupProject`, "Checking your computer", and "Connect your AI account". Phase 6 step 05 mocks them up in the same style, and the founder approves them, before any of its code. The Pause and Resume control in the rail, added the same day, is mocked up the same way by step 04.

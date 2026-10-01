@@ -102,10 +102,12 @@ fn purpose(wire: SessionStartedBodyPurpose) -> SessionPurpose {
         SessionStartedBodyPurpose::Triage => SessionPurpose::Triage,
         SessionStartedBodyPurpose::Refine => SessionPurpose::Refine,
         SessionStartedBodyPurpose::Plan => SessionPurpose::Plan,
+        SessionStartedBodyPurpose::Explore => SessionPurpose::Explore,
         SessionStartedBodyPurpose::Implement => SessionPurpose::Implement,
         SessionStartedBodyPurpose::Verify => SessionPurpose::Verify,
         SessionStartedBodyPurpose::Ceremony => SessionPurpose::Ceremony,
         SessionStartedBodyPurpose::Conversation => SessionPurpose::Conversation,
+        SessionStartedBodyPurpose::Chat => SessionPurpose::Chat,
     }
 }
 

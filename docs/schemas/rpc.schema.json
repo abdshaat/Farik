@@ -1,0 +1,4446 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://farik.dev/schemas/rpc.schema.json",
+  "title": "Farik RPC",
+  "description": "The JSON-RPC 2.0 text frames between the browser and the daemon's GET /rpc (docs/SPEC.md section 8). Any frame is a request, a response, or a notification; the query results and the command reply are $defs, which name the shape of each answer. command and event are objects here, not references, because one schema never references another: command_from_value and event_from_value read them.",
+  "oneOf": [
+    {
+      "$ref": "#/$defs/rpcRequest"
+    },
+    {
+      "$ref": "#/$defs/rpcResponse"
+    },
+    {
+      "$ref": "#/$defs/rpcNotification"
+    }
+  ],
+  "$defs": {
+    "requestId": {
+      "type": "integer",
+      "description": "The caller's own number for a request, echoed by its response."
+    },
+    "queryName": {
+      "type": "string",
+      "enum": [
+        "events.since",
+        "tasks.list",
+        "task.get",
+        "team.get",
+        "serve.status",
+        "folders.list",
+        "computer.check",
+        "account.status",
+        "waiting.list",
+        "contract.get",
+        "contract.check",
+        "task.history",
+        "task.diff",
+        "task.screenshot",
+        "task.checks",
+        "task.tries",
+        "sprint.current",
+        "questions.list",
+        "escalation.choices",
+        "team.activity",
+        "moved.since",
+        "team.propose",
+        "team.validate",
+        "models.list",
+        "project.scan",
+        "task.costs",
+        "sprints.list",
+        "sprint.get",
+        "costs.summary",
+        "metrics",
+        "settings.defaults",
+        "channel.messages",
+        "chats.list",
+        "chat.messages",
+        "templates.list",
+        "template.preview",
+        "backlog.summary"
+      ]
+    },
+    "subscribeRequest": {
+      "title": "Subscribe Request",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "jsonrpc",
+        "id",
+        "method",
+        "params"
+      ],
+      "properties": {
+        "jsonrpc": {
+          "const": "2.0"
+        },
+        "id": {
+          "$ref": "#/$defs/requestId"
+        },
+        "method": {
+          "const": "subscribe"
+        },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "from_seq": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 18446744073709551615
+            }
+          },
+          "required": [
+            "from_seq"
+          ]
+        }
+      }
+    },
+    "unsubscribeRequest": {
+      "title": "Unsubscribe Request",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "jsonrpc",
+        "id",
+        "method",
+        "params"
+      ],
+      "properties": {
+        "jsonrpc": {
+          "const": "2.0"
+        },
+        "id": {
+          "$ref": "#/$defs/requestId"
+        },
+        "method": {
+          "const": "unsubscribe"
+        },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {}
+        }
+      }
+    },
+    "commandRequest": {
+      "title": "Command Request",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "jsonrpc",
+        "id",
+        "method",
+        "params"
+      ],
+      "properties": {
+        "jsonrpc": {
+          "const": "2.0"
+        },
+        "id": {
+          "$ref": "#/$defs/requestId"
+        },
+        "method": {
+          "const": "command"
+        },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "command": {
+              "type": "object",
+              "description": "A command wire of command.schema.json; the daemon validates it with command_from_value."
+            }
+          },
+          "required": [
+            "command"
+          ]
+        }
+      }
+    },
+    "queryRequest": {
+      "title": "Query Request",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "jsonrpc",
+        "id",
+        "method",
+        "params"
+      ],
+      "properties": {
+        "jsonrpc": {
+          "const": "2.0"
+        },
+        "id": {
+          "$ref": "#/$defs/requestId"
+        },
+        "method": {
+          "const": "query"
+        },
+        "params": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/eventsSinceQuery"
+            },
+            {
+              "$ref": "#/$defs/tasksListQuery"
+            },
+            {
+              "$ref": "#/$defs/taskGetQuery"
+            },
+            {
+              "$ref": "#/$defs/teamGetQuery"
+            },
+            {
+              "$ref": "#/$defs/serveStatusQuery"
+            },
+            {
+              "$ref": "#/$defs/foldersListQuery"
+            },
+            {
+              "$ref": "#/$defs/computerCheckQuery"
+            },
+            {
+              "$ref": "#/$defs/accountStatusQuery"
+            },
+            {
+              "$ref": "#/$defs/waitingListQuery"
+            },
+            {
+              "$ref": "#/$defs/contractGetQuery"
+            },
+            {
+              "$ref": "#/$defs/contractCheckQuery"
+            },
+            {
+              "$ref": "#/$defs/taskHistoryQuery"
+            },
+            {
+              "$ref": "#/$defs/taskDiffQuery"
+            },
+            {
+              "$ref": "#/$defs/taskScreenshotQuery"
+            },
+            {
+              "$ref": "#/$defs/taskChecksQuery"
+            },
+            {
+              "$ref": "#/$defs/taskTriesQuery"
+            },
+            {
+              "$ref": "#/$defs/sprintCurrentQuery"
+            },
+            {
+              "$ref": "#/$defs/questionsListQuery"
+            },
+            {
+              "$ref": "#/$defs/escalationChoicesQuery"
+            },
+            {
+              "$ref": "#/$defs/teamActivityQuery"
+            },
+            {
+              "$ref": "#/$defs/movedSinceQuery"
+            },
+            {
+              "$ref": "#/$defs/teamProposeQuery"
+            },
+            {
+              "$ref": "#/$defs/teamValidateQuery"
+            },
+            {
+              "$ref": "#/$defs/modelsListQuery"
+            },
+            {
+              "$ref": "#/$defs/projectScanQuery"
+            },
+            {
+              "$ref": "#/$defs/taskCostsQuery"
+            },
+            {
+              "$ref": "#/$defs/sprintsListQuery"
+            },
+            {
+              "$ref": "#/$defs/backlogSummaryQuery"
+            },
+            {
+              "$ref": "#/$defs/sprintGetQuery"
+            },
+            {
+              "$ref": "#/$defs/costsSummaryQuery"
+            },
+            {
+              "$ref": "#/$defs/metricsQuery"
+            },
+            {
+              "$ref": "#/$defs/settingsDefaultsQuery"
+            },
+            {
+              "$ref": "#/$defs/channelMessagesQuery"
+            },
+            {
+              "$ref": "#/$defs/chatsListQuery"
+            },
+            {
+              "$ref": "#/$defs/chatMessagesQuery"
+            },
+            {
+              "$ref": "#/$defs/templatesListQuery"
+            },
+            {
+              "$ref": "#/$defs/templatePreviewQuery"
+            }
+          ]
+        }
+      }
+    },
+    "eventsSinceQuery": {
+      "title": "Events Since Query",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "params"
+      ],
+      "properties": {
+        "name": {
+          "const": "events.since"
+        },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "after_seq": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 18446744073709551615
+            },
+            "limit": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 500
+            }
+          },
+          "required": [
+            "after_seq",
+            "limit"
+          ]
+        }
+      }
+    },
+    "tasksListQuery": {
+      "title": "Tasks List Query",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "params"
+      ],
+      "properties": {
+        "name": {
+          "const": "tasks.list"
+        },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {}
+        }
+      }
+    },
+    "taskGetQuery": {
+      "title": "Task Get Query",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "params"
+      ],
+      "properties": {
+        "name": {
+          "const": "task.get"
+        },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "task_id": {
+              "type": "string",
+              "pattern": "^FRK-[0-9]{1,6}$"
+            }
+          },
+          "required": [
+            "task_id"
+          ]
+        }
+      }
+    },
+    "teamGetQuery": {
+      "title": "Team Get Query",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "params"
+      ],
+      "properties": {
+        "name": {
+          "const": "team.get"
+        },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {}
+        }
+      }
+    },
+    "serveStatusQuery": {
+      "title": "Serve Status Query",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "params"
+      ],
+      "properties": {
+        "name": {
+          "const": "serve.status"
+        },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {}
+        }
+      }
+    },
+    "rpcRequest": {
+      "title": "Rpc Request",
+      "description": "What the browser sends. The pairing of a query's name with its params is the schema's; the meaning of a command is command_from_value's.",
+      "oneOf": [
+        {
+          "$ref": "#/$defs/subscribeRequest"
+        },
+        {
+          "$ref": "#/$defs/unsubscribeRequest"
+        },
+        {
+          "$ref": "#/$defs/commandRequest"
+        },
+        {
+          "$ref": "#/$defs/queryRequest"
+        },
+        {
+          "$ref": "#/$defs/projectOpenRequest"
+        },
+        {
+          "$ref": "#/$defs/projectCreateRequest"
+        },
+        {
+          "$ref": "#/$defs/accountConnectRequest"
+        },
+        {
+          "$ref": "#/$defs/sandboxBuildRequest"
+        },
+        {
+          "$ref": "#/$defs/browserPullRequest"
+        },
+        {
+          "$ref": "#/$defs/requestFileRequest"
+        },
+        {
+          "$ref": "#/$defs/contractSaveRequest"
+        },
+        {
+          "$ref": "#/$defs/teamSaveRequest"
+        },
+        {
+          "$ref": "#/$defs/teamStartRequest"
+        },
+        {
+          "$ref": "#/$defs/criteriaSaveRequest"
+        },
+        {
+          "$ref": "#/$defs/accountDisconnectRequest"
+        },
+        {
+          "$ref": "#/$defs/projectNoteRequest"
+        },
+        {
+          "$ref": "#/$defs/agentReplaceRequest"
+        },
+        {
+          "$ref": "#/$defs/templateSaveRequest"
+        },
+        {
+          "$ref": "#/$defs/templateApplyRequest"
+        },
+        {
+          "$ref": "#/$defs/templateRenameRequest"
+        },
+        {
+          "$ref": "#/$defs/templateDeleteRequest"
+        }
+      ]
+    },
+    "rpcSuccess": {
+      "title": "Rpc Success",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "jsonrpc",
+        "id",
+        "result"
+      ],
+      "properties": {
+        "jsonrpc": {
+          "const": "2.0"
+        },
+        "id": {
+          "$ref": "#/$defs/requestId"
+        },
+        "result": {
+          "type": "object",
+          "description": "emptyResult for subscribe and unsubscribe, commandReply for command, the query's own result def for query, and the method's own result def (projectOpenResult, projectCreateResult, accountConnectResult, sandboxBuildResult, browserPullResult) for a setup method, and each other method's own result def."
+        }
+      }
+    },
+    "rpcFailure": {
+      "title": "Rpc Failure",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "jsonrpc",
+        "id",
+        "error"
+      ],
+      "properties": {
+        "jsonrpc": {
+          "const": "2.0"
+        },
+        "id": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/requestId"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "null when the request's id could not be read."
+        },
+        "error": {
+          "$ref": "#/$defs/rpcError"
+        }
+      }
+    },
+    "rpcError": {
+      "title": "Rpc Error",
+      "description": "-32700 parse, -32600 invalid request, -32601 unknown method, -32602 invalid params, -32603 internal (the store or a file failed), -32001 unknown_query, -32002 not_found, -32003 refused_here, -32004 no_project (the daemon has no project yet, so it answers only the setup queries), -32005 refused (a setup method was refused; the message is the sentence to show).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "code",
+        "message"
+      ],
+      "properties": {
+        "code": {
+          "type": "integer",
+          "enum": [
+            -32700,
+            -32600,
+            -32601,
+            -32602,
+            -32603,
+            -32001,
+            -32002,
+            -32003,
+            -32004,
+            -32005
+          ]
+        },
+        "message": {
+          "type": "string"
+        },
+        "data": {}
+      }
+    },
+    "rpcResponse": {
+      "title": "Rpc Response",
+      "oneOf": [
+        {
+          "$ref": "#/$defs/rpcSuccess"
+        },
+        {
+          "$ref": "#/$defs/rpcFailure"
+        }
+      ]
+    },
+    "rpcNotification": {
+      "title": "Rpc Notification",
+      "description": "The server's push of one event. The event is an object here because one schema never references another; rpc_notification_from_value reads it with event_from_value.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "jsonrpc",
+        "method",
+        "params"
+      ],
+      "properties": {
+        "jsonrpc": {
+          "const": "2.0"
+        },
+        "method": {
+          "const": "event"
+        },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "event": {
+              "type": "object"
+            }
+          },
+          "required": [
+            "event"
+          ]
+        }
+      }
+    },
+    "emptyResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {}
+    },
+    "commandReply": {
+      "title": "Command Reply",
+      "description": "What the daemon's POST /command answers once the token passes (docs/SPEC.md section 8.2): what the command did, as one sentence and the sequence numbers of the events it appended, or why it did nothing. A reply is what leaves a process, so it has a schema as a command does; farik_protocol::command::reply_from_value reads it against this definition.",
+      "oneOf": [
+        {
+          "$ref": "#/$defs/commandDone"
+        },
+        {
+          "$ref": "#/$defs/commandRefusal"
+        }
+      ]
+    },
+    "commandDone": {
+      "title": "Command Done",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "said",
+        "events"
+      ],
+      "properties": {
+        "said": {
+          "type": "string"
+        },
+        "events": {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 18446744073709551615
+          }
+        }
+      }
+    },
+    "commandRefusal": {
+      "title": "Command Refusal",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "error"
+      ],
+      "properties": {
+        "error": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "detail"
+          ],
+          "properties": {
+            "kind": {
+              "description": "invalid: the command cannot be handled as given, a schema refusal among them; refused: it cannot be done to what it names as things stand; not_found: what it names is not there; failed: the store, a file, git, or the orchestrator failed.",
+              "type": "string",
+              "enum": [
+                "invalid",
+                "refused",
+                "not_found",
+                "failed"
+              ]
+            },
+            "detail": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "eventsSinceResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "events": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          }
+        }
+      },
+      "required": [
+        "events"
+      ]
+    },
+    "tasksListResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "tasks": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/taskProjection"
+          }
+        }
+      },
+      "required": [
+        "tasks"
+      ]
+    },
+    "taskGetResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "task": {
+          "$ref": "#/$defs/taskProjection"
+        },
+        "design_plan": {
+          "description": "The task's latest UI/UX Designer's plan and the Product Manager's decision on it (ADR 0026), or null when no plan was proposed. reason is the decision's, once there is one.",
+          "oneOf": [
+            { "type": "null" },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "plan": { "type": "string" },
+                "state": { "type": "string", "enum": ["proposed", "approved", "returned"] },
+                "reason": { "type": "string" }
+              },
+              "required": ["plan", "state"]
+            }
+          ]
+        },
+        "ui_change": {
+          "type": "boolean",
+          "description": "Whether the task's change touches the interface (ADR 0026): a Software Developer's task whose contract sets ui_change, or whose branch changes a path the team's ui_paths match."
+        },
+        "design_review": {
+          "description": "The UI/UX Designer's design review of the change (step 12), or null when it is not a UI change. state says where it stands; reasons and checks are the latest design_review.recorded since the task last entered verifying, when there is one.",
+          "oneOf": [
+            { "type": "null" },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "state": {
+                  "type": "string",
+                  "enum": ["not_needed", "waiting", "waiting_on_designer", "preview_missing", "designer_needs_sandbox", "designer_needs_browser", "passed", "failed"]
+                },
+                "reasons": { "type": "string" },
+                "checks": {
+                  "type": "array",
+                  "maxItems": 4,
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "width": { "type": "string", "enum": ["phone", "desktop"] },
+                      "theme": { "type": "string", "enum": ["light", "dark"] },
+                      "violations": {
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "properties": {
+                            "rule": { "type": "string" },
+                            "impact": { "type": "string" },
+                            "target": { "type": "string" },
+                            "help": { "type": "string" }
+                          },
+                          "required": ["rule", "impact", "target", "help"]
+                        }
+                      }
+                    },
+                    "required": ["width", "theme", "violations"]
+                  }
+                }
+              },
+              "required": ["state", "checks"]
+            }
+          ]
+        },
+        "design_reviews": {
+          "description": "Every design_review.recorded of the task, oldest first: the Designer that recorded it, whether it passed, its reasons, and when (step 12). The gate reads the earlier ones as the Designer's send-backs, and the latest as who signed the letter.",
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "agent_id": { "type": ["string", "null"] },
+              "pass": { "type": "boolean" },
+              "reasons": { "type": "string" },
+              "recorded_at": { "type": "string", "format": "date-time" }
+            },
+            "required": ["agent_id", "pass", "reasons", "recorded_at"]
+          }
+        }
+      },
+      "required": [
+        "task",
+        "design_plan",
+        "ui_change",
+        "design_review",
+        "design_reviews"
+      ]
+    },
+    "teamGetResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "team": {
+          "type": "object",
+          "description": "The team file as team.schema.json shapes it."
+        },
+        "agents": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/effectiveAgent"
+          }
+        },
+        "judges": {
+          "$ref": "#/$defs/planJudges"
+        },
+        "max_agents": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "The most agents a team may have that are not retired (spec 4.1)."
+        }
+      },
+      "required": [
+        "team",
+        "agents",
+        "judges",
+        "max_agents"
+      ]
+    },
+    "serveStatusResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "project_root": {
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "null while the daemon is in setup mode, before a project is chosen."
+        },
+        "paused": {
+          "type": "boolean"
+        },
+        "credential": {
+          "oneOf": [
+            {
+              "type": "string",
+              "enum": [
+                "api_key",
+                "subscription_token"
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "port": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 65535
+        },
+        "take_on_error": {
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Why taking the chosen project on failed, or null."
+        },
+        "setup_pending": {
+          "type": "boolean",
+          "description": "Whether the project was just set up and waits for the team's setup (the marker .farik/local/setup-pending)."
+        }
+      },
+      "required": [
+        "project_root",
+        "paused",
+        "credential",
+        "take_on_error",
+        "port",
+        "setup_pending"
+      ]
+    },
+    "taskProjection": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "design_review_state": {
+          "description": "tasks.list only, for a task in verifying whose change is to the interface: task.get's design_review.state, so the board need not ask each card (step 12).",
+          "type": "string",
+          "enum": ["not_needed", "waiting", "waiting_on_designer", "preview_missing", "designer_needs_sandbox", "designer_needs_browser", "passed", "failed"]
+        },
+        "task_id": {
+          "type": "string",
+          "pattern": "^FRK-[0-9]{1,6}$"
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "epic",
+            "task"
+          ]
+        },
+        "parent": {
+          "type": "string",
+          "pattern": "^FRK-[0-9]{1,6}$"
+        },
+        "title": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "draft",
+            "refining",
+            "ready",
+            "assigned",
+            "in_progress",
+            "blocked",
+            "verifying",
+            "rejected",
+            "accepted",
+            "escalated",
+            "cancelled"
+          ]
+        },
+        "risk": {
+          "type": "string",
+          "enum": [
+            "low",
+            "medium",
+            "high"
+          ]
+        },
+        "triaged": {
+          "type": "boolean"
+        },
+        "locked": {
+          "type": "boolean"
+        },
+        "updated_seq": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 18446744073709551615
+        },
+        "cost_usd": {
+          "type": "number"
+        },
+        "assignee_id": {
+          "type": "string"
+        },
+        "reviewer_id": {
+          "type": "string"
+        },
+        "iteration": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "awaiting_integration": {
+          "type": "boolean"
+        },
+        "waiting_on_human": {
+          "type": "boolean"
+        },
+        "awaiting_approval": {
+          "type": "boolean"
+        },
+        "verifications": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "rejections": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "interventions": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "sprint": {
+          "type": "string"
+        },
+        "backlog": {
+          "type": "boolean",
+          "description": "Whether the row waits in the Backlog for a sprint (ADR 0028): farik-core's in_the_backlog, so the board need not work it out again."
+        }
+      },
+      "required": [
+        "task_id",
+        "kind",
+        "title",
+        "status",
+        "risk",
+        "triaged",
+        "locked",
+        "updated_seq",
+        "cost_usd",
+        "iteration",
+        "awaiting_integration",
+        "waiting_on_human",
+        "awaiting_approval",
+        "verifications",
+        "rejections",
+        "interventions",
+        "backlog"
+      ],
+      "description": "One row of the board (farik_store::TaskProjection). Optional fields are absent, not null, when the projection has none."
+    },
+    "foldersListQuery": {
+      "title": "Folders List Query",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "params"
+      ],
+      "properties": {
+        "name": {
+          "const": "folders.list"
+        },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "path": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "computerCheckQuery": {
+      "title": "Computer Check Query",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "params"
+      ],
+      "properties": {
+        "name": {
+          "const": "computer.check"
+        },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {}
+        }
+      }
+    },
+    "accountStatusQuery": {
+      "title": "Account Status Query",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "params"
+      ],
+      "properties": {
+        "name": {
+          "const": "account.status"
+        },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {}
+        }
+      }
+    },
+    "projectOpenRequest": {
+      "title": "Project Open Request",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "jsonrpc",
+        "id",
+        "method",
+        "params"
+      ],
+      "properties": {
+        "jsonrpc": {
+          "const": "2.0"
+        },
+        "id": {
+          "$ref": "#/$defs/requestId"
+        },
+        "method": {
+          "const": "project.open"
+        },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "path": {
+              "type": "string"
+            },
+            "no_sandbox": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "path",
+            "no_sandbox"
+          ]
+        }
+      }
+    },
+    "projectCreateRequest": {
+      "title": "Project Create Request",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "jsonrpc",
+        "id",
+        "method",
+        "params"
+      ],
+      "properties": {
+        "jsonrpc": {
+          "const": "2.0"
+        },
+        "id": {
+          "$ref": "#/$defs/requestId"
+        },
+        "method": {
+          "const": "project.create"
+        },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "parent": {
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            },
+            "description": {
+              "type": "string"
+            },
+            "no_sandbox": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "parent",
+            "name",
+            "description",
+            "no_sandbox"
+          ]
+        }
+      }
+    },
+    "accountConnectRequest": {
+      "title": "Account Connect Request",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "jsonrpc",
+        "id",
+        "method",
+        "params"
+      ],
+      "properties": {
+        "jsonrpc": {
+          "const": "2.0"
+        },
+        "id": {
+          "$ref": "#/$defs/requestId"
+        },
+        "method": {
+          "const": "account.connect"
+        },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "api_key",
+                "subscription_token"
+              ]
+            },
+            "secret": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "secret"
+          ]
+        }
+      }
+    },
+    "sandboxBuildRequest": {
+      "title": "Sandbox Build Request",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "jsonrpc",
+        "id",
+        "method",
+        "params"
+      ],
+      "properties": {
+        "jsonrpc": {
+          "const": "2.0"
+        },
+        "id": {
+          "$ref": "#/$defs/requestId"
+        },
+        "method": {
+          "const": "sandbox.build"
+        },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {}
+        }
+      }
+    },
+    "foldersListResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "type": "string"
+        },
+        "parent": {
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "entries": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "git": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "name",
+              "git"
+            ]
+          }
+        }
+      },
+      "required": [
+        "path",
+        "parent",
+        "entries"
+      ]
+    },
+    "computerItem": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "state": {
+          "type": "string",
+          "enum": [
+            "ready",
+            "missing",
+            "too_old",
+            "not_running"
+          ]
+        },
+        "version": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "state"
+      ]
+    },
+    "computerCheckResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "claude": {
+          "$ref": "#/$defs/computerItem"
+        },
+        "git": {
+          "$ref": "#/$defs/computerItem"
+        },
+        "docker": {
+          "$ref": "#/$defs/computerItem"
+        },
+        "sandbox_image": {
+          "$ref": "#/$defs/computerItem"
+        },
+        "designer_browser": {
+          "$ref": "#/$defs/computerItem",
+          "description": "The UI/UX Designer's browser, the Playwright connector's pinned image; present only for a team with a Designer, which setup's suggested team has (step 12)."
+        }
+      },
+      "required": [
+        "claude",
+        "git",
+        "docker",
+        "sandbox_image"
+      ]
+    },
+    "accountStatusResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "provider": {
+          "oneOf": [
+            {
+              "const": "anthropic"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "kind": {
+          "oneOf": [
+            {
+              "type": "string",
+              "enum": [
+                "api_key",
+                "subscription_token"
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "source": {
+          "oneOf": [
+            {
+              "type": "string",
+              "enum": [
+                "environment",
+                "keychain",
+                "file"
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "environment_variable": {
+          "type": "string",
+          "description": "The variable the credential comes from, when it comes from the environment: Farik cannot remove it, so the page names it rather than offering Disconnect."
+        },
+        "key_refused": {
+          "type": "boolean",
+          "description": "True while the team is paused because the model provider refused the credential (docs/SPEC.md 5.5): the key did not work, and connecting the account again resumes the team. Left out otherwise."
+        }
+      },
+      "required": [
+        "provider",
+        "kind",
+        "source"
+      ]
+    },
+    "projectOpenResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "project_root": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "project_root"
+      ]
+    },
+    "projectCreateResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "project_root": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "project_root"
+      ]
+    },
+    "accountConnectResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "stored_in": {
+          "type": "string",
+          "enum": [
+            "keychain",
+            "file"
+          ]
+        },
+        "taking_on": {
+          "type": "boolean",
+          "description": "True when a project that waited on the credential is now being taken on, so the daemon restarts on it."
+        }
+      },
+      "required": [
+        "stored_in",
+        "taking_on"
+      ]
+    },
+    "browserPullRequest": {
+      "title": "Browser Pull Request",
+      "description": "Setup pulls the UI/UX Designer's browser, the Playwright connector's image, by its pinned digest (step 12).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "jsonrpc",
+        "id",
+        "method",
+        "params"
+      ],
+      "properties": {
+        "jsonrpc": {
+          "const": "2.0"
+        },
+        "id": {
+          "$ref": "#/$defs/requestId"
+        },
+        "method": {
+          "const": "browser.pull"
+        },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {}
+        }
+      }
+    },
+    "browserPullResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "image": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "image"
+      ]
+    },
+    "sandboxBuildResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "image": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "image"
+      ]
+    },
+    "waitingListQuery": {
+      "title": "Waiting List Query",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "params"
+      ],
+      "properties": {
+        "name": {
+          "const": "waiting.list"
+        },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {}
+        }
+      }
+    },
+    "contractGetQuery": {
+      "title": "Contract Get Query",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "params"
+      ],
+      "properties": {
+        "name": {
+          "const": "contract.get"
+        },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "task_id": {
+              "type": "string",
+              "pattern": "^FRK-[0-9]{1,6}$"
+            }
+          },
+          "required": [
+            "task_id"
+          ]
+        }
+      }
+    },
+    "contractCheckQuery": {
+      "title": "Contract Check Query",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "params"
+      ],
+      "properties": {
+        "name": {
+          "const": "contract.check"
+        },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "task_id": {
+              "type": "string",
+              "pattern": "^FRK-[0-9]{1,6}$"
+            },
+            "contract": {
+              "type": "object",
+              "description": "A contract as task-contract.schema.json shapes it; the daemon validates it."
+            }
+          },
+          "required": [
+            "task_id",
+            "contract"
+          ]
+        }
+      }
+    },
+    "taskHistoryQuery": {
+      "title": "Task History Query",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "params"
+      ],
+      "properties": {
+        "name": {
+          "const": "task.history"
+        },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "task_id": {
+              "type": "string",
+              "pattern": "^FRK-[0-9]{1,6}$"
+            }
+          },
+          "required": [
+            "task_id"
+          ]
+        }
+      }
+    },
+    "taskDiffQuery": {
+      "title": "Task Diff Query",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "params"
+      ],
+      "properties": {
+        "name": {
+          "const": "task.diff"
+        },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "task_id": {
+              "type": "string",
+              "pattern": "^FRK-[0-9]{1,6}$"
+            }
+          },
+          "required": [
+            "task_id"
+          ]
+        }
+      }
+    },
+    "taskScreenshotQuery": {
+      "title": "Task Screenshot Query",
+      "description": "A screenshot farik_check_page took of the task's preview (step 12): file is the name one of the task's page.checked events gives, and any other name is not_found.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "params"
+      ],
+      "properties": {
+        "name": {
+          "const": "task.screenshot"
+        },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "task_id": {
+              "type": "string",
+              "pattern": "^FRK-[0-9]{1,6}$"
+            },
+            "file": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "required": [
+            "task_id",
+            "file"
+          ]
+        }
+      }
+    },
+    "taskChecksQuery": {
+      "title": "Task Checks Query",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "params"
+      ],
+      "properties": {
+        "name": {
+          "const": "task.checks"
+        },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "task_id": {
+              "type": "string",
+              "pattern": "^FRK-[0-9]{1,6}$"
+            }
+          },
+          "required": [
+            "task_id"
+          ]
+        }
+      }
+    },
+    "taskTriesQuery": {
+      "title": "Task Tries Query",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "params"
+      ],
+      "properties": {
+        "name": {
+          "const": "task.tries"
+        },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "task_id": {
+              "type": "string",
+              "pattern": "^FRK-[0-9]{1,6}$"
+            }
+          },
+          "required": [
+            "task_id"
+          ]
+        }
+      }
+    },
+    "sprintCurrentQuery": {
+      "title": "Sprint Current Query",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "params"
+      ],
+      "properties": {
+        "name": {
+          "const": "sprint.current"
+        },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {}
+        }
+      }
+    },
+    "questionsListQuery": {
+      "title": "Questions List Query",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "params"
+      ],
+      "properties": {
+        "name": {
+          "const": "questions.list"
+        },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "task_id": {
+              "type": "string",
+              "pattern": "^FRK-[0-9]{1,6}$"
+            }
+          }
+        }
+      }
+    },
+    "escalationChoicesQuery": {
+      "title": "Escalation Choices Query",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "params"
+      ],
+      "properties": {
+        "name": {
+          "const": "escalation.choices"
+        },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "task_id": {
+              "type": "string",
+              "pattern": "^FRK-[0-9]{1,6}$"
+            }
+          },
+          "required": [
+            "task_id"
+          ]
+        }
+      }
+    },
+    "teamActivityQuery": {
+      "title": "Team Activity Query",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "params"
+      ],
+      "properties": {
+        "name": {
+          "const": "team.activity"
+        },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {}
+        }
+      }
+    },
+    "movedSinceQuery": {
+      "title": "Moved Since Query",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "params"
+      ],
+      "properties": {
+        "name": {
+          "const": "moved.since"
+        },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "since": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          "required": [
+            "since"
+          ]
+        }
+      }
+    },
+    "taskCostsQuery": {
+      "title": "Task Costs Query",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "params"
+      ],
+      "properties": {
+        "name": {
+          "const": "task.costs"
+        },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "task_id": {
+              "type": "string",
+              "pattern": "^FRK-[0-9]{1,6}$"
+            }
+          },
+          "required": [
+            "task_id"
+          ]
+        }
+      }
+    },
+    "backlogSummaryQuery": {
+      "title": "Backlog Summary Query",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "params"
+      ],
+      "properties": {
+        "name": {
+          "const": "backlog.summary"
+        },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {}
+        }
+      }
+    },
+    "sprintsListQuery": {
+      "title": "Sprints List Query",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "params"
+      ],
+      "properties": {
+        "name": {
+          "const": "sprints.list"
+        },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {}
+        }
+      }
+    },
+    "sprintGetQuery": {
+      "title": "Sprint Get Query",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "params"
+      ],
+      "properties": {
+        "name": {
+          "const": "sprint.get"
+        },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "sprint_id": {
+              "type": "string",
+              "pattern": "^S[1-9][0-9]{0,5}$"
+            }
+          },
+          "required": [
+            "sprint_id"
+          ]
+        }
+      }
+    },
+    "costsSummaryQuery": {
+      "title": "Costs Summary Query",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "params"
+      ],
+      "properties": {
+        "name": {
+          "const": "costs.summary"
+        },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {}
+        }
+      }
+    },
+    "metricsQuery": {
+      "title": "Metrics Query",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "params"
+      ],
+      "properties": {
+        "name": {
+          "const": "metrics"
+        },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "sprint_id": {
+              "type": "string",
+              "pattern": "^S[1-9][0-9]{0,5}$"
+            }
+          }
+        }
+      }
+    },
+    "requestFileRequest": {
+      "title": "Request File Request",
+      "description": "Files the person's words as a draft request. Answers requestFileResult; a refusal of words under 20 characters carries data with errors, each a path, a message and a code, the code too_short, as team.validate answers them.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "jsonrpc",
+        "id",
+        "method",
+        "params"
+      ],
+      "properties": {
+        "jsonrpc": {
+          "const": "2.0"
+        },
+        "id": {
+          "$ref": "#/$defs/requestId"
+        },
+        "method": {
+          "const": "request.file"
+        },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "text": {
+              "type": "string",
+              "maxLength": 20000,
+              "description": "The request in the person's words: its first line is the title, and the whole is the intent. The daemon refuses a text under 20 characters."
+            },
+            "from_chat_message": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 18446744073709551615,
+              "description": "The seq of the agent's chat reply whose proposed request this is: the reply must carry a request not already sent, or the daemon refuses with a sentence. task.created records it."
+            }
+          },
+          "required": [
+            "text"
+          ]
+        }
+      }
+    },
+    "contractSaveRequest": {
+      "title": "Contract Save Request",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "jsonrpc",
+        "id",
+        "method",
+        "params"
+      ],
+      "properties": {
+        "jsonrpc": {
+          "const": "2.0"
+        },
+        "id": {
+          "$ref": "#/$defs/requestId"
+        },
+        "method": {
+          "const": "contract.save"
+        },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "task_id": {
+              "type": "string",
+              "pattern": "^FRK-[0-9]{1,6}$"
+            },
+            "contract": {
+              "type": "object",
+              "description": "A contract as task-contract.schema.json shapes it; the daemon validates it."
+            }
+          },
+          "required": [
+            "task_id",
+            "contract"
+          ]
+        }
+      }
+    },
+    "waitingListResult": {
+      "description": "What waits on the human, questions first, then approvals, other escalations, acceptances, and integrations; then the UI changes whose design review waits for the team's preview (preview_missing), for Docker's sandbox (designer_needs_sandbox), or for Playwright to be turned on for the Designer (designer_needs_browser).",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "waiting": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "task_id": {
+                "type": "string",
+                "pattern": "^FRK-[0-9]{1,6}$"
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "approval",
+                  "acceptance",
+                  "question",
+                  "help",
+                  "integration",
+                  "preview_missing",
+                  "designer_needs_sandbox",
+                  "designer_needs_browser"
+                ]
+              },
+              "agent_id": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "title": {
+                "type": "string"
+              },
+              "line": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "task_id",
+              "kind",
+              "agent_id",
+              "title",
+              "line"
+            ]
+          }
+        }
+      },
+      "required": [
+        "waiting"
+      ]
+    },
+    "contractGetResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "contract": {
+          "type": "object",
+          "description": "A contract as task-contract.schema.json shapes it; the daemon validates it."
+        }
+      },
+      "required": [
+        "contract"
+      ]
+    },
+    "contractCheckResult": {
+      "description": "The rules an unsaved plan fails: schema errors first, as rule schema, then the Definition of Ready's; total is the number of checks run, the schema counting as one.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "failures": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "rule": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              },
+              "plain": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "rule",
+              "message",
+              "plain"
+            ]
+          }
+        },
+        "total": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "failures",
+        "total"
+      ]
+    },
+    "taskHistoryResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "events": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          }
+        }
+      },
+      "required": [
+        "events"
+      ]
+    },
+    "taskScreenshotResult": {
+      "description": "The screenshot's PNG, in base64.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "png_base64": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "png_base64"
+      ]
+    },
+    "taskDiffResult": {
+      "description": "A task's diff against the integration branch, or an epic's tasks' integrated diffs joined in id order, each under a # FRK-n line.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "diff": {
+          "type": "string"
+        },
+        "files": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "added": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "removed": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "diff",
+        "files",
+        "added",
+        "removed"
+      ]
+    },
+    "taskChecksResult": {
+      "description": "Each criterion's latest result since the task last entered verifying; for a plan awaiting approval, the Definition of Ready's failures, each named by its rule.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "checks": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "criterion_id": {
+                "type": "string"
+              },
+              "text": {
+                "type": "string"
+              },
+              "passed": {
+                "type": "boolean"
+              },
+              "evidence": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "criterion_id",
+              "text",
+              "passed",
+              "evidence"
+            ]
+          }
+        }
+      },
+      "required": [
+        "checks"
+      ]
+    },
+    "taskTriesResult": {
+      "description": "The try in progress, iteration + 1, of max_iterations + 1 plus the extra tries granted: the limit bounds returns, and the pass after the last return is a try too.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "try": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "of": {
+          "type": "integer",
+          "minimum": 1
+        }
+      },
+      "required": [
+        "try",
+        "of"
+      ]
+    },
+    "sprintCurrentResult": {
+      "description": "The open sprint and how many of its tasks are done (accepted or cancelled), or null when none is open.",
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "$ref": "#/$defs/sprintSummary"
+        }
+      ]
+    },
+    "questionsListResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "questions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "question_id": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "task_id": {
+                "oneOf": [
+                  {
+                    "type": "string",
+                    "pattern": "^FRK-[0-9]{1,6}$"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "agent_id": {
+                "type": "string"
+              },
+              "text": {
+                "type": "string"
+              },
+              "choices": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "label": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 80
+                    },
+                    "hint": {
+                      "type": "string",
+                      "maxLength": 160
+                    }
+                  },
+                  "required": [
+                    "label"
+                  ]
+                }
+              },
+              "answer": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "required": [
+              "question_id",
+              "task_id",
+              "agent_id",
+              "text",
+              "choices",
+              "answer"
+            ]
+          }
+        }
+      },
+      "required": [
+        "questions"
+      ]
+    },
+    "escalationChoicesResult": {
+      "description": "What the human may do about an escalation: each choice's label and the command the page sends, to which it adds the message.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "choices": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "label": {
+                "type": "string"
+              },
+              "body": {
+                "type": "object"
+              }
+            },
+            "required": [
+              "label",
+              "body"
+            ]
+          }
+        }
+      },
+      "required": [
+        "choices"
+      ]
+    },
+    "teamActivityResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "activity": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "agent_id": {
+                "type": "string"
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "working",
+                  "resting",
+                  "waiting",
+                  "paused",
+                  "idle"
+                ]
+              },
+              "line": {
+                "type": "string"
+              },
+              "task_id": {
+                "type": "string",
+                "pattern": "^FRK-[0-9]{1,6}$"
+              },
+              "until": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "session_id": {
+                "type": "string"
+              },
+              "purpose": {
+                "type": "string",
+                "enum": [
+                  "triage",
+                  "refine",
+                  "plan",
+                  "explore",
+                  "implement",
+                  "verify",
+                  "ceremony",
+                  "conversation",
+                  "chat"
+                ]
+              }
+            },
+            "required": [
+              "agent_id",
+              "state",
+              "line"
+            ]
+          }
+        }
+      },
+      "required": [
+        "activity"
+      ]
+    },
+    "movedSinceResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "moved": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "at": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "line": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "at",
+              "line"
+            ]
+          }
+        }
+      },
+      "required": [
+        "moved"
+      ]
+    },
+    "requestFileResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "task_id": {
+          "type": "string",
+          "pattern": "^FRK-[0-9]{1,6}$"
+        }
+      },
+      "required": [
+        "task_id"
+      ]
+    },
+    "contractSaveResult": {
+      "description": "The human's edit is saved; back_to_refining says a frozen plan went back to refining, to be checked and approved again.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "saved": {
+          "const": true
+        },
+        "back_to_refining": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "saved",
+        "back_to_refining"
+      ]
+    },
+    "sprintSummary": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "sprint_id": {
+          "type": "string"
+        },
+        "done": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "total": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "sprint_id",
+        "done",
+        "total"
+      ]
+    },
+    "taskCostsResult": {
+      "description": "What a task has spent, by the purposes' plain words (Planning: triage, refine, plan; Building: implement; Checking: verify; Meetings and talk: ceremony, conversation; Conversations: chat), each word that has spent anything, and its contract's limit.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "by_purpose": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "words": {
+                "type": "string",
+                "enum": [
+                  "Planning",
+                  "Building",
+                  "Checking",
+                  "Meetings and talk",
+                  "Conversations"
+                ]
+              },
+              "usd": {
+                "type": "number",
+                "minimum": 0
+              }
+            },
+            "required": [
+              "words",
+              "usd"
+            ]
+          }
+        },
+        "total_usd": {
+          "type": "number",
+          "minimum": 0
+        },
+        "limit_usd": {
+          "type": "number",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "by_purpose",
+        "total_usd",
+        "limit_usd"
+      ]
+    },
+    "sprintRow": {
+      "description": "A sprint: its file, who started it (sprint.started), the first assigner that planned it (null when only Farik did), what it spent, and how many of its tasks are done (accepted or cancelled).",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "sprint_id": {
+          "type": "string",
+          "pattern": "^S[1-9][0-9]{0,5}$"
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "open",
+            "ended"
+          ]
+        },
+        "started_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "started_by": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "string"
+            }
+          ]
+        },
+        "ended_at": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "string",
+              "format": "date-time"
+            }
+          ]
+        },
+        "budget_usd": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "number",
+              "minimum": 0
+            }
+          ]
+        },
+        "spent_usd": {
+          "type": "number",
+          "minimum": 0
+        },
+        "planned_by": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "string"
+            }
+          ]
+        },
+        "task_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "done_count": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "sprint_id",
+        "status",
+        "started_at",
+        "started_by",
+        "ended_at",
+        "budget_usd",
+        "spent_usd",
+        "planned_by",
+        "task_count",
+        "done_count"
+      ]
+    },
+    "backlogSummaryResult": {
+      "description": "Whether the team plans its work in sprints, and how much work waits in its Backlog: the rows with no parent, so an epic counts once (ADR 0028).",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "plan_in_sprints": {
+          "type": "boolean"
+        },
+        "count": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "plan_in_sprints",
+        "count"
+      ]
+    },
+    "sprintsListResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "sprints": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/sprintRow"
+          }
+        }
+      },
+      "required": [
+        "sprints"
+      ]
+    },
+    "sprintGetResult": {
+      "description": "sprintRow's fields, its tasks, and its meetings: the ceremony posts from its start until the next sprint starts, one meeting per ceremony session, oldest first.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "sprint_id": {
+          "type": "string",
+          "pattern": "^S[1-9][0-9]{0,5}$"
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "open",
+            "ended"
+          ]
+        },
+        "started_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "started_by": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "string"
+            }
+          ]
+        },
+        "ended_at": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "string",
+              "format": "date-time"
+            }
+          ]
+        },
+        "budget_usd": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "number",
+              "minimum": 0
+            }
+          ]
+        },
+        "spent_usd": {
+          "type": "number",
+          "minimum": 0
+        },
+        "planned_by": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "string"
+            }
+          ]
+        },
+        "task_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "done_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "tasks": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "task_id": {
+                "type": "string",
+                "pattern": "^FRK-[0-9]{1,6}$"
+              },
+              "title": {
+                "type": "string"
+              },
+              "status": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "task_id",
+              "title",
+              "status"
+            ]
+          }
+        },
+        "meetings": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "thread": {
+                "type": "string",
+                "enum": [
+                  "standup",
+                  "planning",
+                  "review",
+                  "retro"
+                ]
+              },
+              "first_seq": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "at": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "posts": {
+                "type": "integer",
+                "minimum": 1
+              }
+            },
+            "required": [
+              "thread",
+              "first_seq",
+              "at",
+              "posts"
+            ]
+          }
+        }
+      },
+      "required": [
+        "sprint_id",
+        "status",
+        "started_at",
+        "started_by",
+        "ended_at",
+        "budget_usd",
+        "spent_usd",
+        "planned_by",
+        "task_count",
+        "done_count",
+        "tasks",
+        "meetings"
+      ]
+    },
+    "costsSummaryResult": {
+      "description": "Today's spending (UTC) and the team's daily limit, today's one-to-one chats (purpose chat), the last sprint's (the open one while one is), and each agent's that is not retired, in the team's order.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "today_usd": {
+          "type": "number",
+          "minimum": 0
+        },
+        "daily_limit_usd": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "number",
+              "minimum": 0
+            }
+          ]
+        },
+        "conversations_today_usd": {
+          "type": "number",
+          "minimum": 0
+        },
+        "sprint": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "sprint_id": {
+                  "type": "string",
+                  "pattern": "^S[1-9][0-9]{0,5}$"
+                },
+                "status": {
+                  "type": "string",
+                  "enum": [
+                    "open",
+                    "ended"
+                  ]
+                },
+                "spent_usd": {
+                  "type": "number",
+                  "minimum": 0
+                },
+                "budget_usd": {
+                  "oneOf": [
+                    {
+                      "type": "null"
+                    },
+                    {
+                      "type": "number",
+                      "minimum": 0
+                    }
+                  ]
+                }
+              },
+              "required": [
+                "sprint_id",
+                "status",
+                "spent_usd",
+                "budget_usd"
+              ]
+            }
+          ]
+        },
+        "agents": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "agent_id": {
+                "type": "string"
+              },
+              "today_usd": {
+                "type": "number",
+                "minimum": 0
+              },
+              "sprint_usd": {
+                "type": "number",
+                "minimum": 0
+              }
+            },
+            "required": [
+              "agent_id",
+              "today_usd",
+              "sprint_usd"
+            ]
+          }
+        }
+      },
+      "required": [
+        "today_usd",
+        "daily_limit_usd",
+        "conversations_today_usd",
+        "sprint",
+        "agents"
+      ]
+    },
+    "metricsResult": {
+      "description": "The harness metrics of F17, over the project or one sprint; a rate is null while no task is accepted.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "accepted_tasks": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "first_pass_acceptance_rate": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "number",
+              "minimum": 0
+            }
+          ]
+        },
+        "interventions_per_accepted_task": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "number",
+              "minimum": 0
+            }
+          ]
+        },
+        "cost_per_accepted_task": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "total_usd": {
+                  "type": "number",
+                  "minimum": 0
+                },
+                "by_purpose": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "words": {
+                        "type": "string",
+                        "enum": [
+                          "Planning",
+                          "Building",
+                          "Checking",
+                          "Meetings and talk",
+                          "Conversations"
+                        ]
+                      },
+                      "usd": {
+                        "type": "number",
+                        "minimum": 0
+                      }
+                    },
+                    "required": [
+                      "words",
+                      "usd"
+                    ]
+                  }
+                }
+              },
+              "required": [
+                "total_usd",
+                "by_purpose"
+              ]
+            }
+          ]
+        },
+        "mechanically_verified_criteria_share": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "number",
+              "minimum": 0
+            }
+          ]
+        },
+        "active_weeks": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "messages": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "reaction": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "ambient": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "reply": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "ceremony": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "system": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "human": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          "required": [
+            "reaction",
+            "ambient",
+            "reply",
+            "ceremony",
+            "system",
+            "human"
+          ]
+        }
+      },
+      "required": [
+        "accepted_tasks",
+        "first_pass_acceptance_rate",
+        "interventions_per_accepted_task",
+        "cost_per_accepted_task",
+        "mechanically_verified_criteria_share",
+        "active_weeks",
+        "messages"
+      ]
+    },
+    "teamProposeQuery": {
+      "title": "Team Propose Query",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "params"
+      ],
+      "properties": {
+        "name": {
+          "const": "team.propose"
+        },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {}
+        }
+      },
+      "description": "The team setup suggests: the team as it is with the five suggested agents in place of its own, and the criterion library as it is, which the setup form edits beside it."
+    },
+    "teamValidateQuery": {
+      "title": "Team Validate Query",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "params"
+      ],
+      "properties": {
+        "name": {
+          "const": "team.validate"
+        },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "team": {
+              "type": "object",
+              "description": "A team as team.schema.json shapes it; the daemon validates it."
+            }
+          },
+          "required": [
+            "team"
+          ]
+        }
+      },
+      "description": "A changed team checked and described before it is saved (docs/SPEC.md section 10). Nothing is written."
+    },
+    "modelsListQuery": {
+      "title": "Models List Query",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "params"
+      ],
+      "properties": {
+        "name": {
+          "const": "models.list"
+        },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {}
+        }
+      },
+      "description": "The newest model of each family the price table prices, with the words a person reads for it."
+    },
+    "teamSaveRequest": {
+      "title": "Team Save Request",
+      "description": "Writes the team when it has no errors and appends team.updated. It refuses a status change (an agent is paused, retired or resumed from its card) and removing an agent the log has seen work from. Answers emptyResult; a refusal's data holds errors, each a path, a message and a code, as team.validate answers them.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "jsonrpc",
+        "id",
+        "method",
+        "params"
+      ],
+      "properties": {
+        "jsonrpc": {
+          "const": "2.0"
+        },
+        "id": {
+          "$ref": "#/$defs/requestId"
+        },
+        "method": {
+          "const": "team.save"
+        },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "team": {
+              "type": "object",
+              "description": "A team as team.schema.json shapes it; the daemon validates it."
+            }
+          },
+          "required": [
+            "team"
+          ]
+        }
+      }
+    },
+    "teamStartRequest": {
+      "title": "Team Start Request",
+      "description": "The setup form's Start the team: writes the team and the criteria, removes the setup marker, and appends team.updated, criteria.updated and, when the marker was there and the team is paused, team.resumed: without the marker a paused team stays paused. While the marker is there it may replace the starter team's agents. Answers emptyResult.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "jsonrpc",
+        "id",
+        "method",
+        "params"
+      ],
+      "properties": {
+        "jsonrpc": {
+          "const": "2.0"
+        },
+        "id": {
+          "$ref": "#/$defs/requestId"
+        },
+        "method": {
+          "const": "team.start"
+        },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "team": {
+              "type": "object",
+              "description": "A team as team.schema.json shapes it; the daemon validates it."
+            },
+            "criteria": {
+              "type": "object",
+              "description": "A criterion library as criteria.schema.json shapes it; the daemon validates it."
+            }
+          },
+          "required": [
+            "team",
+            "criteria"
+          ]
+        }
+      }
+    },
+    "criteriaSaveRequest": {
+      "title": "Criteria Save Request",
+      "description": "Writes the criterion library when it is one and appends criteria.updated. Answers emptyResult.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "jsonrpc",
+        "id",
+        "method",
+        "params"
+      ],
+      "properties": {
+        "jsonrpc": {
+          "const": "2.0"
+        },
+        "id": {
+          "$ref": "#/$defs/requestId"
+        },
+        "method": {
+          "const": "criteria.save"
+        },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "criteria": {
+              "type": "object",
+              "description": "A criterion library as criteria.schema.json shapes it; the daemon validates it."
+            }
+          },
+          "required": [
+            "criteria"
+          ]
+        }
+      }
+    },
+    "accountDisconnectRequest": {
+      "title": "Account Disconnect Request",
+      "description": "Deletes the AI account's credential from every store that holds it and, when one did, pauses the team. A credential from the environment cannot be removed: nothing is deleted, and the answer names its variable.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "jsonrpc",
+        "id",
+        "method",
+        "params"
+      ],
+      "properties": {
+        "jsonrpc": {
+          "const": "2.0"
+        },
+        "id": {
+          "$ref": "#/$defs/requestId"
+        },
+        "method": {
+          "const": "account.disconnect"
+        },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {}
+        }
+      }
+    },
+    "teamProposeResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "team": {
+          "type": "object",
+          "description": "A team as team.schema.json shapes it; the daemon validates it."
+        },
+        "criteria": {
+          "type": "object",
+          "description": "A criterion library as criteria.schema.json shapes it; the daemon validates it."
+        },
+        "unavailable": {
+          "type": "array",
+          "description": "The proposed agents this computer cannot run, which setup shows unticked: the UI/UX Designer, with designer_needs_sandbox, where Farik runs without Docker's sandbox (step 12, D3).",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "agent_id",
+              "reason"
+            ],
+            "properties": {
+              "agent_id": {
+                "type": "string"
+              },
+              "reason": {
+                "enum": [
+                  "designer_needs_sandbox"
+                ]
+              }
+            }
+          }
+        }
+      },
+      "required": [
+        "team",
+        "criteria",
+        "unavailable"
+      ]
+    },
+    "teamValidateResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "errors": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/teamError"
+          }
+        },
+        "effects": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Each effect of the change in plain words; empty when there are errors."
+        },
+        "agents": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/effectiveAgent"
+          },
+          "description": "The team as it would be, as team.get answers it; left out when there are errors."
+        },
+        "judges": {
+          "$ref": "#/$defs/planJudges",
+          "description": "Left out when there are errors."
+        }
+      },
+      "required": [
+        "errors",
+        "effects"
+      ]
+    },
+    "modelsListResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "models": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "id",
+              "label"
+            ],
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "label": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      },
+      "required": [
+        "models"
+      ]
+    },
+    "accountDisconnectResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "removed_from": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "keychain",
+              "file"
+            ]
+          }
+        },
+        "paused": {
+          "type": "boolean",
+          "description": "Whether this call paused the team: true only when a credential was removed and the team was running. A team already paused stays paused and answers false."
+        },
+        "environment_variable": {
+          "type": "string",
+          "description": "The variable the credential comes from, when it comes from the environment and so could not be removed."
+        }
+      },
+      "required": [
+        "removed_from",
+        "paused"
+      ]
+    },
+    "projectScanQuery": {
+      "title": "Project Scan Query",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "params"
+      ],
+      "properties": {
+        "name": {
+          "const": "project.scan"
+        },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {}
+        }
+      },
+      "description": "The project scanned again, as the setup screen \"What we found\" reads it back in rows. Nothing is written."
+    },
+    "projectNoteRequest": {
+      "title": "Project Note Request",
+      "description": "Something is wrong: the user's words kept in .farik/project.md under \"The user says\", which every rescan carries across. Answers emptyResult.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "jsonrpc",
+        "id",
+        "method",
+        "params"
+      ],
+      "properties": {
+        "jsonrpc": {
+          "const": "2.0"
+        },
+        "id": {
+          "$ref": "#/$defs/requestId"
+        },
+        "method": {
+          "const": "project.note"
+        },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "text"
+          ],
+          "properties": {
+            "text": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 2000,
+              "pattern": "\\S",
+              "description": "What the user says about the project, in their own words."
+            }
+          }
+        }
+      }
+    },
+    "projectScanResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "facts",
+        "checks",
+        "kept_private"
+      ],
+      "properties": {
+        "facts": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "language",
+            "toolchain",
+            "workspace",
+            "packages",
+            "tests_in",
+            "tracked_files",
+            "last_commit"
+          ],
+          "properties": {
+            "language": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "description": "The language with the most tracked files."
+            },
+            "toolchain": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "description": "The toolchain's name."
+            },
+            "workspace": {
+              "type": "boolean",
+              "description": "Whether the project is a workspace."
+            },
+            "packages": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "How many packages the workspace has."
+            },
+            "tests_in": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "description": "Where the tests are, as a location."
+            },
+            "tracked_files": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "How many files git tracks."
+            },
+            "last_commit": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "description": "How long ago the last commit was, in words; null before the first commit."
+            }
+          }
+        },
+        "checks": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "The text of each check the scan found in the project's own commands."
+        },
+        "kept_private": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "The protected-path globs that match something on disk, walked four folders deep without .git and node_modules, over at most 2000 entries."
+        }
+      }
+    },
+    "agentReplaceRequest": {
+      "title": "Agent Replace Request",
+      "description": "Replace: the agent retired and a newcomer added, in one validated change to the team file, so that a team is never left without the role the agent held. Appends agent.updated, then team.updated. Answers emptyResult; a refusal's data holds errors, each a path, a message and a code, as team.validate answers them, as team.save's does.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "jsonrpc",
+        "id",
+        "method",
+        "params"
+      ],
+      "properties": {
+        "jsonrpc": {
+          "const": "2.0"
+        },
+        "id": {
+          "$ref": "#/$defs/requestId"
+        },
+        "method": {
+          "const": "agent.replace"
+        },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "agent_id",
+            "newcomer"
+          ],
+          "properties": {
+            "agent_id": {
+              "type": "string",
+              "description": "The agent to retire."
+            },
+            "newcomer": {
+              "type": "object",
+              "description": "The agent that joins, as team.schema.json shapes an agent; the daemon validates the team it makes."
+            }
+          }
+        }
+      }
+    },
+    "effectiveAgent": {
+      "title": "Effective Agent",
+      "description": "An agent as its sessions run: its model and effort (its own, or else its role's), the model's words, the tiers it holds, and base_tiers, those its role and the team's permission answers give it before its own grants and revokes.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "model",
+        "tiers",
+        "base_tiers"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "model": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "label",
+            "effort"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "label": {
+              "type": "string",
+              "description": "The family's words, with (older) when a newer one of the family is priced; the id when no family names it."
+            },
+            "effort": {
+              "type": "string",
+              "enum": [
+                "low",
+                "medium",
+                "high"
+              ]
+            }
+          }
+        },
+        "tiers": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "base_tiers": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "planJudges": {
+      "title": "Plan Judges",
+      "description": "Who checks plans under each choice of policy.judgment.judge: the first active agent of the role, and under auto the one Team::judge resolves (spec 5.3); null where no active agent holds it.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "auto",
+        "architect",
+        "scrum_master"
+      ],
+      "properties": {
+        "auto": {
+          "oneOf": [
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "agent_id",
+                "display_name",
+                "role"
+              ],
+              "properties": {
+                "agent_id": {
+                  "type": "string"
+                },
+                "display_name": {
+                  "type": "string"
+                },
+                "role": {
+                  "type": "string"
+                }
+              }
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "architect": {
+          "oneOf": [
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "agent_id",
+                "display_name",
+                "role"
+              ],
+              "properties": {
+                "agent_id": {
+                  "type": "string"
+                },
+                "display_name": {
+                  "type": "string"
+                },
+                "role": {
+                  "type": "string"
+                }
+              }
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "scrum_master": {
+          "oneOf": [
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "agent_id",
+                "display_name",
+                "role"
+              ],
+              "properties": {
+                "agent_id": {
+                  "type": "string"
+                },
+                "display_name": {
+                  "type": "string"
+                },
+                "role": {
+                  "type": "string"
+                }
+              }
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "settingsDefaultsQuery": {
+      "title": "Settings Defaults Query",
+      "description": "What putting a setting back puts back (spec 10): farik_core::team::defaults(), the same values farik init writes.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "params"
+      ],
+      "properties": {
+        "name": {
+          "const": "settings.defaults"
+        },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {}
+        }
+      }
+    },
+    "settingsDefaultsResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "budgets",
+        "policy",
+        "rules",
+        "ui_paths"
+      ],
+      "properties": {
+        "budgets": {
+          "type": "object",
+          "description": "The team's budgets as team.schema.json shapes them, with no daily limit."
+        },
+        "policy": {
+          "type": "object",
+          "description": "The starter policy, with the plan check and the permission answers written out."
+        },
+        "rules": {
+          "type": "object",
+          "description": "The rules the team adds to Farik's; none by default."
+        },
+        "ui_paths": {
+          "type": "array",
+          "description": "The UI paths every team starts with (spec 5.12): a Software Developer's change that touches one is design-reviewed.",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "channelMessagesQuery": {
+      "title": "Channel Messages Query",
+      "description": "The team channel's newest page of messages before before_seq, or the newest of all without it (spec 5.9).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "params"
+      ],
+      "properties": {
+        "name": {
+          "const": "channel.messages"
+        },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "before_seq": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 18446744073709551615
+            },
+            "limit": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 200,
+              "default": 100
+            }
+          }
+        }
+      }
+    },
+    "chatsListQuery": {
+      "title": "Chats List Query",
+      "description": "The chat list (spec 4.3, 5.9): Team's newest line, then each agent's one-to-one chat.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "params"],
+      "properties": {
+        "name": { "const": "chats.list" },
+        "params": { "type": "object", "additionalProperties": false }
+      }
+    },
+    "chatLine": {
+      "title": "Chat Line",
+      "description": "A chat's or the channel's newest message.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["seq", "at", "author", "text"],
+      "properties": {
+        "seq": { "type": "integer", "minimum": 1, "maximum": 18446744073709551615 },
+        "at": { "type": "string", "format": "date-time" },
+        "author": { "type": "string" },
+        "text": { "type": "string" }
+      }
+    },
+    "chatsListResult": {
+      "description": "team_last is the channel's newest message.posted that is not Farik's system line; chats holds every agent of the team in the team's order, retired ones too with retired true, each with its chat's newest chat_message.posted.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["team_last", "chats"],
+      "properties": {
+        "team_last": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/chatLine" }] },
+        "chats": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["agent_id", "retired", "last"],
+            "properties": {
+              "agent_id": { "type": "string" },
+              "retired": { "type": "boolean" },
+              "last": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/chatLine" }] }
+            }
+          }
+        }
+      }
+    },
+    "chatMessagesQuery": {
+      "title": "Chat Messages Query",
+      "description": "One agent's one-to-one chat, its newest page of messages before before_seq, or the newest of all without it (spec 4.3).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "params"],
+      "properties": {
+        "name": { "const": "chat.messages" },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["agent_id"],
+          "properties": {
+            "agent_id": { "type": "string" },
+            "before_seq": { "type": "integer", "minimum": 1, "maximum": 18446744073709551615 },
+            "limit": { "type": "integer", "minimum": 1, "maximum": 200, "default": 100 }
+          }
+        }
+      }
+    },
+    "chatMessagesResult": {
+      "description": "One page of the agent's chat_message.posted, oldest first within the page: seq and at from the envelope, and the body's author, text (line breaks kept), in_reply_to and request, null when it has none; sent_as is the request the user sent a reply's proposal as (request.file's from_chat_message), null when not sent. waiting says why the user's newest message has no answer yet, null when the agent answered or nobody wrote; when several reasons apply the first wins: retired, key_refused (the team is paused because the provider refused the key), day_spent (the team's daily budget; the message is kept), asleep with until, answering (a session answers or is about to), no_answer (a session ended without a reply: the user asks again). No event is written for a chat that did not run (ADR 0026).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["messages", "waiting"],
+      "properties": {
+        "waiting": {
+          "oneOf": [
+            { "type": "null" },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["because"],
+              "properties": {
+                "because": {
+                  "type": "string",
+                  "enum": ["retired", "key_refused", "day_spent", "asleep", "answering", "no_answer"]
+                },
+                "until": { "type": "string", "format": "date-time" }
+              }
+            }
+          ]
+        },
+        "messages": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["seq", "at", "author", "text", "in_reply_to", "request", "sent_as"],
+            "properties": {
+              "seq": { "type": "integer", "minimum": 1, "maximum": 18446744073709551615 },
+              "at": { "type": "string", "format": "date-time" },
+              "author": { "type": "string" },
+              "text": { "type": "string" },
+              "in_reply_to": {
+                "oneOf": [
+                  { "type": "null" },
+                  { "type": "integer", "minimum": 1, "maximum": 18446744073709551615 }
+                ]
+              },
+              "request": {
+                "oneOf": [
+                  { "type": "null" },
+                  {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": ["title", "text"],
+                    "properties": {
+                      "title": { "type": "string" },
+                      "text": { "type": "string" }
+                    }
+                  }
+                ]
+              },
+              "sent_as": {
+                "oneOf": [
+                  { "type": "null" },
+                  { "type": "string", "pattern": "^FRK-[0-9]{1,6}$" }
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    "channelMessagesResult": {
+      "description": "One page of message.posted, oldest first within the page: seq and at from the envelope, task_id the task the message is about, and the body's fields, thread and in_reply_to null when it has none.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "messages"
+      ],
+      "properties": {
+        "messages": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "seq",
+              "at",
+              "author",
+              "kind",
+              "text",
+              "mentions",
+              "thread",
+              "in_reply_to",
+              "task_id"
+            ],
+            "properties": {
+              "seq": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 18446744073709551615
+              },
+              "at": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "author": {
+                "type": "string"
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "reaction",
+                  "ambient",
+                  "reply",
+                  "ceremony",
+                  "system",
+                  "human"
+                ]
+              },
+              "text": {
+                "type": "string"
+              },
+              "mentions": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "thread": {
+                "oneOf": [
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "type": "string",
+                    "enum": [
+                      "planning",
+                      "standup",
+                      "review",
+                      "retro"
+                    ]
+                  }
+                ]
+              },
+              "in_reply_to": {
+                "oneOf": [
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 18446744073709551615
+                  }
+                ]
+              },
+              "task_id": {
+                "oneOf": [
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "type": "string",
+                    "pattern": "^FRK-[0-9]{1,6}$"
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    "teamError": {
+      "title": "Team Error",
+      "description": "One reason a team is refused: where, the daemon's sentence for a log, and the code the page words it by.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "message",
+        "code"
+      ],
+      "properties": {
+        "path": {
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        },
+        "code": {
+          "type": "string",
+          "enum": [
+            "too_many",
+            "needs_product_manager",
+            "needs_developer",
+            "repeated_id",
+            "worked",
+            "name",
+            "keeps_read",
+            "status_from_card",
+            "judge_not_held",
+            "no_questions",
+            "question_length",
+            "invalid"
+          ],
+          "description": "The refusal as the page words it for a person; the message is for a log, and invalid is any refusal with no words of its own."
+        }
+      }
+    },
+    "templatesListQuery": {
+      "title": "Templates List Query",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "params"
+      ],
+      "properties": {
+        "name": {
+          "const": "templates.list"
+        },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {}
+        }
+      },
+      "description": "The saved teams on this computer, each whole, and the files in the templates folder that are not one. Every template query and method is refused with -32005 and the code no_state_folder at / when Farik has no state folder."
+    },
+    "templatePreviewQuery": {
+      "title": "Template Preview Query",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "params"
+      ],
+      "properties": {
+        "name": {
+          "const": "template.preview"
+        },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "slug": {
+              "type": "string",
+              "description": "The saved team's file name without .yaml, as templates.list answers it."
+            }
+          },
+          "required": [
+            "slug"
+          ]
+        }
+      },
+      "description": "What using a saved team would make of this project's team: who stays, joins, is retired or removed, the effects in words, and the errors that would refuse it. Nothing is written. A slug with no file is -32002; a file that is not a template is refused with template_unreadable at /slug."
+    },
+    "templateSaveRequest": {
+      "title": "Template Save Request",
+      "description": "Saves this project's team as a template under name, in the state folder, and records no event. A name whose slug another template holds is refused with template_exists at /name unless replace is true; a name with no letter or digit, with template_name at /name. Answers templateSlugResult.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "jsonrpc",
+        "id",
+        "method",
+        "params"
+      ],
+      "properties": {
+        "jsonrpc": {
+          "const": "2.0"
+        },
+        "id": {
+          "$ref": "#/$defs/requestId"
+        },
+        "method": {
+          "const": "template.save"
+        },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "name"
+          ],
+          "properties": {
+            "name": {
+              "type": "string",
+              "description": "The saved team's name, as the person typed it; the daemon trims it."
+            },
+            "replace": {
+              "type": "boolean",
+              "description": "Write over the template that holds the name's slug."
+            }
+          }
+        }
+      }
+    },
+    "templateApplyRequest": {
+      "title": "Template Apply Request",
+      "description": "Uses a saved team on this project: worked out again from the team as it is now, so a preview gone stale applies nothing wrong, then the team written once, each retirement's effects (agent.updated, and each in_progress task it held blocked), and team.updated with the template's name. Answers templateAppliedResult, its errors empty; a result the team's rules refuse is refused with -32005, writing nothing, and data.errors as template.preview answers them; so is a template whose file changed since its preview, with template_changed at /digest.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "jsonrpc",
+        "id",
+        "method",
+        "params"
+      ],
+      "properties": {
+        "jsonrpc": {
+          "const": "2.0"
+        },
+        "id": {
+          "$ref": "#/$defs/requestId"
+        },
+        "method": {
+          "const": "template.apply"
+        },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "slug",
+            "digest"
+          ],
+          "properties": {
+            "slug": {
+              "type": "string",
+              "description": "The saved team's file name without .yaml, as templates.list answers it."
+            },
+            "digest": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$",
+              "description": "The digest template.preview answered with what it showed. A template file whose bytes differ since then (saved again, or edited by hand) is refused with template_changed at /digest, writing nothing, so its answers are applied only as the preview showed them."
+            }
+          }
+        }
+      }
+    },
+    "templateRenameRequest": {
+      "title": "Template Rename Request",
+      "description": "Gives a saved team another name, keeping when it was saved, and records no event. A new slug another template holds is refused with template_exists at /name. Answers templateSlugResult.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "jsonrpc",
+        "id",
+        "method",
+        "params"
+      ],
+      "properties": {
+        "jsonrpc": {
+          "const": "2.0"
+        },
+        "id": {
+          "$ref": "#/$defs/requestId"
+        },
+        "method": {
+          "const": "template.rename"
+        },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "slug",
+            "name"
+          ],
+          "properties": {
+            "slug": {
+              "type": "string",
+              "description": "The saved team's file name without .yaml, as templates.list answers it."
+            },
+            "name": {
+              "type": "string",
+              "description": "The saved team's name, as the person typed it; the daemon trims it."
+            }
+          }
+        }
+      }
+    },
+    "templateDeleteRequest": {
+      "title": "Template Delete Request",
+      "description": "Removes a saved team's file, readable or not, and records no event. Answers emptyResult.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "jsonrpc",
+        "id",
+        "method",
+        "params"
+      ],
+      "properties": {
+        "jsonrpc": {
+          "const": "2.0"
+        },
+        "id": {
+          "$ref": "#/$defs/requestId"
+        },
+        "method": {
+          "const": "template.delete"
+        },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "slug"
+          ],
+          "properties": {
+            "slug": {
+              "type": "string",
+              "description": "The saved team's file name without .yaml, as templates.list answers it."
+            }
+          }
+        }
+      }
+    },
+    "templatesListResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "folder",
+        "templates",
+        "unreadable"
+      ],
+      "properties": {
+        "folder": {
+          "type": "string",
+          "description": "The folder the daemon keeps saved teams in, as it uses it: under XDG_CONFIG_HOME when that is set."
+        },
+        "templates": {
+          "type": "array",
+          "description": "By name, case-insensitive.",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "slug",
+              "template"
+            ],
+            "properties": {
+              "slug": {
+                "type": "string"
+              },
+              "template": {
+                "type": "object",
+                "description": "The template whole, as team-template.schema.json shapes it."
+              }
+            }
+          }
+        },
+        "unreadable": {
+          "type": "array",
+          "description": "The files that are not a template, by slug.",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "slug"
+            ],
+            "properties": {
+              "slug": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    "templateAppliedResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "team",
+        "kept",
+        "retired",
+        "removed",
+        "added",
+        "effects",
+        "errors",
+        "digest"
+      ],
+      "description": "template.preview's answer, and template.apply's as applied.",
+      "properties": {
+        "digest": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$",
+          "description": "The sha256 of the template file's bytes as this answer read them, in lowercase hex; template.apply is given it."
+        },
+        "team": {
+          "type": "object",
+          "description": "The team as it would be, or is, as team.schema.json shapes it."
+        },
+        "kept": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Agents that stay, by id."
+        },
+        "retired": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Agents that have worked and are retired, by id."
+        },
+        "removed": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Agents that never worked and leave the file, by id."
+        },
+        "added": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Agents that join, by the id each gets."
+        },
+        "effects": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Each effect on the agents that stay and on the team's answers, in plain words."
+        },
+        "errors": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/teamError"
+          },
+          "description": "Why the result is not a team; empty when it is."
+        }
+      }
+    },
+    "templateSlugResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "slug"
+      ],
+      "properties": {
+        "slug": {
+          "type": "string",
+          "description": "The file name the template is kept under."
+        }
+      }
+    }
+  }
+}

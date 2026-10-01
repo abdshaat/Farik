@@ -16,7 +16,7 @@ use farik_core::governor::paths::normalise;
 use farik_core::pricing::prices::PRICE_TABLE;
 use farik_core::pricing::{PriceTable, validate_price_table};
 use farik_core::sprint::{Sprint, validate_sprint};
-use farik_core::team::{AgentId, Team, validate_team};
+use farik_core::team::{AgentId, Team, TeamTemplate, validate_team, validate_template};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -462,6 +462,31 @@ impl ProjectFiles {
         self.write_text(PROJECT_SCAN, text)
     }
 
+    /// Adds what the user said about the project to `project.md`, as one paragraph dated `date`
+    /// under `## The user says`, made when it is not there yet. A rescan keeps the section.
+    ///
+    /// # Errors
+    ///
+    /// `Io` when the file cannot be read or written.
+    pub fn append_project_note(&self, text: &str, date: NaiveDate) -> Result<(), FilesError> {
+        let before = match self.read_project_scan() {
+            Err(FilesError::NotFound { .. }) => "# The project\n".to_string(),
+            other => other?,
+        };
+        let heading = if before.contains(crate::scan::USER_SAYS) {
+            String::new()
+        } else {
+            format!("\n{}\n", crate::scan::USER_SAYS)
+        };
+        let end = if before.ends_with('\n') { "" } else { "\n" };
+        let note = format!(
+            "{before}{end}{heading}\n{}: {}\n",
+            date.format("%Y-%m-%d"),
+            text.trim()
+        );
+        self.write_text(PROJECT_SCAN, &note)
+    }
+
     /// Writes the channel's summary as the agents were last shown it, for the human to read.
     ///
     /// # Errors
@@ -759,6 +784,8 @@ const PROJECT_SCAN: &str = "project.md";
 const PRICES: &str = "prices.json";
 const SETTINGS: &str = "local/settings.json";
 const CHANNEL_SUMMARY: &str = "local/channel-summary.md";
+/// What a refusal of a team template names it: it lives in the state folder, not under `.farik/`.
+const TEMPLATE: &str = "template";
 
 /// How a file a person edits by hand is read.
 ///
@@ -822,6 +849,28 @@ pub fn criteria_yaml(library: &CriteriaLibrary) -> Result<String, FilesError> {
     let value = as_wire(CRITERIA, library)?;
     validate_criteria(&value).map_err(|errors| refused(CRITERIA, &errors))?;
     yaml_text(CRITERIA, &value)
+}
+
+/// A team template as the YAML its file holds (ADR 0026 C), after holding it to the rules a
+/// template read back is held to, so that what is saved can be read again. It lives in the user's
+/// state folder, not under `.farik/`, so a refusal names it `template`.
+///
+/// # Errors
+///
+/// `Invalid` when the template is not one `validate_template` accepts or cannot be written as YAML.
+pub fn template_yaml(template: &TeamTemplate) -> Result<String, FilesError> {
+    let value = serde_json::to_value(template).map_err(|error| FilesError::Invalid {
+        path: TEMPLATE.to_string(),
+        detail: error.to_string(),
+    })?;
+    validate_template(&value).map_err(|errors| FilesError::Invalid {
+        path: TEMPLATE.to_string(),
+        detail: said(&errors),
+    })?;
+    serde_saphyr::to_string(&value).map_err(|error| FilesError::Invalid {
+        path: TEMPLATE.to_string(),
+        detail: error.to_string(),
+    })
 }
 
 /// A wire value as the YAML a person reads and edits.
@@ -898,12 +947,17 @@ fn product_path(path: &str) -> Result<String, FilesError> {
 fn refused(relative: &str, errors: &[ValidationError]) -> FilesError {
     FilesError::Invalid {
         path: ProjectFiles::named(relative),
-        detail: errors
-            .iter()
-            .map(|error| format!("{} {}", error.path, error.message))
-            .collect::<Vec<_>>()
-            .join("; "),
+        detail: said(errors),
     }
+}
+
+/// Every refusal a validator gave, in one line.
+fn said(errors: &[ValidationError]) -> String {
+    errors
+        .iter()
+        .map(|error| format!("{} {}", error.path, error.message))
+        .collect::<Vec<_>>()
+        .join("; ")
 }
 
 /// A typed value as the wire sees it, which is what a validator reads.
@@ -1129,7 +1183,29 @@ mod tests {
     use chrono::NaiveDate;
 
     use super::fixtures::TempProject;
-    use super::{DecisionEntry, FilesError, contract_path, memory_path, product_path, slug};
+    use super::{
+        DecisionEntry, FilesError, contract_path, memory_path, product_path, slug, template_yaml,
+        yaml_value,
+    };
+
+    #[test]
+    fn round_trips_through_yaml() {
+        let template =
+            farik_core::team::validate_template(&farik_core::team::fixtures::a_template_wire())
+                .expect("the fixture is a template");
+        let text = template_yaml(&template).expect("a template is written");
+        let value = yaml_value(&text, "template").expect("the text is YAML");
+        assert_eq!(
+            farik_core::team::validate_template(&value).expect("and a template again"),
+            template
+        );
+        let mut one_agent = template;
+        one_agent.agents.truncate(1);
+        assert!(
+            matches!(template_yaml(&one_agent), Err(FilesError::Invalid { path, .. }) if path == "template"),
+            "a template that could not be read back is not written"
+        );
+    }
 
     #[test]
     fn says_what_it_could_not_use_and_why_in_plain_words() {

@@ -15,7 +15,7 @@ use serde_json::{Value, json};
 
 use super::{DaemonState, HookRequest, SessionRegistration};
 use crate::session::SessionPurpose;
-use crate::tools::fixtures::{TestProject, a_team_of_three, at};
+use crate::tools::fixtures::{TestProject, a_team_of_three, at, tiers_of};
 use crate::tools::{ToolDeps, tool_descriptors};
 
 /// The session of `dev-a`, on FRK-1.
@@ -95,6 +95,9 @@ impl TestDaemon {
             executor: None,
             limits,
             farik_tools: farik_tools.iter().map(ToString::to_string).collect(),
+            tiers: tiers_of(&self.project.deps, agent),
+            connectors: Vec::new(),
+            preview: None,
             purpose: SessionPurpose::Implement,
             in_reply_to: None,
             thread: None,
@@ -152,6 +155,9 @@ impl TestDaemon {
             executor: None,
             limits: DEFAULT_SESSION_LIMITS,
             farik_tools: every_farik_tool().iter().map(ToString::to_string).collect(),
+            tiers: tiers_of(deps, "dev-a"),
+            connectors: Vec::new(),
+            preview: None,
             purpose: SessionPurpose::Implement,
             in_reply_to: None,
             thread: None,
@@ -163,4 +169,11 @@ impl TestDaemon {
     pub(crate) fn events(&self, kind: EventKind) -> Vec<FarikEvent> {
         self.project.events(&[kind])
     }
+}
+
+/// The reply frame to `method` with `params`, as the web page's socket is answered: for a test
+/// outside the daemon that asks what the page asks.
+pub(crate) async fn answered(state: &Arc<DaemonState>, method: &str, params: &Value) -> Value {
+    let frame = json!({ "jsonrpc": "2.0", "id": 1, "method": method, "params": params });
+    super::web::answer(state, &frame.to_string(), &mut None).await
 }

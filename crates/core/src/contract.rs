@@ -9,6 +9,9 @@ use serde_json::Value;
 
 use crate::text::listed;
 
+// The contract's `summary` is the plain sentences a human gate leads with (spec 5.4). The
+// `summary` of the `task.created` and `contract.written` events is another thing: the log's
+// one-line summary of the contract. The two share a name and nothing else.
 pub use crate::generated::task_contract::{
     ExitCriterion, ExitCriterionVerification as VerificationWire,
     FarikTaskContract as TaskContract, FarikTaskContractBudget as Budget,

@@ -1,0 +1,25 @@
+.column {
+	display: flex;
+	flex-direction: column;
+	gap: var(--farik-space-3);
+	padding: var(--farik-space-3);
+	border: 1px solid var(--farik-color-rule);
+	border-radius: var(--farik-radius-raised);
+	background: var(--farik-color-surface);
+	color: var(--farik-color-ink);
+	font:
+		var(--farik-type-body-weight) var(--farik-type-body-size) /
+		var(--farik-type-body-line-height) var(--farik-type-body-family);
+}
+
+.heading {
+	margin: 0;
+	font:
+		600 var(--farik-type-body-size) / var(--farik-type-body-line-height)
+		var(--farik-type-body-family);
+}
+
+.count {
+	color: var(--farik-color-ink-muted);
+	font-weight: 400;
+}

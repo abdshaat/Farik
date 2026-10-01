@@ -5,38 +5,50 @@
 use std::collections::BTreeMap;
 use std::fmt;
 use std::str::FromStr;
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::{Arc, Mutex, OnceLock, PoisonError};
 use std::time::Duration;
 
+use chrono::{DateTime, Utc};
 use farik_core::branch::task_branch;
-use farik_core::budget::SessionLedger;
+use farik_core::budget::{BudgetState, SessionLedger};
 use farik_core::contract::{Role, TaskContract, TaskId, TaskKind, TaskStatus, wire_method};
-use farik_core::governor::done::{CriterionResult, DoneEvidence, RunBy};
+use farik_core::generated::team::Judgment;
+pub(crate) use farik_core::governor::done::result_awaits_human;
+use farik_core::governor::done::{
+    CriterionResult, DesignReviewNeed, DoneEvidence, RunBy, requires_human_acceptance,
+};
 use farik_core::governor::escalation::EscalationReason;
 use farik_core::governor::gates::{
-    AssignmentInput, AssignmentRequester, Blocker, ChildState, DependencyState, Rejection,
-    WorkState,
+    AssignmentInput, AssignmentRequester, Blocker, ChildState, DependencyState, DesignerBrowser,
+    Rejection, WorkState, waits_for_a_sprint,
 };
-use farik_core::governor::readiness::{JudgmentReview, ParentState, ReadinessContext};
+use farik_core::governor::readiness::{
+    JudgmentAnswer, JudgmentReview, ParentState, ReadinessContext,
+};
+use farik_core::governor::team_rules::is_ui_change;
 use farik_core::governor::transition::{
     ContractAcceptance, GateFailure, TransitionContext, TransitionDecision, TransitionEffect,
     TransitionRefusal, TransitionRequest, evaluate_transition,
 };
 use farik_core::governor::transition_table::{GateId, TransitionActor};
-use farik_core::team::{AgentStatus, HumanAcceptsContracts, Team};
+use farik_core::team::{AgentStatus, HumanAcceptsContracts, JudgmentRequired, Team};
 use farik_protocol::clock::Clock;
 use farik_protocol::event::{
-    BlockerWire, ContractEvaluatedBody, ContractEvaluatedBodyGate, CriterionRecordedBodyRunBy,
-    EscalationRaisedBody, EscalationRaisedBodyReason, EventBody, EventIds, EventKind, FarikEvent,
-    GateWire, HumanAcceptedBodySubject, NoteWrittenBodyKind, RejectionWire, TaskStatusWire,
-    TaskTransitionedBody, TaskTransitionedBodyEffectsItem, TransitionActorWire,
-    TransitionRefusedBody, TransitionRefusedBodyRefusal, new_event,
+    BlockerWire, ContractEvaluatedBody, ContractEvaluatedBodyGate, ContractJudgedBody,
+    CriterionRecordedBodyRunBy, EscalationRaisedBody, EscalationRaisedBodyReason, EventBody,
+    EventIds, EventKind, FarikEvent, GateWire, HumanAcceptedBodySubject, NoteWrittenBodyKind,
+    RejectionWire, TaskStatusWire, TaskTransitionedBody, TaskTransitionedBodyEffectsItem,
+    TransitionActorWire, TransitionRefusedBody, TransitionRefusedBodyRefusal, new_event,
 };
 use farik_store::files::{FilesError, ProjectFiles};
+pub use farik_store::git::integration_branch;
+pub(crate) use farik_store::waiting::{is_move_into, last_move_into, review_passed};
 use farik_store::{EventLog, EventQuery, Git, GitError, Projections, StoreError, TaskProjection};
 
 use crate::channel::{ChannelError, post_system};
-use crate::cost::{CostError, budget_state};
+use crate::cost::{CostError, budget_state, extra_tries};
+use crate::preview::PreviewFactory;
+use crate::tools::design::{DesignReview, ReviewState, design_review};
 
 /// The governor's door: everything a transition is judged on and recorded in.
 pub struct Transitions {
@@ -50,6 +62,8 @@ pub struct Transitions {
     /// event is a read-check-write, and the tools and the orchestrator ask at once. It covers one
     /// process, which is what phase 3 runs.
     requests: Mutex<()>,
+    /// What says whether a preview can run here, once the driver sets it (D4).
+    previews: OnceLock<Arc<dyn PreviewFactory>>,
 }
 
 /// What the requester brings to a transition, and nothing else: every other fact is read from the
@@ -73,12 +87,18 @@ pub struct TransitionAsk {
     /// Why Farik could not run one of the task's criteria for its reviewer, for a reason that is
     /// not the work's: the words of the governor's escalation (5.4).
     pub criterion_unrunnable: Option<String>,
+    /// Why the task's preview could not be made ready: the words of the governor's `preview`
+    /// escalation, the output's last 40 lines among them (step 12).
+    pub preview_failed: Option<String>,
     /// The human's words for a move they asked for, recorded on the move; into `escalated` they
     /// are also the escalation's.
     pub reason: Option<String>,
     /// Whether Farik files this move in the named agent's name, as it files a reviewer's rejection
     /// from the note of a session that has ended (5.4); such a move is said in the channel.
     pub filed_by_farik: bool,
+    /// Whether the human's resolve grants more tries (ADR 0024): the attempt it starts is counted,
+    /// so the move increments the iteration.
+    pub grants_tries: bool,
 }
 
 /// The governor's answer, which is recorded either way.
@@ -193,6 +213,23 @@ impl Transitions {
             clock,
             ids,
             requests: Mutex::new(()),
+            previews: OnceLock::new(),
+        }
+    }
+
+    /// Sets what says whether a preview can run here, which decides whether the team's Designer
+    /// may be assigned (D4); the first set holds.
+    pub fn set_previews(&self, previews: Arc<dyn PreviewFactory>) {
+        let _ = self.previews.set(previews);
+    }
+
+    /// Whether the team's Designer can have its browser. Until the driver has said what runs
+    /// previews, as for a command handled in its own process, nothing does: it fails closed.
+    #[must_use]
+    pub fn designer_browser(&self, team: &Team) -> DesignerBrowser {
+        match self.previews.get() {
+            Some(previews) => crate::preview::designer_browser(team, previews.as_ref()),
+            None => crate::preview::designer_browser(team, &crate::preview::NoPreviews),
         }
     }
 
@@ -262,10 +299,11 @@ impl Transitions {
         decision: &TransitionDecision,
     ) -> Result<(), TransitionError> {
         contract.status = decision.to;
-        if decision
-            .effects
-            .contains(&TransitionEffect::IncrementIteration)
-        {
+        let mut effects = decision.effects.clone();
+        if ask.grants_tries && !effects.contains(&TransitionEffect::IncrementIteration) {
+            effects.insert(0, TransitionEffect::IncrementIteration);
+        }
+        if effects.contains(&TransitionEffect::IncrementIteration) {
             contract.iteration = contract.iteration.saturating_add(1);
         }
         if decision.from == TaskStatus::Ready && decision.to == TaskStatus::Assigned {
@@ -280,7 +318,7 @@ impl Transitions {
             actor: actor_wire(request.actor),
             requested_by: requested_by(request),
             gate: gate_wire(decision.row.gate),
-            effects: decision.effects.iter().copied().map(effect_wire).collect(),
+            effects: effects.iter().copied().map(effect_wire).collect(),
             assignee: contract.assignee.clone(),
             reviewer: contract.reviewer.clone(),
             iteration: u32::try_from(contract.iteration).unwrap_or(u32::MAX),
@@ -355,7 +393,8 @@ impl Transitions {
                     .map(|blocker| blocker.description.clone())
             })
             .or_else(|| ask.reason.clone())
-            .or_else(|| ask.criterion_unrunnable.clone());
+            .or_else(|| ask.criterion_unrunnable.clone())
+            .or_else(|| ask.preview_failed.clone());
         if words.is_none() && decision.from == TaskStatus::Blocked {
             let history = self.log.read(&EventQuery {
                 task_id: Some(request.task_id.clone()),
@@ -434,11 +473,156 @@ impl Transitions {
         })?;
         let now = self.clock.now();
 
+        let (budget, open_sprint, sprint_left, readiness) =
+            self.readiness_parts(&board, row, &history, team, &contract, now)?;
+
+        let (work, changed_paths) = self.work(&contract, team)?;
+
+        let assignment = assignment(
+            ask,
+            team,
+            &board,
+            row,
+            (open_sprint, sprint_left),
+            dependency_states(&contract, &board),
+            self.designer_browser(team),
+        );
+
+        let review = self.review_of(team, &contract, &changed_paths, &history).1;
+        let (results, completion_note, review_note) = evidence_since_work_began(&history);
+        let done = with_the_humans_acceptance(
+            &contract,
+            &history,
+            DoneEvidence {
+                results: results.clone(),
+                changed_paths,
+                completion_note,
+                review_note,
+                human_accepted: false,
+                protected_paths: team.rules().protected_paths,
+                design_review: match review.state {
+                    ReviewState::NotNeeded => DesignReviewNeed::NotNeeded,
+                    ReviewState::Passed => DesignReviewNeed::Passed,
+                    _ => DesignReviewNeed::Missing,
+                },
+            },
+        );
+        let hours = team.policy.blocked_limit_hours.get();
+        Ok(TransitionContext {
+            triaged: row.triaged,
+            children: children_of(&board, id),
+            readiness,
+            readiness_failed_attempts: readiness_failed_attempts(&history),
+            acceptance: ContractAcceptance {
+                required_by_policy: asks_every_contract(team),
+                given: contract_accepted(&history),
+            },
+            assignment,
+            assignee_results: results,
+            work,
+            blocker: ask.blocker.clone(),
+            blocker_resolution: ask.blocker_resolution.clone(),
+            blocked_at: last_move_into(&history, TaskStatus::Blocked)
+                .map(|event| event.envelope.recorded_at),
+            now,
+            blocked_limit: Duration::from_secs(hours.saturating_mul(3600)),
+            done,
+            rejection: ask.rejection.clone(),
+            budget,
+            permission_denied: ask.permission_denied,
+            criterion_unrunnable: ask.criterion_unrunnable.is_some(),
+            preview_failed: ask.preview_failed.is_some(),
+            result_awaits_human: result_awaits_human(&contract),
+            review_passed: review_passed(&history),
+            extra_iterations: extra_tries(&history),
+            design_plan_returns: crate::tools::design::returns(&history),
+            design_reviewer: match (review.state, review.recorded_by) {
+                (ReviewState::Failed, Some((designer, _))) => Some(designer),
+                _ => None,
+            },
+            contract,
+        })
+    }
+
+    /// Whether the task's change touches the interface, and its design review (step 12), read
+    /// from the store and the task branch as `context` reads them.
+    ///
+    /// # Errors
+    ///
+    /// As `context`'s.
+    pub(crate) fn design_review(
+        &self,
+        team: &Team,
+        task_id: &TaskId,
+    ) -> Result<(bool, DesignReview), TransitionError> {
+        let history = self.log.read(&EventQuery {
+            task_id: Some(task_id.clone()),
+            ..EventQuery::default()
+        })?;
+        let contract = self.files.read_contract(task_id)?;
+        let (_, changed_paths) = self.work(&contract, team)?;
+        Ok(self.review_of(team, &contract, &changed_paths, &history))
+    }
+
+    /// `design_review` on what was read.
+    fn review_of(
+        &self,
+        team: &Team,
+        contract: &TaskContract,
+        changed_paths: &[String],
+        history: &[FarikEvent],
+    ) -> (bool, DesignReview) {
+        let ui_change = is_ui_change(
+            contract,
+            contract.assignee_role,
+            changed_paths,
+            &team.rules().ui_paths,
+        );
+        (
+            ui_change,
+            design_review(team, ui_change, history, self.designer_browser(team)),
+        )
+    }
+
+    /// The Definition of Ready's context for `contract` as it is given, which need not be the
+    /// file's: the browser checks a plan the human has not saved yet. Everything else is read from
+    /// the store as `context` reads it.
+    ///
+    /// # Errors
+    ///
+    /// As `context`'s, but for git, which it does not ask.
+    pub fn readiness_context(
+        &self,
+        team: &Team,
+        contract: &TaskContract,
+    ) -> Result<ReadinessContext, TransitionError> {
+        let board = self.projections.board()?;
+        let row = row_of(&board, &contract.id)?;
+        let history = self.log.read(&EventQuery {
+            task_id: Some(contract.id.clone()),
+            ..EventQuery::default()
+        })?;
+        let now = self.clock.now();
+        Ok(self
+            .readiness_parts(&board, row, &history, team, contract, now)?
+            .3)
+    }
+
+    /// The budgets, the open sprint, what is left of it, and the readiness context of `contract`.
+    fn readiness_parts(
+        &self,
+        board: &[TaskProjection],
+        row: &TaskProjection,
+        history: &[FarikEvent],
+        team: &Team,
+        contract: &TaskContract,
+        now: DateTime<Utc>,
+    ) -> Result<(BudgetState, Option<String>, f64, ReadinessContext), TransitionError> {
         let budget = budget_state(
             &self.projections,
             team,
             contract.assignee_role,
-            Some(&contract),
+            Some(contract),
             &SessionLedger::default(),
             now,
         )?;
@@ -458,75 +642,19 @@ impl Transitions {
                 .dependencies
                 .iter()
                 .filter_map(|dependency| {
-                    status_on(&board, dependency.as_str())
+                    status_on(board, dependency.as_str())
                         .map(|status| (dependency.to_string(), status))
                 })
                 .collect(),
             active_agents_by_role: active_agents_by_role(team),
-            parent: self.parent_state(&board, &contract)?,
+            parent: self.parent_state(board, contract)?,
             rules: team.rules(),
-            requires_judgment_review: team.has_active(Role::ScrumMaster),
-            judgment_review: judgment_since_written(&history),
+            requires_judgment_review: team.judgment().required == JudgmentRequired::Always,
+            judgment_review: judgment_since_written(history),
+            human_approves: asks_every_contract(team) || requires_human_acceptance(contract),
         };
 
-        let (work, changed_paths) = self.work(&contract, team)?;
-
-        let assignment = assignment(
-            ask,
-            team,
-            &board,
-            row,
-            (open_sprint, sprint_left),
-            dependency_states(&contract, &board),
-        );
-
-        let (results, completion_note, review_note) = evidence_since_work_began(&history);
-        let done = with_the_humans_acceptance(
-            &contract,
-            &history,
-            DoneEvidence {
-                results: results.clone(),
-                changed_paths,
-                completion_note,
-                review_note,
-                human_accepted: false,
-                protected_paths: team.rules().protected_paths,
-            },
-        );
-        let hours = team.policy.blocked_limit_hours.get();
-        Ok(TransitionContext {
-            triaged: row.triaged,
-            children: board
-                .iter()
-                .filter(|child| child.parent.as_ref() == Some(id))
-                .map(|child| ChildState {
-                    task_id: child.task_id.to_string(),
-                    status: child.status,
-                })
-                .collect(),
-            readiness,
-            readiness_failed_attempts: readiness_failed_attempts(&history),
-            acceptance: ContractAcceptance {
-                required_by_policy: team.policy.human_accepts_contracts
-                    == HumanAcceptsContracts::All,
-                given: contract_accepted(&history),
-            },
-            assignment,
-            assignee_results: results,
-            work,
-            blocker: ask.blocker.clone(),
-            blocker_resolution: ask.blocker_resolution.clone(),
-            blocked_at: last_move_into(&history, TaskStatus::Blocked)
-                .map(|event| event.envelope.recorded_at),
-            now,
-            blocked_limit: Duration::from_secs(hours.saturating_mul(3600)),
-            done,
-            rejection: ask.rejection.clone(),
-            budget,
-            permission_denied: ask.permission_denied,
-            criterion_unrunnable: ask.criterion_unrunnable.is_some(),
-            contract,
-        })
+        Ok((budget, open_sprint, sprint_left, readiness))
     }
 
     /// What the task's branch holds, read from git only when its worktree
@@ -633,6 +761,7 @@ fn move_line(
             .or_else(|| ask.blocker_resolution.clone())
             .or_else(|| ask.reason.clone())
             .or_else(|| ask.criterion_unrunnable.clone())
+            .or_else(|| ask.preview_failed.clone())
     });
     if let Some(reason) = reason.as_deref().map(str::trim).filter(|r| !r.is_empty()) {
         line.push_str(": ");
@@ -722,6 +851,18 @@ fn refused_before_the_governor(
             details,
         }],
     })
+}
+
+/// The tasks under the epic `id`, as the board has them.
+fn children_of(board: &[TaskProjection], id: &TaskId) -> Vec<ChildState> {
+    board
+        .iter()
+        .filter(|child| child.parent.as_ref() == Some(id))
+        .map(|child| ChildState {
+            task_id: child.task_id.to_string(),
+            status: child.status,
+        })
+        .collect()
 }
 
 /// Whether the human is to review this contract, asked when it is assigned: an epic, on a team
@@ -868,6 +1009,7 @@ fn gate_wire(gate: GateId) -> GateWire {
         GateId::IterationBelowLimit => GateWire::IterationBelowLimit,
         GateId::IterationLimitReached => GateWire::IterationLimitReached,
         GateId::GovernorEscalation => GateWire::GovernorEscalation,
+        GateId::HumanRejection => GateWire::HumanRejection,
     }
 }
 
@@ -893,6 +1035,7 @@ fn reason_wire(reason: EscalationReason) -> EscalationRaisedBodyReason {
         EscalationReason::ReadinessFailures => EscalationRaisedBodyReason::ReadinessFailures,
         EscalationReason::Integration => EscalationRaisedBodyReason::Integration,
         EscalationReason::ExplicitRequest => EscalationRaisedBodyReason::ExplicitRequest,
+        EscalationReason::Preview => EscalationRaisedBodyReason::Preview,
     }
 }
 
@@ -930,7 +1073,8 @@ fn dependency_states(contract: &TaskContract, board: &[TaskProjection]) -> Vec<D
 
 /// The pair an assignment would name, from the ask's ids and the team's roles, when the ask names
 /// an assignee, with the sprint `row` and its epic are in, beside the open sprint and what is left
-/// of its budget. `requested_by` is the governor's to set from the request's actor.
+/// of its budget, and whether the team's Designer can have its browser. `requested_by` is the
+/// governor's to set from the request's actor.
 fn assignment(
     ask: &TransitionAsk,
     team: &Team,
@@ -938,6 +1082,7 @@ fn assignment(
     row: &TaskProjection,
     (open_sprint, sprint_left_usd): (Option<String>, f64),
     dependencies: Vec<DependencyState>,
+    designer_browser: DesignerBrowser,
 ) -> Option<AssignmentInput> {
     let assignee_id = ask.assignee_id.as_deref()?;
     let (reviewer_id, reviewer_role) = match ask.reviewer_id.as_deref() {
@@ -953,7 +1098,7 @@ fn assignment(
         assignee_role: role_in(team, assignee_id),
         reviewer_id,
         reviewer_role,
-        assignee_open_tasks: open_tasks(board, assignee_id),
+        assignee_open_tasks: open_tasks(team, open_sprint.as_deref(), board, assignee_id),
         wip_limit: u32::try_from(team.policy.wip_limit_per_agent).unwrap_or(u32::MAX),
         remaining_sprint_budget_usd: sprint_left_usd,
         open_sprint,
@@ -964,7 +1109,9 @@ fn assignment(
                 .find(|epic| &epic.task_id == parent)
                 .and_then(|epic| epic.sprint.clone())
         }),
+        plan_in_sprints: team.plans_in_sprints(),
         dependencies,
+        designer_browser,
     })
 }
 
@@ -974,6 +1121,11 @@ fn status_on(board: &[TaskProjection], task: &str) -> Option<TaskStatus> {
         .iter()
         .find(|row| row.task_id.as_str() == task)
         .map(|row| row.status)
+}
+
+/// Whether the team's policy asks the human to approve every contract, not only the risky ones.
+fn asks_every_contract(team: &Team) -> bool {
+    team.policy.human_accepts_contracts == HumanAcceptsContracts::All
 }
 
 /// How many agents of each role are active.
@@ -994,13 +1146,20 @@ fn role_in(team: &Team, agent_id: &str) -> Role {
         .map_or(Role::Human, |agent| Role::from(agent.role))
 }
 
-/// The tasks an agent holds that are neither accepted nor cancelled (5.2).
-pub(crate) fn open_tasks(board: &[TaskProjection], agent_id: &str) -> u32 {
+/// The tasks an agent holds that are neither accepted nor cancelled (5.2), leaving out one that
+/// waits for a sprint while `open_sprint` is open: it is not being worked (ADR 0028).
+pub(crate) fn open_tasks(
+    team: &Team,
+    open_sprint: Option<&str>,
+    board: &[TaskProjection],
+    agent_id: &str,
+) -> u32 {
     let held = board
         .iter()
         .filter(|row| {
             row.assignee_id.as_deref() == Some(agent_id)
                 && !matches!(row.status, TaskStatus::Accepted | TaskStatus::Cancelled)
+                && !waits_for_a_sprint(&crate::sprints::sprint_hold(team, open_sprint, row))
         })
         .count();
     u32::try_from(held).unwrap_or(u32::MAX)
@@ -1039,7 +1198,7 @@ pub(crate) fn refining_began(history: &[FarikEvent]) -> u64 {
         .unwrap_or(0)
 }
 
-/// The Scrum Master's judgment of the contract the task has now (5.3): the last `contract.judged`
+/// The judge's review of the contract the task has now (5.3): the last `contract.judged`
 /// after both the task's last `contract.written` and where refining last began, else none, since a
 /// contract written again, or refined over, is not the one that was judged.
 pub(crate) fn judgment_since_written(history: &[FarikEvent]) -> Option<JudgmentReview> {
@@ -1055,13 +1214,41 @@ pub(crate) fn judgment_since_written(history: &[FarikEvent]) -> Option<JudgmentR
         .rev()
         .filter(|event| event.envelope.seq > since)
         .find_map(|event| match &event.body {
-            EventBody::ContractJudged(body) => Some(JudgmentReview {
-                fits_budget: body.fits_budget,
-                criteria_detect_failure: body.criteria_detect_failure,
-                reason: body.reason.clone(),
-            }),
+            EventBody::ContractJudged(body) => Some(judgment_review(body)),
             _ => None,
         })
+}
+
+/// A `contract.judged` as the judge's review: its answers, or, for one recorded before the
+/// questions were the team's, its two booleans as answers to the default two questions, each with
+/// the judgment's reason. A boolean left out of such an event is read as no.
+fn judgment_review(body: &ContractJudgedBody) -> JudgmentReview {
+    let answers = if body.answers.is_empty() {
+        let old = [body.fits_budget, body.criteria_detect_failure];
+        Judgment::default()
+            .questions
+            .into_iter()
+            .zip(old)
+            .map(|(question, pass)| JudgmentAnswer {
+                question: question.to_string(),
+                pass: pass.unwrap_or(false),
+                reason: body.reason.clone(),
+            })
+            .collect()
+    } else {
+        body.answers
+            .iter()
+            .map(|answer| JudgmentAnswer {
+                question: answer.question.clone(),
+                pass: answer.pass,
+                reason: answer.reason.clone(),
+            })
+            .collect()
+    };
+    JudgmentReview {
+        answers,
+        reason: body.reason.clone(),
+    }
 }
 
 /// Whether the human accepted the contract the task has now (5.16 item 2): a `human.accepted
@@ -1178,43 +1365,6 @@ fn evidence_since_work_began(
         }
     }
     (results, completion_note, review_note)
-}
-
-pub(crate) fn is_move_into(event: &FarikEvent, status: TaskStatus) -> bool {
-    matches!(&event.body, EventBody::TaskTransitioned(body) if wire_status(body.to) == Some(status))
-}
-
-/// The task's last `task.transitioned` into `status`.
-pub(crate) fn last_move_into(history: &[FarikEvent], status: TaskStatus) -> Option<&FarikEvent> {
-    history
-        .iter()
-        .rev()
-        .find(|event| is_move_into(event, status))
-}
-
-/// A wire status as the contract's own. The two lists are one, which a test in `farik-protocol`
-/// pins, so `None` is a log no Farik wrote.
-fn wire_status(status: TaskStatusWire) -> Option<TaskStatus> {
-    TaskStatus::from_str(&status.to_string()).ok()
-}
-
-/// The branch a task's work is measured against and merges into: the team's
-/// `policy.integration_branch`, or the repository's default branch when the team names none.
-///
-/// # Errors
-///
-/// `CommandFailed` naming the team's branch when git would not take it for a branch name
-/// (`Git::check_branch_name`); what `Git::default_branch` refuses, asked only when the team names
-/// no branch.
-pub fn integration_branch(team: &Team, git: &Git) -> Result<String, GitError> {
-    match &team.policy.integration_branch {
-        Some(branch) => {
-            // The team file's word reaches refspecs and options, so git judges it first.
-            git.check_branch_name(branch.as_str())?;
-            Ok(branch.to_string())
-        }
-        None => git.default_branch(),
-    }
 }
 
 #[cfg(test)]
@@ -1882,6 +2032,54 @@ mod tests {
 
     #[test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn binds_the_summary_to_the_plans_a_human_approves() {
+        // The fixture's team asks the human under `high_risk`.
+        let project = Project::new("readiness-summary", a_team(|_| {}), at(12));
+        project.file("FRK-1", |wire| wire["risk"] = json!("high"));
+        project.created("FRK-1", "refining");
+        project.file("FRK-2", |wire| {
+            wire["kind"] = json!("epic");
+            wire["reviewer_role"] = json!("human");
+        });
+        project.created_under("FRK-2", "refining", "epic", None);
+        project.file("FRK-3", |_| {});
+        project.created("FRK-3", "refining");
+        project.file("FRK-4", |wire| {
+            wire["risk"] = json!("high");
+            wire["summary"] = json!("A login page, so that people can sign in to the app.");
+        });
+        project.created("FRK-4", "refining");
+        let misses_its_summary = |task: &str, team: &Team| {
+            let context = project
+                .transitions
+                .context(
+                    &a_request(task, TaskStatus::Ready, TransitionActor::Governor, None),
+                    &TransitionAsk::default(),
+                    team,
+                )
+                .expect("the context reads");
+            let contract = project
+                .files
+                .read_contract(&task.parse().expect("a task id"))
+                .expect("the file reads");
+            evaluate_readiness(&contract, &context.readiness)
+                .err()
+                .unwrap_or_default()
+                .iter()
+                .any(|failure| failure.rule == ReadinessRule::SummaryPresent)
+        };
+
+        assert!(misses_its_summary("FRK-1", &project.team));
+        assert!(misses_its_summary("FRK-2", &project.team));
+        assert!(!misses_its_summary("FRK-3", &project.team));
+        assert!(!misses_its_summary("FRK-4", &project.team));
+        // Under `all` the human approves every plan, the low risk one too.
+        let all = a_team(|wire| wire["policy"]["human_accepts_contracts"] = json!("all"));
+        assert!(misses_its_summary("FRK-3", &all));
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
     fn checks_readiness_against_the_contracts_own_sprint() {
         let project = Project::new("readiness-sprint", a_team(|_| {}), at(12));
         project.file("FRK-1", |wire| {
@@ -1936,6 +2134,7 @@ mod tests {
             let mut paused = an_agent_wire("dev-c", "software_developer");
             paused["status"] = json!("paused");
             agents.push(paused);
+            wire["policy"]["judgment"] = json!({ "required": "always" });
         });
         let project = Project::new("context-sources", team, at(12));
         project.file("FRK-1", |wire| {
@@ -2215,6 +2414,100 @@ mod tests {
         assert_eq!(row.status, TaskStatus::Assigned);
         assert_eq!(row.assignee_id.as_deref(), Some("dev-a"));
         assert_eq!(row.reviewer_id.as_deref(), Some("dev-b"));
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn refuses_to_assign_the_designer_without_its_browser() {
+        use crate::preview::fixtures::FakePreviews;
+        use crate::preview::{NoPreviews, PreviewFactory};
+        type Case = (
+            &'static str,
+            Team,
+            Option<Arc<dyn PreviewFactory>>,
+            Option<&'static str>,
+        );
+
+        let with_iris = |preview: bool, playwright: bool| {
+            a_team(|wire| {
+                let mut iris = an_agent_wire("iris", "ui_ux_designer");
+                if playwright {
+                    iris["mcp_servers"] = json!([{ "name": "playwright", "source": "builtin" }]);
+                }
+                wire["agents"]
+                    .as_array_mut()
+                    .expect("a list of agents")
+                    .push(iris);
+                if preview {
+                    wire["preview"] = json!({ "start": "make serve", "port": 4401 });
+                }
+            })
+        };
+        let cases: [Case; 5] = [
+            (
+                "assign-designer-no-sandbox",
+                with_iris(true, true),
+                Some(Arc::new(NoPreviews)),
+                Some("designer_needs_sandbox"),
+            ),
+            (
+                "assign-designer-no-preview",
+                with_iris(false, true),
+                Some(Arc::new(FakePreviews::ready())),
+                Some("preview_not_set"),
+            ),
+            (
+                "assign-designer-no-connector",
+                with_iris(true, false),
+                Some(Arc::new(FakePreviews::ready())),
+                Some("designer_needs_browser"),
+            ),
+            // A process that never said what runs previews has none (fails closed).
+            (
+                "assign-designer-previews-unset",
+                with_iris(true, true),
+                None,
+                Some("designer_needs_sandbox"),
+            ),
+            (
+                "assign-designer-ready",
+                with_iris(true, true),
+                Some(Arc::new(FakePreviews::ready())),
+                None,
+            ),
+        ];
+        for (name, team, previews, refusal) in cases {
+            let project = Project::new(name, team, at(12));
+            if let Some(previews) = previews {
+                project.transitions.set_previews(previews);
+            }
+            project.file("FRK-1", |wire| {
+                wire["assignee_role"] = json!("ui_ux_designer");
+            });
+            project.created("FRK-1", "ready");
+            let outcome = project.ask(
+                &a_request(
+                    "FRK-1",
+                    TaskStatus::Assigned,
+                    TransitionActor::ProductManager,
+                    Some("maya"),
+                ),
+                &assigning("iris", "dev-b"),
+            );
+            match refusal {
+                Some(refusal) => {
+                    let failures = assignment_failures(&outcome);
+                    assert!(
+                        failures.iter().any(|failure| failure.starts_with(refusal)),
+                        "{name}: {failures:?}"
+                    );
+                }
+                None => assert!(
+                    matches!(outcome, TransitionOutcome::Moved(_)),
+                    "{name}: {outcome:?}"
+                ),
+            }
+        }
     }
 
     #[test]
@@ -2687,13 +2980,21 @@ mod tests {
         assert_eq!(row.status, TaskStatus::Escalated);
     }
 
-    /// The default team with an active Scrum Master, `sam`, whose judgment readiness then needs.
+    /// The default team with an active Scrum Master, `sam`, who checks every plan against the
+    /// default two questions, whose judgment readiness then needs.
     fn a_team_with_a_scrum_master() -> Team {
+        a_team_with_a_scrum_master_and(|_| {})
+    }
+
+    /// `a_team_with_a_scrum_master`, with `change` applied to its wire last.
+    fn a_team_with_a_scrum_master_and(change: impl FnOnce(&mut Value)) -> Team {
         a_team(|wire| {
             wire["agents"]
                 .as_array_mut()
                 .expect("a list of agents")
                 .push(an_agent_wire("sam", "scrum_master"));
+            wire["policy"]["judgment"] = json!({ "required": "always" });
+            change(wire);
         })
     }
 
@@ -2710,15 +3011,36 @@ mod tests {
         );
     }
 
-    /// A `contract.judged` of `task` by `sam`, with both answers and a reason.
+    /// A `contract.judged` of `task` by `sam`, answering the default two questions, and a reason.
     fn judged(project: &Project, task: &str, fits_budget: bool, criteria_detect_failure: bool) {
+        judged_with(
+            project,
+            task,
+            &[
+                ("Does the task fit its budget?", fits_budget),
+                (
+                    "Would its checks notice if the work went wrong the way its intent worries \
+                     about?",
+                    criteria_detect_failure,
+                ),
+            ],
+        );
+    }
+
+    /// A `contract.judged` of `task` by `sam` with these answers, each with its own reason.
+    fn judged_with(project: &Project, task: &str, answers: &[(&str, bool)]) {
+        let answers: Vec<Value> = answers
+            .iter()
+            .map(|(question, pass)| {
+                json!({ "question": question, "pass": pass, "reason": format!("Answered {pass}.") })
+            })
+            .collect();
         project.record(
             task,
             "contract.judged",
             &json!({
                 "judged_by": "sam",
-                "fits_budget": fits_budget,
-                "criteria_detect_failure": criteria_detect_failure,
+                "answers": answers,
                 "reason": "Two files and one form, too much for five dollars."
             }),
             at(10),
@@ -2780,13 +3102,118 @@ mod tests {
             "{outcome:?}"
         );
         let failures = readiness_failures(&project, "FRK-1");
-        assert!(holds(&failures, "too large for its budget"), "{failures:?}");
+        assert!(
+            holds(&failures, "Does the task fit its budget?"),
+            "{failures:?}"
+        );
         assert!(
             holds(
                 &failures,
                 "Two files and one form, too much for five dollars."
             ),
             "{failures:?}"
+        );
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn passes_only_when_every_answer_passes() {
+        let questions = [
+            "Does the task fit its budget?",
+            "Is it small enough to finish in one go?",
+            "Would its checks notice if the work went wrong the way its intent worries about?",
+        ];
+        for (answers, moves) in [([true, true, true], true), ([true, false, true], false)] {
+            let project = Project::new(
+                &format!("judged-answers-{moves}"),
+                a_team_with_a_scrum_master_and(|wire| {
+                    wire["policy"]["judgment"]["questions"] = json!(questions);
+                }),
+                at(12),
+            );
+            project.file("FRK-1", |_| {});
+            project.created("FRK-1", "refining");
+            written(&project, "FRK-1");
+            let answered: Vec<(&str, bool)> = questions.into_iter().zip(answers).collect();
+            judged_with(&project, "FRK-1", &answered);
+            let outcome = readying(&project, "FRK-1");
+            assert_eq!(
+                matches!(outcome, TransitionOutcome::Moved(_)),
+                moves,
+                "{answers:?}: {outcome:?}"
+            );
+            if !moves {
+                let failures = readiness_failures(&project, "FRK-1");
+                assert!(
+                    holds(
+                        &failures,
+                        "Is it small enough to finish in one go? (Answered false.)"
+                    ),
+                    "{failures:?}"
+                );
+                assert!(
+                    !holds(&failures, "Does the task fit its budget?"),
+                    "only the failed question is named: {failures:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn reads_old_judgments() {
+        for (fits_budget, moves) in [(true, true), (false, false)] {
+            let project = Project::new(
+                &format!("judged-old-{moves}"),
+                a_team_with_a_scrum_master(),
+                at(12),
+            );
+            project.file("FRK-1", |_| {});
+            project.created("FRK-1", "refining");
+            written(&project, "FRK-1");
+            project.record(
+                "FRK-1",
+                "contract.judged",
+                &json!({
+                    "judged_by": "sam",
+                    "fits_budget": fits_budget,
+                    "criteria_detect_failure": true,
+                    "reason": "One file, and C1 runs it."
+                }),
+                at(10),
+            );
+            let outcome = readying(&project, "FRK-1");
+            assert_eq!(
+                matches!(outcome, TransitionOutcome::Moved(_)),
+                moves,
+                "{outcome:?}"
+            );
+            if !moves {
+                let failures = readiness_failures(&project, "FRK-1");
+                assert!(
+                    holds(
+                        &failures,
+                        "Does the task fit its budget? (One file, and C1 runs it.)"
+                    ),
+                    "{failures:?}"
+                );
+            }
+        }
+        // A judgment with neither answers nor the old booleans passes nothing.
+        let project = Project::new("judged-empty", a_team_with_a_scrum_master(), at(12));
+        project.file("FRK-1", |_| {});
+        project.created("FRK-1", "refining");
+        written(&project, "FRK-1");
+        project.record(
+            "FRK-1",
+            "contract.judged",
+            &json!({ "judged_by": "sam", "reason": "Looks fine." }),
+            at(10),
+        );
+        let outcome = readying(&project, "FRK-1");
+        assert!(
+            !matches!(outcome, TransitionOutcome::Moved(_)),
+            "{outcome:?}"
         );
     }
 
@@ -3201,6 +3628,93 @@ mod tests {
             matches!(outcome, TransitionOutcome::Moved(_)),
             "{outcome:?}"
         );
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn accepts_a_ui_change_only_once_the_designer_passed_it() {
+        // The Definition of Done's sixth item, fed from the log: the core rule alone proves
+        // nothing if the runtime never tells it a review is missing.
+        // A Designer that can review, so the review is `waiting`, not held for its browser.
+        let team = a_team(|wire| {
+            let mut iris = an_agent_wire("iris", "ui_ux_designer");
+            iris["mcp_servers"] = json!([{ "name": "playwright", "source": "builtin" }]);
+            wire["agents"]
+                .as_array_mut()
+                .expect("a list of agents")
+                .push(iris);
+            wire["preview"] = json!({ "start": "make serve", "port": 4401 });
+        });
+        let project = Project::new("done-design-review", team, at(12));
+        project
+            .transitions
+            .set_previews(Arc::new(crate::preview::fixtures::FakePreviews::ready()));
+        project.file("FRK-1", |wire| wire["ui_change"] = json!(true));
+        project.created("FRK-1", "assigned");
+        let people = json!({ "assignee": "dev-a", "reviewer": "dev-b" });
+        project.moved("FRK-1", "assigned", "in_progress", &people, at(9));
+        governor_result(&project, "FRK-1", "C1");
+        note(&project, "FRK-1", "completion", "dev-a");
+        note(&project, "FRK-1", "review", "dev-b");
+        project.moved("FRK-1", "in_progress", "verifying", &people, at(10));
+
+        let outcome = project.ask(&accepting("FRK-1"), &TransitionAsk::default());
+        let TransitionOutcome::Refused(refusal) = outcome else {
+            panic!("a UI change whose design review waits: {outcome:?}");
+        };
+        assert!(
+            super::refusal_details(&refusal)
+                .iter()
+                .any(|detail| detail.contains("the UI/UX Designer has not passed it")),
+            "{refusal:?}"
+        );
+
+        project.record(
+            "FRK-1",
+            "design_review.recorded",
+            &json!({ "pass": true, "reasons": "Reads well.", "checks": [] }),
+            at(11),
+        );
+        let outcome = project.ask(&accepting("FRK-1"), &TransitionAsk::default());
+        assert!(
+            matches!(outcome, TransitionOutcome::Moved(_)),
+            "{outcome:?}"
+        );
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn names_the_designer_as_reviewer_only_on_a_fail() {
+        let team = a_team(|wire| {
+            wire["agents"]
+                .as_array_mut()
+                .expect("a list of agents")
+                .push(an_agent_wire("iris", "ui_ux_designer"));
+        });
+        let project = Project::new("design-reviewer", team, at(12));
+        project.file("FRK-1", |wire| wire["ui_change"] = json!(true));
+        project.created("FRK-1", "assigned");
+        let people = json!({ "assignee": "dev-a", "reviewer": "dev-b" });
+        project.moved("FRK-1", "assigned", "in_progress", &people, at(9));
+        project.moved("FRK-1", "in_progress", "verifying", &people, at(10));
+        let reviewed = |pass: bool| {
+            project.append_wire(&json!({
+                "seq": 1,
+                "recorded_at": at(11).to_rfc3339(),
+                "team_id": "farik",
+                "project_id": "farik",
+                "task_id": "FRK-1",
+                "agent_id": "iris",
+                "session_id": "s-1",
+                "kind": "design_review.recorded",
+                "body": { "pass": pass, "reasons": "Looked.", "checks": [] },
+            }));
+            project
+                .context(&accepting("FRK-1"), &TransitionAsk::default())
+                .design_reviewer
+        };
+        assert_eq!(reviewed(true), None, "a pass rejects nothing");
+        assert_eq!(reviewed(false).as_deref(), Some("iris"));
     }
 
     #[test]

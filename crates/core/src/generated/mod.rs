@@ -50,3 +50,22 @@ pub mod team {
         derives = [PartialEq],
     );
 }
+
+/// The template copies five of the team schema's definitions, because `typify` takes no external
+/// reference; each copy is the team's own Rust type here, so a template's role, model and answers
+/// move into a team as they are. `team::template`'s tests pin each copy equal to the team's.
+#[allow(clippy::all, clippy::pedantic, missing_docs)]
+pub mod team_template {
+    typify::import_types!(
+        schema = "../../docs/schemas/team-template.schema.json",
+        struct_builder = false,
+        derives = [PartialEq],
+        replace = {
+            Role = crate::generated::team::Role,
+            Model = crate::generated::team::Model,
+            Permissions = crate::generated::team::Permissions,
+            Judgment = crate::generated::team::Judgment,
+            Integration = crate::generated::team::PolicyIntegration,
+        },
+    );
+}

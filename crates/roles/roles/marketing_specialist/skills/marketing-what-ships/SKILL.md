@@ -29,6 +29,7 @@ first time it appears.
 
 ## 3. Commit and hand off
 
-Commit your changes, write a completion note (what changed, what you did not cover, and what the
+Commit your changes, write a completion note that opens with two or three plain sentences for the
+user and a blank line (then what changed, what you did not cover, and what the
 reviewer should check first), and request `verifying`. You do not publish anything; that is outside
 the harness.

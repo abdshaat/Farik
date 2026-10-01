@@ -354,6 +354,7 @@ fn measures_cost_per_accepted_task_by_purpose() {
             (CostRecordedBodyPurpose::Triage, 0.0625),
             (CostRecordedBodyPurpose::Refine, 0.25),
             (CostRecordedBodyPurpose::Plan, 0.125),
+            (CostRecordedBodyPurpose::Explore, 0.0),
             (CostRecordedBodyPurpose::Implement, 0.75),
             (CostRecordedBodyPurpose::Verify, 0.25),
             (CostRecordedBodyPurpose::Ceremony, 0.0),
@@ -381,6 +382,22 @@ fn counts_an_unpriced_report_as_a_session_at_no_cost() {
         Some(&0.0)
     );
     assert_eq!(metrics.active_weeks, 1);
+}
+
+#[test]
+fn leaves_chat_out_of_cost_per_accepted_task() {
+    let recorded = Recorded::new("chat-cost");
+    recorded.contract("FRK-1", &["command"]);
+    recorded.created("FRK-1", "task", None);
+    verified_once(&recorded, "FRK-1");
+    recorded.cost(Some("FRK-1"), "implement", 2.0, "2026-09-22");
+    recorded.cost(None, "chat", 3.0, "2026-09-22");
+
+    let split = metrics_of(&recorded)
+        .cost_per_accepted_task_usd
+        .expect("a task was accepted");
+    assert!((split.total - 2.0).abs() < f64::EPSILON, "{}", split.total);
+    assert_eq!(split.by_purpose.get(&CostRecordedBodyPurpose::Chat), None);
 }
 
 #[test]

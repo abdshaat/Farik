@@ -27,6 +27,62 @@ pub struct ProjectScan {
     pub read_back: String,
     /// The criteria the project's own commands make available, each with `source: project_scan`.
     pub detected_criteria: Vec<CriterionTemplate>,
+    /// What `read_back` was built from, for a screen that shows it in rows.
+    pub facts: ScanFacts,
+}
+
+/// What one scan found, before any of it is put into one line. It mirrors the scan's `Reading`.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ScanFacts {
+    /// The language with the most tracked files.
+    pub language: Option<String>,
+    /// The toolchain's name.
+    pub toolchain: Option<String>,
+    /// Whether the project is a workspace.
+    pub workspace: bool,
+    /// How many packages the workspace has.
+    pub packages: u32,
+    /// Where the tests are, as a location.
+    pub tests_in: Option<String>,
+    /// How many files git tracks.
+    pub tracked_files: u32,
+    /// How long ago the last commit was, in words; nothing before the first commit.
+    pub last_commit: Option<String>,
+}
+
+impl ScanFacts {
+    /// The one line a person is shown, in the shape section 4 gives.
+    #[must_use]
+    pub fn read_back(&self) -> String {
+        let mut parts: Vec<String> = Vec::new();
+        if self.tracked_files == 0 {
+            parts.push("nothing tracked yet".to_string());
+        }
+        // A workspace of one package is a workspace and not a monorepo, and "1 packages" is not a
+        // count. One condition decides the word and the number together, so they cannot disagree.
+        let monorepo = self.workspace && self.packages > 1;
+        if let Some(language) = &self.language {
+            parts.push(if monorepo {
+                format!("{language} monorepo")
+            } else {
+                language.clone()
+            });
+        }
+        if let Some(toolchain) = &self.toolchain {
+            parts.push(toolchain.clone());
+        }
+        if monorepo {
+            parts.push(format!("{} packages", self.packages));
+        }
+        if let Some(tests) = &self.tests_in {
+            parts.push(format!("tests in {tests}"));
+        }
+        parts.push(match &self.last_commit {
+            Some(ago) => format!("last commit {ago}"),
+            None => "no commits yet".to_string(),
+        });
+        parts.join(", ")
+    }
 }
 
 /// Why a project could not be scanned.
@@ -126,8 +182,10 @@ pub fn scan_project(git: &Git, now: DateTime<Utc>) -> Result<ProjectScan, ScanEr
     let tracked = git.tracked_paths()?;
     let commit = git.head_summary()?;
     let reading = Reading::of(git.root(), &tracked)?;
+    let facts = reading.facts(&tracked, commit.as_ref(), now);
     Ok(ProjectScan {
-        read_back: reading.read_back(&tracked, commit.as_ref(), now),
+        read_back: facts.read_back(),
+        facts,
         detected_criteria: reading.criteria()?,
     })
 }
@@ -190,16 +248,27 @@ pub fn names_of(criteria: &[CriterionTemplate]) -> Vec<String> {
     criteria.iter().map(|one| one.name.to_string()).collect()
 }
 
+/// The heading of the section of `.farik/project.md` that holds the user's own words.
+pub(crate) const USER_SAYS: &str = "## The user says";
+
 /// What `.farik/project.md` holds: the line the scan read back, and the criteria it found.
 ///
 /// This is the file every session is given (`docs/SPEC.md` section 5.8), so it says what the scan
-/// found and nothing it did not.
+/// found and nothing it did not, and what the user said in `previous`, the file as it was.
 #[must_use]
-pub fn project_document(scan: &ProjectScan, library: &CriteriaLibrary) -> String {
+pub fn project_document(
+    scan: &ProjectScan,
+    library: &CriteriaLibrary,
+    previous: Option<&str>,
+) -> String {
     let mut parts = vec![format!("# The project\n\n{}", scan.read_back)];
     let names = names_of(&library.criteria);
     if !names.is_empty() {
         parts.push(format!("Criteria: {}.", names.join(", ")));
+    }
+    // What the user said is theirs, not the scan's: a rescan carries it through unchanged.
+    if let Some(said) = previous.and_then(|text| text.find(USER_SAYS).map(|at| &text[at..])) {
+        parts.push(said.trim_end().to_string());
     }
     format!("{}\n", parts.join("\n\n"))
 }
@@ -487,41 +556,33 @@ impl Reading {
         })
     }
 
+    /// What this reading and the tree's git facts come to, as owned values.
+    fn facts(
+        &self,
+        tracked: &[String],
+        commit: Option<&HeadSummary>,
+        now: DateTime<Utc>,
+    ) -> ScanFacts {
+        ScanFacts {
+            language: self.language.map(str::to_string),
+            toolchain: self.toolchain.map(|toolchain| toolchain.name.to_string()),
+            workspace: self.is_workspace,
+            packages: u32::try_from(self.packages).unwrap_or(u32::MAX),
+            tests_in: self.tests.map(str::to_string),
+            tracked_files: u32::try_from(tracked.len()).unwrap_or(u32::MAX),
+            last_commit: commit.map(|head| how_long_ago(&head.committed_at, now)),
+        }
+    }
+
     /// The one line a person is shown, in the shape section 4 gives.
+    #[cfg(test)]
     fn read_back(
         &self,
         tracked: &[String],
         commit: Option<&HeadSummary>,
         now: DateTime<Utc>,
     ) -> String {
-        let mut parts: Vec<String> = Vec::new();
-        if tracked.is_empty() {
-            parts.push("nothing tracked yet".to_string());
-        }
-        // A workspace of one package is a workspace and not a monorepo, and "1 packages" is not a
-        // count. One condition decides the word and the number together, so they cannot disagree.
-        let monorepo = self.is_workspace && self.packages > 1;
-        if let Some(language) = self.language {
-            parts.push(if monorepo {
-                format!("{language} monorepo")
-            } else {
-                language.to_string()
-            });
-        }
-        if let Some(toolchain) = self.toolchain {
-            parts.push(toolchain.name.to_string());
-        }
-        if monorepo {
-            parts.push(format!("{} packages", self.packages));
-        }
-        if let Some(tests) = self.tests {
-            parts.push(format!("tests in {tests}"));
-        }
-        parts.push(match commit {
-            Some(head) => format!("last commit {}", how_long_ago(&head.committed_at, now)),
-            None => "no commits yet".to_string(),
-        });
-        parts.join(", ")
+        self.facts(tracked, commit, now).read_back()
     }
 
     /// The criteria this project's own commands make available.
@@ -732,8 +793,8 @@ mod tests {
     use serde_json::json;
 
     use super::{
-        Reading, ScanError, TOOLCHAINS, cargo_workspace, how_long_ago, language_of, material,
-        packages_in, scripts_in, seeded_library, tests_in,
+        Reading, ScanError, ScanFacts, TOOLCHAINS, cargo_workspace, how_long_ago, language_of,
+        material, packages_in, scripts_in, seeded_library, tests_in,
     };
 
     fn at(text: &str) -> DateTime<Utc> {
@@ -919,6 +980,64 @@ mod tests {
                 at("2026-09-17T12:00:00Z")
             ),
             "TypeScript monorepo, pnpm, 3 packages, tests in vitest, last commit 4 days ago"
+        );
+    }
+
+    #[test]
+    fn builds_the_same_line_from_its_facts() {
+        let head = crate::git::HeadSummary {
+            sha: "a1b2c3".to_string(),
+            committed_at: "2026-09-13T12:00:00+00:00".to_string(),
+            subject: "a commit".to_string(),
+        };
+        let now = at("2026-09-17T12:00:00Z");
+        let monorepo = Reading {
+            language: Some("TypeScript"),
+            toolchain: Some(toolchain("pnpm")),
+            is_workspace: true,
+            packages: 3,
+            tests: Some("vitest"),
+            scripts: Vec::new(),
+        };
+        let facts = monorepo.facts(&strings(&["package.json"]), Some(&head), now);
+        assert_eq!(
+            facts,
+            ScanFacts {
+                language: Some("TypeScript".to_string()),
+                toolchain: Some("pnpm".to_string()),
+                workspace: true,
+                packages: 3,
+                tests_in: Some("vitest".to_string()),
+                tracked_files: 1,
+                last_commit: Some("4 days ago".to_string()),
+            }
+        );
+        assert_eq!(
+            facts.read_back(),
+            "TypeScript monorepo, pnpm, 3 packages, tests in vitest, last commit 4 days ago"
+        );
+        let single = Reading {
+            packages: 1,
+            tests: None,
+            ..monorepo
+        };
+        assert_eq!(
+            single
+                .facts(&strings(&["package.json"]), None, now)
+                .read_back(),
+            "TypeScript, pnpm, no commits yet"
+        );
+        let nothing = Reading {
+            language: None,
+            toolchain: None,
+            is_workspace: false,
+            packages: 0,
+            tests: None,
+            scripts: Vec::new(),
+        };
+        assert_eq!(
+            nothing.facts(&[], None, now).read_back(),
+            "nothing tracked yet, no commits yet"
         );
     }
 

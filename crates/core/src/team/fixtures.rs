@@ -1,6 +1,8 @@
 use serde_json::{Value, json};
 
-/// A schema-valid wire team: the two agents a team cannot work without, and no optional field.
+/// A schema-valid wire team: the two agents a team cannot work without, and no optional field
+/// but one. It checks no plans (`judgment.required: never`), so that a test not about checking
+/// plans keeps testing what it names; a test about them sets `always`.
 #[must_use]
 pub fn a_team_wire() -> Value {
     json!({
@@ -12,7 +14,8 @@ pub fn a_team_wire() -> Value {
             "wip_limit_per_agent": 2,
             "blocked_limit_hours": 24,
             "max_iterations": 3,
-            "integration": "manual"
+            "integration": "manual",
+            "judgment": { "required": "never" }
         },
         "rules": {}
     })
@@ -43,17 +46,18 @@ pub fn a_full_team_wire() -> Value {
                 "persona": "Asks the question nobody asked.",
                 "avatar": "ada.png",
                 "status": "active",
-                "model": { "id": "claude-opus-5", "effort": "high" },
+                "model": { "id": "claude-opus-5-5", "effort": "high" },
                 "grants": ["execute"],
                 "revokes": ["network"],
-                "preauthorized_external_tools": ["mcp__linear__create_issue"]
+                "preauthorized_external_tools": ["mcp__linear__create_issue"],
+                "mcp_servers": [{ "name": "playwright", "source": "builtin" }]
             },
             {
                 "id": "linus",
                 "display_name": "Linus",
                 "role": "software_developer",
                 "status": "active",
-                "model": { "id": "claude-opus-5" }
+                "model": { "id": "claude-opus-5-5" }
             }
         ],
         "budgets": {
@@ -73,7 +77,13 @@ pub fn a_full_team_wire() -> Value {
             "escalation_age_hours": 24,
             "memory_cap_tokens": 8000,
             "integration": "auto_merge",
-            "integration_branch": "trunk"
+            "integration_branch": "trunk",
+            "judgment": {
+                "required": "always",
+                "questions": ["Does the task fit its budget?", "Is it small enough to finish in one go?"],
+                "judge": "auto"
+            },
+            "permissions": { "run_commands": true, "push": false }
         },
         "rules": {
             "protected_paths": ["infra/**"],
@@ -81,7 +91,43 @@ pub fn a_full_team_wire() -> Value {
             "required_criteria": ["test", "review"],
             "require_new_tests": true,
             "max_task_budget_usd": 12.5,
-            "forbidden_commands": ["^rm -rf /"]
+            "forbidden_commands": ["^rm -rf /"],
+            "document_paths": ["docs/**"],
+            "ui_paths": ["app/**"]
+        },
+        "preview": {
+            "prepare": "pnpm install --frozen-lockfile",
+            "start": "pnpm dev --port 4400",
+            "port": 4400,
+            "path": "/app"
         }
+    })
+}
+
+/// A schema-valid wire template (ADR 0026 C): Mira, Product Manager, and Theo, Developer, with
+/// the four answers written out.
+#[must_use]
+pub fn a_template_wire() -> Value {
+    json!({
+        "version": 1,
+        "name": "Three of us",
+        "saved_at": "2026-09-30T12:00:00Z",
+        "agents": [
+            {
+                "id": "mira",
+                "display_name": "Mira",
+                "role": "product_manager",
+                "persona": "Mira.",
+                "avatar": "product-manager",
+                "model": { "id": "claude-opus-5", "effort": "high" }
+            },
+            { "id": "theo", "display_name": "Theo", "role": "software_developer" }
+        ],
+        "policy": {
+            "permissions": { "run_commands": true, "push": false },
+            "judgment": { "required": "always", "judge": "auto" },
+            "integration": "auto_merge"
+        },
+        "budgets": { "daily_usd": 20 }
     })
 }

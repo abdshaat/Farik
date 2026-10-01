@@ -220,6 +220,19 @@ fn makes_a_project_out_of_a_repository() {
         ["team.updated", "project.scanned", "criteria.updated"],
         "one event per thing it wrote, in the order it wrote them"
     );
+    let log = farik_store::open_event_log(&repository.path.join(".farik/local/farik.db"), at())
+        .expect("the log opens");
+    let events = log
+        .read(&farik_store::EventQuery::default())
+        .expect("the log reads");
+    let farik_protocol::event::EventBody::TeamUpdated(updated) = &events[0].body else {
+        panic!("a team.updated first");
+    };
+    assert_eq!(
+        updated.plan_in_sprints,
+        Some(true),
+        "the starter team plans in sprints, and its team.updated says so (SPEC 8.5)"
+    );
     assert!(
         repository.path.join(".farik/local/.gitignore").is_file(),
         "the log is local and not committed (D5)"
@@ -280,10 +293,23 @@ fn a_second_init_rescans_and_keeps_the_team() {
     files_of(&repository)
         .write_team(&team)
         .expect("the team is written");
+    files_of(&repository)
+        .append_project_note(
+            "It is a shop, not a game.",
+            chrono::NaiveDate::from_ymd_opt(2026, 9, 22).expect("a date"),
+        )
+        .expect("the note is kept");
 
     let ran = run_in(&repository.path, &["init"]);
 
     assert_eq!(ran.code, 0, "{}", ran.err);
+    assert!(
+        files_of(&repository)
+            .read_project_scan()
+            .expect("project.md")
+            .contains("2026-09-22: It is a shop, not a game."),
+        "the user's words outlive the rescan"
+    );
     assert!(
         ran.out
             .contains("kept the team already in .farik/team.yaml"),
@@ -1221,6 +1247,20 @@ fn refuses_an_invocation_it_cannot_use() {
 
     assert_eq!(ran.code, 2, "two is what a wrong command line exits with");
     assert!(ran.err.contains("nonsense"), "{}", ran.err);
+    assert!(ran.out.is_empty(), "{}", ran.out);
+}
+
+#[test]
+fn refuses_serve_with_json() {
+    let ran = run_in(Path::new("."), &["serve", "--json"]);
+
+    assert_eq!(ran.code, 2, "{}", ran.err);
+    assert!(
+        ran.err
+            .contains("farik serve prints lines for a person; --json is not available for it"),
+        "{}",
+        ran.err
+    );
     assert!(ran.out.is_empty(), "{}", ran.out);
 }
 

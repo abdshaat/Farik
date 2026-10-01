@@ -22,11 +22,10 @@
     "agents": {
       "type": "array",
       "minItems": 2,
-      "maxItems": 7,
       "items": {
         "$ref": "#/$defs/agent"
       },
-      "description": "Two to seven agents. Three more rules are validate_team's rather than this schema's, because typify cannot generate a usable type from an array that carries a `contains`: ids are unique, and the team has an active Product Manager and an active Software Developer."
+      "description": "Two agents at least, and at most seven that are not retired: a retired agent stays so that its past events still name someone, and does not count. The seven, and three more rules, are validate_team's rather than this schema's, because a schema cannot count only some items and typify cannot generate a usable type from an array that carries a `contains`: ids are unique, and the team has an active Product Manager and an active Software Developer."
     },
     "budgets": {
       "$ref": "#/$defs/budgets"
@@ -36,9 +35,70 @@
     },
     "rules": {
       "$ref": "#/$defs/rules"
+    },
+    "preview": {
+      "$ref": "#/$defs/preview"
     }
   },
   "$defs": {
+    "preview": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "start",
+        "port"
+      ],
+      "properties": {
+        "prepare": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500,
+          "description": "Installs and builds, in the sandbox image with the task's worktree mounted and the network on, for at most 15 minutes; reused while the task branch's committed tree and this text are unchanged. Left out, skipped."
+        },
+        "start": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500,
+          "description": "Starts the app, in a preview container of the sandbox image with the task's worktree mounted and the network off."
+        },
+        "port": {
+          "type": "integer",
+          "minimum": 1024,
+          "maximum": 65535,
+          "description": "The port the app serves on inside its container."
+        },
+        "path": {
+          "type": "string",
+          "pattern": "^/",
+          "default": "/",
+          "description": "The page to open first. Left out, /."
+        }
+      },
+      "description": "How Farik opens the project's app for the ui_ux_designer (ADR 0026, the founder's D2): set once in Settings, under How to open your app. Without it a Designer's task is not assigned and a design review waits. Templates leave it out."
+    },
+    "mcpServer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "source"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "description": "The connector's name. validate_team refuses one Farik does not ship with unknown_connector; the one it ships is playwright."
+        },
+        "source": {
+          "type": "string",
+          "enum": [
+            "builtin"
+          ],
+          "description": "Where the connector's definition comes from: builtin, shipped in the farik binary."
+        }
+      }
+    },
     "role": {
       "type": "string",
       "enum": [
@@ -46,7 +106,8 @@
         "scrum_master",
         "architect",
         "software_developer",
-        "marketing_specialist"
+        "marketing_specialist",
+        "ui_ux_designer"
       ],
       "description": "The role an agent is instantiated from. `human` is a role a contract may name as a reviewer, never a role an agent holds."
     },
@@ -122,6 +183,15 @@
             "$ref": "#/$defs/permissionTier"
           },
           "description": "Permission tiers this agent does not hold, whatever its role's defaults say (spec 5.6: a role's tiers are the user's to override, which means taking one away as well as adding one). Taking away wins over granting."
+        },
+        "mcp_servers": {
+          "type": "array",
+          "maxItems": 20,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/mcpServer"
+          },
+          "description": "The connectors this agent's explore, implement and design review sessions get (spec 5.6). Any agent may have one; team.propose gives the ui_ux_designer playwright."
         }
       }
     },
@@ -140,9 +210,7 @@
     "model": {
       "type": "object",
       "additionalProperties": false,
-      "required": [
-        "id"
-      ],
+      "description": "The agent's own model and effort. Either may be left out, and the role's stands in for it: changing how carefully an agent works never changes what it runs on.",
       "properties": {
         "id": {
           "type": "string",
@@ -274,8 +342,75 @@
           "maximum": 16000,
           "default": 8000,
           "description": "How long each agent's notebook, .farik/agents/<id>/memory.md, may be, in tokens counted as a quarter of its characters; a longer write is refused (spec 5.8). Left out, 8000."
+        },
+        "plan_in_sprints": {
+          "type": "boolean",
+          "description": "Whether the team plans its work in sprints (ADR 0028): ready tasks wait in the Backlog until a sprint plans them, and no task is assigned outside the open sprint. Left out, false, so a team file written before the key works as it did; setup and farik init write true."
+        },
+        "judgment": {
+          "$ref": "#/$defs/judgment"
+        },
+        "permissions": {
+          "$ref": "#/$defs/permissions"
         }
       }
+    },
+    "judgment": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "required": {
+          "type": "string",
+          "enum": [
+            "always",
+            "never"
+          ],
+          "default": "always",
+          "description": "Whether every contract's plan is checked before work starts (spec 5.3). Left out, always."
+        },
+        "questions": {
+          "type": "array",
+          "maxItems": 5,
+          "items": {
+            "type": "string",
+            "minLength": 10,
+            "maxLength": 200
+          },
+          "default": [
+            "Does the task fit its budget?",
+            "Would its checks notice if the work went wrong the way its intent worries about?"
+          ],
+          "description": "What the judge answers about each plan, one answer per question. Left out, the two of spec 5.3. validate_team refuses none while required is always."
+        },
+        "judge": {
+          "type": "string",
+          "enum": [
+            "auto",
+            "architect",
+            "scrum_master"
+          ],
+          "default": "auto",
+          "description": "Who checks plans. `auto` is the first active agent of the Architect, the Scrum Master and the Product Manager, in that order (the founder, 2026-09-29). A named judge must be an active agent (validate_team)."
+        }
+      },
+      "description": "The plan check (spec 5.3). Left out, every plan is checked by the defaults."
+    },
+    "permissions": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "run_commands": {
+          "type": "boolean",
+          "default": true,
+          "description": "Whether Developers and Architects run commands (the execute tier). Farik still runs every check itself. Left out, true."
+        },
+        "push": {
+          "type": "boolean",
+          "default": false,
+          "description": "Whether Developers push and open pull requests (the git_remote tier). Left out, false."
+        }
+      },
+      "description": "The team's answers to what its agents may do, applied to every agent of the role before the agent's own grants and revokes (spec 5.6)."
     },
     "rules": {
       "type": "object",
@@ -341,7 +476,17 @@
             "minLength": 1
           },
           "default": ["docs/**", "**/*.md", "CHANGELOG.md"],
-          "description": "Globs every allowed path of a task not assigned to the software_developer must fall within: only the Developer changes code (spec 5.12). Left out, docs/**, **/*.md and CHANGELOG.md; an empty list means no task but a Developer's can be ready."
+          "description": "Globs every allowed path of a task not assigned to the software_developer or the ui_ux_designer must fall within: only the Developer and the UI/UX Designer change code (spec 5.12). Left out, docs/**, **/*.md and CHANGELOG.md; an empty list means no task but a Developer's or a Designer's can be ready."
+        },
+        "ui_paths": {
+          "type": "array",
+          "maxItems": 100,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "default": ["**/*.tsx", "**/*.jsx", "**/*.vue", "**/*.svelte", "**/*.css", "**/*.scss", "**/*.html"],
+          "description": "Globs a software_developer's task diff is matched against when it enters verifying: a match makes it a UI change, which the ui_ux_designer design-reviews before the reviewer (ADR 0026, spec 5.12). Left out, the seven design globs; an empty list leaves only the contract's ui_change to say so."
         }
       }
     }

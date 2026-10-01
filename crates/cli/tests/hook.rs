@@ -129,6 +129,9 @@ impl Served {
             executor: None,
             limits: DEFAULT_SESSION_LIMITS,
             farik_tools: Vec::new(),
+            tiers: team.agents[1].tiers(&team.permissions()),
+            connectors: Vec::new(),
+            preview: None,
             purpose: SessionPurpose::Implement,
             in_reply_to: None,
             thread: None,
@@ -141,8 +144,8 @@ impl Served {
         let handle = runtime
             .block_on(serve(
                 DaemonConfig {
-                    port: None,
-                    daemon_file: daemon_file.clone(),
+                    port: farik_runtime::daemon::PortChoice::Any,
+                    daemon_file: Some(daemon_file.clone()),
                 },
                 state,
             ))
@@ -227,10 +230,13 @@ fn fails_closed_when_the_daemon_is_not_there() {
     let reason = denied_reason(&missing.out);
     assert!(reason.contains("nothing.json"), "{reason}");
 
-    let port = {
-        let listener = TcpListener::bind("127.0.0.1:0").expect("a port");
-        listener.local_addr().expect("an address").port()
-    };
+    // Bound and never listening, so that the port stays this test's and a connect to it is always
+    // refused: a port freed again could be taken by another test's listener meanwhile.
+    let reserved = tokio::net::TcpSocket::new_v4().expect("a socket");
+    reserved
+        .bind("127.0.0.1:0".parse().expect("an address"))
+        .expect("a port");
+    let port = reserved.local_addr().expect("an address").port();
     let refused = hook("pre-tool-use", &daemon_file_for(&directory, port), PRE_READ);
     assert_eq!(refused.code, 0, "{}", refused.err);
     let reason = denied_reason(&refused.out);

@@ -22,6 +22,7 @@ use crate::channel::ChannelError;
 use crate::cost::CostError;
 use crate::daemon::{CommandHandler, DaemonState};
 use crate::forge::{Forge, ForgeError};
+use crate::preview::PreviewFactory;
 use crate::sandbox::{Sandbox, SandboxError, SandboxFactory};
 use crate::session::{RuntimeAdapter, RuntimeError};
 use crate::sleep::Sleeper;
@@ -29,9 +30,11 @@ use crate::sprints::SprintError;
 use crate::tools::ToolDeps;
 use crate::transitions::TransitionError;
 
+mod design;
 #[cfg(test)]
 pub(crate) mod fixtures;
 mod human;
+pub(crate) use human::{status_effects, update_agent_held};
 mod integrate;
 mod messages;
 mod recover;
@@ -52,6 +55,8 @@ pub struct OrchestratorDeps {
     pub adapter: Arc<dyn RuntimeAdapter>,
     /// What makes a task's sandbox.
     pub sandboxes: Arc<dyn SandboxFactory>,
+    /// What prepares and starts a task's preview, for a session given a connector.
+    pub previews: Arc<dyn PreviewFactory>,
     /// Where session ids come from.
     pub session_ids: Arc<dyn IdSource + Send + Sync>,
     /// The forge pull requests are opened on, under the `pull_request` policy.
@@ -228,6 +233,13 @@ pub enum TickReport {
         /// What was done.
         what: String,
     },
+    /// An agent answered the user in its one-to-one chat.
+    Chat {
+        /// The agent.
+        agent_id: String,
+        /// What was done.
+        what: String,
+    },
 }
 
 /// How a wait for a sleeping agent ended.
@@ -239,7 +251,8 @@ pub enum Waited {
     Reached,
     /// `stop` was called first.
     Stopped,
-    /// A command the human gave was handled first, which may have made work for an agent awake.
+    /// A command the human gave was handled first, or a request was filed in the browser, which
+    /// may have made work for an agent awake.
     Woken,
 }
 
@@ -438,6 +451,20 @@ impl Orchestrator {
     ///
     /// As `tick`.
     pub async fn tick_within(&self, scope: &TickScope) -> Result<TickReport, OrchestratorError> {
+        let log = &self.deps.tools.log;
+        if crate::pause::paused(log)? {
+            // A paused team still answers its chats (ADR 0026), unless the provider refused the
+            // key, with which no chat can be answered either.
+            if !crate::pause::key_refused(log)?
+                && let Some(report) = rules::chat_alone(self, scope).await?
+            {
+                return Ok(report);
+            }
+            return Ok(TickReport::Idle {
+                why: "the team is paused; farik resume starts it again".to_string(),
+                until: None,
+            });
+        }
         rules::tick(self, scope).await
     }
 
@@ -464,7 +491,8 @@ impl Orchestrator {
                 TickReport::Idle { until: None, .. } => break,
                 TickReport::Acted { .. }
                 | TickReport::Sprint { .. }
-                | TickReport::Conversation { .. } => {}
+                | TickReport::Conversation { .. }
+                | TickReport::Chat { .. } => {}
             }
         }
         Ok(())
@@ -486,6 +514,7 @@ impl Orchestrator {
             () = self.deps.sleeper.sleep_until(capped) => Waited::Reached,
             () = stopped => Waited::Stopped,
             () = self.commands.notified() => Waited::Woken,
+            () = self.deps.daemon.wakes().notified() => Waited::Woken,
         }
     }
 
@@ -577,7 +606,11 @@ impl Orchestrator {
             .agents
             .iter()
             .find(|agent| Some(agent.id.as_str()) == assignee.as_deref())
-            .is_some_and(|agent| agent.tiers().contains(&PermissionTier::Network));
+            .is_some_and(|agent| {
+                agent
+                    .tiers(&team.permissions())
+                    .contains(&PermissionTier::Network)
+            });
         let sandbox: Arc<dyn Sandbox> = Arc::from(self.deps.sandboxes.create(
             &self.deps.tools.ids.project_id,
             task_id,

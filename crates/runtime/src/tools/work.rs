@@ -13,7 +13,7 @@ use farik_protocol::event::{
 };
 use farik_store::EventQuery;
 use schemars::JsonSchema;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
 use super::refusal::Refusal;
@@ -122,6 +122,22 @@ pub(crate) struct WriteNoteInput {
 pub(crate) struct AskHumanInput {
     /// The question.
     question: String,
+    /// At most four answers to offer the person, each a label of 1 to 80 characters and an
+    /// optional hint of up to 160 that says what picking it means. The person may still answer in
+    /// words.
+    #[serde(default)]
+    choices: Vec<ChoiceInput>,
+}
+
+/// One answer `farik_ask_human` offers.
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct ChoiceInput {
+    /// What the person picks, in 1 to 80 characters.
+    label: String,
+    /// What picking it means, in up to 160 characters.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    hint: Option<String>,
 }
 
 /// `farik_write_product_doc`'s input.
@@ -290,6 +306,9 @@ pub(super) fn write_note(call: &Call<'_>, input: WriteNoteInput) -> Result<Value
         }
         .into());
     }
+    if kind != NoteWrittenBodyKind::Progress && !opens_with_a_summary(&input.text) {
+        return Err(Refusal::SummaryMissing.into());
+    }
     let event = call.append(
         Some(task),
         EventBody::NoteWritten(NoteWrittenBody {
@@ -301,14 +320,41 @@ pub(super) fn write_note(call: &Call<'_>, input: WriteNoteInput) -> Result<Value
     Ok(json!({ "seq": event.envelope.seq }))
 }
 
+/// Whether a note opens with the summary a human gate leads with (`docs/SPEC.md` section 5.4):
+/// its first paragraph, up to the first blank line, is 20 to 600 characters.
+pub(super) fn opens_with_a_summary(text: &str) -> bool {
+    let first: Vec<&str> = text
+        .lines()
+        .take_while(|line| !line.trim().is_empty())
+        .collect();
+    (20..=600).contains(&first.join("\n").trim().chars().count())
+}
+
 /// Asks the human, and answers with the question's id: the sequence number of its event, which
 /// is unique and is what `farik answer` takes.
 pub(super) fn ask_human(call: &Call<'_>, input: AskHumanInput) -> Result<Value, ToolError> {
+    let bounded = input.choices.len() <= 4
+        && input.choices.iter().all(|choice| {
+            (1..=80).contains(&choice.label.chars().count())
+                && choice
+                    .hint
+                    .as_ref()
+                    .is_none_or(|hint| hint.chars().count() <= 160)
+        });
+    if !bounded {
+        return Err(ToolError::InvalidInput {
+            detail: "offer at most 4 choices, each a label of 1 to 80 characters and a hint of \
+                     at most 160"
+                .to_string(),
+        });
+    }
+    let choices = serde_json::from_value(json!(input.choices)).map_err(failed)?;
     let event = call.append(
         call.context.task_id.as_ref(),
         EventBody::QuestionAsked(QuestionAskedBody {
             question: input.question,
             asked_by: call.agent_id().to_string(),
+            choices,
         }),
     )?;
     Ok(json!({
@@ -723,17 +769,35 @@ mod tests {
     fn reads_the_latest_notes_into_the_done_evidence() {
         let project = a_project("tools-notes");
         in_progress(&project);
-        note(&project, "dev-a", "completion", "First pass.").expect("the assignee's note");
-        note(&project, "dev-a", "completion", "Done, with the tests.").expect("and a later one");
-        note(&project, "dev-b", "review", "C1 ran and passed.").expect("the reviewer's note");
+        note(
+            &project,
+            "dev-a",
+            "completion",
+            "A first pass at the login form.",
+        )
+        .expect("the assignee's note");
+        note(
+            &project,
+            "dev-a",
+            "completion",
+            "Done, with the login form's tests.",
+        )
+        .expect("and a later one");
+        note(
+            &project,
+            "dev-b",
+            "review",
+            "C1 ran for the reviewer and passed.",
+        )
+        .expect("the reviewer's note");
         let context = context_of(&project);
         assert_eq!(
             context.done.completion_note.as_deref(),
-            Some("Done, with the tests.")
+            Some("Done, with the login form's tests.")
         );
         assert_eq!(
             context.done.review_note.as_deref(),
-            Some("C1 ran and passed.")
+            Some("C1 ran for the reviewer and passed.")
         );
         refused_with(
             note(&project, "dev-b", "completion", "Not mine to say."),
@@ -746,13 +810,62 @@ mod tests {
     }
 
     #[test]
+    fn measures_the_opening_summary_in_characters() {
+        let opens =
+            |first: String| super::opens_with_a_summary(&format!("{first}\n\nThe details."));
+        assert!(!opens("x".repeat(19)));
+        assert!(opens("x".repeat(20)));
+        assert!(opens("é".repeat(600)));
+        assert!(!opens("x".repeat(601)));
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn refuses_a_note_without_an_opening_summary() {
+        let project = a_project("tools-note-summary");
+        in_progress(&project);
+        let refusal = "summary_missing: open the note with two or three plain sentences for the \
+                       user, then a blank line";
+        let too_long = format!("{}\n\nThe details.", "word ".repeat(121));
+        for (agent, kind) in [("dev-a", "completion"), ("dev-b", "review")] {
+            for text in [
+                "Done.",
+                "Done.\n\nThe login form is built and its four tests pass.",
+                "\n\nThe login form is built and its four tests pass.",
+                too_long.as_str(),
+            ] {
+                assert_eq!(
+                    refused_with(note(&project, agent, kind, text), "summary_missing"),
+                    refusal
+                );
+            }
+            note(
+                &project,
+                agent,
+                kind,
+                "The login form is built, and its four tests pass.\n\nThe details follow.",
+            )
+            .expect("a note that opens with a summary");
+            note(&project, agent, kind, "The login form is built.")
+                .expect("a one-paragraph note that is its own summary");
+        }
+        note(&project, "dev-a", "progress", "Halfway.").expect("a progress note needs none");
+    }
+
+    #[test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
     fn forgets_an_iterations_evidence_after_a_rejection() {
         let project = a_project("tools-forget");
         in_progress(&project);
         record(&project, "dev-a", "C1", true).expect("the assignee's run");
         record(&project, "dev-b", "C2", false).expect("the reviewer's answer");
-        note(&project, "dev-a", "completion", "Done.").expect("a note");
+        note(
+            &project,
+            "dev-a",
+            "completion",
+            "Done, with the login form's tests.",
+        )
+        .expect("a note");
         let people = json!({ "assignee": "dev-a", "reviewer": "dev-b" });
         project.moved("FRK-1", "in_progress", "verifying", &people);
         project.moved("FRK-1", "verifying", "rejected", &people);

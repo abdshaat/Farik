@@ -35,9 +35,15 @@ pub(crate) enum Refusal {
         has_parent: bool,
         triaged: bool,
     },
-    /// This caller may not judge this contract now: only the Scrum Master does, on a task
+    /// This caller may not judge this contract now: only the team's judge does, on a task
     /// `refining` (5.3).
-    JudgmentNotAllowed { role: Role, status: TaskStatus },
+    JudgmentNotAllowed {
+        role: Role,
+        judge: Role,
+        status: TaskStatus,
+    },
+    /// A judgment whose answers are not one per question of the team's plan check.
+    JudgmentAnswers { expected: usize },
     /// The caller is neither a contract-writing role nor the task's assignee or reviewer.
     NotAContractWriter { agent_id: String, task_id: String },
     /// An epic's contract waits for the human's answer.
@@ -76,6 +82,8 @@ pub(crate) enum Refusal {
     },
     /// This note is another's to write.
     NotTheNotesWriter { agent_id: String, kind: String },
+    /// A completion or review note that does not open with a summary for the user (5.4).
+    SummaryMissing,
     /// `evaluate_command` refused.
     Command(CommandRefusal),
     /// A command's directory is outside the workspace.
@@ -90,6 +98,18 @@ pub(crate) enum Refusal {
     DecisionRefused { detail: String },
     /// There is no decision with this number.
     NoSuchDecision { number: u32 },
+    /// A design plan proposed or decided outside the session that gives the tool, out of its
+    /// bounds, or with none waiting (ADR 0026).
+    DesignPlanRefused { detail: String },
+    /// A page check asked outside a UI/UX Designer's session of its task with the preview open,
+    /// or of a path that is not the preview's (step 12).
+    CheckPageRefused { detail: String },
+    /// A design review recorded outside the UI/UX Designer's review of its task (step 12).
+    DesignReviewRefused { detail: String },
+    /// A design review recorded before the session checked a page at each width in each theme.
+    DesignReviewIncomplete { missing: String },
+    /// A chat reply outside a chat session, a second one, or one out of its limits (ADR 0026).
+    ChatReplyRefused { detail: String },
     /// A commit named a directory, which git would stage whole, files the path checks never saw
     /// among it.
     PathIsADirectory { path: String },
@@ -97,6 +117,7 @@ pub(crate) enum Refusal {
 
 impl Refusal {
     /// The kind, then what it says.
+    #[allow(clippy::too_many_lines, reason = "one arm per kind of refusal")]
     pub(crate) fn reason(&self) -> String {
         let (kind, detail) = match self {
             Self::AgentNotActive { agent_id, status } => (
@@ -131,9 +152,15 @@ impl Refusal {
                 "triage_not_allowed",
                 triage(*role, *status, *has_parent, *triaged),
             ),
-            Self::JudgmentNotAllowed { role, status } => {
-                ("judgment_not_allowed", judgment(*role, *status))
-            }
+            Self::JudgmentNotAllowed {
+                role,
+                judge,
+                status,
+            } => ("judgment_not_allowed", judgment(*role, *judge, *status)),
+            Self::JudgmentAnswers { expected } => (
+                "judgment_answers",
+                format!("expected {expected} answers, one per question"),
+            ),
             Self::NotAContractWriter { agent_id, task_id } => (
                 "not_a_contract_writer",
                 format!(
@@ -179,17 +206,22 @@ impl Refusal {
             Self::MemoryRefused { detail } => ("memory_refused", detail.clone()),
             Self::DecisionRefused { detail } => ("decision_refused", detail.clone()),
             Self::NoSuchDecision { number } => ("no_such_decision", number.to_string()),
-            Self::NotTheNotesWriter { agent_id, kind } => (
-                "not_the_notes_writer",
-                format!(
-                    "a {kind} note is written by {}, and {agent_id} is not",
-                    match kind.as_str() {
-                        "completion" => "the assignee",
-                        "review" => "the reviewer",
-                        _ => "the assignee or the reviewer",
-                    }
-                ),
+            Self::DesignPlanRefused { detail } => ("design_plan_refused", detail.clone()),
+            Self::CheckPageRefused { detail } => ("check_page_refused", detail.clone()),
+            Self::DesignReviewRefused { detail } => ("design_review_refused", detail.clone()),
+            Self::ChatReplyRefused { detail } => ("chat_reply_refused", detail.clone()),
+            Self::DesignReviewIncomplete { missing } => (
+                "design_review_incomplete",
+                format!("check each page at both widths in both themes first; missing: {missing}"),
             ),
+            Self::SummaryMissing => (
+                "summary_missing",
+                "open the note with two or three plain sentences for the user, then a blank line"
+                    .to_string(),
+            ),
+            Self::NotTheNotesWriter { agent_id, kind } => {
+                ("not_the_notes_writer", notes_writer(agent_id, kind))
+            }
         };
         format!("{kind}: {detail}")
     }
@@ -245,6 +277,15 @@ impl Refusal {
     }
 }
 
+fn notes_writer(agent_id: &str, kind: &str) -> String {
+    let writer = match kind {
+        "completion" => "the assignee",
+        "review" => "the reviewer",
+        _ => "the assignee or the reviewer",
+    };
+    format!("a {kind} note is written by {writer}, and {agent_id} is not")
+}
+
 fn tool(refusal: &ToolRefusal) -> (&'static str, String) {
     match refusal {
         ToolRefusal::TierNotGranted { tier } => (
@@ -269,6 +310,11 @@ fn tool(refusal: &ToolRefusal) -> (&'static str, String) {
         ToolRefusal::InvalidGlob { pattern, detail } => (
             "invalid_glob",
             format!("{pattern} does not compile: {detail}"),
+        ),
+        ToolRefusal::DesignPlanNotApproved => (
+            "design_plan_not_approved",
+            "the Product Manager has not approved this task's design plan, so nothing changes yet"
+                .to_string(),
         ),
         ToolRefusal::RequiresHumanApproval { tool } => (
             "requires_human_approval",
@@ -304,16 +350,15 @@ fn triage(role: Role, status: TaskStatus, has_parent: bool, triaged: bool) -> St
     }
 }
 
-fn judgment(role: Role, status: TaskStatus) -> String {
-    if role == Role::ScrumMaster {
+fn judgment(role: Role, judge: Role, status: TaskStatus) -> String {
+    if role == judge {
         format!(
-            "the task is {status}, and the Scrum Master judges a contract only while it is \
-             refining (5.3)"
+            "the task is {status}, and the judge checks a contract only while it is refining (5.3)"
         )
     } else {
         format!(
-            "role {role} does not judge a contract: the Scrum Master does, on a task refining \
-             (5.3)"
+            "role {role} does not judge a contract: the team's judge, role {judge}, does, on a \
+             task refining (5.3)"
         )
     }
 }

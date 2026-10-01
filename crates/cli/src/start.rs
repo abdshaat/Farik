@@ -5,12 +5,14 @@
 use std::fs::{File, TryLockError};
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 
 use farik_protocol::command::{Command, command_to_value, reply_from_value};
-use farik_runtime::claude::{ClaudeAdapter, ClaudeConfig, ClaudeCredential, credential_from_env};
-use farik_runtime::daemon::{DaemonConfig, DaemonHandle, DaemonState, serve};
+use farik_runtime::claude::{ClaudeAdapter, ClaudeConfig, CredentialKind, SharedCredential};
+use farik_runtime::credential::{Source, load_credential};
+use farik_runtime::daemon::web::{BrowserSessions, ConnectCodes, WebState};
+use farik_runtime::daemon::{DaemonConfig, DaemonHandle, DaemonState, PortChoice, serve};
 use farik_runtime::forge::Forge;
 use farik_runtime::orchestrator::{
     CommandError, CommandReport, Orchestrator, OrchestratorDeps, RecoveryReport, command_handler,
@@ -18,8 +20,9 @@ use farik_runtime::orchestrator::{
 };
 use farik_runtime::sleep::{Sleeper, TokioSleeper};
 use farik_runtime::{
-    DockerSandboxFactory, HostSandboxFactory, RuntimeAdapter, RuntimeError, SANDBOX_IMAGE,
-    SandboxFactory, SessionHandle, SessionSpec,
+    DockerPreviewFactory, DockerSandboxFactory, HostSandboxFactory, NoPreviews, PreviewFactory,
+    RuntimeAdapter, RuntimeError, SANDBOX_IMAGE, SandboxFactory, SessionHandle, SessionSpec,
+    Templates,
 };
 use farik_store::files::Sandbox;
 use serde_json::Value;
@@ -29,6 +32,7 @@ use tokio::sync::mpsc::UnboundedReceiver;
 use crate::daemon_client::{ClientError, DaemonAddress, exchange, read_daemon_file};
 use crate::doctor::unpriced;
 use crate::project::{Project, tool_deps};
+use crate::state::{make_state_dir, state_dir};
 use crate::{CliIo, Engine, Interrupts};
 
 /// The lock the process driving a project holds, under the gitignored `.farik/local/`.
@@ -197,6 +201,7 @@ pub(crate) fn command_orchestrator(
             command: name.to_string(),
         }),
         sandboxes: Arc::new(HostSandboxFactory),
+        previews: Arc::new(NoPreviews),
         session_ids: Arc::clone(&io.session_ids),
         forge: Arc::new(forge(&project.root, io)),
         sleeper: sleeper(io),
@@ -222,16 +227,7 @@ pub(crate) fn forge(root: &Path, io: &CliIo<'_>) -> Forge {
 
 /// The first executable called `program` on the environment's `PATH`.
 pub(crate) fn on_path(program: &str, io: &CliIo<'_>) -> Option<PathBuf> {
-    use std::os::unix::fs::PermissionsExt;
-
-    io.env.get("PATH").and_then(|path| {
-        std::env::split_paths(path)
-            .map(|directory| directory.join(program))
-            .find(|candidate| {
-                std::fs::metadata(candidate)
-                    .is_ok_and(|meta| meta.is_file() && meta.permissions().mode() & 0o111 != 0)
-            })
-    })
+    farik_runtime::computer::on_path(program, &io.env)
 }
 
 /// The adapter of a command handled in this process, which starts no session: answering a
@@ -286,6 +282,16 @@ pub(crate) const NO_SANDBOX_WARNING: &str = "warning: no-sandbox mode (.farik/lo
 /// The variables of the environment a Claude Code session is given besides its credential.
 const SESSION_ENV: [&str; 6] = ["PATH", "HOME", "USER", "LANG", "TERM", "TMPDIR"];
 
+/// What a start is told besides the project: how the process differs from `run`'s.
+#[derive(Clone, Copy, Default)]
+pub(crate) struct StartOptions {
+    /// The port the daemon asks for.
+    pub(crate) port: PortChoice,
+    /// Whether the daemon answers the browser routes (`farik serve` alone), with a first connect
+    /// code for the link it prints.
+    pub(crate) web: bool,
+}
+
 /// A process driving the project: its lock, its served daemon, its orchestrator, and where it
 /// hears Ctrl-C.
 pub(crate) struct Driver {
@@ -295,17 +301,24 @@ pub(crate) struct Driver {
     pub(crate) daemon: Arc<DaemonState>,
     /// One `()` per interrupt.
     pub(crate) interrupts: UnboundedReceiver<()>,
-    /// The credential variable it chose, when the engine is Claude Code.
-    pub(crate) credential: Option<&'static str>,
+    /// The credential it chose and where it came from, when the engine is Claude Code.
+    pub(crate) credential: Option<(CredentialKind, Source)>,
     /// Whether it runs in no-sandbox mode.
     pub(crate) sandbox: Sandbox,
     /// What recovery found and did.
     pub(crate) recovered: RecoveryReport,
+    /// The first connect code, when the browser routes are on.
+    pub(crate) connect_code: Option<String>,
     handle: DaemonHandle,
     _lock: RunLock,
 }
 
 impl Driver {
+    /// The port the daemon listens on.
+    pub(crate) fn port(&self) -> u16 {
+        self.handle.info.port
+    }
+
     /// Shuts the daemon down, removing `daemon.json`, then gives the lock back.
     ///
     /// # Errors
@@ -326,14 +339,20 @@ impl Driver {
 /// # Errors
 ///
 /// The sentence of the step that failed.
-pub(crate) async fn start(project: &Project, io: &mut CliIo<'_>) -> Result<Driver, String> {
+pub(crate) async fn start(
+    project: &Project,
+    io: &mut CliIo<'_>,
+    options: StartOptions,
+) -> Result<Driver, String> {
     let Some(lock) = try_lock(&project.root)? else {
         return Err(driven_elsewhere(&project.root));
     };
-    start_holding(project, io, lock).await
+    start_holding(project, io, lock, options).await
 }
 
-/// `start`, with the run lock already taken by the caller, which it gives back on a refusal.
+/// `start`, with the run lock already taken by the caller, which it gives back on a refusal. The
+/// interrupts are taken from `io` and put back there on a refusal, so that `serve`, which goes
+/// back to setup mode then, still hears Ctrl-C.
 ///
 /// # Errors
 ///
@@ -342,11 +361,33 @@ pub(crate) async fn start_holding(
     project: &Project,
     io: &mut CliIo<'_>,
     lock: RunLock,
+    options: StartOptions,
 ) -> Result<Driver, String> {
-    let interrupts = listen(std::mem::replace(
-        &mut io.interrupts,
-        Interrupts::Channel(tokio::sync::mpsc::unbounded_channel().1),
-    ))?;
+    let interrupts = listen(std::mem::replace(&mut io.interrupts, never()))?;
+    match start_listening(project, io, lock, options).await {
+        Ok(driver) => Ok(Driver {
+            interrupts,
+            ..driver
+        }),
+        Err(error) => {
+            io.interrupts = Interrupts::Channel(interrupts);
+            Err(error)
+        }
+    }
+}
+
+/// Interrupts that never come.
+fn never() -> Interrupts {
+    Interrupts::Channel(tokio::sync::mpsc::unbounded_channel().1)
+}
+
+/// `start_holding` once the interrupts are listened for: the driver it answers hears none yet.
+async fn start_listening(
+    project: &Project,
+    io: &mut CliIo<'_>,
+    lock: RunLock,
+    options: StartOptions,
+) -> Result<Driver, String> {
     let settings = project
         .files
         .read_settings()
@@ -356,20 +397,21 @@ pub(crate) async fn start_holding(
     }
     let claude = match &io.engine {
         Engine::Claude => {
-            let credential = credential_from_env(&io.env).ok_or(
-                "no credential for Claude Code: set ANTHROPIC_API_KEY to an API key, or \
+            let found = load_credential(&io.env, &(io.credential_stores)()).ok_or(
+                "no credential for Claude Code: connect your AI account in the browser farik \
+                 serve opens, or set ANTHROPIC_API_KEY to an API key, or \
                  CLAUDE_CODE_OAUTH_TOKEN to the token claude setup-token prints",
             )?;
             let path = on_path("claude", io)
                 .ok_or("Claude Code is not installed: there is no claude on PATH")?;
-            Some((credential, path))
+            Some((found, path))
         }
         Engine::Given(_) => None,
     };
-    let credential = claude.as_ref().map(|(credential, _)| match credential {
-        ClaudeCredential::ApiKey(_) => "ANTHROPIC_API_KEY",
-        ClaudeCredential::OauthToken(_) => "CLAUDE_CODE_OAUTH_TOKEN",
-    });
+    let credential = claude
+        .as_ref()
+        .map(|((credential, source), _)| (credential.kind(), *source));
+    let claude = claude.map(|((credential, _), path)| (Arc::new(Mutex::new(credential)), path));
     // Every session reads the prices, so a table that cannot be read is refused here, once.
     for sentence in unpriced(project)? {
         let _ = writeln!(
@@ -380,15 +422,26 @@ pub(crate) async fn start_holding(
     }
     let tools = tool_deps(project, io)?;
     let daemon = Arc::new(DaemonState::new(Arc::clone(&tools)));
+    let in_use = claude.as_ref().map(|(shared, _)| Arc::clone(shared));
+    let web = options
+        .web
+        .then(|| web(&project.root, io, in_use))
+        .transpose()?;
     let handle = serve(
         DaemonConfig {
-            port: None,
-            daemon_file: project.root.join(DAEMON_FILE),
+            port: options.port,
+            daemon_file: Some(project.root.join(DAEMON_FILE)),
         },
         Arc::clone(&daemon),
     )
     .await
     .map_err(|error| error.to_string())?;
+    // The port is known once the daemon listens, and the routes read the state on each request.
+    let connect_code = web.map(|(mut web, code)| {
+        web.port = handle.info.port;
+        daemon.set_web(web);
+        code
+    });
     let adapter = match adapter(project, io, claude, &daemon, &handle) {
         Ok(adapter) => adapter,
         Err(error) => {
@@ -396,17 +449,14 @@ pub(crate) async fn start_holding(
             return Err(error);
         }
     };
-    let sandboxes: Arc<dyn SandboxFactory> = match settings.sandbox {
-        Sandbox::Docker => Arc::new(DockerSandboxFactory {
-            image: SANDBOX_IMAGE.to_string(),
-        }),
-        Sandbox::None => Arc::new(HostSandboxFactory),
-    };
+    let (sandboxes, previews) = factories(settings.sandbox, sandbox_image(io));
+    tools.transitions.set_previews(Arc::clone(&previews));
     let orchestrator = Arc::new(Orchestrator::new(OrchestratorDeps {
         tools,
         daemon: Arc::clone(&daemon),
         adapter,
         sandboxes,
+        previews,
         session_ids: Arc::clone(&io.session_ids),
         forge: Arc::new(forge(&project.root, io)),
         sleeper: sleeper(io),
@@ -427,13 +477,85 @@ pub(crate) async fn start_holding(
     Ok(Driver {
         orchestrator,
         daemon,
-        interrupts,
+        interrupts: tokio::sync::mpsc::unbounded_channel().1,
         credential,
         sandbox: settings.sandbox,
         recovered,
+        connect_code,
         handle,
         _lock: lock,
     })
+}
+
+/// The image Docker's sandbox and the preview run in: `SANDBOX_IMAGE`, or the end-to-end
+/// server's `--sandbox-image`.
+fn sandbox_image<'a>(io: &'a CliIo<'_>) -> &'a str {
+    #[cfg(feature = "e2e")]
+    if let Some(image) = io.sandbox_image.as_deref() {
+        return image;
+    }
+    let _ = io;
+    SANDBOX_IMAGE
+}
+
+/// What makes a task's sandbox and its preview, by the project's sandbox setting, in `image`:
+/// the Designer has no browser without Docker's sandbox (D3).
+fn factories(sandbox: Sandbox, image: &str) -> (Arc<dyn SandboxFactory>, Arc<dyn PreviewFactory>) {
+    match sandbox {
+        Sandbox::Docker => (
+            Arc::new(DockerSandboxFactory {
+                image: image.to_string(),
+            }),
+            Arc::new(DockerPreviewFactory {
+                image: image.to_string(),
+                browser: farik_runtime::computer::browser_image(),
+            }),
+        ),
+        Sandbox::None => (Arc::new(HostSandboxFactory), Arc::new(NoPreviews)),
+    }
+}
+
+/// What the browser routes need but the port, and the first connect code, issued. `in_use` is the
+/// credential the sessions start with, shared so that connecting the account again replaces it.
+/// The sessions are kept in the state folder, made here when it is not there yet, or in memory
+/// when there is none.
+pub(crate) fn web(
+    root: &Path,
+    io: &CliIo<'_>,
+    in_use: Option<SharedCredential>,
+) -> Result<(WebState, String), String> {
+    let state = state_dir(&io.env);
+    let file = match &state {
+        Some(directory) => {
+            make_state_dir(directory)?;
+            Some(directory.join("browser-sessions.json"))
+        }
+        None => None,
+    };
+    let sessions = BrowserSessions::open(file).map_err(|error| error.to_string())?;
+    let codes = ConnectCodes::default();
+    let code = codes.issue().map_err(|error| error.to_string())?;
+    let web = WebState {
+        codes,
+        sessions,
+        project_root: root.to_path_buf(),
+        credential: in_use.as_ref().map(|credential| {
+            credential
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .kind()
+        }),
+        port: 0,
+        clock: Arc::clone(&io.clock),
+        take_on_error: std::sync::Mutex::default(),
+        stores: (io.credential_stores)(),
+        env: io.env.clone(),
+        in_use,
+        templates: state.map(|directory| Templates::new(directory.join("templates"))),
+        #[cfg(feature = "e2e")]
+        admit_local_preview: io.admit_local_preview,
+    };
+    Ok((web, code))
 }
 
 /// The adapter sessions start through: the engine's factory's, or Claude Code's once its version
@@ -441,7 +563,7 @@ pub(crate) async fn start_holding(
 fn adapter(
     project: &Project,
     io: &CliIo<'_>,
-    claude: Option<(ClaudeCredential, PathBuf)>,
+    claude: Option<(SharedCredential, PathBuf)>,
     daemon: &Arc<DaemonState>,
     handle: &DaemonHandle,
 ) -> Result<Arc<dyn RuntimeAdapter>, String> {
@@ -476,7 +598,7 @@ fn adapter(
 
 /// Where the process hears the person's interrupts: Ctrl-C, listened for from now on, or the
 /// test's channel.
-fn listen(interrupts: Interrupts) -> Result<UnboundedReceiver<()>, String> {
+pub(crate) fn listen(interrupts: Interrupts) -> Result<UnboundedReceiver<()>, String> {
     match interrupts {
         Interrupts::Channel(receiver) => Ok(receiver),
         Interrupts::CtrlC => {

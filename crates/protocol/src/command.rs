@@ -14,10 +14,11 @@ pub use farik_core::contract::{TaskContract, TaskId, ValidationError};
 
 pub use crate::generated::command::CommandName;
 use crate::generated::command::{
-    AgentUpdateBody, EmptyBody, EscalationResolveBody, FarikCommand as CommandWire,
-    HumanAcceptBody, HumanAcceptBodySubject, MessagePostBody, QuestionAnswerBody,
-    RequestTriageBody, RequestTriageBodySize, SessionStopBody, SprintStartBody, TaskCreateBody,
-    TaskIdBody, TaskTransitionBody,
+    AgentUpdateBody, ChatMessagePostBody, EmptyBody, EscalationResolveBody,
+    FarikCommand as CommandWire, HumanAcceptBody, HumanAcceptBodySubject, HumanSendBackBody,
+    HumanSendBackBodySubject, MessagePostBody, QuestionAnswerBody, RequestTriageBody,
+    RequestTriageBodySize, SessionStopBody, SprintStartBody, TaskCreateBody, TaskIdBody,
+    TaskTransitionBody,
 };
 
 const SCHEMA_JSON: &str = include_str!("../../../docs/schemas/command.schema.json");
@@ -120,6 +121,20 @@ pub enum Command {
         to: TaskStatus,
         /// What the next session about it is told.
         message: String,
+        /// More attempts for an `iterations` escalation, counting the one this starts (ADR 0024).
+        extra_tries: Option<u8>,
+    },
+    /// Send a contract awaiting approval back to `refining`, or a result that waits for the human
+    /// back to its assignee (ADR 0024).
+    HumanSendBack {
+        /// The task.
+        task_id: TaskId,
+        /// Whether the contract or the result is sent back.
+        subject: AcceptSubject,
+        /// What is wrong, in the human's words.
+        message: String,
+        /// The criteria the result fails, when the human names any.
+        failed_criteria: Vec<String>,
     },
     /// Answer a question an agent asked.
     QuestionAnswer {
@@ -164,9 +179,20 @@ pub enum Command {
     },
     /// End the open sprint.
     SprintEnd,
+    /// Pause the whole team: no rule runs until it is resumed.
+    TeamPause,
+    /// Resume a paused team.
+    TeamResume,
     /// Say something in the team's channel.
     MessagePost {
         /// What the human says.
+        text: String,
+    },
+    /// Say something in the human's one-to-one chat with one agent.
+    ChatMessagePost {
+        /// The agent whose chat it is.
+        agent_id: String,
+        /// What the human says, its line breaks kept.
         text: String,
     },
 }
@@ -252,8 +278,13 @@ fn human_command(name: CommandName, body: &Value) -> Result<Command, Vec<Validat
                 task_id: task_id_of(body.task_id.as_str())?,
                 to: status_of(&body.to.to_string())?,
                 message: body.message,
+                // The schema holds it to 1 to 5, so it always fits.
+                extra_tries: body
+                    .extra_tries
+                    .and_then(|tries| u8::try_from(tries.get()).ok()),
             })
         }
+        CommandName::HumanSendBack => send_back(read_body(body, name)?),
         CommandName::QuestionAnswer => {
             let body: QuestionAnswerBody = read_body(body, name)?;
             Ok(Command::QuestionAnswer {
@@ -289,12 +320,16 @@ fn human_command(name: CommandName, body: &Value) -> Result<Command, Vec<Validat
                 session_id: body.session_id.to_string(),
             })
         }
-        CommandName::RunStop | CommandName::SprintEnd => {
+        CommandName::RunStop
+        | CommandName::SprintEnd
+        | CommandName::TeamPause
+        | CommandName::TeamResume => {
             let _: EmptyBody = read_body(body, name)?;
-            Ok(if name == CommandName::RunStop {
-                Command::RunStop
-            } else {
-                Command::SprintEnd
+            Ok(match name {
+                CommandName::RunStop => Command::RunStop,
+                CommandName::SprintEnd => Command::SprintEnd,
+                CommandName::TeamPause => Command::TeamPause,
+                _ => Command::TeamResume,
             })
         }
         CommandName::SprintStart => {
@@ -307,7 +342,26 @@ fn human_command(name: CommandName, body: &Value) -> Result<Command, Vec<Validat
             let body: MessagePostBody = read_body(body, name)?;
             Ok(Command::MessagePost { text: body.text })
         }
+        CommandName::ChatMessagePost => {
+            let body: ChatMessagePostBody = read_body(body, name)?;
+            Ok(Command::ChatMessagePost {
+                agent_id: body.agent_id,
+                text: body.text,
+            })
+        }
     }
+}
+
+fn send_back(body: HumanSendBackBody) -> Result<Command, Vec<ValidationError>> {
+    Ok(Command::HumanSendBack {
+        task_id: task_id_of(body.task_id.as_str())?,
+        subject: match body.subject {
+            HumanSendBackBodySubject::Contract => AcceptSubject::Contract,
+            HumanSendBackBodySubject::Result => AcceptSubject::Result,
+        },
+        message: body.message,
+        failed_criteria: body.failed_criteria,
+    })
 }
 
 /// Writes a command as the wire `command_from_value` reads it back from: the inverse of the reader,
@@ -356,27 +410,26 @@ pub fn command_to_value(command: &Command) -> Value {
             task_id,
             subject,
             message,
-        } => {
-            let mut body = json!({
-                "task_id": task_id.as_str(),
-                "subject": match subject {
-                    AcceptSubject::Contract => "contract",
-                    AcceptSubject::Result => "result",
-                },
-            });
-            if let Some(message) = message {
-                body["message"] = json!(message);
-            }
-            (CommandName::HumanAccept, body)
-        }
+        } => (
+            CommandName::HumanAccept,
+            with_optional(
+                json!({ "task_id": task_id.as_str(), "subject": subject_wire(*subject) }),
+                "message",
+                message.as_ref().map(|message| json!(message)),
+            ),
+        ),
         Command::EscalationResolve {
             task_id,
             to,
             message,
-        } => (
-            CommandName::EscalationResolve,
-            json!({ "task_id": task_id.as_str(), "to": to.to_string(), "message": message }),
-        ),
+            extra_tries,
+        } => resolve_wire(task_id, *to, message, *extra_tries),
+        Command::HumanSendBack {
+            task_id,
+            subject,
+            message,
+            failed_criteria,
+        } => send_back_wire(task_id, *subject, message, failed_criteria),
         Command::QuestionAnswer {
             question_id,
             answer,
@@ -410,9 +463,63 @@ pub fn command_to_value(command: &Command) -> Value {
             json!({ "budget_usd": budget_usd }),
         ),
         Command::SprintEnd => (CommandName::SprintEnd, json!({})),
+        Command::TeamPause => (CommandName::TeamPause, json!({})),
+        Command::TeamResume => (CommandName::TeamResume, json!({})),
         Command::MessagePost { text } => (CommandName::MessagePost, json!({ "text": text })),
+        Command::ChatMessagePost { agent_id, text } => (
+            CommandName::ChatMessagePost,
+            json!({ "agent_id": agent_id, "text": text }),
+        ),
     };
     json!({ "command": name.to_string(), "body": body })
+}
+
+fn resolve_wire(
+    task_id: &TaskId,
+    to: TaskStatus,
+    message: &str,
+    extra_tries: Option<u8>,
+) -> (CommandName, Value) {
+    (
+        CommandName::EscalationResolve,
+        with_optional(
+            json!({ "task_id": task_id.as_str(), "to": to.to_string(), "message": message }),
+            "extra_tries",
+            extra_tries.map(|tries| json!(tries)),
+        ),
+    )
+}
+
+fn send_back_wire(
+    task_id: &TaskId,
+    subject: AcceptSubject,
+    message: &str,
+    failed_criteria: &[String],
+) -> (CommandName, Value) {
+    (
+        CommandName::HumanSendBack,
+        json!({
+            "task_id": task_id.as_str(),
+            "subject": subject_wire(subject),
+            "message": message,
+            "failed_criteria": failed_criteria,
+        }),
+    )
+}
+
+/// `body` with `key` set to `value` when there is one: the schema has no null for an optional field.
+fn with_optional(mut body: Value, key: &str, value: Option<Value>) -> Value {
+    if let Some(value) = value {
+        body[key] = value;
+    }
+    body
+}
+
+fn subject_wire(subject: AcceptSubject) -> &'static str {
+    match subject {
+        AcceptSubject::Contract => "contract",
+        AcceptSubject::Result => "result",
+    }
 }
 
 /// Why a command did nothing, as the reply names it (`$defs/commandReply`).
@@ -731,7 +838,8 @@ mod tests {
             Command::EscalationResolve {
                 task_id: frk(3),
                 to: TaskStatus::Refining,
-                message: "Split it by page.".to_string()
+                message: "Split it by page.".to_string(),
+                extra_tries: None
             }
         );
         assert_eq!(
@@ -744,18 +852,16 @@ mod tests {
                 answer: "Yes.".to_string()
             }
         );
-        assert_eq!(
-            read("contract_lock", &json!({ "task_id": "FRK-3" })),
-            Command::ContractLock { task_id: frk(3) }
-        );
-        assert_eq!(
-            read("contract_unlock", &json!({ "task_id": "FRK-3" })),
-            Command::ContractUnlock { task_id: frk(3) }
-        );
-        assert_eq!(
-            read("task_integrate", &json!({ "task_id": "FRK-3" })),
-            Command::TaskIntegrate { task_id: frk(3) }
-        );
+        for (name, command) in [
+            ("contract_lock", Command::ContractLock { task_id: frk(3) }),
+            (
+                "contract_unlock",
+                Command::ContractUnlock { task_id: frk(3) },
+            ),
+            ("task_integrate", Command::TaskIntegrate { task_id: frk(3) }),
+        ] {
+            assert_eq!(read(name, &json!({ "task_id": "FRK-3" })), command);
+        }
         assert_eq!(
             read(
                 "agent_update",
@@ -790,6 +896,22 @@ mod tests {
                 text: "@dev-a how is FRK-1?".to_string()
             }
         );
+    }
+
+    #[test]
+    fn reads_and_writes_team_pause_and_team_resume() {
+        for (name, command) in [
+            ("team_pause", Command::TeamPause),
+            ("team_resume", Command::TeamResume),
+        ] {
+            assert_eq!(read(name, &json!({})), command);
+            assert_eq!(
+                command_to_value(&command),
+                json!({ "command": name, "body": {} })
+            );
+            let errors = refusal(&json!({ "command": name, "body": { "why": "lunch" } }));
+            assert!(!errors.is_empty(), "{name} takes no field");
+        }
     }
 
     #[test]
@@ -830,6 +952,10 @@ mod tests {
             json!({ "command": "human_accept", "body": { "task_id": "FRK-3", "subject": "contract" } }),
             json!({ "command": "escalation_resolve",
                     "body": { "task_id": "FRK-3", "to": "refining", "message": "Split it by page." } }),
+            json!({ "command": "escalation_resolve",
+                    "body": { "task_id": "FRK-3", "to": "in_progress", "message": "Go.", "extra_tries": 2 } }),
+            json!({ "command": "human_send_back",
+                    "body": { "task_id": "FRK-3", "subject": "result", "message": "Too small.", "failed_criteria": ["C1"] } }),
             json!({ "command": "question_answer", "body": { "question_id": 12, "answer": "Yes." } }),
             json!({ "command": "contract_lock", "body": { "task_id": "FRK-3" } }),
             json!({ "command": "contract_unlock", "body": { "task_id": "FRK-3" } }),
@@ -841,6 +967,7 @@ mod tests {
             json!({ "command": "sprint_start", "body": { "budget_usd": null } }),
             json!({ "command": "sprint_end", "body": {} }),
             json!({ "command": "message_post", "body": { "text": "hello @dev-a" } }),
+            json!({ "command": "chat_message_post", "body": { "agent_id": "mira", "text": "Apple Pay?\nOr not." } }),
         ];
         for wire in wires {
             let command = command_from_value(&wire).expect("the wire reads");

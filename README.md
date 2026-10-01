@@ -9,7 +9,7 @@
 [![check](https://github.com/abdshaat/Farik/actions/workflows/check.yml/badge.svg)](https://github.com/abdshaat/Farik/actions/workflows/check.yml)
 [![license](https://img.shields.io/badge/license-Apache--2.0-6E8F76.svg)](LICENSE)
 [![rust](https://img.shields.io/badge/rust-1.98.1-D8896A.svg)](rust-toolchain.toml)
-[![status](https://img.shields.io/badge/status-pre--release-5A8DFF.svg)](#status)
+[![status](https://img.shields.io/badge/status-pre--release-44607F.svg)](#status)
 
 [Why Farik](#why-farik) &nbsp;|&nbsp; [How it works](#how-it-works) &nbsp;|&nbsp; [The team](#meet-the-team) &nbsp;|&nbsp; [Quick start](#quick-start) &nbsp;|&nbsp; [Roadmap](#roadmap) &nbsp;|&nbsp; [Contributing](#contributing)
 

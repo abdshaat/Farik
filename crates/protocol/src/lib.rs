@@ -9,13 +9,15 @@ pub mod command;
 pub mod event;
 /// Types generated from `docs/schemas/`.
 pub mod generated;
+/// The JSON-RPC wire between the browser and the daemon.
+pub mod rpc;
 
 #[cfg(test)]
 mod tests {
     use crate::generated::event::EventKind;
 
     /// Every kind the log holds in this phase, with the wire name the schema gives it.
-    const KINDS: [(&str, EventKind); 41] = [
+    const KINDS: [(&str, EventKind); 52] = [
         ("task.created", EventKind::TaskCreated),
         ("request.triaged", EventKind::RequestTriaged),
         ("contract.written", EventKind::ContractWritten),
@@ -57,6 +59,17 @@ mod tests {
         ("escalation.aged", EventKind::EscalationAged),
         ("memory.written", EventKind::MemoryWritten),
         ("decision.written", EventKind::DecisionWritten),
+        ("team.paused", EventKind::TeamPaused),
+        ("team.resumed", EventKind::TeamResumed),
+        ("design_plan.proposed", EventKind::DesignPlanProposed),
+        ("design_plan.approved", EventKind::DesignPlanApproved),
+        ("design_plan.returned", EventKind::DesignPlanReturned),
+        ("design_review.recorded", EventKind::DesignReviewRecorded),
+        ("preview.prepared", EventKind::PreviewPrepared),
+        ("preview.started", EventKind::PreviewStarted),
+        ("preview.stopped", EventKind::PreviewStopped),
+        ("page.checked", EventKind::PageChecked),
+        ("chat_message.posted", EventKind::ChatMessagePosted),
     ];
 
     #[test]

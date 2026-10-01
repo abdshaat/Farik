@@ -1,6 +1,10 @@
 //! Farik's memory: the append-only event log, the projections read from it, and the files under
 //! `.farik/` (`docs/SPEC.md` sections 5.1 and 8.4).
 
+/// What each agent does, and what moved.
+pub mod activity;
+/// A task's diff, and an epic's.
+pub mod diff;
 /// What the store refuses, and why.
 pub mod error;
 /// The event log.
@@ -21,15 +25,19 @@ pub mod reconcile;
 pub mod requests;
 /// What the repository says it is.
 pub mod scan;
+/// What waits on the human.
+pub mod waiting;
 
 pub use error::StoreError;
 pub use event_log::{EventLog, EventQuery, IN_MEMORY, open_event_log};
 pub use git::{Git, GitError, HeadSummary, MergeOutcome};
 pub use metrics::{CostSplit, HarnessMetrics, MetricsError};
 pub use projections::{
-    CostProjection, CostScope, Projections, SprintProjection, TaskProjection, open_projections,
+    CostProjection, CostScope, CostWindow, Projections, SprintProjection, TaskProjection,
+    open_projections,
 };
 pub use reconcile::{Drift, ReconcileError, reconcile};
 pub use scan::{
-    ProjectScan, ScanError, material, names_of, project_document, scan_project, seeded_library,
+    ProjectScan, ScanError, ScanFacts, material, names_of, project_document, scan_project,
+    seeded_library,
 };

@@ -157,7 +157,7 @@ mod tests {
             table.source_url,
             "https://platform.claude.com/docs/en/about-claude/pricing"
         );
-        assert_eq!(table.prices.len(), 13);
+        assert_eq!(table.prices.len(), 14);
         let spot = [
             ("claude-opus-5-5", 4.0, 20.0, 5.0, 0.2),
             ("claude-fable-5-1", 10.0, 50.0, 12.5, 0.25),
@@ -167,6 +167,7 @@ mod tests {
             ("claude-opus-4-7", 5.0, 25.0, 6.25, 0.5),
             ("claude-opus-4-6", 5.0, 25.0, 6.25, 0.5),
             ("claude-opus-4-5", 5.0, 25.0, 6.25, 0.5),
+            ("claude-sonnet-5-5", 2.0, 10.0, 2.5, 0.2),
             ("claude-sonnet-5", 2.0, 10.0, 2.5, 0.2),
             ("claude-sonnet-4-6", 3.0, 15.0, 3.75, 0.3),
             ("claude-sonnet-4-5", 3.0, 15.0, 3.75, 0.3),

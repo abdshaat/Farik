@@ -13,6 +13,8 @@ pub mod gates;
 pub mod paths;
 /// Permission tiers and the tool-call and command checks (`docs/SPEC.md` section 5.6, ADR 0004).
 pub mod permissions;
+/// The governor's rules in plain words, for a page to show the user.
+pub mod plain;
 /// The Definition of Ready of `docs/SPEC.md` section 5.3 as one function over a contract and a
 /// context.
 pub mod readiness;

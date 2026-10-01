@@ -9,10 +9,14 @@ out/
 .turbo/
 *.tsbuildinfo
 
+# generated from the token source; never committed
+packages/*/src/generated/
+
 # tauri
 src-tauri/target/
 
 # test and coverage
+apps/web/e2e/screenshots/
 coverage/
 .vitest/
 

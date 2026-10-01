@@ -1,0 +1,4 @@
+.avatar {
+	image-rendering: pixelated;
+	border-radius: var(--farik-radius-none);
+}
