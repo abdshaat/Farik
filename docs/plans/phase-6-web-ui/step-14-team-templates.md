@@ -116,7 +116,7 @@ pub fn template_slug(name: &str) -> Option<String>;
 pub fn validate_template(input: &Value) -> Result<TeamTemplate, Vec<ValidationError>>;
 pub fn template_from_team(team: &Team, name: &str, saved_at: DateTime<Utc>) -> TeamTemplate;
 pub struct TemplateApplied { pub team: Team, pub kept: Vec<String>, pub retired: Vec<String>, pub removed: Vec<String>, pub added: Vec<String>, pub errors: Vec<ValidationError> }   // agent ids; errors empty when validate_team passes
-pub fn apply_template(current: &Team, template: &TeamTemplate, worked: &BTreeSet<String>) -> TemplateApplied;
+pub fn apply_template(current: &Team, template: &TeamTemplate, worked: &BTreeSet<String>, suggested: &[Agent]) -> TemplateApplied;   // suggested: team.propose's agents, one per role (persona, avatar, model, connectors), since farik-core cannot read farik-roles
 // farik-store::files
 pub fn template_yaml(template: &TeamTemplate) -> Result<String, FilesError>;
 // farik-runtime
@@ -182,12 +182,12 @@ Files: modified `crates/core/src/team/template.rs`. Produces: `TemplateApplied`,
 - `refuses_when_a_kept_match_is_paused`: project Ada, the active Developer, who worked, and Theo, a paused Developer; a template whose Developer is `theo`: `retired` holds `ada`, `kept` holds `theo`, and `errors` holds `validate_team`'s needs-an-active-Developer sentence at `/agents`.
 - `retires_a_worked_agent_it_does_not_hold`: `theo` in `worked` and absent from the template is `retired` in the result and in `retired`.
 - `removes_an_agent_that_never_worked`: absent from the file, and in `removed`.
-- `adds_the_rest_with_a_free_id`: a template `theo` Developer where the project's `theo` is retired gets `theo-2`; the same id with another role retires or removes the project's agent and adds `<id>-2`.
+- `adds_the_rest_with_a_free_id`: a template `theo` Developer where the project's `theo` is retired gets `theo-2` (`theo-3` when `theo-2` is held too); the same id with another role retires the project's worked agent and adds `<id>-2`, or removes a never-worked one and adds `<id>` (rule 4: a removed agent holds no id); a 64-character id's free id stays within 64.
 - `leaves_retired_agents_alone`.
 - `takes_the_four_answers`: permissions, judgment and integration are the template's; a template with no `daily_usd` clears the project's; `rules`, `name` and other policy keys are the project's.
 - `never_passes_the_cap`: a seven-agent template over a seven-agent project whose four worked: seven active, four retired, `errors` empty.
 
-- [ ] `feat(core): apply a template to a team by the retirement and required-role rules`
+- [x] `feat(core): apply a template to a team by the retirement and required-role rules`
 
 ### Task 4: Where templates are kept (`farik-runtime`)
 
