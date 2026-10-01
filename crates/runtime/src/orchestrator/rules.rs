@@ -7478,6 +7478,29 @@ mod tests {
         );
     }
 
+    #[test]
+    fn ranks_why_an_idle_tick_waits() {
+        let woken = at() + chrono::Duration::hours(1);
+        let why = |day_spent: bool, asleep: bool, backlog: bool| {
+            let waiting = super::Waiting {
+                day_spent,
+                slept: asleep.then(|| (woken, "dev-a".to_string())),
+            };
+            match super::idle(&waiting, backlog) {
+                TickReport::Idle { why, .. } => why,
+                other => panic!("{other:?}"),
+            }
+        };
+        let asleep = "waiting for dev-a, asleep until 2026-09-22 13:00:00 UTC (its model's usage \
+                      limit)";
+        // A spent day, then a sleeping agent, then the Backlog, then nothing.
+        assert_eq!(why(true, true, true), super::DAY_SPENT);
+        assert_eq!(why(true, false, true), super::DAY_SPENT);
+        assert_eq!(why(false, true, true), asleep);
+        assert_eq!(why(false, false, true), WAITS_FOR_A_SPRINT);
+        assert_eq!(why(false, false, false), NOTHING_TO_DO);
+    }
+
     #[tokio::test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn holds_a_ready_task_until_a_sprint_opens() {
