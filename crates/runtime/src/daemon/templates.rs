@@ -223,8 +223,10 @@ pub(super) async fn call(
         return Err(Failure::new(NO_PROJECT, super::NO_PROJECT));
     };
     templates_of(state)?;
+    let applies = method == "template.apply";
+    let waker = Arc::clone(state);
     let (state, method, params) = (Arc::clone(state), method.to_string(), params.clone());
-    off_the_worker(move || {
+    let answered = off_the_worker(move || {
         let templates = templates_of(&state)?;
         let slug = slug_of(&params);
         match method.as_str() {
@@ -259,7 +261,12 @@ pub(super) async fn call(
             ),
         }
     })
-    .await
+    .await?;
+    // An applied template can free work at once: its policy may switch the Backlog off.
+    if applies {
+        waker.wakes().notify_one();
+    }
+    Ok(answered)
 }
 
 #[cfg(test)]
@@ -588,6 +595,30 @@ mod tests {
         );
         assert_eq!(listed["templates"][0]["template"]["budgets"], json!({}));
         assert_eq!(listed["unreadable"], json!([{ "slug": "broken" }]));
+    }
+
+    /// A template that switches "Plan work in sprints" off frees the Backlog at once.
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn wakes_the_team_when_a_template_is_applied() {
+        let (harness, folder) = templated("templates-apply-wakes", |_| {});
+        saved(&folder, &pair());
+        // The preview's query runs a runtime of its own, so it is read before this one starts.
+        let digest = digest(&harness, "pair");
+
+        let (woken, applied) = tokio::runtime::Runtime::new().expect("a runtime").block_on(
+            crate::daemon::team::tests::wakes(
+                &harness,
+                super::call(
+                    &harness.daemon,
+                    "template.apply",
+                    &json!({ "slug": "pair", "digest": digest }),
+                ),
+            ),
+        );
+
+        assert!(applied.is_ok(), "{applied:?}");
+        assert!(woken, "the wait ends");
     }
 
     #[test]

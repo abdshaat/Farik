@@ -636,10 +636,11 @@ pub(super) async fn call(
             Ok(json!({}))
         }
         "agent.replace" => {
-            let state = Arc::clone(state);
-            off_the_worker(move || replace(&deps, &state, &params))
-                .await
-                .map(|()| json!({}))
+            let holder = Arc::clone(state);
+            off_the_worker(move || replace(&deps, &holder, &params)).await?;
+            // A newcomer can take ready work at once.
+            state.wakes().notify_one();
+            Ok(json!({}))
         }
         "criteria.save" => {
             off_the_worker(move || write_criteria(&deps, &library(&params["criteria"])?))
@@ -996,31 +997,66 @@ pub(super) mod tests {
         );
     }
 
-    /// Switching "Plan work in sprints" off frees the Backlog's work at once, not at the next
-    /// minute's look (the step 15 journey).
-    #[tokio::test]
-    #[ignore = "needs the git program: cargo xtask check --integration"]
-    async fn wakes_the_team_when_the_team_is_saved() {
-        let harness = Harness::new("team-save-wakes", |_| {});
+    /// Whether `act` wakes an orchestrator of `harness` waiting for an hour, within 5 s, and
+    /// what `act` answered.
+    pub(crate) async fn wakes<T>(
+        harness: &Harness,
+        act: impl std::future::Future<Output = T>,
+    ) -> (bool, T) {
         let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
-        let team = team_file(&harness);
-
-        let (ended, saved) = tokio::join!(
+        let (ended, answered) = tokio::join!(
             tokio::time::timeout(
                 std::time::Duration::from_secs(5),
                 orchestrator.wait_until(at() + chrono::Duration::hours(1)),
             ),
             async {
                 tokio::task::yield_now().await;
-                super::call(&harness.daemon, "team.save", &json!({ "team": team })).await
+                act.await
             }
         );
+        (ended == Ok(crate::orchestrator::Waited::Woken), answered)
+    }
+
+    /// Switching "Plan work in sprints" off frees the Backlog's work at once, not at the next
+    /// minute's look (the step 15 journey).
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn wakes_the_team_when_the_team_is_saved() {
+        let harness = Harness::new("team-save-wakes", |_| {});
+        let team = team_file(&harness);
+
+        let (woken, saved) = wakes(
+            &harness,
+            super::call(&harness.daemon, "team.save", &json!({ "team": team })),
+        )
+        .await;
 
         assert!(saved.is_ok(), "the team is saved");
-        assert_eq!(
-            ended.expect("the wait ends"),
-            crate::orchestrator::Waited::Woken
-        );
+        assert!(woken, "the wait ends");
+    }
+
+    /// A new Developer in a retired one's place can take ready work at once.
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn wakes_the_team_when_an_agent_is_replaced() {
+        let harness = Harness::new("team-replace-wakes", |_| {});
+        let newcomer = json!({
+            "id": "noor", "display_name": "Noor", "role": "software_developer",
+            "avatar": "extra-1", "status": "active",
+        });
+
+        let (woken, replaced) = wakes(
+            &harness,
+            super::call(
+                &harness.daemon,
+                "agent.replace",
+                &json!({ "agent_id": "dev-a", "newcomer": newcomer }),
+            ),
+        )
+        .await;
+
+        assert!(replaced.is_ok(), "{replaced:?}");
+        assert!(woken, "the wait ends");
     }
 
     #[test]
