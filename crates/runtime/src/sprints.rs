@@ -105,12 +105,24 @@ pub fn sprint_hold<'a>(
     }
 }
 
+/// The Backlog's rows on `board` with no parent while `open` is the open sprint, so an epic counts
+/// once (ADR 0028).
+pub fn backlog<'a>(
+    team: &'a Team,
+    open: Option<&'a str>,
+    board: &'a [TaskProjection],
+) -> impl Iterator<Item = &'a TaskProjection> {
+    board
+        .iter()
+        .filter(move |row| row.parent.is_none() && in_the_backlog(&sprint_hold(team, open, row)))
+}
+
 /// What switching `team`'s sprint policy touches on `board` while `open` is the open sprint
 /// (ADR 0028): the tasks under way outside it without the Backlog mark, and the titles of the
 /// Backlog's rows with no parent.
 #[must_use]
 pub fn sprint_work<'a>(
-    team: &Team,
+    team: &'a Team,
     open: Option<&'a str>,
     board: &'a [TaskProjection],
 ) -> SprintWork<'a> {
@@ -132,9 +144,7 @@ pub fn sprint_work<'a>(
         .count();
     SprintWork {
         under_way: u32::try_from(under_way).unwrap_or(u32::MAX),
-        in_the_backlog: board
-            .iter()
-            .filter(|row| row.parent.is_none() && in_the_backlog(&sprint_hold(team, open, row)))
+        in_the_backlog: backlog(team, open, board)
             .map(|row| row.title.as_str())
             .collect(),
     }

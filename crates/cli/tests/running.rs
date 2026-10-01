@@ -22,6 +22,7 @@ use farik_runtime::RuntimeAdapter;
 use farik_runtime::recorded::fixtures::{
     UsageThenWaitAdapter, accept_frk_1, implement_finishes_frk_1, plan_assigns_frk_1,
     planning_ceremony_frk_1, refine_writes_task_frk_1, reply_to_a_mention, review_writes_note,
+    standup,
 };
 use farik_runtime::sleep::Sleeper;
 use farik_store::git::fixtures::TempRepo;
@@ -786,6 +787,29 @@ fn says_the_backlog_waits() {
     assert_eq!(ran.code, 0, "{}", ran.err);
     let last: Value = serde_json::from_str(ran.out.lines().last().expect("a line")).expect("JSON");
     assert_eq!(last, json!({ "backlog": { "count": 1 } }));
+
+    // With a sprint open, its Backlog waits for the next sprint, not for the human to start one.
+    // Its planning session posts and plans nothing, so the request stays in the Backlog.
+    let started = run_with(&repository.path, &["sprint", "start"], |_| {});
+    assert_eq!(started.code, 0, "{}", started.err);
+    let ran = run_with(&repository.path, &["run"], |io| {
+        io.engine = recorded(vec![standup()]);
+    });
+    assert_eq!(ran.code, 0, "{}\n{}", ran.out, ran.err);
+    assert!(
+        ran.out
+            .lines()
+            .any(|line| line == "idle: nothing on the board needs doing"),
+        "{}",
+        ran.out
+    );
+    assert!(!ran.out.contains("start a sprint"), "{}", ran.out);
+    let ran = run_with(&repository.path, &["--json", "run"], |io| {
+        io.engine = recorded(Vec::new());
+    });
+    assert_eq!(ran.code, 0, "{}", ran.err);
+    let last: Value = serde_json::from_str(ran.out.lines().last().expect("a line")).expect("JSON");
+    assert_eq!(last, json!({ "waiting_on_you": [] }));
 }
 
 #[test]

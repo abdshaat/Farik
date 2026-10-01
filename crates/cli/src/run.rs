@@ -1,11 +1,10 @@
 //! `farik run` and `farik plan` (`docs/SPEC.md` 8.2): a process that drives the project until
 //! nothing needs doing, a stop, or Ctrl-C, and then says what waits on the human.
 
-use farik_core::governor::gates::in_the_backlog;
 use farik_runtime::claude::CredentialKind;
 use farik_runtime::credential::Source;
 use farik_runtime::orchestrator::{TickReport, TickRules, TickScope};
-use farik_runtime::sprints::sprint_hold;
+use farik_runtime::sprints::backlog;
 use farik_store::files::Sandbox;
 use serde_json::{Value, json};
 
@@ -375,10 +374,7 @@ fn backlog_now(project: &Project) -> Result<usize, String> {
         return Ok(0);
     }
     let board = projections.board().map_err(|error| error.to_string())?;
-    Ok(board
-        .iter()
-        .filter(|row| row.parent.is_none() && in_the_backlog(&sprint_hold(&team, None, row)))
-        .count())
+    Ok(backlog(&team, None, &board).count())
 }
 
 /// Prints what waits on the human: a person's lines, or one `{"waiting_on_you"}` object.

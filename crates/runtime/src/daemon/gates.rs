@@ -9,9 +9,7 @@ use std::sync::Arc;
 
 use chrono::{DateTime, Utc};
 use farik_core::contract::{Role, TaskContract, TaskId, TaskKind, TaskStatus, validate_contract};
-use farik_core::governor::gates::{
-    ContractWriteActor, ContractWriteOutcome, check_contract_write, in_the_backlog,
-};
+use farik_core::governor::gates::{ContractWriteActor, ContractWriteOutcome, check_contract_write};
 use farik_core::governor::plain::plain_readiness;
 use farik_core::governor::readiness::{ReadinessFailure, evaluate_readiness, rules_evaluated};
 use farik_core::governor::transition_table::TransitionActor;
@@ -33,7 +31,6 @@ use serde_json::{Value, json};
 use super::DaemonState;
 use super::web::{Failure, INTERNAL_ERROR, NOT_FOUND, REFUSED, UNKNOWN_QUERY};
 use crate::cost::extra_tries;
-use crate::sprints::sprint_hold;
 use crate::tools::ToolDeps;
 use crate::tools::contracts::changed_fields;
 use crate::tools::design::ReviewState;
@@ -402,10 +399,7 @@ fn backlog_summary(deps: &ToolDeps, team: &Team) -> Result<Value, Failure> {
     let open = deps.projections.open_sprint().map_err(|e| internal(&e))?;
     let open = open.as_ref().map(|open| open.sprint_id.as_str());
     let board = deps.projections.board().map_err(|e| internal(&e))?;
-    let count = board
-        .iter()
-        .filter(|row| row.parent.is_none() && in_the_backlog(&sprint_hold(team, open, row)))
-        .count();
+    let count = crate::sprints::backlog(team, open, &board).count();
     Ok(json!({ "plan_in_sprints": team.plans_in_sprints(), "count": count }))
 }
 
