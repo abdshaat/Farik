@@ -57,7 +57,8 @@
         "chats.list",
         "chat.messages",
         "templates.list",
-        "template.preview"
+        "template.preview",
+        "backlog.summary"
       ]
     },
     "subscribeRequest": {
@@ -260,6 +261,9 @@
             },
             {
               "$ref": "#/$defs/sprintsListQuery"
+            },
+            {
+              "$ref": "#/$defs/backlogSummaryQuery"
             },
             {
               "$ref": "#/$defs/sprintGetQuery"
@@ -991,6 +995,10 @@
         },
         "sprint": {
           "type": "string"
+        },
+        "backlog": {
+          "type": "boolean",
+          "description": "Whether the row waits in the Backlog for a sprint (ADR 0028): farik-core's in_the_backlog, so the board need not work it out again."
         }
       },
       "required": [
@@ -1009,7 +1017,8 @@
         "awaiting_approval",
         "verifications",
         "rejections",
-        "interventions"
+        "interventions",
+        "backlog"
       ],
       "description": "One row of the board (farik_store::TaskProjection). Optional fields are absent, not null, when the projection has none."
     },
@@ -1836,6 +1845,25 @@
         }
       }
     },
+    "backlogSummaryQuery": {
+      "title": "Backlog Summary Query",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "params"
+      ],
+      "properties": {
+        "name": {
+          "const": "backlog.summary"
+        },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {}
+        }
+      }
+    },
     "sprintsListQuery": {
       "title": "Sprints List Query",
       "type": "object",
@@ -2620,6 +2648,24 @@
         "planned_by",
         "task_count",
         "done_count"
+      ]
+    },
+    "backlogSummaryResult": {
+      "description": "Whether the team plans its work in sprints, and how much work waits in its Backlog: the rows with no parent, so an epic counts once (ADR 0028).",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "plan_in_sprints": {
+          "type": "boolean"
+        },
+        "count": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "plan_in_sprints",
+        "count"
       ]
     },
     "sprintsListResult": {

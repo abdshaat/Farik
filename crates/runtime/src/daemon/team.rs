@@ -13,7 +13,7 @@ use farik_core::criteria::validate_criteria;
 use farik_core::governor::gates::DesignerBrowser;
 use farik_core::governor::paths::{PathRefusal, check_protected_paths};
 use farik_core::team::{
-    Agent, MODEL_FAMILIES, SprintWork, Team, ValidationError, describe_change, validate_team,
+    Agent, MODEL_FAMILIES, Team, ValidationError, describe_change, validate_team,
 };
 use farik_protocol::command::{Command, CommandReply};
 use farik_protocol::event::{EventBody, new_event};
@@ -28,6 +28,7 @@ use crate::claude::{CredentialKind, credential_variable};
 use crate::credential::{CredentialError, credential_of_kind, load_credential, save_credential};
 use crate::pause::{key_refused, paused};
 use crate::session::session_model;
+use crate::sprints::sprint_work;
 use crate::tools::ToolDeps;
 
 /// The methods this module answers.
@@ -86,8 +87,11 @@ pub(super) fn query(deps: &ToolDeps, name: &str, params: &Value) -> Result<Value
                 Ok((before, after)) => {
                     let mut answer = effective(deps, &after)?;
                     answer["errors"] = json!([]);
-                    answer["effects"] =
-                        json!(describe_change(&before, &after, &SprintWork::default()));
+                    let board = deps.projections.board().map_err(|e| internal(&e))?;
+                    let open = deps.projections.open_sprint().map_err(|e| internal(&e))?;
+                    let open = open.as_ref().map(|open| open.sprint_id.as_str());
+                    let work = sprint_work(&before, open, &board);
+                    answer["effects"] = json!(describe_change(&before, &after, &work));
                     Ok(answer)
                 }
                 Err(Refused::Errors(errors)) => {
@@ -178,9 +182,10 @@ pub(super) fn web_of(state: &DaemonState) -> Result<&super::web::WebState, Failu
         .ok_or_else(|| Failure::new(INTERNAL_ERROR, "the browser routes are off"))
 }
 
-/// `team.propose`: the team as it is, with the six in place of its agents, and the criteria. The
-/// Designer comes with its Playwright connector on, and is listed `unavailable` where it cannot
-/// have its browser for want of Docker's sandbox, which the page shows unticked (D3).
+/// `team.propose`: the team as it is, with the six in place of its agents and planning in sprints,
+/// and the criteria. The Designer comes with its Playwright connector on, and is listed
+/// `unavailable` where it cannot have its browser for want of Docker's sandbox, which the page
+/// shows unticked (D3).
 fn propose(deps: &ToolDeps) -> Result<Value, Failure> {
     let current = deps.files.read_team().map_err(|e| internal(&e))?;
     let no_sandbox = deps.transitions.designer_browser(&current) == DesignerBrowser::NoSandbox;
@@ -192,6 +197,8 @@ fn propose(deps: &ToolDeps) -> Result<Value, Failure> {
         .map(|agent| json!({ "agent_id": agent.id, "reason": "designer_needs_sandbox" }))
         .collect();
     team["agents"] = serde_json::to_value(agents).map_err(|e| internal(&e))?;
+    // Setup only ever makes a new team, and a new team plans in sprints (ADR 0028).
+    team["policy"]["plan_in_sprints"] = json!(true);
     let criteria = serde_json::to_value(deps.files.read_criteria().map_err(|e| internal(&e))?)
         .map_err(|e| internal(&e))?;
     Ok(json!({ "team": team, "criteria": criteria, "unavailable": unavailable }))
@@ -974,8 +981,10 @@ pub(super) mod tests {
             ]
         );
         // The rest is the team as it is, and the checks the form edits beside it.
-        let team = team_file(&harness);
+        let mut team = team_file(&harness);
         assert_eq!(proposed["team"]["name"], team["name"]);
+        // Planning in sprints, as every new team does (ADR 0028).
+        team["policy"]["plan_in_sprints"] = json!(true);
         assert_eq!(proposed["team"]["policy"], team["policy"]);
         farik_core::team::validate_team(&proposed["team"]).expect("a team");
         assert_eq!(
@@ -1443,6 +1452,87 @@ pub(super) mod tests {
         let again = json!({ "team": team_file(&harness), "criteria": criteria });
         call(&harness.daemon, "team.start", &again, "emptyResult");
         assert!(crate::pause::paused(&harness.project.deps.log).expect("reads"));
+    }
+
+    /// `team.validate`'s effects of switching the sprint policy to `on`, on a board with the ready
+    /// FRK-1, FRK-2 under way since before the switch, FRK-3 under way in the open S2, and FRK-4,
+    /// which S1 left for the Backlog.
+    fn switching(name: &str, on: bool) -> Value {
+        let harness = crate::orchestrator::fixtures::Harness::new(name, |wire| {
+            wire["policy"]["plan_in_sprints"] = json!(!on);
+        });
+        harness.ready("FRK-1");
+        harness.file("FRK-2", "in_progress", |_| {});
+        harness.file("FRK-3", "in_progress", |_| {});
+        harness.file("FRK-4", "assigned", |_| {});
+        harness.open_sprint("S1", &["FRK-4"]);
+        harness.project.record(
+            "",
+            "sprint.ended",
+            &json!({ "sprint_id": "S1", "ended_by": "human", "left": ["FRK-4"], "backlog": true }),
+        );
+        harness.open_sprint("S2", &["FRK-3"]);
+        let mut team = team_file(&harness);
+        team["policy"]["plan_in_sprints"] = json!(on);
+        query(
+            &harness.daemon,
+            "team.validate",
+            &json!({ "team": team }),
+            "teamValidateResult",
+        )["effects"]
+            .clone()
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn describes_the_work_a_switch_touches() {
+        assert_eq!(
+            switching("team-switch-on", true),
+            json!([
+                "Ready work now waits in the Backlog until you start a sprint.",
+                "The task already under way finishes first.",
+            ])
+        );
+        assert_eq!(
+            switching("team-switch-off", false),
+            json!([
+                "Ready work starts as soon as someone is free, without waiting for a sprint.",
+                "The 2 pieces of work in the Backlog, Add a login page and Add a login page, can \
+                 start now.",
+                "You can still start sprints from the Board.",
+            ])
+        );
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn proposes_sprints_for_a_new_team() {
+        let harness = driven("team-propose-sprints");
+        assert_eq!(team_file(&harness)["policy"].get("plan_in_sprints"), None);
+        let proposed = query(
+            &harness.daemon,
+            "team.propose",
+            &json!({}),
+            "teamProposeResult",
+        );
+        assert_eq!(
+            proposed["team"]["policy"]["plan_in_sprints"],
+            json!(true),
+            "{proposed}"
+        );
+        let defaults = query(
+            &harness.daemon,
+            "settings.defaults",
+            &json!({}),
+            "settingsDefaultsResult",
+        );
+        assert_eq!(defaults["policy"]["plan_in_sprints"], json!(true));
+        let start = json!({ "team": proposed["team"], "criteria": proposed["criteria"] });
+        call(&harness.daemon, "team.start", &start, "emptyResult");
+        assert_eq!(
+            team_file(&harness)["policy"]["plan_in_sprints"],
+            json!(true)
+        );
     }
 
     #[test]

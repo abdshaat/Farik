@@ -9,7 +9,9 @@ use std::sync::Arc;
 
 use chrono::{DateTime, Utc};
 use farik_core::contract::{Role, TaskContract, TaskId, TaskKind, TaskStatus, validate_contract};
-use farik_core::governor::gates::{ContractWriteActor, ContractWriteOutcome, check_contract_write};
+use farik_core::governor::gates::{
+    ContractWriteActor, ContractWriteOutcome, check_contract_write, in_the_backlog,
+};
 use farik_core::governor::plain::plain_readiness;
 use farik_core::governor::readiness::{ReadinessFailure, evaluate_readiness, rules_evaluated};
 use farik_core::governor::transition_table::TransitionActor;
@@ -31,6 +33,7 @@ use serde_json::{Value, json};
 use super::DaemonState;
 use super::web::{Failure, INTERNAL_ERROR, NOT_FOUND, REFUSED, UNKNOWN_QUERY};
 use crate::cost::extra_tries;
+use crate::sprints::sprint_hold;
 use crate::tools::ToolDeps;
 use crate::tools::contracts::changed_fields;
 use crate::tools::design::ReviewState;
@@ -176,6 +179,7 @@ pub(super) fn query(deps: &ToolDeps, name: &str, params: &Value) -> Result<Value
             )
         }
         "sprint.current" => sprint_current(deps),
+        "backlog.summary" => backlog_summary(deps, &team()?),
         "questions.list" => questions(deps, params["task_id"].as_str()),
         _ => {
             let task_id = task_of(deps, params)?;
@@ -390,6 +394,19 @@ fn sprint_current(deps: &ToolDeps) -> Result<Value, Failure> {
         .filter(|row| matches!(row.status, TaskStatus::Accepted | TaskStatus::Cancelled))
         .count();
     Ok(json!({ "sprint_id": open.sprint_id, "done": done, "total": tasks.len() }))
+}
+
+/// `backlog.summary`: whether `team` plans in sprints, and how many of the Backlog's rows have no
+/// parent, so an epic counts once.
+fn backlog_summary(deps: &ToolDeps, team: &Team) -> Result<Value, Failure> {
+    let open = deps.projections.open_sprint().map_err(|e| internal(&e))?;
+    let open = open.as_ref().map(|open| open.sprint_id.as_str());
+    let board = deps.projections.board().map_err(|e| internal(&e))?;
+    let count = board
+        .iter()
+        .filter(|row| row.parent.is_none() && in_the_backlog(&sprint_hold(team, open, row)))
+        .count();
+    Ok(json!({ "plan_in_sprints": team.plans_in_sprints(), "count": count }))
 }
 
 /// `questions.list`: every question, of `task` when one is named, oldest first, with its answer.
@@ -1751,6 +1768,58 @@ pub(super) mod tests {
             !moved["moved"].as_array().expect("moved").is_empty(),
             "{moved}"
         );
+    }
+
+    /// A ready task FRK-1, and an epic FRK-2 broken down into the ready FRK-3, FRK-4 and FRK-5,
+    /// on a team that plans in sprints when `on`.
+    fn a_backlog(name: &str, on: bool) -> Harness {
+        let harness = Harness::new(name, |wire| {
+            if on {
+                wire["policy"]["plan_in_sprints"] = json!(true);
+            }
+        });
+        harness.ready("FRK-1");
+        harness.project.filed("FRK-2", "in_progress", "epic", None);
+        for task in ["FRK-3", "FRK-4", "FRK-5"] {
+            harness.project.filed(task, "ready", "task", Some("FRK-2"));
+        }
+        harness
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn summarises_the_backlog() {
+        let summary = |harness: &Harness| {
+            query(
+                &harness.daemon,
+                "backlog.summary",
+                &json!({}),
+                "backlogSummaryResult",
+            )
+        };
+        // The epic counts once, its tasks with it.
+        assert_eq!(
+            summary(&a_backlog("gates-backlog-on", true)),
+            json!({ "plan_in_sprints": true, "count": 2 })
+        );
+        assert_eq!(
+            summary(&a_backlog("gates-backlog-off", false)),
+            json!({ "plan_in_sprints": false, "count": 0 })
+        );
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn leaves_the_backlog_out_of_waiting() {
+        let harness = a_backlog("gates-backlog-waiting", true);
+        let waiting = query(
+            &harness.daemon,
+            "waiting.list",
+            &json!({}),
+            "waitingListResult",
+        );
+        // The Backlog waits for a sprint, which Today says in the team band (answer 2).
+        assert_eq!(waiting["waiting"], json!([]), "{waiting}");
     }
 
     #[test]

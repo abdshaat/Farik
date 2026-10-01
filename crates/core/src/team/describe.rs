@@ -121,7 +121,7 @@ fn sprint_change(old: &Team, new: &Team, work: &SprintWork<'_>) -> Vec<String> {
         said.push("Ready work now waits in the Backlog until you start a sprint.".to_string());
         match work.under_way {
             0 => {}
-            1 => said.push("The 1 task already under way finishes first.".to_string()),
+            1 => said.push("The task already under way finishes first.".to_string()),
             count => said.push(format!("The {count} tasks already under way finish first.")),
         }
     } else {
@@ -131,9 +131,9 @@ fn sprint_change(old: &Team, new: &Team, work: &SprintWork<'_>) -> Vec<String> {
         );
         match work.in_the_backlog.split_last() {
             None => {}
-            Some((only, [])) => said.push(format!(
-                "The 1 piece of work in the Backlog, {only}, can start now."
-            )),
+            Some((only, [])) => {
+                said.push(format!("{only}, waiting in the Backlog, can start now."));
+            }
             Some((last, rest)) => said.push(format!(
                 "The {} pieces of work in the Backlog, {} and {last}, can start now.",
                 rest.len() + 1,
@@ -263,11 +263,11 @@ mod tests {
         };
         assert_eq!(
             describe_change(&off, &on, &one)[1],
-            "The 1 task already under way finishes first."
+            "The task already under way finishes first."
         );
         assert_eq!(
             describe_change(&on, &off, &one)[1],
-            "The 1 piece of work in the Backlog, Gift cards at checkout, can start now."
+            "Gift cards at checkout, waiting in the Backlog, can start now."
         );
         let three = SprintWork {
             under_way: 0,

@@ -191,7 +191,7 @@ Files: as the file map says.
 - `leaves_the_backlog_out_of_waiting` (daemon): `waiting.list` on a policy-on project with FRK-1 waiting in the Backlog answers no row for it (answer 2).
 - The protocol client (not counted above): `client.test.ts` maps `plan_in_sprints` → `planInSprints` and the row's `backlog`. The mapping is generic, so watch it fail on the generated `QueryName` lacking `backlog.summary` (a type error). `generated/rpc.ts` is regenerated.
 
-- [ ] `feat(runtime): answer which work waits in the backlog, and propose sprints for new teams`
+- [x] `feat(runtime): answer which work waits in the backlog, and propose sprints for new teams`
 
 ### Task 5: The pages
 

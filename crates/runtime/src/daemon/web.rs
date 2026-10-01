@@ -16,6 +16,8 @@ use axum::response::{IntoResponse, Response};
 use axum::{Extension, Json};
 use chrono::{DateTime, Utc};
 use farik_core::contract::{TaskId, TaskStatus};
+use farik_core::governor::gates::in_the_backlog;
+use farik_core::team::Team;
 use farik_protocol::clock::Clock;
 use farik_protocol::command::{Command, command_from_value, reply_to_value};
 use farik_protocol::event::{EventBody, event_to_value};
@@ -33,6 +35,7 @@ use crate::claude::CredentialKind;
 use crate::computer::{build_sandbox_image, check_computer, pull_browser_image};
 use crate::credential::CredentialStore;
 use crate::locked;
+use crate::sprints::sprint_hold;
 
 /// What the browser routes need, which only `farik serve` gives the daemon (`DaemonState::set_web`).
 pub struct WebState {
@@ -721,9 +724,10 @@ fn query(state: &DaemonState, name: &str, params: &Value) -> Result<Value, Failu
         "tasks.list" => {
             let board = deps.projections.board().map_err(|error| internal(&error))?;
             let team = deps.files.read_team().map_err(|error| internal(&error))?;
+            let open = open_sprint(deps)?;
             let mut tasks = Vec::with_capacity(board.len());
             for task in &board {
-                let mut wire = task_wire(task);
+                let mut wire = task_wire(task, &team, open.as_deref());
                 // A UI change in review says where its design review stands, for the board's card.
                 if task.status == TaskStatus::Verifying {
                     let (ui_change, review) = deps
@@ -775,7 +779,7 @@ fn query(state: &DaemonState, name: &str, params: &Value) -> Result<Value, Failu
                         })
                         .collect();
                     Ok(json!({
-                        "task": task_wire(&task),
+                        "task": task_wire(&task, &team, open_sprint(deps)?.as_deref()),
                         "design_plan": plan,
                         "ui_change": ui_change,
                         "design_review": ui_change.then_some(review),
@@ -944,8 +948,19 @@ async fn setup_call(state: &DaemonState, method: &str, params: &Value) -> Result
 
 /// One board row as the RPC schema's `taskProjection`: an optional field is left out, not null,
 /// when the projection has none.
-fn task_wire(task: &TaskProjection) -> Value {
+/// The id of the sprint that is open, if one is.
+fn open_sprint(deps: &crate::tools::ToolDeps) -> Result<Option<String>, Failure> {
+    deps.projections
+        .open_sprint()
+        .map(|open| open.map(|open| open.sprint_id))
+        .map_err(|error| Failure::new(INTERNAL_ERROR, error.to_string()))
+}
+
+/// The board's row as the wire carries it, with whether it waits in `team`'s Backlog while
+/// `open` is the open sprint.
+fn task_wire(task: &TaskProjection, team: &Team, open: Option<&str>) -> Value {
     let mut wire = json!({
+        "backlog": in_the_backlog(&sprint_hold(team, open, task)),
         "task_id": task.task_id,
         "kind": task.kind,
         "title": task.title,
@@ -2008,6 +2023,54 @@ mod tests {
         assert_eq!(row("FRK-1").get("design_review_state"), None, "{listed}");
         drop(socket);
         handle.shutdown().await.expect("the daemon stops");
+    }
+
+    /// Whether `tasks.list` puts each of `tasks` in the Backlog, in order.
+    fn backlog_of(harness: &Harness, tasks: &[&str]) -> Vec<Value> {
+        let listed = crate::daemon::gates::tests::query(
+            &harness.daemon,
+            "tasks.list",
+            &json!({}),
+            "tasksListResult",
+        );
+        tasks
+            .iter()
+            .map(|id| {
+                listed["tasks"]
+                    .as_array()
+                    .and_then(|rows| rows.iter().find(|row| row["task_id"] == *id))
+                    .unwrap_or_else(|| panic!("{id} is listed: {listed}"))["backlog"]
+                    .clone()
+            })
+            .collect()
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn marks_backlog_rows() {
+        let on = Harness::new("rpc-backlog-on", |wire| {
+            wire["policy"]["plan_in_sprints"] = json!(true);
+        });
+        on.ready("FRK-1");
+        // Under way since before the switch: no mark, so it keeps its lane.
+        on.file("FRK-2", "in_progress", |_| {});
+        assert_eq!(
+            backlog_of(&on, &["FRK-1", "FRK-2"]),
+            [json!(true), json!(false)]
+        );
+        on.open_sprint("S1", &["FRK-1"]);
+        assert_eq!(
+            backlog_of(&on, &["FRK-1", "FRK-2"]),
+            [json!(false), json!(false)]
+        );
+
+        let off = Harness::new("rpc-backlog-off", |_| {});
+        off.ready("FRK-1");
+        off.file("FRK-2", "in_progress", |_| {});
+        assert_eq!(
+            backlog_of(&off, &["FRK-1", "FRK-2"]),
+            [json!(false), json!(false)]
+        );
     }
 
     #[tokio::test(flavor = "multi_thread")]

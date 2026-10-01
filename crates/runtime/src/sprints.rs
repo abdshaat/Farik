@@ -3,10 +3,10 @@
 
 use std::fmt;
 
-use farik_core::contract::{Role, TaskId, TaskStatus};
+use farik_core::contract::{Role, TaskId, TaskKind, TaskStatus};
 use farik_core::governor::gates::{SprintHold, in_the_backlog};
 use farik_core::sprint::{Sprint, SprintStatus, validate_sprint};
-use farik_core::team::Team;
+use farik_core::team::{SprintWork, Team};
 use farik_protocol::event::{
     EventBody, EventKind, FarikEvent, SessionStartedBodyPurpose, Thread, new_event,
 };
@@ -102,6 +102,41 @@ pub fn sprint_hold<'a>(
         status: row.status,
         sprint: row.sprint.as_deref(),
         left_for_the_backlog: row.left_for_the_backlog,
+    }
+}
+
+/// What switching `team`'s sprint policy touches on `board` while `open` is the open sprint
+/// (ADR 0028): the tasks under way outside it without the Backlog mark, and the titles of the
+/// Backlog's rows with no parent.
+#[must_use]
+pub fn sprint_work<'a>(
+    team: &Team,
+    open: Option<&'a str>,
+    board: &'a [TaskProjection],
+) -> SprintWork<'a> {
+    let under_way = board
+        .iter()
+        .filter(|row| {
+            row.kind == TaskKind::Task
+                && (row.sprint.is_none() || row.sprint.as_deref() != open)
+                && matches!(
+                    row.status,
+                    TaskStatus::Assigned
+                        | TaskStatus::InProgress
+                        | TaskStatus::Blocked
+                        | TaskStatus::Verifying
+                        | TaskStatus::Rejected
+                )
+                && !row.left_for_the_backlog
+        })
+        .count();
+    SprintWork {
+        under_way: u32::try_from(under_way).unwrap_or(u32::MAX),
+        in_the_backlog: board
+            .iter()
+            .filter(|row| row.parent.is_none() && in_the_backlog(&sprint_hold(team, open, row)))
+            .map(|row| row.title.as_str())
+            .collect(),
     }
 }
 

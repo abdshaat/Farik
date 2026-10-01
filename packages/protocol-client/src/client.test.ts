@@ -173,4 +173,31 @@ describe("client", () => {
 			},
 		]);
 	});
+
+	it("maps_the_backlog_and_the_sprint_policy", async () => {
+		const ws = new FakeSocket();
+		const client = connect("ws://x/rpc", ws);
+		ws.emit("open", {});
+		const summary = client.query("backlog.summary", {});
+		const listed = client.query("tasks.list", {});
+		await tick();
+		expect(ws.sent[0]).toMatchObject({
+			method: "query",
+			params: { name: "backlog.summary", params: {} },
+		});
+		ws.receive({
+			jsonrpc: "2.0",
+			id: 1,
+			result: { plan_in_sprints: true, count: 2 },
+		});
+		ws.receive({
+			jsonrpc: "2.0",
+			id: 2,
+			result: { tasks: [{ task_id: "FRK-1", backlog: true }] },
+		});
+		expect(await summary).toEqual({ planInSprints: true, count: 2 });
+		expect(await listed).toEqual({
+			tasks: [{ taskId: "FRK-1", backlog: true }],
+		});
+	});
 });

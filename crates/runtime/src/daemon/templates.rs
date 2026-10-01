@@ -7,8 +7,7 @@ use std::sync::Arc;
 
 use farik_core::contract::TaskStatus;
 use farik_core::team::{
-    AgentStatus, SprintWork, Team, TemplateApplied, apply_template, describe_change,
-    template_from_team,
+    AgentStatus, Team, TemplateApplied, apply_template, describe_change, template_from_team,
 };
 use serde_json::{Value, json};
 
@@ -17,6 +16,7 @@ use super::team::{
     Refused, append, errors_wire, internal, off_the_worker, suggested, team_updated, web_of, worked,
 };
 use super::web::{Failure, INTERNAL_ERROR, NO_PROJECT, NOT_FOUND, REFUSED};
+use crate::sprints::sprint_work;
 use crate::templates::{TemplateError, Templates};
 use crate::tools::ToolDeps;
 
@@ -161,10 +161,12 @@ fn answer(
             )),
         }
     }
+    let open = deps.projections.open_sprint().map_err(|e| internal(&e))?;
+    let open = open.as_ref().map(|open| open.sprint_id.as_str());
     effects.extend(describe_change(
         before,
         &applied.team,
-        &SprintWork::default(),
+        &sprint_work(before, open, &board),
     ));
     Ok(json!({
         "team": applied.team,
@@ -522,6 +524,25 @@ mod tests {
         );
         assert_eq!(team_file(&harness), team, "previewing writes nothing");
         assert_eq!(seq_count(&harness), events, "and records nothing");
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn previews_the_work_a_switch_touches() {
+        let (harness, folder) = templated("templates-switch", |wire| {
+            wire["policy"]["plan_in_sprints"] = json!(true);
+        });
+        harness.ready("FRK-1");
+        let mut off = pair();
+        off["policy"]["plan_in_sprints"] = json!(false);
+        saved(&folder, &off);
+        let effects = preview(&harness, "pair")["effects"].clone();
+        assert!(
+            effects.as_array().expect("effects").contains(&json!(
+                "Add a login page, waiting in the Backlog, can start now."
+            )),
+            "{effects}"
+        );
     }
 
     #[test]
