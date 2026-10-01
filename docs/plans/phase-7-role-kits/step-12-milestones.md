@@ -1,10 +1,10 @@
-# Phase 6, step 16: Milestones 0 and 1 in the web UI
+# Phase 7, step 12: Milestones 0 and 1 in the web UI
 
-Status: draft; steps 01 to 14 landed (step 14 on 2026-10-01, recorded at 9512424); renumbered from step 15 by the project plan's revision 25 (ADR 0028); waits on step 15 and on readiness. Readiness finding B1 is decided: the founder chose the policy (ADR 0028), built in step 15.
-Branch: `phase/6-web-ui`
+Status: draft; moved from phase 6 step 16 by the project plan's revision 26 (ADR 0029), on the founder's decision of 2026-10-01 that the runs test the fully equipped team once, on Claude. The step number 12 is a placeholder until phase 7 is planned, when this runbook is re-planned for the equipped team and reviewed for readiness again. Before the move: phase 6's steps 01 to 15 landed; renumbered from step 15 by revision 25 (ADR 0028); readiness finding B1 decided, the founder choosing the policy (ADR 0028), built in phase 6 step 15. The text below is phase 6's, unchanged.
+Branch: `phase/7-role-kits`
 Spec: `docs/SPEC.md` section 11 (Milestones 0 and 1), F17; the flow it exercises is 4.1, 5.2 to 5.9, 5.14, and 5.16
-Depends on: steps 01 to 15 of this phase, landed; step 15, sprints gather ready work, is what holds both requests in the Backlog until S1 opens. A start gate applies: stage 1 does not begin until `cargo xtask check --integration` passes on the phase branch. The start-gate sha is the phase branch head when stage 1 begins, at or after 9512424, and it is recorded.
-Readiness confirmed by: fresh-session reviewer, 2026-10-01, not ready → findings folded in
+Depends on: phase 6, merged (its step 15, sprints gather ready work, is what holds both requests in the Backlog until S1 opens); steps 01 to 11 of this phase, landed, the kit check (step 11) among them. A start gate applies: stage 1 does not begin until `cargo xtask check --integration` passes on the phase branch. The start-gate sha is the phase branch head when stage 1 begins, and it is recorded.
+Readiness confirmed by: fresh-session reviewer, 2026-10-01, for phase 6's team, not ready → findings folded in; to be reviewed again when phase 7 is planned
 
 This step writes no product code. It is a runbook, like phase 3's step 18 and phase 4's step 08, and it keeps their roles:
 - **[A]** is the agent preparing and recording the run.

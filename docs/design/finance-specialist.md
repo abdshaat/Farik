@@ -12,7 +12,7 @@ The founder's answers shaped the design:
 - The books are private, kept outside the repository, and they are spreadsheets.
 - Receipts come from email; the user never uploads a bill.
 - It reads Stripe, read-only, when the product uses Stripe.
-- It is built in phase 8, after MCP connections exist, because Stripe needs them.
+- It is built in phase 7, after MCP connections exist, because Stripe needs them (phase 8 until ADR 0029 moved it with the plumbing its kit needs).
 
 The market evaluation of 2026-09-27 (`~/farik-research/reports/`, outside the repository) changed the order. The founder accepted three findings: the one finance feature with proven demand inside an agent-team product is AI-spend accounting; reading the user's main mailbox through Google's or Microsoft's mail API needs a restricted-scope verification with a paid yearly assessment, and its label filter is Farik's promise rather than the provider's enforcement; and receipts alone are the wrong source of truth, since every incumbent reconciles against the bank or card statement. So the role ships in two steps. Phase 8 step 02, before the web launch: the role, the books, the AI-spend accounting and forecast, and Stripe. Phase 12 step 02, in the first release after the web release check: receipts from a dedicated receipts mailbox over IMAP, and bank statement reconciliation.
 
@@ -40,7 +40,7 @@ The rest of its setup:
 - **Tiers:** `read` and `network`, the network to research prices. It has no `write_workspace`, `execute`, git, or `external_effect` tier.
 - **Reviewer:** the Product Manager, as for the Marketing Specialist.
 - **Model:** `claude-sonnet-5` at medium effort, the Marketing Specialist's default. The team file can override it.
-- **In the team builder:** it is optional and not among the five suggested. The user adds it with one click. Its avatar is `extra-4` (the character with glasses and the green cardigan), chosen on 2026-09-27; the brand's `characters/extra-4.png` and `avatars/extra-4-256.png` become `finance-specialist.png` in phase 8 step 02, and the character keeps its place among the extras for any other agent.
+- **In the team builder:** it is optional and not among the five suggested. The user adds it with one click. Its avatar is `extra-4` (the character with glasses and the green cardigan), chosen on 2026-09-27; the brand's `characters/extra-4.png` and `avatars/extra-4-256.png` become `finance-specialist.png` in phase 7 step 07, and the character keeps its place among the extras for any other agent.
 
 ## The finance folder
 
@@ -49,7 +49,7 @@ The books live in `.farik/local/finance/`. The folder is on the user's machine, 
 ```
 .farik/local/finance/
   books.xlsx           Expenses, Revenue, Categories, Monthly summary; each row names its receipt file, statement line or Stripe object
-  forecast.xlsx        the long-term forecast, the AI spending from phase 8 on
+  forecast.xlsx        the long-term forecast, the AI spending from phase 7 on
   <name>.xlsx          further workbooks a task asks for, such as pricing.xlsx
   receipts/<yyyy-mm>/  each receipt filed from the receipts mailbox: its attachment (PDF or image), or the email itself when it has none (phase 12)
   imports/             bank and card statements the user exports as CSV, the source the books are reconciled against (phase 12)
@@ -68,7 +68,7 @@ Access:
 
 The first deliverable is the accounting of the team's own AI spending, because it needs no connector, no verification programme, and answers the market's top complaint: `farik_read_costs` gives the role the totals Farik already keeps, and the role writes them into `books.xlsx` and `forecast.xlsx` with a forecast of the next sprints and a recommended budget.
 
-Stripe is read through Stripe's official MCP server, configured for this agent the way phase 8 step 01 configures any MCP server. The user signs in to Stripe (OAuth), which they can revoke from Stripe's dashboard; a scheduled run uses a restricted key with read permissions only, tagged for agents as Stripe requires from 2026-10-31. Read-only is locked twice: at Stripe by the key's permissions, and in Farik, where until the kit takes the connection over in phase 9 step 05, its tools are tagged at connection as spec 5.6 says, the read tools read-only and `stripe_api_write` side-effecting, which the role's tiers refuse; in the kit the read tools are `network` and the rest `denied` (`docs/design/role-kits.md`). Either way the harness refuses a write before Stripe would. Stripe's `stripe_analytics` gives revenue metrics the role uses rather than re-deriving them. Stripe is optional: a product that takes no payments through Stripe skips it.
+Stripe is read through Stripe's official MCP server, configured for this agent the way phase 7 step 01 configures any MCP server. The user signs in to Stripe (OAuth), which they can revoke from Stripe's dashboard; a scheduled run uses a restricted key with read permissions only, tagged for agents as Stripe requires from 2026-10-31. Read-only is locked twice: at Stripe by the key's permissions, and in Farik, where until the kit takes the connection over in phase 9 step 05, its tools are tagged at connection as spec 5.6 says, the read tools read-only and `stripe_api_write` side-effecting, which the role's tiers refuse; in the kit the read tools are `network` and the rest `denied` (`docs/design/role-kits.md`). Either way the harness refuses a write before Stripe would. Stripe's `stripe_analytics` gives revenue metrics the role uses rather than re-deriving them. Stripe is optional: a product that takes no payments through Stripe skips it.
 
 Three Farik tools, which only this role may call:
 
@@ -97,7 +97,7 @@ The explanation for the human goes in the task's completion note, which already 
 Receipts come from a mailbox that holds nothing else, so the boundary is structural rather than a filter Farik promises to apply, which is how every incumbent (Expensify, Dext, Hubdoc, Kick) takes receipts.
 
 - **The receipts mailbox.** The user keeps an alias or a second address at their own provider, `receipts@` their domain or a Gmail alias, and forwards receipts to it; a forwarding rule in their main mailbox does it for them, and vendors can bill it directly.
-- **Connecting.** Farik reads that mailbox over IMAP, with an app password or the provider's IMAP sign-in, kept in the OS keychain where phase 8 step 01 keeps credentials. IMAP needs no restricted-scope verification from Google and no publisher verification from Microsoft, so nothing waits on a provider.
+- **Connecting.** Farik reads that mailbox over IMAP, with an app password or the provider's IMAP sign-in, kept in the OS keychain where phase 7 step 01 keeps credentials. IMAP needs no restricted-scope verification from Google and no publisher verification from Microsoft, so nothing waits on a provider.
 - **Approved senders.** A message is handed over only if its sender is on the user's approved list, which starts with the user's own address; anything else is left unread and never seen by the agent.
 - **Nothing in the mailbox changes.** The connector cannot send, delete, move, flag, or mark a message as read; it keeps its own ledger of what it has handed over.
 - **No duplicates.** Farik remembers each message the agent has filed and never hands it over again.
@@ -120,10 +120,10 @@ The web app's finance setup gains the mailbox connection and the approved sender
 ## Not planned
 
 - **A connector to the user's main mailbox** through Google's or Microsoft's mail API, filtered by a label or folder, the design of the afternoon of 2026-09-27. It needs Google's restricted-scope verification for `gmail.readonly`, with a paid third-party assessment repeated every year, and Microsoft's publisher verification; its filter is applied after a grant that reaches the whole mailbox; and email read by an agent is the best-documented prompt-injection channel. It is built only if users ask for it once receipts intake has shipped.
-- **Reading a paid ledger** (Kick or Digits expose MCP servers) as an alternative to keeping the books. It is an optional connector in the Finance Specialist's kit (phase 9 step 05), not a replacement for the books.
+- **Reading a paid ledger** (Kick or Digits expose MCP servers) as an alternative to keeping the books. It is an optional connector in the Finance Specialist's kit (phase 7 step 08), not a replacement for the books.
 - **A page that shows the books in the browser.** The workbooks are the view until a step asks for one.
 
-New dependencies, each pinned per the repository's rules and named in the step plans: `rust_xlsxwriter` to write workbooks and `calamine` to read them (phase 8); an IMAP client (phase 12).
+New dependencies, each pinned per the repository's rules and named in the step plans: `rust_xlsxwriter` to write workbooks and `calamine` to read them (phase 7); an IMAP client (phase 12).
 
 ## Tests
 

@@ -1,6 +1,6 @@
 # A UI/UX Designer, one-to-one chats and team templates
 
-Status: the founder's decisions of 2026-09-30, written down for the founder's review before any step plan is written. ADR 0026 records the decision. It is the design input to phase 6 steps 11 to 14; the milestone runbook moves to step 15 (revision 23 of the project plan split the Designer into steps 11 and 12), and to step 16 since revision 25 (ADR 0028). Where this document says "decided here", the founder did not rule on the point and this design chose; ADR 0026 lists those points for the founder to confirm.
+Status: the founder's decisions of 2026-09-30, written down for the founder's review before any step plan is written. ADR 0026 records the decision. It is the design input to phase 6 steps 11 to 14; the milestone runbook moves to step 15 (revision 23 of the project plan split the Designer into steps 11 and 12), and to step 16 since revision 25 (ADR 0028); revision 26 moves it to phase 7 step 12 (ADR 0029). Where this document says "decided here", the founder did not rule on the point and this design chose; ADR 0026 lists those points for the founder to confirm.
 
 Three small fixes landed on the phase branch before this design: the Ready pill on the computer check, the waiting rows' buttons, and the rail's breathing Connected dot (`docs/design/web-ui.md`).
 
@@ -80,7 +80,7 @@ The task stays `in_progress` from step 1 to step 4. The plan gate adds events, n
 
 ### The Playwright connector
 
-"Just enough, built to grow": the base phase 8 extends, not a special case it replaces.
+"Just enough, built to grow": the base phase 7 extends, not a special case it replaces.
 
 - **Per agent in the team file.** An agent gains `mcp_servers: [{ name, source }]`. Step 12 accepts one `source`, `builtin`, and one built-in, `playwright`. `team.propose` gives it to the Designer. The agent editor lists an agent's connectors with a switch for each built-in. It is on by default for the Designer only, and any agent may have it.
 - **The built-in's definition** ships in the `farik` binary, at `crates/roles/connectors/playwright.yaml`:
@@ -103,7 +103,7 @@ The task stays `in_progress` from step 1 to step 4. The plan gate adds events, n
   - it returns the violations, each with its rule, impact, element and help text, under the untrusted notice, and a screenshot as the tool's image result.
 
   The agent never gets a tool that runs script in the page; Farik's own code does.
-- **Engine-neutral.** It is an MCP server and a Farik MCP tool, so any engine that speaks MCP can use it (ADR 0023). On an engine without a pre-tool hook, phase 7 routes connector calls through Farik's own server, as ADR 0023 requires for every tool.
+- **Engine-neutral.** It is an MCP server and a Farik MCP tool, so any engine that speaks MCP can use it (ADR 0023). On an engine without a pre-tool hook, phase 8 routes connector calls through Farik's own server, as ADR 0023 requires for every tool.
 
 ### The Designer's kit
 
@@ -228,18 +228,18 @@ Every project on the machine sees every template. Saving and deleting a template
 
 Mockups first: the three starts in `SetupTeam`, "Save as a template" and "Use a saved team" on `Team`, and the before-and-after dialog.
 
-## How phase 8 extends the connector base
+## How phases 7 and 8 extend the connector base
 
 Nothing step 12 builds is replaced; each later step widens it.
 
 | Later step | Extends |
 |---|---|
-| Phase 7 | Runs the Playwright connector and `farik_check_page` on each engine; an engine without a pre-tool hook reaches connector tools only through Farik's own server (ADR 0023) |
-| Phase 8 step 01, MCP per agent | `mcp_servers` gains `source: custom`, with `transport`, `command` or `url`, `args`, `env_keys` and the user's `tool_tiers`; credentials in the keychain (8.6); tool listing with `rmcp`; per-call approval of `external_effect` (`tool.approve`). The hook's server-and-tag check, `tool.called`'s `server` and `tag`, and the per-agent list are step 12's, unchanged. The note on this step in the project plan says so |
-| Phase 8 step 03, skills per agent | The Designer's skills load at the role level as every role's do; agent and team levels are added around them |
-| Phase 8 step 04, memory and decisions view | Keeps the memory history with revert and the decisions view; the chat is step 13's |
-| Phase 9 step 01, kit format | `source: kit`; the built-in's definition moves into `roles/ui_ux_designer/kit.yaml`; allowances; the connector screens; the drift test becomes the kits' |
-| Phase 9 step 03, Developer kit | The Developer's browser testing reuses the Playwright connector and the preview, on the Developer's own task |
+| Phase 8, engines and providers | Runs the Playwright connector and `farik_check_page` on each engine; an engine without a pre-tool hook reaches connector tools only through Farik's own server (ADR 0023) |
+| Phase 7 step 01, MCP per agent | `mcp_servers` gains `source: custom`, with `transport`, `command` or `url`, `args`, `env_keys` and the user's `tool_tiers`; credentials in the keychain (8.6); tool listing with `rmcp`; per-call approval of `external_effect` (`tool.approve`). The hook's server-and-tag check, `tool.called`'s `server` and `tag`, and the per-agent list are step 12's, unchanged. The note on this step in the project plan says so |
+| Phase 7 step 02, skills per agent | The Designer's skills load at the role level as every role's do; agent and team levels are added around them |
+| Phase 9 step 01, memory and decisions view | Keeps the memory history with revert and the decisions view; the chat is step 13's |
+| Phase 7 step 03, kit format | `source: kit`; the built-in's definition moves into `roles/ui_ux_designer/kit.yaml`; allowances; the connector screens; the drift test becomes the kits' |
+| Phase 7 step 05, Developer kit | The Developer's browser testing reuses the Playwright connector and the preview, on the Developer's own task |
 
 ## Risks
 
@@ -251,8 +251,8 @@ Nothing step 12 builds is replaced; each later step widens it.
 - **Emulating the colour scheme and the width** depends on what the pinned image supports. `farik_check_page` is Farik's own script in the Playwright image, not the MCP server's tools, so this depends on Playwright's library, which supports both. The step plan confirms it on the pinned image.
 - **Chats cost money in the background.** A user who chats a lot while the team is paused is still spending. The daily budget still stops chats, and "Conversations" on the Costs page shows it.
 - **Privacy is local, not secret.** A chat is kept out of the channel and away from other agents, but it lives in the event log like everything else, and `farik log` shows it to anyone at the machine.
-- **Templates and providers.** A template saved with a model the project's provider cannot run (phase 7) falls back to the role's default, and the before-and-after dialog says so.
-- **Milestone runbook.** Step 16's team sprint (step 15 until revision 25) uses seven agents, the six of phase 4 and the Designer, the cap (decided by the founder, 2026-09-30). Its two requests are CLI work, so the Designer's review of UI changes occurs only if the run touches UI files.
+- **Templates and providers.** A template saved with a model the project's provider cannot run (phase 8) falls back to the role's default, and the before-and-after dialog says so.
+- **Milestone runbook.** Phase 7 step 12's team sprint (phase 6 step 16 until ADR 0029, step 15 until revision 25) uses seven agents, the six of phase 4 and the Designer, the cap (decided by the founder, 2026-09-30). Its two requests are CLI work, so the Designer's review of UI changes occurs only if the run touches UI files.
 
 ## Open items
 

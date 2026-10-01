@@ -1,6 +1,6 @@
 # The DevOps Engineer
 
-Status: approved by the founder on 2026-09-30, in conversation. It is the design input to phase 9 steps 06 and 07. ADR 0027 records the decision, and spec 0.32 (section 6.9) carries its rules.
+Status: approved by the founder on 2026-09-30, in conversation. It is the design input to phase 7 steps 09 and 10 (phase 9 steps 06 and 07 until ADR 0029). ADR 0027 records the decision, and spec 0.32 (section 6.9) carries its rules.
 
 ## Why
 
@@ -114,15 +114,15 @@ On the hosted service, Farik runs everything in the cloud, the watching included
 
 ## Steps
 
-- Phase 9 step 06, the role and its flow. It covers:
+- Phase 7 step 09, the role and its flow. It covers:
   - the role, its rules and its mockups;
   - the deploy task;
   - the three Farik tools, over a fake platform;
   - the watch tick;
   - the incident flow and its events;
   - the pages: the DevOps Engineer's card, incidents on Today, and a project's production settings (health URL, settling period, error threshold).
-- Phase 9 step 07, the kit: its skills and its four connectors, each chosen, pinned, tagged, and with its setup copy checked in the web app.
-- Phase 9 step 08, the kit check, gains a DevOps task: a planned deploy of a test project, then a deliberately broken deploy. The check sees the restart, the rollback, the fix, the review and the redeploy.
+- Phase 7 step 10, the kit: its skills and its four connectors, each chosen, pinned, tagged, and with its setup copy checked in the web app.
+- Phase 7 step 11, the kit check, gains a DevOps task: a planned deploy of a test project, then a deliberately broken deploy. The check sees the restart, the rollback, the fix, the review and the redeploy.
 
 ## Tests
 
