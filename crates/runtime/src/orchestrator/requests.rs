@@ -3169,6 +3169,13 @@ mod tests {
             "{prompt}"
         );
         assert!(prompt.contains("FRK-3"), "{prompt}");
+        // The epic's task is planned with its epic, not offered on its own.
+        assert!(
+            !prompt
+                .lines()
+                .any(|line| line.contains("FRK-2") && !line.contains("FRK-1")),
+            "{prompt}"
+        );
         for id in ["FRK-1", "FRK-2", "FRK-3"] {
             assert_eq!(harness.row(id).sprint.as_deref(), Some("S1"), "{id}");
         }
