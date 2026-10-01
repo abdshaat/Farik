@@ -25,6 +25,7 @@ const WORDS: Record<string, keyof typeof en> = {
 	template_name: "templateName",
 	template_unreadable: "templateUnreadable",
 	no_state_folder: "templateNoFolder",
+	template_changed: "templateChanged",
 };
 
 /** A refusal in plain words, `{key}` filled from `fill`: its code's sentence, or a plain one for any other. */

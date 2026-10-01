@@ -4146,7 +4146,7 @@
     },
     "templateApplyRequest": {
       "title": "Template Apply Request",
-      "description": "Uses a saved team on this project: worked out again from the team as it is now, so a preview gone stale applies nothing wrong, then the team written once, each retirement's effects (agent.updated, and each in_progress task it held blocked), and team.updated with the template's name. Answers templateAppliedResult, its errors empty; a result the team's rules refuse is refused with -32005, writing nothing, and data.errors as template.preview answers them.",
+      "description": "Uses a saved team on this project: worked out again from the team as it is now, so a preview gone stale applies nothing wrong, then the team written once, each retirement's effects (agent.updated, and each in_progress task it held blocked), and team.updated with the template's name. Answers templateAppliedResult, its errors empty; a result the team's rules refuse is refused with -32005, writing nothing, and data.errors as template.preview answers them; so is a template saved again since its preview, with template_changed at /saved_at.",
       "type": "object",
       "additionalProperties": false,
       "required": [
@@ -4169,12 +4169,18 @@
           "type": "object",
           "additionalProperties": false,
           "required": [
-            "slug"
+            "slug",
+            "saved_at"
           ],
           "properties": {
             "slug": {
               "type": "string",
               "description": "The saved team's file name without .yaml, as templates.list answers it."
+            },
+            "saved_at": {
+              "type": "string",
+              "format": "date-time",
+              "description": "When the previewed template was saved, as templates.list answered it. A template saved again since then is refused with template_changed at /saved_at, writing nothing, so its answers are applied only as the preview showed them."
             }
           }
         }

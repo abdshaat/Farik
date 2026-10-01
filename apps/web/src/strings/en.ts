@@ -1116,6 +1116,8 @@ export const en = {
 		"This saved team cannot be read. Delete it, or fix the file by hand.",
 	templateNoFolder:
 		"Farik has no folder on this computer to keep saved teams in.",
+	templateChanged:
+		"This saved team was saved again since you looked at it. Go back and look at what changes once more.",
 	useLead:
 		"Pick a team you saved. Farik shows you who stays, who joins and who leaves before anything changes.",
 	useList: "Saved teams",

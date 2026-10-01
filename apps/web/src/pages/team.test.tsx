@@ -1322,7 +1322,10 @@ describe("team templates", () => {
 
 		fireEvent.click(within(preview).getByRole("button", { name: en.useApply }));
 		const applied = await sent(s, "template.apply");
-		expect(applied.params).toEqual({ slug: "pair" });
+		expect(applied.params).toEqual({
+			slug: "pair",
+			saved_at: PAIR.template.saved_at,
+		});
 		await s.reply(applied, PREVIEW);
 		await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
 		// The Team page reads the team again and shows the new one.
@@ -1341,6 +1344,37 @@ describe("team templates", () => {
 					.map((li) => li.querySelector("strong")?.textContent),
 			).toEqual(["Mira", "Noor"]),
 		);
+	});
+
+	it("says_when_the_saved_team_changed_since_the_preview", async () => {
+		const { container, s } = await opened("/team");
+		fireEvent.click(
+			await screen.findByRole("button", { name: en.templateUseOpen }),
+		);
+		await answerQuery(s, "templates.list", {
+			folder: FOLDER,
+			templates: [PAIR],
+			unreadable: [],
+		});
+		const dialog = await screen.findByRole("dialog", {
+			name: en.templateUseOpen,
+		});
+		await within(dialog).findByRole("radio", { name: /^Pair/ });
+		fireEvent.click(within(dialog).getByRole("button", { name: en.useShow }));
+		await s.reply(await query(s, "template.preview"), PREVIEW);
+		const preview = await screen.findByRole("dialog", {
+			name: t("usePreviewTitle", { name: "Pair" }),
+		});
+		fireEvent.click(within(preview).getByRole("button", { name: en.useApply }));
+		await s.fail(await sent(s, "template.apply"), -32005, "changed", {
+			errors: [
+				{ path: "/saved_at", message: "changed", code: "template_changed" },
+			],
+		});
+		expect((await within(preview).findByRole("alert")).textContent).toBe(
+			en.templateChanged,
+		);
+		await expectNoAxeViolations(container);
 	});
 
 	it("disables_use_when_the_result_is_refused", async () => {

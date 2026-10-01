@@ -30,6 +30,8 @@ pub(super) const METHODS: [&str; 4] = [
 pub(super) const QUERIES: [&str; 2] = ["templates.list", "template.preview"];
 
 const NO_STATE_FOLDER: &str = "Farik has no folder on this computer to keep saved teams in.";
+const TEMPLATE_CHANGED: &str =
+    "This saved team was saved again since you looked at it. Look at what changes once more.";
 
 /// A refusal the page words by `code`, at `path`.
 fn refusal(code: &str, path: &str, message: &str) -> Failure {
@@ -82,7 +84,7 @@ pub(super) fn query(
                 .collect::<Vec<_>>(),
         }));
     }
-    let (before, applied, _) = applying(deps, templates, slug_of(params))?;
+    let (before, applied, _) = applying(deps, templates, slug_of(params), None)?;
     Ok(answer(&before, &applied))
 }
 
@@ -91,13 +93,20 @@ fn slug_of(params: &Value) -> &str {
 }
 
 /// The team as it is, what the template saved as `slug` makes of it, and the template's name.
-/// An agent has worked when the log has an event of its.
+/// An agent has worked when the log has an event of its. When `saved_at` is given, a template
+/// saved at another time is refused: it changed since the preview that named that time.
 fn applying(
     deps: &ToolDeps,
     templates: &Templates,
     slug: &str,
+    saved_at: Option<&str>,
 ) -> Result<(Team, TemplateApplied, String), Failure> {
     let template = templates.read(slug).map_err(|error| failure(&error))?;
+    if let Some(saved_at) = saved_at
+        && chrono::DateTime::parse_from_rfc3339(saved_at).ok() != Some(template.saved_at.into())
+    {
+        return Err(refusal("template_changed", "/saved_at", TEMPLATE_CHANGED));
+    }
     let current = deps.files.read_team().map_err(|e| internal(&e))?;
     let mut workers = BTreeSet::new();
     for agent in current
@@ -134,9 +143,10 @@ fn apply(
     state: &DaemonState,
     templates: &Templates,
     slug: &str,
+    saved_at: &str,
 ) -> Result<Value, Failure> {
     let _writing = state.team_writes();
-    let (before, applied, name) = applying(deps, templates, slug)?;
+    let (before, applied, name) = applying(deps, templates, slug, Some(saved_at))?;
     if !applied.errors.is_empty() {
         return Err(Refused::Errors(applied.errors).into());
     }
@@ -194,7 +204,13 @@ pub(super) async fn call(
                 templates.delete(slug).map_err(|error| failure(&error))?;
                 Ok(json!({}))
             }
-            _ => apply(&deps, &state, templates, slug),
+            _ => apply(
+                &deps,
+                &state,
+                templates,
+                slug,
+                params["saved_at"].as_str().unwrap_or_default(),
+            ),
         }
     })
     .await
@@ -258,6 +274,9 @@ mod tests {
         served(&harness, Some(folder.clone()));
         (harness, folder)
     }
+
+    /// When `pair` was saved.
+    const SAVED: &str = "2026-09-30T12:00:00Z";
 
     /// "Pair": Mira, the Product Manager `pm`; Ada, the Developer `dev-a`, on a cheaper model;
     /// Noor, a new Developer; commands off and pushing on, no plan check, pull requests, and no
@@ -507,7 +526,7 @@ mod tests {
         let applied = call(
             &harness.daemon,
             "template.apply",
-            &json!({ "slug": "pair" }),
+            &json!({ "slug": "pair", "saved_at": SAVED }),
             "templateAppliedResult",
         );
         assert_eq!(applied, shown, "applying makes what the preview showed");
@@ -607,7 +626,7 @@ mod tests {
             let params = if method == "query" {
                 json!({ "name": "template.preview", "params": { "slug": "broken" } })
             } else {
-                json!({ "slug": "broken" })
+                json!({ "slug": "broken", "saved_at": SAVED })
             };
             assert_eq!(
                 refusal(&harness, method, &params),
@@ -624,7 +643,7 @@ mod tests {
             rpc(
                 &harness.daemon,
                 "template.apply",
-                &json!({ "slug": "nope" })
+                &json!({ "slug": "nope", "saved_at": SAVED })
             )["error"]
                 .get("data"),
             None
@@ -645,7 +664,11 @@ mod tests {
         assert_eq!(shown["errors"][0]["code"], "needs_developer", "{shown}");
         assert_eq!(shown["errors"][0]["path"], "/agents");
         assert_eq!(
-            refusal(&harness, "template.apply", &json!({ "slug": "paused" })),
+            refusal(
+                &harness,
+                "template.apply",
+                &json!({ "slug": "paused", "saved_at": SAVED })
+            ),
             (-32005, json!("needs_developer"), json!("/agents"))
         );
         assert_eq!(team_file(&harness), team, "nothing is written");
@@ -660,7 +683,10 @@ mod tests {
                 json!({ "name": "template.preview", "params": { "slug": "pair" } }),
             ),
             ("template.save", json!({ "name": "Pair" })),
-            ("template.apply", json!({ "slug": "pair" })),
+            (
+                "template.apply",
+                json!({ "slug": "pair", "saved_at": SAVED }),
+            ),
             ("template.rename", json!({ "slug": "pair", "name": "Two" })),
             ("template.delete", json!({ "slug": "pair" })),
         ] {
@@ -693,11 +719,49 @@ mod tests {
             .expect("written");
         let events = seq_count(&harness);
         assert_eq!(
-            refusal(&harness, "template.apply", &json!({ "slug": "pair" })),
+            refusal(
+                &harness,
+                "template.apply",
+                &json!({ "slug": "pair", "saved_at": SAVED })
+            ),
             (-32005, json!("needs_developer"), json!("/agents"))
         );
         assert_eq!(team_file(&harness), wire, "nothing is written");
         assert_eq!(seq_count(&harness), events);
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn refuses_a_template_saved_again_since_the_preview() {
+        let (harness, folder) = templated("templates-changed", |_| {});
+        saved(&folder, &pair());
+        worked(&harness, "dev-b");
+        assert_eq!(preview(&harness, "pair")["errors"], json!([]));
+        // Since the preview, Pair was saved again, from another tab, with another permission.
+        let mut again = pair();
+        again["saved_at"] = json!("2026-10-01T09:00:00Z");
+        again["policy"]["permissions"]["push"] = json!(false);
+        Templates::new(folder.clone())
+            .save(&validate_template(&again).expect("a template"), true)
+            .expect("saved");
+        let (team, events) = (team_file(&harness), seq_count(&harness));
+        assert_eq!(
+            refusal(
+                &harness,
+                "template.apply",
+                &json!({ "slug": "pair", "saved_at": "2026-09-30T12:00:00Z" })
+            ),
+            (-32005, json!("template_changed"), json!("/saved_at"))
+        );
+        assert_eq!(team_file(&harness), team, "nothing is written");
+        assert_eq!(seq_count(&harness), events);
+        call(
+            &harness.daemon,
+            "template.apply",
+            &json!({ "slug": "pair", "saved_at": "2026-10-01T09:00:00Z" }),
+            "templateAppliedResult",
+        );
+        assert_eq!(team_file(&harness)["policy"]["permissions"]["push"], false);
     }
 
     #[test]
@@ -710,8 +774,13 @@ mod tests {
         worked(&harness, "dev-b");
         let writing = harness.daemon.team_writes();
         let daemon = Arc::clone(&harness.daemon);
-        let asking =
-            std::thread::spawn(move || rpc(&daemon, "template.apply", &json!({ "slug": "pair" })));
+        let asking = std::thread::spawn(move || {
+            rpc(
+                &daemon,
+                "template.apply",
+                &json!({ "slug": "pair", "saved_at": SAVED }),
+            )
+        });
         std::thread::sleep(std::time::Duration::from_millis(300));
         // While another write holds the team, it pauses Ada (dev-a), whom Pair keeps as its only
         // Developer: worked out against this team, applying retires dev-b and leaves none active.
@@ -781,7 +850,10 @@ mod tests {
                 "agent.replace",
                 json!({ "agent_id": "dev-b", "newcomer": an_agent_wire("lin", "software_developer") }),
             ),
-            ("template.apply", json!({ "slug": "pair" })),
+            (
+                "template.apply",
+                json!({ "slug": "pair", "saved_at": SAVED }),
+            ),
         ] {
             let before = team_file(&harness);
             let writing = harness.daemon.team_writes();

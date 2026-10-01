@@ -85,14 +85,18 @@ export function UseTemplate({
 	);
 	const [busy, setBusy] = useState(false);
 	const [refused, setRefused] = useState<string>();
-	const name = saved.find((s) => s.slug === shown)?.template.name ?? "";
+	const template = saved.find((s) => s.slug === shown)?.template;
+	const name = template?.name ?? "";
 
 	const apply = async () => {
-		if (!client || !shown) return;
+		if (!client || !shown || !template) return;
 		setBusy(true);
 		setRefused(undefined);
 		try {
-			await client.call("template.apply", { slug: shown });
+			await client.call("template.apply", {
+				slug: shown,
+				savedAt: template.savedAt,
+			});
 			onClose();
 		} catch (e) {
 			setRefused(saidAll(e));

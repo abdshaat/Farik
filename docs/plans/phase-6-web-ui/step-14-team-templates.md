@@ -271,6 +271,8 @@ Fix wave (I2, I3; landing review of 8bc19dd): `works_the_result_out_again_under_
 
 Fix wave (M3): `agent.replace` takes `team_writes()` before its read and calls `update_agent_held` (the body of `update_agent_with`, which now only takes the lock and calls it), so the newcomer is validated against the team as it is under the lock; a newcomer whose id was taken meanwhile is -32005 at `/agents`, not -32603. Test `checks_a_replacement_against_the_team_it_replaces` in `daemon/team.rs`.
 
+Fix wave (M2): `template.apply` requires `saved_at`, the previewed template's, and refuses a template whose `saved_at` differs with -32005 `template_changed` at `/saved_at`, writing nothing (`refuses_a_template_saved_again_since_the_preview`). The page sends it from `templates.list` and words the code (`templateChanged`; `says_when_the_saved_team_changed_since_the_preview`). A hand edit that keeps `saved_at` is not caught; only the local user writes that folder.
+
 ## Verification
 
 ```
