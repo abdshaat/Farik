@@ -37,7 +37,19 @@ The records are `docs/milestones/m1-team-exit.md`, `docs/milestones/m1-web-exit.
   - **Models.** The six keep phase 4's models. Triage and ceremonies now run on `claude-sonnet-5-5` (spec 5.9), not `claude-sonnet-5`, and the record says so.
   - **The seventh agent**, the founder to confirm at readiness (the role's defaults):
     `- { id: ux, display_name: UI/UX Designer, role: ui_ux_designer, status: active, persona: "Checks every screen the Developer builds, in the browser.", model: { id: claude-opus-5-5, effort: high }, mcp_servers: [{ name: playwright, source: builtin }] }`
-  - **No preview.** No `preview` in `team.yaml`, and "How to open your app" in Settings stays empty for the run. Neither request touches `ui_paths`. Farik's own preview (ADR 0026 D2: `farik-e2e-serve --preview`) serves a recorded fixture team, not the run's command line, so it could show nothing the run changes. The Designer is therefore never assigned (`preview_not_set`). With no UI change, Today shows no waiting row for it. The Playwright image is not pulled. The record says the Designer was idle by this choice, and that its live exercise is left to a later run with a UI request. The alternative, which the founder may choose instead: set D2's commands, pull `computer::browser_image()` in stage 1, and accept a prepare of up to 15 minutes per task tree.
+  - **The Designer, with the preview of Farik with sample data** (the founder, 2026-10-01). `team.yaml` carries ADR 0026 D2's preview, so the Designer is `Ready`, not refused with `preview_not_set`. [A] writes this block at the end of `team.yaml` in stage 1:
+
+        preview:
+          prepare: "pnpm install --frozen-lockfile && pnpm -r --if-present generate && pnpm --filter @farik/web build && cargo build -p farik --features e2e --bin farik-e2e-serve"
+          start: "target/debug/farik-e2e-serve --preview --port 4400 --pace 600 --transcripts triage_frk_1_small_by_pm,refine_writes_high_risk_frk_1,judge_frk_1_by_architect,plan_assigns_frk_1_to_theo,implement_finishes_frk_1,review_writes_note,implement_after_send_back_frk_1,review_writes_note"
+          port: 4400
+          path: /
+
+    - `prepare` is D2's word for word. It runs in the sandbox image, whose crates layer (stage 1) lets cargo build offline. The pnpm in the image switches itself to the repository's pinned pnpm, with the network on.
+    - `start` is D2's, plus the sample data. `--preview` serves Farik's web app on a recorded team of its own, Mira (Product Manager), Ada (Architect) and Theo (Developer), with no credential and the network off. `--transcripts` is the accept journey's list (`apps/web/e2e/accept.spec.ts`), so a request filed in the preview plays a recorded high-risk task through its plan gate, a send-back and the acceptance gate, and no AI session starts. `--pace 600` lets each state show.
+    - The first page is `/`, Today.
+    - Caches: only the task's worktree is mounted, so no target or pnpm store can be shared between tasks. `target/` and `node_modules/` stay in the worktree (both ignored by git), so a task's later prepares are warm. Measured on 2026-10-01 at e71ec5f: a cold prepare 78 s, a warm one 16 s, both within the 15-minute limit.
+    - What it shows: Farik's web app built from the task's tree, on sample data, not the run's own team. Neither request touches `ui_paths`, so no design review is expected. The Designer gets work only if planning gives it some, and the record says which happened.
   - **Order of actions: decided.** The founder chose the policy "Plan work in sprints" (ADR 0028, 2026-10-01), built in step 15. Under `farik serve` a ready task used to be assigned at once (readiness finding B1), and holding it by pausing both Developers is refused by the last-of-role rule. With the policy on in `team.yaml`, the team gets work ready at any time but assigns and builds nothing outside the open sprint, so both requests wait in the Backlog until S1 opens. The order in the browser:
     1. On Today, file request 1, then request 2, pasting `brief1.txt` and `brief2.txt`.
     2. Answer the Product Manager's questions.
@@ -78,7 +90,9 @@ This is phase 4 step 08's stage 1, in a fresh `~/farik-m1/`. The attempt of 2026
 - `pnpm -C apps/web build`, then `cargo build --release -p farik`, copied to `~/farik-m1/bin/farik` with its sha256;
 - a new bare clone of `/home/ashaat/Farik` (it must hold the start-gate sha), `test/m1-exit` at that sha, the run's clone, and the local identity;
 - the sandbox image rebuilt from the start-gate sha's `crates/runtime/sandbox` and `crates.Dockerfile`, with the two smoke tests (phase 6 changed the image since phase 4);
-- `team.yaml`, with the seven agents (the Designer's line in Decisions), no `preview`, `policy.plan_in_sprints: true` (step 15), and `judgment` left at its defaults, so the Architect checks plans, with its sha256;
+- `team.yaml`, with the seven agents (the Designer's line in Decisions), the preview block in Decisions, `policy.plan_in_sprints: true` (step 15), and `judgment` left at its defaults, so the Architect checks plans, with its sha256;
+- the Designer's browser image pulled by its digest, `docker pull mcr.microsoft.com/playwright/mcp@sha256:77dccc5ce9e94cb8ae7ebea87ddbb6cd54b05760c4d63c54e16accf2726b8734` (`playwright.yaml`'s pin), with `docker image inspect`'s id recorded;
+- the preview checked by hand, since no command runs a preview on its own: in a throwaway clone at the start-gate sha, [A] runs `prepare` and then `start` with `docker run` exactly as `DockerPreviewFactory` does (the sandbox image, the clone mounted at `/workspace`, `--user <uid>:<gid>`, `bridge` for `prepare` and `none` for `start`), fetches `http://localhost:4400/` from inside the preview container with `curl`, records prepare's time, and removes both containers;
 - `brief1.txt` and `brief2.txt` copied from `~/farik-m1-step11` once `sha256sum` matches stage-1.md's (2fedf82e…, 37529479…);
 - `env.sh` as before, with a fresh, empty `home/`.
 
