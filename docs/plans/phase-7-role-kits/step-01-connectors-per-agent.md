@@ -246,7 +246,7 @@ Files: `daemon/team.rs`, `daemon/web.rs`, the event, command and RPC schemas, `p
 - `disconnect_removes_entry_and_keys_and_records`: another agent's same server is untouched.
 - `team_get_says_connect_again_for_an_unconfirmed_server`: a hand-edited `url` gives `state: connect_again` in `connectors`, and `team` still validates against `team.schema.json`.
 
-- [ ] `feat(runtime): connect and disconnect an agent's MCP server`
+- [x] `feat(runtime): connect and disconnect an agent's MCP server`
 
 ### Task 8: The command line
 

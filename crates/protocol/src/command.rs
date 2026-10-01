@@ -14,11 +14,11 @@ pub use farik_core::contract::{TaskContract, TaskId, ValidationError};
 
 pub use crate::generated::command::CommandName;
 use crate::generated::command::{
-    AgentUpdateBody, ChatMessagePostBody, EmptyBody, EscalationResolveBody,
-    FarikCommand as CommandWire, HumanAcceptBody, HumanAcceptBodySubject, HumanSendBackBody,
-    HumanSendBackBodySubject, MessagePostBody, QuestionAnswerBody, RequestTriageBody,
-    RequestTriageBodySize, SessionStopBody, SprintStartBody, TaskCreateBody, TaskIdBody,
-    TaskTransitionBody,
+    AgentUpdateBody, ChatMessagePostBody, ConnectorConnectBody, ConnectorDisconnectBody, EmptyBody,
+    EscalationResolveBody, FarikCommand as CommandWire, HumanAcceptBody, HumanAcceptBodySubject,
+    HumanSendBackBody, HumanSendBackBodySubject, MessagePostBody, QuestionAnswerBody,
+    RequestTriageBody, RequestTriageBodySize, SessionStopBody, SprintStartBody, TaskCreateBody,
+    TaskIdBody, TaskTransitionBody,
 };
 
 const SCHEMA_JSON: &str = include_str!("../../../docs/schemas/command.schema.json");
@@ -195,6 +195,24 @@ pub enum Command {
         /// What the human says, its line breaks kept.
         text: String,
     },
+    /// Give an agent a custom MCP server whose keys are already kept on this machine, or replace
+    /// the one of its name (ADR 0030).
+    ConnectorConnect {
+        /// The agent.
+        agent: String,
+        /// The `mcp_servers` entry, as `team.schema.json` shapes it: names and templates, no
+        /// value.
+        server: serde_json::Map<String, Value>,
+        /// The hash of the entry kept beside its keys.
+        spec_sha256: String,
+    },
+    /// Take a custom MCP server away from an agent.
+    ConnectorDisconnect {
+        /// The agent.
+        agent: String,
+        /// The server's name.
+        server: String,
+    },
 }
 
 /// Checks a value against `docs/schemas/command.schema.json` and, when it conforms, returns the
@@ -323,15 +341,7 @@ fn human_command(name: CommandName, body: &Value) -> Result<Command, Vec<Validat
         CommandName::RunStop
         | CommandName::SprintEnd
         | CommandName::TeamPause
-        | CommandName::TeamResume => {
-            let _: EmptyBody = read_body(body, name)?;
-            Ok(match name {
-                CommandName::RunStop => Command::RunStop,
-                CommandName::SprintEnd => Command::SprintEnd,
-                CommandName::TeamPause => Command::TeamPause,
-                _ => Command::TeamResume,
-            })
-        }
+        | CommandName::TeamResume => empty_command(name, body),
         CommandName::SprintStart => {
             let body: SprintStartBody = read_body(body, name)?;
             Ok(Command::SprintStart {
@@ -349,6 +359,38 @@ fn human_command(name: CommandName, body: &Value) -> Result<Command, Vec<Validat
                 text: body.text,
             })
         }
+        CommandName::ConnectorConnect | CommandName::ConnectorDisconnect => {
+            connector_command(name, body)
+        }
+    }
+}
+
+/// `run_stop`, `sprint_end`, `team_pause` or `team_resume`, whose body is empty.
+fn empty_command(name: CommandName, body: &Value) -> Result<Command, Vec<ValidationError>> {
+    let _: EmptyBody = read_body(body, name)?;
+    Ok(match name {
+        CommandName::RunStop => Command::RunStop,
+        CommandName::SprintEnd => Command::SprintEnd,
+        CommandName::TeamPause => Command::TeamPause,
+        _ => Command::TeamResume,
+    })
+}
+
+/// `connector_connect` and `connector_disconnect`, each read from its own body shape.
+fn connector_command(name: CommandName, body: &Value) -> Result<Command, Vec<ValidationError>> {
+    if name == CommandName::ConnectorConnect {
+        let body: ConnectorConnectBody = read_body(body, name)?;
+        Ok(Command::ConnectorConnect {
+            agent: body.agent.to_string(),
+            server: body.server,
+            spec_sha256: body.spec_sha256.to_string(),
+        })
+    } else {
+        let body: ConnectorDisconnectBody = read_body(body, name)?;
+        Ok(Command::ConnectorDisconnect {
+            agent: body.agent.to_string(),
+            server: body.server.to_string(),
+        })
     }
 }
 
@@ -437,18 +479,9 @@ pub fn command_to_value(command: &Command) -> Value {
             CommandName::QuestionAnswer,
             json!({ "question_id": question_id, "answer": answer }),
         ),
-        Command::ContractLock { task_id } => (
-            CommandName::ContractLock,
-            json!({ "task_id": task_id.as_str() }),
-        ),
-        Command::ContractUnlock { task_id } => (
-            CommandName::ContractUnlock,
-            json!({ "task_id": task_id.as_str() }),
-        ),
-        Command::TaskIntegrate { task_id } => (
-            CommandName::TaskIntegrate,
-            json!({ "task_id": task_id.as_str() }),
-        ),
+        Command::ContractLock { task_id } => task_wire(CommandName::ContractLock, task_id),
+        Command::ContractUnlock { task_id } => task_wire(CommandName::ContractUnlock, task_id),
+        Command::TaskIntegrate { task_id } => task_wire(CommandName::TaskIntegrate, task_id),
         Command::AgentUpdate { agent_id, status } => (
             CommandName::AgentUpdate,
             json!({ "agent_id": agent_id, "status": status.to_string() }),
@@ -470,8 +503,35 @@ pub fn command_to_value(command: &Command) -> Value {
             CommandName::ChatMessagePost,
             json!({ "agent_id": agent_id, "text": text }),
         ),
+        Command::ConnectorConnect { .. } | Command::ConnectorDisconnect { .. } => {
+            connector_wire(command)
+        }
     };
     json!({ "command": name.to_string(), "body": body })
+}
+
+/// A command whose body is its task's id alone.
+fn task_wire(name: CommandName, task_id: &TaskId) -> (CommandName, Value) {
+    (name, json!({ "task_id": task_id.as_str() }))
+}
+
+/// `connector_connect` or `connector_disconnect` as its name and body.
+fn connector_wire(command: &Command) -> (CommandName, Value) {
+    match command {
+        Command::ConnectorConnect {
+            agent,
+            server,
+            spec_sha256,
+        } => (
+            CommandName::ConnectorConnect,
+            json!({ "agent": agent, "server": server, "spec_sha256": spec_sha256 }),
+        ),
+        Command::ConnectorDisconnect { agent, server } => (
+            CommandName::ConnectorDisconnect,
+            json!({ "agent": agent, "server": server }),
+        ),
+        _ => unreachable!("command_to_value asks this of the two connector commands only"),
+    }
 }
 
 fn resolve_wire(

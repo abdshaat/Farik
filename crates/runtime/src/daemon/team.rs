@@ -4,6 +4,7 @@
 //! the user's note on it.
 //! `web.rs` answers the frames; this module answers what they ask.
 
+use std::collections::BTreeMap;
 use std::fmt::Display;
 use std::path::Path;
 use std::sync::Arc;
@@ -13,7 +14,8 @@ use farik_core::criteria::validate_criteria;
 use farik_core::governor::gates::DesignerBrowser;
 use farik_core::governor::paths::{PathRefusal, check_protected_paths};
 use farik_core::team::{
-    Agent, MODEL_FAMILIES, Team, ValidationError, describe_change, validate_team,
+    Agent, CustomServer, MODEL_FAMILIES, Team, ValidationError, custom_server, describe_change,
+    spec_sha256, validate_team,
 };
 use farik_protocol::command::{Command, CommandReply};
 use farik_protocol::event::{EventBody, new_event};
@@ -22,9 +24,10 @@ use farik_roles::load_role;
 use farik_store::{EventQuery, names_of, scan_project};
 use serde_json::{Value, json};
 
-use super::DaemonState;
 use super::web::{Failure, INTERNAL_ERROR, NO_PROJECT, REFUSED};
-use crate::claude::{CredentialKind, credential_variable};
+use super::{DaemonState, Kept};
+use crate::claude::{CredentialKind, Secret, credential_variable};
+use crate::connectors::{ConnectorEntry, ConnectorError, SecretAt, list_tools};
 use crate::credential::{CredentialError, credential_of_kind, load_credential, save_credential};
 use crate::pause::{key_refused, paused};
 use crate::session::session_model;
@@ -32,13 +35,16 @@ use crate::sprints::sprint_work;
 use crate::tools::ToolDeps;
 
 /// The methods this module answers.
-pub(super) const METHODS: [&str; 6] = [
+pub(super) const METHODS: [&str; 9] = [
     "team.save",
     "agent.replace",
     "team.start",
     "criteria.save",
     "account.disconnect",
     "project.note",
+    "connector.tools",
+    "connector.connect",
+    "connector.disconnect",
 ];
 
 /// The marker the setup host leaves in a project it just made one, which "Start the team" removes.
@@ -71,11 +77,17 @@ pub(super) fn internal(error: &dyn Display) -> Failure {
 }
 
 /// The queries of this module, whose params the schema already passed.
-pub(super) fn query(deps: &ToolDeps, name: &str, params: &Value) -> Result<Value, Failure> {
+pub(super) fn query(
+    state: &DaemonState,
+    deps: &ToolDeps,
+    name: &str,
+    params: &Value,
+) -> Result<Value, Failure> {
     match name {
         "team.get" => {
             let team = deps.files.read_team().map_err(|e| internal(&e))?;
             let mut answer = effective(deps, &team)?;
+            answer["connectors"] = json!(connector_states(state, deps, &team));
             answer["team"] = serde_json::to_value(team).map_err(|e| internal(&e))?;
             answer["max_agents"] = json!(farik_core::team::MAX_AGENTS);
             Ok(answer)
@@ -178,6 +190,256 @@ pub(super) async fn connect(state: &DaemonState, params: &Value) -> Result<Value
         return Err(refused);
     }
     Ok(json!({ "stored_in": source, "taking_on": false }))
+}
+
+/// Where `agent`'s keys for `server` are kept in this project (ADR 0030).
+pub(crate) fn secret_at(deps: &ToolDeps, agent: &str, server: &str) -> SecretAt {
+    SecretAt {
+        project_id: deps.ids.project_id.clone(),
+        agent_id: agent.to_string(),
+        server: server.to_string(),
+    }
+}
+
+/// Each agent's custom servers in `team` and whether each runs: `connected` when the definition
+/// kept beside its keys is the team file's, `store_unavailable` when the store could not be read
+/// the last time it was, and `connect_again` otherwise.
+fn connector_states(state: &DaemonState, deps: &ToolDeps, team: &Team) -> Vec<Value> {
+    team.agents
+        .iter()
+        .flat_map(|agent| {
+            agent
+                .mcp_servers
+                .iter()
+                .flatten()
+                .filter_map(custom_server)
+                .map(move |server| (agent.id.as_str(), server))
+        })
+        .map(|(agent, server)| {
+            let shown = match state.kept(&secret_at(deps, agent, &server.name)) {
+                Kept::Hash(kept) if kept == spec_sha256(&server) => "connected",
+                Kept::Unavailable => "store_unavailable",
+                _ => "connect_again",
+            };
+            json!({ "agent": agent, "server": server.name, "state": shown })
+        })
+        .collect()
+}
+
+/// `team` with `agent`'s entry named `name` replaced by `entry`, or added, or with `entry` `None`
+/// removed, held to the team's rules. An agent the team lacks is an error at `/agents`.
+///
+/// # Errors
+///
+/// The team's errors, each at its field.
+pub(crate) fn with_server(
+    team: &Team,
+    agent: &str,
+    name: &str,
+    entry: Option<&Value>,
+) -> Result<Team, Vec<ValidationError>> {
+    let at = team
+        .agents
+        .iter()
+        .position(|held| held.id.as_str() == agent)
+        .ok_or_else(|| {
+            vec![ValidationError {
+                path: "/agents".to_string(),
+                message: format!("there is no agent {agent}"),
+            }]
+        })?;
+    let mut wire = serde_json::to_value(team).map_err(|error| {
+        vec![ValidationError {
+            path: String::new(),
+            message: error.to_string(),
+        }]
+    })?;
+    let held = &mut wire["agents"][at];
+    let mut servers: Vec<Value> = held["mcp_servers"].as_array().cloned().unwrap_or_default();
+    match (
+        servers.iter().position(|server| server["name"] == name),
+        entry,
+    ) {
+        (Some(place), Some(entry)) => servers[place] = entry.clone(),
+        (None, Some(entry)) => servers.push(entry.clone()),
+        (Some(place), None) => {
+            servers.remove(place);
+        }
+        (None, None) => {}
+    }
+    if let Some(fields) = held.as_object_mut() {
+        if servers.is_empty() {
+            fields.remove("mcp_servers");
+        } else {
+            fields.insert("mcp_servers".to_string(), Value::Array(servers));
+        }
+    }
+    validate_team(&wire)
+}
+
+/// `wire`, a custom server as the user describes it, as `agent`'s entry with `tools`, held to the
+/// team's rules: the entry and the server it describes.
+fn described(
+    deps: &ToolDeps,
+    agent: &str,
+    wire: &Value,
+    tools: Value,
+) -> Result<(Value, CustomServer), Failure> {
+    let mut entry = wire.clone();
+    entry["source"] = json!("custom");
+    entry["tools"] = tools;
+    let name = entry["name"].as_str().unwrap_or_default().to_string();
+    let team = deps.files.read_team().map_err(|e| internal(&e))?;
+    let after = with_server(&team, agent, &name, Some(&entry))
+        .map_err(|errors| Failure::from(Refused::Errors(errors)))?;
+    let server = after
+        .agents
+        .iter()
+        .filter(|held| held.id.as_str() == agent)
+        .flat_map(|held| held.mcp_servers.iter().flatten())
+        .find(|server| server.name.as_str() == name)
+        .and_then(custom_server)
+        .ok_or_else(|| internal(&format!("{name} is not a custom server once validated")))?;
+    Ok((entry, server))
+}
+
+/// The keys `connector.tools` and `connector.connect` carry.
+fn keys_of(params: &Value) -> BTreeMap<String, Secret> {
+    params["keys"]
+        .as_object()
+        .into_iter()
+        .flatten()
+        .map(|(name, value)| {
+            (
+                name.clone(),
+                Secret::new(value.as_str().unwrap_or_default().to_string()),
+            )
+        })
+        .collect()
+}
+
+/// Why a server's tools could not be listed, in a sentence that quotes no key.
+fn not_listed(error: ConnectorError) -> Failure {
+    Failure::new(
+        REFUSED,
+        match error {
+            ConnectorError::Timeout => {
+                "the server did not answer within thirty seconds".to_string()
+            }
+            ConnectorError::KeyMissing(name) => format!("the key {name} has no value"),
+            ConnectorError::Failed(why) => format!("its tools could not be listed: {why}"),
+        },
+    )
+}
+
+/// The tools of the server `params` describes for its agent, held to the team's rules first, as
+/// it lists them with the keys `params` carries.
+async fn listed(
+    deps: &Arc<ToolDeps>,
+    params: &Value,
+) -> Result<Vec<crate::connectors::ListedTool>, Failure> {
+    let (held, asked) = (Arc::clone(deps), params.clone());
+    let (_, server) = off_the_worker(move || {
+        described(
+            &held,
+            asked["agent"].as_str().unwrap_or_default(),
+            &asked["server"],
+            json!({}),
+        )
+    })
+    .await?;
+    list_tools(&server, &keys_of(params))
+        .await
+        .map_err(not_listed)
+}
+
+/// `connector.connect`: the server's tools listed with its keys, each usable one labelled by
+/// `tags` or else `external_effect` (SPEC 5.6), the keys kept beside the definition's hash, then
+/// `connector_connect` handled, which writes the team file and records `connector.connected`.
+async fn connector_connect(
+    state: &DaemonState,
+    deps: &Arc<ToolDeps>,
+    params: &Value,
+) -> Result<Value, Failure> {
+    let agent = params["agent"].as_str().unwrap_or_default().to_string();
+    let listed = listed(deps, params).await?;
+    let tools: serde_json::Map<String, Value> = listed
+        .iter()
+        .filter(|tool| tool.usable)
+        .map(|tool| {
+            let tag = params["tags"]
+                .get(&tool.name)
+                .cloned()
+                .unwrap_or_else(|| json!("external_effect"));
+            (tool.name.clone(), tag)
+        })
+        .collect();
+    let (held, asked, labels) = (Arc::clone(deps), params.clone(), tools.clone());
+    let (entry, server) = off_the_worker(move || {
+        described(
+            &held,
+            asked["agent"].as_str().unwrap_or_default(),
+            &asked["server"],
+            Value::Object(labels),
+        )
+    })
+    .await?;
+    let spec = spec_sha256(&server);
+    let mut keys = keys_of(params);
+    keys.retain(|name, _| server.credential_keys.contains(name));
+    let kept = ConnectorEntry {
+        spec_sha256: spec.clone(),
+        keys,
+    };
+    let (secrets, at) = (
+        state.connector_secrets(),
+        secret_at(deps, &agent, &server.name),
+    );
+    let stored_in = off_the_worker(move || {
+        secrets
+            .save(&at, &kept)
+            .map_err(|error| Failure::new(REFUSED, words(&error)))
+    })
+    .await?;
+    handled(
+        state,
+        Command::ConnectorConnect {
+            agent,
+            server: entry.as_object().cloned().unwrap_or_default(),
+            spec_sha256: spec,
+        },
+    )
+    .await?;
+    Ok(json!({ "stored_in": stored_in, "tools": tools }))
+}
+
+/// `connector.disconnect`: `connector_disconnect` handled, which removes the entry from the team
+/// file and records `connector.disconnected`, then the agent's keys for it deleted.
+async fn connector_disconnect(
+    state: &DaemonState,
+    deps: &ToolDeps,
+    params: &Value,
+) -> Result<Value, Failure> {
+    let (agent, server) = (
+        params["agent"].as_str().unwrap_or_default(),
+        params["server"].as_str().unwrap_or_default(),
+    );
+    handled(
+        state,
+        Command::ConnectorDisconnect {
+            agent: agent.to_string(),
+            server: server.to_string(),
+        },
+    )
+    .await?;
+    let (secrets, at) = (state.connector_secrets(), secret_at(deps, agent, server));
+    off_the_worker(move || {
+        secrets
+            .delete(&at)
+            .map_err(|error| Failure::new(REFUSED, words(&error)))
+    })
+    .await?;
+    Ok(json!({}))
 }
 
 pub(super) fn web_of(state: &DaemonState) -> Result<&super::web::WebState, Failure> {
@@ -631,6 +893,18 @@ pub(super) async fn call(
     };
     let params = params.clone();
     match method {
+        "connector.tools" => {
+            let tools = Box::pin(listed(&deps, &params)).await?;
+            Ok(json!({ "tools": tools
+                .iter()
+                .map(|tool| json!({
+                    "name": tool.name, "description": tool.description, "usable": tool.usable,
+                }))
+                .collect::<Vec<_>>() }))
+        }
+        // Boxed: listing a server's tools makes a large future of every method's.
+        "connector.connect" => Box::pin(connector_connect(state, &deps, &params)).await,
+        "connector.disconnect" => connector_disconnect(state, &deps, &params).await,
         "project.note" => off_the_worker(move || {
             deps.files
                 .append_project_note(
@@ -763,7 +1037,13 @@ pub(super) mod tests {
     use farik_protocol::event::{EventKind, NewEvent, event_from_value};
     use serde_json::{Value, json};
 
+    use farik_protocol::command::{command_from_value, command_to_value};
+    use farik_protocol::event::event_to_value;
+
     use crate::claude::{ClaudeCredential, Secret, SharedCredential};
+    use crate::connectors::{
+        ConnectorEntry, ConnectorSecrets as _, MemoryConnectorSecrets, SecretAt,
+    };
     use crate::credential::{CredentialStore, MemoryStore};
     use crate::daemon::gates::tests::{call, driven, query, rpc};
     use crate::daemon::web::{BrowserSessions, ConnectCodes, WebState};
@@ -2149,5 +2429,395 @@ pub(super) mod tests {
         assert_eq!(pending(), json!(false));
         std::fs::write(harness.project.repo.path.join(MARKER), "").expect("the marker is written");
         assert_eq!(pending(), json!(true));
+    }
+
+    /// The value of the fixture server's key: no reply, event or file may hold it.
+    const KEY: &str = "fixture-key-never-echoed";
+
+    /// The stdio MCP server of `tests/fixtures/mcp_server.sh`, written for `test`, as
+    /// `connector.connect` takes it: its tools are `search`, `env`, `delete_repo`, and
+    /// `repo.delete`, a name Farik can't use.
+    fn fixture_server(test: &str) -> Value {
+        let dir = std::env::temp_dir().join(format!(
+            "farik-team-connector-{}-{test}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("the folder is made");
+        let path = dir.join("server.sh");
+        std::fs::write(&path, include_str!("../../tests/fixtures/mcp_server.sh"))
+            .expect("the script is written");
+        json!({
+            "name": "fixture", "transport": "stdio", "command": "sh",
+            "args": [path.display().to_string()], "credential_keys": ["API_KEY"],
+        })
+    }
+
+    /// A driven daemon keeping its agents' connector keys in memory.
+    fn keeping(name: &str) -> (Harness, Arc<MemoryConnectorSecrets>) {
+        let harness = driven(name);
+        let store = Arc::new(MemoryConnectorSecrets::default());
+        assert!(
+            harness
+                .daemon
+                .set_connector_secrets(Arc::clone(&store) as _)
+        );
+        (harness, store)
+    }
+
+    fn kept_at(harness: &Harness, agent: &str, server: &str) -> SecretAt {
+        SecretAt {
+            project_id: harness.project.deps.ids.project_id.clone(),
+            agent_id: agent.to_string(),
+            server: server.to_string(),
+        }
+    }
+
+    fn connect_params(agent: &str, server: &Value, tags: &Value) -> Value {
+        json!({ "agent": agent, "server": server, "keys": { "API_KEY": KEY }, "tags": tags })
+    }
+
+    /// `server` connected to `agent` through `connector.connect`, labelled by `tags`.
+    fn connected(harness: &Harness, agent: &str, server: &Value, tags: &Value) -> Value {
+        call(
+            &harness.daemon,
+            "connector.connect",
+            &connect_params(agent, server, tags),
+            "connectorConnectResult",
+        )
+    }
+
+    /// `agent`'s entry named `name` in the team file.
+    fn entry(harness: &Harness, agent: usize, name: &str) -> Option<Value> {
+        team_file(harness)["agents"][agent]["mcp_servers"]
+            .as_array()
+            .and_then(|servers| servers.iter().find(|server| server["name"] == name))
+            .cloned()
+    }
+
+    /// The custom server `entry` describes.
+    fn custom(entry: &Value) -> farik_core::team::CustomServer {
+        farik_core::team::custom_server(
+            &serde_json::from_value(entry.clone()).expect("an mcp_servers entry"),
+        )
+        .expect("a custom server")
+    }
+
+    /// The whole log as text.
+    fn log_text(harness: &Harness) -> String {
+        harness
+            .project
+            .events(&[])
+            .iter()
+            .map(|event| event_to_value(event).to_string())
+            .collect()
+    }
+
+    /// Each body of `kind` in the log, as JSON.
+    fn bodies(harness: &Harness, kind: EventKind) -> Vec<Value> {
+        harness
+            .project
+            .events(&[kind])
+            .iter()
+            .map(|event| event_to_value(event)["body"].clone())
+            .collect()
+    }
+
+    fn states(harness: &Harness) -> Value {
+        query(&harness.daemon, "team.get", &json!({}), "teamGetResult")["connectors"].clone()
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn connector_tools_lists_with_the_keys() {
+        let (harness, _) = keeping("connector-tools");
+        let listed = call(
+            &harness.daemon,
+            "connector.tools",
+            &json!({ "agent": "dev-a", "server": fixture_server("tools"), "keys": { "API_KEY": "k" } }),
+            "connectorToolsResult",
+        );
+        let tools = listed["tools"].as_array().expect("a list");
+        let usable: Vec<(&str, bool)> = tools
+            .iter()
+            .map(|tool| {
+                (
+                    tool["name"].as_str().unwrap_or_default(),
+                    tool["usable"] == true,
+                )
+            })
+            .collect();
+        assert_eq!(
+            usable,
+            [
+                ("search", true),
+                ("env", true),
+                ("delete_repo", true),
+                ("repo.delete", false)
+            ]
+        );
+        assert!(
+            tools[1]["description"]
+                .as_str()
+                .is_some_and(|seen| seen.contains("API_KEY=k ")),
+            "{listed}"
+        );
+        assert_eq!(team_file(&harness)["agents"][1].get("mcp_servers"), None);
+        assert!(bodies(&harness, EventKind::ConnectorConnected).is_empty());
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn connect_lists_tags_saves_and_records() {
+        let (harness, store) = keeping("connector-connect");
+        let answer = connected(
+            &harness,
+            "dev-a",
+            &fixture_server("connect"),
+            &json!({ "search": "network", "delete_repo": "denied" }),
+        );
+        let tools =
+            json!({ "search": "network", "env": "external_effect", "delete_repo": "denied" });
+        assert_eq!(answer, json!({ "stored_in": "keychain", "tools": tools }));
+        let written = entry(&harness, 1, "fixture").expect("the entry is written");
+        assert_eq!(written["source"], "custom");
+        assert_eq!(written["tools"], tools);
+        let spec = farik_core::team::spec_sha256(&custom(&written));
+        let kept = store
+            .load(&kept_at(&harness, "dev-a", "fixture"))
+            .expect("the store reads")
+            .expect("the entry is kept");
+        assert_eq!(kept.spec_sha256, spec);
+        assert_eq!(
+            kept.keys
+                .iter()
+                .map(|(name, value)| (name.as_str(), value.expose()))
+                .collect::<Vec<_>>(),
+            [("API_KEY", KEY)]
+        );
+        assert_eq!(
+            bodies(&harness, EventKind::ConnectorConnected),
+            [json!({
+                "agent": "dev-a", "server": "fixture", "transport": "stdio",
+                "credential_keys": ["API_KEY"], "tools": tools, "spec_sha256": spec,
+            })]
+        );
+        assert!(!log_text(&harness).contains(KEY));
+        assert!(
+            !std::fs::read_to_string(harness.project.repo.path.join(".farik/team.yaml"))
+                .expect("the team file reads")
+                .contains(KEY)
+        );
+        assert_eq!(
+            states(&harness),
+            json!([{ "agent": "dev-a", "server": "fixture", "state": "connected" }])
+        );
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn an_unlabelled_tool_is_written_external_effect() {
+        let (harness, _) = keeping("connector-unlabelled");
+        let server = fixture_server("unlabelled");
+        connected(&harness, "dev-a", &server, &json!({}));
+        let written = entry(&harness, 1, "fixture").expect("the entry is written");
+        assert_eq!(
+            written["tools"],
+            json!({ "search": "external_effect", "env": "external_effect", "delete_repo": "external_effect" })
+        );
+        let shown = json!([{ "agent": "dev-a", "server": "fixture", "state": "connected" }]);
+        assert_eq!(states(&harness), shown);
+
+        // Connected again with a label: the one entry is replaced, and the new hash is read.
+        connected(&harness, "dev-a", &server, &json!({ "search": "network" }));
+        let servers = team_file(&harness)["agents"][1]["mcp_servers"].clone();
+        assert_eq!(servers.as_array().map(Vec::len), Some(1), "{servers}");
+        assert_eq!(servers[0]["tools"]["search"], "network");
+        assert_eq!(states(&harness), shown);
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn a_refused_connect_echoes_no_secret() {
+        let (harness, store) = keeping("connector-refused");
+        let mut broken = fixture_server("refused");
+        broken["command"] = json!("false");
+        broken["args"] = json!([]);
+        for server in [broken, {
+            let mut reserved = fixture_server("refused-name");
+            reserved["name"] = json!("farik");
+            reserved
+        }] {
+            let reply = rpc(
+                &harness.daemon,
+                "connector.connect",
+                &connect_params("dev-a", &server, &json!({})),
+            );
+            assert_eq!(reply["error"]["code"], -32005, "{reply}");
+            assert!(!reply.to_string().contains(KEY), "{reply}");
+        }
+        assert!(
+            store
+                .load(&kept_at(&harness, "dev-a", "fixture"))
+                .expect("the store reads")
+                .is_none()
+        );
+        assert!(bodies(&harness, EventKind::ConnectorConnected).is_empty());
+        for method in ["connector.connect", "connector.tools"] {
+            let mut params = connect_params("dev-a", &fixture_server("refused-frame"), &json!({}));
+            params["keys"]["API_KEY"] = json!(KEY);
+            params["unexpected"] = json!(true);
+            let reply = rpc(&harness.daemon, method, &params);
+            assert_eq!(reply["error"]["code"], -32602, "{method}: {reply}");
+            assert_eq!(reply["error"].get("data"), None, "{method}: {reply}");
+            assert!(!reply.to_string().contains(KEY), "{method}: {reply}");
+        }
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn a_connect_command_body_holds_no_secret() {
+        let (harness, _) = keeping("connector-command");
+        let mut server = fixture_server("command");
+        server["source"] = json!("custom");
+        server["tools"] = json!({ "search": "network" });
+        let spec = farik_core::team::spec_sha256(&custom(&server));
+        let wire = |server: &Value, spec: &str| {
+            json!({ "command": "connector_connect",
+                    "body": { "agent": "dev-a", "server": server, "spec_sha256": spec } })
+        };
+        let command =
+            command_from_value(&wire(&server, &spec)).expect("names, labels and a hash are enough");
+        assert_eq!(command_to_value(&command), wire(&server, &spec));
+        let mut with_value = wire(&server, &spec);
+        with_value["body"]["keys"] = json!({ "API_KEY": KEY });
+        assert!(command_from_value(&with_value).is_err());
+
+        let sent = |wire: Value| rpc(&harness.daemon, "command", &json!({ "command": wire }));
+        let mut holding = server.clone();
+        holding["env"] = json!({ "API_KEY": KEY });
+        let refused = sent(wire(&holding, &spec));
+        assert_eq!(refused["result"]["error"]["kind"], "refused", "{refused}");
+        assert!(!refused.to_string().contains(KEY), "{refused}");
+        let refused = sent(wire(&server, &"0".repeat(64)));
+        assert_eq!(refused["result"]["error"]["kind"], "refused", "{refused}");
+        assert!(bodies(&harness, EventKind::ConnectorConnected).is_empty());
+
+        let done = sent(wire(&server, &spec));
+        assert!(done["result"].get("said").is_some(), "{done}");
+        assert_eq!(entry(&harness, 1, "fixture"), Some(server.clone()));
+        assert_eq!(
+            bodies(&harness, EventKind::ConnectorConnected),
+            [json!({
+                "agent": "dev-a", "server": "fixture", "transport": "stdio",
+                "credential_keys": ["API_KEY"], "tools": { "search": "network" },
+                "spec_sha256": spec,
+            })]
+        );
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn disconnect_removes_entry_and_keys_and_records() {
+        let (harness, store) = keeping("connector-disconnect");
+        let server = fixture_server("disconnect");
+        connected(&harness, "dev-a", &server, &json!({}));
+        connected(&harness, "dev-b", &server, &json!({}));
+        call(
+            &harness.daemon,
+            "connector.disconnect",
+            &json!({ "agent": "dev-a", "server": "fixture" }),
+            "emptyResult",
+        );
+        assert_eq!(entry(&harness, 1, "fixture"), None);
+        assert!(entry(&harness, 2, "fixture").is_some());
+        let load = |agent: &str| {
+            store
+                .load(&kept_at(&harness, agent, "fixture"))
+                .expect("the store reads")
+        };
+        assert!(load("dev-a").is_none());
+        assert!(load("dev-b").is_some());
+        assert_eq!(
+            bodies(&harness, EventKind::ConnectorDisconnected),
+            [json!({ "agent": "dev-a", "server": "fixture" })]
+        );
+        assert_eq!(
+            states(&harness),
+            json!([{ "agent": "dev-b", "server": "fixture", "state": "connected" }])
+        );
+        let (code, _) = refused(
+            &harness,
+            "connector.disconnect",
+            &json!({ "agent": "dev-a", "server": "fixture" }),
+        );
+        assert_eq!(code, -32005);
+        assert!(load("dev-b").is_some());
+
+        // The entry put back by hand, as a revert would: its keys are gone, so it runs nothing.
+        let mut wire = team_file(&harness);
+        wire["agents"][1]["mcp_servers"] = wire["agents"][2]["mcp_servers"].clone();
+        let team = farik_core::team::validate_team(&wire).expect("a team");
+        harness
+            .project
+            .deps
+            .files
+            .write_team(&team)
+            .expect("written");
+        assert_eq!(
+            states(&harness),
+            json!([
+                { "agent": "dev-a", "server": "fixture", "state": "connect_again" },
+                { "agent": "dev-b", "server": "fixture", "state": "connected" },
+            ])
+        );
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn team_get_says_connect_again_for_an_unconfirmed_server() {
+        let (harness, store) = keeping("connector-connect-again");
+        let deps = &harness.project.deps;
+        let mut wire = team_file(&harness);
+        wire["agents"][1]["mcp_servers"] = json!([{
+            "name": "linear", "source": "custom", "transport": "http",
+            "url": "https://mcp.linear.example/mcp",
+            "headers": { "Authorization": "Bearer {API_KEY}" },
+            "credential_keys": ["API_KEY"], "tools": { "search": "network" },
+        }]);
+        let team = farik_core::team::validate_team(&wire).expect("a team");
+        deps.files.write_team(&team).expect("written");
+        let linear = custom(&wire["agents"][1]["mcp_servers"][0]);
+        store
+            .save(
+                &kept_at(&harness, "dev-a", "linear"),
+                &ConnectorEntry {
+                    spec_sha256: farik_core::team::spec_sha256(&linear),
+                    keys: [("API_KEY".to_string(), Secret::new(KEY.to_string()))].into(),
+                },
+            )
+            .expect("kept");
+        assert_eq!(
+            states(&harness),
+            json!([{ "agent": "dev-a", "server": "linear", "state": "connected" }])
+        );
+        // What is kept is read once, not on each query: a keychain may ask the user each time.
+        store
+            .delete(&kept_at(&harness, "dev-a", "linear"))
+            .expect("deleted");
+        assert_eq!(
+            states(&harness),
+            json!([{ "agent": "dev-a", "server": "linear", "state": "connected" }])
+        );
+
+        wire["agents"][1]["mcp_servers"][0]["url"] = json!("https://elsewhere.example/mcp");
+        let team = farik_core::team::validate_team(&wire).expect("a team");
+        deps.files.write_team(&team).expect("written");
+        let got = query(&harness.daemon, "team.get", &json!({}), "teamGetResult");
+        assert_eq!(
+            got["connectors"],
+            json!([{ "agent": "dev-a", "server": "linear", "state": "connect_again" }])
+        );
+        farik_core::team::validate_team(&got["team"]).expect("team is still the team file");
     }
 }

@@ -32,7 +32,9 @@
         "message_post",
         "chat_message_post",
         "team_pause",
-        "team_resume"
+        "team_resume",
+        "connector_connect",
+        "connector_disconnect"
       ]
     },
     "commandBodyWire": {
@@ -52,6 +54,8 @@
         { "$ref": "#/$defs/sprintStartBody" },
         { "$ref": "#/$defs/messagePostBody" },
         { "$ref": "#/$defs/chatMessagePostBody" },
+        { "$ref": "#/$defs/connectorConnectBody" },
+        { "$ref": "#/$defs/connectorDisconnectBody" },
         { "$ref": "#/$defs/emptyBody" }
       ]
     },
@@ -199,6 +203,29 @@
       "properties": {
         "agent_id": { "type": "string" },
         "text": { "type": "string" }
+      }
+    },
+    "connectorConnectBody": {
+      "title": "Connector Connect Body",
+      "description": "Gives the agent agent the custom MCP server server, an mcp_servers entry as team.schema.json shapes it with source custom, or replaces the one of its name (docs/SPEC.md 6.7; ADR 0030). Its keys were already kept on this machine, beside spec_sha256, by whoever sends this, so no value is here: the entry holds key names and header templates only. The handler holds the entry to validate_team, and spec_sha256 to the entry's own hash, then writes the team file and appends connector.connected.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["agent", "server", "spec_sha256"],
+      "properties": {
+        "agent": { "type": "string", "minLength": 1 },
+        "server": { "type": "object" },
+        "spec_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+      }
+    },
+    "connectorDisconnectBody": {
+      "title": "Connector Disconnect Body",
+      "description": "Takes the custom MCP server named server away from the agent agent: the team file loses its entry and connector.disconnected is appended. Its keys are deleted by whoever sends this.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["agent", "server"],
+      "properties": {
+        "agent": { "type": "string", "minLength": 1 },
+        "server": { "type": "string", "minLength": 1 }
       }
     },
     "emptyBody": {

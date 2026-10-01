@@ -16,6 +16,7 @@ use farik_core::governor::transition_table::TransitionActor;
 use farik_core::pricing::Usage;
 use farik_core::team::{
     Agent, CustomServer, CustomTransport, Effort, Preview, RoleWire, Team, custom_server,
+    spec_sha256,
 };
 use farik_protocol::event::{
     AgentSleptBody, EventBody, EventIds, EventKind, NoteWrittenBody, NoteWrittenBodyKind,
@@ -32,8 +33,9 @@ use super::verify::{append, append_stamped};
 use super::{OrchestratorDeps, OrchestratorError, TRIAGE_MODEL};
 use crate::channel::post_system;
 use crate::claude::allowed_builtins;
-use crate::connectors::{SecretAt, confirmed_entry};
+use crate::connectors::SecretAt;
 use crate::cost::{CostError, CostSource, budget_state, record_exhaustion, record_session_cost};
+use crate::daemon::Kept;
 use crate::daemon::SessionRegistration;
 use crate::exec::Executor;
 use crate::preview::{
@@ -296,7 +298,8 @@ fn custom_servers(agent: &Agent) -> impl Iterator<Item = CustomServer> + '_ {
 /// The custom connectors `ask`'s session is given: each of the agent's that was connected on this
 /// machine as the team file has it now (ADR 0030), in a session about a task given more than one
 /// tool. One kept with another hash, or none, or whose store cannot be read, is left out, so it
-/// runs nothing and is sent no key (finding R2-B1).
+/// runs nothing and is sent no key (finding R2-B1); what the store answered is remembered, so the
+/// agent's page says why (`team.get`'s `connect_again` or `store_unavailable`).
 fn custom_connectors(deps: &OrchestratorDeps, ask: &SessionAsk<'_>) -> Vec<CustomServer> {
     let about_a_task = matches!(
         ask.purpose,
@@ -309,7 +312,6 @@ fn custom_connectors(deps: &OrchestratorDeps, ask: &SessionAsk<'_>) -> Vec<Custo
     if !about_a_task || ask.only_tool.is_some() {
         return Vec::new();
     }
-    let secrets = deps.daemon.connector_secrets();
     custom_servers(ask.agent)
         .filter(|server| {
             let at = SecretAt {
@@ -317,7 +319,7 @@ fn custom_connectors(deps: &OrchestratorDeps, ask: &SessionAsk<'_>) -> Vec<Custo
                 agent_id: ask.agent.id.to_string(),
                 server: server.name.clone(),
             };
-            matches!(confirmed_entry(secrets.as_ref(), &at, server), Ok(Some(_)))
+            deps.daemon.read_kept(&at) == Kept::Hash(spec_sha256(server))
         })
         .collect()
 }
@@ -2228,6 +2230,119 @@ mod tests {
             .position(|arg| arg == "--disallowedTools")
             .expect("the flag");
         assert_eq!(args[at + 1], "Bash,mcp__github__delete_repo");
+    }
+
+    /// A store in memory that fails every read while `failing` is set, as a locked keychain does.
+    #[derive(Default)]
+    struct Flaky {
+        held: crate::connectors::MemoryConnectorSecrets,
+        failing: std::sync::atomic::AtomicBool,
+    }
+
+    impl crate::connectors::ConnectorSecrets for Flaky {
+        fn load(
+            &self,
+            at: &crate::connectors::SecretAt,
+        ) -> Result<Option<crate::connectors::ConnectorEntry>, crate::credential::CredentialError>
+        {
+            if self.failing.load(std::sync::atomic::Ordering::SeqCst) {
+                return Err(crate::credential::CredentialError::Failed(
+                    "the keychain is locked".to_string(),
+                ));
+            }
+            self.held.load(at)
+        }
+
+        fn save(
+            &self,
+            at: &crate::connectors::SecretAt,
+            entry: &crate::connectors::ConnectorEntry,
+        ) -> Result<crate::connectors::SecretStore, crate::credential::CredentialError> {
+            self.held.save(at, entry)
+        }
+
+        fn delete(
+            &self,
+            at: &crate::connectors::SecretAt,
+        ) -> Result<(), crate::credential::CredentialError> {
+            self.held.delete(at)
+        }
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn a_store_failing_at_session_setup_shows_on_the_agent_page() {
+        use crate::connectors::{ConnectorEntry, ConnectorSecrets as _, SecretAt};
+
+        let harness = Harness::new("session-custom-store-fails", |wire| {
+            with_custom_servers(wire);
+            wire["agents"][1]["mcp_servers"]
+                .as_array_mut()
+                .expect("a list")
+                .truncate(1);
+        });
+        harness.file("FRK-1", "draft", |_| {});
+        let store = Arc::new(Flaky::default());
+        let deps = &harness.project.deps;
+        let team = deps.files.read_team().expect("the team");
+        let github = farik_core::team::custom_server(
+            &agent(&team, "dev-a").mcp_servers.as_ref().expect("servers")[0],
+        )
+        .expect("a custom server");
+        store
+            .save(
+                &SecretAt {
+                    project_id: deps.ids.project_id.clone(),
+                    agent_id: "dev-a".to_string(),
+                    server: "github".to_string(),
+                },
+                &ConnectorEntry {
+                    spec_sha256: farik_core::team::spec_sha256(&github),
+                    keys: [(
+                        "API_KEY".to_string(),
+                        crate::claude::Secret::new(KEY_VALUE.to_string()),
+                    )]
+                    .into(),
+                },
+            )
+            .expect("kept");
+        assert!(
+            harness
+                .daemon
+                .set_connector_secrets(Arc::clone(&store) as _)
+        );
+        let state = || crate::daemon::fixtures::connector_states(&harness.daemon);
+        let shown = |state: &str| json!([{ "agent": "dev-a", "server": "github", "state": state }]);
+        let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
+        let contract = deps
+            .files
+            .read_contract(&"FRK-1".parse().expect("a task id"))
+            .expect("the contract");
+        let given = || {
+            let spec = session_spec(
+                &orchestrator.deps,
+                &team,
+                &dev_asks(&harness, &team, &contract, SessionPurpose::Implement, None),
+            )
+            .expect("the spec");
+            server_names(&spec)
+                .into_iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(state(), shown("connected"));
+
+        store
+            .failing
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+        assert!(given().is_empty());
+        assert_eq!(state(), shown("store_unavailable"));
+
+        store
+            .failing
+            .store(false, std::sync::atomic::Ordering::SeqCst);
+        assert_eq!(given(), ["github"]);
+        assert_eq!(state(), shown("connected"));
     }
 
     #[tokio::test]

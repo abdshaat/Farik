@@ -143,6 +143,9 @@ pub fn a_body_wire(kind: EventKind) -> Value {
         | EventKind::PreviewStarted
         | EventKind::PreviewStopped
         | EventKind::PageChecked => a_design_body_wire(kind),
+        EventKind::ConnectorConnected | EventKind::ConnectorDisconnected => {
+            a_connector_body_wire(kind)
+        }
         EventKind::SprintStarted
         | EventKind::SprintPlanned
         | EventKind::SprintEnded
@@ -348,4 +351,20 @@ fn a_tool_body_wire(field: &str, value: &str) -> Value {
 #[must_use]
 pub fn a_contract_summary_wire() -> Value {
     json!({ "kind": "task", "title": "Add a login page", "status": "draft", "risk": "low" })
+}
+
+/// `dev-a`'s custom server `github`, connected or taken away.
+fn a_connector_body_wire(kind: EventKind) -> Value {
+    if kind == EventKind::ConnectorConnected {
+        json!({
+            "agent": "dev-a",
+            "server": "github",
+            "transport": "stdio",
+            "credential_keys": ["API_KEY"],
+            "tools": { "search_issues": "network", "delete_repo": "denied" },
+            "spec_sha256": "0".repeat(64)
+        })
+    } else {
+        json!({ "agent": "dev-a", "server": "github" })
+    }
 }

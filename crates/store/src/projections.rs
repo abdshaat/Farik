@@ -679,7 +679,9 @@ fn apply_to(transaction: &Transaction<'_>, event: &FarikEvent) -> Result<(), Sto
         | EventBody::PreviewStarted(_)
         | EventBody::PreviewStopped(_)
         | EventBody::PageChecked(_)
-        | EventBody::ChatMessagePosted(_) => Ok(()),
+        | EventBody::ChatMessagePosted(_)
+        | EventBody::ConnectorConnected(_)
+        | EventBody::ConnectorDisconnected(_) => Ok(()),
     }
 }
 

@@ -35,7 +35,7 @@ use serde_json::Value;
 
 use self::mcp::FarikMcp;
 
-use crate::connectors::{ConnectorSecrets, MemoryConnectorSecrets};
+use crate::connectors::{ConnectorSecrets, MemoryConnectorSecrets, SecretAt};
 use crate::exec::Executor;
 use crate::orchestrator::{CommandError, CommandReport, reply_of};
 use crate::preview::RunningPreview;
@@ -62,6 +62,7 @@ pub use hooks::{
 };
 pub use setup::{SetupError, SetupHost};
 pub use team::SETUP_PENDING;
+pub(crate) use team::{secret_at, with_server};
 
 /// What a daemon with no project answers what needs one.
 pub(crate) const NO_PROJECT: &str = "farik has no project yet";
@@ -158,6 +159,20 @@ pub struct DaemonState {
     team_writes: Mutex<()>,
     /// Where each agent's connector keys are kept (ADR 0030), once it is set.
     connector_secrets: OnceLock<Arc<dyn ConnectorSecrets>>,
+    /// What that store held for each account the last time it was read, so that `team.get` does
+    /// not ask a keychain each time.
+    connectors_kept: Mutex<BTreeMap<String, Kept>>,
+}
+
+/// What the connector store held for one agent's server the last time Farik read it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum Kept {
+    /// An entry, connected as the definition this is the `spec_sha256` of.
+    Hash(String),
+    /// No entry.
+    Nothing,
+    /// The store could not be read.
+    Unavailable,
 }
 
 impl DaemonState {
@@ -174,6 +189,7 @@ impl DaemonState {
             web: OnceLock::new(),
             team_writes: Mutex::new(()),
             connector_secrets: OnceLock::new(),
+            connectors_kept: Mutex::new(BTreeMap::new()),
         }
     }
 
@@ -191,6 +207,7 @@ impl DaemonState {
             web: OnceLock::from(web),
             team_writes: Mutex::new(()),
             connector_secrets: OnceLock::new(),
+            connectors_kept: Mutex::new(BTreeMap::new()),
         }
     }
 
@@ -207,6 +224,32 @@ impl DaemonState {
             || Arc::new(MemoryConnectorSecrets::default()) as _,
             Arc::clone,
         )
+    }
+
+    /// What the store holds for `at`, read now and remembered for `team.get`: when a server is
+    /// connected, and when a session is set up, so a store that fails then shows on the agent's
+    /// page rather than leaving the server out unsaid.
+    pub(crate) fn read_kept(&self, at: &SecretAt) -> Kept {
+        let kept = match self.connector_secrets().load(at) {
+            Ok(Some(entry)) => Kept::Hash(entry.spec_sha256),
+            Ok(None) => Kept::Nothing,
+            Err(_) => Kept::Unavailable,
+        };
+        crate::locked(&self.connectors_kept).insert(at.account(), kept.clone());
+        kept
+    }
+
+    /// What the store held for `at` the last time it was read, read now the first time.
+    pub(crate) fn kept(&self, at: &SecretAt) -> Kept {
+        let remembered = crate::locked(&self.connectors_kept)
+            .get(&at.account())
+            .cloned();
+        remembered.unwrap_or_else(|| self.read_kept(at))
+    }
+
+    /// Forgets what the store held for `at`, whose server was taken away.
+    pub(crate) fn forget_kept(&self, at: &SecretAt) {
+        crate::locked(&self.connectors_kept).remove(&at.account());
     }
 
     /// The host answering the wizard, in setup mode.

@@ -9,12 +9,12 @@ use farik_core::governor::gates::{Blocker, Rejection};
 use farik_core::governor::transition::TransitionRequest;
 use farik_core::governor::transition_table::TransitionActor;
 use farik_core::sprint::{Sprint, SprintStatus};
-use farik_core::team::{Agent, AgentStatus, Team, plain_role};
+use farik_core::team::{Agent, AgentStatus, Team, custom_server, plain_role};
 use farik_protocol::command::{AcceptSubject, Command, RequestSize};
 use farik_protocol::event::{
-    AgentUpdatedBody, EscalationRaisedBodyReason, EscalationResolvedBody, EventBody, EventIds,
-    EventKind, HumanAcceptedBody, HumanAcceptedBodySubject, MessageKind, QuestionAnsweredBody,
-    new_event,
+    AgentUpdatedBody, ConnectorDisconnectedBody, EscalationRaisedBodyReason,
+    EscalationResolvedBody, EventBody, EventIds, EventKind, HumanAcceptedBody,
+    HumanAcceptedBodySubject, MessageKind, QuestionAnsweredBody, new_event,
 };
 use farik_store::requests::{RequestError, hold_contract, triage_by_human};
 use farik_store::{EventQuery, TaskProjection};
@@ -25,6 +25,7 @@ use super::{CommandError, CommandReport, IntegrationOutcome, Orchestrator, Orche
 use crate::channel::{ChannelError, NewMessage, mentions_in, post};
 use crate::chat::{ChatError, NewChatMessage, post_chat};
 use crate::daemon::DaemonState;
+use crate::daemon::{secret_at, with_server};
 use crate::pause::paused;
 use crate::sprints::{EndedBy, SprintError, end_sprint, start_sprint};
 use crate::tools::ToolDeps;
@@ -118,6 +119,20 @@ pub(super) async fn handle(
         Command::TeamResume => pause(tools, false),
         Command::MessagePost { text } => post_message(tools, text),
         Command::ChatMessagePost { agent_id, text } => post_chat_message(tools, &agent_id, text),
+        Command::ConnectorConnect {
+            agent,
+            server,
+            spec_sha256,
+        } => connect_server(
+            tools,
+            &orchestrator.deps.daemon,
+            &agent,
+            server,
+            &spec_sha256,
+        ),
+        Command::ConnectorDisconnect { agent, server } => {
+            disconnect_server(tools, &orchestrator.deps.daemon, &agent, &server)
+        }
         Command::RunStop => {
             orchestrator.stop();
             Ok(CommandReport {
@@ -1194,6 +1209,112 @@ fn failed(error: impl std::fmt::Display) -> CommandError {
     CommandError::Failed {
         detail: error.to_string(),
     }
+}
+
+/// `connector_connect`: `server` given to `agent` in the team file, in place of the one of its
+/// name, when the team validates with it and it hashes to `spec_sha256`, the hash kept beside its
+/// keys; then `connector.connected`, and the store read once for `team.get` (ADR 0030).
+fn connect_server(
+    tools: &ToolDeps,
+    daemon: &DaemonState,
+    agent: &str,
+    server: serde_json::Map<String, serde_json::Value>,
+    spec_sha256: &str,
+) -> Result<CommandReport, CommandError> {
+    let entry = serde_json::Value::Object(server);
+    let name = entry["name"].as_str().unwrap_or_default().to_string();
+    let _writing = daemon.team_writes();
+    let team = tools.files.read_team().map_err(failed)?;
+    let after = connector_team(&team, agent, &name, Some(&entry))?;
+    let custom = after
+        .agents
+        .iter()
+        .filter(|held| held.id.as_str() == agent)
+        .flat_map(|held| held.mcp_servers.iter().flatten())
+        .find(|held| held.name.as_str() == name)
+        .and_then(custom_server)
+        .ok_or_else(|| CommandError::Refused {
+            reason: format!("connector_not_custom: {name} is not a custom server"),
+        })?;
+    if farik_core::team::spec_sha256(&custom) != spec_sha256 {
+        return Err(CommandError::Refused {
+            reason: format!(
+                "connector_not_confirmed: {name} was not kept on this machine as it is described \
+                 here; connect it again"
+            ),
+        });
+    }
+    tools.files.write_team(&after).map_err(failed)?;
+    let body = serde_json::from_value(serde_json::json!({
+        "agent": agent,
+        "server": name,
+        "transport": entry["transport"],
+        "credential_keys": entry.get("credential_keys").cloned().unwrap_or_else(|| serde_json::json!([])),
+        "tools": entry.get("tools").cloned().unwrap_or_else(|| serde_json::json!({})),
+        "spec_sha256": spec_sha256,
+    }))
+    .map_err(failed)?;
+    let event = append(tools, None, EventBody::ConnectorConnected(body))?;
+    daemon.read_kept(&secret_at(tools, agent, &name));
+    Ok(CommandReport {
+        said: format!("{agent} has the connector {name}"),
+        events: vec![event],
+    })
+}
+
+/// `connector_disconnect`: the custom server `server` taken away from `agent` in the team file;
+/// then `connector.disconnected`. Its keys are deleted by whoever sent it.
+fn disconnect_server(
+    tools: &ToolDeps,
+    daemon: &DaemonState,
+    agent: &str,
+    server: &str,
+) -> Result<CommandReport, CommandError> {
+    let _writing = daemon.team_writes();
+    let team = tools.files.read_team().map_err(failed)?;
+    let custom = team
+        .agents
+        .iter()
+        .filter(|held| held.id.as_str() == agent)
+        .flat_map(|held| held.mcp_servers.iter().flatten())
+        .any(|held| held.name.as_str() == server && custom_server(held).is_some());
+    if !custom {
+        return Err(CommandError::NotFound {
+            what: format!("{agent}'s custom connector {server}"),
+        });
+    }
+    let after = connector_team(&team, agent, server, None)?;
+    tools.files.write_team(&after).map_err(failed)?;
+    let event = append(
+        tools,
+        None,
+        EventBody::ConnectorDisconnected(ConnectorDisconnectedBody {
+            agent: agent.parse().map_err(failed)?,
+            server: server.parse().map_err(failed)?,
+        }),
+    )?;
+    daemon.forget_kept(&secret_at(tools, agent, server));
+    Ok(CommandReport {
+        said: format!("{agent} no longer has the connector {server}"),
+        events: vec![event],
+    })
+}
+
+/// `team` with `agent`'s connector `name` set to `entry`, or removed, or the refusal naming each
+/// rule it breaks.
+fn connector_team(
+    team: &Team,
+    agent: &str,
+    name: &str,
+    entry: Option<&serde_json::Value>,
+) -> Result<Team, CommandError> {
+    with_server(team, agent, name, entry).map_err(|errors| CommandError::Refused {
+        reason: errors
+            .iter()
+            .map(|error| format!("{}: {}", error.path, error.message))
+            .collect::<Vec<_>>()
+            .join("; "),
+    })
 }
 
 #[cfg(test)]

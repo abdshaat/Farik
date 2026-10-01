@@ -480,6 +480,15 @@
         },
         {
           "$ref": "#/$defs/templateDeleteRequest"
+        },
+        {
+          "$ref": "#/$defs/connectorToolsRequest"
+        },
+        {
+          "$ref": "#/$defs/connectorConnectRequest"
+        },
+        {
+          "$ref": "#/$defs/connectorDisconnectRequest"
         }
       ]
     },
@@ -826,13 +835,43 @@
           "type": "integer",
           "minimum": 1,
           "description": "The most agents a team may have that are not retired (spec 4.1)."
+        },
+        "connectors": {
+          "type": "array",
+          "description": "Each agent's custom MCP servers and whether each runs (ADR 0030): connected when the definition kept on this machine beside its keys is the team file's; connect_again when none is kept or the team file changed since, so it runs nothing until the user connects it again; store_unavailable when the keychain or the private file could not be read, the last time Farik read it, so it is left out of sessions until it can be. The kept definition is read once per connect and disconnect, when a session is set up, and the first time it is asked for.",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "agent",
+              "server",
+              "state"
+            ],
+            "properties": {
+              "agent": {
+                "type": "string"
+              },
+              "server": {
+                "type": "string"
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "connected",
+                  "connect_again",
+                  "store_unavailable"
+                ]
+              }
+            }
+          }
         }
       },
       "required": [
         "team",
         "agents",
         "judges",
-        "max_agents"
+        "max_agents",
+        "connectors"
       ]
     },
     "serveStatusResult": {
@@ -3557,6 +3596,223 @@
             "type": "string"
           },
           "description": "The protected-path globs that match something on disk, walked four folders deep without .git and node_modules, over at most 2000 entries."
+        }
+      }
+    },
+    "connectorServer": {
+      "type": "object",
+      "description": "A custom MCP server as the user describes it, before its tools are labelled: an mcp_servers entry of team.schema.json without source and tools (name, transport, and command and args, or url and headers, and credential_keys). The daemon holds it to validate_team as the agent's entry."
+    },
+    "connectorKeys": {
+      "type": "object",
+      "maxProperties": 8,
+      "propertyNames": {
+        "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+      },
+      "additionalProperties": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 4096
+      },
+      "description": "Each of the server's keys by name, with its value. Never echoed: a refusal of these params carries no data."
+    },
+    "connectorToolsRequest": {
+      "title": "Connector Tools Request",
+      "description": "Lists a custom MCP server's tools, started or reached with the agent's keys, as ConnectorAdd's second step shows them (docs/SPEC.md 5.6; ADR 0030). Nothing is kept. A refusal of these params carries no data, as account.connect's does.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "jsonrpc",
+        "id",
+        "method",
+        "params"
+      ],
+      "properties": {
+        "jsonrpc": {
+          "const": "2.0"
+        },
+        "id": {
+          "$ref": "#/$defs/requestId"
+        },
+        "method": {
+          "const": "connector.tools"
+        },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "agent",
+            "server",
+            "keys"
+          ],
+          "properties": {
+            "agent": {
+              "type": "string"
+            },
+            "server": {
+              "$ref": "#/$defs/connectorServer"
+            },
+            "keys": {
+              "$ref": "#/$defs/connectorKeys"
+            }
+          }
+        }
+      }
+    },
+    "connectorToolsResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "tools"
+      ],
+      "properties": {
+        "tools": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "name",
+              "description",
+              "usable"
+            ],
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "description": {
+                "type": "string"
+              },
+              "usable": {
+                "type": "boolean",
+                "description": "False for a name Claude Code would rewrite (outside ^[A-Za-z0-9_-]{1,64}$): Farik can't use this tool, and it is never written to the team file."
+              }
+            }
+          }
+        }
+      }
+    },
+    "connectorConnectRequest": {
+      "title": "Connector Connect Request",
+      "description": "Gives the agent a custom MCP server (docs/SPEC.md 5.6, 6.7; ADR 0030): its tools listed with the keys, each usable one labelled by tags or else external_effect, the keys kept in the keychain or a private file beside the definition's spec_sha256, then connector_connect handled, which writes the team file and appends connector.connected. A refusal of these params carries no data, as account.connect's does; a refusal of the entry carries the team's errors, each at its field.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "jsonrpc",
+        "id",
+        "method",
+        "params"
+      ],
+      "properties": {
+        "jsonrpc": {
+          "const": "2.0"
+        },
+        "id": {
+          "$ref": "#/$defs/requestId"
+        },
+        "method": {
+          "const": "connector.connect"
+        },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "agent",
+            "server",
+            "keys",
+            "tags"
+          ],
+          "properties": {
+            "agent": {
+              "type": "string"
+            },
+            "server": {
+              "$ref": "#/$defs/connectorServer"
+            },
+            "keys": {
+              "$ref": "#/$defs/connectorKeys"
+            },
+            "tags": {
+              "type": "object",
+              "additionalProperties": {
+                "$ref": "#/$defs/connectorTag"
+              },
+              "description": "The user's label for each tool by name; a listed tool not named here is external_effect."
+            }
+          }
+        }
+      }
+    },
+    "connectorConnectResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "stored_in",
+        "tools"
+      ],
+      "properties": {
+        "stored_in": {
+          "type": "string",
+          "enum": [
+            "keychain",
+            "file"
+          ],
+          "description": "Where the keys were kept: the computer's keychain, or a private file only the user can read."
+        },
+        "tools": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/$defs/connectorTag"
+          },
+          "description": "Each tool as it was written to the team file, with its label."
+        }
+      }
+    },
+    "connectorTag": {
+      "type": "string",
+      "enum": [
+        "network",
+        "external_effect",
+        "denied"
+      ],
+      "description": "A connector tool's label (docs/SPEC.md 5.6): network, only reads; external_effect, changes something outside the sandbox; denied, never offered."
+    },
+    "connectorDisconnectRequest": {
+      "title": "Connector Disconnect Request",
+      "description": "Takes a custom MCP server away from the agent: connector_disconnect handled, which removes its team file entry and appends connector.disconnected, then its keys deleted from wherever they are kept; another agent's are never touched. Answers emptyResult.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "jsonrpc",
+        "id",
+        "method",
+        "params"
+      ],
+      "properties": {
+        "jsonrpc": {
+          "const": "2.0"
+        },
+        "id": {
+          "$ref": "#/$defs/requestId"
+        },
+        "method": {
+          "const": "connector.disconnect"
+        },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "agent",
+            "server"
+          ],
+          "properties": {
+            "agent": {
+              "type": "string"
+            },
+            "server": {
+              "type": "string"
+            }
+          }
         }
       }
     },

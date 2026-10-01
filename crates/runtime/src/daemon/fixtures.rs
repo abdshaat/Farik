@@ -177,3 +177,10 @@ pub(crate) async fn answered(state: &Arc<DaemonState>, method: &str, params: &Va
     let frame = json!({ "jsonrpc": "2.0", "id": 1, "method": method, "params": params });
     super::web::answer(state, &frame.to_string(), &mut None).await
 }
+
+/// What `team.get` answers of each agent's custom connectors and their states.
+pub(crate) fn connector_states(state: &Arc<DaemonState>) -> Value {
+    super::gates::tests::query(state, "team.get", &serde_json::json!({}), "teamGetResult")
+        ["connectors"]
+        .clone()
+}

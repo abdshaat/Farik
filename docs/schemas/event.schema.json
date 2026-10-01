@@ -108,7 +108,9 @@
         "preview.started",
         "preview.stopped",
         "page.checked",
-        "chat_message.posted"
+        "chat_message.posted",
+        "connector.connected",
+        "connector.disconnected"
       ]
     },
     "eventBodyWire": {
@@ -163,7 +165,9 @@
         { "$ref": "#/$defs/previewPreparedBody" },
         { "$ref": "#/$defs/previewStartedBody" },
         { "$ref": "#/$defs/pageCheckedBody" },
-        { "$ref": "#/$defs/chatMessagePostedBody" }
+        { "$ref": "#/$defs/chatMessagePostedBody" },
+        { "$ref": "#/$defs/connectorConnectedBody" },
+        { "$ref": "#/$defs/connectorDisconnectedBody" }
       ]
     },
     "contractSummary": {
@@ -835,6 +839,32 @@
         "path": { "type": "string", "pattern": "^/" },
         "violations": { "type": "array", "items": { "$ref": "#/$defs/violation" } },
         "screenshot": { "type": "string", "minLength": 1 }
+      }
+    },
+    "connectorConnectedBody": {
+      "title": "Connector Connected Body",
+      "description": "The human gave the agent agent the custom MCP server server, or connected it again (docs/SPEC.md 5.6, 6.7; ADR 0030): how it is reached, the names of the keys it is given, the label of each of its tools, and spec_sha256, the hash of that definition kept beside the keys on this machine. No key's value is ever here. The envelope names no agent: the human acted, and the agent did no work.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["agent", "server", "transport", "credential_keys", "tools", "spec_sha256"],
+      "properties": {
+        "agent": { "type": "string", "minLength": 1 },
+        "server": { "type": "string", "minLength": 1 },
+        "transport": { "type": "string", "enum": ["stdio", "http"] },
+        "credential_keys": { "type": "array", "items": { "type": "string" } },
+        "tools": { "type": "object", "additionalProperties": { "$ref": "#/$defs/connectorTag" } },
+        "spec_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+      }
+    },
+    "connectorDisconnectedBody": {
+      "title": "Connector Disconnected Body",
+      "description": "The human took the custom MCP server server away from the agent agent, and its keys were deleted (docs/SPEC.md 6.7; ADR 0030).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["agent", "server"],
+      "properties": {
+        "agent": { "type": "string", "minLength": 1 },
+        "server": { "type": "string", "minLength": 1 }
       }
     },
     "connectorTag": {
