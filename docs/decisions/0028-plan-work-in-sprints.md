@@ -7,7 +7,7 @@ Status: accepted (the founder, in conversation, 2026-10-01)
 
 Sprints are optional (spec 3, "Sprint"; phase 4). With none open, the board flows: a task that becomes `ready` is assigned at once (`in_the_open_sprint`: "with none open, any task"). The command line hid this. In phase 4, `farik contract new` ran only the refining rules, and nothing was assigned until `farik run` after `farik sprint start`, so one sprint's planning could take two requests.
 
-`farik serve` runs every rule all the time. Phase 6 step 15's readiness review (finding B1, 2026-10-01) showed what follows in the browser:
+`farik serve` runs every rule all the time. The milestone runbook's readiness review (finding B1, 2026-10-01; the runbook was phase 6 step 15 then, and is step 16 now) showed what follows in the browser:
 - a ready task is assigned before the human can start a sprint;
 - an approved epic is assigned to its breaker-down at once;
 - "Start sprint" then opens a sprint with no candidate, its planning is passed over, and no review or retro follows;

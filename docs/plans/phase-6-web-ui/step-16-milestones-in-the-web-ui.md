@@ -1,9 +1,9 @@
-# Phase 6, step 15: Milestones 0 and 1 in the web UI
+# Phase 6, step 16: Milestones 0 and 1 in the web UI
 
-Status: draft; steps 01 to 14 landed (step 14 on 2026-10-01, recorded at 9512424); waits on readiness, and on the founder's decision on the order of actions (Decisions, "Order of actions").
+Status: draft; steps 01 to 14 landed (step 14 on 2026-10-01, recorded at 9512424); renumbered from step 15 by the project plan's revision 25 (ADR 0028); waits on step 15 and on readiness. Readiness finding B1 is decided: the founder chose the policy (ADR 0028), built in step 15.
 Branch: `phase/6-web-ui`
 Spec: `docs/SPEC.md` section 11 (Milestones 0 and 1), F17; the flow it exercises is 4.1, 5.2 to 5.9, 5.14, and 5.16
-Depends on: steps 01 to 14 of this phase, landed. A start gate applies: stage 1 does not begin until `cargo xtask check --integration` passes on the phase branch. The start-gate sha is the phase branch head when stage 1 begins, at or after 9512424, and it is recorded.
+Depends on: steps 01 to 15 of this phase, landed; step 15, sprints gather ready work, is what holds both requests in the Backlog until S1 opens. A start gate applies: stage 1 does not begin until `cargo xtask check --integration` passes on the phase branch. The start-gate sha is the phase branch head when stage 1 begins, at or after 9512424, and it is recorded.
 Readiness confirmed by: fresh-session reviewer, 2026-10-01, not ready → findings folded in
 
 This step writes no product code. It is a runbook, like phase 3's step 18 and phase 4's step 08, and it keeps their roles:
@@ -38,22 +38,22 @@ The records are `docs/milestones/m1-team-exit.md`, `docs/milestones/m1-web-exit.
   - **The seventh agent**, the founder to confirm at readiness (the role's defaults):
     `- { id: ux, display_name: UI/UX Designer, role: ui_ux_designer, status: active, persona: "Checks every screen the Developer builds, in the browser.", model: { id: claude-opus-5-5, effort: high }, mcp_servers: [{ name: playwright, source: builtin }] }`
   - **No preview.** No `preview` in `team.yaml`, and "How to open your app" in Settings stays empty for the run. Neither request touches `ui_paths`. Farik's own preview (ADR 0026 D2: `farik-e2e-serve --preview`) serves a recorded fixture team, not the run's command line, so it could show nothing the run changes. The Designer is therefore never assigned (`preview_not_set`). With no UI change, Today shows no waiting row for it. The Playwright image is not pulled. The record says the Designer was idle by this choice, and that its live exercise is left to a later run with a UI request. The alternative, which the founder may choose instead: set D2's commands, pull `computer::browser_image()` in stage 1, and accept a prepare of up to 15 minutes per task tree.
-  - **Order of actions: pending the founder's decision.** `farik serve` runs every rule all the time, and with no sprint open a ready task is assigned at once (spec 3, "Sprint"; `in_the_open_sprint`). Phase 4's order (file, answer, approve, then start the sprint) therefore leaves S1 with no candidate: its planning is passed over, S1 stays empty, and no review or retro follows. Starting the sprint first does not help either: planning fires on the first candidate that becomes ready, and the other never enters S1.
+  - **Order of actions: decided.** The founder chose the policy "Plan work in sprints" (ADR 0028, 2026-10-01), built in step 15. Under `farik serve` a ready task used to be assigned at once (readiness finding B1), and holding it by pausing both Developers is refused by the last-of-role rule. With the policy on in `team.yaml`, the team gets work ready at any time but assigns and builds nothing outside the open sprint, so both requests wait in the Backlog until S1 opens. The order in the browser:
+    1. On Today, file request 1, then request 2, pasting `brief1.txt` and `brief2.txt`.
+    2. Answer the Product Manager's questions.
+    3. Open FRK-2's gate and check phase 4's three things (`allowed_paths` include `CHANGELOG.md`; the requirements or criteria name the CHANGELOG entry; they name the decision the Architect records). If all hold, approve the epic, and approve FRK-1 if it waits; if one is missing, that is an incident: re-run from stage 1 (phase 4 stage 3).
+    4. Both wait in the Backlog: on the Board, FRK-1 is in the Backlog lane, and so is FRK-2 once the Scrum Master has broken it down; Today says "2 pieces of work are ready and wait in the Backlog". Nothing is assigned yet.
+    5. Start the sprint, from Today's link or the Board, with "No limit".
+    6. Planning takes both: S1's planning ceremony plans FRK-1 and FRK-2 with every task under it.
 
-    The readiness review proposed holding FRK-1 by pausing Developer A and Developer B, pausing the team once FRK-2 awaits approval, approving it and starting the sprint while paused, then resuming. Its three checks, run on 2026-10-01 under TDD at 9512424 (the tests are kept as a patch, not committed):
-    - (a) *a ready task whose only possible assignees are paused stays ready*: **cannot be set up.** The product refuses to pause the last active Software Developer (`last_of_role: dev-b is your only Software Developer; add another before dev-b stops.`, D18, spec 10's foolproof configuration), and a team file with no active Developer does not validate. So step 1 of the proposal cannot be done in the browser.
-    - (b) approving the epic, starting the sprint, and resuming an agent are accepted while the team is paused: **holds.**
-    - (c) the first tick after the resume runs S1's planning with both candidates and assigns neither first: **holds** (sprint rules run before rule 8).
-
-    The founder decides between: accepting one request outside S1, with the pass criteria amended to match; or a product change that lets the human hold a ready task, or the team, before the sprint opens, with its own test and spec change. This runbook does not start stage 2 until that decision is recorded here.
-
-    Whatever the order, the founder also: watches the work, acting on whatever Today lists (questions, help, escalations); mentions `@arch` once, in Chats → Team; before accepting the epic, checks on its first filter task's page that the contract carries the decision's `review` criterion (phase 4 stage 4.3), an incident if missing; checks FRK-2's gate for phase 4's three things before approving it (`allowed_paths` include `CHANGELOG.md`; the requirements or criteria name the CHANGELOG entry; they name the decision the Architect records), re-running from stage 1 if one is missing; accepts the epic with a note, and FRK-1's result too if it came out high risk; and reads the review and the "Looking back" meeting in Chats → Team. Any `team.paused` and `team.resumed` events the order adds are by `human`, and the record lists them.
+    Then the founder watches the work, acting on whatever Today lists (questions, help, escalations); mentions `@arch` once, in Chats → Team; before accepting the epic, checks on its first filter task's page that the contract carries the decision's `review` criterion (phase 4 stage 4.3), an incident if missing; accepts the epic with a note, and FRK-1's result too if it came out high risk; and reads the review and the "Looking back" meeting in Chats → Team. No pause or resume is needed. Any the founder takes are by `human`, and the record lists them.
   - **Chats.** Once, after the sprint's planning, the founder asks one agent one question in its one-to-one chat (Chats → the agent). The founder never presses "Send as a request": the run has two requests, word for word. The record lists the `chat` session and its reply. It is not a pass criterion.
   - **Templates.** Not exercised in the team sprint. The founder does not use "Use a saved team" or change any agent's model during the run, whatever the Team page suggests, since its suggestions are now `claude-opus-5-5` and `claude-sonnet-5-5`. "Save as a template" may be pressed after Task 1's record, and it writes only to `~/farik-m1/home/.config/farik/templates`. The thirty-minute test meets templates as new users do: "A saved team" is offered and cannot be chosen.
 - **The thirty-minute test.**
   - **The five users.** The founder recruits them. At least three are non-technical, meaning they do not write code for work.
   - **The machine.** Each user's machine has `farik` (a release build of the phase branch head), Claude Code, git, and Docker installed and working. Each user brings a repository of their own, a git folder, or starts a new project in the wizard. Each uses their own Claude subscription or API key, or one the founder provides for the test.
   - **Before the clock:** Docker's sandbox image is built and the Designer's browser image pulled (the computer check shows both rows ready), so neither counts against the thirty minutes. `farik` is built with `pnpm -C apps/web build` then `cargo build --release -p farik`.
+  - **Sprints.** A new team plans work in sprints (step 15, on by default), so a user's first request waits in the Backlog until they start a sprint, from Today's line or the Board. The clock keeps running. A user who stalls there is recorded with the time, as a finding for the fixes list.
   - **The Designer's preview** is the user's own to set, with no help. A first task held at "<Designer> needs to know how to open your app" is recorded with its time. It is a finding for the fixes list, not help to give.
   - **Start.** The clock starts when the user types `farik serve` in a terminal. That one command is given to them. It stops at the first `human.accepted` of a result, or at thirty minutes.
   - **The observer.** The founder, or someone the founder names, watches without helping. Every question the user asks, and every place they get stuck, is written down with its time.
@@ -78,7 +78,7 @@ This is phase 4 step 08's stage 1, in a fresh `~/farik-m1/`. The attempt of 2026
 - `pnpm -C apps/web build`, then `cargo build --release -p farik`, copied to `~/farik-m1/bin/farik` with its sha256;
 - a new bare clone of `/home/ashaat/Farik` (it must hold the start-gate sha), `test/m1-exit` at that sha, the run's clone, and the local identity;
 - the sandbox image rebuilt from the start-gate sha's `crates/runtime/sandbox` and `crates.Dockerfile`, with the two smoke tests (phase 6 changed the image since phase 4);
-- `team.yaml`, with the seven agents (the Designer's line in Decisions), no `preview`, and `judgment` left at its defaults, so the Architect checks plans, with its sha256;
+- `team.yaml`, with the seven agents (the Designer's line in Decisions), no `preview`, `policy.plan_in_sprints: true` (step 15), and `judgment` left at its defaults, so the Architect checks plans, with its sha256;
 - `brief1.txt` and `brief2.txt` copied from `~/farik-m1-step11` once `sha256sum` matches stage-1.md's (2fedf82e…, 37529479…);
 - `env.sh` as before, with a fresh, empty `home/`.
 
@@ -96,7 +96,7 @@ This is phase 4 step 08's stage 1, in a fresh `~/farik-m1/`. The attempt of 2026
 
 ### Stage 2: the team sprint [F]
 
-In the browser, the founder follows the order of actions above, once the founder has decided it. Wherever the run pauses on the founder, it is visible on Today. Today's "In the channel" and its "Open the channel" link lead to the same place as Chats → Team. Anything that goes wrong in the browser is an incident, recorded with its time and a screenshot. The founder decides whether to go on or to re-run from stage 1. At the end of the stage, [F] stops `farik serve` with Ctrl-C.
+In the browser, the founder follows the order of actions above. Wherever the run pauses on the founder, it is visible on Today. Today's "In the channel" and its "Open the channel" link lead to the same place as Chats → Team. Anything that goes wrong in the browser is an incident, recorded with its time and a screenshot. The founder decides whether to go on or to re-run from stage 1. At the end of the stage, [F] stops `farik serve` with Ctrl-C.
 
 ### Stage 3: the record [A]
 
@@ -127,5 +127,5 @@ For each user:
 
 ## Pass criteria
 
-- **Team sprint:** phase 4 step 08's criteria, with the two changes in stage 3. Phase 4's "On failure" items still apply: the CHANGELOG task may stall in judgment, and planning may take only one request. The second is the expected failure if the order of actions does not hold both requests until S1 opens; the founder's decision on the order is the guard.
+- **Team sprint:** phase 4 step 08's criteria, with the two changes in stage 3. Phase 4's "On failure" items still apply: the CHANGELOG task may stall in judgment, and planning may take only one request. The second is the expected failure if both requests are not held until S1 opens; step 15's policy, on in `team.yaml`, is the guard, and the record shows both in `sprint.planned`.
 - **Thirty-minute test:** the pass bar in Decisions.

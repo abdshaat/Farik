@@ -1,6 +1,6 @@
 # A UI/UX Designer, one-to-one chats and team templates
 
-Status: the founder's decisions of 2026-09-30, written down for the founder's review before any step plan is written. ADR 0026 records the decision. It is the design input to phase 6 steps 11 to 14; the milestone runbook moves to step 15 (revision 23 of the project plan split the Designer into steps 11 and 12). Where this document says "decided here", the founder did not rule on the point and this design chose; ADR 0026 lists those points for the founder to confirm.
+Status: the founder's decisions of 2026-09-30, written down for the founder's review before any step plan is written. ADR 0026 records the decision. It is the design input to phase 6 steps 11 to 14; the milestone runbook moves to step 15 (revision 23 of the project plan split the Designer into steps 11 and 12), and to step 16 since revision 25 (ADR 0028). Where this document says "decided here", the founder did not rule on the point and this design chose; ADR 0026 lists those points for the founder to confirm.
 
 Three small fixes landed on the phase branch before this design: the Ready pill on the computer check, the waiting rows' buttons, and the rail's breathing Connected dot (`docs/design/web-ui.md`).
 
@@ -252,7 +252,7 @@ Nothing step 12 builds is replaced; each later step widens it.
 - **Chats cost money in the background.** A user who chats a lot while the team is paused is still spending. The daily budget still stops chats, and "Conversations" on the Costs page shows it.
 - **Privacy is local, not secret.** A chat is kept out of the channel and away from other agents, but it lives in the event log like everything else, and `farik log` shows it to anyone at the machine.
 - **Templates and providers.** A template saved with a model the project's provider cannot run (phase 7) falls back to the role's default, and the before-and-after dialog says so.
-- **Milestone runbook.** Step 15's team sprint uses seven agents, the six of phase 4 and the Designer, the cap (decided by the founder, 2026-09-30). Its two requests are CLI work, so the Designer's review of UI changes occurs only if the run touches UI files.
+- **Milestone runbook.** Step 16's team sprint (step 15 until revision 25) uses seven agents, the six of phase 4 and the Designer, the cap (decided by the founder, 2026-09-30). Its two requests are CLI work, so the Designer's review of UI changes occurs only if the run touches UI files.
 
 ## Open items
 
