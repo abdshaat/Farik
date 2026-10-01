@@ -1,6 +1,6 @@
 # Phase 6, step 14: Team templates
 
-Status: draft
+Status: built; landing review pending
 Branch: `phase/6-web-ui`
 Spec: `docs/SPEC.md` sections 1 (the "one team" non-goal), 3 (team), 4.1 (three starts), 4.4, 8.4 (the state folder), F1
 Depends on: steps 01 to 13 of this phase (step 06's team setup, step 11's `ui_ux_designer` role, step 12's per-agent connectors, step 13's chats; renumbered from step 13 by the project plan's revision 23)
@@ -263,7 +263,9 @@ Under the next free spec revision when this step lands (0.34 if steps 11, 12 and
 - F1: a template must hold a Product Manager and a Developer, at most seven;
 - the project plan: step 14's line, "Built <date> (spec 0.NN)", and its interface line as the Decisions' RPC shape.
 
-- [ ] `docs(spec): team templates kept on the machine, and the one-team non-goal`
+As built (Task 8): spec revision 0.35 (0.32 to 0.34 were taken by the DevOps Engineer and steps 12 and 13), written from the landed code: 1, 3 (and the 64-character cap on a project's and a team's slug), 4.1, 4.4, 8.4, 8.5 and F1, with the six calls and the refusal codes in F1 rather than a section of their own. Commit message `docs(spec): record team templates`.
+
+- [x] `docs(spec): team templates kept on the machine, and the one-team non-goal`
 
 ## Verification
 
