@@ -917,8 +917,12 @@ pub(crate) fn status_effects(
             } else {
                 (RETIRED, "the human reassigns the task".to_string())
             };
-            for session_id in daemon.sessions_of(agent_id) {
-                daemon.request_stop(&session_id, words);
+            // A paused agent still answers its chats (ADR 0026), so a chat answer under way runs
+            // to its end; its other sessions stop.
+            for (session_id, purpose) in daemon.sessions_of(agent_id) {
+                if !crate::tools::may_work(status, purpose) {
+                    daemon.request_stop(&session_id, words);
+                }
             }
             for row in held.filter(|row| row.status == TaskStatus::InProgress) {
                 events.extend(moved_for(
@@ -1947,6 +1951,55 @@ mod tests {
             orchestrator.tick().await.expect("the tick runs"),
             crate::orchestrator::TickReport::Idle { .. }
         ));
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn lets_a_paused_agent_finish_its_chat_answer() {
+        // The founder's rule: a paused agent still answers its chats, so pausing it stops only
+        // its other sessions; retiring it stops them all.
+        let harness = Harness::new("human-pause-keeps-chat", |wire| {
+            wire["agents"].as_array_mut().expect("agents").push(json!({
+                "id": "dev-c", "display_name": "dev-c", "role": "software_developer",
+                "status": "active",
+            }));
+        });
+        let register = |session: &str, agent: &str, purpose: crate::session::SessionPurpose| {
+            harness
+                .daemon
+                .register_session(crate::daemon::SessionRegistration {
+                    session_id: session.to_string(),
+                    agent_id: agent.to_string(),
+                    task_id: None,
+                    purpose,
+                    in_reply_to: None,
+                    thread: None,
+                    cwd: harness.project.repo.path.clone(),
+                    executor: None,
+                    limits: farik_core::budget::DEFAULT_SESSION_LIMITS,
+                    farik_tools: Vec::new(),
+                    tiers: Vec::new(),
+                    connectors: Vec::new(),
+                    preview: None,
+                });
+        };
+        register("chat-a", "dev-a", crate::session::SessionPurpose::Chat);
+        register("work-a", "dev-a", crate::session::SessionPurpose::Implement);
+        register("chat-c", "dev-c", crate::session::SessionPurpose::Chat);
+        let orchestrator = an_orchestrator(&harness);
+
+        handled(&orchestrator, a_pause("dev-a", AgentStatus::Paused)).await;
+        handled(&orchestrator, a_pause("dev-c", AgentStatus::Retired)).await;
+
+        assert_eq!(harness.daemon.stop_reason("chat-a"), None);
+        assert_eq!(
+            harness.daemon.stop_reason("work-a").as_deref(),
+            Some(super::PAUSED)
+        );
+        assert_eq!(
+            harness.daemon.stop_reason("chat-c").as_deref(),
+            Some(super::RETIRED)
+        );
     }
 
     #[tokio::test]

@@ -260,13 +260,18 @@ impl DaemonState {
             .and_then(|session| session.stop_reason.clone())
     }
 
-    /// The ids of the registered sessions of `agent_id`, in order.
+    /// The ids of the registered sessions of `agent_id`, in order, each with its purpose.
     #[must_use]
-    pub fn sessions_of(&self, agent_id: &str) -> Vec<String> {
+    pub fn sessions_of(&self, agent_id: &str) -> Vec<(String, SessionPurpose)> {
         self.sessions()
             .values()
             .filter(|session| session.registration.agent_id == agent_id)
-            .map(|session| session.registration.session_id.clone())
+            .map(|session| {
+                (
+                    session.registration.session_id.clone(),
+                    session.registration.purpose,
+                )
+            })
             .collect()
     }
 

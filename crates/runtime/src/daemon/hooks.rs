@@ -980,7 +980,13 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     fn stops_the_session_of_an_agent_paused_in_the_team_file() {
         let daemon = TestDaemon::new("hook-paused-stops", |_| {});
-        assert_eq!(daemon.state.sessions_of("dev-a"), vec![DEV_SESSION]);
+        assert_eq!(
+            daemon.state.sessions_of("dev-a"),
+            vec![(
+                DEV_SESSION.to_string(),
+                crate::session::SessionPurpose::Implement
+            )]
+        );
         daemon
             .project
             .deps
